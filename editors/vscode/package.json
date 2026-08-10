@@ -1,0 +1,77 @@
+{
+  "name": "refdes",
+  "displayName": "Refdes",
+  "description": "Hardware design reference documentation: live diagnostics, ID completion, and inline calc results.",
+  "version": "0.1.0",
+  "publisher": "refdes",
+  "license": "MIT",
+  "engines": { "vscode": "^1.85.0" },
+  "categories": ["Programming Languages", "Linters", "Other"],
+  "main": "./extension.js",
+  "activationEvents": ["workspaceContains:**/refdes.yaml"],
+  "contributes": {
+    "commands": [
+      { "command": "refdes.build", "title": "Refdes: Build site", "icon": "$(play)" },
+      { "command": "refdes.check", "title": "Refdes: Check" },
+      { "command": "refdes.allocateIds", "title": "Refdes: Allocate missing IDs" },
+      { "command": "refdes.openPreview", "title": "Refdes: Open built site", "icon": "$(preview)" },
+      { "command": "refdes.refreshIndex", "title": "Refdes: Refresh index" },
+      { "command": "refdes.toggleCalcResults", "title": "Refdes: Toggle inline calc results" }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "refdes.build",
+          "when": "resourceExtname =~ /\\.(md|yaml|yml)$/ && refdes.active",
+          "group": "navigation@1"
+        },
+        {
+          "command": "refdes.openPreview",
+          "when": "resourceExtname =~ /\\.(md|yaml|yml)$/ && refdes.active",
+          "group": "navigation@2"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Refdes",
+      "properties": {
+        "refdes.command": {
+          "type": "string",
+          "default": "refdes",
+          "description": "Command used to run Refdes. Use e.g. '.venv/Scripts/python.exe -m refdes.cli' if it is not on your PATH."
+        },
+        "refdes.checkOnSave": {
+          "type": "boolean",
+          "default": true,
+          "description": "Re-index and publish diagnostics when a file is saved."
+        },
+        "refdes.showCalcResults": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show evaluated calc results inline at the end of each line."
+        }
+      }
+    },
+    "grammars": [
+      {
+        "scopeName": "markdown.refdes.calc",
+        "path": "./syntaxes/calc.injection.json",
+        "injectTo": ["text.html.markdown", "source.yaml"]
+      }
+    ],
+    "problemMatchers": [
+      {
+        "name": "refdes",
+        "owner": "refdes",
+        "fileLocation": ["relative", "${workspaceFolder}"],
+        "pattern": {
+          "regexp": "^(ERROR|WARNING)\\s+(\\S+?):(\\d+)(?:\\s+\\[[^\\]]+\\])?\\s+—\\s+(.*)$",
+          "severity": 1,
+          "file": 2,
+          "line": 3,
+          "message": 4
+        }
+      }
+    ]
+  }
+}

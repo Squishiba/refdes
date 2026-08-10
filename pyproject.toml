@@ -1,0 +1,66 @@
+[project]
+name = "refdes"
+version = "0.1.0"
+description = "Reference documentation for hardware design decisions: typed items, units-aware math, and traceability."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Jared" }]
+keywords = [
+    "hardware",
+    "documentation",
+    "requirements",
+    "traceability",
+    "electronics",
+    "pcb",
+    "units",
+    "engineering",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Manufacturing",
+    "Intended Audience :: Science/Research",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Documentation",
+    "Topic :: Scientific/Engineering :: Electronic Design Automation (EDA)",
+    "Topic :: Software Development :: Documentation",
+]
+dependencies = [
+    "pyyaml>=6.0",
+    "jinja2>=3.1",
+    "pint>=0.23",
+    "markdown-it-py>=3.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "build>=1.0", "twine>=5.0"]
+
+[project.urls]
+Homepage = "https://github.com/CHANGEME/refdes"
+Documentation = "https://github.com/CHANGEME/refdes/tree/main/docs"
+Source = "https://github.com/CHANGEME/refdes"
+Issues = "https://github.com/CHANGEME/refdes/issues"
+
+[project.scripts]
+refdes = "refdes.cli:main"
+
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+# Without this the wheel ships only .py files, and `refdes build` dies with
+# TemplateNotFound on the first run. Templates and site assets are code here.
+[tool.setuptools.package-data]
+refdes = ["templates/*.j2", "templates/assets/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

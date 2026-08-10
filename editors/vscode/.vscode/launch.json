@@ -1,0 +1,17 @@
+{
+  // Press F5 with this folder open. A second VS Code window ("Extension
+  // Development Host") starts with the extension loaded, opened on the Refdes
+  // project itself so there is something to look at.
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Run Refdes extension",
+      "type": "extensionHost",
+      "request": "launch",
+      "args": [
+        "--extensionDevelopmentPath=${workspaceFolder}",
+        "${workspaceFolder}/../.."
+      ]
+    }
+  ]
+}

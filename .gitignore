@@ -1,0 +1,16 @@
+_site/
+*.egg-info/
+build/
+dist/
+_docs/
+
+# Per-machine Claude Code permissions, not shared state.
+.claude/settings.local.json
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Not ignored on purpose: .refdes/ids.yaml is the ID ledger. It records which
+# numbers have been burned and must be committed, or two branches will hand out
+# the same ID.

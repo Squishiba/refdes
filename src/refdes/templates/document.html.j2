@@ -1,0 +1,134 @@
+{% extends "base.html.j2" %}
+{% block title %}{{ project.title }} — full record{% endblock %}
+{% block content %}
+
+<article class="document">
+
+<header class="doc-head">
+  <h1>{{ project.title }}</h1>
+  <p class="muted">
+    Complete design record{% if project.version %}, version <code>{{ project.version }}</code>{% endif %}.
+    Every item in one document, in reading order. Cross-references jump within the
+    page, so this is the form to print or archive.
+  </p>
+</header>
+
+<nav class="toc">
+  <h2>Contents</h2>
+  {% for label, items in sections %}
+  {% if items %}
+  <details open>
+    <summary>{{ label }} <span class="count">{{ items | length }}</span></summary>
+    <ul>
+      {% for item in items %}
+      <li><a href="#{{ item.slug }}"><code>{{ item.id }}</code> {{ item.title }}</a></li>
+      {% endfor %}
+    </ul>
+  </details>
+  {% endif %}
+  {% endfor %}
+</nav>
+
+{% for label, items in sections %}
+{% if items %}
+<section class="doc-part">
+  <h2 class="part-title">{{ label }}</h2>
+
+  {% for item in items %}
+  {% set spec = project.types.get(item.type) %}
+  <section class="doc-item" id="{{ item.slug }}">
+    <h3>
+      <code>{{ item.id }}</code> {{ item.title }}
+      {% set state = check_state(item) %}
+      {% if state != 'none' %}<span class="pill pill-{{ state }}">{{ state }}</span>{% endif %}
+      {% if item.external %}<span class="pill pill-external">imported from {{ item.origin }}</span>{% endif %}
+    </h3>
+
+    {% set cov = coverage_of(item.id) %}
+    {% if cov %}
+    <p class="doc-coverage">
+      <span class="pill pill-stage-{{ cov.stage }}">{{ cov.stage }}</span>
+      {% if cov.addressed_by %}addressed by {{ cov.addressed_by | join(', ') }}.{% endif %}
+      {% if cov.satisfied_by %}Satisfied by {{ cov.satisfied_by | join(', ') }}.{% endif %}
+      {% if cov.verified_by %}Verified by {{ cov.verified_by | join(', ') }}.{% endif %}
+    </p>
+    {% endif %}
+
+    {% if spec %}
+    <table class="fields">
+      <tbody>
+      {% for name, fspec in spec.fields.items() %}
+        {% set value = item.fields.get(name) %}
+        {% if value not in (None, '', []) and name not in ('options', 'checks') %}
+        <tr>
+          <th>{{ name }}</th>
+          <td>{% if value is string or value is number %}{{ value }}
+              {% elif value is sequence %}{{ value | join(', ') }}
+              {% else %}{{ value }}{% endif %}</td>
+        </tr>
+        {% endif %}
+      {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+
+    {% if item.body_html %}
+    <div class="body">{{ anchored(item.body_html) | safe }}</div>
+    {% endif %}
+
+    {% if item.fields.get('options') %}
+    <h4>Options considered</h4>
+    {% for opt in item.fields['options'] %}
+    <div class="option option-{{ (opt.get('verdict') or 'considered') | lower }}">
+      <div class="option-head">
+        <span class="option-name">{{ opt.get('name', '(unnamed)') }}</span>
+        <span class="verdict verdict-{{ (opt.get('verdict') or 'considered') | lower }}">{{ opt.get('verdict', 'considered') }}</span>
+      </div>
+      {% if opt.get('because') %}<p class="because">{{ opt['because'] }}</p>{% endif %}
+    </div>
+    {% endfor %}
+    {% endif %}
+
+    {% if item.checks %}
+    <h4>Checks</h4>
+    <table class="grid">
+      <thead><tr><th></th><th>Value</th><th>Result</th><th>Against</th><th>Detail</th></tr></thead>
+      <tbody>
+      {% for c in item.checks %}
+        <tr>
+          <td>{% if c.ok %}✓{% elif c.ok is none %}?{% else %}✗{% endif %}</td>
+          <td class="mono">{{ c.value_name }}</td>
+          <td class="mono {{ 'good' if c.ok else 'bad' }}">{{ c.actual or '—' }}</td>
+          <td><a href="#{{ c.against | lower }}">{{ c.against }}</a></td>
+          <td class="small">{{ c.detail }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+
+    {% if item.links or item.backlinks %}
+    <p class="doc-traces">
+      {% for name, targets in item.links.items() %}
+      <span class="rel">{{ project.link_types[name].label if name in project.link_types else name }}</span>
+      {% for t in targets %}<a href="#{{ t | lower }}">{{ t }}</a>{% if not loop.last %}, {% endif %}{% endfor %}.
+      {% endfor %}
+      {% for name, sources in item.backlinks.items() %}
+      <span class="rel">{{ name }}</span>
+      {% for s in sources %}<a href="#{{ s | lower }}">{{ s }}</a>{% if not loop.last %}, {% endif %}{% endfor %}.
+      {% endfor %}
+    </p>
+    {% endif %}
+
+    <p class="provenance small">
+      <code>{{ item.source_file }}{% if not item.external %}:{{ item.source_line }}{% endif %}</code>
+      · hash <code>{{ item.content_hash }}</code>
+    </p>
+  </section>
+  {% endfor %}
+</section>
+{% endif %}
+{% endfor %}
+
+</article>
+{% endblock %}

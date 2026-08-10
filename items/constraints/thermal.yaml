@@ -1,0 +1,23 @@
+defaults:
+  type: constraint
+  prefix: CON-THM
+  owner: J. Bin
+  tags: [thermal]
+  status: accepted
+
+items:
+  - id: CON-THM-001
+    title: Board power density
+    limit: "<= 0.15 W/in^2"
+    rationale: >
+      Natural convection only — the enclosure is sealed with no vents and no fan.
+      Above this density the board exceeds 85 °C at the 55 °C ambient rating.
+    source: Enclosure spec rev C, p.14
+
+  - id: CON-THM-002
+    title: Minimum converter efficiency
+    limit: ">= 0.90"
+    rationale: >
+      Every point of efficiency below this pushes dissipation past what the
+      enclosure can shed. Directly supports CON-THM-001.
+    source: Thermal model TM-014

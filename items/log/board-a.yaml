@@ -1,0 +1,82 @@
+# The running design log. Append only -- new entries go at the bottom, and a
+# correction is a new entry with `amends:`, never an edit to an old one.
+#
+# Entries record the progression: what was measured, what was tried, what failed,
+# and why the design moved the way it did. A `decision` is the conclusion; these
+# are the steps that got there.
+
+defaults:
+  type: log
+  prefix: LOG-A
+  board: board-a
+  author: J. Bin
+
+items:
+  - id: LOG-A-001
+    date: 2026-02-18
+    summary: Took delivery of the customer spec rev D and pulled out the power requirements.
+    addresses: [REQ-PWR-001, REQ-PWR-002]
+    body: |
+      Three things drive the power architecture: a 9–36 V input range, a 3V3 rail at
+      1.2 A, and a sealed enclosure. The last one is not written as a power
+      requirement anywhere, but it is the binding constraint — see CON-THM-001.
+
+  - id: LOG-A-002
+    date: 2026-02-24
+    summary: Ruled out an LDO on thermal grounds before doing any layout work.
+    addresses: [REQ-PWR-002]
+    body: |
+      Back of the envelope: (12 V − 3.3 V) × 1.2 A is 10.4 W of dissipation in the
+      pass element. The enclosure budget is under a watt for the whole power stage.
+      This is not a marginal call, so I did not model it further.
+
+  - id: LOG-A-003
+    date: 2026-03-04
+    summary: Bench-measured TPS62913 efficiency on the eval board; 93 % at half load.
+    addresses: [REQ-PWR-003]
+    body: |
+      Measured across the input range with a 0.6 A load. Efficiency held between
+      91 % and 94 %, worst case at 36 V in. Datasheet figure of 93 % is fair to use
+      for the thermal calculation.
+
+  - id: LOG-A-004
+    date: 2026-03-14
+    summary: Settled on the synchronous buck. Wrote it up as DEC-PWR-001.
+    addresses: [REQ-PWR-002, REQ-PWR-003]
+    records: [DEC-PWR-001]
+    body: |
+      Topology is decided. The dissipation number still needs somewhere to go — see
+      the next entry.
+
+  - id: LOG-A-005
+    date: 2026-03-16
+    summary: Thermal check fails. Power stage is over the density budget at the current allocation.
+    addresses: [CON-THM-001]
+    body: |
+      With the power stage allocated 1.4 × 0.9 inches, DEC-PWR-001 computes
+      0.2366 W/in² against a 0.15 W/in² budget in CON-THM-001. Roughly 1.6× over.
+
+      Three ways out, none chosen yet:
+
+      1. Widen the power stage allocation to about 2.0 × 1.0 inches. Costs board area
+         we do not obviously have.
+      2. Improve efficiency. The TPS62913 is already near the top of what is
+         available at this current; not much headroom.
+      3. Renegotiate CON-THM-001. The 0.15 W/in² figure came from a thermal model at
+         55 °C ambient — worth asking whether that ambient is real.
+
+      Flagging this rather than quietly widening the allocation, because option 3
+      would change a constraint that other decisions also depend on.
+
+  - id: LOG-A-006
+    date: 2026-03-19
+    summary: Correction to LOG-A-003 — the 93 % figure was at 12 V in, not worst case.
+    amends: [LOG-A-003]
+    addresses: [REQ-PWR-003]
+    body: |
+      Re-read my own bench notes. The 93 % measurement was at 12 V input. At 36 V in
+      it drops to 91 %. DEC-PWR-001 uses 0.93, which is optimistic for the worst-case
+      input. Redoing the thermal calculation at 0.91 makes the CON-THM-001 overage in
+      LOG-A-005 worse, not better.
+
+      Leaving LOG-A-003 as written and recording the correction here.

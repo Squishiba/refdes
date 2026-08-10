@@ -1,0 +1,48 @@
+{% extends "base.html.j2" %}
+{% block title %}Design log — {{ project.title }}{% endblock %}
+{% block content %}
+
+<h1>Design log</h1>
+<p class="muted">
+  Append-only, oldest first. Entries are sealed once built; a correction is a new
+  entry that <code>amends</code> an earlier one, never an edit to it.
+</p>
+
+{% if not entries %}
+<p class="muted">No entries yet.</p>
+{% endif %}
+
+<ol class="timeline">
+{% for entry in entries %}
+  <li class="tl-entry" id="{{ entry.slug }}">
+    <div class="tl-meta">
+      <span class="tl-date">{{ entry.fields.get('date', '') }}</span>
+      <a class="ref tl-id" href="{{ entry.slug }}.html" data-ref="{{ entry.id }}">{{ entry.id }}</a>
+      {% if entry.fields.get('author') %}<span class="muted">{{ entry.fields['author'] }}</span>{% endif %}
+      {% if entry.fields.get('board') %}<span class="tl-board">{{ entry.fields['board'] }}</span>{% endif %}
+    </div>
+    <div class="tl-summary">{{ entry.fields.get('summary', '') }}</div>
+    {% if entry.links.get('amends') %}
+    <div class="tl-amends">
+      amends
+      {% for ref in entry.links['amends'] %}
+      <a class="ref" href="{{ ref | lower }}.html" data-ref="{{ ref }}">{{ ref }}</a>{% if not loop.last %}, {% endif %}
+      {% endfor %}
+    </div>
+    {% endif %}
+    {% if entry.links.get('addresses') %}
+    <div class="tl-addresses">
+      <span class="rel">addresses</span>
+      {% for ref in entry.links['addresses'] %}
+      <a class="ref" href="{{ ref | lower }}.html" data-ref="{{ ref }}">{{ ref }}</a>{% if not loop.last %}, {% endif %}
+      {% endfor %}
+    </div>
+    {% endif %}
+    {% if entry.body_html %}
+    <div class="tl-body body">{{ entry.body_html | safe }}</div>
+    {% endif %}
+  </li>
+{% endfor %}
+</ol>
+
+{% endblock %}

@@ -1,0 +1,60 @@
+{% extends "base.html.j2" %}
+{% block title %}Coverage — {{ project.title }}{% endblock %}
+{% block content %}
+
+<h1>Coverage</h1>
+<p class="muted">
+  Three separate questions, deliberately not collapsed into one. <b>Addressed</b>
+  means somebody has worked on it and written it up in the design log.
+  <b>Satisfied</b> means a decision claims to meet it. <b>Verified</b> means a test
+  proves it.
+</p>
+
+{% set counts = {'open': 0, 'addressed': 0, 'satisfied': 0, 'verified': 0} %}
+{% for _item, cov in coverage_rows %}
+{% if counts.update({cov.stage: counts[cov.stage] + 1}) %}{% endif %}
+{% endfor %}
+
+<section class="cards">
+  <div class="card {{ 'card-bad' if counts['open'] else 'card-good' }}">
+    <div class="card-num">{{ counts['open'] }}</div><div class="card-label">open</div>
+  </div>
+  <div class="card {{ 'card-warn' if counts['addressed'] else '' }}">
+    <div class="card-num">{{ counts['addressed'] }}</div><div class="card-label">addressed only</div>
+  </div>
+  <div class="card {{ 'card-warn' if counts['satisfied'] else '' }}">
+    <div class="card-num">{{ counts['satisfied'] }}</div><div class="card-label">satisfied, unverified</div>
+  </div>
+  <div class="card card-good">
+    <div class="card-num">{{ counts['verified'] }}</div><div class="card-label">verified</div>
+  </div>
+</section>
+
+<table class="grid coverage">
+  <thead>
+    <tr>
+      <th>ID</th><th>Title</th><th>Stage</th>
+      <th>Addressed by</th><th>Satisfied by</th><th>Verified by</th>
+    </tr>
+  </thead>
+  <tbody>
+  {% for item, cov in coverage_rows %}
+    <tr class="stage-{{ cov.stage }}">
+      <td><a class="ref" href="{{ item.slug }}.html" data-ref="{{ item.id }}">{{ item.id }}</a></td>
+      <td>{{ item.title }}</td>
+      <td><span class="pill pill-stage-{{ cov.stage }}">{{ cov.stage }}</span></td>
+      {% for group in [cov.addressed_by, cov.satisfied_by, cov.verified_by] %}
+      <td>
+        {% if group %}
+          {% for ref in group %}
+          <a class="ref" href="{{ ref | lower }}.html" data-ref="{{ ref }}">{{ ref }}</a>{% if not loop.last %}, {% endif %}
+          {% endfor %}
+        {% else %}<span class="muted">—</span>{% endif %}
+      </td>
+      {% endfor %}
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+
+{% endblock %}

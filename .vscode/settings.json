@@ -1,0 +1,7 @@
+{
+  // The extension shells out to the CLI. VS Code does not activate the venv, so
+  // point at the executable inside it rather than relying on PATH.
+  "refdes.command": ".venv\\Scripts\\refdes.exe",
+  "refdes.checkOnSave": true,
+  "refdes.showCalcResults": true
+}

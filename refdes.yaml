@@ -1,0 +1,147 @@
+# Refdes project configuration.
+#
+# This file defines the item types, the links between them, and the change-tracking
+# policy. Most people never need to open it -- the defaults below are a sensible
+# hardware starter schema.
+
+site:
+  title: "Example Board — Design Reference"
+  out: _site
+
+id:
+  width: 3                      # REQ-PWR-004. Set generously now; changing it later is painful.
+  ledger: .refdes/ids.yaml   # burned IDs are never reused
+
+history:
+  # Applied to any field that does not declare its own on_change.
+  default: invalidate
+
+# Named units to collapse derived results into, so V*A renders as "W" rather than
+# "ampere * volt". Only single-symbol units belong here: a unit you wrote yourself,
+# like in^2, is always left exactly as you wrote it.
+units:
+  preferred: [W, V, A, ohm, F, H, Hz, J, N, Pa, K, s, m, g]
+
+  # House units. `mil` and `mils` already map to `thou` by default, because pint
+  # reads a bare "mil" as the angular mil rather than a thousandth of an inch.
+  aliases: {}
+
+# Link types and the back-link name generated for each.
+link_types:
+  derives_from: { inverse: derived_by,     label: "Derives from" }
+  satisfies:    { inverse: satisfied_by,   label: "Satisfies" }
+  constrains:   { inverse: constrained_by, label: "Constrains" }
+  verified_by:  { inverse: verifies,       label: "Verified by" }
+  supersedes:   { inverse: superseded_by,  label: "Supersedes" }
+  implements:   { inverse: implemented_by, label: "Implements" }
+  addresses:    { inverse: addressed_by,   label: "Addresses" }
+  amends:       { inverse: amended_by,     label: "Amends" }
+  records:      { inverse: recorded_by,    label: "Records" }
+
+types:
+
+  requirement:
+    prefix: REQ
+    label: Requirement
+    preview: [status, text]
+    fields:
+      text:          { type: text, required: true, on_change: invalidate }
+      status:        { type: enum, choices: [draft, open, accepted, retired], default: draft, on_change: invalidate }
+      rationale:     { type: text,   on_change: invalidate }
+      owner:         { type: person, on_change: log }
+      source:        { type: text,   on_change: log }
+      tags:          { type: list,   on_change: log }
+      last_reviewed: { type: date,   on_change: ignore }
+    links:
+      derives_from: [requirement]
+      verified_by:  [test]
+    body: { on_change: invalidate }
+
+  constraint:
+    prefix: CON
+    label: Constraint
+    preview: [status, limit, rationale]
+    fields:
+      title:         { type: text, required: true, on_change: invalidate }
+      limit:         { type: limit, required: true, on_change: invalidate }
+      status:        { type: enum, choices: [draft, open, accepted, retired], default: draft, on_change: invalidate }
+      rationale:     { type: text,   on_change: invalidate }
+      owner:         { type: person, on_change: log }
+      source:        { type: text,   on_change: log }
+      tags:          { type: list,   on_change: log }
+      last_reviewed: { type: date,   on_change: ignore }
+    links:
+      derives_from: [requirement, constraint]
+    body: { on_change: invalidate }
+
+  decision:
+    prefix: DEC
+    label: Decision
+    preview: [status, title, date]
+    fields:
+      title:         { type: text, required: true, on_change: invalidate }
+      status:        { type: enum, choices: [proposed, accepted, superseded, rejected], default: proposed, on_change: invalidate }
+      date:          { type: date,    on_change: log }
+      owner:         { type: person,  on_change: log }
+      tags:          { type: list,    on_change: log }
+      options:       { type: options, on_change: invalidate }
+      checks:        { type: checks,  on_change: invalidate }
+      last_reviewed: { type: date,    on_change: ignore }
+    links:
+      satisfies:   [requirement]
+      constrains:  [constraint]
+      supersedes:  [decision]
+      implements:  [component]
+    body: { on_change: invalidate }
+
+  component:
+    prefix: CMP
+    label: Component
+    preview: [status, title, part_number]
+    fields:
+      title:       { type: text, required: true, on_change: invalidate }
+      part_number: { type: text, on_change: invalidate }
+      refdes:      { type: list, on_change: log }
+      status:      { type: enum, choices: [candidate, selected, obsolete], default: candidate, on_change: invalidate }
+      tags:        { type: list, on_change: log }
+    links:
+      satisfies: [requirement]
+    body: { on_change: invalidate }
+
+  # The running design log: a dated, append-only record of how the design actually
+  # got where it is, including the measurements and the dead ends. A `decision` is a
+  # settled conclusion; a `log` entry is a step on the way to one.
+  #
+  # Sealed after the first build. Corrections are made by appending a new entry with
+  # `amends:`, never by editing history.
+  log:
+    prefix: LOG
+    label: Log entry
+    plural: Log entries
+    append_only: true
+    preview: [date, author, summary]
+    fields:
+      date:    { type: date, required: true, on_change: invalidate }
+      summary: { type: text, required: true, on_change: invalidate }
+      author:  { type: person, on_change: invalidate }
+      board:   { type: text, on_change: invalidate }
+      tags:    { type: list, on_change: log }
+    links:
+      addresses: [requirement, constraint]
+      amends:    [log]
+      records:   [decision]
+    body: { on_change: invalidate }
+
+  test:
+    prefix: TST
+    label: Test
+    preview: [status, title]
+    fields:
+      title:  { type: text, required: true, on_change: invalidate }
+      status: { type: enum, choices: [planned, passing, failing, blocked], default: planned, on_change: invalidate }
+      method: { type: text, on_change: invalidate }
+      owner:  { type: person, on_change: log }
+      tags:   { type: list, on_change: log }
+    links:
+      verifies: [requirement, constraint]
+    body: { on_change: invalidate }

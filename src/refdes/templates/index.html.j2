@@ -1,0 +1,107 @@
+{% extends "base.html.j2" %}
+{% block content %}
+
+<h1>{{ project.title }}</h1>
+
+<section class="cards">
+  <div class="card">
+    <div class="card-num">{{ project.items | length }}</div>
+    <div class="card-label">items</div>
+  </div>
+  <div class="card {{ 'card-bad' if failing else 'card-good' }}">
+    <div class="card-num">{{ failing | length }}</div>
+    <div class="card-label">failing checks</div>
+  </div>
+  <div class="card {{ 'card-warn' if outstanding else 'card-good' }}">
+    <div class="card-num">{{ outstanding | length }}</div>
+    <div class="card-label"><a href="coverage.html">not yet verified</a></div>
+  </div>
+  <div class="card {{ 'card-bad' if project.errors else 'card-good' }}">
+    <div class="card-num">{{ project.errors | length }}</div>
+    <div class="card-label">errors</div>
+  </div>
+</section>
+
+{% if failing %}
+<section class="panel panel-bad">
+  <h2>Failing checks</h2>
+  <table class="grid">
+    <thead><tr><th>Item</th><th>Value</th><th>Actual</th><th>Limit</th><th>Constraint</th></tr></thead>
+    <tbody>
+    {% for item, check in failing %}
+      <tr>
+        <td><a class="ref" href="{{ item.slug }}.html" data-ref="{{ item.id }}">{{ item.id }}</a></td>
+        <td class="mono">{{ check.value_name }}</td>
+        <td class="mono bad">{{ check.actual }}</td>
+        <td class="mono">{{ check.limit }}</td>
+        <td><a class="ref" href="{{ check.against | lower }}.html" data-ref="{{ check.against }}">{{ check.against }}</a></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endif %}
+
+{% if outstanding %}
+<section class="panel panel-warn">
+  <h2>Outstanding work</h2>
+  <table class="grid">
+    <thead><tr><th>ID</th><th>Title</th><th>Stage</th></tr></thead>
+    <tbody>
+    {% for item, cov in outstanding %}
+      <tr>
+        <td><a class="ref" href="{{ item.slug }}.html" data-ref="{{ item.id }}">{{ item.id }}</a></td>
+        <td>{{ item.title }}</td>
+        <td><span class="pill pill-stage-{{ cov.stage }}">{{ cov.stage }}</span></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <p class="small"><a href="coverage.html">Full coverage table →</a></p>
+</section>
+{% endif %}
+
+{% for type_name, items in by_type.items() %}
+{% set spec = project.types[type_name] %}
+<section id="type-{{ type_name }}">
+  <h2>{{ spec.plural }} <span class="count">{{ items | length }}</span></h2>
+  <table class="grid">
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>Title</th>
+        {% for f in spec.preview if f != 'text' and f != 'title' %}<th>{{ f }}</th>{% endfor %}
+        <th>Checks</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for item in items %}
+      <tr>
+        <td><a class="ref" href="{{ item.slug }}.html" data-ref="{{ item.id }}">{{ item.id }}</a></td>
+        <td>{{ item.title }}</td>
+        {% for f in spec.preview if f != 'text' and f != 'title' %}
+        <td class="mono">{{ item.fields.get(f, '') }}</td>
+        {% endfor %}
+        {% set state = check_state(item) %}
+        <td><span class="pill pill-{{ state }}">{{ state }}</span></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endfor %}
+
+{% if project.diagnostics %}
+<section class="panel">
+  <h2>Diagnostics</h2>
+  <ul class="tight mono small">
+    {% for d in project.diagnostics %}
+    <li class="{{ 'bad' if d.level == 'error' else 'warn' }}">
+      {{ d.level }} — {{ d.where }}{% if d.item_id %} [{{ d.item_id }}]{% endif %}: {{ d.message }}
+    </li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
+
+{% endblock %}

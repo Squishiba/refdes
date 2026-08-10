@@ -1,0 +1,37 @@
+# The Refdes documentation, built with Refdes.
+#
+# A pages-only project: no items, so no coverage, no design log, no traceability —
+# just narrative markdown rendered with the same theme. This is what a project gets
+# when it wants an overview page alongside its requirements.
+
+site:
+  title: "Refdes"
+  out: ../_docs
+  pages: ../docs
+
+  # Reading order. Anything not listed falls in after these, alphabetically.
+  nav:
+    - index
+    - getting-started
+    - concepts
+    - authoring
+    - pages
+    - markdown
+    - ids
+    - links
+    - math
+    - checks
+    - design-log
+    - coverage
+    - change-tracking
+    - multi-board
+    - schema-reference
+    - cli-reference
+    - output
+    - troubleshooting
+
+# A schema is still required, but nothing here uses it.
+types:
+  note:
+    prefix: NOTE
+    label: Note

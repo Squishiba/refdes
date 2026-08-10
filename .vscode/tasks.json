@@ -1,0 +1,46 @@
+{
+  // Problem matchers for Refdes. These work with no extension installed:
+  // run a task, and errors land in the Problems panel with click-to-navigate.
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Refdes: check",
+      "type": "shell",
+      "command": "${workspaceFolder}/.venv/Scripts/python.exe",
+      "args": ["-m", "refdes.cli", "check"],
+      "options": { "env": { "PYTHONIOENCODING": "utf-8", "PYTHONPATH": "src" } },
+      "group": { "kind": "build", "isDefault": true },
+      "presentation": { "reveal": "silent", "panel": "dedicated" },
+      "problemMatcher": {
+        "owner": "refdes",
+        "fileLocation": ["relative", "${workspaceFolder}"],
+        "pattern": {
+          "regexp": "^(ERROR|WARNING)\\s+(\\S+?):(\\d+)(?:\\s+\\[[^\\]]+\\])?\\s+—\\s+(.*)$",
+          "severity": 1,
+          "file": 2,
+          "line": 3,
+          "message": 4
+        }
+      }
+    },
+    {
+      "label": "Refdes: build",
+      "type": "shell",
+      "command": "${workspaceFolder}/.venv/Scripts/python.exe",
+      "args": ["-m", "refdes.cli", "build", "--keep-going"],
+      "options": { "env": { "PYTHONIOENCODING": "utf-8", "PYTHONPATH": "src" } },
+      "presentation": { "reveal": "always", "panel": "dedicated" },
+      "problemMatcher": {
+        "owner": "refdes",
+        "fileLocation": ["relative", "${workspaceFolder}"],
+        "pattern": {
+          "regexp": "^(ERROR|WARNING)\\s+(\\S+?):(\\d+)(?:\\s+\\[[^\\]]+\\])?\\s+—\\s+(.*)$",
+          "severity": 1,
+          "file": 2,
+          "line": 3,
+          "message": 4
+        }
+      }
+    }
+  ]
+}

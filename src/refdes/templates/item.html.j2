@@ -1,0 +1,135 @@
+{% extends "base.html.j2" %}
+{% block title %}{{ item.id }} — {{ project.title }}{% endblock %}
+{% block content %}
+
+<article class="item">
+
+<div class="item-head">
+  <span class="type-badge">{{ spec.label }}</span>
+  <h1>{{ item.id }}</h1>
+  {% set state = check_state(item) %}
+  {% if state != 'none' %}<span class="pill pill-{{ state }}">{{ state }}</span>{% endif %}
+  {% if item.external %}<span class="pill pill-external">imported from {{ item.origin }}</span>{% endif %}
+  {% if spec.append_only %}<span class="pill pill-sealed">append-only</span>{% endif %}
+</div>
+<p class="item-title">{{ item.title }}</p>
+
+{% if item.external %}
+<p class="notice">
+  Read-only. This item is owned by the <b>{{ item.origin }}</b> project{% if item.fields.get('_version') %}
+  at version <code>{{ item.fields['_version'] }}</code>{% endif %}. Incoming links below are
+  from this project only.
+</p>
+{% endif %}
+
+{% set cov = coverage_of(item.id) %}
+{% if cov %}
+<section class="coverage-strip stage-{{ cov.stage }}">
+  <span class="pill pill-stage-{{ cov.stage }}">{{ cov.stage }}</span>
+  <span><b>addressed</b> {% if cov.addressed_by %}{{ cov.addressed_by | join(', ') }}{% else %}<span class="muted">—</span>{% endif %}</span>
+  <span><b>satisfied</b> {% if cov.satisfied_by %}{{ cov.satisfied_by | join(', ') }}{% else %}<span class="muted">—</span>{% endif %}</span>
+  <span><b>verified</b> {% if cov.verified_by %}{{ cov.verified_by | join(', ') }}{% else %}<span class="muted">—</span>{% endif %}</span>
+</section>
+{% endif %}
+
+<table class="fields">
+  <tbody>
+  {% for name, fspec in spec.fields.items() %}
+    {% set value = item.fields.get(name) %}
+    {% if value not in (None, '', []) and name not in ('options', 'checks') %}
+    <tr>
+      <th>{{ name }}</th>
+      <td>
+        {% if value is string or value is number %}{{ value }}
+        {% elif value is sequence %}{{ value | join(', ') }}
+        {% else %}{{ value }}{% endif %}
+      </td>
+      <td class="on-change" title="on_change policy for this field">{{ fspec.on_change }}</td>
+    </tr>
+    {% endif %}
+  {% endfor %}
+  </tbody>
+</table>
+
+{% if item.body_html %}
+<div class="body">{{ item.body_html | safe }}</div>
+{% endif %}
+
+{% if item.fields.get('options') %}
+<section class="options">
+  <h2>Options considered</h2>
+  {% for opt in item.fields['options'] %}
+  <div class="option option-{{ (opt.get('verdict') or 'considered') | lower }}">
+    <div class="option-head">
+      <span class="option-name">{{ opt.get('name', '(unnamed)') }}</span>
+      <span class="verdict verdict-{{ (opt.get('verdict') or 'considered') | lower }}">{{ opt.get('verdict', 'considered') }}</span>
+    </div>
+    {% if opt.get('because') %}<p class="because">{{ opt['because'] }}</p>{% endif %}
+  </div>
+  {% endfor %}
+</section>
+{% endif %}
+
+{% if item.checks %}
+<section class="checks">
+  <h2>Checks</h2>
+  <table class="grid">
+    <thead><tr><th></th><th>Value</th><th>Result</th><th>Against</th><th>Detail</th></tr></thead>
+    <tbody>
+    {% for c in item.checks %}
+      <tr>
+        <td>{% if c.ok %}✓{% elif c.ok is none %}?{% else %}✗{% endif %}</td>
+        <td class="mono">{{ c.value_name }}</td>
+        <td class="mono {{ 'good' if c.ok else 'bad' }}">{{ c.actual or '—' }}</td>
+        <td><a class="ref" href="{{ c.against | lower }}.html" data-ref="{{ c.against }}">{{ c.against }}</a></td>
+        <td class="small">{{ c.detail }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endif %}
+
+{% if item.links or item.backlinks %}
+<section class="traces">
+  <h2>Traceability</h2>
+  <div class="trace-cols">
+    <div>
+      <h3>Outgoing</h3>
+      {% if item.links %}
+      <ul class="tight">
+        {% for name, targets in item.links.items() %}
+        <li><span class="rel">{{ project.link_types[name].label if name in project.link_types else name }}</span>
+          {% for t in targets %}
+          <a class="ref" href="{{ t | lower }}.html" data-ref="{{ t }}">{{ t }}</a>{% if not loop.last %}, {% endif %}
+          {% endfor %}
+        </li>
+        {% endfor %}
+      </ul>
+      {% else %}<p class="muted">None.</p>{% endif %}
+    </div>
+    <div>
+      <h3>Incoming</h3>
+      {% if item.backlinks %}
+      <ul class="tight">
+        {% for name, sources in item.backlinks.items() %}
+        <li><span class="rel">{{ name }}</span>
+          {% for s in sources %}
+          <a class="ref" href="{{ s | lower }}.html" data-ref="{{ s }}">{{ s }}</a>{% if not loop.last %}, {% endif %}
+          {% endfor %}
+        </li>
+        {% endfor %}
+      </ul>
+      {% else %}<p class="muted">Nothing links here.</p>{% endif %}
+    </div>
+  </div>
+</section>
+{% endif %}
+
+<footer class="provenance">
+  <span>source <code>{{ item.source_file }}:{{ item.source_line }}</code></span>
+  <span>content hash <code>{{ item.content_hash }}</code> <span class="muted">(over <code>invalidate</code> fields only)</span></span>
+</footer>
+
+</article>
+{% endblock %}

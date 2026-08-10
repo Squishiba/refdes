@@ -1,0 +1,72 @@
+{
+  "scopeName": "markdown.refdes.calc",
+  "injectionSelector": "L:text.html.markdown, L:source.yaml",
+  "patterns": [{ "include": "#calc-fence" }],
+  "repository": {
+    "calc-fence": {
+      "begin": "(^|\\G)(\\s*)(```)\\s*(calc)\\s*$",
+      "beginCaptures": {
+        "3": { "name": "punctuation.definition.markdown" },
+        "4": { "name": "fenced_code.block.language.markdown" }
+      },
+      "end": "(^|\\G)(\\s*)(```)\\s*$",
+      "endCaptures": { "3": { "name": "punctuation.definition.markdown" } },
+      "name": "meta.embedded.block.calc",
+      "patterns": [
+        { "include": "#comment" },
+        { "include": "#assignment" },
+        { "include": "#bracketed-unit" },
+        { "include": "#quantity" },
+        { "include": "#function" },
+        { "include": "#tolerance" },
+        { "include": "#operator" }
+      ]
+    },
+
+    "comment": {
+      "match": "#.*$",
+      "name": "comment.line.number-sign.calc"
+    },
+
+    "assignment": {
+      "match": "^\\s*([A-Za-z_][A-Za-z0-9_]*)\\s*(?:(:)\\s*([^=#]+?)\\s*)?(=)",
+      "captures": {
+        "1": { "name": "variable.other.assignment.calc" },
+        "2": { "name": "punctuation.separator.calc" },
+        "3": { "name": "entity.name.type.unit.calc" },
+        "4": { "name": "keyword.operator.assignment.calc" }
+      }
+    },
+
+    "bracketed-unit": {
+      "begin": "\\[",
+      "end": "\\]",
+      "beginCaptures": { "0": { "name": "punctuation.definition.unit.calc" } },
+      "endCaptures": { "0": { "name": "punctuation.definition.unit.calc" } },
+      "name": "entity.name.type.unit.calc"
+    },
+
+    "quantity": {
+      "match": "\\b(\\d+(?:\\.\\d+)?(?:[eE][-+]?\\d+)?)\\s*([A-Za-zΩµμ°][A-Za-z0-9_]*(?:\\^-?\\d+)?(?:[/·][A-Za-zΩµμ°][A-Za-z0-9_]*(?:\\^-?\\d+)?)*)?",
+      "captures": {
+        "1": { "name": "constant.numeric.calc" },
+        "2": { "name": "entity.name.type.unit.calc" }
+      }
+    },
+
+    "tolerance": {
+      "match": "±|\\+/-",
+      "name": "keyword.operator.tolerance.calc"
+    },
+
+    "function": {
+      "match": "\\b(sqrt|abs|min|max|exp|ln|log10)\\b(?=\\s*\\()",
+      "name": "support.function.calc"
+    },
+
+    "operator": {
+      "match": "[+\\-*/^()]",
+      "name": "keyword.operator.arithmetic.calc"
+    }
+  }
+}

@@ -1,0 +1,9 @@
+# Refdes ID ledger — allocated IDs are never reused, even after an item
+# is deleted. Do not hand-edit unless you know why you are doing it.
+allocated:
+- REQ-PWR-005
+burned:
+  CON-THM: 2
+  DEC-PWR: 1
+  REQ-PWR: 5
+  TST-PWR: 2
