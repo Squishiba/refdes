@@ -1,0 +1,16 @@
+# Normalise to LF in the repository, check out native.
+#
+# Item content hashes are line-ending independent (verified), so a CRLF checkout
+# will not produce false append-only seal violations. This keeps diffs clean
+# across platforms regardless.
+* text=auto
+
+*.py    text eol=lf
+*.md    text eol=lf
+*.yaml  text eol=lf
+*.yml   text eol=lf
+*.json  text eol=lf
+*.js    text eol=lf
+*.css   text eol=lf
+*.j2    text eol=lf
+*.toml  text eol=lf
