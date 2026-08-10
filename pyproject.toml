@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
 license-files = ["LICENSE"]
-authors = [{ name = "Jared" }]
+authors = [{ name = "Squishiba" }]
 keywords = [
     "hardware",
     "documentation",
@@ -42,10 +42,10 @@ dependencies = [
 dev = ["pytest>=8.0", "build>=1.0", "twine>=5.0"]
 
 [project.urls]
-Homepage = "https://github.com/CHANGEME/refdes"
-Documentation = "https://github.com/CHANGEME/refdes/tree/main/docs"
-Source = "https://github.com/CHANGEME/refdes"
-Issues = "https://github.com/CHANGEME/refdes/issues"
+Homepage = "https://github.com/Squishiba/refdes"
+Documentation = "https://github.com/Squishiba/refdes/tree/main/docs"
+Source = "https://github.com/Squishiba/refdes"
+Issues = "https://github.com/Squishiba/refdes/issues"
 
 [project.scripts]
 refdes = "refdes.cli:main"
