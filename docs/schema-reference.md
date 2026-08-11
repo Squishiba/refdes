@@ -202,6 +202,12 @@ unaffected. With it, a board is the first path segment under `items/` matched
 against this registry, overridable per item with the reserved `board:` key. See
 [multiple boards](multi-board.md).
 
+Two boards resolving to the same `items/` path segment — either the same `path:`
+given twice, or a `path:` colliding with another board's key — is a hard error
+at project-load time, printed as `configuration error: boards.board-b and
+boards.board-a both map to items/board-a/ — path segments must be unique`, and
+fails before any item is parsed.
+
 ---
 
 ## Item-level `history`

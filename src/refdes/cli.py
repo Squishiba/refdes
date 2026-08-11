@@ -188,7 +188,14 @@ def main(argv: list[str] | None = None) -> int:
     )
     p_build.set_defaults(func=cmd_build)
 
-    p_check = sub.add_parser("check", help="validate without rendering")
+    p_check = sub.add_parser(
+        "check",
+        help="validate without rendering",
+        description="Validate the project without rendering a site: parse every "
+        "item, resolve links, run calcs and checks, and verify (but never create "
+        "or update) append-only seals and board-drift records. Exits non-zero on "
+        "any error. Nothing is written to disk -- use 'build' for that.",
+    )
     p_check.set_defaults(func=cmd_check)
 
     p_index = sub.add_parser(
@@ -203,7 +210,15 @@ def main(argv: list[str] | None = None) -> int:
     p_id.add_argument("--dry-run", action="store_true", help="show without writing")
     p_id.set_defaults(func=cmd_id)
 
-    p_audit = sub.add_parser("audit", help="list every field excluded from invalidation")
+    p_audit = sub.add_parser(
+        "audit",
+        help="list suppressed fields, resealed entries, board moves, and imports",
+        description="List everything the build tracks but does not fail on: schema "
+        "fields excluded from invalidation, item-level history overrides, "
+        "append-only log entries edited after sealing (--reseal), accepted and "
+        "outstanding board moves (--accept-board-move), and imported projects. "
+        "Suppression is allowed; invisible suppression is not.",
+    )
     p_audit.set_defaults(func=cmd_audit)
 
     args = parser.parse_args(argv)

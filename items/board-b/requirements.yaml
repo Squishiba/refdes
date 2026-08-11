@@ -1,0 +1,16 @@
+# Board B: a second, smaller board sharing this project with Board A. Its own
+# folder is registered in refdes.yaml as `board-b`, so items here resolve their
+# board from the path alone -- no `board:` override needed, unlike Board A's
+# items, which predate the registry. See docs/multi-board.md.
+
+defaults:
+  type: requirement
+  prefix: REQ-B-PWR
+  owner: J. Bin
+  tags: [power]
+  status: accepted
+
+items:
+  - id: REQ-B-PWR-001
+    text: The board shall accept the same 9 V to 36 V input rail as Board A.
+    source: Shared platform spec.

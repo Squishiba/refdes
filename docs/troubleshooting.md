@@ -133,6 +133,14 @@ A warning. The item renders unvalidated. Add the type to your schema to silence 
 **Hover previews do nothing.**
 JavaScript is disabled, or `assets/app.js` is missing. Links still work either way.
 
+**An image or a PDF link 404s in the built site even though the source file
+exists.**
+Expected today — `refdes build` never copies local images or other local files
+into `_site/`, and the path you wrote is checked against your source file's
+directory but rendered into a page that lives flat in `_site/`. See [images and
+other local files](markdown.md#images-and-other-local-files) for the actual
+behavior and the copy-step workaround.
+
 **`UnicodeEncodeError` in a Windows terminal.**
 The CLI reconfigures stdout to UTF-8, but if you pipe through another tool set
 `PYTHONIOENCODING=utf-8`.

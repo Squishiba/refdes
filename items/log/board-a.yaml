@@ -8,6 +8,11 @@
 defaults:
   type: log
   prefix: LOG-A
+  # `board` here is the `log` type's own hand-typed field (declared in
+  # refdes.yaml), not the reserved `board:` override the boards: registry
+  # added later -- a type's own field always wins, so these entries are plain
+  # text-tagged, not board-scoped, and do not appear on document-board-a.html
+  # etc. See docs/design-log.md#board-is-a-plain-field-here-not-the-reserved-override.
   board: board-a
   author: J. Bin
 

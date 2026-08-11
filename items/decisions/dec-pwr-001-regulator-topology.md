@@ -6,6 +6,7 @@ status: accepted
 date: 2026-03-14
 owner: J. Bin
 tags: [power, thermal]
+board: board-a   # folder predates the boards: registry; see refdes.yaml
 satisfies: [REQ-PWR-002, REQ-PWR-003]
 constrains: [CON-THM-001]
 options:

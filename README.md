@@ -31,7 +31,7 @@ refdes build     # render _site/ and items.json
 refdes check     # validate without rendering; non-zero exit on errors
 refdes index     # print items.json to stdout, for tooling
 refdes id        # allocate IDs for items that have none, writing them back
-refdes audit     # list suppressed fields, resealed entries, and imports
+refdes audit     # list suppressed fields, resealed entries, board moves, and imports
 ```
 
 ## Editor support
@@ -48,7 +48,30 @@ carries problem matchers that work out of the box.
 One object model, two serializations. Rich items get a file; bulk items get a list.
 
 **`items/**/*.md`** — front-matter plus a markdown body, for decisions and anything
-with prose, calcs, or options.
+with prose, calcs, or options. Not limited to one item: a further `---` starts a
+new item's front-matter, and an optional leading block whose only key is
+`defaults:` applies to every item that follows, the same way `defaults:` works in
+a list file:
+
+```markdown
+---
+defaults:
+  type: decision
+  prefix: DEC-PWR
+---
+id: DEC-PWR-001
+title: 3V3 rail regulator topology
+---
+
+Body of the first decision.
+
+---
+title: LDO thermal fallback, rejected
+---
+
+Body of the second decision. Each item keeps its own body — the next item's
+front-matter is where this one ends.
+```
 
 **`items/**/*.yaml`** — a list sharing `defaults:`, for bulk requirements:
 
@@ -185,6 +208,11 @@ items:
       or renegotiate the 0.15 W/in² figure...
 ```
 
+That `board: board-a` is the `log` type's own hand-typed field, not the
+`boards:` registry's reserved `board:` override (below) — a type's own field
+always wins, so a `log` entry stays plain-text-tagged rather than board-scoped
+until that field is retired in favor of the reserved key.
+
 Entries are **sealed on first build**. Editing one afterwards fails the build:
 
 ```
@@ -220,6 +248,38 @@ the least-covered first, and the same data is in `items.json` under `coverage`.
 For a family of boards in one repo, use folders and per-board prefixes
 (`REQ-A-PWR`, `REQ-B-PWR`, `IFC-*` for anything shared). Links, checks, and
 back-links all work across folders with no extra machinery.
+
+Register the boards to get more than organisation — per-board pages, a token
+lint, and drift tracking when a file moves:
+
+```yaml
+boards:
+  board-a:
+    label: "Board A"
+    token: A          # optional; checked against item id prefixes
+  board-b:
+    label: "Board B"
+    token: B
+```
+
+A board is the first path segment under `items/`, matched against this
+registry. `boards:` is entirely **opt-in** — absent, nothing here does
+anything, and every item's board stays unset. Override the path for one item
+(or a whole file, in `defaults:`) with the reserved `board:` key, the same way
+`prefix:` overrides a file's default prefix; naming an unregistered board is a
+build error, not a silent no-op.
+
+Each registered board gets its own scoped `document-<board>.html`,
+`coverage-<board>.html`, `log-<board>.html`, and `summary-<board>.html`
+alongside the unchanged project-wide versions — handing `document-board-a.html`
+to Board A's team shows only their items. If a board declares `token:`, the
+build warns when an item's id prefix does not contain it — a lint, not a
+rename. `.refdes/boards.yaml` records which board each item was on at the last
+build (commit it, the same as `.refdes/ids.yaml`); moving a file into a
+different board's folder warns on the next build instead of silently
+re-scoping it. This repo's own [`items/`](items/) and [`refdes.yaml`](refdes.yaml)
+register two boards as a worked example. See [multiple boards](docs/multi-board.md)
+for the rest, including per-board token linting and drift acceptance.
 
 When boards need to ship, version, or be owned separately, split them into projects
 and import the shared one:

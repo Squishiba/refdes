@@ -139,7 +139,7 @@ class Item:
     body_html: str = ""
     history: dict[str, Any] = field(default_factory=dict)  # item-level on_change overrides
     calc_values: dict[str, str] = field(default_factory=dict)  # name -> formatted result
-    prefix_hint: str = ""  # defaults.prefix from a list file, used by the ID allocator
+    prefix_hint: str = ""  # 'prefix:' override -- own key or file/block defaults:, used by the ID allocator
     content_hash: str = ""  # over `invalidate` fields only; drives suspect links
     external: bool = False  # imported from another project: read-only here
     origin: str = ""        # name of the import it came from

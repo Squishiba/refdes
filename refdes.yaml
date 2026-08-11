@@ -145,3 +145,23 @@ types:
     links:
       verifies: [requirement, constraint]
     body: { on_change: invalidate }
+
+# Opt-in board registry for a family of boards sharing this project. Absent
+# entirely, an item's board stays unset and the site is unaffected -- see
+# docs/multi-board.md. A board is the first path segment under items/, matched
+# against this registry, and overridable per item (or per file's defaults:)
+# with the reserved `board:` key -- used below for Board A, whose items live in
+# folders that predate this registry (items/requirements, items/constraints,
+# items/decisions) rather than in items/board-a/. Board B is new enough to just
+# live in items/board-b/ and needs no override.
+#
+# Board A declares no `token:` on purpose: its prefixes (REQ-PWR, CON-THM,
+# DEC-PWR, TST-PWR) predate board tokens and were frozen before this registry
+# existed, so there is no letter to check them against. See docs/ids.md on
+# adopting board-token prefixes from the start next time.
+boards:
+  board-a:
+    label: "Board A"
+  board-b:
+    label: "Board B"
+    token: B

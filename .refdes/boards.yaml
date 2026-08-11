@@ -1,0 +1,17 @@
+# Refdes board drift manifest. Records which board each item was on the
+# last time the project was built, so a file moving boards -- usually a
+# move to the wrong folder -- is a warning instead of a silent surprise.
+boards:
+  CON-THM-001: board-a
+  CON-THM-002: board-a
+  DEC-B-001: board-b
+  DEC-B-002: board-b
+  DEC-PWR-001: board-a
+  REQ-B-PWR-001: board-b
+  REQ-PWR-001: board-a
+  REQ-PWR-002: board-a
+  REQ-PWR-003: board-a
+  REQ-PWR-004: board-a
+  REQ-PWR-005: board-a
+  TST-PWR-001: board-a
+  TST-PWR-002: board-a

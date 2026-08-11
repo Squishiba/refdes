@@ -7,6 +7,7 @@ defaults:
   owner: J. Bin
   tags: [power]
   status: accepted
+  board: board-a   # folder predates the boards: registry; see refdes.yaml
 
 items:
   - id: REQ-PWR-001

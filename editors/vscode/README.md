@@ -53,7 +53,9 @@ values from the schema.
 failing checks.
 
 **Go to definition.** <kbd>F12</kbd> or ctrl-click an ID to jump to where it is
-defined, including inside a list file.
+defined, including inside a list file or a multi-item markdown file (several
+`---`-fenced items sharing one `.md` file, optionally under a leading
+`defaults:` block).
 
 **Syntax highlighting** for `calc` blocks in both markdown and YAML bodies —
 variables, units, unit assertions, numbers, functions, and tolerances.

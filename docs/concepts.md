@@ -95,6 +95,11 @@ Bulk items — requirements, log entries — go in list files sharing `defaults:
 Both produce identical items. Neither is a lesser form, and
 `refdes promote` (not yet built) is intended to move an item between them.
 
+A markdown file is not limited to one item, either: a further `---` starts a new
+item's front-matter, and an optional leading `defaults:` block applies to every
+item that follows, the same way it does in a list file. See [several items in
+one file](authoring.md#several-items-in-one-file).
+
 ## What is deliberately not here
 
 - **No code execution.** The calc DSL has no loops, conditionals, imports, or

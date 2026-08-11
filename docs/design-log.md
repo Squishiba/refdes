@@ -35,7 +35,7 @@ items:
 | `date` | required; orders the timeline |
 | `summary` | required; the one-line version shown on the timeline |
 | `author` | who wrote it |
-| `board` | which board, when a project holds several |
+| `board` | which board, when a project holds several — see below |
 | `body` | the detail — markdown, may contain calc blocks |
 
 | Link | Points at |
@@ -43,6 +43,21 @@ items:
 | `addresses` | a requirement or constraint this entry works on |
 | `records` | the decision this entry led to |
 | `amends` | an earlier log entry this corrects |
+
+### `board` is a plain field here, not the reserved override
+
+The starter schema's `log` type declares its own `board` field, which predates
+the `boards:` registry described in [multiple boards](multi-board.md). The
+reserved `board:` override key that scopes an item to a registered board only
+applies to a type that does **not** already declare a field of that name — see
+[reserved keys](authoring.md#reserved-keys) — so on a `log` entry, `board:`
+stays exactly what it always was: free text, with no effect on board-scoped
+pages, token linting, or drift tracking.
+
+Once a project registers `boards:`, it is worth moving `log`'s hand-typed
+`board` field out of the schema so `board:` picks up the reserved behavior
+instead — the two cannot both be true for the same type at once, since the
+field always wins.
 
 ## Append-only
 

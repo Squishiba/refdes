@@ -13,7 +13,7 @@
 | `document.html` | Every item in one page, in reading order — the printable record |
 | `<id>.html` | One page per item, lowercased ID (`req-pwr-002.html`) |
 | `items.json` | The machine-readable export |
-| `assets/` | One stylesheet, one script |
+| `assets/` | One stylesheet, one script — not a place your own images or PDFs end up; see [images and other local files](markdown.md#images-and-other-local-files) |
 
 Static files. No server, no build step for the reader, no network calls. Hover
 previews are inlined at build time; with JavaScript disabled every reference is

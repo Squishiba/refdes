@@ -3,6 +3,7 @@ defaults:
   prefix: TST-PWR
   owner: A. Rivera
   tags: [power]
+  board: board-a   # folder predates the boards: registry; see refdes.yaml
 
 items:
   - id: TST-PWR-001

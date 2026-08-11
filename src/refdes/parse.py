@@ -2,8 +2,9 @@
 
 Two serializations, one object model:
 
-  items/**/*.md    one item: YAML front-matter + markdown body (decisions, anything
-                   with a body, calcs, or options)
+  items/**/*.md    one or more items, each YAML front-matter + markdown body
+                   (decisions, anything with a body, calcs, or options) --
+                   see parse_markdown_file for the several-items-in-one-file rules
   items/**/*.yaml  a list of items sharing `defaults:` (bulk requirements)
 """
 

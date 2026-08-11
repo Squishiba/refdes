@@ -1256,8 +1256,20 @@ def test_token_lint_is_silent_without_a_declared_token(tmp_path):
 
 
 def test_boards_registry_absent_is_inert(tmp_path):
-    """No `boards:` block: every item's board stays empty, matching today."""
-    shutil.copy(os.path.join(REPO, "refdes.yaml"), tmp_path / "refdes.yaml")
+    """No `boards:` block: every item's board stays empty, matching today.
+
+    A dedicated, standalone fixture on purpose -- not a copy of this repo's own
+    `refdes.yaml`, and not built from `_project()`, because that config now
+    registers real boards (see test_real_project_registers_boards_and_renders_
+    board_pages below). This is the regression guarantee that a project with no
+    `boards:` block at all stays completely unaffected, kept independent of
+    whatever the sample project does.
+    """
+    (tmp_path / "refdes.yaml").write_text(
+        "site: { title: T, out: _site }\n"
+        "types:\n  requirement: { prefix: REQ, fields: { text: { type: text } } }\n",
+        encoding="utf-8",
+    )
     items = tmp_path / "items" / "requirements"
     items.mkdir(parents=True)
     (items / "r.yaml").write_text(
@@ -1266,22 +1278,34 @@ def test_boards_registry_absent_is_inert(tmp_path):
         encoding="utf-8",
     )
     project = _build_at(tmp_path)
+    assert project.boards == {}
     assert project.items["REQ-001"].board == ""
+    out = render.render_site(project)
+    assert not any(name.startswith("document-") for name in os.listdir(out))
     payload = render.items_json(project)
     assert "boards" not in payload
     assert "board" not in payload["items"][0]
 
 
-def test_real_project_has_no_boards_registry_and_renders_no_board_pages(tmp_path):
-    """This repo's own project has no `boards:` block -- verified inert."""
+def test_real_project_registers_boards_and_renders_board_pages(tmp_path):
+    """This repo's own project now demonstrates the boards: registry itself.
+
+    Board A is the existing items, retrofitted with a `board: board-a` default
+    (their folders predate the registry, so path-based resolution alone would
+    not reach them). Board B is a small, separate items/board-b/ tree that
+    resolves purely from its folder name, with no override needed.
+    """
     project = _project()
-    assert project.boards == {}
-    assert all(item.board == "" for item in project.local_items)
+    assert set(project.boards) == {"board-a", "board-b"}
+    assert project.items["REQ-PWR-001"].board == "board-a"
+    assert project.items["REQ-B-PWR-001"].board == "board-b"
     project.out_dir = str(tmp_path / "_site")  # absolute: render outside the repo
     out = render.render_site(project)
-    assert not any(name.startswith("document-") for name in os.listdir(out))
+    for board in ("board-a", "board-b"):
+        for page in ("document", "coverage", "log", "summary"):
+            assert os.path.isfile(os.path.join(out, f"{page}-{board}.html"))
     payload = render.items_json(project)
-    assert "boards" not in payload
+    assert set(payload["boards"]) == {"board-a", "board-b"}
 
 
 def test_board_path_alias_matches_a_differently_named_folder(tmp_path):

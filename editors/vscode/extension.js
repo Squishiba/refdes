@@ -285,8 +285,10 @@ function enumChoicesFor(fieldName) {
 /**
  * Which item owns a given line.
  *
- * A .md file is one item, so its front-matter id covers everything. A list file
- * holds many, so each `- id:` starts a region that runs to the next one.
+ * Tracks the most recent `id:` line at or before `targetLine`: a `- id:` entry
+ * in a list file, or an item's own front-matter in a .md file -- including a
+ * multi-item .md file, where a later item's front-matter simply overrides the
+ * one before it as the scan reaches it.
  */
 function itemIdAtLine(document, targetLine) {
   let current = null;

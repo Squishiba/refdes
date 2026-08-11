@@ -52,6 +52,16 @@ legitimately belong to none.
 anything** — every item's board stays unset and the site is unaffected. Adding the
 block later does not change any ID.
 
+Two boards mapping to the same `items/` path segment — whether from a repeated
+`path:` or a `path:` that collides with another board's key — is a hard error at
+project-load time, not a silent overwrite. It fails before any item is even
+parsed:
+
+```
+configuration error: boards.board-b and boards.board-a both map to
+                      items/board-a/ — path segments must be unique
+```
+
 Override the path for one item with `board:`, the same way `prefix:` overrides a
 file's default prefix:
 
