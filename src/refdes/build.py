@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 
 from markdown_it import MarkdownIt
@@ -19,6 +20,11 @@ BARE_REF_RE = re.compile(r"(?<![\w\-/])([A-Z][A-Z0-9]*(?:-[A-Z0-9]+)*-\d{1,6})(?
 INLINE_VALUE_RE = re.compile(r"\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}")
 # Regions of rendered HTML where references must not be linkified.
 PROTECTED_RE = re.compile(r"<pre\b[\s\S]*?</pre>|<code\b[\s\S]*?</code>", re.IGNORECASE)
+# `<img src="...">` as markdown-it emits it -- html is off, so this only ever comes
+# from `![alt](src)`, never from a literal tag the author typed.
+IMG_SRC_RE = re.compile(r'<img\b[^>]*?\bsrc="([^"]*)"', re.IGNORECASE)
+# A URL (has a scheme) or protocol-relative reference: not ours to validate.
+_URL_SCHEME_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9+.\-]*:|^//")
 
 
 # ----------------------------------------------------------------------- validation
@@ -87,10 +93,12 @@ COVERABLE = ("requirement", "constraint")
 
 
 def compute_coverage(project: Project) -> None:
-    """Three distinct notions of done, which people routinely conflate.
+    """Distinct notions of done, which people routinely conflate.
 
     addressed  — somebody has worked on it and written it up in the design log
-    satisfied  — a decision claims to meet it
+    claimed    — a decision or component says it meets it, but hasn't settled
+                 (its status is not in the type's satisfying_statuses:, if declared)
+    satisfied  — a settled decision or component claims to meet it
     verified   — a test proves it
 
     A requirement can be satisfied without being verified, and addressed without
@@ -109,10 +117,26 @@ def compute_coverage(project: Project) -> None:
             set(item.backlinks.get("addressed_by", []))
             | set(item.links.get("addresses", []))
         )
-        cov.satisfied_by = sorted(
+
+        satisfying_ids = sorted(
             set(item.backlinks.get("satisfied_by", []))
             | set(item.links.get("satisfies", []))
         )
+        settled: list[str] = []
+        claimed: list[str] = []
+        for satisfier_id in satisfying_ids:
+            satisfier = project.items.get(satisfier_id)
+            spec = project.types.get(satisfier.type) if satisfier else None
+            allowed = spec.satisfying_statuses if spec else None
+            # Unconfigured type: every link counts as settled, same as before
+            # satisfying_statuses existed.
+            if allowed is not None and satisfier.fields.get("status") not in allowed:
+                claimed.append(satisfier_id)
+            else:
+                settled.append(satisfier_id)
+        cov.satisfied_by = settled
+        cov.claimed_by = claimed
+
         cov.verified_by = sorted(
             set(item.backlinks.get("verified_by", []))
             | set(item.links.get("verified_by", []))
@@ -359,6 +383,30 @@ def _linkify(
     return "".join(out)
 
 
+def _validate_images(
+    html: str,
+    project: Project,
+    where_file: str,
+    where_line: int | None = None,
+    where_id: str | None = None,
+) -> None:
+    """Warn on a local image src that does not resolve to a file on disk.
+
+    Resolved relative to the source file's own directory -- the same base a
+    browser would use to open the rendered page next to its markdown source.
+    """
+    for match in IMG_SRC_RE.finditer(html):
+        src = match.group(1)
+        if not src or _URL_SCHEME_RE.match(src):
+            continue
+        full_path = os.path.join(project.root, os.path.dirname(where_file), src)
+        if not os.path.isfile(full_path):
+            project.warn(
+                f"image src {src!r} does not exist",
+                file=where_file, line=where_line, item_id=where_id,
+            )
+
+
 def render_bodies(project: Project) -> None:
     # gfm-like adds tables and strikethrough, which a hardware document needs for
     # pin maps and BOM excerpts. linkify stays off: bare IDs are our own concern,
@@ -402,6 +450,7 @@ def render_bodies(project: Project) -> None:
             else:
                 html = html.replace(token, table)
 
+        _validate_images(html, project, item.source_file, item.source_line, item.id)
         item.body_html = _linkify(
             html, project, item.source_file, item.source_line, item.id
         )
@@ -414,6 +463,7 @@ def render_pages(project: Project) -> None:
 
     for page in project.pages:
         html = md.render(page.body)
+        _validate_images(html, project, page.source_file)
         html = _linkify(html, project, page.source_file)
         page.body_html = pages_mod.rewrite_page_links(html, known)
         pages_mod.add_heading_anchors(page)

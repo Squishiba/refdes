@@ -27,6 +27,7 @@
 <section class="coverage-strip stage-{{ cov.stage }}">
   <span class="pill pill-stage-{{ cov.stage }}">{{ cov.stage }}</span>
   <span><b>addressed</b> {% if cov.addressed_by %}{{ cov.addressed_by | join(', ') }}{% else %}<span class="muted">—</span>{% endif %}</span>
+  <span><b>claimed</b> {% if cov.claimed_by %}{{ cov.claimed_by | join(', ') }}{% else %}<span class="muted">—</span>{% endif %}</span>
   <span><b>satisfied</b> {% if cov.satisfied_by %}{{ cov.satisfied_by | join(', ') }}{% else %}<span class="muted">—</span>{% endif %}</span>
   <span><b>verified</b> {% if cov.verified_by %}{{ cov.verified_by | join(', ') }}{% else %}<span class="muted">—</span>{% endif %}</span>
 </section>

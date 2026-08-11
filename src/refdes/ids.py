@@ -20,6 +20,7 @@ from .model import Item, Project
 
 ID_RE = re.compile(r"^([A-Z][A-Z0-9]*(?:-[A-Z0-9]+)*)-(\d+)$")
 LIST_ENTRY_RE = re.compile(r"^(\s*)-(\s+)(\S.*)$")
+FLOW_ENTRY_RE = re.compile(r"^\{(.*)\}\s*$")
 
 
 def split_id(item_id: str) -> tuple[str, int] | None:
@@ -92,14 +93,28 @@ def _insert_into_markdown(lines: list[str], line_no: int, new_id: str) -> list[s
 
 
 def _insert_into_list(lines: list[str], line_no: int, new_id: str) -> list[str] | None:
-    """Rewrite `- text: ...` as `- id: X` / `  text: ...`, preserving indentation."""
+    """Rewrite `- text: ...` as `- id: X` / `  text: ...`, preserving indentation.
+
+    A flow-style entry (`- {text: ...}`) cannot be split across two lines like a
+    block mapping without breaking the braces, so the id is injected inside them
+    instead. An entry whose flow mapping does not close on the same line is
+    refused rather than guessed at, so it fails loudly instead of corrupting the
+    file.
+    """
     index = line_no - 1
     if not (0 <= index < len(lines)):
         return None
     match = LIST_ENTRY_RE.match(lines[index])
     if not match:
         return None
-    indent, _sep, rest = match.groups()
+    indent, sep, rest = match.groups()
+    if rest.startswith("{"):
+        flow_match = FLOW_ENTRY_RE.match(rest)
+        if not flow_match:
+            return None
+        inner = flow_match.group(1).strip()
+        new_inner = f"id: {new_id}" if not inner else f"id: {new_id}, {inner}"
+        return lines[:index] + [f"{indent}-{sep}{{{new_inner}}}"] + lines[index + 1 :]
     replacement = [f"{indent}- id: {new_id}", f"{indent}  {rest}"]
     return lines[:index] + replacement + lines[index + 1 :]
 

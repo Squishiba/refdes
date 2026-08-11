@@ -4,13 +4,14 @@
 
 <h1>Coverage</h1>
 <p class="muted">
-  Three separate questions, deliberately not collapsed into one. <b>Addressed</b>
-  means somebody has worked on it and written it up in the design log.
-  <b>Satisfied</b> means a decision claims to meet it. <b>Verified</b> means a test
-  proves it.
+  Deliberately not collapsed into one question. <b>Addressed</b> means somebody
+  has worked on it and written it up in the design log. <b>Claimed</b> means a
+  decision or component says it meets it, but that decision has not settled yet
+  (still proposed, on hold, etc.). <b>Satisfied</b> means a settled decision
+  meets it. <b>Verified</b> means a test proves it.
 </p>
 
-{% set counts = {'open': 0, 'addressed': 0, 'satisfied': 0, 'verified': 0} %}
+{% set counts = {'open': 0, 'addressed': 0, 'claimed': 0, 'satisfied': 0, 'verified': 0} %}
 {% for _item, cov in coverage_rows %}
 {% if counts.update({cov.stage: counts[cov.stage] + 1}) %}{% endif %}
 {% endfor %}
@@ -21,6 +22,9 @@
   </div>
   <div class="card {{ 'card-warn' if counts['addressed'] else '' }}">
     <div class="card-num">{{ counts['addressed'] }}</div><div class="card-label">addressed only</div>
+  </div>
+  <div class="card {{ 'card-warn' if counts['claimed'] else '' }}">
+    <div class="card-num">{{ counts['claimed'] }}</div><div class="card-label">claimed, unsettled</div>
   </div>
   <div class="card {{ 'card-warn' if counts['satisfied'] else '' }}">
     <div class="card-num">{{ counts['satisfied'] }}</div><div class="card-label">satisfied, unverified</div>
@@ -34,7 +38,7 @@
   <thead>
     <tr>
       <th>ID</th><th>Title</th><th>Stage</th>
-      <th>Addressed by</th><th>Satisfied by</th><th>Verified by</th>
+      <th>Addressed by</th><th>Claimed by</th><th>Satisfied by</th><th>Verified by</th>
     </tr>
   </thead>
   <tbody>
@@ -43,7 +47,7 @@
       <td><a class="ref" href="{{ item.slug }}.html" data-ref="{{ item.id }}">{{ item.id }}</a></td>
       <td>{{ item.title }}</td>
       <td><span class="pill pill-stage-{{ cov.stage }}">{{ cov.stage }}</span></td>
-      {% for group in [cov.addressed_by, cov.satisfied_by, cov.verified_by] %}
+      {% for group in [cov.addressed_by, cov.claimed_by, cov.satisfied_by, cov.verified_by] %}
       <td>
         {% if group %}
           {% for ref in group %}

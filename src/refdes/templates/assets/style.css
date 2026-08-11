@@ -8,6 +8,7 @@
   --good: #1a7f45;
   --bad: #b3261e;
   --warn: #9a6400;
+  --claim: #7a4fbf;
   --mono: ui-monospace, "Cascadia Code", "SF Mono", Menlo, Consolas, monospace;
 }
 
@@ -22,6 +23,7 @@
     --good: #5cc98a;
     --bad: #ff7b72;
     --warn: #e3b341;
+    --claim: #c39bff;
   }
 }
 
@@ -150,6 +152,7 @@ ul.tight li { margin: 3px 0; }
 
 .pill-stage-open      { color: var(--bad);   border-color: color-mix(in srgb, var(--bad) 50%, transparent); }
 .pill-stage-addressed { color: var(--warn);  border-color: color-mix(in srgb, var(--warn) 50%, transparent); }
+.pill-stage-claimed   { color: var(--claim); border-color: color-mix(in srgb, var(--claim) 50%, transparent); }
 .pill-stage-satisfied { color: var(--accent);border-color: color-mix(in srgb, var(--accent) 50%, transparent); }
 .pill-stage-verified  { color: var(--good);  border-color: color-mix(in srgb, var(--good) 50%, transparent); }
 
@@ -162,6 +165,7 @@ ul.tight li { margin: 3px 0; }
   text-transform: uppercase; letter-spacing: .04em; margin-right: 4px; }
 .coverage-strip.stage-open      { border-left: 3px solid var(--bad); }
 .coverage-strip.stage-addressed { border-left: 3px solid var(--warn); }
+.coverage-strip.stage-claimed   { border-left: 3px solid var(--claim); }
 .coverage-strip.stage-satisfied { border-left: 3px solid var(--accent); }
 .coverage-strip.stage-verified  { border-left: 3px solid var(--good); }
 
@@ -303,6 +307,7 @@ a.ref:hover { text-decoration: none; border-bottom-style: solid; }
 .stagebar-seg { display: block; height: 100%; }
 .stagebar-verified  { background: var(--good); }
 .stagebar-satisfied { background: var(--accent); }
+.stagebar-claimed   { background: var(--claim); }
 .stagebar-addressed { background: var(--warn); }
 .stagebar-open      { background: var(--bad); }
 

@@ -120,11 +120,23 @@ def _build_item(
         elif key in spec.fields:
             item.fields[key] = _strip_lines(value)
         else:
-            project.warn(
-                f"unknown field {key!r} on {spec.label.lower()}."
-                f"{_suggest(key, sorted(known_keys))}",
-                file=rel, line=line, item_id=item.id or "?",
-            )
+            # A typo'd link name (`sattisfies:` for `satisfies:`) doesn't just lose a
+            # field -- it drops a traceability edge, so it must fail the build rather
+            # than pass with a warning that's easy to miss.
+            link_match = difflib.get_close_matches(key, sorted(spec.links), n=1, cutoff=0.6)
+            if link_match:
+                project.error(
+                    f"unknown field {key!r} on {spec.label.lower()} -- did you mean "
+                    f"the link {link_match[0]!r}? A misspelled link name silently "
+                    f"drops the edge instead of erroring.",
+                    file=rel, line=line, item_id=item.id or "?",
+                )
+            else:
+                project.warn(
+                    f"unknown field {key!r} on {spec.label.lower()}."
+                    f"{_suggest(key, sorted(known_keys))}",
+                    file=rel, line=line, item_id=item.id or "?",
+                )
             item.fields[key] = _strip_lines(value)
 
     for fname, fspec in spec.fields.items():

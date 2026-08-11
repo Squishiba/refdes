@@ -126,6 +126,10 @@ types:
 | `fields` | `{}` | Legal fields |
 | `links` | `{}` | Legal links, mapped to allowed target types |
 | `body` | project default | `on_change` mode for the markdown body |
+| `satisfying_statuses` | not set — every `satisfies:` link counts | `status` values that count as settled; see [coverage](coverage.md#which-statuses-count-as-satisfying) |
+
+`satisfying_statuses` requires the type to declare a `status` field — the project
+fails to load if it doesn't.
 
 ### Field options
 

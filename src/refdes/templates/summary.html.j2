@@ -34,7 +34,7 @@
   <h2>Coverage</h2>
   <div class="stagebar" role="img"
        aria-label="{{ stage_counts['verified'] }} of {{ total_covered }} verified">
-    {% for stage in ['verified', 'satisfied', 'addressed', 'open'] %}
+    {% for stage in ['verified', 'satisfied', 'claimed', 'addressed', 'open'] %}
     {% if stage_counts[stage] %}
     <span class="stagebar-seg stagebar-{{ stage }}"
           style="width: {{ (stage_counts[stage] / total_covered * 100) | round(2) }}%"
@@ -43,7 +43,7 @@
     {% endfor %}
   </div>
   <ul class="legend">
-    {% for stage in ['verified', 'satisfied', 'addressed', 'open'] %}
+    {% for stage in ['verified', 'satisfied', 'claimed', 'addressed', 'open'] %}
     <li><span class="swatch stagebar-{{ stage }}"></span>{{ stage_counts[stage] }} {{ stage }}</li>
     {% endfor %}
   </ul>
