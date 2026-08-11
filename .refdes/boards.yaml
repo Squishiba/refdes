@@ -2,6 +2,7 @@
 # last time the project was built, so a file moving boards -- usually a
 # move to the wrong folder -- is a warning instead of a silent surprise.
 boards:
+  CMP-PWR-001: board-a
   CON-THM-001: board-a
   CON-THM-002: board-a
   DEC-B-001: board-b

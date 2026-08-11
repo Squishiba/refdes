@@ -11,7 +11,7 @@ import re
 from markdown_it import MarkdownIt
 
 from . import boards as boards_mod
-from . import calc, imports, pages as pages_mod, seal
+from . import calc, citations as citations_mod, imports, pages as pages_mod, seal
 from .model import INVALIDATE, CalcLine, CheckResult, Coverage, Item, Project
 
 # Explicit reference: [[REQ-PWR-002]] or [[REQ-PWR-002|the input range]]
@@ -72,6 +72,19 @@ def validate_items(project: Project) -> None:
                         f"{fname}: {exc}",
                         file=item.source_file, line=item.source_line, item_id=item.id,
                     )
+            elif fspec.type == "citations":
+                if not isinstance(value, list):
+                    project.error(
+                        f"{fname}: must be a list of citation entries",
+                        file=item.source_file, line=item.source_line, item_id=item.id,
+                    )
+                else:
+                    for index, entry in enumerate(value):
+                        if not isinstance(entry, dict) or not entry.get("url"):
+                            project.error(
+                                f"{fname}[{index}]: each citation needs a 'url'",
+                                file=item.source_file, line=item.source_line, item_id=item.id,
+                            )
 
 
 def resolve_links(project: Project) -> None:
@@ -560,6 +573,7 @@ def build(
     seal_write: bool = False,
     reseal: bool = False,
     accept_board_move: bool = False,
+    require_citations: bool = False,
 ) -> Project:
     pages_mod.load_pages(project)
     collect_static_assets(project)
@@ -576,6 +590,7 @@ def build(
     boards_mod.verify(project, write=seal_write, accept_move=accept_board_move)
     boards_mod.lint_tokens(project)
     compute_coverage(project)
+    citations_mod.verify(project, require=require_citations)
     render_bodies(project)
     render_pages(project)
     return project

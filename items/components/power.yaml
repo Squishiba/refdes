@@ -1,0 +1,19 @@
+# Components referenced by DEC-PWR-001's regulator-topology decision. See
+# docs/markdown.md#citing-a-datasheet for how `datasheets:` works.
+
+defaults:
+  type: component
+  prefix: CMP-PWR
+  board: board-a   # folder predates the boards: registry; see refdes.yaml
+
+items:
+  - id: CMP-PWR-001
+    title: TPS62913 synchronous buck converter
+    part_number: TPS62913
+    status: selected
+    datasheets:
+      - url: https://www.ti.com/lit/ds/symlink/tps62913.pdf
+        rev: E
+        page: "14"
+        part_number: TPS62913
+        vendor: false

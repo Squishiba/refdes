@@ -37,7 +37,7 @@
   <tbody>
   {% for name, fspec in spec.fields.items() %}
     {% set value = item.fields.get(name) %}
-    {% if value not in (None, '', []) and name not in ('options', 'checks') %}
+    {% if value not in (None, '', []) and name not in ('options', 'checks') and fspec.type != 'citations' %}
     <tr>
       <th>{{ name }}</th>
       <td>
@@ -83,6 +83,36 @@
         <td class="mono">{{ c.value_name }}</td>
         <td class="mono {{ 'good' if c.ok else 'bad' }}">{{ c.actual or '—' }}</td>
         <td><a class="ref" href="{{ c.against | lower }}.html" data-ref="{{ c.against }}">{{ c.against }}</a></td>
+        <td class="small">{{ c.detail }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endif %}
+
+{% if item.citations %}
+<section class="citations">
+  <h2>Citations</h2>
+  <table class="grid">
+    <thead><tr><th></th><th>URL</th><th>Rev</th><th>Page</th><th>Part #</th><th>Vendor</th><th>Detail</th></tr></thead>
+    <tbody>
+    {% for c in item.citations %}
+      <tr>
+        <td>
+          {% if c.state == 'ok' %}<span class="pill pill-pass">ok</span>
+          {% elif c.state == 'hash_mismatch' %}<span class="pill pill-fail">hash mismatch</span>
+          {% else %}<span class="pill pill-warn">{{ c.state.replace('_', ' ') }}</span>
+          {% endif %}
+        </td>
+        <td>
+          <a href="{{ c.spec.url }}" target="_blank" rel="noopener">{{ c.spec.url }}</a>
+          {% if c.local_path %}<br><a href="assets/{{ c.local_path }}">local copy</a>{% endif %}
+        </td>
+        <td class="mono">{{ c.spec.rev or '—' }}</td>
+        <td class="mono">{{ c.spec.page or '—' }}</td>
+        <td class="mono">{{ c.spec.part_number or '—' }}</td>
+        <td>{{ 'yes' if c.spec.vendor else 'no' }}</td>
         <td class="small">{{ c.detail }}</td>
       </tr>
     {% endfor %}

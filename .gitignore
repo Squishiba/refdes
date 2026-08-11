@@ -16,6 +16,12 @@ __pycache__/
 *.vsix
 node_modules/
 
-# Not ignored on purpose: .refdes/ids.yaml is the ID ledger. It records which
-# numbers have been burned and must be committed, or two branches will hand out
-# the same ID.
+# Not ignored on purpose: .refdes/ids.yaml is the ID ledger, and
+# .refdes/citations.yaml is the citation lockfile (sha256 + fetch time, no
+# bytes) -- both record which numbers/hashes have been burned and must be
+# committed, or two branches will hand out the same ID or re-pin a datasheet
+# without anyone noticing. The vendored bytes themselves are a different
+# matter: manufacturer datasheets are generally copyrighted, so the actual
+# PDFs `refdes fetch --url ... ` downloads with `vendor: true` are gitignored
+# and re-fetched locally instead of committed.
+.refdes/vendor/

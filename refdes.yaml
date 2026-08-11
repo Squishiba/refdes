@@ -104,6 +104,11 @@ types:
       refdes:      { type: list, on_change: log }
       status:      { type: enum, choices: [candidate, selected, obsolete], default: candidate, on_change: invalidate }
       tags:        { type: list, on_change: log }
+      # Declared intent only -- url, rev, page, part_number, vendor. Computed
+      # provenance (hash, fetch time, vendored flag) lives in
+      # .refdes/citations.yaml, updated only by `refdes fetch`. See
+      # docs/markdown.md#citing-a-datasheet.
+      datasheets:  { type: citations, on_change: invalidate }
     links:
       satisfies: [requirement]
     body: { on_change: invalidate }

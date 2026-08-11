@@ -7,6 +7,7 @@ import json
 import sys
 
 from . import build as build_mod
+from . import citations as citations_mod
 from . import ids as ids_mod
 from . import parse as parse_mod
 from . import render as render_mod
@@ -45,7 +46,17 @@ def cmd_check(args) -> int:
     project = _load(args)
     # `check` never writes: it verifies existing seals without creating new ones.
     build_mod.build(project, seal_write=False, reseal=False)
-    return _report(project)
+    drift = citations_mod.refresh(project) if args.refresh else []
+    status = _report(project)
+    if drift:
+        print(f"\n{len(drift)} citation(s) drifted from their pinned hash:")
+        for d in drift:
+            print(f"  {d.url}")
+            print(f"    pinned    {d.pinned_sha256}")
+            print(f"    upstream  {d.upstream_sha256}")
+            print(f"    cited by  {', '.join(d.citers)}")
+        status = 1
+    return status
 
 
 def cmd_build(args) -> int:
@@ -57,6 +68,7 @@ def cmd_build(args) -> int:
         seal_write=True,
         reseal=args.reseal,
         accept_board_move=args.accept_board_move,
+        require_citations=args.require_citations,
     )
     out_dir = render_mod.render_site(project)
     status = _report(project)
@@ -99,6 +111,30 @@ def cmd_id(args) -> int:
         print(f"{verb} {new_id}  ({item.source_file}:{item.source_line}) {item.title}")
     print(f"{verb} {len(assignments)} id(s)")
     return 0
+
+
+def cmd_fetch(args) -> int:
+    """The only command that touches the network. Pins and optionally vendors."""
+    project = _load(args, require_ids=False)
+    try:
+        results = citations_mod.fetch_all(
+            project, item_id=args.item, url=args.url, update=args.update
+        )
+    except citations_mod.CitationError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+
+    failed = 0
+    for r in results:
+        if r.error:
+            failed += 1
+            print(f"FAILED  {r.url}  {r.error}", file=sys.stderr)
+            continue
+        verb = "skipped" if r.skipped else "fetched"
+        vendored = "vendored" if r.vendored else "hash-only"
+        print(f"{verb:8} {r.url}  sha256={r.sha256[:12]}...  {vendored}")
+    print(f"{len(results)} citation(s) processed, {failed} failed")
+    return 1 if failed else 0
 
 
 def cmd_audit(args) -> int:
@@ -156,6 +192,16 @@ def cmd_audit(args) -> int:
             pin = f" pinned to {spec.version}" if spec.version else " unpinned"
             print(f"  {spec.name:<14} {count} items{pin}  <- {spec.items_path}")
 
+    grouped = citations_mod.by_url(project)
+    if grouped:
+        print("\nCitations:")
+        for url, statuses in grouped.items():
+            state = statuses[0].state
+            vendored = "vendored" if any(s.vendored for s in statuses) else "hash-only"
+            citers = ", ".join(sorted({s.item_id for s in statuses}))
+            print(f"  {url}")
+            print(f"    {state:<14} {vendored:<10} cited by {citers}")
+
     print(f"\n{len(project.items)} items audited "
           f"({len(project.local_items)} local)")
     return 0
@@ -186,6 +232,11 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="accept a recorded board change for an item (recorded in `audit`)",
     )
+    p_build.add_argument(
+        "--require-citations",
+        action="store_true",
+        help="promote unpinned/missing-cache citation warnings to errors (CI)",
+    )
     p_build.set_defaults(func=cmd_build)
 
     p_check = sub.add_parser(
@@ -195,6 +246,12 @@ def main(argv: list[str] | None = None) -> int:
         "item, resolve links, run calcs and checks, and verify (but never create "
         "or update) append-only seals and board-drift records. Exits non-zero on "
         "any error. Nothing is written to disk -- use 'build' for that.",
+    )
+    p_check.add_argument(
+        "--refresh",
+        action="store_true",
+        help="also re-fetch every pinned citation and report drift (network; "
+        "writes nothing)",
     )
     p_check.set_defaults(func=cmd_check)
 
@@ -209,6 +266,22 @@ def main(argv: list[str] | None = None) -> int:
     p_id = sub.add_parser("id", help="allocate IDs for items that have none")
     p_id.add_argument("--dry-run", action="store_true", help="show without writing")
     p_id.set_defaults(func=cmd_id)
+
+    p_fetch = sub.add_parser(
+        "fetch",
+        help="fetch and pin (optionally vendor) datasheet citations",
+        description="The only command that touches the network. Fetches every "
+        "url a `citations:` field declares, records its sha256 and fetch time in "
+        "the `.refdes/citations.yaml` lockfile, and vendors the bytes into "
+        "`.refdes/vendor/` for any citation that declares `vendor: true`. "
+        "Already-pinned urls are skipped unless --update is given.",
+    )
+    p_fetch.add_argument("--item", help="fetch only this item's citations")
+    p_fetch.add_argument("--url", help="fetch only this url")
+    p_fetch.add_argument(
+        "--update", action="store_true", help="re-fetch even if already pinned"
+    )
+    p_fetch.set_defaults(func=cmd_fetch)
 
     p_audit = sub.add_parser(
         "audit",

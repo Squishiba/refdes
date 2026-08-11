@@ -125,6 +125,7 @@ ul.tight li { margin: 3px 0; }
 .pill-fail { color: var(--bad);  border-color: color-mix(in srgb, var(--bad) 50%, transparent); }
 .pill-unknown { color: var(--warn); }
 .pill-none { color: var(--muted); }
+.pill-warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 50%, transparent); }
 
 .body { margin: 20px 0; }
 .body p { margin: 12px 0; }

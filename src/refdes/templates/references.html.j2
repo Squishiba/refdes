@@ -1,0 +1,47 @@
+{% extends "base.html.j2" %}
+{% block title %}References{% if board %} — {{ board.label }}{% endif %} — {{ project.title }}{% endblock %}
+{% block content %}
+
+<h1>References{% if board %} — {{ board.label }}{% endif %}</h1>
+<p class="muted">
+  Every datasheet citation{% if board %} on {{ board.label }}{% endif %}, grouped by
+  URL. Provenance -- hash, fetch time, vendored flag -- comes from
+  <code>.refdes/citations.yaml</code>, written only by <code>refdes fetch</code>.
+</p>
+
+{% if grouped %}
+<table class="grid">
+  <thead>
+    <tr><th></th><th>URL</th><th>Cited by</th><th>Vendor</th><th>Fetched</th><th>SHA-256</th></tr>
+  </thead>
+  <tbody>
+  {% for url, statuses in grouped.items() %}
+    {% set s0 = statuses[0] %}
+    <tr>
+      <td>
+        {% if s0.state == 'ok' %}<span class="pill pill-pass">ok</span>
+        {% elif s0.state == 'hash_mismatch' %}<span class="pill pill-fail">hash mismatch</span>
+        {% else %}<span class="pill pill-warn">{{ s0.state.replace('_', ' ') }}</span>
+        {% endif %}
+      </td>
+      <td>
+        <a href="{{ url }}" target="_blank" rel="noopener">{{ url }}</a>
+        {% if s0.local_path %}<br><a href="assets/{{ s0.local_path }}">local copy</a>{% endif %}
+      </td>
+      <td>
+        {% for s in statuses %}
+        <a class="ref" href="{{ s.item_id | lower }}.html" data-ref="{{ s.item_id }}">{{ s.item_id }}</a>{% if not loop.last %}, {% endif %}
+        {% endfor %}
+      </td>
+      <td>{{ 'vendored' if s0.vendored else 'hash-only' }}</td>
+      <td class="mono small">{{ s0.fetched or '—' }}</td>
+      <td class="mono small">{{ (s0.sha256[:12] ~ '…') if s0.sha256 else '—' }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="muted">No item declares a citation.</p>
+{% endif %}
+
+{% endblock %}

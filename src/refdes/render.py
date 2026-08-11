@@ -9,6 +9,7 @@ import shutil
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
+from . import citations as citations_mod
 from .model import Item, Project
 
 TEMPLATE_DIR = os.path.join(os.path.dirname(__file__), "templates")
@@ -417,6 +418,8 @@ def render_site(project: Project) -> str:
     env.globals["check_state"] = _check_state
     env.globals["coverage_of"] = project.coverage.get
     env.globals["has_log"] = any(i.type == "log" for i in project.local_items)
+    citations_by_url = citations_mod.by_url(project)
+    env.globals["has_citations"] = bool(citations_by_url)
 
     # A page called `index` owns index.html; otherwise the item dashboard does. This
     # is what lets a docs-only project render as an ordinary website.
@@ -452,11 +455,13 @@ def render_site(project: Project) -> str:
         "log",
         "document",
         "summary",
+        "references",
         dashboard_name[: -len(".html")],
     }
     for board_key in project.boards:
         reserved.update(
-            f"{name}-{board_key}" for name in ("coverage", "log", "document", "summary")
+            f"{name}-{board_key}"
+            for name in ("coverage", "log", "document", "summary", "references")
         )
     if project.items:
         keep = []
@@ -542,6 +547,17 @@ def render_site(project: Project) -> str:
             )
         )
 
+    references_tpl = env.get_template("references.html.j2")
+    written.add("references.html")
+    with open(os.path.join(out_dir, "references.html"), "w", encoding="utf-8") as fh:
+        fh.write(
+            references_tpl.render(
+                project=project,
+                grouped=citations_by_url,
+                previews_json=previews_json,
+            )
+        )
+
     item_tpl = env.get_template("item.html.j2")
     for item in project.items.values():
         spec = project.types.get(item.type)
@@ -618,6 +634,19 @@ def render_site(project: Project) -> str:
                     project=project,
                     board=board_spec,
                     entries=_log_entries(project, board=board_key),
+                    previews_json=previews_json,
+                )
+            )
+
+        written.add(f"references-{board_key}.html")
+        with open(
+            os.path.join(out_dir, f"references-{board_key}.html"), "w", encoding="utf-8"
+        ) as fh:
+            fh.write(
+                references_tpl.render(
+                    project=project,
+                    board=board_spec,
+                    grouped=citations_mod.by_url(project, board=board_key),
                     previews_json=previews_json,
                 )
             )
