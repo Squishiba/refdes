@@ -49,6 +49,7 @@
     <p class="doc-coverage">
       <span class="pill pill-stage-{{ cov.stage }}">{{ cov.stage }}</span>
       {% if cov.addressed_by %}addressed by {{ cov.addressed_by | join(', ') }}.{% endif %}
+      {% if cov.claimed_by %}Claimed by {{ cov.claimed_by | join(', ') }}.{% endif %}
       {% if cov.satisfied_by %}Satisfied by {{ cov.satisfied_by | join(', ') }}.{% endif %}
       {% if cov.verified_by %}Verified by {{ cov.verified_by | join(', ') }}.{% endif %}
     </p>

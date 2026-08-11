@@ -139,7 +139,7 @@ def summary_payload(project: Project) -> dict:
             }
         )
 
-    stage_counts = {"open": 0, "addressed": 0, "satisfied": 0, "verified": 0}
+    stage_counts = {"open": 0, "addressed": 0, "claimed": 0, "satisfied": 0, "verified": 0}
     for cov in project.coverage.values():
         stage_counts[cov.stage] = stage_counts.get(cov.stage, 0) + 1
     total_covered = sum(stage_counts.values())
@@ -198,6 +198,7 @@ def items_json(project: Project) -> dict:
             item_id: {
                 "stage": cov.stage,
                 "addressed_by": cov.addressed_by,
+                "claimed_by": cov.claimed_by,
                 "satisfied_by": cov.satisfied_by,
                 "verified_by": cov.verified_by,
             }
@@ -272,9 +273,50 @@ def items_json(project: Project) -> dict:
     }
 
 
+MANIFEST_NAME = ".refdes-manifest.json"
+
+
+def _load_manifest(out_dir: str) -> set[str]:
+    path = os.path.join(out_dir, MANIFEST_NAME)
+    if not os.path.isfile(path):
+        return set()
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, json.JSONDecodeError):
+        return set()
+    return set(data) if isinstance(data, list) else set()
+
+
+def _asset_file_list(asset_dir: str) -> list[str]:
+    out = []
+    for dirpath, _dirnames, filenames in os.walk(asset_dir):
+        for name in filenames:
+            rel = os.path.relpath(os.path.join(dirpath, name), asset_dir).replace("\\", "/")
+            out.append(f"assets/{rel}")
+    return out
+
+
+def _prune_stale_output(out_dir: str, written: set[str]) -> None:
+    """Delete output from a previous build that this build no longer produces.
+
+    A deleted or renamed item must not leave a live, still-linkable page behind.
+    Only ever removes files this tool itself wrote and tracked in the manifest --
+    never anything else that happens to live in out_dir.
+    """
+    previous = _load_manifest(out_dir)
+    for rel in previous - written:
+        path = os.path.join(out_dir, *rel.split("/"))
+        if os.path.isfile(path):
+            os.remove(path)
+    with open(os.path.join(out_dir, MANIFEST_NAME), "w", encoding="utf-8") as fh:
+        json.dump(sorted(written), fh, indent=2)
+
+
 def render_site(project: Project) -> str:
     out_dir = os.path.join(project.root, project.out_dir)
     os.makedirs(out_dir, exist_ok=True)
+    written: set[str] = set()
 
     env = Environment(
         loader=FileSystemLoader(TEMPLATE_DIR),
@@ -307,7 +349,7 @@ def render_site(project: Project) -> str:
         if check.ok is False
     ]
     # Coverage, ordered so the work that still needs doing floats to the top.
-    stage_order = {"open": 0, "addressed": 1, "satisfied": 2, "verified": 3}
+    stage_order = {"open": 0, "addressed": 1, "claimed": 2, "satisfied": 3, "verified": 4}
     coverage_rows = sorted(
         (
             (project.items[item_id], cov)
@@ -349,6 +391,7 @@ def render_site(project: Project) -> str:
 
     page_tpl = env.get_template("page.html.j2")
     for page in project.pages:
+        written.add(f"{page.slug}.html")
         with open(
             os.path.join(out_dir, f"{page.slug}.html"), "w", encoding="utf-8"
         ) as fh:
@@ -360,6 +403,7 @@ def render_site(project: Project) -> str:
 
     if project.items:
         index_tpl = env.get_template("index.html.j2")
+        written.add(dashboard_name)
         with open(os.path.join(out_dir, dashboard_name), "w", encoding="utf-8") as fh:
             fh.write(
                 index_tpl.render(
@@ -376,9 +420,12 @@ def render_site(project: Project) -> str:
     if not project.items:
         if os.path.isdir(ASSET_DIR):
             shutil.copytree(ASSET_DIR, os.path.join(out_dir, "assets"), dirs_exist_ok=True)
+            written.update(_asset_file_list(ASSET_DIR))
+        _prune_stale_output(out_dir, written)
         return out_dir
 
     summary_tpl = env.get_template("summary.html.j2")
+    written.add("summary.html")
     with open(os.path.join(out_dir, "summary.html"), "w", encoding="utf-8") as fh:
         fh.write(
             summary_tpl.render(
@@ -389,6 +436,7 @@ def render_site(project: Project) -> str:
         )
 
     coverage_tpl = env.get_template("coverage.html.j2")
+    written.add("coverage.html")
     with open(os.path.join(out_dir, "coverage.html"), "w", encoding="utf-8") as fh:
         fh.write(
             coverage_tpl.render(
@@ -399,6 +447,7 @@ def render_site(project: Project) -> str:
         )
 
     log_tpl = env.get_template("log.html.j2")
+    written.add("log.html")
     with open(os.path.join(out_dir, "log.html"), "w", encoding="utf-8") as fh:
         fh.write(
             log_tpl.render(
@@ -413,6 +462,7 @@ def render_site(project: Project) -> str:
         spec = project.types.get(item.type)
         if spec is None:  # imported item of a type this schema does not declare
             continue
+        written.add(f"{item.slug}.html")
         with open(
             os.path.join(out_dir, f"{item.slug}.html"), "w", encoding="utf-8"
         ) as fh:
@@ -427,6 +477,7 @@ def render_site(project: Project) -> str:
 
     known_slugs = {item.slug for item in project.items.values()}
     document_tpl = env.get_template("document.html.j2")
+    written.add("document.html")
     with open(os.path.join(out_dir, "document.html"), "w", encoding="utf-8") as fh:
         fh.write(
             document_tpl.render(
@@ -437,11 +488,14 @@ def render_site(project: Project) -> str:
             )
         )
 
+    written.add("items.json")
     with open(os.path.join(out_dir, "items.json"), "w", encoding="utf-8") as fh:
         json.dump(items_json(project), fh, indent=2, ensure_ascii=False, default=str)
 
     asset_out = os.path.join(out_dir, "assets")
     if os.path.isdir(ASSET_DIR):
         shutil.copytree(ASSET_DIR, asset_out, dirs_exist_ok=True)
+        written.update(_asset_file_list(ASSET_DIR))
 
+    _prune_stale_output(out_dir, written)
     return out_dir

@@ -69,6 +69,10 @@ class ItemType:
     preview: list[str] = field(default_factory=list)
     body_on_change: str = INVALIDATE
     append_only: bool = False  # sealed after first build; corrections go in new entries
+    # Which `status` values count as "settled" when this type satisfies a
+    # requirement or constraint. None means unconfigured: every link counts, same
+    # as before this existed, so existing projects see no behavior change.
+    satisfying_statuses: list[str] | None = None
 
 
 @dataclass
@@ -181,11 +185,12 @@ class ImportSpec:
 
 @dataclass
 class Coverage:
-    """Three distinct notions of 'done' for one requirement or constraint."""
+    """Four distinct notions of 'done' for one requirement or constraint."""
 
     item_id: str
     addressed_by: list[str] = field(default_factory=list)   # log entries
-    satisfied_by: list[str] = field(default_factory=list)   # decisions
+    claimed_by: list[str] = field(default_factory=list)     # decisions/components, not yet settled
+    satisfied_by: list[str] = field(default_factory=list)   # decisions/components, settled
     verified_by: list[str] = field(default_factory=list)    # tests
 
     @property
@@ -194,6 +199,8 @@ class Coverage:
             return "verified"
         if self.satisfied_by:
             return "satisfied"
+        if self.claimed_by:
+            return "claimed"
         if self.addressed_by:
             return "addressed"
         return "open"

@@ -98,6 +98,15 @@ def load_project(config_path: str | None = None, start: str = ".") -> Project:
                 f"types.{tname}.body.on_change must be one of {list(ON_CHANGE_MODES)}"
             )
 
+        satisfying_statuses = tspec.get("satisfying_statuses")
+        if satisfying_statuses is not None:
+            if "status" not in fields:
+                raise SchemaError(
+                    f"types.{tname}.satisfying_statuses requires a 'status' field "
+                    f"on {tname}"
+                )
+            satisfying_statuses = [str(s) for s in satisfying_statuses]
+
         types[tname] = ItemType(
             name=tname,
             prefix=tspec.get("prefix", tname[:3].upper()),
@@ -108,6 +117,7 @@ def load_project(config_path: str | None = None, start: str = ".") -> Project:
             preview=list(tspec.get("preview") or []),
             body_on_change=body_on_change,
             append_only=bool(tspec.get("append_only", False)),
+            satisfying_statuses=satisfying_statuses,
         )
 
     if not types:

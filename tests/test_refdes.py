@@ -14,12 +14,13 @@ import sys
 import textwrap
 
 import pytest
+import yaml
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from refdes import build as build_mod  # noqa: E402
 from refdes import calc, ids, parse, render, seal  # noqa: E402
-from refdes.schema import load_project  # noqa: E402
+from refdes.schema import SchemaError, load_project  # noqa: E402
 
 REPO = os.path.join(os.path.dirname(__file__), "..")
 
@@ -234,6 +235,323 @@ def test_item_level_override_beats_the_schema():
     ) == "log"
 
 
+# ----------------------------------------------------------------- coverage
+
+
+COVERAGE_SCHEMA = """\
+site: {title: "Coverage Test", out: _site}
+id: {width: 3, ledger: .refdes/ids.yaml}
+history: {default: invalidate}
+units: {preferred: []}
+link_types:
+  satisfies: { inverse: satisfied_by, label: "Satisfies" }
+types:
+  requirement:
+    prefix: REQ
+    label: Requirement
+    fields:
+      text: { type: text, required: true, on_change: invalidate }
+    links: {}
+    body: { on_change: invalidate }
+  decision:
+    prefix: DEC
+    label: Decision
+    fields:
+      title:  { type: text, required: true, on_change: invalidate }
+      status: { type: enum, choices: [proposed, accepted, on_hold], default: proposed, on_change: invalidate }
+    links:
+      satisfies: [requirement]
+    satisfying_statuses: [accepted]
+    body: { on_change: invalidate }
+"""
+
+COVERAGE_ITEMS = {
+    "req-a.md": """\
+---
+id: REQ-A-001
+type: requirement
+text: Needs a settled decision.
+---
+""",
+    "dec-a.md": """\
+---
+id: DEC-A-001
+type: decision
+title: Settled choice.
+status: accepted
+satisfies: [REQ-A-001]
+---
+""",
+    "req-b.md": """\
+---
+id: REQ-B-001
+type: requirement
+text: Only claimed so far.
+---
+""",
+    "dec-b.md": """\
+---
+id: DEC-B-001
+type: decision
+title: Not settled yet.
+status: on_hold
+satisfies: [REQ-B-001]
+---
+""",
+}
+
+
+@pytest.fixture
+def coverage_project(tmp_path):
+    (tmp_path / "refdes.yaml").write_text(COVERAGE_SCHEMA, encoding="utf-8")
+    items = tmp_path / "items"
+    items.mkdir()
+    for name, text in COVERAGE_ITEMS.items():
+        (items / name).write_text(text, encoding="utf-8")
+    return tmp_path
+
+
+def test_settled_decision_satisfies_but_unsettled_only_claims(coverage_project):
+    """A requirement's only satisfier being `on_hold` must not read as satisfied (#1 P1-1)."""
+    project = load_project(config_path=str(coverage_project / "refdes.yaml"))
+    parse.load_items(project)
+    build_mod.build(project)
+
+    settled = project.coverage["REQ-A-001"]
+    assert settled.stage == "satisfied"
+    assert settled.satisfied_by == ["DEC-A-001"]
+    assert settled.claimed_by == []
+
+    unsettled = project.coverage["REQ-B-001"]
+    assert unsettled.stage == "claimed"
+    assert unsettled.claimed_by == ["DEC-B-001"]
+    assert unsettled.satisfied_by == []
+
+
+def test_satisfying_statuses_absent_keeps_old_behavior(coverage_project):
+    """A type with no satisfying_statuses: configured still counts every link (back-compat)."""
+    schema = COVERAGE_SCHEMA.replace("    satisfying_statuses: [accepted]\n", "")
+    (coverage_project / "refdes.yaml").write_text(schema, encoding="utf-8")
+
+    project = load_project(config_path=str(coverage_project / "refdes.yaml"))
+    parse.load_items(project)
+    build_mod.build(project)
+
+    unsettled = project.coverage["REQ-B-001"]
+    assert unsettled.stage == "satisfied"
+    assert unsettled.satisfied_by == ["DEC-B-001"]
+    assert unsettled.claimed_by == []
+
+
+NO_STATUS_FIELD_SCHEMA = """\
+site: {title: "Bad Schema", out: _site}
+id: {width: 3, ledger: .refdes/ids.yaml}
+history: {default: invalidate}
+units: {preferred: []}
+link_types:
+  satisfies: { inverse: satisfied_by, label: "Satisfies" }
+types:
+  requirement:
+    prefix: REQ
+    label: Requirement
+    fields:
+      text: { type: text, required: true, on_change: invalidate }
+    links: {}
+    body: { on_change: invalidate }
+  decision:
+    prefix: DEC
+    label: Decision
+    fields:
+      title: { type: text, required: true, on_change: invalidate }
+    links:
+      satisfies: [requirement]
+    satisfying_statuses: [accepted]
+    body: { on_change: invalidate }
+"""
+
+
+def test_satisfying_statuses_requires_a_status_field(tmp_path):
+    path = tmp_path / "refdes.yaml"
+    path.write_text(NO_STATUS_FIELD_SCHEMA, encoding="utf-8")
+    with pytest.raises(SchemaError, match="satisfying_statuses"):
+        load_project(config_path=str(path))
+
+
+# --------------------------------------------------------- misspelled link keys
+
+
+TYPO_LINK_ITEMS = {
+    "req-a.md": """\
+---
+id: REQ-A-001
+type: requirement
+text: Needs a decision.
+---
+""",
+    "dec-a.md": """\
+---
+id: DEC-A-001
+type: decision
+title: Typo'd the link name.
+status: accepted
+sattisfies: [REQ-A-001]
+---
+""",
+}
+
+
+@pytest.fixture
+def typo_link_project(tmp_path):
+    (tmp_path / "refdes.yaml").write_text(COVERAGE_SCHEMA, encoding="utf-8")
+    items = tmp_path / "items"
+    items.mkdir()
+    for name, text in TYPO_LINK_ITEMS.items():
+        (items / name).write_text(text, encoding="utf-8")
+    return tmp_path
+
+
+def test_misspelled_link_key_errors_instead_of_silently_dropping(typo_link_project):
+    """`sattisfies:` must fail the build, not warn while quietly losing the edge (#1 P1-3)."""
+    project = load_project(config_path=str(typo_link_project / "refdes.yaml"))
+    parse.load_items(project)
+
+    assert any(
+        "sattisfies" in d.message and "satisfies" in d.message for d in project.errors
+    )
+    assert not any("sattisfies" in d.message for d in project.warnings)
+    # The edge really is dropped -- that's exactly why this must be an error.
+    assert project.items["DEC-A-001"].links == {}
+
+
+def test_unrecognized_field_far_from_any_link_still_only_warns(tmp_path):
+    """A genuine unknown field with no close link name must keep warning, not error."""
+    (tmp_path / "refdes.yaml").write_text(COVERAGE_SCHEMA, encoding="utf-8")
+    items = tmp_path / "items"
+    items.mkdir()
+    (items / "dec-a.md").write_text(
+        """\
+---
+id: DEC-A-001
+type: decision
+title: Has a genuinely unrelated field.
+status: accepted
+completely_unrelated_nonsense: yes
+---
+""",
+        encoding="utf-8",
+    )
+    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    parse.load_items(project)
+
+    assert any("completely_unrelated_nonsense" in d.message for d in project.warnings)
+    assert not any("completely_unrelated_nonsense" in d.message for d in project.errors)
+
+
+# ------------------------------------------------------------------ image src
+
+
+IMAGE_ITEM = """\
+---
+id: DEC-A-001
+type: decision
+title: Has a couple images.
+status: accepted
+---
+
+![missing](figures/missing.png)
+
+![present](figures/present.png)
+
+![remote](https://example.com/photo.png)
+"""
+
+
+@pytest.fixture
+def image_project(tmp_path):
+    (tmp_path / "refdes.yaml").write_text(COVERAGE_SCHEMA, encoding="utf-8")
+    items = tmp_path / "items"
+    items.mkdir()
+    (items / "dec-a.md").write_text(IMAGE_ITEM, encoding="utf-8")
+    figures = items / "figures"
+    figures.mkdir()
+    (figures / "present.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+    return tmp_path
+
+
+def test_missing_image_src_warns_present_and_remote_do_not(image_project):
+    """A dangling image src must warn like every other dangling reference (#1 P1-4)."""
+    project = load_project(config_path=str(image_project / "refdes.yaml"))
+    parse.load_items(project)
+    build_mod.build(project)
+
+    messages = [d.message for d in project.warnings]
+    assert any("figures/missing.png" in m for m in messages)
+    assert not any("figures/present.png" in m for m in messages)
+    assert not any("example.com" in m for m in messages)
+
+
+# -------------------------------------------------------------- stale output
+
+
+PRUNE_ITEMS = {
+    "req-a.md": """\
+---
+id: REQ-A-001
+type: requirement
+text: Stays.
+---
+""",
+    "req-b.md": """\
+---
+id: REQ-B-001
+type: requirement
+text: Gets deleted.
+---
+""",
+}
+
+
+@pytest.fixture
+def prune_project(tmp_path):
+    (tmp_path / "refdes.yaml").write_text(COVERAGE_SCHEMA, encoding="utf-8")
+    items = tmp_path / "items"
+    items.mkdir()
+    for name, text in PRUNE_ITEMS.items():
+        (items / name).write_text(text, encoding="utf-8")
+    return tmp_path
+
+
+def _build_and_render(root):
+    project = load_project(config_path=str(root / "refdes.yaml"))
+    parse.load_items(project)
+    build_mod.build(project)
+    return render.render_site(project)
+
+
+def test_deleting_an_item_prunes_its_stale_page(prune_project):
+    """A deleted item must not leave a live, still-linkable page in _site/ (#1 P1-4)."""
+    out_dir = _build_and_render(prune_project)
+    stale_page = os.path.join(out_dir, "req-b-001.html")
+    assert os.path.isfile(stale_page)
+
+    (prune_project / "items" / "req-b.md").unlink()
+
+    out_dir = _build_and_render(prune_project)
+    assert not os.path.isfile(stale_page)
+    assert os.path.isfile(os.path.join(out_dir, "req-a-001.html"))
+
+
+def test_prune_never_touches_files_it_did_not_write(prune_project):
+    """Pruning must be scoped to the manifest, never a blanket sweep of out_dir."""
+    out_dir = _build_and_render(prune_project)
+    hand_written = os.path.join(out_dir, "notes.txt")
+    with open(hand_written, "w", encoding="utf-8") as fh:
+        fh.write("keep me")
+
+    _build_and_render(prune_project)
+    assert os.path.isfile(hand_written)
+
+
 # ---------------------------------------------------------------------- ids
 
 
@@ -296,6 +614,69 @@ def test_allocated_numbers_are_burned_and_never_reused(temp_project):
     parse.load_items(project2, require_ids=False)
     assignments = ids.allocate(project2)
     assert assignments[0][1] == "REQ-TMP-004"
+
+
+FLOW_STYLE_LIST_FILE = """\
+defaults:
+  type: requirement
+  prefix: REQ-TMP
+items:
+  - id: REQ-TMP-001
+    text: First.
+  - {text: flow style entry}
+"""
+
+
+@pytest.fixture
+def flow_style_project(tmp_path):
+    shutil.copy(os.path.join(REPO, "refdes.yaml"), tmp_path / "refdes.yaml")
+    items = tmp_path / "items" / "requirements"
+    items.mkdir(parents=True)
+    (items / "tmp.yaml").write_text(FLOW_STYLE_LIST_FILE, encoding="utf-8")
+    return tmp_path
+
+
+def test_allocation_into_flow_style_entry_stays_valid_yaml(flow_style_project):
+    """`- {text: ...}` must gain an id without breaking the flow mapping (#1 P1-13)."""
+    project = load_project(config_path=str(flow_style_project / "refdes.yaml"))
+    parse.load_items(project, require_ids=False)
+    ids.allocate(project)
+
+    path = flow_style_project / "items" / "requirements" / "tmp.yaml"
+    text = path.read_text(encoding="utf-8")
+
+    # The rewritten file must still be parseable YAML with the id + text intact.
+    reparsed = yaml.safe_load(text)
+    entries = reparsed["items"]
+    assert entries[1] == {"id": "REQ-TMP-002", "text": "flow style entry"}
+
+
+def test_unclosed_flow_entry_is_refused_not_corrupted(flow_style_project):
+    """A flow mapping that doesn't close on its own line must be refused, not guessed at."""
+    path = flow_style_project / "items" / "requirements" / "tmp.yaml"
+    path.write_text(
+        textwrap.dedent(
+            """\
+            defaults:
+              type: requirement
+              prefix: REQ-TMP
+            items:
+              - id: REQ-TMP-001
+                text: First.
+              - {text: "spans
+                multiple lines"}
+            """
+        ),
+        encoding="utf-8",
+    )
+    project = load_project(config_path=str(flow_style_project / "refdes.yaml"))
+    parse.load_items(project, require_ids=False)
+    before = path.read_text(encoding="utf-8")
+    ids.allocate(project)
+    after = path.read_text(encoding="utf-8")
+
+    assert after == before  # refused write must leave the source file untouched
+    assert any("could not write id" in d.message for d in project.errors)
 
 
 # ------------------------------------------------------------------------ imports

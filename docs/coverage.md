@@ -1,28 +1,38 @@
 # Coverage
 
-Coverage answers "what still needs doing" with three separate questions rather than
-one done/not-done flag.
+Coverage answers "what still needs doing" with several separate questions rather
+than one done/not-done flag.
 
-## The four stages
+## The five stages
 
 | Stage | Means | Produced by |
 |---|---|---|
 | `open` | Nothing references it at all | — |
 | `addressed` | Somebody has worked on it | a **log** entry `addresses` it |
-| `satisfied` | A decision claims to meet it | a **decision** `satisfies` it |
+| `claimed` | A decision or component says it meets it, but that claim hasn't settled | a **decision**/**component** `satisfies` it, with a `status` not (yet) in the type's `satisfying_statuses:` |
+| `satisfied` | A settled decision or component claims to meet it | a **decision**/**component** `satisfies` it, with a `status` in `satisfying_statuses:` |
 | `verified` | A test proves it | a **test** `verifies` it |
 
 The stage shown is the highest reached. They are cumulative in intent but not
 required to be in practice — a requirement can be verified without any log entry
 ever mentioning it.
 
-## Why three and not one
+`claimed` only appears for types that declare `satisfying_statuses:` — see
+[below](#which-statuses-count-as-satisfying). A type that doesn't declare it never
+produces a `claimed` requirement: every linked decision or component counts as
+satisfying immediately, exactly like before this existed.
+
+## Why several and not one
 
 Because these fail differently:
 
-- **Satisfied but not verified** is the dangerous one. A decision says the design
-  meets the requirement; nothing has proven it. This is normal mid-project and
-  catastrophic at ship time, and a single "done" flag hides it completely.
+- **Claimed but not settled** is the one that bit a real migration: a `status:
+  on_hold` (or `proposed`) decision was being read as fully satisfying, silently.
+  A decision that hasn't settled is a claim, not a fact yet.
+- **Satisfied but not verified** is the next most dangerous. A settled decision
+  says the design meets the requirement; nothing has proven it. This is normal
+  mid-project and catastrophic at ship time, and a single "done" flag hides it
+  completely.
 - **Addressed but not satisfied** is work in progress. Somebody has been at it for
   three weeks and no decision has landed. Worth seeing.
 - **Open** is untouched. Sometimes fine, sometimes a requirement everyone forgot.
@@ -63,12 +73,42 @@ WARNING items/requirements/power.yaml:20 [REQ-PWR-003] — satisfied but not
 These are warnings, not errors — a mid-project board legitimately has both. Use
 `refdes check` in CI and decide for yourself whether to gate on warnings.
 
+## Which statuses count as satisfying
+
+By default, any decision or component linked with `satisfies:` counts as
+satisfying — the item's own `status` field is not consulted. That is the
+behavior every project already has, and it stays exactly that way on upgrade.
+
+To have coverage respect settlement, declare `satisfying_statuses:` on the type:
+
+```yaml
+types:
+  decision:
+    fields:
+      status: { type: enum, choices: [proposed, accepted, superseded, rejected],
+                default: proposed }
+    links:
+      satisfies: [requirement]
+    satisfying_statuses: [accepted]   # only an `accepted` decision satisfies
+```
+
+A decision whose `status` is not in that list still records the link — it shows
+up as `claimed_by` on the requirement's coverage, and the requirement's stage
+caps at `claimed` instead of `satisfied`. Declaring `satisfying_statuses:`
+requires the type to have a `status` field; the project fails to load otherwise.
+
+| `satisfying_statuses:` | Behavior |
+|---|---|
+| not declared *(default)* | Every `satisfies:` link counts as satisfying, regardless of status — unchanged from before this existed |
+| a list of status values | Only a link whose `status` is in the list counts as satisfying; the rest count as `claimed` |
+
 ## Closing the gaps
 
 | To move from | to | do this |
 |---|---|---|
 | `open` | `addressed` | write a log entry with `addresses: [REQ-X]` |
-| `addressed` | `satisfied` | write a decision with `satisfies: [REQ-X]` |
+| `addressed` | `claimed`/`satisfied` | write a decision or component with `satisfies: [REQ-X]` |
+| `claimed` | `satisfied` | move its `status` into the type's `satisfying_statuses:` list |
 | `satisfied` | `verified` | write a test with `verifies: [REQ-X]` |
 
 Any of these edges may be declared from either end — see [links](links.md).
@@ -80,6 +120,7 @@ Any of these edges may be declared from either end — see [links](links.md).
   "REQ-PWR-003": {
     "stage": "satisfied",
     "addressed_by": ["LOG-A-003", "LOG-A-004", "LOG-A-006"],
+    "claimed_by": [],
     "satisfied_by": ["DEC-PWR-001"],
     "verified_by": []
   }
