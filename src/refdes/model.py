@@ -111,6 +111,40 @@ class CheckResult:
 
 
 @dataclass
+class CitationSpec:
+    """One entry of a `citations:`-typed field -- declared intent only.
+
+    Computed provenance (hash, fetch time, vendored flag) is never stored here or
+    on the item; it lives in the `.refdes/citations.yaml` lockfile, keyed by url,
+    so that re-fetching a datasheet can never retroactively mark a sealed log
+    entry -- or any other suspect-link consumer of an item's content hash -- as
+    edited.
+    """
+
+    field: str
+    index: int
+    url: str
+    rev: str = ""
+    page: str = ""
+    part_number: str = ""
+    vendor: bool = False
+
+
+@dataclass
+class CitationStatus:
+    """One citation, resolved against the lockfile at build/check time."""
+
+    spec: CitationSpec
+    item_id: str
+    state: str = "ok"  # "ok" | "unpinned" | "cache_missing" | "hash_mismatch"
+    detail: str = ""
+    sha256: str = ""
+    fetched: str = ""
+    vendored: bool = False
+    local_path: str = ""  # project-root-relative path to the vendored blob, if any
+
+
+@dataclass
 class CalcLine:
     """One line of a ```calc block, evaluated."""
 
@@ -145,6 +179,7 @@ class Item:
     origin: str = ""        # name of the import it came from
     board_hint: str = ""    # explicit `board:` override, item value beats file defaults
     board: str = ""         # resolved board key; "" if boards: is unused or no match
+    citations: list[CitationStatus] = field(default_factory=list)  # populated during build
 
     @property
     def title(self) -> str:
@@ -253,6 +288,11 @@ class Project:
     # (item_id, previous_board, current_board), for items whose board changed
     # since the last time `.refdes/boards.yaml` was written.
     board_moves: list[tuple[str, str, str]] = field(default_factory=list)
+    # Project-root-relative paths of every local file that must be copied into
+    # `_site/assets/`, mirroring this same path -- populated by resolved local
+    # `<img>` references and by `site.assets:` directories.
+    assets: set[str] = field(default_factory=set)
+    asset_dirs: list[str] = field(default_factory=list)  # site.assets: raw config
 
     @property
     def local_items(self) -> list[Item]:

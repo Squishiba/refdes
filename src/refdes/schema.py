@@ -169,6 +169,7 @@ def load_project(config_path: str | None = None, start: str = ".") -> Project:
         version=str(site.get("version") or ""),
         pages_dir=str(site.get("pages") or "pages"),
         nav_order=[str(s) for s in (site.get("nav") or [])],
+        asset_dirs=[str(s) for s in (site.get("assets") or [])],
         imports=import_specs,
         types=types,
         link_types=link_types,

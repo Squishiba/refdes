@@ -358,6 +358,35 @@ def _asset_file_list(asset_dir: str) -> list[str]:
     return out
 
 
+def _copy_project_assets(project: Project, out_dir: str, written: set[str]) -> None:
+    """Copy `project.assets` into `_site/assets/`, mirroring each root-relative path.
+
+    Runs after the template's own `assets/` copytree, so a project asset whose
+    path collides with a name the template itself owns (`style.css`, `app.js`) is
+    refused with a build error instead of silently overwriting it -- the same
+    guard `render_site` already applies to a page whose slug collides with a
+    generated report.
+    """
+    reserved = set(os.listdir(ASSET_DIR)) if os.path.isdir(ASSET_DIR) else set()
+    asset_out = os.path.join(out_dir, "assets")
+    for rel in sorted(project.assets):
+        top = rel.split("/", 1)[0]
+        if top in reserved:
+            project.error(
+                f"asset {rel!r} would be written to assets/{top}, which the site "
+                f"template itself uses. Rename the source file or its enclosing "
+                f"directory."
+            )
+            continue
+        src = os.path.join(project.root, *rel.split("/"))
+        if not os.path.isfile(src):
+            continue  # already reported as a build error when the reference was resolved
+        dest = os.path.join(asset_out, *rel.split("/"))
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
+        shutil.copy2(src, dest)
+        written.add(f"assets/{rel}")
+
+
 def _prune_stale_output(out_dir: str, written: set[str]) -> None:
     """Delete output from a previous build that this build no longer produces.
 
@@ -476,6 +505,7 @@ def render_site(project: Project) -> str:
         if os.path.isdir(ASSET_DIR):
             shutil.copytree(ASSET_DIR, os.path.join(out_dir, "assets"), dirs_exist_ok=True)
             written.update(_asset_file_list(ASSET_DIR))
+        _copy_project_assets(project, out_dir, written)
         _prune_stale_output(out_dir, written)
         return out_dir
 
@@ -612,6 +642,7 @@ def render_site(project: Project) -> str:
     if os.path.isdir(ASSET_DIR):
         shutil.copytree(ASSET_DIR, asset_out, dirs_exist_ok=True)
         written.update(_asset_file_list(ASSET_DIR))
+    _copy_project_assets(project, out_dir, written)
 
     _prune_stale_output(out_dir, written)
     return out_dir

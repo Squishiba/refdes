@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import html as html_entities
 import json
 import os
 import re
@@ -22,10 +23,19 @@ INLINE_VALUE_RE = re.compile(r"\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}")
 # Regions of rendered HTML where references must not be linkified.
 PROTECTED_RE = re.compile(r"<pre\b[\s\S]*?</pre>|<code\b[\s\S]*?</code>", re.IGNORECASE)
 # `<img src="...">` as markdown-it emits it -- html is off, so this only ever comes
-# from `![alt](src)`, never from a literal tag the author typed.
-IMG_SRC_RE = re.compile(r'<img\b[^>]*?\bsrc="([^"]*)"', re.IGNORECASE)
+# from `![alt](src)`, never from a literal tag the author typed. Three groups so a
+# rewrite can replace just the URL and leave the rest of the tag untouched.
+IMG_SRC_RE = re.compile(r'(<img\b[^>]*?\bsrc=")([^"]*)(")', re.IGNORECASE)
 # A URL (has a scheme) or protocol-relative reference: not ours to validate.
 _URL_SCHEME_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9+.\-]*:|^//")
+# A whole paragraph that is nothing but one image immediately followed by a
+# Quarto-style attribute suffix: `![alt](src){width=60% caption="..."}`. Anything
+# else -- no suffix, other text in the paragraph -- is left completely alone.
+FIGURE_RE = re.compile(
+    r'<p>\s*(<img\b[^>]*?>)\s*\{([^{}]*)\}\s*</p>', re.IGNORECASE
+)
+FIGURE_ATTR_RE = re.compile(r'([A-Za-z_][\w-]*)\s*=\s*(?:"([^"]*)"|(\S+))')
+IMG_ALT_RE = re.compile(r'\balt="([^"]*)"', re.IGNORECASE)
 
 
 # ----------------------------------------------------------------------- validation
@@ -384,28 +394,74 @@ def _linkify(
     return "".join(out)
 
 
-def _validate_images(
+def _process_images(
     html: str,
     project: Project,
     where_file: str,
     where_line: int | None = None,
     where_id: str | None = None,
-) -> None:
-    """Warn on a local image src that does not resolve to a file on disk.
+) -> str:
+    """Resolve, validate, register, and rewrite local `<img src>` references.
 
-    Resolved relative to the source file's own directory -- the same base a
-    browser would use to open the rendered page next to its markdown source.
+    A local src is resolved relative to the source file's own directory -- the
+    same base a browser would use to open the rendered page next to its markdown
+    source. One that resolves is registered in `project.assets` under its
+    project-root-relative path and rewritten to `assets/<that path>`, which is
+    where `render_site` copies it, mirroring the source layout. One that does not
+    resolve is a build error, not a warning: unlike a dangling cross-reference,
+    there is no sensible way to render a missing image, and now that a resolving
+    src is actually made to work end to end, a broken one should stop the build.
     """
-    for match in IMG_SRC_RE.finditer(html):
-        src = match.group(1)
+
+    def swap(match: re.Match) -> str:
+        prefix, src, suffix = match.group(1), match.group(2), match.group(3)
         if not src or _URL_SCHEME_RE.match(src):
-            continue
-        full_path = os.path.join(project.root, os.path.dirname(where_file), src)
+            return match.group(0)
+        full_path = os.path.normpath(
+            os.path.join(project.root, os.path.dirname(where_file), src)
+        )
         if not os.path.isfile(full_path):
-            project.warn(
+            project.error(
                 f"image src {src!r} does not exist",
                 file=where_file, line=where_line, item_id=where_id,
             )
+            return match.group(0)
+        rel = os.path.relpath(full_path, project.root).replace("\\", "/")
+        project.assets.add(rel)
+        return f"{prefix}assets/{rel}{suffix}"
+
+    return IMG_SRC_RE.sub(swap, html)
+
+
+def _apply_figure_attrs(html: str) -> str:
+    """Wrap `![alt](src){width=60% caption="..."}` in a real `<figure>`.
+
+    Only a paragraph containing nothing but one image immediately followed by a
+    `{...}` suffix is touched -- matched the same way `_process_images` and
+    `_linkify` scan rendered HTML with a regex rather than a markdown-it plugin.
+    With no suffix the image passes through completely untouched. `alt` always
+    stays on the `<img>`; `caption` falls back to it when not given.
+    """
+
+    def swap(match: re.Match) -> str:
+        img_tag, attrs_text = match.group(1), match.group(2)
+        # markdown-it escapes '"' in plain text the same as '&', '<', '>', so the
+        # quoted-value delimiters in `attrs_text` are themselves `&quot;` by the
+        # time this regex ever sees them. Unescape first to parse the attributes,
+        # then re-escape whatever ends up in the caption before it goes back into
+        # the page as HTML text.
+        attrs = {
+            m.group(1).lower(): m.group(2) if m.group(2) is not None else m.group(3)
+            for m in FIGURE_ATTR_RE.finditer(html_entities.unescape(attrs_text))
+        }
+        alt_match = IMG_ALT_RE.search(img_tag)
+        alt = alt_match.group(1) if alt_match else ""  # already HTML-escaped text
+        caption = _esc(attrs["caption"]) if "caption" in attrs else alt
+        style = f' style="width: {_esc(attrs["width"])}"' if attrs.get("width") else ""
+        figcaption = f"<figcaption>{caption}</figcaption>" if caption else ""
+        return f'<figure class="md-figure"{style}>{img_tag}{figcaption}</figure>'
+
+    return FIGURE_RE.sub(swap, html)
 
 
 def render_bodies(project: Project) -> None:
@@ -451,7 +507,8 @@ def render_bodies(project: Project) -> None:
             else:
                 html = html.replace(token, table)
 
-        _validate_images(html, project, item.source_file, item.source_line, item.id)
+        html = _process_images(html, project, item.source_file, item.source_line, item.id)
+        html = _apply_figure_attrs(html)
         item.body_html = _linkify(
             html, project, item.source_file, item.source_line, item.id
         )
@@ -464,10 +521,35 @@ def render_pages(project: Project) -> None:
 
     for page in project.pages:
         html = md.render(page.body)
-        _validate_images(html, project, page.source_file)
+        html = _process_images(html, project, page.source_file)
+        html = _apply_figure_attrs(html)
         html = _linkify(html, project, page.source_file)
         page.body_html = pages_mod.rewrite_page_links(html, known)
         pages_mod.add_heading_anchors(page)
+
+
+# --------------------------------------------------------------------- static assets
+
+
+def collect_static_assets(project: Project) -> None:
+    """Register every file under a `site.assets:` directory, no reference needed.
+
+    For a local file that is linked to (a PDF, a datasheet not managed as a
+    citation) rather than embedded as an `<img>`, there is nothing in the
+    rendered HTML to resolve automatically -- the author writes the `href`
+    themselves, pointed at `assets/<path under the declared directory>`. This
+    just makes sure the file is actually there to be linked to.
+    """
+    for rel_dir in project.asset_dirs:
+        full_dir = os.path.join(project.root, rel_dir)
+        if not os.path.isdir(full_dir):
+            project.warn(f"site.assets entry {rel_dir!r} is not a directory", file="refdes.yaml")
+            continue
+        for dirpath, _dirnames, filenames in os.walk(full_dir):
+            for name in filenames:
+                full_path = os.path.join(dirpath, name)
+                rel = os.path.relpath(full_path, project.root).replace("\\", "/")
+                project.assets.add(rel)
 
 
 # ------------------------------------------------------------------------ entry point
@@ -480,6 +562,7 @@ def build(
     accept_board_move: bool = False,
 ) -> Project:
     pages_mod.load_pages(project)
+    collect_static_assets(project)
     calc.set_unit_aliases(project.unit_aliases)
     calc.set_preferred_units(project.preferred_units)
     imports.load_imports(project)

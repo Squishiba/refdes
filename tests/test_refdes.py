@@ -448,7 +448,7 @@ completely_unrelated_nonsense: yes
     assert not any("completely_unrelated_nonsense" in d.message for d in project.errors)
 
 
-# ------------------------------------------------------------------ image src
+# ------------------------------------------------------------- images and assets
 
 
 IMAGE_ITEM = """\
@@ -479,16 +479,203 @@ def image_project(tmp_path):
     return tmp_path
 
 
-def test_missing_image_src_warns_present_and_remote_do_not(image_project):
-    """A dangling image src must warn like every other dangling reference (#1 P1-4)."""
+def test_missing_image_src_errors_present_and_remote_do_not(image_project):
+    """A dangling image src must fail the build now that a resolving one works."""
     project = load_project(config_path=str(image_project / "refdes.yaml"))
     parse.load_items(project)
     build_mod.build(project)
 
-    messages = [d.message for d in project.warnings]
+    messages = [d.message for d in project.errors]
     assert any("figures/missing.png" in m for m in messages)
     assert not any("figures/present.png" in m for m in messages)
     assert not any("example.com" in m for m in messages)
+    assert not any("figures/missing.png" in d.message for d in project.warnings)
+
+
+def test_present_local_image_is_registered_and_rewritten(image_project):
+    project = load_project(config_path=str(image_project / "refdes.yaml"))
+    parse.load_items(project)
+    build_mod.build(project)
+
+    assert "items/figures/present.png" in project.assets
+    item = project.items["DEC-A-001"]
+    assert 'src="assets/items/figures/present.png"' in item.body_html
+    # A remote src is never touched or registered.
+    assert "assets/https" not in item.body_html
+    assert 'src="https://example.com/photo.png"' in item.body_html
+
+
+def test_local_image_is_copied_into_the_site(image_project):
+    out = _build_and_render(image_project)
+    copied = os.path.join(out, "assets", "items", "figures", "present.png")
+    assert os.path.isfile(copied)
+    assert open(copied, "rb").read() == b"\x89PNG\r\n\x1a\n"
+
+
+def test_deleting_an_image_reference_prunes_its_copied_asset(image_project):
+    out = _build_and_render(image_project)
+    copied = os.path.join(out, "assets", "items", "figures", "present.png")
+    assert os.path.isfile(copied)
+
+    text = (image_project / "items" / "dec-a.md").read_text(encoding="utf-8")
+    text = text.replace("![present](figures/present.png)\n\n", "")
+    (image_project / "items" / "dec-a.md").write_text(text, encoding="utf-8")
+
+    out = _build_and_render(image_project)
+    assert not os.path.isfile(copied)
+
+
+def test_asset_colliding_with_a_template_reserved_name_is_an_error(tmp_path):
+    """An image path that would land on assets/style.css must not clobber it."""
+    (tmp_path / "refdes.yaml").write_text(COVERAGE_SCHEMA, encoding="utf-8")
+    items = tmp_path / "items"
+    items.mkdir()
+    # Escapes items/ via '..' so its root-relative destination is exactly
+    # "style.css" -- the template's own reserved top-level asset name.
+    (items / "dec-a.md").write_text(
+        "---\nid: DEC-A-001\ntype: decision\ntitle: Clobbers style.css.\n"
+        "status: accepted\n---\n\n![bad](../style.css)\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "style.css").write_text("body { color: red }", encoding="utf-8")
+
+    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    parse.load_items(project)
+    build_mod.build(project)
+    out = render.render_site(project)
+
+    assert any("would be written to assets/style.css" in d.message for d in project.errors)
+    real_style = open(os.path.join(out, "assets", "style.css"), encoding="utf-8").read()
+    assert "color: red" not in real_style  # the template's own stylesheet survived
+
+
+# ------------------------------------------------------------- site.assets:
+
+SITE_ASSETS_SCHEMA = COVERAGE_SCHEMA.replace(
+    'site: {title: "Coverage Test", out: _site}',
+    'site: {title: "Coverage Test", out: _site, assets: [figures]}',
+)
+
+
+@pytest.fixture
+def site_assets_project(tmp_path):
+    (tmp_path / "refdes.yaml").write_text(SITE_ASSETS_SCHEMA, encoding="utf-8")
+    items = tmp_path / "items"
+    items.mkdir()
+    (items / "req-a.md").write_text(
+        "---\nid: REQ-A-001\ntype: requirement\ntext: Nothing references figures.\n---\n",
+        encoding="utf-8",
+    )
+    figures = tmp_path / "figures"
+    figures.mkdir()
+    (figures / "board.pdf").write_bytes(b"%PDF-1.4 fake")
+    return tmp_path
+
+
+def test_site_assets_directory_is_copied_with_no_reference_needed(site_assets_project):
+    out = _build_and_render(site_assets_project)
+    copied = os.path.join(out, "assets", "figures", "board.pdf")
+    assert os.path.isfile(copied)
+    assert open(copied, "rb").read() == b"%PDF-1.4 fake"
+
+
+def test_site_assets_missing_directory_warns(tmp_path):
+    schema = COVERAGE_SCHEMA.replace(
+        'site: {title: "Coverage Test", out: _site}',
+        'site: {title: "Coverage Test", out: _site, assets: [nope]}',
+    )
+    (tmp_path / "refdes.yaml").write_text(schema, encoding="utf-8")
+    items = tmp_path / "items"
+    items.mkdir()
+    (items / "req-a.md").write_text(
+        "---\nid: REQ-A-001\ntype: requirement\ntext: t.\n---\n", encoding="utf-8"
+    )
+    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    parse.load_items(project)
+    build_mod.build(project)
+    assert any("'nope' is not a directory" in d.message for d in project.warnings)
+
+
+# ------------------------------------------------------------- figure/caption
+
+FIGURE_ITEM = """\
+---
+id: DEC-A-001
+type: decision
+title: Has a captioned figure.
+status: accepted
+---
+
+![the curve](figures/present.png){width=60% caption="Figure 3 — the curve"}
+
+![no caption given](figures/present.png){width=40%}
+
+![plain, no suffix](figures/present.png)
+"""
+
+
+@pytest.fixture
+def figure_project(tmp_path):
+    (tmp_path / "refdes.yaml").write_text(COVERAGE_SCHEMA, encoding="utf-8")
+    items = tmp_path / "items"
+    items.mkdir()
+    (items / "dec-a.md").write_text(FIGURE_ITEM, encoding="utf-8")
+    figures = items / "figures"
+    figures.mkdir()
+    (figures / "present.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+    return tmp_path
+
+
+def test_figure_attrs_wrap_the_image_and_set_width_and_caption(figure_project):
+    project = load_project(config_path=str(figure_project / "refdes.yaml"))
+    parse.load_items(project)
+    build_mod.build(project)
+    html = project.items["DEC-A-001"].body_html
+
+    assert '<figure class="md-figure" style="width: 60%">' in html
+    assert "<figcaption>Figure 3 — the curve</figcaption>" in html
+    assert '<img src="assets/items/figures/present.png" alt="the curve" />' in html
+
+
+def test_figure_caption_falls_back_to_alt_when_not_given(figure_project):
+    project = load_project(config_path=str(figure_project / "refdes.yaml"))
+    parse.load_items(project)
+    build_mod.build(project)
+    html = project.items["DEC-A-001"].body_html
+
+    assert '<figure class="md-figure" style="width: 40%">' in html
+    assert "<figcaption>no caption given</figcaption>" in html
+
+
+def test_image_with_no_suffix_is_never_wrapped_in_a_figure(figure_project):
+    project = load_project(config_path=str(figure_project / "refdes.yaml"))
+    parse.load_items(project)
+    build_mod.build(project)
+    html = project.items["DEC-A-001"].body_html
+
+    assert '<img src="assets/items/figures/present.png" alt="plain, no suffix" />' in html
+    # Exactly two images are wrapped (the two with a suffix); the third stands alone.
+    assert html.count("<figure") == 2
+
+
+# ------------------------------------------------------------- pages + images
+
+def test_pages_get_the_same_image_resolution_and_copy(tmp_path):
+    config = open(os.path.join(REPO, "refdes.yaml"), encoding="utf-8").read()
+    (tmp_path / "refdes.yaml").write_text(config, encoding="utf-8")
+    pages = tmp_path / "pages"
+    pages.mkdir()
+    (pages / "index.md").write_text(
+        "# Overview\n\n![board photo](img/board.png)\n", encoding="utf-8"
+    )
+    img_dir = pages / "img"
+    img_dir.mkdir()
+    (img_dir / "board.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+
+    out = _build_and_render(tmp_path)
+    assert os.path.isfile(os.path.join(out, "assets", "pages", "img", "board.png"))
+    index_html = open(os.path.join(out, "index.html"), encoding="utf-8").read()
+    assert 'src="assets/pages/img/board.png"' in index_html
 
 
 # -------------------------------------------------------------- stale output

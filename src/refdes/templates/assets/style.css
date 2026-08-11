@@ -139,6 +139,10 @@ ul.tight li { margin: 3px 0; }
 .body pre { background: var(--panel); padding: 12px 14px; border-radius: 6px; overflow-x: auto; }
 .body pre code { background: none; padding: 0; }
 
+.md-figure { margin: 20px auto; max-width: 100%; text-align: center; }
+.md-figure img { max-width: 100%; height: auto; border-radius: 6px; }
+.md-figure figcaption { margin-top: 8px; font-size: 13px; color: var(--muted); }
+
 .pill-external { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 50%, transparent); }
 .pill-sealed   { color: var(--muted); }
 

@@ -52,6 +52,8 @@ P_dens  : W/in^2 = P_diss / A_board
 The converter loses {{P_diss}} at full load, spread over {{A_board}} of board, so
 the power stage runs at {{P_dens}}.
 
+![TPS62913 efficiency vs. load current, half-load point marked](img/efficiency-curve.png){width=70% caption="Figure 1 — TPS62913 efficiency vs. load current (half-load point marked)"}
+
 That is where this decision is currently in trouble: CON-THM-001 allows
 0.15 W/in², and the check below fails. The options are to widen the power stage
 allocation, improve efficiency, or renegotiate the enclosure spec — none of which
