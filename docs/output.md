@@ -123,6 +123,14 @@ The interchange format. **Anything downstream should read this, not the HTML.**
       "type": "decision",
       "title": "3V3 rail regulator topology",
       "fields": { "status": "accepted", "options": [ ... ] },
+      "citations": {
+        "datasheets": [
+          { "url": "https://www.ti.com/lit/ds/symlink/tps62913.pdf",
+            "state": "ok", "pinned": true, "vendored": false,
+            "sha256": "9f2c...", "fetched": "2026-03-01T12:00:00Z",
+            "local_path": "", "detail": "" }
+        ]
+      },
       "links": { "satisfies": ["REQ-PWR-002"], "constrains": ["CON-THM-001"] },
       "backlinks": { "recorded_by": ["LOG-A-004"] },
       "content_hash": "673e6ba11269f350",
@@ -159,6 +167,47 @@ The interchange format. **Anything downstream should read this, not the HTML.**
 | `calcs[].bounds` | Empty unless the value carries a tolerance |
 | `checks[].ok` | `true`, `false`, or `null` when it could not be evaluated |
 | `boards` / `items[].board` | Only present when the project declares a `boards:` registry |
+| `types[].fields[].type` | The field's declared type (`text`, `citations`, ...) — how a consumer finds "which field is my citations field" without being told out of band |
+| `items[].citations` | Resolved provenance, keyed by field name — local items only; empty `{}` for items with no `citations:`-typed field |
+
+`items[].fields` is authored intent only — for a `citations:`-typed field, each
+entry is just what was written in the item (`url`, `rev`, `page`, `part_number`,
+`vendor:`). What it *resolved to* is a separate, parallel structure,
+`items[].citations`, keyed by field name and ordered to match `fields[fname]`:
+
+```json
+"citations": {
+  "datasheets": [
+    { "url": "...", "state": "ok", "pinned": true, "vendored": false,
+      "sha256": "9f2c...", "fetched": "2026-03-01T12:00:00Z",
+      "local_path": "", "detail": "" }
+  ]
+}
+```
+
+They're kept apart because they change for different reasons: `fields` changes
+when someone edits the item; `citations` changes when someone runs `refdes
+fetch`, independent of the item's content hash. See
+[citations.py](../src/refdes/citations.py) for why that separation exists at
+the model level, and [citing a datasheet](markdown.md#citing-a-datasheet) for
+the authoring side.
+
+Every entry always has the same keys, so "not yet pinned" and "pinned but not
+vendored" are each an explicit `state`, not something inferred from an absent
+key:
+
+| `state` | Meaning |
+|---|---|
+| `"ok"` | Resolved — hash on file, and vendored locally if `vendor: true` was declared |
+| `"unpinned"` | No lockfile entry yet — `refdes fetch` has not run for this url |
+| `"cache_missing"` | Pinned and vendored, but the local blob is gone |
+| `"hash_mismatch"` | Vendored blob's hash no longer matches the pinned sha256 (always an error) |
+
+`pinned` is `state != "unpinned"` — the one field to check "is this dependency
+tree fully pinned for a release" without enumerating `state` values yourself.
+`vendored` and `sha256` distinguish hash-only pins (`vendored: false`, `sha256`
+set) from vendored ones (`vendored: true`) — vendoring is opt-in per citation,
+so a fully-pinned project can still be `vendored: false` throughout.
 
 ### What it is good for
 

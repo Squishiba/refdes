@@ -232,6 +232,32 @@ def preview_payload(project: Project) -> dict:
     return out
 
 
+def _citations_json(item: Item) -> dict:
+    """Resolved provenance for `item.citations`, grouped by field and ordered by index.
+
+    Deliberately kept separate from `fields` -- `fields[fname][i]` is authored
+    intent (url, rev, vendor:), this is what it resolved to (sha256, vendored,
+    pinned). Every entry always carries the same keys, `state` included, so
+    "unpinned" and "pinned but not vendored" are each a distinct, explicit
+    `state` value rather than something a consumer infers from an absent key.
+    """
+    out: dict[str, list[dict]] = {}
+    for status in sorted(item.citations, key=lambda s: (s.spec.field, s.spec.index)):
+        out.setdefault(status.spec.field, []).append(
+            {
+                "url": status.spec.url,
+                "state": status.state,
+                "pinned": status.state != "unpinned",
+                "vendored": status.vendored,
+                "sha256": status.sha256,
+                "fetched": status.fetched,
+                "local_path": status.local_path,
+                "detail": status.detail,
+            }
+        )
+    return out
+
+
 def items_json(project: Project) -> dict:
     """The machine-readable export. Anything downstream should read this, not HTML.
 
@@ -290,6 +316,7 @@ def items_json(project: Project) -> dict:
             entry["board"] = item.board
         entry.update({
             "fields": item.fields,
+            "citations": _citations_json(item),
             "links": item.links,
             "backlinks": item.backlinks,
             "content_hash": item.content_hash,

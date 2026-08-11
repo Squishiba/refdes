@@ -1969,6 +1969,117 @@ def test_vendored_citation_hash_mismatch_is_always_an_error(citation_project):
     assert any("tampered or corrupt" in d.message for d in project.errors)
 
 
+# ------------------------------------------------------------- items_json export
+
+
+def _citation_entry(payload, item_id="CMP-001"):
+    return next(i for i in payload["items"] if i["id"] == item_id)
+
+
+def test_items_json_citations_unpinned(citation_project):
+    project = _cite_build(citation_project)
+    payload = render.items_json(project)
+    status = _citation_entry(payload)["citations"]["datasheets"][0]
+    assert status["state"] == "unpinned"
+    assert status["pinned"] is False
+    assert status["vendored"] is False
+    assert status["sha256"] == ""
+    assert status["fetched"] == ""
+    assert status["local_path"] == ""
+    assert "has no fetched record" in status["detail"]
+    # authored intent stays in `fields`, untouched by resolution
+    assert _citation_entry(payload)["fields"]["datasheets"][0] == {
+        "url": "https://example.com/ds.pdf",
+        "rev": "C",
+        "page": "14",
+        "part_number": "TPS62913",
+        "vendor": True,
+    }
+
+
+def test_items_json_citations_hash_only_pinned_not_vendored(citation_project):
+    (citation_project / "items" / "cmp.yaml").write_text(
+        "defaults: {type: component}\n"
+        "items:\n  - id: CMP-001\n    title: t\n"
+        "    datasheets:\n      - url: https://example.com/ds.pdf\n        vendor: false\n",
+        encoding="utf-8",
+    )
+    _write_citation_lockfile(
+        citation_project,
+        {"https://example.com/ds.pdf": {"sha256": "abc123", "fetched": "2026-01-01T00:00:00Z", "vendored": False}},
+    )
+    project = _cite_build(citation_project)
+    payload = render.items_json(project)
+    status = _citation_entry(payload)["citations"]["datasheets"][0]
+    assert status["state"] == "ok"
+    assert status["pinned"] is True
+    assert status["vendored"] is False
+    assert status["sha256"] == "abc123"
+    assert status["fetched"] == "2026-01-01T00:00:00Z"
+    assert status["local_path"] == ""
+
+
+def test_items_json_citations_vendored(citation_project):
+    data = b"%PDF-1.4 real bytes"
+    sha = hashlib.sha256(data).hexdigest()
+    _write_citation_lockfile(
+        citation_project,
+        {"https://example.com/ds.pdf": {"sha256": sha, "fetched": "2026-01-01T00:00:00Z", "vendored": True}},
+    )
+    _write_vendor_blob(citation_project, sha, ".pdf", data)
+    project = _cite_build(citation_project)
+    payload = render.items_json(project)
+    status = _citation_entry(payload)["citations"]["datasheets"][0]
+    assert status["state"] == "ok"
+    assert status["pinned"] is True
+    assert status["vendored"] is True
+    assert status["sha256"] == sha
+    assert status["local_path"] == f".refdes/vendor/{sha}.pdf"
+
+
+def test_items_json_citations_cache_missing(citation_project):
+    _write_citation_lockfile(
+        citation_project,
+        {"https://example.com/ds.pdf": {"sha256": "deadbeef", "fetched": "2026-01-01T00:00:00Z", "vendored": True}},
+    )
+    project = _cite_build(citation_project)
+    payload = render.items_json(project)
+    status = _citation_entry(payload)["citations"]["datasheets"][0]
+    assert status["state"] == "cache_missing"
+    assert status["pinned"] is True
+    assert status["vendored"] is True
+    assert status["sha256"] == "deadbeef"
+    assert status["local_path"] == ""
+
+
+def test_items_json_citations_empty_for_items_without_citation_fields(tmp_path):
+    (tmp_path / "refdes.yaml").write_text(
+        "site: { title: T, out: _site }\n"
+        "types:\n  requirement: { prefix: REQ, fields: { text: { type: text } } }\n",
+        encoding="utf-8",
+    )
+    items = tmp_path / "items" / "requirements"
+    items.mkdir(parents=True)
+    (items / "r.yaml").write_text(
+        "defaults: { type: requirement, prefix: REQ }\n"
+        "items:\n  - id: REQ-001\n    text: A requirement.\n",
+        encoding="utf-8",
+    )
+    project = _build_at(tmp_path)
+    payload = render.items_json(project)
+    assert payload["items"][0]["citations"] == {}
+
+
+def test_items_json_types_expose_citations_field_type(citation_project):
+    """The field-type/schema section is how a consumer discovers `datasheets`
+    is a `citations` field in the first place -- pre-existing, unrelated to
+    citation resolution, but this is the mechanism `citations` above pairs with.
+    """
+    project = _cite_build(citation_project)
+    payload = render.items_json(project)
+    assert payload["types"]["component"]["fields"]["datasheets"]["type"] == "citations"
+
+
 INCONSISTENT_VENDOR_ITEMS = """\
 defaults:
   type: component
