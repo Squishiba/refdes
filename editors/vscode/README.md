@@ -1,17 +1,22 @@
 # Refdes for VS Code
 
 Live diagnostics, ID completion, hover previews, go-to-definition, and inline calc
-results for Refdes projects.
+results for [Refdes](https://github.com/Squishiba/refdes) projects — reference
+documentation for hardware design decisions.
 
-## Running it
+## Setup
 
-No build step — it is plain JavaScript.
+This extension is a thin client over the `refdes` command line tool, so **install
+that first**:
 
-1. Open `editors/vscode/` in VS Code.
-2. Press <kbd>F5</kbd>. A second window opens with the extension loaded.
-3. In that window, open a folder containing a `refdes.yaml`.
+```
+pip install refdes
+```
 
-If `refdes` is not on your PATH, point the setting at your virtualenv:
+Then open any folder containing a `refdes.yaml`. The extension activates on its own.
+
+If `refdes` is not on your `PATH` — for instance it lives in a project virtualenv —
+point the setting at it:
 
 ```json
 {
@@ -19,8 +24,8 @@ If `refdes` is not on your PATH, point the setting at your virtualenv:
 }
 ```
 
-To install it properly instead of debugging it: `npx vsce package` and then
-**Extensions → … → Install from VSIX**.
+A status bar item appears once the project loads. If it never shows up, the
+extension could not run the CLI; check the setting above.
 
 ## What it does
 
@@ -91,3 +96,13 @@ lexer. If highlighting and the parser ever disagree, the parser is right.
 - **Diagnostics as you type.** Currently on save; live would need debounced runs
   against unsaved buffers.
 - **Snippets** for new requirements, decisions, and log entries.
+
+## Developing
+
+No build step — it is plain JavaScript. Open `editors/vscode/` in VS Code and press
+<kbd>F5</kbd>; a second window opens with the extension loaded. Open a folder
+containing a `refdes.yaml` in that window.
+
+## Licence
+
+MIT.

@@ -14,3 +14,8 @@
 *.css   text eol=lf
 *.j2    text eol=lf
 *.toml  text eol=lf
+
+# Never newline-convert these. A PNG signature contains a literal CRLF, so a
+# missed binary sniff would corrupt the file silently rather than loudly.
+*.png   binary
+*.vsix  binary
