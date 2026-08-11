@@ -289,3 +289,33 @@ a.ref:hover { text-decoration: none; border-bottom-style: solid; }
 /* Wide content scrolls inside its own box rather than the page. */
 .body table, .grid { display: block; overflow-x: auto; }
 @media (min-width: 720px) { .body table, .grid { display: table; } }
+
+/* ---------------------------------------------------------------- summary view */
+
+.num { text-align: right; }
+.row-bad > td { background: color-mix(in srgb, var(--bad) 7%, transparent); }
+
+/* Stacked coverage bar: proportions of the whole, worst-to-best left to right. */
+.stagebar {
+  display: flex; height: 14px; border-radius: 7px; overflow: hidden;
+  border: 1px solid var(--line); background: var(--panel); margin: 4px 0 10px;
+}
+.stagebar-seg { display: block; height: 100%; }
+.stagebar-verified  { background: var(--good); }
+.stagebar-satisfied { background: var(--accent); }
+.stagebar-addressed { background: var(--warn); }
+.stagebar-open      { background: var(--bad); }
+
+.legend { display: flex; flex-wrap: wrap; gap: 14px; list-style: none; padding: 0; margin: 0; }
+.legend li { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
+.swatch { width: 11px; height: 11px; border-radius: 3px; display: inline-block; }
+
+/* Margin bars are relative to each other, not absolute: the point is ranking. */
+.margins .marginbar-cell { width: 120px; min-width: 120px; }
+.marginbar {
+  display: block; height: 9px; border-radius: 5px; min-width: 2px;
+  background: var(--muted);
+}
+.marginbar-good { background: var(--good); }
+.marginbar-warn { background: var(--warn); }
+.marginbar-bad  { background: var(--bad); }

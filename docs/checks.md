@@ -90,6 +90,17 @@ These are errors too, not silent passes:
 | `check against CON-X, which declares no limit` | target has no `limit` field |
 | `check ... cannot compare: ...` | dimensional mismatch between value and limit |
 
+## How close was it?
+
+Passing is not the same as passing comfortably. Every evaluated check also records a
+**margin** — its worst-case slack relative to the limit — and `summary.html` sorts all
+of them tightest-first so a check that scrapes through by 3% sits at the top of the
+page instead of hiding among the greens.
+
+Negative means violated, positive means slack, and the sign always agrees with the
+pass/fail verdict. See [output formats](output.md) for the details, including the
+cases where a margin is genuinely undefined.
+
 ## Why this matters across projects
 
 A constraint owned by a shared platform project can be checked by every board that

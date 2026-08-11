@@ -1,0 +1,183 @@
+{% extends "base.html.j2" %}
+{% block title %}Summary — {{ project.title }}{% endblock %}
+{% block content %}
+
+<h1>Summary</h1>
+<p class="muted">
+  The whole project at a glance: what is closest to breaking, every number the
+  design computes, and what is not traced to anything.
+</p>
+
+<section class="cards">
+  <div class="card">
+    <div class="card-num">{{ project.items | length }}</div>
+    <div class="card-label">items</div>
+  </div>
+  <div class="card {{ 'card-bad' if checks_failing else 'card-good' }}">
+    <div class="card-num">{{ checks_failing }}/{{ checks_total }}</div>
+    <div class="card-label">checks failing</div>
+  </div>
+  {% if tightest is not none %}
+  <div class="card {{ 'card-bad' if tightest < 0 else ('card-warn' if tightest < 0.1 else 'card-good') }}">
+    <div class="card-num">{{ '%+.0f'|format(tightest * 100) }}%</div>
+    <div class="card-label">tightest margin</div>
+  </div>
+  {% endif %}
+  <div class="card {{ 'card-warn' if stage_counts['verified'] < total_covered else 'card-good' }}">
+    <div class="card-num">{{ stage_counts['verified'] }}/{{ total_covered }}</div>
+    <div class="card-label"><a href="coverage.html">verified</a></div>
+  </div>
+</section>
+
+{% if total_covered %}
+<section>
+  <h2>Coverage</h2>
+  <div class="stagebar" role="img"
+       aria-label="{{ stage_counts['verified'] }} of {{ total_covered }} verified">
+    {% for stage in ['verified', 'satisfied', 'addressed', 'open'] %}
+    {% if stage_counts[stage] %}
+    <span class="stagebar-seg stagebar-{{ stage }}"
+          style="width: {{ (stage_counts[stage] / total_covered * 100) | round(2) }}%"
+          title="{{ stage_counts[stage] }} {{ stage }}"></span>
+    {% endif %}
+    {% endfor %}
+  </div>
+  <ul class="legend">
+    {% for stage in ['verified', 'satisfied', 'addressed', 'open'] %}
+    <li><span class="swatch stagebar-{{ stage }}"></span>{{ stage_counts[stage] }} {{ stage }}</li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
+
+{% if margin_rows %}
+<section>
+  <h2>Margins <span class="count">{{ margin_rows | length }}</span></h2>
+  <p class="small muted">
+    Worst-case slack against each limit, relative to the limit. Tightest first — a
+    check that passes by 2% and one that passes by 200% are not the same situation.
+  </p>
+  <table class="grid margins">
+    <thead>
+      <tr><th>Item</th><th>Value</th><th>Actual</th><th>Limit</th><th>Constraint</th><th class="num">Margin</th><th></th></tr>
+    </thead>
+    <tbody>
+    {% for item, check in margin_rows %}
+      <tr class="{{ 'row-bad' if check.ok is false }}">
+        <td><a class="ref" href="{{ item.slug }}.html" data-ref="{{ item.id }}">{{ item.id }}</a></td>
+        <td class="mono">{{ check.value_name }}</td>
+        <td class="mono {{ 'bad' if check.ok is false }}">{{ check.actual }}</td>
+        <td class="mono">{{ check.limit }}</td>
+        <td><a class="ref" href="{{ check.against | lower }}.html" data-ref="{{ check.against }}">{{ check.against }}</a></td>
+        <td class="num mono">
+          {% if check.margin is none %}<span class="muted">—</span>
+          {% else %}{{ '%+.1f'|format(check.margin_pct) }}%{% endif %}
+        </td>
+        <td class="marginbar-cell">
+          {% if check.margin is not none %}
+          {# Clamped at 100%: past that the exact number stops mattering. #}
+          {% set width = ((check.margin | abs) * 100) | round(1) %}
+          <span class="marginbar {{ 'marginbar-bad' if check.margin < 0 else ('marginbar-warn' if check.margin < 0.1 else 'marginbar-good') }}"
+                style="width: {{ 100 if width > 100 else width }}%"></span>
+          {% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endif %}
+
+{% if calc_rows %}
+<section>
+  <h2>Computed values <span class="count">{{ calc_rows | length }}</span></h2>
+  <p class="small muted">
+    Every value any item computes. This is the numeric surface of the design — if a
+    number is wrong, it is on this page.
+  </p>
+  <table class="grid">
+    <thead>
+      <tr><th>Item</th><th>Name</th><th>Expression</th><th>Result</th><th>Bounds</th></tr>
+    </thead>
+    <tbody>
+    {% for item, line in calc_rows %}
+      <tr class="{{ 'row-bad' if line.error }}">
+        <td><a class="ref" href="{{ item.slug }}.html" data-ref="{{ item.id }}">{{ item.id }}</a></td>
+        <td class="mono">{{ line.name }}{% if line.annotation %}<span class="calc-annotation">: {{ line.annotation }}</span>{% endif %}</td>
+        <td class="mono small">{{ line.expression }}</td>
+        {% if line.error %}
+        <td class="mono bad" colspan="2">⚠ {{ line.error }}</td>
+        {% else %}
+        <td class="mono">{{ line.result }}</td>
+        <td class="mono muted small">{{ line.bounds }}</td>
+        {% endif %}
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endif %}
+
+<section>
+  <h2>By type</h2>
+  <table class="grid">
+    <thead><tr><th>Type</th><th class="num">Items</th><th class="num">Verified</th></tr></thead>
+    <tbody>
+    {% for row in type_rows %}
+      <tr>
+        <td><a href="{{ dashboard_href }}#type-{{ row.name }}">{{ row.plural }}</a></td>
+        <td class="num mono">{{ row.count }}</td>
+        <td class="num mono">
+          {% if row.coverable %}{{ row.verified }}/{{ row.coverable }}
+          {% else %}<span class="muted">n/a</span>{% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+{% if orphans %}
+<section class="panel panel-warn">
+  <h2>Not linked to anything <span class="count">{{ orphans | length }}</span></h2>
+  <p class="small">
+    These have no links in either direction. Sometimes correct — a standalone
+    component — but this is where traceability quietly stops.
+  </p>
+  <table class="grid">
+    <thead><tr><th>ID</th><th>Type</th><th>Title</th></tr></thead>
+    <tbody>
+    {% for item in orphans %}
+      <tr>
+        <td><a class="ref" href="{{ item.slug }}.html" data-ref="{{ item.id }}">{{ item.id }}</a></td>
+        <td>{{ project.types[item.type].label if item.type in project.types else item.type }}</td>
+        <td>{{ item.title }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endif %}
+
+{% if log_entries %}
+<section>
+  <h2>Recent design log</h2>
+  <table class="grid">
+    <thead><tr><th>Date</th><th>ID</th><th>Entry</th></tr></thead>
+    <tbody>
+    {% for item in log_entries %}
+      <tr>
+        <td class="mono small">{{ item.fields.get('date', '') }}</td>
+        <td><a class="ref" href="{{ item.slug }}.html" data-ref="{{ item.id }}">{{ item.id }}</a></td>
+        <td>{{ item.title }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% if log_total > log_entries | length %}
+  <p class="small"><a href="log.html">All {{ log_total }} entries →</a></p>
+  {% endif %}
+</section>
+{% endif %}
+
+{% endblock %}

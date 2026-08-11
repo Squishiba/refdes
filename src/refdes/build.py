@@ -212,6 +212,7 @@ def run_checks(project: Project) -> None:
                     result.ok, result.detail = ok, detail
                     result.actual = calc.format_value(env[name])
                     result.limit = limit.text
+                    result.margin = limit.margin(env[name])
                     if not ok:
                         project.error(
                             f"{name} = {result.actual} violates {target_id} "

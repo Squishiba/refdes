@@ -422,6 +422,45 @@ class Limit:
             raise CalcError(f"cannot compare: {exc}") from exc
         raise CalcError(f"unsupported limit kind {self.kind!r}")
 
+    def margin(self, value: Value) -> float | None:
+        """Fractional headroom against the worst-case bound, or None if meaningless.
+
+        Positive is slack, negative is a violation, and 0.05 means "five percent
+        away from the limit". Pass/fail alone hides the difference between a design
+        that clears a thermal limit by half and one that clears it by a hair, which
+        is exactly the distinction a design review needs.
+
+        Measured relative to the limit itself, so it is comparable across unrelated
+        quantities -- a 3% thermal margin and a 3% voltage margin mean the same
+        thing to a reviewer.
+        """
+        try:
+            if self.kind in ("<=", "<"):
+                bound = self.high.nom
+                return _relative(bound - value.hi, bound)
+            if self.kind in (">=", ">"):
+                bound = self.low.nom
+                return _relative(value.lo - bound, bound)
+            if self.kind == "range":
+                span = self.high.nom - self.low.nom
+                below = value.lo - self.low.nom
+                above = self.high.nom - value.hi
+                # The nearer edge is the one that will fail first.
+                return _relative(min(below, above), span)
+            # An equality has no notion of "how close", only met or not.
+            return None
+        except (pint.DimensionalityError, ZeroDivisionError, ValueError):
+            return None
+
+
+def _relative(slack, reference) -> float | None:
+    """slack / |reference| as a plain float, or None if the reference is zero."""
+    magnitude = abs(float(reference.magnitude)) if hasattr(reference, "magnitude") else abs(float(reference))
+    if magnitude == 0:
+        return None
+    ratio = slack / abs(reference)
+    return float(ratio.magnitude if hasattr(ratio, "magnitude") else ratio)
+
 
 RANGE_RE = re.compile(r"^(.*?)\s*\.\.\s*(.*)$")
 COMPARE_RE = re.compile(r"^\s*(<=|>=|==|<|>)\s*(.+)$")

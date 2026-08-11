@@ -67,6 +67,102 @@ def _check_state(item: Item) -> str:
     return "pass"
 
 
+def summary_payload(project: Project) -> dict:
+    """Everything the at-a-glance view needs, computed once.
+
+    The per-type pages answer "what does this item say". This answers the questions
+    you actually ask at a design review: what is closest to breaking, what numbers
+    does the design depend on, and what is not traced to anything.
+    """
+    local = [i for i in project.items.values() if not i.external]
+
+    # Every evaluated check, tightest margin first. A pass at 2% and a pass at 200%
+    # are not the same engineering situation, and sorting by margin is what surfaces
+    # the difference without anyone having to hunt.
+    margin_rows = [
+        (item, check)
+        for item in local
+        for check in item.checks
+        if check.ok is not None
+    ]
+    margin_rows.sort(
+        key=lambda row: (row[1].margin is None, row[1].margin if row[1].margin is not None else 0.0)
+    )
+
+    # Every number the design computes, in one table.
+    calc_rows = [
+        (item, line)
+        for item in sorted(local, key=lambda i: i.id)
+        for line in item.calcs
+    ]
+
+    # Items connected to nothing in any direction. Not an error -- a component can
+    # legitimately stand alone -- but it is where traceability silently stops.
+    #
+    # A `checks:` entry is a real dependency that is not a link: a constraint an
+    # expression is checked against is traced, even with no edges pointing at it.
+    # Counting only links would list such a constraint as untraced, directly
+    # contradicting the margins table above.
+    checked_against = {
+        check.against for i in local for check in i.checks if check.against
+    }
+    orphans = sorted(
+        (
+            i
+            for i in local
+            if not any(i.links.values())
+            and not any(i.backlinks.values())
+            and i.id not in checked_against
+        ),
+        key=lambda i: i.id,
+    )
+
+    log_entries = sorted(
+        (i for i in local if i.type == "log"),
+        key=lambda i: (str(i.fields.get("date", "")), i.id),
+        reverse=True,
+    )
+
+    type_rows = []
+    for type_name, spec in project.types.items():
+        items = [i for i in local if i.type == type_name]
+        if not items:
+            continue
+        covered = [project.coverage[i.id] for i in items if i.id in project.coverage]
+        type_rows.append(
+            {
+                "name": type_name,
+                "plural": spec.plural,
+                "count": len(items),
+                "verified": sum(1 for c in covered if c.stage == "verified"),
+                "coverable": len(covered),
+            }
+        )
+
+    stage_counts = {"open": 0, "addressed": 0, "satisfied": 0, "verified": 0}
+    for cov in project.coverage.values():
+        stage_counts[cov.stage] = stage_counts.get(cov.stage, 0) + 1
+    total_covered = sum(stage_counts.values())
+
+    evaluated = [c for _i, c in margin_rows]
+    with_margin = [c.margin for c in evaluated if c.margin is not None]
+
+    return {
+        "margin_rows": margin_rows,
+        "calc_rows": calc_rows,
+        "orphans": orphans,
+        "log_entries": log_entries[:10],
+        "log_total": len(log_entries),
+        "type_rows": type_rows,
+        "stage_counts": stage_counts,
+        "total_covered": total_covered,
+        "checks_total": len(evaluated),
+        "checks_failing": sum(1 for c in evaluated if c.ok is False),
+        "tightest": min(with_margin) if with_margin else None,
+        "calc_errors": sum(1 for _i, line in calc_rows if line.error),
+    }
+
+
 def preview_payload(project: Project) -> dict:
     out = {}
     for item in project.items.values():
@@ -156,6 +252,7 @@ def items_json(project: Project) -> dict:
                         "actual": c.actual,
                         "limit": c.limit,
                         "detail": c.detail,
+                        "margin": c.margin,
                     }
                     for c in item.checks
                 ],
@@ -228,7 +325,13 @@ def render_site(project: Project) -> str:
 
     # Generated reports own these filenames. A page of the same name would be
     # silently clobbered by whichever is written last, so say so instead.
-    reserved = {"coverage", "log", "document", dashboard_name[: -len(".html")]}
+    reserved = {
+        "coverage",
+        "log",
+        "document",
+        "summary",
+        dashboard_name[: -len(".html")],
+    }
     if project.items:
         keep = []
         for page in project.pages:
@@ -274,6 +377,16 @@ def render_site(project: Project) -> str:
         if os.path.isdir(ASSET_DIR):
             shutil.copytree(ASSET_DIR, os.path.join(out_dir, "assets"), dirs_exist_ok=True)
         return out_dir
+
+    summary_tpl = env.get_template("summary.html.j2")
+    with open(os.path.join(out_dir, "summary.html"), "w", encoding="utf-8") as fh:
+        fh.write(
+            summary_tpl.render(
+                project=project,
+                previews_json=previews_json,
+                **summary_payload(project),
+            )
+        )
 
     coverage_tpl = env.get_template("coverage.html.j2")
     with open(os.path.join(out_dir, "coverage.html"), "w", encoding="utf-8") as fh:

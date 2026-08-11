@@ -251,8 +251,18 @@ prefix. If you may ever split boards apart, adopt board-token prefixes now
 disabled. Cross-references get hover previews (keyboard-accessible, Escape to
 dismiss, tap on touch) showing the target's fields and current check state.
 
-`_site/items.json` is the machine-readable export. Anything downstream should read
-that, not the HTML.
+`summary.html` is the design-review page. `index.html` says what exists; the summary
+says what to worry about:
+
+- **Margins** — every check ranked by worst-case slack against its limit, tightest
+  first. Pass/fail hides the difference between clearing a thermal limit by 3% and
+  clearing it by 200%; only one of those survives a hot day.
+- **Computed values** — every number every calc block produces, in one table.
+- **Not linked to anything** — where traceability quietly stops. A constraint that is
+  *checked against* counts as traced, even though a check creates no link edge.
+
+`_site/items.json` is the machine-readable export, margins included. Anything
+downstream should read that, not the HTML.
 
 ## Not built yet
 
@@ -287,3 +297,24 @@ that, not the HTML.
 The suite covers the invariants that must not quietly break: IDs never shift or get
 reused, the DSL cannot execute code, the content hash follows the `on_change`
 policy exactly, and checks use the worst-case bound.
+
+## Releasing
+
+The CLI ships to PyPI and the extension to the VS Code Marketplace. They version
+independently — a calc fix bumps only `pyproject.toml`, an autocomplete fix only
+`editors/vscode/package.json`.
+
+```bash
+python release.py cli 0.1.1
+python release.py extension 0.2.0
+```
+
+The script bumps the version, wipes stale build output, rebuilds, and validates —
+in that order, because building before bumping ships stale metadata, and
+`twine upload dist/*` will happily upload a leftover wheel next to the new one. It
+refuses on a dirty tree, on a version that is not higher than the current one, and
+on a version already published to PyPI.
+
+It stops before uploading and prints the remaining commands. **Neither registry ever
+lets you overwrite or reuse a version**, so publishing stays a separate, deliberate
+step. Add `--dry-run` to run the checks and change nothing.

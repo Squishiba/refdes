@@ -539,6 +539,108 @@ def test_docs_site_builds_with_no_items_at_all(tmp_path):
     assert not os.path.exists(os.path.join(out, "coverage.html"))
 
 
+# ----------------------------------------------------------------- summary view
+
+
+@pytest.mark.parametrize(
+    "limit_text, value, expected",
+    [
+        ("<= 0.15 W/in^2", "0.10 W/in^2", 1 / 3),    # a third of the limit spare
+        ("<= 0.15 W/in^2", "0.2366 W/in^2", -0.577), # over, so negative
+        ("<= 0.15 W/in^2", "0.15 W/in^2", 0.0),      # exactly on the limit
+        (">= 3.0 V", "3.3 V", 0.1),
+        (">= 3.0 V", "2.7 V", -0.1),
+        ("9 V .. 36 V", "12 V", 1 / 9),              # nearer edge decides
+        ("9 V .. 36 V", "40 V", -4 / 27),
+    ],
+)
+def test_margin_reports_fractional_slack(limit_text, value, expected):
+    env = {}
+    calc.evaluate_block(f"x = {value}", env)
+    margin = calc.parse_limit(limit_text).margin(env["x"])
+    assert margin == pytest.approx(expected, abs=1e-3)
+
+
+def test_margin_sign_always_agrees_with_pass_fail():
+    """A positive margin that failed, or negative that passed, would be a lie."""
+    for limit_text, value in [
+        ("<= 5 V", "4 V"), ("<= 5 V", "6 V"),
+        (">= 5 V", "6 V"), (">= 5 V", "4 V"),
+        ("1 V .. 5 V", "3 V"), ("1 V .. 5 V", "7 V"),
+    ]:
+        env = {}
+        calc.evaluate_block(f"x = {value}", env)
+        limit = calc.parse_limit(limit_text)
+        ok, _ = limit.check(env["x"])
+        assert (limit.margin(env["x"]) >= 0) is ok, (limit_text, value)
+
+
+def test_margin_is_unit_aware_not_magnitude_aware():
+    """150 mW and 0.1 W differ by 33%, not by a factor of 1500."""
+    env = {}
+    calc.evaluate_block("x = 0.1 W", env)
+    assert calc.parse_limit("<= 150 mW").margin(env["x"]) == pytest.approx(1 / 3, abs=1e-3)
+
+
+def test_margin_is_undefined_where_it_would_be_meaningless():
+    env = {}
+    calc.evaluate_block("x = 5 V", env)
+    assert calc.parse_limit("== 5 V").margin(env["x"]) is None  # met or not, no "close"
+    env2 = {}
+    calc.evaluate_block("y = 0 V", env2)
+    assert calc.parse_limit("<= 0 V").margin(env2["y"]) is None  # no dividing by zero
+
+
+def test_summary_orders_checks_by_tightest_margin():
+    payload = render.summary_payload(_project())
+    margins = [c.margin for _i, c in payload["margin_rows"] if c.margin is not None]
+    assert margins == sorted(margins)
+    assert margins[0] < 0  # the thermal violation sorts to the top
+
+
+def test_a_constraint_that_is_checked_against_is_not_orphaned():
+    """`checks:` is a real dependency even though it creates no link edge.
+
+    Listing a checked-against constraint as untraced would contradict the margins
+    table on the very same page.
+    """
+    project = _project()
+    payload = render.summary_payload(project)
+    orphan_ids = {i.id for i in payload["orphans"]}
+    checked = {c.against for i in project.local_items for c in i.checks if c.against}
+    assert checked
+    assert not (orphan_ids & checked)
+
+
+def test_summary_reports_every_computed_value():
+    project = _project()
+    payload = render.summary_payload(project)
+    assert len(payload["calc_rows"]) == sum(len(i.calcs) for i in project.local_items)
+
+
+def test_log_entries_have_a_readable_title_not_their_own_id():
+    """A log entry names its description `summary`, so `title` must find it.
+
+    Without this every table that shows a title -- coverage, the full record, hover
+    previews -- renders a column of bare IDs for log entries.
+    """
+    project = _project()
+    entries = [i for i in project.local_items if i.type == "log"]
+    assert entries
+    for entry in entries:
+        assert entry.title != entry.id
+        assert entry.title == entry.fields["summary"]
+
+
+def test_page_named_summary_collides_with_the_report(paged_project):
+    (paged_project / "pages" / "summary.md").write_text("# Nope\n", encoding="utf-8")
+    project = _build_at(paged_project)
+    render.render_site(project)
+    assert any("generated report" in d.message for d in project.errors)
+    out = os.path.join(paged_project, "_site", "summary.html")
+    assert "Nope" not in open(out, encoding="utf-8").read()
+
+
 # -------------------------------------------------------------------- integration
 
 

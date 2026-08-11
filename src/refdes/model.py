@@ -81,6 +81,11 @@ class CheckResult:
     detail: str = ""
     actual: str = ""
     limit: str = ""
+    margin: float | None = None  # fractional slack; negative means violated
+
+    @property
+    def margin_pct(self) -> float | None:
+        return None if self.margin is None else self.margin * 100.0
 
 
 @dataclass
@@ -119,7 +124,10 @@ class Item:
 
     @property
     def title(self) -> str:
-        for key in ("title", "text"):
+        # `summary` is what a log entry calls its one-line description, and `name`
+        # what a component calls it. Without them those types fall back to their own
+        # ID, so every table that shows a title renders a column of bare IDs.
+        for key in ("title", "text", "summary", "name"):
             value = self.fields.get(key)
             if value:
                 text = str(value).strip()

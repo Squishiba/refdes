@@ -7,6 +7,7 @@
 | File | Contents |
 |---|---|
 | `index.html` | Counts, failing checks, outstanding work, tables per type, diagnostics |
+| `summary.html` | The whole project at a glance: margins, every computed value, gaps |
 | `coverage.html` | The full [coverage](coverage.md) table, least-covered first |
 | `log.html` | The [design log](design-log.md) timeline, oldest first |
 | `document.html` | Every item in one page, in reading order — the printable record |
@@ -23,6 +24,39 @@ Serve it locally with:
 ```bash
 python -m http.server -d _site 8000
 ```
+
+## The summary
+
+`summary.html` is the design-review page. `index.html` tells you what exists;
+`summary.html` tells you what to worry about.
+
+**Margins.** Every evaluated check, sorted by worst-case slack against its limit,
+tightest first. Pass and fail is a blunt instrument — a design that clears a thermal
+limit by 3% and one that clears it by 200% both read as "pass", and only one of them
+survives a tolerance stack-up or a hot day. Margin is measured relative to the limit,
+so it is comparable across unrelated quantities:
+
+| Limit | Value | Margin |
+|---|---|---|
+| `<= 0.15 W/in^2` | `0.10 W/in^2` | +33.3% |
+| `<= 0.15 W/in^2` | `0.2366 W/in^2` | −57.7% |
+| `>= 0.90` | `0.93` | +3.3% |
+| `9 V .. 36 V` | `35 V` | +3.7% |
+
+Ranges measure to the nearer edge, since that is what fails first. An `==` limit has
+no margin — it is met or it is not — and neither does a limit of zero, so both show
+`—` rather than a fabricated number. The sign always agrees with pass/fail.
+
+Margins are in `items.json` too, as `checks[].margin`, a fraction rather than a
+percentage.
+
+**Computed values.** Every value every calc block produces, in one table. If a number
+in the design is wrong, it is on this page.
+
+**Not linked to anything.** Items with no links in either direction. A constraint that
+something is *checked against* counts as traced even though a check creates no link
+edge, so it will not appear here. Being listed is not an error — a standalone
+component is legitimate — but it is where traceability quietly stops.
 
 ## The full record
 
