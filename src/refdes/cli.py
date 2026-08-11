@@ -52,7 +52,12 @@ def cmd_build(args) -> int:
     project = _load(args)
     if args.out:
         project.out_dir = args.out
-    build_mod.build(project, seal_write=True, reseal=args.reseal)
+    build_mod.build(
+        project,
+        seal_write=True,
+        reseal=args.reseal,
+        accept_board_move=args.accept_board_move,
+    )
     out_dir = render_mod.render_site(project)
     status = _report(project)
     print(f"site written to {out_dir}")
@@ -136,6 +141,14 @@ def cmd_audit(args) -> int:
     else:
         print("  (none)")
 
+    if project.boards:
+        print("\nBoard moves since the manifest was last written:")
+        if project.board_moves:
+            for item_id, old, new in project.board_moves:
+                print(f"  {item_id:<14} {old} -> {new}")
+        else:
+            print("  (none)")
+
     if project.imports:
         print("\nImported projects (read-only):")
         for spec in project.imports:
@@ -167,6 +180,11 @@ def main(argv: list[str] | None = None) -> int:
         "--reseal",
         action="store_true",
         help="accept edits to sealed append-only entries (recorded in `audit`)",
+    )
+    p_build.add_argument(
+        "--accept-board-move",
+        action="store_true",
+        help="accept a recorded board change for an item (recorded in `audit`)",
     )
     p_build.set_defaults(func=cmd_build)
 

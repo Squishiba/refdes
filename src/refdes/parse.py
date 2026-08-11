@@ -31,7 +31,7 @@ RESERVED = {"id", "type", "history", "body"}
 # Reserved, but only when the item's own type does not already declare a field of
 # the same name -- so a schema that predates one of these keys keeps working
 # unchanged instead of having the field silently shadowed.
-OVERRIDABLE = {"prefix"}
+OVERRIDABLE = {"prefix", "board"}
 
 
 class _LineLoader(yaml.SafeLoader):
@@ -126,6 +126,8 @@ def _build_item(
         if key in OVERRIDABLE and key not in spec.fields:
             if key == "prefix" and value:
                 item.prefix_hint = str(value)
+            elif key == "board" and value:
+                item.board_hint = str(value)
             continue
         if key in spec.links:
             targets = value if isinstance(value, list) else [value]

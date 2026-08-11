@@ -59,6 +59,24 @@ class LinkType:
 
 
 @dataclass
+class BoardSpec:
+    """One entry in the opt-in `boards:` registry.
+
+    A board's items are matched by the first path segment under `items/`, unless
+    `path` says that segment is spelled differently from the board's own key.
+    """
+
+    name: str
+    label: str
+    token: str = ""  # optional; checked for consistency against item id prefixes
+    path: str = ""   # alias for the items/ path segment; defaults to `name`
+
+    @property
+    def path_segment(self) -> str:
+        return self.path or self.name
+
+
+@dataclass
 class ItemType:
     name: str
     prefix: str
@@ -125,6 +143,8 @@ class Item:
     content_hash: str = ""  # over `invalidate` fields only; drives suspect links
     external: bool = False  # imported from another project: read-only here
     origin: str = ""        # name of the import it came from
+    board_hint: str = ""    # explicit `board:` override, item value beats file defaults
+    board: str = ""         # resolved board key; "" if boards: is unused or no match
 
     @property
     def title(self) -> str:
@@ -229,6 +249,10 @@ class Project:
     imports: list[ImportSpec] = field(default_factory=list)
     coverage: dict[str, Coverage] = field(default_factory=dict)
     seal_violations: list[str] = field(default_factory=list)
+    boards: dict[str, BoardSpec] = field(default_factory=dict)
+    # (item_id, previous_board, current_board), for items whose board changed
+    # since the last time `.refdes/boards.yaml` was written.
+    board_moves: list[tuple[str, str, str]] = field(default_factory=list)
 
     @property
     def local_items(self) -> list[Item]:

@@ -36,12 +36,21 @@ def _anchorize(html: str, known_slugs: set[str]) -> str:
     return PAGE_HREF_RE.sub(swap, html)
 
 
-def _document_sections(project: Project) -> list[tuple[str, list[Item]]]:
-    """Items grouped for linear reading: schema order, log entries by date."""
+def _document_sections(
+    project: Project, board: str | None = None
+) -> list[tuple[str, list[Item]]]:
+    """Items grouped for linear reading: schema order, log entries by date.
+
+    `board`, when given, scopes this to one board's own local items -- imported
+    items carry no board, so a per-board document has no "Imported references"
+    section.
+    """
     sections: list[tuple[str, list[Item]]] = []
     for type_name, spec in project.types.items():
         items = [
-            i for i in project.items.values() if i.type == type_name and not i.external
+            i
+            for i in project.items.values()
+            if i.type == type_name and not i.external and (board is None or i.board == board)
         ]
         if type_name == "log":
             items.sort(key=lambda i: (str(i.fields.get("date", "")), i.id))
@@ -49,12 +58,36 @@ def _document_sections(project: Project) -> list[tuple[str, list[Item]]]:
             items.sort(key=lambda i: i.id)
         sections.append((spec.plural, items))
 
-    imported = sorted(
-        (i for i in project.items.values() if i.external), key=lambda i: i.id
-    )
-    if imported:
-        sections.append(("Imported references", imported))
+    if board is None:
+        imported = sorted(
+            (i for i in project.items.values() if i.external), key=lambda i: i.id
+        )
+        if imported:
+            sections.append(("Imported references", imported))
     return sections
+
+
+def _coverage_rows(project: Project, board: str | None = None) -> list[tuple[Item, object]]:
+    stage_order = {"open": 0, "addressed": 1, "claimed": 2, "satisfied": 3, "verified": 4}
+    rows = [
+        (project.items[item_id], cov)
+        for item_id, cov in project.coverage.items()
+        if item_id in project.items
+        and (board is None or project.items[item_id].board == board)
+    ]
+    rows.sort(key=lambda row: (stage_order.get(row[1].stage, 9), row[0].id))
+    return rows
+
+
+def _log_entries(project: Project, board: str | None = None) -> list[Item]:
+    return sorted(
+        (
+            i
+            for i in project.local_items
+            if i.type == "log" and (board is None or i.board == board)
+        ),
+        key=lambda i: (str(i.fields.get("date", "")), i.id),
+    )
 
 
 def _check_state(item: Item) -> str:
@@ -67,14 +100,20 @@ def _check_state(item: Item) -> str:
     return "pass"
 
 
-def summary_payload(project: Project) -> dict:
+def summary_payload(project: Project, board: str | None = None) -> dict:
     """Everything the at-a-glance view needs, computed once.
 
     The per-type pages answer "what does this item say". This answers the questions
     you actually ask at a design review: what is closest to breaking, what numbers
     does the design depend on, and what is not traced to anything.
+
+    `board`, when given, scopes every table on the page to that board's own items.
     """
-    local = [i for i in project.items.values() if not i.external]
+    local = [
+        i
+        for i in project.items.values()
+        if not i.external and (board is None or i.board == board)
+    ]
 
     # Every evaluated check, tightest margin first. A pass at 2% and a pass at 200%
     # are not the same engineering situation, and sorting by margin is what surfaces
@@ -139,15 +178,18 @@ def summary_payload(project: Project) -> dict:
             }
         )
 
+    local_ids = {i.id for i in local}
     stage_counts = {"open": 0, "addressed": 0, "claimed": 0, "satisfied": 0, "verified": 0}
-    for cov in project.coverage.values():
-        stage_counts[cov.stage] = stage_counts.get(cov.stage, 0) + 1
+    for item_id, cov in project.coverage.items():
+        if item_id in local_ids:
+            stage_counts[cov.stage] = stage_counts.get(cov.stage, 0) + 1
     total_covered = sum(stage_counts.values())
 
     evaluated = [c for _i, c in margin_rows]
     with_margin = [c.margin for c in evaluated if c.margin is not None]
 
     return {
+        "item_count": len(local),
         "margin_rows": margin_rows,
         "calc_rows": calc_rows,
         "orphans": orphans,
@@ -190,87 +232,106 @@ def preview_payload(project: Project) -> dict:
 
 
 def items_json(project: Project) -> dict:
-    """The machine-readable export. Anything downstream should read this, not HTML."""
-    return {
+    """The machine-readable export. Anything downstream should read this, not HTML.
+
+    The `boards` key and each item's `board` are only present when a project has
+    actually declared a `boards:` registry -- so a project that has not adopted
+    boards gets byte-identical output to before this feature existed.
+    """
+    payload: dict = {
         "title": project.title,
         "version": project.version,
-        "coverage": {
-            item_id: {
-                "stage": cov.stage,
-                "addressed_by": cov.addressed_by,
-                "claimed_by": cov.claimed_by,
-                "satisfied_by": cov.satisfied_by,
-                "verified_by": cov.verified_by,
-            }
-            for item_id, cov in sorted(project.coverage.items())
-        },
-        "types": {
-            name: {
-                "label": spec.label,
-                "plural": spec.plural,
-                "prefix": spec.prefix,
-                "append_only": spec.append_only,
-                "fields": {
-                    f.name: {
-                        "type": f.type,
-                        "on_change": f.on_change,
-                        "required": f.required,
-                        "choices": f.choices,
-                    }
-                    for f in spec.fields.values()
-                },
-                "links": spec.links,
-            }
-            for name, spec in project.types.items()
-        },
-        "items": [
-            {
-                "id": item.id,
-                "type": item.type,
-                "title": item.title,
-                "fields": item.fields,
-                "links": item.links,
-                "backlinks": item.backlinks,
-                "content_hash": item.content_hash,
-                "external": item.external,
-                "origin": item.origin,
-                "source": {"file": item.source_file, "line": item.source_line},
-                "calcs": [
-                    {
-                        "name": c.name,
-                        "expression": c.expression,
-                        "result": c.result,
-                        "bounds": c.bounds,
-                        "error": c.error,
-                    }
-                    for c in item.calcs
-                ],
-                "checks": [
-                    {
-                        "value": c.value_name,
-                        "against": c.against,
-                        "ok": c.ok,
-                        "actual": c.actual,
-                        "limit": c.limit,
-                        "detail": c.detail,
-                        "margin": c.margin,
-                    }
-                    for c in item.checks
-                ],
-            }
-            for item in sorted(project.items.values(), key=lambda i: i.id)
-        ],
-        "diagnostics": [
-            {
-                "level": d.level,
-                "message": d.message,
-                "file": d.file,
-                "line": d.line,
-                "item": d.item_id,
-            }
-            for d in project.diagnostics
-        ],
     }
+    if project.boards:
+        payload["boards"] = {
+            name: {"label": spec.label, "token": spec.token, "path": spec.path}
+            for name, spec in sorted(project.boards.items())
+        }
+
+    payload["coverage"] = {
+        item_id: {
+            "stage": cov.stage,
+            "addressed_by": cov.addressed_by,
+            "claimed_by": cov.claimed_by,
+            "satisfied_by": cov.satisfied_by,
+            "verified_by": cov.verified_by,
+        }
+        for item_id, cov in sorted(project.coverage.items())
+    }
+    payload["types"] = {
+        name: {
+            "label": spec.label,
+            "plural": spec.plural,
+            "prefix": spec.prefix,
+            "append_only": spec.append_only,
+            "fields": {
+                f.name: {
+                    "type": f.type,
+                    "on_change": f.on_change,
+                    "required": f.required,
+                    "choices": f.choices,
+                }
+                for f in spec.fields.values()
+            },
+            "links": spec.links,
+        }
+        for name, spec in project.types.items()
+    }
+
+    items_out = []
+    for item in sorted(project.items.values(), key=lambda i: i.id):
+        entry = {
+            "id": item.id,
+            "type": item.type,
+            "title": item.title,
+        }
+        if project.boards:
+            entry["board"] = item.board
+        entry.update({
+            "fields": item.fields,
+            "links": item.links,
+            "backlinks": item.backlinks,
+            "content_hash": item.content_hash,
+            "external": item.external,
+            "origin": item.origin,
+            "source": {"file": item.source_file, "line": item.source_line},
+            "calcs": [
+                {
+                    "name": c.name,
+                    "expression": c.expression,
+                    "result": c.result,
+                    "bounds": c.bounds,
+                    "error": c.error,
+                }
+                for c in item.calcs
+            ],
+            "checks": [
+                {
+                    "value": c.value_name,
+                    "against": c.against,
+                    "ok": c.ok,
+                    "actual": c.actual,
+                    "limit": c.limit,
+                    "detail": c.detail,
+                    "margin": c.margin,
+                }
+                for c in item.checks
+            ],
+        })
+        items_out.append(entry)
+    payload["items"] = items_out
+
+    payload["diagnostics"] = [
+        {
+            "level": d.level,
+            "message": d.message,
+            "file": d.file,
+            "line": d.line,
+            "item": d.item_id,
+        }
+        for d in project.diagnostics
+    ]
+    return payload
 
 
 MANIFEST_NAME = ".refdes-manifest.json"
@@ -349,24 +410,14 @@ def render_site(project: Project) -> str:
         if check.ok is False
     ]
     # Coverage, ordered so the work that still needs doing floats to the top.
-    stage_order = {"open": 0, "addressed": 1, "claimed": 2, "satisfied": 3, "verified": 4}
-    coverage_rows = sorted(
-        (
-            (project.items[item_id], cov)
-            for item_id, cov in project.coverage.items()
-            if item_id in project.items
-        ),
-        key=lambda row: (stage_order.get(row[1].stage, 9), row[0].id),
-    )
+    coverage_rows = _coverage_rows(project)
     outstanding = [row for row in coverage_rows if row[1].stage != "verified"]
 
-    log_entries = sorted(
-        (i for i in project.local_items if i.type == "log"),
-        key=lambda i: (str(i.fields.get("date", "")), i.id),
-    )
+    log_entries = _log_entries(project)
 
     # Generated reports own these filenames. A page of the same name would be
-    # silently clobbered by whichever is written last, so say so instead.
+    # silently clobbered by whichever is written last, so say so instead. Each
+    # board adds its own scoped set of the same four reports.
     reserved = {
         "coverage",
         "log",
@@ -374,6 +425,10 @@ def render_site(project: Project) -> str:
         "summary",
         dashboard_name[: -len(".html")],
     }
+    for board_key in project.boards:
+        reserved.update(
+            f"{name}-{board_key}" for name in ("coverage", "log", "document", "summary")
+        )
     if project.items:
         keep = []
         for page in project.pages:
@@ -489,6 +544,67 @@ def render_site(project: Project) -> str:
         )
 
     written.add("items.json")
+
+    # One document/coverage/log/summary set per registered board, scoped to that
+    # board's own items -- the unscoped pages above are unaffected either way.
+    for board_key, board_spec in project.boards.items():
+        board_sections = _document_sections(project, board=board_key)
+        board_known_slugs = {
+            item.slug for _label, items in board_sections for item in items
+        }
+        written.add(f"document-{board_key}.html")
+        with open(
+            os.path.join(out_dir, f"document-{board_key}.html"), "w", encoding="utf-8"
+        ) as fh:
+            fh.write(
+                document_tpl.render(
+                    project=project,
+                    board=board_spec,
+                    sections=board_sections,
+                    anchored=lambda html, slugs=board_known_slugs: _anchorize(html, slugs),
+                    previews_json=previews_json,
+                )
+            )
+
+        written.add(f"coverage-{board_key}.html")
+        with open(
+            os.path.join(out_dir, f"coverage-{board_key}.html"), "w", encoding="utf-8"
+        ) as fh:
+            fh.write(
+                coverage_tpl.render(
+                    project=project,
+                    board=board_spec,
+                    coverage_rows=_coverage_rows(project, board=board_key),
+                    previews_json=previews_json,
+                )
+            )
+
+        written.add(f"log-{board_key}.html")
+        with open(
+            os.path.join(out_dir, f"log-{board_key}.html"), "w", encoding="utf-8"
+        ) as fh:
+            fh.write(
+                log_tpl.render(
+                    project=project,
+                    board=board_spec,
+                    entries=_log_entries(project, board=board_key),
+                    previews_json=previews_json,
+                )
+            )
+
+        written.add(f"summary-{board_key}.html")
+        with open(
+            os.path.join(out_dir, f"summary-{board_key}.html"), "w", encoding="utf-8"
+        ) as fh:
+            fh.write(
+                summary_tpl.render(
+                    project=project,
+                    board=board_spec,
+                    previews_json=previews_json,
+                    **summary_payload(project, board=board_key),
+                )
+            )
+
     with open(os.path.join(out_dir, "items.json"), "w", encoding="utf-8") as fh:
         json.dump(items_json(project), fh, indent=2, ensure_ascii=False, default=str)
 

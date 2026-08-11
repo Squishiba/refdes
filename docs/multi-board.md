@@ -26,6 +26,75 @@ IFC-CAN-001 backlinks: {'constrained_by': ['DEC-A-001', 'DEC-B-001']}
 
 Tighten that shared limit and each board's own arithmetic is re-checked against it.
 
+### Naming the boards
+
+None of the above needs a `boards:` block — folders are just organisation until you
+register them. Once you want board-scoped pages, or a warning when a file lands in
+the wrong folder, add one:
+
+```yaml
+boards:
+  board-a:
+    label: "Board A"
+    token: A          # optional; checked against item id prefixes
+  board-b:
+    label: "Board B"
+    token: B
+    path: brd-b        # optional; use when the folder is spelled differently
+```
+
+A board is the first path segment under `items/`, matched against this registry —
+`items/board-a/requirements.yaml` is on `board-a`. A segment that is not registered
+(`shared/` above) gets no board; that is not an error, since shared items
+legitimately belong to none.
+
+`boards:` is entirely opt-in. **With no `boards:` block, nothing here does
+anything** — every item's board stays unset and the site is unaffected. Adding the
+block later does not change any ID.
+
+Override the path for one item with `board:`, the same way `prefix:` overrides a
+file's default prefix:
+
+```yaml
+items:
+  - id: IFC-CAN-001
+    board: board-a   # this one lives in shared/ but is board-a's concern
+    ...
+```
+
+Precedence is the item's own `board:`, then the file's `defaults.board`, then the
+path. An override must name a registered board; a typo is a build error, not a
+silent no-op.
+
+**IDs stay independent of boards.** Nothing here changes an ID's prefix
+automatically. If a board declares `token:`, the build warns when an item's own id
+prefix does not contain it — a lint, not a rename:
+
+```
+WARNING items/board-b/requirements.yaml:9 [REQ-PWR-004] — item is on board
+        'board-b' (token 'B'), but its id prefix 'REQ-PWR' does not contain that
+        token
+```
+
+**Per-board pages.** Each registered board gets its own scoped
+`document-<board>.html`, `coverage-<board>.html`, `log-<board>.html`, and
+`summary-<board>.html`, alongside the unchanged project-wide versions. Handing
+`document-board-a.html` to Board A's team shows only their items.
+
+**Drift is a warning, not silent.** `.refdes/boards.yaml` records which board each
+item was on at the last build — commit it, the same as `.refdes/ids.yaml`. Move a
+file to a different board's folder and the next build warns:
+
+```
+WARNING items/board-b/requirements.yaml:9 [REQ-PWR-004] — REQ-PWR-004 moved from
+        board 'board-a' to 'board-b' since the last build. Run 'refdes build
+        --accept-board-move' if this is deliberate, or move the file back.
+```
+
+Run `refdes build --accept-board-move` to accept it; `refdes audit` lists every
+accepted and outstanding move. Unlike a sealed log entry, a board move is never a
+build error — moving a file is an ordinary thing to do on purpose.
+
 ### When this stops working
 
 - **A board ships to a different customer** — you cannot hand over the site without

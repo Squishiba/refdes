@@ -9,6 +9,7 @@ import re
 
 from markdown_it import MarkdownIt
 
+from . import boards as boards_mod
 from . import calc, imports, pages as pages_mod, seal
 from .model import INVALIDATE, CalcLine, CheckResult, Coverage, Item, Project
 
@@ -472,17 +473,25 @@ def render_pages(project: Project) -> None:
 # ------------------------------------------------------------------------ entry point
 
 
-def build(project: Project, seal_write: bool = False, reseal: bool = False) -> Project:
+def build(
+    project: Project,
+    seal_write: bool = False,
+    reseal: bool = False,
+    accept_board_move: bool = False,
+) -> Project:
     pages_mod.load_pages(project)
     calc.set_unit_aliases(project.unit_aliases)
     calc.set_preferred_units(project.preferred_units)
     imports.load_imports(project)
+    boards_mod.resolve(project)
     validate_items(project)
     resolve_links(project)
     run_calcs(project)
     run_checks(project)
     compute_hashes(project)
     seal.verify(project, write=seal_write, reseal=reseal)
+    boards_mod.verify(project, write=seal_write, accept_move=accept_board_move)
+    boards_mod.lint_tokens(project)
     compute_coverage(project)
     render_bodies(project)
     render_pages(project)

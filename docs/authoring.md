@@ -190,10 +190,13 @@ These are never treated as fields:
 | `body` | Markdown body (list files only) |
 | `history` | Item-level [`on_change` overrides](change-tracking.md) |
 | `prefix` | [ID allocator](ids.md) prefix, item overrides file `defaults:` |
+| `board` | [Board](multi-board.md) override, item overrides file `defaults:` |
 
-`prefix` is reserved only where the item's own type does not already declare a
-field of that name — a schema written before this key existed keeps working
-unchanged.
+`prefix` and `board` are reserved only where the item's own type does not already
+declare a field of that name — a schema written before either key existed keeps
+working unchanged. (The starter schema's `log` type still has its own hand-typed
+`board` field for this reason; it predates the reserved key and should eventually
+move to it.)
 
 ## Folder layout
 
