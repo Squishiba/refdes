@@ -19,10 +19,19 @@ import yaml
 from .model import ON_CHANGE_MODES, Item, Project
 
 FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n?(.*)$", re.DOTALL)
+# A candidate fence line: `---` alone on its line.
+FENCE_RE = re.compile(r"^---[ \t]*$")
+# A YAML mapping key opening a line at column 0 -- what has to follow a `---` for it
+# to be read as a new item's front-matter rather than a literal horizontal rule.
+KEY_LINE_RE = re.compile(r"^[A-Za-z_][\w.-]*\s*:(\s|$)")
 # `body` is the markdown body, not a field. In a .md file it is the text after the
 # front-matter; in a list file it is a `body:` key, so a running log can be written
 # as a list without one file per daily entry.
 RESERVED = {"id", "type", "history", "body"}
+# Reserved, but only when the item's own type does not already declare a field of
+# the same name -- so a schema that predates one of these keys keeps working
+# unchanged instead of having the field silently shadowed.
+OVERRIDABLE = {"prefix"}
 
 
 class _LineLoader(yaml.SafeLoader):
@@ -110,9 +119,13 @@ def _build_item(
                 file=rel, line=line, item_id=item.id,
             )
 
-    known_keys = set(spec.fields) | set(spec.links) | RESERVED
+    known_keys = set(spec.fields) | set(spec.links) | RESERVED | OVERRIDABLE
     for key, value in raw.items():
-        if key in RESERVED or key == "__line__":
+        if key == "__line__" or key in RESERVED:
+            continue
+        if key in OVERRIDABLE and key not in spec.fields:
+            if key == "prefix" and value:
+                item.prefix_hint = str(value)
             continue
         if key in spec.links:
             targets = value if isinstance(value, list) else [value]
@@ -146,27 +159,94 @@ def _build_item(
     return item
 
 
+def _yaml_mapping(text: str) -> dict | None:
+    """Parse `text` as YAML, returning it only if it is a mapping (empty -> {})."""
+    parsed = yaml.load(text, Loader=_LineLoader)
+    if parsed is None:
+        return {}
+    return parsed if isinstance(parsed, dict) else None
+
+
 def parse_markdown_file(project: Project, path: str) -> list[Item]:
+    """Read one or more `---`-fenced item documents from a single .md file.
+
+    A file must open with `---`, YAML, `---` -- exactly today's single-item form,
+    matched the same way so a plain file is unaffected byte-for-byte. After that,
+    a further `---` only starts a new item if the line right after it looks like a
+    YAML key, a closing `---` exists later, and the text between actually parses as
+    a YAML mapping. Failing any of those, it is left alone as a literal horizontal
+    rule inside the previous item's body -- which is what makes a today-style file
+    with a `---` in its prose keep working unmigrated.
+
+    If the first block's only key is `defaults:`, it is not an item -- its mapping
+    is merged under every item that follows, the same way `defaults:` works in a
+    list file.
+    """
     rel = _relpath(project, path)
     with open(path, "r", encoding="utf-8") as fh:
         text = fh.read()
+    lines = text.split("\n")
 
-    match = FRONTMATTER_RE.match(text)
-    if not match:
+    fence_idx = [i for i, l in enumerate(lines) if FENCE_RE.match(l)]
+    if len(fence_idx) < 2 or fence_idx[0] != 0:
         project.error("no YAML front-matter (file must start with '---')", file=rel, line=1)
         return []
 
+    close0 = fence_idx[1]
+    head_text = "\n".join(lines[1:close0])
     try:
-        raw = yaml.load(match.group(1), Loader=_LineLoader) or {}
+        parsed0 = _yaml_mapping(head_text)
     except yaml.YAMLError as exc:
         project.error(f"invalid YAML front-matter: {exc}", file=rel, line=1)
         return []
-    if not isinstance(raw, dict):
+    if parsed0 is None:
         project.error("front-matter must be a mapping", file=rel, line=1)
         return []
 
-    item = _build_item(project, raw, rel, line=2, body=match.group(2))
-    return [item] if item else []
+    blocks: list[tuple[int, int, dict]] = [(0, close0, parsed0)]
+
+    # Every remaining fence is independently a candidate to open the next item,
+    # paired with whichever fence comes right after it -- including a fence that is
+    # already serving as the previous item's close, which is what lets one `---`
+    # between two back-to-back items do double duty as both. A fence with nothing
+    # later to close it (the last one in the file) is never reachable as an opener
+    # here, which is exactly "a closing fence exists later".
+    for k in range(1, len(fence_idx) - 1):
+        open_i = fence_idx[k]
+        close_i = fence_idx[k + 1]
+        next_line = lines[open_i + 1] if open_i + 1 < len(lines) else ""
+        if not KEY_LINE_RE.match(next_line):
+            continue
+        try:
+            parsed = _yaml_mapping("\n".join(lines[open_i + 1 : close_i]))
+        except yaml.YAMLError:
+            parsed = None
+        if parsed is None:
+            continue
+        blocks.append((open_i, close_i, parsed))
+
+    defaults: dict[str, Any] = {}
+    start = 0
+    first_keys = {k for k in blocks[0][2] if k != "__line__"}
+    if first_keys == {"defaults"} and isinstance(blocks[0][2].get("defaults"), dict):
+        defaults = _strip_lines(blocks[0][2]["defaults"])
+        start = 1
+
+    item_blocks = blocks[start:]
+    if not item_blocks:
+        project.error("file has no items after 'defaults:'", file=rel, line=1)
+        return []
+
+    out: list[Item] = []
+    for index, (open_i, close_i, parsed) in enumerate(item_blocks):
+        body_end = item_blocks[index + 1][0] if index + 1 < len(item_blocks) else len(lines)
+        body = "\n".join(lines[close_i + 1 : body_end])
+        merged: dict[str, Any] = dict(defaults)
+        merged.update({k: v for k, v in parsed.items() if k != "__line__"})
+        item = _build_item(project, merged, rel, line=open_i + 2, body=body)
+        if item:
+            out.append(item)
+    return out
 
 
 def parse_list_file(project: Project, path: str) -> list[Item]:
@@ -183,7 +263,6 @@ def parse_list_file(project: Project, path: str) -> list[Item]:
         return []
 
     defaults = _strip_lines(raw.get("defaults") or {})
-    defaults.pop("prefix", None)  # consumed by the ID allocator, not a field
 
     out: list[Item] = []
     entries = raw.get("items") or []
@@ -203,21 +282,6 @@ def parse_list_file(project: Project, path: str) -> list[Item]:
         if item:
             out.append(item)
     return out
-
-
-def list_file_prefix(path: str) -> str | None:
-    """Read defaults.prefix from a list file without a full parse."""
-    try:
-        with open(path, "r", encoding="utf-8") as fh:
-            raw = yaml.safe_load(fh) or {}
-    except (OSError, yaml.YAMLError):
-        return None
-    if isinstance(raw, dict):
-        defaults = raw.get("defaults") or {}
-        if isinstance(defaults, dict):
-            prefix = defaults.get("prefix")
-            return str(prefix) if prefix else None
-    return None
 
 
 def source_files(project: Project) -> list[str]:
@@ -243,13 +307,9 @@ def load_items(project: Project, require_ids: bool = True) -> None:
     for path in source_files(project):
         if path.endswith(".md"):
             items = parse_markdown_file(project, path)
-            prefix = None
         else:
             items = parse_list_file(project, path)
-            prefix = list_file_prefix(path)
         for item in items:
-            if prefix:
-                item.prefix_hint = prefix
             if not item.id:
                 project.pending.append(item)
                 if require_ids:

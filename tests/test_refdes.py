@@ -627,6 +627,30 @@ items:
 """
 
 
+# -------------------------------------------------------------- multi-item markdown
+
+MULTI_ITEM_DECISION_MD = """\
+---
+defaults:
+  type: decision
+  prefix: DEC-X
+  status: accepted
+---
+id: DEC-X-001
+title: First decision
+---
+
+Body of the first decision. Has some prose.
+
+---
+id: DEC-X-002
+title: Second decision
+---
+
+Body of the second decision.
+"""
+
+
 @pytest.fixture
 def flow_style_project(tmp_path):
     shutil.copy(os.path.join(REPO, "refdes.yaml"), tmp_path / "refdes.yaml")
@@ -677,6 +701,202 @@ def test_unclosed_flow_entry_is_refused_not_corrupted(flow_style_project):
 
     assert after == before  # refused write must leave the source file untouched
     assert any("could not write id" in d.message for d in project.errors)
+
+
+@pytest.fixture
+def multi_item_project(tmp_path):
+    shutil.copy(os.path.join(REPO, "refdes.yaml"), tmp_path / "refdes.yaml")
+    items = tmp_path / "items" / "decisions"
+    items.mkdir(parents=True)
+    (items / "multi.md").write_text(MULTI_ITEM_DECISION_MD, encoding="utf-8")
+    return tmp_path
+
+
+def test_multi_item_markdown_file_parses_each_item_separately(multi_item_project):
+    project = load_project(config_path=str(multi_item_project / "refdes.yaml"))
+    parse.load_items(project, require_ids=False)
+    assert not project.errors
+
+    one = project.items["DEC-X-001"]
+    two = project.items["DEC-X-002"]
+    assert one.fields["title"] == "First decision"
+    assert two.fields["title"] == "Second decision"
+    # `defaults:` applied to both, and each keeps its own body -- no leakage
+    # between items sharing one file.
+    assert one.fields["status"] == "accepted"
+    assert two.fields["status"] == "accepted"
+    assert "first decision" in one.body.lower()
+    assert "second decision" in two.body.lower()
+    assert "Body of the first decision" not in two.body
+    assert "Body of the second decision" not in one.body
+
+
+def test_multi_item_source_lines_point_at_each_items_own_fence(multi_item_project):
+    project = load_project(config_path=str(multi_item_project / "refdes.yaml"))
+    parse.load_items(project, require_ids=False)
+    text = (
+        (multi_item_project / "items" / "decisions" / "multi.md")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    )
+    one = project.items["DEC-X-001"]
+    two = project.items["DEC-X-002"]
+    assert text[one.source_line - 1].strip() == "id: DEC-X-001"
+    assert text[two.source_line - 1].strip() == "id: DEC-X-002"
+
+
+def test_today_style_single_item_file_is_unaffected(tmp_path):
+    """A one-document file, unchanged, must parse identically to before."""
+    shutil.copy(os.path.join(REPO, "refdes.yaml"), tmp_path / "refdes.yaml")
+    items = tmp_path / "items" / "decisions"
+    items.mkdir(parents=True)
+    text = open(
+        os.path.join(REPO, "items", "decisions", "dec-pwr-001-regulator-topology.md"),
+        encoding="utf-8",
+    ).read()
+    (items / "dec.md").write_text(text, encoding="utf-8")
+
+    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    parse.load_items(project, require_ids=False)
+    assert not project.errors
+    assert len(project.items) == 1
+    item = project.items["DEC-PWR-001"]
+    assert item.source_line == 2
+    assert item.body.startswith("\nThe 3V3 rail draws")
+
+
+def test_literal_horizontal_rule_stays_in_the_body(tmp_path):
+    """A `---` not followed by a YAML key is prose, not a second item."""
+    shutil.copy(os.path.join(REPO, "refdes.yaml"), tmp_path / "refdes.yaml")
+    items = tmp_path / "items" / "decisions"
+    items.mkdir(parents=True)
+    (items / "one.md").write_text(
+        "---\n"
+        "id: DEC-HR-001\n"
+        "type: decision\n"
+        "title: Solo\n"
+        "---\n\n"
+        "Some intro text.\n\n"
+        "---\n\n"
+        "More text after a horizontal rule.\n",
+        encoding="utf-8",
+    )
+    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    parse.load_items(project, require_ids=False)
+    assert not project.errors
+    assert len(project.items) == 1
+    item = project.items["DEC-HR-001"]
+    assert "More text after a horizontal rule." in item.body
+    assert "---" in item.body
+
+
+def test_horizontal_rule_with_no_closing_fence_stays_literal(tmp_path):
+    """Key-shaped text after a `---` with nothing later to close it stays prose."""
+    shutil.copy(os.path.join(REPO, "refdes.yaml"), tmp_path / "refdes.yaml")
+    items = tmp_path / "items" / "decisions"
+    items.mkdir(parents=True)
+    (items / "one.md").write_text(
+        "---\n"
+        "id: DEC-HR-002\n"
+        "type: decision\n"
+        "title: Solo\n"
+        "---\n\n"
+        "Some intro text.\n\n"
+        "---\n"
+        "Note: this looks like a key but there is no closing fence.\n",
+        encoding="utf-8",
+    )
+    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    parse.load_items(project, require_ids=False)
+    assert not project.errors
+    assert len(project.items) == 1
+    item = project.items["DEC-HR-002"]
+    assert "Note: this looks like a key" in item.body
+
+
+def test_defaults_block_alone_with_no_items_is_an_error(tmp_path):
+    shutil.copy(os.path.join(REPO, "refdes.yaml"), tmp_path / "refdes.yaml")
+    items = tmp_path / "items" / "decisions"
+    items.mkdir(parents=True)
+    (items / "empty.md").write_text(
+        "---\ndefaults:\n  type: decision\n---\n\nJust prose, no item.\n",
+        encoding="utf-8",
+    )
+    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    parse.load_items(project, require_ids=False)
+    assert any("no items" in d.message for d in project.errors)
+
+
+def test_refdes_id_writes_back_into_each_items_own_fence(tmp_path):
+    shutil.copy(os.path.join(REPO, "refdes.yaml"), tmp_path / "refdes.yaml")
+    items = tmp_path / "items" / "decisions"
+    items.mkdir(parents=True)
+    path = items / "multi.md"
+    path.write_text(
+        "---\ndefaults:\n  type: decision\n  prefix: DEC-MULTI\n---\n"
+        "title: First, no id yet\n---\n\nBody one.\n\n"
+        "---\ntitle: Second, no id yet\n---\n\nBody two.\n",
+        encoding="utf-8",
+    )
+
+    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    parse.load_items(project, require_ids=False)
+    assignments = ids.allocate(project)
+    assert [new_id for _item, new_id in assignments] == [
+        "DEC-MULTI-001",
+        "DEC-MULTI-002",
+    ]
+
+    # Re-parse from disk: both ids landed at the right fence, and each item still
+    # has its own distinct body.
+    project2 = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    parse.load_items(project2, require_ids=False)
+    assert "Body one." in project2.items["DEC-MULTI-001"].body
+    assert "Body two." in project2.items["DEC-MULTI-002"].body
+    assert "Body two." not in project2.items["DEC-MULTI-001"].body
+
+
+# ------------------------------------------------------------- reserved prefix key
+
+
+def test_per_item_prefix_overrides_file_defaults_in_a_list_file(tmp_path):
+    shutil.copy(os.path.join(REPO, "refdes.yaml"), tmp_path / "refdes.yaml")
+    items = tmp_path / "items" / "requirements"
+    items.mkdir(parents=True)
+    (items / "mixed.yaml").write_text(
+        "defaults:\n  type: requirement\n  prefix: REQ-DEFAULT\n"
+        "items:\n"
+        "  - text: Uses the file default prefix.\n"
+        "  - prefix: REQ-OVERRIDE\n"
+        "    text: Uses its own prefix.\n",
+        encoding="utf-8",
+    )
+    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    parse.load_items(project, require_ids=False)
+    assignments = ids.allocate(project)
+    got = {item.fields["text"]: new_id for item, new_id in assignments}
+    assert got["Uses the file default prefix."] == "REQ-DEFAULT-001"
+    assert got["Uses its own prefix."] == "REQ-OVERRIDE-001"
+    # `prefix:` is consumed, never stored as a field.
+    assert "prefix" not in project.items["REQ-OVERRIDE-001"].fields
+
+
+def test_per_item_prefix_overrides_file_defaults_in_markdown(tmp_path):
+    shutil.copy(os.path.join(REPO, "refdes.yaml"), tmp_path / "refdes.yaml")
+    items = tmp_path / "items" / "decisions"
+    items.mkdir(parents=True)
+    (items / "multi.md").write_text(
+        "---\ndefaults:\n  type: decision\n  prefix: DEC-DEFAULT\n---\n"
+        "title: Uses the file default\n---\n\nBody.\n\n"
+        "---\nprefix: DEC-OWN\ntitle: Uses its own prefix\n---\n\nBody.\n",
+        encoding="utf-8",
+    )
+    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    parse.load_items(project, require_ids=False)
+    assignments = ids.allocate(project)
+    got = {item.fields["title"]: new_id for item, new_id in assignments}
+    assert got["Uses the file default"] == "DEC-DEFAULT-001"
+    assert got["Uses its own prefix"] == "DEC-OWN-001"
 
 
 # ------------------------------------------------------------------------ imports
