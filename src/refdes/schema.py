@@ -7,7 +7,15 @@ from typing import Any
 
 import yaml
 
-from .model import ON_CHANGE_MODES, FieldSpec, ImportSpec, ItemType, LinkType, Project
+from .model import (
+    ON_CHANGE_MODES,
+    BoardSpec,
+    FieldSpec,
+    ImportSpec,
+    ItemType,
+    LinkType,
+    Project,
+)
 
 CONFIG_NAME = "refdes.yaml"
 
@@ -136,6 +144,25 @@ def load_project(config_path: str | None = None, start: str = ".") -> Project:
             )
         )
 
+    boards: dict[str, BoardSpec] = {}
+    path_owner: dict[str, str] = {}
+    for bname, bspec in (raw.get("boards") or {}).items():
+        bspec = bspec or {}
+        spec = BoardSpec(
+            name=bname,
+            label=bspec.get("label", bname),
+            token=str(bspec.get("token") or ""),
+            path=str(bspec.get("path") or ""),
+        )
+        segment = spec.path_segment
+        if segment in path_owner:
+            raise SchemaError(
+                f"boards.{bname} and boards.{path_owner[segment]} both map to "
+                f"items/{segment}/ — path segments must be unique"
+            )
+        path_owner[segment] = bname
+        boards[bname] = spec
+
     return Project(
         title=site.get("title", "Design Reference"),
         out_dir=site.get("out", "_site"),
@@ -152,4 +179,5 @@ def load_project(config_path: str | None = None, start: str = ".") -> Project:
         preferred_units=list(units.get("preferred") or []),
         unit_aliases=dict(units.get("aliases") or {}),
         root=root,
+        boards=boards,
     )

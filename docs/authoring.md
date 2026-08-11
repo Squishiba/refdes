@@ -81,7 +81,61 @@ P : W = 3.3 V * 1.2 A
 ```
 ````
 
-One item per markdown file. The filename does not matter — the ID is the identity.
+The filename does not matter — the ID is the identity.
+
+### Several items in one file
+
+A `.md` file is not limited to one item. A further `---` starts a new item's
+front-matter as long as the line right after it looks like a YAML key, a closing
+`---` exists later, and the text between actually parses as YAML — otherwise it is
+left alone as a literal horizontal rule in the body, exactly as it always was. This
+is what makes a today-style single-item file valid unmigrated: nothing after its
+one closing `---` looks like a fresh front-matter block, so the whole rest of the
+file stays its body.
+
+An optional leading block whose only key is `defaults:` applies to every item that
+follows, the same way `defaults:` works in a list file:
+
+````markdown
+---
+defaults:
+  type: decision
+  prefix: DEC-PWR
+---
+id: DEC-PWR-001
+title: 3V3 rail regulator topology
+---
+
+Body of the first decision.
+
+---
+title: LDO thermal fallback, rejected
+---
+
+Body of the second decision. Each item keeps its own body — the next item's
+front-matter is where this one ends.
+````
+
+Items with no `id:` are filled in by `refdes id`, which inserts each one at its own
+item's fence regardless of how many other items share the file.
+
+### `prefix:` per item
+
+`prefix:` may be set on an individual item, not only in `defaults:`. The item's own
+value wins:
+
+```yaml
+defaults:
+  type: decision
+  prefix: DEC-PWR
+---
+prefix: DEC-MECH   # this one item only, everything else still gets DEC-PWR
+title: Enclosure fastener torque
+---
+```
+
+`prefix:` is consumed by the [ID allocator](ids.md); it is never stored as a field,
+and it works the same way in a list file's `items:` entries.
 
 ## Choosing between them
 
@@ -135,6 +189,14 @@ These are never treated as fields:
 | `type` | Which item type it is |
 | `body` | Markdown body (list files only) |
 | `history` | Item-level [`on_change` overrides](change-tracking.md) |
+| `prefix` | [ID allocator](ids.md) prefix, item overrides file `defaults:` |
+| `board` | [Board](multi-board.md) override, item overrides file `defaults:` |
+
+`prefix` and `board` are reserved only where the item's own type does not already
+declare a field of that name — a schema written before either key existed keeps
+working unchanged. (The starter schema's `log` type still has its own hand-typed
+`board` field for this reason; it predates the reserved key and should eventually
+move to it.)
 
 ## Folder layout
 

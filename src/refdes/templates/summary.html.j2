@@ -1,16 +1,19 @@
 {% extends "base.html.j2" %}
-{% block title %}Summary — {{ project.title }}{% endblock %}
+{% block title %}Summary{% if board %} — {{ board.label }}{% endif %} — {{ project.title }}{% endblock %}
 {% block content %}
 
-<h1>Summary</h1>
+{% set cov_href = ('coverage-' ~ board.name ~ '.html') if board else 'coverage.html' %}
+{% set log_href = ('log-' ~ board.name ~ '.html') if board else 'log.html' %}
+{% set scope_label = board.label if board else 'The whole project' %}
+<h1>Summary{% if board %} — {{ board.label }}{% endif %}</h1>
 <p class="muted">
-  The whole project at a glance: what is closest to breaking, every number the
+  {{ scope_label }} at a glance: what is closest to breaking, every number the
   design computes, and what is not traced to anything.
 </p>
 
 <section class="cards">
   <div class="card">
-    <div class="card-num">{{ project.items | length }}</div>
+    <div class="card-num">{{ item_count }}</div>
     <div class="card-label">items</div>
   </div>
   <div class="card {{ 'card-bad' if checks_failing else 'card-good' }}">
@@ -25,7 +28,7 @@
   {% endif %}
   <div class="card {{ 'card-warn' if stage_counts['verified'] < total_covered else 'card-good' }}">
     <div class="card-num">{{ stage_counts['verified'] }}/{{ total_covered }}</div>
-    <div class="card-label"><a href="coverage.html">verified</a></div>
+    <div class="card-label"><a href="{{ cov_href }}">verified</a></div>
   </div>
 </section>
 
@@ -175,7 +178,7 @@
     </tbody>
   </table>
   {% if log_total > log_entries | length %}
-  <p class="small"><a href="log.html">All {{ log_total }} entries →</a></p>
+  <p class="small"><a href="{{ log_href }}">All {{ log_total }} entries →</a></p>
   {% endif %}
 </section>
 {% endif %}

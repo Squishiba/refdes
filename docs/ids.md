@@ -70,8 +70,11 @@ will hand out the same number.
 
 The prefix comes from, in order:
 
-1. `defaults.prefix` in a list file (`REQ-PWR`)
-2. the type's `prefix` in `refdes.yaml` (`REQ`)
+1. `prefix:` on the item itself (a list entry, or one item in a multi-item
+   markdown file — see [authoring](authoring.md#prefix-per-item))
+2. `defaults.prefix` in a list file or a markdown file's leading `defaults:`
+   block (`REQ-PWR`)
+3. the type's `prefix` in `refdes.yaml` (`REQ`)
 
 Prefixes may contain hyphens, which is how you get `REQ-PWR-001` and `CON-THM-001`
 from the same `requirement`/`constraint` types.

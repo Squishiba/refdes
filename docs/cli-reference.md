@@ -21,6 +21,7 @@ Validate, evaluate, and render the site plus `items.json`.
 | `-o`, `--out DIR` | Output directory, overriding `site.out` |
 | `--keep-going` | Exit 0 even when there are errors |
 | `--reseal` | Accept edits to sealed append-only entries |
+| `--accept-board-move` | Accept a recorded [board](multi-board.md) change for an item |
 
 ```bash
 refdes build
@@ -105,7 +106,7 @@ Updates `.refdes/ids.yaml`. See [IDs](ids.md).
 
 Report everything that has been made less visible: fields excluded from
 invalidation, item-level overrides and their stated reasons, resealed log entries,
-and imported projects.
+[board](multi-board.md) moves, and imported projects.
 
 ```bash
 refdes audit
@@ -123,11 +124,17 @@ Item-level overrides:
 Append-only entries edited after sealing:
   (none)
 
+Board moves since the manifest was last written:
+  (none)
+
 Imported projects (read-only):
   platform       1 items pinned to 2026.3  <- ../platform/_site/items.json
 
 16 items audited (16 local)
 ```
+
+The "Board moves" section only appears for a project that has declared a
+`boards:` registry.
 
 ---
 
@@ -167,6 +174,7 @@ python -m http.server -d _site 8000
 |---|---|---|
 | `.refdes/ids.yaml` | **yes** | Burned ID numbers; two branches sharing it prevents collisions |
 | `.refdes/log-seal.yaml` | **yes** | Append-only seals for log entries |
+| `.refdes/boards.yaml` | **yes** | Board drift manifest; only written by a project with `boards:` |
 | `_site/` | no | Generated output |
 
 Source files are also rewritten by `refdes id`, which inserts allocated IDs in

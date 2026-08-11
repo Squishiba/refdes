@@ -13,6 +13,7 @@ units:       { ... }   # preferred display units
 link_types:  { ... }   # relationships and their inverses
 types:       { ... }   # item types
 imports:     [ ... ]   # other projects to read
+boards:      { ... }   # opt-in board registry
 ```
 
 ---
@@ -177,6 +178,29 @@ imports:
 | `version` | no | Asserted against the artifact's `site.version` |
 
 See [multiple boards](multi-board.md).
+
+---
+
+## `boards`
+
+```yaml
+boards:
+  board-a:
+    label: "Board A"
+    token: A
+    path: brd-a
+```
+
+| Key | Required | Purpose |
+|---|---|---|
+| `label` | no, defaults to the key | Display name on board-scoped pages |
+| `token` | no | Checked against item id prefixes; unset means no check |
+| `path` | no, defaults to the key | The `items/` path segment, if different from the key |
+
+Absent entirely, this key does nothing: no item gets a board, and the site is
+unaffected. With it, a board is the first path segment under `items/` matched
+against this registry, overridable per item with the reserved `board:` key. See
+[multiple boards](multi-board.md).
 
 ---
 

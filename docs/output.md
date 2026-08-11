@@ -19,6 +19,14 @@ Static files. No server, no build step for the reader, no network calls. Hover
 previews are inlined at build time; with JavaScript disabled every reference is
 still a working link.
 
+### Per-board pages
+
+A project with a `boards:` registry additionally gets `document-<board>.html`,
+`coverage-<board>.html`, `log-<board>.html`, and `summary-<board>.html` for each
+registered board, scoped to that board's own items — everything above unaffected.
+See [multiple boards](multi-board.md). With no `boards:` registry, none of these
+are written.
+
 Serve it locally with:
 
 ```bash
@@ -148,6 +156,7 @@ The interchange format. **Anything downstream should read this, not the HTML.**
 | `source` | `file:line` of the item's definition; enough for go-to-definition |
 | `calcs[].bounds` | Empty unless the value carries a tolerance |
 | `checks[].ok` | `true`, `false`, or `null` when it could not be evaluated |
+| `boards` / `items[].board` | Only present when the project declares a `boards:` registry |
 
 ### What it is good for
 

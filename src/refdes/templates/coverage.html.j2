@@ -1,8 +1,8 @@
 {% extends "base.html.j2" %}
-{% block title %}Coverage — {{ project.title }}{% endblock %}
+{% block title %}Coverage{% if board %} — {{ board.label }}{% endif %} — {{ project.title }}{% endblock %}
 {% block content %}
 
-<h1>Coverage</h1>
+<h1>Coverage{% if board %} — {{ board.label }}{% endif %}</h1>
 <p class="muted">
   Deliberately not collapsed into one question. <b>Addressed</b> means somebody
   has worked on it and written it up in the design log. <b>Claimed</b> means a

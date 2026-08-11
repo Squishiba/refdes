@@ -20,6 +20,11 @@ file's body, or in a `body:` block in a list file.
 | ` ```lang ` | fenced code block |
 | `\| a \| b \|` | table (see below) |
 
+A `---` only reads as the start of a new item — see [several items in one
+file](authoring.md#several-items-in-one-file) — when a YAML key immediately
+follows it and a closing `---` exists later. Anything else, including an ordinary
+`---` before a closing paragraph, renders as a horizontal rule.
+
 Tables use the GitHub form:
 
 ```markdown
