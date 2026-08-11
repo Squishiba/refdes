@@ -3,7 +3,7 @@
   "displayName": "Refdes",
   "description": "Hardware design reference documentation: live diagnostics, ID completion, and inline calc results.",
   "version": "0.1.0",
-  "publisher": "refdes",
+  "publisher": "SquishingCo",
   "license": "MIT",
   "icon": "icon.png",
   "engines": { "vscode": "^1.85.0" },
