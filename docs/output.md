@@ -10,10 +10,11 @@
 | `summary.html` | The whole project at a glance: margins, every computed value, gaps |
 | `coverage.html` | The full [coverage](coverage.md) table, least-covered first |
 | `log.html` | The [design log](design-log.md) timeline, oldest first |
+| `references.html` | Every [citation](markdown.md#citing-a-datasheet) in the project, grouped by url |
 | `document.html` | Every item in one page, in reading order — the printable record |
 | `<id>.html` | One page per item, lowercased ID (`req-pwr-002.html`) |
 | `items.json` | The machine-readable export |
-| `assets/` | One stylesheet, one script — not a place your own images or PDFs end up; see [images and other local files](markdown.md#images-and-other-local-files) |
+| `assets/` | The stylesheet and script, plus every local image, `site.assets:` directory, and vendored citation your project references — see [images and other local files](markdown.md#images-and-other-local-files) |
 
 Static files. No server, no build step for the reader, no network calls. Hover
 previews are inlined at build time; with JavaScript disabled every reference is
@@ -22,10 +23,10 @@ still a working link.
 ### Per-board pages
 
 A project with a `boards:` registry additionally gets `document-<board>.html`,
-`coverage-<board>.html`, `log-<board>.html`, and `summary-<board>.html` for each
-registered board, scoped to that board's own items — everything above unaffected.
-See [multiple boards](multi-board.md). With no `boards:` registry, none of these
-are written.
+`coverage-<board>.html`, `log-<board>.html`, `summary-<board>.html`, and
+`references-<board>.html` for each registered board, scoped to that board's own
+items — everything above unaffected. See [multiple boards](multi-board.md).
+With no `boards:` registry, none of these are written.
 
 Serve it locally with:
 
@@ -89,6 +90,7 @@ and linear ordering are the parts that would otherwise break.
 - Rendered body, with calc blocks as evaluated tables and IDs autolinked
 - Options-considered panel for decisions, chosen and rejected
 - Checks table with pass/fail and the worst-case detail
+- Citations table for any `citations`-typed field — pinned/vendored state, rev, page, part number
 - Traceability: outgoing and incoming links
 - Provenance: source `file:line`, and the content hash
 

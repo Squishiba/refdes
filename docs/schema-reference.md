@@ -34,6 +34,7 @@ site:
 | `pages` | `pages` | Directory of narrative [pages](pages.md) |
 | `nav` | *(empty)* | Explicit page order in the nav bar, by slug |
 | `version` | *(empty)* | Written into `items.json`; checked by downstream [imports](multi-board.md) |
+| `assets` | *(empty)* | Directories copied verbatim into `assets/`, no reference needed — see [images and other local files](markdown.md#images-and-other-local-files) |
 
 ---
 
@@ -136,23 +137,34 @@ fails to load if it doesn't.
 
 | Key | Purpose |
 |---|---|
-| `type` | `text`, `enum`, `limit`, `person`, `date`, `list`, `options`, `checks`, `quantity` |
+| `type` | `text`, `enum`, `limit`, `person`, `date`, `list`, `options`, `checks`, `citations`, `quantity` |
 | `required` | Missing or empty is a build error |
 | `choices` | Allowed values, for `type: enum` |
 | `default` | Applied when the item omits the field |
 | `on_change` | `invalidate`, `log`, or `ignore` |
 
-**Only `enum` and `limit` are enforced today.** `enum` is checked against
-`choices`; `limit` is parsed as a quantity. The others are declarative — they
-document intent and are where future validation will hook in.
+**`enum`, `limit`, and `citations` are enforced today.** `enum` is checked
+against `choices`; `limit` is parsed as a quantity; `citations` is checked to
+be a list of entries that each have at least a `url`. The rest are
+declarative — they document intent and are where future validation will hook
+in.
 
-Three field names have behaviour attached regardless of declared type:
+Three field *names* have behaviour attached regardless of declared type:
 
 | Field | Behaviour |
 |---|---|
 | `limit` | Parsed as a quantity; makes the item checkable |
 | `options` | Rendered as the options-considered panel (`name`, `verdict`, `because`) |
 | `checks` | Evaluated as [checks](checks.md) (`value`, `against`) |
+
+`citations` is different: it is keyed off the declared **type**, not a fixed
+field name, so a project can call the field `datasheets`, `references`,
+anything. Any field declared `type: citations` gets a `url` (required), plus
+`rev`, `page`, `part_number`, and `vendor` per entry, its own table on the
+item page, and an entry in `references.html` — see [citing a
+datasheet](markdown.md#citing-a-datasheet), [CLI
+reference](cli-reference.md#refdes-fetch), and [output
+formats](output.md#items.json).
 
 ### Starter types
 

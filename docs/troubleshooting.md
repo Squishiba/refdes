@@ -133,13 +133,19 @@ A warning. The item renders unvalidated. Add the type to your schema to silence 
 **Hover previews do nothing.**
 JavaScript is disabled, or `assets/app.js` is missing. Links still work either way.
 
-**An image or a PDF link 404s in the built site even though the source file
+**A local `![...]()` image src is a build error.**
+It does not resolve to a real file relative to your source file's own
+directory. That is deliberate — a resolving src is copied into `_site/assets/`
+automatically, so a broken one is worth stopping the build over. See [images
+and other local files](markdown.md#images-and-other-local-files).
+
+**A `[text](file.pdf)` link 404s in the built site even though the source file
 exists.**
-Expected today — `refdes build` never copies local images or other local files
-into `_site/`, and the path you wrote is checked against your source file's
-directory but rendered into a page that lives flat in `_site/`. See [images and
-other local files](markdown.md#images-and-other-local-files) for the actual
-behavior and the copy-step workaround.
+Expected — only `<img src>` goes through the resolve-and-copy pipeline; a
+plain link's `href` is emitted unchanged. Either declare an opt-in
+`site.assets:` directory and point the link at `assets/...`, or — for a
+datasheet specifically — use a structured [citation](markdown.md#citing-a-datasheet)
+instead of a bare link.
 
 **`UnicodeEncodeError` in a Windows terminal.**
 The CLI reconfigures stdout to UTF-8, but if you pipe through another tool set

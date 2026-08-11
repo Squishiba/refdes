@@ -169,9 +169,10 @@ WARNING items/requirements/power.yaml:12 [REQ-PWR-002] — unknown field 'sorce'
         Did you mean 'source'?
 ```
 
-Field types are declarative. Today only `enum` (checked against `choices`) and
-`limit` (parsed as a quantity) are enforced; the rest are documentation for
-readers and for future validation.
+Field types are declarative. Today `enum` (checked against `choices`), `limit`
+(parsed as a quantity), and `citations` (checked to be a list of entries each
+with a `url` — see [citing a datasheet](markdown.md#citing-a-datasheet)) are
+enforced; the rest are documentation for readers and for future validation.
 
 ### Titles
 
