@@ -9,18 +9,29 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-# on_change modes, in descending order of consequence.
-INVALIDATE = "invalidate"  # timeline + baseline diff + feeds the suspect hash
-LOG = "log"                # timeline only
-IGNORE = "ignore"          # invisible to the history layer
+# on_change modes. Only `invalidate` does anything today: compute_hashes()
+# (build.py) is the sole consumer and only checks for INVALIDATE, so `log` and
+# `ignore` are currently indistinguishable -- both are excluded from the content
+# hash and neither is written anywhere. `log` is reserved for a future per-field
+# history layer; until that exists it behaves exactly like `ignore`.
+INVALIDATE = "invalidate"  # feeds the content hash and suspect-link invalidation
+LOG = "log"                # reserved for a future history layer -- behaves as ignore today
+IGNORE = "ignore"          # excluded from the content hash
 ON_CHANGE_MODES = (INVALIDATE, LOG, IGNORE)
+
+
+# Diagnostic severities, in descending order of consequence.
+ERROR = "error"      # blocks the build
+WARNING = "warning"  # visible by default; worth a look
+INFO = "info"        # default-hidden; the normal state of an incomplete project
+DIAGNOSTIC_LEVELS = (ERROR, WARNING, INFO)
 
 
 @dataclass
 class Diagnostic:
     """A validation message. `where` is rendered as file:line for editors."""
 
-    level: str  # "error" | "warning"
+    level: str  # "error" | "warning" | "info"
     message: str
     file: str | None = None
     line: int | None = None
@@ -91,6 +102,12 @@ class ItemType:
     # requirement or constraint. None means unconfigured: every link counts, same
     # as before this existed, so existing projects see no behavior change.
     satisfying_statuses: list[str] | None = None
+    # Diagnostic level a failing `checks:` entry is reported at for items of this
+    # type. A decision either meets its constraints or it doesn't, so ERROR is
+    # the default; a type whose items are still candidates being compared (e.g.
+    # "option") can set this to INFO so a failed criterion is a finding, not a
+    # build-blocking defect.
+    check_severity: str = ERROR
 
 
 @dataclass
@@ -300,15 +317,22 @@ class Project:
         return [i for i in self.items.values() if not i.external]
 
     def error(self, message: str, **kw: Any) -> None:
-        self.diagnostics.append(Diagnostic("error", message, **kw))
+        self.diagnostics.append(Diagnostic(ERROR, message, **kw))
 
     def warn(self, message: str, **kw: Any) -> None:
-        self.diagnostics.append(Diagnostic("warning", message, **kw))
+        self.diagnostics.append(Diagnostic(WARNING, message, **kw))
+
+    def info(self, message: str, **kw: Any) -> None:
+        self.diagnostics.append(Diagnostic(INFO, message, **kw))
 
     @property
     def errors(self) -> list[Diagnostic]:
-        return [d for d in self.diagnostics if d.level == "error"]
+        return [d for d in self.diagnostics if d.level == ERROR]
 
     @property
     def warnings(self) -> list[Diagnostic]:
-        return [d for d in self.diagnostics if d.level == "warning"]
+        return [d for d in self.diagnostics if d.level == WARNING]
+
+    @property
+    def infos(self) -> list[Diagnostic]:
+        return [d for d in self.diagnostics if d.level == INFO]

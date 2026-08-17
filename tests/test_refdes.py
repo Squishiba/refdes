@@ -1914,6 +1914,109 @@ def test_check_error_omits_nominal_when_worst_case_equals_it(tmp_path):
     assert "nominal" not in message
 
 
+CHECK_SEVERITY_SCHEMA = """\
+site: {title: "Check Severity Test", out: _site}
+id: {width: 3, ledger: .refdes/ids.yaml}
+history: {default: invalidate}
+units: {preferred: []}
+types:
+  constraint:
+    prefix: CON
+    label: Constraint
+    fields:
+      title: { type: text, required: true, on_change: invalidate }
+      limit: { type: limit, required: true, on_change: invalidate }
+    body: { on_change: invalidate }
+  option:
+    prefix: OPT
+    label: Option
+    check_severity: info
+    fields:
+      title: { type: text, required: true, on_change: invalidate }
+    body: { on_change: invalidate }
+  decision:
+    prefix: DEC
+    label: Decision
+    fields:
+      title: { type: text, required: true, on_change: invalidate }
+    body: { on_change: invalidate }
+"""
+
+
+def _check_severity_project(tmp_path, *, item_type, item_id, prefix, checks_extra=""):
+    """One item of `item_type`, with a failing check against CON-IO-004."""
+    (tmp_path / "refdes.yaml").write_text(CHECK_SEVERITY_SCHEMA, encoding="utf-8")
+    items = tmp_path / "items"
+    items.mkdir()
+    (items / "con.yaml").write_text(
+        "defaults: { type: constraint }\n"
+        "items:\n"
+        "  - id: CON-IO-004\n"
+        "    title: Input current budget\n"
+        '    limit: "<= 600 mA"\n',
+        encoding="utf-8",
+    )
+    (items / f"{prefix.lower()}.md").write_text(
+        "---\n"
+        f"id: {item_id}\n"
+        f"type: {item_type}\n"
+        "title: Candidate under evaluation\n"
+        "checks:\n"
+        "  - value: CLIM\n"
+        "    against: CON-IO-004\n"
+        f"{checks_extra}"
+        "---\n\n"
+        "```calc\nCLIM : A = 0.697 A\n```\n",
+        encoding="utf-8",
+    )
+    return _build_at(tmp_path)
+
+
+def test_check_severity_info_does_not_error_or_block_the_build(tmp_path):
+    """finding 18: a candidate type can mark failing checks as findings, not defects."""
+    project = _check_severity_project(
+        tmp_path, item_type="option", item_id="OPT-IO-001", prefix="opt"
+    )
+    check = project.items["OPT-IO-001"].checks[0]
+    assert check.ok is False  # the Checks table must still show the failure
+    assert not project.errors
+    info_messages = [d.message for d in project.infos]
+    assert any("CLIM violates CON-IO-004" in m for m in info_messages)
+
+
+def test_check_severity_defaults_to_error_when_unconfigured(tmp_path):
+    """Back-compat: a type with no check_severity: still errors, same as before this existed."""
+    project = _check_severity_project(
+        tmp_path, item_type="decision", item_id="DEC-IO-001", prefix="dec"
+    )
+    check = project.items["DEC-IO-001"].checks[0]
+    assert check.ok is False
+    assert any("CLIM violates CON-IO-004" in d.message for d in project.errors)
+    assert not project.infos
+
+
+def test_check_severity_rejects_an_unrecognized_value(tmp_path):
+    bad_schema = CHECK_SEVERITY_SCHEMA.replace(
+        "check_severity: info", "check_severity: nonsense"
+    )
+    (tmp_path / "refdes.yaml").write_text(bad_schema, encoding="utf-8")
+    with pytest.raises(SchemaError, match="check_severity"):
+        load_project(config_path=str(tmp_path / "refdes.yaml"))
+
+
+def test_check_severity_info_still_errors_on_a_malformed_check_entry(tmp_path):
+    """Only a failing (evaluated) check is downgraded -- a broken checks: entry is
+    always an authoring mistake, regardless of the item's type."""
+    project = _check_severity_project(
+        tmp_path,
+        item_type="option",
+        item_id="OPT-IO-002",
+        prefix="opt",
+        checks_extra="  - value: CLIM\n    against: CON-DOES-NOT-EXIST\n",
+    )
+    assert any("does not exist" in d.message for d in project.errors)
+
+
 def test_backlinks_resolve_from_either_end_of_an_edge():
     """A test declaring `verifies` must appear as `verified_by` on the requirement."""
     project = _project()

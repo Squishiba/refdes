@@ -12,7 +12,7 @@ from markdown_it import MarkdownIt
 
 from . import boards as boards_mod
 from . import calc, citations as citations_mod, imports, pages as pages_mod, seal
-from .model import INVALIDATE, CalcLine, CheckResult, Coverage, Item, Project
+from .model import ERROR, INFO, INVALIDATE, WARNING, CalcLine, CheckResult, Coverage, Item, Project
 
 # Explicit reference: [[REQ-PWR-002]] or [[REQ-PWR-002|the input range]]
 EXPLICIT_REF_RE = re.compile(r"\[\[\s*([A-Za-z0-9\-_]+)\s*(?:\|\s*([^\]]+?)\s*)?\]\]")
@@ -128,7 +128,24 @@ def compute_coverage(project: Project) -> None:
     A requirement can be satisfied without being verified, and addressed without
     being satisfied. Collapsing those into one "done" flag is how open work goes
     missing.
+
+    Two of these are individually uninteresting at scale, so they're counted
+    rather than reported per item -- coverage.html carries the detail:
+
+    - "nothing addresses, satisfies, or verifies this yet" -- every item starts
+      here, so a project early in its life is mostly this.
+    - "satisfied but not verified" -- routine noise when the project has not
+      written a test plan yet, which is why it's suppressed entirely when no
+      `test` items exist at all (the moment the first one is added, these
+      become real findings again and start appearing).
+
+    "Claimed but not verified" stays per item: it names an unsettled decision,
+    which is the one class of coverage warning that is actually actionable.
     """
+    has_tests = any(item.type == "test" for item in project.items.values())
+    open_items: list[str] = []
+    unverified_items: list[str] = []
+
     for item in project.local_items:
         if item.type not in COVERABLE:
             continue
@@ -168,15 +185,24 @@ def compute_coverage(project: Project) -> None:
         project.coverage[item.id] = cov
 
         if cov.stage == "open":
+            open_items.append(item.id)
+        elif cov.stage == "claimed" and item.type == "requirement":
             project.warn(
-                "nothing addresses, satisfies, or verifies this yet",
+                "claimed but not verified (no test links to it)",
                 file=item.source_file, line=item.source_line, item_id=item.id,
             )
-        elif not cov.verified_by and item.type == "requirement":
-            project.warn(
-                f"{cov.stage} but not verified (no test links to it)",
-                file=item.source_file, line=item.source_line, item_id=item.id,
-            )
+        elif not cov.verified_by and item.type == "requirement" and has_tests:
+            unverified_items.append(item.id)
+
+    if open_items:
+        project.warn(
+            f"{len(open_items)} item(s) with no coverage — see coverage.html"
+        )
+    if unverified_items:
+        project.warn(
+            f"{len(unverified_items)} requirement(s) satisfied but not verified "
+            f"— see coverage.html"
+        )
 
 
 # ----------------------------------------------------------------------------- calc
@@ -212,8 +238,19 @@ def run_calcs(project: Project) -> None:
         item._env = env  # retained for check evaluation
 
 
+_CHECK_EMITTERS = {ERROR: Project.error, WARNING: Project.warn, INFO: Project.info}
+
+
 def run_checks(project: Project) -> None:
     for item in project.local_items:
+        spec = project.types.get(item.type)
+        check_severity = spec.check_severity if spec else ERROR
+        # A failing check on a candidate item (check_severity: info) is the
+        # finding, not a defect -- everything else about a `checks:` entry
+        # (malformed shape, an unresolved target, a target with no limit) is a
+        # real authoring mistake regardless of type, so those stay project.error.
+        emit_violation = _CHECK_EMITTERS.get(check_severity, Project.error)
+
         entries = item.fields.get("checks") or []
         if not isinstance(entries, list):
             project.error(
@@ -265,8 +302,8 @@ def run_checks(project: Project) -> None:
                         message = f"{name} violates {target_id}: {detail}"
                         if env[name].has_width and limit.kind in ("<=", "<", ">=", ">"):
                             message += f" (nominal {result.actual})"
-                        project.error(
-                            message,
+                        emit_violation(
+                            project, message,
                             file=item.source_file, line=item.source_line, item_id=item.id,
                         )
                 except calc.CalcError as exc:
@@ -285,9 +322,11 @@ def run_checks(project: Project) -> None:
 def compute_hashes(project: Project) -> None:
     """Hash only the fields whose on_change mode is `invalidate`.
 
-    This is what a link records at review time, so that a change to a `log` field
-    (owner, tags) never marks downstream items suspect. Imported items keep the hash
-    their own project computed.
+    This is what a link records at review time, so that a change to a `log` or
+    `ignore` field (owner, tags) never marks downstream items suspect -- the two
+    modes are indistinguishable here. `log` is reserved for a future history layer
+    and currently behaves as `ignore`. Imported items keep the hash their own
+    project computed.
     """
     for item in project.local_items:
         spec = project.types[item.type]

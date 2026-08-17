@@ -31,13 +31,17 @@ def _load(args, require_ids: bool = True) -> Project:
     return project
 
 
-def _report(project: Project) -> int:
+def _report(project: Project, verbose: bool = False) -> int:
     for d in project.diagnostics:
+        if d.level == "info" and not verbose:
+            continue
         stream = sys.stderr if d.level == "error" else sys.stdout
         print(str(d), file=stream)
 
     errors, warnings = len(project.errors), len(project.warnings)
     summary = f"{len(project.items)} items, {errors} errors, {warnings} warnings"
+    if verbose:
+        summary += f", {len(project.infos)} info"
     print(summary)
     return 1 if errors else 0
 
@@ -47,7 +51,7 @@ def cmd_check(args) -> int:
     # `check` never writes: it verifies existing seals without creating new ones.
     build_mod.build(project, seal_write=False, reseal=False)
     drift = citations_mod.refresh(project) if args.refresh else []
-    status = _report(project)
+    status = _report(project, verbose=args.verbose)
     if drift:
         print(f"\n{len(drift)} citation(s) drifted from their pinned hash:")
         for d in drift:
@@ -71,7 +75,7 @@ def cmd_build(args) -> int:
         require_citations=args.require_citations,
     )
     out_dir = render_mod.render_site(project)
-    status = _report(project)
+    status = _report(project, verbose=args.verbose)
     print(f"site written to {out_dir}")
     if status and not args.keep_going:
         print("build completed with errors (use --keep-going to exit 0)", file=sys.stderr)
@@ -237,6 +241,11 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="promote unpinned/missing-cache citation warnings to errors (CI)",
     )
+    p_build.add_argument(
+        "-v", "--verbose",
+        action="store_true",
+        help="also show info-level diagnostics (routine states hidden by default)",
+    )
     p_build.set_defaults(func=cmd_build)
 
     p_check = sub.add_parser(
@@ -252,6 +261,11 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="also re-fetch every pinned citation and report drift (network; "
         "writes nothing)",
+    )
+    p_check.add_argument(
+        "-v", "--verbose",
+        action="store_true",
+        help="also show info-level diagnostics (routine states hidden by default)",
     )
     p_check.set_defaults(func=cmd_check)
 

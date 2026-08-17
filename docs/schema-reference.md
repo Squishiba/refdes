@@ -66,6 +66,15 @@ history:
 The `on_change` mode for any field that does not declare its own. One of
 `invalidate`, `log`, `ignore`. See [change tracking](change-tracking.md).
 
+Only `invalidate` has any effect today: it is the sole mode the content hash
+checks for. `log` is reserved for a future per-field history layer and currently
+behaves exactly like `ignore` -- choosing between them is not yet a meaningful
+decision.
+
+This entire surface only matters to a project under version control. Without a
+VCS there is no history layer to feed, and `history:` reduces to nothing more
+than a hash-exclusion list.
+
 ---
 
 ## `units`
@@ -129,9 +138,15 @@ types:
 | `links` | `{}` | Legal links, mapped to allowed target types |
 | `body` | project default | `on_change` mode for the markdown body |
 | `satisfying_statuses` | not set — every `satisfies:` link counts | `status` values that count as settled; see [coverage](coverage.md#which-statuses-count-as-satisfying) |
+| `check_severity` | `error` | Diagnostic level for a failing `checks:` entry on items of this type; see [checks](checks.md#candidates-vs-decisions) |
 
 `satisfying_statuses` requires the type to declare a `status` field — the project
 fails to load if it doesn't.
+
+`check_severity` must be `error`, `warning`, or `info`. It only changes how a
+*failing* check is reported — the check still runs, and `item.checks` (and the
+rendered Checks table) still shows pass/fail exactly the same way regardless of
+the setting.
 
 ### Field options
 

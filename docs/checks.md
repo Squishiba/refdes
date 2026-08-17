@@ -79,6 +79,39 @@ site index. `refdes check` exits non-zero, so CI catches it.
 Tip: use a [unit assertion](math.md) matching the constraint's units
 (`P_dens : W/in^2`) so both sides of the comparison read in the same unit.
 
+## Candidates vs. decisions
+
+A failing check being a build error assumes the item is a decision: the design
+either meets the constraint or it doesn't. That's the wrong reading for an item
+that is still a *candidate* — comparing several microcontrollers against a
+shared `CON-IO-008 (>= 2 DACs)`, two of them lacking an on-chip DAC is the
+finding you're building the comparison to surface, not a defect to fix before
+the build can pass.
+
+Set `check_severity: info` on the type to change what a failing check is
+reported as:
+
+```yaml
+types:
+  option:
+    check_severity: info      # candidates are scored, not asserted
+```
+
+| `check_severity` | A failing check is... |
+|---|---|
+| `error` (default) | a build error — unchanged from every project today |
+| `warning` | a warning — visible by default, does not fail the build |
+| `info` | an info diagnostic — hidden unless `-v`/`--verbose`, does not fail the build |
+
+This only changes the diagnostic for a check that *ran and failed*. The item
+page's `fail` badge and the check table's detail string are unaffected — a
+candidate that fails a criterion still shows `fail`, exactly as a decision
+would, because a comparison table needs every row read the same way.
+
+Checks that could not be evaluated at all (below) are always errors,
+regardless of `check_severity`: a typo'd value name or a missing target is an
+authoring mistake, not a finding about the design.
+
 ## Checks that cannot be evaluated
 
 These are errors too, not silent passes:

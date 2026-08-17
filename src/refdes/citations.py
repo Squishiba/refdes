@@ -158,7 +158,8 @@ def verify(project: Project, require: bool = False) -> None:
     Hermetic -- reads `.refdes/citations.yaml` and `.refdes/vendor/`, touches no
     network. Severities:
 
-      no lockfile entry     -- warning, or error with `require` (CI)
+      no lockfile entry     -- info (routine until `refdes fetch` runs), or
+                                error with `require` (CI)
       vendored but no blob  -- warning, or error with `require` (CI)
       blob hash mismatch    -- ERROR always, never soft-failed: a corrupted or
                                 tampered local cache is not something to wave
@@ -173,11 +174,14 @@ def verify(project: Project, require: bool = False) -> None:
 
     records = load_lockfile(project)
     severity = project.error if require else project.warn
+    unpinned_severity = project.error if require else project.info
 
     grouped: dict[str, list[tuple[Item, CitationSpec]]] = defaultdict(list)
     for item, spec in entries:
         grouped[spec.url].append((item, spec))
-        item.citations.append(_resolve(project, item, spec, records.get(spec.url), severity))
+        item.citations.append(
+            _resolve(project, item, spec, records.get(spec.url), severity, unpinned_severity)
+        )
 
     for url, citers in grouped.items():
         vendor_flags = {spec.vendor for _item, spec in citers}
@@ -190,7 +194,7 @@ def verify(project: Project, require: bool = False) -> None:
             )
 
 
-def _resolve(project, item, spec, record, severity) -> CitationStatus:
+def _resolve(project, item, spec, record, severity, unpinned_severity) -> CitationStatus:
     status = CitationStatus(spec=spec, item_id=item.id)
     if record is None:
         status.state = "unpinned"
@@ -198,7 +202,9 @@ def _resolve(project, item, spec, record, severity) -> CitationStatus:
             f"citation to {spec.url} has no fetched record; run "
             f"'refdes fetch --url {spec.url}' to pin it"
         )
-        severity(status.detail, file=item.source_file, line=item.source_line, item_id=item.id)
+        unpinned_severity(
+            status.detail, file=item.source_file, line=item.source_line, item_id=item.id
+        )
         return status
 
     status.sha256 = str(record.get("sha256") or "")

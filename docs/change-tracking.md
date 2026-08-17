@@ -12,6 +12,11 @@ already drives the content hash today.
 | `log` | yes | no | no |
 | `ignore` | no | no | no |
 
+**Only the last column is implemented today.** The timeline and baseline-diff
+columns describe what the history layer will do once it exists; until then
+`log` and `ignore` are indistinguishable in every observable way -- see
+[what is not built yet](#what-is-not-built-yet).
+
 `invalidate` is for the substance: a requirement's text, a constraint's limit, a
 decision's rationale. `log` is for things worth seeing but harmless: owner, tags,
 source reference. `ignore` is for noise: timestamps, generated fields.
@@ -25,6 +30,12 @@ not stored".
 Without it, suspect links are unusable. If a change of owner marks fifty
 downstream links suspect, people stop reading the badges within a week and the
 feature is dead. Roughly half your fields should be `log`.
+
+This is design intent for the history layer, not current behavior: today `log`
+has no observable effect beyond being excluded from the content hash, same as
+`ignore`. Marking a field `log` now is a forward-looking choice, not a
+functional one -- it costs nothing and means the schema is already correct
+once the history layer exists.
 
 ## Setting it
 
@@ -128,4 +139,5 @@ worth knowing before you reorganise the schema.
 The git-backed layer: field-level diffs between revisions, per-item timelines,
 suspect-link badges, baselines, and change reports between two baselines. The
 `on_change` policy and the content hash it depends on are implemented and tested;
-the git reader is not written.
+the git reader is not written. Until it is, `log` behaves exactly like `ignore`
+in every observable way.

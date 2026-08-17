@@ -8,6 +8,8 @@ from typing import Any
 import yaml
 
 from .model import (
+    DIAGNOSTIC_LEVELS,
+    ERROR,
     ON_CHANGE_MODES,
     BoardSpec,
     FieldSpec,
@@ -115,6 +117,13 @@ def load_project(config_path: str | None = None, start: str = ".") -> Project:
                 )
             satisfying_statuses = [str(s) for s in satisfying_statuses]
 
+        check_severity = tspec.get("check_severity", ERROR)
+        if check_severity not in DIAGNOSTIC_LEVELS:
+            raise SchemaError(
+                f"types.{tname}.check_severity must be one of {list(DIAGNOSTIC_LEVELS)}, "
+                f"got {check_severity!r}"
+            )
+
         types[tname] = ItemType(
             name=tname,
             prefix=tspec.get("prefix", tname[:3].upper()),
@@ -126,6 +135,7 @@ def load_project(config_path: str | None = None, start: str = ".") -> Project:
             body_on_change=body_on_change,
             append_only=bool(tspec.get("append_only", False)),
             satisfying_statuses=satisfying_statuses,
+            check_severity=check_severity,
         )
 
     if not types:
