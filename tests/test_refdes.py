@@ -220,6 +220,15 @@ def test_log_field_does_not_disturb_the_content_hash():
     assert _hash_after(project, "REQ-PWR-001", "owner", "Someone Else") == before
 
 
+def test_log_and_ignore_are_indistinguishable_for_hashing():
+    """`log` is reserved for a future history layer; today it behaves as `ignore`."""
+    project = _project()
+    before = project.items["REQ-PWR-001"].content_hash
+    log_hash = _hash_after(project, "REQ-PWR-001", "owner", "Someone Else")  # on_change: log
+    ignore_hash = _hash_after(project, "REQ-PWR-001", "last_reviewed", "2020-01-01")  # on_change: ignore
+    assert log_hash == before == ignore_hash
+
+
 def test_invalidate_field_changes_the_content_hash():
     project = _project()
     before = project.items["CON-THM-001"].content_hash
