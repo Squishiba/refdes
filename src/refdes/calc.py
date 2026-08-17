@@ -465,6 +465,22 @@ def _relative(slack, reference) -> float | None:
 RANGE_RE = re.compile(r"^(.*?)\s*\.\.\s*(.*)$")
 COMPARE_RE = re.compile(r"^\s*(<=|>=|==|<|>)\s*(.+)$")
 
+# Heuristic for the parse-failure hint below: text with two or more numbers
+# *and* a list-like conjunction (", ", "; ", " and ", " with ") reads as
+# several bounds run together in prose -- e.g. "±1 % ... 0-60 degC, with 12 V
+# TVS protection" -- rather than one malformed comparison or range. Neither
+# signal alone is enough (a tolerance like "100 ohm ±5%" has two numbers but
+# no conjunction; "somewhere under 2 watts" has a conjunction-free typo and
+# only one number), so both are required to keep the hint rare.
+_LIMIT_NUMBER_RE = re.compile(r"[-+±]?\d+(?:\.\d+)?")
+_LIMIT_CONJUNCTION_RE = re.compile(r",\s|;\s|\band\b|\bwith\b", re.IGNORECASE)
+
+
+def _multi_bound_hint(raw: str) -> str:
+    if len(_LIMIT_NUMBER_RE.findall(raw)) >= 2 and _LIMIT_CONJUNCTION_RE.search(raw):
+        return "\nnote: if this limit describes more than one bound, split it into separate constraint items"
+    return ""
+
 
 def parse_limit(text: str) -> Limit:
     raw = str(text).strip()
@@ -490,7 +506,7 @@ def parse_limit(text: str) -> Limit:
 
     raise CalcError(
         f"could not read limit {raw!r}; expected a comparison such as '<= 2 W/in^2' "
-        f"or a range such as '9 V .. 36 V'"
+        f"or a range such as '9 V .. 36 V'" + _multi_bound_hint(raw)
     )
 
 

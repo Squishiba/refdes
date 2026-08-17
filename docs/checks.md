@@ -37,6 +37,72 @@ ERROR items/constraints/thermal.yaml:8 [CON-THM-001] — limit: could not read l
       range such as '9 V .. 36 V'
 ```
 
+If the text that failed to parse looks like it is naming more than one bound, the
+error grows a second line:
+
+```
+note: if this limit describes more than one bound, split it into separate
+      constraint items
+```
+
+## One `limit`, one bound
+
+`limit` takes a single scalar comparison or range — never a list of them. A spec
+sentence that reads naturally as "X, with Y, across Z" is not one constraint with
+three clauses; it is three constraints that happen to share a paragraph in the
+datasheet.
+
+A real case that stalled a project: a sensor spec reading "±1 % of full scale
+across 0–60 °C, with 12 V TVS protection". Written as a single `limit`, none of the
+three numbers has anywhere to go — `limit` is `required: true`, so the field can't
+be left off, and packing all three into one string fails to parse (the field is
+scalar, not a list). The fix is not a bigger `limit` syntax; it's to notice that
+"accuracy", "temperature range", and "clamp voltage" are three different
+engineering arguments wearing one sentence, and give each its own item:
+
+```yaml
+- id: CON-SNS-010
+  title: Sensor accuracy
+  limit: "<= 0.01"   # 1 % of full scale, as a dimensionless fraction -- % is not a unit
+  rationale: Control loop tolerance budget assumes 1 % worst case.
+
+- id: CON-SNS-011
+  title: Operating temperature
+  limit: "0 degC .. 60 degC"
+  rationale: Enclosure is rated for this range; the sensor must not be the
+    limiting part.
+
+- id: CON-SNS-012
+  title: Input clamp voltage
+  limit: "<= 12 V"
+  rationale: TVS clamp voltage margin against the input's absolute max rating.
+```
+
+This is strictly more useful than the merged version: each constraint now checks
+independently, gets its own page and its own row in the coverage table, and
+carries the one rationale that actually explains it — the three reasons were
+never the same reason, they were only ever the same string.
+
+If a spec relates *several already-declared values* — not one value against a
+fixed number, but an arithmetic relationship between them, e.g. "the sum of the
+slot current limits shall not exceed the rail's rated capacity" — that is not a
+gap in `limit` either. Compute the relation in a [calc block](math.md) and check
+the result against an ordinary scalar constraint:
+
+```calc
+I_total = I_slot1 + I_slot2 + I_slot3
+```
+
+```yaml
+checks:
+  - value: I_total
+    against: CON-PWR-020   # limit: "<= 25 A"
+```
+
+The relation (`+`) lives in the calc expression; the constraint stays a single
+number. There is no `checks:` form for "sum against limit" because none is
+needed — arithmetic is calc's job, and a `limit` only ever compares one value.
+
 ## Declaring a check
 
 In the item doing the work — usually a decision — name a calc value and the item to

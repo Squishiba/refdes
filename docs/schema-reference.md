@@ -168,7 +168,7 @@ Three field *names* have behaviour attached regardless of declared type:
 
 | Field | Behaviour |
 |---|---|
-| `limit` | Parsed as a quantity; makes the item checkable |
+| `limit` | Parsed as a quantity; makes the item checkable. One scalar bound per field — see [one `limit`, one bound](checks.md#one-limit-one-bound) |
 | `options` | Rendered as the options-considered panel (`name`, `verdict`, `because`) |
 | `checks` | Evaluated as [checks](checks.md) (`value`, `against`) |
 
