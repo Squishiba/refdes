@@ -47,27 +47,20 @@ reproduce the exact config-surface bloat this design exists to fix (that
 prototype is what took one real project from 5 types to 9 and roughly
 doubled its field-declaration count).
 
-The standard is authored using two pieces of plumbing that aren't part of the
-core decision but are required to keep it from being fifty-odd duplicate
-field declarations:
+The standard is authored using one piece of plumbing that isn't part of the
+core decision but is required to keep it from being fifty-odd duplicate
+field declarations: **`field_sets:`**, named reusable groups of field
+definitions merged into a type's own `fields:` via `include:`. This is the
+mechanism the standard is built with, not just a convenience projects may
+reach for; see §5.
 
-- **`field_sets:`** — named, reusable groups of field definitions, merged
-  into a type's own `fields:` via `include:`. This is the mechanism the
-  standard is built with, not just a convenience projects may reach for; see
-  §5.
-- **Three small per-type flags that generalize logic the build pipeline
-  hardcodes today by type *name***: `coverable: bool`, `coverable_statuses:
-  list[str]`, and a new `verifying_statuses` mirroring the existing
-  `satisfying_statuses`. Coverage computation today checks `item.type ==
-  "requirement"`, `item.type == "test"`, and `status == "retired"` directly
-  in Python. That's harmless while the schema is fixed by convention; once a
-  project is allowed to rename or drop the standard's `requirement` or `test`
-  types (§2), those hardcodes stop matching anything and coverage silently
-  degrades rather than erroring — the single worst failure mode available in
-  this design, because it repeats a pattern (a feature quietly doing nothing
-  while reporting cleanly) this project has already had to fix twice before.
-  These three flags close that gap and are a required companion to shipping
-  the standard, not an optional nice-to-have.
+The standard's types below also use `coverable:`, `coverable_statuses:`, and
+`verifying_statuses:` — but those are general schema engine capabilities,
+not standard-specific plumbing, exactly like `required:` and
+`satisfying_statuses:` already are. They're specified in §2, alongside the
+rest of the engine's override-safety machinery, because they're available to
+every project's own type declarations whether or not that project uses the
+standard at all.
 
 ### Types, fields, and status lifecycles
 
@@ -134,12 +127,13 @@ types:
     satisfying_statuses: [accepted]
     check_severity: error
     fields:
-      title:   { type: text, required: true, on_change: invalidate }
-      status:  { type: enum, choices: [proposed, in_progress, accepted, on_hold, rejected, superseded],
-                 default: proposed, on_change: invalidate }
-      date:    { type: date, on_change: log }
-      options: { type: options, on_change: invalidate }
-      checks:  { type: checks, on_change: invalidate }
+      title:     { type: text, required: true, on_change: invalidate }
+      status:    { type: enum, choices: [proposed, in_progress, accepted, on_hold, rejected, superseded],
+                   default: proposed, on_change: invalidate }
+      rationale: { type: text, on_change: invalidate, required_when: {status: rejected} }
+      date:      { type: date, on_change: log }
+      options:   { type: options, on_change: invalidate }
+      checks:    { type: checks, on_change: invalidate }
     include: [provenance, stewardship]
     links:
       satisfies:      [requirement]
@@ -210,15 +204,40 @@ byte-identical across types — `tags`, `note`, `source`, `owner`,
 `last_reviewed` — go into a `field_sets:` entry.
 
 `decision`'s status list adds `rejected` beyond the plain
-proposed/in-progress/accepted/on-hold/superseded progression. That's a
-deliberate addition, not evidenced by any single real project: it names "this
-was proposed, analyzed, and explicitly ruled out" as distinct from
-`on_hold` (paused, might resume) and `superseded` (replaced by a later
-*accepted* decision) — without it, a rejected option has no honest status to
-sit at. Flagged here because it's the one status value in this document that
-isn't backed by observed usage; if it proves unwanted, dropping it back to
-five values is a one-line change to `v1/base.yaml` before it ships, or a
-project-level override afterward (§2).
+proposed/in-progress/accepted/on-hold/superseded progression, naming "this
+was proposed, analyzed, and explicitly ruled out" as distinct from `on_hold`
+(paused, might resume) and `superseded` (replaced by a later *accepted*
+decision). The status value itself remains the one thing in this document
+not backed by observed usage in a real project; if it proves unwanted,
+dropping it back to five values is a one-line change to `v1/base.yaml`
+before it ships, or a project-level override afterward (§2).
+
+A rejected decision needs somewhere to put *why*. Its absence in an earlier
+draft of this standard looked like an oversight, since `requirement` and
+`constraint` both carry a `rationale` field and a decision is the type where
+"why" is the entire point. `decision.rationale` above carries the same
+`on_change: invalidate` treatment as `requirement.rationale` and
+`constraint.rationale`, and is conditionally required exactly when it
+matters most: `required_when: {status: rejected}`. This is a general schema
+mechanism, not a special case wired to this one status — see §2 for its full
+specification, including how the requirement is toggled off project-wide,
+and how it behaves if a project removes `rejected` from the status list
+without also touching the condition.
+
+`rationale` isn't the only place a rejected decision's reasoning can live,
+and it isn't always the right one. It's the decision's *current*, single
+explanation — mutable, meant to state the reasoning as understood now, and
+overwriting it destroys whatever it said before. For reasoning that's
+contested or evolved over time — the back-and-forth that led to a rejection,
+a trade-off argued one way before the decision landed — the existing `log` →
+`records` → `decision` edge (the link table below) is the better home: a
+dated, append-only, sealed account of the reasoning as it happened, immune
+to later editing. Reach for `rationale` to state the decision's current
+justification somewhere a reader can find without digging; reach for one or
+more `log` entries when the reasoning itself is worth preserving exactly as
+it was argued at the time — a single mutable field can't hold "we considered
+X, Y showed it violated the current-limit constraint, we went with Z" as a
+real timeline, and shouldn't try to.
 
 `log` gets `include: [provenance]` only, not `stewardship` — an append-only
 entry has no reviewer rotation and no "last reviewed" date; it's a historical
@@ -316,15 +335,174 @@ posture the existing board-registry path-collision check already takes. The
 same rule applies to removing a whole type: `types.component: null` errors
 if anything still declares `selects: [component]`.
 
-**What conflicts with something the tool relies on, concretely:** the three
-per-type flags introduced in §1 (`coverable`, `coverable_statuses`,
-`verifying_statuses`) exist specifically so that overriding or removing a
-standard type is safe. Before they exist, coverage computation checks type
-names and a hardcoded `"retired"` string directly; a project that renames or
-drops `requirement` under the override rules above would silently lose
-coverage reporting for it rather than erroring. Shipping those three flags is
-a precondition for override being a safe operation at all, not an optional
-refinement.
+### Coverage participation is schema language, not standard content
+
+`coverable: bool`, `coverable_statuses: list[str]`, and `verifying_statuses:
+list[str]` are not part of the standard dictionary — they are general schema
+engine capabilities, exactly like `required:`, `on_change:`,
+`satisfying_statuses:`, and `check_severity:` already are. They're available
+to every project's own `types:` declarations regardless of whether that
+project uses the standard, a preset, or `standard: none`. §1's standard
+simply uses them on its own six types, the same way any bespoke schema is
+free to use them on its own — this is what makes overriding or removing a
+standard type safe, per the rule above, rather than something the standard
+specifically needs.
+
+They exist to replace three places the coverage computation hardcodes a type
+or status *name* directly in Python instead of reading it from
+configuration:
+
+- A hardcoded tuple of exactly two type names gates which items get a
+  `Coverage` object computed at all → replaced by `coverable: bool` on the
+  type.
+- A hardcoded `status == "retired"` string excludes retired items from
+  coverage → replaced by `coverable_statuses: list[str]` on the type; unset
+  means no exclusion beyond a sensible default (below).
+- A hardcoded type-name check gates the per-item "claimed but not verified"
+  warning and whether "satisfied but not verified" warnings are suppressed
+  when nothing verifies anything yet. This one splits in two: which items
+  can *verify* something at all is now derived directly from the schema's
+  own `links:` declarations — any type that declares a `verifies`-family
+  link, by its own name or its computed inverse, is a verifier, which needs
+  no new flag since every project's link declarations already carry this
+  information. Which *statuses* of a verifier actually count as verified,
+  as opposed to merely linked, is `verifying_statuses`, mirroring
+  `satisfying_statuses` exactly — unset means every link counts, the same
+  default `satisfying_statuses` already uses.
+
+**The compatibility hazard, and the fallback.** These hardcodes are why a
+bespoke `standard: none` project with its own hand-authored `requirement`
+and `test` types works today without declaring anything — the engine
+already knows what those names mean, by convention. If `coverable` became
+the *sole* mechanism, every such project would go silently uncovered the
+moment it upgraded `refdes`, because a flag that didn't exist when its
+schema was written can't be present in it.
+
+So the type-name fallback stays, demoted from the only path to a fallback
+with a warning: if a type does not declare `coverable:` at all, the loader
+checks whether its name is literally `requirement` or `constraint` —
+today's behavior, preserved exactly — and emits one project-level warning
+naming the fix:
+
+```
+WARNING types.requirement does not declare 'coverable:'; falling back to
+  name-based detection (requirement/constraint are coverable by convention).
+  Add 'coverable: true' explicitly — this fallback is removed in refdes 1.0.
+```
+
+The same fallback, narrowly scoped to preserve today's behavior exactly,
+keeps the "claimed but not verified" warning restricted to items literally
+named `requirement` when reached through the fallback path — it does not
+also start firing for `constraint`-named types just because they happen to
+match the same name check, which would be a new warning appearing on an old
+project with no config change to explain it. Once a project explicitly
+declares `coverable: true` on its own `constraint`-equivalent type, the
+warning applies there too, on the general path — an opt-in improvement, not
+a compatibility break.
+
+The verifier-detection half needs no equivalent fallback: because it's
+derived from `links:` declarations every project already has rather than a
+new flag, any project with a test-like type that already declares a
+`verifies`-shaped link keeps working with zero changes, standard or not.
+
+`coverable_statuses` left unset on a coverable type defaults to excluding
+`status == "retired"` if the type has a `status` field, and excluding
+nothing otherwise. This needs no warning — it isn't a name-detection
+compatibility shim, just an unconfigured default, the same posture
+`satisfying_statuses: None` already takes.
+
+The name-based `coverable` fallback, and its warning, is removed at the next
+*major* version of `refdes` itself — the same deprecation horizon §3 already
+applies to dropping support for old `standard.version` bundles, kept
+consistent rather than inventing a second policy for the same kind of
+change.
+
+### Conditional requiredness: `required_when`
+
+A field can be required only when another field on the same item currently
+holds a particular value — the mechanism `decision.rationale` uses in §1 to
+require a reason exactly when `status: rejected`. Like the coverage flags
+above, this is general schema language available to any field on any type,
+standard or bespoke — not a special case wired to one field.
+
+```yaml
+fields:
+  rationale:
+    type: text
+    on_change: invalidate
+    required_when: { status: rejected }
+```
+
+- The mapping's keys name other fields on the *same* type; a field cannot
+  name itself.
+- Each value is a scalar or a list of scalars — a list means "any of these"
+  (an OR within that one key).
+- Multiple keys are ANDed together: every named field must currently match
+  one of its listed values for the dependent field to become required.
+- This is deliberately not a general expression language: no OR across
+  different keys, no negation, no nesting. A need that can't be expressed as
+  "all of these fields currently match one of these values" wants a
+  different, separate mechanism, not an extension of this one.
+- A field declares `required: true` or `required_when:`, never both —
+  combining them is redundant, since unconditional already implies every
+  condition, and is a `SchemaError` at load.
+
+**Which field types `required_when` can key off:** the *condition* fields
+(the keys in the mapping, e.g. `status`) must be `type: enum`. An enum has a
+closed, declared `choices:` list, which is what lets the loader validate
+that every value named in a `required_when:` actually exists, and
+re-validate that after any override touches the enum's choices (below).
+Extending this to free-typed fields — `text`, `list`, `date` — would mean
+either no validation of the referenced value at all, or a type-specific
+validator per field type; neither is attempted here. The *dependent* field
+(the one that becomes conditionally required) has no type restriction — "is
+this field present and non-empty" is the same check `required: true` already
+performs regardless of type.
+
+**The diagnostic**, at build time, evaluated per item only when the named
+condition currently matches, names the specific rule that fired rather than
+reporting a bare missing field:
+
+```
+ERROR items/main-io/decisions.md:50 [DEC-IO-002] — 'rationale' is required
+  when status is 'rejected' (required_when: {status: rejected})
+```
+
+**Load-time validation**, run alongside the merge described above, after
+base, presets, and the project overlay have all been applied — because only
+the final resolved schema matters: a `required_when:` naming a field that
+doesn't exist on the type is a `SchemaError` (difflib-suggested against
+known fields, the same suggestion machinery used elsewhere in the tool); one
+naming a field that exists but isn't an `enum` is a `SchemaError`; and — the
+case this was built for — **one naming a value not present in the
+referenced enum's resolved `choices:` is a `SchemaError`**:
+
+```
+configuration error: types.decision.fields.rationale.required_when
+references status: 'rejected', which is not among status's declared
+choices: [draft, in_progress, accepted, on_hold, superseded]. Update or
+remove the required_when clause.
+```
+
+So a project overriding `decision.fields.status.choices` to drop `rejected`
+without also touching `rationale.required_when` doesn't silently leave a
+dead, unreachable condition in the merged schema — it fails the build,
+naming both sides, the same posture this document already takes for every
+other case of removing something the config relies on.
+
+**The toggle.** Whether `decision.rationale` ships `required_when: {status:
+rejected}` by default is a project-level choice, not a fixed property of the
+standard bundle. That toggle belongs in the project-level config file
+introduced separately for calc significant figures and item layout, not in
+`refdes.yaml`'s `standard:` block — this document doesn't define that file
+or the toggle's exact key, only its contract: a boolean, defaulting to
+`true`, consulted by the loader before the standard's `decision.rationale`
+field is merged in, which drops the `required_when` clause when the toggle
+is `false`. The raw override underneath it is always available regardless of
+whether that toggle exists yet — a project can set
+`types.decision.fields.rationale.required_when: null` directly, using the
+normal override syntax above; the toggle is convenience for one well-known
+case, not a new capability.
 
 ---
 
