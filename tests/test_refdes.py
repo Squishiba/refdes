@@ -379,6 +379,146 @@ def test_satisfying_statuses_requires_a_status_field(tmp_path):
         load_project(config_path=str(path))
 
 
+# ---------------------------------------------------- coverage warning aggregation
+
+COVERAGE_AGGREGATION_SCHEMA = """\
+site: {title: "Coverage Aggregation Test", out: _site}
+id: {width: 3, ledger: .refdes/ids.yaml}
+history: {default: invalidate}
+units: {preferred: []}
+link_types:
+  satisfies: { inverse: satisfied_by, label: "Satisfies" }
+  verifies:  { inverse: verified_by, label: "Verifies" }
+types:
+  requirement:
+    prefix: REQ
+    label: Requirement
+    fields:
+      text: { type: text, required: true, on_change: invalidate }
+    links: {}
+    body: { on_change: invalidate }
+  decision:
+    prefix: DEC
+    label: Decision
+    fields:
+      title:  { type: text, required: true, on_change: invalidate }
+      status: { type: enum, choices: [proposed, accepted, on_hold], default: proposed, on_change: invalidate }
+    links:
+      satisfies: [requirement]
+    satisfying_statuses: [accepted]
+    body: { on_change: invalidate }
+  test:
+    prefix: TST
+    label: Test
+    fields:
+      title: { type: text, required: true, on_change: invalidate }
+    links:
+      verifies: [requirement]
+    body: { on_change: invalidate }
+"""
+
+COVERAGE_AGGREGATION_ITEMS = {
+    "req-open.md": "---\nid: REQ-OPEN-001\ntype: requirement\ntext: Untouched.\n---\n",
+    "req-sat.md": "---\nid: REQ-SAT-001\ntype: requirement\ntext: Settled, unverified.\n---\n",
+    "dec-sat.md": (
+        "---\nid: DEC-SAT-001\ntype: decision\ntitle: t\nstatus: accepted\n"
+        "satisfies: [REQ-SAT-001]\n---\n"
+    ),
+    "req-claim.md": "---\nid: REQ-CLAIM-001\ntype: requirement\ntext: Not settled.\n---\n",
+    "dec-claim.md": (
+        "---\nid: DEC-CLAIM-001\ntype: decision\ntitle: t\nstatus: on_hold\n"
+        "satisfies: [REQ-CLAIM-001]\n---\n"
+    ),
+    "req-verified.md": "---\nid: REQ-VERIFIED-001\ntype: requirement\ntext: Fully covered.\n---\n",
+    "dec-verified.md": (
+        "---\nid: DEC-VERIFIED-001\ntype: decision\ntitle: t\nstatus: accepted\n"
+        "satisfies: [REQ-VERIFIED-001]\n---\n"
+    ),
+    "tst.md": (
+        "---\nid: TST-VERIFIED-001\ntype: test\ntitle: t\n"
+        "verifies: [REQ-VERIFIED-001]\n---\n"
+    ),
+}
+
+
+@pytest.fixture
+def coverage_aggregation_project(tmp_path):
+    (tmp_path / "refdes.yaml").write_text(COVERAGE_AGGREGATION_SCHEMA, encoding="utf-8")
+    items = tmp_path / "items"
+    items.mkdir()
+    for name, text in COVERAGE_AGGREGATION_ITEMS.items():
+        (items / name).write_text(text, encoding="utf-8")
+    return tmp_path
+
+
+def _build_coverage_project(path):
+    project = load_project(config_path=str(path / "refdes.yaml"))
+    parse.load_items(project)
+    build_mod.build(project)
+    return project
+
+
+def test_open_and_unverified_coverage_warnings_are_aggregated(coverage_aggregation_project):
+    """Per-item noise for the two routine coverage classes collapses into one
+    summary line each, with `coverage.html` carrying the detail (issue #3, finding 8)."""
+    project = _build_coverage_project(coverage_aggregation_project)
+
+    messages = {d.message for d in project.warnings if d.item_id is None}
+    assert "1 item(s) with no coverage — see coverage.html" in messages
+    assert "1 requirement(s) satisfied but not verified — see coverage.html" in messages
+
+    # No per-item duplicate for either aggregated class.
+    assert not any(d.item_id == "REQ-OPEN-001" for d in project.warnings)
+    assert not any(d.item_id == "REQ-SAT-001" for d in project.warnings)
+    # Fully verified requirement contributes to neither bucket.
+    assert not any(d.item_id == "REQ-VERIFIED-001" for d in project.warnings)
+
+
+def test_claimed_but_not_verified_stays_per_item(coverage_aggregation_project):
+    """The one coverage warning that names something actionable -- an unsettled
+    decision -- must not be swallowed into the aggregate."""
+    project = _build_coverage_project(coverage_aggregation_project)
+
+    claimed = [d for d in project.warnings if d.item_id == "REQ-CLAIM-001"]
+    assert len(claimed) == 1
+    assert "claimed but not verified" in claimed[0].message
+
+
+def test_satisfied_without_any_test_items_is_silent(coverage_project):
+    """`coverage_project` declares no `test` type at all, so "not verified" is
+    noise by construction -- suppressed entirely, per item and aggregated."""
+    project = _build_coverage_project(coverage_project)
+
+    assert not any(d.item_id == "REQ-A-001" for d in project.warnings)
+    assert not any("satisfied but not verified" in d.message for d in project.warnings)
+
+
+def test_first_test_item_makes_unverified_warnings_reappear(coverage_project):
+    """The suppression only holds while zero `test` items exist -- adding the
+    first one is meant to bring the warning right back (confirmed intended
+    behaviour, not a surprise to design around)."""
+    schema = COVERAGE_SCHEMA + (
+        "  test:\n"
+        "    prefix: TST\n"
+        "    label: Test\n"
+        "    fields:\n"
+        "      title: { type: text, required: true, on_change: invalidate }\n"
+        "    body: { on_change: invalidate }\n"
+    )
+    (coverage_project / "refdes.yaml").write_text(schema, encoding="utf-8")
+    (coverage_project / "items" / "tst.md").write_text(
+        "---\nid: TST-UNRELATED-001\ntype: test\ntitle: An unrelated test.\n---\n",
+        encoding="utf-8",
+    )
+
+    project = _build_coverage_project(coverage_project)
+
+    assert any(
+        d.message == "1 requirement(s) satisfied but not verified — see coverage.html"
+        for d in project.warnings
+    )
+
+
 # --------------------------------------------------------- misspelled link keys
 
 
@@ -2044,12 +2184,33 @@ def test_coverage_separates_addressed_satisfied_and_verified():
     assert "LOG-A-005" in cov["CON-THM-001"].addressed_by
 
 
-def test_outstanding_work_is_warned_about():
+def test_outstanding_work_is_aggregated_into_summary_lines():
+    """The real project's own coverage gaps (issue #3, finding 8) roll up into
+    two summary lines instead of one warning per requirement."""
     project = _project()
-    warned = {d.item_id for d in project.warnings}
-    assert "REQ-PWR-003" in warned  # satisfied but unverified
-    assert "REQ-PWR-004" in warned  # nothing at all
-    assert "REQ-PWR-001" not in warned  # verified by TST-PWR-001
+
+    open_count = sum(1 for c in project.coverage.values() if c.stage == "open")
+    unverified_count = sum(
+        1
+        for item_id, c in project.coverage.items()
+        if c.stage != "open"
+        and c.stage != "claimed"
+        and not c.verified_by
+        and project.items[item_id].type == "requirement"
+    )
+    assert open_count > 0 and unverified_count > 0  # otherwise this proves nothing
+
+    aggregate_messages = {d.message for d in project.warnings if d.item_id is None}
+    assert f"{open_count} item(s) with no coverage — see coverage.html" in aggregate_messages
+    assert (
+        f"{unverified_count} requirement(s) satisfied but not verified — see coverage.html"
+        in aggregate_messages
+    )
+
+    # Neither routine class leaves a per-item warning behind.
+    assert not any(d.item_id == "REQ-PWR-003" for d in project.warnings)
+    assert not any(d.item_id == "REQ-PWR-004" for d in project.warnings)
+    assert not any(d.item_id == "REQ-PWR-001" for d in project.warnings)  # verified
 
 
 def test_log_entries_are_sealed_and_edits_are_caught():
@@ -2170,11 +2331,14 @@ def test_citation_entry_without_url_is_an_error(tmp_path):
 # ---------------------------------------------------------------------- verify
 
 
-def test_unpinned_citation_warns_by_default(citation_project):
+def test_unpinned_citation_is_info_by_default(citation_project):
+    """Routine until `refdes fetch` runs (issue #3, finding 8) -- default-hidden
+    info, not a warning that competes with actionable diagnostics."""
     project = _cite_build(citation_project)
     status = project.items["CMP-001"].citations[0]
     assert status.state == "unpinned"
-    assert any("has no fetched record" in d.message for d in project.warnings)
+    assert any("has no fetched record" in d.message for d in project.infos)
+    assert not any("has no fetched record" in d.message for d in project.warnings)
     assert not any("has no fetched record" in d.message for d in project.errors)
 
 
@@ -2601,6 +2765,23 @@ def test_cli_build_require_citations_promotes_to_error(citation_project, capsys)
 
 def test_cli_build_without_require_citations_still_succeeds(citation_project):
     assert cli_mod.main(["-c", str(citation_project / "refdes.yaml"), "build"]) == 0
+
+
+def test_cli_check_hides_info_diagnostics_by_default(citation_project, capsys):
+    code = cli_mod.main(["-c", str(citation_project / "refdes.yaml"), "check"])
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "has no fetched record" not in out
+    assert ", 0 info" not in out  # summary line unchanged unless --verbose
+
+
+def test_cli_check_verbose_shows_info_diagnostics(citation_project, capsys):
+    code = cli_mod.main(["-c", str(citation_project / "refdes.yaml"), "check", "--verbose"])
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "INFO" in out
+    assert "has no fetched record" in out
+    assert ", 1 info" in out
 
 
 def test_cli_audit_lists_citations(citation_project, capsys):
