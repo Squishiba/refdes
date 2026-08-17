@@ -262,9 +262,11 @@ def run_checks(project: Project) -> None:
                     result.limit = limit.text
                     result.margin = limit.margin(env[name])
                     if not ok:
+                        message = f"{name} violates {target_id}: {detail}"
+                        if env[name].has_width and limit.kind in ("<=", "<", ">=", ">"):
+                            message += f" (nominal {result.actual})"
                         project.error(
-                            f"{name} = {result.actual} violates {target_id} "
-                            f"({limit.text})",
+                            message,
                             file=item.source_file, line=item.source_line, item_id=item.id,
                         )
                 except calc.CalcError as exc:

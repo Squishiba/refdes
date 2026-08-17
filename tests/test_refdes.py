@@ -1744,6 +1744,67 @@ def test_example_project_builds_and_catches_the_thermal_violation():
     assert "violates CON-THM-001" in " ".join(d.message for d in project.errors)
 
 
+def _io_check_project(tmp_path, *, tolerance):
+    """A single toleranced (or exact) check violating a `<=` constraint."""
+    shutil.copy(os.path.join(REPO, "refdes.yaml"), tmp_path / "refdes.yaml")
+    items = tmp_path / "items"
+    items.mkdir()
+    (items / "io.yaml").write_text(
+        "defaults: { type: constraint }\n"
+        "items:\n"
+        "  - id: CON-IO-004\n"
+        "    title: Input current budget\n"
+        '    limit: "<= 600 mA"\n',
+        encoding="utf-8",
+    )
+    calc_line = "CLIM : A = 0.6061 A ± 15%" if tolerance else "CLIM : A = 0.697 A"
+    (items / "dec-io-002.md").write_text(
+        "---\n"
+        "id: DEC-IO-002\n"
+        "type: decision\n"
+        "title: Input current draw\n"
+        "status: accepted\n"
+        "constrains: [CON-IO-004]\n"
+        "checks:\n"
+        "  - value: CLIM\n"
+        "    against: CON-IO-004\n"
+        "---\n\n"
+        f"```calc\n{calc_line}\n```\n",
+        encoding="utf-8",
+    )
+    return _build_at(tmp_path)
+
+
+def test_check_error_reports_worst_case_with_nominal_in_parens(tmp_path):
+    """A toleranced breach must report its worst-case bound, not just the nominal.
+
+    Reporting only the nominal (0.6061 A) makes a 97 mA / 16% worst-case breach
+    read as a 6 mA overshoot. The nominal stays in a parenthetical because it is
+    the number a reader recognises from the calc block.
+    """
+    project = _io_check_project(tmp_path, tolerance=True)
+    check = project.items["DEC-IO-002"].checks[0]
+    assert check.ok is False
+    message = next(d.message for d in project.errors if "CON-IO-004" in d.message)
+    assert (
+        "CLIM violates CON-IO-004: worst case 0.697 A vs <= 600 mA (nominal 0.6061 A)"
+        in message
+    )
+
+
+def test_check_error_omits_nominal_when_worst_case_equals_it(tmp_path):
+    """No tolerance means worst case and nominal are the same number.
+
+    The parenthetical would be pure noise here, so it must not appear.
+    """
+    project = _io_check_project(tmp_path, tolerance=False)
+    check = project.items["DEC-IO-002"].checks[0]
+    assert check.ok is False
+    message = next(d.message for d in project.errors if "CON-IO-004" in d.message)
+    assert "CLIM violates CON-IO-004: worst case 0.697 A vs <= 600 mA" in message
+    assert "nominal" not in message
+
+
 def test_backlinks_resolve_from_either_end_of_an_edge():
     """A test declaring `verifies` must appear as `verified_by` on the requirement."""
     project = _project()
