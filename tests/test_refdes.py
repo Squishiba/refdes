@@ -1399,9 +1399,50 @@ def test_unregistered_path_segment_gets_no_board(board_project):
     assert project.items["REQ-S-001"].board == ""
 
 
+def test_unregistered_path_segment_warns_that_it_has_no_board(board_project):
+    project = _build_at(board_project)
+    warned = [
+        d for d in project.warnings
+        if d.item_id == "REQ-S-001" and d.message.startswith("no board")
+    ]
+    assert len(warned) == 1
+    message = warned[0].message
+    assert "'shared' is not in the boards: registry" in message
+    # Both remedies named: the file's defaults:, or moving it under a real board.
+    assert "board: <name>" in message
+    assert "items/<registered-board>/" in message
+
+
+def test_item_directly_under_items_warns_that_it_has_no_board(tmp_path):
+    (tmp_path / "refdes.yaml").write_text(BOARD_CONFIG, encoding="utf-8")
+    items = tmp_path / "items"
+    items.mkdir(parents=True, exist_ok=True)
+    (items / "loose.yaml").write_text(
+        "defaults: { type: requirement, prefix: REQ-L }\n"
+        "items:\n  - id: REQ-L-001\n    text: Sits directly in items/, no board folder.\n",
+        encoding="utf-8",
+    )
+    project = _build_at(tmp_path)
+    assert project.items["REQ-L-001"].board == ""
+    warned = [
+        d for d in project.warnings
+        if d.item_id == "REQ-L-001" and d.message.startswith("no board")
+    ]
+    assert len(warned) == 1
+    assert "outside any board folder" in warned[0].message
+
+
 def test_item_level_board_override_beats_the_path(board_project):
     project = _build_at(board_project)
     assert project.items["REQ-S-002"].board == "board-a"
+
+
+def test_item_level_board_override_does_not_warn_about_no_board(board_project):
+    project = _build_at(board_project)
+    assert not any(
+        d.item_id == "REQ-S-002" and d.message.startswith("no board")
+        for d in project.warnings
+    )
 
 
 def test_explicit_board_override_must_be_registered(tmp_path):
@@ -1628,6 +1669,74 @@ def test_audit_reports_board_moves(board_project):
     parse.load_items(project2)
     build_mod.build(project2)  # audit never writes
     assert ("REQ-A-001", "board-a", "board-b") in project2.board_moves
+
+
+def test_a_move_off_the_registry_is_drift_too(board_project):
+    """Finding 17: leaving the registry entirely is the drift most worth catching."""
+    project = _build_at(board_project)
+    build_mod.build(project, seal_write=True)  # records REQ-A-001 -> board-a
+
+    # Rename board-a's folder to something the registry doesn't know -- same
+    # repro shape as finding 16: the item now resolves to no board at all.
+    (board_project / "items" / "board-a").rename(
+        board_project / "items" / "board-a-renamed"
+    )
+
+    project2 = _build_at(board_project)
+    assert project2.items["REQ-A-001"].board == ""
+    assert ("REQ-A-001", "board-a", "") in project2.board_moves
+    assert not project2.errors
+    assert any(
+        d.item_id == "REQ-A-001"
+        and "was on board 'board-a' and now resolves to no board" in d.message
+        for d in project2.warnings
+    )
+    # Not accepted: the manifest still remembers the old board.
+    assert boards_mod.load_manifest(project2)["REQ-A-001"] == "board-a"
+
+
+def test_accept_board_move_off_the_registry_records_the_empty_board(board_project):
+    project = _build_at(board_project)
+    build_mod.build(project, seal_write=True)
+    (board_project / "items" / "board-a").rename(
+        board_project / "items" / "board-a-renamed"
+    )
+
+    project2 = _build_at(board_project)
+    build_mod.build(project2, seal_write=True, accept_board_move=True)
+    assert boards_mod.load_manifest(project2)["REQ-A-001"] == ""
+
+    project3 = _build_at(board_project)
+    assert not project3.board_moves  # drift silenced: recorded "" matches resolved ""
+
+
+def test_audit_reports_a_board_move_off_the_registry(board_project):
+    project = _build_at(board_project)
+    build_mod.build(project, seal_write=True)
+    (board_project / "items" / "board-a").rename(
+        board_project / "items" / "board-a-renamed"
+    )
+    project2 = load_project(config_path=str(board_project / "refdes.yaml"))
+    parse.load_items(project2)
+    build_mod.build(project2)  # audit never writes
+    assert ("REQ-A-001", "board-a", "") in project2.board_moves
+
+
+def test_item_that_never_had_a_board_does_not_trigger_drift(board_project):
+    """REQ-S-001 lives in an unregistered folder from its very first build: it is
+    never in the manifest, so verify() must stay silent about it. Finding 16's
+    diagnostic covers it instead, and the two must not double up on one file."""
+    seed = _build_at(board_project)
+    build_mod.build(seed, seal_write=True)
+    assert "REQ-S-001" not in boards_mod.load_manifest(seed)
+
+    project = _build_at(board_project)
+    assert not any(item_id == "REQ-S-001" for item_id, _, _ in project.board_moves)
+    warned = [
+        d for d in project.warnings
+        if d.item_id == "REQ-S-001" and d.message.startswith("no board")
+    ]
+    assert len(warned) == 1
 
 
 # ----------------------------------------------------------------- summary view

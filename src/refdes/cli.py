@@ -181,7 +181,7 @@ def cmd_audit(args) -> int:
         print("\nBoard moves since the manifest was last written:")
         if project.board_moves:
             for item_id, old, new in project.board_moves:
-                print(f"  {item_id:<14} {old} -> {new}")
+                print(f"  {item_id:<14} {old} -> {new or '(none)'}")
         else:
             print("  (none)")
 

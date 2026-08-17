@@ -32,7 +32,8 @@ def _path_index(project: Project) -> dict[str, str]:
     return {spec.path_segment: name for name, spec in project.boards.items()}
 
 
-def _derive(project: Project, item: Item) -> str:
+def _segment(item: Item) -> str:
+    """The first items/ path segment under which `item` lives, or "" if none."""
     rel = item.source_file.replace("\\", "/")
     prefix = "items/"
     if not rel.startswith(prefix):
@@ -40,8 +41,12 @@ def _derive(project: Project, item: Item) -> str:
     remainder = rel[len(prefix) :]
     if "/" not in remainder:
         return ""  # file sits directly in items/, no board segment
-    segment = remainder.split("/", 1)[0]
-    return _path_index(project).get(segment, "")
+    return remainder.split("/", 1)[0]
+
+
+def _derive(project: Project, item: Item) -> str:
+    segment = _segment(item)
+    return _path_index(project).get(segment, "") if segment else ""
 
 
 def resolve(project: Project) -> None:
@@ -67,6 +72,18 @@ def resolve(project: Project) -> None:
             item.board = item.board_hint
         else:
             item.board = _derive(project, item)
+            if not item.board:
+                segment = _segment(item)
+                if segment:
+                    reason = f"{segment!r} is not in the boards: registry"
+                else:
+                    reason = "it sits directly in items/, outside any board folder"
+                project.warn(
+                    f"no board: {reason} and no board: key was set. Add "
+                    f"`board: <name>` to the file's defaults:, or move the file "
+                    f"to items/<registered-board>/.",
+                    file=item.source_file, line=item.source_line, item_id=item.id,
+                )
 
 
 def lint_tokens(project: Project) -> None:
@@ -133,9 +150,10 @@ def verify(project: Project, write: bool = False, accept_move: bool = False) -> 
     changed = False
 
     for item in sorted(project.local_items, key=lambda i: i.id):
-        if not item.board:
-            continue
         recorded = manifest.get(item.id)
+        if not item.board and recorded is None:
+            continue  # never on a board -- finding 16's diagnostic covers this
+
         if recorded is None:
             if write:
                 manifest[item.id] = item.board
@@ -145,19 +163,30 @@ def verify(project: Project, write: bool = False, accept_move: bool = False) -> 
             continue
 
         project.board_moves.append((item.id, recorded, item.board))
+        if item.board:
+            accepted = f"was on {recorded!r}, now on {item.board!r}"
+            warning = (
+                f"{item.id} moved from board {recorded!r} to {item.board!r} "
+                f"since the last build. Run 'refdes build --accept-board-move' "
+                f"if this is deliberate, or move the file back."
+            )
+        else:
+            accepted = f"was on {recorded!r}, now resolves to no board"
+            warning = (
+                f"{item.id} was on board {recorded!r} and now resolves to no "
+                f"board. Run 'refdes build --accept-board-move' if this is "
+                f"deliberate, or restore the board."
+            )
         if accept_move:
             project.warn(
-                f"board move accepted: {item.id} was on {recorded!r}, now on "
-                f"{item.board!r}",
+                f"board move accepted: {item.id} {accepted}",
                 file=item.source_file, line=item.source_line, item_id=item.id,
             )
             manifest[item.id] = item.board
             changed = True
         else:
             project.warn(
-                f"{item.id} moved from board {recorded!r} to {item.board!r} since "
-                f"the last build. Run 'refdes build --accept-board-move' if this "
-                f"is deliberate, or move the file back.",
+                warning,
                 file=item.source_file, line=item.source_line, item_id=item.id,
             )
 
