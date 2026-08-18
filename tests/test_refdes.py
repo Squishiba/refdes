@@ -9,6 +9,7 @@ bound rather than the nominal.
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import shutil
 import sys
@@ -23,6 +24,8 @@ from refdes import boards as boards_mod  # noqa: E402
 from refdes import build as build_mod  # noqa: E402
 from refdes import calc, cli as cli_mod, citations as citations_mod, ids, nav as nav_mod, parse, render, seal  # noqa: E402
 from refdes import lifecycle  # noqa: E402
+from refdes import scaffold as scaffold_mod  # noqa: E402
+from refdes import schema_json as schema_json_mod  # noqa: E402
 from refdes import standards  # noqa: E402
 from refdes import workspaces as workspaces_mod  # noqa: E402
 from refdes.schema import SchemaError, load_project  # noqa: E402
@@ -6319,4 +6322,422 @@ def test_equivalent_and_alternate_are_ordinary_authored_links_for_the_lint(parts
     assert any(
         "equivalent points at CMP-002" in d.message and "workspace 'beta'" in d.message
         for d in project.warnings
+    )
+
+
+# ------------------------------------------------ init, new, schema, presets
+
+def test_latest_version_resolves_the_concrete_bundled_max():
+    assert standards.latest_version("hardware") == 1
+
+
+def test_available_presets_includes_design_debate():
+    assert "design-debate" in standards.available_presets("hardware", 1)
+
+
+def test_preset_providers_maps_names_to_the_preset():
+    types, link_types = standards.preset_providers("hardware", 1)
+    assert types["debate"] == "design-debate"
+    assert types["option"] == "design-debate"
+    assert link_types["raises"] == "design-debate"
+    assert link_types["resolved_by"] == "design-debate"
+
+
+def test_init_writes_the_exact_documented_file(tmp_path):
+    path = scaffold_mod.init(str(tmp_path))
+    assert path == str(tmp_path / "refdes.yaml")
+    text = open(path, encoding="utf-8").read()
+    assert "types:" not in text
+    assert "link_types:" not in text
+    assert "field_sets:" not in text
+    assert "standard:" in text
+    assert "base: hardware" in text
+    assert "version: 1" in text  # the concrete integer, never the word "latest"
+    assert "presets: []" in text
+
+    # The file must actually load and resolve to a real, usable schema.
+    project = load_project(config_path=path)
+    assert "requirement" in project.types
+    assert "decision" in project.types
+
+
+def test_init_standard_none_writes_the_escape_hatch(tmp_path):
+    path = scaffold_mod.init(str(tmp_path), standard=None)
+    text = open(path, encoding="utf-8").read()
+    assert "standard: none" in text
+    assert "base:" not in text
+
+
+def test_init_with_preset_writes_it_into_the_list(tmp_path):
+    path = scaffold_mod.init(str(tmp_path), standard="hardware", presets=["design-debate"])
+    text = open(path, encoding="utf-8").read()
+    assert "presets: [design-debate]" in text
+    project = load_project(config_path=path)
+    assert "debate" in project.types
+
+
+def test_init_preset_with_standard_none_is_a_load_time_error(tmp_path):
+    with pytest.raises(SchemaError, match="presets require a base standard"):
+        scaffold_mod.init(str(tmp_path), standard=None, presets=["design-debate"])
+
+
+def test_init_refuses_to_overwrite_an_existing_config(tmp_path):
+    (tmp_path / "refdes.yaml").write_text("site: {title: t, out: _site}\n", encoding="utf-8")
+    with pytest.raises(SchemaError, match="already exists"):
+        scaffold_mod.init(str(tmp_path))
+
+
+def test_init_writes_vscode_yaml_schema_association(tmp_path):
+    scaffold_mod.init(str(tmp_path))
+    settings = (tmp_path / ".vscode" / "settings.json").read_text(encoding="utf-8")
+    data = json.loads(settings)
+    assert data["yaml.schemas"]["./.refdes/schema.json"] == ["items/**/*.yaml"]
+
+
+def test_cli_init_end_to_end(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    status = cli_mod.main(["init"])
+    assert status == 0
+    assert (tmp_path / "refdes.yaml").is_file()
+    assert (tmp_path / ".vscode" / "settings.json").is_file()
+    out = capsys.readouterr().out
+    assert "standard: hardware@1" in out
+
+
+# --------------------------------------------------------------- refdes new
+
+
+def test_new_item_text_required_field_no_default_is_a_placeholder():
+    project = _build_at_repo_schema()
+    spec = project.types["requirement"]
+    text = scaffold_mod.new_item_text("requirement", spec)
+    assert "type: requirement" in text
+    assert "text:  # required -- text" in text
+
+
+def test_new_item_text_field_with_default_is_uncommented_with_the_default():
+    project = _build_at_repo_schema()
+    spec = project.types["decision"]
+    text = scaffold_mod.new_item_text("decision", spec)
+    assert "status: proposed  # choices:" in text
+
+
+def test_new_item_text_optional_field_is_commented_out():
+    project = _build_at_repo_schema()
+    spec = project.types["decision"]
+    text = scaffold_mod.new_item_text("decision", spec)
+    assert "# date:  # date" in text
+
+
+def test_new_item_text_required_when_field_notes_the_condition():
+    project = _build_at_repo_schema()
+    spec = project.types["decision"]
+    text = scaffold_mod.new_item_text("decision", spec)
+    assert "# rationale:" in text
+    assert "required when status is 'rejected'" in text
+
+
+def test_new_item_text_links_are_commented_out_with_target_hint():
+    project = _build_at_repo_schema()
+    spec = project.types["decision"]
+    text = scaffold_mod.new_item_text("decision", spec)
+    assert "# satisfies: []  # target: requirement" in text
+
+
+def _build_at_repo_schema():
+    """A real project resolving the bundled hardware@1 standard, for
+    refdes new / JSON schema tests that need its actual field shapes."""
+    return load_project(config_path=os.path.join(REPO, "refdes.yaml"))
+
+
+def test_cli_new_unknown_type_reports_a_hint(tmp_path, capsys):
+    scaffold_mod.init(str(tmp_path))
+    status = cli_mod.main(["-c", str(tmp_path / "refdes.yaml"), "new", "decisoin"])
+    assert status == 1
+    err = capsys.readouterr().err
+    assert "unknown type 'decisoin'" in err
+    assert "Did you mean 'decision'?" in err
+
+
+def test_cli_new_known_type_prints_scaffold(tmp_path, capsys):
+    scaffold_mod.init(str(tmp_path))
+    status = cli_mod.main(["-c", str(tmp_path / "refdes.yaml"), "new", "requirement"])
+    assert status == 0
+    out = capsys.readouterr().out
+    assert "type: requirement" in out
+
+
+# ----------------------------------------------------------------- JSON schema
+
+
+def test_build_schema_shape():
+    project = _build_at_repo_schema()
+    doc = schema_json_mod.build_schema(project)
+    assert doc["$schema"] == "http://json-schema.org/draft-07/schema#"
+    assert doc["oneOf"] == [
+        {"$ref": "#/$defs/list_file"},
+        {"$ref": "#/$defs/bare_item"},
+    ]
+    assert "requirement__bare" in doc["$defs"]
+    assert "requirement__entry" in doc["$defs"]
+    # JSON-serializable end to end.
+    json.dumps(doc)
+
+
+def test_build_schema_required_only_unconditional():
+    project = _build_at_repo_schema()
+    doc = schema_json_mod.build_schema(project)
+    branch = doc["$defs"]["decision__bare"]
+    assert "title" in branch["required"]
+    # rationale is required_when, not unconditionally required.
+    assert "rationale" not in branch["required"]
+
+
+def test_build_schema_enum_field_carries_choices_and_default():
+    project = _build_at_repo_schema()
+    doc = schema_json_mod.build_schema(project)
+    status = doc["$defs"]["decision__bare"]["properties"]["status"]
+    assert status["enum"] == [
+        "proposed", "in_progress", "accepted", "on_hold", "rejected", "superseded",
+    ]
+    assert status["default"] == "proposed"
+
+
+def test_build_schema_link_carries_target_description():
+    project = _build_at_repo_schema()
+    doc = schema_json_mod.build_schema(project)
+    satisfies = doc["$defs"]["decision__bare"]["properties"]["satisfies"]
+    assert satisfies["type"] == "array"
+    assert satisfies["description"] == "target: requirement"
+
+
+def test_build_schema_additional_properties_false():
+    project = _build_at_repo_schema()
+    doc = schema_json_mod.build_schema(project)
+    assert doc["$defs"]["decision__bare"]["additionalProperties"] is False
+    assert doc["$defs"]["list_file"]["additionalProperties"] is False
+    # defaults: inside a list file is deliberately unvalidated.
+    assert doc["$defs"]["list_file"]["properties"]["defaults"]["additionalProperties"] is True
+
+
+def test_build_schema_body_only_on_the_list_file_entry_branch():
+    project = _build_at_repo_schema()
+    doc = schema_json_mod.build_schema(project)
+    assert "body" not in doc["$defs"]["decision__bare"]["properties"]
+    assert "body" in doc["$defs"]["decision__entry"]["properties"]
+
+
+def test_build_schema_id_is_never_required():
+    project = _build_at_repo_schema()
+    doc = schema_json_mod.build_schema(project)
+    for key, branch in doc["$defs"].items():
+        if key.endswith("__bare") or key.endswith("__entry"):
+            assert "id" not in branch["required"]
+
+
+def test_build_schema_prefix_board_workspace_omitted_when_shadowed(tmp_path):
+    (tmp_path / "refdes.yaml").write_text(
+        "site: {title: t, out: _site}\n"
+        "types:\n"
+        "  requirement:\n"
+        "    prefix: REQ\n"
+        "    fields:\n"
+        "      text: {type: text, required: true}\n"
+        "      board: {type: text}\n",  # shadows the reserved OVERRIDABLE key
+        encoding="utf-8",
+    )
+    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    doc = schema_json_mod.build_schema(project)
+    props = doc["$defs"]["requirement__bare"]["properties"]
+    assert props["board"] == {"type": "string"}  # the field's own, not the override
+    assert "prefix" in props  # not shadowed, still offered
+
+
+def test_write_schema_creates_the_file_and_detects_staleness(tmp_path):
+    (tmp_path / "refdes.yaml").write_text(COVERAGE_SCHEMA, encoding="utf-8")
+    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    was_stale = schema_json_mod.write_schema(project)
+    assert was_stale is False  # nothing existed before this write
+    schema_path = tmp_path / ".refdes" / "schema.json"
+    assert schema_path.is_file()
+    json.loads(schema_path.read_text(encoding="utf-8"))  # valid JSON
+
+    # Freshly written -- not stale relative to the config that hasn't changed.
+    was_stale_2 = schema_json_mod.write_schema(project)
+    assert was_stale_2 is False
+
+    # Make the schema file look older than a just-touched refdes.yaml.
+    old = os.path.getmtime(schema_path) - 10
+    os.utime(schema_path, (old, old))
+    was_stale_3 = schema_json_mod.write_schema(project)
+    assert was_stale_3 is True
+
+
+def test_cli_schema_json_prints_valid_schema(tmp_path, capsys):
+    scaffold_mod.init(str(tmp_path))
+    status = cli_mod.main(["-c", str(tmp_path / "refdes.yaml"), "schema", "--json"])
+    assert status == 0
+    out = capsys.readouterr().out
+    doc = json.loads(out)
+    assert "requirement__bare" in doc["$defs"]
+
+
+def test_check_refreshes_schema_json_and_warns_when_stale(tmp_path, capsys):
+    (tmp_path / "refdes.yaml").write_text(COVERAGE_SCHEMA, encoding="utf-8")
+    (tmp_path / "items").mkdir()
+    schema_path = tmp_path / ".refdes" / "schema.json"
+
+    cli_mod.main(["-c", str(tmp_path / "refdes.yaml"), "check"])
+    assert schema_path.is_file()
+
+    old = os.path.getmtime(schema_path) - 10
+    os.utime(schema_path, (old, old))
+    capsys.readouterr()
+    cli_mod.main(["-c", str(tmp_path / "refdes.yaml"), "check"])
+    out = capsys.readouterr().out
+    assert "schema.json was older than refdes.yaml" in out
+
+
+# ------------------------------------------------------- preset add/remove
+
+
+def test_add_preset_appends_to_the_list(tmp_path):
+    scaffold_mod.init(str(tmp_path))
+    scaffold_mod.add_preset(str(tmp_path), "design-debate")
+    text = (tmp_path / "refdes.yaml").read_text(encoding="utf-8")
+    assert "presets: [design-debate]" in text
+
+
+def test_add_preset_unknown_name_is_an_error(tmp_path):
+    scaffold_mod.init(str(tmp_path))
+    with pytest.raises(SchemaError, match="does not exist"):
+        scaffold_mod.add_preset(str(tmp_path), "nope-preset")
+
+
+def test_add_preset_already_selected_is_an_error(tmp_path):
+    scaffold_mod.init(str(tmp_path), presets=["design-debate"])
+    with pytest.raises(SchemaError, match="already selected"):
+        scaffold_mod.add_preset(str(tmp_path), "design-debate")
+
+
+def test_add_preset_preserves_hand_written_comments(tmp_path):
+    scaffold_mod.init(str(tmp_path))
+    config_path = tmp_path / "refdes.yaml"
+    text = config_path.read_text(encoding="utf-8")
+    text = text.replace("site:", "# A hand-written comment nobody wants lost.\nsite:")
+    config_path.write_text(text, encoding="utf-8")
+
+    scaffold_mod.add_preset(str(tmp_path), "design-debate")
+    after = config_path.read_text(encoding="utf-8")
+    assert "# A hand-written comment nobody wants lost." in after
+
+
+def test_remove_preset_removes_from_the_list(tmp_path):
+    scaffold_mod.init(str(tmp_path), presets=["design-debate"])
+    scaffold_mod.remove_preset(str(tmp_path), "design-debate")
+    text = (tmp_path / "refdes.yaml").read_text(encoding="utf-8")
+    assert "presets: []" in text
+
+
+def test_remove_preset_not_selected_is_an_error(tmp_path):
+    scaffold_mod.init(str(tmp_path))
+    with pytest.raises(SchemaError, match="not currently selected"):
+        scaffold_mod.remove_preset(str(tmp_path), "design-debate")
+
+
+def test_remove_preset_reports_orphaned_items_before_writing(tmp_path):
+    scaffold_mod.init(str(tmp_path), presets=["design-debate"])
+    items = tmp_path / "items"
+    items.mkdir()
+    (items / "db-001.md").write_text(
+        "---\nid: DB-001\ntype: debate\ntitle: An open question.\nstatus: open\n---\n",
+        encoding="utf-8",
+    )
+    diagnostics = scaffold_mod.remove_preset(str(tmp_path), "design-debate")
+    assert any(
+        "unknown type 'debate'" in d.message and "design-debate" in d.message
+        for d in diagnostics
+    )
+    # The report ran, but the config change still applied -- this command's
+    # job is to surface the consequence, not block an author who already
+    # decided to accept it.
+    text = (tmp_path / "refdes.yaml").read_text(encoding="utf-8")
+    assert "presets: []" in text
+    # No leftover scratch file.
+    assert not (tmp_path / "refdes.yaml.scratch").exists()
+
+
+def test_cli_standard_add_and_remove_preset(tmp_path, capsys):
+    scaffold_mod.init(str(tmp_path))
+    config = str(tmp_path / "refdes.yaml")
+    status = cli_mod.main(["-c", config, "standard", "add-preset", "design-debate"])
+    assert status == 0
+    assert "design-debate" in (tmp_path / "refdes.yaml").read_text(encoding="utf-8")
+
+    status = cli_mod.main(["-c", config, "standard", "remove-preset", "design-debate"])
+    assert status == 0
+    assert "presets: []" in (tmp_path / "refdes.yaml").read_text(encoding="utf-8")
+
+
+def test_cli_standard_remove_preset_exit_code_reflects_errors(tmp_path):
+    scaffold_mod.init(str(tmp_path), presets=["design-debate"])
+    items = tmp_path / "items"
+    items.mkdir()
+    (items / "db-001.md").write_text(
+        "---\nid: DB-001\ntype: debate\ntitle: An open question.\nstatus: open\n---\n",
+        encoding="utf-8",
+    )
+    config = str(tmp_path / "refdes.yaml")
+    status = cli_mod.main(["-c", config, "standard", "remove-preset", "design-debate"])
+    assert status == 1
+
+
+# ---------------------------------------------- preset-provided diagnostics
+
+
+def test_unknown_type_matching_a_preset_names_it(tmp_path):
+    scaffold_mod.init(str(tmp_path))  # no presets selected
+    items = tmp_path / "items"
+    items.mkdir()
+    (items / "db-001.md").write_text(
+        "---\nid: DB-001\ntype: debate\ntitle: An open question.\nstatus: open\n---\n",
+        encoding="utf-8",
+    )
+    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    parse.load_items(project)
+    assert any(
+        "unknown type 'debate'" in d.message
+        and "provided by the 'design-debate' preset" in d.message
+        for d in project.errors
+    )
+
+
+def test_unknown_type_with_no_preset_match_is_the_ordinary_message(tmp_path):
+    scaffold_mod.init(str(tmp_path))
+    items = tmp_path / "items"
+    items.mkdir()
+    (items / "x.md").write_text(
+        "---\nid: X-001\ntype: totallymadeup\ntitle: t.\n---\n", encoding="utf-8"
+    )
+    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    parse.load_items(project)
+    msg = next(d.message for d in project.errors if "unknown type" in d.message)
+    assert "provided by" not in msg
+
+
+def test_unknown_link_matching_a_preset_names_it(tmp_path):
+    scaffold_mod.init(str(tmp_path))  # no presets selected
+    items = tmp_path / "items"
+    items.mkdir()
+    (items / "dec-001.md").write_text(
+        "---\nid: DEC-001\ntype: decision\ntitle: t.\nstatus: accepted\n"
+        "resolved_by: []\n---\n",
+        encoding="utf-8",
+    )
+    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    parse.load_items(project)
+    assert any(
+        "unknown field 'resolved_by'" in d.message
+        and "provided by the 'design-debate' preset" in d.message
+        for d in project.errors
     )
