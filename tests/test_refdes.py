@@ -5371,6 +5371,22 @@ def test_index_missing_required_parameter_is_an_error(blocks_project):
     assert any("missing required parameter 'by'" in d.message for d in project.errors)
 
 
+def test_block_directive_inside_a_fenced_code_example_is_not_executed(blocks_project):
+    """A doc showing "here's how you write {{index ...}}" inside a fenced
+    example must render that line as literal example text, not run it as a
+    live directive -- the trap docs/blocks.md's own examples originally fell
+    into (extraction happens on raw markdown before md.render, so it has no
+    idea a fence is present unless it looks for one itself)."""
+    _page_with_block(
+        blocks_project,
+        '```markdown\n{{index by="status" type="decision"}}\n```',
+    )
+    project, page = _index_page(blocks_project)
+    assert not project.errors
+    assert "index-table" not in page.body_html
+    assert "{{index by=" in page.body_html  # survives, HTML-escaped, inside <pre><code>
+
+
 def test_unrecognized_block_name_passes_through_as_literal_text(blocks_project):
     _page_with_block(blocks_project, '{{TBD some note to self}}')
     project, page = _index_page(blocks_project)

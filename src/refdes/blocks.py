@@ -43,6 +43,14 @@ from .model import Item, Project
 # paragraph. `.` doesn't match newline by default, so this only ever matches
 # within one line regardless of MULTILINE scanning the whole document.
 BLOCK_LINE_RE = re.compile(r'^[ \t]*\{\{(.+?)\}\}[ \t]*$', re.MULTILINE)
+# A fenced code block in the *raw* markdown source (```/~~~, any language tag,
+# closed by a matching fence) -- extraction happens before md.render (see
+# extract_blocks below), so unlike _linkify's PROTECTED_RE (which skips
+# already-rendered <pre>/<code>), this has to recognize the fence syntax
+# itself. Without this, a doc showing "here's how you write {{index ...}}"
+# inside a ```markdown example would have that example executed as a real
+# directive -- exactly the trap docs/blocks.md's own examples fell into.
+_RAW_FENCE_RE = re.compile(r'^[ \t]*(`{3,}|~{3,})[^\n]*\n.*?^[ \t]*\1[ \t]*$', re.DOTALL | re.MULTILINE)
 _NAME_TOKEN_RE = re.compile(r'^([A-Za-z_][A-Za-z0-9_]*)\s*(.*)$', re.DOTALL)
 # Same key="value"/key=bareword microsyntax as FIGURE_ATTR_RE (build.py) --
 # duplicated rather than imported, since build.py imports this module and a
@@ -397,8 +405,12 @@ def extract_blocks(project: Project, source: str, where_file: str) -> tuple[str,
     see this module's own docstring for why that ordering is load-bearing.
     """
     rendered: list[str] = []
+    fences = [(m.start(), m.end()) for m in _RAW_FENCE_RE.finditer(source)]
 
     def swap(match: re.Match) -> str:
+        if any(start <= match.start() < end for start, end in fences):
+            return match.group(0)  # inside a fenced code block -- an example, not live
+
         content = match.group(1).strip()
         name_match = _NAME_TOKEN_RE.match(content)
         name = name_match.group(1) if name_match else ""
