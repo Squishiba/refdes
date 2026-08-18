@@ -9,6 +9,7 @@ import shutil
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
+from . import build as build_mod
 from . import citations as citations_mod
 from . import nav as nav_mod
 from .model import Item, Project
@@ -36,6 +37,17 @@ def _anchorize(html: str, known_slugs: set[str]) -> str:
         return match.group(0)
 
     return PAGE_HREF_RE.sub(swap, html)
+
+
+def _figured(project: Project, bodies: list[str]):
+    """A `figured(html)` closure for one rendered document: numbers every
+    `{id="..."}` figure across `bodies` in that document's own reading order,
+    then returns a function that resolves figure-number markers and
+    `[[fig:id]]` references against that one document's numbering
+    (docs/design/index-blocks.md §9) -- the same per-document posture
+    `_anchorize` already takes with cross-item hrefs."""
+    numbers = build_mod.assign_figure_numbers(bodies)
+    return lambda html: build_mod.resolve_figures(html, project, numbers)
 
 
 def _in_scope(item: Item, board: str | None, workspace: str | None) -> bool:
@@ -573,7 +585,8 @@ def render_site(project: Project) -> str:
         ) as fh:
             fh.write(
                 page_tpl.render(
-                    project=project, page=page, previews_json=previews_json
+                    project=project, page=page, previews_json=previews_json,
+                    figured=_figured(project, [page.body_html]),
                 )
             )
 
@@ -661,18 +674,23 @@ def render_site(project: Project) -> str:
                     item=item,
                     spec=spec,
                     previews_json=previews_json,
+                    figured=_figured(project, [item.body_html]),
                 )
             )
 
     known_slugs = {item.slug for item in project.items.values()}
     document_tpl = env.get_template("document.html.j2")
+    doc_sections = _document_sections(project)
     written.add("document.html")
     with open(os.path.join(out_dir, "document.html"), "w", encoding="utf-8") as fh:
         fh.write(
             document_tpl.render(
                 project=project,
-                sections=_document_sections(project),
+                sections=doc_sections,
                 anchored=lambda html: _anchorize(html, known_slugs),
+                figured=_figured(
+                    project, [item.body_html for _label, items in doc_sections for item in items]
+                ),
                 previews_json=previews_json,
             )
         )
@@ -696,6 +714,9 @@ def render_site(project: Project) -> str:
                     board=board_spec,
                     sections=board_sections,
                     anchored=lambda html, slugs=board_known_slugs: _anchorize(html, slugs),
+                    figured=_figured(
+                        project, [item.body_html for _label, items in board_sections for item in items]
+                    ),
                     previews_json=previews_json,
                 )
             )
@@ -769,6 +790,9 @@ def render_site(project: Project) -> str:
                     workspace=workspace_spec,
                     sections=ws_sections,
                     anchored=lambda html, slugs=ws_known_slugs: _anchorize(html, slugs),
+                    figured=_figured(
+                        project, [item.body_html for _label, items in ws_sections for item in items]
+                    ),
                     previews_json=previews_json,
                 )
             )

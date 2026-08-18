@@ -53,7 +53,7 @@
 </table>
 
 {% if item.body_html %}
-<div class="body">{{ item.body_html | safe }}</div>
+<div class="body">{{ figured(item.body_html) | safe }}</div>
 {% endif %}
 
 {% if item.fields.get('options') %}

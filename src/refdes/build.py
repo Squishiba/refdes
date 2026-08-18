@@ -16,8 +16,11 @@ from . import calc, citations as citations_mod, imports, pages as pages_mod, sea
 from . import workspaces as workspaces_mod
 from .model import ERROR, INFO, INVALIDATE, WARNING, CalcLine, CheckResult, Coverage, Item, ItemType, Project
 
-# Explicit reference: [[REQ-PWR-002]] or [[REQ-PWR-002|the input range]]
-EXPLICIT_REF_RE = re.compile(r"\[\[\s*([A-Za-z0-9\-_]+)\s*(?:\|\s*([^\]]+?)\s*)?\]\]")
+# Explicit reference: [[REQ-PWR-002]] or [[REQ-PWR-002|the input range]]. The
+# ':' admits the "fig:" namespace (docs/design/index-blocks.md §9) -- item ids
+# are allocated as PREFIX-BOARD-NNN and never contain one, so this only ever
+# matches the new namespace on real projects, never an existing item id.
+EXPLICIT_REF_RE = re.compile(r"\[\[\s*([A-Za-z0-9\-_:]+)\s*(?:\|\s*([^\]]+?)\s*)?\]\]")
 # Bare reference: REQ-PWR-002 appearing in prose.
 BARE_REF_RE = re.compile(r"(?<![\w\-/])([A-Z][A-Z0-9]*(?:-[A-Z0-9]+)*-\d{1,6})(?![\w\-])")
 # Inline calc value: {{P_diss}}
@@ -38,6 +41,19 @@ FIGURE_RE = re.compile(
 )
 FIGURE_ATTR_RE = re.compile(r'([A-Za-z_][\w-]*)\s*=\s*(?:"([^"]*)"|(\S+))')
 IMG_ALT_RE = re.compile(r'\balt="([^"]*)"', re.IGNORECASE)
+# A resolved figure's number, filled in once the whole rendered document is
+# known (docs/design/index-blocks.md §9) -- emitted by _apply_figure_attrs,
+# consumed by resolve_figures.
+FIG_NUM_MARKER_RE = re.compile(r'<span class="fig-num" data-fig="([^"]*)"></span>')
+# A `[[fig:id]]` reference, deferred the same way: the id's existence anywhere
+# in the project, and whether it lands in *this* rendered document, both
+# depend on state that isn't complete until every item and page has been
+# processed. Context is smuggled through as data attributes so the deferred
+# warning can still be attributed to the line that wrote the reference.
+FIG_REF_PENDING_RE = re.compile(
+    r'<span class="fig-ref-pending" data-fig="([^"]*)" data-label="([^"]*)"'
+    r' data-where-file="([^"]*)" data-where-line="([^"]*)" data-where-id="([^"]*)"></span>'
+)
 
 
 # ----------------------------------------------------------------------- validation
@@ -550,6 +566,19 @@ def _linkify(
     """Turn IDs into preview-bearing links, skipping code and pre regions."""
 
     def link(target_id: str, label: str | None, explicit: bool) -> str:
+        if explicit and target_id.startswith("fig:"):
+            # Deferred: existence (anywhere, and in this document) can't be
+            # known until every item/page has run _apply_figure_attrs and the
+            # whole document this reference lands in has been assembled --
+            # see resolve_figures.
+            fig_id = target_id[len("fig:") :]
+            return (
+                f'<span class="fig-ref-pending" data-fig="{_esc(fig_id)}" '
+                f'data-label="{_esc(label) if label else ""}" '
+                f'data-where-file="{_esc(where_file)}" '
+                f'data-where-line="{where_line if where_line is not None else ""}" '
+                f'data-where-id="{_esc(where_id) if where_id else ""}"></span>'
+            )
         target = project.items.get(target_id)
         if target is None:
             if explicit:
@@ -564,11 +593,24 @@ def _linkify(
             f'<a class="ref" href="{target.slug}.html" data-ref="{target.id}">{text}</a>'
         )
 
-    def process(segment: str) -> str:
-        segment = EXPLICIT_REF_RE.sub(
-            lambda m: link(m.group(1), m.group(2), True), segment
-        )
+    def bare(segment: str) -> str:
         return BARE_REF_RE.sub(lambda m: link(m.group(1), None, False), segment)
+
+    def process(segment: str) -> str:
+        # Bare-ref scanning must only ever see the literal gaps between
+        # explicit refs, never an explicit ref's own replacement HTML --
+        # that HTML embeds the target id again (as link text, and now also in
+        # a fig-ref-pending marker's data attributes), and a second sweep
+        # over the whole already-substituted string would match that
+        # embedded id and linkify it a second time, nesting <a> inside <a>.
+        chunks: list[str] = []
+        last = 0
+        for m in EXPLICIT_REF_RE.finditer(segment):
+            chunks.append(bare(segment[last : m.start()]))
+            chunks.append(link(m.group(1), m.group(2), True))
+            last = m.end()
+        chunks.append(bare(segment[last:]))
+        return "".join(chunks)
 
     out: list[str] = []
     last = 0
@@ -638,14 +680,27 @@ def _process_images(
     return IMG_SRC_RE.sub(swap, html)
 
 
-def _apply_figure_attrs(html: str) -> str:
-    """Wrap `![alt](src){width=60% caption="..."}` in a real `<figure>`.
+def _apply_figure_attrs(
+    html: str,
+    project: Project,
+    where_file: str,
+    where_line: int | None = None,
+    where_id: str | None = None,
+) -> str:
+    """Wrap `![alt](src){width=60% caption="..."}` in a real `<figure>`, and
+    register an explicit `id=` in the project-wide figure registry
+    (docs/design/index-blocks.md §9).
 
     Only a paragraph containing nothing but one image immediately followed by a
     `{...}` suffix is touched -- matched the same way `_process_images` and
     `_linkify` scan rendered HTML with a regex rather than a markdown-it plugin.
     With no suffix the image passes through completely untouched. `alt` always
-    stays on the `<img>`; `caption` falls back to it when not given.
+    stays on the `<img>`; `caption` falls back to it when not given. `id=` is
+    optional exactly like `width=`/`caption=` already are -- a figure with no
+    id renders exactly as it does today, numbered nowhere, referenced by
+    nobody. A duplicate id is a build error naming both locations; the second
+    figure keeps rendering, just without an id (which would be invalid HTML
+    twice over) or a number.
     """
 
     def swap(match: re.Match) -> str:
@@ -663,10 +718,89 @@ def _apply_figure_attrs(html: str) -> str:
         alt = alt_match.group(1) if alt_match else ""  # already HTML-escaped text
         caption = _esc(attrs["caption"]) if "caption" in attrs else alt
         style = f' style="width: {_esc(attrs["width"])}"' if attrs.get("width") else ""
-        figcaption = f"<figcaption>{caption}</figcaption>" if caption else ""
-        return f'<figure class="md-figure"{style}>{img_tag}{figcaption}</figure>'
+
+        id_attr = ""
+        num_marker = ""
+        fig_id = attrs.get("id")
+        if fig_id:
+            existing = project.figures.get(fig_id)
+            if existing is not None:
+                owner, owner_file, owner_line = existing
+                loc = f"{owner_file}:{owner_line}" if owner_line is not None else owner_file
+                project.error(
+                    f"figure id {fig_id!r} is already used by {owner} ({loc}). "
+                    f"Figure ids must be unique across the project.",
+                    file=where_file, line=where_line, item_id=where_id,
+                )
+            else:
+                project.figures[fig_id] = (where_id or where_file, where_file, where_line)
+                id_attr = f' id="{_esc(fig_id)}"'
+                num_marker = f'<span class="fig-num" data-fig="{_esc(fig_id)}"></span>'
+                # Baked in now, not at resolution time: whether a caption
+                # follows the number is static, only the number itself
+                # depends on which document this figure ends up rendered in.
+                if caption:
+                    num_marker += " — "
+
+        figcaption = f"<figcaption>{num_marker}{caption}</figcaption>" if (caption or num_marker) else ""
+        return f'<figure class="md-figure"{id_attr}{style}>{img_tag}{figcaption}</figure>'
 
     return FIGURE_RE.sub(swap, html)
+
+
+def assign_figure_numbers(bodies: list[str]) -> dict[str, int]:
+    """Number every `{id="..."}` figure across `bodies`, in the order given.
+
+    Each rendered document computes its own figure numbers, fresh, in its own
+    reading order (docs/design/index-blocks.md §9) -- `bodies` is that
+    document's own sequence of rendered item/page bodies, e.g. one item's
+    `body_html` for `item.html.j2`, or every section's items in
+    `_document_sections`' order for `document.html`.
+    """
+    numbers: dict[str, int] = {}
+    for html in bodies:
+        for match in FIG_NUM_MARKER_RE.finditer(html):
+            fig_id = match.group(1)
+            if fig_id not in numbers:
+                numbers[fig_id] = len(numbers) + 1
+    return numbers
+
+
+def resolve_figures(html: str, project: Project, numbers: dict[str, int]) -> str:
+    """Fill in figure-number markers and `[[fig:id]]` cross-references in one
+    piece of already-rendered HTML, using `numbers` (this document's own id ->
+    Figure N map, from `assign_figure_numbers` run over the same document).
+    """
+
+    def num_marker(match: re.Match) -> str:
+        return f"Figure {numbers[match.group(1)]}"
+
+    def ref(match: re.Match) -> str:
+        fig_id, label_raw, where_file, where_line_raw, where_id = match.groups()
+        label = html_entities.unescape(label_raw) if label_raw else None
+        where_line = int(where_line_raw) if where_line_raw else None
+        item_id = where_id or None
+        if fig_id not in project.figures:
+            project.warn(
+                f"reference to figure {fig_id!r}, which does not exist. "
+                f'Check the figure\'s {{id="..."}} attribute.',
+                file=where_file, line=where_line, item_id=item_id,
+            )
+            return f'<span class="ref ref-missing" title="unknown figure">{label or fig_id}</span>'
+        if fig_id not in numbers:
+            owner, _owner_file, _owner_line = project.figures[fig_id]
+            project.warn(
+                f"reference to figure {fig_id!r}, which exists on {owner} but is "
+                f"not rendered on this page — figure references only resolve "
+                f"within the same rendered document.",
+                file=where_file, line=where_line, item_id=item_id,
+            )
+            return f'<span class="ref ref-missing" title="unknown figure">{label or fig_id}</span>'
+        text = label or f"Figure {numbers[fig_id]}"
+        return f'<a class="ref fig-ref" href="#{fig_id}">{text}</a>'
+
+    html = FIG_NUM_MARKER_RE.sub(num_marker, html)
+    return FIG_REF_PENDING_RE.sub(ref, html)
 
 
 def render_bodies(project: Project) -> None:
@@ -713,7 +847,7 @@ def render_bodies(project: Project) -> None:
                 html = html.replace(token, table)
 
         html = _process_images(html, project, item.source_file, item.source_line, item.id)
-        html = _apply_figure_attrs(html)
+        html = _apply_figure_attrs(html, project, item.source_file, item.source_line, item.id)
         item.body_html = _linkify(
             html, project, item.source_file, item.source_line, item.id
         )
@@ -744,7 +878,7 @@ def render_pages(project: Project) -> None:
                 html = html.replace(token, block_html)
 
         html = _process_images(html, project, page.source_file)
-        html = _apply_figure_attrs(html)
+        html = _apply_figure_attrs(html, project, page.source_file)
         html = _linkify(html, project, page.source_file)
         page.body_html = pages_mod.rewrite_page_links(html, known)
         pages_mod.add_heading_anchors(page)
