@@ -2227,6 +2227,112 @@ def test_cli_build_reseal_scoped_to_board(sealed_board_project, capsys):
     assert status == 0
 
 
+# ------------------------------------------------------------------- check --board
+
+CROSS_BOARD_CONFIG = """\
+site: { title: "Cross-board Test", out: _site }
+id: { width: 3 }
+boards:
+  board-a: { label: "Board A" }
+  board-b: { label: "Board B" }
+link_types:
+  satisfies: { inverse: satisfied_by, label: "Satisfies" }
+types:
+  requirement:
+    prefix: REQ
+    fields:
+      text: { type: text, required: true }
+  decision:
+    prefix: DEC
+    fields:
+      title: { type: text, required: true }
+    links:
+      satisfies: [requirement]
+"""
+
+
+@pytest.fixture
+def cross_board_project(tmp_path):
+    """A decision on board-b that satisfies a requirement on board-a -- the case
+    that breaks if `check --board` ever scopes the file walk instead of just the
+    report: board-b's own folder never mentions REQ-A-001 at all.
+    """
+    (tmp_path / "refdes.yaml").write_text(CROSS_BOARD_CONFIG, encoding="utf-8")
+    a = tmp_path / "items" / "board-a"
+    a.mkdir(parents=True)
+    (a / "req.md").write_text(
+        "---\nid: REQ-A-001\ntype: requirement\ntext: Owned by board A.\n---\n",
+        encoding="utf-8",
+    )
+    b = tmp_path / "items" / "board-b"
+    b.mkdir(parents=True)
+    (b / "dec.md").write_text(
+        "---\nid: DEC-B-001\ntype: decision\ntitle: Board B decision.\n"
+        "satisfies: [REQ-A-001]\n---\n",
+        encoding="utf-8",
+    )
+    return tmp_path
+
+
+def test_check_board_scope_does_not_affect_link_resolution(cross_board_project):
+    project = _build_at(cross_board_project)
+    assert not project.errors
+    assert project.items["DEC-B-001"].links["satisfies"] == ["REQ-A-001"]
+    assert "DEC-B-001" in project.items["REQ-A-001"].backlinks.get("satisfied_by", [])
+
+
+def test_cli_check_board_scopes_the_report_not_the_link_walk(cross_board_project, capsys):
+    """`--board board-b` must still resolve REQ-A-001 -- it just doesn't get
+    reported, since board-b's own item count is 1 (DEC-B-001 only)."""
+    status = cli_mod.main(
+        ["-c", str(cross_board_project / "refdes.yaml"), "check", "--board", "board-b"]
+    )
+    out = capsys.readouterr().out
+    assert status == 0
+    assert "1 items, 0 errors" in out
+
+
+def test_check_board_filters_diagnostics_to_that_board(board_project, capsys):
+    status = cli_mod.main(
+        ["-c", str(board_project / "refdes.yaml"), "check", "--board", "board-b"]
+    )
+    out = capsys.readouterr().out
+    assert status == 0
+    assert "REQ-WRONG-001" in out  # board-b's own token-mismatch warning
+    assert "REQ-S-001" not in out  # unboarded item's warning, filtered out
+    assert "2 items, 0 errors, 2 warnings" in out
+
+
+def test_check_board_always_shows_project_level_diagnostics(board_project, capsys):
+    """A diagnostic with no item_id isn't attributable to any one board, so
+    --board must never hide it -- here, the project-wide 'no coverage' summary
+    warning that `check` always emits for this fixture's uncovered items."""
+    status = cli_mod.main(
+        ["-c", str(board_project / "refdes.yaml"), "check", "--board", "board-a"]
+    )
+    out = capsys.readouterr().out
+    assert status == 0
+    assert "no coverage" in out
+
+
+def test_check_without_board_flag_is_unaffected_by_the_feature(board_project, capsys):
+    status = cli_mod.main(["-c", str(board_project / "refdes.yaml"), "check"])
+    out = capsys.readouterr().out
+    assert "REQ-WRONG-001" in out
+    assert "REQ-S-001" in out
+    assert "5 items, 0 errors, 4 warnings" in out
+
+
+def test_cli_check_board_rejects_unknown_board(board_project, capsys):
+    status = cli_mod.main(
+        ["-c", str(board_project / "refdes.yaml"), "check", "--board", "bord-a"]
+    )
+    assert status == 1
+    err = capsys.readouterr().err
+    assert "not a board declared" in err
+    assert "board-a" in err  # difflib suggestion
+
+
 # ----------------------------------------------------------------- summary view
 
 

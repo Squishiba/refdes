@@ -31,27 +31,63 @@ def _load(args, require_ids: bool = True) -> Project:
     return project
 
 
-def _report(project: Project, verbose: bool = False) -> int:
+def _visible(project: Project, verbose: bool, board: str | None) -> list:
+    """Diagnostics worth printing: info hidden unless `verbose`, and, when `board`
+    is given, narrowed to that board's own items -- a report filter only. A
+    diagnostic with no `item_id`, or whose item isn't found (nothing here
+    resolves that far), is project-level rather than board-specific and is
+    never hidden by `--board`: an unattributable problem could affect every
+    board, and hiding it would defeat the point of a review.
+    """
+    out = []
     for d in project.diagnostics:
         if d.level == "info" and not verbose:
             continue
+        if board is not None and d.item_id is not None:
+            item = project.items.get(d.item_id)
+            if item is not None and item.board != board:
+                continue
+        out.append(d)
+    return out
+
+
+def _report(project: Project, verbose: bool = False, board: str | None = None) -> int:
+    visible = _visible(project, verbose, board)
+    for d in visible:
         stream = sys.stderr if d.level == "error" else sys.stdout
         print(str(d), file=stream)
 
-    errors, warnings = len(project.errors), len(project.warnings)
-    summary = f"{len(project.items)} items, {errors} errors, {warnings} warnings"
+    errors = sum(1 for d in visible if d.level == "error")
+    warnings = sum(1 for d in visible if d.level == "warning")
+    item_count = (
+        len(project.items)
+        if board is None
+        else sum(1 for i in project.items.values() if i.board == board)
+    )
+    summary = f"{item_count} items, {errors} errors, {warnings} warnings"
     if verbose:
-        summary += f", {len(project.infos)} info"
+        summary += f", {sum(1 for d in visible if d.level == 'info')} info"
     print(summary)
     return 1 if errors else 0
 
 
 def cmd_check(args) -> int:
     project = _load(args)
+    if args.board and args.board not in project.boards:
+        import difflib
+
+        close = difflib.get_close_matches(args.board, list(project.boards), n=1, cutoff=0.5)
+        hint = f" Did you mean {close[0]!r}?" if close else ""
+        project.error(
+            f"--board {args.board!r} is not a board declared in refdes.yaml's "
+            f"boards: registry.{hint}"
+        )
     # `check` never writes: it verifies existing seals without creating new ones.
+    # The whole project still parses and resolves links regardless of --board --
+    # only what gets reported below is narrowed.
     build_mod.build(project, seal_write=False, reseal=False)
     drift = citations_mod.refresh(project) if args.refresh else []
-    status = _report(project, verbose=args.verbose)
+    status = _report(project, verbose=args.verbose, board=args.board)
     if drift:
         print(f"\n{len(drift)} citation(s) drifted from their pinned hash:")
         for d in drift:
@@ -275,6 +311,13 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="also re-fetch every pinned citation and report drift (network; "
         "writes nothing)",
+    )
+    p_check.add_argument(
+        "--board",
+        metavar="NAME",
+        help="only report diagnostics for one board's own items -- the whole "
+        "project still parses and resolves links, so a cross-board reference "
+        "is still checked, just not necessarily shown",
     )
     p_check.add_argument(
         "-v", "--verbose",

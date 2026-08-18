@@ -89,7 +89,22 @@ WARNING items/board-b/requirements.yaml:9 [REQ-PWR-004] — item is on board
 **Per-board pages.** Each registered board gets its own scoped
 `document-<board>.html`, `coverage-<board>.html`, `log-<board>.html`, and
 `summary-<board>.html`, alongside the unchanged project-wide versions. Handing
-`document-board-a.html` to Board A's team shows only their items.
+`document-board-a.html` to Board A's team shows only their items. The nav bar
+gets a group per board linking to that set automatically — see
+[pages](pages.md#grouping-a-page-under-a-board) for tagging a hand-written
+overview page into the same group instead of hand-linking it.
+
+**Reviewing one board.** `refdes check --board board-a` still parses and
+resolves the whole project — a decision on one board that satisfies a
+requirement on another still checks correctly — it just only *reports*
+board-a's own diagnostics, so a team can review their own board without
+someone else's unrelated warning in the way. See [CLI reference](cli-reference.md).
+
+**Seals are per board too.** An append-only [log entry](design-log.md)'s seal
+lives in `.refdes/log-seal-<board>.yaml` once it resolves onto a board — items
+with no board keep using `.refdes/log-seal.yaml`, same as before boards
+existed. `refdes build --reseal board-a` accepts an edit only to board-a's own
+sealed entries.
 
 **Drift is a warning, not silent.** `.refdes/boards.yaml` records which board each
 item was on at the last build — commit it, the same as `.refdes/ids.yaml`. Move a

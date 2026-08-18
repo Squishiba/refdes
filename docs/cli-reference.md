@@ -65,6 +65,23 @@ Errors go to stderr, warnings to stdout. Every diagnostic leads with
 
 | Option | Effect |
 |---|---|
+| `--refresh` | Also re-fetch every pinned [citation](markdown.md#citing-a-datasheet) and report drift (network; writes nothing) |
+| `--board NAME` | Only report diagnostics for one [board](multi-board.md)'s own items |
+| `-v`, `--verbose` | Also show info-level diagnostics |
+
+`--board` is a report filter, not a smaller build: the whole project is still
+parsed and every link still resolved, so a decision on one board that
+`satisfies` a requirement on another still checks correctly. Only what gets
+*printed* — and the item count in the summary line — is narrowed to that
+board's own items. A diagnostic that isn't attributable to any one item (a
+project-level warning, for instance) is never hidden by `--board`.
+
+```bash
+refdes check --board power
+```
+
+| Option | Effect |
+|---|---|
 | `--refresh` | Also re-fetch every pinned [citation](markdown.md#citing-a-datasheet) and report drift |
 
 `--refresh` is the only thing that ever makes `check` touch the network, and
