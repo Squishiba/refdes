@@ -5118,3 +5118,553 @@ def test_audit_reports_both_diffs(lifecycle_project, capsys):
     assert "Since last revision (rev-a" in out
     assert "Since last release: (no release stamped yet)" in out
     assert "(3 unchanged)" in out
+
+
+# ------------------------------------------------------------- generated blocks
+
+BLOCKS_SCHEMA = """\
+site: {title: "Blocks Test", out: _site}
+id: {width: 3, ledger: .refdes/ids.yaml}
+history: {default: invalidate}
+units: {preferred: []}
+boards:
+  power: {label: Power}
+  thermal: {label: Thermal}
+link_types:
+  satisfies:      { inverse: satisfied_by, label: "Satisfies" }
+  constrained_by: { inverse: constrains,   label: "Constrained by" }
+  verifies:       { inverse: verified_by,  label: "Verifies" }
+  selects:        { inverse: selected_by,  label: "Selects", trace: false }
+types:
+  requirement:
+    prefix: REQ
+    fields:
+      text: { type: text, required: true, on_change: invalidate }
+    links: {}
+    body: { on_change: invalidate }
+  constraint:
+    prefix: CON
+    fields:
+      title: { type: text, required: true, on_change: invalidate }
+    links: {}
+    body: { on_change: invalidate }
+  component:
+    prefix: CMP
+    fields:
+      title: { type: text, required: true, on_change: invalidate }
+    links: {}
+    body: { on_change: invalidate }
+  decision:
+    prefix: DEC
+    fields:
+      title:          { type: text, required: true, on_change: invalidate }
+      status:         { type: enum, choices: [proposed, accepted, on_hold], default: proposed, on_change: invalidate }
+      schematic_page: { type: text, on_change: invalidate }
+      tags:           { type: list, on_change: ignore }
+      checks:         { type: checks, on_change: invalidate }
+    links:
+      satisfies:      [requirement]
+      constrained_by: [constraint]
+      selects:        [component]
+    body: { on_change: invalidate }
+  test:
+    prefix: TST
+    fields:
+      title: { type: text, required: true, on_change: invalidate }
+    links:
+      verifies: [requirement]
+    body: { on_change: invalidate }
+"""
+
+BLOCKS_ITEMS = {
+    "req-001.md": """\
+---
+id: REQ-001
+type: requirement
+text: Input voltage range.
+---
+""",
+    "con-001.md": """\
+---
+id: CON-001
+type: constraint
+title: Thermal budget.
+---
+""",
+    "cmp-001.md": """\
+---
+id: CMP-001
+type: component
+title: TPS62913.
+---
+""",
+    "dec-001.md": """\
+---
+id: DEC-001
+type: decision
+title: Buck topology.
+status: accepted
+schematic_page: "12"
+tags: [layout, review]
+board: power
+satisfies: [REQ-001]
+constrained_by: [CON-001]
+selects: [CMP-001]
+---
+""",
+    "dec-002.md": """\
+---
+id: DEC-002
+type: decision
+title: Inductor choice.
+status: proposed
+schematic_page: "7"
+tags: [review]
+board: power
+---
+""",
+    "dec-003.md": """\
+---
+id: DEC-003
+type: decision
+title: Enclosure material.
+status: on_hold
+schematic_page: "12"
+board: thermal
+---
+""",
+    "tst-001.md": """\
+---
+id: TST-001
+type: test
+title: Load regulation sweep.
+verifies: [REQ-001]
+---
+""",
+}
+
+
+@pytest.fixture
+def blocks_project(tmp_path):
+    (tmp_path / "refdes.yaml").write_text(BLOCKS_SCHEMA, encoding="utf-8")
+    items = tmp_path / "items"
+    items.mkdir()
+    for name, text in BLOCKS_ITEMS.items():
+        (items / name).write_text(text, encoding="utf-8")
+    (tmp_path / "pages").mkdir()
+    return tmp_path
+
+
+def _page_with_block(project_root, directive):
+    (project_root / "pages" / "index.md").write_text(
+        f"# Overview\n\n{directive}\n", encoding="utf-8"
+    )
+
+
+def _index_page(blocks_project):
+    project = _build_at(blocks_project)
+    page = next(p for p in project.pages if p.slug == "index")
+    return project, page
+
+
+def test_index_groups_by_enum_in_declared_choices_order(blocks_project):
+    """Heading order follows `choices:` (proposed, accepted, on_hold), not
+    alphabetical (accepted, on_hold, proposed) -- a distinguishing case."""
+    _page_with_block(blocks_project, '{{index by="status" type="decision"}}')
+    project, page = _index_page(blocks_project)
+    assert not project.errors
+    headings = [h for h in ["proposed", "accepted", "on_hold"] if f"<h4>{h}</h4>" in page.body_html]
+    positions = [page.body_html.index(f"<h4>{h}</h4>") for h in headings]
+    assert positions == sorted(positions)
+    assert headings == ["proposed", "accepted", "on_hold"]
+    assert "DEC-002" in page.body_html  # proposed
+    assert "DEC-001" in page.body_html  # accepted
+    assert "DEC-003" in page.body_html  # on_hold
+
+
+def test_index_groups_by_text_field_lexicographically_with_unset_last(blocks_project):
+    """`schematic_page` is text, not a number: "12" < "7" lexicographically.
+    A decision with no schematic_page value groups under (unset), sorted last."""
+    (blocks_project / "items" / "dec-004.md").write_text(
+        "---\nid: DEC-004\ntype: decision\ntitle: No page yet.\n---\n", encoding="utf-8"
+    )
+    _page_with_block(blocks_project, '{{index by="schematic_page" type="decision"}}')
+    project, page = _index_page(blocks_project)
+    assert not project.errors
+    order = [h for h in ["12", "7", "(unset)"] if f"<h4>{h}</h4>" in page.body_html]
+    assert order == ["12", "7", "(unset)"]
+
+
+def test_index_list_valued_field_files_item_under_every_value(blocks_project):
+    _page_with_block(blocks_project, '{{index by="tags" type="decision"}}')
+    project, page = _index_page(blocks_project)
+    assert not project.errors
+    assert "<h4>layout</h4>" in page.body_html
+    assert "<h4>review</h4>" in page.body_html
+    # DEC-001 (tags: [layout, review]) appears under both headings -- the ID
+    # cell's text is picked up by the page's own _linkify pass for free, so
+    # each appearance is both an href and the link text: 2 headings x 2.
+    assert page.body_html.count("DEC-001") == 4
+    assert page.body_html.count('href="dec-001.html"') == 2
+
+
+def test_index_board_scoping(blocks_project):
+    _page_with_block(blocks_project, '{{index by="status" type="decision" board="thermal"}}')
+    project, page = _index_page(blocks_project)
+    assert not project.errors
+    assert "DEC-003" in page.body_html
+    assert "DEC-001" not in page.body_html
+    assert "DEC-002" not in page.body_html
+
+
+def test_index_empty_result_is_not_an_error(blocks_project):
+    # TST-001 has no board, so board="thermal" matches zero test items.
+    _page_with_block(blocks_project, '{{index by="title" type="test" board="thermal"}}')
+    project, page = _index_page(blocks_project)
+    assert not project.errors
+    assert "No test items." in page.body_html
+
+
+def test_index_unknown_type_suggests_a_correction(blocks_project):
+    _page_with_block(blocks_project, '{{index by="status" type="decisoin"}}')
+    project, _page = _index_page(blocks_project)
+    assert any(
+        "unknown type 'decisoin'" in d.message and "Did you mean 'decision'?" in d.message
+        for d in project.errors
+    )
+
+
+def test_index_unknown_field_names_declared_fields(blocks_project):
+    _page_with_block(blocks_project, '{{index by="pageno" type="decision"}}')
+    project, _page = _index_page(blocks_project)
+    msg = next(d.message for d in project.errors if "has no field" in d.message)
+    assert "no field 'pageno'" in msg
+    assert "schematic_page" in msg
+
+
+def test_index_non_groupable_field_type_is_an_error(blocks_project):
+    _page_with_block(blocks_project, '{{index by="checks" type="decision"}}')
+    project, _page = _index_page(blocks_project)
+    assert any("not a groupable field" in d.message for d in project.errors)
+
+
+def test_index_unknown_board_suggests_a_correction(blocks_project):
+    _page_with_block(blocks_project, '{{index by="status" type="decision" board="powr"}}')
+    project, _page = _index_page(blocks_project)
+    assert any(
+        "unknown board 'powr'" in d.message and "Did you mean 'power'?" in d.message
+        for d in project.errors
+    )
+
+
+def test_index_unknown_parameter_names_accepted_ones(blocks_project):
+    _page_with_block(blocks_project, '{{index by="status" type="decision" sortt="asc"}}')
+    project, _page = _index_page(blocks_project)
+    msg = next(d.message for d in project.errors if "unknown parameter" in d.message)
+    assert "'sortt'" in msg
+    assert "by, type, board" in msg
+
+
+def test_index_missing_required_parameter_is_an_error(blocks_project):
+    _page_with_block(blocks_project, '{{index type="decision"}}')
+    project, _page = _index_page(blocks_project)
+    assert any("missing required parameter 'by'" in d.message for d in project.errors)
+
+
+def test_unrecognized_block_name_passes_through_as_literal_text(blocks_project):
+    _page_with_block(blocks_project, '{{TBD some note to self}}')
+    project, page = _index_page(blocks_project)
+    assert not project.errors
+    assert "{{TBD some note to self}}" in page.body_html
+
+
+def test_index_only_local_items_not_imports(blocks_project):
+    """An imported item must never appear in a project-generated index --
+    that is what makes the block trustworthy as *this* project's own view."""
+    import json
+
+    upstream = {
+        "title": "Upstream",
+        "version": "1",
+        "items": [
+            {
+                "id": "DEC-X-001",
+                "type": "decision",
+                "title": "Foreign.",
+                "fields": {"title": "Foreign.", "status": "accepted"},
+                "links": {},
+                "content_hash": "upstreamhash01",
+            }
+        ],
+    }
+    (blocks_project / "upstream.json").write_text(json.dumps(upstream), encoding="utf-8")
+    schema = BLOCKS_SCHEMA + (
+        '\nimports:\n  - name: platform\n    items: upstream.json\n    version: "1"\n'
+    )
+    (blocks_project / "refdes.yaml").write_text(schema, encoding="utf-8")
+    _page_with_block(blocks_project, '{{index by="status" type="decision"}}')
+    project, page = _index_page(blocks_project)
+    assert not project.errors
+    assert "DEC-X-001" in project.items  # imported, resolvable...
+    assert "DEC-X-001" not in page.body_html  # ...but never in a generated index
+
+
+def test_cascade_up_follows_declared_links_within_trace_true_default(blocks_project):
+    """`selects` is `trace: false` in this schema, so it's excluded from the
+    default `via=` set -- CMP-001 must not appear."""
+    _page_with_block(blocks_project, '{{cascade from="DEC-001" direction="up"}}')
+    project, page = _index_page(blocks_project)
+    assert not project.errors
+    assert "REQ-001" in page.body_html
+    assert "CON-001" in page.body_html
+    assert "CMP-001" not in page.body_html
+
+
+def test_cascade_explicit_via_can_include_a_non_traced_link(blocks_project):
+    _page_with_block(blocks_project, '{{cascade from="DEC-001" direction="up" via="selects"}}')
+    project, page = _index_page(blocks_project)
+    assert not project.errors
+    assert "CMP-001" in page.body_html
+    assert "REQ-001" not in page.body_html
+
+
+def test_cascade_down_follows_backlinks(blocks_project):
+    _page_with_block(blocks_project, '{{cascade from="REQ-001" direction="down"}}')
+    project, page = _index_page(blocks_project)
+    assert not project.errors
+    assert "DEC-001" in page.body_html  # satisfied_by
+    assert "TST-001" in page.body_html  # verified_by
+
+
+def test_cascade_both_renders_two_labeled_branches(blocks_project):
+    _page_with_block(blocks_project, '{{cascade from="REQ-001" direction="both"}}')
+    project, page = _index_page(blocks_project)
+    assert not project.errors
+    assert ">Upward<" in page.body_html
+    assert ">Downward<" in page.body_html
+    assert "DEC-001" in page.body_html
+
+
+def test_cascade_depth_limits_the_walk(blocks_project):
+    # DEC-002 has no outgoing links, so depth=1 from it should show nothing.
+    _page_with_block(blocks_project, '{{cascade from="DEC-002" direction="up" depth="1"}}')
+    project, page = _index_page(blocks_project)
+    assert not project.errors
+    assert "nothing found" in page.body_html
+
+
+def test_cascade_unknown_root_is_an_error(blocks_project):
+    _page_with_block(blocks_project, '{{cascade from="REQ-999" direction="up"}}')
+    project, _page = _index_page(blocks_project)
+    assert any("REQ-999 does not exist" in d.message for d in project.errors)
+
+
+def test_cascade_unknown_direction_is_an_error(blocks_project):
+    _page_with_block(blocks_project, '{{cascade from="DEC-001" direction="sideways"}}')
+    project, _page = _index_page(blocks_project)
+    assert any(
+        "unknown direction 'sideways'" in d.message and "down, up, both" in d.message
+        for d in project.errors
+    )
+
+
+def test_cascade_missing_required_parameter_is_an_error(blocks_project):
+    _page_with_block(blocks_project, '{{cascade from="DEC-001"}}')
+    project, _page = _index_page(blocks_project)
+    assert any("missing required parameter 'direction'" in d.message for d in project.errors)
+
+
+def test_cascade_unknown_via_link_type_suggests_a_correction(blocks_project):
+    _page_with_block(
+        blocks_project, '{{cascade from="DEC-001" direction="up" via="satisfyes"}}'
+    )
+    project, _page = _index_page(blocks_project)
+    assert any(
+        "unknown link type 'satisfyes'" in d.message and "Did you mean 'satisfies'?" in d.message
+        for d in project.errors
+    )
+
+
+def test_cascade_non_positive_depth_is_an_error(blocks_project):
+    _page_with_block(blocks_project, '{{cascade from="DEC-001" direction="up" depth="0"}}')
+    project, _page = _index_page(blocks_project)
+    assert any("depth must be a positive integer" in d.message for d in project.errors)
+
+
+DIAMOND_SCHEMA = """\
+site: {title: "Diamond Test", out: _site}
+id: {width: 3, ledger: .refdes/ids.yaml}
+link_types:
+  next: { inverse: prev, label: "Next" }
+types:
+  node:
+    prefix: NODE
+    fields:
+      title: { type: text, required: true }
+    links:
+      next: [node]
+"""
+
+
+@pytest.fixture
+def diamond_project(tmp_path):
+    (tmp_path / "refdes.yaml").write_text(DIAMOND_SCHEMA, encoding="utf-8")
+    items = tmp_path / "items"
+    items.mkdir()
+    # NODE-001 -> NODE-002 -> NODE-004, NODE-001 -> NODE-003 -> NODE-004:
+    # two paths reconverge on NODE-004.
+    graph = {
+        "NODE-001": ("Root", ["NODE-002", "NODE-003"]),
+        "NODE-002": ("Left", ["NODE-004"]),
+        "NODE-003": ("Right", ["NODE-004"]),
+        "NODE-004": ("Sink", []),
+    }
+    for node_id, (title, targets) in graph.items():
+        next_yaml = f"next: [{', '.join(targets)}]\n" if targets else ""
+        (items / f"{node_id.lower()}.md").write_text(
+            f"---\nid: {node_id}\ntype: node\ntitle: {title}\n{next_yaml}---\n",
+            encoding="utf-8",
+        )
+    (tmp_path / "pages").mkdir()
+    return tmp_path
+
+
+def test_cascade_marks_a_reconverged_node_already_shown(diamond_project):
+    _page_with_block(diamond_project, '{{cascade from="NODE-001" direction="up"}}')
+    project, page = _index_page(diamond_project)
+    assert not project.errors
+    # Rendered twice (once fully, once as the reconverged leaf) -- the page's
+    # own _linkify pass also bare-links each occurrence's plain-text id, so
+    # 'data-ref="NODE-004"' is the reliable count, not the raw substring.
+    assert page.body_html.count('data-ref="NODE-004"') == 2
+    assert page.body_html.count("already shown above") == 1
+
+
+# --------------------------------------------------------- figure identity/numbering
+
+FIG_SCHEMA = """\
+site: {title: "Figures Test", out: _site}
+id: {width: 3, ledger: .refdes/ids.yaml}
+boards:
+  power: {label: Power}
+types:
+  decision:
+    prefix: DEC
+    fields:
+      title: { type: text, required: true }
+    links: {}
+  component:
+    prefix: CMP
+    fields:
+      title: { type: text, required: true }
+    links: {}
+"""
+
+FIG_PNG = b"\x89PNG\r\n\x1a\n"
+
+
+@pytest.fixture
+def fig_project(tmp_path):
+    (tmp_path / "refdes.yaml").write_text(FIG_SCHEMA, encoding="utf-8")
+    items = tmp_path / "items"
+    items.mkdir()
+    figures = items / "figures"
+    figures.mkdir()
+    (figures / "curve.png").write_bytes(FIG_PNG)
+    (items / "dec-001.md").write_text(
+        "---\nid: DEC-001\ntype: decision\ntitle: Buck topology.\nboard: power\n---\n\n"
+        'See [[fig:fig-curve]] and [[fig:fig-curve|the curve above]].\n'
+        'Also [[fig:fig-nope]].\n\n'
+        '![the curve](figures/curve.png){id="fig-curve" caption="Efficiency"}\n',
+        encoding="utf-8",
+    )
+    (items / "cmp-001.md").write_text(
+        "---\nid: CMP-001\ntype: component\ntitle: TPS62913.\nboard: power\n---\n\n"
+        "Cross-item: [[fig:fig-curve]].\n",
+        encoding="utf-8",
+    )
+    pages = tmp_path / "pages"
+    pages.mkdir()
+    (pages / "index.md").write_text(
+        "# Overview\n\nPage ref: [[fig:fig-curve]].\n", encoding="utf-8"
+    )
+    return tmp_path
+
+
+def test_figure_id_is_registered_and_gets_an_html_id(fig_project):
+    project = _build_at(fig_project)
+    assert not project.errors
+    assert "fig-curve" in project.figures
+    owner, source_file, _line = project.figures["fig-curve"]
+    assert owner == "DEC-001"
+    assert source_file == "items/dec-001.md"
+
+
+def test_duplicate_figure_id_is_an_error_naming_both_locations(fig_project):
+    (fig_project / "items" / "cmp-002.md").write_text(
+        "---\nid: CMP-002\ntype: component\ntitle: Dup.\nboard: power\n---\n\n"
+        '![dup](figures/curve.png){id="fig-curve"}\n',
+        encoding="utf-8",
+    )
+    project = _build_at(fig_project)
+    # cmp-002.md sorts before dec-001.md, so CMP-002 registers 'fig-curve'
+    # first and DEC-001's own use of it is the one that collides.
+    msg = next(d.message for d in project.errors if "figure id" in d.message)
+    assert "figure id 'fig-curve' is already used by CMP-002" in msg
+    assert "items/cmp-002.md" in msg
+    assert "Figure ids must be unique across the project" in msg
+
+
+def test_figure_numbers_per_document_own_item_page(fig_project):
+    project = _build_at(fig_project)
+    out = render.render_site(project)
+    html = open(os.path.join(out, "dec-001.html"), encoding="utf-8").read()
+    assert "<figcaption>Figure 1 — Efficiency</figcaption>" in html
+    assert '<a class="ref fig-ref" href="#fig-curve">Figure 1</a>' in html
+    assert '<a class="ref fig-ref" href="#fig-curve">the curve above</a>' in html
+    assert '<span class="ref ref-missing" title="unknown figure">fig-nope</span>' in html
+    assert any(
+        "reference to figure 'fig-nope', which does not exist" in d.message
+        for d in project.warnings
+    )
+
+
+def test_figure_cross_item_reference_fails_on_the_items_own_page(fig_project):
+    out = _build_and_render(fig_project)
+    html = open(os.path.join(out, "cmp-001.html"), encoding="utf-8").read()
+    assert '<span class="ref ref-missing" title="unknown figure">fig-curve</span>' in html
+
+
+def test_figure_cross_item_reference_resolves_in_the_combined_document(fig_project):
+    out = _build_and_render(fig_project)
+    html = open(os.path.join(out, "document.html"), encoding="utf-8").read()
+    assert html.count("Figure 1") >= 2  # DEC-001's own figure and CMP-001's cross-ref
+    assert '<a class="ref fig-ref" href="#fig-curve">Figure 1</a>' in html
+
+
+def test_figure_reference_on_a_narrative_page_that_lacks_it_warns(fig_project):
+    project = _build_at(fig_project)
+    out = render.render_site(project)
+    assert any(
+        "exists on DEC-001 but is not rendered on this page" in d.message
+        for d in project.warnings
+    )
+    index_html = open(os.path.join(out, "index.html"), encoding="utf-8").read()
+    assert '<span class="ref ref-missing" title="unknown figure">fig-curve</span>' in index_html
+
+
+# -------------------------------------------------- explicit reference regression
+
+def test_explicit_item_reference_does_not_nest_duplicate_links(blocks_project):
+    """Regression: _linkify's bare-reference pass used to re-scan its own
+    explicit-reference substitutions, turning [[ID]] into nested <a><a>...
+    tags because the target id also appears as the link's own text/attrs."""
+    (blocks_project / "items" / "req-001.md").write_text(
+        "---\nid: REQ-001\ntype: requirement\ntext: Input voltage range.\n---\n\n"
+        "See [[CON-001]] for the thermal budget.\n",
+        encoding="utf-8",
+    )
+    project = _build_at(blocks_project)
+    html = project.items["REQ-001"].body_html
+    assert html.count("<a") == 1
+    assert '<a class="ref" href="con-001.html" data-ref="CON-001">CON-001</a>' in html
