@@ -89,6 +89,126 @@ and this project uses [Semantic Versioning](https://semver.org/).
   `_site/assets/datasheets/<sha256><ext>` (flattened, not mirrored under
   `.refdes/vendor/`, since dot-prefixed directories are skipped by several
   static hosts including GitHub Pages via Jekyll).
+- Workspaces: a `workspaces:` registry (an ownership boundary one level above
+  boards), `item_layout: workspace` as the second of the two fixed layouts
+  `refdes-project.yaml` already validated, an item-level `workspace:`
+  override, a cross-workspace reference lint (`cross_workspace_severity`,
+  default warning) that flags an authored link crossing into a workspace not
+  marked `shared: true`, per-workspace pages, nav grouping (boards nest under
+  their workspace), `--workspace` scoping on `refdes check`, workspace drift
+  tracked in `.refdes/boards.yaml` and reported by `refdes audit`, and an
+  eighth release-gate rule, `unaccepted_workspace_moves`. Entirely inert with
+  no `workspaces:` registry declared. See [workspaces](docs/workspaces.md).
+- Board-grouped site navigation: once `boards:` is registered, the top bar
+  groups a project's pages and generated reports under each board's label
+  instead of one flat list; a narrative page joins a board's group by tagging
+  `board:` in its front matter. A project with no `boards:` registry renders
+  the same flat nav as before.
+- Append-only seals are now split per board: each registered board gets its
+  own `.refdes/log-seal-<board>.yaml`, and `--reseal` optionally takes a
+  board name to accept edits only to that board's own entries (bare
+  `--reseal` still accepts everywhere). A project with no `boards:` registry
+  is unaffected (single `.refdes/log-seal.yaml`, as before).
+- `refdes check --board NAME` narrows which diagnostics print, and the item
+  count in the summary line, to one board's own items -- the whole project
+  still parses and every link still resolves regardless; a project-level
+  diagnostic with no attributable item is never hidden by `--board`.
+- Generated blocks, `{{index}}` and `{{cascade}}`: `{{index by="<field>"
+  type="<type>"}}` groups a type's items into ID/Title tables by a field's
+  current value (enum fields in declared-`choices:` order, dates
+  chronologically, everything else lexicographically, with an `(unset)`
+  bucket last); `{{cascade from="<id>" direction="down|up|both"}}` renders a
+  bounded, rooted walk of the traceability graph, a revisited node rendering
+  once more as a terminal leaf rather than erroring. Both are extracted and
+  validated before markdown rendering, sharing the standard hover-preview
+  linking; an unrecognized block name passes through as literal text, and a
+  block shown as an example inside a fenced code block is left untouched
+  rather than executed. `link_types:` entries gain a `trace:` flag (default
+  `true`) controlling which verbs a cascade walks by default -- the bundled
+  standard sets it `false` on `amends`/`records`/`supersedes`/`addresses`.
+  See [blocks](docs/blocks.md).
+- Figures: an explicit `id="..."` on a figure registers it in a project-wide
+  registry and enables numbering; each rendered document numbers its own
+  figures fresh in its own reading order; `[[fig:id]]` resolves to a linked
+  "Figure N" (or a custom label) wherever both the figure and the reference
+  are rendered together. `refdes check` now catches a dangling `[[fig:...]]`
+  immediately, the same as a dangling `[[ITEM-ID]]`, instead of only
+  discovering it on the next `refdes build`.
+- `blocked_by:` link and its cascade report: a decision (or any type) can
+  declare `blocked_by: [...]`; the report resolves each direct edge to its
+  structural root, detects cycles as a hard build error, and flags a blocker
+  that reached a settled status while the edge is still declared. Surfaced
+  in `refdes audit` ("Blocked chains"), a panel on the blocked item's own
+  page, and folded into `coverage.html`'s "claimed but not verified"
+  warnings.
+- Parts indexing (`parts.html`, plus per-board/per-workspace variants,
+  broken out separately in `refdes audit`'s "Parts:" section) and part
+  equivalence: `parts.html` indexes any type's `part_number` field and any
+  citation's own nested `part_number` by exact string, so a part cited but
+  never made into a component still shows up. `equivalent`/`alternate`
+  links on `component` (already in the bundled standard) now render
+  correctly for the self-inverse case (`equivalent`'s inverse is itself),
+  merging outgoing and incoming declarations instead of showing the same
+  claim twice.
+- `refdes init`, `refdes new <type>`, `refdes schema --json`, and
+  `refdes standard add-preset`/`remove-preset`: `init` writes a minimal
+  `refdes.yaml` pointing at the standard (no copied `types:`/`link_types:`)
+  plus a `.vscode/settings.json` wiring up `yaml.schemas`; `new` scaffolds an
+  item's front matter for any type in the merged schema; `schema --json`
+  emits a JSON Schema over the project's actual merged schema, written to
+  `.refdes/schema.json` (gitignored) as a side effect of every
+  project-loading command, with staleness detected by `refdes check`;
+  `standard add-preset`/`remove-preset` edit `standard.presets:` in place as
+  a minimal text patch, `remove-preset` reporting exactly what breaks before
+  writing the change.
+- VS Code extension: declares `redhat.vscode-yaml` as a dependency, so
+  `items/**/*.yaml` gets full YAML-schema completion/validation from the
+  association `refdes init` now writes; adds a third completion trigger for
+  `.md` front matter, which that mechanism can't reach -- field and link key
+  names, once the current item's type is known from context.
+- `refdes stub-tests`: writes one multi-item markdown file per (workspace,
+  board), one starter test item per still-uncovered coverable item in that
+  scope (`verifies:` already pointing at it, the type's own default
+  `status:`, an empty `method:` if the type declares one). Deduplicates by
+  declared links, not text, so re-running never doubles up and deleting a
+  stub makes its target eligible again.
+- `former_ids:`, a reserved list field recording the id(s) an item replaces
+  after a renumbering: `[[old_id]]` and a bare `old_id` (when it fits the
+  ordinary `PREFIX-NNN` bare-reference shape) resolve to the declaring item
+  with a visible "(formerly old_id)" marker; a former id colliding with a
+  live id, or claimed by two items, is a build error; every former id is
+  folded into the ID ledger so the allocator can never reissue it; `refdes
+  audit` lists the full mapping.
+- `refdes former-ids propose`: infers old-to-new id candidates by comparing
+  the most recent baseline snapshot to the live project and scoring title
+  similarity; shows every candidate with its confidence and writes nothing
+  until specific old ids are named via `--confirm`.
+
+### Fixed
+
+- `refdes check`/`refdes build` now warn when an item resolves to no board
+  (a `boards:` registry is declared but a path segment isn't in it), and
+  treat a recorded board going away as drift -- both were previously
+  silent, so a restructured `items/` tree could hollow out a board's pages
+  with no diagnostic at all.
+- A limit's parse-failure diagnostic now appends a hint when the
+  unparseable text looks like several bounds run together in one sentence
+  (two or more numbers plus a list-like conjunction), suggesting a split
+  into separate constraint items.
+- A `[[ITEM-ID]]` reference inside prose no longer produces nested
+  duplicate `<a>` tags (the bare-reference pass was re-scanning the
+  explicit-reference pass's own already-substituted HTML).
+- A `{{index ...}}`/`{{cascade ...}}` directive shown as a literal example
+  inside a fenced code block was being executed as a real block instead of
+  left as text.
+- Packaging: `standards/**/*.yaml` (the bundled standard library) is now
+  included in the built wheel -- previously an installed, non-editable
+  `refdes` would fail to resolve `standard:` at all, since the files it
+  needs simply weren't shipped.
+- Finding 9: a tolerance written on the wrong side of a calc declaration
+  (`name : unit ± tol = expr` instead of `name : unit = expr ± tol`) now
+  gets a diagnostic naming the fix (`a tolerance belongs on the right-hand
+  side — ...`) instead of `unknown unit 'W ± 10%' in declaration`.
 
 ### Breaking
 
@@ -103,6 +223,46 @@ and this project uses [Semantic Versioning](https://semver.org/).
   them is now opt-in via `publish_datasheets: true` in
   `refdes-project.yaml`. With it left unset (or the file absent), the
   rendered citation links upstream only, same as an unvendored citation.
+- `refdes check`/`refdes build`'s failing-`checks:` message now leads with
+  the worst-case bound instead of the nominal value it previously (and
+  incorrectly) reported -- e.g. `P_dens = 0.2366 W/in² violates CON-THM-001
+  (<= 0.15 W/in^2)` is now `P_dens violates CON-THM-001: worst case 0.2366
+  W/in² vs <= 0.15 W/in^2`, with `(nominal X)` appended only when a
+  tolerance widens the check. Anything scripted against the old message
+  text will need updating.
+- Coverage diagnostics now aggregate: "nothing addresses, satisfies, or
+  verifies this yet" and "satisfied but not verified" each collapse into
+  one project-level summary line (pointing at `coverage.html`) instead of
+  one warning per item; "satisfied but not verified" is additionally
+  suppressed entirely when the project declares no verifier (`test`-like)
+  items at all. A new `info` diagnostic severity was added, hidden by
+  default and shown with the new `-v`/`--verbose` flag on `check`/`build`.
+- An unpinned citation (no fetched record yet) is now reported at `info`
+  severity, not `warning` -- it's the routine state before `refdes fetch`
+  has run. Still promoted to error with `--require-citations`.
+- Local image (`<img src>`) destinations in the rendered site are now
+  content-hashed leaf filenames (`figures/curve.<hash>.png`) instead of
+  mirroring the source path exactly. Ordinary `![alt](src)` markdown images
+  are unaffected -- the rendered `<img src>` is rewritten to match
+  automatically -- but a hand-typed link into `_site/assets/...` hard-coding
+  the old, unhashed destination path will now 404.
+- A project that adopts the bundled `hardware@1` standard (`standard:
+  {base: hardware, version: 1}`) gets `coverable_statuses: [active]` on
+  `requirement`/`constraint` and `verifying_statuses: [passing]` on `test`:
+  a `draft`-status requirement or constraint now leaves coverage tracking
+  entirely (no `coverage.html` row, doesn't count toward "N item(s) with no
+  coverage"), and a `test` whose own status isn't `passing` -- including
+  `planned`, both the standard's own default and what `refdes stub-tests`
+  generates -- no longer counts as verifying anything it links to. A
+  project not using the standard, or a custom type that doesn't declare
+  these flags, is unaffected.
+- This repository's own sample project migrated onto the standard:
+  `decision.constrains` is now `constrained_by`, `requirement`/`constraint`
+  status choices renamed `accepted` -> `active` (the standard's
+  `draft`/`active`/`retired` enum has no `accepted`), and `REQ-PWR-003`'s
+  self-referencing `derives_from` is now `refines`. Anyone using this
+  repository's `refdes.yaml`/items as a starting template should expect the
+  same renames on adopting the standard.
 
 ## [0.3.0] - 2026-08-11
 
