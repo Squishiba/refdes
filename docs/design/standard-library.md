@@ -88,6 +88,8 @@ link_types:
   supersedes:     { inverse: superseded_by, label: "Supersedes" }
   selects:        { inverse: selected_by,   label: "Selects" }
   blocked_by:     { inverse: blocks,        label: "Blocked by" }
+  equivalent:     { inverse: equivalent,    label: "Equivalent" }   # self-inverse; see §11
+  alternate:      { inverse: alternate,     label: "Alternate" }    # self-inverse; see §11
 
 types:
   requirement:
@@ -168,10 +170,13 @@ types:
       part_number: { type: text, on_change: invalidate }
       refdes:      { type: list, on_change: log }
       status:      { type: enum, choices: [candidate, selected, obsolete], default: candidate, on_change: invalidate }
+      rationale:   { type: text, on_change: invalidate, required_when: {links: alternate} }
       datasheets:  { type: citations, on_change: invalidate }
     include: [provenance, stewardship]
     links:
-      satisfies: [requirement]
+      satisfies:  [requirement]
+      equivalent: []   # self-inverse; see §11
+      alternate:  []   # self-inverse; see §11
     body: { on_change: invalidate }
 
   log:
@@ -247,9 +252,10 @@ record, not a living document.
 
 ### Link vocabulary
 
-Eleven verbs, each declared on the type that would naturally author it in
+Thirteen verbs, each declared on the type that would naturally author it in
 front-matter; the other direction is a computed backlink, not something a
-project ever writes.
+project ever writes — except the last two, which are their own backlink; see
+below.
 
 | verb (declared on) | inverse (computed) | source → allowed targets | meaning |
 |---|---|---|---|
@@ -264,8 +270,10 @@ project ever writes.
 | `supersedes` (decision) | `superseded_by` | decision → decision | replacement |
 | `selects` (decision) | `selected_by` | decision → component | picks this specific part to realize itself |
 | `blocked_by` (decision) | `blocks` | decision → any type, unrestricted | names what's holding this decision up |
+| `equivalent` (component) | `equivalent` (self) | component → component | drop-in; no review needed before substituting |
+| `alternate` (component) | `alternate` (self) | component → component | close, but check before substituting |
 
-Three choices here are worth explaining rather than taking as given:
+Five choices here are worth explaining rather than taking as given:
 
 - **`constrained_by`, not `constrains`, is what a decision author types.**
   "A decision constrains a constraint" reads backwards — a decision is bound
@@ -290,6 +298,14 @@ Three choices here are worth explaining rather than taking as given:
   cycle as a hard error, and is deliberately unrestricted in what it may
   target. See §9 for the full design, including how it feeds back into
   coverage.
+- **`equivalent` and `alternate` are the only self-inverse verbs in this
+  vocabulary** — every other link here is directional (satisfying is not the
+  same claim as being satisfied), but two components being interchangeable
+  is the same fact regardless of which one's front-matter states it, so both
+  declare themselves as their own inverse rather than inventing a passive
+  form (`equivalent_by`) that would mean nothing different. See §11 for how
+  the model handles that without special-casing, and for why `alternate`'s
+  rationale is required and `equivalent`'s isn't.
 
 ---
 
@@ -729,7 +745,8 @@ optional presets at the same time.
 | `requirement` | fields; self-referencing decomposition link (renamed to `refines`) | `status` choices `[draft, open, accepted, retired]` → `[draft, active, retired]` — **breaking**: any item currently at `status: open` needs a manual call, `draft` or `active`, nothing should guess this automatically |
 | `constraint` | fields; decomposition link unchanged | same status-choices collapse |
 | `decision` | `status` is a strict subset of the standard's list — additive, no breakage | `constrains:` → `constrained_by:` (rename plus direction flip); `implements: [component]` → `selects: [component]` — both mechanical front-matter renames across every decision item |
-| `component`, `test`, `log` | match directly | — |
+| `test`, `log` | match directly | — |
+| `component` | fields, `satisfies` unchanged | additive only: `rationale`, `equivalent`, `alternate` are new declarations with no existing counterpart to collide with |
 | `boards:` | untouched — a separate top-level key, not part of `standard:` | — |
 
 Net effect: `refdes.yaml` shrinks to `site:` / `id:` / `standard:` / `boards:`
@@ -750,15 +767,22 @@ link verbs) against this design:
   dropped (nothing to migrate, since it was never used); `verifies` and
   `amends` are kept even though unused today, because they become necessary
   the moment `test` items or a log correction exist.
-- **`derives_from`, `records`, and `blocked_by` are net-new capability**, not
-  currently declared at all — zero breakage, immediately available.
-  `blocked_by` in particular has direct cited evidence of need: the real
-  project's own follow-up notes describe exactly this cascade by hand — a
-  decision on hold with three (four, counting a pair of decisions about the
+- **`derives_from`, `records`, `blocked_by`, `equivalent`, and `alternate`
+  are net-new capability**, not currently declared at all — zero breakage,
+  immediately available. `blocked_by` in particular has direct cited
+  evidence of need: the real project's own follow-up notes describe exactly
+  this cascade by hand — a decision on hold with three (four, counting a
+  pair of decisions about the
   same GPIO-expansion question) other decisions assuming its outcome,
   recorded as a bullet list inside the blocked decision's body that nothing
   validated and nothing updated when the situation changed. Adopting the
   edge replaces that list with something the build checks.
+- **Parts indexing (§10) is likewise additive**, and answers a question the
+  same follow-up notes ask directly: the real project's documentation names
+  real silicon by part number across several boards without any way to see
+  where else a given part is used short of a grep. `component.rationale`
+  and the `equivalent`/`alternate` links (§11) are new declarations on a
+  type that already exists, with nothing to collide with.
 - **The `provenance` field set reproduces this project's own hand-derived
   convention verbatim**: `tags` on `ignore`, `note`/`source` on `log`,
   repeated across every type. Adopting `include: [provenance]` matches
@@ -1218,3 +1242,316 @@ audit`. This is where "three requirements are unsettled because of one open
 question" is actually meant to be read: the aggregate CLI line is the
 pointer, the page is where the full "these three, that one cause" picture
 lives.
+
+---
+
+## 10. Indexing part numbers, and the parts page
+
+The docs name a lot of real silicon, and today "what changes if the
+STM32G474 is dropped" means grepping for the string across every item and
+citation. Two sources of a part number already exist in the schema —
+`component.part_number` and the nested `part_number` inside a `citations:`
+entry — and neither needs to be duplicated into a new type to answer that
+question. This is explicitly **not** a `part` item type: the ask is indexing
+a field that already exists, twice over.
+
+### No new type, no new field type — indexing what's already there
+
+Two sources, both already in §1's standard, neither requiring a new
+declaration:
+
+1. `component.part_number` — a plain `text` field.
+2. The nested `part_number` key inside every `citations:`-typed field's
+   entries (`CitationSpec.part_number`, `citations.py:37,118`) — present on
+   *any* type that declares a `citations:` field, not only `component`. §1's
+   standard only puts one on `component.datasheets`, but §2 lets a project
+   add a `citations:` field to any type, and the nested key follows it
+   there automatically. This is the case that covers "cited a datasheet for
+   it, never made a component item" — a part that's real enough to have a
+   spec sheet pinned but hasn't (yet, or ever) become a BOM line.
+
+Recognized **by field name**, the same way `limit`, `options`, and `checks`
+already are (schema-reference.md's "three field names have behaviour
+attached regardless of declared type") — not by declared field `type:`,
+because `part_number` is a plain string with no structure of its own, unlike
+`citations`, which is recognized by its declared type precisely because it
+*does* have structure. Any field literally named `part_number`, on any item
+type, feeds the index. A project that later adds `part_number` to some other
+type — a connector spec, say — is picked up automatically, with no config
+change.
+
+### Exact string, deliberately
+
+Indexed on the literal string, with no normalization, no family grouping, no
+guessing that `STM32G474` and `STM32G474RET6` are the same part or even
+related parts. Every normalization scheme considered — strip a package
+suffix, match a manufacturer prefix, fuzzy-match — is right for some
+vendors' part-numbering conventions and wrong for others, and wrong here is
+worse than not trying: a false grouping silently answers "what uses this
+part" with the wrong set of items, which is a worse outcome than answering
+"nothing, under this exact string" and leaving the reader to notice the near
+match themselves. If family grouping is ever wanted, it's a **declared
+field** — a project adds, say, `family: STM32G4` to its own components and
+indexes on that field name instead of (or alongside) `part_number` — which
+this feature already supports for free, since it only needs a project to
+pick a field name; never a heuristic the tool invents on a project's behalf.
+
+### Why this isn't an `{{index}}` block
+
+`{{index by="part_number" type="component"}}` already works today, exactly
+as `docs/design/index-blocks.md` §2 specifies — `part_number` is a plain
+`text` field on one type, which is exactly what that family is built to
+group. But it only reaches the component half of the picture, and it
+*cannot* be extended to reach the nested half without breaking two
+restrictions that document states are load-bearing, not incidental:
+
+- §3 of that document explicitly rejects `citations` as a groupable field
+  type — "structured records... not a value with a current reading a
+  heading could name." The nested `part_number` sub-key is exactly that
+  structured-record case.
+- §2 of that document makes `type=` deliberately singular — "if a project
+  wants decisions and components indexed by the same field, that's two
+  blocks, not one." The parts page needs to reach *every* type that happens
+  to declare a `citations:` field, an open-ended set, not two named types.
+
+Both restrictions exist so that family stays a small, closed set of
+parameter-only blocks with one fixed meaning each (index-blocks.md §7's
+whole non-goal). Reaching this page's actual requirement would mean rebuilding
+both restrictions specifically to accommodate one page — exactly the "each
+block reinvents its own version" outcome that document's §6 exists to
+prevent. The parts page is a dedicated, purpose-built report instead,
+following `references.html`'s precedent, not `{{index}}`'s. An author who
+only cares about the component half is still free to drop
+`{{index by="part_number" type="component"}}` into a narrative page today;
+the dedicated report below is for the question that block can't answer.
+
+### The report: global and per-board, following `references.html`'s shape
+
+`citations.py` already has the exact mechanism to mirror: `collect()` walks
+every local item's every `citations:`-typed field regardless of which type
+declares it, and `by_url(project, board=None)` regroups the result by URL,
+optionally scoped to one board — this is precisely what `references.html`
+and `references-{board}.html` render, and precisely what `refdes audit`'s
+existing "Citations:" section prints. Parts indexing adds a sibling,
+`by_part_number(project, board=None)`, doing the identical regroup keyed on
+`spec.part_number` instead of `spec.url` (entries with no part number are
+skipped — most citations won't have one filled in), plus a second, equally
+small walk over `component.part_number` and any other field named
+`part_number` on any local item. Both feed one merged, sorted-by-exact-string
+structure — one entry per part number, carrying whichever components declare
+it directly and whichever citations name it in their nested `part_number`.
+No new traversal logic: this reuses `collect()`'s walk and `by_url()`'s
+grouping shape wholesale.
+
+Rendered exactly like citations: **`parts.html`**, global, plus
+**`parts-{board}.html`** per board, both from one template, following the
+same "global page has no board filter, board page filters both sources to
+`item.board == board`" rule `by_url` already uses. `"parts"` and
+`"parts-{board}"` join the existing `reserved` name set in `render_site`
+(`render.py:480-492`) alongside `"references"` and `"references-{board}"`,
+so a narrative page can't collide with the generated report — the same
+mechanism, one more literal string.
+
+**`refdes audit`** gets a "Parts:" section, in the same shape as its
+existing "Citations:" section — every part number, not filtered to
+multiply-used ones, so a reader skims for the multi-board rows themselves
+rather than the tool pre-deciding what's interesting:
+
+```
+Parts:
+  STM32G474      used by CMP-014, CMP-019 (components), REQ-IO-SYS-004 (citation)
+                 — boards: main-io, expansion
+  STM32H523      used by CMP-021 (component) — board: main-io
+```
+
+Each component page's existing fields table already shows its own
+`part_number`; a small addition there — "also used by: ..." — links straight
+to the part's section on `parts.html` rather than duplicating the full list
+on every component page that happens to share a part.
+
+### Workspaces, and why the cross-workspace lint doesn't apply here
+
+**"Workspace" isn't a concept this codebase defines** — `docs/design/index-blocks.md`
+§2 reached the identical conclusion when asked to scope index blocks by
+workspace, and the reasoning is unchanged here: inventing one to satisfy
+this brief would add a concept the rest of the tool doesn't have. Scoping is
+board-only, matching every other generated report in the tool. If a
+workspace concept and a cross-workspace lint (the "further ideas" note about
+grouping boards under a shared-ownership boundary) are ever built, this
+section states the invariant that design will have to respect, so it isn't
+discovered as a conflict after the fact:
+
+**The parts page is a derived view, not an authored link.** It stores
+nothing on any item, declares no `links:`, and creates no edge a project
+would ever write down — it's computed fresh, at build time, from field
+values that already exist. A future cross-workspace lint has something real
+to check *because* `refines`/`satisfies`/`constrained_by`/etc. are edges a
+project author deliberately typed, each one a real claim of dependency that
+makes a workspace harder to extract on its own. The parts page produces
+none of those. Two boards in different workspaces using the same
+microcontroller is a coincidence of the bill of materials, not a claimed
+dependency between them, and it is exactly the coincidence this page exists
+to surface — it's what answers "what's affected if this part goes end of
+life" or "where else could a second source qualify," across the whole
+project, on purpose. A cross-workspace lint should be scoped to declared
+`links:`, never to which items happen to share a `part_number`; nothing
+about this design needs to wait for that lint to exist, and nothing about
+that lint, whenever it's built, should need to touch this page.
+
+---
+
+## 11. Part equivalence: two relationships, and the self-inverse link
+
+**This is not a parts database.** A manufacturer's own equivalence data —
+"these two op-amps are pin-compatible per the datasheet" — is parts data,
+and belongs in whatever system of record already holds part numbers,
+package outlines, and AVL lists, not in refdes. What belongs here is
+narrower and different in kind: *this project's author has decided* two
+parts are interchangeable for *this design*. That's a reviewable claim, not
+a fact about silicon — it can be wrong, it can go stale when a requirement
+changes, and someone can disagree with it. Staleness and reviewability are
+exactly refdes's domain everywhere else in this document (§9's stale-blocker
+check is the same shape of problem), so the design follows that lead rather
+than reaching for a parts-database shape.
+
+### Two verbs, and why not one field
+
+`equivalent` — drop-in, no review needed before substituting; rationale
+optional, because the claim ("these are interchangeable") is complete on its
+own. `alternate` — functionally close but check before substituting;
+rationale required, because unlike `equivalent` the entire content of the
+claim is *which way* it isn't quite a drop-in — "there's something you
+should know" with no statement of what is worse than not recording the
+relationship at all.
+
+Two alternatives to a pair of links were considered and rejected:
+
+- **A `component.equivalents:` field**, shaped like `options:` (a flat list
+  of `{name, verdict, because}` panels with no items behind them). Rejected
+  because, unlike a decision's considered-and-rejected options, both sides
+  of an equivalence claim already exist as real component items — the field
+  would mean re-typing the other part's identity as a bare string, losing
+  the validated ID reference, the computed backlink that lets the *other*
+  component's page show the claim too, and any hook for `required_when` to
+  gate on which kind of claim it is.
+- **One shared link plus an enum field** naming the relationship kind
+  (`substitute_kind: {choices: [equivalent, alternate]}`) instead of two
+  verbs. Rejected because it can't represent a component that has *both* an
+  equivalent and a different alternate at once — exactly the second-sourcing
+  case §10 exists to surface (a drop-in second source *and* a functionally
+  close but imperfect option, simultaneously) — since one enum field per
+  component can only record one relationship kind at a time.
+
+Two link verbs, declared on `component` and restricted to `component`
+targets, is the only shape that gives each pairing its own kind without
+losing the identity or reviewability of either side.
+
+### The symmetry problem, and how the model handles it
+
+Every other verb in this vocabulary is directional — satisfying is not the
+same claim as being satisfied, so each gets its own inverse name
+(`satisfies`/`satisfied_by`, `refines`/`refined_by`, and so on). Equivalence
+doesn't have a natural passive form: if CMP-014 is `equivalent` to CMP-019,
+CMP-019 is not "equivalented by" CMP-014 — it is, identically,
+`equivalent` to CMP-014. The same is true of `alternate`. Inventing a
+distinct inverse name for either would create a word that means nothing
+different from the verb it's the inverse of, which is worse than not having
+one.
+
+**The loader already tolerates this without special-casing.** A
+`link_types` entry's `inverse:` is just a string (§1's YAML: `equivalent: {
+inverse: equivalent, ... }`), and nothing in the load path requires it to
+differ from the verb's own name — `inverse_of["equivalent"] = "equivalent"`
+is set once, and the pass that fills in the reverse direction
+(`inverse_of.setdefault(inverse, name)`, `schema.py`) is a no-op against a
+key that's already set to the same value. Declaring a self-inverse link
+needs no schema-loader change.
+
+**Rendering is where the accommodation actually has to happen, and it's
+worth stating plainly rather than leaving implicit.** Every other link
+renders its forward declarations (`item.links[verb]`) and its computed
+backlinks (`item.backlinks[inverse]`) as two differently-labeled sections,
+because the labels genuinely mean different things — "Satisfies" is not
+"Satisfied by." For a self-inverse verb, `links["equivalent"]` and
+`backlinks["equivalent"]` share not just a key name but an identical
+meaning, and rendering them as two same-labeled sections would show a
+reader the same fact twice, differing only in which of the two components
+happened to type the YAML — information nobody reading the page cares
+about. **The least ugly accommodation**: an item page merges
+`links.get(verb, [])` with `backlinks.get(inverse, [])` into one
+de-duplicated set before rendering, whenever `verb == inverse` for that
+link type. This is a general rule, keyed off `LinkType.inverse ==
+LinkType.name`, not a special case hardcoded to these two verb names — any
+future self-inverse verb gets the same treatment automatically. A component
+declaring `equivalent: [CMP-019]` and CMP-019 separately, redundantly, also
+declaring `equivalent: [CMP-014]` back is harmless under this rule: the
+merge de-duplicates to the same single visible entry either way, so there's
+nothing to validate and nothing worth warning about — unlike a misspelled
+link name, a redundant symmetric declaration costs nothing and names
+nothing wrong.
+
+### `alternate`'s required rationale, and the one narrow extension to `required_when`
+
+§2 specifies `required_when:` with condition keys naming an `enum` field on
+the same type — deliberately, so the loader can validate every named value
+against a closed, declared `choices:` list. Gating `component.rationale` on
+"does this component declare an `alternate:` link" is a different kind of
+condition: not a field currently holding one of several values, but a link
+currently holding at least one target. This needs a second, narrow
+condition kind, not a rewrite of the mechanism:
+
+```yaml
+rationale:
+  type: text
+  on_change: invalidate
+  required_when: { links: alternate }
+```
+
+Inside a `required_when:` mapping, the key `links` is reserved (a field can
+never legitimately be named `links` in the first place, so this introduces
+no ambiguity) and its value names one or more link names declared on the
+same type; the condition is satisfied when the item declares at least one
+target under any of them. This combines with field-value conditions by the
+same AND rule already specified — a `required_when:` mapping may name both
+kinds at once, though nothing in this standard currently needs to.
+Load-time validation mirrors the enum case exactly: a `links` condition
+naming something not declared as a link on the type (after the full merge —
+base, presets, project overlay) is a `SchemaError`, the same posture as a
+`required_when` naming a value absent from an enum's resolved `choices:` —
+removing or renaming the `alternate` link without also touching
+`rationale`'s `required_when` doesn't silently stop enforcing anything, it
+fails the build.
+
+**One simplification, stated rather than hidden**: `rationale` is a single
+field per component, not one entry per `alternate` edge. A component with
+two different `alternate` candidates, each imperfect for a different
+reason, has one shared rationale text to explain both, not two independent
+ones. This is a deliberate trade against building per-edge structured
+rationale (an `alternate:` entry shaped like a `citations:` entry, each
+carrying its own `because:`) — rejected because it would make `alternate`
+behave unlike every other link in this vocabulary and unlike `equivalent`
+right next to it, for a case (a component with multiple simultaneous
+imperfect alternates) that's plausible but not evidenced. `rationale` is
+free text, so it degrades gracefully to one combined explanation rather than
+becoming wrong; if per-edge rationale is ever needed, that is a real fork
+worth its own design, not a default to build in ahead of the need.
+
+### What a part needs before it can carry this claim
+
+A link connects items, and a part known only through a citation's nested
+`part_number` — the case §10 exists to surface — has no item and no ID to
+link from or to. It can't carry an `equivalent` or `alternate` claim until
+it's promoted to a real `component` item. That's not a gap so much as the
+natural shape of the workflow: §10's parts page is how a citation-only part
+becomes visible as a candidate worth a second look; making a reviewable
+equivalence claim about it is a reason to give it an item, not something
+this design needs to support without one.
+
+### What this doesn't touch
+
+`compute_coverage` reads `satisfied_by`/`addressed_by`/`verified_by`-shaped
+backlinks only; `equivalent` and `alternate` aren't satisfies-shaped, so
+coverage is entirely unaffected — no interaction to design. Neither verb
+adds a new field *type*, unlike `citations`: `equivalent`/`alternate` are
+ordinary links, and `component.rationale` is an ordinary `text` field
+already used the same way on three other standard types.
