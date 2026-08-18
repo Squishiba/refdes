@@ -57,6 +57,7 @@ def _report_links(
         for i in project.local_items
     )
     has_citations = bool(citations_mod.by_url(project, board=board, workspace=workspace))
+    has_parts = bool(citations_mod.by_part_number(project, board=board, workspace=workspace))
 
     unscoped = board is None and workspace is None
     links = [NavNode("Summary", f"summary{suffix}.html")]
@@ -67,6 +68,8 @@ def _report_links(
         links.append(NavNode("Design log", f"log{suffix}.html"))
     if has_citations:
         links.append(NavNode("References", f"references{suffix}.html"))
+    if has_parts:
+        links.append(NavNode("Parts", f"parts{suffix}.html"))
     links.append(NavNode("Full record", f"document{suffix}.html"))
     if unscoped:
         links.append(NavNode("JSON", "items.json"))

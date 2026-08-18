@@ -412,6 +412,24 @@ def cmd_audit(args) -> int:
             print(f"  {url}")
             print(f"    {state:<14} {vendored:<10} cited by {citers}")
 
+    grouped_parts = citations_mod.by_part_number(project)
+    if grouped_parts:
+        print("\nParts:")
+        for part_number, usage in grouped_parts.items():
+            used_by = []
+            if usage.components:
+                ids = ", ".join(sorted({c.id for c in usage.components}))
+                label = "component" if len(usage.components) == 1 else "components"
+                used_by.append(f"{ids} ({label})")
+            if usage.citers:
+                ids = ", ".join(sorted({c.id for c, _status in usage.citers}))
+                label = "citation" if len(usage.citers) == 1 else "citations"
+                used_by.append(f"{ids} ({label})")
+            print(f"  {part_number:<14} used by {', '.join(used_by)}")
+            if usage.boards:
+                label = "board" if len(usage.boards) == 1 else "boards"
+                print(f"  {'':<14} — {label}: {', '.join(usage.boards)}")
+
     print(f"\n{len(project.items)} items audited "
           f"({len(project.local_items)} local)")
     return 0

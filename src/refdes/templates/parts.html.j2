@@ -1,0 +1,47 @@
+{% extends "base.html.j2" %}
+{% block title %}Parts{% if board %} — {{ board.label }}{% elif workspace %} — {{ workspace.label }}{% endif %} — {{ project.title }}{% endblock %}
+{% block content %}
+
+<h1>Parts{% if board %} — {{ board.label }}{% elif workspace %} — {{ workspace.label }}{% endif %}</h1>
+<p class="muted">
+  Every <code>part_number</code>{% if board %} on {{ board.label }}{% elif workspace %} on {{ workspace.label }}{% endif %},
+  indexed on the exact string — no normalization, no family grouping. A
+  near-miss (a package-suffixed variant, say) is a deliberately separate
+  entry, not merged into this one.
+</p>
+
+{% if parts %}
+<table class="grid parts">
+  <thead>
+    <tr><th>Part number</th><th>Components</th><th>Cited by</th>{% if not board and not workspace %}<th>Boards</th>{% endif %}</tr>
+  </thead>
+  <tbody>
+  {% for part_number, usage in parts.items() %}
+    <tr id="{{ part_anchor(part_number) }}">
+      <td class="mono">{{ part_number }}</td>
+      <td>
+        {% if usage.components %}
+          {% for c in usage.components %}
+          <a class="ref" href="{{ c.slug }}.html" data-ref="{{ c.id }}">{{ c.id }}</a>{% if not loop.last %}, {% endif %}
+          {% endfor %}
+        {% else %}<span class="muted">—</span>{% endif %}
+      </td>
+      <td>
+        {% if usage.citers %}
+          {% for c, status in usage.citers %}
+          <a class="ref" href="{{ c.slug }}.html" data-ref="{{ c.id }}">{{ c.id }}</a>{% if not loop.last %}, {% endif %}
+          {% endfor %}
+        {% else %}<span class="muted">—</span>{% endif %}
+      </td>
+      {% if not board and not workspace %}
+      <td class="small">{{ usage.boards | join(', ') if usage.boards else '—' }}</td>
+      {% endif %}
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="muted">No item declares a <code>part_number</code>.</p>
+{% endif %}
+
+{% endblock %}

@@ -42,6 +42,12 @@
       <th>{{ name }}</th>
       <td>
         {% if value is string or value is number %}{{ value }}
+          {% if name == 'part_number' %}
+            {% set usage = parts_usage(value) %}
+            {% if usage and (usage.components | length + usage.citers | length) > 1 %}
+            <a class="ref small" href="parts.html#{{ part_anchor(value) }}">also used elsewhere</a>
+            {% endif %}
+          {% endif %}
         {% elif value is sequence %}{{ value | join(', ') }}
         {% else %}{{ value }}{% endif %}
       </td>
@@ -139,15 +145,30 @@
 </section>
 {% endif %}
 
+{% set tv = trace_view(item) %}
 {% if item.links or item.backlinks %}
 <section class="traces">
   <h2>Traceability</h2>
+  {% if tv.self_inverse %}
+  {# A self-inverse verb (equivalent/alternate) means links[verb] and
+     backlinks[verb] are the identical fact, not an Outgoing/Incoming pair
+     -- see docs/design/standard-library.md §11. Rendered once, merged. #}
+  <ul class="tight self-inverse">
+    {% for name, ids in tv.self_inverse.items() %}
+    <li><span class="rel">{{ project.link_types[name].label if name in project.link_types else name }}</span>
+      {% for t in ids %}
+      <a class="ref" href="{{ t | lower }}.html" data-ref="{{ t }}">{{ t }}</a>{% if not loop.last %}, {% endif %}
+      {% endfor %}
+    </li>
+    {% endfor %}
+  </ul>
+  {% endif %}
   <div class="trace-cols">
     <div>
       <h3>Outgoing</h3>
-      {% if item.links %}
+      {% if tv.outgoing %}
       <ul class="tight">
-        {% for name, targets in item.links.items() %}
+        {% for name, targets in tv.outgoing.items() %}
         <li><span class="rel">{{ project.link_types[name].label if name in project.link_types else name }}</span>
           {% for t in targets %}
           <a class="ref" href="{{ t | lower }}.html" data-ref="{{ t }}">{{ t }}</a>{% if not loop.last %}, {% endif %}
@@ -159,9 +180,9 @@
     </div>
     <div>
       <h3>Incoming</h3>
-      {% if item.backlinks %}
+      {% if tv.incoming %}
       <ul class="tight">
-        {% for name, sources in item.backlinks.items() %}
+        {% for name, sources in tv.incoming.items() %}
         <li><span class="rel">{{ name }}</span>
           {% for s in sources %}
           <a class="ref" href="{{ s | lower }}.html" data-ref="{{ s }}">{{ s }}</a>{% if not loop.last %}, {% endif %}

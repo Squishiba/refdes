@@ -18,6 +18,7 @@ site:
     - authoring
     - pages
     - markdown
+    - blocks
     - ids
     - links
     - math
@@ -28,6 +29,7 @@ site:
     - multi-board
     - workspaces
     - lifecycle
+    - parts
     - schema-reference
     - cli-reference
     - output

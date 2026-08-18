@@ -34,7 +34,7 @@ from urllib.parse import urlparse
 
 import yaml
 
-from .model import CitationSpec, CitationStatus, Item, Project
+from .model import CitationSpec, CitationStatus, Item, PartUsage, Project
 
 LOCKFILE = ".refdes/citations.yaml"
 VENDOR_DIR = ".refdes/vendor"
@@ -143,6 +143,39 @@ def by_url(
             continue
         for status in item.citations:
             grouped[status.spec.url].append(status)
+    return dict(sorted(grouped.items()))
+
+
+def by_part_number(
+    project: Project, board: str | None = None, workspace: str | None = None
+) -> dict[str, PartUsage]:
+    """Every part number, regrouped by the exact string -- no normalization,
+    no family grouping (docs/design/standard-library.md §10). Two sources,
+    neither requiring a new declaration: a field literally named
+    `part_number` (recognized by name, the same way `limit`/`options`/
+    `checks` already are -- on any item type, not only `component`), and a
+    citation's own nested `part_number` (`item.citations`, populated by
+    `verify()`). `board`/`workspace` scope the same way `by_url` does.
+    """
+    grouped: dict[str, PartUsage] = {}
+
+    def usage(part_number: str) -> PartUsage:
+        return grouped.setdefault(part_number, PartUsage(part_number=part_number))
+
+    for item in project.local_items:
+        if board is not None and item.board != board:
+            continue
+        if workspace is not None and item.workspace != workspace:
+            continue
+        spec = project.types.get(item.type)
+        if spec is not None and "part_number" in spec.fields:
+            value = item.fields.get("part_number")
+            if value:
+                usage(str(value)).components.append(item)
+        for status in item.citations:
+            if status.spec.part_number:
+                usage(status.spec.part_number).citers.append((item, status))
+
     return dict(sorted(grouped.items()))
 
 

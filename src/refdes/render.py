@@ -128,6 +128,55 @@ def _check_state(item: Item) -> str:
     return "pass"
 
 
+_PART_ANCHOR_RE = re.compile(r"[^A-Za-z0-9_-]+")
+
+
+def _part_anchor(part_number: str) -> str:
+    """HTML id for a part number's row on parts.html -- the exact string,
+    sanitized to characters an id/URL fragment can hold safely. Used both to
+    write the anchor on parts.html and to link to it from a component page,
+    so the two always agree."""
+    return "part-" + _PART_ANCHOR_RE.sub("-", part_number).strip("-").lower()
+
+
+def _trace_view(item: Item, project: Project) -> dict:
+    """Split an item's links/backlinks into three buckets for the
+    Traceability section: `outgoing` (this item's own declarations, minus
+    self-inverse verbs), `incoming` (computed backlinks, same exclusion),
+    and `self_inverse` -- every link type where `LinkType.inverse ==
+    LinkType.name` (`equivalent`/`alternate` today, any future one
+    automatically), merged from both `links` and `backlinks` into one
+    de-duplicated list per verb.
+
+    docs/design/standard-library.md §11: for a self-inverse verb,
+    `links["equivalent"]` and `backlinks["equivalent"]` are the identical
+    fact, not two different ones the way "Satisfies"/"Satisfied by" are --
+    rendering them as separate Outgoing/Incoming entries would show a reader
+    the same claim twice, differing only in which of the two items happened
+    to type the YAML.
+    """
+    self_inverse: dict[str, list[str]] = {}
+    outgoing: dict[str, list[str]] = {}
+    incoming: dict[str, list[str]] = {}
+    for name, targets in item.links.items():
+        ltype = project.link_types.get(name)
+        if ltype is not None and ltype.inverse == name:
+            self_inverse.setdefault(name, []).extend(targets)
+        else:
+            outgoing[name] = targets
+    for name, sources in item.backlinks.items():
+        ltype = project.link_types.get(name)
+        if ltype is not None and ltype.inverse == name:
+            self_inverse.setdefault(name, []).extend(sources)
+        else:
+            incoming[name] = sources
+    return {
+        "outgoing": outgoing,
+        "incoming": incoming,
+        "self_inverse": {name: sorted(set(ids)) for name, ids in self_inverse.items()},
+    }
+
+
 def summary_payload(
     project: Project, board: str | None = None, workspace: str | None = None
 ) -> dict:
@@ -511,7 +560,11 @@ def render_site(project: Project) -> str:
     env.globals["check_state"] = _check_state
     env.globals["coverage_of"] = project.coverage.get
     env.globals["blocked_chains_for"] = blocked_mod.by_item(project).get
+    env.globals["trace_view"] = lambda item: _trace_view(item, project)
+    env.globals["part_anchor"] = _part_anchor
     citations_by_url = citations_mod.by_url(project)
+    parts_by_number = citations_mod.by_part_number(project)
+    env.globals["parts_usage"] = parts_by_number.get
 
     # A page called `index` owns index.html; otherwise the item dashboard does. This
     # is what lets a docs-only project render as an ordinary website.
@@ -541,27 +594,15 @@ def render_site(project: Project) -> str:
 
     # Generated reports own these filenames. A page of the same name would be
     # silently clobbered by whichever is written last, so say so instead. Each
-    # board and each workspace adds its own scoped set of the same five
+    # board and each workspace adds its own scoped set of the same six
     # reports -- schema.py's load-time check already guarantees a board key
     # and a workspace key never collide, so these two updates never fight.
-    reserved = {
-        "coverage",
-        "log",
-        "document",
-        "summary",
-        "references",
-        dashboard_name[: -len(".html")],
-    }
+    report_names = ("coverage", "log", "document", "summary", "references", "parts")
+    reserved = {*report_names, dashboard_name[: -len(".html")]}
     for board_key in project.boards:
-        reserved.update(
-            f"{name}-{board_key}"
-            for name in ("coverage", "log", "document", "summary", "references")
-        )
+        reserved.update(f"{name}-{board_key}" for name in report_names)
     for workspace_key in project.workspaces:
-        reserved.update(
-            f"{name}-{workspace_key}"
-            for name in ("coverage", "log", "document", "summary", "references")
-        )
+        reserved.update(f"{name}-{workspace_key}" for name in report_names)
     if project.items:
         keep = []
         for page in project.pages:
@@ -657,6 +698,17 @@ def render_site(project: Project) -> str:
             references_tpl.render(
                 project=project,
                 grouped=citations_by_url,
+                previews_json=previews_json,
+            )
+        )
+
+    parts_tpl = env.get_template("parts.html.j2")
+    written.add("parts.html")
+    with open(os.path.join(out_dir, "parts.html"), "w", encoding="utf-8") as fh:
+        fh.write(
+            parts_tpl.render(
+                project=project,
+                parts=parts_by_number,
                 previews_json=previews_json,
             )
         )
@@ -762,6 +814,19 @@ def render_site(project: Project) -> str:
                 )
             )
 
+        written.add(f"parts-{board_key}.html")
+        with open(
+            os.path.join(out_dir, f"parts-{board_key}.html"), "w", encoding="utf-8"
+        ) as fh:
+            fh.write(
+                parts_tpl.render(
+                    project=project,
+                    board=board_spec,
+                    parts=citations_mod.by_part_number(project, board=board_key),
+                    previews_json=previews_json,
+                )
+            )
+
         written.add(f"summary-{board_key}.html")
         with open(
             os.path.join(out_dir, f"summary-{board_key}.html"), "w", encoding="utf-8"
@@ -834,6 +899,19 @@ def render_site(project: Project) -> str:
                     project=project,
                     workspace=workspace_spec,
                     grouped=citations_mod.by_url(project, workspace=workspace_key),
+                    previews_json=previews_json,
+                )
+            )
+
+        written.add(f"parts-{workspace_key}.html")
+        with open(
+            os.path.join(out_dir, f"parts-{workspace_key}.html"), "w", encoding="utf-8"
+        ) as fh:
+            fh.write(
+                parts_tpl.render(
+                    project=project,
+                    workspace=workspace_spec,
+                    parts=citations_mod.by_part_number(project, workspace=workspace_key),
                     previews_json=previews_json,
                 )
             )

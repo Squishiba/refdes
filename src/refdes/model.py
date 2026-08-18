@@ -258,6 +258,30 @@ class CitationStatus:
 
 
 @dataclass
+class PartUsage:
+    """Everything that names one exact part-number string -- indexed by the
+    literal string, no normalization (docs/design/standard-library.md §10).
+    `components` is every local item with a field literally named
+    `part_number` (regardless of declared type or item type) holding this
+    string; `citers` is every `(item, CitationStatus)` whose citation's own
+    nested `part_number` matches. A part cited but never made into a
+    component item has `components == []`; one made into a component but
+    never cited has `citers == []`.
+    """
+
+    part_number: str
+    components: list["Item"] = field(default_factory=list)
+    citers: list[tuple["Item", CitationStatus]] = field(default_factory=list)
+
+    @property
+    def boards(self) -> list[str]:
+        return sorted(
+            {i.board for i in self.components if i.board}
+            | {i.board for i, _status in self.citers if i.board}
+        )
+
+
+@dataclass
 class CalcLine:
     """One line of a ```calc block, evaluated."""
 
