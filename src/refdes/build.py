@@ -10,6 +10,7 @@ import re
 
 from markdown_it import MarkdownIt
 
+from . import blocks as blocks_mod
 from . import boards as boards_mod
 from . import calc, citations as citations_mod, imports, pages as pages_mod, seal
 from . import workspaces as workspaces_mod
@@ -700,12 +701,29 @@ def render_bodies(project: Project) -> None:
 
 
 def render_pages(project: Project) -> None:
-    """Render narrative pages: markdown, item cross-references, page-to-page links."""
+    """Render narrative pages: markdown, generated blocks, item cross-references,
+    page-to-page links."""
     md = MarkdownIt("gfm-like", {"html": False, "linkify": False})
     known = {page.slug for page in project.pages}
 
     for page in project.pages:
-        html = md.render(page.body)
+        # Generated blocks ({{index}}, {{cascade}}) extract from raw source
+        # and placeholder-swap before md.render, then get their real HTML
+        # back immediately after -- same two-step calc blocks already use.
+        # This has to land before _linkify (next): an index/cascade table's
+        # cells are item IDs, and injecting the table before _linkify runs
+        # means _linkify's own pass over the whole page picks up every ID
+        # for free, with the standard hover preview -- see blocks.py's
+        # module docstring.
+        source, block_htmls = blocks_mod.extract_blocks(project, page.body, page.source_file)
+        html = md.render(source)
+        for index, block_html in enumerate(block_htmls):
+            token = blocks_mod.placeholder(index)
+            if f"<p>{token}</p>" in html:
+                html = html.replace(f"<p>{token}</p>", block_html)
+            else:
+                html = html.replace(token, block_html)
+
         html = _process_images(html, project, page.source_file)
         html = _apply_figure_attrs(html)
         html = _linkify(html, project, page.source_file)
