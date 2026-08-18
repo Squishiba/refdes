@@ -244,6 +244,7 @@ class Page:
     source_file: str
     order: int = 100
     in_nav: bool = True
+    board: str = ""  # optional `board:` tag; groups this page under that board's nav entry
     body_html: str = ""
     headings: list[tuple[int, str, str]] = field(default_factory=list)  # level, text, anchor
 

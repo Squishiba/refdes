@@ -10,18 +10,18 @@
 <header class="topbar">
   <a class="brand" href="{{ home_href }}">{{ project.title }}</a>
   <nav>
-    {% for page in project.pages if page.in_nav %}
-    <a href="{{ page.slug }}.html">{{ page.title }}</a>
-    {% endfor %}
-    {% if project.items %}
-    <a href="summary.html">Summary</a>
-    <a href="{{ dashboard_href }}">Items</a>
-    <a href="coverage.html">Coverage</a>
-    {% if has_log %}<a href="log.html">Design log</a>{% endif %}
-    {% if has_citations %}<a href="references.html">References</a>{% endif %}
-    <a href="document.html">Full record</a>
-    <a href="items.json">JSON</a>
+    {% for node in nav_tree %}
+    {% if node.href %}
+    <a href="{{ node.href }}">{{ node.label }}</a>
+    {% else %}
+    <span class="nav-group">
+      <span class="nav-group-label">{{ node.label }}</span>
+      {% for child in node.children %}
+      <a href="{{ child.href }}">{{ child.label }}</a>
+      {% endfor %}
+    </span>
     {% endif %}
+    {% endfor %}
   </nav>
 </header>
 

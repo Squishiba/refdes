@@ -21,7 +21,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from refdes import boards as boards_mod  # noqa: E402
 from refdes import build as build_mod  # noqa: E402
-from refdes import calc, cli as cli_mod, citations as citations_mod, ids, parse, render, seal  # noqa: E402
+from refdes import calc, cli as cli_mod, citations as citations_mod, ids, nav as nav_mod, parse, render, seal  # noqa: E402
 from refdes.schema import SchemaError, load_project  # noqa: E402
 
 REPO = os.path.join(os.path.dirname(__file__), "..")
@@ -1781,6 +1781,121 @@ def test_reserved_filename_guard_covers_per_board_report_names(board_project):
     project = _build_at(board_project)
     render.render_site(project)
     assert any("generated report" in d.message for d in project.errors)
+
+
+# ------------------------------------------------------------------------ nav
+
+
+@pytest.fixture
+def unboarded_project(tmp_path):
+    """A project with no `boards:` registry at all -- a dedicated fixture, not
+    `paged_project` (which copies this repo's own config, and this repo now
+    registers boards -- see test_real_project_registers_boards_and_renders_
+    board_pages)."""
+    (tmp_path / "refdes.yaml").write_text(
+        "site: { title: T, out: _site, pages: pages }\n"
+        "types:\n  requirement: { prefix: REQ, fields: { text: { type: text } } }\n",
+        encoding="utf-8",
+    )
+    items = tmp_path / "items"
+    items.mkdir()
+    (items / "r.yaml").write_text(
+        "defaults: { type: requirement, prefix: REQ }\n"
+        "items:\n  - id: REQ-001\n    text: A requirement.\n",
+        encoding="utf-8",
+    )
+    pages = tmp_path / "pages"
+    pages.mkdir()
+    (pages / "index.md").write_text("# Overview\n\nSome prose.\n", encoding="utf-8")
+    return tmp_path
+
+
+def test_nav_tree_is_flat_with_no_boards_registered(unboarded_project):
+    """No boards: registry -- nav degrades to the same flat list as before."""
+    project = _build_at(unboarded_project)
+    tree = nav_mod.build_nav(project, dashboard_href="items.html")
+    assert [n.label for n in tree] == [
+        "Overview", "Summary", "Items", "Coverage", "Full record", "JSON",
+    ]
+    assert all(n.href and not n.children for n in tree)
+
+
+def test_nav_tree_groups_pages_and_reports_under_their_board(board_project):
+    pages = board_project / "pages"
+    pages.mkdir()
+    (pages / "power.md").write_text(
+        "---\nboard: board-a\n---\n\n# Power overview\n", encoding="utf-8"
+    )
+    project = _build_at(board_project)
+    tree = nav_mod.build_nav(project, dashboard_href="items.html")
+
+    groups = {n.label: n for n in tree if not n.href}
+    assert set(groups) == {"Board A", "Board B"}
+
+    a_children = [c.label for c in groups["Board A"].children]
+    assert a_children == ["Power overview", "Summary", "Coverage", "Full record"]
+    # A board with no page of its own still gets a group -- just its reports.
+    assert [c.label for c in groups["Board B"].children] == ["Summary", "Coverage", "Full record"]
+
+    # The board-tagged page is not duplicated at the top level.
+    root_labels = [n.label for n in tree if n.href]
+    assert "Power overview" not in root_labels
+
+
+def test_nav_group_appears_for_a_page_only_board_with_no_items(tmp_path):
+    (tmp_path / "refdes.yaml").write_text(
+        "site: { title: T, out: _site, pages: pages }\n"
+        "boards:\n  power: { label: Power }\n"
+        "types:\n  note: { prefix: NOTE }\n",
+        encoding="utf-8",
+    )
+    pages = tmp_path / "pages"
+    pages.mkdir()
+    (pages / "overview.md").write_text(
+        "---\nboard: power\n---\n\n# Power overview\n", encoding="utf-8"
+    )
+    project = _build_at(tmp_path)
+    tree = nav_mod.build_nav(project, dashboard_href="index.html")
+    groups = {n.label: n for n in tree if not n.href}
+    assert set(groups) == {"Power"}
+    assert [c.label for c in groups["Power"].children] == ["Power overview"]
+
+
+def test_page_board_tag_must_be_registered(board_project):
+    pages = board_project / "pages"
+    pages.mkdir()
+    (pages / "bad.md").write_text(
+        "---\nboard: nonexistent\n---\n\n# Bad\n", encoding="utf-8"
+    )
+    project = _build_at(board_project)
+    assert any(
+        "nonexistent" in d.message and "not declared" in d.message
+        for d in project.errors
+    )
+    page = next(p for p in project.pages if p.slug == "bad")
+    assert page.board == ""
+
+
+def test_rendered_nav_shows_board_groups(board_project):
+    pages = board_project / "pages"
+    pages.mkdir()
+    (pages / "power.md").write_text(
+        "---\nboard: board-a\n---\n\n# Power overview\n", encoding="utf-8"
+    )
+    project = _build_at(board_project)
+    out = render.render_site(project)
+    html = open(os.path.join(out, "document.html"), encoding="utf-8").read()
+    assert '<span class="nav-group-label">Board A</span>' in html
+    assert 'href="power.html"' in html
+    assert 'href="summary-board-a.html"' in html
+    assert 'href="coverage-board-b.html"' in html
+
+
+def test_rendered_nav_has_no_groups_without_boards_registered(unboarded_project):
+    project = _build_at(unboarded_project)
+    out = render.render_site(project)
+    html = open(os.path.join(out, "index.html"), encoding="utf-8").read()
+    assert "nav-group" not in html
 
 
 # --------------------------------------------------------------- board drift

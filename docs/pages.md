@@ -45,6 +45,7 @@ The 3V3 rail is the binding design problem — see REQ-PWR-002 and CON-THM-001.
 | `title` | first `# heading`, else filename | Nav label and page title |
 | `order` | `100` | Sort position; lower comes first |
 | `nav` | `true` | Set `false` to render but keep out of the nav bar |
+| `board` | *(none)* | Group this page under that board's nav entry instead of the top level |
 
 ## Ordering the nav
 
@@ -62,6 +63,25 @@ site:
 
 Names are page slugs (the filename without `.md`). Anything unlisted follows,
 sorted by `order` then title.
+
+## Grouping a page under a board
+
+If the project has a `boards:` registry (see [multi-board](multi-board.md)), the
+nav bar already gets one group per board, listing that board's own reports —
+summary, coverage, design log, references, full record. Tag a page's front-matter
+`board:` with a board name and it joins that group too, instead of sitting in the
+top-level list:
+
+```markdown
+---
+title: Power board overview
+board: power
+---
+```
+
+This is what replaces a hand-written row of links at the top of a board overview
+page: the nav bar already gets you there. `order` and `nav: false` still work the
+same way inside a board's group as they do at the top level.
 
 ## What pages can do
 

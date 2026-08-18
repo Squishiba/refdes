@@ -86,7 +86,26 @@ def _read_page(project: Project, path: str, root: str) -> Page | None:
         source_file=rel_to_root,
         order=int(meta.get("order", 100)),
         in_nav=bool(meta.get("nav", True)),
+        board=str(meta.get("board") or ""),
     )
+
+
+def validate_boards(project: Project) -> None:
+    """A page's `board:` tag must name a board actually declared in `boards:`.
+
+    Runs after `boards.resolve()` so `project.boards` is settled. An unknown tag
+    is reported and cleared rather than left to silently strand the page outside
+    every nav group -- the same "name the fix, then keep going" posture
+    `boards.resolve()` already takes for an item's own bad `board:` override.
+    """
+    for page in project.pages:
+        if page.board and page.board not in project.boards:
+            project.error(
+                f"page board: {page.board!r} is not declared in refdes.yaml's "
+                f"boards: registry",
+                file=page.source_file,
+            )
+            page.board = ""
 
 
 # --------------------------------------------------------------------- rendering

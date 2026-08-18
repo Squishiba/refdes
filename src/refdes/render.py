@@ -10,6 +10,7 @@ import shutil
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from . import citations as citations_mod
+from . import nav as nav_mod
 from .model import Item, Project
 
 TEMPLATE_DIR = os.path.join(os.path.dirname(__file__), "templates")
@@ -444,9 +445,7 @@ def render_site(project: Project) -> str:
     )
     env.globals["check_state"] = _check_state
     env.globals["coverage_of"] = project.coverage.get
-    env.globals["has_log"] = any(i.type == "log" for i in project.local_items)
     citations_by_url = citations_mod.by_url(project)
-    env.globals["has_citations"] = bool(citations_by_url)
 
     # A page called `index` owns index.html; otherwise the item dashboard does. This
     # is what lets a docs-only project render as an ordinary website.
@@ -504,6 +503,8 @@ def render_site(project: Project) -> str:
         # Drop it entirely rather than half-including it: leaving it in would put a
         # nav link on every page pointing at the report instead of the page.
         project.pages = keep
+
+    env.globals["nav_tree"] = nav_mod.build_nav(project, dashboard_href=dashboard_name)
 
     page_tpl = env.get_template("page.html.j2")
     for page in project.pages:

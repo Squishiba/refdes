@@ -59,7 +59,9 @@ h3 { font-size: 14px; margin: 12px 0 6px; text-transform: uppercase; letter-spac
   padding: 12px 20px; border-bottom: 1px solid var(--line); background: var(--panel);
 }
 .brand { font-weight: 650; color: var(--fg); }
-.topbar nav { display: flex; gap: 16px; flex-wrap: wrap; font-size: 13.5px; }
+.topbar nav { display: flex; gap: 16px; flex-wrap: wrap; font-size: 13.5px; align-items: baseline; }
+.nav-group { display: inline-flex; align-items: baseline; gap: 12px; padding-left: 12px; border-left: 1px solid var(--line); }
+.nav-group-label { color: var(--muted); font-size: 11.5px; text-transform: uppercase; letter-spacing: .04em; }
 
 .footer {
   max-width: 1040px; margin: 0 auto; padding: 20px;

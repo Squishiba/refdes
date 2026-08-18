@@ -622,6 +622,7 @@ def build(
     calc.set_preferred_units(project.preferred_units)
     imports.load_imports(project)
     boards_mod.resolve(project)
+    pages_mod.validate_boards(project)
     validate_items(project)
     resolve_links(project)
     run_calcs(project)
