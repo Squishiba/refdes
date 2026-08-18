@@ -17,10 +17,9 @@ sigfigs: 4
 item_layout: flat
 
 # Where `stamped_by` comes from on a `refdes revision`/`refdes release`
-# baseline (not implemented yet -- see docs/design/lifecycle.md).
-# "os_user" reads the OS username, no git involved. "git_identity" reads
-# `git config user.name`/`user.email`, falling back to "os_user" with a
-# warning if that fails.
+# baseline -- see docs/lifecycle.md. "os_user" reads the OS username, no
+# git involved. "git_identity" reads `git config user.name`, falling back
+# to "os_user" with a warning if that fails.
 baseline_identity: os_user
 
 # Whether `decision.rationale` requires a value when `status: rejected`
@@ -35,11 +34,11 @@ require_rejection_rationale: true
 # link in the rendered site points upstream instead of to a local copy.
 publish_datasheets: false
 
-# The seven configurable rules `refdes release`/`refdes revision` will check
-# (not implemented yet -- see docs/design/lifecycle.md §1). Each rule is an
-# independent (release, revision) boolean pair; only the keys you want to
-# change from the defaults below need to be listed. The unconditional error
-# floor (any project.error) is not configurable and is not one of these.
+# The seven configurable rules `refdes release`/`refdes revision` check --
+# see docs/lifecycle.md. Each rule is an independent (release, revision)
+# boolean pair; only the keys you want to change from the defaults below
+# need to be listed. The unconditional error floor (any project.error) is
+# not configurable and is not one of these.
 release_gate:
   draft_items:              { release: true,  revision: false }
   unpinned_citations:       { release: true,  revision: false }

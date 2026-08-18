@@ -1,8 +1,9 @@
 # Change tracking
 
-Every field declares what a change to it *means*. This is what will drive suspect
-links, baseline diffs, and item timelines once the git history layer lands — and it
-already drives the content hash today.
+Every field declares what a change to it *means*. This drives the content hash
+today, and [the baseline diff](lifecycle.md#the-diff-what-changed-and-since-when)
+built on top of it; it's also what will drive suspect links and item timelines
+once the git history layer lands.
 
 ## The three modes
 
@@ -12,10 +13,14 @@ already drives the content hash today.
 | `log` | yes | no | no |
 | `ignore` | no | no | no |
 
-**Only the last column is implemented today.** The timeline and baseline-diff
-columns describe what the history layer will do once it exists; until then
-`log` and `ignore` are indistinguishable in every observable way -- see
-[what is not built yet](#what-is-not-built-yet).
+**The last two columns are implemented; the first is not.** `refdes
+revision`/`refdes release` stamp a content hash over `invalidate` fields
+only, and `refdes audit`'s baseline diff reports an item as changed
+precisely when that hash moved — so "counts in a baseline diff" is real,
+item-scoped behavior today. "In the timeline" describes a continuous,
+field-level history the parked git-reader layer would provide; until it
+exists, `log` and `ignore` are indistinguishable in every *other*
+observable way -- see [what is not built yet](#what-is-not-built-yet).
 
 `invalidate` is for the substance: a requirement's text, a constraint's limit, a
 decision's rationale. `log` is for things worth seeing but harmless: owner, tags,
@@ -137,7 +142,10 @@ worth knowing before you reorganise the schema.
 ## What is not built yet
 
 The git-backed layer: field-level diffs between revisions, per-item timelines,
-suspect-link badges, baselines, and change reports between two baselines. The
-`on_change` policy and the content hash it depends on are implemented and tested;
-the git reader is not written. Until it is, `log` behaves exactly like `ignore`
-in every observable way.
+and suspect-link badges. The `on_change` policy and the content hash it
+depends on are implemented and tested, and baselines (`refdes
+revision`/`refdes release`) plus the item-scoped change report between two of
+them are built on top of that hash and need no git reader at all -- see
+[project lifecycle](lifecycle.md). What's left needs actual history: *what*
+changed within an item, not just that it did, and a continuous view across
+many small steps rather than two-point comparisons between named baselines.

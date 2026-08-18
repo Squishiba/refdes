@@ -155,3 +155,30 @@ its own page with full traceability.
 An entry that `addresses` a requirement moves it from **open** to **addressed** —
 somebody has worked on it, even though no decision has been reached and no test
 exists. See [coverage](coverage.md).
+
+## After a release
+
+`refdes release <name>` does not write a log entry for you, and never
+prompts for one. A machine-generated "released rev-b" entry with no
+rationale is exactly the low-value noise this file's own append-only
+discipline exists to keep out of the timeline — an empty auto-entry is
+worse than no entry. `revision`/`release` also can't reliably guess a log
+entry's prefix or board on the project's behalf the way they can guess a
+gate result, so writing one would mean guessing at both.
+
+What it prints instead is a nudge, on a successful `release` only (a
+`revision` is allowed to be a mid-thought checkpoint with nothing to
+announce yet):
+
+```
+Consider recording this in the design log, e.g.:
+  - id: LOG-A-0NN
+    date: 2026-08-17
+    summary: Released rev-b — sent to fab.
+    records: [DEC-...]
+```
+
+Write the entry the same way you'd write any other — `records:` the
+decision(s) the release actually turned on, and say in `summary:` what
+shipped and why, the same as any other point on the timeline. See
+[lifecycle](lifecycle.md) for `revision`/`release` themselves.

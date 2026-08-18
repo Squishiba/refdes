@@ -305,6 +305,25 @@ computed. A version mismatch or an ID collision is a hard error.
 prefix. If you may ever split boards apart, adopt board-token prefixes now
 (`REQ-A-PWR-001`) — it costs nothing today and IDs are frozen once baselined.
 
+## Project lifecycle
+
+Three states, two commands, no flags on either. **draft** is the state a
+project is in when nothing has been stamped — not a command, nothing to
+run; `check`/`build` stay exactly as permissive as always.
+
+```bash
+refdes revision rev-c   # cuts an internal checkpoint, unconditionally
+refdes release  rev-b   # runs the full readiness gate, stamps only if it passes
+```
+
+`release` fails safely and says exactly what's blocking — running it when
+you're not ready *is* the check, which is why there's no `--dry-run`.
+Both write `.refdes/baselines/<name>.yaml`, a content-hash snapshot of
+every local item; re-stamping the same name with the same content is a
+no-op, with different content it's an error — a name is a permanent label
+once written. `refdes audit` reports what's changed since the last
+revision and since the last release. See [project lifecycle](docs/lifecycle.md).
+
 ## Output
 
 `_site/` is static HTML — no server, no build step for the reader, works with JS
@@ -326,13 +345,16 @@ downstream should read that, not the HTML.
 
 ## Not built yet
 
-- **Git history layer** — field-level diffs, item timelines, suspect links,
-  baselines. The `on_change` policy and content hash it depends on are wired and
-  tested; the git reader is not written. Imported items already carry their
-  upstream hash, so cross-project suspect links drop in with it.
-- **Workspace view** — one combined site across several projects, with
-  cross-project back-links and an interface-compliance matrix. Individual projects
-  import and build correctly today; the federated view does not exist.
+- **Git history layer** — field-level diffs, item timelines, and true
+  edge-scoped suspect links. Baselines (`refdes revision`/`refdes release`)
+  and the item-scoped diff between them *are* built, and need no git reader
+  at all — see [project lifecycle](docs/lifecycle.md). What's left needs
+  actual history: *what* changed within an item, not just that it did.
+- **Federated view** — one combined site across several *projects* (not to
+  be confused with [workspaces](docs/workspaces.md), which group boards
+  inside one project), with cross-project back-links and an
+  interface-compliance matrix. Individual projects import and build
+  correctly today; the federated view does not exist.
 - **Solving for unknowns** — `sympy` symbolic solve. Forward evaluation only today.
 - **Client-side search** and query blocks in narrative pages.
 - **Typeset math** — calc blocks render as clean tables; KaTeX can be vendored later.

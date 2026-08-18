@@ -1,7 +1,7 @@
 # CLI reference
 
 ```
-refdes [-c CONFIG] {build,check,index,id,fetch,audit} [options]
+refdes [-c CONFIG] {build,check,revision,release,index,id,fetch,audit} [options]
 ```
 
 | Global option | Effect |
@@ -102,6 +102,63 @@ Exits non-zero on drift, same as on any other error.
 
 ---
 
+## `refdes revision <name>`
+
+Cut an internal checkpoint. Stamps `.refdes/baselines/<name>.yaml`
+unconditionally, past the always-on error floor — no readiness gate by
+default. No flags; the name is the only argument.
+
+```bash
+refdes revision rev-c
+```
+
+```
+41 items, 0 errors, 0 warnings
+
+revision 'rev-c' stamped: 41 items.
+  .refdes/baselines/rev-c.yaml
+```
+
+Re-running the same name with identical content is a no-op (exit 0, file
+untouched); with different content it's an error (nothing written) — a
+name is a permanent label once stamped. See
+[lifecycle](lifecycle.md#edge-cases).
+
+---
+
+## `refdes release <name>`
+
+Run the full readiness gate (`release_gate:` in `refdes-project.yaml`) and
+stamp `.refdes/baselines/<name>.yaml` only if every enabled rule passes. On
+failure, nothing is written and the blocking rules are printed. No flags —
+running this when the project isn't ready *is* the check; there is no
+`--dry-run`.
+
+```bash
+refdes release rev-b
+```
+
+```
+41 items, 0 errors, 0 warnings
+
+release 'rev-b' blocked -- not stamped:
+  FAIL     draft_items            REQ-PWR-004, REQ-PWR-005
+  FAIL     uncovered_requirements CON-THM-002
+  pass     unpinned_citations
+  pass     missing_vendored_copies
+  skipped  unverified_requirements
+  skipped  info_check_failures
+  pass     unaccepted_board_moves
+```
+
+Fix what's listed and run it again. On success, a one-line nudge to record
+the release in the [design log](design-log.md#after-a-release) — printed,
+never auto-written. See [lifecycle](lifecycle.md) for the full readiness
+gate, the baseline file's shape, `stamped_by`, and the diff `refdes audit`
+surfaces against it.
+
+---
+
 ## `refdes index`
 
 Print `items.json` to stdout without rendering the site. Does everything `check`
@@ -182,7 +239,8 @@ into vendoring.
 
 Report everything that has been made less visible: fields excluded from
 invalidation, item-level overrides and their stated reasons, resealed log entries,
-[board](multi-board.md) and [workspace](workspaces.md) moves, imported projects, and
+[board](multi-board.md) and [workspace](workspaces.md) moves, what's changed
+since the last [revision and release](lifecycle.md), imported projects, and
 [citations](markdown.md#citing-a-datasheet).
 
 ```bash
@@ -200,6 +258,22 @@ Item-level overrides:
 
 Append-only entries edited after sealing:
   (none)
+
+Baselines:
+  most recent stamp:   rev-c (revision, 2026-08-10T09:12:00Z)
+  most recent release: rev-b (2026-07-02T16:40:00Z)
+
+Since last revision (rev-c, 2026-08-10T09:12:00Z):
+  changed   3   DEC-PWR-002, CMP-PWR-001, REQ-PWR-003
+  added     1   TST-PWR-004
+  removed   0
+  (12 unchanged)
+
+Since last release (rev-b, 2026-07-02T16:40:00Z):
+  changed   9   CMP-PWR-001, DEC-PWR-001, DEC-PWR-002, REQ-PWR-002, ...
+  added     4   TST-PWR-003, TST-PWR-004, DEC-PWR-003, CMP-PWR-005
+  removed   0
+  (7 unchanged)
 
 Board moves since the manifest was last written:
   (none)
@@ -219,8 +293,12 @@ Citations:
 
 The "Board moves" section only appears for a project that has declared a
 `boards:` registry, and "Workspace moves" only for one that has declared
-`workspaces:`. The "Citations" section only appears for a project that
-declares a `citations`-typed field somewhere and has at least one item using it.
+`workspaces:`. "Baselines" always appears — a project that has never run
+`refdes revision`/`refdes release` (still in **draft**) shows `(none stamped
+yet -- project is in draft)` there instead, and each "Since last..." section
+shows `(no revision/release stamped yet)`. The "Citations" section only
+appears for a project that declares a `citations`-typed field somewhere and
+has at least one item using it.
 
 ---
 
@@ -263,6 +341,7 @@ python -m http.server -d _site 8000
 | `.refdes/log-seal-<board>.yaml` | **yes** | Append-only seals for one registered board's own log entries |
 | `.refdes/boards.yaml` | **yes** | Board and workspace drift manifest; the `workspaces:` section only appears for a project that has declared `workspaces:` |
 | `.refdes/citations.yaml` | **yes** | Citation lockfile (sha256, fetch time, vendored flag); written only by `refdes fetch` |
+| `.refdes/baselines/<name>.yaml` | **yes** | One file per `refdes revision`/`refdes release` stamp; never modified after it's written |
 | `.refdes/vendor/` | **no, gitignored** | Vendored datasheet bytes, content-addressed by sha256; written only by `refdes fetch --url ... ` for a citation with `vendor: true` |
 | `_site/` | no | Generated output |
 

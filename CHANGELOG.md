@@ -9,6 +9,27 @@ and this project uses [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Project lifecycle: `refdes revision <name>` cuts an internal checkpoint
+  unconditionally (past the always-on error floor); `refdes release <name>`
+  runs the full readiness gate and stamps only if it passes -- on failure it
+  writes nothing and prints exactly what's blocking, since running it when
+  you're not ready *is* the check (neither command takes flags). Both write
+  `.refdes/baselines/<name>.yaml`, a content-hash snapshot of every local
+  item -- re-stamping the same name with identical content is a no-op,
+  with different content it's an error, since a name is a permanent label
+  once written. The seven `release_gate:` rules (already parsed from
+  `refdes-project.yaml`) are wired up: `draft_items`, `unpinned_citations`,
+  `missing_vendored_copies`, `uncovered_requirements`,
+  `unverified_requirements` (off by default for `release` -- boards go to
+  fab to get tested), `info_check_failures`, and `unaccepted_board_moves`.
+  `stamped_by` defaults to the OS username with zero git involvement;
+  `baseline_identity: git_identity` opts into `git config user.name`,
+  warning and falling back rather than erroring if it can't be resolved.
+  `refdes audit` reports what's changed since the last revision (either
+  kind) and since the last release (specifically) -- this is deliberately
+  not the git-history layer: both are a directory scan and a hash
+  comparison, no git object ever read. See
+  [project lifecycle](docs/lifecycle.md).
 - The standard schema library: a bundled `hardware@1` dictionary (six item
   types -- `requirement`, `constraint`, `decision`, `test`, `component`,
   `log` -- their fields, status lifecycles, and thirteen-verb link

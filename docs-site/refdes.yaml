@@ -27,6 +27,7 @@ site:
     - change-tracking
     - multi-board
     - workspaces
+    - lifecycle
     - schema-reference
     - cli-reference
     - output
