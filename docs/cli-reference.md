@@ -1,7 +1,7 @@
 # CLI reference
 
 ```
-refdes [-c CONFIG] {build,check,revision,release,index,id,fetch,audit,init,new,schema,standard} [options]
+refdes [-c CONFIG] {build,check,revision,release,index,id,fetch,audit,init,new,schema,standard,stub-tests} [options]
 ```
 
 | Global option | Effect |
@@ -382,6 +382,50 @@ writing the config change, then writes it regardless; the command's job is
 to surface the consequence, not to block an author who already decided to
 accept it. Exits 1 if the report contains any error, 0 otherwise; either
 way, the removal is applied.
+
+---
+
+## `refdes stub-tests`
+
+Generate a starter test item for every coverable item that has no
+verifying test yet, so a wall of coverage warnings becomes a checklist
+instead of a blank page. See [coverage](coverage.md#stub-tests).
+
+| Option | Effect |
+|---|---|
+| `--type NAME` | Which type to generate (only needed when more than one type declares a `verifies` link) |
+| `--dry-run` | Show what would be written without writing |
+
+```bash
+refdes stub-tests
+refdes stub-tests --dry-run
+```
+
+Writes one multi-item markdown file per board (or workspace), each holding
+one stub per still-uncovered item in that scope — `verifies:` already
+pointing at it, the type's own default `status:` (`planned` in the bundled
+standard), and an empty `method:` if the type declares one. Refuses to run
+if the project has any build error, the same posture `refdes id` and
+`refdes revision`/`release` already take. Run `refdes id` afterward to
+allocate the new items' ids.
+
+```
+$ refdes stub-tests
+wrote 3 stub(s) to items/power/stub-tests.md: REQ-PWR-004, REQ-PWR-005, CON-THM-002
+wrote 3 stub test(s) across 1 file(s)
+Run 'refdes id' to allocate ids for the new items.
+```
+
+**Deduplicates by declared links, never text.** An item that already has a
+verifying test — even one still `planned`, even one that hasn't been
+allocated an id yet — is skipped, so running this twice in a row is safe
+and never doubles up. Deleting a stub (or its whole file) makes its target
+eligible again on the next run, automatically. **Refdes does not own test
+items after they're written** — one test often verifies several
+requirements and one requirement often needs several tests at different
+corners, so restructure freely; the generated file is a starting point,
+never something the tool goes on maintaining. A prior run's file is
+appended to, never overwritten, so nothing already there is ever touched.
 
 ---
 

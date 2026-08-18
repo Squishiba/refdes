@@ -206,6 +206,40 @@ otherwise). The [standard library](standard-library.md) sets this on `test`.
 
 Any of these edges may be declared from either end — see [links](links.md).
 
+## `stub-tests`
+
+`refdes stub-tests` writes a starter test for every coverable item with no
+verifying test yet, `verifies:` already pointing at it — the last row of
+the table above, without hand-typing each one:
+
+```bash
+refdes stub-tests
+refdes id   # allocate ids for the new items
+```
+
+Writes one multi-item markdown file per board (or workspace), not one file
+per item — a whole board's worth of gaps closes as a single, reviewable
+diff. Deduplicates by the declared `verifies:` edge itself, not by text: an
+item that already has a test (`planned` or otherwise, allocated an id or
+not) is skipped, so running it again after adding new requirements is safe
+and only ever adds what's newly missing. A prior run's file is appended to,
+never overwritten.
+
+**The prerequisite is `verifying_statuses:`, already covered
+[above](#which-statuses-count-as-verifying).** A generated stub's `status:`
+is the type's own declared default (`planned` in the bundled standard),
+deliberately not one of `verifying_statuses:` — so a fresh stub never
+retroactively marks its target `verified`. Coverage stays exactly as
+honest immediately after a `stub-tests` run as it was the moment before.
+
+**Refdes does not own test items once they're written.** One test often
+verifies several requirements at once (a single thermal soak covering five
+thermal requirements); one requirement often needs several tests at
+different corners. The generated one-test-per-requirement file is a
+starting point for exactly that reason — restructure it, merge stubs
+together, split one apart, however the real test plan actually needs to
+work. See [CLI reference](cli-reference.md#refdes-stub-tests).
+
 ## In `items.json`
 
 ```json

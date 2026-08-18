@@ -17,6 +17,7 @@ from . import scaffold as scaffold_mod
 from . import schema_json as schema_json_mod
 from . import seal as seal_mod
 from . import standards
+from . import stub_tests as stub_tests_mod
 from .model import INVALIDATE, Project
 from .schema import SchemaError, load_project
 
@@ -527,6 +528,26 @@ def cmd_standard_remove_preset(args) -> int:
     return 0
 
 
+def cmd_stub_tests(args) -> int:
+    project, _stale = _load(args, require_ids=False)
+    build_mod.build(project, seal_write=False, reseal=False)
+    if project.errors:
+        return _report(project)
+    written = stub_tests_mod.generate(project, verifier_type=args.type, dry_run=args.dry_run)
+    if not written:
+        print("no coverable item is missing a verifying test")
+        return 0
+    verb = "would write" if args.dry_run else "wrote"
+    total = 0
+    for path, ids in written:
+        total += len(ids)
+        print(f"{verb} {len(ids)} stub(s) to {path}: {', '.join(ids)}")
+    print(f"{verb} {total} stub test(s) across {len(written)} file(s)")
+    if not args.dry_run:
+        print("Run 'refdes id' to allocate ids for the new items.")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     _fix_console()
 
@@ -749,6 +770,29 @@ def main(argv: list[str] | None = None) -> int:
     )
     p_remove_preset.add_argument("name")
     p_remove_preset.set_defaults(func=cmd_standard_remove_preset)
+
+    p_stub_tests = sub.add_parser(
+        "stub-tests",
+        help="generate starter test items for coverable items with no verifying test",
+        description="Write one multi-item markdown file per board/workspace, "
+        "one starter item per still-uncovered coverable item in that scope -- "
+        "verifies: already pointing at it, status: planned, and an empty "
+        "method: to fill in. Deduplicates by declared links, not text: an "
+        "item that already has a verifying test (allocated or still pending "
+        "an id) is skipped, so re-running never doubles up, and deleting a "
+        "stub makes its target eligible again. A starting point only -- "
+        "refdes does not own test items afterward.",
+    )
+    p_stub_tests.add_argument(
+        "--type",
+        metavar="NAME",
+        help="which type to generate (only needed if more than one type "
+        "declares a 'verifies' link)",
+    )
+    p_stub_tests.add_argument(
+        "--dry-run", action="store_true", help="show what would be written without writing"
+    )
+    p_stub_tests.set_defaults(func=cmd_stub_tests)
 
     args = parser.parse_args(argv)
     try:
