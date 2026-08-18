@@ -20,17 +20,22 @@ Validate, evaluate, and render the site plus `items.json`.
 |---|---|
 | `-o`, `--out DIR` | Output directory, overriding `site.out` |
 | `--keep-going` | Exit 0 even when there are errors |
-| `--reseal` | Accept edits to sealed append-only entries |
+| `--reseal [BOARD]` | Accept edits to sealed append-only entries. Bare, accepts every board's; name one board to scope it, e.g. `--reseal power` |
 | `--accept-board-move` | Accept a recorded [board](multi-board.md) change for an item |
 | `--require-citations` | Promote unpinned/missing-cache [citation](markdown.md#citing-a-datasheet) warnings to errors |
 
 ```bash
 refdes build
 refdes build -o public --keep-going
+refdes build --reseal power
 ```
 
-Build also **seals** any new [log entries](design-log.md) it finds, writing
-`.refdes/log-seal.yaml`.
+Build also **seals** any new [log entries](design-log.md) it finds. Seals are
+stored per board — `.refdes/log-seal-<board>.yaml` for a registered board's own
+entries, `.refdes/log-seal.yaml` for entries with no board (the only file used
+at all when the project has no `boards:` registry). `--reseal <board>` only
+accepts edits to that board's own entries; every other board's still fail as a
+normal violation.
 
 `--keep-going` is for local iteration when you want to look at the site despite a
 failing check. Do not use it in CI — it defeats the point.

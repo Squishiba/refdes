@@ -62,7 +62,11 @@ field always wins.
 ## Append-only
 
 Entries are **sealed on first build**. The hash of each is recorded in
-`.refdes/log-seal.yaml`. Editing a sealed entry afterwards fails the build:
+`.refdes/log-seal.yaml` — or, once a project registers `boards:` *and* an entry
+actually resolves onto one (the reserved `board:` override, not a same-named
+plain field like the one this schema's own `log` type declares above),
+`.refdes/log-seal-<board>.yaml` instead. Editing a sealed entry afterwards
+fails the build:
 
 ```
 ERROR items/log/board-a.yaml:33 [LOG-A-003] — LOG-A-003 is append-only and has
@@ -71,7 +75,8 @@ ERROR items/log/board-a.yaml:33 [LOG-A-003] — LOG-A-003 is append-only and has
       deliberate.
 ```
 
-Commit `.refdes/log-seal.yaml` along with your entries.
+Commit `.refdes/log-seal.yaml` (and any `.refdes/log-seal-<board>.yaml`) along
+with your entries.
 
 `refdes check` verifies existing seals without creating new ones, so it is safe
 in CI. `refdes build` seals anything new it finds.
@@ -98,8 +103,10 @@ amending entries, and `LOG-A-003` shows `amended_by: [LOG-A-006]`.
 
 ### The escape hatch
 
-`refdes build --reseal` accepts an edit to a sealed entry. It is reported as a
-warning at the time and listed permanently by `refdes audit`:
+`refdes build --reseal` accepts an edit to a sealed entry, on any board. Name a
+board to scope it to just that board's own entries — `refdes build --reseal
+power` — leaving every other board's edits to fail as a normal violation. It is
+reported as a warning at the time and listed permanently by `refdes audit`:
 
 ```
 Append-only entries edited after sealing:

@@ -67,6 +67,15 @@ def cmd_build(args) -> int:
     project = _load(args)
     if args.out:
         project.out_dir = args.out
+    if args.reseal and args.reseal != seal_mod.RESEAL_ALL and args.reseal not in project.boards:
+        import difflib
+
+        close = difflib.get_close_matches(args.reseal, list(project.boards), n=1, cutoff=0.5)
+        hint = f" Did you mean {close[0]!r}?" if close else ""
+        project.error(
+            f"--reseal {args.reseal!r} is not a board declared in refdes.yaml's "
+            f"boards: registry.{hint}"
+        )
     build_mod.build(
         project,
         seal_write=True,
@@ -228,8 +237,13 @@ def main(argv: list[str] | None = None) -> int:
     )
     p_build.add_argument(
         "--reseal",
-        action="store_true",
-        help="accept edits to sealed append-only entries (recorded in `audit`)",
+        nargs="?",
+        const=seal_mod.RESEAL_ALL,
+        default=None,
+        metavar="BOARD",
+        help="accept edits to sealed append-only entries (recorded in `audit`); "
+        "bare, this accepts every board's edits, or name one board to scope it, "
+        "e.g. --reseal power",
     )
     p_build.add_argument(
         "--accept-board-move",
