@@ -722,12 +722,12 @@ Two things stay worth building regardless:
   can autocomplete field and link names while writing. Even a fixed,
   well-known vocabulary benefits from this, and it's the only mechanism that
   covers the extension surface (§2) — a project's own added types and fields
-  still need discovery, standard or not.
+  still need discovery, standard or not. Fully specified in §12.
 - **A scaffolding command** (`refdes new <type>`), which becomes *more*
-  valuable once the standard is fixed: the scaffold text can be hand-curated
-  once per standard type (`status: draft  # draft | active | retired`) and
-  stays correct for every project, instead of being generated generically
-  from arbitrary schema.
+  valuable once the standard is fixed: the scaffold stays correct for every
+  project because it's generated from the same resolved schema §12 emits,
+  not hand-maintained text that could quietly drift from it — see §12's
+  closing section.
 
 **The no-`init` problem.** Nearly disappears as a design problem — see §3
 for the concrete file `init` now writes (three top-level keys, no
@@ -1555,3 +1555,262 @@ coverage is entirely unaffected — no interaction to design. Neither verb
 adds a new field *type*, unlike `citations`: `equivalent`/`alternate` are
 ordinary links, and `component.rationale` is an ordinary `text` field
 already used the same way on three other standard types.
+
+---
+
+## 12. JSON Schema emission, and what it actually reaches
+
+Most of finding 21 — "the link vocabulary must be memorised, because
+nothing helps while you are writing" — dissolves once the vocabulary is
+tool-defined (§6): there's nothing left to memorize when the fields and
+links are the same across every `refdes` project. What's left is real,
+though: nothing today tells an *editor* what the resolved schema is, so
+completion and validation while typing still don't exist. This section
+specifies the command that fixes that, `refdes schema --json`, and — because
+this is the part most likely to be built and then quietly not work — spends
+real space on where the output actually lands and where it doesn't.
+
+### One serializer, reused three ways
+
+`items.json`'s `types` key already carries almost everything this needs:
+`items_json` (`render.py:288-306`) walks `project.types.items()` and emits,
+per type, `label`, `prefix`, `append_only`, every field's `type`/
+`on_change`/`required`/`choices`, and `links` (the link-name → allowed-target
+list). That function reads the fully *resolved* `Project` object — after
+base, presets, and the project overlay have all been merged (§2) — so it is
+already, in substance, a serialization of the exact thing this command needs
+to emit. It's just not shaped as a JSON Schema: no `$schema`, no
+`properties`/`required` envelope, no discriminated union across types, no
+`additionalProperties: false`.
+
+`refdes schema --json` doesn't recompute anything new — it's a second,
+sibling serializer over the identical `project.types`/`project.link_types`
+objects `items_json` already reads, rendering the standard JSON Schema
+envelope instead of `items.json`'s lighter shape. One in-memory model, two
+serializations, generated at the same point in the same load — not two
+places that could independently drift, the same posture §4 already takes
+toward a resolved-schema hash for imports. §12's closing section reuses the
+same per-type serializer a third time, for `refdes new <type>`.
+
+### What it covers
+
+- **Item front-matter fields per type**: name, JSON-Schema `type`
+  (`text`→`string`, `date`→`string` with `format: date`, `list`→`array`,
+  `enum`→`enum` with the type's declared `choices:` and `default:`, and so
+  on through the field types §1's reference already lists).
+- **Status (and every other enum field's) legal values per type** — directly
+  from `choices:`, so `decision.status` offers exactly `proposed`,
+  `in_progress`, `accepted`, `on_hold`, `rejected`, `superseded` and nothing
+  else, matching §1 exactly because it's read from the same place §1's own
+  YAML is.
+- **Link verb names, as legal property keys** — `refines`, `constrained_by`,
+  `blocked_by`, and so on, each `{"type": "array", "items": {"type":
+  "string"}}`. **The allowed-target-type restriction is not, and cannot be,
+  enforced by the schema** — JSON Schema validates one document in
+  isolation, and confirming that a listed ID actually resolves to an item of
+  an allowed type requires reading other files, which is `refdes check`'s
+  job, unchanged. The schema gets an author the link *name* — no more typing
+  `sattisfies:` and finding out at build time — and the target set is stated
+  in the property's `description` for a human to read on hover, not
+  something the validator itself checks.
+- **Reserved and overridable keys** — `id` (deliberately unconstrained, see
+  below), `type` (the discriminator, see below), `history` (both shapes
+  documented in schema-reference.md: a scalar mode or a `{fields, reason}`
+  mapping), and `prefix`/`board` included as legal properties on a type's
+  branch *only when that type doesn't already declare a same-named field* —
+  mirroring `OVERRIDABLE` (`parse.py:35`) exactly rather than approximating
+  it.
+- **`additionalProperties: false`** on every branch, which is what makes an
+  unknown key light up the moment it's typed rather than the next time
+  `refdes check` runs. This is a real capability gain, not a duplicate of
+  `parse.py`'s existing difflib-suggestion diagnostic (`unknown field
+  'sattisfies' … did you mean the link 'satisfies'?`) — the schema catches
+  the same class of mistake *sooner*, with a generic validator message; the
+  CLI's message remains the more informative one when it does run. Neither
+  replaces the other.
+
+`id` is deliberately **not** in `required`, and carries no pattern
+restriction. An item mid-authoring, before `refdes id` has allocated it, is
+the tool's own normal workflow (`project.pending`, `parse.py:305-323`) —
+requiring `id` in the schema would put a red squiggle on exactly the case
+the two-phase author-then-allocate flow exists to support.
+
+A single type's branch, illustrated (`requirement`, abbreviated):
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "id":            { "type": "string" },
+    "type":          { "const": "requirement" },
+    "text":          { "type": "string" },
+    "status":        { "enum": ["draft", "active", "retired"], "default": "draft" },
+    "rationale":     { "type": "string" },
+    "refines":       { "type": "array", "items": { "type": "string" },
+                        "description": "target: requirement" },
+    "source":        { "type": "string" },
+    "note":          { "type": "string" },
+    "tags":          { "type": "array", "items": { "type": "string" } },
+    "owner":         { "type": "string" },
+    "last_reviewed": { "type": "string", "format": "date" },
+    "history":       { "$ref": "#/$defs/history" }
+  },
+  "required": ["text"],
+  "additionalProperties": false
+}
+```
+
+### Two document shapes, one schema
+
+An item is authored in two physical shapes (§1's intro; `parse.py`'s module
+docstring), and the emitted schema has to describe both from one file, since
+one `yaml.schemas` association maps one schema to a glob, not one per file:
+
+- **A bare item** — `.md` front matter, or one entry inside a list file's
+  `items:` array — is one of the per-type branches above.
+- **A list file** — `{defaults?: {...}, items: [...]}` — is a second shape,
+  whose `items:` entries are the *same* per-type union, and whose
+  `defaults:` mapping is deliberately left as `additionalProperties: true`
+  and *not* validated against any one type's fields, because `defaults:`
+  merges into whichever type each entry declares and the schema has no way
+  to know that in advance for the block as a whole.
+
+The top level of the emitted file is `oneOf` between these two shapes,
+discriminated structurally (a list file has an `items:` key at the top
+level; a bare item doesn't). One difference between the two bare-item
+contexts is worth stating precisely rather than glossing over: `body` is a
+legal key *inside a list-file entry* (the markdown body as a string,
+`parse.py:31`'s `RESERVED`) but is never a legal key in `.md` front matter,
+where the body is the text after the closing fence, not a YAML key at all.
+The per-type branch used for list-file entries includes `body`; the one
+conceptually describing `.md` front matter — see below for why "conceptually"
+is doing real work in that sentence — does not.
+
+### Where it lives, and why it isn't committed
+
+`.refdes/schema.json`, joining the directory's other generated artifacts.
+Unlike `.refdes/ids.yaml`, `.refdes/citations.yaml`, `.refdes/boards.yaml`,
+and `.refdes/log-seal.yaml` — all committed, per the repository's own
+`.gitignore`, because each records state that must persist and be shared
+across branches (burned IDs, fetched hashes, the board-move drift baseline,
+sealed content) — `schema.json` carries no history at all. It's a pure
+function of the current merged config; deleting it loses nothing, and by
+definition it should always exactly match what the current config would
+produce. That puts it in the same category as `_site/` and
+`.refdes/vendor/`: a derived artifact, not a record. It's gitignored, with a
+comment in the same voice the existing gitignore comment already uses:
+
+```
+# .refdes/schema.json is regenerated on every command that loads the
+# project -- deleting it loses nothing, and a committed copy would just be
+# one more thing that can silently disagree with refdes.yaml.
+.refdes/schema.json
+```
+
+### Regeneration and staleness
+
+Every command that loads a project already resolves the full merged schema
+as part of doing its own job — writing it to `.refdes/schema.json` is a
+cheap side effect tacked onto that, the same way `build` already writes
+`.refdes/boards.yaml` and the ID ledger as housekeeping alongside its main
+work. So `build`, `check`, `index`, `id`, `fetch`, and `audit` all refresh
+it, not just an explicit invocation — "stale schema files are worse than
+none" is answered by making staleness hard to sustain rather than by
+detecting it after the fact. `refdes schema --json` itself remains the
+explicit, standalone command (finding 21's own proposed spelling),
+printing to stdout like `refdes index` already does, for piping into
+something else or inspecting directly.
+
+The one gap this doesn't close: a project with only `yaml.schemas`
+configured and no refdes-aware file watcher running (someone editing `.yaml`
+list files with a bare yaml-language-server setup, no refdes extension
+active) has nothing that re-triggers a refdes command on save, so
+`.refdes/schema.json` can go stale between a `refdes.yaml` edit and the next
+CLI invocation. `refdes check` closes this with one cheap mtime comparison —
+if `.refdes/schema.json` exists and is older than `refdes.yaml`, warn that
+it's stale and about to be refreshed. Given how aggressively it's already
+regenerated, this is a trip-wire for one narrow gap, not the primary
+defense.
+
+### Getting an editor to use it, and the gap in doing so for `.md` files
+
+For `items/**/*.yaml`, the standard mechanism is `yaml.schemas`, a setting
+`redhat.vscode-yaml` (the de facto YAML language server for VS Code) reads
+to map a schema file to a glob:
+
+```json
+// .vscode/settings.json
+{
+  "yaml.schemas": { "./.refdes/schema.json": ["items/**/*.yaml"] }
+}
+```
+
+`refdes init` (§3, §8) writes this file as part of its scaffold, so a new
+project has it from the start rather than requiring anyone to know the
+setting exists; a project predating this feature adds the same four lines
+by hand. `editors/vscode/package.json` declares `redhat.vscode-yaml` under
+`extensionDependencies`, so installing the refdes extension pulls it in —
+without it, the `yaml.schemas` setting is inert. For a setup that doesn't
+read VS Code workspace settings at all (a bare yaml-language-server
+configuration in another editor), the equivalent is a per-file modeline,
+`# yaml-language-server: $schema=./.refdes/schema.json` as the first line —
+more repetitive across files, but editor-agnostic, and worth documenting as
+the portable fallback rather than the primary mechanism.
+
+**For the Markdown item format — the one most items actually use — this
+does not work today, and it isn't a refdes gap.** `vscode-yaml` does not
+validate or
+complete YAML front matter embedded in Markdown files; this is a confirmed,
+open, unresolved upstream limitation
+([redhat-developer/vscode-yaml#207](https://github.com/redhat-developer/vscode-yaml/issues/207)),
+not a matter of configuration. Associating the schema with `.md` files via
+`yaml.schemas` has no effect. This is worth stating plainly rather than
+shipping a design that quietly doesn't work for the primary case: the schema
+file is genuinely useful for `.yaml` list files and portable to any
+yaml-language-server-based editor today, and it will start working for
+`.md` front matter automatically, with no refdes-side change, the day that
+upstream issue closes. Nothing here should be built to work around it in the
+meantime — that would be exactly the kind of tool-specific patch this
+design otherwise avoids.
+
+### What the VS Code extension gains, and the one change it needs
+
+For `.yaml` files, the extension gains real completion and validation with
+**zero changes to `extension.js`** — it's `yaml.schemas` plus
+`redhat.vscode-yaml`, both configuration, described above.
+
+For `.md` front matter — where the upstream gap means yaml-language-server
+contributes nothing — the gain has to come from the extension itself, and it
+needs one concrete, small change. `completionProvider` (`extension.js:237`)
+already offers two things: enum values after `field: ` (`enumChoicesFor`,
+reading `index.data.types[type].fields[name].choices` — data `refdes index
+--compact` already returns on every refresh) and item IDs after `[[` or a
+prefixed hyphen. It does not currently complete *field or link key names*
+while typing inside front matter, which is the actual gap finding 21 named.
+The fix reuses data the extension already has in hand: `index.data.types`
+already carries every field name and every link name per type (the same
+payload `enumChoicesFor` reads today), so `completionProvider` needs a third
+trigger — offering `Object.keys(type.fields)` and `Object.keys(type.links)`
+as key completions at the start of a front-matter line, once the current
+item's `type:` is known from context — not a new file to read, not a
+dependency on `.refdes/schema.json`'s freshness, just a second way of using
+data the extension is already fetching. Hover, go-to-definition, and
+diagnostics are unaffected; nothing about those needs the schema.
+
+### `refdes new <type>`, without a second source of truth
+
+`refdes new <type>` scaffolds a starter item by calling the identical
+per-type serializer this section already specified, not a second,
+independently-maintained template per type — the concern named at the top
+of this task ("shipping two sources of it would guarantee they drift")
+applies here as directly as it does to the schema-versus-`items.json`
+question above, and gets the identical answer: one function, reused. A
+required field with a declared `default:` is written with that default;
+a required field with none gets a placeholder; an optional field is written
+commented-out, its comment showing the same `choices:`/type information the
+schema's own `description` carries; a link is written commented-out, naming
+its allowed target types the same way. None of this is hand-curated text
+maintained separately per standard type, correcting what §6 originally
+suggested — generating it from the resolved schema is what keeps it correct
+automatically as the standard itself changes across versions (§3), rather
+than needing its own migration step alongside `refdes standard upgrade`.
