@@ -84,11 +84,21 @@ def _build_item(
         return None
     spec = project.types.get(str(type_name))
     if spec is None:
-        project.error(
-            f"unknown type {type_name!r}.{_suggest(str(type_name), list(project.types))}",
-            file=rel,
-            line=line,
-        )
+        preset_name = project.preset_provided_types.get(str(type_name))
+        if preset_name:
+            project.error(
+                f"unknown type {type_name!r} -- it was provided by the "
+                f"{preset_name!r} preset, which is not listed under "
+                f"standard.presets:. Add it back, or migrate this item to a "
+                f"declared type.",
+                file=rel, line=line,
+            )
+        else:
+            project.error(
+                f"unknown type {type_name!r}.{_suggest(str(type_name), list(project.types))}",
+                file=rel,
+                line=line,
+            )
         return None
 
     item = Item(
@@ -142,7 +152,15 @@ def _build_item(
             # field -- it drops a traceability edge, so it must fail the build rather
             # than pass with a warning that's easy to miss.
             link_match = difflib.get_close_matches(key, sorted(spec.links), n=1, cutoff=0.6)
-            if link_match:
+            preset_name = project.preset_provided_links.get(key)
+            if preset_name and key not in project.link_types:
+                project.error(
+                    f"unknown field {key!r} on {spec.label.lower()} -- it was "
+                    f"provided by the {preset_name!r} preset, which is not listed "
+                    f"under standard.presets:. Add it back, or remove this link.",
+                    file=rel, line=line, item_id=item.id or "?",
+                )
+            elif link_match:
                 project.error(
                     f"unknown field {key!r} on {spec.label.lower()} -- did you mean "
                     f"the link {link_match[0]!r}? A misspelled link name silently "

@@ -25,3 +25,10 @@ node_modules/
 # PDFs `refdes fetch --url ... ` downloads with `vendor: true` are gitignored
 # and re-fetched locally instead of committed.
 .refdes/vendor/
+
+# .refdes/schema.json is regenerated on every command that loads the
+# project -- deleting it loses nothing, and a committed copy would just be
+# one more thing that can silently disagree with refdes.yaml. **/ so this
+# also covers docs-site/.refdes/, a second refdes project living in this
+# same repo.
+**/.refdes/schema.json

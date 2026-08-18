@@ -473,6 +473,16 @@ def load_project(config_path: str | None = None, start: str = ".") -> Project:
             f"(e.g. coverage-{clashing}.html); rename one of them"
         )
 
+    preset_provided_types: dict[str, str] = {}
+    preset_provided_links: dict[str, str] = {}
+    standard_cfg = raw.get("standard")
+    if isinstance(standard_cfg, dict) and standard_cfg.get("base") in standards.known_bases():
+        version = standard_cfg.get("version")
+        if isinstance(version, int) and not isinstance(version, bool):
+            preset_provided_types, preset_provided_links = standards.preset_providers(
+                standard_cfg["base"], version
+            )
+
     return Project(
         title=site.get("title", "Design Reference"),
         out_dir=site.get("out", "_site"),
@@ -499,4 +509,6 @@ def load_project(config_path: str | None = None, start: str = ".") -> Project:
         publish_datasheets=settings["publish_datasheets"],
         release_gate=settings["release_gate"],
         cross_workspace_severity=settings["cross_workspace_severity"],
+        preset_provided_types=preset_provided_types,
+        preset_provided_links=preset_provided_links,
     )

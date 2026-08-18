@@ -447,6 +447,13 @@ class Project:
     imports: list[ImportSpec] = field(default_factory=list)
     coverage: dict[str, Coverage] = field(default_factory=dict)
     blocked_chains: list[BlockedChain] = field(default_factory=list)
+    # {name: preset_name} for every type/link_type any bundled preset at this
+    # project's base@version declares, regardless of which presets are
+    # currently selected -- lets an unknown-type/unknown-link diagnostic name
+    # the specific preset a since-removed name used to come from
+    # (docs/design/standard-library.md §8). Empty when standard: none.
+    preset_provided_types: dict[str, str] = field(default_factory=dict)
+    preset_provided_links: dict[str, str] = field(default_factory=dict)
     seal_violations: list[str] = field(default_factory=list)
     boards: dict[str, BoardSpec] = field(default_factory=dict)
     # (item_id, previous_board, current_board), for items whose board changed

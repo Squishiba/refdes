@@ -13,7 +13,10 @@ from . import ids as ids_mod
 from . import lifecycle as lifecycle_mod
 from . import parse as parse_mod
 from . import render as render_mod
+from . import scaffold as scaffold_mod
+from . import schema_json as schema_json_mod
 from . import seal as seal_mod
+from . import standards
 from .model import INVALIDATE, Project
 from .schema import SchemaError, load_project
 
@@ -27,10 +30,21 @@ def _fix_console() -> None:
             pass
 
 
-def _load(args, require_ids: bool = True) -> Project:
+def _load(args, require_ids: bool = True) -> tuple[Project, bool]:
+    """Returns (project, schema_was_stale) -- the second only ever True when
+    a `.refdes/schema.json` from a previous run predates the current
+    `refdes.yaml`, which every caller except `cmd_check` ignores; `check`
+    surfaces it as the one narrow trip-wire for the gap this command's own
+    aggressive regeneration doesn't otherwise close."""
     project = load_project(config_path=args.config)
+    # A cheap side effect of loading, not a job of its own -- every command
+    # that reaches this point has already resolved the full merged schema,
+    # so writing .refdes/schema.json here is the same housekeeping posture
+    # `build` already applies to .refdes/boards.yaml and the ID ledger
+    # (docs/design/standard-library.md §12).
+    schema_was_stale = schema_json_mod.write_schema(project)
     parse_mod.load_items(project, require_ids=require_ids)
-    return project
+    return project, schema_was_stale
 
 
 def _visible(
@@ -89,7 +103,12 @@ def _report(
 
 
 def cmd_check(args) -> int:
-    project = _load(args)
+    project, schema_was_stale = _load(args)
+    if schema_was_stale:
+        project.warn(
+            ".refdes/schema.json was older than refdes.yaml -- refreshed. If your "
+            "editor's completion looked stale, it should catch up now."
+        )
     if args.board and args.board not in project.boards:
         import difflib
 
@@ -128,7 +147,7 @@ def cmd_check(args) -> int:
 
 
 def cmd_build(args) -> int:
-    project = _load(args)
+    project, _stale = _load(args)
     if args.out:
         project.out_dir = args.out
     if args.reseal and args.reseal != seal_mod.RESEAL_ALL and args.reseal not in project.boards:
@@ -179,7 +198,7 @@ def _run_stamp(args, kind: str) -> int:
     """
     lifecycle_mod.validate_name(args.name)  # SchemaError -> exit 2, via main()
 
-    project = _load(args)
+    project, _stale = _load(args)
     build_mod.build(project, seal_write=False, reseal=False, accept_board_move=False)
     if project.errors:
         return _report(project)
@@ -236,7 +255,7 @@ def cmd_index(args) -> int:
     each time would make that unusable. This does everything `check` does and
     prints the export instead of a report.
     """
-    project = _load(args, require_ids=False)
+    project, _stale = _load(args, require_ids=False)
     build_mod.build(project, seal_write=False, reseal=False)
     json.dump(
         render_mod.items_json(project),
@@ -250,7 +269,7 @@ def cmd_index(args) -> int:
 
 
 def cmd_id(args) -> int:
-    project = _load(args, require_ids=False)
+    project, _stale = _load(args, require_ids=False)
     if not project.pending:
         print("no items are missing an id")
         return 0
@@ -265,7 +284,7 @@ def cmd_id(args) -> int:
 
 def cmd_fetch(args) -> int:
     """The only command that touches the network. Pins and optionally vendors."""
-    project = _load(args, require_ids=False)
+    project, _stale = _load(args, require_ids=False)
     try:
         results = citations_mod.fetch_all(
             project, item_id=args.item, url=args.url, update=args.update
@@ -300,7 +319,7 @@ def _print_baseline_diff(diff) -> None:
 
 def cmd_audit(args) -> int:
     """Suppression is allowed; invisible suppression is not."""
-    project = _load(args, require_ids=False)
+    project, _stale = _load(args, require_ids=False)
     build_mod.build(project)
 
     print("Schema fields not tracked as 'invalidate':")
@@ -432,6 +451,72 @@ def cmd_audit(args) -> int:
 
     print(f"\n{len(project.items)} items audited "
           f"({len(project.local_items)} local)")
+    return 0
+
+
+def cmd_init(args) -> int:
+    standard = None if args.standard == "none" else args.standard
+    presets = list(args.preset or [])
+    path = scaffold_mod.init(os.getcwd(), standard=standard, presets=presets)
+    rel = os.path.relpath(path, os.getcwd()).replace("\\", "/")
+    print(f"wrote {rel}")
+    if standard is not None:
+        version = standards.latest_version(standard)
+        preset_note = f", presets: {presets}" if presets else ""
+        print(f"standard: {standard}@{version}{preset_note}")
+    else:
+        print("standard: none -- types:/link_types: are yours to declare")
+    return 0
+
+
+def cmd_new(args) -> int:
+    project = load_project(config_path=args.config)
+    spec = project.types.get(args.type)
+    if spec is None:
+        import difflib
+
+        close = difflib.get_close_matches(args.type, list(project.types), n=1, cutoff=0.5)
+        hint = f" Did you mean {close[0]!r}?" if close else ""
+        print(f"unknown type {args.type!r}.{hint}", file=sys.stderr)
+        return 1
+    sys.stdout.write(scaffold_mod.new_item_text(args.type, spec))
+    return 0
+
+
+def cmd_schema(args) -> int:
+    project = load_project(config_path=args.config)
+    json.dump(schema_json_mod.build_schema(project), sys.stdout, indent=2)
+    sys.stdout.write("\n")
+    return 0
+
+
+def _standard_project_root(args) -> str:
+    from .schema import find_config
+
+    config_path = args.config or find_config()
+    return os.path.dirname(os.path.abspath(config_path))
+
+
+def cmd_standard_add_preset(args) -> int:
+    scaffold_mod.add_preset(_standard_project_root(args), args.name)
+    print(f"added preset {args.name!r} to standard.presets:")
+    return 0
+
+
+def cmd_standard_remove_preset(args) -> int:
+    diagnostics = scaffold_mod.remove_preset(_standard_project_root(args), args.name)
+    for d in diagnostics:
+        stream = sys.stderr if d.level == "error" else sys.stdout
+        print(str(d), file=stream)
+    error_count = sum(1 for d in diagnostics if d.level == "error")
+    print(f"removed preset {args.name!r} from standard.presets:")
+    if error_count:
+        print(
+            f"{error_count} error(s) above -- fix these, or add the preset back "
+            "with 'refdes standard add-preset'",
+            file=sys.stderr,
+        )
+        return 1
     return 0
 
 
@@ -579,6 +664,84 @@ def main(argv: list[str] | None = None) -> int:
         "allowed; invisible suppression is not.",
     )
     p_audit.set_defaults(func=cmd_audit)
+
+    p_init = sub.add_parser(
+        "init",
+        help="write a minimal refdes.yaml that points at the standard",
+        description="Write a minimal refdes.yaml in the current directory -- "
+        "site:/standard:/id: only, no types:/link_types:/field_sets: -- plus "
+        ".vscode/settings.json wiring up schema completion for items/**/*.yaml. "
+        "standard: points at the standard library rather than copying it; "
+        "<latest> is resolved to a concrete pinned integer, never written as "
+        "the literal word 'latest'.",
+    )
+    p_init.add_argument(
+        "--standard",
+        default="hardware",
+        metavar="NAME",
+        help="base standard to pin (default: hardware), or 'none' for the "
+        "fully self-declared escape hatch (today's pre-standard behavior)",
+    )
+    p_init.add_argument(
+        "--preset",
+        action="append",
+        metavar="NAME",
+        help="layer a preset on top of the base (repeatable). Requires a base "
+        "standard -- combining with --standard none is a load-time error, "
+        "since every preset's types target base types.",
+    )
+    p_init.set_defaults(func=cmd_init)
+
+    p_new = sub.add_parser(
+        "new",
+        help="print a starter item for one type to stdout",
+        description="Scaffold a starter item's front matter for TYPE, generated "
+        "from the identical resolved schema 'refdes schema --json' emits -- not "
+        "a second, hand-maintained template that could drift from it. Prints to "
+        "stdout; redirect it where you want the item to live, e.g. "
+        "'refdes new decision > items/power/dec-005.md'.",
+    )
+    p_new.add_argument("type", help="an item type in the merged schema, standard or project-defined")
+    p_new.set_defaults(func=cmd_new)
+
+    p_schema = sub.add_parser(
+        "schema",
+        help="print the project's merged JSON Schema to stdout",
+        description="Emit a JSON Schema describing the project's actual merged "
+        "schema -- base at its pinned version, plus selected presets, plus the "
+        "project overlay -- for editor completion. The same schema is written "
+        "to .refdes/schema.json by every command that loads the project; this "
+        "is the explicit, standalone form, for piping into something else or "
+        "inspecting directly.",
+    )
+    p_schema.add_argument(
+        "--json", action="store_true", help="JSON Schema output (the only format today)"
+    )
+    p_schema.set_defaults(func=cmd_schema)
+
+    p_standard = sub.add_parser(
+        "standard",
+        help="add or remove a preset from standard.presets:",
+        description="Change standard.presets: with validation and reporting. "
+        "Hand-editing standard.presets: directly and re-running 'refdes build' "
+        "does exactly the same thing -- these commands exist for the "
+        "validation and reporting step, not because the underlying operation "
+        "needs a command.",
+    )
+    standard_sub = p_standard.add_subparsers(dest="standard_command", required=True)
+
+    p_add_preset = standard_sub.add_parser(
+        "add-preset", help="validate a preset name and add it to standard.presets:"
+    )
+    p_add_preset.add_argument("name")
+    p_add_preset.set_defaults(func=cmd_standard_add_preset)
+
+    p_remove_preset = standard_sub.add_parser(
+        "remove-preset",
+        help="remove a preset from standard.presets:, reporting what breaks first",
+    )
+    p_remove_preset.add_argument("name")
+    p_remove_preset.set_defaults(func=cmd_standard_remove_preset)
 
     args = parser.parse_args(argv)
     try:

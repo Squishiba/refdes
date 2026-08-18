@@ -189,6 +189,51 @@ def _available_presets(version_dir: str) -> list[str]:
     )
 
 
+def known_bases() -> tuple[str, ...]:
+    return _KNOWN_BASES
+
+
+def latest_version(base_name: str) -> int:
+    """The concrete integer `refdes init` pins -- never the literal string
+    "latest" (docs/design/standard-library.md §3): resolved once, here,
+    against whichever versions the installed tool actually bundles, and
+    written as a real number so the pin is verifiable from the moment the
+    project file exists."""
+    if base_name not in _KNOWN_BASES:
+        raise SchemaError(f"standard.base must be one of {list(_KNOWN_BASES)}, got {base_name!r}")
+    versions = [
+        int(name[1:]) for name in _available_versions(base_name) if name.startswith("v")
+    ]
+    if not versions:
+        raise SchemaError(f"no bundled versions found for base {base_name!r}")
+    return max(versions)
+
+
+def available_presets(base_name: str, version: int) -> list[str]:
+    """Every preset name bundled for `base_name@version`, for `refdes init
+    --preset` and `refdes standard add-preset` to validate against."""
+    version_dir = os.path.join(_STANDARDS_ROOT, base_name, f"v{version}")
+    return _available_presets(version_dir)
+
+
+def preset_providers(base_name: str, version: int) -> tuple[dict[str, str], dict[str, str]]:
+    """(types, link_types), each {name: preset_name}, for every preset
+    bundled at this base@version -- regardless of which presets the project
+    currently selects. Lets a diagnostic name the specific preset a since-
+    removed type or link used to come from, rather than a bare "unknown"
+    (docs/design/standard-library.md §8's two extended diagnostics)."""
+    version_dir = os.path.join(_STANDARDS_ROOT, base_name, f"v{version}")
+    types: dict[str, str] = {}
+    link_types: dict[str, str] = {}
+    for preset_name in _available_presets(version_dir):
+        preset_doc = _read_yaml(os.path.join(version_dir, "presets", f"{preset_name}.yaml"))
+        for tname in preset_doc.get("types") or {}:
+            types[tname] = preset_name
+        for lname in preset_doc.get("link_types") or {}:
+            link_types[lname] = preset_name
+    return types, link_types
+
+
 # --------------------------------------------------------------------- merging
 
 
