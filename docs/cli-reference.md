@@ -433,6 +433,49 @@ appended to, never overwritten, so nothing already there is ever touched.
 
 ---
 
+## `refdes former-ids propose`
+
+Infer old-to-new id mappings after a renumbering, and write `former_ids:`
+only for the ones you confirm. See [renumbering](ids.md#renumbering-former_ids).
+
+| Option | Effect |
+|---|---|
+| `--baseline NAME` | Compare against this baseline instead of the most recently stamped one |
+| `--confirm OLD_ID[,OLD_ID...]` | Write `former_ids:` for these candidates, and only these |
+
+```bash
+refdes former-ids propose
+refdes former-ids propose --confirm CAN_00,CAN_01
+```
+
+Compares the most recent [baseline](lifecycle.md) snapshot to the live
+project: an id that was there at baseline time but is gone now, matched by
+title similarity against a same-type id that's new since, is a candidate,
+shown with its confidence:
+
+```
+$ refdes former-ids propose
+1 candidate former-id mapping(s):
+  CAN_00 (requirement 'The bus shall recover...') -> REQ-CAN-001 ('The bus shall recover...')  confidence 94%
+
+Nothing written. Re-run with --confirm OLD_ID[,OLD_ID...] to record the ones you accept as former_ids:.
+
+$ refdes former-ids propose --confirm CAN_00
+wrote former_ids: [CAN_00] to REQ-CAN-001 (items/can/requirements.yaml)
+```
+
+**Nothing is ever written without `--confirm`, and only for the ids it
+names.** This mirrors how a schematic annotation tool works: it proposes a
+renumbering, a person reviews it, and only the accepted mappings become
+real. A wrong link in a traceability tool is worse than a missing one, so
+inference only ever drafts a suggestion here — the `former_ids:` entry
+`--confirm` writes is what build actually reads afterward, never a fuzzy
+match recomputed on the fly. An id passed to `--confirm` that isn't among
+the currently proposed candidates is refused, not guessed at — re-run
+`propose` without `--confirm` first if the project has changed since.
+
+---
+
 ## Recipes
 
 **Pre-commit hook** — `.git/hooks/pre-commit`:

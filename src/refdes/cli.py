@@ -9,6 +9,7 @@ import sys
 
 from . import build as build_mod
 from . import citations as citations_mod
+from . import former_ids as former_ids_mod
 from . import ids as ids_mod
 from . import lifecycle as lifecycle_mod
 from . import parse as parse_mod
@@ -553,6 +554,53 @@ def cmd_stub_tests(args) -> int:
     return 0
 
 
+def cmd_former_ids_propose(args) -> int:
+    """Show inferred old-to-new id mappings; write none unless --confirm names them.
+
+    Never a build error on its own -- comparing a baseline that predates
+    unrelated errors elsewhere in the project is still useful, so this only
+    needs the project to parse, not to pass validate_items()/resolve_links().
+    """
+    project, _stale = _load(args, require_ids=False)
+    build_mod.build(project, seal_write=False, reseal=False)
+    try:
+        candidates = former_ids_mod.propose(project, baseline_name=args.baseline)
+    except former_ids_mod.ProposeError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+
+    if not candidates:
+        print("no candidate former-id mappings found")
+        return 0
+
+    print(f"{len(candidates)} candidate former-id mapping(s):")
+    for c in candidates:
+        print(
+            f"  {c.old_id} ({c.old_type} {c.old_title!r}) -> {c.new_id} "
+            f"({c.new_title!r})  confidence {c.confidence:.0%}"
+        )
+
+    if not args.confirm:
+        print(
+            "\nNothing written. Re-run with --confirm OLD_ID[,OLD_ID...] to "
+            "record the ones you accept as former_ids:."
+        )
+        return 0
+
+    requested = [x.strip() for x in args.confirm.split(",") if x.strip()]
+    try:
+        confirmed = former_ids_mod.confirm(project, candidates, requested)
+    except former_ids_mod.ProposeError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+
+    print()
+    for c in confirmed:
+        item = project.items[c.new_id]
+        print(f"wrote former_ids: [{c.old_id}] to {c.new_id} ({item.source_file})")
+    return 1 if project.errors else 0
+
+
 def main(argv: list[str] | None = None) -> int:
     _fix_console()
 
@@ -798,6 +846,35 @@ def main(argv: list[str] | None = None) -> int:
         "--dry-run", action="store_true", help="show what would be written without writing"
     )
     p_stub_tests.set_defaults(func=cmd_stub_tests)
+
+    p_former_ids = sub.add_parser(
+        "former-ids",
+        help="infer and record former_ids: mappings after a renumbering",
+    )
+    former_ids_sub = p_former_ids.add_subparsers(dest="former_ids_command", required=True)
+
+    p_former_ids_propose = former_ids_sub.add_parser(
+        "propose",
+        help="show inferred old-to-new id candidates; write none unless --confirm",
+        description="Compare the most recent baseline snapshot to the live "
+        "project: an id present at baseline time but gone now, matched by "
+        "title similarity against a same-type id that's new since, is a "
+        "candidate former_ids: mapping, shown with its confidence. Never "
+        "written automatically -- a wrong link in a traceability tool is "
+        "worse than a missing one. Pass --confirm to write former_ids: for "
+        "the candidates you accept, named by their old id.",
+    )
+    p_former_ids_propose.add_argument(
+        "--baseline",
+        metavar="NAME",
+        help="compare against this baseline instead of the most recently stamped one",
+    )
+    p_former_ids_propose.add_argument(
+        "--confirm",
+        metavar="OLD_ID[,OLD_ID...]",
+        help="write former_ids: for these candidates (by old id), and only these",
+    )
+    p_former_ids_propose.set_defaults(func=cmd_former_ids_propose)
 
     args = parser.parse_args(argv)
     try:

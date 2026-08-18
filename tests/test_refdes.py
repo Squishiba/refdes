@@ -23,6 +23,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 from refdes import boards as boards_mod  # noqa: E402
 from refdes import build as build_mod  # noqa: E402
 from refdes import calc, cli as cli_mod, citations as citations_mod, ids, nav as nav_mod, parse, render, seal  # noqa: E402
+from refdes import former_ids  # noqa: E402
 from refdes import lifecycle  # noqa: E402
 from refdes import scaffold as scaffold_mod  # noqa: E402
 from refdes import schema_json as schema_json_mod  # noqa: E402
@@ -1320,6 +1321,133 @@ def test_items_json_exports_former_ids(tmp_path):
     payload = render.items_json(project)
     entry = next(i for i in payload["items"] if i["id"] == "REQ-001")
     assert entry["former_ids"] == ["REQ-050"]
+
+
+# ---------------------------------------------------- former-ids propose command
+
+
+def _propose_build(root):
+    project = load_project(config_path=str(root / "refdes.yaml"))
+    parse.load_items(project, require_ids=False)
+    build_mod.build(project, seal_write=False, reseal=False)
+    return project
+
+
+def test_propose_errors_with_no_baseline_stamped(tmp_path):
+    root = _former_ids_project(tmp_path, "defaults: { type: requirement }\nitems: []\n")
+    project = _propose_build(root)
+    with pytest.raises(former_ids.ProposeError, match="no baseline stamped yet"):
+        former_ids.propose(project)
+
+
+def test_propose_matches_a_renumbered_item_by_title_similarity(tmp_path):
+    root = _former_ids_project(
+        tmp_path,
+        "defaults: { type: requirement }\n"
+        "items:\n  - id: REQ-001\n"
+        "    text: The bus shall recover from a bit error within one frame.\n",
+    )
+    project = _propose_build(root)
+    lifecycle.stamp(project, kind="revision", name="rev-a")
+
+    (root / "items" / "r.yaml").write_text(
+        "defaults: { type: requirement }\n"
+        "items:\n  - id: REQ-002\n"
+        "    text: The bus shall recover from a bit error within one frame.\n",
+        encoding="utf-8",
+    )
+    project2 = _propose_build(root)
+    candidates = former_ids.propose(project2)
+    assert len(candidates) == 1
+    c = candidates[0]
+    assert (c.old_id, c.new_id) == ("REQ-001", "REQ-002")
+    assert c.confidence == 1.0
+
+
+def test_propose_ignores_a_removed_id_already_resolved(tmp_path):
+    """An old id another item already claims via former_ids: is done -- it
+    must not show up again as a fresh candidate."""
+    root = _former_ids_project(
+        tmp_path,
+        "defaults: { type: requirement }\n"
+        "items:\n  - id: REQ-001\n    text: A requirement.\n",
+    )
+    project = _propose_build(root)
+    lifecycle.stamp(project, kind="revision", name="rev-a")
+
+    (root / "items" / "r.yaml").write_text(
+        "defaults: { type: requirement }\n"
+        "items:\n"
+        "  - id: REQ-002\n    text: A requirement.\n    former_ids: [REQ-001]\n"
+        "  - id: REQ-003\n    text: A different, unrelated requirement.\n",
+        encoding="utf-8",
+    )
+    project2 = _propose_build(root)
+    assert former_ids.propose(project2) == []
+
+
+def test_propose_confirm_writes_former_ids_and_rejects_unknown_names(tmp_path):
+    root = _former_ids_project(
+        tmp_path,
+        "defaults: { type: requirement }\n"
+        "items:\n  - id: REQ-001\n    text: A migrated requirement.\n",
+    )
+    project = _propose_build(root)
+    lifecycle.stamp(project, kind="revision", name="rev-a")
+
+    (root / "items" / "r.yaml").write_text(
+        "defaults: { type: requirement }\n"
+        "items:\n  - id: REQ-002\n    text: A migrated requirement.\n",
+        encoding="utf-8",
+    )
+    project2 = _propose_build(root)
+    candidates = former_ids.propose(project2)
+
+    with pytest.raises(former_ids.ProposeError, match="not a currently proposed candidate"):
+        former_ids.confirm(project2, candidates, ["REQ-999"])
+
+    confirmed = former_ids.confirm(project2, candidates, ["REQ-001"])
+    assert [c.new_id for c in confirmed] == ["REQ-002"]
+    assert project2.former_ids["REQ-001"] == "REQ-002"
+
+    text = (root / "items" / "r.yaml").read_text(encoding="utf-8")
+    assert "former_ids: [REQ-001]" in text
+
+    # And it's now durable: reparsing the rewritten file resolves cleanly.
+    project3 = _propose_build(root)
+    assert not project3.errors
+    assert project3.former_ids["REQ-001"] == "REQ-002"
+
+
+def test_cli_former_ids_propose_shows_candidates_then_writes_on_confirm(tmp_path, capsys):
+    root = _former_ids_project(
+        tmp_path,
+        "defaults: { type: requirement }\n"
+        "items:\n  - id: REQ-001\n    text: A migrated requirement.\n",
+    )
+    project = _propose_build(root)
+    lifecycle.stamp(project, kind="revision", name="rev-a")
+
+    (root / "items" / "r.yaml").write_text(
+        "defaults: { type: requirement }\n"
+        "items:\n  - id: REQ-002\n    text: A migrated requirement.\n",
+        encoding="utf-8",
+    )
+
+    status = cli_mod.main(["-c", str(root / "refdes.yaml"), "former-ids", "propose"])
+    assert status == 0
+    out = capsys.readouterr().out
+    assert "REQ-001" in out and "REQ-002" in out
+    assert "Nothing written" in out
+    assert "former_ids: [REQ-001]" not in (root / "items" / "r.yaml").read_text(encoding="utf-8")
+
+    status = cli_mod.main(
+        ["-c", str(root / "refdes.yaml"), "former-ids", "propose", "--confirm", "REQ-001"]
+    )
+    assert status == 0
+    out = capsys.readouterr().out
+    assert "wrote former_ids: [REQ-001] to REQ-002" in out
+    assert "former_ids: [REQ-001]" in (root / "items" / "r.yaml").read_text(encoding="utf-8")
 
 
 FLOW_STYLE_LIST_FILE = """\

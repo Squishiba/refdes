@@ -139,20 +139,25 @@ def collect_former_ids(project: Project) -> None:
 # -------------------------------------------------------------------- write-back
 
 
-def _insert_into_markdown(lines: list[str], line_no: int, new_id: str) -> list[str]:
-    """Insert `id:` as the first front-matter key (line_no is the first key line)."""
+def insert_into_markdown(lines: list[str], line_no: int, new_line: str) -> list[str]:
+    """Insert `new_line` as the first front-matter key (line_no is the first key line).
+
+    Generic over what the key/value text is -- allocate() inserts `id: X`;
+    former_ids.confirm() reuses this to insert `former_ids: [X]` the same way.
+    """
     index = max(0, line_no - 1)
-    return lines[:index] + [f"id: {new_id}"] + lines[index:]
+    return lines[:index] + [new_line] + lines[index:]
 
 
-def _insert_into_list(lines: list[str], line_no: int, new_id: str) -> list[str] | None:
-    """Rewrite `- text: ...` as `- id: X` / `  text: ...`, preserving indentation.
+def insert_into_list(lines: list[str], line_no: int, key: str, value: str) -> list[str] | None:
+    """Rewrite `- text: ...` as `- {key}: {value}` / `  text: ...`, preserving indentation.
 
-    A flow-style entry (`- {text: ...}`) cannot be split across two lines like a
-    block mapping without breaking the braces, so the id is injected inside them
-    instead. An entry whose flow mapping does not close on the same line is
-    refused rather than guessed at, so it fails loudly instead of corrupting the
-    file.
+    Generic over `key`/`value` for the same reason as insert_into_markdown()
+    above. A flow-style entry (`- {text: ...}`) cannot be split across two
+    lines like a block mapping without breaking the braces, so the new pair is
+    injected inside them instead. An entry whose flow mapping does not close
+    on the same line is refused rather than guessed at, so it fails loudly
+    instead of corrupting the file.
     """
     index = line_no - 1
     if not (0 <= index < len(lines)):
@@ -166,9 +171,9 @@ def _insert_into_list(lines: list[str], line_no: int, new_id: str) -> list[str] 
         if not flow_match:
             return None
         inner = flow_match.group(1).strip()
-        new_inner = f"id: {new_id}" if not inner else f"id: {new_id}, {inner}"
+        new_inner = f"{key}: {value}" if not inner else f"{key}: {value}, {inner}"
         return lines[:index] + [f"{indent}-{sep}{{{new_inner}}}"] + lines[index + 1 :]
-    replacement = [f"{indent}- id: {new_id}", f"{indent}  {rest}"]
+    replacement = [f"{indent}- {key}: {value}", f"{indent}  {rest}"]
     return lines[:index] + replacement + lines[index + 1 :]
 
 
@@ -204,9 +209,9 @@ def allocate(project: Project, dry_run: bool = False) -> list[tuple[Item, str]]:
 
         for item, new_id in sorted(entries, key=lambda e: e[0].source_line, reverse=True):
             if rel.endswith(".md"):
-                lines = _insert_into_markdown(lines, item.source_line, new_id)
+                lines = insert_into_markdown(lines, item.source_line, f"id: {new_id}")
             else:
-                updated = _insert_into_list(lines, item.source_line, new_id)
+                updated = insert_into_list(lines, item.source_line, "id", new_id)
                 if updated is None:
                     project.error(
                         f"could not write id {new_id} back into the source",

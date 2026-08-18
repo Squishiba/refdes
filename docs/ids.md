@@ -140,6 +140,13 @@ it has to resolve to exactly one. Every retired number is also burned into
 the ledger's high-water mark, the same as an allocated one, so the allocator
 can never reissue it. `refdes audit` lists the full former-id mapping.
 
+Writing `former_ids:` by hand for every item a renumbering touches is easy to
+skip, which is exactly how the mapping gets lost in the first place.
+`refdes former-ids propose` infers candidates by comparing the most recent
+[baseline](lifecycle.md) to the live project -- see [CLI
+reference](cli-reference.md#refdes-former-ids-propose) -- and writes nothing
+until you confirm which ones to accept.
+
 ## Planning ahead for multiple boards
 
 If there is any chance of a second board, put a board token in the prefix now:
