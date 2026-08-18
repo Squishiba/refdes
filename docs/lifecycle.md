@@ -30,18 +30,19 @@ add nothing new here.
 
 ```yaml
 release_gate:
-  draft_items:              { release: true,  revision: false }
-  unpinned_citations:       { release: true,  revision: false }
-  missing_vendored_copies:  { release: true,  revision: false }
-  uncovered_requirements:   { release: true,  revision: false }
-  unverified_requirements:  { release: false, revision: false }
-  info_check_failures:      { release: false, revision: false }
-  unaccepted_board_moves:   { release: true,  revision: false }
+  draft_items:                 { release: true,  revision: false }
+  unpinned_citations:          { release: true,  revision: false }
+  missing_vendored_copies:     { release: true,  revision: false }
+  uncovered_requirements:      { release: true,  revision: false }
+  unverified_requirements:     { release: false, revision: false }
+  info_check_failures:         { release: false, revision: false }
+  unaccepted_board_moves:      { release: true,  revision: false }
+  unaccepted_workspace_moves:  { release: true,  revision: false }
 ```
 
 Only list the keys you want to change — this is an overlay on the defaults
 above. An unknown key is a load-time `SchemaError`, difflib-suggested
-against the seven names.
+against the eight names.
 
 | Rule | Blocks a release when... |
 |---|---|
@@ -51,7 +52,8 @@ against the seven names.
 | `uncovered_requirements` | a non-draft coverable item's coverage stage is `open` |
 | `unverified_requirements` | a non-draft coverable item isn't yet `verified` |
 | `info_check_failures` | a failing check on a `check_severity: info` type |
-| `unaccepted_board_moves` | an item's board/workspace differs from `.refdes/boards.yaml` |
+| `unaccepted_board_moves` | an item's board differs from `.refdes/boards.yaml` |
+| `unaccepted_workspace_moves` | an item's workspace differs from `.refdes/boards.yaml`'s `workspaces:` key ([workspaces](workspaces.md)) |
 
 **Why `unverified_requirements` defaults off.** This is a hardware tool:
 boards frequently go to fab specifically so they *can* be tested. Requiring
@@ -88,6 +90,7 @@ release 'rev-b' blocked -- not stamped:
   skipped  unverified_requirements
   skipped  info_check_failures
   pass     unaccepted_board_moves
+  pass     unaccepted_workspace_moves
 ```
 
 Fix what's listed and run it again — there's no flag to override or skip a
@@ -140,6 +143,7 @@ gate:
   unverified_requirements: skipped
   info_check_failures: skipped
   unaccepted_board_moves: pass
+  unaccepted_workspace_moves: pass
 
 items:
   CMP-PWR-001: {hash: 673e6ba11269f350, type: component, title: "Buck converter"}

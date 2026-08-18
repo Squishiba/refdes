@@ -303,6 +303,10 @@ def _rule_unaccepted_board_moves(project: Project) -> list[str]:
     return sorted({item_id for item_id, _old, _new in project.board_moves})
 
 
+def _rule_unaccepted_workspace_moves(project: Project) -> list[str]:
+    return sorted({item_id for item_id, _old, _new in project.workspace_moves})
+
+
 _RULES: dict[str, Callable[[Project], list[str]]] = {
     "draft_items": _rule_draft_items,
     "unpinned_citations": _rule_unpinned_citations,
@@ -311,6 +315,7 @@ _RULES: dict[str, Callable[[Project], list[str]]] = {
     "unverified_requirements": _rule_unverified_requirements,
     "info_check_failures": _rule_info_check_failures,
     "unaccepted_board_moves": _rule_unaccepted_board_moves,
+    "unaccepted_workspace_moves": _rule_unaccepted_workspace_moves,
 }
 
 # Fixed order, matching the table in docs/design/lifecycle.md §1 -- also the
@@ -336,7 +341,7 @@ def evaluate_gate(project: Project, kind: str) -> list[GateRuleResult]:
     "release" or "revision" -- which half of each rule's (release, revision)
     pair is consulted. Only ever reads `project.release_gate`, already
     parsed and validated from refdes-project.yaml; this function is the only
-    place those seven rules are actually evaluated."""
+    place those eight rules are actually evaluated."""
     results = []
     for name in RULE_NAMES:
         enabled = bool(project.release_gate.get(name, RELEASE_GATE_DEFAULTS[name])[kind])

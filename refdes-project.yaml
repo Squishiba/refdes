@@ -34,19 +34,22 @@ require_rejection_rationale: true
 # link in the rendered site points upstream instead of to a local copy.
 publish_datasheets: false
 
-# The seven configurable rules `refdes release`/`refdes revision` check --
+# The eight configurable rules `refdes release`/`refdes revision` check --
 # see docs/lifecycle.md. Each rule is an independent (release, revision)
 # boolean pair; only the keys you want to change from the defaults below
 # need to be listed. The unconditional error floor (any project.error) is
 # not configurable and is not one of these.
 release_gate:
-  draft_items:              { release: true,  revision: false }
-  unpinned_citations:       { release: true,  revision: false }
-  missing_vendored_copies:  { release: true,  revision: false }
-  uncovered_requirements:   { release: true,  revision: false }
-  unverified_requirements:  { release: false, revision: false }
-  info_check_failures:      { release: false, revision: false }
-  unaccepted_board_moves:   { release: true,  revision: false }
+  draft_items:                 { release: true,  revision: false }
+  unpinned_citations:          { release: true,  revision: false }
+  missing_vendored_copies:     { release: true,  revision: false }
+  uncovered_requirements:      { release: true,  revision: false }
+  unverified_requirements:     { release: false, revision: false }
+  info_check_failures:         { release: false, revision: false }
+  unaccepted_board_moves:      { release: true,  revision: false }
+  # This project declares no workspaces:, so this has no effect here;
+  # kept at the default (same posture as cross_workspace_severity below).
+  unaccepted_workspace_moves:  { release: true,  revision: false }
 
 # Diagnostic level for an authored link that crosses from one workspace into
 # another that isn't marked shared: true (docs/workspaces.md). This project

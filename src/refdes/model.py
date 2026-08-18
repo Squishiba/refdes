@@ -36,17 +36,20 @@ DIAGNOSTIC_LEVELS = (ERROR, WARNING, INFO)
 ITEM_LAYOUTS = ("flat", "workspace")
 BASELINE_IDENTITIES = ("os_user", "git_identity")
 
-# The seven configurable release-gate rules from docs/design/lifecycle.md §1,
-# with their shipped (release, revision) defaults. Parsed and validated now;
-# consumed later by `refdes revision`/`refdes release`, which don't exist yet.
+# The eight configurable release-gate rules from docs/design/lifecycle.md §1
+# (unaccepted_workspace_moves added alongside its board-move counterpart,
+# see docs/lifecycle.md), with their shipped (release, revision) defaults.
 RELEASE_GATE_DEFAULTS: dict[str, dict[str, bool]] = {
-    "draft_items":             {"release": True,  "revision": False},
-    "unpinned_citations":      {"release": True,  "revision": False},
-    "missing_vendored_copies": {"release": True,  "revision": False},
-    "uncovered_requirements":  {"release": True,  "revision": False},
-    "unverified_requirements": {"release": False, "revision": False},
-    "info_check_failures":     {"release": False, "revision": False},
-    "unaccepted_board_moves":  {"release": True,  "revision": False},
+    "draft_items":                {"release": True,  "revision": False},
+    "unpinned_citations":         {"release": True,  "revision": False},
+    "missing_vendored_copies":    {"release": True,  "revision": False},
+    "uncovered_requirements":     {"release": True,  "revision": False},
+    "unverified_requirements":    {"release": False, "revision": False},
+    "info_check_failures":        {"release": False, "revision": False},
+    "unaccepted_board_moves":     {"release": True,  "revision": False},
+    # Same default as unaccepted_board_moves -- a silent workspace change is
+    # the same class of drift a release shouldn't ship past unnoticed.
+    "unaccepted_workspace_moves": {"release": True,  "revision": False},
 }
 
 

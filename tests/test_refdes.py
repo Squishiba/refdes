@@ -1886,13 +1886,14 @@ def test_project_settings_absent_file_matches_pre_config_defaults(tmp_path):
     assert project.require_rejection_rationale is True
     assert project.publish_datasheets is False
     assert project.release_gate == {
-        "draft_items":              {"release": True,  "revision": False},
-        "unpinned_citations":       {"release": True,  "revision": False},
-        "missing_vendored_copies":  {"release": True,  "revision": False},
-        "uncovered_requirements":   {"release": True,  "revision": False},
-        "unverified_requirements":  {"release": False, "revision": False},
-        "info_check_failures":      {"release": False, "revision": False},
-        "unaccepted_board_moves":   {"release": True,  "revision": False},
+        "draft_items":                {"release": True,  "revision": False},
+        "unpinned_citations":         {"release": True,  "revision": False},
+        "missing_vendored_copies":    {"release": True,  "revision": False},
+        "uncovered_requirements":     {"release": True,  "revision": False},
+        "unverified_requirements":    {"release": False, "revision": False},
+        "info_check_failures":        {"release": False, "revision": False},
+        "unaccepted_board_moves":     {"release": True,  "revision": False},
+        "unaccepted_workspace_moves": {"release": True,  "revision": False},
     }
 
 
@@ -4767,6 +4768,32 @@ def test_unaccepted_board_moves_rule_reads_project_board_moves(lifecycle_project
     project.board_moves.append(("REQ-001", "board-a", "board-b"))
     results = {r.name: r for r in lifecycle.evaluate_gate(project, "release")}
     assert results["unaccepted_board_moves"].offenders == ["REQ-001"]
+
+
+def test_unaccepted_workspace_moves_rule_reads_project_workspace_moves(lifecycle_project):
+    """Same shape as unaccepted_board_moves, reading project.workspace_moves
+    instead -- a file silently changing workspace used to pass release
+    unnoticed even though the same drift on board: already blocked it."""
+    project = _lc_build(lifecycle_project)
+    project.workspace_moves.append(("REQ-001", "alpha", "beta"))
+    results = {r.name: r for r in lifecycle.evaluate_gate(project, "release")}
+    assert results["unaccepted_workspace_moves"].offenders == ["REQ-001"]
+    assert results["unaccepted_workspace_moves"].status == "FAIL"
+    # Same default posture as unaccepted_board_moves: on for release, off
+    # for revision.
+    revision_results = {r.name: r for r in lifecycle.evaluate_gate(project, "revision")}
+    assert revision_results["unaccepted_workspace_moves"].status == "skipped"
+
+
+def test_unaccepted_workspace_moves_blocks_a_release(lifecycle_project):
+    project = _lc_build(lifecycle_project)
+    project.workspace_moves.append(("REQ-001", "alpha", "beta"))
+    outcome = lifecycle.stamp(project, kind="release", name="rev-a")
+    assert outcome.status == "gate_failed"
+    assert any(
+        r.name == "unaccepted_workspace_moves" and r.status == "FAIL"
+        for r in outcome.gate_results
+    )
 
 
 def test_info_check_failures_rule(tmp_path):
