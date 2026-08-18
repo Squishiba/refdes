@@ -134,13 +134,25 @@ nominal 10 V passes. This is the whole reason tolerances propagate.
 ## What a failure looks like
 
 ```
-ERROR items/decisions/dec-pwr-001-regulator.md:2 [DEC-PWR-001]
-      P_dens = 0.2366 W/in² violates CON-THM-001 (<= 0.15 W/in^2)
+ERROR items/decisions/dec-pwr-001-regulator-topology.md:2 [DEC-PWR-001] —
+      P_dens violates CON-THM-001: worst case 0.2366 W/in² vs <= 0.15 W/in^2
 ```
 
-The item's page shows a `fail` badge, the check table gives the detail
-(`worst case 0.2366 W/in² vs <= 0.15 W/in^2`), and the failure is listed on the
-site index. `refdes check` exits non-zero, so CI catches it.
+The message leads with the worst-case bound that was actually checked. `P_dens`
+here has no tolerance, so worst case and nominal are the same number and there
+is nothing to disambiguate. A value that does carry a tolerance gets a
+`(nominal X)` suffix instead, since the number that failed and the number an
+author typed can differ — see [worst case, not nominal](#worst-case-not-nominal)
+above:
+
+```
+ERROR items/decisions/dec-io-002.md:2 [DEC-IO-002] — CLIM violates CON-IO-004:
+      worst case 0.697 A vs <= 600 mA (nominal 0.6061 A)
+```
+
+The item's page shows a `fail` badge, the check table gives the same detail,
+and the failure is listed on the site index. `refdes check` exits non-zero, so
+CI catches it.
 
 Tip: use a [unit assertion](math.md) matching the constraint's units
 (`P_dens : W/in^2`) so both sides of the comparison read in the same unit.

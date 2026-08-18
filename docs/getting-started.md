@@ -19,7 +19,10 @@ On macOS or Linux the interpreter is `.venv/bin/python`. Everything below assume
 
 A project is any folder containing `refdes.yaml`. Copy the starter schema from
 this repository to begin — it already defines requirements, constraints, decisions,
-components, tests, and log entries.
+components, tests, and log entries. Drop the `boards:` block at the bottom of
+the file for now — it registers this repository's own two example boards, and
+a single-board project has no use for it yet. See
+[multiple boards](multi-board.md) when a second board shows up.
 
 ```
 my-board/
@@ -147,9 +150,10 @@ refdes build
 ```
 
 ```
-ERROR  items/decisions/dec-pwr-001-regulator.md:2 [DEC-PWR-001]
-       P_dens = 0.2366 W/in² violates CON-THM-001 (<= 0.15 W/in^2)
-6 items, 1 errors, 3 warnings
+ERROR   items/decisions/dec-pwr-001-regulator.md:2 [DEC-PWR-001] — P_dens
+        violates CON-THM-001: worst case 0.2366 W/in² vs <= 0.15 W/in^2
+WARNING <project> — 2 item(s) with no coverage — see coverage.html
+4 items, 1 errors, 1 warnings
 site written to _site
 ```
 

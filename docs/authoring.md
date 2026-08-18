@@ -165,8 +165,8 @@ An unknown field is a **warning**, not an error, and the value is kept. The warn
 suggests a correction:
 
 ```
-WARNING items/requirements/power.yaml:12 [REQ-PWR-002] — unknown field 'sorce'.
-        Did you mean 'source'?
+WARNING items/requirements/power.yaml:12 [REQ-PWR-002] — unknown field 'sorce'
+        on requirement. Did you mean 'source'?
 ```
 
 Field types are declarative. Today `enum` (checked against `choices`), `limit`

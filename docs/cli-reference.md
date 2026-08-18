@@ -22,7 +22,7 @@ Validate, evaluate, and render the site plus `items.json`.
 | `--keep-going` | Exit 0 even when there are errors |
 | `--reseal [BOARD]` | Accept edits to sealed append-only entries. Bare, accepts every board's; name one board to scope it, e.g. `--reseal power` |
 | `--accept-board-move` | Accept a recorded [board](multi-board.md) change for an item |
-| `--require-citations` | Promote unpinned/missing-cache [citation](markdown.md#citing-a-datasheet) warnings to errors |
+| `--require-citations` | Promote the unpinned-citation (info) and missing-cache-blob (warning) [citation](markdown.md#citing-a-datasheet) diagnostics to errors |
 
 ```bash
 refdes build
@@ -53,11 +53,10 @@ refdes check
 ```
 
 ```
-ERROR   items/decisions/dec-pwr-001-regulator.md:2 [DEC-PWR-001] — P_dens =
-        0.2366 W/in² violates CON-THM-001 (<= 0.15 W/in^2)
-WARNING items/requirements/power.yaml:26 [REQ-PWR-004] — nothing addresses,
-        satisfies, or verifies this yet
-16 items, 1 errors, 4 warnings
+ERROR   items/decisions/dec-pwr-001-regulator-topology.md:2 [DEC-PWR-001] —
+        P_dens violates CON-THM-001: worst case 0.2366 W/in² vs <= 0.15 W/in^2
+WARNING <project> — 3 item(s) with no coverage — see coverage.html
+20 items, 1 errors, 8 warnings
 ```
 
 Errors go to stderr, warnings to stdout. Every diagnostic leads with
@@ -79,10 +78,6 @@ project-level warning, for instance) is never hidden by `--board`.
 ```bash
 refdes check --board power
 ```
-
-| Option | Effect |
-|---|---|
-| `--refresh` | Also re-fetch every pinned [citation](markdown.md#citing-a-datasheet) and report drift |
 
 `--refresh` is the only thing that ever makes `check` touch the network, and
 even then it writes nothing — it re-fetches each pinned citation to a scratch
@@ -257,7 +252,8 @@ python -m http.server -d _site 8000
 | Path | Commit it? | Purpose |
 |---|---|---|
 | `.refdes/ids.yaml` | **yes** | Burned ID numbers; two branches sharing it prevents collisions |
-| `.refdes/log-seal.yaml` | **yes** | Append-only seals for log entries |
+| `.refdes/log-seal.yaml` | **yes** | Append-only seals for log entries with no board (the only file used at all when the project has no `boards:` registry) |
+| `.refdes/log-seal-<board>.yaml` | **yes** | Append-only seals for one registered board's own log entries |
 | `.refdes/boards.yaml` | **yes** | Board drift manifest; only written by a project with `boards:` |
 | `.refdes/citations.yaml` | **yes** | Citation lockfile (sha256, fetch time, vendored flag); written only by `refdes fetch` |
 | `.refdes/vendor/` | **no, gitignored** | Vendored datasheet bytes, content-addressed by sha256; written only by `refdes fetch --url ... ` for a citation with `vendor: true` |

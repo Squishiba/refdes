@@ -144,7 +144,8 @@ The interchange format. **Anything downstream should read this, not the HTML.**
       "checks": [
         { "value": "P_dens", "against": "CON-THM-001", "ok": false,
           "actual": "0.2366 W/in²", "limit": "<= 0.15 W/in^2",
-          "detail": "worst case 0.2366 W/in² vs <= 0.15 W/in^2" }
+          "detail": "worst case 0.2366 W/in² vs <= 0.15 W/in^2",
+          "margin": -0.5773 }
       ]
     }
   ],

@@ -93,7 +93,7 @@ Name mismatch, or the calc line that defines it failed — fix that error first.
 **`check against CON-THM-001, which declares no limit`**
 The target needs a `limit` field.
 
-**`P_dens = 0.2366 W/in² violates CON-THM-001 (<= 0.15 W/in^2)`**
+**`P_dens violates CON-THM-001: worst case 0.2366 W/in² vs <= 0.15 W/in^2`**
 Not a tool problem. The design does not meet the constraint. Change the design,
 change the constraint, or record in the [design log](design-log.md) that you know.
 

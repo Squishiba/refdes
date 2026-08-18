@@ -207,8 +207,8 @@ This is the payoff. Platform tightens the connector rating:
 Board A, unchanged, now fails:
 
 ```
-ERROR items/decisions/pins.md:2 [DEC-A-001] — I_pin = 2.4 A violates
-      IFC-CAN-001 (<= 2 A)
+ERROR items/decisions/pins.md:2 [DEC-A-001] — I_pin violates IFC-CAN-001:
+      worst case 2.4 A vs <= 2 A
 ```
 
 Nobody had to remember which boards were affected.

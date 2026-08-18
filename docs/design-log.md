@@ -81,6 +81,17 @@ with your entries.
 `refdes check` verifies existing seals without creating new ones, so it is safe
 in CI. `refdes build` seals anything new it finds.
 
+### Adopting boards on a project that already has `.refdes/log-seal.yaml`
+
+Nothing to migrate by hand. An entry sealed before `boards:` existed stays
+verified against that same hash even after it comes to resolve onto a board —
+`refdes check` looks it up in the base file if the board's own file doesn't
+have it yet, so a project that adopts boards without immediately rebuilding
+still catches a real edit. The physical move only happens on a `refdes build`:
+the entry is written into `.refdes/log-seal-<board>.yaml` and dropped from
+`.refdes/log-seal.yaml` in the same run. `refdes check` never writes, so it
+never performs this move itself.
+
 ### Corrections
 
 Append a new entry rather than editing the old one:

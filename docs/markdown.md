@@ -181,7 +181,7 @@ inconsistent `vendor:` flags across items is a warning.
 
 | Situation | Severity |
 |---|---|
-| No lockfile entry for a cited url | warning (error with `--require-citations`) |
+| No lockfile entry for a cited url | info (error with `--require-citations`) — routine until `refdes fetch` runs, so it's hidden unless `-v`/`--verbose` |
 | `vendor: true`, but the local blob is missing | warning (error with `--require-citations`) |
 | The local blob's hash no longer matches its recorded sha256 | **error, always** |
 

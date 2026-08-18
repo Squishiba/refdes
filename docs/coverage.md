@@ -61,17 +61,39 @@ work** panel with the same rows. Each item's own page shows a coverage strip.
 
 ## Warnings
 
-The build warns about anything not fully verified:
+Two of the five stages are individually uninteresting at scale — a project
+early in its life is mostly `open`, and "satisfied but not verified" is
+routine noise before a test plan exists — so the build collapses each into
+one summary line instead of one warning per item:
 
 ```
-WARNING items/constraints/thermal.yaml:17 [CON-THM-002] — nothing addresses,
-        satisfies, or verifies this yet
-WARNING items/requirements/power.yaml:20 [REQ-PWR-003] — satisfied but not
+WARNING <project> — 3 item(s) with no coverage — see coverage.html
+WARNING <project> — 2 requirement(s) satisfied but not verified — see coverage.html
+```
+
+`coverage.html` carries the per-item detail; the summary line just tells you
+there is some. "Satisfied but not verified" is suppressed entirely when the
+project has no `test` items at all — the moment the first one is added, these
+become real findings again and start appearing.
+
+`claimed` — an unsettled decision or component (`status` not yet in
+`satisfying_statuses:`) — stays a **per-item** warning, because it is the one
+class here that actually names something to act on:
+
+```
+WARNING items/requirements/power.yaml:20 [REQ-PWR-006] — claimed but not
         verified (no test links to it)
 ```
 
-These are warnings, not errors — a mid-project board legitimately has both. Use
-`refdes check` in CI and decide for yourself whether to gate on warnings.
+These are warnings, not errors — a mid-project board legitimately has all
+three. Use `refdes check` in CI and decide for yourself whether to gate on
+warnings.
+
+Diagnostics also have an `info` level, for the routine state of an
+incomplete project — hidden by default, shown with `-v`/`--verbose` on
+`check` or `build`. Nothing coverage produces is `info` today; it's used
+elsewhere (an unpinned citation, for instance) but shares the same flag, so
+`-v` is worth knowing about even if you came here for coverage.
 
 ## Which statuses count as satisfying
 

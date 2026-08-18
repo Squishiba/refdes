@@ -289,7 +289,8 @@ def main(argv: list[str] | None = None) -> int:
     p_build.add_argument(
         "--require-citations",
         action="store_true",
-        help="promote unpinned/missing-cache citation warnings to errors (CI)",
+        help="promote the unpinned-citation (info) and missing-cache-blob "
+        "(warning) diagnostics to errors (CI)",
     )
     p_build.add_argument(
         "-v", "--verbose",
