@@ -216,7 +216,7 @@ bytes) is gitignored; every other `.refdes/*.yaml` manifest is committed.
 kind: release                  # "revision" | "release"
 name: rev-b
 stamped_at: 2026-08-17T14:03:00Z
-stamped_by: "J. Bin <jared.bin12@gmail.com>"   # best-effort, see below; omitted if unknown
+stamped_by: "jbin"             # OS username by default; see §2, "stamped_by"
 refdes_version: "0.3.0"
 
 # Present only for kind: release. Records which rules were active and
@@ -269,29 +269,72 @@ with no other information is nearly useless six months later. `type` and
 properties) and turn a removed-item diff line into `REQ-OLD-002 (requirement)
 "Legacy input protection" — removed`.
 
-### `stamped_by`: two options
+### `stamped_by`: configurable source, defaults to the OS username
 
-**Option A (recommended): best-effort from `git config user.name`/
-`user.email`, subprocess, swallowed on any failure; falls back to
-`getpass.getuser()`; omit the field entirely if both fail.** This is
-identity metadata, not history reading — it does not open the `.git`
-object database, walk commits, or do anything the "not the git layer" line
-in §5 is protecting. It degrades to "field absent" on a machine with no git
-installed or no identity configured (a bare CI runner), which the baseline
-schema already treats as optional.
+**Settled by user decision.** `stamped_by` has two selectable sources — the
+OS username, or git's local identity config — chosen by a project-level
+preference, defaulting to the OS username.
 
-**Option B: OS username only** (`getpass.getuser()` / `%USERNAME%`), no
-subprocess call to git at all. Simpler, zero dependency on git being
-installed, but on most machines gives a login name (`jbin`) instead of the
-name that actually appears on commits and in the design log elsewhere in
-the project (`docs/design-log.md`'s example entries are attributed
-`J. Bin`), which is a worse match for the rest of the tool's own
-conventions.
+The setting lives in the same not-yet-named project-level config file that
+already carries calc significant figures, item layout, the `required_when`
+toggle, datasheet publishing, and `release_gate:` (§1) — this document adds
+one more top-level key to that same file, not a second config location:
 
-I lean toward A but flag it explicitly in my reply — it's the more likely
-of the two decisions in this document to be wrong, because "shell out to
-`git config`" is a small crack in the "this deliberately doesn't read git"
-boundary even though it only reads local config, not history.
+```yaml
+baseline_identity: os_user   # os_user | git_identity — default: os_user
+```
+
+- **`os_user` (default)** — `getpass.getuser()` / `%USERNAME%`. No
+  subprocess, no read of any git state, no dependency on git being
+  installed at all.
+- **`git_identity`** — `git config user.name` / `user.email`, via
+  subprocess. Opt-in only; a project sets this explicitly to get a name
+  that matches what already appears on commits and in the design log
+  (`docs/design-log.md`'s example entries are attributed `J. Bin`, not a
+  login name).
+
+**Defaulting to `os_user` means this design touches no git state at all
+unless a project explicitly opts in** — worth stating plainly, since "this
+deliberately isn't the git-history layer" is one of this document's central
+claims (§5). With the shipped default, `revision`/`release` never invoke
+`git` in any form: no subprocess, no read of `.git/config`, nothing. Git
+enters the picture only if a project sets `baseline_identity: git_identity`
+— and even then it's a read of local config, never the object database,
+never history. This is a stronger version of that claim than an earlier
+draft of this section made, which shelled out to git unconditionally.
+
+**When `git_identity` is selected but resolution fails** (git not
+installed, not inside a git repository, or `user.name`/`user.email` unset)
+— **warn and fall back to `os_user`; do not error, and do not silently
+substitute without saying so.**
+
+```
+WARNING baseline_identity: git_identity, but 'git config user.name' failed
+        (git not installed, not a git repository, or identity unset) —
+        stamped_by falls back to the OS username.
+```
+
+Justification for warn-and-fall-back over the other two options:
+
+- **Not error.** `stamped_by` is metadata on the baseline, read by no gate
+  rule in §1 — nothing in the readiness gate depends on it. Erroring would
+  let a missing name string block a release/revision outright, which
+  inverts the whole design's posture: the gate exists to catch real
+  readiness problems (uncovered requirements, unpinned citations), and
+  treating a cosmetic field the same way would train people to route around
+  the tool, the same failure mode §1 already argues against for gating on
+  item deletion. It's also the realistic case for CI: a runner typically
+  has git installed (to check the repo out) but no `user.name`/
+  `user.email` configured, since it never commits anything itself —
+  `release` should still succeed there.
+- **Not silent.** Falling back with no diagnostic would hide a real
+  project misconfiguration (the project asked for `git_identity` and isn't
+  getting it) behind a baseline file that looks fine. "Suppression is
+  allowed, invisible suppression is not" is the same principle
+  `docs/change-tracking.md` already states for `on_change` overrides;
+  a `project.warn(...)` here is that principle applied to this setting.
+  It surfaces through the same diagnostic reporting every other warning in
+  this design already uses (§1) — visible by default, never build-blocking.
 
 ### Name validation
 
@@ -485,6 +528,11 @@ What this design **does** give you, with zero git object reads:
   (since-last-revision, since-last-release).
 - A ready-made scope list to hand to `git diff` for the field-level answer,
   when git is available (§3).
+- With the shipped default (`baseline_identity: os_user`, §2), *zero* git
+  involvement of any kind — not just no object reads, no subprocess call to
+  git at all. The only way this design touches git is a project explicitly
+  opting into `baseline_identity: git_identity` for `stamped_by`, and even
+  that is a read of local config, never history.
 
 What still needs the git reader, unchanged from today's framing:
 
@@ -604,6 +652,7 @@ failure, `2` `SchemaError` — `src/refdes/cli.py:311-316`):
 | What | Where |
 |---|---|
 | `release_gate:` config block | the new project-level config file (not named here) |
+| `baseline_identity:` config key (`os_user` default \| `git_identity`) | same project-level config file |
 | `.refdes/baselines/<name>.yaml` | new, one per stamp, committed |
 | `refdes revision <name>` | new CLI subcommand |
 | `refdes release <name>` | new CLI subcommand |
