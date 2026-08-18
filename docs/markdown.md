@@ -62,9 +62,12 @@ Substitutes a calc value from the same item.
 ```markdown
 The budget in CON-THM-001 drives this.        <- bare ID, autolinked
 See [[REQ-PWR-002|the input range]] instead.  <- explicit, custom text
+See [[fig:fig-curve]] for the efficiency curve. <- figure reference
 ```
 
-Both get hover previews. See [links](links.md).
+Item references get hover previews. See [links](links.md). A `fig:`-prefixed
+id resolves to a numbered figure instead — see [width and
+captions](#width-and-captions) below.
 
 ## Images and other local files
 
@@ -75,9 +78,15 @@ copied into `_site/assets/`, and its `src` in the rendered page is rewritten
 to point at that copy. `figures/pattern.png` written in
 `items/decisions/dec-001.md` resolves against
 `items/decisions/figures/pattern.png` on disk, and ends up at
-`_site/assets/items/decisions/figures/pattern.png`, mirroring the same path
-under `assets/` — no manual copy step, and no mismatch between what the build
-checked and what the browser requests.
+`_site/assets/items/decisions/figures/pattern.<hash>.png` — same directory
+structure, a short content hash spliced into the leaf filename. The hash
+changes whenever the bytes do, so editing an image and rebuilding can never
+serve stale content from a browser or CDN cache under the same URL; you never
+write the hashed name yourself, since refdes both resolves the source and
+writes the `src=` that points at the copy. This applies to `<img src>` only —
+an ordinary `[text](file.pdf)` link to a local file, or a `site.assets:`
+directory linked to by hand, is not rewritten; see [`[text](file.pdf)` and
+other local links](#textfilepdf-and-other-local-links) below.
 
 A `src` that does not resolve is a **build error**, not a warning — unlike a
 dangling cross-reference there is no sensible way to render a missing image,
@@ -93,15 +102,39 @@ A Quarto-style attribute suffix directly after the image, on the same line,
 wraps it in a real `<figure>`/`<figcaption>`:
 
 ```markdown
-![TPS62913 efficiency vs. load current, half-load point marked](figures/curve.png){width=60% caption="Figure 3 — efficiency vs. load current"}
+![TPS62913 efficiency vs. load current, half-load point marked](figures/curve.png){id="fig-curve" width=60% caption="Efficiency vs. load current"}
 ```
 
 `width` becomes the `<figure>`'s CSS width; `caption` becomes the caption
 text, falling back to the `alt` text when omitted. `alt` always stays on the
-`<img>` itself, whether or not a caption is given. Figure numbering is not
-automatic — write `Figure 3 —` as literal caption text, same as you would in
-prose. With no `{...}` suffix, the image renders exactly as it always has: a
-bare `<img>`, no `<figure>` wrapper.
+`<img>` itself, whether or not a caption is given. With no `{...}` suffix, the
+image renders exactly as it always has: a bare `<img>`, no `<figure>`
+wrapper.
+
+`id` is optional, exactly like `width`/`caption`. Give a figure one and two
+things follow automatically:
+
+- Its caption is prefixed with a number — `Figure 1 — Efficiency vs. load
+  current` — computed fresh for **each rendered document it appears on**
+  (its own item page, `document.html`, a per-board/per-workspace document, a
+  narrative page), in that document's own reading order. The same figure is
+  "Figure 1" on its own item's page and might be "Figure 7" in the combined
+  `document.html` — there is no single project-wide number, because there is
+  no single document.
+- `[[fig:fig-curve]]` anywhere in prose resolves to a link reading `Figure N`
+  (or `[[fig:fig-curve|custom text]]` for custom link text), using *that
+  document's own* number — see [cross-references](#cross-references) above.
+  A same-item figure reference always resolves, since an item's own figures
+  are always in the same document as its own body. A cross-item reference
+  only resolves in a document that contains both items at once
+  (`document.html` or a per-board/per-workspace document) — from inside one
+  item's own standalone page, referencing another item's figure warns and
+  renders as unresolved, naming exactly why.
+
+An `id` must be unique across the whole project — one flat namespace, the
+same posture item IDs already have — since a figure can be referenced from
+any item or page, not just the one it's embedded in. A duplicate is a build
+error naming both locations.
 
 ### `[text](file.pdf)` and other local links
 
@@ -207,9 +240,7 @@ option to turn this on.
 **Definition lists** and **footnotes** do not render — they need
 `mdit-py-plugins`, which is not currently a dependency.
 
-**Callouts** (`::: {.warning}`) and **automatic figure numbering /
-cross-references to figures** are not implemented. These are the most likely
-next additions.
+**Callouts** (`::: {.warning}`) are not implemented.
 
 ## Where markdown is *not* used
 

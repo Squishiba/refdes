@@ -80,6 +80,10 @@ suppress linking entirely.
 **Explicit `[[...]]` references are validated.** An unresolved one is a warning and
 renders in red, so use this form when a broken reference should be noticed.
 
+A `[[fig:some-id]]` reference — the same `[[...]]` envelope, a `fig:` prefix —
+resolves to a numbered figure instead of an item. See [width and
+captions](markdown.md#width-and-captions).
+
 ## Hover previews
 
 Every reference shows a preview card on hover: type badge, ID, title, selected

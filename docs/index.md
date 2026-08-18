@@ -19,6 +19,7 @@ time.
 | [Authoring items](authoring.md) | The two file formats, fields, bodies, when to use which |
 | [Pages](pages.md) | Narrative markdown alongside your items — and pages-only sites |
 | [Markdown reference](markdown.md) | Every formatting feature that works in an item body |
+| [Generated blocks](blocks.md) | `{{index}}` and `{{cascade}}` on narrative pages, and the parameters-not-expressions non-goal |
 | [IDs](ids.md) | Allocation, prefixes, why numbers are never reused |
 | [Links and traceability](links.md) | Link types, back-links, cross-references, hover previews |
 | [Math](math.md) | Calc blocks, units, tolerances, brackets, unit assertions |

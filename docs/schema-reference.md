@@ -157,9 +157,15 @@ link_types:
 |---|---|---|
 | `inverse` | `<name>_by` | Name of the computed back-link |
 | `label` | the link name | Heading shown on item pages |
+| `trace` | `true` | Whether this link type participates in a `{{cascade}}` block's default walk (see [generated blocks](blocks.md)) |
 
 Either end resolves to the same edge, so a type may declare `verifies` even though
 `verified_by` is the name in `link_types`. See [links](links.md).
+
+`trace: false` marks a link as describing process rather than "this item's
+correctness rests on that one" — the bundled standard sets it on `amends`,
+`records`, `supersedes`, and `addresses`. A `{{cascade}}` block with no
+explicit `via=` follows every link type where `trace` is still `true`.
 
 ---
 
