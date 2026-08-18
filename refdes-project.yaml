@@ -10,9 +10,10 @@
 # messages (e.g. "3.96 W"). 1-15.
 sigfigs: 4
 
-# How items/ is laid out. "flat" is today's items/<board>/; "workspace" adds
-# one more path segment, items/<workspace>/<board>/. Recorded and validated
-# here; the workspace layer itself is not implemented yet.
+# How items/ is laid out. "flat" is items/<board>/ (this project's own
+# layout); "workspace" adds one more path segment, items/<workspace>/<board>/,
+# read against a workspaces: registry in refdes.yaml. See docs/workspaces.md.
+# This project declares no workspaces:, so "flat" is the only sensible value.
 item_layout: flat
 
 # Where `stamped_by` comes from on a `refdes revision`/`refdes release`
@@ -23,8 +24,7 @@ item_layout: flat
 baseline_identity: os_user
 
 # Whether `decision.rationale` requires a value when `status: rejected`
-# (docs/design/standard-library.md's required_when mechanism). Not
-# implemented yet.
+# (the standard's required_when mechanism -- see docs/standard-library.md).
 require_rejection_rationale: true
 
 # Whether a `vendor: true` citation's locally-cached PDF is copied into
@@ -48,3 +48,9 @@ release_gate:
   unverified_requirements:  { release: false, revision: false }
   info_check_failures:      { release: false, revision: false }
   unaccepted_board_moves:   { release: true,  revision: false }
+
+# Diagnostic level for an authored link that crosses from one workspace into
+# another that isn't marked shared: true (docs/workspaces.md). This project
+# declares no workspaces:, so the setting has no effect here; kept at the
+# default. "error" | "warning" | "info".
+cross_workspace_severity: warning

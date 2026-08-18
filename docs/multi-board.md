@@ -130,6 +130,13 @@ build error — moving a file is an ordinary thing to do on purpose.
   other's build.
 - **The site becomes unusable** at four or five boards.
 
+Before reaching for separate projects, consider **[workspaces](workspaces.md)**
+— an ownership boundary one level above boards, still inside one project. It
+doesn't solve version pinning, but it does group boards by product, add a
+lint that catches a board quietly depending on another product's items, and
+lay out `items/` so that splitting later, when you actually need to, is a
+folder move rather than a renumbering.
+
 ## Separate projects with imports
 
 Split into projects, each with its own `refdes.yaml`, and import the shared one:
@@ -234,7 +241,8 @@ now.** It costs nothing today, and IDs freeze once baselined. See [IDs](ids.md).
 
 ## Not built yet
 
-The **workspace view**: one combined site across several projects, with
-cross-project back-links and an interface-compliance matrix ("which of our seven
-boards violate the connector derating?"). Individual projects import and build
-correctly today; the federated view does not exist.
+The **federated view**: one combined site across several *projects* (not to be
+confused with [workspaces](workspaces.md), which group boards inside one
+project), with cross-project back-links and an interface-compliance matrix
+("which of our seven boards violate the connector derating?"). Individual
+projects import and build correctly today; the federated view does not exist.

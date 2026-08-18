@@ -26,6 +26,7 @@ site:
     - coverage
     - change-tracking
     - multi-board
+    - workspaces
     - schema-reference
     - cli-reference
     - output

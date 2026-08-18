@@ -21,7 +21,7 @@ Validate, evaluate, and render the site plus `items.json`.
 | `-o`, `--out DIR` | Output directory, overriding `site.out` |
 | `--keep-going` | Exit 0 even when there are errors |
 | `--reseal [BOARD]` | Accept edits to sealed append-only entries. Bare, accepts every board's; name one board to scope it, e.g. `--reseal power` |
-| `--accept-board-move` | Accept a recorded [board](multi-board.md) change for an item |
+| `--accept-board-move` | Accept a recorded [board](multi-board.md) or [workspace](workspaces.md) change for an item |
 | `--require-citations` | Promote the unpinned-citation (info) and missing-cache-blob (warning) [citation](markdown.md#citing-a-datasheet) diagnostics to errors |
 
 ```bash
@@ -55,7 +55,7 @@ refdes check
 ```
 ERROR   items/decisions/dec-pwr-001-regulator-topology.md:2 [DEC-PWR-001] —
         P_dens violates CON-THM-001: worst case 0.2366 W/in² vs <= 0.15 W/in^2
-WARNING <project> — 3 item(s) with no coverage — see coverage.html
+WARNING <project> — 1 item(s) with no coverage — see coverage.html
 20 items, 1 errors, 8 warnings
 ```
 
@@ -66,17 +66,20 @@ Errors go to stderr, warnings to stdout. Every diagnostic leads with
 |---|---|
 | `--refresh` | Also re-fetch every pinned [citation](markdown.md#citing-a-datasheet) and report drift (network; writes nothing) |
 | `--board NAME` | Only report diagnostics for one [board](multi-board.md)'s own items |
+| `--workspace NAME` | Only report diagnostics for one [workspace](workspaces.md)'s own items |
 | `-v`, `--verbose` | Also show info-level diagnostics |
 
-`--board` is a report filter, not a smaller build: the whole project is still
-parsed and every link still resolved, so a decision on one board that
-`satisfies` a requirement on another still checks correctly. Only what gets
-*printed* — and the item count in the summary line — is narrowed to that
-board's own items. A diagnostic that isn't attributable to any one item (a
-project-level warning, for instance) is never hidden by `--board`.
+`--board`/`--workspace` are report filters, not a smaller build: the whole
+project is still parsed and every link still resolved, so a decision on one
+board that `satisfies` a requirement on another still checks correctly. Only
+what gets *printed* — and the item count in the summary line — is narrowed to
+that scope's own items. A diagnostic that isn't attributable to any one item
+(a project-level warning, for instance) is never hidden by either flag. The
+two are combinable.
 
 ```bash
 refdes check --board power
+refdes check --workspace product-a
 ```
 
 `--refresh` is the only thing that ever makes `check` touch the network, and
@@ -179,7 +182,7 @@ into vendoring.
 
 Report everything that has been made less visible: fields excluded from
 invalidation, item-level overrides and their stated reasons, resealed log entries,
-[board](multi-board.md) moves, imported projects, and
+[board](multi-board.md) and [workspace](workspaces.md) moves, imported projects, and
 [citations](markdown.md#citing-a-datasheet).
 
 ```bash
@@ -201,6 +204,9 @@ Append-only entries edited after sealing:
 Board moves since the manifest was last written:
   (none)
 
+Workspace moves since the manifest was last written:
+  (none)
+
 Imported projects (read-only):
   platform       1 items pinned to 2026.3  <- ../platform/_site/items.json
 
@@ -212,7 +218,8 @@ Citations:
 ```
 
 The "Board moves" section only appears for a project that has declared a
-`boards:` registry. The "Citations" section only appears for a project that
+`boards:` registry, and "Workspace moves" only for one that has declared
+`workspaces:`. The "Citations" section only appears for a project that
 declares a `citations`-typed field somewhere and has at least one item using it.
 
 ---
@@ -254,7 +261,7 @@ python -m http.server -d _site 8000
 | `.refdes/ids.yaml` | **yes** | Burned ID numbers; two branches sharing it prevents collisions |
 | `.refdes/log-seal.yaml` | **yes** | Append-only seals for log entries with no board (the only file used at all when the project has no `boards:` registry) |
 | `.refdes/log-seal-<board>.yaml` | **yes** | Append-only seals for one registered board's own log entries |
-| `.refdes/boards.yaml` | **yes** | Board drift manifest; only written by a project with `boards:` |
+| `.refdes/boards.yaml` | **yes** | Board and workspace drift manifest; the `workspaces:` section only appears for a project that has declared `workspaces:` |
 | `.refdes/citations.yaml` | **yes** | Citation lockfile (sha256, fetch time, vendored flag); written only by `refdes fetch` |
 | `.refdes/vendor/` | **no, gitignored** | Vendored datasheet bytes, content-addressed by sha256; written only by `refdes fetch --url ... ` for a citation with `vendor: true` |
 | `_site/` | no | Generated output |

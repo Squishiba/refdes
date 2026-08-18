@@ -46,6 +46,7 @@ The 3V3 rail is the binding design problem — see REQ-PWR-002 and CON-THM-001.
 | `order` | `100` | Sort position; lower comes first |
 | `nav` | `true` | Set `false` to render but keep out of the nav bar |
 | `board` | *(none)* | Group this page under that board's nav entry instead of the top level |
+| `workspace` | *(none)* | Group this page under that workspace's nav entry instead of the top level |
 
 ## Ordering the nav
 
@@ -82,6 +83,11 @@ board: power
 This is what replaces a hand-written row of links at the top of a board overview
 page: the nav bar already gets you there. `order` and `nav: false` still work the
 same way inside a board's group as they do at the top level.
+
+A `workspaces:` registry (see [workspaces](workspaces.md)) works the same way
+one level up — tag `workspace: product-a` instead of, or as well as, `board:`.
+A page tagged with only `workspace:` sits directly in that workspace's group,
+alongside any board groups nested inside it.
 
 ## What pages can do
 

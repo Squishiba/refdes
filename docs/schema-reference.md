@@ -16,6 +16,7 @@ link_types:  { ... }   # relationships and their inverses
 types:       { ... }   # item types
 imports:     [ ... ]   # other projects to read
 boards:      { ... }   # opt-in board registry
+workspaces:  { ... }   # opt-in workspace registry, one level above boards
 ```
 
 `standard:` (or its absence) determines where `link_types:`/`types:` start
@@ -340,6 +341,35 @@ given twice, or a `path:` colliding with another board's key — is a hard error
 at project-load time, printed as `configuration error: boards.board-b and
 boards.board-a both map to items/board-a/ — path segments must be unique`, and
 fails before any item is parsed.
+
+---
+
+## `workspaces`
+
+```yaml
+workspaces:
+  platform:
+    label: "Shared Platform"
+    shared: true
+  product-a:
+    label: "Product A"
+```
+
+| Key | Required | Purpose |
+|---|---|---|
+| `label` | no, defaults to the key | Display name on workspace-scoped pages |
+| `shared` | no, defaults to `false` | Other workspaces may link into this one without tripping the cross-workspace lint |
+| `path` | no, defaults to the key | The `items/` path segment, if different from the key |
+
+Absent entirely, this key does nothing. With it, a workspace is one level
+above a board — read from the first `items/` path segment when
+`item_layout: workspace` (`refdes-project.yaml`), overridable per item with
+the reserved `workspace:` key regardless of layout. See
+[workspaces](workspaces.md).
+
+A board key and a workspace key must never collide — they share one
+generated-filename namespace (`coverage-<key>.html`); doing so is a hard
+error at project-load time naming both sides.
 
 ---
 
