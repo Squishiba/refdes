@@ -406,11 +406,21 @@ class Project:
     # Same shape as board_moves, for workspace membership -- recorded in the
     # same `.refdes/boards.yaml` manifest, under its own `workspaces:` key.
     workspace_moves: list[tuple[str, str, str]] = field(default_factory=list)
-    # Project-root-relative paths of every local file that must be copied into
-    # `_site/assets/`, mirroring this same path -- populated by resolved local
-    # `<img>` references and by `site.assets:` directories.
-    assets: set[str] = field(default_factory=set)
+    # Every local file that must be copied into `_site/assets/`: source path
+    # (project-root-relative) -> destination path (relative to assets/).
+    # Populated by resolved local `<img>` references (hashed leaf filename,
+    # docs/design/index-blocks.md §10) and by `site.assets:` directories
+    # (identity mapping -- an author's own hand-typed href to one of those
+    # files must keep working unrewritten, so those never hash). Keyed by
+    # source so the same image referenced from many items/pages hashes once.
+    assets: dict[str, str] = field(default_factory=dict)
     asset_dirs: list[str] = field(default_factory=list)  # site.assets: raw config
+    # Figure id -> (owner label for a collision message, source file, source
+    # line or None) -- one flat, project-wide namespace, the same posture
+    # item ids already have (docs/design/index-blocks.md §9). Populated by
+    # _apply_figure_attrs as each `{id="..."}` is seen; a second use of the
+    # same id is a build error naming both locations.
+    figures: dict[str, tuple[str, str, int | None]] = field(default_factory=dict)
     # Vendored datasheet copies to publish into the site: {dest path relative to
     # assets/ (flattened, e.g. "datasheets/<sha256>.pdf") -> absolute source
     # path in the vendor cache}. Populated by citations.verify() only when

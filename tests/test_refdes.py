@@ -688,6 +688,13 @@ completely_unrelated_nonsense: yes
 # ------------------------------------------------------------- images and assets
 
 
+def _asset_hash(data: bytes) -> str:
+    """Matches build.py's own truncation of the content sha256 for a hashed
+    asset filename -- computed here, not hardcoded, so a deliberate change to
+    the truncation length doesn't silently rot these tests."""
+    return hashlib.sha256(data).hexdigest()[:16]
+
+
 IMAGE_ITEM = """\
 ---
 id: DEC-A-001
@@ -735,23 +742,61 @@ def test_present_local_image_is_registered_and_rewritten(image_project):
     build_mod.build(project)
 
     assert "items/figures/present.png" in project.assets
+    digest = _asset_hash(b"\x89PNG\r\n\x1a\n")
+    assert project.assets["items/figures/present.png"] == f"items/figures/present.{digest}.png"
     item = project.items["DEC-A-001"]
-    assert 'src="assets/items/figures/present.png"' in item.body_html
+    assert f'src="assets/items/figures/present.{digest}.png"' in item.body_html
     # A remote src is never touched or registered.
     assert "assets/https" not in item.body_html
     assert 'src="https://example.com/photo.png"' in item.body_html
 
 
 def test_local_image_is_copied_into_the_site(image_project):
-    out = _build_and_render(image_project)
-    copied = os.path.join(out, "assets", "items", "figures", "present.png")
+    project = load_project(config_path=str(image_project / "refdes.yaml"))
+    parse.load_items(project)
+    build_mod.build(project)
+    out = render.render_site(project)
+
+    digest = _asset_hash(b"\x89PNG\r\n\x1a\n")
+    copied = os.path.join(out, "assets", "items", "figures", f"present.{digest}.png")
     assert os.path.isfile(copied)
     assert open(copied, "rb").read() == b"\x89PNG\r\n\x1a\n"
 
 
+def test_editing_an_image_changes_its_url_and_prunes_the_old_one(image_project):
+    """Content-hashed filenames (docs/design/index-blocks.md §10): editing the
+    bytes in place must not silently serve stale content from a cache under
+    the same URL -- the filename itself has to change, and the old one must
+    not linger in _site/."""
+    project = load_project(config_path=str(image_project / "refdes.yaml"))
+    parse.load_items(project)
+    build_mod.build(project)
+    out = render.render_site(project)
+    old_digest = _asset_hash(b"\x89PNG\r\n\x1a\n")
+    old_path = os.path.join(out, "assets", "items", "figures", f"present.{old_digest}.png")
+    assert os.path.isfile(old_path)
+
+    new_bytes = b"\x89PNG\r\n\x1a\n\x00extra"
+    (image_project / "items" / "figures" / "present.png").write_bytes(new_bytes)
+
+    project2 = load_project(config_path=str(image_project / "refdes.yaml"))
+    parse.load_items(project2)
+    build_mod.build(project2)
+    out2 = render.render_site(project2)
+    new_digest = _asset_hash(new_bytes)
+    assert new_digest != old_digest
+    new_path = os.path.join(out2, "assets", "items", "figures", f"present.{new_digest}.png")
+    assert os.path.isfile(new_path)
+    assert not os.path.isfile(old_path)  # pruned, same as any other stale output
+
+
 def test_deleting_an_image_reference_prunes_its_copied_asset(image_project):
-    out = _build_and_render(image_project)
-    copied = os.path.join(out, "assets", "items", "figures", "present.png")
+    project = load_project(config_path=str(image_project / "refdes.yaml"))
+    parse.load_items(project)
+    build_mod.build(project)
+    out = render.render_site(project)
+    digest = _asset_hash(b"\x89PNG\r\n\x1a\n")
+    copied = os.path.join(out, "assets", "items", "figures", f"present.{digest}.png")
     assert os.path.isfile(copied)
 
     text = (image_project / "items" / "dec-a.md").read_text(encoding="utf-8")
@@ -763,18 +808,25 @@ def test_deleting_an_image_reference_prunes_its_copied_asset(image_project):
 
 
 def test_asset_colliding_with_a_template_reserved_name_is_an_error(tmp_path):
-    """An image path that would land on assets/style.css must not clobber it."""
-    (tmp_path / "refdes.yaml").write_text(COVERAGE_SCHEMA, encoding="utf-8")
+    """A site.assets: directory literally named `style.css` must not clobber
+    the template's own reserved top-level asset name. An `<img src>` can no
+    longer produce this collision now that it is always content-hashed (an
+    escaping `../style.css` reference now lands on `style.<hash>.css`); a
+    site.assets: mapping stays an identity mapping (docs/design/index-blocks.md
+    §10), so it is the one remaining way to hit this."""
+    schema = COVERAGE_SCHEMA.replace(
+        'site: {title: "Coverage Test", out: _site}',
+        'site: {title: "Coverage Test", out: _site, assets: ["style.css"]}',
+    )
+    (tmp_path / "refdes.yaml").write_text(schema, encoding="utf-8")
     items = tmp_path / "items"
     items.mkdir()
-    # Escapes items/ via '..' so its root-relative destination is exactly
-    # "style.css" -- the template's own reserved top-level asset name.
-    (items / "dec-a.md").write_text(
-        "---\nid: DEC-A-001\ntype: decision\ntitle: Clobbers style.css.\n"
-        "status: accepted\n---\n\n![bad](../style.css)\n",
-        encoding="utf-8",
+    (items / "req-a.md").write_text(
+        "---\nid: REQ-A-001\ntype: requirement\ntext: t.\n---\n", encoding="utf-8"
     )
-    (tmp_path / "style.css").write_text("body { color: red }", encoding="utf-8")
+    clobber_dir = tmp_path / "style.css"
+    clobber_dir.mkdir()
+    (clobber_dir / "logo.png").write_text("SHOULD NOT LAND HERE", encoding="utf-8")
 
     project = load_project(config_path=str(tmp_path / "refdes.yaml"))
     parse.load_items(project)
@@ -783,7 +835,7 @@ def test_asset_colliding_with_a_template_reserved_name_is_an_error(tmp_path):
 
     assert any("would be written to assets/style.css" in d.message for d in project.errors)
     real_style = open(os.path.join(out, "assets", "style.css"), encoding="utf-8").read()
-    assert "color: red" not in real_style  # the template's own stylesheet survived
+    assert "SHOULD NOT LAND HERE" not in real_style  # the template's own stylesheet survived
 
 
 # ------------------------------------------------------------- site.assets:
@@ -868,10 +920,11 @@ def test_figure_attrs_wrap_the_image_and_set_width_and_caption(figure_project):
     parse.load_items(project)
     build_mod.build(project)
     html = project.items["DEC-A-001"].body_html
+    digest = _asset_hash(b"\x89PNG\r\n\x1a\n")
 
     assert '<figure class="md-figure" style="width: 60%">' in html
     assert "<figcaption>Figure 3 — the curve</figcaption>" in html
-    assert '<img src="assets/items/figures/present.png" alt="the curve" />' in html
+    assert f'<img src="assets/items/figures/present.{digest}.png" alt="the curve" />' in html
 
 
 def test_figure_caption_falls_back_to_alt_when_not_given(figure_project):
@@ -889,8 +942,9 @@ def test_image_with_no_suffix_is_never_wrapped_in_a_figure(figure_project):
     parse.load_items(project)
     build_mod.build(project)
     html = project.items["DEC-A-001"].body_html
+    digest = _asset_hash(b"\x89PNG\r\n\x1a\n")
 
-    assert '<img src="assets/items/figures/present.png" alt="plain, no suffix" />' in html
+    assert f'<img src="assets/items/figures/present.{digest}.png" alt="plain, no suffix" />' in html
     # Exactly two images are wrapped (the two with a suffix); the third stands alone.
     assert html.count("<figure") == 2
 
@@ -910,9 +964,10 @@ def test_pages_get_the_same_image_resolution_and_copy(tmp_path):
     (img_dir / "board.png").write_bytes(b"\x89PNG\r\n\x1a\n")
 
     out = _build_and_render(tmp_path)
-    assert os.path.isfile(os.path.join(out, "assets", "pages", "img", "board.png"))
+    digest = _asset_hash(b"\x89PNG\r\n\x1a\n")
+    assert os.path.isfile(os.path.join(out, "assets", "pages", "img", f"board.{digest}.png"))
     index_html = open(os.path.join(out, "index.html"), encoding="utf-8").read()
-    assert 'src="assets/pages/img/board.png"' in index_html
+    assert f'src="assets/pages/img/board.{digest}.png"' in index_html
 
 
 # -------------------------------------------------------------- stale output

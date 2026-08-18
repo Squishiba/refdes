@@ -411,7 +411,10 @@ def _asset_file_list(asset_dir: str) -> list[str]:
 
 
 def _copy_project_assets(project: Project, out_dir: str, written: set[str]) -> None:
-    """Copy `project.assets` into `_site/assets/`, mirroring each root-relative path.
+    """Copy `project.assets` into `_site/assets/`: source path -> destination
+    path (relative to assets/), the latter content-hashed for a resolved
+    `<img src>` and identity-mapped for a `site.assets:` directory file (see
+    `project.assets`'s own docstring in model.py).
 
     Runs after the template's own `assets/` copytree, so a project asset whose
     path collides with a name the template itself owns (`style.css`, `app.js`) is
@@ -421,8 +424,8 @@ def _copy_project_assets(project: Project, out_dir: str, written: set[str]) -> N
     """
     reserved = set(os.listdir(ASSET_DIR)) if os.path.isdir(ASSET_DIR) else set()
     asset_out = os.path.join(out_dir, "assets")
-    for rel in sorted(project.assets):
-        top = rel.split("/", 1)[0]
+    for rel, dest_rel in sorted(project.assets.items()):
+        top = dest_rel.split("/", 1)[0]
         if top in reserved:
             project.error(
                 f"asset {rel!r} would be written to assets/{top}, which the site "
@@ -433,10 +436,10 @@ def _copy_project_assets(project: Project, out_dir: str, written: set[str]) -> N
         src = os.path.join(project.root, *rel.split("/"))
         if not os.path.isfile(src):
             continue  # already reported as a build error when the reference was resolved
-        dest = os.path.join(asset_out, *rel.split("/"))
+        dest = os.path.join(asset_out, *dest_rel.split("/"))
         os.makedirs(os.path.dirname(dest), exist_ok=True)
         shutil.copy2(src, dest)
-        written.add(f"assets/{rel}")
+        written.add(f"assets/{dest_rel}")
 
 
 def _copy_datasheet_assets(project: Project, out_dir: str, written: set[str]) -> None:

@@ -580,6 +580,16 @@ def _linkify(
     return "".join(out)
 
 
+def _hashed_leaf(rel: str, digest: str) -> str:
+    """`figures/curve.png` + digest -> `figures/curve.<digest>.png` -- source
+    directory structure preserved, hash and extension appended to the leaf
+    filename only (docs/design/index-blocks.md §10)."""
+    directory, _, leaf = rel.rpartition("/")
+    base, dot, ext = leaf.rpartition(".")
+    hashed_leaf = f"{base}.{digest}.{ext}" if dot else f"{leaf}.{digest}"
+    return f"{directory}/{hashed_leaf}" if directory else hashed_leaf
+
+
 def _process_images(
     html: str,
     project: Project,
@@ -591,10 +601,11 @@ def _process_images(
 
     A local src is resolved relative to the source file's own directory -- the
     same base a browser would use to open the rendered page next to its markdown
-    source. One that resolves is registered in `project.assets` under its
-    project-root-relative path and rewritten to `assets/<that path>`, which is
-    where `render_site` copies it, mirroring the source layout. One that does not
-    resolve is a build error, not a warning: unlike a dangling cross-reference,
+    source. One that resolves is registered in `project.assets` (source path ->
+    a content-hashed destination path, computed once per source and reused for
+    every further reference to the same file) and rewritten to
+    `assets/<hashed path>`, which is where `render_site` copies it. One that does
+    not resolve is a build error, not a warning: unlike a dangling cross-reference,
     there is no sensible way to render a missing image, and now that a resolving
     src is actually made to work end to end, a broken one should stop the build.
     """
@@ -613,8 +624,16 @@ def _process_images(
             )
             return match.group(0)
         rel = os.path.relpath(full_path, project.root).replace("\\", "/")
-        project.assets.add(rel)
-        return f"{prefix}assets/{rel}{suffix}"
+        dest = project.assets.get(rel)
+        if dest is None:
+            # Read once, on the path already being opened to confirm it
+            # resolves -- not a second I/O pass. Cached by source path, so
+            # the same image referenced from many items/pages hashes once.
+            with open(full_path, "rb") as fh:
+                digest = hashlib.sha256(fh.read()).hexdigest()[:16]
+            dest = _hashed_leaf(rel, digest)
+            project.assets[rel] = dest
+        return f"{prefix}assets/{dest}{suffix}"
 
     return IMG_SRC_RE.sub(swap, html)
 
@@ -742,6 +761,12 @@ def collect_static_assets(project: Project) -> None:
     rendered HTML to resolve automatically -- the author writes the `href`
     themselves, pointed at `assets/<path under the declared directory>`. This
     just makes sure the file is actually there to be linked to.
+
+    Registered as an identity mapping (source path -> itself), never hashed --
+    unlike `<img src>`, refdes doesn't own the `href` an author types by hand
+    into a `site.assets:`-backed link, so hashing the destination would
+    silently break it with no way for the tool to catch that at build time
+    (docs/design/index-blocks.md §10's explicit scope line).
     """
     for rel_dir in project.asset_dirs:
         full_dir = os.path.join(project.root, rel_dir)
@@ -752,7 +777,7 @@ def collect_static_assets(project: Project) -> None:
             for name in filenames:
                 full_path = os.path.join(dirpath, name)
                 rel = os.path.relpath(full_path, project.root).replace("\\", "/")
-                project.assets.add(rel)
+                project.assets[rel] = rel
 
 
 # ------------------------------------------------------------------------ entry point
