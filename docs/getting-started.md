@@ -17,37 +17,43 @@ On macOS or Linux the interpreter is `.venv/bin/python`. Everything below assume
 
 ## 1. Create the project
 
-A project is any folder containing `refdes.yaml`. The [standard
-library](standard-library.md) already defines requirements, constraints,
-decisions, components, tests, and log entries, so a new project's `refdes.yaml`
-can be this short:
+A project is any folder containing `refdes.yaml`.
+
+```bash
+mkdir my-board && cd my-board
+refdes init
+```
 
 ```yaml
 site:
-  title: "My Board — Design Reference"
+  title: "New Project — Design Reference"
   out: _site
-
-id:
-  width: 3
-  ledger: .refdes/ids.yaml
 
 standard:
   base: hardware
   version: 1
-  presets: []
+
+id:
+  width: 3
+  ledger: .refdes/ids.yaml
 ```
+
+That's the whole file `refdes init` writes — rename the title to taste.
+Nothing here defines a `requirement` or a `link_types:` block — that all
+comes from the pinned standard, resolved live from the installed `refdes`
+package. See [the standard library](standard-library.md) for what it
+covers, and `refdes init --standard none` if you'd rather author every type
+by hand, as every project did before this existed. `init` also writes
+`.vscode/settings.json`, wiring up field/link completion for `items/**/*.yaml`
+files if you're using VS Code — see [editor
+support](standard-library.md#editor-support-json-schema-emission).
 
 ```
 my-board/
   refdes.yaml
+  .vscode/settings.json
   items/
 ```
-
-Nothing here defines a `requirement` or a `link_types:` block — that all comes
-from the pinned standard, resolved live from the installed `refdes` package.
-See [the standard library](standard-library.md) for what it covers, and
-`standard: none` if you'd rather author every type by hand, as every project
-did before this existed.
 
 Everything under `items/` is scanned recursively. The folder layout is yours to
 choose; it has no meaning to the tool.
@@ -113,7 +119,14 @@ stored as a string, which is what makes the next step possible.
 
 ## 4. Write a decision that does arithmetic
 
-Items with a body go in their own markdown file.
+Items with a body go in their own markdown file. Not sure what fields a
+decision takes? `refdes new decision` prints a starter with every field
+commented in, generated from the same resolved schema an editor's
+completion reads — no trip back to this page needed.
+
+```bash
+refdes new decision > items/decisions/dec-pwr-001-regulator.md
+```
 
 `items/decisions/dec-pwr-001-regulator.md`
 

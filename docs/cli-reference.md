@@ -1,7 +1,7 @@
 # CLI reference
 
 ```
-refdes [-c CONFIG] {build,check,revision,release,index,id,fetch,audit} [options]
+refdes [-c CONFIG] {build,check,revision,release,index,id,fetch,audit,init,new,schema,standard} [options]
 ```
 
 | Global option | Effect |
@@ -307,6 +307,77 @@ shows `(no revision/release stamped yet)`. The "Citations" section only
 appears for a project that declares a `citations`-typed field somewhere and
 has at least one item using it; "Parts" only for one that has at least one
 `part_number`, from either source — see [parts](parts.md).
+
+---
+
+## `refdes init`
+
+Write a minimal `refdes.yaml` in the current directory, plus
+`.vscode/settings.json`. See [the standard library](standard-library.md#refdes-init).
+
+| Option | Effect |
+|---|---|
+| `--standard NAME` | Base standard to pin (default: `hardware`), or `none` for the fully self-declared escape hatch |
+| `--preset NAME` | Layer a preset on top of the base (repeatable). Combined with `--standard none` is a load-time error. |
+
+```bash
+refdes init
+refdes init --standard none
+refdes init --preset design-debate
+```
+
+Refuses to run if `refdes.yaml` already exists in the current directory.
+
+---
+
+## `refdes new <type>`
+
+Print a starter item's front matter for `TYPE` to stdout — any type in the
+merged schema, standard or project-defined. See [the standard
+library](standard-library.md#refdes-new-type).
+
+```bash
+refdes new decision > items/power/dec-005.md
+```
+
+An unknown type exits 1 with a did-you-mean suggestion, the same as an
+unknown type anywhere else in the tool.
+
+---
+
+## `refdes schema --json`
+
+Print the project's merged JSON Schema to stdout. The same document is
+written to `.refdes/schema.json` by every command that loads the project
+(`build`, `check`, `index`, `id`, `fetch`, `audit`, and this command
+itself); this is the explicit, standalone form, for piping into something
+else or inspecting directly. See [editor
+support](standard-library.md#editor-support-json-schema-emission).
+
+```bash
+refdes schema --json > schema.json
+refdes schema --json | jq '."$defs".decision__bare.properties'
+```
+
+---
+
+## `refdes standard add-preset` / `remove-preset`
+
+Change `standard.presets:` with validation and reporting. See [the standard
+library](standard-library.md#presets).
+
+```bash
+refdes standard add-preset design-debate
+refdes standard remove-preset design-debate
+```
+
+`add-preset` validates the name exists at the project's pinned version
+before adding it. `remove-preset` reports what the removal breaks — as
+ordinary diagnostics, printed the same way `check`'s are — **before**
+writing the config change, then writes it regardless; the command's job is
+to surface the consequence, not to block an author who already decided to
+accept it. Exits 1 if the report contains any error, 0 otherwise; either
+way, the removal is applied.
 
 ---
 
