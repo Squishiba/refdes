@@ -10,17 +10,20 @@
 <header class="topbar">
   <a class="brand" href="{{ home_href }}">{{ project.title }}</a>
   <nav>
-    {% for node in nav_tree %}
+    {% macro render_nav_node(node) %}
     {% if node.href %}
     <a href="{{ node.href }}">{{ node.label }}</a>
     {% else %}
     <span class="nav-group">
       <span class="nav-group-label">{{ node.label }}</span>
       {% for child in node.children %}
-      <a href="{{ child.href }}">{{ child.label }}</a>
+      {{ render_nav_node(child) }}
       {% endfor %}
     </span>
     {% endif %}
+    {% endmacro %}
+    {% for node in nav_tree %}
+    {{ render_nav_node(node) }}
     {% endfor %}
   </nav>
 </header>
