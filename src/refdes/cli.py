@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 
 from . import build as build_mod
 from . import citations as citations_mod
 from . import ids as ids_mod
+from . import lifecycle as lifecycle_mod
 from . import parse as parse_mod
 from . import render as render_mod
 from . import seal as seal_mod
@@ -152,6 +154,79 @@ def cmd_build(args) -> int:
         print("build completed with errors (use --keep-going to exit 0)", file=sys.stderr)
         return status
     return 0
+
+
+def _print_gate_table(results: list) -> None:
+    for r in results:
+        line = f"  {r.status:<8} {r.name}"
+        if r.offenders:
+            shown = ", ".join(r.offenders[:6])
+            if len(r.offenders) > 6:
+                shown += f", ... ({len(r.offenders)} total)"
+            line += f"  {shown}"
+        print(line, file=sys.stderr if r.status == "FAIL" else sys.stdout)
+
+
+def _run_stamp(args, kind: str) -> int:
+    """Shared body of `refdes revision <name>` / `refdes release <name>`.
+
+    No flags on either command -- running one when the project isn't ready
+    *is* the check (docs/design/lifecycle.md). Both call build() in the same
+    read-only mode `check` uses; neither ever writes a seal, board, or
+    citation manifest -- only the baseline file itself, and only once the
+    unconditional error floor and (for anything the gate enables for this
+    kind) the readiness gate both pass.
+    """
+    lifecycle_mod.validate_name(args.name)  # SchemaError -> exit 2, via main()
+
+    project = _load(args)
+    build_mod.build(project, seal_write=False, reseal=False, accept_board_move=False)
+    if project.errors:
+        return _report(project)
+
+    outcome = lifecycle_mod.stamp(project, kind=kind, name=args.name)
+    # Diagnostics (including a stamped_by git_identity fallback warning, which
+    # resolve_stamped_by() only adds on the path that actually stamps) print
+    # through the same _report() every other command uses, before the
+    # stamp-specific result below.
+    _report(project)
+
+    if outcome.status == "gate_failed":
+        print(f"\n{kind} {args.name!r} blocked -- not stamped:", file=sys.stderr)
+        _print_gate_table(outcome.gate_results)
+        return 1
+
+    if outcome.status == "conflict":
+        print(f"\nerror: {outcome.conflict_detail}", file=sys.stderr)
+        return 1
+
+    if outcome.status == "unchanged":
+        print(
+            f"\n{kind} {args.name!r} unchanged since {outcome.stamped_at} -- "
+            "nothing to stamp."
+        )
+        return 0
+
+    # stamped
+    rel_path = os.path.relpath(outcome.path, project.root).replace("\\", "/")
+    tail = ", all gates passed." if kind == "release" else "."
+    print(f"\n{kind} {args.name!r} stamped: {outcome.item_count} items{tail}")
+    print(f"  {rel_path}")
+    if kind == "release":
+        print("\nConsider recording this in the design log, e.g.:")
+        print("  - id: LOG-...")
+        print(f"    date: {outcome.stamped_at[:10]}")
+        print(f"    summary: Released {args.name} — sent to fab.")
+        print("    records: [DEC-...]")
+    return 0
+
+
+def cmd_revision(args) -> int:
+    return _run_stamp(args, kind="revision")
+
+
+def cmd_release(args) -> int:
+    return _run_stamp(args, kind="release")
 
 
 def cmd_index(args) -> int:
@@ -367,6 +442,31 @@ def main(argv: list[str] | None = None) -> int:
         help="also show info-level diagnostics (routine states hidden by default)",
     )
     p_check.set_defaults(func=cmd_check)
+
+    p_revision = sub.add_parser(
+        "revision",
+        help="stamp an internal checkpoint baseline",
+        description="Cut an internal checkpoint: stamps "
+        ".refdes/baselines/<name>.yaml unconditionally, modulo the "
+        "unconditional error floor (the same one 'check' already has). No "
+        "readiness gate. Takes exactly one argument and no flags -- there is "
+        "nothing to configure per run.",
+    )
+    p_revision.add_argument("name", help="baseline name, e.g. rev-b")
+    p_revision.set_defaults(func=cmd_revision)
+
+    p_release = sub.add_parser(
+        "release",
+        help="run the readiness gate and stamp a baseline if it passes",
+        description="Run the full readiness gate (release_gate: in "
+        "refdes-project.yaml) and stamp .refdes/baselines/<name>.yaml only "
+        "if every enabled rule passes. On failure, nothing is written and "
+        "the blocking rules are printed. Running this when the project "
+        "isn't ready *is* the check -- there is no --dry-run. Takes exactly "
+        "one argument and no flags.",
+    )
+    p_release.add_argument("name", help="baseline name, e.g. rev-b")
+    p_release.set_defaults(func=cmd_release)
 
     p_index = sub.add_parser(
         "index", help="print items.json to stdout without rendering the site"

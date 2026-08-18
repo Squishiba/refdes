@@ -124,15 +124,31 @@ def latest(baselines: list[Baseline], kind: str | None = None) -> Baseline | Non
 
 
 def _save_baseline_file(project: Project, data: dict) -> str:
+    """Two dump passes, not one: `default_flow_style=None` (PyYAML's
+    per-node heuristic) would flow-style *both* `gate:` and each item entry,
+    which makes `gate:` -- one rule per line is what's actually worth
+    git-diffing -- collapse into a wrapped blob. So the head (kind through
+    gate) is dumped block-style, and each item entry is dumped individually
+    flow-style (still through `yaml.safe_dump`, so a title with a colon or
+    quote in it is escaped correctly, not hand-formatted) -- the shape
+    docs/design/lifecycle.md §2 shows.
+    """
     path = baseline_path(project, data["name"])
     os.makedirs(os.path.dirname(path), exist_ok=True)
+    items = data["items"]
+    head = {k: v for k, v in data.items() if k != "items"}
     with open(path, "w", encoding="utf-8") as fh:
         fh.write(_HEADER)
-        # default_flow_style=None (PyYAML's per-node heuristic) is what turns
-        # each item's {hash, type, title} into one flow-style line -- the
-        # shape docs/design/lifecycle.md §2 shows -- while the outer
-        # kind/name/.../items structure stays block style.
-        yaml.safe_dump(data, fh, sort_keys=False, default_flow_style=None)
+        fh.write(yaml.safe_dump(head, sort_keys=False, default_flow_style=False))
+        if not items:
+            fh.write("items: {}\n")
+        else:
+            fh.write("items:\n")
+            for item_id, entry in items.items():
+                line = yaml.safe_dump(
+                    entry, default_flow_style=True, sort_keys=False, allow_unicode=True
+                ).strip()
+                fh.write(f"  {item_id}: {line}\n")
     return path
 
 
