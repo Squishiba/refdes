@@ -87,6 +87,7 @@ link_types:
   amends:         { inverse: amended_by,    label: "Amends" }
   supersedes:     { inverse: superseded_by, label: "Supersedes" }
   selects:        { inverse: selected_by,   label: "Selects" }
+  blocked_by:     { inverse: blocks,        label: "Blocked by" }
 
 types:
   requirement:
@@ -140,6 +141,7 @@ types:
       constrained_by: [constraint]
       supersedes:     [decision]
       selects:        [component]
+      blocked_by:     []   # empty target list = unrestricted; see §9
     body: { on_change: invalidate }
 
   test:
@@ -245,7 +247,7 @@ record, not a living document.
 
 ### Link vocabulary
 
-Ten verbs, each declared on the type that would naturally author it in
+Eleven verbs, each declared on the type that would naturally author it in
 front-matter; the other direction is a computed backlink, not something a
 project ever writes.
 
@@ -261,8 +263,9 @@ project ever writes.
 | `amends` (log) | `amended_by` | log → log | append-only correction chain |
 | `supersedes` (decision) | `superseded_by` | decision → decision | replacement |
 | `selects` (decision) | `selected_by` | decision → component | picks this specific part to realize itself |
+| `blocked_by` (decision) | `blocks` | decision → any type, unrestricted | names what's holding this decision up |
 
-Two choices here are worth explaining rather than taking as given:
+Three choices here are worth explaining rather than taking as given:
 
 - **`constrained_by`, not `constrains`, is what a decision author types.**
   "A decision constrains a constraint" reads backwards — a decision is bound
@@ -281,6 +284,12 @@ Two choices here are worth explaining rather than taking as given:
   decomposition (a requirement broken into more specific requirements);
   `derives_from` is cross-kind derivation (a constraint's numeric bound
   traces back to the requirement or constraint that justifies it).
+- **`blocked_by` is new, and resolves further than the direct edge it
+  declares.** The edge itself is direct, like every other link here; the
+  report built around it (§9) walks the chain to the root cause, treats a
+  cycle as a hard error, and is deliberately unrestricted in what it may
+  target. See §9 for the full design, including how it feeds back into
+  coverage.
 
 ---
 
@@ -741,8 +750,15 @@ link verbs) against this design:
   dropped (nothing to migrate, since it was never used); `verifies` and
   `amends` are kept even though unused today, because they become necessary
   the moment `test` items or a log correction exist.
-- **`derives_from` and `records` are net-new capability**, not currently
-  declared at all — zero breakage, immediately available.
+- **`derives_from`, `records`, and `blocked_by` are net-new capability**, not
+  currently declared at all — zero breakage, immediately available.
+  `blocked_by` in particular has direct cited evidence of need: the real
+  project's own follow-up notes describe exactly this cascade by hand — a
+  decision on hold with three (four, counting a pair of decisions about the
+  same GPIO-expansion question) other decisions assuming its outcome,
+  recorded as a bullet list inside the blocked decision's body that nothing
+  validated and nothing updated when the situation changed. Adopting the
+  edge replaces that list with something the build checks.
 - **The `provenance` field set reproduces this project's own hand-derived
   convention verbatim**: `tags` on `ignore`, `note`/`source` on `log`,
   repeated across every type. Adopting `include: [provenance]` matches
@@ -987,3 +1003,218 @@ third-party) or a project has selected two presets that were never meant to
 coexist. Guessing a winner in either case would hide a real problem instead
 of surfacing it at the same point in the pipeline every other configuration
 conflict in this tool already surfaces at.
+
+---
+
+## 9. `blocked_by:` and the cascade report
+
+A decision on hold pending an unresolved question routinely has several
+other decisions depending on its outcome. Today that cascade is a
+hand-written bullet list inside the blocked decision's body — nothing checks
+it, nothing updates it when the situation changes. `on_hold` (§1's decision
+status list) currently has nowhere to point: a blocked item can record *that*
+it's blocked, in a `note`, but not *on what*. And coverage already
+distinguishes `claimed` from `satisfied` for exactly this kind of unsettled
+state — the sentence a review needs and doesn't get is "three requirements
+are unsettled *because of* one open question."
+
+### The edge, and why the report resolves further than it does
+
+`blocked_by:` is declared on `decision`, targeting any item type with no
+restriction (§1's YAML):
+
+```yaml
+link_types:
+  blocked_by: { inverse: blocks, label: "Blocked by" }
+
+types:
+  decision:
+    links:
+      blocked_by: []   # empty target list = unrestricted, an existing engine behavior
+```
+
+An empty target list isn't new schema surface. `build.py`'s link-target
+validation only enforces an allowed-types check when the declared list is
+non-empty (`if allowed and target.type not in allowed`), so an empty list
+already means "no restriction" for any link in this schema — `blocked_by` is
+simply the first standard verb to use that behavior deliberately rather than
+by omission.
+
+`blocked_by` is standard on `decision` only, not on every type — matching
+the only case with direct evidence (below), and keeping the vocabulary at
+the size §1 already argues for, where each verb earns its place. A project
+that needs a `requirement` or `test` blockable the same way adds
+`blocked_by:` to that type's own `links:` under §2's ordinary extension
+rule; nothing about the link type itself is decision-specific.
+
+**The declared edge is direct** — an item names only its immediate
+blocker(s), the same as every other link in this vocabulary:
+`blocked_by: [DEC-IO-001]`. **The report resolves transitively**, because
+naming the root cause, not the nearest link in the chain, is the entire
+value of building this at all. DEC-IO-016 declaring
+`blocked_by: [DEC-IO-003]`, itself `blocked_by: [DEC-IO-001]`, should read as
+blocked on DEC-IO-001 — with the path shown, not collapsed straight to the
+root:
+
+```
+DEC-IO-016  <- DEC-IO-003 <- DEC-IO-001 (on_hold, root)
+```
+
+"Root" here is structural, not status-based: the walk follows `blocked_by`
+edges until it reaches an item declaring none of its own. Whether that root,
+or any link along the path, has since become settled is a separate
+question — see the stale-blocker check, below. The walk continues across an
+import boundary for free: an imported item already carries its own `links:`
+(§4), so a `blocked_by` chain that crosses into an upstream project resolves
+the same way a local one does, with no special-casing needed.
+
+### Cycle detection
+
+A `blocked_by` graph is a project asserting a DAG, and nothing about a
+hand-written link stops someone from declaring `DEC-IO-001: blocked_by:
+[DEC-IO-003]` alongside `DEC-IO-003: blocked_by: [DEC-IO-001]`. Walking that
+structurally would recurse forever looking for a root that doesn't exist, so
+it's checked once, as a dedicated build step run after ordinary link
+resolution — once every `blocked_by` edge is in hand — and a cycle is a hard
+`error`, never a warning and never silent truncation:
+
+```
+ERROR items/main-io/decisions.md:12 [DEC-IO-003] — blocked_by cycle:
+  DEC-IO-003 -> DEC-IO-001 -> DEC-IO-003
+```
+
+Reported at the `file:line` of the edge that closes the loop — the concrete
+declaration whoever reads the error would actually edit — not at some
+arbitrary "first" node picked out of the cycle. This check runs before
+coverage, checks, or the report below, all of which assume the `blocked_by`
+graph is acyclic; none of them need their own cycle handling as a result.
+
+### No status restriction on the target
+
+`blocked_by:` may point at an item of any type, in any status, with nothing
+checked at declaration time — deliberately. The alternative — validating
+that a `blocked_by:` target is currently "unsettled" — was considered and
+rejected: status is mutable, so that validation would have to re-run on
+every build forever just to keep agreeing with itself, and it would be wrong
+on arrival for real cases that aren't about an unsettled *decision* at all —
+blocked on a test that hasn't passed yet, blocked on a component that hasn't
+been selected. The edge records a real dependency regardless of the
+blocker's current state; what changes over time is whether that dependency
+is still *live*, which is a question about the blocker's status at read
+time, not something worth gating at write time.
+
+### The stale-blocker diagnostic
+
+The moment a `blocked_by:` edge stops being live — its target reaches a
+settled status while the blocked item still declares the edge — is the
+actionable moment, and the entire reason recording the edge is worth doing
+instead of leaving it as a note. "Settled" reuses the mechanism §2 already
+established rather than inventing a third parallel notion of done: a blocker
+counts as settled when its own type declares `satisfying_statuses` (or, for
+a verifier-shaped type, `verifying_statuses`) and its current status is in
+that list. A type that declares neither simply never triggers this check —
+the same "unconfigured means nothing special happens" default used
+throughout this document.
+
+```
+INFO items/main-io/decisions.md:80 [DEC-IO-005] — blocked_by DEC-IO-001, which is now
+  'accepted' — is it still blocked? Remove the edge if resolved, or say in 'rationale'
+  why it still applies.
+```
+
+`info`, per the severity finding 8 established: default-hidden, because a
+project mid-resolution will trip this repeatedly as blockers clear one at a
+time, and that's a normal state, not a defect. It's a per-item diagnostic
+like any other, so it follows the same visibility rules as every other
+`info`-level finding in the ordinary diagnostic stream — but because `refdes
+audit` is already the "show me everything interesting regardless of
+severity" surface (below), the stale flag also appears there
+unconditionally, not gated behind whatever visibility setting governs
+`check`/`build` output.
+
+### The report
+
+Folded into three surfaces that already exist, not a new command and not a
+new page — consistent with keeping the tool's learnable surface from growing
+every time a feature does.
+
+**`refdes audit`** gets a new section, in the same style as its existing
+"Board moves" and "Imported projects" sections: grouped, one line per
+blocked item, showing the full path to root and flagging staleness inline.
+
+```
+Blocked chains:
+  DEC-IO-005  <- DEC-IO-001 (on_hold, root)
+  DEC-IO-009  <- DEC-IO-001 (on_hold, root)
+  DEC-IO-003  <- DEC-IO-001 (on_hold, root)
+  DEC-IO-016  <- DEC-IO-003 <- DEC-IO-001 (on_hold, root)
+  DEC-IO-020  <- DEC-IO-014 (accepted)  -- stale: edge still declared, blocker settled
+```
+
+`(none)` when the project declares no `blocked_by:` edges at all, matching
+every other conditional section in `audit` today.
+
+**The blocked item's own page** gets a small panel alongside its existing
+links section, showing its direct blocker(s) and, if the chain runs deeper
+than one hop, the resolved root — the same fact `refdes audit` shows, in the
+same shape, on the page a reader actually lands on after following a link to
+DEC-IO-016.
+
+**`coverage.html`** is where the feature's headline sentence actually
+belongs, because that's where a review already reads "why isn't this
+settled" — see below.
+
+None of these needs a new page, a new artifact, or a new subcommand:
+`audit` already exists as the terminal report, item pages already render a
+links section, and `coverage.html` already exists as the page a reviewer
+opens for precisely this question.
+
+### Interaction with coverage
+
+This is the sentence the whole feature exists to produce, so it has to land
+in the two coverage surfaces that already carry "claimed but not settled"
+information, not a third, separate one.
+
+**The existing per-item "claimed but not verified" warning** — kept
+per-item deliberately, per finding 8, because it's the one coverage warning
+that's individually actionable — gets the blocker chain appended when the
+claiming decision is blocked:
+
+```
+WARNING items/main-io/requirements.md:40 [REQ-IO-CONN-002] — claimed but not verified
+  (no test links to it); claimed by DEC-IO-016, which is blocked_by DEC-IO-003 <- DEC-IO-001
+  (on_hold)
+```
+
+No ambiguity to resolve here — it's naming this one item's actual claimer(s)
+and their actual chain, whatever that is.
+
+**A new aggregate line, grouped by root blocker**, sits alongside the
+existing summary lines (`N item(s) with no coverage`, `N requirement(s)
+satisfied but not verified`) rather than replacing the per-item warnings
+above:
+
+```
+2 requirement(s) unsettled because DEC-IO-001 is on_hold — see coverage.html
+```
+
+One line per distinct root blocker that accounts for at least one
+claimed-but-unsettled requirement. This is deliberately conservative about
+when it fires: a requirement whose claim traces to a blocked decision with
+**exactly one** root blocker is grouped under that root; a requirement whose
+claimer has no `blocked_by` chain at all, or whose several claimers trace to
+*different* root blockers, is left out of this grouping and simply keeps its
+ordinary per-item warning — forcing an ambiguous case into a misleading
+one-line summary would be worse than not summarizing it. This doesn't reopen
+finding 8's decision to keep "claimed" per-item rather than aggregated: it's
+an additional, sharper cut across the same per-item facts for the specific,
+common case where several unsettled requirements really do share one cause,
+not a replacement for the detail underneath it.
+
+**`coverage.html`** extends the existing per-item row for a claimed item —
+which already names its claiming decision(s) — to show the blocker chain
+inline when the claimer is blocked, using the same path notation as `refdes
+audit`. This is where "three requirements are unsettled because of one open
+question" is actually meant to be read: the aggregate CLI line is the
+pointer, the page is where the full "these three, that one cause" picture
+lives.
