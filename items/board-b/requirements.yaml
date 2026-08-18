@@ -8,7 +8,7 @@ defaults:
   prefix: REQ-B-PWR
   owner: J. Bin
   tags: [power]
-  status: accepted
+  status: active
 
 items:
   - id: REQ-B-PWR-001

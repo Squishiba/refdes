@@ -3,7 +3,7 @@ defaults:
   prefix: CON-THM
   owner: J. Bin
   tags: [thermal]
-  status: accepted
+  status: active
   board: board-a   # folder predates the boards: registry; see refdes.yaml
 
 items:

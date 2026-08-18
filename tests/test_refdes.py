@@ -1345,7 +1345,7 @@ id: DEC-X-001
 type: decision
 title: Connector pin allocation
 status: accepted
-constrains: [IFC-CAN-001]
+constrained_by: [IFC-CAN-001]
 checks:
   - value: I_pin
     against: IFC-CAN-001
@@ -2889,11 +2889,18 @@ def test_coverage_separates_addressed_satisfied_and_verified():
     assert cov["REQ-PWR-003"].satisfied_by == ["DEC-PWR-001"]
     assert cov["REQ-PWR-003"].verified_by == []
 
-    # Fully covered.
-    assert cov["REQ-PWR-002"].stage == "verified"
+    # Linked to a test, but that test is only 'planned', not 'passing' -- the
+    # standard's test.verifying_statuses: [passing] means a merely-linked test
+    # doesn't count as having verified anything yet.
+    assert cov["REQ-PWR-002"].stage == "satisfied"
+    assert cov["REQ-PWR-002"].verified_by == []
+
+    # requirement.coverable_statuses: [active] excludes draft items from
+    # coverage entirely -- REQ-PWR-004 (draft) isn't tracked at all.
+    assert "REQ-PWR-004" not in cov
 
     # Written down and never touched again.
-    assert cov["REQ-PWR-004"].stage == "open"
+    assert cov["CON-THM-002"].stage == "open"
 
     # A log entry alone counts as addressed, not satisfied.
     assert cov["CON-THM-001"].stage == "addressed"

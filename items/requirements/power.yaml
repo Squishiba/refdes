@@ -6,7 +6,7 @@ defaults:
   prefix: REQ-PWR
   owner: J. Bin
   tags: [power]
-  status: accepted
+  status: active
   board: board-a   # folder predates the boards: registry; see refdes.yaml
 
 items:
@@ -22,7 +22,7 @@ items:
     text: Converter efficiency shall exceed 90 % at half load.
     rationale: Drives the thermal budget in a sealed enclosure with no forced airflow.
     source: Derived from CON-THM-001.
-    derives_from: [REQ-PWR-002]
+    refines: [REQ-PWR-002]
 
   - id: REQ-PWR-004
     text: The 3V3 rail shall remain within regulation during a 12 V to 9 V input step.

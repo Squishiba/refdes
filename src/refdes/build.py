@@ -321,7 +321,7 @@ def compute_coverage(project: Project) -> None:
                 "claimed but not verified (no test links to it)",
                 file=item.source_file, line=item.source_line, item_id=item.id,
             )
-        elif not cov.verified_by and warn_eligible and has_verifiers:
+        elif cov.stage == "satisfied" and warn_eligible and has_verifiers:
             unverified_items.append(item.id)
 
     if open_items:

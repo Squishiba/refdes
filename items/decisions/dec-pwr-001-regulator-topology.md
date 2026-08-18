@@ -8,7 +8,7 @@ owner: J. Bin
 tags: [power, thermal]
 board: board-a   # folder predates the boards: registry; see refdes.yaml
 satisfies: [REQ-PWR-002, REQ-PWR-003]
-constrains: [CON-THM-001]
+constrained_by: [CON-THM-001]
 options:
   - name: LDO (TPS7A4700)
     verdict: rejected
