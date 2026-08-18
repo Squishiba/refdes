@@ -383,6 +383,18 @@ def cmd_audit(args) -> int:
         else:
             print("  (none)")
 
+    print("\nBlocked chains:")
+    if project.blocked_chains:
+        for chain in sorted(project.blocked_chains, key=lambda c: c.path):
+            path_str = " <- ".join(chain.path)
+            root_status = f" ({chain.root_status}, root)" if chain.root_status else " (root)"
+            line = f"  {path_str}{root_status}"
+            if chain.stale:
+                line += "  -- stale: edge still declared, blocker settled"
+            print(line)
+    else:
+        print("  (none)")
+
     if project.imports:
         print("\nImported projects (read-only):")
         for spec in project.imports:

@@ -10,6 +10,7 @@ import re
 
 from markdown_it import MarkdownIt
 
+from . import blocked as blocked_mod
 from . import blocks as blocks_mod
 from . import boards as boards_mod
 from . import calc, citations as citations_mod, imports, pages as pages_mod, seal
@@ -275,6 +276,11 @@ def compute_coverage(project: Project) -> None:
     open_items: list[str] = []
     unverified_items: list[str] = []
     warned_fallback_types: set[str] = set()
+    chains_by_claimer = blocked_mod.by_item(project)
+    # One bucket per root blocker that accounts for >=1 claimed-but-unsettled
+    # item with *exactly one* distinct root -- deliberately conservative,
+    # see the aggregate line below.
+    unsettled_by_root: dict[str, list[str]] = {}
 
     for item in project.local_items:
         spec = project.types[item.type]
@@ -335,10 +341,36 @@ def compute_coverage(project: Project) -> None:
         if cov.stage == "open":
             open_items.append(item.id)
         elif cov.stage == "claimed" and warn_eligible:
+            # Every claimer's own blocked_by chain(s), if it has any -- no
+            # ambiguity to resolve here, unlike the aggregate line below:
+            # this is naming this one item's actual claimer(s) and their
+            # actual chain(s), whatever that is.
+            notes = []
+            claimer_roots: set[str] = set()
+            for claimer_id in claimed:
+                claimer_chains = chains_by_claimer.get(claimer_id)
+                if not claimer_chains:
+                    continue
+                claimer_roots.update(c.root_id for c in claimer_chains)
+                chain_text = "; ".join(
+                    f"blocked_by {' <- '.join(c.path[1:])}"
+                    + (f" ({c.root_status})" if c.root_status else "")
+                    for c in claimer_chains
+                )
+                notes.append(f"claimed by {claimer_id}, which is {chain_text}")
+            message = "claimed but not verified (no test links to it)"
+            if notes:
+                message += "; " + "; ".join(notes)
             project.warn(
-                "claimed but not verified (no test links to it)",
-                file=item.source_file, line=item.source_line, item_id=item.id,
+                message, file=item.source_file, line=item.source_line, item_id=item.id,
             )
+            # Deliberately conservative: only when every blocked claimer
+            # traces to the *same single* root is this item unambiguous
+            # enough to fold into the aggregate line -- no chain at all, or
+            # several claimers tracing to different roots, is left out and
+            # simply keeps the per-item warning above.
+            if len(claimer_roots) == 1:
+                unsettled_by_root.setdefault(next(iter(claimer_roots)), []).append(item.id)
         elif cov.stage == "satisfied" and warn_eligible and has_verifiers:
             unverified_items.append(item.id)
 
@@ -349,6 +381,14 @@ def compute_coverage(project: Project) -> None:
     if unverified_items:
         project.warn(
             f"{len(unverified_items)} requirement(s) satisfied but not verified "
+            f"— see coverage.html"
+        )
+    for root_id, items in sorted(unsettled_by_root.items()):
+        root = project.items.get(root_id)
+        status = root.fields.get("status") if root else None
+        status_text = f" is {status}" if status else " is unsettled"
+        project.warn(
+            f"{len(items)} requirement(s) unsettled because {root_id}{status_text} "
             f"— see coverage.html"
         )
 
@@ -936,6 +976,7 @@ def build(
     validate_items(project)
     resolve_links(project)
     workspaces_mod.lint_cross_workspace_references(project)
+    blocked_mod.resolve(project)
     run_calcs(project)
     run_checks(project)
     compute_hashes(project)

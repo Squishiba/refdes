@@ -59,9 +59,73 @@ knows what it satisfies. Declaring both ends is allowed but redundant.
 | `addresses` | `addressed_by` | log entry → requirement or constraint |
 | `amends` | `amended_by` | log entry → earlier log entry |
 | `records` | `recorded_by` | log entry → decision |
+| `blocked_by` | `blocks` | decision → anything holding it up — see [below](#blocked-by-and-the-cascade-report) |
 
 Add your own by declaring them in `link_types` and listing them under a type's
 `links:`.
+
+## `blocked_by:` and the cascade report
+
+A decision on hold pending an unresolved question routinely has other
+decisions depending on its outcome. `blocked_by:` records that dependency,
+targeting any item type with no restriction:
+
+```yaml
+- id: DEC-IO-005
+  blocked_by: [DEC-IO-001]
+```
+
+**The declared edge is direct** — an item names only its immediate
+blocker(s) — **but the report resolves transitively**, because naming the
+root cause, not the nearest link in the chain, is the whole value. `DEC-IO-016`
+declaring `blocked_by: [DEC-IO-003]`, itself `blocked_by: [DEC-IO-001]`,
+reads as blocked on `DEC-IO-001`, with the full path shown, not collapsed:
+
+```
+DEC-IO-016 <- DEC-IO-003 <- DEC-IO-001 (on_hold, root)
+```
+
+"Root" is structural — the walk follows `blocked_by` edges until it reaches
+an item declaring none of its own — not status-based. Whether the root, or
+any link along the path, has since become settled is a separate question:
+see the stale check below.
+
+**No status restriction on the target**, deliberately: `blocked_by:` may
+point at an item of any type in any status, since the edge records a real
+dependency regardless of the blocker's current state. Validating that a
+target is "currently unsettled" was considered and rejected — status is
+mutable, so that check would have to re-run forever just to keep agreeing
+with itself.
+
+**A cycle is a hard build error**, never silent truncation, reported at the
+file:line of the edge that actually closes the loop:
+
+```
+ERROR items/main-io/decisions.md:12 [DEC-IO-003] — blocked_by cycle:
+  DEC-IO-003 -> DEC-IO-001 -> DEC-IO-003
+```
+
+**The stale-blocker check.** The moment an edge stops being live — its
+target reaches a settled status (per the type's `satisfying_statuses:` or
+`verifying_statuses:`, see [coverage](coverage.md)) while the blocked item
+still declares it — is worth a nudge:
+
+```
+INFO items/main-io/decisions.md:80 [DEC-IO-005] — blocked_by DEC-IO-001, which
+  is now 'accepted' — is it still blocked? Remove the edge if resolved, or say
+  in 'rationale' why it still applies.
+```
+
+`info`: default-hidden (a project mid-resolution trips this repeatedly as
+blockers clear one at a time, which is normal, not a defect), shown with
+`-v`/`--verbose`, and always shown in `refdes audit` regardless.
+
+**Three existing surfaces, no new command.** `refdes audit` gets a "Blocked
+chains:" section, one line per resolved chain, flagging staleness inline. The
+blocked item's own page gets a small panel showing its chain to root.
+`coverage.html` is where the headline sentence — "these requirements are
+unsettled *because of* this one open question" — actually lands; see
+[coverage](coverage.md#when-the-claimer-is-blocked).
 
 ## Cross-references in prose
 

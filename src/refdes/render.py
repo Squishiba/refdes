@@ -9,6 +9,7 @@ import shutil
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
+from . import blocked as blocked_mod
 from . import build as build_mod
 from . import citations as citations_mod
 from . import nav as nav_mod
@@ -509,6 +510,7 @@ def render_site(project: Project) -> str:
     )
     env.globals["check_state"] = _check_state
     env.globals["coverage_of"] = project.coverage.get
+    env.globals["blocked_chains_for"] = blocked_mod.by_item(project).get
     citations_by_url = citations_mod.by_url(project)
 
     # A page called `index` owns index.html; otherwise the item dashboard does. This

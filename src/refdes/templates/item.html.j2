@@ -121,6 +121,24 @@
 </section>
 {% endif %}
 
+{% set chains = blocked_chains_for(item.id) %}
+{% if chains %}
+<section class="blocked-chains">
+  <h2>Blocked</h2>
+  <ul class="tight">
+  {% for chain in chains %}
+    <li>
+      {% for hop in chain.path[1:] %}
+      <a class="ref" href="{{ hop | lower }}.html" data-ref="{{ hop }}">{{ hop }}</a>{% if not loop.last %} ←{% endif %}
+      {% endfor %}
+      {% if chain.root_status %}<span class="muted">({{ chain.root_status }}{% if chain.path | length > 2 %}, root{% endif %})</span>{% endif %}
+      {% if chain.stale %}<span class="pill pill-warn">stale</span>{% endif %}
+    </li>
+  {% endfor %}
+  </ul>
+</section>
+{% endif %}
+
 {% if item.links or item.backlinks %}
 <section class="traces">
   <h2>Traceability</h2>

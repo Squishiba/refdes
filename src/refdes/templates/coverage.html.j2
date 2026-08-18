@@ -48,10 +48,19 @@
       <td>{{ item.title }}</td>
       <td><span class="pill pill-stage-{{ cov.stage }}">{{ cov.stage }}</span></td>
       {% for group in [cov.addressed_by, cov.claimed_by, cov.satisfied_by, cov.verified_by] %}
+      {% set is_claimed_col = loop.index0 == 1 %}
       <td>
         {% if group %}
           {% for ref in group %}
           <a class="ref" href="{{ ref | lower }}.html" data-ref="{{ ref }}">{{ ref }}</a>{% if not loop.last %}, {% endif %}
+          {% if is_claimed_col %}
+          {# claimed_by only: the blocker chain is what makes "claimed but
+             unsettled" actionable -- addressed/satisfied/verified claimers
+             don't get this note. #}
+          {% for chain in blocked_chains_for(ref) or [] %}
+          <br><span class="muted blocked-note">← {{ chain.path[1:] | join(' ← ') }}{% if chain.root_status %} ({{ chain.root_status }}){% endif %}</span>
+          {% endfor %}
+          {% endif %}
           {% endfor %}
         {% else %}<span class="muted">—</span>{% endif %}
       </td>

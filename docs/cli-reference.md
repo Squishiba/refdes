@@ -240,7 +240,8 @@ into vendoring.
 Report everything that has been made less visible: fields excluded from
 invalidation, item-level overrides and their stated reasons, resealed log entries,
 [board](multi-board.md) and [workspace](workspaces.md) moves, what's changed
-since the last [revision and release](lifecycle.md), imported projects, and
+since the last [revision and release](lifecycle.md), [blocked_by
+chains](links.md#blocked-by-and-the-cascade-report), imported projects, and
 [citations](markdown.md#citing-a-datasheet).
 
 ```bash
@@ -280,6 +281,9 @@ Board moves since the manifest was last written:
 
 Workspace moves since the manifest was last written:
   (none)
+
+Blocked chains:
+  DEC-PWR-005 <- DEC-PWR-001 (on_hold, root)
 
 Imported projects (read-only):
   platform       1 items pinned to 2026.3  <- ../platform/_site/items.json

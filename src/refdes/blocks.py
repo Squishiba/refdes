@@ -206,15 +206,18 @@ class CascadeNode:
 
 class CascadeCycleError(Exception):
     """Raised by walk_cascade() when on_cycle="error" and a revisit occurs --
-    the seam a future blocked_by report (docs/design/standard-library.md §9)
-    reuses instead of `{{cascade}}`'s own graceful "already shown" marker,
-    since a blocked_by graph is specifically asserted acyclic and a cycle in
-    it is a real authoring bug, not a legitimate reconvergence."""
+    the seam the blocked_by cascade report (docs/design/standard-library.md
+    §9) reuses instead of `{{cascade}}`'s own graceful "already shown"
+    marker, since a blocked_by graph is specifically asserted acyclic and a
+    cycle in it is a real authoring bug, not a legitimate reconvergence.
 
-    def __init__(self, from_id: str, to_id: str):
-        self.from_id = from_id
-        self.to_id = to_id
-        super().__init__(f"cycle: {from_id} -> {to_id}")
+    `path` is the full walk from the root down to the closing edge, e.g.
+    `["DEC-IO-003", "DEC-IO-001", "DEC-IO-003"]` -- enough to report the
+    whole cycle, not just the one edge that happened to close it."""
+
+    def __init__(self, path: list[str]):
+        self.path = path
+        super().__init__(f"cycle: {' -> '.join(path)}")
 
 
 def walk_cascade(
@@ -250,7 +253,7 @@ def walk_cascade(
         if direction == "down"
         else set()
     )
-    return _walk(project, root_id, direction, via, via_inverses, depth, visited, on_cycle)
+    return _walk(project, root_id, direction, via, via_inverses, depth, visited, on_cycle, [root_id])
 
 
 def _walk(
@@ -262,6 +265,7 @@ def _walk(
     depth: int,
     visited: set[str],
     on_cycle: str,
+    path: list[str],
 ) -> list[CascadeNode]:
     if depth <= 0:
         return []
@@ -288,11 +292,14 @@ def _walk(
         for target_id in sorted(edges[link_name]):
             if target_id in visited:
                 if on_cycle == "error":
-                    raise CascadeCycleError(current_id, target_id)
+                    raise CascadeCycleError(path + [target_id])
                 children.append(CascadeNode(target_id, label, already_shown=True))
                 continue
             visited.add(target_id)
-            sub = _walk(project, target_id, direction, via, via_inverses, depth - 1, visited, on_cycle)
+            sub = _walk(
+                project, target_id, direction, via, via_inverses, depth - 1,
+                visited, on_cycle, path + [target_id],
+            )
             children.append(CascadeNode(target_id, label, children=sub))
     return children
 

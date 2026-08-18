@@ -106,9 +106,37 @@ warnings.
 
 Diagnostics also have an `info` level, for the routine state of an
 incomplete project — hidden by default, shown with `-v`/`--verbose` on
-`check` or `build`. Nothing coverage produces is `info` today; it's used
-elsewhere (an unpinned citation, for instance) but shares the same flag, so
-`-v` is worth knowing about even if you came here for coverage.
+`check` or `build`. The [`blocked_by:` stale check](links.md#blocked-by-and-the-cascade-report)
+is the one thing in this area that's `info`; nothing else coverage produces
+is, but `-v` is worth knowing about even if you came here for coverage.
+
+## When the claimer is blocked
+
+If a `claimed` item's claiming decision itself declares `blocked_by:`, the
+per-item warning names the blocker chain, resolved all the way to its root:
+
+```
+WARNING items/main-io/requirements.md:40 [REQ-IO-CONN-002] — claimed but not verified
+  (no test links to it); claimed by DEC-IO-016, which is blocked_by DEC-IO-003 <-
+  DEC-IO-001 (on_hold)
+```
+
+When several `claimed` items trace to the same single root blocker, a
+second summary line groups them — this is the sentence coverage exists to
+produce: not just "unsettled," but *why*:
+
+```
+WARNING <project> — 2 requirement(s) unsettled because DEC-IO-001 is on_hold — see coverage.html
+```
+
+Deliberately conservative: an item is only folded into this line when its
+claim traces to **exactly one** root. An item whose claimer has no
+`blocked_by` chain at all, or whose several claimers trace to *different*
+roots, keeps its ordinary per-item warning instead — a misleading one-line
+summary would be worse than not summarizing it. `coverage.html` shows the
+same chain inline next to every claimed item's row. See
+[`blocked_by:`](links.md#blocked-by-and-the-cascade-report) for the edge
+itself and the rest of its surfaces (`refdes audit`, the item page).
 
 ## Which statuses count as satisfying
 

@@ -376,6 +376,28 @@ class Coverage:
 
 
 @dataclass
+class BlockedChain:
+    """One direct `blocked_by:` edge, resolved to its structural root
+    (docs/design/standard-library.md §9). The declared edge is direct; this
+    is the transitive resolution -- naming the root cause, not just the
+    nearest link in the chain, is the whole point of building this.
+
+    `path` is the full walk from the declaring item to the root, both ends
+    inclusive: `[item_id, ..., root_id]`. `len(path) == 2` for a direct
+    block with no further chain of its own.
+    """
+
+    item_id: str
+    path: list[str]
+    root_id: str
+    root_status: str | None
+    # Whether path[1] (the *direct* target, not necessarily the root) has
+    # reached a settled status while this edge is still declared -- a fact
+    # about this one edge, independent of how deep the chain runs past it.
+    stale: bool
+
+
+@dataclass
 class Project:
     title: str
     out_dir: str
@@ -397,6 +419,7 @@ class Project:
     version: str = ""
     imports: list[ImportSpec] = field(default_factory=list)
     coverage: dict[str, Coverage] = field(default_factory=dict)
+    blocked_chains: list[BlockedChain] = field(default_factory=list)
     seal_violations: list[str] = field(default_factory=list)
     boards: dict[str, BoardSpec] = field(default_factory=dict)
     # (item_id, previous_board, current_board), for items whose board changed
