@@ -5669,6 +5669,31 @@ def test_figure_reference_on_a_narrative_page_that_lacks_it_warns(fig_project):
     assert '<span class="ref ref-missing" title="unknown figure">fig-curve</span>' in index_html
 
 
+def test_check_catches_a_dangling_figure_reference_without_rendering(fig_project):
+    """`refdes check` never calls render_site, so a dangling [[fig:...]] has
+    to be caught by build() itself -- the same way a dangling [[ITEM-ID]]
+    already is -- or `check` would silently miss what `build` catches."""
+    project = _build_at(fig_project)  # build() only, exactly what `check` runs
+    assert any(
+        "reference to figure 'fig-nope', which does not exist" in d.message
+        for d in project.warnings
+    )
+
+
+def test_build_does_not_double_warn_a_dangling_figure_reference(fig_project):
+    """The same project run through build() then render_site() (what `refdes
+    build` actually does) must warn about a nonexistent figure id exactly
+    once, not once from the eager check and again from every document
+    resolve_figures happens to touch."""
+    project = _build_at(fig_project)
+    render.render_site(project)
+    matches = [
+        d.message for d in project.warnings
+        if "reference to figure 'fig-nope', which does not exist" in d.message
+    ]
+    assert len(matches) == 1
+
+
 # -------------------------------------------------- explicit reference regression
 
 def test_explicit_item_reference_does_not_nest_duplicate_links(blocks_project):

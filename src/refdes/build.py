@@ -806,10 +806,47 @@ def assign_figure_numbers(bodies: list[str]) -> dict[str, int]:
     return numbers
 
 
+def validate_figure_refs(project: Project) -> None:
+    """Eagerly catch a `[[fig:id]]` reference to an id that doesn't exist
+    ANYWHERE in the project -- the one class of figure-reference mistake
+    that's knowable without ever assembling a rendered document, so it's
+    checked once here, right after every item/page body has been rendered,
+    rather than only inside `resolve_figures` (which only ever runs from
+    `render_site`, so `refdes check` -- which never renders -- would
+    otherwise never catch a dangling `[[fig:...]]` the way it already
+    catches a dangling `[[ITEM-ID]]`).
+
+    The complementary "exists, but not in this specific rendered document"
+    check is inherently document-shaped (the same body can render into up to
+    three different documents, each with its own answer) and stays in
+    `resolve_figures`, which is why this only handles the anywhere-or-not
+    question and never re-warns what `resolve_figures` goes on to check.
+    """
+    bodies = [item.body_html for item in project.local_items] + [
+        page.body_html for page in project.pages
+    ]
+    for html in bodies:
+        for match in FIG_REF_PENDING_RE.finditer(html):
+            fig_id, _label_raw, where_file, where_line_raw, where_id = match.groups()
+            if fig_id in project.figures:
+                continue
+            where_line = int(where_line_raw) if where_line_raw else None
+            project.warn(
+                f"reference to figure {fig_id!r}, which does not exist. "
+                f'Check the figure\'s {{id="..."}} attribute.',
+                file=where_file, line=where_line, item_id=where_id or None,
+            )
+
+
 def resolve_figures(html: str, project: Project, numbers: dict[str, int]) -> str:
     """Fill in figure-number markers and `[[fig:id]]` cross-references in one
     piece of already-rendered HTML, using `numbers` (this document's own id ->
     Figure N map, from `assign_figure_numbers` run over the same document).
+
+    A reference to a figure id that doesn't exist anywhere has already been
+    warned about by `validate_figure_refs` (run once, at build() time) --
+    this only warns about the complementary, document-scoped case: the id is
+    real, just not present in *this* rendered document.
     """
 
     def num_marker(match: re.Match) -> str:
@@ -821,11 +858,6 @@ def resolve_figures(html: str, project: Project, numbers: dict[str, int]) -> str
         where_line = int(where_line_raw) if where_line_raw else None
         item_id = where_id or None
         if fig_id not in project.figures:
-            project.warn(
-                f"reference to figure {fig_id!r}, which does not exist. "
-                f'Check the figure\'s {{id="..."}} attribute.',
-                file=where_file, line=where_line, item_id=item_id,
-            )
             return f'<span class="ref ref-missing" title="unknown figure">{label or fig_id}</span>'
         if fig_id not in numbers:
             owner, _owner_file, _owner_line = project.figures[fig_id]
@@ -987,4 +1019,5 @@ def build(
     citations_mod.verify(project, require=require_citations)
     render_bodies(project)
     render_pages(project)
+    validate_figure_refs(project)
     return project
