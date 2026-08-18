@@ -253,6 +253,38 @@ const completionProvider = {
       }
     }
 
+    // Offer field/link key names at the start of a front-matter line, once
+    // the current item's type is known from context -- the gap yaml-
+    // language-server can't close for .md front matter (vscode-yaml#207),
+    // and .refdes/schema.json's own freshness plays no part here: this
+    // reuses index.data.types, the same payload enumChoicesFor already
+    // reads on every refresh.
+    const keyMatch = before.match(/^(\s*(?:-\s*)?)([a-z_]*)$/);
+    if (keyMatch) {
+      const typeName = itemTypeAtLine(document, position.line);
+      const spec = typeName && index.data.types && index.data.types[typeName];
+      if (spec) {
+        const fieldKeys = Object.keys(spec.fields || {});
+        const linkKeys = Object.keys(spec.links || {});
+        const items = fieldKeys
+          .map((k) => {
+            const c = new vscode.CompletionItem(k, vscode.CompletionItemKind.Field);
+            c.detail = (spec.fields[k] || {}).type;
+            c.insertText = `${k}: `;
+            return c;
+          })
+          .concat(
+            linkKeys.map((k) => {
+              const c = new vscode.CompletionItem(k, vscode.CompletionItemKind.Reference);
+              c.detail = `link -> ${(spec.links[k] || []).join(", ") || "any"}`;
+              c.insertText = `${k}: `;
+              return c;
+            })
+          );
+        if (items.length) return items;
+      }
+    }
+
     // Otherwise offer item IDs, after `[[` or once a prefix with its hyphen has
     // been typed. Requiring the hyphen keeps completions out of ordinary prose --
     // "PCB" and "TODO" should not pop a list, but "REQ-" should.
@@ -295,6 +327,19 @@ function itemIdAtLine(document, targetLine) {
   for (let i = 0; i <= targetLine; i++) {
     const text = document.lineAt(i).text;
     const match = text.match(/^\s*(?:-\s*)?id:\s*(\S+)\s*$/);
+    if (match) current = match[1];
+  }
+  return current;
+}
+
+// Same scan as itemIdAtLine, tracking `type:` instead of `id:` -- what the
+// key-completion trigger in completionProvider needs to know which type's
+// fields/links to offer.
+function itemTypeAtLine(document, targetLine) {
+  let current = null;
+  for (let i = 0; i <= targetLine; i++) {
+    const text = document.lineAt(i).text;
+    const match = text.match(/^\s*(?:-\s*)?type:\s*(\S+)\s*$/);
     if (match) current = match[1];
   }
   return current;

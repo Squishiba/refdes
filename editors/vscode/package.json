@@ -25,6 +25,7 @@
   "galleryBanner": { "color": "#14171A", "theme": "dark" },
   "main": "./extension.js",
   "activationEvents": ["workspaceContains:**/refdes.yaml"],
+  "extensionDependencies": ["redhat.vscode-yaml"],
   "contributes": {
     "commands": [
       { "command": "refdes.build", "title": "Refdes: Build site", "icon": "$(play)" },

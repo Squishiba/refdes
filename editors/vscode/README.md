@@ -47,7 +47,22 @@ checks, broken links, unverified requirements, append-only violations.
 
 **Completion.** Type two or more uppercase letters, or `[[`, to get item IDs with
 their titles. After a field name like `status:`, you get that field's allowed
-values from the schema.
+values from the schema. At the start of a front-matter line, once the current
+item's `type:` is known from context, you get that type's own field and link
+key names — the same data, just a second way of using it, and the piece that
+closes the gap `.yaml`'s `yaml.schemas` completion (below) can't reach for
+`.md` files.
+
+**Schema completion for `.yaml` list files.** This extension declares
+`redhat.vscode-yaml` as a dependency and `refdes init` writes
+`.vscode/settings.json` pointing `yaml.schemas` at `.refdes/schema.json` —
+together they give full IntelliSense (required fields, `additionalProperties:
+false` catching a typo the moment it's typed, hover documentation) for
+`items/**/*.yaml`. This does **not** currently work for `.md` front matter —
+an upstream vscode-yaml limitation, not a refdes gap — which is what the
+field/link key completion above exists to cover in the meantime. See [editor
+support](https://github.com/Squishiba/refdes/blob/main/docs/standard-library.md#editor-support-json-schema-emission)
+for the full story.
 
 **Hover.** Hover any ID for its type, title, key fields, coverage stage, and any
 failing checks.
@@ -97,7 +112,10 @@ lexer. If highlighting and the parser ever disagree, the parser is right.
   proper in-editor webview with auto-refresh is the obvious next step.
 - **Diagnostics as you type.** Currently on save; live would need debounced runs
   against unsaved buffers.
-- **Snippets** for new requirements, decisions, and log entries.
+- **Snippets** for new requirements, decisions, and log entries, inserted directly
+  in the editor. `refdes new <type>` covers the same need today from the CLI —
+  `refdes new decision > items/power/dec-005.md` — generated from the identical
+  resolved schema, just not yet wired into VS Code's own snippet/IntelliSense UI.
 
 ## Developing
 
