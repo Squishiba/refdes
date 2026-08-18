@@ -290,7 +290,12 @@ def load_project(config_path: str | None = None, start: str = ".") -> Project:
     for name, spec in resolved_link_types.items():
         spec = spec or {}
         inverse = spec.get("inverse", f"{name}_by")
-        link_types[name] = LinkType(name=name, inverse=inverse, label=spec.get("label", name))
+        link_types[name] = LinkType(
+            name=name,
+            inverse=inverse,
+            label=spec.get("label", name),
+            trace=bool(spec.get("trace", True)),
+        )
         inverse_of[name] = inverse
 
     # A link may be declared from either end -- a requirement's `verified_by` and a

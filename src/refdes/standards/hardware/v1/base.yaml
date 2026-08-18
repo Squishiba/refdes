@@ -18,15 +18,19 @@ field_sets:
     last_reviewed: { type: date,   on_change: ignore }
 
 link_types:
+  # trace: false on amends/records/supersedes/addresses -- none of these is
+  # "this item's correctness is justified by that one," which is what a
+  # {{cascade}} block's default walk is for (docs/design/index-blocks.md §6).
+  # Every other verb traces by default.
   refines:        { inverse: refined_by,    label: "Refines" }
   derives_from:   { inverse: derived_by,    label: "Derives from" }
   satisfies:      { inverse: satisfied_by,  label: "Satisfies" }
   constrained_by: { inverse: constrains,    label: "Constrained by" }
   verifies:       { inverse: verified_by,   label: "Verifies" }
-  addresses:      { inverse: addressed_by,  label: "Addresses" }
-  records:        { inverse: recorded_by,   label: "Records" }
-  amends:         { inverse: amended_by,    label: "Amends" }
-  supersedes:     { inverse: superseded_by, label: "Supersedes" }
+  addresses:      { inverse: addressed_by,  label: "Addresses",   trace: false }
+  records:        { inverse: recorded_by,   label: "Records",     trace: false }
+  amends:         { inverse: amended_by,    label: "Amends",      trace: false }
+  supersedes:     { inverse: superseded_by, label: "Supersedes",  trace: false }
   selects:        { inverse: selected_by,   label: "Selects" }
   blocked_by:     { inverse: blocks,        label: "Blocked by" }
   equivalent:     { inverse: equivalent,    label: "Equivalent" }   # self-inverse

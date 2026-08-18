@@ -106,6 +106,14 @@ class LinkType:
     name: str
     inverse: str
     label: str
+    # Whether this verb participates in a {{cascade}} block's default `via`
+    # set. Schema-declared metadata, exactly like check_severity or
+    # satisfying_statuses -- a fact about the verb, set once, not something
+    # an author composes per-block. True by default: every link traces
+    # unless its schema explicitly opts it out (amends/records/supersedes/
+    # addresses in the bundled standard, none of which is "this item's
+    # correctness is justified by that one").
+    trace: bool = True
 
 
 @dataclass
