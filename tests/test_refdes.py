@@ -582,12 +582,21 @@ def test_first_test_item_makes_unverified_warnings_reappear(coverage_project):
     """The suppression only holds while zero `test` items exist -- adding the
     first one is meant to bring the warning right back (confirmed intended
     behaviour, not a surprise to design around)."""
-    schema = COVERAGE_SCHEMA + (
+    # Verifier-type detection is link-based now (docs/design/standard-library.md
+    # §2), so this fixture's `test` type needs an actual `verifies:` link to
+    # count -- a bare type named "test" with no such link no longer implies one.
+    schema = COVERAGE_SCHEMA.replace(
+        '  satisfies: { inverse: satisfied_by, label: "Satisfies" }\n',
+        '  satisfies: { inverse: satisfied_by, label: "Satisfies" }\n'
+        '  verifies: { inverse: verified_by, label: "Verifies" }\n',
+    ) + (
         "  test:\n"
         "    prefix: TST\n"
         "    label: Test\n"
         "    fields:\n"
         "      title: { type: text, required: true, on_change: invalidate }\n"
+        "    links:\n"
+        "      verifies: [requirement]\n"
         "    body: { on_change: invalidate }\n"
     )
     (coverage_project / "refdes.yaml").write_text(schema, encoding="utf-8")
@@ -2549,7 +2558,9 @@ def test_check_board_filters_diagnostics_to_that_board(board_project, capsys):
     assert status == 0
     assert "REQ-WRONG-001" in out  # board-b's own token-mismatch warning
     assert "REQ-S-001" not in out  # unboarded item's warning, filtered out
-    assert "2 items, 0 errors, 2 warnings" in out
+    # +1 over the item-scoped warnings: the project-level, once-per-type
+    # 'coverable:' fallback nudge (this fixture's schema predates that flag).
+    assert "2 items, 0 errors, 3 warnings" in out
 
 
 def test_check_board_always_shows_project_level_diagnostics(board_project, capsys):
@@ -2569,7 +2580,9 @@ def test_check_without_board_flag_is_unaffected_by_the_feature(board_project, ca
     out = capsys.readouterr().out
     assert "REQ-WRONG-001" in out
     assert "REQ-S-001" in out
-    assert "5 items, 0 errors, 4 warnings" in out
+    # +1 over the item-scoped warnings: the project-level, once-per-type
+    # 'coverable:' fallback nudge (this fixture's schema predates that flag).
+    assert "5 items, 0 errors, 5 warnings" in out
 
 
 def test_cli_check_board_rejects_unknown_board(board_project, capsys):

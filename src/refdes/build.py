@@ -12,7 +12,7 @@ from markdown_it import MarkdownIt
 
 from . import boards as boards_mod
 from . import calc, citations as citations_mod, imports, pages as pages_mod, seal
-from .model import ERROR, INFO, INVALIDATE, WARNING, CalcLine, CheckResult, Coverage, Item, Project
+from .model import ERROR, INFO, INVALIDATE, WARNING, CalcLine, CheckResult, Coverage, Item, ItemType, Project
 
 # Explicit reference: [[REQ-PWR-002]] or [[REQ-PWR-002|the input range]]
 EXPLICIT_REF_RE = re.compile(r"\[\[\s*([A-Za-z0-9\-_]+)\s*(?:\|\s*([^\]]+?)\s*)?\]\]")
@@ -41,17 +41,60 @@ IMG_ALT_RE = re.compile(r'\balt="([^"]*)"', re.IGNORECASE)
 # ----------------------------------------------------------------------- validation
 
 
+def _required_when_satisfied(item: Item, condition: dict[str, object]) -> bool:
+    """All condition keys AND together; a key's own value(s) OR together.
+
+    The reserved key "links" checks whether the item declares at least one
+    target under any of the named links; every other key names a sibling field
+    and matches against its current value. See
+    docs/design/standard-library.md §2 and §11.
+    """
+    for key, raw_values in condition.items():
+        values = raw_values if isinstance(raw_values, list) else [raw_values]
+        if key == "links":
+            if not any(item.links.get(str(name)) for name in values):
+                return False
+        elif item.fields.get(key) not in values:
+            return False
+    return True
+
+
+def _format_required_when(condition: dict[str, object]) -> str:
+    clauses = []
+    for key, raw_values in condition.items():
+        values = raw_values if isinstance(raw_values, list) else [raw_values]
+        if key == "links":
+            joined = " or ".join(repr(str(v)) for v in values)
+            clauses.append(f"it has a link under {joined}")
+        else:
+            joined = " or ".join(repr(v) for v in values)
+            clauses.append(f"{key} is {joined}")
+    return " and ".join(clauses)
+
+
 def validate_items(project: Project) -> None:
     for item in project.local_items:
         spec = project.types[item.type]
 
         for fname, fspec in spec.fields.items():
             value = item.fields.get(fname)
-            if fspec.required and (value is None or str(value).strip() == ""):
-                project.error(
-                    f"missing required field {fname!r}",
-                    file=item.source_file, line=item.source_line, item_id=item.id,
-                )
+            effective_required = fspec.required or (
+                fspec.required_when is not None
+                and _required_when_satisfied(item, fspec.required_when)
+            )
+            if effective_required and (value is None or str(value).strip() == ""):
+                if fspec.required_when is not None:
+                    project.error(
+                        f"{fname!r} is required when "
+                        f"{_format_required_when(fspec.required_when)} "
+                        f"(required_when: {fspec.required_when})",
+                        file=item.source_file, line=item.source_line, item_id=item.id,
+                    )
+                else:
+                    project.error(
+                        f"missing required field {fname!r}",
+                        file=item.source_file, line=item.source_line, item_id=item.id,
+                    )
                 continue
             if value is None:
                 continue
@@ -113,7 +156,64 @@ def resolve_links(project: Project) -> None:
                 target.backlinks.setdefault(inverse, []).append(item.id)
 
 
-COVERABLE = ("requirement", "constraint")
+# Preserved exactly for the name-based coverable/verifier fallback below -- the
+# behavior every project had before `coverable:`/verifies-link detection existed.
+_FALLBACK_COVERABLE_TYPES = ("requirement", "constraint")
+
+
+def _verifier_type_names(project: Project) -> set[str]:
+    """Which types can verify something, derived from `links:`, not a type name.
+
+    A type declaring `verifies` on itself is the verifier (the standard's own
+    convention: test.links.verifies: [...]). A type declaring `verified_by`
+    naming its own verifier target types (the legacy convention: a requirement
+    declaring `verified_by: [test]`) makes each named target type a verifier
+    instead. Either spelling of the pair is recognized, so this needs no new
+    flag -- every project's link declarations already carry the information
+    (docs/design/standard-library.md §2).
+    """
+    names: set[str] = set()
+    for tname, spec in project.types.items():
+        for lname, targets in spec.links.items():
+            if lname == "verifies":
+                names.add(tname)
+            elif lname == "verified_by":
+                names.update(targets)
+    return names
+
+
+def _resolve_coverable(
+    spec: ItemType, project: Project, warned: set[str]
+) -> tuple[bool, bool]:
+    """(is_coverable, via_fallback). Emits the one-time fallback warning only for
+    the two names the fallback has ever recognized -- see the compatibility
+    hazard writeup in docs/design/standard-library.md §2."""
+    if spec.coverable is not None:
+        return spec.coverable, False
+    is_fallback_coverable = spec.name in _FALLBACK_COVERABLE_TYPES
+    if is_fallback_coverable and spec.name not in warned:
+        project.warn(
+            f"types.{spec.name} does not declare 'coverable:'; falling back to "
+            "name-based detection (requirement/constraint are coverable by "
+            "convention). Add 'coverable: true' explicitly -- this fallback is "
+            "removed in refdes 1.0."
+        )
+        warned.add(spec.name)
+    return is_fallback_coverable, True
+
+
+def _excluded_by_status(item: Item, spec: ItemType) -> bool:
+    """True if this item's current status keeps it out of coverage.
+
+    `coverable_statuses` set: inclusion list -- coverable only when status is in
+    it. Unset: falls back to excluding `status == "retired"` if a status field
+    exists, and excluding nothing otherwise -- the exact pre-existing behavior.
+    """
+    if spec.coverable_statuses is not None:
+        return item.fields.get("status") not in spec.coverable_statuses
+    if "status" in spec.fields:
+        return item.fields.get("status") == "retired"
+    return False
 
 
 def compute_coverage(project: Project) -> None:
@@ -136,20 +236,34 @@ def compute_coverage(project: Project) -> None:
       here, so a project early in its life is mostly this.
     - "satisfied but not verified" -- routine noise when the project has not
       written a test plan yet, which is why it's suppressed entirely when no
-      `test` items exist at all (the moment the first one is added, these
+      verifier items exist at all (the moment the first one is added, these
       become real findings again and start appearing).
 
     "Claimed but not verified" stays per item: it names an unsettled decision,
     which is the one class of coverage warning that is actually actionable.
+
+    Participation is gated by `coverable:`/`coverable_statuses:` and which
+    verifier links actually settle by `verifying_statuses:` -- schema-engine
+    flags, not standard-specific plumbing (see model.ItemType and
+    docs/design/standard-library.md §2). A type that never declares `coverable:`
+    falls back to the old requirement/constraint-by-name convention, with a
+    one-time warning; on that fallback path only, the requirement/constraint
+    asymmetry in which types get the per-item warnings below is preserved
+    exactly. Once a type explicitly declares `coverable: true`, it gets the
+    same warnings as any other coverable type -- no further name restriction.
     """
-    has_tests = any(item.type == "test" for item in project.items.values())
+    verifier_type_names = _verifier_type_names(project)
+    has_verifiers = any(item.type in verifier_type_names for item in project.items.values())
     open_items: list[str] = []
     unverified_items: list[str] = []
+    warned_fallback_types: set[str] = set()
 
     for item in project.local_items:
-        if item.type not in COVERABLE:
+        spec = project.types[item.type]
+        coverable, via_fallback = _resolve_coverable(spec, project, warned_fallback_types)
+        if not coverable:
             continue
-        if item.fields.get("status") == "retired":
+        if _excluded_by_status(item, spec):
             continue
 
         cov = Coverage(item_id=item.id)
@@ -167,8 +281,8 @@ def compute_coverage(project: Project) -> None:
         claimed: list[str] = []
         for satisfier_id in satisfying_ids:
             satisfier = project.items.get(satisfier_id)
-            spec = project.types.get(satisfier.type) if satisfier else None
-            allowed = spec.satisfying_statuses if spec else None
+            satisfier_spec = project.types.get(satisfier.type) if satisfier else None
+            allowed = satisfier_spec.satisfying_statuses if satisfier_spec else None
             # Unconfigured type: every link counts as settled, same as before
             # satisfying_statuses existed.
             if allowed is not None and satisfier.fields.get("status") not in allowed:
@@ -178,20 +292,36 @@ def compute_coverage(project: Project) -> None:
         cov.satisfied_by = settled
         cov.claimed_by = claimed
 
-        cov.verified_by = sorted(
+        verifying_ids = sorted(
             set(item.backlinks.get("verified_by", []))
             | set(item.links.get("verified_by", []))
         )
+        verified: list[str] = []
+        for verifier_id in verifying_ids:
+            verifier = project.items.get(verifier_id)
+            verifier_spec = project.types.get(verifier.type) if verifier else None
+            allowed = verifier_spec.verifying_statuses if verifier_spec else None
+            # Unconfigured: every link counts, mirroring satisfying_statuses.
+            if allowed is None or (verifier and verifier.fields.get("status") in allowed):
+                verified.append(verifier_id)
+        cov.verified_by = verified
         project.coverage[item.id] = cov
+
+        # On the fallback path, only items literally named "requirement" get the
+        # two warnings below, matching pre-existing behavior exactly (constraint
+        # was always coverable but never got these). Once a type explicitly opts
+        # in with `coverable: true`, it gets the same treatment as any other
+        # coverable type -- an opt-in improvement, not a compatibility break.
+        warn_eligible = not via_fallback or item.type == "requirement"
 
         if cov.stage == "open":
             open_items.append(item.id)
-        elif cov.stage == "claimed" and item.type == "requirement":
+        elif cov.stage == "claimed" and warn_eligible:
             project.warn(
                 "claimed but not verified (no test links to it)",
                 file=item.source_file, line=item.source_line, item_id=item.id,
             )
-        elif not cov.verified_by and item.type == "requirement" and has_tests:
+        elif not cov.verified_by and warn_eligible and has_verifiers:
             unverified_items.append(item.id)
 
     if open_items:

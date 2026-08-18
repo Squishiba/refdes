@@ -50,6 +50,13 @@ def _default_release_gate() -> dict[str, dict[str, bool]]:
     return {name: dict(rule) for name, rule in RELEASE_GATE_DEFAULTS.items()}
 
 
+class SchemaError(Exception):
+    """Raised for any configuration-time problem in refdes.yaml, refdes-project.yaml,
+    or the standard library bundle -- never for a per-item build-time diagnostic,
+    which goes through Project.error() instead. Defined here, not in schema.py or
+    standards.py, so both can raise it without importing each other."""
+
+
 @dataclass
 class Diagnostic:
     """A validation message. `where` is rendered as file:line for editors."""
@@ -83,6 +90,11 @@ class FieldSpec:
     required: bool = False
     choices: list[str] | None = None
     default: Any = None
+    # Conditional requiredness: {other_field_or_"links": value_or_[values]}, ANDed
+    # across keys, ORed within a key's value list. Mutually exclusive with
+    # `required` -- see docs/design/standard-library.md §2 "Conditional
+    # requiredness". None means unconditional (ordinary `required:` behavior only).
+    required_when: dict[str, Any] | None = None
 
 
 @dataclass
@@ -131,6 +143,22 @@ class ItemType:
     # "option") can set this to INFO so a failed criterion is a finding, not a
     # build-blocking defect.
     check_severity: str = ERROR
+    # Engine-level coverage-participation flags -- schema language, not standard
+    # content (docs/design/standard-library.md §2). None means "not declared":
+    # compute_coverage() falls back to the pre-existing name-based convention
+    # (requirement/constraint are coverable) with a one-time warning, so a project
+    # written before these existed sees no behavior change.
+    coverable: bool | None = None
+    # Statuses at which an item of this type actually counts as coverable, e.g.
+    # [active] to exclude both draft and retired. None means unconfigured: falls
+    # back to excluding `status == "retired"` if a status field exists, and
+    # excluding nothing otherwise -- see compute_coverage().
+    coverable_statuses: list[str] | None = None
+    # Statuses at which a verifier item (one that declares a `verifies`-family
+    # link) actually counts as having verified something, mirroring
+    # satisfying_statuses. None means every link counts, same as before this
+    # existed.
+    verifying_statuses: list[str] | None = None
 
 
 @dataclass

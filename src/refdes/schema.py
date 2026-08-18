@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import difflib
 import os
 from typing import Any
 
 import yaml
 
+from . import standards
 from .model import (
     BASELINE_IDENTITIES,
     DIAGNOSTIC_LEVELS,
@@ -20,6 +22,7 @@ from .model import (
     ItemType,
     LinkType,
     Project,
+    SchemaError,
 )
 
 CONFIG_NAME = "refdes.yaml"
@@ -38,10 +41,6 @@ _KNOWN_SETTINGS = {
     "publish_datasheets",
     "release_gate",
 }
-
-
-class SchemaError(Exception):
-    pass
 
 
 def _settings_error(message: str) -> SchemaError:
@@ -166,6 +165,85 @@ def find_config(start: str = ".") -> str:
         here = parent
 
 
+def _validate_required_when(types: dict[str, ItemType]) -> None:
+    """Cross-validate every `required_when:` against the fully merged schema.
+
+    Runs after base, presets, and the project overlay have all been applied --
+    only the final resolved schema matters (docs/design/standard-library.md §2).
+    An override that drops an enum value or a link a `required_when:` still
+    references fails the build here, naming both sides, rather than silently
+    leaving a dead condition in the merged schema.
+    """
+    for tname, spec in types.items():
+        for fname, fspec in spec.fields.items():
+            if not fspec.required_when:
+                continue
+            for key, raw_values in fspec.required_when.items():
+                values = raw_values if isinstance(raw_values, list) else [raw_values]
+                if key == "links":
+                    for lname in values:
+                        if lname not in spec.links:
+                            close = difflib.get_close_matches(
+                                str(lname), sorted(spec.links), n=1, cutoff=0.5
+                            )
+                            hint = f" Did you mean {close[0]!r}?" if close else ""
+                            raise SchemaError(
+                                f"types.{tname}.fields.{fname}.required_when.links "
+                                f"names {lname!r}, which is not a declared link on "
+                                f"{tname}.{hint}"
+                            )
+                    continue
+                if key == fname:
+                    raise SchemaError(
+                        f"types.{tname}.fields.{fname}.required_when cannot name "
+                        "itself"
+                    )
+                cond_field = spec.fields.get(key)
+                if cond_field is None:
+                    close = difflib.get_close_matches(
+                        str(key), sorted(spec.fields), n=1, cutoff=0.5
+                    )
+                    hint = f" Did you mean {close[0]!r}?" if close else ""
+                    raise SchemaError(
+                        f"types.{tname}.fields.{fname}.required_when references "
+                        f"field {key!r}, which is not declared on {tname}.{hint}"
+                    )
+                if cond_field.type != "enum":
+                    raise SchemaError(
+                        f"types.{tname}.fields.{fname}.required_when references "
+                        f"{key!r}, which is type {cond_field.type!r} -- "
+                        "required_when condition fields must be type: enum"
+                    )
+                choices = cond_field.choices or []
+                for value in values:
+                    if value not in choices:
+                        raise SchemaError(
+                            f"types.{tname}.fields.{fname}.required_when "
+                            f"references {key}: {value!r}, which is not among "
+                            f"{key}'s declared choices: {choices}. Update or "
+                            "remove the required_when clause."
+                        )
+
+
+def _validate_link_targets(types: dict[str, ItemType]) -> None:
+    """A link's declared target types must still exist after any override.
+
+    An empty target list means "unrestricted" (docs/design/standard-library.md
+    §9) and is exempt. This is what turns `types.component: null` into a hard,
+    specific error when something still declares `selects: [component]`,
+    instead of a silent no-op at build time.
+    """
+    for tname, spec in types.items():
+        for lname, targets in spec.links.items():
+            for target in targets:
+                if target not in types:
+                    raise SchemaError(
+                        f"types.{tname}.links.{lname} names target type "
+                        f"{target!r}, which is not declared (removed by an "
+                        "override?)"
+                    )
+
+
 def load_project(config_path: str | None = None, start: str = ".") -> Project:
     path = config_path or find_config(start)
     with open(path, "r", encoding="utf-8") as fh:
@@ -185,9 +263,20 @@ def load_project(config_path: str | None = None, start: str = ".") -> Project:
             f"history.default must be one of {list(ON_CHANGE_MODES)}, got {default_on_change!r}"
         )
 
+    # standard: {base, version, presets} resolves fresh, here, on every load --
+    # never a scaffold copy. See standards.py and docs/design/standard-library.md
+    # §3. `resolved_link_types`/`resolved_types` are plain dicts in exactly the
+    # shape refdes.yaml's own link_types:/types: would use, already merged across
+    # base -> presets -> this project's own overlay, with `include:` resolved
+    # into `fields:` -- everything below reads them exactly as it always read
+    # raw.get("link_types")/raw.get("types") directly.
+    resolved_link_types, resolved_types = standards.resolve_schema(
+        raw, settings["require_rejection_rationale"]
+    )
+
     link_types: dict[str, LinkType] = {}
     inverse_of: dict[str, str] = {}
-    for name, spec in (raw.get("link_types") or {}).items():
+    for name, spec in resolved_link_types.items():
         spec = spec or {}
         inverse = spec.get("inverse", f"{name}_by")
         link_types[name] = LinkType(name=name, inverse=inverse, label=spec.get("label", name))
@@ -199,7 +288,7 @@ def load_project(config_path: str | None = None, start: str = ".") -> Project:
         inverse_of.setdefault(inverse, name)
 
     types: dict[str, ItemType] = {}
-    for tname, tspec in (raw.get("types") or {}).items():
+    for tname, tspec in resolved_types.items():
         tspec = tspec or {}
         fields: dict[str, FieldSpec] = {}
         for fname, fspec in (tspec.get("fields") or {}).items():
@@ -210,13 +299,30 @@ def load_project(config_path: str | None = None, start: str = ".") -> Project:
                     f"types.{tname}.fields.{fname}.on_change must be one of "
                     f"{list(ON_CHANGE_MODES)}, got {on_change!r}"
                 )
+            required = bool(fspec.get("required", False))
+            required_when = fspec.get("required_when")
+            if required_when is not None:
+                if not isinstance(required_when, dict) or not required_when:
+                    raise SchemaError(
+                        f"types.{tname}.fields.{fname}.required_when must be a "
+                        "mapping of field or link name to the value(s) that make "
+                        "this field required"
+                    )
+                if required:
+                    raise SchemaError(
+                        f"types.{tname}.fields.{fname} declares both "
+                        "'required: true' and 'required_when:' -- unconditional "
+                        "requiredness already implies every condition; use one "
+                        "or the other"
+                    )
             fields[fname] = FieldSpec(
                 name=fname,
                 type=fspec.get("type", "text"),
                 on_change=on_change,
-                required=bool(fspec.get("required", False)),
+                required=required,
                 choices=fspec.get("choices"),
                 default=fspec.get("default"),
+                required_when=required_when,
             )
 
         links: dict[str, list[str]] = {}
@@ -250,6 +356,17 @@ def load_project(config_path: str | None = None, start: str = ".") -> Project:
                 f"got {check_severity!r}"
             )
 
+        coverable_raw = tspec.get("coverable")
+        coverable = None if coverable_raw is None else bool(coverable_raw)
+
+        coverable_statuses = tspec.get("coverable_statuses")
+        if coverable_statuses is not None:
+            coverable_statuses = [str(s) for s in coverable_statuses]
+
+        verifying_statuses = tspec.get("verifying_statuses")
+        if verifying_statuses is not None:
+            verifying_statuses = [str(s) for s in verifying_statuses]
+
         types[tname] = ItemType(
             name=tname,
             prefix=tspec.get("prefix", tname[:3].upper()),
@@ -262,10 +379,16 @@ def load_project(config_path: str | None = None, start: str = ".") -> Project:
             append_only=bool(tspec.get("append_only", False)),
             satisfying_statuses=satisfying_statuses,
             check_severity=check_severity,
+            coverable=coverable,
+            coverable_statuses=coverable_statuses,
+            verifying_statuses=verifying_statuses,
         )
 
     if not types:
         raise SchemaError(f"{path} declares no item types")
+
+    _validate_required_when(types)
+    _validate_link_targets(types)
 
     import_specs: list[ImportSpec] = []
     for entry in raw.get("imports") or []:
