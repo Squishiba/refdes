@@ -31,39 +31,54 @@ def _load(args, require_ids: bool = True) -> Project:
     return project
 
 
-def _visible(project: Project, verbose: bool, board: str | None) -> list:
-    """Diagnostics worth printing: info hidden unless `verbose`, and, when `board`
-    is given, narrowed to that board's own items -- a report filter only. A
-    diagnostic with no `item_id`, or whose item isn't found (nothing here
-    resolves that far), is project-level rather than board-specific and is
-    never hidden by `--board`: an unattributable problem could affect every
-    board, and hiding it would defeat the point of a review.
+def _visible(
+    project: Project, verbose: bool, board: str | None, workspace: str | None = None
+) -> list:
+    """Diagnostics worth printing: info hidden unless `verbose`, and, when
+    `board` and/or `workspace` is given, narrowed to that scope's own items --
+    a report filter only. A diagnostic with no `item_id`, or whose item isn't
+    found (nothing here resolves that far), is project-level rather than
+    scope-specific and is never hidden by either flag: an unattributable
+    problem could affect every board or workspace, and hiding it would defeat
+    the point of a review.
     """
     out = []
     for d in project.diagnostics:
         if d.level == "info" and not verbose:
             continue
-        if board is not None and d.item_id is not None:
+        if d.item_id is not None:
             item = project.items.get(d.item_id)
-            if item is not None and item.board != board:
-                continue
+            if item is not None:
+                if board is not None and item.board != board:
+                    continue
+                if workspace is not None and item.workspace != workspace:
+                    continue
         out.append(d)
     return out
 
 
-def _report(project: Project, verbose: bool = False, board: str | None = None) -> int:
-    visible = _visible(project, verbose, board)
+def _report(
+    project: Project,
+    verbose: bool = False,
+    board: str | None = None,
+    workspace: str | None = None,
+) -> int:
+    visible = _visible(project, verbose, board, workspace)
     for d in visible:
         stream = sys.stderr if d.level == "error" else sys.stdout
         print(str(d), file=stream)
 
     errors = sum(1 for d in visible if d.level == "error")
     warnings = sum(1 for d in visible if d.level == "warning")
-    item_count = (
-        len(project.items)
-        if board is None
-        else sum(1 for i in project.items.values() if i.board == board)
-    )
+    if board is None and workspace is None:
+        item_count = len(project.items)
+    else:
+        item_count = sum(
+            1
+            for i in project.items.values()
+            if (board is None or i.board == board)
+            and (workspace is None or i.workspace == workspace)
+        )
     summary = f"{item_count} items, {errors} errors, {warnings} warnings"
     if verbose:
         summary += f", {sum(1 for d in visible if d.level == 'info')} info"
@@ -82,12 +97,23 @@ def cmd_check(args) -> int:
             f"--board {args.board!r} is not a board declared in refdes.yaml's "
             f"boards: registry.{hint}"
         )
+    if args.workspace and args.workspace not in project.workspaces:
+        import difflib
+
+        close = difflib.get_close_matches(
+            args.workspace, list(project.workspaces), n=1, cutoff=0.5
+        )
+        hint = f" Did you mean {close[0]!r}?" if close else ""
+        project.error(
+            f"--workspace {args.workspace!r} is not a workspace declared in "
+            f"refdes.yaml's workspaces: registry.{hint}"
+        )
     # `check` never writes: it verifies existing seals without creating new ones.
-    # The whole project still parses and resolves links regardless of --board --
-    # only what gets reported below is narrowed.
+    # The whole project still parses and resolves links regardless of --board/
+    # --workspace -- only what gets reported below is narrowed.
     build_mod.build(project, seal_write=False, reseal=False)
     drift = citations_mod.refresh(project) if args.refresh else []
-    status = _report(project, verbose=args.verbose, board=args.board)
+    status = _report(project, verbose=args.verbose, board=args.board, workspace=args.workspace)
     if drift:
         print(f"\n{len(drift)} citation(s) drifted from their pinned hash:")
         for d in drift:
@@ -234,6 +260,14 @@ def cmd_audit(args) -> int:
         else:
             print("  (none)")
 
+    if project.workspaces:
+        print("\nWorkspace moves since the manifest was last written:")
+        if project.workspace_moves:
+            for item_id, old, new in project.workspace_moves:
+                print(f"  {item_id:<14} {old} -> {new or '(none)'}")
+        else:
+            print("  (none)")
+
     if project.imports:
         print("\nImported projects (read-only):")
         for spec in project.imports:
@@ -284,7 +318,8 @@ def main(argv: list[str] | None = None) -> int:
     p_build.add_argument(
         "--accept-board-move",
         action="store_true",
-        help="accept a recorded board change for an item (recorded in `audit`)",
+        help="accept a recorded board or workspace change for an item "
+        "(recorded in `audit`)",
     )
     p_build.add_argument(
         "--require-citations",
@@ -319,6 +354,12 @@ def main(argv: list[str] | None = None) -> int:
         help="only report diagnostics for one board's own items -- the whole "
         "project still parses and resolves links, so a cross-board reference "
         "is still checked, just not necessarily shown",
+    )
+    p_check.add_argument(
+        "--workspace",
+        metavar="NAME",
+        help="only report diagnostics for one workspace's own items -- same "
+        "report-filter posture as --board, and combinable with it",
     )
     p_check.add_argument(
         "-v", "--verbose",
@@ -357,12 +398,13 @@ def main(argv: list[str] | None = None) -> int:
 
     p_audit = sub.add_parser(
         "audit",
-        help="list suppressed fields, resealed entries, board moves, and imports",
+        help="list suppressed fields, resealed entries, board/workspace moves, "
+        "and imports",
         description="List everything the build tracks but does not fail on: schema "
         "fields excluded from invalidation, item-level history overrides, "
         "append-only log entries edited after sealing (--reseal), accepted and "
-        "outstanding board moves (--accept-board-move), and imported projects. "
-        "Suppression is allowed; invisible suppression is not.",
+        "outstanding board and workspace moves (--accept-board-move), and imported "
+        "projects. Suppression is allowed; invisible suppression is not.",
     )
     p_audit.set_defaults(func=cmd_audit)
 
