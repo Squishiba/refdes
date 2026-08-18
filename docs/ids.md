@@ -110,6 +110,36 @@ baseline**, which gives the rule to remember:
 Sequential numbering plus detection is a better trade than collision-proof random
 suffixes, which nobody wants to read or type.
 
+## Renumbering: `former_ids:`
+
+Migrating into Refdes, or renumbering to adopt a [board
+token](multi-board.md), leaves external references -- schematics, review
+notes, commit messages -- citing an id that no longer exists. `former_ids:`
+records what an item used to be called, so those references still resolve:
+
+```yaml
+- id: REQ-CAN-001
+  text: The bus shall recover from a bit error within one frame.
+  former_ids: [CAN_00]
+```
+
+`[[CAN_00]]` and a bare `CAN_00` in prose now resolve to `REQ-CAN-001`,
+rendered with a visible "(formerly CAN_00)" marker rather than a silent
+redirect -- a reader following the old id needs to see it landed somewhere
+else. Bare (bracket-free) autolinking only reaches an id shaped like
+`PREFIX-NNN`, the same pattern any live id already needs; a former id from an
+external scheme that doesn't fit that shape -- `CAN_00` above, underscore-
+joined rather than hyphenated -- still resolves, but only written explicitly
+as `[[CAN_00]]`. `refdes check` warns when a declared `former_ids:` entry
+can't bare-autolink, so the gap is visible instead of a silent no-op.
+
+A `former_ids:` entry naming a still-live id -- another item's, or its own --
+is a build error: `former_ids` may only retire ids, never claim one still in
+use. So is a former id declared by two different items, since a reference to
+it has to resolve to exactly one. Every retired number is also burned into
+the ledger's high-water mark, the same as an allocated one, so the allocator
+can never reissue it. `refdes audit` lists the full former-id mapping.
+
 ## Planning ahead for multiple boards
 
 If there is any chance of a second board, put a board token in the prefix now:

@@ -14,6 +14,7 @@ from . import blocked as blocked_mod
 from . import blocks as blocks_mod
 from . import boards as boards_mod
 from . import calc, citations as citations_mod, imports, pages as pages_mod, seal
+from . import ids as ids_mod
 from . import workspaces as workspaces_mod
 from .model import ERROR, INFO, INVALIDATE, WARNING, CalcLine, CheckResult, Coverage, Item, ItemType, Project
 
@@ -147,6 +148,30 @@ def validate_items(project: Project) -> None:
                                 f"{fname}[{index}]: each citation needs a 'url'",
                                 file=item.source_file, line=item.source_line, item_id=item.id,
                             )
+
+
+def validate_former_ids(project: Project) -> None:
+    """Populate `project.former_ids` and flag one the linker can never reach.
+
+    `BARE_REF_RE` requires an id to end in `-<digits>` -- deliberately: prose
+    is full of hyphen-free, underscore-joined, all-caps tokens (`MAX_RETRY_3`,
+    `GPIO_12`) that would false-positive as references if bare-word matching
+    were loosened to catch them. Rather than widen that regex and trade
+    autolink precision for former-id recall, an old id shaped like that is
+    still fully linkable -- just only explicitly, as `[[old_id]]` -- and this
+    warns so the gap is visible instead of a silent no-op.
+    """
+    ids_mod.collect_former_ids(project)
+    for old_id, owner_id in project.former_ids.items():
+        if BARE_REF_RE.fullmatch(old_id):
+            continue
+        owner = project.items[owner_id]
+        project.warn(
+            f"former_ids: {old_id!r} does not match the bare-reference shape "
+            f"(PREFIX-NNN) and will never autolink in prose -- reference it "
+            f"explicitly as [[{old_id}]]",
+            file=owner.source_file, line=owner.source_line, item_id=owner_id,
+        )
 
 
 def resolve_links(project: Project) -> None:
@@ -621,6 +646,19 @@ def _linkify(
             )
         target = project.items.get(target_id)
         if target is None:
+            former_owner_id = project.former_ids.get(target_id)
+            if former_owner_id is not None:
+                # Resolves, but never silently -- a reader following an old id
+                # must see it landed somewhere else, not be quietly redirected
+                # (finding 12).
+                owner = project.items[former_owner_id]
+                text = label or target_id
+                return (
+                    f'<a class="ref ref-former" href="{owner.slug}.html" '
+                    f'data-ref="{owner.id}">{text}</a>'
+                    f'<span class="ref-former-marker" '
+                    f'title="{owner.id} was formerly {target_id}">(formerly {target_id})</span>'
+                )
             if explicit:
                 project.warn(
                     f"reference to {target_id!r}, which does not exist",
@@ -1006,6 +1044,7 @@ def build(
     pages_mod.validate_boards(project)
     pages_mod.validate_workspaces(project)
     validate_items(project)
+    validate_former_ids(project)
     resolve_links(project)
     workspaces_mod.lint_cross_workspace_references(project)
     blocked_mod.resolve(project)

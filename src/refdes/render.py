@@ -402,6 +402,7 @@ def items_json(project: Project) -> dict:
             entry["workspace"] = item.workspace
         entry.update({
             "fields": item.fields,
+            "former_ids": item.former_ids,
             "citations": _citations_json(item),
             "links": item.links,
             "backlinks": item.backlinks,

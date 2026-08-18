@@ -299,6 +299,8 @@ table.coverage td { font-size: 13px; }
 a.ref { border-bottom: 1px dotted currentColor; text-decoration: none; }
 a.ref:hover { text-decoration: none; border-bottom-style: solid; }
 .ref-missing { color: var(--bad); border-bottom: 1px dashed var(--bad); cursor: help; }
+a.ref-former { border-bottom-color: var(--warn); }
+.ref-former-marker { color: var(--warn); font-size: 0.85em; cursor: help; }
 
 #preview-card {
   position: absolute; z-index: 60; max-width: 380px;

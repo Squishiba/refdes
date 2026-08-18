@@ -61,7 +61,9 @@ def save_ledger(project: Project, ledger: dict) -> None:
 
 
 def high_water(project: Project, ledger: dict) -> dict[str, int]:
-    """Highest number seen per prefix, across live items and the ledger."""
+    """Highest number seen per prefix, across live items, their `former_ids:`
+    (finding 12: a migration renumbering must not let a later item reuse the
+    old number just because it fell out of the ledger), and the ledger."""
     marks: dict[str, int] = defaultdict(int)
     for prefix, number in (ledger.get("burned") or {}).items():
         marks[prefix] = max(marks[prefix], int(number))
@@ -69,10 +71,14 @@ def high_water(project: Project, ledger: dict) -> dict[str, int]:
         parsed = split_id(str(item_id))
         if parsed:
             marks[parsed[0]] = max(marks[parsed[0]], parsed[1])
-    for item_id in project.items:
-        parsed = split_id(item_id)
+    for item in project.items.values():
+        parsed = split_id(item.id)
         if parsed:
             marks[parsed[0]] = max(marks[parsed[0]], parsed[1])
+        for old_id in item.former_ids:
+            parsed = split_id(old_id)
+            if parsed:
+                marks[parsed[0]] = max(marks[parsed[0]], parsed[1])
     return marks
 
 
@@ -81,6 +87,53 @@ def prefix_for(project: Project, item: Item) -> str:
         return item.prefix_hint
     spec = project.types.get(item.type)
     return spec.prefix if spec else item.type[:3].upper()
+
+
+# --------------------------------------------------------------- former ids
+
+
+def collect_former_ids(project: Project) -> None:
+    """Populate `project.former_ids` (old id -> current item id) and validate.
+
+    A migration renumbers an item and there was previously nowhere to record
+    the mapping: external references (schematics, review notes, commit
+    messages) citing the old id had no path to the replacement, and nothing
+    stopped a future item being minted with that old id (finding 12).
+
+    Two ways an entry can be unsafe, both hard errors:
+
+    - It names a still-live id -- either a different item's (a real
+      collision: which one wins?) or its own (self-reference makes no
+      sense). Either way `former_ids:` must name only retired ids.
+    - Two different items declare the same former id. `[[old_id]]` has to
+      resolve to exactly one item, so this can't be allowed to pick one
+      arbitrarily and stay silent about the other.
+
+    A former id that collides is never added to `project.former_ids`, so a
+    reference to it falls through to the ordinary "unknown item" handling
+    rather than resolving ambiguously.
+    """
+    for item in project.local_items:
+        for old_id in item.former_ids:
+            live = project.items.get(old_id)
+            if live is not None:
+                whose = "this item's own current id" if live is item else "still a live item id"
+                project.error(
+                    f"former_ids: {old_id!r} is {whose} -- former_ids must name "
+                    "only retired ids, never one still in use",
+                    file=item.source_file, line=item.source_line, item_id=item.id,
+                )
+                continue
+            claimed_by = project.former_ids.get(old_id)
+            if claimed_by is not None and claimed_by != item.id:
+                project.error(
+                    f"former_ids: {old_id!r} is declared by both {claimed_by} "
+                    f"and {item.id} -- a former id must resolve to exactly one "
+                    "item",
+                    file=item.source_file, line=item.source_line, item_id=item.id,
+                )
+                continue
+            project.former_ids[old_id] = item.id
 
 
 # -------------------------------------------------------------------- write-back

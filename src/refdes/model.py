@@ -326,6 +326,11 @@ class Item:
     workspace_hint: str = ""  # explicit `workspace:` override, same precedence as board_hint
     workspace: str = ""       # resolved workspace key; "" if workspaces: is unused or no match
     citations: list[CitationStatus] = field(default_factory=list)  # populated during build
+    # IDs this item replaces after a renumbering (finding 12) -- reserved like
+    # `id:`/`board:`, not a schema field, so it works on any type. [[old_id]]
+    # and a bare old_id in prose resolve to this item with a visible "formerly"
+    # marker; see ids.collect_former_ids for collision handling and burning.
+    former_ids: list[str] = field(default_factory=list)
 
     @property
     def title(self) -> str:
@@ -512,6 +517,11 @@ class Project:
     # because how strictly a project wants this enforced varies; defaults to
     # warning, not error, so adopting workspaces never breaks an existing build.
     cross_workspace_severity: str = WARNING
+    # Old id -> current item id, one entry per declared `former_ids:` across
+    # every local item. Populated by ids.collect_former_ids() (build.py calls
+    # it early, before rendering); consulted by _linkify so [[old_id]] and a
+    # bare old_id keep resolving after a renumbering, and by `refdes audit`.
+    former_ids: dict[str, str] = field(default_factory=dict)
 
     @property
     def local_items(self) -> list[Item]:

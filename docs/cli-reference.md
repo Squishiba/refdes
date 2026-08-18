@@ -242,7 +242,8 @@ invalidation, item-level overrides and their stated reasons, resealed log entrie
 [board](multi-board.md) and [workspace](workspaces.md) moves, what's changed
 since the last [revision and release](lifecycle.md), [blocked_by
 chains](links.md#blocked-by-and-the-cascade-report), imported projects,
-[citations](markdown.md#citing-a-datasheet), and [parts](parts.md).
+[citations](markdown.md#citing-a-datasheet), [parts](parts.md), and
+[former ids](ids.md#renumbering-former_ids).
 
 ```bash
 refdes audit
@@ -294,6 +295,9 @@ Citations:
 
 Parts:
   TPS62913       used by CMP-PWR-001 (component) — board: power
+
+Former IDs:
+  CAN_00         -> REQ-CAN-001
 
 16 items audited (16 local)
 ```

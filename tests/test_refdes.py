@@ -1141,6 +1141,187 @@ def test_allocated_numbers_are_burned_and_never_reused(temp_project):
     assert assignments[0][1] == "REQ-TMP-004"
 
 
+# ------------------------------------------------------------------ former_ids
+
+FORMER_IDS_SCHEMA = (
+    "site: { title: T, out: _site }\n"
+    "types:\n"
+    "  requirement: { prefix: REQ, fields: { text: { type: text } } }\n"
+    "  decision: { prefix: DEC, fields: {}, body: {} }\n"
+)
+
+
+def _former_ids_project(tmp_path, items_yaml):
+    (tmp_path / "refdes.yaml").write_text(FORMER_IDS_SCHEMA, encoding="utf-8")
+    items = tmp_path / "items"
+    items.mkdir()
+    (items / "r.yaml").write_text(items_yaml, encoding="utf-8")
+    return tmp_path
+
+
+def _former_ids_build(root):
+    project = load_project(config_path=str(root / "refdes.yaml"))
+    parse.load_items(project, require_ids=False)
+    build_mod.build(project, seal_write=False, reseal=False)
+    return project
+
+
+def test_former_ids_are_burned_so_the_allocator_never_reissues_them(tmp_path):
+    root = _former_ids_project(
+        tmp_path,
+        "defaults: { type: requirement }\n"
+        "items:\n"
+        "  - id: REQ-001\n    text: Renumbered item.\n    former_ids: [REQ-050]\n"
+        "  - text: Brand new, no id yet.\n",
+    )
+    project = load_project(config_path=str(root / "refdes.yaml"))
+    parse.load_items(project, require_ids=False)
+    assignments = ids.allocate(project)
+    assert assignments[0][1] == "REQ-051"  # not REQ-002 -- REQ-050 stays burned
+
+
+def test_former_ids_colliding_with_another_items_live_id_is_an_error(tmp_path):
+    root = _former_ids_project(
+        tmp_path,
+        "defaults: { type: requirement }\n"
+        "items:\n"
+        "  - id: REQ-001\n    text: A.\n"
+        "  - id: REQ-002\n    text: B.\n    former_ids: [REQ-001]\n",
+    )
+    project = _former_ids_build(root)
+    assert any(
+        "former_ids: 'REQ-001' is still a live item id" in d.message and d.item_id == "REQ-002"
+        for d in project.errors
+    )
+    assert "REQ-001" not in project.former_ids
+
+
+def test_former_ids_naming_itself_is_an_error(tmp_path):
+    root = _former_ids_project(
+        tmp_path,
+        "defaults: { type: requirement }\n"
+        "items:\n  - id: REQ-001\n    text: A.\n    former_ids: [REQ-001]\n",
+    )
+    project = _former_ids_build(root)
+    assert any(
+        "former_ids: 'REQ-001' is this item's own current id" in d.message
+        for d in project.errors
+    )
+
+
+def test_former_ids_claimed_by_two_items_is_an_error(tmp_path):
+    root = _former_ids_project(
+        tmp_path,
+        "defaults: { type: requirement }\n"
+        "items:\n"
+        "  - id: REQ-001\n    text: A.\n    former_ids: [REQ-OLD-01]\n"
+        "  - id: REQ-002\n    text: B.\n    former_ids: [REQ-OLD-01]\n",
+    )
+    project = _former_ids_build(root)
+    message = next(d.message for d in project.errors if "REQ-OLD-01" in d.message)
+    assert "REQ-001" in message and "REQ-002" in message
+    assert "exactly one item" in message
+
+
+def test_former_ids_resolve_bracketed_reference_with_a_formerly_marker(tmp_path):
+    (tmp_path / "refdes.yaml").write_text(FORMER_IDS_SCHEMA, encoding="utf-8")
+    items = tmp_path / "items"
+    items.mkdir()
+    (items / "r.yaml").write_text(
+        "defaults: { type: requirement }\n"
+        "items:\n  - id: REQ-001\n    text: Renumbered.\n    former_ids: [REQ-050]\n",
+        encoding="utf-8",
+    )
+    (items / "dec.md").write_text(
+        "---\nid: DEC-001\ntype: decision\n---\n\nSee [[REQ-050]] for context.\n",
+        encoding="utf-8",
+    )
+    project = _former_ids_build(tmp_path)
+    assert not project.errors
+    html = project.items["DEC-001"].body_html
+    assert 'class="ref ref-former"' in html
+    assert 'href="req-001.html"' in html
+    assert 'data-ref="REQ-001"' in html
+    assert "(formerly REQ-050)" in html
+
+
+def test_former_ids_resolve_bare_reference_when_it_fits_the_bare_pattern(tmp_path):
+    (tmp_path / "refdes.yaml").write_text(FORMER_IDS_SCHEMA, encoding="utf-8")
+    items = tmp_path / "items"
+    items.mkdir()
+    (items / "r.yaml").write_text(
+        "defaults: { type: requirement }\n"
+        "items:\n  - id: REQ-001\n    text: Renumbered.\n    former_ids: [REQ-050]\n",
+        encoding="utf-8",
+    )
+    (items / "dec.md").write_text(
+        "---\nid: DEC-001\ntype: decision\n---\n\nSee REQ-050 for context.\n",
+        encoding="utf-8",
+    )
+    project = _former_ids_build(tmp_path)
+    html = project.items["DEC-001"].body_html
+    assert 'class="ref ref-former"' in html
+    assert "(formerly REQ-050)" in html
+
+
+def test_former_ids_shaped_like_a_legacy_underscore_id_only_link_explicitly(tmp_path):
+    """`BARE_REF_RE` requires a `-<digits>` suffix, so an underscore-style former
+    id like the CAN_00 example in finding 12 can never bare-autolink -- must
+    stay reachable via [[CAN_00]], and the gap must be visible, not silent."""
+    (tmp_path / "refdes.yaml").write_text(FORMER_IDS_SCHEMA, encoding="utf-8")
+    items = tmp_path / "items"
+    items.mkdir()
+    (items / "r.yaml").write_text(
+        "defaults: { type: requirement }\n"
+        "items:\n  - id: REQ-001\n    text: Renumbered.\n    former_ids: [CAN_00]\n",
+        encoding="utf-8",
+    )
+    (items / "dec.md").write_text(
+        "---\nid: DEC-001\ntype: decision\n---\n\n"
+        "Bare mention CAN_00 stays plain text. Explicit [[CAN_00]] still resolves.\n",
+        encoding="utf-8",
+    )
+    project = _former_ids_build(tmp_path)
+    assert any(
+        "'CAN_00' does not match the bare-reference shape" in d.message
+        and "[[CAN_00]]" in d.message
+        for d in project.warnings
+    )
+    html = project.items["DEC-001"].body_html
+    assert "Bare mention CAN_00 stays plain text" in html
+    assert html.count('class="ref ref-former"') == 1  # only the explicit one resolved
+
+
+def test_cli_audit_lists_former_ids(tmp_path, capsys):
+    (tmp_path / "refdes.yaml").write_text(FORMER_IDS_SCHEMA, encoding="utf-8")
+    items = tmp_path / "items"
+    items.mkdir()
+    (items / "r.yaml").write_text(
+        "defaults: { type: requirement }\n"
+        "items:\n  - id: REQ-001\n    text: Renumbered.\n    former_ids: [REQ-050]\n",
+        encoding="utf-8",
+    )
+    assert cli_mod.main(["-c", str(tmp_path / "refdes.yaml"), "audit"]) == 0
+    out = capsys.readouterr().out
+    assert "Former IDs:" in out
+    assert "REQ-050" in out and "REQ-001" in out
+
+
+def test_items_json_exports_former_ids(tmp_path):
+    (tmp_path / "refdes.yaml").write_text(FORMER_IDS_SCHEMA, encoding="utf-8")
+    items = tmp_path / "items"
+    items.mkdir()
+    (items / "r.yaml").write_text(
+        "defaults: { type: requirement }\n"
+        "items:\n  - id: REQ-001\n    text: Renumbered.\n    former_ids: [REQ-050]\n",
+        encoding="utf-8",
+    )
+    project = _former_ids_build(tmp_path)
+    payload = render.items_json(project)
+    entry = next(i for i in payload["items"] if i["id"] == "REQ-001")
+    assert entry["former_ids"] == ["REQ-050"]
+
+
 FLOW_STYLE_LIST_FILE = """\
 defaults:
   type: requirement

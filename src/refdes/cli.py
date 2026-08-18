@@ -457,6 +457,11 @@ def cmd_audit(args) -> int:
                 label = "workspace" if len(usage.workspaces) == 1 else "workspaces"
                 print(f"  {'':<14} — {label}: {', '.join(usage.workspaces)}")
 
+    if project.former_ids:
+        print("\nFormer IDs:")
+        for old_id, new_id in sorted(project.former_ids.items()):
+            print(f"  {old_id:<14} -> {new_id}")
+
     print(f"\n{len(project.items)} items audited "
           f"({len(project.local_items)} local)")
     return 0
