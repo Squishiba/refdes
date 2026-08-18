@@ -711,6 +711,23 @@ def evaluate_block(source: str, env: dict[str, Value]) -> list[CalcOutcome]:
         match = ANNOTATED_RE.match(line)
         if match:
             name, annotation, expression = match.groups()
+            # Finding 9: a tolerance belongs on the right-hand side (evaluate_
+            # assignment splits on it there); one character to the left, next to
+            # the unit assertion, "W ± 10%" can never parse as a unit. Caught
+            # here, ahead of evaluation, so the message names the fix instead of
+            # describing what the parser saw ("unknown unit 'W ± 10%'").
+            tol_parts = TOLERANCE_SPLIT.split(annotation, maxsplit=1)
+            if len(tol_parts) == 2:
+                unit_part, tol_part = tol_parts[0].strip(), tol_parts[1].strip()
+                outcomes.append(
+                    CalcOutcome(
+                        name, expression, comment, None,
+                        "a tolerance belongs on the right-hand side — "
+                        f"{name} : {unit_part} = {expression} ± {tol_part}",
+                        annotation,
+                    )
+                )
+                continue
         else:
             match = ASSIGN_RE.match(line)
             if not match:

@@ -112,6 +112,46 @@ def test_unit_assertion_catches_dimensional_drift():
     assert "declared as W" in outcomes[0].error
 
 
+def test_misplaced_tolerance_names_the_fix_not_the_parse_failure():
+    """Finding 9: a tolerance one character to the left of where it belongs
+    (next to the unit assertion, not the expression) must not surface as
+    "unknown unit 'W ± 10%'" -- that describes what the parser saw, not what
+    the author meant, while they're one character from working syntax."""
+    outcomes = calc.evaluate_block("P : W ± 10% = V * I", {})
+    assert outcomes[0].error is not None
+    assert "unknown unit" not in outcomes[0].error
+    assert (
+        "a tolerance belongs on the right-hand side — P : W = V * I ± 10%"
+        == outcomes[0].error
+    )
+
+
+def test_misplaced_tolerance_plus_minus_spelling_is_also_caught():
+    outcomes = calc.evaluate_block("P : W +/- 10% = V * I", {})
+    assert outcomes[0].error is not None
+    assert "a tolerance belongs on the right-hand side — P : W = V * I ± 10%" == outcomes[0].error
+
+
+def test_misplaced_tolerance_error_reaches_the_build_diagnostic(tmp_path):
+    (tmp_path / "refdes.yaml").write_text(
+        "site: { title: T, out: _site }\n"
+        "types:\n  decision: { prefix: DEC, fields: {} }\n",
+        encoding="utf-8",
+    )
+    items = tmp_path / "items"
+    items.mkdir()
+    (items / "dec.md").write_text(
+        "---\nid: DEC-001\ntype: decision\n---\n\n"
+        "```calc\nV = 3.3 V\nI = 1.2 A\nP : W ± 10% = V * I\n```\n",
+        encoding="utf-8",
+    )
+    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    parse.load_items(project)
+    build_mod.build(project)
+    message = next(d.message for d in project.errors if "P" in d.message)
+    assert "calc 'P': a tolerance belongs on the right-hand side — P : W = V * I ± 10%" == message
+
+
 def test_mil_is_a_length_not_pints_angular_mil():
     """pint reads a bare `mil` as the NATO angular mil, which is dimensionless.
 
