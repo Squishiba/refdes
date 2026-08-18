@@ -29,7 +29,11 @@ DIAGNOSTIC_LEVELS = (ERROR, WARNING, INFO)
 
 # refdes-project.yaml: project-level presentation/behaviour settings, distinct
 # from refdes.yaml's schema. See schema.py's loader for validation.
-ITEM_LAYOUTS = ("flat", "workspace")  # "workspace" is recorded/validated only; see docs/design/standard-library.md
+# "flat" is today's items/<board>/; "workspace" adds one more path segment,
+# items/<workspace>/<board>/ -- a fixed choice, not a path template, so the
+# tool never has to promise arbitrary nesting depth. See boards.py/workspaces.py
+# and docs/workspaces.md.
+ITEM_LAYOUTS = ("flat", "workspace")
 BASELINE_IDENTITIES = ("os_user", "git_identity")
 
 # The seven configurable release-gate rules from docs/design/lifecycle.md §1,
@@ -109,13 +113,39 @@ class BoardSpec:
     """One entry in the opt-in `boards:` registry.
 
     A board's items are matched by the first path segment under `items/`, unless
-    `path` says that segment is spelled differently from the board's own key.
+    `path` says that segment is spelled differently from the board's own key --
+    or, under `item_layout: workspace`, the second segment (see WorkspaceSpec).
     """
 
     name: str
     label: str
     token: str = ""  # optional; checked for consistency against item id prefixes
     path: str = ""   # alias for the items/ path segment; defaults to `name`
+
+    @property
+    def path_segment(self) -> str:
+        return self.path or self.name
+
+
+@dataclass
+class WorkspaceSpec:
+    """One entry in the opt-in `workspaces:` registry -- an ownership boundary
+    one level above boards. A workspace holds everything used only by that
+    workspace; it's the seam along which a project would later split, so
+    extracting it is a folder move, not a renumbering. Matched by the first
+    path segment under `items/` when `item_layout: workspace`, unless `path`
+    says that segment is spelled differently from the workspace's own key.
+
+    `shared: true` means any workspace may depend on this one -- see
+    workspaces.py's cross-workspace reference lint, which otherwise flags an
+    authored link crossing from one workspace into another as a hidden
+    dependency that would make the source workspace harder to extract later.
+    """
+
+    name: str
+    label: str
+    shared: bool = False
+    path: str = ""  # alias for the items/ path segment; defaults to `name`
 
     @property
     def path_segment(self) -> str:
@@ -251,6 +281,8 @@ class Item:
     origin: str = ""        # name of the import it came from
     board_hint: str = ""    # explicit `board:` override, item value beats file defaults
     board: str = ""         # resolved board key; "" if boards: is unused or no match
+    workspace_hint: str = ""  # explicit `workspace:` override, same precedence as board_hint
+    workspace: str = ""       # resolved workspace key; "" if workspaces: is unused or no match
     citations: list[CitationStatus] = field(default_factory=list)  # populated during build
 
     @property
@@ -300,6 +332,7 @@ class Page:
     order: int = 100
     in_nav: bool = True
     board: str = ""  # optional `board:` tag; groups this page under that board's nav entry
+    workspace: str = ""  # optional `workspace:` tag; groups this page under that workspace's nav entry
     body_html: str = ""
     headings: list[tuple[int, str, str]] = field(default_factory=list)  # level, text, anchor
 
@@ -361,6 +394,10 @@ class Project:
     # (item_id, previous_board, current_board), for items whose board changed
     # since the last time `.refdes/boards.yaml` was written.
     board_moves: list[tuple[str, str, str]] = field(default_factory=list)
+    workspaces: dict[str, WorkspaceSpec] = field(default_factory=dict)
+    # Same shape as board_moves, for workspace membership -- recorded in the
+    # same `.refdes/boards.yaml` manifest, under its own `workspaces:` key.
+    workspace_moves: list[tuple[str, str, str]] = field(default_factory=list)
     # Project-root-relative paths of every local file that must be copied into
     # `_site/assets/`, mirroring this same path -- populated by resolved local
     # `<img>` references and by `site.assets:` directories.
@@ -388,6 +425,11 @@ class Project:
     # which copied unconditionally.
     publish_datasheets: bool = False
     release_gate: dict[str, dict[str, bool]] = field(default_factory=_default_release_gate)
+    # Diagnostic level for an authored link crossing from one workspace into a
+    # non-shared one (workspaces.py's cross-workspace lint). Configurable
+    # because how strictly a project wants this enforced varies; defaults to
+    # warning, not error, so adopting workspaces never breaks an existing build.
+    cross_workspace_severity: str = WARNING
 
     @property
     def local_items(self) -> list[Item]:

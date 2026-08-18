@@ -2165,7 +2165,7 @@ def test_first_build_records_the_manifest_without_warning(board_project):
     build_mod.build(project, seal_write=True)
     assert not project.board_moves
     manifest = boards_mod.load_manifest(project)
-    assert manifest["REQ-A-001"] == "board-a"
+    assert manifest["boards"]["REQ-A-001"] == "board-a"
 
 
 def test_moving_a_file_to_another_board_warns_but_does_not_error(board_project):
@@ -2186,7 +2186,7 @@ def test_moving_a_file_to_another_board_warns_but_does_not_error(board_project):
         for d in project2.warnings
     )
     # Not accepted: the manifest still remembers the old board.
-    assert boards_mod.load_manifest(project2)["REQ-A-001"] == "board-a"
+    assert boards_mod.load_manifest(project2)["boards"]["REQ-A-001"] == "board-a"
 
 
 def test_accept_board_move_updates_the_manifest_and_silences_future_builds(board_project):
@@ -2199,7 +2199,7 @@ def test_accept_board_move_updates_the_manifest_and_silences_future_builds(board
 
     project2 = _build_at(board_project)
     build_mod.build(project2, seal_write=True, accept_board_move=True)
-    assert boards_mod.load_manifest(project2)["REQ-A-001"] == "board-b"
+    assert boards_mod.load_manifest(project2)["boards"]["REQ-A-001"] == "board-b"
 
     project3 = _build_at(board_project)
     build_mod.build(project3, seal_write=True)
@@ -2239,7 +2239,7 @@ def test_a_move_off_the_registry_is_drift_too(board_project):
         for d in project2.warnings
     )
     # Not accepted: the manifest still remembers the old board.
-    assert boards_mod.load_manifest(project2)["REQ-A-001"] == "board-a"
+    assert boards_mod.load_manifest(project2)["boards"]["REQ-A-001"] == "board-a"
 
 
 def test_accept_board_move_off_the_registry_records_the_empty_board(board_project):
@@ -2251,7 +2251,7 @@ def test_accept_board_move_off_the_registry_records_the_empty_board(board_projec
 
     project2 = _build_at(board_project)
     build_mod.build(project2, seal_write=True, accept_board_move=True)
-    assert boards_mod.load_manifest(project2)["REQ-A-001"] == ""
+    assert boards_mod.load_manifest(project2)["boards"]["REQ-A-001"] == ""
 
     project3 = _build_at(board_project)
     assert not project3.board_moves  # drift silenced: recorded "" matches resolved ""

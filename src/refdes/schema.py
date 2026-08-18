@@ -16,6 +16,7 @@ from .model import (
     ITEM_LAYOUTS,
     ON_CHANGE_MODES,
     RELEASE_GATE_DEFAULTS,
+    WARNING,
     BoardSpec,
     FieldSpec,
     ImportSpec,
@@ -23,6 +24,7 @@ from .model import (
     LinkType,
     Project,
     SchemaError,
+    WorkspaceSpec,
 )
 
 CONFIG_NAME = "refdes.yaml"
@@ -40,6 +42,7 @@ _KNOWN_SETTINGS = {
     "require_rejection_rationale",
     "publish_datasheets",
     "release_gate",
+    "cross_workspace_severity",
 }
 
 
@@ -103,6 +106,13 @@ def _load_project_settings(root: str) -> dict[str, Any]:
             f"publish_datasheets must be true or false, got {publish_datasheets!r}"
         )
 
+    cross_workspace_severity = raw.get("cross_workspace_severity", WARNING)
+    if cross_workspace_severity not in DIAGNOSTIC_LEVELS:
+        raise _settings_error(
+            f"cross_workspace_severity must be one of {list(DIAGNOSTIC_LEVELS)}, "
+            f"got {cross_workspace_severity!r}"
+        )
+
     release_gate = {name: dict(rule) for name, rule in RELEASE_GATE_DEFAULTS.items()}
     overlay = raw.get("release_gate") or {}
     if not isinstance(overlay, dict):
@@ -147,6 +157,7 @@ def _load_project_settings(root: str) -> dict[str, Any]:
         "require_rejection_rationale": require_rejection_rationale,
         "publish_datasheets": publish_datasheets,
         "release_gate": release_gate,
+        "cross_workspace_severity": cross_workspace_severity,
     }
 
 
@@ -422,6 +433,41 @@ def load_project(config_path: str | None = None, start: str = ".") -> Project:
         path_owner[segment] = bname
         boards[bname] = spec
 
+    # Own path-segment namespace -- a workspace is a different level under
+    # items/ than a board (items/<workspace>/<board>/), so a workspace's
+    # segment never collides with a board's own.
+    workspaces: dict[str, WorkspaceSpec] = {}
+    workspace_path_owner: dict[str, str] = {}
+    for wname, wspec in (raw.get("workspaces") or {}).items():
+        wspec = wspec or {}
+        spec = WorkspaceSpec(
+            name=wname,
+            label=wspec.get("label", wname),
+            shared=bool(wspec.get("shared", False)),
+            path=str(wspec.get("path") or ""),
+        )
+        segment = spec.path_segment
+        if segment in workspace_path_owner:
+            raise SchemaError(
+                f"workspaces.{wname} and workspaces.{workspace_path_owner[segment]} "
+                f"both map to items/{segment}/ — path segments must be unique"
+            )
+        workspace_path_owner[segment] = wname
+        workspaces[wname] = spec
+
+    # A board and a workspace share one generated-filename namespace
+    # (`<report>-<key>.html`, and `<report>-<key>` in the drift manifest), so a
+    # name used for both would collide there even though their path levels
+    # don't collide above.
+    name_collision = set(boards) & set(workspaces)
+    if name_collision:
+        clashing = sorted(name_collision)[0]
+        raise SchemaError(
+            f"{clashing!r} is declared as both a board and a workspace — boards "
+            f"and workspaces share one namespace for generated report names "
+            f"(e.g. coverage-{clashing}.html); rename one of them"
+        )
+
     return Project(
         title=site.get("title", "Design Reference"),
         out_dir=site.get("out", "_site"),
@@ -440,10 +486,12 @@ def load_project(config_path: str | None = None, start: str = ".") -> Project:
         unit_aliases=dict(units.get("aliases") or {}),
         root=root,
         boards=boards,
+        workspaces=workspaces,
         sigfigs=settings["sigfigs"],
         item_layout=settings["item_layout"],
         baseline_identity=settings["baseline_identity"],
         require_rejection_rationale=settings["require_rejection_rationale"],
         publish_datasheets=settings["publish_datasheets"],
         release_gate=settings["release_gate"],
+        cross_workspace_severity=settings["cross_workspace_severity"],
     )
