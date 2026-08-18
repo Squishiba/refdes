@@ -9,6 +9,44 @@ and this project uses [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- The standard schema library: a bundled `hardware@1` dictionary (six item
+  types -- `requirement`, `constraint`, `decision`, `test`, `component`,
+  `log` -- their fields, status lifecycles, and thirteen-verb link
+  vocabulary) resolved live, by reference, into any project declaring
+  `standard: {base: hardware, version: 1, presets: []}` in `refdes.yaml`.
+  `refdes.yaml` never contains a copy of the standard's `types:`/
+  `link_types:`/`field_sets:` -- only the pointer -- and the project's own
+  overlay merges on top (add a field, remove one, redeclare an enum, add or
+  remove a whole type, with a load-time error if the removal breaks
+  something still relied on). `standard: none`, or omitting `standard:`
+  entirely, is the explicit escape hatch: today's fully self-declared
+  behaviour, unchanged. See [the standard library](docs/standard-library.md).
+- `field_sets:`/`include:`: named, reusable groups of field definitions
+  pulled into a type instead of retyped on each -- the mechanism the
+  standard is itself authored with (`provenance`, `stewardship`), also
+  available to a project's own custom types.
+- An optional `design-debate` preset (`debate`/`option`/`claim`/`position`),
+  bundled but not enabled by default, opted into with
+  `standard.presets: [design-debate]`. Presets are peers: purely additive
+  against the base and each other, with a name collision a hard load-time
+  error naming both sides.
+- `coverable:`, `coverable_statuses:`, and `verifying_statuses:` on any
+  `types:` entry (standard or bespoke) -- engine-level coverage flags, not
+  standard-specific plumbing. They replace three previously hardcoded
+  behaviours in `compute_coverage()` (a fixed requirement/constraint type
+  gate, a hardcoded `status == "retired"` exclusion, and detecting `test`
+  items by type name). A type that declares no `coverable:` falls back to
+  the old name-based convention with a one-time warning, preserving
+  pre-existing behaviour exactly.
+- `required_when:` on any field: conditionally required based on a sibling
+  enum field's current value, or on a link being present
+  (`required_when: {links: alternate}`), cross-validated against the fully
+  merged schema at load time. Wired to `decision.rationale` via the
+  already-parsed `require_rejection_rationale` setting in
+  `refdes-project.yaml`.
+- This repository's own sample project now declares
+  `standard: {base: hardware, version: 1}` instead of hand-declaring its six
+  types.
 - `refdes-project.yaml`: an optional, committed, project-level settings file
   sitting next to `refdes.yaml` for presentation/behaviour preferences that
   aren't schema -- `sigfigs`, `item_layout`, `baseline_identity`,
@@ -33,6 +71,12 @@ and this project uses [Semantic Versioning](https://semver.org/).
 
 ### Breaking
 
+- The "satisfied but not verified" coverage warning now only fires for an
+  item whose coverage stage is actually `satisfied`, not merely "not yet
+  verified" (which also matched `addressed`). Latent since `constraint` was
+  always coverable but never eligible for this warning; migrating a
+  project's `constraint` type onto `coverable: true` (as the standard does)
+  can surface it for the first time on an addressed-only constraint.
 - Vendored citation PDFs are no longer copied into the built site by
   default. Manufacturer datasheets are generally copyrighted, so publishing
   them is now opt-in via `publish_datasheets: true` in

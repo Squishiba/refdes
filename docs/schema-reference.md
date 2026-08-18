@@ -10,11 +10,18 @@ site:        { ... }   # title, output directory, version
 id:          { ... }   # ID width and ledger location
 history:     { ... }   # default on_change mode
 units:       { ... }   # preferred display units
+standard:    { ... }   # the bundled standard dictionary, or "none"
+field_sets:  { ... }   # reusable field groups, include:d by a type
 link_types:  { ... }   # relationships and their inverses
 types:       { ... }   # item types
 imports:     [ ... ]   # other projects to read
 boards:      { ... }   # opt-in board registry
 ```
+
+`standard:` (or its absence) determines where `link_types:`/`types:` start
+from before this file's own blocks are applied on top — see [the standard
+library](standard-library.md) for the full picture. Everything below describes
+the merged result, regardless of where each piece came from.
 
 ---
 
@@ -90,6 +97,53 @@ ignored. A unit you write yourself is never rewritten. See [math](math.md).
 
 ---
 
+## `standard`
+
+```yaml
+standard:
+  base: hardware
+  version: 1
+  presets: []
+```
+
+Points at the bundled standard dictionary instead of hand-declaring
+`link_types:`/`types:`/`field_sets:` from scratch. Resolved fresh, from the
+installed `refdes` package, on every load — this file never contains a copy of
+what the standard declares, only the pointer to it. Absent entirely, or the
+string `standard: none`, means no standard: every type, link, and field set
+comes only from this file, exactly like every project before this existed.
+
+| Key | Required | Purpose |
+|---|---|---|
+| `base` | yes | Which bundled dictionary — `hardware` today |
+| `version` | yes | A pinned integer, e.g. `1` — never the string `"latest"` |
+| `presets` | no, defaults to `[]` | Optional bundled extensions layered on top, e.g. `[design-debate]` |
+
+This file's own `link_types:`/`types:`/`field_sets:` are merged on top of the
+resolved standard, not replacing it — see [the standard
+library](standard-library.md#overriding-and-extending) for the merge rules
+(add a field, remove one, redeclare an enum, add or remove a whole type).
+
+---
+
+## `field_sets`
+
+```yaml
+field_sets:
+  provenance:
+    source: { type: text, on_change: log }
+    tags:   { type: list, on_change: ignore }
+```
+
+Named, reusable groups of field definitions, `include:`d by one or more types
+instead of being retyped on each. The standard is authored this way internally
+(`provenance`, `stewardship`); a project can declare its own for fields
+repeated across its own custom types. See [the standard
+library](standard-library.md#field_sets-and-include) for `include:`'s merge
+order against a type's own fields.
+
+---
+
 ## `link_types`
 
 ```yaml
@@ -117,12 +171,15 @@ types:
     label: Constraint
     append_only: false
     preview: [status, limit, rationale]
+    coverable: true
+    coverable_statuses: [active]
     fields:
       title:  { type: text,  required: true, on_change: invalidate }
       limit:  { type: limit, required: true, on_change: invalidate }
-      status: { type: enum, choices: [draft, open, accepted, retired],
+      status: { type: enum, choices: [draft, active, retired],
                 default: draft, on_change: invalidate }
       owner:  { type: person, on_change: log }
+    include: [provenance]
     links:
       derives_from: [requirement, constraint]
     body: { on_change: invalidate }
@@ -135,10 +192,14 @@ types:
 | `append_only` | `false` | Seal items of this type after first build |
 | `preview` | `[]` | Fields shown in hover previews and index columns |
 | `fields` | `{}` | Legal fields |
+| `include` | not set | Names of `field_sets:` entries merged into `fields:` before this type's own fields are applied |
 | `links` | `{}` | Legal links, mapped to allowed target types |
 | `body` | project default | `on_change` mode for the markdown body |
 | `satisfying_statuses` | not set — every `satisfies:` link counts | `status` values that count as settled; see [coverage](coverage.md#which-statuses-count-as-satisfying) |
 | `check_severity` | `error` | Diagnostic level for a failing `checks:` entry on items of this type; see [checks](checks.md#candidates-vs-decisions) |
+| `coverable` | not set — falls back to name-based detection, see below | Whether items of this type get a `Coverage` object at all |
+| `coverable_statuses` | not set — excludes `status: retired` if a `status` field exists, nothing otherwise | `status` values that keep an item in coverage; unlisted statuses (e.g. `draft`) are excluded entirely, not just "open" |
+| `verifying_statuses` | not set — every `verifies:` link counts | `status` values on a verifier (a type declaring a `verifies`-family link) that actually count as having verified, as opposed to merely linked; mirrors `satisfying_statuses` |
 
 `satisfying_statuses` requires the type to declare a `status` field — the project
 fails to load if it doesn't.
@@ -148,15 +209,54 @@ fails to load if it doesn't.
 rendered Checks table) still shows pass/fail exactly the same way regardless of
 the setting.
 
+`coverable`, `coverable_statuses`, and `verifying_statuses` are engine
+capabilities, not standard-specific plumbing — available on any type in any
+project, `standard: none` included. A type that never declares `coverable:`
+falls back to the pre-existing convention (`requirement`/`constraint` are
+coverable by name) with a one-time warning naming the fix; that fallback, and
+the requirement-only restriction on the per-item coverage warnings it
+preserves, is removed in refdes 1.0. See
+[coverage](coverage.md#what-gets-coverage) for the full behavior.
+
 ### Field options
 
 | Key | Purpose |
 |---|---|
 | `type` | `text`, `enum`, `limit`, `person`, `date`, `list`, `options`, `checks`, `citations`, `quantity` |
 | `required` | Missing or empty is a build error |
+| `required_when` | Required only when a sibling condition currently holds — see below |
 | `choices` | Allowed values, for `type: enum` |
 | `default` | Applied when the item omits the field |
 | `on_change` | `invalidate`, `log`, or `ignore` |
+
+### `required_when`
+
+A field required only when a sibling field currently holds a particular value,
+or a particular link is present — instead of being unconditionally `required`:
+
+```yaml
+fields:
+  rationale:
+    type: text
+    on_change: invalidate
+    required_when: { status: rejected }
+```
+
+- Each key names another field on the *same* type (which must be `type: enum`
+  — its declared `choices:` is what lets this be validated) or the reserved
+  key `links`, whose value names one or more link names on the type.
+- Each value is a scalar or a list of scalars (a list is "any of these").
+  Multiple keys are ANDed: every named condition must currently hold.
+- A field declares `required: true` or `required_when:`, never both — that
+  combination is a `SchemaError` at load.
+- Validated against the fully merged schema (after any `standard:` and
+  overrides are applied): a `required_when:` naming a field that doesn't
+  exist, isn't an `enum`, or names a value outside that enum's resolved
+  `choices:` fails the build at load time, not silently.
+
+The standard's own `decision.rationale` uses this
+(`required_when: {status: rejected}`), toggled by
+`require_rejection_rationale:` in `refdes-project.yaml`.
 
 **`enum`, `limit`, and `citations` are enforced today.** `enum` is checked
 against `choices`; `limit` is parsed as a quantity; `citations` is checked to
@@ -183,9 +283,15 @@ formats](output.md#items.json).
 
 ### Starter types
 
-`requirement`, `constraint`, `decision`, `component`, `test`, `log`. Add, remove,
-or rename them freely — nothing in the code depends on these names except
-`coverage`, which looks for `requirement` and `constraint`.
+`requirement`, `constraint`, `decision`, `component`, `test`, `log` — the
+[standard library](standard-library.md) ships these by default, so most
+projects never declare `types:` at all. A project may still add, remove, or
+override any of them under `standard:`'s merge rules, or declare its own from
+scratch under `standard: none`. Nothing in the code depends on these
+particular names — `coverable:`/`coverable_statuses:`/`verifying_statuses:`
+(above) are what makes a type participate in coverage, not its name; the
+fallback that still checks for `requirement`/`constraint` by name only fires
+when a type declares no `coverable:` at all, and is removed in refdes 1.0.
 
 ---
 

@@ -15,6 +15,7 @@ time.
 
 | Guide | Covers |
 |---|---|
+| [The standard library](standard-library.md) | The bundled types and links every project starts with, and how to override or extend them |
 | [Authoring items](authoring.md) | The two file formats, fields, bodies, when to use which |
 | [Pages](pages.md) | Narrative markdown alongside your items — and pages-only sites |
 | [Markdown reference](markdown.md) | Every formatting feature that works in an item body |

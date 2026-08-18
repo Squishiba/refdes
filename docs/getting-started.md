@@ -17,18 +17,37 @@ On macOS or Linux the interpreter is `.venv/bin/python`. Everything below assume
 
 ## 1. Create the project
 
-A project is any folder containing `refdes.yaml`. Copy the starter schema from
-this repository to begin — it already defines requirements, constraints, decisions,
-components, tests, and log entries. Drop the `boards:` block at the bottom of
-the file for now — it registers this repository's own two example boards, and
-a single-board project has no use for it yet. See
-[multiple boards](multi-board.md) when a second board shows up.
+A project is any folder containing `refdes.yaml`. The [standard
+library](standard-library.md) already defines requirements, constraints,
+decisions, components, tests, and log entries, so a new project's `refdes.yaml`
+can be this short:
+
+```yaml
+site:
+  title: "My Board — Design Reference"
+  out: _site
+
+id:
+  width: 3
+  ledger: .refdes/ids.yaml
+
+standard:
+  base: hardware
+  version: 1
+  presets: []
+```
 
 ```
 my-board/
   refdes.yaml
   items/
 ```
+
+Nothing here defines a `requirement` or a `link_types:` block — that all comes
+from the pinned standard, resolved live from the installed `refdes` package.
+See [the standard library](standard-library.md) for what it covers, and
+`standard: none` if you'd rather author every type by hand, as every project
+did before this existed.
 
 Everything under `items/` is scanned recursively. The folder layout is yours to
 choose; it has no meaning to the tool.
@@ -46,7 +65,7 @@ defaults:
   prefix: REQ-PWR
   owner: J. Bin
   tags: [power]
-  status: accepted
+  status: active
 
 items:
   - text: The unit shall operate from an input supply of 9 V to 36 V.
@@ -78,7 +97,7 @@ The IDs are now written into your file. They will never change. See [IDs](ids.md
 defaults:
   type: constraint
   prefix: CON-THM
-  status: accepted
+  status: active
 
 items:
   - id: CON-THM-001
@@ -106,7 +125,7 @@ title: 3V3 rail regulator topology
 status: accepted
 date: 2026-03-14
 satisfies: [REQ-PWR-002]
-constrains: [CON-THM-001]
+constrained_by: [CON-THM-001]
 options:
   - name: LDO (TPS7A4700)
     verdict: rejected

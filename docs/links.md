@@ -9,17 +9,22 @@ and what they may point at, is declared in `refdes.yaml`:
 types:
   decision:
     links:
-      satisfies:  [requirement]
-      constrains: [constraint]
-      supersedes: [decision]
+      satisfies:      [requirement]
+      constrained_by: [constraint]
+      supersedes:     [decision]
 ```
 
 In an item:
 
 ```yaml
-satisfies: [REQ-PWR-002, REQ-PWR-003]
-constrains: [CON-THM-001]
+satisfies:      [REQ-PWR-002, REQ-PWR-003]
+constrained_by: [CON-THM-001]
 ```
+
+The [standard library](standard-library.md) already declares this vocabulary for
+the six starter types, so most projects never write a `types:...links:` block at
+all — this is what to reach for on a custom type, or one the standard doesn't
+cover.
 
 Pointing at a nonexistent item, or at an item of a type the schema disallows, is a
 build error.
@@ -30,8 +35,8 @@ Each link type declares its inverse:
 
 ```yaml
 link_types:
-  verified_by: { inverse: verifies,     label: "Verified by" }
-  satisfies:   { inverse: satisfied_by, label: "Satisfies" }
+  verifies:  { inverse: verified_by,  label: "Verifies" }
+  satisfies: { inverse: satisfied_by, label: "Satisfies" }
 ```
 
 Declare the edge from **either** end and the other direction appears automatically.

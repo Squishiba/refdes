@@ -157,9 +157,13 @@ types:
   requirement:
     fields:
       text:    { type: text, required: true, on_change: invalidate }
-      status:  { type: enum, choices: [draft, open, accepted, retired], default: draft }
+      status:  { type: enum, choices: [draft, active, retired], default: draft }
       owner:   { type: person, on_change: log }
 ```
+
+The [standard library](standard-library.md) already declares this for `requirement`
+and the other five starter types — this is what a custom type, or an override of
+a standard one, looks like.
 
 An unknown field is a **warning**, not an error, and the value is kept. The warning
 suggests a correction:

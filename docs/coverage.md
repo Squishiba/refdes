@@ -39,8 +39,23 @@ Because these fail differently:
 
 ## What gets coverage
 
-Requirements and constraints, unless their `status` is `retired`. Imported items
-are excluded — an upstream project's coverage gaps are that project's problem.
+Governed by two engine-level flags on the type, not a hardcoded list of type
+names — see [schema reference](schema-reference.md#types) for the full
+picture:
+
+- **`coverable: true`** puts items of this type in coverage at all. A type
+  that declares no `coverable:` falls back to the old convention
+  (`requirement`/`constraint` are coverable by name) with a one-time warning;
+  the [standard library](standard-library.md) declares it explicitly on both.
+- **`coverable_statuses:`** narrows which of those items actually participate,
+  by `status`. Unset, it excludes only `status: retired` (if the type has a
+  `status` field at all) — the original behavior. Set, it's an *inclusion*
+  list: `coverable_statuses: [active]` means a `draft` item isn't tracked
+  either, not just "open" — it doesn't appear in coverage or its warnings at
+  all. The standard sets this on `requirement`/`constraint`.
+
+Imported items are excluded regardless — an upstream project's coverage gaps
+are that project's problem.
 
 ## The coverage page
 
@@ -123,6 +138,34 @@ requires the type to have a `status` field; the project fails to load otherwise.
 |---|---|
 | not declared *(default)* | Every `satisfies:` link counts as satisfying, regardless of status — unchanged from before this existed |
 | a list of status values | Only a link whose `status` is in the list counts as satisfying; the rest count as `claimed` |
+
+## Which statuses count as verifying
+
+The same idea, for `verified` instead of `satisfied`. By default, any test (or
+other type declaring a `verifies`-family link) linked with `verifies:` counts
+as verifying, regardless of its own `status`:
+
+```yaml
+types:
+  test:
+    fields:
+      status: { type: enum, choices: [planned, passing, failing, blocked], default: planned }
+    links:
+      verifies: [requirement, constraint]
+    verifying_statuses: [passing]   # only a passing test actually verifies
+```
+
+Without `verifying_statuses:`, a `planned` or `failing` test still counts as
+having verified the requirement it links to — which is what let a merely-linked
+test hide behind a green coverage page. With it, only a `passing` test does;
+the rest leave the requirement at whatever stage it would otherwise reach
+(typically `satisfied`, if something has claimed it, or `addressed`/`open`
+otherwise). The [standard library](standard-library.md) sets this on `test`.
+
+| `verifying_statuses:` | Behavior |
+|---|---|
+| not declared *(default)* | Every `verifies:` link counts as verifying, regardless of status — unchanged from before this existed |
+| a list of status values | Only a link whose `status` is in the list counts as verifying |
 
 ## Closing the gaps
 

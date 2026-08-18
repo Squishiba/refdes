@@ -14,6 +14,7 @@ site:
     - index
     - getting-started
     - concepts
+    - standard-library
     - authoring
     - pages
     - markdown
