@@ -280,6 +280,13 @@ class PartUsage:
             | {i.board for i, _status in self.citers if i.board}
         )
 
+    @property
+    def workspaces(self) -> list[str]:
+        return sorted(
+            {i.workspace for i in self.components if i.workspace}
+            | {i.workspace for i, _status in self.citers if i.workspace}
+        )
+
 
 @dataclass
 class CalcLine:

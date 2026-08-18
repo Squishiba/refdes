@@ -6188,6 +6188,43 @@ def test_audit_reports_a_parts_section(parts_project, capsys):
     assert "used by CMP-004 (citation)" in out
 
 
+def test_audit_parts_section_breaks_out_workspaces(parts_project, capsys):
+    """CMP-001 (alpha) and CMP-002 (beta) share STM32G474 -- a project with a
+    workspaces: registry should see that split named, the same way boards
+    already are."""
+    cli_mod.main(["-c", str(parts_project / "refdes.yaml"), "audit"])
+    out = capsys.readouterr().out
+    assert "— workspaces: alpha, beta" in out
+
+
+def test_audit_parts_section_omits_workspace_line_for_a_flat_project(tmp_path, capsys):
+    """A project with no workspaces: registry never populates item.workspace
+    at all, so the line must not appear -- not even empty -- rather than
+    growing a confusing always-blank row."""
+    (tmp_path / "refdes.yaml").write_text(
+        "site: {title: t, out: _site}\n"
+        "boards:\n  power: {label: Power}\n"
+        "types:\n"
+        "  component:\n"
+        "    prefix: CMP\n"
+        "    fields:\n"
+        "      title: {type: text, required: true}\n"
+        "      part_number: {type: text}\n",
+        encoding="utf-8",
+    )
+    items = tmp_path / "items"
+    items.mkdir()
+    (items / "cmp-001.md").write_text(
+        "---\nid: CMP-001\ntype: component\ntitle: t.\n"
+        "part_number: TPS62913\nboard: power\n---\n",
+        encoding="utf-8",
+    )
+    cli_mod.main(["-c", str(tmp_path / "refdes.yaml"), "audit"])
+    out = capsys.readouterr().out
+    assert "— board: power" in out
+    assert "workspace" not in out
+
+
 def test_nav_parts_link_present_when_parts_exist(parts_project):
     project = _parts_build(parts_project)
     tree = nav_mod.build_nav(project, dashboard_href="index.html")

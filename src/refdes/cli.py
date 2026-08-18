@@ -448,6 +448,13 @@ def cmd_audit(args) -> int:
             if usage.boards:
                 label = "board" if len(usage.boards) == 1 else "boards"
                 print(f"  {'':<14} — {label}: {', '.join(usage.boards)}")
+            # A flat-layout project (no workspaces: registry) never
+            # populates item.workspace at all, so usage.workspaces is
+            # always empty there -- this line simply never appears rather
+            # than growing an always-empty row.
+            if usage.workspaces:
+                label = "workspace" if len(usage.workspaces) == 1 else "workspaces"
+                print(f"  {'':<14} — {label}: {', '.join(usage.workspaces)}")
 
     print(f"\n{len(project.items)} items audited "
           f"({len(project.local_items)} local)")

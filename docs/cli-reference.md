@@ -306,7 +306,11 @@ yet -- project is in draft)` there instead, and each "Since last..." section
 shows `(no revision/release stamped yet)`. The "Citations" section only
 appears for a project that declares a `citations`-typed field somewhere and
 has at least one item using it; "Parts" only for one that has at least one
-`part_number`, from either source — see [parts](parts.md).
+`part_number`, from either source — see [parts](parts.md). Each part gets
+its own `— board(s):` line and, for a project with a `workspaces:`
+registry, a `— workspace(s):` line the same way — a flat-layout project
+never populates an item's workspace in the first place, so that line simply
+never appears there rather than showing up empty.
 
 ---
 
