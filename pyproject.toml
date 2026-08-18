@@ -59,8 +59,11 @@ where = ["src"]
 
 # Without this the wheel ships only .py files, and `refdes build` dies with
 # TemplateNotFound on the first run. Templates and site assets are code here.
+# standards/**/*.yaml is the bundled standard library (base.yaml and preset
+# files per version) -- resolved live from the installed package on every
+# load_project() call, so it has to ship too. See standards.py.
 [tool.setuptools.package-data]
-refdes = ["templates/*.j2", "templates/assets/*"]
+refdes = ["templates/*.j2", "templates/assets/*", "standards/**/*.yaml"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
