@@ -287,6 +287,17 @@ def cmd_fetch(args) -> int:
     return 1 if failed else 0
 
 
+def _print_baseline_diff(diff) -> None:
+    changed = ", ".join(diff.changed)
+    print(f"  changed   {len(diff.changed)}" + (f"   {changed}" if changed else ""))
+    added = ", ".join(diff.added)
+    print(f"  added     {len(diff.added)}" + (f"   {added}" if added else ""))
+    print(f"  removed   {len(diff.removed)}")
+    for item_id, item_type, title in diff.removed:
+        print(f"    {item_id} ({item_type}) {title!r} — no longer in the project")
+    print(f"  ({diff.unchanged_count} unchanged)")
+
+
 def cmd_audit(args) -> int:
     """Suppression is allowed; invisible suppression is not."""
     project = _load(args, require_ids=False)
@@ -326,6 +337,35 @@ def cmd_audit(args) -> int:
             print(f"  {entry_id}")
     else:
         print("  (none)")
+
+    # "draft" is the state a project is in when nothing below has been
+    # stamped -- not a command, nothing to run, so this is where that state
+    # actually becomes visible (docs/design/lifecycle.md). `check`/`build`
+    # stay exactly as permissive as they always were.
+    baselines = lifecycle_mod.list_baselines(project)
+    latest_any = lifecycle_mod.latest(baselines)
+    latest_release = lifecycle_mod.latest(baselines, kind="release")
+    print("\nBaselines:")
+    if not baselines:
+        print("  (none stamped yet -- project is in draft)")
+    else:
+        print(f"  most recent stamp:   {latest_any.name} ({latest_any.kind}, {latest_any.stamped_at})")
+        if latest_release:
+            print(f"  most recent release: {latest_release.name} ({latest_release.stamped_at})")
+        else:
+            print("  most recent release: (none stamped yet)")
+
+    if latest_any:
+        print(f"\nSince last revision ({latest_any.name}, {latest_any.stamped_at}):")
+        _print_baseline_diff(lifecycle_mod.diff_against(project, latest_any))
+    else:
+        print("\nSince last revision: (no revision stamped yet)")
+
+    if latest_release:
+        print(f"\nSince last release ({latest_release.name}, {latest_release.stamped_at}):")
+        _print_baseline_diff(lifecycle_mod.diff_against(project, latest_release))
+    else:
+        print("\nSince last release: (no release stamped yet)")
 
     if project.boards:
         print("\nBoard moves since the manifest was last written:")
@@ -499,12 +539,14 @@ def main(argv: list[str] | None = None) -> int:
     p_audit = sub.add_parser(
         "audit",
         help="list suppressed fields, resealed entries, board/workspace moves, "
-        "and imports",
+        "baseline diffs, and imports",
         description="List everything the build tracks but does not fail on: schema "
         "fields excluded from invalidation, item-level history overrides, "
         "append-only log entries edited after sealing (--reseal), accepted and "
-        "outstanding board and workspace moves (--accept-board-move), and imported "
-        "projects. Suppression is allowed; invisible suppression is not.",
+        "outstanding board and workspace moves (--accept-board-move), what's "
+        "changed since the last revision and the last release (see 'refdes "
+        "revision'/'refdes release'), and imported projects. Suppression is "
+        "allowed; invisible suppression is not.",
     )
     p_audit.set_defaults(func=cmd_audit)
 
