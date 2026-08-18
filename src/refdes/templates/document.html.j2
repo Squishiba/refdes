@@ -1,12 +1,12 @@
 {% extends "base.html.j2" %}
-{% block title %}{{ project.title }}{% if board %} — {{ board.label }}{% endif %} — full record{% endblock %}
+{% block title %}{{ project.title }}{% if board %} — {{ board.label }}{% elif workspace %} — {{ workspace.label }}{% endif %} — full record{% endblock %}
 {% block content %}
 
 <article class="document">
 
-{% set record_label = ('Design record for ' ~ board.label) if board else 'Complete design record' %}
+{% set record_label = ('Design record for ' ~ board.label) if board else (('Design record for ' ~ workspace.label) if workspace else 'Complete design record') %}
 <header class="doc-head">
-  <h1>{{ project.title }}{% if board %} — {{ board.label }}{% endif %}</h1>
+  <h1>{{ project.title }}{% if board %} — {{ board.label }}{% elif workspace %} — {{ workspace.label }}{% endif %}</h1>
   <p class="muted">
     {{ record_label }}{% if project.version %}, version <code>{{ project.version }}</code>{% endif %}.
     Every item in one document, in reading order. Cross-references jump within the

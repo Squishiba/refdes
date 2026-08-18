@@ -38,21 +38,31 @@ def _anchorize(html: str, known_slugs: set[str]) -> str:
     return PAGE_HREF_RE.sub(swap, html)
 
 
+def _in_scope(item: Item, board: str | None, workspace: str | None) -> bool:
+    """The one filter every per-board/per-workspace report shares. Callers pass
+    at most one of `board`/`workspace` -- both `None` means unscoped."""
+    if board is not None and item.board != board:
+        return False
+    if workspace is not None and item.workspace != workspace:
+        return False
+    return True
+
+
 def _document_sections(
-    project: Project, board: str | None = None
+    project: Project, board: str | None = None, workspace: str | None = None
 ) -> list[tuple[str, list[Item]]]:
     """Items grouped for linear reading: schema order, log entries by date.
 
-    `board`, when given, scopes this to one board's own local items -- imported
-    items carry no board, so a per-board document has no "Imported references"
-    section.
+    `board`/`workspace`, when given, scope this to that board's or
+    workspace's own local items -- imported items carry neither, so a scoped
+    document has no "Imported references" section.
     """
     sections: list[tuple[str, list[Item]]] = []
     for type_name, spec in project.types.items():
         items = [
             i
             for i in project.items.values()
-            if i.type == type_name and not i.external and (board is None or i.board == board)
+            if i.type == type_name and not i.external and _in_scope(i, board, workspace)
         ]
         if type_name == "log":
             items.sort(key=lambda i: (str(i.fields.get("date", "")), i.id))
@@ -60,7 +70,7 @@ def _document_sections(
             items.sort(key=lambda i: i.id)
         sections.append((spec.plural, items))
 
-    if board is None:
+    if board is None and workspace is None:
         imported = sorted(
             (i for i in project.items.values() if i.external), key=lambda i: i.id
         )
@@ -69,24 +79,27 @@ def _document_sections(
     return sections
 
 
-def _coverage_rows(project: Project, board: str | None = None) -> list[tuple[Item, object]]:
+def _coverage_rows(
+    project: Project, board: str | None = None, workspace: str | None = None
+) -> list[tuple[Item, object]]:
     stage_order = {"open": 0, "addressed": 1, "claimed": 2, "satisfied": 3, "verified": 4}
     rows = [
         (project.items[item_id], cov)
         for item_id, cov in project.coverage.items()
-        if item_id in project.items
-        and (board is None or project.items[item_id].board == board)
+        if item_id in project.items and _in_scope(project.items[item_id], board, workspace)
     ]
     rows.sort(key=lambda row: (stage_order.get(row[1].stage, 9), row[0].id))
     return rows
 
 
-def _log_entries(project: Project, board: str | None = None) -> list[Item]:
+def _log_entries(
+    project: Project, board: str | None = None, workspace: str | None = None
+) -> list[Item]:
     return sorted(
         (
             i
             for i in project.local_items
-            if i.type == "log" and (board is None or i.board == board)
+            if i.type == "log" and _in_scope(i, board, workspace)
         ),
         key=lambda i: (str(i.fields.get("date", "")), i.id),
     )
@@ -102,19 +115,22 @@ def _check_state(item: Item) -> str:
     return "pass"
 
 
-def summary_payload(project: Project, board: str | None = None) -> dict:
+def summary_payload(
+    project: Project, board: str | None = None, workspace: str | None = None
+) -> dict:
     """Everything the at-a-glance view needs, computed once.
 
     The per-type pages answer "what does this item say". This answers the questions
     you actually ask at a design review: what is closest to breaking, what numbers
     does the design depend on, and what is not traced to anything.
 
-    `board`, when given, scopes every table on the page to that board's own items.
+    `board`/`workspace`, when given, scope every table on the page to that
+    board's or workspace's own items.
     """
     local = [
         i
         for i in project.items.values()
-        if not i.external and (board is None or i.board == board)
+        if not i.external and _in_scope(i, board, workspace)
     ]
 
     # Every evaluated check, tightest margin first. A pass at 2% and a pass at 200%
@@ -275,6 +291,11 @@ def items_json(project: Project) -> dict:
             name: {"label": spec.label, "token": spec.token, "path": spec.path}
             for name, spec in sorted(project.boards.items())
         }
+    if project.workspaces:
+        payload["workspaces"] = {
+            name: {"label": spec.label, "shared": spec.shared, "path": spec.path}
+            for name, spec in sorted(project.workspaces.items())
+        }
 
     payload["coverage"] = {
         item_id: {
@@ -315,6 +336,8 @@ def items_json(project: Project) -> dict:
         }
         if project.boards:
             entry["board"] = item.board
+        if project.workspaces:
+            entry["workspace"] = item.workspace
         entry.update({
             "fields": item.fields,
             "citations": _citations_json(item),
@@ -501,7 +524,9 @@ def render_site(project: Project) -> str:
 
     # Generated reports own these filenames. A page of the same name would be
     # silently clobbered by whichever is written last, so say so instead. Each
-    # board adds its own scoped set of the same four reports.
+    # board and each workspace adds its own scoped set of the same five
+    # reports -- schema.py's load-time check already guarantees a board key
+    # and a workspace key never collide, so these two updates never fight.
     reserved = {
         "coverage",
         "log",
@@ -513,6 +538,11 @@ def render_site(project: Project) -> str:
     for board_key in project.boards:
         reserved.update(
             f"{name}-{board_key}"
+            for name in ("coverage", "log", "document", "summary", "references")
+        )
+    for workspace_key in project.workspaces:
+        reserved.update(
+            f"{name}-{workspace_key}"
             for name in ("coverage", "log", "document", "summary", "references")
         )
     if project.items:
@@ -716,6 +746,79 @@ def render_site(project: Project) -> str:
                     board=board_spec,
                     previews_json=previews_json,
                     **summary_payload(project, board=board_key),
+                )
+            )
+
+    # Same five reports, one set per registered workspace, scoped to that
+    # workspace's own items -- mirrors the per-board loop above exactly.
+    for workspace_key, workspace_spec in project.workspaces.items():
+        ws_sections = _document_sections(project, workspace=workspace_key)
+        ws_known_slugs = {
+            item.slug for _label, items in ws_sections for item in items
+        }
+        written.add(f"document-{workspace_key}.html")
+        with open(
+            os.path.join(out_dir, f"document-{workspace_key}.html"), "w", encoding="utf-8"
+        ) as fh:
+            fh.write(
+                document_tpl.render(
+                    project=project,
+                    workspace=workspace_spec,
+                    sections=ws_sections,
+                    anchored=lambda html, slugs=ws_known_slugs: _anchorize(html, slugs),
+                    previews_json=previews_json,
+                )
+            )
+
+        written.add(f"coverage-{workspace_key}.html")
+        with open(
+            os.path.join(out_dir, f"coverage-{workspace_key}.html"), "w", encoding="utf-8"
+        ) as fh:
+            fh.write(
+                coverage_tpl.render(
+                    project=project,
+                    workspace=workspace_spec,
+                    coverage_rows=_coverage_rows(project, workspace=workspace_key),
+                    previews_json=previews_json,
+                )
+            )
+
+        written.add(f"log-{workspace_key}.html")
+        with open(
+            os.path.join(out_dir, f"log-{workspace_key}.html"), "w", encoding="utf-8"
+        ) as fh:
+            fh.write(
+                log_tpl.render(
+                    project=project,
+                    workspace=workspace_spec,
+                    entries=_log_entries(project, workspace=workspace_key),
+                    previews_json=previews_json,
+                )
+            )
+
+        written.add(f"references-{workspace_key}.html")
+        with open(
+            os.path.join(out_dir, f"references-{workspace_key}.html"), "w", encoding="utf-8"
+        ) as fh:
+            fh.write(
+                references_tpl.render(
+                    project=project,
+                    workspace=workspace_spec,
+                    grouped=citations_mod.by_url(project, workspace=workspace_key),
+                    previews_json=previews_json,
+                )
+            )
+
+        written.add(f"summary-{workspace_key}.html")
+        with open(
+            os.path.join(out_dir, f"summary-{workspace_key}.html"), "w", encoding="utf-8"
+        ) as fh:
+            fh.write(
+                summary_tpl.render(
+                    project=project,
+                    workspace=workspace_spec,
+                    previews_json=previews_json,
+                    **summary_payload(project, workspace=workspace_key),
                 )
             )
 

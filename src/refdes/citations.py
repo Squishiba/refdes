@@ -123,11 +123,14 @@ def collect(project: Project) -> list[tuple[Item, CitationSpec]]:
     return out
 
 
-def by_url(project: Project, board: str | None = None) -> dict[str, list[CitationStatus]]:
+def by_url(
+    project: Project, board: str | None = None, workspace: str | None = None
+) -> dict[str, list[CitationStatus]]:
     """`item.citations`, regrouped by url -- for `audit` and `references.html`.
 
-    `board`, when given, scopes this to that board's own items, the same way
-    `render._document_sections` and friends scope the other per-board reports.
+    `board`/`workspace`, when given, scope this to that board's or workspace's
+    own items, the same way `render._document_sections` and friends scope the
+    other per-board/per-workspace reports. Callers pass at most one of the two.
 
     Only meaningful after `verify()` has run (via `build()`), which is what
     populates `item.citations` in the first place.
@@ -135,6 +138,8 @@ def by_url(project: Project, board: str | None = None) -> dict[str, list[Citatio
     grouped: dict[str, list[CitationStatus]] = defaultdict(list)
     for item in project.local_items:
         if board is not None and item.board != board:
+            continue
+        if workspace is not None and item.workspace != workspace:
             continue
         for status in item.citations:
             grouped[status.spec.url].append(status)

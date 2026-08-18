@@ -1,8 +1,8 @@
 {% extends "base.html.j2" %}
-{% block title %}Design log{% if board %} — {{ board.label }}{% endif %} — {{ project.title }}{% endblock %}
+{% block title %}Design log{% if board %} — {{ board.label }}{% elif workspace %} — {{ workspace.label }}{% endif %} — {{ project.title }}{% endblock %}
 {% block content %}
 
-<h1>Design log{% if board %} — {{ board.label }}{% endif %}</h1>
+<h1>Design log{% if board %} — {{ board.label }}{% elif workspace %} — {{ workspace.label }}{% endif %}</h1>
 <p class="muted">
   Append-only, oldest first. Entries are sealed once built; a correction is a new
   entry that <code>amends</code> an earlier one, never an edit to it.

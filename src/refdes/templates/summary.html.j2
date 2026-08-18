@@ -1,11 +1,12 @@
 {% extends "base.html.j2" %}
-{% block title %}Summary{% if board %} — {{ board.label }}{% endif %} — {{ project.title }}{% endblock %}
+{% block title %}Summary{% if board %} — {{ board.label }}{% elif workspace %} — {{ workspace.label }}{% endif %} — {{ project.title }}{% endblock %}
 {% block content %}
 
-{% set cov_href = ('coverage-' ~ board.name ~ '.html') if board else 'coverage.html' %}
-{% set log_href = ('log-' ~ board.name ~ '.html') if board else 'log.html' %}
-{% set scope_label = board.label if board else 'The whole project' %}
-<h1>Summary{% if board %} — {{ board.label }}{% endif %}</h1>
+{% set scope_key = board.name if board else (workspace.name if workspace else none) %}
+{% set cov_href = ('coverage-' ~ scope_key ~ '.html') if scope_key else 'coverage.html' %}
+{% set log_href = ('log-' ~ scope_key ~ '.html') if scope_key else 'log.html' %}
+{% set scope_label = board.label if board else (workspace.label if workspace else 'The whole project') %}
+<h1>Summary{% if board %} — {{ board.label }}{% elif workspace %} — {{ workspace.label }}{% endif %}</h1>
 <p class="muted">
   {{ scope_label }} at a glance: what is closest to breaking, every number the
   design computes, and what is not traced to anything.

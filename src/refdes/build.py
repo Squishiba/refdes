@@ -12,6 +12,7 @@ from markdown_it import MarkdownIt
 
 from . import boards as boards_mod
 from . import calc, citations as citations_mod, imports, pages as pages_mod, seal
+from . import workspaces as workspaces_mod
 from .model import ERROR, INFO, INVALIDATE, WARNING, CalcLine, CheckResult, Coverage, Item, ItemType, Project
 
 # Explicit reference: [[REQ-PWR-002]] or [[REQ-PWR-002|the input range]]
@@ -751,10 +752,13 @@ def build(
     calc.set_unit_aliases(project.unit_aliases)
     calc.set_preferred_units(project.preferred_units)
     imports.load_imports(project)
+    workspaces_mod.resolve(project)
     boards_mod.resolve(project)
     pages_mod.validate_boards(project)
+    pages_mod.validate_workspaces(project)
     validate_items(project)
     resolve_links(project)
+    workspaces_mod.lint_cross_workspace_references(project)
     run_calcs(project)
     run_checks(project)
     compute_hashes(project)

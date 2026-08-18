@@ -1,10 +1,10 @@
 {% extends "base.html.j2" %}
-{% block title %}References{% if board %} — {{ board.label }}{% endif %} — {{ project.title }}{% endblock %}
+{% block title %}References{% if board %} — {{ board.label }}{% elif workspace %} — {{ workspace.label }}{% endif %} — {{ project.title }}{% endblock %}
 {% block content %}
 
-<h1>References{% if board %} — {{ board.label }}{% endif %}</h1>
+<h1>References{% if board %} — {{ board.label }}{% elif workspace %} — {{ workspace.label }}{% endif %}</h1>
 <p class="muted">
-  Every datasheet citation{% if board %} on {{ board.label }}{% endif %}, grouped by
+  Every datasheet citation{% if board %} on {{ board.label }}{% elif workspace %} on {{ workspace.label }}{% endif %}, grouped by
   URL. Provenance -- hash, fetch time, vendored flag -- comes from
   <code>.refdes/citations.yaml</code>, written only by <code>refdes fetch</code>.
 </p>

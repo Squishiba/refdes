@@ -87,6 +87,7 @@ def _read_page(project: Project, path: str, root: str) -> Page | None:
         order=int(meta.get("order", 100)),
         in_nav=bool(meta.get("nav", True)),
         board=str(meta.get("board") or ""),
+        workspace=str(meta.get("workspace") or ""),
     )
 
 
@@ -106,6 +107,22 @@ def validate_boards(project: Project) -> None:
                 file=page.source_file,
             )
             page.board = ""
+
+
+def validate_workspaces(project: Project) -> None:
+    """A page's `workspace:` tag must name a workspace declared in `workspaces:`.
+
+    Mirrors validate_boards() exactly, for the same reason: name the fix,
+    then clear it, rather than stranding the page outside every nav group.
+    """
+    for page in project.pages:
+        if page.workspace and page.workspace not in project.workspaces:
+            project.error(
+                f"page workspace: {page.workspace!r} is not declared in "
+                f"refdes.yaml's workspaces: registry",
+                file=page.source_file,
+            )
+            page.workspace = ""
 
 
 # --------------------------------------------------------------------- rendering
