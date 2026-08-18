@@ -30,6 +30,7 @@ time.
 | [Multiple boards](multi-board.md) | Folders, separate projects, imports, version pinning |
 | [Workspaces](workspaces.md) | Grouping boards by product, the two-level layout, the cross-workspace lint |
 | [Project lifecycle](lifecycle.md) | draft → `revision` → `release`, the readiness gate, baselines, the diff |
+| [Parts](parts.md) | The parts page, exact-string indexing, `equivalent`/`alternate` |
 
 ## Reference
 

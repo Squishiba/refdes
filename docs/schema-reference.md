@@ -263,7 +263,9 @@ fields:
 
 The standard's own `decision.rationale` uses this
 (`required_when: {status: rejected}`), toggled by
-`require_rejection_rationale:` in `refdes-project.yaml`.
+`require_rejection_rationale:` in `refdes-project.yaml`. `component.rationale`
+uses the `links` form (`required_when: {links: alternate}`) — see
+[`alternate`'s required rationale](links.md#part-equivalence-equivalent-and-alternate).
 
 **`enum`, `limit`, and `citations` are enforced today.** `enum` is checked
 against `choices`; `limit` is parsed as a quantity; `citations` is checked to
@@ -271,13 +273,14 @@ be a list of entries that each have at least a `url`. The rest are
 declarative — they document intent and are where future validation will hook
 in.
 
-Three field *names* have behaviour attached regardless of declared type:
+Four field *names* have behaviour attached regardless of declared type:
 
 | Field | Behaviour |
 |---|---|
 | `limit` | Parsed as a quantity; makes the item checkable. One scalar bound per field — see [one `limit`, one bound](checks.md#one-limit-one-bound) |
 | `options` | Rendered as the options-considered panel (`name`, `verdict`, `because`) |
 | `checks` | Evaluated as [checks](checks.md) (`value`, `against`) |
+| `part_number` | Indexed into [the parts page](parts.md), on any type that declares it, alongside the nested `part_number` inside any `citations:` entry |
 
 `citations` is different: it is keyed off the declared **type**, not a fixed
 field name, so a project can call the field `datasheets`, `references`,

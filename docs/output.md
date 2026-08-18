@@ -11,6 +11,7 @@
 | `coverage.html` | The full [coverage](coverage.md) table, least-covered first |
 | `log.html` | The [design log](design-log.md) timeline, oldest first |
 | `references.html` | Every [citation](markdown.md#citing-a-datasheet) in the project, grouped by url |
+| `parts.html` | Every [part number](parts.md), exact-string indexed, with where-used backlinks |
 | `document.html` | Every item in one page, in reading order — the printable record |
 | `<id>.html` | One page per item, lowercased ID (`req-pwr-002.html`) |
 | `items.json` | The machine-readable export |
@@ -23,10 +24,22 @@ still a working link.
 ### Per-board pages
 
 A project with a `boards:` registry additionally gets `document-<board>.html`,
-`coverage-<board>.html`, `log-<board>.html`, `summary-<board>.html`, and
-`references-<board>.html` for each registered board, scoped to that board's own
-items — everything above unaffected. See [multiple boards](multi-board.md).
-With no `boards:` registry, none of these are written.
+`coverage-<board>.html`, `log-<board>.html`, `summary-<board>.html`,
+`references-<board>.html`, and `parts-<board>.html` for each registered
+board, scoped to that board's own items — everything above unaffected. See
+[multiple boards](multi-board.md). With no `boards:` registry, none of these
+are written.
+
+### Per-workspace pages
+
+The same six pages, `-<workspace>` instead of `-<board>`, for each
+registered [workspace](workspaces.md) — `document-<workspace>.html`,
+`coverage-<workspace>.html`, `log-<workspace>.html`,
+`summary-<workspace>.html`, `references-<workspace>.html`, and
+`parts-<workspace>.html`, scoped to that workspace's own items. A board and
+workspace key never collide (schema.py validates this at load), so the two
+sets of pages coexist without fighting over a filename. With no
+`workspaces:` registry, none of these are written.
 
 Serve it locally with:
 

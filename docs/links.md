@@ -60,9 +60,63 @@ knows what it satisfies. Declaring both ends is allowed but redundant.
 | `amends` | `amended_by` | log entry → earlier log entry |
 | `records` | `recorded_by` | log entry → decision |
 | `blocked_by` | `blocks` | decision → anything holding it up — see [below](#blocked-by-and-the-cascade-report) |
+| `equivalent` | `equivalent` (self-inverse) | component → drop-in second source — see [below](#part-equivalence-equivalent-and-alternate) |
+| `alternate` | `alternate` (self-inverse) | component → functionally close, check before substituting — see [below](#part-equivalence-equivalent-and-alternate) |
 
 Add your own by declaring them in `link_types` and listing them under a type's
 `links:`.
+
+## Part equivalence: `equivalent` and `alternate`
+
+**This isn't a parts database.** A manufacturer's own equivalence data —
+"these two op-amps are pin-compatible per the datasheet" — belongs in
+whatever system of record already holds part numbers and AVL lists, not
+here. What belongs in refdes is narrower: *this project's author has
+decided* two components are interchangeable for *this design*. That's a
+reviewable claim, not a fact about silicon — it can be wrong, and it can go
+stale when a requirement changes.
+
+Two verbs, both `component` → `component`, because they mean different things:
+
+```yaml
+- id: CMP-014
+  equivalent: [CMP-019]      # drop-in, no review needed
+- id: CMP-021
+  alternate: [CMP-014]       # functionally close -- check before substituting
+  rationale: Higher ESR at the output cap; verify ripple before swapping.
+```
+
+**`equivalent`** — a drop-in second source. The claim ("these are
+interchangeable") is complete on its own, so `rationale` is optional.
+
+**`alternate`** — functionally close but not a drop-in. `rationale` is
+**required** (`required_when: {links: alternate}`) because the entire
+content of the claim is *which way* it isn't quite a drop-in — recording
+"there's something you should know" with no statement of what is worse than
+not recording the relationship at all.
+
+Both are declared on `component` only, restricted to `component` targets. A
+part known only through a citation's nested `part_number` (see
+[parts](parts.md)) has no item to link from — promoting it to a real
+`component` is what makes an equivalence claim possible, and is itself a
+reason to give it an item.
+
+### Equivalence is symmetric — the self-inverse link
+
+Every other link in this vocabulary is directional: satisfying isn't the
+same claim as being satisfied, so each gets its own inverse name. Equivalence
+has no natural passive form — if CMP-014 is `equivalent` to CMP-019, CMP-019
+is, identically, `equivalent` to CMP-014, not "equivalented by" it.
+`equivalent`/`alternate` declare themselves as their own inverse
+(`{ inverse: equivalent, ... }`), which the loader already handles with no
+special-casing.
+
+Because of this, an item page merges its own declarations with the computed
+backlink into one list before rendering, rather than showing the identical
+fact twice under "Outgoing" and "Incoming." A component declaring
+`equivalent: [CMP-019]`, and CMP-019 separately declaring `equivalent:
+[CMP-014]` back, is harmless — the merge de-duplicates to one visible entry
+either way, so there's nothing to validate and nothing worth warning about.
 
 ## `blocked_by:` and the cascade report
 

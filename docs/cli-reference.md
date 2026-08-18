@@ -241,8 +241,8 @@ Report everything that has been made less visible: fields excluded from
 invalidation, item-level overrides and their stated reasons, resealed log entries,
 [board](multi-board.md) and [workspace](workspaces.md) moves, what's changed
 since the last [revision and release](lifecycle.md), [blocked_by
-chains](links.md#blocked-by-and-the-cascade-report), imported projects, and
-[citations](markdown.md#citing-a-datasheet).
+chains](links.md#blocked-by-and-the-cascade-report), imported projects,
+[citations](markdown.md#citing-a-datasheet), and [parts](parts.md).
 
 ```bash
 refdes audit
@@ -292,6 +292,9 @@ Citations:
   https://www.ti.com/lit/ds/symlink/tps62913.pdf
     unpinned       hash-only  cited by CMP-PWR-001
 
+Parts:
+  TPS62913       used by CMP-PWR-001 (component) — board: power
+
 16 items audited (16 local)
 ```
 
@@ -302,7 +305,8 @@ The "Board moves" section only appears for a project that has declared a
 yet -- project is in draft)` there instead, and each "Since last..." section
 shows `(no revision/release stamped yet)`. The "Citations" section only
 appears for a project that declares a `citations`-typed field somewhere and
-has at least one item using it.
+has at least one item using it; "Parts" only for one that has at least one
+`part_number`, from either source — see [parts](parts.md).
 
 ---
 
