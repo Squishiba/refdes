@@ -1,0 +1,50 @@
+# Refdes project settings.
+#
+# Presentation and behaviour, not schema -- refdes.yaml defines item types,
+# links, and change-tracking policy; this file is process policy and
+# formatting preference for the same project. Optional: a project with no
+# refdes-project.yaml behaves exactly as if every setting below were left at
+# its default.
+
+# Significant figures for formatted quantities in calc results and check
+# messages (e.g. "3.96 W"). 1-15.
+sigfigs: 4
+
+# How items/ is laid out. "flat" is today's items/<board>/; "workspace" adds
+# one more path segment, items/<workspace>/<board>/. Recorded and validated
+# here; the workspace layer itself is not implemented yet.
+item_layout: flat
+
+# Where `stamped_by` comes from on a `refdes revision`/`refdes release`
+# baseline (not implemented yet -- see docs/design/lifecycle.md).
+# "os_user" reads the OS username, no git involved. "git_identity" reads
+# `git config user.name`/`user.email`, falling back to "os_user" with a
+# warning if that fails.
+baseline_identity: os_user
+
+# Whether `decision.rationale` requires a value when `status: rejected`
+# (docs/design/standard-library.md's required_when mechanism). Not
+# implemented yet.
+require_rejection_rationale: true
+
+# Whether a `vendor: true` citation's locally-cached PDF is copied into
+# _site/ (as assets/datasheets/<sha256>.pdf) so the built site can serve it
+# directly. Off by default: manufacturer datasheets are generally
+# copyrighted, and publishing a site that includes them is a redistribution
+# question each project should opt into deliberately. When off, the citation
+# link in the rendered site points upstream instead of to a local copy.
+publish_datasheets: false
+
+# The seven configurable rules `refdes release`/`refdes revision` will check
+# (not implemented yet -- see docs/design/lifecycle.md §1). Each rule is an
+# independent (release, revision) boolean pair; only the keys you want to
+# change from the defaults below need to be listed. The unconditional error
+# floor (any project.error) is not configurable and is not one of these.
+release_gate:
+  draft_items:              { release: true,  revision: false }
+  unpinned_citations:       { release: true,  revision: false }
+  missing_vendored_copies:  { release: true,  revision: false }
+  uncovered_requirements:   { release: true,  revision: false }
+  unverified_requirements:  { release: false, revision: false }
+  info_check_failures:      { release: false, revision: false }
+  unaccepted_board_moves:   { release: true,  revision: false }

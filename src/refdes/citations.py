@@ -233,11 +233,15 @@ def _resolve(project, item, spec, record, severity, unpinned_severity) -> Citati
         project.error(status.detail, file=item.source_file, line=item.source_line, item_id=item.id)
         return status
 
-    status.local_path = os.path.relpath(blob, project.root).replace("\\", "/")
-    # Reuses Part A's asset-copy machinery rather than a second copy path:
-    # render_site copies everything in `project.assets` into `_site/assets/`,
-    # mirroring this same project-root-relative path.
-    project.assets.add(status.local_path)
+    if project.publish_datasheets:
+        # Flattened (assets/datasheets/<sha256><ext>), not mirrored under
+        # `.refdes/vendor/` -- a dot-prefixed directory is skipped by several
+        # static hosts, GitHub Pages via Jekyll included. Tracked separately
+        # from `project.assets`, whose copy step mirrors source path to dest
+        # path; here they differ, so render_site copies this dict instead.
+        ext = os.path.splitext(blob)[1]
+        status.local_path = f"datasheets/{status.sha256}{ext}"
+        project.datasheet_assets[status.local_path] = blob
     return status
 
 

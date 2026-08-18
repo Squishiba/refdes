@@ -152,6 +152,58 @@ def test_absolute_tolerance():
     assert calc.format_bounds(env["V"]) == "11.5 V … 12.5 V"
 
 
+# --------------------------------------------------------------- sigfig format
+
+
+def test_format_quantity_default_digits_is_four():
+    env = {}
+    calc.evaluate_block("P = 3.3 V * 1.2 A", env)
+    assert calc.format_value(env["P"]) == "3.96 W"
+
+
+def test_format_quantity_respects_requested_digits():
+    env = {}
+    calc.evaluate_block("P = 3.3 V * 1.2 A", env)
+    assert calc.format_value(env["P"], 2) == "4 W"
+
+
+def test_format_quantity_prefers_positional_over_a_couple_of_invented_zeros():
+    """issue #3 finding 14: plain `:.{n}g` renders 606.0606 at 2 sigfigs as
+    "6.1e+02", which overstates how surprising the number is. One invented
+    trailing zero is close enough to stay positional: "610"."""
+    env = {}
+    calc.evaluate_block("x = 606.0606", env)
+    assert calc.format_value(env["x"], 2) == "610"
+
+
+def test_format_quantity_keeps_scientific_beyond_a_couple_of_invented_zeros():
+    """1234567 at 4 sigfigs would need three invented zeros ("1235000") to stay
+    positional -- too far from the real precision, so it keeps the exponent."""
+    env = {}
+    calc.evaluate_block("x = 1234567", env)
+    assert calc.format_value(env["x"], 4) == "1.235e+06"
+
+
+def test_format_quantity_sigfig_taming_applies_with_units_too():
+    env = {}
+    calc.evaluate_block("R = 606.0606 ohm", env)
+    assert calc.format_value(env["R"], 2) == "610 Ω"
+
+
+@pytest.mark.parametrize(
+    "magnitude, digits, expected",
+    [
+        (606.0606, 2, "610"),      # 1 invented zero -- positional
+        (1234567, 4, "1.235e+06"),  # 3 invented zeros -- stays scientific
+        (999.6, 3, "1000"),        # rounds across a power of ten, still positional
+        (0.0004321, 2, "0.00043"),  # underflow case untouched by this rule
+        (0, 3, "0"),
+    ],
+)
+def test_sigfig_str_boundary_cases(magnitude, digits, expected):
+    assert calc._sigfig_str(magnitude, digits) == expected
+
+
 @pytest.mark.parametrize(
     "source",
     [
@@ -1741,6 +1793,203 @@ def test_boards_registry_rejects_duplicate_path_segments(tmp_path):
         load_project(config_path=str(tmp_path / "refdes.yaml"))
 
 
+# --------------------------------------------------- project settings (refdes-project.yaml)
+
+MINIMAL_PROJECT_SCHEMA = (
+    "site: { title: T, out: _site }\n"
+    "types:\n  requirement: { prefix: REQ, fields: { text: { type: text } } }\n"
+)
+
+
+def _write_minimal_project(tmp_path, settings_yaml: str | None = None):
+    (tmp_path / "refdes.yaml").write_text(MINIMAL_PROJECT_SCHEMA, encoding="utf-8")
+    if settings_yaml is not None:
+        (tmp_path / "refdes-project.yaml").write_text(settings_yaml, encoding="utf-8")
+    return tmp_path / "refdes.yaml"
+
+
+def test_project_settings_absent_file_matches_pre_config_defaults(tmp_path):
+    """A project with no refdes-project.yaml behaves exactly as today -- except
+    publish_datasheets, whose default is a deliberate change (see its own
+    docstring on Project)."""
+    config = _write_minimal_project(tmp_path)
+    project = load_project(config_path=str(config))
+    assert project.sigfigs == 4
+    assert project.item_layout == "flat"
+    assert project.baseline_identity == "os_user"
+    assert project.require_rejection_rationale is True
+    assert project.publish_datasheets is False
+    assert project.release_gate == {
+        "draft_items":              {"release": True,  "revision": False},
+        "unpinned_citations":       {"release": True,  "revision": False},
+        "missing_vendored_copies":  {"release": True,  "revision": False},
+        "uncovered_requirements":   {"release": True,  "revision": False},
+        "unverified_requirements":  {"release": False, "revision": False},
+        "info_check_failures":      {"release": False, "revision": False},
+        "unaccepted_board_moves":   {"release": True,  "revision": False},
+    }
+
+
+def test_project_settings_sigfigs_overrides_the_default(tmp_path):
+    config = _write_minimal_project(tmp_path, "sigfigs: 6\n")
+    project = load_project(config_path=str(config))
+    assert project.sigfigs == 6
+
+
+@pytest.mark.parametrize(
+    "settings_yaml",
+    ["sigfigs: 0\n", "sigfigs: 16\n", "sigfigs: 1.5\n", 'sigfigs: "4"\n', "sigfigs: true\n"],
+)
+def test_project_settings_sigfigs_out_of_range_or_wrong_type_is_a_schema_error(tmp_path, settings_yaml):
+    config = _write_minimal_project(tmp_path, settings_yaml)
+    with pytest.raises(SchemaError, match="sigfigs must be an integer between 1 and 15"):
+        load_project(config_path=str(config))
+
+
+def test_project_settings_item_layout_accepts_workspace(tmp_path):
+    config = _write_minimal_project(tmp_path, "item_layout: workspace\n")
+    project = load_project(config_path=str(config))
+    assert project.item_layout == "workspace"
+
+
+def test_project_settings_item_layout_rejects_a_free_form_pattern(tmp_path):
+    """The user explicitly rejected general pattern syntax -- only the two
+    fixed shapes are valid, not e.g. "<workspace>/<board>"."""
+    config = _write_minimal_project(tmp_path, 'item_layout: "<workspace>/<board>"\n')
+    with pytest.raises(SchemaError, match=r"item_layout must be one of \['flat', 'workspace'\]"):
+        load_project(config_path=str(config))
+
+
+def test_project_settings_baseline_identity_accepts_git_identity(tmp_path):
+    config = _write_minimal_project(tmp_path, "baseline_identity: git_identity\n")
+    project = load_project(config_path=str(config))
+    assert project.baseline_identity == "git_identity"
+
+
+def test_project_settings_baseline_identity_rejects_unknown_value(tmp_path):
+    config = _write_minimal_project(tmp_path, "baseline_identity: ldap\n")
+    with pytest.raises(SchemaError, match="baseline_identity must be one of"):
+        load_project(config_path=str(config))
+
+
+def test_project_settings_require_rejection_rationale_must_be_boolean(tmp_path):
+    config = _write_minimal_project(tmp_path, "require_rejection_rationale: maybe\n")
+    with pytest.raises(SchemaError, match="require_rejection_rationale must be true or false"):
+        load_project(config_path=str(config))
+
+
+def test_project_settings_publish_datasheets_must_be_boolean(tmp_path):
+    config = _write_minimal_project(tmp_path, "publish_datasheets: on-request\n")
+    with pytest.raises(SchemaError, match="publish_datasheets must be true or false"):
+        load_project(config_path=str(config))
+
+
+def test_project_settings_release_gate_overlay_only_touches_named_rules(tmp_path):
+    config = _write_minimal_project(
+        tmp_path,
+        "release_gate:\n  unverified_requirements: { release: true }\n",
+    )
+    project = load_project(config_path=str(config))
+    assert project.release_gate["unverified_requirements"] == {"release": True, "revision": False}
+    # everything else is untouched
+    assert project.release_gate["draft_items"] == {"release": True, "revision": False}
+
+
+def test_project_settings_release_gate_rejects_unknown_rule_with_a_suggestion(tmp_path):
+    config = _write_minimal_project(
+        tmp_path,
+        "release_gate:\n  draft_item: { release: true }\n",  # typo: missing 's'
+    )
+    with pytest.raises(SchemaError, match=r"draft_item.*Did you mean 'draft_items'"):
+        load_project(config_path=str(config))
+
+
+def test_project_settings_release_gate_rejects_unknown_inner_key(tmp_path):
+    config = _write_minimal_project(
+        tmp_path,
+        "release_gate:\n  draft_items: { relase: true }\n",  # typo: missing 'e'
+    )
+    with pytest.raises(SchemaError, match="release_gate.draft_items.relase"):
+        load_project(config_path=str(config))
+
+
+def test_project_settings_release_gate_rejects_non_boolean_value(tmp_path):
+    config = _write_minimal_project(
+        tmp_path,
+        "release_gate:\n  draft_items: { release: yes-please }\n",
+    )
+    with pytest.raises(SchemaError, match="release_gate.draft_items.release must be true or false"):
+        load_project(config_path=str(config))
+
+
+def test_project_settings_unknown_top_level_key_is_a_schema_error(tmp_path):
+    config = _write_minimal_project(tmp_path, "sigffigs: 6\n")  # typo
+    with pytest.raises(SchemaError, match=r"unknown setting 'sigffigs'.*Did you mean 'sigfigs'"):
+        load_project(config_path=str(config))
+
+
+def test_project_settings_file_must_be_a_mapping(tmp_path):
+    config = _write_minimal_project(tmp_path, "- not\n- a\n- mapping\n")
+    with pytest.raises(SchemaError, match="must be a mapping"):
+        load_project(config_path=str(config))
+
+
+def test_sigfigs_flows_through_calc_formatting(tmp_path):
+    """Project.sigfigs, resolved once at load, reaches calc.format_value via
+    build.run_calcs without every caller threading a digits= parameter."""
+    (tmp_path / "refdes.yaml").write_text(
+        "site: { title: T, out: _site }\n"
+        "types:\n  decision: { prefix: DEC, fields: {} }\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "refdes-project.yaml").write_text("sigfigs: 2\n", encoding="utf-8")
+    items = tmp_path / "items"
+    items.mkdir()
+    (items / "dec.md").write_text(
+        "---\nid: DEC-001\ntype: decision\n---\n\n"
+        "```calc\nP = 3.3 V * 1.2 A\n```\n",
+        encoding="utf-8",
+    )
+    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    parse.load_items(project)
+    build_mod.build(project)
+    assert project.items["DEC-001"].calcs[0].result == "4 W"  # 2 sigfigs, not "3.96 W"
+
+
+def test_sigfigs_flows_through_check_messages(tmp_path):
+    (tmp_path / "refdes.yaml").write_text(
+        "site: { title: T, out: _site }\n"
+        "types:\n"
+        "  constraint: { prefix: CON, fields: { limit: { type: limit, required: true } } }\n"
+        "  decision: { prefix: DEC, fields: {} }\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "refdes-project.yaml").write_text("sigfigs: 2\n", encoding="utf-8")
+    items = tmp_path / "items"
+    items.mkdir()
+    (items / "con.yaml").write_text(
+        "defaults: { type: constraint }\n"
+        "items:\n  - id: CON-001\n    limit: \"<= 600 mA\"\n",
+        encoding="utf-8",
+    )
+    (items / "dec.md").write_text(
+        "---\n"
+        "id: DEC-001\n"
+        "type: decision\n"
+        "checks:\n"
+        "  - value: x\n"
+        "    against: CON-001\n"
+        "---\n\n"
+        "```calc\nx : A = 0.6061 A\n```\n",
+        encoding="utf-8",
+    )
+    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    parse.load_items(project)
+    build_mod.build(project)
+    check = project.items["DEC-001"].checks[0]
+    assert check.actual == "0.61 A"  # 2 sigfigs, not the default 4 (0.6061 A)
+
+
 def test_per_board_pages_are_scoped_to_that_boards_items(board_project):
     project = _build_at(board_project)
     out = render.render_site(project)
@@ -2819,7 +3068,13 @@ def test_hash_only_citation_is_ok_with_no_local_file_needed(citation_project):
     assert not project.warnings and not project.errors
 
 
+def _enable_publish_datasheets(root):
+    (root / "refdes-project.yaml").write_text("publish_datasheets: true\n", encoding="utf-8")
+
+
 def test_vendored_citation_ok_when_blob_matches(citation_project):
+    """publish_datasheets defaults off, so a vendored citation resolves 'ok' but
+    is not exposed as a local copy -- the rendered link stays upstream-only."""
     data = b"%PDF-1.4 real bytes"
     sha = hashlib.sha256(data).hexdigest()
     _write_citation_lockfile(
@@ -2830,8 +3085,38 @@ def test_vendored_citation_ok_when_blob_matches(citation_project):
     project = _cite_build(citation_project)
     status = project.items["CMP-001"].citations[0]
     assert status.state == "ok"
-    assert status.local_path == f".refdes/vendor/{sha}.pdf"
+    assert status.local_path == ""
     assert not project.errors
+
+
+def test_vendored_citation_published_when_publish_datasheets_is_on(citation_project):
+    data = b"%PDF-1.4 real bytes"
+    sha = hashlib.sha256(data).hexdigest()
+    _write_citation_lockfile(
+        citation_project,
+        {"https://example.com/ds.pdf": {"sha256": sha, "fetched": "2026-01-01T00:00:00Z", "vendored": True}},
+    )
+    _write_vendor_blob(citation_project, sha, ".pdf", data)
+    _enable_publish_datasheets(citation_project)
+    project = _cite_build(citation_project)
+    status = project.items["CMP-001"].citations[0]
+    assert status.state == "ok"
+    assert status.local_path == f"datasheets/{sha}.pdf"  # flattened, not .refdes/vendor/...
+    assert not project.errors
+
+
+def test_cache_missing_and_hash_mismatch_are_unaffected_by_publish_datasheets(citation_project):
+    """Local-cache integrity checks are unconditional -- publishing is a separate
+    concern from whether the vendored copy is trustworthy."""
+    _write_citation_lockfile(
+        citation_project,
+        {"https://example.com/ds.pdf": {"sha256": "deadbeef", "fetched": "2026-01-01T00:00:00Z", "vendored": True}},
+    )
+    _enable_publish_datasheets(citation_project)
+    project = _cite_build(citation_project)
+    status = project.items["CMP-001"].citations[0]
+    assert status.state == "cache_missing"
+    assert status.local_path == ""
 
 
 def test_vendored_citation_cache_missing_when_blob_absent(citation_project):
@@ -2925,7 +3210,7 @@ def test_items_json_citations_vendored(citation_project):
     assert status["pinned"] is True
     assert status["vendored"] is True
     assert status["sha256"] == sha
-    assert status["local_path"] == f".refdes/vendor/{sha}.pdf"
+    assert status["local_path"] == ""  # publish_datasheets defaults off
 
 
 def test_items_json_citations_cache_missing(citation_project):
@@ -3276,7 +3561,9 @@ def test_reserved_name_guard_covers_references(citation_project):
     assert any("generated report" in d.message for d in project.errors)
 
 
-def test_vendored_citation_pdf_is_copied_into_the_site(citation_project):
+def test_vendored_citation_pdf_is_not_published_by_default(citation_project):
+    """publish_datasheets defaults off: nothing is copied into _site/, and the
+    rendered citation links upstream only -- no 'local copy' link."""
     data = b"%PDF-1.4 vendored bytes"
     sha = hashlib.sha256(data).hexdigest()
     _write_citation_lockfile(
@@ -3286,9 +3573,30 @@ def test_vendored_citation_pdf_is_copied_into_the_site(citation_project):
     _write_vendor_blob(citation_project, sha, ".pdf", data)
     project = _cite_build(citation_project)
     out = render.render_site(project)
-    copied = os.path.join(out, "assets", ".refdes", "vendor", f"{sha}.pdf")
+    assert not os.path.isdir(os.path.join(out, "assets", "datasheets"))
+    assert not os.path.isdir(os.path.join(out, "assets", ".refdes"))
+    html = open(os.path.join(out, "cmp-001.html"), encoding="utf-8").read()
+    assert "https://example.com/ds.pdf" in html
+    assert "local copy" not in html
+
+
+def test_vendored_citation_pdf_is_copied_into_the_site_when_published(citation_project):
+    data = b"%PDF-1.4 vendored bytes"
+    sha = hashlib.sha256(data).hexdigest()
+    _write_citation_lockfile(
+        citation_project,
+        {"https://example.com/ds.pdf": {"sha256": sha, "fetched": "2026-01-01T00:00:00Z", "vendored": True}},
+    )
+    _write_vendor_blob(citation_project, sha, ".pdf", data)
+    _enable_publish_datasheets(citation_project)
+    project = _cite_build(citation_project)
+    out = render.render_site(project)
+    copied = os.path.join(out, "assets", "datasheets", f"{sha}.pdf")
     assert os.path.isfile(copied)
     assert open(copied, "rb").read() == data
+    html = open(os.path.join(out, "cmp-001.html"), encoding="utf-8").read()
+    assert f"assets/datasheets/{sha}.pdf" in html
+    assert "local copy" in html
 
 
 def test_nav_shows_references_link_only_when_citations_exist(citation_project):

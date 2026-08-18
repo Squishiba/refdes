@@ -7,6 +7,38 @@ and this project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- `refdes-project.yaml`: an optional, committed, project-level settings file
+  sitting next to `refdes.yaml` for presentation/behaviour preferences that
+  aren't schema -- `sigfigs`, `item_layout`, `baseline_identity`,
+  `require_rejection_rationale`, `publish_datasheets`, and `release_gate:`.
+  Absent entirely, a project behaves exactly as before this change (see
+  Breaking, below, for the one exception). `item_layout`,
+  `baseline_identity`, `require_rejection_rationale`, and `release_gate:` are
+  parsed and validated now for features landing in later steps
+  (workspace-layer item layout, `refdes revision`/`refdes release`, and the
+  `required_when` standard-library mechanism); they have no effect yet.
+- `sigfigs` (default 4, range 1-15) replaces the hardcoded significant-figure
+  count in calc results and check messages, resolved once at project load.
+  Formatting also now prefers positional notation over `%g`'s scientific
+  flip when only a couple of trailing zeros need inventing (606.0606 at 2
+  sigfigs now renders "610", not "6.1e+02"); a number far enough past the
+  requested precision (1234567 at 4 sigfigs) still renders in scientific
+  notation.
+- `publish_datasheets: true` copies `vendor: true` citation PDFs into
+  `_site/assets/datasheets/<sha256><ext>` (flattened, not mirrored under
+  `.refdes/vendor/`, since dot-prefixed directories are skipped by several
+  static hosts including GitHub Pages via Jekyll).
+
+### Breaking
+
+- Vendored citation PDFs are no longer copied into the built site by
+  default. Manufacturer datasheets are generally copyrighted, so publishing
+  them is now opt-in via `publish_datasheets: true` in
+  `refdes-project.yaml`. With it left unset (or the file absent), the
+  rendered citation links upstream only, same as an unvendored citation.
+
 ## [0.3.0] - 2026-08-11
 
 ### Added

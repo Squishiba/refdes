@@ -27,6 +27,29 @@ INFO = "info"        # default-hidden; the normal state of an incomplete project
 DIAGNOSTIC_LEVELS = (ERROR, WARNING, INFO)
 
 
+# refdes-project.yaml: project-level presentation/behaviour settings, distinct
+# from refdes.yaml's schema. See schema.py's loader for validation.
+ITEM_LAYOUTS = ("flat", "workspace")  # "workspace" is recorded/validated only; see docs/design/standard-library.md
+BASELINE_IDENTITIES = ("os_user", "git_identity")
+
+# The seven configurable release-gate rules from docs/design/lifecycle.md §1,
+# with their shipped (release, revision) defaults. Parsed and validated now;
+# consumed later by `refdes revision`/`refdes release`, which don't exist yet.
+RELEASE_GATE_DEFAULTS: dict[str, dict[str, bool]] = {
+    "draft_items":             {"release": True,  "revision": False},
+    "unpinned_citations":      {"release": True,  "revision": False},
+    "missing_vendored_copies": {"release": True,  "revision": False},
+    "uncovered_requirements":  {"release": True,  "revision": False},
+    "unverified_requirements": {"release": False, "revision": False},
+    "info_check_failures":     {"release": False, "revision": False},
+    "unaccepted_board_moves":  {"release": True,  "revision": False},
+}
+
+
+def _default_release_gate() -> dict[str, dict[str, bool]]:
+    return {name: dict(rule) for name, rule in RELEASE_GATE_DEFAULTS.items()}
+
+
 @dataclass
 class Diagnostic:
     """A validation message. `where` is rendered as file:line for editors."""
@@ -158,7 +181,11 @@ class CitationStatus:
     sha256: str = ""
     fetched: str = ""
     vendored: bool = False
-    local_path: str = ""  # project-root-relative path to the vendored blob, if any
+    # Path to the published copy, relative to `assets/` (e.g.
+    # "datasheets/<sha256>.pdf") -- set only when the citation is vendored AND
+    # Project.publish_datasheets is on; empty otherwise, which is also how the
+    # rendered citation link knows to point upstream instead of to a local copy.
+    local_path: str = ""
 
 
 @dataclass
@@ -311,6 +338,28 @@ class Project:
     # `<img>` references and by `site.assets:` directories.
     assets: set[str] = field(default_factory=set)
     asset_dirs: list[str] = field(default_factory=list)  # site.assets: raw config
+    # Vendored datasheet copies to publish into the site: {dest path relative to
+    # assets/ (flattened, e.g. "datasheets/<sha256>.pdf") -> absolute source
+    # path in the vendor cache}. Populated by citations.verify() only when
+    # publish_datasheets is on; copied by render.render_site(). Unlike `assets`
+    # above, source and destination paths differ (flattened, not mirrored), so
+    # this can't reuse that set.
+    datasheet_assets: dict[str, str] = field(default_factory=dict)
+
+    # refdes-project.yaml settings -- see schema.py's loader. Every default here
+    # matches today's behaviour except `publish_datasheets` (see its own field)
+    # and `sigfigs`/`baseline_identity`, which had no prior behaviour to match.
+    sigfigs: int = 4
+    item_layout: str = "flat"  # "flat" | "workspace" -- see model.ITEM_LAYOUTS
+    baseline_identity: str = "os_user"  # "os_user" | "git_identity"
+    require_rejection_rationale: bool = True  # decision.rationale required_when toggle
+    # Whether verify() copies vendored citation PDFs into _site/. Default false:
+    # manufacturer datasheets are generally copyrighted, and publishing them is
+    # a redistribution question a project must opt into, not one this tool
+    # should decide by default -- a deliberate change from pre-config behaviour,
+    # which copied unconditionally.
+    publish_datasheets: bool = False
+    release_gate: dict[str, dict[str, bool]] = field(default_factory=_default_release_gate)
 
     @property
     def local_items(self) -> list[Item]:

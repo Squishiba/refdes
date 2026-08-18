@@ -231,8 +231,8 @@ def run_calcs(project: Project) -> None:
                         file=item.source_file, line=item.source_line, item_id=item.id,
                     )
                 else:
-                    line.result = calc.format_value(outcome.value)
-                    line.bounds = calc.format_bounds(outcome.value)
+                    line.result = calc.format_value(outcome.value, project.sigfigs)
+                    line.bounds = calc.format_bounds(outcome.value, project.sigfigs)
                     item.calc_values[outcome.name] = line.result
                 item.calcs.append(line)
         item._env = env  # retained for check evaluation
@@ -293,9 +293,9 @@ def run_checks(project: Project) -> None:
             else:
                 try:
                     limit = calc.parse_limit(str(target.fields["limit"]))
-                    ok, detail = limit.check(env[name])
+                    ok, detail = limit.check(env[name], project.sigfigs)
                     result.ok, result.detail = ok, detail
-                    result.actual = calc.format_value(env[name])
+                    result.actual = calc.format_value(env[name], project.sigfigs)
                     result.limit = limit.text
                     result.margin = limit.margin(env[name])
                     if not ok:

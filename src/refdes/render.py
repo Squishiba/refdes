@@ -416,6 +416,32 @@ def _copy_project_assets(project: Project, out_dir: str, written: set[str]) -> N
         written.add(f"assets/{rel}")
 
 
+def _copy_datasheet_assets(project: Project, out_dir: str, written: set[str]) -> None:
+    """Copy `project.datasheet_assets` into `_site/assets/`, flattened.
+
+    Populated only when `publish_datasheets` is on (citations.py) -- source and
+    destination differ (`.refdes/vendor/<sha256><ext>` -> flattened
+    `assets/datasheets/<sha256><ext>`), so this can't reuse
+    `_copy_project_assets`'s mirroring copy.
+    """
+    asset_out = os.path.join(out_dir, "assets")
+    for rel, src in sorted(project.datasheet_assets.items()):
+        target = f"assets/{rel}"
+        if target in written:
+            project.error(
+                f"published datasheet {rel!r} collides with an existing "
+                f"{target}, most likely a site.assets: directory of the same "
+                f"name -- rename one of them."
+            )
+            continue
+        if not os.path.isfile(src):
+            continue  # already reported as cache_missing when the citation was resolved
+        dest = os.path.join(asset_out, *rel.split("/"))
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
+        shutil.copy2(src, dest)
+        written.add(target)
+
+
 def _prune_stale_output(out_dir: str, written: set[str]) -> None:
     """Delete output from a previous build that this build no longer produces.
 
@@ -539,6 +565,7 @@ def render_site(project: Project) -> str:
             shutil.copytree(ASSET_DIR, os.path.join(out_dir, "assets"), dirs_exist_ok=True)
             written.update(_asset_file_list(ASSET_DIR))
         _copy_project_assets(project, out_dir, written)
+        _copy_datasheet_assets(project, out_dir, written)
         _prune_stale_output(out_dir, written)
         return out_dir
 
@@ -700,6 +727,7 @@ def render_site(project: Project) -> str:
         shutil.copytree(ASSET_DIR, asset_out, dirs_exist_ok=True)
         written.update(_asset_file_list(ASSET_DIR))
     _copy_project_assets(project, out_dir, written)
+    _copy_datasheet_assets(project, out_dir, written)
 
     _prune_stale_output(out_dir, written)
     return out_dir

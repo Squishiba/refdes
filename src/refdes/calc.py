@@ -399,25 +399,25 @@ class Limit:
     high: Value | None
     text: str
 
-    def check(self, value: Value) -> tuple[bool, str]:
+    def check(self, value: Value, digits: int = 4) -> tuple[bool, str]:
         """Evaluate worst-case: the tolerance bound that is hardest to satisfy."""
         try:
             if self.kind in ("<=", "<"):
                 worst = value.hi
                 bound = self.high.nom
                 ok = worst <= bound if self.kind == "<=" else worst < bound
-                return ok, f"worst case {format_quantity(worst)} vs {self.text}"
+                return ok, f"worst case {format_quantity(worst, digits)} vs {self.text}"
             if self.kind in (">=", ">"):
                 worst = value.lo
                 bound = self.low.nom
                 ok = worst >= bound if self.kind == ">=" else worst > bound
-                return ok, f"worst case {format_quantity(worst)} vs {self.text}"
+                return ok, f"worst case {format_quantity(worst, digits)} vs {self.text}"
             if self.kind == "==":
                 ok = bool(value.lo == self.low.nom and value.hi == self.low.nom)
-                return ok, f"{format_value(value)} vs {self.text}"
+                return ok, f"{format_value(value, digits)} vs {self.text}"
             if self.kind == "range":
                 ok = bool(value.lo >= self.low.nom and value.hi <= self.high.nom)
-                return ok, f"range {format_value(value)} vs {self.text}"
+                return ok, f"range {format_value(value, digits)} vs {self.text}"
         except pint.DimensionalityError as exc:
             raise CalcError(f"cannot compare: {exc}") from exc
         raise CalcError(f"unsupported limit kind {self.kind!r}")
@@ -595,18 +595,38 @@ def _unit_count_units(units) -> int:
         return 1
 
 
+def _sigfig_str(magnitude: float, digits: int) -> str:
+    """Render `magnitude` to `digits` significant figures.
+
+    Plain `:.{digits}g` flips to scientific notation as soon as the integer part
+    outgrows `digits` -- 606.0606 at 2 sigfigs becomes "6.1e+02", which no
+    datasheet or review would write. This prefers positional notation as long as
+    only a couple of trailing zeros have to be invented to reach the right order
+    of magnitude (issue #3 finding 14): 606.0606 at 2 sigfigs becomes "610" (one
+    invented zero). 1234567 at 4 sigfigs would need three invented zeros to stay
+    positional, so it keeps the exponent: "1.235e+06".
+    """
+    text = f"{magnitude:.{digits}g}"
+    if "e" not in text:
+        return text
+    exponent = int(text.split("e")[1])
+    if exponent < 0 or exponent - digits + 1 > 2:
+        return text
+    return f"{float(text):.0f}"
+
+
 def format_quantity(q, digits: int = 4) -> str:
     # Only a genuinely unitless number prints bare. `50 ppm` and `10 dBm` are
     # dimensionless but carry a unit, and dropping it would hide what the value is.
     if not _unit_map(q):
-        return f"{float(q.magnitude):.{digits}g}"
+        return _sigfig_str(float(q.magnitude), digits)
     if q.dimensionless:
-        return f"{float(q.magnitude):.{digits}g} {q.units:~P}"
+        return f"{_sigfig_str(float(q.magnitude), digits)} {q.units:~P}"
     try:
         shown = _simplify(q)
     except Exception:
         shown = q
-    return f"{float(shown.magnitude):.{digits}g} {shown.units:~P}"
+    return f"{_sigfig_str(float(shown.magnitude), digits)} {shown.units:~P}"
 
 
 def format_value(value: Value, digits: int = 4) -> str:

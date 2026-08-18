@@ -8,9 +8,12 @@ from typing import Any
 import yaml
 
 from .model import (
+    BASELINE_IDENTITIES,
     DIAGNOSTIC_LEVELS,
     ERROR,
+    ITEM_LAYOUTS,
     ON_CHANGE_MODES,
+    RELEASE_GATE_DEFAULTS,
     BoardSpec,
     FieldSpec,
     ImportSpec,
@@ -21,9 +24,131 @@ from .model import (
 
 CONFIG_NAME = "refdes.yaml"
 
+# Project-level presentation/behaviour settings, committed alongside refdes.yaml
+# but deliberately not in it -- refdes.yaml is schema (types, links, boards);
+# this is process policy and formatting preference. See docs/design/lifecycle.md
+# and docs/design/standard-library.md for the design discussions behind these.
+PROJECT_SETTINGS_NAME = "refdes-project.yaml"
+
+_KNOWN_SETTINGS = {
+    "sigfigs",
+    "item_layout",
+    "baseline_identity",
+    "require_rejection_rationale",
+    "publish_datasheets",
+    "release_gate",
+}
+
 
 class SchemaError(Exception):
     pass
+
+
+def _settings_error(message: str) -> SchemaError:
+    return SchemaError(f"{PROJECT_SETTINGS_NAME}: {message}")
+
+
+def _load_project_settings(root: str) -> dict[str, Any]:
+    """Load and validate `refdes-project.yaml`, sibling to `refdes.yaml`.
+
+    Absent entirely, every setting takes the default matching pre-config
+    behaviour -- except `publish_datasheets`, whose default is a deliberate
+    behaviour change (see `Project.publish_datasheets`'s docstring).
+    """
+    path = os.path.join(root, PROJECT_SETTINGS_NAME)
+    if not os.path.isfile(path):
+        raw: dict[str, Any] = {}
+    else:
+        with open(path, "r", encoding="utf-8") as fh:
+            raw = yaml.safe_load(fh) or {}
+        if not isinstance(raw, dict):
+            raise _settings_error("must be a mapping of setting name to value")
+
+    for key in raw:
+        if key not in _KNOWN_SETTINGS:
+            import difflib
+
+            close = difflib.get_close_matches(str(key), sorted(_KNOWN_SETTINGS), n=1, cutoff=0.5)
+            hint = f" Did you mean {close[0]!r}?" if close else ""
+            raise _settings_error(f"unknown setting {key!r}.{hint}")
+
+    sigfigs = raw.get("sigfigs", 4)
+    if isinstance(sigfigs, bool) or not isinstance(sigfigs, int) or not (1 <= sigfigs <= 15):
+        raise _settings_error(
+            f"sigfigs must be an integer between 1 and 15, got {sigfigs!r}"
+        )
+
+    item_layout = raw.get("item_layout", "flat")
+    if item_layout not in ITEM_LAYOUTS:
+        raise _settings_error(
+            f"item_layout must be one of {list(ITEM_LAYOUTS)}, got {item_layout!r}"
+        )
+
+    baseline_identity = raw.get("baseline_identity", "os_user")
+    if baseline_identity not in BASELINE_IDENTITIES:
+        raise _settings_error(
+            f"baseline_identity must be one of {list(BASELINE_IDENTITIES)}, "
+            f"got {baseline_identity!r}"
+        )
+
+    require_rejection_rationale = raw.get("require_rejection_rationale", True)
+    if not isinstance(require_rejection_rationale, bool):
+        raise _settings_error(
+            f"require_rejection_rationale must be true or false, got "
+            f"{require_rejection_rationale!r}"
+        )
+
+    publish_datasheets = raw.get("publish_datasheets", False)
+    if not isinstance(publish_datasheets, bool):
+        raise _settings_error(
+            f"publish_datasheets must be true or false, got {publish_datasheets!r}"
+        )
+
+    release_gate = {name: dict(rule) for name, rule in RELEASE_GATE_DEFAULTS.items()}
+    overlay = raw.get("release_gate") or {}
+    if not isinstance(overlay, dict):
+        raise _settings_error(
+            "release_gate must be a mapping of rule name to {release, revision}"
+        )
+    for rule_name, rule_cfg in overlay.items():
+        if rule_name not in RELEASE_GATE_DEFAULTS:
+            import difflib
+
+            close = difflib.get_close_matches(
+                str(rule_name), sorted(RELEASE_GATE_DEFAULTS), n=1, cutoff=0.5
+            )
+            hint = f" Did you mean {close[0]!r}?" if close else ""
+            raise _settings_error(
+                f"release_gate.{rule_name} is not a known rule "
+                f"(one of {list(RELEASE_GATE_DEFAULTS)}).{hint}"
+            )
+        rule_cfg = rule_cfg or {}
+        if not isinstance(rule_cfg, dict):
+            raise _settings_error(
+                f"release_gate.{rule_name} must be a mapping with 'release' "
+                f"and/or 'revision' keys, got {rule_cfg!r}"
+            )
+        for key, value in rule_cfg.items():
+            if key not in ("release", "revision"):
+                raise _settings_error(
+                    f"release_gate.{rule_name}.{key} is not valid -- only "
+                    f"'release' and 'revision' are recognized"
+                )
+            if not isinstance(value, bool):
+                raise _settings_error(
+                    f"release_gate.{rule_name}.{key} must be true or false, "
+                    f"got {value!r}"
+                )
+            release_gate[rule_name][key] = value
+
+    return {
+        "sigfigs": sigfigs,
+        "item_layout": item_layout,
+        "baseline_identity": baseline_identity,
+        "require_rejection_rationale": require_rejection_rationale,
+        "publish_datasheets": publish_datasheets,
+        "release_gate": release_gate,
+    }
 
 
 def find_config(start: str = ".") -> str:
@@ -47,6 +172,7 @@ def load_project(config_path: str | None = None, start: str = ".") -> Project:
         raw: dict[str, Any] = yaml.safe_load(fh) or {}
 
     root = os.path.dirname(os.path.abspath(path))
+    settings = _load_project_settings(root)
 
     site = raw.get("site") or {}
     id_cfg = raw.get("id") or {}
@@ -191,4 +317,10 @@ def load_project(config_path: str | None = None, start: str = ".") -> Project:
         unit_aliases=dict(units.get("aliases") or {}),
         root=root,
         boards=boards,
+        sigfigs=settings["sigfigs"],
+        item_layout=settings["item_layout"],
+        baseline_identity=settings["baseline_identity"],
+        require_rejection_rationale=settings["require_rejection_rationale"],
+        publish_datasheets=settings["publish_datasheets"],
+        release_gate=settings["release_gate"],
     )
