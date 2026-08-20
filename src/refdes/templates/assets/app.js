@@ -143,4 +143,30 @@
   window.addEventListener("scroll", function () {
     if (current) place(current);
   }, { passive: true });
+
+  // Scroll-spy for the in-document table of contents (document.html.j2's
+  // .toc): which section is "current" isn't knowable until the page is
+  // actually scrolling, unlike the top-nav's aria-current="page" (set at
+  // build time in base.html.j2) -- the two together are finding 5. Absent
+  // outside document.html (no .doc-item/.toc there), so this is a no-op on
+  // every other page.
+  var tocSections = document.querySelectorAll(".doc-item");
+  var tocLinks = document.querySelectorAll(".toc a");
+  if (tocSections.length && tocLinks.length && window.IntersectionObserver) {
+    var tocObserver = new IntersectionObserver(
+      function (entries) {
+        entries.forEach(function (e) {
+          if (!e.isIntersecting) return;
+          tocLinks.forEach(function (a) { a.classList.remove("current"); });
+          var link = document.querySelector('.toc a[href="#' + e.target.id + '"]');
+          if (link) link.classList.add("current");
+        });
+      },
+      // Biased toward the top of the viewport: "current" means the section
+      // actually being read, not merely the one still clinging to the
+      // bottom edge of the screen.
+      { rootMargin: "0px 0px -70% 0px" }
+    );
+    tocSections.forEach(function (s) { tocObserver.observe(s); });
+  }
 })();
