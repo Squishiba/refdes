@@ -30,7 +30,15 @@ SCHEMA_REL_PATH = os.path.join(".refdes", "schema.json")
 _FIELD_TYPE_MAP: dict[str, dict[str, Any]] = {
     "text": {"type": "string"},
     "person": {"type": "string"},
-    "limit": {"type": "string"},
+    # `examples` is not a constraint -- it's a hint for the editor's own
+    # completion. Verified against the real yaml-language-server (what
+    # redhat.vscode-yaml wraps): a JSON Schema `examples` array on a string
+    # property does surface as completion items when finishing a `limit:`
+    # value, and the server pre-quotes the one that actually needs quotes
+    # (">= 9 V") while leaving the one that doesn't ("<= 600 mA") bare --
+    # confirmed by driving the server directly over its LSP stdio protocol,
+    # not assumed from documentation (finding 13, item 3).
+    "limit": {"type": "string", "examples": [">= 9 V", "<= 600 mA"]},
     "quantity": {"type": "string"},
     "date": {"type": "string", "format": "date"},
     "list": {"type": "array", "items": {"type": "string"}},

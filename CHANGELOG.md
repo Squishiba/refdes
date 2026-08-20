@@ -37,6 +37,14 @@ and this project uses [Semantic Versioning](https://semver.org/).
   `yaml.schemas` path, so two refdes projects open in the same VS Code
   session could validate one project's files against the other's schema.
   `refdes init` now writes an absolute, project-specific path.
+- A malformed YAML file always reported `line 1`, regardless of where the
+  problem actually was -- not a fallback, wrong for every parse failure past
+  the first couple of lines. Both catch sites now read the real location off
+  the exception. A bare `>`/`>=` value (read by YAML as a folded-block-scalar
+  indicator, not a comparison, on any field) now also gets a targeted hint
+  telling you to quote it. `limit:`'s generated JSON Schema fragment carries
+  `examples` showing the quoted forms, verified against the real
+  `yaml-language-server` to actually surface as editor completions.
 
 ## [0.4.0] - 2026-08-18
 

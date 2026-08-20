@@ -793,6 +793,126 @@ completely_unrelated_nonsense: yes
     assert not any("completely_unrelated_nonsense" in d.message for d in project.errors)
 
 
+# --------------------------------------------------------- YAML error diagnostics
+
+
+def test_invalid_yaml_in_a_list_file_reports_the_real_line_not_always_1(tmp_path):
+    """Finding 13's actual point: line=1 was hardcoded, not a fallback -- wrong
+    for any malformed YAML past the first couple of lines, not just the '>'
+    gotcha this finding is nominally about. A literal tab in indentation is a
+    clean repro: YAML disallows it outright, and PyYAML's own mark lands
+    exactly on the offending line."""
+    (tmp_path / "refdes.yaml").write_text(COVERAGE_SCHEMA, encoding="utf-8")
+    items = tmp_path / "items"
+    items.mkdir()
+    (items / "bad.yaml").write_text(
+        "items:\n"
+        "  - id: REQ-A-001\n"
+        "    text: fine.\n"
+        "  - id: REQ-A-002\n"
+        "\ttext: tabbed\n",
+        encoding="utf-8",
+    )
+    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    parse.load_items(project)
+
+    yaml_errors = [d for d in project.errors if "invalid YAML" in d.message]
+    assert len(yaml_errors) == 1
+    assert yaml_errors[0].line != 1
+    assert yaml_errors[0].line == 5  # the tabbed line itself
+
+
+def test_invalid_yaml_in_markdown_front_matter_reports_the_real_line(tmp_path):
+    """Same fix, front-matter path -- the parsed text is a *slice* of the
+    file starting after the opening fence, so the exception's own mark (which
+    is relative to that slice) needs the slice's offset added back, or the
+    reported line would be wrong in a new way instead of just defaulting to 1."""
+    (tmp_path / "refdes.yaml").write_text(COVERAGE_SCHEMA, encoding="utf-8")
+    items = tmp_path / "items"
+    items.mkdir()
+    (items / "bad.md").write_text(
+        "---\n"
+        "id: DEC-A-001\n"
+        "type: decision\n"
+        "title: fine so far\n"
+        "\tstatus: tabbed\n"
+        "---\n",
+        encoding="utf-8",
+    )
+    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    parse.load_items(project)
+
+    yaml_errors = [d for d in project.errors if "invalid YAML front-matter" in d.message]
+    assert len(yaml_errors) == 1
+    assert yaml_errors[0].line != 1
+    assert yaml_errors[0].line == 5  # the tabbed line itself
+
+
+def test_bare_gte_limit_gets_a_quoting_hint(tmp_path):
+    """A bare '>=' value is read by YAML as a folded-block-scalar indicator,
+    not a comparison -- the resulting scanner error should carry a targeted
+    hint saying so, not just PyYAML's raw internals message."""
+    (tmp_path / "refdes.yaml").write_text(COVERAGE_SCHEMA, encoding="utf-8")
+    items = tmp_path / "items"
+    items.mkdir()
+    (items / "bad.yaml").write_text(
+        "items:\n"
+        "  - id: CON-001\n"
+        "    title: t\n"
+        "    limit: >= 9 V\n",
+        encoding="utf-8",
+    )
+    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    parse.load_items(project)
+
+    yaml_errors = [d for d in project.errors if "invalid YAML" in d.message]
+    assert len(yaml_errors) == 1
+    assert "needs quotes" in yaml_errors[0].message
+    assert '">= 9 V"' in yaml_errors[0].message
+    assert yaml_errors[0].line == 4  # the `limit: >= 9 V` line itself
+
+
+def test_bare_gt_hint_fires_on_any_field_not_just_limit(tmp_path):
+    """The finding is explicit that this must be scoped to the line's actual
+    content, not to a field literally named `limit` -- the same YAML gotcha
+    hits any field."""
+    (tmp_path / "refdes.yaml").write_text(COVERAGE_SCHEMA, encoding="utf-8")
+    items = tmp_path / "items"
+    items.mkdir()
+    (items / "bad.yaml").write_text(
+        "items:\n"
+        "  - id: REQ-A-001\n"
+        "    text: > shall be greater than something\n",
+        encoding="utf-8",
+    )
+    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    parse.load_items(project)
+
+    yaml_errors = [d for d in project.errors if "invalid YAML" in d.message]
+    assert len(yaml_errors) == 1
+    assert "needs quotes" in yaml_errors[0].message
+
+
+def test_other_yaml_errors_get_no_quoting_hint(tmp_path):
+    """The hint must not fire on an unrelated malformed-YAML failure -- an
+    unterminated flow sequence has nothing to do with the '>' gotcha."""
+    (tmp_path / "refdes.yaml").write_text(COVERAGE_SCHEMA, encoding="utf-8")
+    items = tmp_path / "items"
+    items.mkdir()
+    (items / "bad.yaml").write_text(
+        "items:\n"
+        "  - id: REQ-A-001\n"
+        "    text: [ unterminated\n",
+        encoding="utf-8",
+    )
+    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    parse.load_items(project)
+
+    yaml_errors = [d for d in project.errors if "invalid YAML" in d.message]
+    assert len(yaml_errors) == 1
+    assert "needs quotes" not in yaml_errors[0].message
+
+
 # ------------------------------------------------------------- images and assets
 
 
@@ -7132,6 +7252,20 @@ def test_build_schema_enum_field_carries_choices_and_default():
         "proposed", "in_progress", "accepted", "on_hold", "rejected", "superseded",
     ]
     assert status["default"] == "proposed"
+
+
+def test_build_schema_limit_field_carries_quoting_examples():
+    """Finding 13, item 3: a `limit:` value starting with '>'/'>=' needs
+    quotes in YAML; `examples` on the JSON Schema fragment is a hint for the
+    editor's own completion. Verified (not just shipped hopefully) against
+    the real yaml-language-server -- see schema_json.py's comment on this
+    fragment for how."""
+    project = _build_at_repo_schema()
+    doc = schema_json_mod.build_schema(project)
+    limit = doc["$defs"]["constraint__bare"]["properties"]["limit"]
+    assert limit["type"] == "string"
+    assert ">= 9 V" in limit["examples"]
+    assert "<= 600 mA" in limit["examples"]
 
 
 def test_build_schema_link_carries_target_description():

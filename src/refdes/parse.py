@@ -78,6 +78,65 @@ def _relpath(project: Project, path: str) -> str:
         return path.replace("\\", "/")
 
 
+# Substrings PyYAML's own exception carries when a bare '>'/'>=' is misread as
+# a folded-block-scalar indicator rather than a comparison -- checked with
+# `or` (either is sufficient) because the exact wording of `.problem` differs
+# by what immediately follows the '>' (see finding 13's own repro: '>= ' fails
+# with "chomping or indentation indicators", a bare '> 9' fails with "expected
+# a comment or a line break" instead), while `.context` stays this one string
+# either way.
+_CHOMPING_PROBLEM = "chomping or indentation indicators"
+_BLOCK_SCALAR_CONTEXT = "while scanning a block scalar"
+
+
+def _yaml_error_report(exc: yaml.YAMLError, lines: list[str], offset: int) -> tuple[str, int]:
+    """(message, line) for a YAMLError raised while parsing part of a file.
+
+    `line` is the real, 1-indexed source line the exception's own mark names,
+    falling back to 1 only when no mark is set at all -- not a blanket
+    default, which was the actual bug (finding 13's real point: this was
+    wrong for every malformed YAML file, not just the '>' gotcha). `lines` is
+    the *whole file's* lines (0-indexed); `offset` is how many of them
+    precede the text actually handed to the YAML parser (0 for a full-file
+    parse; the first content line's index for a slice, e.g. front matter),
+    since a mark's own `.line` is relative to whatever text was parsed, not
+    the file it came from.
+
+    `message` adds a targeted hint for the single most common way this fails:
+    a bare '>' or '>=' value, which YAML reads as a folded-block-scalar
+    indicator rather than a comparison. Detection is scoped to the source
+    line's actual content at the failure point, not to any particular field
+    name -- the same gotcha hits any field, not just `limit:`.
+    """
+    mark = getattr(exc, "problem_mark", None)
+    if mark is None:
+        return str(exc), 1
+
+    line = offset + mark.line + 1
+    message = str(exc)
+
+    is_block_scalar_failure = _CHOMPING_PROBLEM in (
+        getattr(exc, "problem", None) or ""
+    ) or _BLOCK_SCALAR_CONTEXT in (getattr(exc, "context", None) or "")
+    if is_block_scalar_failure:
+        # context_mark, when present, points at the '>' itself; problem_mark
+        # points at whatever character broke the scan just after it (the '='
+        # in '>=', for instance) -- prefer the more precise one.
+        pointer = getattr(exc, "context_mark", None) or mark
+        real_idx = offset + pointer.line
+        source_line = lines[real_idx] if 0 <= real_idx < len(lines) else ""
+        value = source_line[pointer.column :]
+        if value.startswith(">"):
+            operator = ">=" if value.startswith(">=") else ">"
+            message += (
+                f" -- a value starting with {operator!r} needs quotes here: YAML "
+                f"reads a bare '>' as the start of a block scalar, not a "
+                f'comparison. Try "{value.strip()}".'
+            )
+
+    return message, line
+
+
 def _suggest(name: str, known: list[str]) -> str:
     close = difflib.get_close_matches(name, known, n=1, cutoff=0.6)
     return f" Did you mean {close[0]!r}?" if close else ""
@@ -262,7 +321,8 @@ def parse_markdown_file(project: Project, path: str) -> list[Item]:
     try:
         parsed0 = _yaml_mapping(head_text)
     except yaml.YAMLError as exc:
-        project.error(f"invalid YAML front-matter: {exc}", file=rel, line=1)
+        message, err_line = _yaml_error_report(exc, lines, offset=1)
+        project.error(f"invalid YAML front-matter: {message}", file=rel, line=err_line)
         return []
     if parsed0 is None:
         project.error("front-matter must be a mapping", file=rel, line=1)
@@ -317,11 +377,13 @@ def parse_markdown_file(project: Project, path: str) -> list[Item]:
 def parse_list_file(project: Project, path: str) -> list[Item]:
     rel = _relpath(project, path)
     with open(path, "r", encoding="utf-8") as fh:
-        try:
-            raw = yaml.load(fh, Loader=_LineLoader) or {}
-        except yaml.YAMLError as exc:
-            project.error(f"invalid YAML: {exc}", file=rel, line=1)
-            return []
+        text = fh.read()
+    try:
+        raw = yaml.load(text, Loader=_LineLoader) or {}
+    except yaml.YAMLError as exc:
+        message, err_line = _yaml_error_report(exc, text.split("\n"), offset=0)
+        project.error(f"invalid YAML: {message}", file=rel, line=err_line)
+        return []
 
     if not isinstance(raw, dict) or "items" not in raw:
         project.error("list file must be a mapping with an 'items:' key", file=rel, line=1)
