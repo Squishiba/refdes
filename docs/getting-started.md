@@ -39,13 +39,16 @@ id:
 ```
 
 That's the whole file `refdes init` writes — rename the title to taste.
-Nothing here defines a `requirement` or a `link_types:` block — that all
-comes from the pinned standard, resolved live from the installed `refdes`
-package. See [the standard library](standard-library.md) for what it
-covers, and `refdes init --standard none` if you'd rather author every type
-by hand, as every project did before this existed. `init` also writes
-`.vscode/settings.json`, wiring up field/link completion for `items/**/*.yaml`
-files if you're using VS Code — see [editor
+`version: 2` is whatever the installed `refdes` currently bundles as newest,
+never the literal word `"latest"` — a later `refdes` may write a higher
+number here; that's expected, not a sign this page is out of date. Nothing
+here defines a `requirement` or a `link_types:` block — that all comes from
+the pinned standard, resolved live from the installed `refdes` package. See
+[the standard library](standard-library.md) for what it covers, and `refdes
+init --standard none` if you'd rather author every type by hand, as every
+project did before this existed. `init` also writes `.vscode/settings.json`,
+wiring up field/link completion for `items/**/*.yaml` files if you're using
+VS Code — see [editor
 support](standard-library.md#editor-support-json-schema-emission).
 
 ```
