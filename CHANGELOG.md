@@ -21,6 +21,17 @@ and this project uses [Semantic Versioning](https://semver.org/).
   `constraint.title` now gets one specific diagnostic naming the rename,
   rather than a generic unknown-field warning plus an unrelated-looking
   missing-required error.
+- `section: <type>` markers (finding 6, replacing the type-keyed `items:`
+  mapping the finding originally proposed): a `- section: <type>` list entry,
+  or a `section: <type>` fenced block in Markdown, asserts the type for every
+  item after it until the next section or end of file, so a file mixing
+  several types no longer has to restate `type:` on each one. Unlike
+  `defaults: {type: ...}`, a section *asserts* rather than defaults -- an
+  item inside one that names a conflicting type is an error, not a silent
+  override, and a file-level `defaults:` naming a different type than an
+  active section is likewise an error rather than a silent pick-a-winner.
+  No `enforce_grouping:` setting was added: a section makes interleaved
+  types within it structurally impossible rather than something to lint for.
 
 ### Fixed
 
@@ -45,6 +56,12 @@ and this project uses [Semantic Versioning](https://semver.org/).
   telling you to quote it. `limit:`'s generated JSON Schema fragment carries
   `examples` showing the quoted forms, verified against the real
   `yaml-language-server` to actually surface as editor completions.
+- A multi-item Markdown file only ever reads its very first block as
+  `defaults:`. A `defaults:`-shaped block anywhere else used to be silently
+  misparsed as a malformed item -- an "unknown field 'defaults'" warning, and
+  every item after it silently kept whatever type came from the *original*
+  leading defaults, wrong or not. Now an error naming the mistake, pointing
+  at `section: <type>` as the fix.
 
 ## [0.4.0] - 2026-08-18
 

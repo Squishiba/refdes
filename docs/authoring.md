@@ -30,6 +30,8 @@ items:
 - `prefix:` is consumed by the [ID allocator](ids.md), not stored as a field.
 - Entries may omit `id:` — run `refdes id` to fill them in.
 
+A file with more than one type in it — see [Sections](#sections) below.
+
 ### Bodies in list files
 
 Use a `body:` key with a YAML block scalar. This is what makes a running log
@@ -119,6 +121,11 @@ front-matter is where this one ends.
 Items with no `id:` are filled in by `refdes id`, which inserts each one at its own
 item's fence regardless of how many other items share the file.
 
+`defaults:` only applies from that one leading block — it is not something you can
+re-declare partway through a file to change what applies to later items. A block
+shaped like `defaults:` anywhere else is an error. Use [a section](#sections) to
+change the type partway through a file instead.
+
 ### `prefix:` per item
 
 `prefix:` may be set on an individual item, not only in `defaults:`. The item's own
@@ -136,6 +143,94 @@ title: Enclosure fastener torque
 
 `prefix:` is consumed by the [ID allocator](ids.md); it is never stored as a field,
 and it works the same way in a list file's `items:` entries.
+
+## Sections
+
+A `section: <type>` marker asserts the type for every item after it, until the
+next section or the end of the file — the same spelling in both formats, placed
+wherever each format's structure naturally allows a marker to sit between items:
+a list entry of its own in a list file, a fenced block of its own in Markdown.
+
+```yaml
+items:
+  - section: requirement
+  - id: REQ-IO-AI-001
+    text: The AI accelerator rail shall regulate to 0.85 V ±3%.
+  - id: REQ-IO-AI-002
+    text: The AI accelerator rail shall supply 40 A continuous.
+
+  - section: constraint
+  - id: CON-IO-001
+    limit: "<= 5 A"
+    rationale: Trace width on the outer layer at 1 oz copper.
+```
+
+```markdown
+---
+section: requirement
+---
+id: REQ-IO-AI-001
+text: The AI accelerator rail shall regulate to 0.85 V ±3%.
+---
+
+---
+section: constraint
+---
+id: CON-IO-001
+limit: "<= 5 A"
+rationale: Trace width on the outer layer at 1 oz copper.
+---
+```
+
+Neither item above states its own `type:` — the section already did, and every
+item under it is that type until the next `section:` or the end of the file.
+
+### A section asserts; `defaults:` provides a fallback
+
+This is the actual difference between the two, not just a second way to spell the
+same thing. Under `defaults: {type: requirement}`, an item may still legally
+declare `type: decision` — a default is something an item is free to override.
+Under `section: requirement`, the container has already stated what its items
+are, so an item inside it declaring a conflicting `type:` is an **error** naming
+both, not a silent override:
+
+```
+ERROR items/main-io/interfaces.yaml:6 — item declares type 'decision' but sits
+      inside a 'section: requirement' block (opened at line 2) -- a section
+      asserts its items' type; this one disagrees. Move the item out of the
+      section, or fix whichever of the two is wrong.
+```
+
+`defaults:` keeps working exactly as it always has for everything else — a
+section only ever asserts `type:`, nothing more. Every other field a section's
+items need still comes from `defaults:` or the item's own keys, with the same
+precedence as today.
+
+### Composing a file-level `defaults:` with a section
+
+- `defaults:` fields other than `type:` apply under a section exactly as they
+  do outside one — unaffected by whether a section is active.
+- If `defaults:` does not set `type:`, a section simply supplies it, and nothing
+  can conflict.
+- If `defaults:` *does* set `type:` and a section asserts a different one, that
+  is the file contradicting itself, not two independent fallbacks to reconcile
+  silently — it is an error at the section marker itself, naming both values:
+
+  ```
+  ERROR items/main-io/interfaces.yaml:2 — 'section: constraint' conflicts with
+        this file's own 'defaults: {type: requirement}' -- a section asserts
+        what its items are; reconcile the two rather than leaving them to
+        silently disagree. Drop 'type:' from defaults:, or make it match.
+  ```
+
+  Fix it by dropping `type:` from `defaults:` (the common case — most files
+  using sections don't need a file-wide type at all) or by making the two agree.
+
+Because a section asserts its own type, interleaving two types inside one section
+is not something a linter has to catch after the fact — an item that disagrees
+with its enclosing section is simply an error, so the file cannot express
+disorganized interleaving within a section in the first place. There is no
+`enforce_grouping:` setting; a section doesn't need one to enforce.
 
 ## Choosing between them
 

@@ -142,6 +142,82 @@ def _suggest(name: str, known: list[str]) -> str:
     return f" Did you mean {close[0]!r}?" if close else ""
 
 
+def _only_key(mapping: dict[str, Any], key: str) -> bool:
+    """True if `mapping`'s one real key (ignoring line bookkeeping) is `key`
+    -- the same shape test that already distinguished a `defaults:`-only
+    block from an item, generalized so `section:` markers use it too."""
+    return {k for k in mapping if k != "__line__"} == {key}
+
+
+def _resolve_section_marker(
+    project: Project, marker: dict[str, Any], default_type: Any, rel: str, line: int
+) -> str | None:
+    """`marker` is already known to be a `section:`-only block/entry (finding
+    6, built instead of the type-keyed `items:` mapping: same spelling in
+    both formats, a bare fenced block in Markdown, a single-key list entry in
+    YAML, since neither format's structure lets the other spelling work in
+    both). Validate its value against a `defaults: {type: ...}` this file may
+    also declare and return the asserted type, or None if the marker is
+    malformed or conflicts (both already reported as errors).
+
+    A section *asserts* rather than defaults -- unlike an ordinary
+    `defaults: {type: X}`, which an item is always free to override, a
+    section states what its items are. A file-level default that disagrees
+    with an active section isn't a fallback being overridden, it's the file
+    contradicting itself, so it's a hard error naming both values rather than
+    a silent pick-a-winner.
+    """
+    value = marker.get("section")
+    if not isinstance(value, str) or not value:
+        project.error("'section:' must name a type (a non-empty string)", file=rel, line=line)
+        return None
+    if default_type is not None and default_type != value:
+        project.error(
+            f"'section: {value}' conflicts with this file's own "
+            f"'defaults: {{type: {default_type}}}' -- a section asserts what "
+            f"its items are; reconcile the two rather than leaving them to "
+            f"silently disagree. Drop 'type:' from defaults:, or make it "
+            f"match.",
+            file=rel, line=line,
+        )
+        return None
+    return value
+
+
+def _apply_section(
+    project: Project,
+    merged: dict[str, Any],
+    section_type: str | None,
+    section_line: int | None,
+    rel: str,
+    line: int,
+) -> bool:
+    """If a section is active, enforce that `merged` (an item's fields,
+    already layered over `defaults:`, before `_build_item` sees them) agrees
+    with its asserted type, then stamp that type in. False means this item
+    contradicts its enclosing section and was already reported -- the caller
+    must skip it rather than build it. An item that omits `type:` entirely
+    (the normal case: that's the whole point of a section) always agrees by
+    construction; an item that restates the same type agrees too and is left
+    alone. Only an item naming a *different* type is a conflict, since a
+    section asserts rather than defaults (see _resolve_section_marker)."""
+    if section_type is None:
+        return True
+    item_type = merged.get("type")
+    if item_type is not None and item_type != section_type:
+        project.error(
+            f"item declares type {item_type!r} but sits inside a "
+            f"'section: {section_type}' block (opened at line {section_line}) "
+            f"-- a section asserts its items' type; this one disagrees. Move "
+            f"the item out of the section, or fix whichever of the two is "
+            f"wrong.",
+            file=rel, line=line,
+        )
+        return False
+    merged["type"] = section_type
+    return True
+
+
 def _build_item(
     project: Project,
     raw: dict[str, Any],
@@ -304,7 +380,12 @@ def parse_markdown_file(project: Project, path: str) -> list[Item]:
 
     If the first block's only key is `defaults:`, it is not an item -- its mapping
     is merged under every item that follows, the same way `defaults:` works in a
-    list file.
+    list file. A `defaults:`-shaped block anywhere else in the file is an error,
+    not a second application point (see the error message inline below).
+
+    A block whose only key is `section:` (finding 6) is likewise not an item --
+    it asserts a type for every item after it until the next section or end of
+    file, the Markdown spelling of a YAML list file's `- section: <type>` entry.
     """
     rel = _relpath(project, path)
     with open(path, "r", encoding="utf-8") as fh:
@@ -356,19 +437,55 @@ def parse_markdown_file(project: Project, path: str) -> list[Item]:
     if first_keys == {"defaults"} and isinstance(blocks[0][2].get("defaults"), dict):
         defaults = _strip_lines(blocks[0][2]["defaults"])
         start = 1
+    default_type = defaults.get("type")
 
     item_blocks = blocks[start:]
     if not item_blocks:
         project.error("file has no items after 'defaults:'", file=rel, line=1)
         return []
 
+    # `---\nsection: <type>\n---` (finding 6): a marker block, not an item --
+    # the Markdown spelling of the same thing `- section: <type>` is in a
+    # YAML list file. Asserts the type for every item after it until the next
+    # section or end of file; see _resolve_section_marker/_apply_section for
+    # why this is stricter than `defaults:` rather than a second spelling of
+    # it, and parse_list_file for the identical logic there.
+    section_type: str | None = None
+    section_line: int | None = None
+
     out: list[Item] = []
     for index, (open_i, close_i, parsed) in enumerate(item_blocks):
+        line = open_i + 2
         body_end = item_blocks[index + 1][0] if index + 1 < len(item_blocks) else len(lines)
+
+        if _only_key(parsed, "defaults"):
+            # Only blocks[0] is ever read as file-wide defaults (above). One
+            # anywhere else used to be silently misparsed as a malformed item
+            # -- reporting "unknown field 'defaults'" on whatever type was
+            # already active, then leaving every item after it wrongly typed
+            # too, with nothing louder than that one warning to notice by.
+            project.error(
+                "'defaults:' only applies as the very first block in a file "
+                "-- a later one here doesn't take effect. Use "
+                "'section: <type>' to change what applies to the items that "
+                "follow.",
+                file=rel, line=line,
+            )
+            continue
+
+        if _only_key(parsed, "section"):
+            resolved = _resolve_section_marker(project, parsed, default_type, rel, line)
+            if resolved is not None:
+                section_type = resolved
+                section_line = line
+            continue
+
         body = "\n".join(lines[close_i + 1 : body_end])
         merged: dict[str, Any] = dict(defaults)
         merged.update({k: v for k, v in parsed.items() if k != "__line__"})
-        item = _build_item(project, merged, rel, line=open_i + 2, body=body)
+        if not _apply_section(project, merged, section_type, section_line, rel, line):
+            continue
+        item = _build_item(project, merged, rel, line=line, body=body)
         if item:
             out.append(item)
     return out
@@ -390,6 +507,7 @@ def parse_list_file(project: Project, path: str) -> list[Item]:
         return []
 
     defaults = _strip_lines(raw.get("defaults") or {})
+    default_type = defaults.get("type")
 
     out: list[Item] = []
     entries = raw.get("items") or []
@@ -397,14 +515,32 @@ def parse_list_file(project: Project, path: str) -> list[Item]:
         project.error("'items:' must be a list", file=rel, line=1)
         return []
 
+    # `- section: <type>` (finding 6): a marker entry, not an item -- asserts
+    # the type for every entry after it until the next section or end of
+    # list. Interleaving two types under one section is structurally
+    # impossible rather than something to lint for after the fact, since an
+    # item that names a conflicting type is simply an error (_apply_section).
+    section_type: str | None = None
+    section_line: int | None = None
+
     for entry in entries:
         if not isinstance(entry, dict):
             project.error(f"list entry must be a mapping, got {type(entry).__name__}",
                           file=rel, line=1)
             continue
         line = entry.get("__line__", 1)
+
+        if _only_key(entry, "section"):
+            resolved = _resolve_section_marker(project, entry, default_type, rel, line)
+            if resolved is not None:
+                section_type = resolved
+                section_line = line
+            continue
+
         merged: dict[str, Any] = dict(defaults)
         merged.update({k: v for k, v in entry.items() if k != "__line__"})
+        if not _apply_section(project, merged, section_type, section_line, rel, line):
+            continue
         item = _build_item(project, merged, rel, line=line)
         if item:
             out.append(item)

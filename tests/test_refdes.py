@@ -1960,6 +1960,205 @@ def test_refdes_id_writes_back_into_each_items_own_fence(tmp_path):
     assert "Body two." not in project2.items["DEC-MULTI-001"].body
 
 
+# ------------------------------------------------------------------- sections
+
+SECTIONS_SCHEMA = (
+    "site: { title: T, out: _site }\n"
+    "types:\n"
+    "  requirement: { prefix: REQ, fields: { text: { type: text, required: true } } }\n"
+    "  decision: { prefix: DEC, fields: { title: { type: text, required: true } }, body: {} }\n"
+)
+
+
+def test_section_elides_type_in_a_yaml_list_file(tmp_path):
+    """Finding 6, built instead of the type-keyed items: mapping. A `section:`
+    entry asserts the type for everything after it, so items no longer need
+    to restate `type:` even though the file mixes two of them."""
+    (tmp_path / "refdes.yaml").write_text(SECTIONS_SCHEMA, encoding="utf-8")
+    (tmp_path / "items").mkdir()
+    (tmp_path / "items" / "i.yaml").write_text(
+        "items:\n"
+        "  - section: requirement\n"
+        "  - id: REQ-001\n    text: Elided via section.\n"
+        "  - id: REQ-002\n    text: Also elided.\n"
+        "  - section: decision\n"
+        "  - id: DEC-001\n    title: Elided via a second section.\n",
+        encoding="utf-8",
+    )
+    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    parse.load_items(project)
+    assert not project.errors
+    assert not project.warnings
+    assert project.items["REQ-001"].type == "requirement"
+    assert project.items["REQ-002"].type == "requirement"
+    assert project.items["DEC-001"].type == "decision"
+
+
+def test_section_elides_type_in_multi_item_markdown(tmp_path):
+    """The Markdown spelling of the same marker: a fenced block whose only
+    key is `section:`, as close to the list-file spelling as the format
+    allows."""
+    (tmp_path / "refdes.yaml").write_text(SECTIONS_SCHEMA, encoding="utf-8")
+    (tmp_path / "items").mkdir()
+    (tmp_path / "items" / "i.md").write_text(
+        "---\n"
+        "section: decision\n"
+        "---\n"
+        "---\n"
+        "id: DEC-101\n"
+        "title: First, elided type via section.\n"
+        "---\n"
+        "Body one.\n"
+        "\n"
+        "---\n"
+        "section: requirement\n"
+        "---\n"
+        "---\n"
+        "id: REQ-101\n"
+        "text: Second, elided type via a new section.\n"
+        "---\n",
+        encoding="utf-8",
+    )
+    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    parse.load_items(project)
+    assert not project.errors
+    assert not project.warnings
+    assert project.items["DEC-101"].type == "decision"
+    assert "Body one." in project.items["DEC-101"].body
+    assert project.items["REQ-101"].type == "requirement"
+
+
+def test_item_contradicting_its_section_is_an_error_not_a_silent_override(tmp_path):
+    """The crux of why a section isn't just a second spelling of `defaults:`:
+    under `defaults: {type: X}` an item may legally declare a different
+    type -- a default is a fallback. Under a section, the container has
+    already asserted what its items are, so a contradicting item is an
+    error naming the conflict."""
+    (tmp_path / "refdes.yaml").write_text(SECTIONS_SCHEMA, encoding="utf-8")
+    (tmp_path / "items").mkdir()
+    (tmp_path / "items" / "i.yaml").write_text(
+        "items:\n"
+        "  - section: requirement\n"
+        "  - id: DEC-201\n    type: decision\n    title: Contradicts the active section.\n",
+        encoding="utf-8",
+    )
+    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    parse.load_items(project)
+    assert any(
+        "declares type 'decision'" in d.message and "section: requirement" in d.message
+        for d in project.errors
+    )
+    assert "DEC-201" not in project.items
+
+
+def test_file_defaults_type_conflicting_with_a_section_is_an_error(tmp_path):
+    """Composition rule: if a file-level `defaults:` names a type and a
+    section asserts a different one, that's the file contradicting itself --
+    an error naming both, not a silent pick-a-winner."""
+    (tmp_path / "refdes.yaml").write_text(SECTIONS_SCHEMA, encoding="utf-8")
+    (tmp_path / "items").mkdir()
+    (tmp_path / "items" / "i.yaml").write_text(
+        "defaults:\n  type: requirement\n"
+        "items:\n"
+        "  - section: decision\n"
+        "  - id: DEC-301\n    title: Never legitimately typed.\n",
+        encoding="utf-8",
+    )
+    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    parse.load_items(project)
+    assert any(
+        "section: decision" in d.message and "defaults: {type: requirement}" in d.message
+        for d in project.errors
+    )
+
+
+def test_section_composes_with_defaults_for_non_type_fields(tmp_path):
+    """A file-level `defaults:` still supplies every other field exactly as
+    today; a section only ever asserts `type:`, nothing else."""
+    (tmp_path / "refdes.yaml").write_text(
+        "site: { title: T, out: _site }\n"
+        "types:\n"
+        "  requirement:\n"
+        "    prefix: REQ\n"
+        "    fields:\n"
+        "      text:   { type: text, required: true }\n"
+        "      status: { type: enum, choices: [draft, active], default: draft }\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "items").mkdir()
+    (tmp_path / "items" / "i.yaml").write_text(
+        "defaults:\n  status: active\n"
+        "items:\n"
+        "  - section: requirement\n"
+        "  - id: REQ-401\n    text: Gets status from file defaults, type from the section.\n",
+        encoding="utf-8",
+    )
+    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    parse.load_items(project)
+    assert not project.errors
+    item = project.items["REQ-401"]
+    assert item.type == "requirement"
+    assert item.fields["status"] == "active"
+
+
+def test_later_defaults_block_in_markdown_is_now_an_error_not_silent(tmp_path):
+    """The bug the investigation turned up: only the very first block in a
+    multi-item Markdown file was ever read as file-wide defaults. A second
+    `defaults:`-shaped block used to be silently misparsed as a malformed
+    item, and everything after it silently kept the *original* file-wide
+    type -- reproduced here exactly as found: an intended requirement lands
+    as a decision, with nothing louder than an 'unknown field' warning to
+    notice by. Must error now, independent of the section feature."""
+    (tmp_path / "refdes.yaml").write_text(SECTIONS_SCHEMA, encoding="utf-8")
+    (tmp_path / "items").mkdir()
+    (tmp_path / "items" / "i.md").write_text(
+        "---\n"
+        "defaults:\n"
+        "  type: decision\n"
+        "---\n"
+        "---\n"
+        "id: DEC-401\n"
+        "title: First decision.\n"
+        "---\n"
+        "Body one.\n"
+        "\n"
+        "---\n"
+        "defaults:\n"
+        "  type: requirement\n"
+        "---\n"
+        "---\n"
+        "id: REQ-401\n"
+        "text: A requirement after a second defaults block.\n"
+        "---\n",
+        encoding="utf-8",
+    )
+    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    parse.load_items(project)
+    assert any(
+        "'defaults:' only applies as the very first block" in d.message
+        for d in project.errors
+    )
+    # The first block's type is unaffected; the real fix (turn this into a
+    # 'section: requirement' marker) is left to the author -- this test only
+    # needs to confirm the mistake is no longer silent.
+    assert project.items["DEC-401"].type == "decision"
+
+
+def test_section_marker_must_name_a_real_string(tmp_path):
+    (tmp_path / "refdes.yaml").write_text(SECTIONS_SCHEMA, encoding="utf-8")
+    (tmp_path / "items").mkdir()
+    (tmp_path / "items" / "i.yaml").write_text(
+        "items:\n"
+        "  - section:\n"
+        "  - id: REQ-501\n    type: requirement\n    text: Unaffected by the bad marker.\n",
+        encoding="utf-8",
+    )
+    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    parse.load_items(project)
+    assert any("'section:' must name a type" in d.message for d in project.errors)
+    assert project.items["REQ-501"].type == "requirement"
+
+
 # ------------------------------------------------------------- reserved prefix key
 
 
