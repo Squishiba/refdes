@@ -180,8 +180,24 @@ def _build_item(
             item.fields[key] = _strip_lines(value)
 
     for fname, fspec in spec.fields.items():
-        if fname not in item.fields and fspec.default is not None:
+        if fname not in item.fields:
+            if fspec.default is not None:
+                item.fields[fname] = fspec.default
+        elif item.fields[fname] is None and fspec.default is not None:
+            # A bare `key:` with nothing after the colon is YAML null, not absence --
+            # left alone, it would look "already resolved" to validate_items() and skip
+            # both the default and the enum/limit/etc. check right below it, silently
+            # dropping whatever the author meant to write. Coalesce it into absent so
+            # it gets the same default an omitted key would, and say so: unlike an
+            # omitted key, an explicit null was something the author typed, so it's
+            # worth a warning rather than a silent correction.
             item.fields[fname] = fspec.default
+            project.warn(
+                f"{fname!r} was written as an explicit null (a bare {fname}: with no "
+                f"value) -- treating it as absent and using the default {fspec.default!r} "
+                f"instead of leaving it unset and unvalidated.",
+                file=rel, line=line, item_id=item.id or "?",
+            )
 
     return item
 

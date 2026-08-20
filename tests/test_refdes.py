@@ -4379,6 +4379,39 @@ def test_coverable_statuses_excludes_unlisted_statuses_entirely(tmp_path):
     assert "REQ-002" in project.coverage
 
 
+def test_explicit_null_enum_field_gets_default_applied_and_reported(tmp_path):
+    """A bare `status:` (present, value null) must not bypass the schema default and
+    the enum check the way it silently did before -- it should behave exactly like
+    an absent key: get the default, and say so, rather than being treated as an
+    already-resolved value with nothing to check."""
+    (tmp_path / "refdes.yaml").write_text(
+        "site: { title: T, out: _site }\n"
+        "types:\n"
+        "  requirement:\n"
+        "    prefix: REQ\n"
+        "    coverable: true\n"
+        "    coverable_statuses: [active]\n"
+        "    fields:\n"
+        "      text:   { type: text, required: true }\n"
+        "      status: { type: enum, choices: [draft, active, retired], default: draft }\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "items").mkdir()
+    (tmp_path / "items" / "i.yaml").write_text(
+        "items:\n"
+        "  - id: REQ-001\n    type: requirement\n    text: A requirement.\n    status:\n",
+        encoding="utf-8",
+    )
+    project = _build_at(tmp_path)
+
+    assert not project.errors
+    assert project.items["REQ-001"].fields["status"] == "draft"
+    assert any(
+        d.item_id == "REQ-001" and "status" in d.message and "null" in d.message.lower()
+        for d in project.warnings
+    )
+
+
 def test_verifying_statuses_filters_which_links_count_as_verified(tmp_path):
     (tmp_path / "refdes.yaml").write_text(
         "site: { title: T, out: _site }\n"
