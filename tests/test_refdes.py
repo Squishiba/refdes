@@ -1142,6 +1142,94 @@ def test_allocated_numbers_are_burned_and_never_reused(temp_project):
     assert assignments[0][1] == "REQ-TMP-004"
 
 
+def test_id_write_back_fills_bare_id_key_in_place_not_a_second_key(tmp_path):
+    """`refdes new` scaffolds a bare `id:` placeholder as the first key. Running
+    `refdes id` on it must fill that key in place -- not insert a second `id:` key
+    below it. A duplicate key is not a cosmetic wart: YAML resolves a mapping with
+    a duplicate key to the *last* occurrence, which is the still-empty original, so
+    the item silently looks unallocated again on the very next parse, and a second
+    `refdes id` run burns a second id on top of the first without fixing anything."""
+    (tmp_path / "refdes.yaml").write_text(
+        "site: { title: T, out: _site }\n"
+        "types:\n"
+        "  requirement: { prefix: REQ, fields: { text: { type: text, required: true } } }\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "items").mkdir()
+    path = tmp_path / "items" / "i.yaml"
+    path.write_text(
+        "defaults: { type: requirement, prefix: CAN }\n"
+        "items:\n"
+        "  - id:\n"
+        "    text: A can requirement.\n",
+        encoding="utf-8",
+    )
+
+    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    parse.load_items(project, require_ids=False)
+    assignments = ids.allocate(project)
+    assert assignments and assignments[0][1] == "CAN-001"
+
+    text = path.read_text(encoding="utf-8")
+    assert text.count("id:") == 1, f"expected exactly one 'id:' key, got:\n{text}"
+    assert "id: CAN-001" in text
+
+    # Re-parse from disk, the way a second, separate `refdes id` invocation would --
+    # this is what actually exposes the corruption: a duplicate key resolves to the
+    # *last* one, so a still-broken file looks pending again here.
+    project2 = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    parse.load_items(project2, require_ids=False)
+    assert project2.items.get("CAN-001") is not None
+    assert not project2.pending, "the item must not still look unallocated on reparse"
+
+    # A second run against an already-correct file must be a no-op, not another
+    # allocation burning a second id for the same item.
+    assignments2 = ids.allocate(project2)
+    assert assignments2 == []
+
+
+def test_id_write_back_fills_bare_id_key_in_place_markdown(tmp_path):
+    """Same corruption as the YAML-list form above, but through the front-matter
+    insertion path (`insert_into_markdown`), which is even more directly at fault:
+    it splices in a new line unconditionally, with no read of what's already on the
+    target line at all."""
+    (tmp_path / "refdes.yaml").write_text(
+        "site: { title: T, out: _site }\n"
+        "types:\n"
+        "  decision: { prefix: DEC, fields: { title: { type: text, required: true } }, body: {} }\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "items").mkdir()
+    path = tmp_path / "items" / "d.md"
+    path.write_text(
+        "---\n"
+        "id:\n"
+        "type: decision\n"
+        "title: A decision.\n"
+        "---\n"
+        "Body text.\n",
+        encoding="utf-8",
+    )
+
+    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    parse.load_items(project, require_ids=False)
+    assignments = ids.allocate(project)
+    assert assignments and assignments[0][1] == "DEC-001"
+
+    text = path.read_text(encoding="utf-8")
+    front_matter = text.split("---")[1]
+    assert front_matter.count("id:") == 1, f"expected exactly one 'id:' key, got:\n{text}"
+    assert "id: DEC-001" in front_matter
+
+    project2 = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    parse.load_items(project2, require_ids=False)
+    assert project2.items.get("DEC-001") is not None
+    assert not project2.pending, "the item must not still look unallocated on reparse"
+
+    assignments2 = ids.allocate(project2)
+    assert assignments2 == []
+
+
 # ------------------------------------------------------------------ former_ids
 
 FORMER_IDS_SCHEMA = (

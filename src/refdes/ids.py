@@ -144,8 +144,19 @@ def insert_into_markdown(lines: list[str], line_no: int, new_line: str) -> list[
 
     Generic over what the key/value text is -- allocate() inserts `id: X`;
     former_ids.confirm() reuses this to insert `former_ids: [X]` the same way.
+
+    If the target line already *is* that same key, written bare (e.g. a
+    scaffolded `id:` placeholder with no value), replace it in place instead
+    of inserting a second occurrence above it. A duplicate key isn't cosmetic:
+    YAML resolves a mapping with a repeated key to the *last* one, so leaving
+    the original blank key in place means the item still parses as if nothing
+    were ever written -- looking unallocated again on the very next parse, and
+    burning another id if `refdes id` runs again on it.
     """
     index = max(0, line_no - 1)
+    key = new_line.split(":", 1)[0].strip()
+    if index < len(lines) and re.match(rf"^{re.escape(key)}:\s*$", lines[index]):
+        return lines[:index] + [new_line] + lines[index + 1 :]
     return lines[:index] + [new_line] + lines[index:]
 
 
@@ -158,6 +169,11 @@ def insert_into_list(lines: list[str], line_no: int, key: str, value: str) -> li
     injected inside them instead. An entry whose flow mapping does not close
     on the same line is refused rather than guessed at, so it fails loudly
     instead of corrupting the file.
+
+    If the target line already *is* `{key}:` written bare (e.g. a scaffolded
+    `id:` placeholder), its value is filled in place rather than inserting a
+    second `{key}:` key above it -- see insert_into_markdown()'s docstring for
+    why a duplicate key is a correctness bug, not a cosmetic one.
     """
     index = line_no - 1
     if not (0 <= index < len(lines)):
@@ -173,6 +189,8 @@ def insert_into_list(lines: list[str], line_no: int, key: str, value: str) -> li
         inner = flow_match.group(1).strip()
         new_inner = f"{key}: {value}" if not inner else f"{key}: {value}, {inner}"
         return lines[:index] + [f"{indent}-{sep}{{{new_inner}}}"] + lines[index + 1 :]
+    if re.match(rf"^{re.escape(key)}:\s*$", rest):
+        return lines[:index] + [f"{indent}- {key}: {value}"] + lines[index + 1 :]
     replacement = [f"{indent}- {key}: {value}", f"{indent}  {rest}"]
     return lines[:index] + replacement + lines[index + 1 :]
 
