@@ -7383,6 +7383,51 @@ def test_cli_schema_json_prints_valid_schema(tmp_path, capsys):
     assert "requirement__bare" in doc["$defs"]
 
 
+def test_build_graph_emits_one_edge_per_declared_link(tmp_path):
+    """Finding 11: the graph is a walk over the same resolved project.types
+    build_schema() uses, with a different renderer -- one Mermaid edge per
+    (type, link, target) triple, in the direction actually declared."""
+    (tmp_path / "refdes.yaml").write_text(
+        "site: { title: T, out: _site }\n"
+        "link_types:\n"
+        "  satisfies: { inverse: satisfied_by, label: Satisfies }\n"
+        "types:\n"
+        "  requirement: { prefix: REQ, fields: { text: { type: text } } }\n"
+        "  decision:\n"
+        "    prefix: DEC\n"
+        "    fields: { title: { type: text } }\n"
+        "    links: { satisfies: [requirement] }\n",
+        encoding="utf-8",
+    )
+    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    graph = schema_json_mod.build_graph(project)
+    assert "graph LR" in graph
+    assert "decision -- satisfies --> requirement" in graph
+    # The inverse is computed, not separately declared -- must not appear as
+    # its own edge (that would double the graph for every link verb).
+    assert "satisfied_by" not in graph
+
+
+def test_build_graph_unrestricted_target_draws_to_a_single_any_node():
+    """An empty target list (`links: {blocked_by: []}`) means "any type" --
+    the graph must draw one edge to a synthetic `any` node, not one edge per
+    known type, which would imply N distinct semantic edges instead of one
+    general one."""
+    project = _build_at_repo_schema()
+    graph = schema_json_mod.build_graph(project)
+    assert "decision -- blocked_by --> any" in graph
+
+
+def test_cli_schema_graph_prints_mermaid_source(tmp_path, capsys):
+    scaffold_mod.init(str(tmp_path))
+    status = cli_mod.main(["-c", str(tmp_path / "refdes.yaml"), "schema", "--graph"])
+    assert status == 0
+    out = capsys.readouterr().out
+    assert out.startswith("%%")
+    assert "graph LR" in out
+    assert "requirement -- refines --> requirement" in out
+
+
 def test_check_refreshes_schema_json_and_warns_when_stale(tmp_path, capsys):
     (tmp_path / "refdes.yaml").write_text(COVERAGE_SCHEMA, encoding="utf-8")
     (tmp_path / "items").mkdir()

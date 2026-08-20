@@ -499,8 +499,11 @@ def cmd_new(args) -> int:
 
 def cmd_schema(args) -> int:
     project = load_project(config_path=args.config)
-    json.dump(schema_json_mod.build_schema(project), sys.stdout, indent=2)
-    sys.stdout.write("\n")
+    if args.graph:
+        sys.stdout.write(schema_json_mod.build_graph(project))
+    else:
+        json.dump(schema_json_mod.build_schema(project), sys.stdout, indent=2)
+        sys.stdout.write("\n")
     return 0
 
 
@@ -787,16 +790,23 @@ def main(argv: list[str] | None = None) -> int:
 
     p_schema = sub.add_parser(
         "schema",
-        help="print the project's merged JSON Schema to stdout",
-        description="Emit a JSON Schema describing the project's actual merged "
-        "schema -- base at its pinned version, plus selected presets, plus the "
-        "project overlay -- for editor completion. The same schema is written "
-        "to .refdes/schema.json by every command that loads the project; this "
-        "is the explicit, standalone form, for piping into something else or "
-        "inspecting directly.",
+        help="print the project's merged JSON Schema, or type/link graph, to stdout",
+        description="Emit the project's actual merged schema -- base at its "
+        "pinned version, plus selected presets, plus the project overlay -- "
+        "as JSON Schema (--json, the default; the same schema is written to "
+        ".refdes/schema.json by every command that loads the project, this is "
+        "the explicit standalone form) or as Mermaid flowchart source "
+        "describing the type/link graph (--graph): generated from the "
+        "resolved schema so it can't go stale the way a hand-drawn diagram "
+        "would the moment a preset or overlay changes a verb.",
     )
     p_schema.add_argument(
-        "--json", action="store_true", help="JSON Schema output (the only format today)"
+        "--json", action="store_true", help="JSON Schema output (the default)"
+    )
+    p_schema.add_argument(
+        "--graph",
+        action="store_true",
+        help="Mermaid flowchart source describing the actual type/link graph, to stdout",
     )
     p_schema.set_defaults(func=cmd_schema)
 

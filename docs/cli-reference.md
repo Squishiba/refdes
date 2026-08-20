@@ -369,6 +369,24 @@ refdes schema --json | jq '."$defs".decision__bare.properties'
 
 ---
 
+## `refdes schema --graph`
+
+Print Mermaid flowchart source describing the project's actual type/link
+graph to stdout — the same resolved schema `--json` emits, walked with a
+different renderer. Generated, not hand-drawn, so a preset or project
+overlay changing a verb can't leave it silently stale. See [links and
+traceability](links.md#starter-link-types) for a worked example, generated
+against the bundled standard.
+
+```bash
+refdes schema --graph > graph.mmd
+```
+
+GitHub renders a ` ```mermaid ` fence natively in any Markdown file (README,
+issue, wiki); paste the output into one, or into any other Mermaid renderer.
+
+---
+
 ## `refdes standard add-preset` / `remove-preset`
 
 Change `standard.presets:` with validation and reporting. See [the standard
