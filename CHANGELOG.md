@@ -9,6 +9,26 @@ and this project uses [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- `refdes revise <mapping-file>`: rewrites project-local vocabulary (type
+  names, field names scoped per type, link verb names, id prefixes) across
+  every item file in one operation, from a hand-written old->new mapping.
+  `refdes standard upgrade --to N` does the same thing for a bundled
+  standard's own version history, needing no hand-written mapping -- each
+  standard version ships its own `migration.yaml` describing its delta from
+  the version before it (`hardware@2`'s ships the `constraint.title` ->
+  `constraint.text` rename above), and a multi-version jump chains every
+  intervening version's own delta in order rather than merging them into
+  one combined rename. Both carry each affected item's content hash forward
+  in every stamped baseline *and* seal file, id by id, so a purely cosmetic
+  rename never looks like a content change or, for a sealed append-only log
+  entry, a build-breaking seal violation. Refuses, rolling back cleanly,
+  rather than guessing at an ambiguous mapping, an already-used target
+  name, or a rename the current schema doesn't yet support. Baselines now
+  also record which standard version they were stamped under
+  (`Baseline.standard`), so a multi-version upgrade knows where an existing
+  baseline started -- one stamped before this field existed is left alone
+  (reported, not guessed at) during a chained upgrade rather than silently
+  matched against whichever version happens to be current.
 - `hardware@2`: `constraint.title` is now `constraint.text`, matching
   `requirement.text`'s role as the type's one required content field --
   `title` was a short-label field with nowhere for a constraint's actual

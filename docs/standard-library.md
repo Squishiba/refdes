@@ -301,12 +301,15 @@ shipped, so a project pinned to an old version keeps working unchanged; moving
 to a newer one is a deliberate act, not something that happens under a
 project on an ordinary upgrade.
 
-`refdes standard upgrade` — a guided, deliberate migration between versions
-— is designed but not implemented yet; see
-[docs/design/standard-library.md](design/standard-library.md) §3 if you want
-the full design. For now, moving to a newer version means hand-editing
-`standard.version:` and reading `refdes check`'s diagnostics for whatever
-changed.
+`refdes standard upgrade --to N` is a guided, deliberate migration between
+pinned versions — see the [CLI reference](cli-reference.md#refdes-standard-upgrade---to-n).
+It chains each intervening version's own `migration.yaml`, in order, rewriting
+item files and `standard.version:` together and carrying content hashes
+forward in baselines and seals so the rename doesn't look like a content
+change. Moving to a newer version without it still works exactly as before —
+hand-edit `standard.version:` and read `refdes check`'s diagnostics for
+whatever changed — but the command does the rewrite for you when the change
+is one a `migration.yaml` already describes.
 
 `hardware@2` is the first version bump: `constraint.title` is renamed to
 `constraint.text`, matching `requirement.text`'s role as the type's one
@@ -316,7 +319,9 @@ constraint's actual normative sentence to go but the optional `body:`).
 changes for a project that doesn't touch its pin. A project that does move to
 `version: 2` (or later) with items still declaring `constraint.title` gets a
 specific diagnostic naming the rename, not a generic unknown-field warning
-paired with an unrelated-looking missing-required error.
+paired with an unrelated-looking missing-required error — or, run `refdes
+standard upgrade --to 2` and the rewrite (and the diagnostic) never happens
+at all.
 
 ## `coverable`, `coverable_statuses`, `verifying_statuses`, and `required_when`
 
@@ -344,8 +349,8 @@ The standard's own types simply use them:
 
 ## Not yet built
 
-`refdes standard upgrade` — a guided, deliberate migration between pinned
-versions, with a dry-run report of what a project's own usage would need to
-change — is designed in
+A dry-run report of what a project's own usage would need to change ahead
+of `refdes standard upgrade`, without applying anything, is designed in
 [`docs/design/standard-library.md`](design/standard-library.md) §3 but not
-implemented. Everything else that document specs is built.
+implemented — `refdes revise` supports `--dry-run`; `standard upgrade` does
+not yet. Everything else that document specs is built.

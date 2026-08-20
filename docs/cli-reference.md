@@ -1,7 +1,7 @@
 # CLI reference
 
 ```
-refdes [-c CONFIG] {build,check,revision,release,index,id,fetch,audit,init,new,schema,standard,stub-tests} [options]
+refdes [-c CONFIG] {build,check,revision,release,index,id,fetch,audit,init,new,schema,standard,revise,stub-tests} [options]
 ```
 
 | Global option | Effect |
@@ -404,6 +404,90 @@ writing the config change, then writes it regardless; the command's job is
 to surface the consequence, not to block an author who already decided to
 accept it. Exits 1 if the report contains any error, 0 otherwise; either
 way, the removal is applied.
+
+---
+
+## `refdes standard upgrade --to N`
+
+Move a project's pinned `standard.version:` forward, rewriting every item
+file to match.
+
+```bash
+refdes standard upgrade --to 2
+```
+
+Each bundled standard version ships its own `migration.yaml` — the delta
+from the version immediately before it (`hardware@2`'s renames
+`constraint.title` to `constraint.text`; see the [changelog](../CHANGELOG.md)).
+Upgrading from `v1` to `v4` chains every intervening version's own
+migration, in order — `v1→v2`, then `v2→v3`, then `v3→v4` — never merged
+into one combined rename, so a name a later version reuses (freed up by an
+earlier step) is never mistaken for a collision. Each step rewrites item
+files, bumps `standard.version:` in `refdes.yaml`, and carries the affected
+items' content hashes forward in every stamped baseline and seal file, the
+same way `refdes revise` does (below) — see there for what that buys you.
+A baseline stamped before it recorded which standard version it started at
+(or stamped under `standard: none`) is left alone during a chained
+upgrade, reported rather than guessed at, since there's nowhere recorded
+to say where in the chain its hashes began.
+
+Stops at the first version step that fails, leaving the project fully
+valid at whatever version it reached — never partway through a single
+step's own rewrite. Exits 1 on failure, 0 once every step to `--to N` has
+applied.
+
+---
+
+## `refdes revise <mapping-file>`
+
+Rewrite project-local vocabulary — type names, field names (scoped per
+type), link verb names, id prefixes — across every item file in one
+operation, from a hand-written mapping:
+
+```yaml
+# rename.yaml
+types:
+  constraint: bound
+fields:
+  constraint:      # keyed by the OLD type name
+    title: text
+links:
+  refines: narrows
+prefixes:
+  CON: BND
+```
+
+```bash
+refdes revise rename.yaml
+refdes revise rename.yaml --dry-run   # show what would change, write nothing
+```
+
+For a bundled standard's own version upgrade, use `refdes standard upgrade
+--to N` instead (above) — it needs no hand-written mapping. `revise` is
+for your own project-local renames: something not part of the standard,
+or a hand-rolled schema with no `standard:` pin at all.
+
+Every rewrite is line-level surgical text editing — the same `id:`
+write-back approach `refdes id` already uses — never a full YAML
+re-serialization, which would silently destroy comments and formatting a
+real item file relies on. The whole operation is computed and verified in
+memory before anything touches disk: an ambiguous mapping (two old names
+targeting the same new one, or a target name already in use) is refused
+up front; a rename the rewrite can't locate, or that leaves the rewritten
+project invalid, is refused and rolled back completely, never partially
+applied. A type or required-field rename needs the schema to move with
+the data — `revise` alone only touches item files, never `refdes.yaml`'s
+own `types:`/`link_types:` — so on a hand-rolled schema, pair the rename
+with your own edit to `refdes.yaml` (in whichever order makes both sides
+agree once both are done).
+
+Every affected item's content hash is carried forward, id by id, in every
+stamped baseline **and** every seal file (`.refdes/log-seal*.yaml`) — not
+just baselines. The same hash drives both: a baseline that doesn't carry
+it forward reports a purely cosmetic rename as a changed item; a seal that
+doesn't is worse, since a seal mismatch on a sealed `log` entry is a build
+**error**, not a diff — carrying it forward is what keeps a cosmetic
+rename from turning a clean build into a failing one.
 
 ---
 

@@ -583,6 +583,23 @@ $ refdes standard upgrade --to 2
    `--force` to bump anyway and leave the new diagnostics as ordinary build
    errors until fixed.
 
+**As actually shipped (finding 12), this narrowed one way and grew
+another.** There is no separate report-then-`--apply`-then-`--force`
+sequence: `refdes standard upgrade --to N` always rewrites, in one
+verified operation per version step, chained through every intervening
+version's own `migration.yaml` (`hardware/v2/migration.yaml`, not a
+`v1-to-v2.diff.yaml` sibling file) rather than stopping short of item
+files by default. What grew: the rewrite carries every affected item's
+content hash forward in stamped baselines *and* seal files, id by id, so
+the same rename that would otherwise read as a content change (or, for a
+sealed `log` entry, a build-breaking seal violation) doesn't. A
+project-local equivalent, `refdes revise <mapping-file>`, applies the same
+engine from a hand-written mapping instead of a bundled `migration.yaml`,
+for vocabulary that isn't part of the standard at all — see the [CLI
+reference](../cli-reference.md#refdes-standard-upgrade---to-n). The
+report-first, no-rewrite-by-default posture below is what was designed;
+it is not what got built.
+
 **Escape hatch:** `standard: none` (or omitting `standard:` entirely, in a
 config predating this feature) means exactly today's 0.3.0 behavior — nothing
 pre-seeded, `types:`/`link_types:` fully authored by the project. This is
