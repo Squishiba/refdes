@@ -76,12 +76,20 @@ class Baseline:
     refdes_version: str
     items: dict[str, dict] = field(default_factory=dict)
     gate: dict[str, str] | None = None
+    # {base, version} the project was pinned to when this baseline was
+    # stamped -- distinct from refdes_version (the tool, not the vocabulary).
+    # None for a baseline stamped under `standard: none`, or one written
+    # before this field existed: revise.py's carry-forward refuses to touch
+    # such a baseline's hashes rather than assume it started at whatever the
+    # project's *current* pin happens to be, which could simply be wrong.
+    standard: dict[str, object] | None = None
 
 
 def _load_baseline_file(path: str) -> Baseline:
     with open(path, "r", encoding="utf-8") as fh:
         data = yaml.safe_load(fh) or {}
     gate = data.get("gate")
+    standard = data.get("standard")
     return Baseline(
         name=str(data.get("name", "")),
         kind=str(data.get("kind", "")),
@@ -90,6 +98,7 @@ def _load_baseline_file(path: str) -> Baseline:
         refdes_version=str(data.get("refdes_version", "")),
         items={k: dict(v) for k, v in (data.get("items") or {}).items()},
         gate=dict(gate) if gate is not None else None,
+        standard=dict(standard) if isinstance(standard, dict) else None,
     )
 
 
@@ -412,6 +421,8 @@ def stamp(project: Project, kind: str, name: str) -> StampOutcome:
         "stamped_by": stamped_by,
         "refdes_version": _refdes_version(),
     }
+    if project.standard_base:
+        data["standard"] = {"base": project.standard_base, "version": project.standard_version}
     if kind == "release":
         # Only for kind: release -- records which rules were active and
         # passed, so re-reading an old release stays meaningful after the

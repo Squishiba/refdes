@@ -5783,6 +5783,68 @@ def test_revision_stamps_unconditionally_despite_draft_and_uncovered_items(lifec
     assert os.path.isfile(outcome.path)
 
 
+def test_stamp_records_the_pinned_standard_version(tmp_path):
+    """A baseline records `refdes_version` (the tool) but nothing said which
+    *vocabulary* version produced its hashes -- revise.py needs this to know
+    where to start migrating an existing baseline from."""
+    (tmp_path / "refdes.yaml").write_text(
+        "site: { title: T, out: _site }\n"
+        "standard: { base: hardware, version: 2, presets: [] }\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "items").mkdir()
+    (tmp_path / "items" / "i.yaml").write_text(
+        "items:\n  - id: REQ-001\n    type: requirement\n    text: A requirement.\n",
+        encoding="utf-8",
+    )
+    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    parse.load_items(project)
+    build_mod.build(project, seal_write=False, reseal=False, accept_board_move=False)
+    assert project.standard_base == "hardware"
+    assert project.standard_version == 2
+
+    outcome = lifecycle.stamp(project, kind="revision", name="rev-a")
+    assert outcome.status == "stamped"
+    baseline = lifecycle.load_baseline(project, "rev-a")
+    assert baseline.standard == {"base": "hardware", "version": 2}
+
+
+def test_stamp_omits_standard_for_a_hand_rolled_schema(lifecycle_project):
+    """`standard: none` (or no standard: key at all, as LIFECYCLE_SCHEMA has)
+    must not fabricate a {base, version} -- there is no bundled vocabulary
+    version to record."""
+    project = _lc_build(lifecycle_project)
+    assert project.standard_base == ""
+    assert project.standard_version is None
+    outcome = lifecycle.stamp(project, kind="revision", name="rev-a")
+    baseline = lifecycle.load_baseline(project, "rev-a")
+    assert baseline.standard is None
+
+
+def test_baseline_written_before_this_field_existed_loads_as_none(tmp_path):
+    """Backward compatibility: an old baseline file with no `standard:` key
+    at all must load with `.standard is None`, not raise or default to
+    something that looks like an answer."""
+    (tmp_path / ".refdes" / "baselines").mkdir(parents=True)
+    (tmp_path / ".refdes" / "baselines" / "old.yaml").write_text(
+        "kind: revision\n"
+        "name: old\n"
+        "stamped_at: '2026-01-01T00:00:00Z'\n"
+        "stamped_by: someone\n"
+        "refdes_version: 0.3.0\n"
+        "items: {}\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "refdes.yaml").write_text(
+        "site: {title: t, out: _site}\n"
+        "types:\n  requirement: { prefix: REQ, fields: { text: { type: text } } }\n",
+        encoding="utf-8",
+    )
+    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    baseline = lifecycle.load_baseline(project, "old")
+    assert baseline.standard is None
+
+
 def _pin_lifecycle_citation(root) -> None:
     (root / ".refdes").mkdir(exist_ok=True)
     (root / ".refdes" / "citations.yaml").write_text(

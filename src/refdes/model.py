@@ -522,6 +522,15 @@ class Project:
     # it early, before rendering); consulted by _linkify so [[old_id]] and a
     # bare old_id keep resolving after a renumbering, and by `refdes audit`.
     former_ids: dict[str, str] = field(default_factory=dict)
+    # standard: {base, version} exactly as this load resolved it -- "" / None
+    # when standard: none or absent. Distinct from `version` above (that's
+    # site.version, this project's own document version) and from
+    # lifecycle.Baseline.refdes_version (the tool's own version). Recorded so
+    # a stamped baseline can carry its own standard.version forward (revise.py),
+    # which nothing before this needed: no other reader of Project cared which
+    # pinned version produced the types/link_types it already has in hand.
+    standard_base: str = ""
+    standard_version: int | None = None
 
     @property
     def local_items(self) -> list[Item]:
