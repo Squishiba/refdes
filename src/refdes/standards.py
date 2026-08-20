@@ -234,6 +234,27 @@ def preset_providers(base_name: str, version: int) -> tuple[dict[str, str], dict
     return types, link_types
 
 
+def load_migration_raw(base_name: str, version: int) -> dict[str, Any] | None:
+    """`hardware/v<version>/migration.yaml` as a plain dict -- the delta from
+    `version - 1` to `version`, in the same shape a hand-written revise.py
+    mapping file uses (types:/fields:/links:/prefixes:), or None if this
+    version ships no migration (v1, the first version, always doesn't; a
+    later version might not either, if nothing in it needed a rename).
+
+    Returned as a plain dict, not a revise.Mapping, so this module never has
+    to import revise.py -- revise.py imports standards.py for the upgrade
+    chain, not the other way around. Establishes the convention every future
+    standard version follows: shipping this file alongside base.yaml is what
+    makes `refdes standard upgrade --to N` need no hand-written mapping for
+    the bundled vocabulary, the same way base.yaml itself needs no project
+    ever to copy it.
+    """
+    path = os.path.join(_STANDARDS_ROOT, base_name, f"v{version}", "migration.yaml")
+    if not os.path.isfile(path):
+        return None
+    return _read_yaml(path)
+
+
 # --------------------------------------------------------------------- merging
 
 

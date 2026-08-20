@@ -25,6 +25,7 @@ from refdes import build as build_mod  # noqa: E402
 from refdes import calc, cli as cli_mod, citations as citations_mod, ids, nav as nav_mod, parse, render, seal  # noqa: E402
 from refdes import former_ids  # noqa: E402
 from refdes import lifecycle  # noqa: E402
+from refdes import revise  # noqa: E402
 from refdes import scaffold as scaffold_mod  # noqa: E402
 from refdes import schema_json as schema_json_mod  # noqa: E402
 from refdes import standards  # noqa: E402
@@ -5951,6 +5952,466 @@ def test_kind_mismatch_under_the_same_name_is_a_conflict(lifecycle_project):
     # Same items, but kind differs (revision vs release) -- not a silent
     # kind upgrade; gate wasn't even satisfied here anyway (draft/uncovered).
     assert outcome.status in ("conflict", "gate_failed")
+
+
+# ------------------------------------------------------------ revise (finding 12)
+
+REVISE_SCHEMA = (
+    "site: { title: T, out: _site }\n"
+    "types:\n"
+    "  bound:\n"
+    "    prefix: BND\n"
+    "    fields:\n"
+    "      text:  { type: text, required: true }\n"
+    "      limit: { type: limit, required: true }\n"
+)
+
+
+@pytest.fixture
+def revise_project(tmp_path):
+    (tmp_path / "refdes.yaml").write_text(REVISE_SCHEMA, encoding="utf-8")
+    items = tmp_path / "items"
+    items.mkdir()
+    (items / "i.yaml").write_text(
+        "defaults:\n  type: bound\n  prefix: BND\n"
+        "items:\n"
+        "  - id: BND-001\n    label: Board power density\n    limit: \"<= 0.15 W/in^2\"\n",
+        encoding="utf-8",
+    )
+    return tmp_path
+
+
+def test_revise_renames_a_prefix_standalone_no_schema_change_needed(tmp_path):
+    """Core, plain `revise`, no mutate_config: a prefix rename never depends
+    on the schema at all (prefixes aren't type-checked), so this is the one
+    rename category that always works standalone -- confirmed here, then
+    the field/type cases (which do need the schema to move too) get their
+    own tests below via mutate_config."""
+    (tmp_path / "refdes.yaml").write_text(REVISE_SCHEMA, encoding="utf-8")
+    (tmp_path / "items").mkdir()
+    (tmp_path / "items" / "i.yaml").write_text(
+        "defaults:\n  type: bound\n  prefix: BND\n"
+        "items:\n"
+        "  - id: BND-001\n    text: Board power density\n    limit: \"<= 0.15 W/in^2\"\n",
+        encoding="utf-8",
+    )
+    mapping = revise.Mapping(prefixes={"BND": "LIM"})
+    result = revise.apply(str(tmp_path), mapping)
+    assert result.ok, result.errors
+    assert result.changed_files == ["items/i.yaml"]
+    assert result.id_changes == {"BND-001": "LIM-001"}
+    text = (tmp_path / "items" / "i.yaml").read_text(encoding="utf-8")
+    assert "prefix: LIM" in text
+    assert "id: LIM-001" in text
+
+
+def test_revise_renames_type_and_prefix_atomically_with_schema_via_mutate_config(tmp_path):
+    """Type and prefix renames need the schema to move with the data --
+    plain revise doesn't touch refdes.yaml, but a caller-supplied
+    mutate_config (what standards.py's upgrade chain uses) can make the two
+    move together as one verified operation."""
+    (tmp_path / "refdes.yaml").write_text(
+        "site: { title: T, out: _site }\n"
+        "types:\n  constraint: { prefix: CON, fields: { text: { type: text, required: true } } }\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "items").mkdir()
+    (tmp_path / "items" / "i.yaml").write_text(
+        "defaults:\n  type: constraint\n  prefix: CON\n"
+        "items:\n  - id: CON-001\n    text: Board power density\n",
+        encoding="utf-8",
+    )
+    mapping = revise.Mapping(types={"constraint": "bound"}, prefixes={"CON": "BND"})
+
+    def bump(config_path):
+        with open(config_path, encoding="utf-8") as fh:
+            text = fh.read()
+        text = text.replace("constraint:", "bound:").replace(
+            "constraint, prefix: CON", "bound, prefix: BND"
+        )
+        with open(config_path, "w", encoding="utf-8") as fh:
+            fh.write(text)
+
+    result = revise.apply(str(tmp_path), mapping, mutate_config=bump)
+    assert result.ok, result.errors
+    assert result.id_changes == {"CON-001": "BND-001"}
+    text = (tmp_path / "items" / "i.yaml").read_text(encoding="utf-8")
+    assert "type: bound" in text
+    assert "prefix: BND" in text
+    assert "id: BND-001" in text
+
+
+def test_revise_refuses_and_rolls_back_a_required_field_rename_without_schema_update(revise_project):
+    """A required-field rename where the schema hasn't moved is refused, not
+    silently applied -- the safety net this whole engine exists for. The
+    file is byte-identical afterward: refused all the way back, not
+    partially applied."""
+    before = (revise_project / "items" / "i.yaml").read_text(encoding="utf-8")
+    mapping = revise.Mapping(fields={"bound": {"label": "text"}})
+    # This project's schema already says `text:` (not `label:`), so before
+    # even rewriting anything, the *current* file (still saying `label:`)
+    # already conflicts with the schema -- refused up front.
+    result = revise.apply(str(revise_project), mapping)
+    assert not result.ok
+    after = (revise_project / "items" / "i.yaml").read_text(encoding="utf-8")
+    assert after == before
+
+
+def test_revise_refuses_ambiguous_target_already_in_use(tmp_path):
+    (tmp_path / "refdes.yaml").write_text(
+        "site: { title: T, out: _site }\n"
+        "types:\n"
+        "  bound: { prefix: BND, fields: { label: { type: text }, text: { type: text } } }\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "items").mkdir()
+    (tmp_path / "items" / "i.yaml").write_text(
+        "defaults: { type: bound, prefix: BND }\n"
+        "items:\n  - id: BND-001\n    label: x\n    text: y\n",
+        encoding="utf-8",
+    )
+    mapping = revise.Mapping(fields={"bound": {"label": "text"}})
+    result = revise.apply(str(tmp_path), mapping)
+    assert not result.ok
+    assert any("already exists" in e for e in result.errors)
+
+
+def test_revise_refuses_a_self_contradictory_mapping():
+    """Two different old names both wanting the same new name -- caught
+    without even needing a project, since the mapping contradicts itself."""
+    project = load_project(config_path=os.path.join(REPO, "refdes.yaml"))
+    mapping = revise.Mapping(prefixes={"REQ": "R", "RSK": "R"})
+    errors = revise.check_ambiguous(project, mapping)
+    assert any("collides" in e for e in errors)
+
+
+def _label_schema(tmp_path) -> None:
+    (tmp_path / "refdes.yaml").write_text(
+        "site: { title: T, out: _site }\n"
+        "types:\n"
+        "  bound:\n"
+        "    prefix: BND\n"
+        "    fields:\n"
+        "      label: { type: text, required: true }\n"
+        "      limit: { type: limit, required: true }\n",
+        encoding="utf-8",
+    )
+
+
+def _bump_label_field_to_text(config_path: str) -> None:
+    with open(config_path, encoding="utf-8") as fh:
+        text = fh.read()
+    text = text.replace(
+        "label: { type: text, required: true }", "text:  { type: text, required: true }"
+    )
+    with open(config_path, "w", encoding="utf-8") as fh:
+        fh.write(text)
+
+
+@pytest.fixture
+def label_project(tmp_path):
+    """Schema and item file agree on `label:` -- the state a real project is
+    actually in before a rename, unlike revise_project above (deliberately
+    pre-broken, for the refusal test)."""
+    _label_schema(tmp_path)
+    items = tmp_path / "items"
+    items.mkdir()
+    (items / "i.yaml").write_text(
+        "defaults:\n  type: bound\n  prefix: BND\n"
+        "items:\n"
+        "  - id: BND-001\n    label: Board power density\n    limit: \"<= 0.15 W/in^2\"\n",
+        encoding="utf-8",
+    )
+    return tmp_path
+
+
+def test_revise_carries_baseline_hash_forward(label_project):
+    """The core promise: a cosmetic rename must not make an untouched
+    baseline suddenly report every item as 'changed'."""
+    project = load_project(config_path=str(label_project / "refdes.yaml"))
+    parse.load_items(project)
+    build_mod.build(project, seal_write=False, reseal=False, accept_board_move=False)
+    assert not project.errors
+    old_hash = project.items["BND-001"].content_hash
+    outcome = lifecycle.stamp(project, kind="revision", name="rev-a")
+    assert outcome.status == "stamped"
+
+    mapping = revise.Mapping(fields={"bound": {"label": "text"}})
+    result = revise.apply(str(label_project), mapping, mutate_config=_bump_label_field_to_text)
+    assert result.ok, result.errors
+    assert result.baselines_updated == ["rev-a"]
+
+    project2 = load_project(config_path=str(label_project / "refdes.yaml"))
+    baseline = lifecycle.load_baseline(project2, "rev-a")
+    new_hash = baseline.items["BND-001"]["hash"]
+    assert new_hash != old_hash
+
+    parse.load_items(project2)
+    build_mod.build(project2, seal_write=False, reseal=False, accept_board_move=False)
+    diff = lifecycle.diff_against(project2, baseline)
+    assert diff.changed == []
+    assert diff.added == []
+    assert diff.removed == []
+
+
+def _log_schema(tmp_path) -> None:
+    (tmp_path / "refdes.yaml").write_text(
+        "site: { title: T, out: _site }\n"
+        "types:\n"
+        "  log:\n"
+        "    prefix: LOG\n"
+        "    append_only: true\n"
+        "    fields:\n"
+        "      summary: { type: text, required: true }\n",
+        encoding="utf-8",
+    )
+
+
+def _bump_summary_field_to_note(config_path: str) -> None:
+    with open(config_path, encoding="utf-8") as fh:
+        text = fh.read()
+    text = text.replace(
+        "summary: { type: text, required: true }", "note:    { type: text, required: true }"
+    )
+    with open(config_path, "w", encoding="utf-8") as fh:
+        fh.write(text)
+
+
+@pytest.fixture
+def log_project(tmp_path):
+    _log_schema(tmp_path)
+    items = tmp_path / "items"
+    items.mkdir()
+    (items / "log.yaml").write_text(
+        "defaults:\n  type: log\n  prefix: LOG\n"
+        "items:\n  - id: LOG-001\n    summary: First entry.\n",
+        encoding="utf-8",
+    )
+    return tmp_path
+
+
+def test_revise_carries_seal_hash_forward(log_project):
+    """seal.py's append-only comparison is driven by the same content_hash
+    a rename touches, and a mismatch there is a hard build ERROR, not a
+    diff -- the caveat finding 12 flagged beyond what the finding itself
+    stated. A cosmetic field rename on a sealed log entry must not turn a
+    clean build into a seal-violation failure."""
+    project = load_project(config_path=str(log_project / "refdes.yaml"))
+    parse.load_items(project)
+    build_mod.build(project, seal_write=True)
+    assert not project.errors
+    old_hash = seal.load_seals(project, board="")["LOG-001"]
+
+    mapping = revise.Mapping(fields={"log": {"summary": "note"}})
+    result = revise.apply(str(log_project), mapping, mutate_config=_bump_summary_field_to_note)
+    assert result.ok, result.errors
+    assert result.seals_updated == ["(base)"]
+
+    reloaded_seals = seal.load_seals(
+        load_project(config_path=str(log_project / "refdes.yaml")), board=""
+    )
+    assert reloaded_seals.keys() == {"LOG-001"}
+    assert reloaded_seals["LOG-001"] != old_hash
+
+    project2 = load_project(config_path=str(log_project / "refdes.yaml"))
+    parse.load_items(project2)
+    build_mod.build(project2, seal_write=False, reseal=False, accept_board_move=False)
+    assert not project2.errors
+    assert project2.seal_violations == []
+
+
+def test_plain_revise_ignores_a_baselines_missing_standard_field(label_project):
+    """Plain revise (no standard_transition -- there's no chain, so no
+    ambiguity about which baseline started where) matches purely by hash:
+    a baseline written before the standard: field existed (or, as here, a
+    hand-rolled project with no bundled standard at all) still gets carried
+    forward. The chained, standard-upgrade case where a missing standard:
+    genuinely has to be skipped is tested separately, where the ambiguity
+    is real."""
+    project = load_project(config_path=str(label_project / "refdes.yaml"))
+    parse.load_items(project)
+    build_mod.build(project, seal_write=False, reseal=False, accept_board_move=False)
+    lifecycle.stamp(project, kind="revision", name="rev-a")
+
+    baseline_path = lifecycle.baseline_path(project, "rev-a")
+    text = open(baseline_path, encoding="utf-8").read()
+    assert "standard:" not in text  # nothing to record: no bundled standard pinned
+
+    mapping = revise.Mapping(fields={"bound": {"label": "text"}})
+    result = revise.apply(str(label_project), mapping, mutate_config=_bump_label_field_to_text)
+    assert result.ok, result.errors
+    assert result.baselines_updated == ["rev-a"]
+    assert result.baselines_skipped_no_standard == []
+
+
+def _write_fake_versioned_standard(root, versions, migrations=None):
+    """`<root>/fake/v<N>/base.yaml` for each version in `versions` (a dict of
+    version number -> base.yaml document), plus `<root>/fake/v<N>/migration.yaml`
+    for each version number present in `migrations` -- a synthetic multi-
+    version standard, isolated from the real bundled `hardware` standard, for
+    tests that need to drive `revise.apply_standard_upgrade` through more
+    than one version step."""
+    for version, doc in versions.items():
+        version_dir = os.path.join(str(root), "fake", f"v{version}")
+        os.makedirs(version_dir, exist_ok=True)
+        with open(os.path.join(version_dir, "base.yaml"), "w", encoding="utf-8") as fh:
+            yaml.safe_dump(doc, fh)
+    for version, doc in (migrations or {}).items():
+        version_dir = os.path.join(str(root), "fake", f"v{version}")
+        os.makedirs(version_dir, exist_ok=True)
+        with open(os.path.join(version_dir, "migration.yaml"), "w", encoding="utf-8") as fh:
+            yaml.safe_dump(doc, fh)
+
+
+def test_standard_upgrade_skips_a_baseline_with_no_recorded_standard(tmp_path, monkeypatch):
+    """The chained case, where skipping is the real, needed behavior: a
+    baseline written before Baseline.standard existed (simulated here by
+    stamping normally, then stripping the field back out) has nowhere
+    recorded to say which version its hashes started at, so a multi-version
+    chain must not guess -- it's left alone, reported as skipped, rather
+    than silently matched against whichever version happens to be current."""
+    monkeypatch.setattr(standards, "_STANDARDS_ROOT", str(tmp_path / "std"))
+    monkeypatch.setattr(standards, "_KNOWN_BASES", ("fake",))
+    _write_fake_versioned_standard(
+        tmp_path / "std",
+        {
+            1: {"types": {"widget": {"prefix": "WID", "fields": {"title": {"type": "text", "required": True}}}}},
+            2: {"types": {"widget": {"prefix": "WID", "fields": {"text": {"type": "text", "required": True}}}}},
+        },
+        migrations={2: {"fields": {"widget": {"title": "text"}}}},
+    )
+
+    project_root = tmp_path / "proj"
+    (project_root / "items").mkdir(parents=True)
+    (project_root / "refdes.yaml").write_text(
+        "site: { title: T, out: _site }\nstandard: { base: fake, version: 1, presets: [] }\n",
+        encoding="utf-8",
+    )
+    (project_root / "items" / "i.yaml").write_text(
+        "defaults:\n  type: widget\n  prefix: WID\n"
+        "items:\n  - id: WID-001\n    title: A widget.\n",
+        encoding="utf-8",
+    )
+    project = load_project(config_path=str(project_root / "refdes.yaml"))
+    parse.load_items(project)
+    build_mod.build(project, seal_write=False, reseal=False, accept_board_move=False)
+    lifecycle.stamp(project, kind="revision", name="rev-a")
+
+    # Strip the standard: field back out, simulating a baseline stamped
+    # before it existed.
+    baseline_path = lifecycle.baseline_path(project, "rev-a")
+    with open(baseline_path, encoding="utf-8") as fh:
+        stripped = "\n".join(l for l in fh.read().splitlines() if not l.startswith(("standard:", "  base:", "  version:")))
+    with open(baseline_path, "w", encoding="utf-8") as fh:
+        fh.write(stripped + "\n")
+    reloaded = lifecycle.load_baseline(project, "rev-a")
+    assert reloaded.standard is None
+
+    steps = revise.apply_standard_upgrade(str(project_root), 2)
+    assert len(steps) == 1
+    assert steps[0].result.ok, steps[0].result.errors
+    assert steps[0].result.baselines_skipped_no_standard == ["rev-a"]
+    assert steps[0].result.baselines_updated == []
+
+
+def test_apply_standard_upgrade_chains_multiple_versions(tmp_path, monkeypatch):
+    """v1 -> v4 works by chaining each version's own delta in order -- one
+    apply() call per version step (extension 2), never a single merged
+    jump straight from v1's schema to v4's."""
+    monkeypatch.setattr(standards, "_STANDARDS_ROOT", str(tmp_path / "std"))
+    monkeypatch.setattr(standards, "_KNOWN_BASES", ("fake",))
+    _write_fake_versioned_standard(
+        tmp_path / "std",
+        {
+            1: {"types": {"widget": {"prefix": "WID", "fields": {"a": {"type": "text", "required": True}}}}},
+            2: {"types": {"widget": {"prefix": "WID", "fields": {"b": {"type": "text", "required": True}}}}},
+            3: {"types": {"widget": {"prefix": "WID", "fields": {"c": {"type": "text", "required": True}}}}},
+            4: {"types": {"widget": {"prefix": "WID", "fields": {"d": {"type": "text", "required": True}}}}},
+        },
+        migrations={
+            2: {"fields": {"widget": {"a": "b"}}},
+            3: {"fields": {"widget": {"b": "c"}}},
+            4: {"fields": {"widget": {"c": "d"}}},
+        },
+    )
+    project_root = tmp_path / "proj"
+    (project_root / "items").mkdir(parents=True)
+    (project_root / "refdes.yaml").write_text(
+        "site: { title: T, out: _site }\nstandard: { base: fake, version: 1, presets: [] }\n",
+        encoding="utf-8",
+    )
+    (project_root / "items" / "i.yaml").write_text(
+        "defaults:\n  type: widget\n  prefix: WID\n"
+        "items:\n  - id: WID-001\n    a: Original value.\n",
+        encoding="utf-8",
+    )
+
+    steps = revise.apply_standard_upgrade(str(project_root), 4)
+    assert [(s.from_version, s.to_version) for s in steps] == [(1, 2), (2, 3), (3, 4)]
+    assert all(s.result.ok for s in steps), [s.result.errors for s in steps]
+
+    text = (project_root / "items" / "i.yaml").read_text(encoding="utf-8")
+    assert "d: Original value." in text
+    assert "a:" not in text and "b:" not in text and "c:" not in text
+
+    final_project = load_project(config_path=str(project_root / "refdes.yaml"))
+    assert final_project.standard_version == 4
+
+
+def test_apply_standard_upgrade_reused_field_name_across_versions(tmp_path, monkeypatch):
+    """v2 renames title -> text; v3 independently renames notes -> title,
+    reusing the name v2 just freed up. Chaining each step fully in order
+    (never collapsing into one merged mapping) is what keeps this from
+    colliding: by the time v3's own rename runs, nothing in the project is
+    named `title` any more, so `notes -> title` lands cleanly and each
+    original value ends up under the right final key, not swapped or lost."""
+    monkeypatch.setattr(standards, "_STANDARDS_ROOT", str(tmp_path / "std"))
+    monkeypatch.setattr(standards, "_KNOWN_BASES", ("fake",))
+    _write_fake_versioned_standard(
+        tmp_path / "std",
+        {
+            1: {"types": {"widget": {"prefix": "WID", "fields": {
+                "title": {"type": "text", "required": True},
+                "notes": {"type": "text", "required": True},
+            }}}},
+            2: {"types": {"widget": {"prefix": "WID", "fields": {
+                "text": {"type": "text", "required": True},
+                "notes": {"type": "text", "required": True},
+            }}}},
+            3: {"types": {"widget": {"prefix": "WID", "fields": {
+                "text": {"type": "text", "required": True},
+                "title": {"type": "text", "required": True},
+            }}}},
+        },
+        migrations={
+            2: {"fields": {"widget": {"title": "text"}}},
+            3: {"fields": {"widget": {"notes": "title"}}},
+        },
+    )
+    project_root = tmp_path / "proj"
+    (project_root / "items").mkdir(parents=True)
+    (project_root / "refdes.yaml").write_text(
+        "site: { title: T, out: _site }\nstandard: { base: fake, version: 1, presets: [] }\n",
+        encoding="utf-8",
+    )
+    (project_root / "items" / "i.yaml").write_text(
+        "defaults:\n  type: widget\n  prefix: WID\n"
+        "items:\n  - id: WID-001\n    title: Title value.\n    notes: Notes value.\n",
+        encoding="utf-8",
+    )
+
+    steps = revise.apply_standard_upgrade(str(project_root), 3)
+    assert len(steps) == 2
+    assert all(s.result.ok for s in steps), [s.result.errors for s in steps]
+
+    text = (project_root / "items" / "i.yaml").read_text(encoding="utf-8")
+    assert "text: Title value." in text
+    assert "title: Notes value." in text
+
+    final_project = load_project(config_path=str(project_root / "refdes.yaml"))
+    parse.load_items(final_project)
+    build_mod.build(final_project, seal_write=False, reseal=False, accept_board_move=False)
+    assert not final_project.errors
 
 
 # --------------------------------------------------------------------- diff

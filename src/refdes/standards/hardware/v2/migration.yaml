@@ -1,0 +1,14 @@
+# The delta from hardware v1 to v2 -- what `refdes standard upgrade --to 2`
+# applies to a project pinned at v1 (or chains through, upgrading further:
+# see standards.load_migration_chain / revise.py). Read by revise.py, never
+# by base.yaml's own resolution -- this file plays no part in what standard:
+# {base: hardware, version: 2} actually resolves to; it only describes how a
+# project already on v1 moves its own existing content to match.
+#
+# See docs/design/standard-library.md §3 for the versioning design this
+# implements, and finding 4 (constraint.title -> constraint.text) for why
+# this is the shape v1 -> v2 actually takes.
+
+fields:
+  constraint:
+    title: text
