@@ -177,11 +177,11 @@ types:
     prefix: CON
     label: Constraint
     append_only: false
-    preview: [status, limit, rationale]
+    preview: [status, text, limit]
     coverable: true
     coverable_statuses: [active]
     fields:
-      title:  { type: text,  required: true, on_change: invalidate }
+      text:   { type: text,  required: true, on_change: invalidate }
       limit:  { type: limit, required: true, on_change: invalidate }
       status: { type: enum, choices: [draft, active, retired],
                 default: draft, on_change: invalidate }

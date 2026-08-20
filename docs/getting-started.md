@@ -31,7 +31,7 @@ site:
 
 standard:
   base: hardware
-  version: 1
+  version: 2
 
 id:
   width: 3
@@ -107,7 +107,7 @@ defaults:
 
 items:
   - id: CON-THM-001
-    title: Board power density
+    text: Board power density
     limit: "<= 0.15 W/in^2"
     rationale: >
       Natural convection only — the enclosure is sealed, with no vents and no fan.

@@ -614,7 +614,7 @@ site:
 
 standard:
   base: hardware
-  version: 1
+  version: 2
   presets: []
 
 id:

@@ -707,6 +707,68 @@ def test_misspelled_link_key_errors_instead_of_silently_dropping(typo_link_proje
     assert project.items["DEC-A-001"].links == {}
 
 
+def test_constraint_title_renamed_to_text_gives_a_specific_diagnostic(tmp_path):
+    """Finding 4: hardware v2 renamed constraint.title to constraint.text. An
+    item still declaring the old key must get one diagnostic naming the
+    rename -- not the generic unknown-field warning plus an unrelated-looking
+    missing-required error a plain rename would otherwise produce."""
+    (tmp_path / "refdes.yaml").write_text(
+        "site: { title: T, out: _site }\n"
+        "standard: { base: hardware, version: 2, presets: [] }\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "items").mkdir()
+    (tmp_path / "items" / "i.yaml").write_text(
+        "items:\n"
+        "  - id: CON-001\n    type: constraint\n    title: Old-style constraint.\n"
+        '    limit: "<= 1 W"\n',
+        encoding="utf-8",
+    )
+    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    parse.load_items(project)
+
+    rename_errors = [
+        d for d in project.errors
+        if "constraint.title" in d.message and "constraint.text" in d.message
+    ]
+    assert len(rename_errors) == 1
+    assert rename_errors[0].item_id == "CON-001"
+
+    # Exactly this one diagnostic -- not the generic pair a plain rename would
+    # otherwise produce.
+    assert not any("unknown field 'title'" in d.message for d in project.warnings)
+    assert not any("missing required field 'text'" in d.message for d in project.errors)
+
+    # The old value is used for the new field, so nothing downstream cascades
+    # into a confusing secondary failure.
+    assert project.items["CON-001"].fields["text"] == "Old-style constraint."
+
+
+def test_constraint_title_on_hardware_v1_is_unaffected(tmp_path):
+    """v1 is untouched: title: is still constraint's real field there, so the
+    rename diagnostic must not fire -- confirming it's scoped to schemas
+    where the rename actually applies, not fired unconditionally by type
+    name alone."""
+    (tmp_path / "refdes.yaml").write_text(
+        "site: { title: T, out: _site }\n"
+        "standard: { base: hardware, version: 1, presets: [] }\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "items").mkdir()
+    (tmp_path / "items" / "i.yaml").write_text(
+        "items:\n"
+        "  - id: CON-001\n    type: constraint\n    title: A constraint.\n"
+        '    limit: "<= 1 W"\n',
+        encoding="utf-8",
+    )
+    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    parse.load_items(project)
+    build_mod.build(project)
+    assert not project.errors
+    assert not project.warnings
+    assert project.items["CON-001"].fields["title"] == "A constraint."
+
+
 def test_unrecognized_field_far_from_any_link_still_only_warns(tmp_path):
     """A genuine unknown field with no close link name must keep warning, not error."""
     (tmp_path / "refdes.yaml").write_text(COVERAGE_SCHEMA, encoding="utf-8")
@@ -4218,6 +4280,37 @@ def test_standard_hardware_v1_resolves_the_six_types(tmp_path):
     assert "refines" in project.link_types
 
 
+def test_standard_hardware_v2_renames_constraint_title_to_text(tmp_path):
+    """Finding 4: v2 is the first version bump -- constraint.title becomes
+    constraint.text, matching requirement.text's role as the type's one
+    required content field."""
+    (tmp_path / "refdes.yaml").write_text(
+        "site: { title: T, out: _site }\n"
+        "standard: { base: hardware, version: 2, presets: [] }\n",
+        encoding="utf-8",
+    )
+    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    constraint = project.types["constraint"]
+    assert "text" in constraint.fields
+    assert constraint.fields["text"].required is True
+    assert "title" not in constraint.fields
+    assert constraint.preview == ["status", "text", "limit"]
+
+
+def test_standard_hardware_v1_still_has_constraint_title(tmp_path):
+    """v1 must stay byte-identical forever -- adding v2 must not touch it."""
+    (tmp_path / "refdes.yaml").write_text(
+        "site: { title: T, out: _site }\n"
+        "standard: { base: hardware, version: 1, presets: [] }\n",
+        encoding="utf-8",
+    )
+    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    constraint = project.types["constraint"]
+    assert "title" in constraint.fields
+    assert "text" not in constraint.fields
+    assert constraint.preview == ["status", "limit", "rationale"]
+
+
 def test_standard_version_must_be_a_pinned_integer(tmp_path):
     (tmp_path / "refdes.yaml").write_text(
         "site: { title: T, out: _site }\n"
@@ -6836,11 +6929,12 @@ def test_equivalent_and_alternate_are_ordinary_authored_links_for_the_lint(parts
 # ------------------------------------------------ init, new, schema, presets
 
 def test_latest_version_resolves_the_concrete_bundled_max():
-    assert standards.latest_version("hardware") == 1
+    assert standards.latest_version("hardware") == 2
 
 
 def test_available_presets_includes_design_debate():
     assert "design-debate" in standards.available_presets("hardware", 1)
+    assert "design-debate" in standards.available_presets("hardware", 2)
 
 
 def test_preset_providers_maps_names_to_the_preset():
@@ -6860,7 +6954,7 @@ def test_init_writes_the_exact_documented_file(tmp_path):
     assert "field_sets:" not in text
     assert "standard:" in text
     assert "base: hardware" in text
-    assert "version: 1" in text  # the concrete integer, never the word "latest"
+    assert "version: 2" in text  # the concrete integer, never the word "latest"
     assert "presets: []" in text
 
     # The file must actually load and resolve to a real, usable schema.
@@ -6938,7 +7032,7 @@ def test_cli_init_end_to_end(tmp_path, monkeypatch, capsys):
     assert (tmp_path / "refdes.yaml").is_file()
     assert (tmp_path / ".vscode" / "settings.json").is_file()
     out = capsys.readouterr().out
-    assert "standard: hardware@1" in out
+    assert "standard: hardware@2" in out
 
 
 # --------------------------------------------------------------- refdes new
@@ -6982,7 +7076,7 @@ def test_new_item_text_links_are_commented_out_with_target_hint():
 
 
 def _build_at_repo_schema():
-    """A real project resolving the bundled hardware@1 standard, for
+    """A real project resolving the bundled hardware@2 standard, for
     refdes new / JSON schema tests that need its actual field shapes."""
     return load_project(config_path=os.path.join(REPO, "refdes.yaml"))
 

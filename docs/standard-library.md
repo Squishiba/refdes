@@ -9,7 +9,7 @@ the package and resolved live, by reference, into every project that opts in.
 ```yaml
 standard:
   base: hardware
-  version: 1
+  version: 2
   presets: []
 ```
 
@@ -116,7 +116,7 @@ Bundled, curated extensions to the base standard, opted into by name:
 ```yaml
 standard:
   base: hardware
-  version: 1
+  version: 2
   presets: [design-debate]
 ```
 
@@ -307,6 +307,16 @@ project on an ordinary upgrade.
 the full design. For now, moving to a newer version means hand-editing
 `standard.version:` and reading `refdes check`'s diagnostics for whatever
 changed.
+
+`hardware@2` is the first version bump: `constraint.title` is renamed to
+`constraint.text`, matching `requirement.text`'s role as the type's one
+required content field (`title` was a short-label field with nowhere for a
+constraint's actual normative sentence to go but the optional `body:`).
+`hardware@1` keeps `title:` and resolves exactly as it always has — nothing
+changes for a project that doesn't touch its pin. A project that does move to
+`version: 2` (or later) with items still declaring `constraint.title` gets a
+specific diagnostic naming the rename, not a generic unknown-field warning
+paired with an unrelated-looking missing-required error.
 
 ## `coverable`, `coverable_statuses`, `verifying_statuses`, and `required_when`
 

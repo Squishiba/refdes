@@ -34,6 +34,18 @@ RESERVED = {"id", "type", "history", "body", "former_ids"}
 # unchanged instead of having the field silently shadowed.
 OVERRIDABLE = {"prefix", "board", "workspace"}
 
+# Fields renamed by a standard-library version bump, keyed by (type name, old
+# key) -> new key. A plain rename would otherwise surface as an unknown-field
+# warning on the old key plus a missing-required error on the new one --
+# accurate, but a miserable way to discover that the fix is "rename this key"
+# (finding 4: hardware v1's constraint.title -> v2's constraint.text). Scoped
+# to the type name alone, so it also flags a hand-rolled schema that happens
+# to name a type `constraint` and drop `title` for unrelated reasons -- an
+# acceptable false positive given how narrowly this table is meant to stay.
+_RENAMED_FIELDS: dict[tuple[str, str], str] = {
+    ("constraint", "title"): "text",
+}
+
 
 class _LineLoader(yaml.SafeLoader):
     """SafeLoader that tags each mapping with the source line of its first key."""
@@ -151,6 +163,16 @@ def _build_item(
             item.links[key] = [str(t) for t in targets if t]
         elif key in spec.fields:
             item.fields[key] = _strip_lines(value)
+        elif (spec.name, key) in _RENAMED_FIELDS:
+            new_key = _RENAMED_FIELDS[(spec.name, key)]
+            project.error(
+                f"'{spec.name}.{key}' is now '{spec.name}.{new_key}' -- rename this "
+                f"key in the source file. Its value is used for {new_key!r} in this "
+                f"build so the rest of it doesn't also report a missing required "
+                f"field.",
+                file=rel, line=line, item_id=item.id or "?",
+            )
+            item.fields[new_key] = _strip_lines(value)
         else:
             # A typo'd link name (`sattisfies:` for `satisfies:`) doesn't just lose a
             # field -- it drops a traceability edge, so it must fail the build rather

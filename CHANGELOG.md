@@ -7,6 +7,21 @@ and this project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- `hardware@2`: `constraint.title` is now `constraint.text`, matching
+  `requirement.text`'s role as the type's one required content field --
+  `title` was a short-label field with nowhere for a constraint's actual
+  normative sentence to go but the optional, overflow-only `body:`.
+  `constraint.preview` updated to `[status, text, limit]` to match.
+  `hardware@1` is untouched and still resolves exactly as it always has --
+  this ships as a new pinned version rather than an in-place edit, since
+  `standard.version: N` is meant to be byte-identical forever once released.
+  A project on `version: 2` (or later) whose items still declare
+  `constraint.title` now gets one specific diagnostic naming the rename,
+  rather than a generic unknown-field warning plus an unrelated-looking
+  missing-required error.
+
 ### Fixed
 
 - An explicit `null` on an enum field no longer bypasses its schema default

@@ -8,7 +8,7 @@ defaults:
 
 items:
   - id: CON-THM-001
-    title: Board power density
+    text: Board power density
     limit: "<= 0.15 W/in^2"
     rationale: >
       Natural convection only — the enclosure is sealed with no vents and no fan.
@@ -16,7 +16,7 @@ items:
     source: Enclosure spec rev C, p.14
 
   - id: CON-THM-002
-    title: Minimum converter efficiency
+    text: Minimum converter efficiency
     limit: ">= 0.90"
     rationale: >
       Every point of efficiency below this pushes dissipation past what the

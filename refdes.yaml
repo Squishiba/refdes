@@ -35,7 +35,7 @@ units:
 # integer (not "latest") is the whole point.
 standard:
   base: hardware
-  version: 1
+  version: 2
   presets: []
 
 # The one field the standard doesn't know about: this project's log entries
