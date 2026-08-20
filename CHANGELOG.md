@@ -7,6 +7,22 @@ and this project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- An explicit `null` on an enum field no longer bypasses its schema default
+  and the enum check that skips any `None` value -- it's coalesced into
+  absent, same as an omitted key, and reported when it happens.
+- `refdes id` no longer inserts a second `id:` key when run on an
+  already-scaffolded bare `id:` placeholder -- it fills the existing key in
+  place, in both the YAML-list and Markdown front-matter write-back paths.
+- The generated JSON Schema no longer hard-rejects a field `refdes check`
+  only warns about -- `additionalProperties` on a type's merged schema node
+  is permissive, matching the CLI's actual leniency.
+- Every generated `.vscode/settings.json` used to point at the same relative
+  `yaml.schemas` path, so two refdes projects open in the same VS Code
+  session could validate one project's files against the other's schema.
+  `refdes init` now writes an absolute, project-specific path.
+
 ## [0.4.0] - 2026-08-18
 
 ### Added
