@@ -7022,10 +7022,46 @@ def test_build_schema_link_carries_target_description():
 def test_build_schema_additional_properties_false():
     project = _build_at_repo_schema()
     doc = schema_json_mod.build_schema(project)
-    assert doc["$defs"]["decision__bare"]["additionalProperties"] is False
+    # A type node must not be stricter than `refdes check`, which only warns
+    # on an undeclared field rather than rejecting it (finding 3) -- so
+    # additionalProperties is NOT false here, unlike the list_file envelope
+    # below, whose {defaults, items} shape isn't an extensible per-type node.
+    assert doc["$defs"]["decision__bare"]["additionalProperties"] is not False
     assert doc["$defs"]["list_file"]["additionalProperties"] is False
     # defaults: inside a list file is deliberately unvalidated.
     assert doc["$defs"]["list_file"]["properties"]["defaults"]["additionalProperties"] is True
+
+
+def test_generated_schema_does_not_reject_what_check_only_warns_about(tmp_path):
+    """Finding 3: adding a field a type doesn't declare produced two different
+    verdicts -- `refdes check` warns and keeps building, but the generated
+    schema's `additionalProperties: false` hard-rejects the identical input in
+    the editor. The two must agree, and per instruction the schema is the side
+    that has to yield here (an editor red-underlining valid input is worse than
+    an editor missing something `check` will catch anyway)."""
+    (tmp_path / "refdes.yaml").write_text(
+        "site: { title: T, out: _site }\n"
+        "types:\n"
+        "  requirement: { prefix: REQ, fields: { text: { type: text, required: true } } }\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "items").mkdir()
+    (tmp_path / "items" / "i.yaml").write_text(
+        "items:\n"
+        "  - id: REQ-001\n    type: requirement\n    text: A requirement.\n"
+        "    datasheets: something extra\n",
+        encoding="utf-8",
+    )
+    project = _build_at(tmp_path)
+    assert not project.errors
+    assert any("unknown field 'datasheets'" in d.message for d in project.warnings)
+
+    doc = schema_json_mod.build_schema(project)
+    branch = doc["$defs"]["requirement__entry"]
+    assert "datasheets" not in branch["properties"]  # still undeclared, just not fatal
+    assert branch["additionalProperties"] is not False, (
+        "the generated schema rejects a field the CLI only warns about"
+    )
 
 
 def test_build_schema_body_only_on_the_list_file_entry_branch():

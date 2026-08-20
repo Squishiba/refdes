@@ -152,7 +152,16 @@ def _type_branch(type_name: str, spec: ItemType, include_body: bool) -> dict[str
         "type": "object",
         "properties": properties,
         "required": required,
-        "additionalProperties": False,
+        # Not `False`: `refdes check` only warns on a field a type doesn't
+        # declare (parse.py's unknown-field handling) -- it never rejects the
+        # build over it, because the standard's own field-level merge exists
+        # specifically to let a project extend a type this way. `false` here
+        # would make the editor stricter than the tool it's a convenience
+        # layer over, hard-rejecting input the CLI accepts (finding 3). The
+        # oneOf discrimination in build_schema() still works with this
+        # permissive: each branch's own `type` const rejects every value but
+        # its own regardless of this setting.
+        "additionalProperties": True,
     }
 
 
