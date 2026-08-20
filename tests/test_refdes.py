@@ -6899,7 +6899,36 @@ def test_init_writes_vscode_yaml_schema_association(tmp_path):
     scaffold_mod.init(str(tmp_path))
     settings = (tmp_path / ".vscode" / "settings.json").read_text(encoding="utf-8")
     data = json.loads(settings)
-    assert data["yaml.schemas"]["./.refdes/schema.json"] == ["items/**/*.yaml"]
+    schema_keys = list(data["yaml.schemas"])
+    assert len(schema_keys) == 1
+    schema_key = schema_keys[0]
+    assert data["yaml.schemas"][schema_key] == ["items/**/*.yaml"]
+    # An absolute, this-project-only path -- not a bare relative one that two
+    # different refdes projects would produce byte-identically (finding 9).
+    assert os.path.isabs(schema_key)
+    assert os.path.normpath(schema_key) == os.path.normpath(
+        str(tmp_path / ".refdes" / "schema.json")
+    )
+
+
+def test_init_two_projects_get_disambiguated_schema_paths(tmp_path):
+    """Finding 9: every generated .vscode/settings.json pointed at the same
+    relative './.refdes/schema.json', so redhat.vscode-yaml -- which doesn't
+    reliably scope a relative schema path to the workspace folder that
+    declared it -- could apply one project's schema to another's files when
+    both happened to be open in the same VS Code session (a multi-root
+    workspace, or just switching folders without a full reload)."""
+    proj_a = tmp_path / "a"
+    proj_b = tmp_path / "b"
+    scaffold_mod.init(str(proj_a))
+    scaffold_mod.init(str(proj_b))
+
+    settings_a = json.loads((proj_a / ".vscode" / "settings.json").read_text(encoding="utf-8"))
+    settings_b = json.loads((proj_b / ".vscode" / "settings.json").read_text(encoding="utf-8"))
+
+    key_a = next(iter(settings_a["yaml.schemas"]))
+    key_b = next(iter(settings_b["yaml.schemas"]))
+    assert key_a != key_b, "two projects produced the identical, collision-prone schema key"
 
 
 def test_cli_init_end_to_end(tmp_path, monkeypatch, capsys):

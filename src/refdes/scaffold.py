@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
 from typing import Any
@@ -18,13 +19,25 @@ from .build import _format_required_when
 from .model import ItemType, Project, SchemaError
 from .schema import load_project
 
-INIT_VSCODE_SETTINGS = """\
-{
-  "yaml.schemas": {
-    "./.refdes/schema.json": ["items/**/*.yaml"]
-  }
-}
-"""
+
+def _vscode_settings_text(target_dir: str) -> str:
+    """`.vscode/settings.json` content wiring `yaml.schemas` to this project's
+    own `.refdes/schema.json`, keyed by an absolute path rather than the bare
+    relative `./.refdes/schema.json` every project used to write identically.
+
+    `redhat.vscode-yaml` does not reliably scope a relative schema path to the
+    workspace folder that declared it, so two refdes projects open in the same
+    VS Code session (a multi-root workspace, or just switching folders without
+    a full reload) could end up validating one project's files against the
+    other's schema -- a false rejection, not a near-miss, since the two
+    schemas can differ arbitrarily (finding 9). An absolute path names one
+    specific file unambiguously regardless of how many folders are open.
+    """
+    schema_path = os.path.abspath(
+        os.path.join(target_dir, ".refdes", "schema.json")
+    ).replace("\\", "/")
+    settings = {"yaml.schemas": {schema_path: ["items/**/*.yaml"]}}
+    return json.dumps(settings, indent=2) + "\n"
 
 
 def _init_yaml(base: str | None, version: int | None, presets: list[str]) -> str:
@@ -104,7 +117,7 @@ def init(
         if not os.path.isfile(settings_path):
             os.makedirs(vscode_dir, exist_ok=True)
             with open(settings_path, "w", encoding="utf-8") as fh:
-                fh.write(INIT_VSCODE_SETTINGS)
+                fh.write(_vscode_settings_text(target_dir))
 
     return config_path
 
