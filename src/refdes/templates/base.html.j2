@@ -7,27 +7,41 @@
 <link rel="stylesheet" href="assets/style.css">
 </head>
 <body>
-<header class="topbar">
+<aside class="sidenav">
   <a class="brand" href="{{ home_href }}">{{ project.title }}</a>
+  {# The checkbox hack, not another <details>: below the breakpoint further
+     down in style.css this collapses the whole tree behind one "Navigation"
+     line, since rendering it open unconditionally would push page content
+     down by several hundred pixels on a phone before any of it is visible --
+     worse than the wrapped bar this replaces. A <details> wrapper here
+     doesn't work for this: closed non-summary content is hidden by an
+     internal, unstyleable UA mechanism in current browsers (verified
+     directly, not assumed -- a plain `display` override on the content does
+     not reach it), so there is no reliable way to force it open at a wider
+     viewport with CSS alone. A checkbox's :checked state has no such
+     problem. Still no JavaScript: the label alone drives it. #}
+  <input type="checkbox" id="sidenav-toggle" class="sidenav-toggle-input">
+  <label for="sidenav-toggle" class="sidenav-toggle-label">☰ Navigation</label>
   <nav>
     {% macro render_nav_node(node) %}
     {% if node.href %}
-    <a href="{{ node.href }}">{{ node.label }}</a>
+    <a href="{{ node.href }}"{% if node.href == current_page %} aria-current="page"{% endif %}>{{ node.label }}</a>
     {% else %}
-    <span class="nav-group">
-      <span class="nav-group-label">{{ node.label }}</span>
+    <details{% if node.contains(current_page) %} open{% endif %}>
+      <summary>{{ node.label }}</summary>
       {% for child in node.children %}
       {{ render_nav_node(child) }}
       {% endfor %}
-    </span>
+    </details>
     {% endif %}
     {% endmacro %}
     {% for node in nav_tree %}
     {{ render_nav_node(node) }}
     {% endfor %}
   </nav>
-</header>
+</aside>
 
+<div class="content">
 <main>
 {% block content %}{% endblock %}
 </main>
@@ -37,6 +51,7 @@
   {% if project.items %}The machine-readable source of truth is
   <a href="items.json">items.json</a>.{% endif %}
 </footer>
+</div>
 
 <div id="preview-card" role="tooltip" hidden></div>
 <script id="preview-data" type="application/json">{{ previews_json | safe }}</script>

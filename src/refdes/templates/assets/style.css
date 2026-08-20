@@ -54,14 +54,67 @@ h3 { font-size: 14px; margin: 12px 0 6px; text-transform: uppercase; letter-spac
 
 /* ---------------------------------------------------------------- chrome */
 
-.topbar {
-  display: flex; align-items: center; gap: 20px; flex-wrap: wrap;
-  padding: 12px 20px; border-bottom: 1px solid var(--line); background: var(--panel);
+/* Below the 860px breakpoint further down, .sidenav is a plain block sitting
+   above .content in normal document flow -- not a rail. A fixed-width column
+   is fine on a desktop viewport; on a phone it would permanently claim
+   horizontal space narrower screens can't spare, which is worse than the
+   flat bar it replaces (finding 7's own reasoning, applied to itself). At or
+   above the breakpoint, body becomes a row and .sidenav becomes a sticky
+   column instead. */
+.sidenav {
+  padding: 16px 20px; border-bottom: 1px solid var(--line); background: var(--panel);
 }
-.brand { font-weight: 650; color: var(--fg); }
-.topbar nav { display: flex; gap: 16px; flex-wrap: wrap; font-size: 13.5px; align-items: baseline; }
-.nav-group { display: inline-flex; align-items: baseline; gap: 12px; padding-left: 12px; border-left: 1px solid var(--line); }
-.nav-group-label { color: var(--muted); font-size: 11.5px; text-transform: uppercase; letter-spacing: .04em; }
+.brand { display: block; font-weight: 650; color: var(--fg); margin-bottom: 10px; }
+
+/* The checkbox hack: a real, focusable checkbox visually reduced to nothing
+   (not display:none, which would also drop it from keyboard tab order), a
+   <label> styled as the visible toggle button, and :checked driving the
+   sibling <nav>'s display -- ordinary CSS, no browser-internal hiding to
+   fight (unlike a <details> wrapper: see base.html.j2's comment on why one
+   wasn't used here). Below the breakpoint further down, .sidenav is a plain
+   block sitting above .content in normal flow -- not a rail. A fixed-width
+   column is fine on a desktop viewport; on a phone it would permanently
+   claim horizontal space narrower screens can't spare, which is worse than
+   the flat bar it replaces (finding 7's own reasoning, applied to itself).
+   At or above the breakpoint, body becomes a row, .sidenav a sticky column,
+   and the toggle disappears entirely -- nothing to collapse there. */
+.sidenav-toggle-input {
+  position: absolute; width: 1px; height: 1px; overflow: hidden;
+  clip: rect(0, 0, 0, 0); white-space: nowrap;
+}
+.sidenav-toggle-label {
+  display: block; cursor: pointer; font-weight: 600; font-size: 14px; padding: 4px 0;
+}
+.sidenav-toggle-input:focus-visible ~ .sidenav-toggle-label { outline: 2px solid var(--accent); }
+
+.sidenav nav { display: none; flex-direction: column; gap: 2px; font-size: 13.5px; margin-top: 6px; }
+.sidenav-toggle-input:checked ~ nav { display: flex; }
+.sidenav nav > a, .sidenav nav > details > summary { padding: 4px 0; }
+.sidenav a { color: var(--fg); border-radius: 4px; }
+.sidenav a:hover { text-decoration: none; color: var(--accent); }
+.sidenav a[aria-current="page"] {
+  color: var(--accent); font-weight: 650;
+}
+.sidenav nav details { margin: 2px 0; }
+.sidenav nav summary {
+  cursor: pointer; font-size: 11.5px; color: var(--muted);
+  text-transform: uppercase; letter-spacing: .04em;
+}
+.sidenav nav details > a, .sidenav nav details details { margin-left: 12px; }
+.sidenav nav details a { display: block; padding: 3px 0 3px 4px; font-size: 13.5px; }
+
+@media (min-width: 860px) {
+  body { display: flex; align-items: flex-start; }
+  .sidenav {
+    flex: 0 0 230px; box-sizing: border-box;
+    position: sticky; top: 0; height: 100vh; overflow-y: auto;
+    border-bottom: none; border-right: 1px solid var(--line);
+  }
+  .content { flex: 1 1 auto; min-width: 0; }
+
+  .sidenav-toggle-label { display: none; }
+  .sidenav nav { display: flex; } /* always shown, independent of :checked */
+}
 
 .footer {
   max-width: 1040px; margin: 0 auto; padding: 20px;
@@ -249,7 +302,12 @@ table.coverage td { font-size: 13px; }
 .doc-traces .rel { margin-left: 0; }
 
 @media print {
-  .topbar, .footer, #preview-card { display: none; }
+  /* The sidebar is navigation chrome, not content -- hidden outright, the
+     same as the topbar it replaces was, rather than printed expanded (which
+     would dump the whole nav tree ahead of the actual record) or left as a
+     permanent column eating width on every page. */
+  .sidenav, .footer, #preview-card { display: none; }
+  .content { display: block; } /* undo the flex row from the >=860px rule */
   .doc-item { break-inside: avoid; border-left: none; padding-left: 0; }
   .toc details { display: block; }
   a { color: inherit; text-decoration: none; }

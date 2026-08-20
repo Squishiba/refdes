@@ -2760,6 +2760,70 @@ def test_nav_tree_is_flat_with_no_boards_registered(unboarded_project):
     assert all(n.href and not n.children for n in tree)
 
 
+def test_navnode_contains_checks_self_and_descendants_at_any_depth():
+    """Findings 5 and 7's shared plumbing: a group node must recognize a page
+    living inside a nested descendant, not just its own direct href or
+    immediate children -- board.py's own nesting (workspace > board > page)
+    goes at least two levels deep."""
+    leaf = nav_mod.NavNode("Coverage", "coverage-board-a.html")
+    board_group = nav_mod.NavNode("Board A", children=[leaf])
+    workspace_group = nav_mod.NavNode("Platform", children=[board_group])
+
+    assert leaf.contains("coverage-board-a.html")
+    assert board_group.contains("coverage-board-a.html")
+    assert workspace_group.contains("coverage-board-a.html")
+    assert not workspace_group.contains("coverage-board-b.html")
+    assert not leaf.contains("")
+
+
+def test_rendered_page_marks_current_page_with_aria_current(board_project):
+    """Finding 5: the sidebar link for whatever page is actually being
+    rendered gets aria-current="page" -- and no other link on that same page
+    does, including the same-labeled link ("Coverage") in a sibling board's
+    own group."""
+    project = _build_at(board_project)
+    out = render.render_site(project)
+    coverage_a = open(os.path.join(out, "coverage-board-a.html"), encoding="utf-8").read()
+    assert '<a href="coverage-board-a.html" aria-current="page">Coverage</a>' in coverage_a
+    without_it = coverage_a.replace(
+        '<a href="coverage-board-a.html" aria-current="page">Coverage</a>', ""
+    )
+    assert "aria-current" not in without_it
+
+
+def test_sidebar_group_containing_current_page_is_pre_expanded(board_project):
+    """Finding 7: the board group the reader is already standing inside opens
+    pre-expanded (no click needed to see where you are); a sibling group with
+    nothing to do with the current page stays collapsed."""
+    project = _build_at(board_project)
+    out = render.render_site(project)
+    doc_a = open(os.path.join(out, "document-board-a.html"), encoding="utf-8").read()
+    sidenav = doc_a.split('<div class="content">')[0]
+    assert "<details open>\n      <summary>Board A</summary>" in sidenav
+    assert "<details>\n      <summary>Board B</summary>" in sidenav
+
+
+def test_sidebar_has_a_mobile_collapse_toggle_with_no_javascript(board_project):
+    """Finding 7's narrow-viewport handling: the whole nav tree sits behind a
+    checkbox-driven toggle (not a <details> wrapper -- verified directly
+    against a real browser that a closed <details>'s non-summary content
+    can't be forced open by CSS alone, since current browsers hide it via an
+    internal, unstyleable mechanism) so a phone doesn't get several hundred
+    pixels of expanded navigation before any real content. No <script> tag
+    is involved in driving it -- the label/checkbox association is native
+    HTML."""
+    project = _build_at(board_project)
+    out = render.render_site(project)
+    html = open(os.path.join(out, "index.html"), encoding="utf-8").read()
+    sidenav = html.split('<div class="content">')[0]
+    assert '<input type="checkbox" id="sidenav-toggle"' in sidenav
+    assert '<label for="sidenav-toggle"' in sidenav
+    app_js = open(
+        os.path.join(REPO, "src", "refdes", "templates", "assets", "app.js"), encoding="utf-8"
+    ).read()
+    assert "sidenav" not in app_js  # native label/checkbox, no script drives it
+
+
 def test_nav_tree_groups_pages_and_reports_under_their_board(board_project):
     pages = board_project / "pages"
     pages.mkdir()
@@ -2825,17 +2889,23 @@ def test_rendered_nav_shows_board_groups(board_project):
     project = _build_at(board_project)
     out = render.render_site(project)
     html = open(os.path.join(out, "document.html"), encoding="utf-8").read()
-    assert '<span class="nav-group-label">Board A</span>' in html
+    assert "<summary>Board A</summary>" in html
     assert 'href="power.html"' in html
     assert 'href="summary-board-a.html"' in html
     assert 'href="coverage-board-b.html"' in html
 
 
 def test_rendered_nav_has_no_groups_without_boards_registered(unboarded_project):
+    """Finding 7's explicit requirement: a project with no boards/workspaces
+    registered must degrade to a flat list of links, not an empty rail or a
+    single lonely disclosure -- nav.py's build_nav() already returns a flat
+    root list with nothing to group in this case, so there is nothing for
+    the sidebar to wrap in <details> at all."""
     project = _build_at(unboarded_project)
     out = render.render_site(project)
     html = open(os.path.join(out, "index.html"), encoding="utf-8").read()
-    assert "nav-group" not in html
+    assert "<details" not in html.split('<div class="content">')[0]
+    assert '<a href="summary.html"' in html
 
 
 # --------------------------------------------------------------- board drift

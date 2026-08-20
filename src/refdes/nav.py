@@ -31,6 +31,15 @@ class NavNode:
     href: str = ""
     children: list["NavNode"] = field(default_factory=list)
 
+    def contains(self, page: str) -> bool:
+        """Whether `page` (an output filename, e.g. "coverage-main-io.html")
+        is this node's own link or any descendant's, at any depth -- used to
+        decide whether a sidebar group should render pre-expanded because the
+        page currently being rendered lives inside it (findings 5 and 7)."""
+        if self.href == page:
+            return True
+        return any(child.contains(page) for child in self.children)
+
 
 def _report_links(
     project: Project,

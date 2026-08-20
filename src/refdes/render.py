@@ -547,6 +547,23 @@ def _prune_stale_output(out_dir: str, written: set[str]) -> None:
         json.dump(sorted(written), fh, indent=2)
 
 
+def _write_html(out_dir: str, written: set[str], name: str, template, **context) -> None:
+    """Render `template` to `<out_dir>/<name>`, tracking it in `written` and
+    stamping `current_page` into its own context.
+
+    The single seam every HTML page in the site is written through, so
+    `current_page` -- which page a template's own render call is for -- is
+    never something a call site can forget to pass. Findings 5 and 7 both
+    need it: `base.html.j2` compares it against a nav node's `href` to mark
+    `aria-current="page"`, and to decide which sidebar group should render
+    pre-expanded because the reader is already standing inside it.
+    """
+    written.add(name)
+    context["current_page"] = name
+    with open(os.path.join(out_dir, name), "w", encoding="utf-8") as fh:
+        fh.write(template.render(**context))
+
+
 def render_site(project: Project) -> str:
     out_dir = os.path.join(project.root, project.out_dir)
     os.makedirs(out_dir, exist_ok=True)
@@ -623,30 +640,22 @@ def render_site(project: Project) -> str:
 
     page_tpl = env.get_template("page.html.j2")
     for page in project.pages:
-        written.add(f"{page.slug}.html")
-        with open(
-            os.path.join(out_dir, f"{page.slug}.html"), "w", encoding="utf-8"
-        ) as fh:
-            fh.write(
-                page_tpl.render(
-                    project=project, page=page, previews_json=previews_json,
-                    figured=_figured(project, [page.body_html]),
-                )
-            )
+        _write_html(
+            out_dir, written, f"{page.slug}.html", page_tpl,
+            project=project, page=page, previews_json=previews_json,
+            figured=_figured(project, [page.body_html]),
+        )
 
     if project.items:
         index_tpl = env.get_template("index.html.j2")
-        written.add(dashboard_name)
-        with open(os.path.join(out_dir, dashboard_name), "w", encoding="utf-8") as fh:
-            fh.write(
-                index_tpl.render(
-                    project=project,
-                    by_type=by_type,
-                    failing=failing,
-                    outstanding=outstanding,
-                    previews_json=previews_json,
-                )
-            )
+        _write_html(
+            out_dir, written, dashboard_name, index_tpl,
+            project=project,
+            by_type=by_type,
+            failing=failing,
+            outstanding=outstanding,
+            previews_json=previews_json,
+        )
     elif not project.pages:
         project.warn("nothing to render: no items and no pages")
 
@@ -660,95 +669,72 @@ def render_site(project: Project) -> str:
         return out_dir
 
     summary_tpl = env.get_template("summary.html.j2")
-    written.add("summary.html")
-    with open(os.path.join(out_dir, "summary.html"), "w", encoding="utf-8") as fh:
-        fh.write(
-            summary_tpl.render(
-                project=project,
-                previews_json=previews_json,
-                **summary_payload(project),
-            )
-        )
+    _write_html(
+        out_dir, written, "summary.html", summary_tpl,
+        project=project,
+        previews_json=previews_json,
+        **summary_payload(project),
+    )
 
     coverage_tpl = env.get_template("coverage.html.j2")
-    written.add("coverage.html")
-    with open(os.path.join(out_dir, "coverage.html"), "w", encoding="utf-8") as fh:
-        fh.write(
-            coverage_tpl.render(
-                project=project,
-                coverage_rows=coverage_rows,
-                previews_json=previews_json,
-            )
-        )
+    _write_html(
+        out_dir, written, "coverage.html", coverage_tpl,
+        project=project,
+        coverage_rows=coverage_rows,
+        previews_json=previews_json,
+    )
 
     log_tpl = env.get_template("log.html.j2")
-    written.add("log.html")
-    with open(os.path.join(out_dir, "log.html"), "w", encoding="utf-8") as fh:
-        fh.write(
-            log_tpl.render(
-                project=project,
-                entries=log_entries,
-                previews_json=previews_json,
-            )
-        )
+    _write_html(
+        out_dir, written, "log.html", log_tpl,
+        project=project,
+        entries=log_entries,
+        previews_json=previews_json,
+    )
 
     references_tpl = env.get_template("references.html.j2")
-    written.add("references.html")
-    with open(os.path.join(out_dir, "references.html"), "w", encoding="utf-8") as fh:
-        fh.write(
-            references_tpl.render(
-                project=project,
-                grouped=citations_by_url,
-                previews_json=previews_json,
-            )
-        )
+    _write_html(
+        out_dir, written, "references.html", references_tpl,
+        project=project,
+        grouped=citations_by_url,
+        previews_json=previews_json,
+    )
 
     parts_tpl = env.get_template("parts.html.j2")
-    written.add("parts.html")
-    with open(os.path.join(out_dir, "parts.html"), "w", encoding="utf-8") as fh:
-        fh.write(
-            parts_tpl.render(
-                project=project,
-                parts=parts_by_number,
-                previews_json=previews_json,
-            )
-        )
+    _write_html(
+        out_dir, written, "parts.html", parts_tpl,
+        project=project,
+        parts=parts_by_number,
+        previews_json=previews_json,
+    )
 
     item_tpl = env.get_template("item.html.j2")
     for item in project.items.values():
         spec = project.types.get(item.type)
         if spec is None:  # imported item of a type this schema does not declare
             continue
-        written.add(f"{item.slug}.html")
-        with open(
-            os.path.join(out_dir, f"{item.slug}.html"), "w", encoding="utf-8"
-        ) as fh:
-            fh.write(
-                item_tpl.render(
-                    project=project,
-                    item=item,
-                    spec=spec,
-                    previews_json=previews_json,
-                    figured=_figured(project, [item.body_html]),
-                )
-            )
+        _write_html(
+            out_dir, written, f"{item.slug}.html", item_tpl,
+            project=project,
+            item=item,
+            spec=spec,
+            previews_json=previews_json,
+            figured=_figured(project, [item.body_html]),
+        )
 
     known_slugs = {item.slug for item in project.items.values()}
     document_tpl = env.get_template("document.html.j2")
     doc_sections = _document_sections(project)
-    written.add("document.html")
-    with open(os.path.join(out_dir, "document.html"), "w", encoding="utf-8") as fh:
-        fh.write(
-            document_tpl.render(
-                project=project,
-                sections=doc_sections,
-                anchored=lambda html: _anchorize(html, known_slugs),
-                figured=_figured(
-                    project, [item.body_html for _label, items in doc_sections for item in items]
-                ),
-                previews_json=previews_json,
-            )
-        )
+    _write_html(
+        out_dir, written, "document.html", document_tpl,
+        project=project,
+        sections=doc_sections,
+        anchored=lambda html: _anchorize(html, known_slugs),
+        figured=_figured(
+            project, [item.body_html for _label, items in doc_sections for item in items]
+        ),
+        previews_json=previews_json,
+    )
 
     written.add("items.json")
 
@@ -759,87 +745,57 @@ def render_site(project: Project) -> str:
         board_known_slugs = {
             item.slug for _label, items in board_sections for item in items
         }
-        written.add(f"document-{board_key}.html")
-        with open(
-            os.path.join(out_dir, f"document-{board_key}.html"), "w", encoding="utf-8"
-        ) as fh:
-            fh.write(
-                document_tpl.render(
-                    project=project,
-                    board=board_spec,
-                    sections=board_sections,
-                    anchored=lambda html, slugs=board_known_slugs: _anchorize(html, slugs),
-                    figured=_figured(
-                        project, [item.body_html for _label, items in board_sections for item in items]
-                    ),
-                    previews_json=previews_json,
-                )
-            )
+        _write_html(
+            out_dir, written, f"document-{board_key}.html", document_tpl,
+            project=project,
+            board=board_spec,
+            sections=board_sections,
+            anchored=lambda html, slugs=board_known_slugs: _anchorize(html, slugs),
+            figured=_figured(
+                project, [item.body_html for _label, items in board_sections for item in items]
+            ),
+            previews_json=previews_json,
+        )
 
-        written.add(f"coverage-{board_key}.html")
-        with open(
-            os.path.join(out_dir, f"coverage-{board_key}.html"), "w", encoding="utf-8"
-        ) as fh:
-            fh.write(
-                coverage_tpl.render(
-                    project=project,
-                    board=board_spec,
-                    coverage_rows=_coverage_rows(project, board=board_key),
-                    previews_json=previews_json,
-                )
-            )
+        _write_html(
+            out_dir, written, f"coverage-{board_key}.html", coverage_tpl,
+            project=project,
+            board=board_spec,
+            coverage_rows=_coverage_rows(project, board=board_key),
+            previews_json=previews_json,
+        )
 
-        written.add(f"log-{board_key}.html")
-        with open(
-            os.path.join(out_dir, f"log-{board_key}.html"), "w", encoding="utf-8"
-        ) as fh:
-            fh.write(
-                log_tpl.render(
-                    project=project,
-                    board=board_spec,
-                    entries=_log_entries(project, board=board_key),
-                    previews_json=previews_json,
-                )
-            )
+        _write_html(
+            out_dir, written, f"log-{board_key}.html", log_tpl,
+            project=project,
+            board=board_spec,
+            entries=_log_entries(project, board=board_key),
+            previews_json=previews_json,
+        )
 
-        written.add(f"references-{board_key}.html")
-        with open(
-            os.path.join(out_dir, f"references-{board_key}.html"), "w", encoding="utf-8"
-        ) as fh:
-            fh.write(
-                references_tpl.render(
-                    project=project,
-                    board=board_spec,
-                    grouped=citations_mod.by_url(project, board=board_key),
-                    previews_json=previews_json,
-                )
-            )
+        _write_html(
+            out_dir, written, f"references-{board_key}.html", references_tpl,
+            project=project,
+            board=board_spec,
+            grouped=citations_mod.by_url(project, board=board_key),
+            previews_json=previews_json,
+        )
 
-        written.add(f"parts-{board_key}.html")
-        with open(
-            os.path.join(out_dir, f"parts-{board_key}.html"), "w", encoding="utf-8"
-        ) as fh:
-            fh.write(
-                parts_tpl.render(
-                    project=project,
-                    board=board_spec,
-                    parts=citations_mod.by_part_number(project, board=board_key),
-                    previews_json=previews_json,
-                )
-            )
+        _write_html(
+            out_dir, written, f"parts-{board_key}.html", parts_tpl,
+            project=project,
+            board=board_spec,
+            parts=citations_mod.by_part_number(project, board=board_key),
+            previews_json=previews_json,
+        )
 
-        written.add(f"summary-{board_key}.html")
-        with open(
-            os.path.join(out_dir, f"summary-{board_key}.html"), "w", encoding="utf-8"
-        ) as fh:
-            fh.write(
-                summary_tpl.render(
-                    project=project,
-                    board=board_spec,
-                    previews_json=previews_json,
-                    **summary_payload(project, board=board_key),
-                )
-            )
+        _write_html(
+            out_dir, written, f"summary-{board_key}.html", summary_tpl,
+            project=project,
+            board=board_spec,
+            previews_json=previews_json,
+            **summary_payload(project, board=board_key),
+        )
 
     # Same five reports, one set per registered workspace, scoped to that
     # workspace's own items -- mirrors the per-board loop above exactly.
@@ -848,87 +804,57 @@ def render_site(project: Project) -> str:
         ws_known_slugs = {
             item.slug for _label, items in ws_sections for item in items
         }
-        written.add(f"document-{workspace_key}.html")
-        with open(
-            os.path.join(out_dir, f"document-{workspace_key}.html"), "w", encoding="utf-8"
-        ) as fh:
-            fh.write(
-                document_tpl.render(
-                    project=project,
-                    workspace=workspace_spec,
-                    sections=ws_sections,
-                    anchored=lambda html, slugs=ws_known_slugs: _anchorize(html, slugs),
-                    figured=_figured(
-                        project, [item.body_html for _label, items in ws_sections for item in items]
-                    ),
-                    previews_json=previews_json,
-                )
-            )
+        _write_html(
+            out_dir, written, f"document-{workspace_key}.html", document_tpl,
+            project=project,
+            workspace=workspace_spec,
+            sections=ws_sections,
+            anchored=lambda html, slugs=ws_known_slugs: _anchorize(html, slugs),
+            figured=_figured(
+                project, [item.body_html for _label, items in ws_sections for item in items]
+            ),
+            previews_json=previews_json,
+        )
 
-        written.add(f"coverage-{workspace_key}.html")
-        with open(
-            os.path.join(out_dir, f"coverage-{workspace_key}.html"), "w", encoding="utf-8"
-        ) as fh:
-            fh.write(
-                coverage_tpl.render(
-                    project=project,
-                    workspace=workspace_spec,
-                    coverage_rows=_coverage_rows(project, workspace=workspace_key),
-                    previews_json=previews_json,
-                )
-            )
+        _write_html(
+            out_dir, written, f"coverage-{workspace_key}.html", coverage_tpl,
+            project=project,
+            workspace=workspace_spec,
+            coverage_rows=_coverage_rows(project, workspace=workspace_key),
+            previews_json=previews_json,
+        )
 
-        written.add(f"log-{workspace_key}.html")
-        with open(
-            os.path.join(out_dir, f"log-{workspace_key}.html"), "w", encoding="utf-8"
-        ) as fh:
-            fh.write(
-                log_tpl.render(
-                    project=project,
-                    workspace=workspace_spec,
-                    entries=_log_entries(project, workspace=workspace_key),
-                    previews_json=previews_json,
-                )
-            )
+        _write_html(
+            out_dir, written, f"log-{workspace_key}.html", log_tpl,
+            project=project,
+            workspace=workspace_spec,
+            entries=_log_entries(project, workspace=workspace_key),
+            previews_json=previews_json,
+        )
 
-        written.add(f"references-{workspace_key}.html")
-        with open(
-            os.path.join(out_dir, f"references-{workspace_key}.html"), "w", encoding="utf-8"
-        ) as fh:
-            fh.write(
-                references_tpl.render(
-                    project=project,
-                    workspace=workspace_spec,
-                    grouped=citations_mod.by_url(project, workspace=workspace_key),
-                    previews_json=previews_json,
-                )
-            )
+        _write_html(
+            out_dir, written, f"references-{workspace_key}.html", references_tpl,
+            project=project,
+            workspace=workspace_spec,
+            grouped=citations_mod.by_url(project, workspace=workspace_key),
+            previews_json=previews_json,
+        )
 
-        written.add(f"parts-{workspace_key}.html")
-        with open(
-            os.path.join(out_dir, f"parts-{workspace_key}.html"), "w", encoding="utf-8"
-        ) as fh:
-            fh.write(
-                parts_tpl.render(
-                    project=project,
-                    workspace=workspace_spec,
-                    parts=citations_mod.by_part_number(project, workspace=workspace_key),
-                    previews_json=previews_json,
-                )
-            )
+        _write_html(
+            out_dir, written, f"parts-{workspace_key}.html", parts_tpl,
+            project=project,
+            workspace=workspace_spec,
+            parts=citations_mod.by_part_number(project, workspace=workspace_key),
+            previews_json=previews_json,
+        )
 
-        written.add(f"summary-{workspace_key}.html")
-        with open(
-            os.path.join(out_dir, f"summary-{workspace_key}.html"), "w", encoding="utf-8"
-        ) as fh:
-            fh.write(
-                summary_tpl.render(
-                    project=project,
-                    workspace=workspace_spec,
-                    previews_json=previews_json,
-                    **summary_payload(project, workspace=workspace_key),
-                )
-            )
+        _write_html(
+            out_dir, written, f"summary-{workspace_key}.html", summary_tpl,
+            project=project,
+            workspace=workspace_spec,
+            previews_json=previews_json,
+            **summary_payload(project, workspace=workspace_key),
+        )
 
     with open(os.path.join(out_dir, "items.json"), "w", encoding="utf-8") as fh:
         json.dump(items_json(project), fh, indent=2, ensure_ascii=False, default=str)
