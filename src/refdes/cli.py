@@ -14,6 +14,7 @@ from . import ids as ids_mod
 from . import lifecycle as lifecycle_mod
 from . import parse as parse_mod
 from . import render as render_mod
+from . import revise as revise_mod
 from . import scaffold as scaffold_mod
 from . import schema_json as schema_json_mod
 from . import seal as seal_mod
@@ -537,6 +538,65 @@ def cmd_standard_remove_preset(args) -> int:
     return 0
 
 
+def _print_revision_result(result, dry_run: bool) -> int:
+    if not result.ok:
+        print("refused:" if not dry_run else "would refuse:", file=sys.stderr)
+        for e in result.errors:
+            print(f"  {e}", file=sys.stderr)
+        return 1
+
+    verb = "would change" if dry_run else "changed"
+    if not result.changed_files and not result.id_changes:
+        print("nothing to do -- mapping doesn't apply to this project")
+        return 0
+
+    print(f"{verb} {len(result.changed_files)} file(s):")
+    for rel in result.changed_files:
+        print(f"  {rel}")
+    if result.id_changes:
+        print("id changes:")
+        for old_id, new_id in sorted(result.id_changes.items()):
+            print(f"  {old_id} -> {new_id}")
+    if dry_run:
+        return 0
+    if result.baselines_updated:
+        print(f"baselines carried forward: {', '.join(result.baselines_updated)}")
+    if result.baselines_skipped_no_standard:
+        print(
+            "baselines skipped (no recorded standard to migrate from): "
+            + ", ".join(result.baselines_skipped_no_standard)
+        )
+    if result.seals_updated:
+        print(f"seals carried forward: {', '.join(result.seals_updated)}")
+    return 0
+
+
+def cmd_revise(args) -> int:
+    project_root = _standard_project_root(args)
+    try:
+        mapping = revise_mod.load_mapping(args.mapping)
+    except SchemaError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    result = revise_mod.apply(project_root, mapping, dry_run=args.dry_run)
+    return _print_revision_result(result, dry_run=args.dry_run)
+
+
+def cmd_standard_upgrade(args) -> int:
+    project_root = _standard_project_root(args)
+    steps = revise_mod.apply_standard_upgrade(project_root, args.to)
+    ok = True
+    for step in steps:
+        print(f"v{step.from_version} -> v{step.to_version}:")
+        status = _print_revision_result(step.result, dry_run=False)
+        if status != 0:
+            ok = False
+            break
+    if ok:
+        print(f"\nupgraded to v{args.to}.")
+    return 0 if ok else 1
+
+
 def cmd_stub_tests(args) -> int:
     project, _stale = _load(args, require_ids=False)
     build_mod.build(project, seal_write=False, reseal=False)
@@ -833,6 +893,50 @@ def main(argv: list[str] | None = None) -> int:
     )
     p_remove_preset.add_argument("name")
     p_remove_preset.set_defaults(func=cmd_standard_remove_preset)
+
+    p_standard_upgrade = standard_sub.add_parser(
+        "upgrade",
+        help="move a pinned standard forward, rewriting item files and "
+        "standard.version: to match",
+        description="Chain the bundled standard's own migration.yaml files, "
+        "one version at a time, from the project's currently pinned "
+        "standard.version: up to --to N -- each step rewrites item files "
+        "for that version's own rename, bumps standard.version: to match, "
+        "and carries content hashes forward in every stamped baseline and "
+        "seal so the rename doesn't look like a content change. Never "
+        "merges steps: a multi-version jump is always applied as its full "
+        "chain of individual deltas, in order. Refuses (rolling back "
+        "cleanly) rather than guessing at an ambiguous or ill-formed step.",
+    )
+    p_standard_upgrade.add_argument(
+        "--to", type=int, required=True, metavar="N",
+        help="target standard.version: to upgrade to",
+    )
+    p_standard_upgrade.set_defaults(func=cmd_standard_upgrade)
+
+    p_revise = sub.add_parser(
+        "revise",
+        help="rewrite project-local vocabulary (types/fields/links/prefixes) "
+        "from a hand-written mapping file",
+        description="Apply an explicit old->new vocabulary mapping (type "
+        "names, field names scoped per type, link verb names, id prefixes) "
+        "to every item file in one operation, carrying each affected item's "
+        "content hash forward in stamped baselines and seals so the rename "
+        "doesn't look like a content change. For a bundled standard's own "
+        "version upgrade, use 'refdes standard upgrade --to N' instead, "
+        "which needs no hand-written mapping. Refuses (rolling back "
+        "cleanly) rather than guessing at an ambiguous mapping, an "
+        "already-used target name, or a rename the current schema doesn't "
+        "yet support.",
+    )
+    p_revise.add_argument(
+        "mapping",
+        help="path to a YAML file with types:/fields:/links:/prefixes: renames",
+    )
+    p_revise.add_argument(
+        "--dry-run", action="store_true", help="show what would change without writing"
+    )
+    p_revise.set_defaults(func=cmd_revise)
 
     p_stub_tests = sub.add_parser(
         "stub-tests",
