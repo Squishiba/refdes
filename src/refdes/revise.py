@@ -40,7 +40,7 @@ from . import lifecycle
 from . import parse
 from . import seal as seal_mod
 from . import standards as standards_mod
-from .model import Item, Project, SchemaError
+from .model import CHECK_VIOLATION, Item, Project, SchemaError
 from .schema import load_project
 
 # -------------------------------------------------------------------- mapping
@@ -577,7 +577,37 @@ class RevisionResult:
     # "file:line  OLD-ID" for every prose mention of a renamed id left behind
     # -- see _stale_prose_references().
     stale_references: list[str] = field(default_factory=list)
+    # True when this step changed refdes.yaml itself -- today, a standard
+    # upgrade bumping `standard.version:`. Distinguishes "no item file needed
+    # rewriting, and the pin moved" from "this mapping does not apply here",
+    # which look identical from changed_files alone.
+    config_updated: bool = False
     dry_run: bool = False
+
+
+def _blocking_errors(project: Project) -> list:
+    """Errors that must stop a vocabulary rewrite -- every error except a
+    check that ran and produced a violating result.
+
+    The rule this enforces is "a hash change caused by this rename must not
+    be able to hide behind an already-broken build", and that is about the
+    document: an item that doesn't parse, a required field that isn't there,
+    a link pointing at nothing, a schema the data no longer satisfies. Those
+    still refuse.
+
+    A failing `checks:` result is not that. It means the arithmetic ran, the
+    comparison happened, and the design does not currently meet a bound --
+    the tool working exactly as designed, and the single most likely state
+    for a board mid-revision to be sitting in for weeks at a time. This
+    project's own sample carries one deliberately, as the teaching example
+    on the front page of the docs. Blocking a vocabulary migration on it
+    made `refdes revise` and `refdes standard upgrade` unusable on precisely
+    the projects most likely to need them, and bought nothing: a rename
+    cannot change a check's verdict, since the arithmetic and the limit both
+    move with it, and if one somehow did, the post-rewrite validation below
+    compares the same way and would catch it.
+    """
+    return [d for d in project.errors if d.code != CHECK_VIOLATION]
 
 
 def _load_and_validate(config_path: str) -> Project:
@@ -638,7 +668,8 @@ def apply(
     """
     config_path = os.path.join(project_root, "refdes.yaml")
     project_before = _load_and_validate(config_path)
-    if project_before.errors:
+    blocking = _blocking_errors(project_before)
+    if blocking:
         return RevisionResult(
             ok=False,
             errors=[
@@ -646,7 +677,7 @@ def apply(
                 "hash change caused by this rename can't hide behind one "
                 "already-broken build"
             ]
-            + [str(d) for d in project_before.errors],
+            + [str(d) for d in blocking],
         )
 
     ambiguous = check_ambiguous(project_before, mapping)
@@ -718,12 +749,13 @@ def apply(
         _rollback()
         return RevisionResult(ok=False, errors=[f"rewritten project no longer loads: {exc}"])
 
-    if project_light.errors:
+    light_blocking = _blocking_errors(project_light)
+    if light_blocking:
         _rollback()
         return RevisionResult(
             ok=False,
             errors=["rewritten project has parse errors -- rolled back:"]
-            + [str(d) for d in project_light.errors],
+            + [str(d) for d in light_blocking],
         )
 
     # Correlate old<->new items by (source_file, source_line): a pure
@@ -751,12 +783,13 @@ def apply(
         _rollback()
         return RevisionResult(ok=False, errors=[f"rewritten project no longer loads: {exc}"])
 
-    if project_after.errors:
+    after_blocking = _blocking_errors(project_after)
+    if after_blocking:
         _rollback()
         return RevisionResult(
             ok=False,
             errors=["rewritten project has build errors -- rolled back:"]
-            + [str(d) for d in project_after.errors],
+            + [str(d) for d in after_blocking],
         )
 
     baselines_updated, baselines_skipped = _carry_forward_baselines(
@@ -771,6 +804,7 @@ def apply(
         baselines_skipped_no_standard=baselines_skipped,
         seals_updated=seals_updated,
         stale_references=_stale_prose_references(project_after, id_changes),
+        config_updated=mutate_config is not None,
     )
 
 

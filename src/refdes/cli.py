@@ -564,7 +564,15 @@ def _print_revision_result(result, dry_run: bool) -> int:
 
     verb = "would change" if dry_run else "changed"
     if not result.changed_files and not result.id_changes:
-        print("nothing to do -- mapping doesn't apply to this project")
+        if result.config_updated:
+            # A version step whose delta renames nothing still did the work
+            # that matters: it moved the pin and re-validated the whole
+            # project against the new version. Saying "nothing to do" here
+            # would describe a real, and possibly refusable, step as a no-op.
+            print("no item file needed rewriting -- standard.version: bumped "
+                  "and the project re-validated against it")
+        else:
+            print("nothing to do -- mapping doesn't apply to this project")
         return 0
 
     print(f"{verb} {len(result.changed_files)} file(s):")

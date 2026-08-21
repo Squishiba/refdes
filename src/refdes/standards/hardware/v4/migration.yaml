@@ -1,0 +1,31 @@
+# The delta from hardware v3 to v4 -- what `refdes standard upgrade --to 4`
+# applies to a project pinned at v3 (or chains through, upgrading further:
+# see standards.load_migration_chain / revise.py). Read by revise.py, never
+# by base.yaml's own resolution -- this file plays no part in what standard:
+# {base: hardware, version: 4} actually resolves to; it only describes how a
+# project already on v3 moves its own existing content to match.
+#
+# Deliberately empty of renames, and shipped anyway.
+#
+# v4's only change is that `component.equivalent` and `component.alternate`
+# stop accepting any target type and accept `[component]` -- a restriction on
+# what is already written, not a rename of it. No type, field, link verb, or
+# id prefix changes spelling, so there is nothing in any item file for this
+# step to rewrite: an `equivalent: [CMP-019]` that was correct at v3 is
+# byte-for-byte correct at v4.
+#
+# What the step still does is verify. `revise.apply()` reloads and fully
+# validates the project after bumping standard.version:, so a link this
+# restriction now rejects surfaces there as an ordinary "equivalent may point
+# at ['component'], but REQ-PWR-001 is a requirement" error, and the whole
+# step is refused and rolled back rather than leaving the project pinned to a
+# version its own items no longer satisfy. That is the honest outcome: the
+# rename engine cannot guess what a component was meant to be equivalent to.
+#
+# This file exists rather than being omitted (load_migration_raw treats a
+# missing file and an empty one identically) so that every version from v2 on
+# ships one, and "what changed in vN, and what does upgrading do about it"
+# has exactly one place to look for every N.
+#
+# See docs/design/standard-library.md §3 for the versioning design this
+# implements, and §11 for the component → component intent this restores.

@@ -26,6 +26,14 @@ WARNING = "warning"  # visible by default; worth a look
 INFO = "info"        # default-hidden; the normal state of an incomplete project
 DIAGNOSTIC_LEVELS = (ERROR, WARNING, INFO)
 
+# `Diagnostic.code` values. A check that ran and produced a violating result
+# is a finding *about the design*, not a defect in the document -- the tool
+# working, not failing -- and it is a state a real project sits in for weeks.
+# Anything that needs to act on that distinction rather than just print the
+# message looks for this. Today that is one caller: `refdes revise` and
+# `refdes standard upgrade`, which must not be blocked by it.
+CHECK_VIOLATION = "check_violation"
+
 
 # refdes-project.yaml: project-level presentation/behaviour settings, distinct
 # from refdes.yaml's schema. See schema.py's loader for validation.
@@ -73,6 +81,13 @@ class Diagnostic:
     file: str | None = None
     line: int | None = None
     item_id: str | None = None
+    # A stable machine-readable tag for the *kind* of finding, set only where
+    # something needs to reason about a diagnostic rather than print it.
+    # Today that is one case: CHECK_VIOLATION, which `refdes revise` and
+    # `refdes standard upgrade` must be able to tell apart from a project
+    # that does not parse or validate. Everything else leaves it None rather
+    # than growing a taxonomy nothing reads.
+    code: str | None = None
 
     @property
     def where(self) -> str:

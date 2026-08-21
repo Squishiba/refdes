@@ -6714,6 +6714,140 @@ def test_revise_refuses_and_rolls_back_a_required_field_rename_without_schema_up
     assert after == before
 
 
+VIOLATING_SCHEMA = (
+    "site: { title: T, out: _site }\n"
+    'link_types:\n  constrained_by: { inverse: constrains, label: "Constrained by" }\n'
+    "types:\n"
+    "  constraint:\n"
+    "    prefix: CON\n"
+    "    fields:\n"
+    "      text:  { type: text, required: true }\n"
+    "      limit: { type: limit, required: true }\n"
+    "  decision:\n"
+    "    prefix: DEC\n"
+    "    fields:\n"
+    "      title: { type: text, required: true }\n"
+    "      checks: { type: checks }\n"
+    "    links:\n"
+    "      constrained_by: [constraint]\n"
+    "    body: {}\n"
+)
+
+
+@pytest.fixture
+def violating_project(tmp_path):
+    """A project whose build fails on a *check* -- the design does not meet a
+    declared limit -- and on nothing else. The tool working, not failing."""
+    (tmp_path / "refdes.yaml").write_text(VIOLATING_SCHEMA, encoding="utf-8")
+    items = tmp_path / "items"
+    items.mkdir()
+    (items / "con.yaml").write_text(
+        "defaults:\n  type: constraint\n  prefix: CON-THM\n"
+        "items:\n"
+        "  - id: CON-THM-001\n    text: Board power density\n"
+        '    limit: "<= 0.15 W/in^2"\n',
+        encoding="utf-8",
+    )
+    (items / "dec.md").write_text(
+        "---\n"
+        "id: DEC-001\n"
+        "type: decision\n"
+        "title: Regulator topology\n"
+        "constrained_by: [CON-THM-001]\n"
+        "checks:\n"
+        "  - value: P_dens\n"
+        "    against: CON-THM-001\n"
+        "---\n\n"
+        "```calc\nP_dens : W/in^2 = 0.2366 W/in^2\n```\n",
+        encoding="utf-8",
+    )
+    return tmp_path
+
+
+def test_a_failing_check_does_not_block_a_rename(violating_project):
+    """A decision currently violating a bound is a normal, often long-lived
+    state -- this repository's own sample project ships one deliberately, as
+    the teaching example on the front page of the docs. Refusing every
+    vocabulary migration until it is resolved made `revise` and `standard
+    upgrade` unusable on exactly the projects most likely to need them, and
+    protected nothing: a rename moves the arithmetic and the limit together,
+    so it cannot change a check's verdict."""
+    project = _build_at(violating_project)
+    assert any(d.code == "check_violation" for d in project.errors), [
+        str(d) for d in project.errors
+    ]
+
+    result = revise.apply(str(violating_project), revise.Mapping(prefixes={"CON": "BND"}))
+    assert result.ok, result.errors
+    assert result.id_changes == {"CON-THM-001": "BND-THM-001"}
+    assert "id: BND-THM-001" in (
+        violating_project / "items" / "con.yaml"
+    ).read_text(encoding="utf-8")
+
+
+def test_a_content_error_still_blocks_a_rename(violating_project):
+    """The rule the refusal exists for is unchanged: a hash change caused by
+    the rename must not be able to hide behind a document that doesn't
+    validate. A dangling link is exactly that, and still refuses."""
+    (violating_project / "items" / "dec.md").write_text(
+        "---\n"
+        "id: DEC-001\n"
+        "type: decision\n"
+        "title: Regulator topology\n"
+        "constrained_by: [CON-THM-999]\n"
+        "---\n",
+        encoding="utf-8",
+    )
+    result = revise.apply(str(violating_project), revise.Mapping(prefixes={"CON": "BND"}))
+    assert not result.ok
+    assert any("existing build errors" in e for e in result.errors), result.errors
+    assert "id: CON-THM-001" in (
+        violating_project / "items" / "con.yaml"
+    ).read_text(encoding="utf-8")
+
+
+def test_a_missing_required_field_still_blocks_a_rename(violating_project):
+    """The other half of the same rule: a schema the data no longer satisfies
+    is a content problem, not a finding about the design."""
+    (violating_project / "items" / "con.yaml").write_text(
+        "defaults:\n  type: constraint\n  prefix: CON-THM\n"
+        "items:\n  - id: CON-THM-001\n    text: No limit on this one.\n",
+        encoding="utf-8",
+    )
+    result = revise.apply(str(violating_project), revise.Mapping(prefixes={"CON": "BND"}))
+    assert not result.ok
+    assert any("existing build errors" in e for e in result.errors), result.errors
+
+
+def test_standard_upgrade_runs_on_a_project_with_a_failing_check(tmp_path):
+    """The end-to-end version of the same thing, through the bundled
+    standard's own chain rather than a hand-written mapping."""
+    (tmp_path / "refdes.yaml").write_text(
+        "site: { title: T, out: _site }\n"
+        "standard: { base: hardware, version: 3, presets: [] }\n"
+        "id: { width: 3, ledger: .refdes/ids.yaml }\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "items").mkdir()
+    (tmp_path / "items" / "b.yaml").write_text(
+        "items:\n  - id: BND-001\n    type: bound\n    text: Board power density\n"
+        '    limit: "<= 0.15 W/in^2"\n    status: active\n',
+        encoding="utf-8",
+    )
+    (tmp_path / "items" / "d.md").write_text(
+        "---\nid: DEC-001\ntype: decision\ntitle: Regulator\nstatus: accepted\n"
+        "constrained_by: [BND-001]\nchecks:\n  - value: P_dens\n    against: BND-001\n---\n\n"
+        "```calc\nP_dens : W/in^2 = 0.2366 W/in^2\n```\n",
+        encoding="utf-8",
+    )
+    steps = revise.apply_standard_upgrade(str(tmp_path), 4)
+    assert [(s.from_version, s.to_version) for s in steps] == [(3, 4)]
+    assert steps[0].result.ok, steps[0].result.errors
+    # The pin moved even though no item file needed rewriting.
+    assert steps[0].result.config_updated
+    assert "version: 4" in (tmp_path / "refdes.yaml").read_text(encoding="utf-8")
+
+
 def test_revise_refuses_ambiguous_target_already_in_use(tmp_path):
     (tmp_path / "refdes.yaml").write_text(
         "site: { title: T, out: _site }\n"
@@ -7405,6 +7539,99 @@ def test_the_rename_hint_stays_quiet_where_the_new_type_does_not_exist(tmp_path)
     messages = [d.message for d in project.errors]
     assert any("unknown type 'constraint'" in m for m in messages), messages
     assert not any("it is now 'bound'" in m for m in messages), messages
+
+
+def _equivalence_project(tmp_path, version, target_id="REQ-001"):
+    """A component declaring `equivalent:` at a target that is not a
+    component, against a given pinned standard version."""
+    (tmp_path / "refdes.yaml").write_text(
+        "site: { title: T, out: _site }\n"
+        "standard: { base: hardware, version: %d, presets: [] }\n"
+        "id: { width: 3, ledger: .refdes/ids.yaml }\n" % version,
+        encoding="utf-8",
+    )
+    (tmp_path / "items").mkdir()
+    (tmp_path / "items" / "i.yaml").write_text(
+        "items:\n"
+        "  - id: REQ-001\n    type: requirement\n    text: A requirement.\n"
+        "    status: active\n"
+        "  - id: CMP-001\n    type: component\n    title: A capacitor.\n"
+        "    equivalent: [%s]\n" % target_id,
+        encoding="utf-8",
+    )
+    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    parse.load_items(project)
+    build_mod.build(project)
+    return project
+
+
+def test_hardware_v4_restricts_equivalent_and_alternate_to_components(tmp_path):
+    """`[]` in a `links:` target list means *unrestricted* -- that is what it
+    deliberately means one type up on `decision.blocked_by:` -- so writing it
+    on `equivalent`/`alternate` left the shipped dictionary accepting
+    `equivalent: [REQ-001]` on a component with no diagnostic at all, while
+    the spec (docs/design/standard-library.md 11) and every version of the
+    docs said component -> component. v4 restores the intent."""
+    project = _equivalence_project(tmp_path, version=4)
+    assert any(
+        "equivalent may point at ['component']" in d.message and "REQ-001" in d.message
+        for d in project.errors
+    ), [str(d) for d in project.errors]
+
+
+def test_hardware_v4_still_allows_a_component_to_component_equivalence(tmp_path):
+    """The restriction must not catch the case it exists to describe."""
+    (tmp_path / "refdes.yaml").write_text(
+        "site: { title: T, out: _site }\n"
+        "standard: { base: hardware, version: 4, presets: [] }\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "items").mkdir()
+    (tmp_path / "items" / "i.yaml").write_text(
+        "items:\n"
+        "  - id: CMP-001\n    type: component\n    title: First source.\n"
+        "    equivalent: [CMP-002]\n"
+        "  - id: CMP-002\n    type: component\n    title: Second source.\n",
+        encoding="utf-8",
+    )
+    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    parse.load_items(project)
+    build_mod.build(project)
+    assert not project.errors, [str(d) for d in project.errors]
+
+
+@pytest.mark.parametrize("version", [1, 2, 3])
+def test_earlier_versions_keep_the_unrestricted_behaviour(tmp_path, version):
+    """Byte-identical forever: a project pinned below v4 sees no change at
+    all, including the permissiveness v4 removes. Upgrading is what opts a
+    project into the check."""
+    project = _equivalence_project(tmp_path, version=version)
+    assert not any("equivalent may point at" in d.message for d in project.errors), [
+        str(d) for d in project.errors
+    ]
+
+
+def test_v4_is_the_version_init_pins(tmp_path):
+    assert standards.latest_version("hardware") == 4
+
+
+def test_the_parts_fixture_matches_the_bundled_standard():
+    """The suite never caught the unrestricted `equivalent` because the parts
+    fixture hand-declared the *restricted* form -- the schema the standard was
+    supposed to have, not the one it shipped. A fixture that can quietly
+    diverge from the dictionary it stands in for is a trap for whoever reads
+    it next, so this pins the two together."""
+    _link_types, types = standards.resolve_schema(
+        {"standard": {"base": "hardware", "version": standards.latest_version("hardware")}},
+        require_rejection_rationale=True,
+    )
+    shipped = types["component"]["links"]
+    fixture = yaml.safe_load(PARTS_SCHEMA)["types"]["component"]["links"]
+    for verb in ("equivalent", "alternate"):
+        assert fixture[verb] == shipped[verb], (
+            f"parts fixture declares {verb}: {fixture[verb]}, "
+            f"but the bundled standard ships {shipped[verb]}"
+        )
 
 
 def test_hardware_v3_renames_constraint_to_bound_and_gains_refines(tmp_path):
@@ -8950,7 +9177,18 @@ def test_equivalent_and_alternate_are_ordinary_authored_links_for_the_lint(parts
 # ------------------------------------------------ init, new, schema, presets
 
 def test_latest_version_resolves_the_concrete_bundled_max():
-    assert standards.latest_version("hardware") == 3
+    """Deliberately not a literal: this is the highest vN directory that
+    actually ships, so hard-coding the number of the day just breaks on the
+    next version bump without telling anyone anything."""
+    bundled = [
+        int(name[1:])
+        for name in os.listdir(
+            os.path.join(os.path.dirname(standards.__file__), "standards", "hardware")
+        )
+        if name.startswith("v")
+    ]
+    assert standards.latest_version("hardware") == max(bundled)
+    assert standards.latest_version("hardware") >= 4
 
 
 def test_available_presets_includes_design_debate():
@@ -8975,7 +9213,10 @@ def test_init_writes_the_exact_documented_file(tmp_path):
     assert "field_sets:" not in text
     assert "standard:" in text
     assert "base: hardware" in text
-    assert "version: 3" in text  # the concrete integer, never the word "latest"
+    # The concrete integer, never the word "latest" -- and read from the
+    # bundle rather than hard-coded, so a version bump doesn't fail here.
+    assert f"version: {standards.latest_version('hardware')}" in text
+    assert "latest" not in text
     assert "presets: []" in text
 
     # The file must actually load and resolve to a real, usable schema.
@@ -9053,7 +9294,7 @@ def test_cli_init_end_to_end(tmp_path, monkeypatch, capsys):
     assert (tmp_path / "refdes.yaml").is_file()
     assert (tmp_path / ".vscode" / "settings.json").is_file()
     out = capsys.readouterr().out
-    assert "standard: hardware@3" in out
+    assert f"standard: hardware@{standards.latest_version('hardware')}" in out
 
 
 # --------------------------------------------------------------- refdes new

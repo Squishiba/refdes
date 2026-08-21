@@ -16,7 +16,10 @@ from . import boards as boards_mod
 from . import calc, citations as citations_mod, imports, pages as pages_mod, seal
 from . import ids as ids_mod
 from . import workspaces as workspaces_mod
-from .model import ERROR, INFO, INVALIDATE, WARNING, CalcLine, CheckResult, Coverage, Item, ItemType, Project
+from .model import (
+    CHECK_VIOLATION, ERROR, INFO, INVALIDATE, WARNING,
+    CalcLine, CheckResult, Coverage, Item, ItemType, Project,
+)
 
 # Explicit reference: [[REQ-PWR-002]] or [[REQ-PWR-002|the input range]]. The
 # ':' admits the "fig:" namespace (docs/design/index-blocks.md §9) -- item ids
@@ -518,6 +521,7 @@ def run_checks(project: Project) -> None:
                         emit_violation(
                             project, message,
                             file=item.source_file, line=item.source_line, item_id=item.id,
+                            code=CHECK_VIOLATION,
                         )
                 except calc.CalcError as exc:
                     result.detail = str(exc)
