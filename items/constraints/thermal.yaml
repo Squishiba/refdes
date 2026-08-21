@@ -8,6 +8,13 @@ defaults:
 
 items:
   - id: BND-THM-001
+    # Renamed from CON-THM-001 by `refdes standard upgrade --to 3` (hardware@3
+    # renamed `constraint` to `bound`, prefix CON -> BND). The rename moves
+    # structured references but never prose, so this records the old id here
+    # instead: every "CON-THM-001" still written in a rationale, a source
+    # note, or a sealed log entry keeps resolving, marked "(formerly
+    # CON-THM-001)", without rewriting a single historical sentence.
+    former_ids: [CON-THM-001]
     text: Board power density
     limit: "<= 0.15 W/in^2"
     rationale: >

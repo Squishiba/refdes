@@ -28,7 +28,7 @@ units:
   # reads a bare "mil" as the angular mil rather than a thousandth of an inch.
   aliases: {}
 
-# The standard dictionary: requirement, constraint, decision, test, component,
+# The standard dictionary: requirement, bound, decision, test, component,
 # log, plus the standard link vocabulary -- resolved live against the
 # installed refdes package on every load, never copied into this file. See
 # docs/design/standard-library.md for what it covers and why pinning a plain
@@ -58,7 +58,7 @@ types:
 # items/decisions) rather than in items/board-a/. Board B is new enough to just
 # live in items/board-b/ and needs no override.
 #
-# Board A declares no `token:` on purpose: its prefixes (REQ-PWR, CON-THM,
+# Board A declares no `token:` on purpose: its prefixes (REQ-PWR, BND-THM,
 # DEC-PWR, TST-PWR) predate board tokens and were frozen before this registry
 # existed, so there is no letter to check them against. See docs/ids.md on
 # adopting board-token prefixes from the start next time.
