@@ -736,7 +736,10 @@ def main(argv: list[str] | None = None) -> int:
         description="Validate the project without rendering a site: parse every "
         "item, resolve links, run calcs and checks, and verify (but never create "
         "or update) append-only seals and board-drift records. Exits non-zero on "
-        "any error. Nothing is written to disk -- use 'build' for that.",
+        "any error. Nothing of the project's own is written -- no site, no seal, "
+        "no board or citation manifest, no baseline. The one exception is "
+        "'.refdes/schema.json', the gitignored editor-completion schema every "
+        "project-loading command refreshes.",
     )
     p_check.add_argument(
         "--refresh",

@@ -44,9 +44,11 @@ failing check. Do not use it in CI — it defeats the point.
 
 ## `refdes check`
 
-Validate without rendering. Faster, writes nothing, and verifies existing seals
-without creating new ones — which makes it the right command for CI and pre-commit
-hooks.
+Validate without rendering. Faster, and verifies existing seals without creating
+new ones — which makes it the right command for CI and pre-commit hooks. Nothing
+of the project's own is written: no site, no seal, no board or citation manifest,
+no baseline. (`.refdes/schema.json`, the gitignored editor-completion schema, is
+refreshed by every command that loads the project, this one included.)
 
 ```bash
 refdes check
