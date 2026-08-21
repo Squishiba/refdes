@@ -40,10 +40,12 @@ standard:
 
 # The one field the standard doesn't know about: this project's log entries
 # carry a hand-typed `board:` field predating the boards: registry below (see
-# that registry's own comment). It shadows the reserved `board:` override on
-# purpose -- a type's own field always wins -- so log entries stay
-# text-tagged, not board-scoped. Everything else about `log` comes from the
-# standard unchanged.
+# that registry's own comment). It shadows the reserved `board:` override --
+# a type's own field always wins -- so that key scopes nothing on a log
+# entry; the entries are board-scoped by living in items/board-a/, like
+# everything else. Retiring the field would be tidier still, but it would
+# change every entry's content hash, and log entries are sealed append-only.
+# Everything else about `log` comes from the standard unchanged.
 types:
   log:
     fields:
@@ -57,6 +59,10 @@ types:
 # folders that predate this registry (items/requirements, items/constraints,
 # items/decisions) rather than in items/board-a/. Board B is new enough to just
 # live in items/board-b/ and needs no override.
+#
+# The one exception is the design log, which the override cannot reach: the
+# `log` type declares its own `board` field, so it lives in items/board-a/ and
+# is scoped by its path like Board B's items are.
 #
 # Board A declares no `token:` on purpose: its prefixes (REQ-PWR, BND-THM,
 # DEC-PWR, TST-PWR) predate board tokens and were frozen before this registry

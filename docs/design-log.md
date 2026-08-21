@@ -59,6 +59,15 @@ Once a project registers `boards:`, it is worth moving `log`'s hand-typed
 instead — the two cannot both be true for the same type at once, since the
 field always wins.
 
+**If you can't retire the field**, because the entries are already sealed and
+dropping it would change every content hash, put the file under the
+registered board's own folder instead: `items/<board>/log.yaml`. The path is
+what the registry matches, and it needs no reserved key to work. Leaving the
+file somewhere that isn't a registered board means every entry resolves to no
+board at all — one warning per entry, on every build. This repository's own
+sample project does exactly this; see
+[`items/board-a/log.yaml`](../items/board-a/log.yaml).
+
 ## Append-only
 
 Entries are **sealed on first build**. The hash of each is recorded in

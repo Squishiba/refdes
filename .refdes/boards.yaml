@@ -11,6 +11,12 @@ boards:
   DEC-B-001: board-b
   DEC-B-002: board-b
   DEC-PWR-001: board-a
+  LOG-A-001: board-a
+  LOG-A-002: board-a
+  LOG-A-003: board-a
+  LOG-A-004: board-a
+  LOG-A-005: board-a
+  LOG-A-006: board-a
   REQ-B-PWR-001: board-b
   REQ-PWR-001: board-a
   REQ-PWR-002: board-a

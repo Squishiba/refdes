@@ -9,10 +9,17 @@ defaults:
   type: log
   prefix: LOG-A
   # `board` here is the `log` type's own hand-typed field (declared in
-  # refdes.yaml), not the reserved `board:` override the boards: registry
-  # added later -- a type's own field always wins, so these entries are plain
-  # text-tagged, not board-scoped, and do not appear on document-board-a.html
-  # etc. See docs/design-log.md#board-is-a-plain-field-here-not-the-reserved-override.
+  # refdes.yaml), not the reserved `board:` override -- a type's own field
+  # always wins, so this key scopes nothing. What actually puts these entries
+  # on Board A is the folder they now live in: items/board-a/ matches the
+  # boards: registry directly, the way every other board's items do. Before
+  # that move this file sat in items/log/, which is not a registered board,
+  # so all six entries resolved to no board at all and every build reported
+  # six "no board" warnings on a project that looked otherwise clean.
+  #
+  # The field stays because retiring it would change every entry's content
+  # hash, and these are sealed append-only entries. See
+  # docs/design-log.md#board-is-a-plain-field-here-not-the-reserved-override.
   board: board-a
   author: J. Bin
 

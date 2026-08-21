@@ -1,4 +1,10 @@
 # Refdes append-only seals. Each entry records the content hash of a log
 # entry at the time it was first built. Editing a sealed entry fails the
 # build; append a new entry that `amends` it instead.
-sealed: {}
+sealed:
+  LOG-A-001: b85d98cb24ab9e56
+  LOG-A-002: 55146c762b746af5
+  LOG-A-003: c345132772a843f3
+  LOG-A-004: 4c379cea39db51b0
+  LOG-A-005: 70a1960b7d1b322f
+  LOG-A-006: 09fd478156cf62b4
