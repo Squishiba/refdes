@@ -148,6 +148,12 @@ The print stylesheet hides all of this.
 
 The interchange format. **Anything downstream should read this, not the HTML.**
 
+Four keys follow the registries they come from, and are absent entirely
+without them rather than present and empty: top-level `boards` and a
+per-item `board` for a [`boards:`](multi-board.md) registry, top-level
+`workspaces` and a per-item `workspace` for a
+[`workspaces:`](workspaces.md) one. Everything else below is always present.
+
 ```json
 {
   "title": "Example Board — Design Reference",
@@ -156,9 +162,13 @@ The interchange format. **Anything downstream should read this, not the HTML.**
     "REQ-PWR-003": {
       "stage": "satisfied",
       "addressed_by": ["LOG-A-003", "LOG-A-004", "LOG-A-006"],
+      "claimed_by": [],
       "satisfied_by": ["DEC-PWR-001"],
       "verified_by": []
     }
+  },
+  "boards": {
+    "board-a": { "label": "Board A", "token": "", "path": "" }
   },
   "types": {
     "requirement": {
@@ -186,6 +196,8 @@ The interchange format. **Anything downstream should read this, not the HTML.**
       "content_hash": "673e6ba11269f350",
       "external": false,
       "origin": "",
+      "board": "board-a",
+      "former_ids": [],
       "source": { "file": "items/decisions/dec-pwr-001-regulator.md", "line": 2 },
       "calcs": [
         { "name": "P_diss", "expression": "P_out * (1/eff - 1)",
