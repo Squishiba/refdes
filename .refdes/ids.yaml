@@ -3,7 +3,7 @@
 allocated:
 - REQ-PWR-005
 burned:
-  CON-THM: 2
+  BND-THM: 2
   DEC-PWR: 1
   REQ-PWR: 5
   TST-PWR: 2

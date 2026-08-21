@@ -356,8 +356,8 @@ def test_log_and_ignore_are_indistinguishable_for_hashing():
 
 def test_invalidate_field_changes_the_content_hash():
     project = _project()
-    before = project.items["CON-THM-001"].content_hash
-    assert _hash_after(project, "CON-THM-001", "limit", "<= 1.5 W/in^2") != before
+    before = project.items["BND-THM-001"].content_hash
+    assert _hash_after(project, "BND-THM-001", "limit", "<= 1.5 W/in^2") != before
 
 
 def test_item_level_override_beats_the_schema():
@@ -2211,7 +2211,7 @@ UPSTREAM = {
     "items": [
         {
             "id": "IFC-CAN-001",
-            "type": "constraint",
+            "type": "bound",
             "title": "Per-pin current rating",
             "fields": {"title": "Per-pin current rating", "limit": "<= 3 A"},
             "links": {},
@@ -2305,7 +2305,7 @@ def test_version_pin_mismatch_refuses_the_import(importing_project):
 def test_id_collision_across_projects_is_an_error(importing_project):
     colliding = (importing_project / "items" / "decisions" / "dup.yaml")
     colliding.write_text(
-        "defaults: { type: constraint }\n"
+        "defaults: { type: bound }\n"
         "items:\n"
         "  - id: IFC-CAN-001\n"
         "    title: Locally redefined\n"
@@ -3658,7 +3658,7 @@ def test_example_project_builds_and_catches_the_thermal_violation():
     by_name = {c.value_name: c for c in decision.checks}
     assert by_name["eff"].ok is True
     assert by_name["P_dens"].ok is False
-    assert "violates CON-THM-001" in " ".join(d.message for d in project.errors)
+    assert "violates BND-THM-001" in " ".join(d.message for d in project.errors)
 
 
 def _io_check_project(tmp_path, *, tolerance):
@@ -3667,9 +3667,9 @@ def _io_check_project(tmp_path, *, tolerance):
     items = tmp_path / "items"
     items.mkdir()
     (items / "io.yaml").write_text(
-        "defaults: { type: constraint }\n"
+        "defaults: { type: bound }\n"
         "items:\n"
-        "  - id: CON-IO-004\n"
+        "  - id: BND-IO-004\n"
         "    title: Input current budget\n"
         '    limit: "<= 600 mA"\n',
         encoding="utf-8",
@@ -3681,10 +3681,10 @@ def _io_check_project(tmp_path, *, tolerance):
         "type: decision\n"
         "title: Input current draw\n"
         "status: accepted\n"
-        "constrains: [CON-IO-004]\n"
+        "constrained_by: [BND-IO-004]\n"
         "checks:\n"
         "  - value: CLIM\n"
-        "    against: CON-IO-004\n"
+        "    against: BND-IO-004\n"
         "---\n\n"
         f"```calc\n{calc_line}\n```\n",
         encoding="utf-8",
@@ -3702,9 +3702,9 @@ def test_check_error_reports_worst_case_with_nominal_in_parens(tmp_path):
     project = _io_check_project(tmp_path, tolerance=True)
     check = project.items["DEC-IO-002"].checks[0]
     assert check.ok is False
-    message = next(d.message for d in project.errors if "CON-IO-004" in d.message)
+    message = next(d.message for d in project.errors if "BND-IO-004" in d.message)
     assert (
-        "CLIM violates CON-IO-004: worst case 0.697 A vs <= 600 mA (nominal 0.6061 A)"
+        "CLIM violates BND-IO-004: worst case 0.697 A vs <= 600 mA (nominal 0.6061 A)"
         in message
     )
 
@@ -3717,8 +3717,8 @@ def test_check_error_omits_nominal_when_worst_case_equals_it(tmp_path):
     project = _io_check_project(tmp_path, tolerance=False)
     check = project.items["DEC-IO-002"].checks[0]
     assert check.ok is False
-    message = next(d.message for d in project.errors if "CON-IO-004" in d.message)
-    assert "CLIM violates CON-IO-004: worst case 0.697 A vs <= 600 mA" in message
+    message = next(d.message for d in project.errors if "BND-IO-004" in d.message)
+    assert "CLIM violates BND-IO-004: worst case 0.697 A vs <= 600 mA" in message
     assert "nominal" not in message
 
 
@@ -3852,11 +3852,11 @@ def test_coverage_separates_addressed_satisfied_and_verified():
     assert "REQ-PWR-004" not in cov
 
     # Written down and never touched again.
-    assert cov["CON-THM-002"].stage == "open"
+    assert cov["BND-THM-002"].stage == "open"
 
     # A log entry alone counts as addressed, not satisfied.
-    assert cov["CON-THM-001"].stage == "addressed"
-    assert "LOG-A-005" in cov["CON-THM-001"].addressed_by
+    assert cov["BND-THM-001"].stage == "addressed"
+    assert "LOG-A-005" in cov["BND-THM-001"].addressed_by
 
 
 def test_outstanding_work_is_aggregated_into_summary_lines():
@@ -6414,6 +6414,238 @@ def test_apply_standard_upgrade_reused_field_name_across_versions(tmp_path, monk
     assert not final_project.errors
 
 
+# ------------------------------------ revise: compound prefixes (finding 10)
+
+COMPOUND_PREFIX_SCHEMA = (
+    "site: { title: T, out: _site }\n"
+    "link_types:\n"
+    "  constrained_by: { inverse: constrains, label: \"Constrained by\" }\n"
+    "types:\n"
+    "  constraint:\n"
+    "    prefix: CON\n"
+    "    fields:\n"
+    "      text:  { type: text, required: true }\n"
+    "      limit: { type: limit, required: true }\n"
+    "  decision:\n"
+    "    prefix: DEC\n"
+    "    fields:\n"
+    "      title: { type: text, required: true }\n"
+    "      checks: { type: checks }\n"
+    "    links:\n"
+    "      constrained_by: [constraint]\n"
+)
+
+
+@pytest.fixture
+def compound_prefix_project(tmp_path):
+    """Mirrors this project's own convention: a `constraint` item using a
+    compound prefix (`CON-THM`, base `CON` plus a board token) that a
+    `decision` elsewhere references both through a `links:` field and a
+    `checks:` entry, plus a prose mention that must never be rewritten."""
+    (tmp_path / "refdes.yaml").write_text(COMPOUND_PREFIX_SCHEMA, encoding="utf-8")
+    items = tmp_path / "items"
+    items.mkdir()
+    (items / "con.yaml").write_text(
+        "defaults:\n  type: constraint\n  prefix: CON-THM\n"
+        "items:\n"
+        "  - id: CON-THM-001\n    text: Board power density\n    limit: \"<= 0.15 W/in^2\"\n",
+        encoding="utf-8",
+    )
+    (items / "dec.md").write_text(
+        "---\n"
+        "id: DEC-001\n"
+        "type: decision\n"
+        "title: Regulator topology\n"
+        "constrained_by: [CON-THM-001]\n"
+        "checks:\n"
+        "  - value: P_dens\n"
+        "    against: CON-THM-001\n"
+        "---\n\n"
+        "The thermal budget in CON-THM-001 drives this choice.\n\n"
+        "```calc\nP_dens : W/in^2 = 0.1 W/in^2\n```\n",
+        encoding="utf-8",
+    )
+    return tmp_path
+
+
+def test_revise_renames_a_compound_prefix_built_on_the_renamed_base(compound_prefix_project):
+    """`ids.split_id`'s `PREFIX-NNN` shape treats a board-token-suffixed
+    prefix (`CON-THM`) as one atomic string, so a bare dict lookup against
+    `mapping.prefixes` (`{CON: BND}`) would silently miss it -- this project's
+    own `refdes.yaml` documents exactly this convention (`REQ-PWR`, `CON-THM`,
+    `DEC-PWR`, `TST-PWR`). Confirms the item's own `prefix:`/`id:` move.
+    Prefix-only mapping, deliberately: renaming `types:` needs the schema to
+    move with it (see `mutate_config`, covered by its own dedicated test
+    above), which is orthogonal to what this is testing."""
+    mapping = revise.Mapping(prefixes={"CON": "BND"})
+    result = revise.apply(str(compound_prefix_project), mapping)
+    assert result.ok, result.errors
+    assert result.id_changes == {"CON-THM-001": "BND-THM-001"}
+    text = (compound_prefix_project / "items" / "con.yaml").read_text(encoding="utf-8")
+    assert "prefix: BND-THM" in text
+    assert "id: BND-THM-001" in text
+
+
+def test_revise_does_not_rename_an_unrelated_prefix_sharing_a_letters(tmp_path):
+    """`CONFIG` must never match a `CON` rename -- the required separator is
+    the hyphen itself, not just the leading letters."""
+    (tmp_path / "refdes.yaml").write_text(
+        "site: { title: T, out: _site }\n"
+        "types:\n  widget: { prefix: CONFIG, fields: { text: { type: text, required: true } } }\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "items").mkdir()
+    (tmp_path / "items" / "i.yaml").write_text(
+        "defaults:\n  type: widget\n  prefix: CONFIG\n"
+        "items:\n  - id: CONFIG-001\n    text: Untouched.\n",
+        encoding="utf-8",
+    )
+    mapping = revise.Mapping(prefixes={"CON": "BND"})
+    result = revise.apply(str(tmp_path), mapping)
+    assert result.ok, result.errors
+    assert result.changed_files == []
+    assert result.id_changes == {}
+
+
+def test_revise_rewrites_a_link_value_and_a_checks_against_value(compound_prefix_project):
+    """The item's own id relabeling (previous test) is only half of a real
+    prefix rename -- every *other* item's structured reference to it
+    (`constrained_by: [...]`, `checks: - against: ...`) must move too, or the
+    rewritten project is left with dangling references (caught, and refused,
+    before this fix existed -- see the commit message). A clean reload+build
+    confirms it: nothing in the schema changed (prefix-only mapping), so a
+    project that still validates end to end is proof every reference now
+    agrees with the renamed id."""
+    mapping = revise.Mapping(prefixes={"CON": "BND"})
+    result = revise.apply(str(compound_prefix_project), mapping)
+    assert result.ok, result.errors
+    text = (compound_prefix_project / "items" / "dec.md").read_text(encoding="utf-8")
+    assert "constrained_by: [BND-THM-001]" in text
+    assert "against: BND-THM-001" in text
+
+    project = load_project(config_path=str(compound_prefix_project / "refdes.yaml"))
+    parse.load_items(project)
+    build_mod.build(project, seal_write=False, reseal=False, accept_board_move=False)
+    assert not project.errors
+
+
+def test_revise_leaves_a_prose_mention_of_the_renamed_id_untouched(compound_prefix_project):
+    """Only structured references move -- an id mentioned in body prose is
+    never rewritten, the same posture `_rewrite_fields_and_links` already
+    takes for field/link key renames."""
+    mapping = revise.Mapping(prefixes={"CON": "BND"})
+    result = revise.apply(str(compound_prefix_project), mapping)
+    assert result.ok, result.errors
+    text = (compound_prefix_project / "items" / "dec.md").read_text(encoding="utf-8")
+    assert "The thermal budget in CON-THM-001 drives this choice." in text
+
+
+def test_revise_relabels_a_compound_prefix_in_the_id_ledger(compound_prefix_project):
+    (compound_prefix_project / ".refdes").mkdir()
+    (compound_prefix_project / ".refdes" / "ids.yaml").write_text(
+        "burned:\n  CON-THM: 1\nallocated: []\n", encoding="utf-8"
+    )
+    mapping = revise.Mapping(prefixes={"CON": "BND"})
+    result = revise.apply(str(compound_prefix_project), mapping)
+    assert result.ok, result.errors
+    ledger_text = (compound_prefix_project / ".refdes" / "ids.yaml").read_text(encoding="utf-8")
+    assert "BND-THM: 1" in ledger_text
+    assert "CON-THM" not in ledger_text
+
+
+# --------------------------------------------- hardware@3: constraint -> bound
+
+def test_hardware_v3_renames_constraint_to_bound_and_gains_refines(tmp_path):
+    """finding 10 (narrower version): `bound` replaces `constraint`, prefix
+    `CON` -> `BND`, additively gaining `refines: [bound]` alongside its
+    existing `derives_from: [requirement, bound]`. `requirement` itself is
+    untouched -- the finding's `capability` rename was explicitly rejected."""
+    (tmp_path / "refdes.yaml").write_text(
+        "site: { title: T, out: _site }\n"
+        "standard: { base: hardware, version: 3, presets: [] }\n",
+        encoding="utf-8",
+    )
+    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    assert "constraint" not in project.types
+    bound = project.types["bound"]
+    assert bound.prefix == "BND"
+    assert bound.links["refines"] == ["bound"]
+    assert bound.links["derives_from"] == ["requirement", "bound"]
+
+    requirement = project.types["requirement"]
+    assert requirement.prefix == "REQ"
+    assert requirement.links == {"refines": ["requirement"]}
+
+    decision = project.types["decision"]
+    assert decision.links["constrained_by"] == ["bound"]
+
+
+def test_hardware_v1_and_v2_still_resolve_constraint_unchanged(tmp_path):
+    """v3 is additive to the standard library, not a replacement -- a project
+    still pinned at v1 or v2 sees no difference at all."""
+    for version in (1, 2):
+        (tmp_path / "refdes.yaml").write_text(
+            "site: { title: T, out: _site }\n"
+            f"standard: {{ base: hardware, version: {version}, presets: [] }}\n",
+            encoding="utf-8",
+        )
+        project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+        assert "bound" not in project.types
+        assert project.types["constraint"].prefix == "CON"
+
+
+def test_standard_upgrade_to_3_renames_constraint_and_its_compound_prefix(tmp_path):
+    """End-to-end against the real bundled standard: a v2-pinned project
+    using this project's own compound-prefix convention, with a decision
+    referencing the constraint through both a link and a checks: entry,
+    upgrades cleanly to v3 -- the exact shape that blocked on first attempt
+    against this project's own refdes.yaml (see the commit message)."""
+    (tmp_path / "refdes.yaml").write_text(
+        "site: { title: T, out: _site }\n"
+        "standard: { base: hardware, version: 2, presets: [] }\n",
+        encoding="utf-8",
+    )
+    items = tmp_path / "items"
+    items.mkdir()
+    (items / "con.yaml").write_text(
+        "defaults:\n  type: constraint\n  prefix: CON-THM\n  status: active\n"
+        "items:\n"
+        "  - id: CON-THM-001\n    text: Board power density\n    limit: \"<= 1 W/in^2\"\n",
+        encoding="utf-8",
+    )
+    (items / "dec.md").write_text(
+        "---\n"
+        "id: DEC-001\n"
+        "type: decision\n"
+        "title: Regulator topology\n"
+        "status: accepted\n"
+        "constrained_by: [CON-THM-001]\n"
+        "checks:\n"
+        "  - value: P_dens\n"
+        "    against: CON-THM-001\n"
+        "---\n\n"
+        "```calc\nP_dens : W/in^2 = 0.1 W/in^2\n```\n",
+        encoding="utf-8",
+    )
+
+    steps = revise.apply_standard_upgrade(str(tmp_path), 3)
+    assert len(steps) == 1
+    assert steps[0].result.ok, steps[0].result.errors
+    assert steps[0].result.id_changes == {"CON-THM-001": "BND-THM-001"}
+
+    con_text = (items / "con.yaml").read_text(encoding="utf-8")
+    assert "type: bound" in con_text and "prefix: BND-THM" in con_text and "id: BND-THM-001" in con_text
+    dec_text = (items / "dec.md").read_text(encoding="utf-8")
+    assert "constrained_by: [BND-THM-001]" in dec_text
+    assert "against: BND-THM-001" in dec_text
+
+    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    assert project.standard_version == 3
+    parse.load_items(project)
+    build_mod.build(project, seal_write=False, reseal=False, accept_board_move=False)
+    assert not project.errors
+
+
 # --------------------------------------------------------------------- diff
 
 
@@ -7841,7 +8073,7 @@ def test_equivalent_and_alternate_are_ordinary_authored_links_for_the_lint(parts
 # ------------------------------------------------ init, new, schema, presets
 
 def test_latest_version_resolves_the_concrete_bundled_max():
-    assert standards.latest_version("hardware") == 2
+    assert standards.latest_version("hardware") == 3
 
 
 def test_available_presets_includes_design_debate():
@@ -7866,7 +8098,7 @@ def test_init_writes_the_exact_documented_file(tmp_path):
     assert "field_sets:" not in text
     assert "standard:" in text
     assert "base: hardware" in text
-    assert "version: 2" in text  # the concrete integer, never the word "latest"
+    assert "version: 3" in text  # the concrete integer, never the word "latest"
     assert "presets: []" in text
 
     # The file must actually load and resolve to a real, usable schema.
@@ -7944,7 +8176,7 @@ def test_cli_init_end_to_end(tmp_path, monkeypatch, capsys):
     assert (tmp_path / "refdes.yaml").is_file()
     assert (tmp_path / ".vscode" / "settings.json").is_file()
     out = capsys.readouterr().out
-    assert "standard: hardware@2" in out
+    assert "standard: hardware@3" in out
 
 
 # --------------------------------------------------------------- refdes new
@@ -8054,7 +8286,7 @@ def test_build_schema_limit_field_carries_quoting_examples():
     fragment for how."""
     project = _build_at_repo_schema()
     doc = schema_json_mod.build_schema(project)
-    limit = doc["$defs"]["constraint__bare"]["properties"]["limit"]
+    limit = doc["$defs"]["bound__bare"]["properties"]["limit"]
     assert limit["type"] == "string"
     assert ">= 9 V" in limit["examples"]
     assert "<= 600 mA" in limit["examples"]

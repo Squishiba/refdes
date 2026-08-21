@@ -229,18 +229,22 @@ def _rewrite_type_and_prefix_lines(lines: list[str], mapping: Mapping) -> list[s
             out[i] = f"{indent}{key}:{sp1}{mapping.types[m.group(4)]}{sp2}"
             continue
         m = _PREFIX_LINE_RE.match(line)
-        if m and m.group(3) in mapping.prefixes:
-            indent, sp1, _old, sp2 = m.groups()
-            out[i] = f"{indent}prefix:{sp1}{mapping.prefixes[m.group(3)]}{sp2}"
-            continue
+        if m:
+            new_prefix = _rename_prefix(m.group(3), mapping.prefixes)
+            if new_prefix is not None:
+                indent, sp1, _old, sp2 = m.groups()
+                out[i] = f"{indent}prefix:{sp1}{new_prefix}{sp2}"
+                continue
         m = _ID_LINE_RE.match(line)
         if m:
             split = ids_mod.split_id(m.group(3))
-            if split is not None and split[0] in mapping.prefixes:
-                indent, sp1, old_id, sp2 = m.groups()
+            if split is not None:
                 old_prefix = split[0]
-                new_id = mapping.prefixes[old_prefix] + old_id[len(old_prefix) :]
-                out[i] = f"{indent}id:{sp1}{new_id}{sp2}"
+                new_prefix = _rename_prefix(old_prefix, mapping.prefixes)
+                if new_prefix is not None:
+                    indent, sp1, old_id, sp2 = m.groups()
+                    new_id = new_prefix + old_id[len(old_prefix) :]
+                    out[i] = f"{indent}id:{sp1}{new_id}{sp2}"
     return out
 
 
@@ -271,6 +275,73 @@ def _item_spans(rel: str, lines: list[str], items: list[Item]) -> list[tuple[Ite
 
 def _field_or_link_line_re(key: str) -> re.Pattern:
     return re.compile(rf"^(\s*(?:-\s+)?){re.escape(key)}:(.*)$")
+
+
+_ID_TOKEN_RE = re.compile(r"\b[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)*-\d+\b")
+
+
+def _rewrite_id_tokens(value: str, prefixes: dict[str, str]) -> str:
+    """Replace every id-shaped token in `value` whose prefix renames under
+    `prefixes` (exact or compound, see `_rename_prefix`); every other
+    character -- punctuation, other tokens -- passes through untouched."""
+
+    def repl(m: re.Match) -> str:
+        token = m.group(0)
+        split = ids_mod.split_id(token)
+        if split is None:
+            return token
+        new_prefix = _rename_prefix(split[0], prefixes)
+        return token if new_prefix is None else new_prefix + token[len(split[0]) :]
+
+    return _ID_TOKEN_RE.sub(repl, value)
+
+
+def _rewrite_reference_ids(
+    lines: list[str], rel: str, items: list[Item], mapping: Mapping
+) -> list[str]:
+    """Per-item pass: id-valued *references to other items* -- a link's own
+    target list (`constrained_by: [CON-THM-001]`) and a `checks:` entry's
+    `against:` -- rewritten when the referenced id's prefix renames under
+    `mapping.prefixes`.
+
+    An item's *own* id/prefix is `_rewrite_type_and_prefix_lines`'s job, not
+    this one; this only ever follows a reference the item already declares
+    (a verb in its own resolved `item.links`, or `against:` on an item that
+    has `checks:` set), so a prefix rename can never leave a dangling
+    reference behind elsewhere in the project. Scoped to lines matching one
+    of those keys within the item's own span -- prose mentioning the same id
+    elsewhere (a rationale, a log entry's body) is never touched, matching
+    `_rewrite_fields_and_links`'s own scoping.
+
+    Same-line values only (`key: [A, B]` or `key: A`); a block-style list
+    value on the lines *after* the key is not rewritten -- not needed by any
+    reference in this project today, and left as a known gap rather than
+    guessed at.
+
+    Runs before `_rewrite_fields_and_links` in `_rewrite_file` so it can
+    still find a link by its *current* key name, before any `mapping.links`
+    verb rename has touched that same line's key.
+    """
+    if not mapping.prefixes:
+        return lines
+    out = list(lines)
+    for item, start, end in _item_spans(rel, lines, items):
+        keys = set(item.links)
+        if "checks" in item.fields:
+            keys.add("against")
+        if not keys:
+            continue
+        for i in range(start, min(end, len(out))):
+            for key in keys:
+                m = _field_or_link_line_re(key).match(out[i])
+                if not m:
+                    continue
+                indent, rest = m.groups()
+                new_rest = _rewrite_id_tokens(rest, mapping.prefixes)
+                if new_rest != rest:
+                    out[i] = f"{indent}{key}:{new_rest}"
+                break
+    return out
 
 
 def _rewrite_one_key(
@@ -354,6 +425,7 @@ def _rewrite_file(project: Project, path: str, rel: str, mapping: Mapping) -> tu
     items = [i for i in project.local_items if i.source_file == rel]
 
     lines = _rewrite_type_and_prefix_lines(lines, mapping)
+    lines = _rewrite_reference_ids(lines, rel, items, mapping)
     lines, errors = _rewrite_fields_and_links(lines, rel, items, mapping, project)
 
     after = newline.join(lines)
@@ -382,9 +454,8 @@ def _relabel_ledger(project: Project, prefixes: dict[str, str]) -> dict | None:
     burned = dict(ledger.get("burned") or {})
     new_burned: dict[str, int] = {}
     for prefix, number in burned.items():
-        new_burned[prefixes.get(prefix, prefix)] = max(
-            int(new_burned.get(prefixes.get(prefix, prefix), 0)), int(number)
-        )
+        relabeled = _rename_prefix(prefix, prefixes) or prefix
+        new_burned[relabeled] = max(int(new_burned.get(relabeled, 0)), int(number))
     allocated = [
         _relabel_id(str(i), prefixes) for i in (ledger.get("allocated") or [])
     ]
@@ -394,12 +465,36 @@ def _relabel_ledger(project: Project, prefixes: dict[str, str]) -> dict | None:
     return original
 
 
+def _rename_prefix(prefix: str, prefixes: dict[str, str]) -> str | None:
+    """The new spelling of `prefix` under `prefixes`, or None if untouched.
+
+    Handles both an exact match (`CON` -> `BND`) and a project's own compound
+    prefix built on a renamed base -- `ids.split_id`'s `PREFIX-NNN` shape
+    can't distinguish "REQ-PWR" (one atomic prefix) from "REQ" + a board
+    token, so a bare dict lookup against `mapping.prefixes` silently misses
+    every item using this project's own documented convention (`REQ-PWR`,
+    `CON-THM`, `DEC-PWR`, `TST-PWR` -- see refdes.yaml's boards: comment).
+    The required separator is the hyphen itself, not just the substring, so
+    an unrelated prefix that happens to start with the same letters (`CONFIG`)
+    never matches.
+    """
+    if prefix in prefixes:
+        return prefixes[prefix]
+    for old, new in prefixes.items():
+        if prefix.startswith(old + "-"):
+            return new + prefix[len(old) :]
+    return None
+
+
 def _relabel_id(item_id: str, prefixes: dict[str, str]) -> str:
     split = ids_mod.split_id(item_id)
-    if split is None or split[0] not in prefixes:
+    if split is None:
         return item_id
     old_prefix = split[0]
-    return prefixes[old_prefix] + item_id[len(old_prefix) :]
+    new_prefix = _rename_prefix(old_prefix, prefixes)
+    if new_prefix is None:
+        return item_id
+    return new_prefix + item_id[len(old_prefix) :]
 
 
 def _restore_ledger(project: Project, original: dict) -> None:

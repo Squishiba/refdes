@@ -8,7 +8,7 @@ owner: J. Bin
 tags: [power, thermal]
 board: board-a   # folder predates the boards: registry; see refdes.yaml
 satisfies: [REQ-PWR-002, REQ-PWR-003]
-constrained_by: [CON-THM-001]
+constrained_by: [BND-THM-001]
 options:
   - name: LDO (TPS7A4700)
     verdict: rejected
@@ -27,9 +27,9 @@ options:
       that REQ-PWR-002 does not actually have once the second-stage LC is fitted.
 checks:
   - value: eff
-    against: CON-THM-002
+    against: BND-THM-002
   - value: P_dens
-    against: CON-THM-001
+    against: BND-THM-001
 ---
 
 The 3V3 rail draws up to 1.2 A from a 9–36 V input, in a sealed enclosure with no

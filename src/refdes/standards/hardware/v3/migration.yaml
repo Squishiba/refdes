@@ -1,0 +1,22 @@
+# The delta from hardware v2 to v3 -- what `refdes standard upgrade --to 3`
+# applies to a project pinned at v2 (or chains through, upgrading further:
+# see standards.load_migration_chain / revise.py). Read by revise.py, never
+# by base.yaml's own resolution -- this file plays no part in what standard:
+# {base: hardware, version: 3} actually resolves to; it only describes how a
+# project already on v2 moves its own existing content to match.
+#
+# Only the type/prefix rename is a rewrite: `bound` additively gaining
+# `refines: [bound]` is a new schema capability, not a rename of anything an
+# existing item file already has written down, so there is nothing here for
+# an existing `constraint`/`bound` item to migrate on that point -- it's
+# simply available to use in new links from here on.
+#
+# See docs/design/standard-library.md §3 for the versioning design this
+# implements, and finding 10 (the narrower version: rename `constraint` to
+# `bound`, not `requirement` to `capability`) for why this is the shape
+# v2 -> v3 actually takes.
+
+types:
+  constraint: bound
+prefixes:
+  CON: BND

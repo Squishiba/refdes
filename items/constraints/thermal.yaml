@@ -1,13 +1,13 @@
 defaults:
-  type: constraint
-  prefix: CON-THM
+  type: bound
+  prefix: BND-THM
   owner: J. Bin
   tags: [thermal]
   status: active
   board: board-a   # folder predates the boards: registry; see refdes.yaml
 
 items:
-  - id: CON-THM-001
+  - id: BND-THM-001
     text: Board power density
     limit: "<= 0.15 W/in^2"
     rationale: >
@@ -15,7 +15,7 @@ items:
       Above this density the board exceeds 85 °C at the 55 °C ambient rating.
     source: Enclosure spec rev C, p.14
 
-  - id: CON-THM-002
+  - id: BND-THM-002
     text: Minimum converter efficiency
     limit: ">= 0.90"
     rationale: >

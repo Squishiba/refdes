@@ -1,0 +1,171 @@
+# The refdes standard dictionary — "hardware" base, version 3.
+#
+# Shipped inside the refdes package. Byte-identical forever once released: a
+# project pinning `standard: {base: hardware, version: 3}` gets exactly this
+# file, unchanged by any future refdes upgrade. See
+# docs/design/standard-library.md for the full design discussion behind every
+# choice here — this file is deliberately un-annotated beyond what a reader
+# needs to trust that it matches the spec, since the spec is the place to
+# argue about it, not this file.
+#
+# Changed from v2, both from finding 10 (narrower version -- "requirement"
+# stays: it's the term of art the field already uses, and "capability"
+# already means something else, higher-level, in DoDAF/MoDAF):
+#
+# 1. `constraint` is now `bound` (prefix `CON` -> `BND`). `requirement` and
+#    `constraint` read as near-synonyms in plain English -- a constraint
+#    colloquially *is* a requirement -- which is what actually produced the
+#    authoring mix-up the finding reproduced. `bound` doesn't have that
+#    problem, and it directly names the `limit:` field that makes the type
+#    mechanically distinct: a `bound` is a machine-checkable limit; a
+#    `requirement` is prose.
+# 2. `bound` additively gains `refines: [bound]`, alongside its existing
+#    `derives_from: [requirement, bound]`. Before this, only `requirement`
+#    could `refines:` -- the exact repro the finding starts from is
+#    `refines:` on a constraint failing with "unknown field... did you mean
+#    'prefix'?", a suggestion nowhere near the real answer. `refines:`
+#    narrows within the same type (a `bound` sharpening another `bound` of
+#    the same concept, the same way a `requirement` narrows a
+#    `requirement`); `derives_from:` stays for a `bound` that's built on or
+#    operationalizes something else -- a requirement, or a different bound
+#    it was calculated or justified from. Both stay: they answer different
+#    questions ("what does this narrow" vs. "what was this derived from"),
+#    and `derives_from:` alone can still cross into `requirement`, which
+#    `refines:` deliberately cannot.
+#
+# v1 and v2 are untouched and still resolve exactly as they always have; a
+# project pinned there sees no difference from this change at all.
+
+field_sets:
+  provenance:
+    source: { type: text, on_change: log }
+    note:   { type: text, on_change: log }
+    tags:   { type: list, on_change: ignore }
+  stewardship:
+    owner:         { type: person, on_change: log }
+    last_reviewed: { type: date,   on_change: ignore }
+
+link_types:
+  # trace: false on amends/records/supersedes/addresses -- none of these is
+  # "this item's correctness is justified by that one," which is what a
+  # {{cascade}} block's default walk is for (docs/design/index-blocks.md §6).
+  # Every other verb traces by default.
+  refines:        { inverse: refined_by,    label: "Refines" }
+  derives_from:   { inverse: derived_by,    label: "Derives from" }
+  satisfies:      { inverse: satisfied_by,  label: "Satisfies" }
+  constrained_by: { inverse: constrains,    label: "Constrained by" }
+  verifies:       { inverse: verified_by,   label: "Verifies" }
+  addresses:      { inverse: addressed_by,  label: "Addresses",   trace: false }
+  records:        { inverse: recorded_by,   label: "Records",     trace: false }
+  amends:         { inverse: amended_by,    label: "Amends",      trace: false }
+  supersedes:     { inverse: superseded_by, label: "Supersedes",  trace: false }
+  selects:        { inverse: selected_by,   label: "Selects" }
+  blocked_by:     { inverse: blocks,        label: "Blocked by" }
+  equivalent:     { inverse: equivalent,    label: "Equivalent" }   # self-inverse
+  alternate:      { inverse: alternate,     label: "Alternate" }    # self-inverse
+
+types:
+  requirement:
+    prefix: REQ
+    label: Requirement
+    preview: [status, text]
+    coverable: true
+    coverable_statuses: [active]
+    fields:
+      text:      { type: text, required: true, on_change: invalidate }
+      status:    { type: enum, choices: [draft, active, retired], default: draft, on_change: invalidate }
+      rationale: { type: text, on_change: invalidate }
+    include: [provenance, stewardship]
+    links:
+      refines: [requirement]
+    body: { on_change: invalidate }
+
+  bound:
+    prefix: BND
+    label: Bound
+    preview: [status, text, limit]
+    coverable: true
+    coverable_statuses: [active]
+    fields:
+      text:      { type: text, required: true, on_change: invalidate }
+      limit:     { type: limit, required: true, on_change: invalidate }
+      status:    { type: enum, choices: [draft, active, retired], default: draft, on_change: invalidate }
+      rationale: { type: text, on_change: invalidate }
+    include: [provenance, stewardship]
+    links:
+      refines:      [bound]
+      derives_from: [requirement, bound]
+    body: { on_change: invalidate }
+
+  decision:
+    prefix: DEC
+    label: Decision
+    preview: [status, title, date]
+    satisfying_statuses: [accepted]
+    check_severity: error
+    fields:
+      title:     { type: text, required: true, on_change: invalidate }
+      status:    { type: enum, choices: [proposed, in_progress, accepted, on_hold, rejected, superseded],
+                   default: proposed, on_change: invalidate }
+      rationale: { type: text, on_change: invalidate, required_when: {status: rejected} }
+      date:      { type: date, on_change: log }
+      options:   { type: options, on_change: invalidate }
+      checks:    { type: checks, on_change: invalidate }
+    include: [provenance, stewardship]
+    links:
+      satisfies:      [requirement]
+      constrained_by: [bound]
+      supersedes:     [decision]
+      selects:        [component]
+      blocked_by:     []   # empty target list = unrestricted
+    body: { on_change: invalidate }
+
+  test:
+    prefix: TST
+    label: Test
+    preview: [status, title]
+    verifying_statuses: [passing]
+    fields:
+      title:  { type: text, required: true, on_change: invalidate }
+      status: { type: enum, choices: [planned, passing, failing, blocked], default: planned, on_change: invalidate }
+      method: { type: text, on_change: invalidate }
+    include: [provenance, stewardship]
+    links:
+      verifies: [requirement, bound]
+    body: { on_change: invalidate }
+
+  component:
+    prefix: CMP
+    label: Component
+    preview: [status, title, part_number]
+    satisfying_statuses: [selected]
+    fields:
+      title:       { type: text, required: true, on_change: invalidate }
+      part_number: { type: text, on_change: invalidate }
+      refdes:      { type: list, on_change: log }
+      status:      { type: enum, choices: [candidate, selected, obsolete], default: candidate, on_change: invalidate }
+      rationale:   { type: text, on_change: invalidate, required_when: {links: alternate} }
+      datasheets:  { type: citations, on_change: invalidate }
+    include: [provenance, stewardship]
+    links:
+      satisfies:  [requirement]
+      equivalent: []   # self-inverse
+      alternate:  []   # self-inverse
+    body: { on_change: invalidate }
+
+  log:
+    prefix: LOG
+    label: Log entry
+    plural: Log entries
+    append_only: true
+    preview: [date, author, summary]
+    fields:
+      date:    { type: date, required: true, on_change: invalidate }
+      summary: { type: text, required: true, on_change: invalidate }
+      author:  { type: person, on_change: invalidate }
+    include: [provenance]
+    links:
+      addresses: [requirement, bound]
+      amends:    [log]
+      records:   [decision]
+    body: { on_change: invalidate }

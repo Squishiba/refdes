@@ -56,7 +56,7 @@ items:
   - id: LOG-A-005
     date: 2026-03-16
     summary: Thermal check fails. Power stage is over the density budget at the current allocation.
-    addresses: [CON-THM-001]
+    addresses: [BND-THM-001]
     body: |
       With the power stage allocated 1.4 × 0.9 inches, DEC-PWR-001 computes
       0.2366 W/in² against a 0.15 W/in² budget in CON-THM-001. Roughly 1.6× over.
