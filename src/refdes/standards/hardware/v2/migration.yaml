@@ -1,14 +1,44 @@
 # The delta from hardware v1 to v2 -- what `refdes standard upgrade --to 2`
-# applies to a project pinned at v1 (or chains through, upgrading further:
-# see standards.load_migration_chain / revise.py). Read by revise.py, never
-# by base.yaml's own resolution -- this file plays no part in what standard:
-# {base: hardware, version: 2} actually resolves to; it only describes how a
-# project already on v1 moves its own existing content to match.
+# applies to a project pinned at v1. Read by revise.py, never by base.yaml's
+# own resolution: this file plays no part in what standard: {base: hardware,
+# version: 2} resolves to; it only describes how a project already on v1
+# moves its own existing content to match.
+#
+# Two of v2's three changes rewrite item files, and they are expressed here
+# as one step because they are one version's move, not three:
+#
+#   `fields:` is keyed by the OLD type name, so `constraint.title -> text`
+#   is found while the item still says `type: constraint` -- the field pass
+#   runs against the pre-rewrite project, so the type rename below never
+#   hides it.
+#
+#   `types:` and `prefixes:` together move `constraint` -> `bound` and every
+#   `CON`-prefixed id to `BND`, including this project's own compound
+#   convention (`CON-THM-001` -> `BND-THM-001`) and every structured
+#   reference to it.
+#
+# v2's third change -- restricting `component.equivalent`/`alternate` to
+# `[component]` -- deliberately appears nowhere here. It is a restriction on
+# what is already written rather than a rename: an `equivalent: [CMP-019]`
+# correct at v1 is byte-for-byte correct at v2, so there is nothing for this
+# file to rewrite. It is still enforced on upgrade, because apply() reloads
+# and fully validates the project afterwards: a component pointing
+# `equivalent` at something that is not a component surfaces there as an
+# ordinary target-type error, and the whole step is refused and rolled back
+# rather than leaving the project pinned to a version its own items no
+# longer satisfy. The engine cannot guess what a component was meant to be
+# equivalent to, so it declines to.
 #
 # See docs/design/standard-library.md §3 for the versioning design this
-# implements, and finding 4 (constraint.title -> constraint.text) for why
-# this is the shape v1 -> v2 actually takes.
+# implements, and §11 for the component -> component intent part three
+# restores.
 
 fields:
-  constraint:
+  constraint:       # keyed by the OLD type name
     title: text
+
+types:
+  constraint: bound
+
+prefixes:
+  CON: BND

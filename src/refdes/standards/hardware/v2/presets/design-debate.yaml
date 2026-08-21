@@ -36,7 +36,7 @@ types:
       checks: { type: checks, on_change: invalidate }
     include: [provenance]
     links:
-      met_by: [requirement, constraint]
+      met_by: [requirement, bound]
     body: { on_change: invalidate }
 
   claim:
@@ -48,7 +48,7 @@ types:
       status: { type: enum, choices: [open, accepted, rebutted], default: open, on_change: invalidate }
     include: [provenance]
     links:
-      bears_on: [option, requirement, constraint]
+      bears_on: [option, requirement, bound]
     body: { on_change: invalidate }
 
   position:

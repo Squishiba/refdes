@@ -709,13 +709,26 @@ def test_misspelled_link_key_errors_instead_of_silently_dropping(typo_link_proje
 
 
 def test_constraint_title_renamed_to_text_gives_a_specific_diagnostic(tmp_path):
-    """Finding 4: hardware v2 renamed constraint.title to constraint.text. An
-    item still declaring the old key must get one diagnostic naming the
-    rename -- not the generic unknown-field warning plus an unrelated-looking
-    missing-required error a plain rename would otherwise produce."""
+    """Finding 4: an item declaring `constraint.title` where the schema wants
+    `constraint.text` gets one diagnostic naming the rename -- not the generic
+    unknown-field warning plus an unrelated-looking missing-required error a
+    plain rename would otherwise produce.
+
+    Against a hand-rolled schema, deliberately. The bundled standard reached
+    this shape at the old v2 and left it again at the old v3, which renamed
+    the type itself; now that those are collapsed into one version, no pinned
+    standard has a `constraint` type wanting `text`, and a standard project
+    that hasn't migrated gets the *type* rename diagnostic instead (below).
+    The field table stays, because a hand-rolled schema in this shape is
+    exactly the other case its docstring says it covers."""
     (tmp_path / "refdes.yaml").write_text(
         "site: { title: T, out: _site }\n"
-        "standard: { base: hardware, version: 2, presets: [] }\n",
+        "types:\n"
+        "  constraint:\n"
+        "    prefix: CON\n"
+        "    fields:\n"
+        "      text:  { type: text, required: true }\n"
+        "      limit: { type: limit, required: true }\n",
         encoding="utf-8",
     )
     (tmp_path / "items").mkdir()
@@ -5439,21 +5452,42 @@ def test_standard_hardware_v1_resolves_the_six_types(tmp_path):
     assert "refines" in project.link_types
 
 
-def test_standard_hardware_v2_renames_constraint_title_to_text(tmp_path):
-    """Finding 4: v2 is the first version bump -- constraint.title becomes
-    constraint.text, matching requirement.text's role as the type's one
-    required content field."""
+def test_standard_hardware_v2_carries_the_whole_v1_delta(tmp_path):
+    """v2 is the one version bump between 0.4.0 and 0.5.0, and it carries all
+    three of that period's vocabulary changes at once: `title` -> `text`,
+    `constraint` -> `bound` (prefix CON -> BND, gaining `refines:`), and
+    `equivalent`/`alternate` restricted to components. They were developed as
+    three internal steps and never published separately, so they ship as one
+    version rather than three."""
     (tmp_path / "refdes.yaml").write_text(
         "site: { title: T, out: _site }\n"
         "standard: { base: hardware, version: 2, presets: [] }\n",
         encoding="utf-8",
     )
     project = load_project(config_path=str(tmp_path / "refdes.yaml"))
-    constraint = project.types["constraint"]
-    assert "text" in constraint.fields
-    assert constraint.fields["text"].required is True
-    assert "title" not in constraint.fields
-    assert constraint.preview == ["status", "text", "limit"]
+    assert "constraint" not in project.types
+
+    bound = project.types["bound"]
+    assert bound.prefix == "BND"
+    assert "text" in bound.fields and bound.fields["text"].required is True
+    assert "title" not in bound.fields
+    assert bound.preview == ["status", "text", "limit"]
+    assert bound.links["refines"] == ["bound"]
+    assert bound.links["derives_from"] == ["requirement", "bound"]
+
+    component = project.types["component"]
+    assert component.links["equivalent"] == ["component"]
+    assert component.links["alternate"] == ["component"]
+
+    # Every verb that pointed at `constraint` now points at `bound`.
+    assert project.types["decision"].links["constrained_by"] == ["bound"]
+    assert project.types["test"].links["verifies"] == ["requirement", "bound"]
+    assert project.types["log"].links["addresses"] == ["requirement", "bound"]
+
+    # requirement is untouched throughout -- the `capability` rename that was
+    # considered alongside the `bound` one was explicitly rejected.
+    assert project.types["requirement"].prefix == "REQ"
+    assert project.types["requirement"].links == {"refines": ["requirement"]}
 
 
 def test_standard_hardware_v1_still_has_constraint_title(tmp_path):
@@ -6936,28 +6970,27 @@ def test_standard_upgrade_runs_on_a_project_with_a_failing_check(tmp_path):
     standard's own chain rather than a hand-written mapping."""
     (tmp_path / "refdes.yaml").write_text(
         "site: { title: T, out: _site }\n"
-        "standard: { base: hardware, version: 3, presets: [] }\n"
+        "standard: { base: hardware, version: 1, presets: [] }\n"
         "id: { width: 3, ledger: .refdes/ids.yaml }\n",
         encoding="utf-8",
     )
     (tmp_path / "items").mkdir()
     (tmp_path / "items" / "b.yaml").write_text(
-        "items:\n  - id: BND-001\n    type: bound\n    text: Board power density\n"
+        "items:\n  - id: CON-001\n    type: constraint\n    title: Board power density\n"
         '    limit: "<= 0.15 W/in^2"\n    status: active\n',
         encoding="utf-8",
     )
     (tmp_path / "items" / "d.md").write_text(
         "---\nid: DEC-001\ntype: decision\ntitle: Regulator\nstatus: accepted\n"
-        "constrained_by: [BND-001]\nchecks:\n  - value: P_dens\n    against: BND-001\n---\n\n"
+        "constrained_by: [CON-001]\nchecks:\n  - value: P_dens\n    against: CON-001\n---\n\n"
         "```calc\nP_dens : W/in^2 = 0.2366 W/in^2\n```\n",
         encoding="utf-8",
     )
-    steps = revise.apply_standard_upgrade(str(tmp_path), 4)
-    assert [(s.from_version, s.to_version) for s in steps] == [(3, 4)]
+    steps = revise.apply_standard_upgrade(str(tmp_path), 2)
+    assert [(s.from_version, s.to_version) for s in steps] == [(1, 2)]
     assert steps[0].result.ok, steps[0].result.errors
-    # The pin moved even though no item file needed rewriting.
-    assert steps[0].result.config_updated
-    assert "version: 4" in (tmp_path / "refdes.yaml").read_text(encoding="utf-8")
+    assert steps[0].result.id_changes == {"CON-001": "BND-001"}
+    assert "version: 2" in (tmp_path / "refdes.yaml").read_text(encoding="utf-8")
 
 
 def test_revise_refuses_ambiguous_target_already_in_use(tmp_path):
@@ -7220,7 +7253,14 @@ def test_standard_upgrade_skips_a_baseline_with_no_recorded_standard(tmp_path, m
 def test_apply_standard_upgrade_chains_multiple_versions(tmp_path, monkeypatch):
     """v1 -> v4 works by chaining each version's own delta in order -- one
     apply() call per version step (extension 2), never a single merged
-    jump straight from v1's schema to v4's."""
+    jump straight from v1's schema to v4's.
+
+    Against a synthetic bundle, and it must stay that way: the real
+    `hardware` bundle has exactly one step (v1 -> v2), so it cannot exercise
+    chaining at all, and it will only ever grow one step at a time. This test
+    and the two around it are where the chain's ordering guarantees live --
+    including the adversarial case below, where a later version reuses a name
+    an earlier one freed. Do not rewrite them against the real bundle."""
     monkeypatch.setattr(standards, "_STANDARDS_ROOT", str(tmp_path / "std"))
     monkeypatch.setattr(standards, "_KNOWN_BASES", ("fake",))
     _write_fake_versioned_standard(
@@ -7602,9 +7642,9 @@ def test_revise_relabels_a_compound_prefix_in_the_id_ledger(compound_prefix_proj
     assert "CON-THM" not in ledger_text
 
 
-# --------------------------------------------- hardware@3: constraint -> bound
+# ------------------------------------- hardware@2: the whole v1 -> v2 delta
 
-def test_an_item_still_typed_constraint_at_v3_names_the_rename(tmp_path):
+def test_an_item_still_typed_constraint_at_v2_names_the_rename(tmp_path):
     """The type-level counterpart of the `constraint.title` -> `constraint.text`
     diagnostic (finding 4). Without it, moving the pin to v3 by hand reports a
     bare "unknown type 'constraint'." on every item in the project, and
@@ -7612,7 +7652,7 @@ def test_an_item_still_typed_constraint_at_v3_names_the_rename(tmp_path):
     close enough to suggest."""
     (tmp_path / "refdes.yaml").write_text(
         "site: { title: T, out: _site }\n"
-        "standard: { base: hardware, version: 3, presets: [] }\n",
+        "standard: { base: hardware, version: 2, presets: [] }\n",
         encoding="utf-8",
     )
     (tmp_path / "items").mkdir()
@@ -7626,7 +7666,7 @@ def test_an_item_still_typed_constraint_at_v3_names_the_rename(tmp_path):
     parse.load_items(project)
     messages = [d.message for d in project.errors]
     assert any(
-        "it is now 'bound'" in m and "hardware@3" in m and "standard upgrade" in m
+        "it is now 'bound'" in m and "hardware@2" in m and "standard upgrade" in m
         for m in messages
     ), messages
 
@@ -7677,25 +7717,25 @@ def _equivalence_project(tmp_path, version, target_id="REQ-001"):
     return project
 
 
-def test_hardware_v4_restricts_equivalent_and_alternate_to_components(tmp_path):
+def test_hardware_v2_restricts_equivalent_and_alternate_to_components(tmp_path):
     """`[]` in a `links:` target list means *unrestricted* -- that is what it
     deliberately means one type up on `decision.blocked_by:` -- so writing it
-    on `equivalent`/`alternate` left the shipped dictionary accepting
-    `equivalent: [REQ-001]` on a component with no diagnostic at all, while
-    the spec (docs/design/standard-library.md 11) and every version of the
-    docs said component -> component. v4 restores the intent."""
-    project = _equivalence_project(tmp_path, version=4)
+    on `equivalent`/`alternate` left v1's dictionary accepting `equivalent:
+    [REQ-001]` on a component with no diagnostic at all, while the spec
+    (docs/design/standard-library.md 11) and every version of the docs said
+    component -> component. v2 restores the intent."""
+    project = _equivalence_project(tmp_path, version=2)
     assert any(
         "equivalent may point at ['component']" in d.message and "REQ-001" in d.message
         for d in project.errors
     ), [str(d) for d in project.errors]
 
 
-def test_hardware_v4_still_allows_a_component_to_component_equivalence(tmp_path):
+def test_hardware_v2_still_allows_a_component_to_component_equivalence(tmp_path):
     """The restriction must not catch the case it exists to describe."""
     (tmp_path / "refdes.yaml").write_text(
         "site: { title: T, out: _site }\n"
-        "standard: { base: hardware, version: 4, presets: [] }\n",
+        "standard: { base: hardware, version: 2, presets: [] }\n",
         encoding="utf-8",
     )
     (tmp_path / "items").mkdir()
@@ -7712,19 +7752,18 @@ def test_hardware_v4_still_allows_a_component_to_component_equivalence(tmp_path)
     assert not project.errors, [str(d) for d in project.errors]
 
 
-@pytest.mark.parametrize("version", [1, 2, 3])
-def test_earlier_versions_keep_the_unrestricted_behaviour(tmp_path, version):
-    """Byte-identical forever: a project pinned below v4 sees no change at
-    all, including the permissiveness v4 removes. Upgrading is what opts a
-    project into the check."""
-    project = _equivalence_project(tmp_path, version=version)
+def test_v1_keeps_the_unrestricted_behaviour(tmp_path):
+    """Byte-identical forever: a project pinned at v1 sees no change at all,
+    including the permissiveness v2 removes. Upgrading is what opts a project
+    into the check."""
+    project = _equivalence_project(tmp_path, version=1)
     assert not any("equivalent may point at" in d.message for d in project.errors), [
         str(d) for d in project.errors
     ]
 
 
-def test_v4_is_the_version_init_pins(tmp_path):
-    assert standards.latest_version("hardware") == 4
+def test_v2_is_the_version_init_pins(tmp_path):
+    assert standards.latest_version("hardware") == 2
 
 
 def test_the_parts_fixture_matches_the_bundled_standard():
@@ -7746,54 +7785,37 @@ def test_the_parts_fixture_matches_the_bundled_standard():
         )
 
 
-def test_hardware_v3_renames_constraint_to_bound_and_gains_refines(tmp_path):
-    """finding 10 (narrower version): `bound` replaces `constraint`, prefix
-    `CON` -> `BND`, additively gaining `refines: [bound]` alongside its
-    existing `derives_from: [requirement, bound]`. `requirement` itself is
-    untouched -- the finding's `capability` rename was explicitly rejected."""
+def test_hardware_v1_still_resolves_constraint_unchanged(tmp_path):
+    """v2 is a new pinned version, not an edit to an old one -- a project
+    still pinned at v1 sees no difference at all."""
     (tmp_path / "refdes.yaml").write_text(
         "site: { title: T, out: _site }\n"
-        "standard: { base: hardware, version: 3, presets: [] }\n",
+        "standard: { base: hardware, version: 1, presets: [] }\n",
         encoding="utf-8",
     )
     project = load_project(config_path=str(tmp_path / "refdes.yaml"))
-    assert "constraint" not in project.types
-    bound = project.types["bound"]
-    assert bound.prefix == "BND"
-    assert bound.links["refines"] == ["bound"]
-    assert bound.links["derives_from"] == ["requirement", "bound"]
-
-    requirement = project.types["requirement"]
-    assert requirement.prefix == "REQ"
-    assert requirement.links == {"refines": ["requirement"]}
-
-    decision = project.types["decision"]
-    assert decision.links["constrained_by"] == ["bound"]
+    assert "bound" not in project.types
+    assert project.types["constraint"].prefix == "CON"
+    assert "title" in project.types["constraint"].fields
+    assert project.types["component"].links["equivalent"] == []
 
 
-def test_hardware_v1_and_v2_still_resolve_constraint_unchanged(tmp_path):
-    """v3 is additive to the standard library, not a replacement -- a project
-    still pinned at v1 or v2 sees no difference at all."""
-    for version in (1, 2):
-        (tmp_path / "refdes.yaml").write_text(
-            "site: { title: T, out: _site }\n"
-            f"standard: {{ base: hardware, version: {version}, presets: [] }}\n",
-            encoding="utf-8",
-        )
-        project = load_project(config_path=str(tmp_path / "refdes.yaml"))
-        assert "bound" not in project.types
-        assert project.types["constraint"].prefix == "CON"
+def test_standard_upgrade_v1_to_v2_applies_the_whole_collapsed_delta(tmp_path):
+    """End-to-end against the real bundled standard, as one v1 -> v2 run.
 
-
-def test_standard_upgrade_to_3_renames_constraint_and_its_compound_prefix(tmp_path):
-    """End-to-end against the real bundled standard: a v2-pinned project
-    using this project's own compound-prefix convention, with a decision
-    referencing the constraint through both a link and a checks: entry,
-    upgrades cleanly to v3 -- the exact shape that blocked on first attempt
-    against this project's own refdes.yaml (see the commit message)."""
+    The three changes v2 carries were developed as three internal steps, so
+    the migration that replaces them must be tested as the single step it now
+    is rather than assumed to be the concatenation of three that each passed.
+    This exercises all of it at once: `title` -> `text` on a type that is
+    *itself* being renamed in the same step (the field pass is keyed by the
+    old type name and runs against the pre-rewrite project, which is what
+    keeps the type rename from hiding it), the compound-prefix convention
+    this repository uses, structured references through both a link and a
+    `checks:` entry, and an equivalence that must survive untouched while the
+    restriction on it starts being enforced."""
     (tmp_path / "refdes.yaml").write_text(
         "site: { title: T, out: _site }\n"
-        "standard: { base: hardware, version: 2, presets: [] }\n",
+        "standard: { base: hardware, version: 1, presets: [] }\n",
         encoding="utf-8",
     )
     items = tmp_path / "items"
@@ -7801,7 +7823,14 @@ def test_standard_upgrade_to_3_renames_constraint_and_its_compound_prefix(tmp_pa
     (items / "con.yaml").write_text(
         "defaults:\n  type: constraint\n  prefix: CON-THM\n  status: active\n"
         "items:\n"
-        "  - id: CON-THM-001\n    text: Board power density\n    limit: \"<= 1 W/in^2\"\n",
+        "  - id: CON-THM-001\n    title: Board power density\n    limit: \"<= 1 W/in^2\"\n",
+        encoding="utf-8",
+    )
+    (items / "cmp.yaml").write_text(
+        "defaults:\n  type: component\n  prefix: CMP\n"
+        "items:\n"
+        "  - id: CMP-001\n    title: First source.\n    equivalent: [CMP-002]\n"
+        "  - id: CMP-002\n    title: Second source.\n",
         encoding="utf-8",
     )
     (items / "dec.md").write_text(
@@ -7819,22 +7848,60 @@ def test_standard_upgrade_to_3_renames_constraint_and_its_compound_prefix(tmp_pa
         encoding="utf-8",
     )
 
-    steps = revise.apply_standard_upgrade(str(tmp_path), 3)
+    steps = revise.apply_standard_upgrade(str(tmp_path), 2)
     assert len(steps) == 1
     assert steps[0].result.ok, steps[0].result.errors
     assert steps[0].result.id_changes == {"CON-THM-001": "BND-THM-001"}
 
     con_text = (items / "con.yaml").read_text(encoding="utf-8")
-    assert "type: bound" in con_text and "prefix: BND-THM" in con_text and "id: BND-THM-001" in con_text
+    assert "type: bound" in con_text
+    assert "prefix: BND-THM" in con_text
+    assert "id: BND-THM-001" in con_text
+    # The field rename landed too, on the same item, in the same step.
+    assert "text: Board power density" in con_text
+    assert "title:" not in con_text
+
     dec_text = (items / "dec.md").read_text(encoding="utf-8")
     assert "constrained_by: [BND-THM-001]" in dec_text
     assert "against: BND-THM-001" in dec_text
 
+    # Nothing renames an equivalence; the restriction only starts being checked.
+    assert "equivalent: [CMP-002]" in (items / "cmp.yaml").read_text(encoding="utf-8")
+
     project = load_project(config_path=str(tmp_path / "refdes.yaml"))
-    assert project.standard_version == 3
+    assert project.standard_version == 2
     parse.load_items(project)
     build_mod.build(project, seal_write=False, reseal=False, accept_board_move=False)
-    assert not project.errors
+    assert not project.errors, [str(d) for d in project.errors]
+
+
+def test_upgrade_refuses_when_an_equivalence_no_longer_satisfies_v2(tmp_path):
+    """v2's third change renames nothing, so its migration.yaml says nothing
+    about it -- but the step still re-validates, and a component pointing
+    `equivalent` at a non-component is refused and rolled back rather than
+    pinned to a version its own items don't satisfy."""
+    (tmp_path / "refdes.yaml").write_text(
+        "site: { title: T, out: _site }\n"
+        "standard: { base: hardware, version: 1, presets: [] }\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "items").mkdir()
+    (tmp_path / "items" / "i.yaml").write_text(
+        "items:\n"
+        "  - id: REQ-001\n    type: requirement\n    text: A requirement.\n"
+        "    status: active\n"
+        "  - id: CMP-001\n    type: component\n    title: A capacitor.\n"
+        "    equivalent: [REQ-001]\n",
+        encoding="utf-8",
+    )
+    steps = revise.apply_standard_upgrade(str(tmp_path), 2)
+    assert len(steps) == 1
+    assert not steps[0].result.ok
+    assert any("equivalent may point at" in e for e in steps[0].result.errors), (
+        steps[0].result.errors
+    )
+    # Rolled back: the pin did not move.
+    assert "version: 1" in (tmp_path / "refdes.yaml").read_text(encoding="utf-8")
 
 
 # --------------------------------------------------------------------- diff
@@ -9300,7 +9367,7 @@ def test_latest_version_resolves_the_concrete_bundled_max():
         if name.startswith("v")
     ]
     assert standards.latest_version("hardware") == max(bundled)
-    assert standards.latest_version("hardware") >= 4
+    assert standards.latest_version("hardware") >= 2
 
 
 def test_available_presets_includes_design_debate():

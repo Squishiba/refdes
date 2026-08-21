@@ -8,13 +8,50 @@
 # needs to trust that it matches the spec, since the spec is the place to
 # argue about it, not this file.
 #
-# Changed from v1: `constraint.title` is now `constraint.text`, matching
-# `requirement.text`'s role as the type's one required content field --
-# `title` was a short-label field misused to carry a constraint's whole
-# normative sentence, with no other place for it to go but the optional,
-# overflow-only `body:`. `constraint.preview` updated to match. v1 is
-# untouched and still resolves exactly as it always has; a project pinned
-# there sees no difference from this change at all.
+# Changed from v1, in three parts. All three came out of real adoption
+# between 0.4.0 and 0.5.0 and none of them was ever published on its own, so
+# they arrive together as one version rather than as three:
+#
+# 1. `constraint.title` is now `constraint.text` (below, `bound.text`),
+#    matching `requirement.text`'s role as the type's one required content
+#    field. `title` was a short-label field with nowhere for a constraint's
+#    actual normative sentence to go but the optional, overflow-only
+#    `body:`. `preview` follows it: `[status, text, limit]`.
+#
+# 2. `constraint` is now `bound`, prefix `CON` -> `BND`. `requirement` and
+#    `constraint` read as near-synonyms in plain English — a constraint
+#    colloquially *is* a requirement — which is what produced the authoring
+#    mix-up this came from. `bound` doesn't have that problem, and it names
+#    the `limit:` field that makes the type mechanically distinct: a `bound`
+#    is a machine-checkable limit, a `requirement` is prose. ("requirement"
+#    stays as it is: it's the term of art the field already uses, and
+#    "capability" already means something else, higher-level, in
+#    DoDAF/MoDAF.)
+#
+#    `bound` additively gains `refines: [bound]` alongside its existing
+#    `derives_from: [requirement, bound]`. Before this only `requirement`
+#    could `refines:`, so a constraint narrowing another constraint had
+#    nowhere to say so. Both stay: they answer different questions ("what
+#    does this narrow" vs. "what was this derived from"), and
+#    `derives_from:` alone may cross into `requirement`, which `refines:`
+#    deliberately cannot.
+#
+# 3. `component.equivalent` and `component.alternate` are restricted to
+#    `[component]`, where v1 wrote both as `[]`. An empty target list does
+#    not mean "no targets to name"; it means *unrestricted*, and it is used
+#    that way deliberately on `decision.blocked_by:`, where an item really
+#    may be blocked by anything. On these two verbs it was a slip: the spec
+#    (docs/design/standard-library.md §11) has always said component →
+#    component and the docs have always described them that way, but the
+#    dictionary accepted `equivalent: [REQ-PWR-001]` on a component without
+#    a word. Every other verb here names its targets and is checked; these
+#    two are now no different.
+#
+# v1 is untouched and still resolves exactly as it always has; a project
+# pinned there sees no difference from any of this. `refdes standard upgrade
+# --to 2` applies parts 1 and 2 to an existing project's item files (part 3
+# renames nothing — it only starts checking what is already written) and
+# refuses, rolling back, if the result would not validate.
 
 field_sets:
   provenance:
@@ -60,9 +97,9 @@ types:
       refines: [requirement]
     body: { on_change: invalidate }
 
-  constraint:
-    prefix: CON
-    label: Constraint
+  bound:
+    prefix: BND
+    label: Bound
     preview: [status, text, limit]
     coverable: true
     coverable_statuses: [active]
@@ -73,7 +110,8 @@ types:
       rationale: { type: text, on_change: invalidate }
     include: [provenance, stewardship]
     links:
-      derives_from: [requirement, constraint]
+      refines:      [bound]
+      derives_from: [requirement, bound]
     body: { on_change: invalidate }
 
   decision:
@@ -93,7 +131,7 @@ types:
     include: [provenance, stewardship]
     links:
       satisfies:      [requirement]
-      constrained_by: [constraint]
+      constrained_by: [bound]
       supersedes:     [decision]
       selects:        [component]
       blocked_by:     []   # empty target list = unrestricted
@@ -110,7 +148,7 @@ types:
       method: { type: text, on_change: invalidate }
     include: [provenance, stewardship]
     links:
-      verifies: [requirement, constraint]
+      verifies: [requirement, bound]
     body: { on_change: invalidate }
 
   component:
@@ -128,8 +166,8 @@ types:
     include: [provenance, stewardship]
     links:
       satisfies:  [requirement]
-      equivalent: []   # self-inverse
-      alternate:  []   # self-inverse
+      equivalent: [component]   # self-inverse; see the header note on v3's `[]`
+      alternate:  [component]   # self-inverse; see the header note on v3's `[]`
     body: { on_change: invalidate }
 
   log:
@@ -144,7 +182,7 @@ types:
       author:  { type: person, on_change: invalidate }
     include: [provenance]
     links:
-      addresses: [requirement, constraint]
+      addresses: [requirement, bound]
       amends:    [log]
       records:   [decision]
     body: { on_change: invalidate }
