@@ -62,8 +62,8 @@ graph LR
   bound -- derives_from --> requirement
   bound -- derives_from --> bound
   component -- satisfies --> requirement
-  component -- equivalent --> any
-  component -- alternate --> any
+  component -- equivalent --> component
+  component -- alternate --> component
   decision -- satisfies --> requirement
   decision -- constrained_by --> bound
   decision -- supersedes --> decision
