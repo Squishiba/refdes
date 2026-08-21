@@ -23,6 +23,18 @@ LIST_ENTRY_RE = re.compile(r"^(\s*)-(\s+)(\S.*)$")
 FLOW_ENTRY_RE = re.compile(r"^\{(.*)\}\s*$")
 
 
+def _value_pattern(old_value: str | None) -> str:
+    """Regex fragment matching `old_value` as it may appear in raw source
+    text -- optionally wrapped in the quotes YAML parsing already stripped
+    (`id: "042"` and `id: 042` both resolve to the same string by the time
+    `old_value` reaches here, but only one of them still has quotes on the
+    line). Empty (matches only a truly bare key) when `old_value` is None.
+    """
+    if old_value is None:
+        return ""
+    return rf"[\"']?{re.escape(old_value)}[\"']?"
+
+
 def split_id(item_id: str) -> tuple[str, int] | None:
     match = ID_RE.match(item_id.strip())
     if not match:
@@ -89,6 +101,43 @@ def prefix_for(project: Project, item: Item) -> str:
     return spec.prefix if spec else item.type[:3].upper()
 
 
+def validate_prefixes(project: Project) -> None:
+    """Finding 8 Parts 1/2: an already-id'd item's own prefix -- the id
+    scheme's "type segment" -- must match what `prefix_for()` would derive
+    for it. `prefix_for()` was previously read only inside `allocate()`, for
+    a *pending* item choosing its id for the first time; this reaches the
+    opposite population, an item that already has a hand-typed id, doing
+    nothing but a static comparison of two already-known strings -- no
+    resolution, no ambient state.
+
+    A mismatch is a loud, blocking error, never a silent rewrite: fixing it
+    automatically would change the one string every link, backlink, and
+    ledger entry is keyed on -- the same class of harm Part 0's write-back
+    bug caused by accident, self-inflicted here instead.
+
+    Checked as "starts with", not "equals": Part 2's free-form category
+    segment (`IO-AI`, `EXP-PCIE`) is typed straight into the id with no
+    scheme change and no matching `prefix:` of its own, so `id: CON-IO-004`
+    against a bare `prefix: CON` is exactly right, not a mismatch --
+    `split_id`'s own greedy match would otherwise read `CON-IO` as one
+    inseparable prefix and flag every categorized id in the project.
+    """
+    for item in project.local_items:
+        if not item.id:
+            continue  # pending -- nothing to compare yet
+        if split_id(item.id) is None:
+            continue  # not shaped like PREFIX-NNN at all -- a different diagnostic's job
+        expected = prefix_for(project, item)
+        if item.id.startswith(f"{expected}-"):
+            continue
+        source = "from defaults:" if item.prefix_hint else f"the {item.type!r} type's default"
+        project.error(
+            f"id {item.id!r} does not match this item's prefix {expected!r} "
+            f"({source})",
+            file=item.source_file, line=item.source_line, item_id=item.id,
+        )
+
+
 # --------------------------------------------------------------- former ids
 
 
@@ -139,28 +188,37 @@ def collect_former_ids(project: Project) -> None:
 # -------------------------------------------------------------------- write-back
 
 
-def insert_into_markdown(lines: list[str], line_no: int, new_line: str) -> list[str]:
+def insert_into_markdown(
+    lines: list[str], line_no: int, new_line: str, old_value: str | None = None
+) -> list[str]:
     """Insert `new_line` as the first front-matter key (line_no is the first key line).
 
     Generic over what the key/value text is -- allocate() inserts `id: X`;
     former_ids.confirm() reuses this to insert `former_ids: [X]` the same way.
 
-    If the target line already *is* that same key, written bare (e.g. a
-    scaffolded `id:` placeholder with no value), replace it in place instead
-    of inserting a second occurrence above it. A duplicate key isn't cosmetic:
-    YAML resolves a mapping with a repeated key to the *last* one, so leaving
-    the original blank key in place means the item still parses as if nothing
-    were ever written -- looking unallocated again on the very next parse, and
-    burning another id if `refdes id` runs again on it.
+    If the target line already *is* that same key, replace it in place
+    instead of inserting a second occurrence above it. A duplicate key isn't
+    cosmetic: YAML resolves a mapping with a repeated key to the *last* one,
+    so leaving the original in place means the item still parses as if
+    nothing were ever written -- looking unallocated again on the very next
+    parse, and burning another id if `refdes id` runs again on it.
+
+    `old_value`, when given, is the exact text currently on that line (e.g.
+    a bare-numeric `id:` hint being expanded -- finding 8 Part 1) and is
+    matched literally; otherwise only a *bare* key (a scaffolded placeholder
+    with no value at all) is replaced, matching the original, narrower fix.
     """
     index = max(0, line_no - 1)
     key = new_line.split(":", 1)[0].strip()
-    if index < len(lines) and re.match(rf"^{re.escape(key)}:\s*$", lines[index]):
+    value_pattern = _value_pattern(old_value)
+    if index < len(lines) and re.match(rf"^{re.escape(key)}:\s*{value_pattern}\s*$", lines[index]):
         return lines[:index] + [new_line] + lines[index + 1 :]
     return lines[:index] + [new_line] + lines[index:]
 
 
-def insert_into_list(lines: list[str], line_no: int, key: str, value: str) -> list[str] | None:
+def insert_into_list(
+    lines: list[str], line_no: int, key: str, value: str, old_value: str | None = None
+) -> list[str] | None:
     """Rewrite `- text: ...` as `- {key}: {value}` / `  text: ...`, preserving indentation.
 
     Generic over `key`/`value` for the same reason as insert_into_markdown()
@@ -170,10 +228,12 @@ def insert_into_list(lines: list[str], line_no: int, key: str, value: str) -> li
     on the same line is refused rather than guessed at, so it fails loudly
     instead of corrupting the file.
 
-    If the target line already *is* `{key}:` written bare (e.g. a scaffolded
-    `id:` placeholder), its value is filled in place rather than inserting a
-    second `{key}:` key above it -- see insert_into_markdown()'s docstring for
-    why a duplicate key is a correctness bug, not a cosmetic one.
+    If the target line already *is* `{key}:` -- bare, or already holding
+    `old_value` when given (a bare-numeric `id:` hint being expanded,
+    finding 8 Part 1) -- its value is replaced in place rather than
+    inserting a second `{key}:` above it, in both block and flow style; see
+    insert_into_markdown()'s docstring for why a duplicate key is a
+    correctness bug, not a cosmetic one.
     """
     index = line_no - 1
     if not (0 <= index < len(lines)):
@@ -182,21 +242,43 @@ def insert_into_list(lines: list[str], line_no: int, key: str, value: str) -> li
     if not match:
         return None
     indent, sep, rest = match.groups()
+    value_pattern = _value_pattern(old_value)
     if rest.startswith("{"):
         flow_match = FLOW_ENTRY_RE.match(rest)
         if not flow_match:
             return None
         inner = flow_match.group(1).strip()
-        new_inner = f"{key}: {value}" if not inner else f"{key}: {value}, {inner}"
+        existing_re = re.compile(rf"(^|,)(\s*){re.escape(key)}:\s*{value_pattern}\s*(?=,|$)")
+        if existing_re.search(inner):
+            new_inner = existing_re.sub(
+                lambda m: f"{m.group(1)}{m.group(2)}{key}: {value}", inner, count=1
+            )
+        else:
+            new_inner = f"{key}: {value}" if not inner else f"{key}: {value}, {inner}"
         return lines[:index] + [f"{indent}-{sep}{{{new_inner}}}"] + lines[index + 1 :]
-    if re.match(rf"^{re.escape(key)}:\s*$", rest):
+    if re.match(rf"^{re.escape(key)}:\s*{value_pattern}\s*$", rest):
         return lines[:index] + [f"{indent}- {key}: {value}"] + lines[index + 1 :]
     replacement = [f"{indent}- {key}: {value}", f"{indent}  {rest}"]
     return lines[:index] + replacement + lines[index + 1 :]
 
 
 def allocate(project: Project, dry_run: bool = False) -> list[tuple[Item, str]]:
-    """Allocate IDs for every pending item and write them into the source files."""
+    """Allocate IDs for every pending item and write them into the source files.
+
+    Two passes, in this order, both against the same `marks` high-water dict:
+
+    1. Numeric-hint items (finding 8 Part 1: `id: 042`) freeze the *specific*
+       number the author typed, verbatim -- `marks[prefix]` is raised to at
+       least that number, never incremented past it. A number at or below
+       the current high water is a collision (already live, or burned by a
+       since-deleted item) and is refused with an error rather than silently
+       renumbered -- the same "yell, don't rewrite" posture as everything
+       else that touches id identity.
+    2. Truly-pending items (no `id:` at all) get the next free number per
+       prefix, exactly as before -- run second so a numeric hint's reserved
+       number is never handed out from under it, regardless of which order
+       the items happen to appear in the file.
+    """
     if not project.pending:
         return []
 
@@ -205,6 +287,27 @@ def allocate(project: Project, dry_run: bool = False) -> list[tuple[Item, str]]:
 
     assignments: list[tuple[Item, str]] = []
     for item in project.pending:
+        if not item.numeric_id_hint:
+            continue
+        prefix = prefix_for(project, item)
+        number = int(item.numeric_id_hint)
+        new_id = f"{prefix}-{item.numeric_id_hint}"
+        if number <= marks.get(prefix, 0):
+            project.error(
+                f"id: {item.numeric_id_hint} would expand to {new_id!r}, but "
+                f"that number is already used or was burned by an earlier "
+                f"item under prefix {prefix!r} -- pick a number higher than "
+                f"{marks.get(prefix, 0)}, or leave id: blank to let 'refdes "
+                f"id' assign the next one",
+                file=item.source_file, line=item.source_line,
+            )
+            continue
+        marks[prefix] = number
+        assignments.append((item, new_id))
+
+    for item in project.pending:
+        if item.numeric_id_hint:
+            continue
         prefix = prefix_for(project, item)
         marks[prefix] = marks.get(prefix, 0) + 1
         new_id = f"{prefix}-{marks[prefix]:0{project.id_width}d}"
@@ -226,10 +329,15 @@ def allocate(project: Project, dry_run: bool = False) -> list[tuple[Item, str]]:
         lines = text.splitlines()
 
         for item, new_id in sorted(entries, key=lambda e: e[0].source_line, reverse=True):
+            old_value = item.numeric_id_hint or None
             if rel.endswith(".md"):
-                lines = insert_into_markdown(lines, item.source_line, f"id: {new_id}")
+                lines = insert_into_markdown(
+                    lines, item.source_line, f"id: {new_id}", old_value=old_value
+                )
             else:
-                updated = insert_into_list(lines, item.source_line, "id", new_id)
+                updated = insert_into_list(
+                    lines, item.source_line, "id", new_id, old_value=old_value
+                )
                 if updated is None:
                     project.error(
                         f"could not write id {new_id} back into the source",

@@ -318,6 +318,18 @@ class Item:
     history: dict[str, Any] = field(default_factory=dict)  # item-level on_change overrides
     calc_values: dict[str, str] = field(default_factory=dict)  # name -> formatted result
     prefix_hint: str = ""  # 'prefix:' override -- own key or file/block defaults:, used by the ID allocator
+    # A bare-numeric `id:` value (finding 8 Part 1), e.g. "042" from a
+    # *quoted* `id: "042"` -- unquoted is never trusted here (an unquoted
+    # leading zero is octal in YAML: `id: 042` parses to 34, not 42; see
+    # id_rejected below). `item.id` stays "" until `refdes id` expands this
+    # into the full `<prefix>-<digits>` form and writes it back, in place.
+    numeric_id_hint: str = ""
+    # `id:` was an unquoted number (int/float) YAML may have already silently
+    # mangled -- item.id is "" like a genuinely blank id, but this item must
+    # never enter project.pending: it isn't safe for `refdes id` to allocate
+    # into or expand, only for a human to fix by hand. The error is already
+    # reported at parse time; this just keeps the allocator away from it.
+    id_rejected: bool = False
     content_hash: str = ""  # over `invalidate` fields only; drives suspect links
     external: bool = False  # imported from another project: read-only here
     origin: str = ""        # name of the import it came from

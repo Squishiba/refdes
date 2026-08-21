@@ -1045,6 +1045,7 @@ def build(
     pages_mod.validate_workspaces(project)
     validate_items(project)
     validate_former_ids(project)
+    ids_mod.validate_prefixes(project)
     resolve_links(project)
     workspaces_mod.lint_cross_workspace_references(project)
     blocked_mod.resolve(project)

@@ -218,6 +218,58 @@ def _apply_section(
     return True
 
 
+def _resolve_id_value(
+    project: Project, raw_id: Any, rel: str, line: int
+) -> tuple[str, str, bool]:
+    """Split a raw `id:` value into (item_id, numeric_id_hint, rejected).
+
+    Four shapes:
+
+    - absent/blank -- `item_id`/`numeric_id_hint` both "", `rejected` False:
+      the item is pending, same as always.
+    - a full id (`REQ-001`, or anything else that isn't purely digits) --
+      `item_id` is that string, the other two stay "" / False.
+    - a bare number (finding 8 Part 1: `id: 001`, meant to expand to
+      `REQ-001` once `refdes id` sees a prefix to attach) -- `item_id` stays
+      "" (still pending) and `numeric_id_hint` carries the literal digit
+      string.
+    - a rejected number (see below) -- `item_id` stays "" but `rejected` is
+      True, which keeps it *out* of `project.pending`: this item's `id:` is
+      not safely blank, so `refdes id` must never treat it as free to
+      allocate into. The already-reported error is the only diagnostic;
+      nothing here is a placeholder waiting for the allocator.
+
+    The bare-number case only accepts a *string* of digits, never an int:
+    YAML resolves an unquoted leading zero as octal (`id: 042` parses to the
+    integer 34, not 42), so trusting `raw_id` as a number here would risk
+    silently freezing the wrong id forever -- the exact class of harm this
+    finding exists to prevent. An unquoted number is refused with a
+    diagnostic naming the fix (quote it) rather than guessed at.
+    """
+    if isinstance(raw_id, bool):
+        return "", "", False  # YAML's `id: yes`/`no` -- not a number, not a valid id either way
+    if isinstance(raw_id, (int, float)):
+        # Deliberately not naming raw_id as "what you typed": by the time
+        # YAML hands it here, an unquoted leading zero has already been
+        # silently reinterpreted (042 -> 34), so raw_id may already be wrong
+        # -- there's nothing left to recover it from.
+        project.error(
+            "id: is an unquoted number -- YAML reads a leading zero as octal "
+            "(042 silently becomes 34, not 42), so trusting it here risks "
+            "freezing the wrong id forever. Quote the value as a string "
+            '(id: "042") so the digits are used literally, or write the '
+            "complete id by hand.",
+            file=rel, line=line,
+        )
+        return "", "", True
+    if not raw_id:
+        return "", "", False
+    text = str(raw_id).strip()
+    if text.isdigit():
+        return "", text, False
+    return text, "", False
+
+
 def _build_item(
     project: Project,
     raw: dict[str, Any],
@@ -248,12 +300,15 @@ def _build_item(
             )
         return None
 
+    item_id, numeric_id_hint, id_rejected = _resolve_id_value(project, raw.get("id"), rel, line)
     item = Item(
-        id=str(raw["id"]) if raw.get("id") else "",
+        id=item_id,
         type=spec.name,
         source_file=rel,
         source_line=line,
         body=body,
+        numeric_id_hint=numeric_id_hint,
+        id_rejected=id_rejected,
     )
 
     if not item.body and raw.get("body"):
@@ -574,12 +629,24 @@ def load_items(project: Project, require_ids: bool = True) -> None:
             items = parse_list_file(project, path)
         for item in items:
             if not item.id:
+                if item.id_rejected:
+                    # Already reported at parse time (an unquoted, possibly
+                    # YAML-mangled number) -- must not enter project.pending,
+                    # or `refdes id` would "fix" it by allocating a fresh,
+                    # unrelated id and writing it in *alongside* the bad
+                    # value instead of replacing it, corrupting the file the
+                    # same way Part 0's original bug did.
+                    continue
                 project.pending.append(item)
                 if require_ids:
-                    project.error(
-                        "item has no id — run 'refdes id' to allocate one",
-                        file=item.source_file, line=item.source_line,
-                    )
+                    if item.numeric_id_hint:
+                        message = (
+                            f"id: {item.numeric_id_hint} has no prefix yet -- "
+                            f"run 'refdes id' to expand it into a full id"
+                        )
+                    else:
+                        message = "item has no id — run 'refdes id' to allocate one"
+                    project.error(message, file=item.source_file, line=item.source_line)
                 continue
             existing = project.items.get(item.id)
             if existing:

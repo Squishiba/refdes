@@ -282,7 +282,13 @@ def cmd_id(args) -> int:
     for item, new_id in assignments:
         print(f"{verb} {new_id}  ({item.source_file}:{item.source_line}) {item.title}")
     print(f"{verb} {len(assignments)} id(s)")
-    return 0
+    # A numeric-hint collision (finding 8 Part 1) or a write-back refusal is
+    # reported via project.error() inside allocate() itself, not raised --
+    # surface it here rather than let a partial "allocated 0 id(s)" pass
+    # for success with no explanation.
+    for d in project.errors:
+        print(str(d), file=sys.stderr)
+    return 1 if project.errors else 0
 
 
 def cmd_fetch(args) -> int:
