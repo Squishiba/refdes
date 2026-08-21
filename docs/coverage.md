@@ -47,7 +47,7 @@ picture:
   that declares no `coverable:` falls back to the old convention
   (`requirement`/`constraint` are coverable by name -- the two names that
   convention has ever recognized, kept as-is for compatibility rather than
-  following the `hardware@3` rename) with a one-time warning;
+  following the `hardware@2` rename) with a one-time warning;
   the [standard library](standard-library.md) declares it explicitly on both.
 - **`coverable_statuses:`** narrows which of those items actually participate,
   by `status`. Unset, it excludes only `status: retired` (if the type has a

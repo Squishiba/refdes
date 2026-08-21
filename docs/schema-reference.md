@@ -303,7 +303,7 @@ particular names — `coverable:`/`coverable_statuses:`/`verifying_statuses:`
 (above) are what makes a type participate in coverage, not its name; the
 fallback that still checks for `requirement`/`constraint` by name only fires
 when a type declares no `coverable:` at all. It keeps those two literal names,
-deliberately unchanged by the `hardware@3` rename, because its whole job is to
+deliberately unchanged by the `hardware@2` rename, because its whole job is to
 reproduce what projects did before `coverable:` existed; it is removed in
 refdes 1.0.
 

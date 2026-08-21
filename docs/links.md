@@ -138,13 +138,13 @@ possible, and is itself a reason to give it an item.
 Both are restricted to `component` targets, and that restriction is
 checked — `equivalent: [REQ-PWR-001]` on a component is a build error.
 
-> **Only from `hardware@4` onward.** v1 to v3 wrote both target lists as
-> `[]`, which the loader reads as *unrestricted* (the same way
-> `decision.blocked_by: []` deliberately is), so on those versions the same
-> line builds clean. A project pinned below v4 keeps that behaviour, since a
-> pinned version never changes under you; `refdes standard upgrade --to 4`
-> is what opts into the check, and it will refuse and roll back if an
-> existing link doesn't satisfy it — telling you which one.
+> **Only from `hardware@2` onward.** v1 wrote both target lists as `[]`,
+> which the loader reads as *unrestricted* (the same way
+> `decision.blocked_by: []` deliberately is), so on v1 the same line builds
+> clean. A project pinned at v1 keeps that behaviour, since a pinned version
+> never changes under you; `refdes standard upgrade --to 2` is what opts
+> into the check, and it will refuse and roll back if an existing link
+> doesn't satisfy it — telling you which one.
 
 ### Equivalence is symmetric — the self-inverse link
 

@@ -9,7 +9,7 @@ the package and resolved live, by reference, into every project that opts in.
 ```yaml
 standard:
   base: hardware
-  version: 4
+  version: 2
   presets: []
 ```
 
@@ -116,7 +116,7 @@ Bundled, curated extensions to the base standard, opted into by name:
 ```yaml
 standard:
   base: hardware
-  version: 4
+  version: 2
   presets: [design-debate]
 ```
 
@@ -321,45 +321,50 @@ is one a `migration.yaml` already describes.
 **`hardware@1`** — the original six types. `constraint` carries a `title:`
 field.
 
-**`hardware@2`** — `constraint.title` is renamed to `constraint.text`,
-matching `requirement.text`'s role as the type's one required content field
-(`title` was a short-label field with nowhere for a constraint's actual
-normative sentence to go but the optional `body:`). `constraint.preview`
-becomes `[status, text, limit]` to match.
+**`hardware@2`** — three changes, arriving together. They came out of real
+adoption over a single development cycle and none of them was published on
+its own, so they are one version rather than three:
 
-**`hardware@3`** — `constraint` itself is renamed to **`bound`**, and its
-prefix `CON` to `BND`. In plain English a constraint colloquially *is* a
-requirement, and that near-synonymy is what produced real authoring mix-ups;
-`bound` doesn't have the problem, and it names the `limit:` field that makes
-the type mechanically distinct — a `bound` is a machine-checkable limit, a
-`requirement` is prose. `bound` also gains `refines: [bound]` alongside its
-existing `derives_from: [requirement, bound]`: before this, only
-`requirement` could `refines:`, so a constraint narrowing another constraint
-had nowhere to say so. Both verbs stay, because they answer different
-questions — "what does this narrow" versus "what was this derived from" —
-and `derives_from:` alone can still cross into `requirement`, which
-`refines:` deliberately cannot.
+1. **`constraint.title` becomes `constraint.text`**, matching
+   `requirement.text`'s role as the type's one required content field
+   (`title` was a short-label field with nowhere for a constraint's actual
+   normative sentence to go but the optional `body:`). `preview` follows it,
+   becoming `[status, text, limit]`.
 
-**`hardware@4`** — `component.equivalent` and `component.alternate` are
-restricted to `[component]` targets, where v1 to v3 wrote them as `[]`. An
-empty target list means *unrestricted*, which is what it deliberately means
-on `decision.blocked_by:`; on these two verbs it was a slip, and the shipped
-dictionary accepted `equivalent: [REQ-PWR-001]` on a component without a
-word while every version of the docs said component → component. Nothing
-else moves — the whole delta from v3 is two target lists.
+2. **`constraint` becomes `bound`**, prefix `CON` → `BND`. In plain English
+   a constraint colloquially *is* a requirement, and that near-synonymy is
+   what produced real authoring mix-ups; `bound` doesn't have the problem,
+   and it names the `limit:` field that makes the type mechanically distinct
+   — a `bound` is a machine-checkable limit, a `requirement` is prose.
+   `bound` also gains `refines: [bound]` alongside its existing
+   `derives_from: [requirement, bound]`: before this only `requirement`
+   could `refines:`, so a constraint narrowing another constraint had
+   nowhere to say so. Both verbs stay, because they answer different
+   questions — "what does this narrow" versus "what was this derived from"
+   — and `derives_from:` alone can still cross into `requirement`, which
+   `refines:` deliberately cannot.
 
-Every earlier version resolves exactly as it always has; nothing changes for
-a project that doesn't touch its pin.
+3. **`component.equivalent` and `component.alternate` are restricted to
+   `[component]`**, where v1 wrote both as `[]`. An empty target list means
+   *unrestricted*, which is what it deliberately means on
+   `decision.blocked_by:`; on these two verbs it was a slip, and v1's
+   dictionary accepted `equivalent: [REQ-PWR-001]` on a component without a
+   word while every version of the docs said component → component.
 
-**Moving a pin by hand still works**, and the two renames each get a specific
-diagnostic rather than a generic one. An item still declaring
-`constraint.title` at `version: 2` or later is told the field was renamed
-(and its value is used for `text:` in that build, so the rest of the item
-doesn't also report a missing required field). An item still typed
-`constraint` at `version: 3` is told the type is now `bound` — worth having
-because `constraint` and `bound` share almost no letters, so a did-you-mean
-suggestion offers nothing. Running `refdes standard upgrade --to 3` instead
-does the whole rewrite, ids included, and neither diagnostic ever happens.
+`hardware@1` resolves exactly as it always has; nothing changes for a
+project that doesn't touch its pin.
+
+`refdes standard upgrade --to 2` applies parts 1 and 2 to your item files
+and their ids. Part 3 renames nothing — it only starts checking what is
+already written — so the upgrade has nothing to rewrite for it, but it will
+refuse the whole step, rolling back, if an existing `equivalent`/`alternate`
+no longer satisfies the restriction, naming the offending link.
+
+**Moving a pin by hand still works**, and gets a specific diagnostic rather
+than a generic one: an item still typed `constraint` at `version: 2` is told
+the type is now `bound`, which is worth saying because `constraint` and
+`bound` share almost no letters, so a did-you-mean suggestion offers
+nothing.
 
 ## `coverable`, `coverable_statuses`, `verifying_statuses`, and `required_when`
 

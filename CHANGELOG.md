@@ -9,35 +9,45 @@ and this project uses [Semantic Versioning](https://semver.org/).
 
 ### Added
 
-- `hardware@4`: `component.equivalent` and `component.alternate` are
-  restricted to `[component]` targets, where v1-v3 wrote them as `[]`. An
-  empty target list means *unrestricted* -- which is what it deliberately
-  means on `decision.blocked_by:` -- so the shipped dictionary accepted
-  `equivalent: [REQ-PWR-001]` on a component with no diagnostic at all,
-  while the spec and every version of the docs said component -> component.
-  Nothing else moves: the whole delta from v3 is two target lists. It ships
-  a `migration.yaml` with no renames in it, since a restriction on what is
-  already written is not a rename -- an `equivalent: [CMP-019]` correct at
-  v3 is byte-for-byte correct at v4 -- but the upgrade step still
-  re-validates, so a link the restriction rejects surfaces as an ordinary
-  target-type error and the step is refused and rolled back rather than
-  pinning a project to a version its items don't satisfy. Projects pinned
-  below v4 are untouched, permissiveness included.
-- `hardware@3`: `constraint` is renamed to `bound`, prefix `CON` -> `BND`,
-  and `bound` additively gains `refines: [bound]` alongside its existing
-  `derives_from: [requirement, bound]`. `requirement` and `constraint` read
-  as near-synonyms in plain English -- a constraint colloquially *is* a
-  requirement -- which is what produced the authoring mix-up this comes
-  from; `bound` doesn't have that problem, and it names the `limit:` field
-  that makes the type mechanically distinct. Before this, only
-  `requirement` could `refines:`, so a constraint narrowing another
-  constraint had nowhere to say so; `derives_from:` stays, since the two
-  answer different questions and only `derives_from:` may cross into
-  `requirement`. `hardware@1` and `@2` are untouched. `refdes standard
-  upgrade --to 3` applies the rename, ids included; moving the pin by hand
-  instead now gets a diagnostic naming the rename rather than a bare
-  "unknown type 'constraint'." with no did-you-mean (the two names are too
-  dissimilar for difflib to suggest anything).
+- `hardware@2`, the first version bump since the standard library shipped.
+  Three vocabulary changes, arriving as one version because they came out of
+  one development cycle and none of them was ever published on its own:
+    1. `constraint.title` is now `constraint.text`, matching
+       `requirement.text`'s role as the type's one required content field --
+       `title` was a short-label field with nowhere for a constraint's
+       actual normative sentence to go but the optional, overflow-only
+       `body:`. `preview` follows it, becoming `[status, text, limit]`.
+    2. `constraint` is now `bound`, prefix `CON` -> `BND`, and `bound`
+       additively gains `refines: [bound]` alongside its existing
+       `derives_from: [requirement, bound]`. `requirement` and `constraint`
+       read as near-synonyms in plain English -- a constraint colloquially
+       *is* a requirement -- which is what produced the authoring mix-up
+       this comes from; `bound` doesn't have that problem, and it names the
+       `limit:` field that makes the type mechanically distinct. Before
+       this only `requirement` could `refines:`, so a constraint narrowing
+       another constraint had nowhere to say so; `derives_from:` stays,
+       since the two answer different questions and only `derives_from:`
+       may cross into `requirement`.
+    3. `component.equivalent` and `component.alternate` are restricted to
+       `[component]`, where v1 wrote both as `[]`. An empty target list
+       means *unrestricted* -- which is what it deliberately means on
+       `decision.blocked_by:` -- so v1's dictionary accepted `equivalent:
+       [REQ-PWR-001]` on a component with no diagnostic at all, while the
+       spec and every version of the docs said component -> component.
+
+  `hardware@1` is untouched and still resolves exactly as it always has:
+  this ships as a new pinned version rather than an in-place edit, since
+  `standard.version: N` is byte-identical forever once released.
+
+  `refdes standard upgrade --to 2` applies parts 1 and 2 to an existing
+  project's item files and their ids. Part 3 renames nothing -- it only
+  starts checking what is already written -- so there is nothing for the
+  migration to rewrite, but the step still re-validates and will refuse,
+  rolling back, if an existing equivalence no longer satisfies it, naming
+  the offending link. Moving the pin by hand instead gets a diagnostic
+  naming the type rename rather than a bare "unknown type 'constraint'."
+  with no did-you-mean (the two names are too dissimilar for difflib to
+  suggest anything).
 - `refdes schema --graph`: Mermaid flowchart source for the project's
   actual type/link graph -- the same resolved schema `--json` emits, walked
   with a different renderer, so a preset or project overlay changing a verb
@@ -74,10 +84,9 @@ and this project uses [Semantic Versioning](https://semver.org/).
   `refdes standard upgrade --to N` does the same thing for a bundled
   standard's own version history, needing no hand-written mapping -- each
   standard version ships its own `migration.yaml` describing its delta from
-  the version before it (`hardware@2`'s ships the `constraint.title` ->
-  `constraint.text` rename above), and a multi-version jump chains every
-  intervening version's own delta in order rather than merging them into
-  one combined rename. Both carry each affected item's content hash forward
+  the version before it (`hardware@2`'s ships the renames described above),
+  and a multi-version jump chains every intervening version's own delta in
+  order rather than merging them into one combined rename. Both carry each affected item's content hash forward
   in every stamped baseline *and* seal file, id by id, so a purely cosmetic
   rename never looks like a content change or, for a sealed append-only log
   entry, a build-breaking seal violation. Refuses, rolling back cleanly,
@@ -88,18 +97,6 @@ and this project uses [Semantic Versioning](https://semver.org/).
   baseline started -- one stamped before this field existed is left alone
   (reported, not guessed at) during a chained upgrade rather than silently
   matched against whichever version happens to be current.
-- `hardware@2`: `constraint.title` is now `constraint.text`, matching
-  `requirement.text`'s role as the type's one required content field --
-  `title` was a short-label field with nowhere for a constraint's actual
-  normative sentence to go but the optional, overflow-only `body:`.
-  `constraint.preview` updated to `[status, text, limit]` to match.
-  `hardware@1` is untouched and still resolves exactly as it always has --
-  this ships as a new pinned version rather than an in-place edit, since
-  `standard.version: N` is meant to be byte-identical forever once released.
-  A project on `version: 2` (or later) whose items still declare
-  `constraint.title` now gets one specific diagnostic naming the rename,
-  rather than a generic unknown-field warning plus an unrelated-looking
-  missing-required error.
 - `section: <type>` markers (finding 6, replacing the type-keyed `items:`
   mapping the finding originally proposed): a `- section: <type>` list entry,
   or a `section: <type>` fenced block in Markdown, asserts the type for every

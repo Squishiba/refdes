@@ -35,16 +35,17 @@ The schema marks it `required: true`. In the bundled standard, `requirement` and
 **`status: 'in-review' is not one of ['draft', 'active', 'retired']`**
 Use one of the declared `choices`, or add yours to the schema.
 
-**`unknown type 'constraint' -- it is now 'bound' in hardware@3 ...`**
-The `hardware@3` rename. Either put `standard.version:` back where it was and
-run `refdes standard upgrade --to 3` (which rewrites the items and their ids
-for you), or rename by hand — the prefix moved from `CON` to `BND` too. See
-[the standard library](standard-library.md#the-versions-shipped-so-far).
+**`unknown type 'constraint' -- it is now 'bound' in hardware@2 ...`**
+The `hardware@2` rename. Either put `standard.version:` back where it was and
+run `refdes standard upgrade --to 2` (which rewrites the items and their ids
+for you), or rename by hand — the prefix moved from `CON` to `BND` too, and
+`title:` became `text:` in the same version. See [the standard
+library](standard-library.md#the-versions-shipped-so-far).
 
 **`'constraint.title' is now 'constraint.text' -- rename this key ...`**
-The `hardware@2` rename, same story one version earlier. Its value is used for
-`text:` in that build so the item doesn't also report a missing required
-field.
+The same rename's field half, which you'll see on a hand-rolled schema that
+declares a `constraint` type wanting `text:`. Its value is used for `text:`
+in that build so the item doesn't also report a missing required field.
 
 ## IDs
 
