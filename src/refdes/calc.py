@@ -433,6 +433,16 @@ class Limit:
         Measured relative to the limit itself, so it is comparable across unrelated
         quantities -- a 3% thermal margin and a 3% voltage margin mean the same
         thing to a reviewer.
+
+        None for an *offset* unit (`degC`, `degF`) on a one-sided comparison:
+        dividing a temperature difference by a temperature reading is the
+        ambiguous operation pint refuses outright, and rightly so -- "45 degC
+        of slack against an 85 degC limit" is 53% or 13% depending entirely
+        on where you put zero, so there is no fraction to report. The check
+        itself is unaffected: comparing two temperatures is well-defined, and
+        a limit written on an absolute scale (`<= 350 K`) or as a range
+        (`0 degC .. 60 degC`, whose reference is itself a difference) still
+        gets a real margin.
         """
         try:
             if self.kind in ("<=", "<"):
@@ -449,7 +459,7 @@ class Limit:
                 return _relative(min(below, above), span)
             # An equality has no notion of "how close", only met or not.
             return None
-        except (pint.DimensionalityError, ZeroDivisionError, ValueError):
+        except (pint.PintError, ZeroDivisionError, ValueError):
             return None
 
 

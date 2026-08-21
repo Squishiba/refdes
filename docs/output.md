@@ -65,9 +65,21 @@ so it is comparable across unrelated quantities:
 | `>= 0.90` | `0.93` | +3.3% |
 | `9 V .. 36 V` | `35 V` | +3.7% |
 
-Ranges measure to the nearer edge, since that is what fails first. An `==` limit has
-no margin — it is met or it is not — and neither does a limit of zero, so both show
-`—` rather than a fabricated number. The sign always agrees with pass/fail.
+Ranges measure to the nearer edge, since that is what fails first.
+
+Three cases show `—` rather than a fabricated number: an `==` limit (it is met
+or it is not, with no notion of "how close"), a limit of zero (nothing to take
+a fraction of), and a one-sided comparison against an **offset temperature
+unit** — `<= 85 degC`. A fraction of a `degC` reading depends entirely on where
+you put zero: 45 °C of slack under an 85 °C limit is 53% on the Celsius scale
+and 13% in kelvin, so there is no honest number to print. The check itself is
+unaffected — comparing two temperatures is perfectly well-defined — and a limit
+written on an absolute scale (`<= 350 K`), or as a range (`0 degC .. 60 degC`,
+which measures against its own span), still gets a real margin.
+
+A negative margin always means the check failed. The converse is *almost*
+always true: a margin of exactly `0` means the worst case landed precisely on
+the limit, which `<=`/`>=` pass and `<`/`>` fail.
 
 Margins are in `items.json` too, as `checks[].margin`, a fraction rather than a
 percentage.

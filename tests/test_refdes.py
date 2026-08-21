@@ -794,6 +794,100 @@ completely_unrelated_nonsense: yes
     assert not any("completely_unrelated_nonsense" in d.message for d in project.errors)
 
 
+# ------------------------------------------------ checks against temperatures
+
+TEMPERATURE_SCHEMA = (
+    "site: { title: T, out: _site }\n"
+    "link_types:\n"
+    '  constrained_by: { inverse: constrains, label: "Constrained by" }\n'
+    "types:\n"
+    "  bound:\n"
+    "    prefix: BND\n"
+    "    fields:\n"
+    "      text:  { type: text, required: true }\n"
+    "      limit: { type: limit, required: true }\n"
+    "  decision:\n"
+    "    prefix: DEC\n"
+    "    fields:\n"
+    "      title: { type: text, required: true }\n"
+    "      checks: { type: checks }\n"
+    "    links:\n"
+    "      constrained_by: [bound]\n"
+    "    body: {}\n"
+)
+
+
+def _temperature_project(tmp_path, limit, value="40 degC"):
+    (tmp_path / "refdes.yaml").write_text(TEMPERATURE_SCHEMA, encoding="utf-8")
+    items = tmp_path / "items"
+    items.mkdir()
+    (items / "b.yaml").write_text(
+        "items:\n"
+        "  - id: BND-001\n    type: bound\n    text: Junction temperature\n"
+        '    limit: "%s"\n' % limit,
+        encoding="utf-8",
+    )
+    (items / "d.md").write_text(
+        "---\n"
+        "id: DEC-001\n"
+        "type: decision\n"
+        "title: Thermal\n"
+        "constrained_by: [BND-001]\n"
+        "checks:\n"
+        "  - value: T_j\n"
+        "    against: BND-001\n"
+        "---\n\n"
+        "```calc\nT_j : degC = %s\n```\n" % value,
+        encoding="utf-8",
+    )
+    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    parse.load_items(project)
+    build_mod.build(project)
+    return project
+
+
+@pytest.mark.parametrize("limit", ["<= 85 degC", "< 85 degC", ">= 10 degC", "<= 200 degF"])
+def test_a_check_against_a_temperature_limit_does_not_crash(tmp_path, limit):
+    """`< 85 degC` is one of the six forms the limits table documents, and about
+    the most obvious constraint a board has. Every one-sided comparison against
+    an offset unit used to abort the whole command with an unhandled
+    pint.OffsetUnitCalculusError traceback -- not a diagnostic, a crash -- from
+    inside margin(), which divides a temperature *difference* by a temperature
+    *reading*. No test had ever evaluated a check against a temperature, and the
+    sample project has none."""
+    project = _temperature_project(tmp_path, limit)
+    result = project.items["DEC-001"].checks[0]
+    assert result.ok, result.detail
+    # The comparison itself is well-defined and still reported.
+    assert "40" in result.detail
+
+
+def test_a_temperature_margin_is_undefined_not_invented(tmp_path):
+    """A fraction of an offset-unit reading has no meaning -- 45 degC of slack
+    against an 85 degC limit is 53% or 13% depending purely on where zero
+    sits -- so there is no number to report. `margin: None` is the same
+    already-supported state an `==` limit produces."""
+    project = _temperature_project(tmp_path, "<= 85 degC")
+    assert project.items["DEC-001"].checks[0].margin is None
+
+
+def test_an_absolute_temperature_scale_still_gets_a_real_margin(tmp_path):
+    """Kelvin has no offset, so the division is well-defined and the margin is
+    a real number -- the None above is specific to offset units, not a blanket
+    give-up on temperature."""
+    project = _temperature_project(tmp_path, "<= 350 K", value="300 K")
+    margin = project.items["DEC-001"].checks[0].margin
+    assert margin is not None
+    assert margin == pytest.approx((350 - 300) / 350, rel=1e-6)
+
+
+def test_a_temperature_range_limit_still_gets_a_real_margin(tmp_path):
+    """A range measures slack against its own span -- a difference divided by a
+    difference -- so offset units are not ambiguous there and never were."""
+    project = _temperature_project(tmp_path, "0 degC .. 60 degC")
+    assert project.items["DEC-001"].checks[0].margin is not None
+
+
 # --------------------------------------------------------- YAML error diagnostics
 
 
