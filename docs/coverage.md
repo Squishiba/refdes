@@ -45,14 +45,16 @@ picture:
 
 - **`coverable: true`** puts items of this type in coverage at all. A type
   that declares no `coverable:` falls back to the old convention
-  (`requirement`/`constraint` are coverable by name) with a one-time warning;
+  (`requirement`/`constraint` are coverable by name -- the two names that
+  convention has ever recognized, kept as-is for compatibility rather than
+  following the `hardware@3` rename) with a one-time warning;
   the [standard library](standard-library.md) declares it explicitly on both.
 - **`coverable_statuses:`** narrows which of those items actually participate,
   by `status`. Unset, it excludes only `status: retired` (if the type has a
   `status` field at all) — the original behavior. Set, it's an *inclusion*
   list: `coverable_statuses: [active]` means a `draft` item isn't tracked
   either, not just "open" — it doesn't appear in coverage or its warnings at
-  all. The standard sets this on `requirement`/`constraint`.
+  all. The standard sets this on `requirement`/`bound`.
 
 Imported items are excluded regardless — an upstream project's coverage gaps
 are that project's problem.
@@ -62,10 +64,10 @@ are that project's problem.
 `coverage.html` lists everything least-covered first:
 
 ```
-open       CON-THM-002   Minimum converter efficiency      addr=—
+open       BND-THM-002   Minimum converter efficiency      addr=—
 open       REQ-PWR-004   3V3 regulation during input step  addr=—
 open       REQ-PWR-005   40 V input transient tolerance    addr=—
-addressed  CON-THM-001   Board power density               addr=LOG-A-005
+addressed  BND-THM-001   Board power density               addr=LOG-A-005
 satisfied  REQ-PWR-003   Efficiency > 90 % at half load    sat=DEC-PWR-001, ver=—
 verified   REQ-PWR-001   Input supply 9 V to 36 V          ver=TST-PWR-001
 verified   REQ-PWR-002   3V3 rail, 1.2 A, < 50 mV ripple   ver=TST-PWR-002
@@ -179,7 +181,7 @@ types:
     fields:
       status: { type: enum, choices: [planned, passing, failing, blocked], default: planned }
     links:
-      verifies: [requirement, constraint]
+      verifies: [requirement, bound]
     verifying_statuses: [passing]   # only a passing test actually verifies
 ```
 

@@ -22,7 +22,7 @@ field-level history the parked git-reader layer would provide; until it
 exists, `log` and `ignore` are indistinguishable in every *other*
 observable way -- see [what is not built yet](#what-is-not-built-yet).
 
-`invalidate` is for the substance: a requirement's text, a constraint's limit, a
+`invalidate` is for the substance: a requirement's text, a bound's limit, a
 decision's rationale. `log` is for things worth seeing but harmless: owner, tags,
 source reference. `ignore` is for noise: timestamps, generated fields.
 
@@ -48,7 +48,7 @@ once the history layer exists.
 
 ```yaml
 types:
-  constraint:
+  bound:
     fields:
       limit:         { type: limit,  on_change: invalidate }
       rationale:     { type: text,   on_change: invalidate }
@@ -112,11 +112,12 @@ to hide a substantive change. Two things close that:
 
 ```
 Schema fields not tracked as 'invalidate':
-  constraint
+  bound
     last_reviewed    ignore
+    note             log
     owner            log
     source           log
-    tags             log
+    tags             ignore
 
 Item-level overrides:
   REQ-PWR-004    owner -> ignore  — Owner rotates weekly during bring-up.

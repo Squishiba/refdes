@@ -478,7 +478,10 @@ _LIMIT_CONJUNCTION_RE = re.compile(r",\s|;\s|\band\b|\bwith\b", re.IGNORECASE)
 
 def _multi_bound_hint(raw: str) -> str:
     if len(_LIMIT_NUMBER_RE.findall(raw)) >= 2 and _LIMIT_CONJUNCTION_RE.search(raw):
-        return "\nnote: if this limit describes more than one bound, split it into separate constraint items"
+        return (
+            "\nnote: if this limit describes more than one bound, split it into "
+            "one item per bound"
+        )
     return ""
 
 

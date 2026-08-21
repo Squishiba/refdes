@@ -37,14 +37,14 @@ nav: true
 
 # Power architecture
 
-The 3V3 rail is the binding design problem — see REQ-PWR-002 and CON-THM-001.
+The 3V3 rail is the binding design problem — see REQ-PWR-002 and BND-THM-001.
 ```
 
 | Key | Default | Purpose |
 |---|---|---|
 | `title` | first `# heading`, else filename | Nav label and page title |
 | `order` | `100` | Sort position; lower comes first |
-| `nav` | `true` | Set `false` to render but keep out of the nav bar |
+| `nav` | `true` | Set `false` to render but keep out of the sidebar |
 | `board` | *(none)* | Group this page under that board's nav entry instead of the top level |
 | `workspace` | *(none)* | Group this page under that workspace's nav entry instead of the top level |
 
@@ -68,8 +68,8 @@ sorted by `order` then title.
 ## Grouping a page under a board
 
 If the project has a `boards:` registry (see [multi-board](multi-board.md)), the
-nav bar already gets one group per board, listing that board's own reports —
-summary, coverage, design log, references, full record. Tag a page's front-matter
+sidebar already gets one collapsible group per board, listing that board's own
+reports — summary, coverage, design log, references, full record. Tag a page's front-matter
 `board:` with a board name and it joins that group too, instead of sitting in the
 top-level list:
 
@@ -81,7 +81,7 @@ board: power
 ```
 
 This is what replaces a hand-written row of links at the top of a board overview
-page: the nav bar already gets you there. `order` and `nav: false` still work the
+page: the sidebar already gets you there. `order` and `nav: false` still work the
 same way inside a board's group as they do at the top level.
 
 A `workspaces:` registry (see [workspaces](workspaces.md)) works the same way
@@ -99,10 +99,12 @@ alongside any board groups nested inside it.
 - **All the usual markdown.** See the [markdown reference](markdown.md), including
   tables and fenced code.
 - **Get an on-page contents list.** Any page with more than two `##` headings gets
-  a sticky sidebar built from its headings, each with a stable anchor.
+  a sticky contents list built from its headings, each with a stable anchor, which
+  highlights the section currently in view as you scroll. See [site
+  navigation](output.md#site-navigation) for the sidebar that carries it.
 
 Pages do **not** get `calc` blocks evaluated — arithmetic belongs to items, where
-it can be checked against a constraint.
+it can be checked against a bound.
 
 ## A pages-only project
 

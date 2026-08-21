@@ -5,7 +5,7 @@ has to say, not what kind of item it is.
 
 ## List files — `items/**/*.yaml`
 
-For items that are mostly one sentence: requirements, constraints, tests, log
+For items that are mostly one sentence: requirements, bounds, tests, log
 entries. `defaults:` applies to every entry in the file.
 
 ```yaml
@@ -42,13 +42,13 @@ items:
   - id: LOG-005
     date: 2026-03-16
     summary: Thermal check fails at the current power-stage allocation.
-    addresses: [CON-THM-001]
+    addresses: [BND-THM-001]
     body: |
       Three ways out, none chosen yet:
 
       1. Widen the allocation to about 2.0 × 1.0 inches.
       2. Improve efficiency — little headroom at this current.
-      3. Renegotiate CON-THM-001; the 55 °C ambient may not be real.
+      3. Renegotiate BND-THM-001; the 55 °C ambient may not be real.
 ```
 
 The body is markdown, and supports everything a `.md` file's body does, including
@@ -159,8 +159,8 @@ items:
   - id: REQ-IO-AI-002
     text: The AI accelerator rail shall supply 40 A continuous.
 
-  - section: constraint
-  - id: CON-IO-001
+  - section: bound
+  - id: BND-IO-001
     limit: "<= 5 A"
     rationale: Trace width on the outer layer at 1 oz copper.
 ```
@@ -174,9 +174,9 @@ text: The AI accelerator rail shall regulate to 0.85 V ±3%.
 ---
 
 ---
-section: constraint
+section: bound
 ---
-id: CON-IO-001
+id: BND-IO-001
 limit: "<= 5 A"
 rationale: Trace width on the outer layer at 1 oz copper.
 ---
@@ -217,7 +217,7 @@ precedence as today.
   silently — it is an error at the section marker itself, naming both values:
 
   ```
-  ERROR items/main-io/interfaces.yaml:2 — 'section: constraint' conflicts with
+  ERROR items/main-io/interfaces.yaml:2 — 'section: bound' conflicts with
         this file's own 'defaults: {type: requirement}' -- a section asserts
         what its items are; reconcile the two rather than leaving them to
         silently disagree. Drop 'type:' from defaults:, or make it match.
@@ -307,7 +307,7 @@ whatever helps you find things:
 items/
   requirements/power.yaml
   requirements/mechanical.yaml
-  constraints/thermal.yaml
+  bounds/thermal.yaml
   decisions/dec-pwr-001-regulator.md
   tests/power.yaml
   log/board-a.yaml

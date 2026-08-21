@@ -60,7 +60,7 @@ Substitutes a calc value from the same item.
 ### Cross-references
 
 ```markdown
-The budget in CON-THM-001 drives this.        <- bare ID, autolinked
+The budget in BND-THM-001 drives this.        <- bare ID, autolinked
 See [[REQ-PWR-002|the input range]] instead.  <- explicit, custom text
 See [[fig:fig-curve]] for the efficiency curve. <- figure reference
 ```
@@ -244,6 +244,6 @@ option to turn this on.
 
 ## Where markdown is *not* used
 
-Field values are plain text, not markdown. A requirement's `text`, a constraint's
+Field values are plain text, not markdown. A requirement's `text`, a bound's
 `rationale`, and an option's `because` all render literally. If you need
 formatting, put it in the body.

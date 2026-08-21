@@ -156,7 +156,7 @@ board moves. A project that has never declared `workspaces:` never gets a
 
 Each registered workspace gets its own scoped `document-<workspace>.html`,
 `coverage-<workspace>.html`, `log-<workspace>.html`, `references-<workspace>.html`,
-and `summary-<workspace>.html`, exactly like a board does. The nav bar nests
+and `summary-<workspace>.html`, exactly like a board does. The sidebar nests
 each board's group inside its workspace's group, derived from which boards
 actually have items resolving into that workspace — a board with no items
 yet (or items outside any workspace) falls back to a top-level group, same

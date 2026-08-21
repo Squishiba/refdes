@@ -1,7 +1,7 @@
 # The standard library
 
 A new project's `refdes.yaml` doesn't need to declare `requirement`,
-`constraint`, or any of the usual hardware-traceability vocabulary by hand.
+`bound`, or any of the usual hardware-traceability vocabulary by hand.
 `refdes` ships a **standard dictionary** — six item types, their fields, their
 status lifecycles, and the link vocabulary connecting them — bundled inside
 the package and resolved live, by reference, into every project that opts in.
@@ -9,7 +9,7 @@ the package and resolved live, by reference, into every project that opts in.
 ```yaml
 standard:
   base: hardware
-  version: 2
+  version: 3
   presets: []
 ```
 
@@ -27,9 +27,9 @@ the standard link vocabulary:
 | Type | Prefix | Status lifecycle | Purpose |
 |---|---|---|---|
 | `requirement` | `REQ` | `draft` → `active` → `retired` | What the design must do |
-| `constraint` | `CON` | `draft` → `active` → `retired` | A numeric bound, checkable in a `calc` block |
+| `bound` | `BND` | `draft` → `active` → `retired` | A machine-checkable limit, compared against a `calc` result |
 | `decision` | `DEC` | `proposed` → `in_progress` → `accepted` / `on_hold` / `rejected` / `superseded` | A settled choice, with options considered |
-| `test` | `TST` | `planned` → `passing` / `failing` / `blocked` | Proof a requirement or constraint holds |
+| `test` | `TST` | `planned` → `passing` / `failing` / `blocked` | Proof a requirement or bound holds |
 | `component` | `CMP` | `candidate` → `selected` / `obsolete` | A specific part realizing a decision |
 | `log` | `LOG` | — (append-only) | The dated, unedited record of how the design got here |
 
@@ -116,7 +116,7 @@ Bundled, curated extensions to the base standard, opted into by name:
 ```yaml
 standard:
   base: hardware
-  version: 2
+  version: 3
   presets: [design-debate]
 ```
 
@@ -208,6 +208,11 @@ refdes new decision > items/power/dec-005.md
 ---
 id:
 type: decision
+# source:  # text
+# note:  # text
+# tags:  # list
+# owner:  # person
+# last_reviewed:  # date
 title:  # required -- text
 status: proposed  # choices: proposed, in_progress, accepted, on_hold, rejected, superseded
 # rationale:  # text; required when status is 'rejected'
@@ -215,7 +220,7 @@ status: proposed  # choices: proposed, in_progress, accepted, on_hold, rejected,
 # options:  # options
 # checks:  # checks
 # satisfies: []  # target: requirement
-# constrained_by: []  # target: constraint
+# constrained_by: []  # target: bound
 # supersedes: []  # target: decision
 # selects: []  # target: component
 # blocked_by: []  # target: any
@@ -311,17 +316,42 @@ hand-edit `standard.version:` and read `refdes check`'s diagnostics for
 whatever changed — but the command does the rewrite for you when the change
 is one a `migration.yaml` already describes.
 
-`hardware@2` is the first version bump: `constraint.title` is renamed to
-`constraint.text`, matching `requirement.text`'s role as the type's one
-required content field (`title` was a short-label field with nowhere for a
-constraint's actual normative sentence to go but the optional `body:`).
-`hardware@1` keeps `title:` and resolves exactly as it always has — nothing
-changes for a project that doesn't touch its pin. A project that does move to
-`version: 2` (or later) with items still declaring `constraint.title` gets a
-specific diagnostic naming the rename, not a generic unknown-field warning
-paired with an unrelated-looking missing-required error — or, run `refdes
-standard upgrade --to 2` and the rewrite (and the diagnostic) never happens
-at all.
+### The versions shipped so far
+
+**`hardware@1`** — the original six types. `constraint` carries a `title:`
+field.
+
+**`hardware@2`** — `constraint.title` is renamed to `constraint.text`,
+matching `requirement.text`'s role as the type's one required content field
+(`title` was a short-label field with nowhere for a constraint's actual
+normative sentence to go but the optional `body:`). `constraint.preview`
+becomes `[status, text, limit]` to match.
+
+**`hardware@3`** — `constraint` itself is renamed to **`bound`**, and its
+prefix `CON` to `BND`. In plain English a constraint colloquially *is* a
+requirement, and that near-synonymy is what produced real authoring mix-ups;
+`bound` doesn't have the problem, and it names the `limit:` field that makes
+the type mechanically distinct — a `bound` is a machine-checkable limit, a
+`requirement` is prose. `bound` also gains `refines: [bound]` alongside its
+existing `derives_from: [requirement, bound]`: before this, only
+`requirement` could `refines:`, so a constraint narrowing another constraint
+had nowhere to say so. Both verbs stay, because they answer different
+questions — "what does this narrow" versus "what was this derived from" —
+and `derives_from:` alone can still cross into `requirement`, which
+`refines:` deliberately cannot.
+
+Every earlier version resolves exactly as it always has; nothing changes for
+a project that doesn't touch its pin.
+
+**Moving a pin by hand still works**, and the two renames each get a specific
+diagnostic rather than a generic one. An item still declaring
+`constraint.title` at `version: 2` or later is told the field was renamed
+(and its value is used for `text:` in that build, so the rest of the item
+doesn't also report a missing required field). An item still typed
+`constraint` at `version: 3` is told the type is now `bound` — worth having
+because `constraint` and `bound` share almost no letters, so a did-you-mean
+suggestion offers nothing. Running `refdes standard upgrade --to 3` instead
+does the whole rewrite, ids included, and neither diagnostic ever happens.
 
 ## `coverable`, `coverable_statuses`, `verifying_statuses`, and `required_when`
 

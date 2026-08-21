@@ -40,7 +40,7 @@ site:
 | `title` | `Design Reference` | Site title and nav brand |
 | `out` | `_site` | Output directory, relative to the project root |
 | `pages` | `pages` | Directory of narrative [pages](pages.md) |
-| `nav` | *(empty)* | Explicit page order in the nav bar, by slug |
+| `nav` | *(empty)* | Explicit page order in the sidebar, by slug |
 | `version` | *(empty)* | Written into `items.json`; checked by downstream [imports](multi-board.md) |
 | `assets` | *(empty)* | Directories copied verbatim into `assets/`, no reference needed — see [images and other local files](markdown.md#images-and-other-local-files) |
 
@@ -173,9 +173,9 @@ explicit `via=` follows every link type where `trace` is still `true`.
 
 ```yaml
 types:
-  constraint:
-    prefix: CON
-    label: Constraint
+  bound:
+    prefix: BND
+    label: Bound
     append_only: false
     preview: [status, text, limit]
     coverable: true
@@ -188,7 +188,8 @@ types:
       owner:  { type: person, on_change: log }
     include: [provenance]
     links:
-      derives_from: [requirement, constraint]
+      refines:      [bound]
+      derives_from: [requirement, bound]
     body: { on_change: invalidate }
 ```
 
@@ -293,7 +294,7 @@ formats](output.md#items.json).
 
 ### Starter types
 
-`requirement`, `constraint`, `decision`, `component`, `test`, `log` — the
+`requirement`, `bound`, `decision`, `component`, `test`, `log` — the
 [standard library](standard-library.md) ships these by default, so most
 projects never declare `types:` at all. A project may still add, remove, or
 override any of them under `standard:`'s merge rules, or declare its own from
@@ -301,7 +302,10 @@ scratch under `standard: none`. Nothing in the code depends on these
 particular names — `coverable:`/`coverable_statuses:`/`verifying_statuses:`
 (above) are what makes a type participate in coverage, not its name; the
 fallback that still checks for `requirement`/`constraint` by name only fires
-when a type declares no `coverable:` at all, and is removed in refdes 1.0.
+when a type declares no `coverable:` at all. It keeps those two literal names,
+deliberately unchanged by the `hardware@3` rename, because its whole job is to
+reproduce what projects did before `coverable:` existed; it is removed in
+refdes 1.0.
 
 ---
 

@@ -116,7 +116,7 @@ ERROR calc P: declared as W but the expression evaluates to V/A
 ```
 
 Assertions also **pin the display unit**, which is why `P_dens : W/in^2` reports
-`0.2366 W/in²` rather than `236.6 mW/in²` — matching the constraint it is checked
+`0.2366 W/in²` rather than `236.6 mW/in²` — matching the bound it is checked
 against. Use them wherever getting the dimension wrong would be expensive.
 
 ## Tolerances

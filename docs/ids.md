@@ -100,7 +100,7 @@ records the high-water mark per prefix:
 
 ```yaml
 burned:
-  CON-THM: 2
+  BND-THM: 2
   DEC-PWR: 1
   REQ-PWR: 5
 allocated:

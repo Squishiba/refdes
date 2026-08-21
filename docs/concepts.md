@@ -2,7 +2,7 @@
 
 ## Items
 
-Everything is an **item**: a requirement, a constraint, a decision, a component, a
+Everything is an **item**: a requirement, a bound, a decision, a component, a
 test, a log entry. An item has
 
 - a stable **ID** (`REQ-PWR-002`) that never changes,
@@ -35,7 +35,7 @@ else. `3.3 V + 1.2 A` is a build error, not a silent wrong answer. Tolerances
 propagate as intervals, so `12 V ± 5%` carries 11.4 V to 12.6 V through every
 subsequent expression.
 
-This is what makes constraint checking possible: a limit of `<= 0.15 W/in^2` and a
+This is what makes checking possible: a limit of `<= 0.15 W/in^2` and a
 computed `0.2366 W/in²` are comparable quantities, not strings.
 
 ## Checks are evaluated at the worst case
@@ -83,6 +83,11 @@ Every field declares what a change to it means:
 | `invalidate` | yes | yes | yes |
 | `log` | yes | no | no |
 | `ignore` | no | no | no |
+
+The last two columns are behaviour today; the timeline column is design
+intent for the parked git-history layer, so `log` and `ignore` are currently
+indistinguishable in every observable way. See [change
+tracking](change-tracking.md#the-three-modes).
 
 The **content hash** of an item is computed over its `invalidate` fields only. That
 is what stops a change of owner from marking fifty links suspect, and it is the

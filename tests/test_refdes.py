@@ -299,14 +299,14 @@ def test_unreadable_limit_hints_when_it_looks_like_several_bounds():
     temperature, clamp voltage) that motivated this hint."""
     with pytest.raises(calc.CalcError) as exc:
         calc.parse_limit("±1 % of full scale across 0-60 degC, with 12 V TVS protection")
-    assert "split it into separate constraint items" in str(exc.value)
+    assert "split it into one item per bound" in str(exc.value)
 
 
 def test_unreadable_limit_does_not_hint_on_an_ordinary_typo():
     """A single-bound typo shouldn't get told to split into multiple constraints."""
     with pytest.raises(calc.CalcError) as exc:
         calc.parse_limit("somewhere under 2 watts")
-    assert "split it into separate constraint items" not in str(exc.value)
+    assert "split it into one item per bound" not in str(exc.value)
 
 
 def test_unreadable_limit_does_not_hint_on_a_tolerance_alone():
@@ -314,7 +314,7 @@ def test_unreadable_limit_does_not_hint_on_a_tolerance_alone():
     bounds) should not trigger the hint either."""
     with pytest.raises(calc.CalcError) as exc:
         calc.parse_limit("100 ohm ±5%")
-    assert "split it into separate constraint items" not in str(exc.value)
+    assert "split it into one item per bound" not in str(exc.value)
 
 
 # -------------------------------------------------------------------- on_change

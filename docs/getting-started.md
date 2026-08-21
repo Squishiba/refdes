@@ -1,7 +1,7 @@
 # Getting started
 
 We will build a small but complete project: two requirements, a thermal
-constraint, a decision with real arithmetic, a test, and a log entry. By the end
+bound, a decision with real arithmetic, a test, and a log entry. By the end
 the build will catch a genuine design problem.
 
 ## Install
@@ -31,7 +31,8 @@ site:
 
 standard:
   base: hardware
-  version: 2
+  version: 3
+  presets: []
 
 id:
   width: 3
@@ -39,7 +40,7 @@ id:
 ```
 
 That's the whole file `refdes init` writes — rename the title to taste.
-`version: 2` is whatever the installed `refdes` currently bundles as newest,
+`version: 3` is whatever the installed `refdes` currently bundles as newest,
 never the literal word `"latest"` — a later `refdes` may write a higher
 number here; that's expected, not a sign this page is out of date. Nothing
 here defines a `requirement` or a `link_types:` block — that all comes from
@@ -91,25 +92,29 @@ refdes id
 ```
 
 ```
-allocated REQ-PWR-001  (items/requirements/power.yaml:9)  The unit shall operate...
-allocated REQ-PWR-002  (items/requirements/power.yaml:12) The 3V3 rail shall supply...
+allocated REQ-PWR-001  (items/requirements/power.yaml:9) The unit shall operate from an input supply of 9 V to 36 V.
+allocated REQ-PWR-002  (items/requirements/power.yaml:12) The 3V3 rail shall supply 1.2 A continuous.
 allocated 2 id(s)
 ```
 
 The IDs are now written into your file. They will never change. See [IDs](ids.md).
 
-## 3. Add a constraint with a real limit
+## 3. Add a bound with a real limit
 
-`items/constraints/thermal.yaml`
+A **bound** is a machine-checkable limit — the type that makes the next step
+possible. (It was called `constraint` up to `hardware@2`; see [the standard
+library](standard-library.md#versioning-and-pinning).)
+
+`items/bounds/thermal.yaml`
 
 ```yaml
 defaults:
-  type: constraint
-  prefix: CON-THM
+  type: bound
+  prefix: BND-THM
   status: active
 
 items:
-  - id: CON-THM-001
+  - id: BND-THM-001
     text: Board power density
     limit: "<= 0.15 W/in^2"
     rationale: >
@@ -141,7 +146,7 @@ title: 3V3 rail regulator topology
 status: accepted
 date: 2026-03-14
 satisfies: [REQ-PWR-002]
-constrained_by: [CON-THM-001]
+constrained_by: [BND-THM-001]
 options:
   - name: LDO (TPS7A4700)
     verdict: rejected
@@ -151,11 +156,11 @@ options:
     because: 93 % efficiency at half load, ripple within spec with a 2nd-stage LC.
 checks:
   - value: P_dens
-    against: CON-THM-001
+    against: BND-THM-001
 ---
 
 The 3V3 rail draws up to 1.2 A in a sealed enclosure. REQ-PWR-002 sets the load;
-CON-THM-001 sets what we may dissipate getting there.
+BND-THM-001 sets what we may dissipate getting there.
 
 ```calc
 V_out            = 3.3 V
@@ -176,7 +181,7 @@ Three things are happening:
   would be a build error.
 - `P_diss : W` is a **unit assertion** — if the algebra drifted dimensionally, the
   build fails at that line.
-- `checks:` compares `P_dens` against `CON-THM-001`'s limit.
+- `checks:` compares `P_dens` against `BND-THM-001`'s limit.
 
 ## 5. Build
 
@@ -185,12 +190,15 @@ refdes build
 ```
 
 ```
-ERROR   items/decisions/dec-pwr-001-regulator.md:2 [DEC-PWR-001] — P_dens
-        violates CON-THM-001: worst case 0.2366 W/in² vs <= 0.15 W/in^2
+ERROR   items/decisions/dec-pwr-001-regulator.md:2 [DEC-PWR-001] — P_dens violates BND-THM-001: worst case 0.2366 W/in² vs <= 0.15 W/in^2
 WARNING <project> — 2 item(s) with no coverage — see coverage.html
 4 items, 1 errors, 1 warnings
-site written to _site
+site written to /path/to/my-board/_site
+build completed with errors (use --keep-going to exit 0)
 ```
+
+Errors go to stderr and everything else to stdout, so the two streams may
+interleave differently in your terminal than they do above.
 
 That is the point of the tool. Nobody typed 0.2366; the build computed it and
 compared it to the budget. Open `_site/index.html`.
@@ -230,11 +238,11 @@ items:
   - id: LOG-001
     date: 2026-03-16
     summary: Thermal check fails; the power stage is over the density budget.
-    addresses: [CON-THM-001]
+    addresses: [BND-THM-001]
     body: |
       Three ways out, none chosen: widen the allocation, improve efficiency, or
       renegotiate the 0.15 W/in² figure. Flagging rather than quietly widening,
-      because option three changes a constraint other decisions depend on.
+      because option three changes a bound other decisions depend on.
 ```
 
 Log entries are **append-only**. Once built, editing this entry fails the build;

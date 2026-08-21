@@ -40,7 +40,7 @@ items:
 
 | Link | Points at |
 |---|---|
-| `addresses` | a requirement or constraint this entry works on |
+| `addresses` | a requirement or bound this entry works on |
 | `records` | the decision this entry led to |
 | `amends` | an earlier log entry this corrects |
 
@@ -74,6 +74,21 @@ ERROR items/log/board-a.yaml:33 [LOG-A-003] — LOG-A-003 is append-only and has
       `amends: [LOG-A-003]` instead, or run with --reseal if the edit is
       deliberate.
 ```
+
+**Deleting a sealed entry fails the same way.** A page torn out of the
+notebook is worse than one written over, so the two are reported alike:
+
+```
+ERROR  LOG-A-003 is append-only and was sealed, but no item with that id is
+       in the project any more. An append-only entry is corrected by appending
+       one that `amends` it, never by deleting it -- restore it, or run with
+       --reseal if the removal is deliberate.
+```
+
+An id that is still in the project under a different board, or that another
+item now claims through [`former_ids:`](ids.md#renumbering-former_ids) after a
+renumbering, has not been deleted and is not reported. `--reseal` accepts the
+removal and drops the orphaned seal.
 
 Commit `.refdes/log-seal.yaml` (and any `.refdes/log-seal-<board>.yaml`) along
 with your entries.

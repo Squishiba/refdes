@@ -84,7 +84,7 @@ $ refdes release rev-b
 
 release 'rev-b' blocked -- not stamped:
   FAIL     draft_items            REQ-PWR-004, REQ-PWR-005
-  FAIL     uncovered_requirements CON-THM-002
+  FAIL     uncovered_requirements BND-THM-002
   pass     unpinned_citations
   pass     missing_vendored_copies
   skipped  unverified_requirements

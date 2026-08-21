@@ -75,7 +75,7 @@ percentage.
 **Computed values.** Every value every calc block produces, in one table. If a number
 in the design is wrong, it is on this page.
 
-**Not linked to anything.** Items with no links in either direction. A constraint that
+**Not linked to anything.** Items with no links in either direction. A bound that
 something is *checked against* counts as traced even though a check creates no link
 edge, so it will not appear here. Being listed is not an error — a standalone
 component is legitimate — but it is where traceability quietly stops.
@@ -95,10 +95,35 @@ across pages.
 It is also the intended input for real PDF generation later — the anchor rewriting
 and linear ordering are the parts that would otherwise break.
 
+## Site navigation
+
+Every page carries the same **sidebar**, generated from the project's own
+structure — there is nothing to hand-maintain and no `nav:` tree to write.
+
+- Narrative [pages](pages.md) that belong to no board or workspace come
+  first, then the project-wide generated reports.
+- Once a `boards:` or `workspaces:` registry exists, each one becomes a
+  collapsible group holding its own pages and its own scoped reports, with
+  boards nesting inside the workspace their items resolve into. A group
+  renders already open when the page you are reading lives inside it.
+- The link to the current page is marked `aria-current="page"`, so screen
+  readers and the stylesheet agree on where you are.
+- Below a narrow viewport the whole tree collapses behind a single
+  "☰ Navigation" line, so page content starts at the top of a phone screen
+  instead of several hundred pixels down. It is a CSS-only toggle — no
+  JavaScript is involved, and it works with JavaScript disabled.
+
+A page with more than two `##` headings additionally gets an on-page contents
+list built from those headings. Where JavaScript is available, it highlights
+the section currently in view as you scroll; without it, it stays an ordinary
+list of working anchors.
+
+The print stylesheet hides all of this.
+
 ## An item page
 
 - Type badge, ID, check state, and — where relevant — `imported` or `append-only`
-- Coverage strip for requirements and constraints
+- Coverage strip for requirements and bounds
 - Field table, with each field's `on_change` mode shown
 - Rendered body, with calc blocks as evaluated tables and IDs autolinked
 - Options-considered panel for decisions, chosen and rejected
@@ -144,7 +169,7 @@ The interchange format. **Anything downstream should read this, not the HTML.**
             "local_path": "", "detail": "" }
         ]
       },
-      "links": { "satisfies": ["REQ-PWR-002"], "constrains": ["CON-THM-001"] },
+      "links": { "satisfies": ["REQ-PWR-002"], "constrained_by": ["BND-THM-001"] },
       "backlinks": { "recorded_by": ["LOG-A-004"] },
       "content_hash": "673e6ba11269f350",
       "external": false,
@@ -155,7 +180,7 @@ The interchange format. **Anything downstream should read this, not the HTML.**
           "result": "0.2981 W", "bounds": "", "error": null }
       ],
       "checks": [
-        { "value": "P_dens", "against": "CON-THM-001", "ok": false,
+        { "value": "P_dens", "against": "BND-THM-001", "ok": false,
           "actual": "0.2366 W/in²", "limit": "<= 0.15 W/in^2",
           "detail": "worst case 0.2366 W/in² vs <= 0.15 W/in^2",
           "margin": -0.5773 }

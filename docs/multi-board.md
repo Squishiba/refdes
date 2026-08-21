@@ -17,7 +17,7 @@ items/
 ```
 
 Give each board its own prefix via `defaults.prefix`. Links, checks, back-links,
-coverage, and previews all work across folders. A shared constraint checked by two
+coverage, and previews all work across folders. A shared bound checked by two
 boards shows both in its incoming links:
 
 ```
@@ -89,7 +89,7 @@ WARNING items/board-b/requirements.yaml:9 [REQ-PWR-004] — item is on board
 **Per-board pages.** Each registered board gets its own scoped
 `document-<board>.html`, `coverage-<board>.html`, `log-<board>.html`, and
 `summary-<board>.html`, alongside the unchanged project-wide versions. Handing
-`document-board-a.html` to Board A's team shows only their items. The nav bar
+`document-board-a.html` to Board A's team shows only their items. The sidebar
 gets a group per board linking to that set automatically — see
 [pages](pages.md#grouping-a-page-under-a-board) for tagging a hand-written
 overview page into the same group instead of hand-linking it.

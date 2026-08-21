@@ -18,16 +18,33 @@ Typo, or a type not declared in `refdes.yaml`.
 A `.md` file under `items/` needs front-matter. If it is not an item, move it out
 of `items/`.
 
+**`invalid YAML front-matter: ...`** on a line partway down a `.md` file
+A [multi-item markdown file](authoring.md#several-items-in-one-file) reads every
+`---`-fenced block that opens with a `key:` line as an item. This is one of those
+blocks failing to parse — the line number points inside it. Until it parses, that
+item is not in the project at all.
+
 **`unknown field 'sorce'. Did you mean 'source'?`**
 A warning. The value is kept but not validated. Fix the spelling or declare the
 field in the schema.
 
 **`missing required field 'text'`**
-The schema marks it `required: true`. Note requirements use `text`, decisions and
-constraints use `title`.
+The schema marks it `required: true`. In the bundled standard, `requirement` and
+`bound` use `text`; `decision`, `test`, and `component` use `title`.
 
-**`status: 'in-review' is not one of ['draft', 'open', 'accepted', 'retired']`**
+**`status: 'in-review' is not one of ['draft', 'active', 'retired']`**
 Use one of the declared `choices`, or add yours to the schema.
+
+**`unknown type 'constraint' -- it is now 'bound' in hardware@3 ...`**
+The `hardware@3` rename. Either put `standard.version:` back where it was and
+run `refdes standard upgrade --to 3` (which rewrites the items and their ids
+for you), or rename by hand — the prefix moved from `CON` to `BND` too. See
+[the standard library](standard-library.md#the-versions-shipped-so-far).
+
+**`'constraint.title' is now 'constraint.text' -- rename this key ...`**
+The `hardware@2` rename, same story one version earlier. Its value is used for
+`text:` in that build so the item doesn't also report a missing required
+field.
 
 ## IDs
 
@@ -118,6 +135,14 @@ change the bound, or record in the [design log](design-log.md) that you know.
 Working as designed. Append a new entry with `amends: [LOG-A-003]`. If the edit is
 genuinely deliberate, `refdes build --reseal` — it is recorded in
 `refdes audit` forever.
+
+**`LOG-A-003 is append-only and was sealed, but no item with that id is in the
+project any more`**
+The entry was deleted rather than amended. Restore it and append a correction
+that `amends` it, or — if the removal really is deliberate — `refdes build
+--reseal`, which drops the orphaned seal. If the item was renumbered rather
+than removed, record the old id in its replacement's
+[`former_ids:`](ids.md#renumbering-former_ids) and this stops firing.
 
 **Every log entry reports as modified after a rebase or line-ending change.**
 The hash covers content, with whitespace normalised, so this should not happen from

@@ -3,7 +3,7 @@
 Reference documentation for hardware design decisions. Typed, linked items like
 sphinx-needs; authoring ergonomics closer to Quarto; a Doxygen-shaped reference
 site. The part that is neither: the math in a document is *evaluated*, carries
-units, and is checked against your constraints at build time.
+units, and is checked against your declared bounds at build time.
 
 A spec change propagates through the arithmetic and tells you which decisions it
 just invalidated.
@@ -27,12 +27,17 @@ python -m venv .venv && ./.venv/Scripts/python.exe -m pip install -e .
 ## Commands
 
 ```bash
+refdes init      # write a minimal refdes.yaml pointing at the standard library
 refdes build     # render _site/ and items.json
 refdes check     # validate without rendering; non-zero exit on errors
 refdes index     # print items.json to stdout, for tooling
 refdes id        # allocate IDs for items that have none, writing them back
 refdes audit     # list suppressed fields, resealed entries, board moves, and imports
 ```
+
+Fifteen commands in all, including `new`, `schema`, `fetch`, `revision`,
+`release`, `stub-tests`, `revise`, `standard`, and `former-ids` — see the
+[CLI reference](docs/cli-reference.md).
 
 ## Editor support
 
@@ -147,22 +152,22 @@ P : W = V_out / I_load     ->  error: declared as W but the expression evaluates
 ```
 
 It also pins the display unit, which is why `P_dens : W/in^2` reports
-`0.2366 W/in²` rather than `236.6 mW/in²` — matching the constraint it is checked
+`0.2366 W/in²` rather than `236.6 mW/in²` — matching the bound it is checked
 against. Annotations are optional; use them where getting the dimension wrong would
 be expensive.
 
 ## Checks
 
-A constraint declares a limit; a decision declares what it is checking:
+A bound declares a limit; a decision declares what it is checking:
 
 ```yaml
-# in the constraint
+# in the bound
 limit: "<= 0.15 W/in^2"
 
 # in the decision
 checks:
   - value: P_dens
-    against: CON-THM-001
+    against: BND-THM-001
 ```
 
 `refdes check` fails the build when the value violates the limit, evaluated at
@@ -178,8 +183,9 @@ Every field declares what a change to it means:
 | `log` | yes | no | no |
 | `ignore` | no | no | no |
 
-Set per field in `refdes.yaml`, overridable per item (with a required
-`reason:`). The content hash is computed over `invalidate` fields only, which is
+The timeline column is design intent for the parked git-history layer, so
+`log` and `ignore` behave identically today. Set per field in `refdes.yaml`,
+overridable per item (with a required `reason:`). The content hash is computed over `invalidate` fields only, which is
 what stops an owner change from marking fifty links suspect.
 
 `refdes audit` lists everything currently suppressed. Suppression is allowed;
@@ -202,7 +208,7 @@ items:
   - id: LOG-A-005
     date: 2026-03-16
     summary: Thermal check fails; power stage is over the density budget.
-    addresses: [CON-THM-001]
+    addresses: [BND-THM-001]
     body: |
       Three ways out, none chosen yet: widen the allocation, improve efficiency,
       or renegotiate the 0.15 W/in² figure...
@@ -220,6 +226,9 @@ ERROR  LOG-A-003 is append-only and has been modified since it was sealed.
        Append a new entry with `amends: [LOG-A-003]` instead, or run with
        --reseal if the edit is deliberate.
 ```
+
+Deleting one fails the same way, for the same reason — a page torn out of the
+notebook is worse than one written over.
 
 Corrections are appended, exactly as in a paper notebook where you strike through
 and initial rather than erase. `--reseal` exists for deliberate overrides and is
@@ -337,7 +346,7 @@ says what to worry about:
   first. Pass/fail hides the difference between clearing a thermal limit by 3% and
   clearing it by 200%; only one of those survives a hot day.
 - **Computed values** — every number every calc block produces, in one table.
-- **Not linked to anything** — where traceability quietly stops. A constraint that is
+- **Not linked to anything** — where traceability quietly stops. A bound that is
   *checked against* counts as traced, even though a check creates no link edge.
 
 `_site/items.json` is the machine-readable export, margins included. Anything

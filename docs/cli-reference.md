@@ -1,7 +1,7 @@
 # CLI reference
 
 ```
-refdes [-c CONFIG] {build,check,revision,release,index,id,fetch,audit,init,new,schema,standard,revise,stub-tests} [options]
+refdes [-c CONFIG] {build,check,revision,release,index,id,fetch,audit,init,new,schema,standard,revise,stub-tests,former-ids} [options]
 ```
 
 | Global option | Effect |
@@ -53,11 +53,12 @@ refdes check
 ```
 
 ```
-ERROR   items/decisions/dec-pwr-001-regulator-topology.md:2 [DEC-PWR-001] —
-        P_dens violates CON-THM-001: worst case 0.2366 W/in² vs <= 0.15 W/in^2
+ERROR   items/decisions/dec-pwr-001-regulator-topology.md:2 [DEC-PWR-001] — P_dens violates BND-THM-001: worst case 0.2366 W/in² vs <= 0.15 W/in^2
 WARNING <project> — 1 item(s) with no coverage — see coverage.html
 20 items, 1 errors, 8 warnings
 ```
+
+(Wrapped here for the page; the tool prints each diagnostic on one line.)
 
 Errors go to stderr, warnings to stdout. Every diagnostic leads with
 `file:line`, so editors and CI annotations can link straight to the source.
@@ -143,7 +144,7 @@ refdes release rev-b
 
 release 'rev-b' blocked -- not stamped:
   FAIL     draft_items            REQ-PWR-004, REQ-PWR-005
-  FAIL     uncovered_requirements CON-THM-002
+  FAIL     uncovered_requirements BND-THM-002
   pass     unpinned_citations
   pass     missing_vendored_copies
   skipped  unverified_requirements
@@ -197,7 +198,7 @@ refdes id
 ```
 
 ```
-allocated REQ-PWR-005  (items/requirements/power.yaml:36)  The unit shall tolerate...
+allocated REQ-PWR-005  (items/requirements/power.yaml:36) The unit shall tolerate a reversed input without damage.
 allocated 1 id(s)
 ```
 
@@ -258,7 +259,7 @@ refdes audit
 
 ```
 Schema fields not tracked as 'invalidate':
-  constraint
+  bound
     last_reviewed    ignore
     owner            log
 
@@ -420,12 +421,14 @@ Move a project's pinned `standard.version:` forward, rewriting every item
 file to match.
 
 ```bash
-refdes standard upgrade --to 2
+refdes standard upgrade --to 3
 ```
 
 Each bundled standard version ships its own `migration.yaml` — the delta
 from the version immediately before it (`hardware@2`'s renames
-`constraint.title` to `constraint.text`; see the [changelog](../CHANGELOG.md)).
+`constraint.title` to `constraint.text`; `hardware@3`'s renames the
+`constraint` type to `bound` and its `CON` prefix to `BND`). See [the
+versions shipped so far](standard-library.md#the-versions-shipped-so-far).
 Upgrading from `v1` to `v4` chains every intervening version's own
 migration, in order — `v1→v2`, then `v2→v3`, then `v3→v4` — never merged
 into one combined rename, so a name a later version reuses (freed up by an
@@ -442,6 +445,14 @@ Stops at the first version step that fails, leaving the project fully
 valid at whatever version it reached — never partway through a single
 step's own rewrite. Exits 1 on failure, 0 once every step to `--to N` has
 applied.
+
+> **The project must build clean first.** Both this and `refdes revise`
+> refuse outright if `refdes check` reports *any* error, so that a hash
+> change caused by the rename can't hide behind an already-broken build.
+> Note that a failing `checks:` result counts — a decision currently
+> violating a bound is an ordinary, often long-lived state of a real
+> project, and it will block the rename until it is resolved or the check
+> is downgraded with [`check_severity:`](checks.md#candidates-vs-decisions).
 
 ---
 
@@ -488,6 +499,26 @@ own `types:`/`link_types:` — so on a hand-rolled schema, pair the rename
 with your own edit to `refdes.yaml` (in whichever order makes both sides
 agree once both are done).
 
+**Structured references move; prose does not.** A link's own target list —
+in either YAML spelling, `key: [A, B]` or a block sequence of `- A` entries
+under a bare key — and a `checks:` entry's `against:` are rewritten along
+with the ids themselves. An id written into a rationale, a log entry's body,
+or a narrative page is deliberately left alone: rewriting prose means editing
+a sentence, including sealed ones that are not supposed to change. What it
+does instead is tell you, so the difference is never silent:
+
+```
+2 prose mention(s) of a renamed id left behind -- these no longer resolve,
+and were not rewritten (a rename never edits prose):
+  items/decisions/dec-pwr-001.md:36  CON-THM-001 -> BND-THM-001
+  pages/overview.md:5  CON-THM-001 -> BND-THM-001
+```
+
+Fix each one by hand, or — usually better — record the old id once as a
+[`former_ids:`](ids.md#renumbering-former_ids) entry on the renamed item, and
+every mention of it resolves again, marked "(formerly CON-THM-001)", with no
+historical sentence edited at all.
+
 Every affected item's content hash is carried forward, id by id, in every
 stamped baseline **and** every seal file (`.refdes/log-seal*.yaml`) — not
 just baselines. The same hash drives both: a baseline that doesn't carry
@@ -524,7 +555,7 @@ allocate the new items' ids.
 
 ```
 $ refdes stub-tests
-wrote 3 stub(s) to items/power/stub-tests.md: REQ-PWR-004, REQ-PWR-005, CON-THM-002
+wrote 3 stub(s) to items/power/stub-tests.md: REQ-PWR-004, REQ-PWR-005, BND-THM-002
 wrote 3 stub test(s) across 1 file(s)
 Run 'refdes id' to allocate ids for the new items.
 ```
@@ -624,7 +655,8 @@ python -m http.server -d _site 8000
 | `.refdes/log-seal-<board>.yaml` | **yes** | Append-only seals for one registered board's own log entries |
 | `.refdes/boards.yaml` | **yes** | Board and workspace drift manifest; the `workspaces:` section only appears for a project that has declared `workspaces:` |
 | `.refdes/citations.yaml` | **yes** | Citation lockfile (sha256, fetch time, vendored flag); written only by `refdes fetch` |
-| `.refdes/baselines/<name>.yaml` | **yes** | One file per `refdes revision`/`refdes release` stamp; never modified after it's written |
+| `.refdes/baselines/<name>.yaml` | **yes** | One file per `refdes revision`/`refdes release` stamp. Not rewritten by any ordinary command; `refdes revise` and `refdes standard upgrade` do edit it, to carry an item's content hash across a rename |
+| `.refdes/schema.json` | **no, gitignored** | The project's merged JSON Schema, for editor completion; rewritten by every command that loads the project |
 | `.refdes/vendor/` | **no, gitignored** | Vendored datasheet bytes, content-addressed by sha256; written only by `refdes fetch --url ... ` for a citation with `vendor: true` |
 | `_site/` | no | Generated output |
 

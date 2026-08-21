@@ -1,8 +1,8 @@
 # Refdes documentation
 
 Reference documentation for hardware design decisions. Typed, linked items with
-units-aware math that is evaluated and checked against your constraints at build
-time.
+units-aware math that is evaluated and checked against your declared bounds at
+build time.
 
 ## Start here
 
@@ -15,7 +15,7 @@ time.
 
 | Guide | Covers |
 |---|---|
-| [The standard library](standard-library.md) | The bundled types and links every project starts with, and how to override or extend them |
+| [The standard library](standard-library.md) | The bundled types and links every project starts with, how to override or extend them, and what each pinned version changed |
 | [Authoring items](authoring.md) | The two file formats, fields, bodies, when to use which |
 | [Pages](pages.md) | Narrative markdown alongside your items — and pages-only sites |
 | [Markdown reference](markdown.md) | Every formatting feature that works in an item body |
@@ -43,11 +43,11 @@ time.
 
 ## The one-paragraph version
 
-You write requirements, constraints, decisions, tests, and log entries as small
+You write requirements, bounds, decisions, tests, and log entries as small
 files with YAML front-matter. Each gets a stable ID and typed links to the others.
 Decisions can contain `calc` blocks whose arithmetic carries real units and
-tolerances, and can declare `checks` against a constraint's limit. `refdes build`
+tolerances, and can declare `checks` against a bound's limit. `refdes build`
 validates everything, evaluates the math, verifies the checks at the worst-case
 tolerance bound, and renders a static HTML site plus a machine-readable
-`items.json`. When someone tightens a constraint, the build tells you which
+`items.json`. When someone tightens a bound, the build tells you which
 decisions just stopped being true.
