@@ -140,7 +140,7 @@ Named, reusable groups of field definitions, `include:`d by one or more types
 instead of being retyped on each. The standard is authored this way internally
 (`provenance`, `stewardship`); a project can declare its own for fields
 repeated across its own custom types. See [the standard
-library](standard-library.md#field_sets-and-include) for `include:`'s merge
+library](standard-library.md#field-sets-and-include) for `include:`'s merge
 order against a type's own fields.
 
 ---
@@ -290,7 +290,7 @@ anything. Any field declared `type: citations` gets a `url` (required), plus
 item page, and an entry in `references.html` — see [citing a
 datasheet](markdown.md#citing-a-datasheet), [CLI
 reference](cli-reference.md#refdes-fetch), and [output
-formats](output.md#items.json).
+formats](output.md#items-json).
 
 ### Starter types
 

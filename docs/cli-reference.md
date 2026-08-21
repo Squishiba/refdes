@@ -253,7 +253,7 @@ invalidation, item-level overrides and their stated reasons, resealed log entrie
 since the last [revision and release](lifecycle.md), [blocked_by
 chains](links.md#blocked-by-and-the-cascade-report), imported projects,
 [citations](markdown.md#citing-a-datasheet), [parts](parts.md), and
-[former ids](ids.md#renumbering-former_ids).
+[former ids](ids.md#renumbering-former-ids).
 
 ```bash
 refdes audit
@@ -352,7 +352,7 @@ Refuses to run if `refdes.yaml` already exists in the current directory.
 
 Print a starter item's front matter for `TYPE` to stdout — any type in the
 merged schema, standard or project-defined. See [the standard
-library](standard-library.md#refdes-new-type).
+library](standard-library.md#refdes-new-lt-type-gt).
 
 ```bash
 refdes new decision > items/power/dec-005.md
@@ -517,7 +517,7 @@ and were not rewritten (a rename never edits prose):
 ```
 
 Fix each one by hand, or — usually better — record the old id once as a
-[`former_ids:`](ids.md#renumbering-former_ids) entry on the renamed item, and
+[`former_ids:`](ids.md#renumbering-former-ids) entry on the renamed item, and
 every mention of it resolves again, marked "(formerly CON-THM-001)", with no
 historical sentence edited at all.
 
@@ -583,7 +583,7 @@ appended to, never overwritten, so nothing already there is ever touched.
 ## `refdes former-ids propose`
 
 Infer old-to-new id mappings after a renumbering, and write `former_ids:`
-only for the ones you confirm. See [renumbering](ids.md#renumbering-former_ids).
+only for the ones you confirm. See [renumbering](ids.md#renumbering-former-ids).
 
 | Option | Effect |
 |---|---|

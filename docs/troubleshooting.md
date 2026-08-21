@@ -142,7 +142,7 @@ The entry was deleted rather than amended. Restore it and append a correction
 that `amends` it, or — if the removal really is deliberate — `refdes build
 --reseal`, which drops the orphaned seal. If the item was renumbered rather
 than removed, record the old id in its replacement's
-[`former_ids:`](ids.md#renumbering-former_ids) and this stops firing.
+[`former_ids:`](ids.md#renumbering-former-ids) and this stops firing.
 
 **Every log entry reports as modified after a rebase or line-ending change.**
 The hash covers content, with whitespace normalised, so this should not happen from

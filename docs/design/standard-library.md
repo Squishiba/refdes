@@ -596,7 +596,7 @@ sealed `log` entry, a build-breaking seal violation) doesn't. A
 project-local equivalent, `refdes revise <mapping-file>`, applies the same
 engine from a hand-written mapping instead of a bundled `migration.yaml`,
 for vocabulary that isn't part of the standard at all — see the [CLI
-reference](../cli-reference.md#refdes-standard-upgrade---to-n). The
+reference](../cli-reference.md#refdes-standard-upgrade-to-n). The
 report-first, no-rewrite-by-default posture below is what was designed;
 it is not what got built.
 

@@ -86,7 +86,7 @@ ERROR  LOG-A-003 is append-only and was sealed, but no item with that id is
 ```
 
 An id that is still in the project under a different board, or that another
-item now claims through [`former_ids:`](ids.md#renumbering-former_ids) after a
+item now claims through [`former_ids:`](ids.md#renumbering-former-ids) after a
 renumbering, has not been deleted and is not reported. `--reseal` accepts the
 removal and drops the orphaned seal.
 

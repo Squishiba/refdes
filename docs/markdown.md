@@ -86,7 +86,7 @@ write the hashed name yourself, since refdes both resolves the source and
 writes the `src=` that points at the copy. This applies to `<img src>` only —
 an ordinary `[text](file.pdf)` link to a local file, or a `site.assets:`
 directory linked to by hand, is not rewritten; see [`[text](file.pdf)` and
-other local links](#textfilepdf-and-other-local-links) below.
+other local links](#text-file-pdf-and-other-local-links) below.
 
 A `src` that does not resolve is a **build error**, not a warning — unlike a
 dangling cross-reference there is no sensible way to render a missing image,

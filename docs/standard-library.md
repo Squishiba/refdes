@@ -41,7 +41,7 @@ the self-inverse `equivalent`/`alternate` pair on `component`. See
 
 Every type also carries `owner`/`last_reviewed` (the `stewardship` field set)
 and `source`/`note`/`tags` (`provenance`) — see [field_sets and
-`include:`](#field_sets-and-include) for how those are assembled without
+`include:`](#field-sets-and-include) for how those are assembled without
 retyping five fields on every type.
 
 ## Opting out
@@ -307,7 +307,7 @@ to a newer one is a deliberate act, not something that happens under a
 project on an ordinary upgrade.
 
 `refdes standard upgrade --to N` is a guided, deliberate migration between
-pinned versions — see the [CLI reference](cli-reference.md#refdes-standard-upgrade---to-n).
+pinned versions — see the [CLI reference](cli-reference.md#refdes-standard-upgrade-to-n).
 It chains each intervening version's own `migration.yaml`, in order, rewriting
 item files and `standard.version:` together and carrying content hashes
 forward in baselines and seals so the rename doesn't look like a content
@@ -366,7 +366,7 @@ The standard's own types simply use them:
   rather than merely linked — see [coverage](coverage.md#which-statuses-count-as-verifying).
 - `required_when:` makes a field conditionally required on a sibling field's
   value or a link being present — see [schema
-  reference](schema-reference.md#required_when). The standard's own
+  reference](schema-reference.md#required-when). The standard's own
   `decision.rationale` uses it (`required_when: {status: rejected}`), toggled
   off by setting `require_rejection_rationale: false` in
   `refdes-project.yaml`.
