@@ -26,6 +26,51 @@ The ID is written back into your source file, preserving comments and indentatio
 
 Use `--dry-run` to see what would be allocated without writing.
 
+## Choosing your own number
+
+Leave `id:` blank and `refdes id` picks the next free number. If you have a
+real reason to pick the number yourself instead — matching a legacy scheme,
+a schematic reference, a deliberate sequence — write it as a **quoted
+string**, with no prefix:
+
+```yaml
+defaults:
+  prefix: CAN
+items:
+  - id: "042"
+    text: Bit-timing tolerance, matching the CAN transceiver datasheet's own
+          numbering.
+```
+
+`refdes id` expands it once, in the file, the moment it sees a prefix to
+attach:
+
+```yaml
+items:
+  - id: CAN-042
+    text: Bit-timing tolerance, matching the CAN transceiver datasheet's own
+          numbering.
+```
+
+That's the whole mechanism — nothing is ever resolved live. The moment the
+number is expanded, the stored id is exactly as self-contained and move-safe
+as one you typed by hand in full; there is no ongoing lookup for `check` or
+`build` to perform, because by the time either runs, the shorthand no longer
+exists in the file.
+
+**The value must be quoted, always** — even without a leading zero. YAML
+reads an unquoted leading zero as octal (`id: 042` parses to the number 34,
+not 42), and there is no way to tell, after the fact, whether an unquoted
+number like `id: 42` was ever going to be mangled or not — so every unquoted
+number is refused with an error, not just the ones that would actually be
+wrong, rather than risking a silently incorrect id permanently burned into
+the ledger.
+
+A number that's already used, or was burned by an earlier item under the
+same prefix (even one since deleted), is refused the same way a duplicate
+full id is — pick a higher number, or leave `id:` blank and let the
+allocator choose.
+
 ## Numbers are never derived from position
 
 This is the rule everything else depends on. If IDs came from an item's position in
@@ -76,8 +121,25 @@ The prefix comes from, in order:
    block (`REQ-PWR`)
 3. the type's `prefix` in `refdes.yaml` (`REQ`)
 
-Prefixes may contain hyphens, which is how you get `REQ-PWR-001` and `CON-THM-001`
-from the same `requirement`/`constraint` types.
+Prefixes may contain hyphens, which is how you get `REQ-PWR-001` and `BND-THM-001`
+from the same `requirement`/`bound` types.
+
+**A hand-typed id must actually start with this prefix.** Declaring
+`prefix: CAN` and then typing `id: CNA-001` — a typo, not a deliberate
+choice — is caught as an ordinary `refdes check` error, not silently
+accepted:
+
+```
+ERROR id 'CNA-001' does not match this item's prefix 'CAN' (from defaults:)
+```
+
+This is a pure comparison of two values the project already knows — no
+resolution, nothing ambient — and it is never auto-corrected. Fixing a
+mismatch automatically would rewrite the one string every link, backlink,
+and ledger entry is keyed on; get the id wrong on purpose or by accident and
+`refdes check` will tell you, but only you fix it. A free-form suffix typed
+directly into the id (see below) is not a mismatch — the check only requires
+the id to *start with* the declared prefix, not equal it exactly.
 
 ## Width
 
@@ -159,3 +221,41 @@ defaults:
 It costs nothing today and it is the difference between splitting boards into
 separate projects later and being unable to. See
 [multiple boards](multi-board.md).
+
+## A recommended shape: `<TYPE>-<BOARD>-<CATEGORY>-<NNN>`
+
+Everything above composes into one convention worth naming, not a new
+mechanism:
+
+```
+REQ   -   PWR   -   AI   - 004
+TYPE      BOARD      CATEGORY  NNN
+```
+
+- **Type** is the type's own prefix (`REQ`), from `refdes.yaml`.
+- **Board** is a token folded into `prefix:` — `REQ-PWR` — exactly as
+  described above. It is expressed through `prefix:`, not derived from
+  anything: there is no board- or workspace-aware id segment, and this is
+  deliberate. Baking a board name into the id *once, at allocation, and
+  never re-resolving it* is the only safe form a derived segment could
+  take — which makes it behave exactly like the prefix you already declare
+  once per file. `.refdes/boards.yaml` already treats a board move as a
+  normal, expected event (`refdes build --accept-board-move`); a live id
+  segment tracking board membership would put this convention at war with
+  that. Nothing stops a board segment being added as a real mechanism
+  later — but it is easy to add and hard to unpick once ids in the wild
+  depend on it, so this project does that deliberately, not by omission.
+- **Category** is free-form and author-chosen — `AI`, `PWR`, `IO`, whatever
+  groups this project's own items usefully (`REQ-PWR-IO-004`,
+  `CMP-PWR-EXP-PCIE-002`). There is no scheme change here either: it is
+  just more of `prefix:`, or typed straight into the id and left there,
+  whichever reads better for a given board. `refdes check` only requires
+  the id to *start with* the declared prefix (see above), so a category
+  segment typed into the id and not mirrored in `prefix:` is never flagged.
+- **Number** is [chosen or allocated](#choosing-your-own-number) as
+  described above.
+
+Nothing enforces this exact shape — it is a naming convention this project
+follows, not a schema Refdes validates beyond "starts with the declared
+prefix." Adopt as much or as little of it as makes ids in your own project
+easy to read at a glance.

@@ -183,6 +183,9 @@ output.
 ## `refdes id`
 
 Allocate IDs for items that have none, writing them into the source files.
+Also expands a quoted bare number (`id: "042"`) into a full id against its
+prefix, freezing the author's own chosen number rather than picking the next
+free one — see [choosing your own number](ids.md#choosing-your-own-number).
 
 | Option | Effect |
 |---|---|
@@ -197,6 +200,10 @@ refdes id
 allocated REQ-PWR-005  (items/requirements/power.yaml:36)  The unit shall tolerate...
 allocated 1 id(s)
 ```
+
+Exits non-zero and prints the reason if a bare-numeric hint collides with an
+id already used or burned — nothing is written for that item, but every
+other pending item in the same run still allocates normally.
 
 Updates `.refdes/ids.yaml`. See [IDs](ids.md).
 

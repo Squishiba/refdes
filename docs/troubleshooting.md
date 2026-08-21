@@ -41,14 +41,29 @@ if it has not been baselined. Commit `.refdes/ids.yaml` to prevent this.
 **`could not write id back into the source`**
 The list entry is not in the expected `- key: value` shape. Add the `id:` by hand.
 
+**`id: is an unquoted number -- YAML reads a leading zero as octal ...`**
+Quote it: `id: "042"`, not `id: 042`. Unquoted, YAML may silently read it as a
+different number — quoting is required even without a leading zero, since
+there's no way to tell after the fact which numbers would have been affected.
+See [choosing your own number](ids.md#choosing-your-own-number).
+
+**`id: 042 would expand to 'CAN-042', but that number is already used or was
+burned by an earlier item ...`**
+Pick a higher number, or leave `id:` blank and let `refdes id` choose one.
+
+**`id 'CNA-001' does not match this item's prefix 'CAN' (from defaults:)`**
+Typo in the id, or in the `prefix:` — fix whichever one is wrong. Never
+auto-corrected: it's the string every link and the ledger are keyed on.
+
 ## Links
 
 **`satisfies points at 'REQ-PWR-009', which does not exist`**
 Typo, deleted item, or a failed import. Check the import errors first — they
 cascade.
 
-**`satisfies may point at ['requirement'], but CON-THM-001 is a constraint`**
-Wrong link type. A decision `satisfies` requirements and `constrains` constraints.
+**`satisfies may point at ['requirement'], but BND-THM-001 is a bound`**
+Wrong link type. A decision `satisfies` requirements and is `constrained_by`
+bounds.
 
 **A reference in prose did not become a link.**
 Bare IDs only link when they resolve. A near miss like `REQ-PWR-2` instead of
@@ -90,12 +105,12 @@ Split it across two lines.
 **`check refers to 'P_dens', which no calc block defines`**
 Name mismatch, or the calc line that defines it failed — fix that error first.
 
-**`check against CON-THM-001, which declares no limit`**
+**`check against BND-THM-001, which declares no limit`**
 The target needs a `limit` field.
 
-**`P_dens violates CON-THM-001: worst case 0.2366 W/in² vs <= 0.15 W/in^2`**
-Not a tool problem. The design does not meet the constraint. Change the design,
-change the constraint, or record in the [design log](design-log.md) that you know.
+**`P_dens violates BND-THM-001: worst case 0.2366 W/in² vs <= 0.15 W/in^2`**
+Not a tool problem. The design does not meet the bound. Change the design,
+change the bound, or record in the [design log](design-log.md) that you know.
 
 ## The design log
 
