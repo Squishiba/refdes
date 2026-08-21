@@ -3203,10 +3203,117 @@ def test_real_project_registers_boards_and_renders_board_pages(tmp_path):
     project.out_dir = str(tmp_path / "_site")  # absolute: render outside the repo
     out = render.render_site(project)
     for board in ("board-a", "board-b"):
-        for page in ("document", "coverage", "log", "summary"):
+        for page in ("document", "coverage", "summary"):
             assert os.path.isfile(os.path.join(out, f"{page}-{board}.html"))
+    # Board A has the design log; Board B has none, so no log-board-b.html is
+    # written -- the nav never linked one, and an empty report page nothing
+    # points at is not a page.
+    assert os.path.isfile(os.path.join(out, "log-board-a.html"))
+    assert not os.path.exists(os.path.join(out, "log-board-b.html"))
     payload = render.items_json(project)
     assert set(payload["boards"]) == {"board-a", "board-b"}
+
+
+def _nav_hrefs(nodes):
+    out = []
+    for node in nodes:
+        if node.href:
+            out.append(node.href)
+        out.extend(_nav_hrefs(node.children))
+    return out
+
+
+@pytest.fixture
+def empty_board_project(tmp_path):
+    """A registry declaring two boards where only one has any items."""
+    (tmp_path / "refdes.yaml").write_text(
+        "site: { title: T, out: _site }\n"
+        "boards:\n"
+        "  board-a: { label: Board A }\n"
+        "  board-z: { label: Board Z }\n"
+        "types:\n"
+        "  requirement: { prefix: REQ, fields: { text: { type: text, required: true } } }\n",
+        encoding="utf-8",
+    )
+    items = tmp_path / "items" / "board-a"
+    items.mkdir(parents=True)
+    (items / "r.yaml").write_text(
+        "defaults: { type: requirement, prefix: REQ }\n"
+        "items:\n  - id: REQ-001\n    text: The only item in the project.\n",
+        encoding="utf-8",
+    )
+    return tmp_path
+
+
+def test_a_board_with_no_items_gets_no_report_pages(empty_board_project, tmp_path):
+    """A registered but unpopulated board used to get a full set of six report
+    pages describing nothing -- and the nav linked only three of them, so the
+    other three were unreachable as well as empty. The mirror image of the
+    boardless-items bug: pages with no items behind them."""
+    project = _build_at(empty_board_project)
+    project.out_dir = str(tmp_path / "out")
+    out = render.render_site(project)
+
+    for page in ("document", "coverage", "summary", "log", "references", "parts"):
+        assert not os.path.exists(os.path.join(out, f"{page}-board-z.html")), page
+    # The populated board is unaffected.
+    assert os.path.isfile(os.path.join(out, "coverage-board-a.html"))
+
+
+def test_an_empty_board_gets_no_nav_group_either(empty_board_project):
+    project = _build_at(empty_board_project)
+    tree = nav_mod.build_nav(project, dashboard_href="index.html")
+    labels = [n.label for n in tree]
+    assert "Board A" in labels
+    assert "Board Z" not in labels
+
+
+def test_every_report_the_nav_links_is_written_and_vice_versa(
+    empty_board_project, tmp_path
+):
+    """The invariant nav.py's docstring claims and previously did not hold in
+    either direction. Both sides now come from `nav.scope_reports`, so they
+    cannot drift apart again."""
+    project = _build_at(empty_board_project)
+    project.out_dir = str(tmp_path / "out")
+    out = render.render_site(project)
+
+    linked = {
+        h for h in _nav_hrefs(nav_mod.build_nav(project, dashboard_href="index.html"))
+        if h.endswith(".html")
+    }
+    on_disk = {
+        name for name in os.listdir(out)
+        if name.endswith(".html") and "-" in name and not name.startswith("req-")
+    }
+    scoped_links = {h for h in linked if "-" in h and not h.startswith("req-")}
+    assert scoped_links == on_disk, (scoped_links, on_disk)
+
+
+def test_a_populated_board_with_no_log_gets_no_log_page(tmp_path):
+    """Not only the empty-board case: a board that has items but no log
+    entries was still given a `log-<board>.html` the nav declined to link."""
+    (tmp_path / "refdes.yaml").write_text(
+        "site: { title: T, out: _site }\n"
+        "boards:\n  board-a: { label: Board A }\n"
+        "types:\n"
+        "  requirement: { prefix: REQ, fields: { text: { type: text, required: true } } }\n"
+        "  log:\n    prefix: LOG\n    append_only: true\n    fields:\n"
+        "      summary: { type: text, required: true }\n",
+        encoding="utf-8",
+    )
+    items = tmp_path / "items" / "board-a"
+    items.mkdir(parents=True)
+    (items / "r.yaml").write_text(
+        "defaults: { type: requirement, prefix: REQ }\n"
+        "items:\n  - id: REQ-001\n    text: No log anywhere in this project.\n",
+        encoding="utf-8",
+    )
+    project = _build_at(tmp_path)
+    project.out_dir = str(tmp_path / "out")
+    out = render.render_site(project)
+    assert os.path.isfile(os.path.join(out, "summary-board-a.html"))
+    assert not os.path.exists(os.path.join(out, "log-board-a.html"))
 
 
 def test_board_path_alias_matches_a_differently_named_folder(tmp_path):

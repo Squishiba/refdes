@@ -41,6 +41,58 @@ class NavNode:
         return any(child.contains(page) for child in self.children)
 
 
+# Report basename -> nav label, in the order a scope's links are listed.
+REPORT_LABELS = {
+    "summary": "Summary",
+    "coverage": "Coverage",
+    "log": "Design log",
+    "references": "References",
+    "parts": "Parts",
+    "document": "Full record",
+}
+
+
+def scope_reports(
+    project: Project, board: str | None = None, workspace: str | None = None
+) -> list[str]:
+    """Which generated reports exist for one scope, as basenames without the
+    `-<scope>` suffix. Callers pass at most one of `board`/`workspace`; both
+    None means the whole project.
+
+    **The single source of truth for this question.** `render.render_site`
+    decides what to write from this list and this module builds its links
+    from the same list, so the nav and the output directory cannot disagree
+    -- previously each answered it separately, and they differed in both
+    directions: a registered board with no items still got a full set of six
+    empty report pages written (three of them unreachable, since the nav
+    declined to link them), and a populated board with no log entries got a
+    `log-<board>.html` nothing pointed at.
+
+    A scope with no items of its own has no reports at all, which is what
+    keeps an empty registered board from producing a page set describing
+    nothing.
+    """
+    if not project.items:
+        return []
+    scoped = [
+        i for i in project.local_items
+        if (board is None or i.board == board)
+        and (workspace is None or i.workspace == workspace)
+    ]
+    if (board is not None or workspace is not None) and not scoped:
+        return []
+
+    names = ["summary", "coverage"]
+    if any(i.type == "log" for i in scoped):
+        names.append("log")
+    if citations_mod.by_url(project, board=board, workspace=workspace):
+        names.append("references")
+    if citations_mod.by_part_number(project, board=board, workspace=workspace):
+        names.append("parts")
+    names.append("document")
+    return sorted(names, key=list(REPORT_LABELS).index)
+
+
 def _report_links(
     project: Project,
     board: str | None,
@@ -50,36 +102,23 @@ def _report_links(
     """The generated-report links for one scope: the whole project, one board,
     or one workspace. Callers pass at most one of `board`/`workspace`.
 
-    Mirrors exactly which report files `render.render_site` actually writes for
-    that scope, so a nav link never dangles: the project-wide dashboard and
-    `items.json` only exist unscoped; every other report has a `-<board>` or
-    `-<workspace>` variant once that registry is in use.
+    Built from `scope_reports` so a nav link can never dangle and a written
+    report can never go unlinked. The project-wide dashboard and `items.json`
+    are the two entries that are not scoped reports and so are added here.
     """
-    if not project.items:
+    names = scope_reports(project, board=board, workspace=workspace)
+    if not names:
         return []
     scope_key = board or workspace
     suffix = f"-{scope_key}" if scope_key else ""
-    has_log = any(
-        i.type == "log"
-        and (board is None or i.board == board)
-        and (workspace is None or i.workspace == workspace)
-        for i in project.local_items
-    )
-    has_citations = bool(citations_mod.by_url(project, board=board, workspace=workspace))
-    has_parts = bool(citations_mod.by_part_number(project, board=board, workspace=workspace))
-
     unscoped = board is None and workspace is None
-    links = [NavNode("Summary", f"summary{suffix}.html")]
-    if unscoped:
-        links.append(NavNode("Items", dashboard_href))
-    links.append(NavNode("Coverage", f"coverage{suffix}.html"))
-    if has_log:
-        links.append(NavNode("Design log", f"log{suffix}.html"))
-    if has_citations:
-        links.append(NavNode("References", f"references{suffix}.html"))
-    if has_parts:
-        links.append(NavNode("Parts", f"parts{suffix}.html"))
-    links.append(NavNode("Full record", f"document{suffix}.html"))
+
+    links: list[NavNode] = []
+    for name in names:
+        links.append(NavNode(REPORT_LABELS[name], f"{name}{suffix}.html"))
+        # The item dashboard sits with the reports but only exists unscoped.
+        if unscoped and name == "summary":
+            links.append(NavNode("Items", dashboard_href))
     if unscoped:
         links.append(NavNode("JSON", "items.json"))
     return links

@@ -740,7 +740,16 @@ def render_site(project: Project) -> str:
 
     # One document/coverage/log/summary set per registered board, scoped to that
     # board's own items -- the unscoped pages above are unaffected either way.
+    #
+    # `nav.scope_reports` decides *which* of them exist, and the nav builds its
+    # links from the same call, so the two cannot disagree. A board with no
+    # items at all gets none: it used to get a full set of six pages
+    # describing nothing, three of which the nav then declined to link, so
+    # they were unreachable as well as empty.
     for board_key, board_spec in project.boards.items():
+        board_reports = nav_mod.scope_reports(project, board=board_key)
+        if not board_reports:
+            continue
         board_sections = _document_sections(project, board=board_key)
         board_known_slugs = {
             item.slug for _label, items in board_sections for item in items
@@ -765,29 +774,32 @@ def render_site(project: Project) -> str:
             previews_json=previews_json,
         )
 
-        _write_html(
-            out_dir, written, f"log-{board_key}.html", log_tpl,
-            project=project,
-            board=board_spec,
-            entries=_log_entries(project, board=board_key),
-            previews_json=previews_json,
-        )
+        if "log" in board_reports:
+            _write_html(
+                out_dir, written, f"log-{board_key}.html", log_tpl,
+                project=project,
+                board=board_spec,
+                entries=_log_entries(project, board=board_key),
+                previews_json=previews_json,
+            )
 
-        _write_html(
-            out_dir, written, f"references-{board_key}.html", references_tpl,
-            project=project,
-            board=board_spec,
-            grouped=citations_mod.by_url(project, board=board_key),
-            previews_json=previews_json,
-        )
+        if "references" in board_reports:
+            _write_html(
+                out_dir, written, f"references-{board_key}.html", references_tpl,
+                project=project,
+                board=board_spec,
+                grouped=citations_mod.by_url(project, board=board_key),
+                previews_json=previews_json,
+            )
 
-        _write_html(
-            out_dir, written, f"parts-{board_key}.html", parts_tpl,
-            project=project,
-            board=board_spec,
-            parts=citations_mod.by_part_number(project, board=board_key),
-            previews_json=previews_json,
-        )
+        if "parts" in board_reports:
+            _write_html(
+                out_dir, written, f"parts-{board_key}.html", parts_tpl,
+                project=project,
+                board=board_spec,
+                parts=citations_mod.by_part_number(project, board=board_key),
+                previews_json=previews_json,
+            )
 
         _write_html(
             out_dir, written, f"summary-{board_key}.html", summary_tpl,
@@ -797,9 +809,13 @@ def render_site(project: Project) -> str:
             **summary_payload(project, board=board_key),
         )
 
-    # Same five reports, one set per registered workspace, scoped to that
-    # workspace's own items -- mirrors the per-board loop above exactly.
+    # Same reports, one set per registered workspace, scoped to that
+    # workspace's own items -- mirrors the per-board loop above exactly,
+    # `nav.scope_reports` gate included.
     for workspace_key, workspace_spec in project.workspaces.items():
+        ws_reports = nav_mod.scope_reports(project, workspace=workspace_key)
+        if not ws_reports:
+            continue
         ws_sections = _document_sections(project, workspace=workspace_key)
         ws_known_slugs = {
             item.slug for _label, items in ws_sections for item in items
@@ -824,29 +840,32 @@ def render_site(project: Project) -> str:
             previews_json=previews_json,
         )
 
-        _write_html(
-            out_dir, written, f"log-{workspace_key}.html", log_tpl,
-            project=project,
-            workspace=workspace_spec,
-            entries=_log_entries(project, workspace=workspace_key),
-            previews_json=previews_json,
-        )
+        if "log" in ws_reports:
+            _write_html(
+                out_dir, written, f"log-{workspace_key}.html", log_tpl,
+                project=project,
+                workspace=workspace_spec,
+                entries=_log_entries(project, workspace=workspace_key),
+                previews_json=previews_json,
+            )
 
-        _write_html(
-            out_dir, written, f"references-{workspace_key}.html", references_tpl,
-            project=project,
-            workspace=workspace_spec,
-            grouped=citations_mod.by_url(project, workspace=workspace_key),
-            previews_json=previews_json,
-        )
+        if "references" in ws_reports:
+            _write_html(
+                out_dir, written, f"references-{workspace_key}.html", references_tpl,
+                project=project,
+                workspace=workspace_spec,
+                grouped=citations_mod.by_url(project, workspace=workspace_key),
+                previews_json=previews_json,
+            )
 
-        _write_html(
-            out_dir, written, f"parts-{workspace_key}.html", parts_tpl,
-            project=project,
-            workspace=workspace_spec,
-            parts=citations_mod.by_part_number(project, workspace=workspace_key),
-            previews_json=previews_json,
-        )
+        if "parts" in ws_reports:
+            _write_html(
+                out_dir, written, f"parts-{workspace_key}.html", parts_tpl,
+                project=project,
+                workspace=workspace_spec,
+                parts=citations_mod.by_part_number(project, workspace=workspace_key),
+                previews_json=previews_json,
+            )
 
         _write_html(
             out_dir, written, f"summary-{workspace_key}.html", summary_tpl,
