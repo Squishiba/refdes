@@ -321,6 +321,15 @@ def allocate(project: Project, dry_run: bool = False) -> list[tuple[Item, str]]:
     for item, new_id in assignments:
         by_file[item.source_file].append((item, new_id))
 
+    # An id whose write-back was refused is *not* allocated. The refusal
+    # happens before anything is written (insert_into_list returns None
+    # having touched nothing), so no file, and nothing anywhere else, can be
+    # referring to that id -- reporting it as allocated, recording it in the
+    # ledger, and burning its number would all be claims about a write that
+    # never happened. The error stands on its own; the number stays free for
+    # the next run, once the entry is in a shape that can be written to.
+    failed: set[int] = set()
+
     for rel, entries in by_file.items():
         path = os.path.join(project.root, rel)
         with open(path, "r", encoding="utf-8") as fh:
@@ -343,24 +352,34 @@ def allocate(project: Project, dry_run: bool = False) -> list[tuple[Item, str]]:
                         f"could not write id {new_id} back into the source",
                         file=rel, line=item.source_line,
                     )
+                    failed.add(id(item))
                     continue
                 lines = updated
 
         with open(path, "w", encoding="utf-8", newline="") as fh:
             fh.write(newline.join(lines) + newline)
 
+    written = [(item, new_id) for item, new_id in assignments if id(item) not in failed]
+
     ledger.setdefault("allocated", [])
-    for _item, new_id in assignments:
+    for _item, new_id in written:
         if new_id not in ledger["allocated"]:
             ledger["allocated"].append(new_id)
     burned = ledger.setdefault("burned", {})
-    for prefix, number in marks.items():
+    # High water over what was already burned plus what this run actually
+    # wrote -- never over `marks`, which was advanced during assignment and
+    # so still counts the refusals above.
+    for prefix, number in high_water(project, ledger).items():
         burned[prefix] = max(int(burned.get(prefix, 0)), int(number))
+    for _item, new_id in written:
+        parsed = split_id(new_id)
+        if parsed:
+            burned[parsed[0]] = max(int(burned.get(parsed[0], 0)), parsed[1])
     save_ledger(project, ledger)
 
-    for item, new_id in assignments:
+    for item, new_id in written:
         item.id = new_id
         project.items[new_id] = item
-    project.pending.clear()
+    project.pending = [item for item in project.pending if id(item) in failed]
 
-    return assignments
+    return written

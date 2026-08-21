@@ -2225,6 +2225,71 @@ def test_unclosed_flow_entry_is_refused_not_corrupted(flow_style_project):
     assert any("could not write id" in d.message for d in project.errors)
 
 
+def test_a_refused_write_back_is_not_reported_as_allocated(flow_style_project):
+    """The refusal used to sit one line above "allocated REQ-TMP-002" and
+    "allocated 1 id(s)", for an id that was never written anywhere -- and the
+    ledger recorded it as allocated and burned its number, so the next run
+    handed the same item a different id and REQ-TMP-002 was gone for nothing.
+    Nothing was written, so nothing is claimed."""
+    path = flow_style_project / "items" / "requirements" / "tmp.yaml"
+    path.write_text(
+        textwrap.dedent(
+            """\
+            defaults:
+              type: requirement
+              prefix: REQ-TMP
+            items:
+              - id: REQ-TMP-001
+                text: First.
+              - {text: "spans
+                multiple lines"}
+            """
+        ),
+        encoding="utf-8",
+    )
+    project = load_project(config_path=str(flow_style_project / "refdes.yaml"))
+    parse.load_items(project, require_ids=False)
+    assignments = ids.allocate(project)
+
+    assert assignments == []
+    ledger = ids.load_ledger(project)
+    assert "REQ-TMP-002" not in (ledger.get("allocated") or [])
+    assert int((ledger.get("burned") or {}).get("REQ-TMP", 0)) == 1
+    # Still pending, so a later run retries it rather than skipping it.
+    assert len(project.pending) == 1
+
+
+def test_one_refused_write_back_does_not_block_its_neighbours(flow_style_project):
+    """Per-item, not per-file: an entry that can be written still is, and is
+    still reported and burned normally."""
+    path = flow_style_project / "items" / "requirements" / "tmp.yaml"
+    path.write_text(
+        textwrap.dedent(
+            """\
+            defaults:
+              type: requirement
+              prefix: REQ-TMP
+            items:
+              - id: REQ-TMP-001
+                text: First.
+              - {text: "spans
+                multiple lines"}
+              - text: A writable one.
+            """
+        ),
+        encoding="utf-8",
+    )
+    project = load_project(config_path=str(flow_style_project / "refdes.yaml"))
+    parse.load_items(project, require_ids=False)
+    assignments = ids.allocate(project)
+
+    assert [new_id for _item, new_id in assignments] == ["REQ-TMP-003"]
+    assert "id: REQ-TMP-003" in path.read_text(encoding="utf-8")
+    ledger = ids.load_ledger(project)
+    assert ledger["allocated"] == ["REQ-TMP-003"]
+    assert any("could not write id" in d.message for d in project.errors)
+
+
 @pytest.fixture
 def multi_item_project(tmp_path):
     shutil.copy(os.path.join(REPO, "refdes.yaml"), tmp_path / "refdes.yaml")
