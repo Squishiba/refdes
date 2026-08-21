@@ -100,6 +100,32 @@ and this project uses [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- A check against a limit in an offset temperature unit (`<= 85 degC`, one
+  of the six forms the limits table documents, and about the most obvious
+  constraint a board has) aborted the whole command with an unhandled
+  `pint.OffsetUnitCalculusError` traceback -- from `check`, `build`, and
+  `index` alike. The crash was in the margin calculation, which divides a
+  temperature *difference* by a temperature *reading*; there is no honest
+  fraction to report either way, since 45 degC of slack under an 85 degC
+  limit is 53% on the Celsius scale and 13% in kelvin, so this joins the
+  two cases a margin was already undefined for. The check itself was never
+  in question and is unchanged, as are absolute scales (`<= 350 K`) and
+  ranges (`0 degC .. 60 degC`), which still get real margins.
+- `refdes id` reported "allocated REQ-002" and "allocated 1 id(s)" directly
+  below the error saying that id could not be written into the source, and
+  recorded it in the ledger's `allocated:` list and burned its number -- so
+  the next run gave the item a different id and the burned one stood for
+  nothing. A refused write-back touches nothing, so it is no longer counted
+  as an allocation anywhere, and the item stays pending for a later run.
+  Per item, not per file: a neighbouring entry that can be written still is.
+- The `refdes release` readiness-gate table picked a stream per row (FAIL to
+  stderr, everything else to stdout), so under redirection -- CI, where it
+  matters most -- the table arrived split across two files with its ordering
+  lost. It is one block of output and now goes to one place.
+- `refdes check --help` and the CLI reference both claimed `check` writes
+  nothing to disk. It refreshes `.refdes/schema.json`, like every other
+  command that loads the project. Reworded to the guarantee that actually
+  holds: nothing of the project's own is written.
 - A `---`-fenced block partway down a multi-item Markdown file whose YAML
   didn't parse -- or parsed to something that isn't a mapping -- was skipped
   with no diagnostic at all. The item vanished from the project, its body
