@@ -7,6 +7,8 @@ and this project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-08-21
+
 ### Added
 
 - `hardware@2`, the first version bump since the standard library shipped.
@@ -218,6 +220,59 @@ and this project uses [Semantic Versioning](https://semver.org/).
   every item after it silently kept whatever type came from the *original*
   leading defaults, wrong or not. Now an error naming the mistake, pointing
   at `section: <type>` as the fix.
+
+### Breaking
+
+- **The bundled standard moves to `hardware@2`, and `constraint` is now
+  `bound`.** The id prefix moves with it, `CON` -> `BND`, so this touches
+  every id, every link target, and every `checks:` entry pointing at one.
+  `constraint.title` is also now `bound.text`, and
+  `component.equivalent`/`alternate` no longer accept a non-component
+  target. `refdes init` pins `version: 2` from now on.
+
+  **A project pinned at `version: 1` is completely unaffected** and stays
+  that way until it chooses otherwise -- that is what pinning is for. To
+  move: `refdes standard upgrade --to 2`, which rewrites the item files and
+  their ids, carries content hashes forward in every stamped baseline and
+  seal so the rename doesn't read as a content change, and refuses (rolling
+  back) rather than leaving a half-migrated project. Prose mentions of a
+  renamed id are deliberately not rewritten but are reported by file and
+  line; recording the old id once in the replacement's `former_ids:` makes
+  every one of them resolve again.
+
+- **Three things that used to build clean are now errors.** Each was a
+  silent failure rather than a lenience worth keeping:
+  - deleting a sealed append-only log entry (editing one was already an
+    error; removing it outright was not detected at all);
+  - a `---`-fenced block partway down a multi-item Markdown file whose YAML
+    doesn't parse (the item used to vanish from the project, its body text
+    folding into the previous item's, with the build still exiting 0);
+  - at `hardware@2` only, an `equivalent`/`alternate` pointing at something
+    that is not a component.
+
+- **The generated site's top nav bar is replaced by a sidebar.** Anything
+  styling, scraping, or linking into the old markup will need updating. The
+  tree is collapsible, marks the current page with `aria-current`, and
+  collapses behind one line below a narrow viewport, still without
+  JavaScript.
+
+- **A scoped report page is only written when it has something to show.** A
+  registered board with no items gets no report pages at all, and a board
+  with no log entries gets no `log-<board>.html`; previously both were
+  written and then left unlinked. A hand-written link to one of those URLs
+  will now 404. Everything the sidebar links exists, and everything that
+  exists is linked.
+
+- **`checks[].margin` is `null` for a limit in an offset temperature unit**
+  (`<= 85 degC`), where the command previously crashed outright with an
+  unhandled traceback. Consumers already had to handle `null` for an `==`
+  limit and a limit of zero; this is a third case, not a new shape.
+
+- **`refdes id` no longer counts a refused write-back as an allocation.** An
+  id it could not write into the source is no longer reported as allocated,
+  no longer recorded in `.refdes/ids.yaml`, and no longer burns its number.
+  Anything parsing the `allocated N id(s)` line will see a different count
+  in that failure case -- and the id stays available for the next run.
 
 ## [0.4.0] - 2026-08-18
 
@@ -572,7 +627,8 @@ and this project uses [Semantic Versioning](https://semver.org/).
   line-ending independent.
 - Author, licence, and project URL metadata.
 
-[Unreleased]: https://github.com/Squishiba/refdes/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/Squishiba/refdes/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/Squishiba/refdes/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/Squishiba/refdes/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/Squishiba/refdes/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/Squishiba/refdes/compare/v0.2.0...v0.2.1
