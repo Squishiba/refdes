@@ -32,3 +32,8 @@ node_modules/
 # also covers docs-site/.refdes/, a second refdes project living in this
 # same repo.
 **/.refdes/schema.json
+
+# A scratch refdes project used to exercise doc generation against a real
+# schema. It has its own refdes.yaml and is not part of this tool -- kept on
+# disk, deliberately out of the repo.
+ornith-docs/
