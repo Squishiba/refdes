@@ -562,6 +562,11 @@ wrote 3 stub test(s) across 1 file(s)
 Run 'refdes id' to allocate ids for the new items.
 ```
 
+The generated items carry the verifier type's own default prefix (`TST`),
+not one derived from the board they land in — so in a project whose boards
+declare `token:`, each stub trips the token lint until its `prefix:` is
+edited. Do that before `refdes id`, since an id is frozen once allocated.
+
 **Deduplicates by declared links, never text.** An item that already has a
 verifying test — even one still `planned`, even one that hasn't been
 allocated an id yet — is skipped, so running this twice in a row is safe

@@ -61,17 +61,21 @@ are that project's problem.
 
 ## The coverage page
 
-`coverage.html` lists everything least-covered first:
+`coverage.html` is one table, least-covered first, with a column per stage —
+so the row tells you not just how far an item got but exactly which items
+carried it there:
 
-```
-open       BND-THM-002   Minimum converter efficiency      addr=—
-open       REQ-PWR-004   3V3 regulation during input step  addr=—
-open       REQ-PWR-005   40 V input transient tolerance    addr=—
-addressed  BND-THM-001   Board power density               addr=LOG-A-005
-satisfied  REQ-PWR-003   Efficiency > 90 % at half load    sat=DEC-PWR-001, ver=—
-verified   REQ-PWR-001   Input supply 9 V to 36 V          ver=TST-PWR-001
-verified   REQ-PWR-002   3V3 rail, 1.2 A, < 50 mV ripple   ver=TST-PWR-002
-```
+| ID | Title | Stage | Addressed by | Claimed by | Satisfied by | Verified by |
+|---|---|---|---|---|---|---|
+| BND-THM-002 | Minimum converter efficiency | open | — | — | — | — |
+| BND-THM-001 | Board power density | addressed | LOG-A-005 | — | — | — |
+| REQ-PWR-003 | Converter efficiency shall exceed 90 % at half load. | satisfied | LOG-A-003, LOG-A-004, LOG-A-006 | — | DEC-PWR-001 | — |
+| REQ-PWR-001 | The unit shall operate from an input supply of 9 V to 36 V. | verified | LOG-A-001 | — | — | TST-PWR-001 |
+
+**Claimed by** is its own column, separate from **Satisfied by**: an
+unsettled decision claiming a requirement is not the same as a settled one
+meeting it (see [the five stages](#the-five-stages)), and
+collapsing the two is exactly what this page exists to avoid.
 
 Counts by stage appear at the top, and the site index carries an **Outstanding
 work** panel with the same rows. Each item's own page shows a coverage strip.
@@ -233,6 +237,21 @@ is the type's own declared default (`planned` in the bundled standard),
 deliberately not one of `verifying_statuses:` — so a fresh stub never
 retroactively marks its target `verified`. Coverage stays exactly as
 honest immediately after a `stub-tests` run as it was the moment before.
+
+**A generated stub takes the type's default prefix**, not one built from the
+board it lands on. In a project whose boards declare `token:` (see [multiple
+boards](multi-board.md#naming-the-boards)), the standard's `TST` will not
+contain that token, so each stub trips the token lint until you edit its
+`prefix:`:
+
+```
+WARNING items/product-a/board-a/stub-tests.md:2 [TST-002] — item is on board
+        'board-a' (token 'A'), but its id prefix 'TST' does not contain that token
+```
+
+Set `prefix:` on the generated items (or in a `defaults:` block at the top of
+the file) *before* running `refdes id` — an id is frozen once allocated, so
+this is much cheaper to fix beforehand than after.
 
 **Refdes does not own test items once they're written.** One test often
 verifies several requirements at once (a single thermal soak covering five
