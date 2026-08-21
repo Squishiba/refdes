@@ -313,10 +313,15 @@ def _rewrite_reference_ids(
     elsewhere (a rationale, a log entry's body) is never touched, matching
     `_rewrite_fields_and_links`'s own scoping.
 
-    Same-line values only (`key: [A, B]` or `key: A`); a block-style list
-    value on the lines *after* the key is not rewritten -- not needed by any
-    reference in this project today, and left as a known gap rather than
-    guessed at.
+    Both YAML spellings of the value are handled: same-line (`key: [A, B]`
+    or `key: A`) and block-style, where the key line is bare and the targets
+    follow as `- A` entries under it. Block style is the idiomatic spelling
+    for a list of any length, and skipping it did not merely leave those
+    references alone -- the rewritten project then had a dangling link
+    target, so the whole operation refused and rolled back, with a
+    diagnostic ("constrained_by points at 'CON-THM-001', which does not
+    exist") that named the symptom and nothing about the real cause. Only
+    flow-style values had ever been run through this engine.
 
     Runs before `_rewrite_fields_and_links` in `_rewrite_file` so it can
     still find a link by its *current* key name, before any `mapping.links`
@@ -331,17 +336,50 @@ def _rewrite_reference_ids(
             keys.add("against")
         if not keys:
             continue
-        for i in range(start, min(end, len(out))):
+        limit = min(end, len(out))
+        for i in range(start, limit):
             for key in keys:
                 m = _field_or_link_line_re(key).match(out[i])
                 if not m:
                     continue
                 indent, rest = m.groups()
-                new_rest = _rewrite_id_tokens(rest, mapping.prefixes)
-                if new_rest != rest:
-                    out[i] = f"{indent}{key}:{new_rest}"
+                if rest.strip():
+                    new_rest = _rewrite_id_tokens(rest, mapping.prefixes)
+                    if new_rest != rest:
+                        out[i] = f"{indent}{key}:{new_rest}"
+                else:
+                    _rewrite_block_sequence(out, i + 1, limit, len(indent), mapping.prefixes)
                 break
     return out
+
+
+_SEQ_ENTRY_RE = re.compile(r"^(\s*)-(\s+)(\S.*?)(\s*)$")
+
+
+def _rewrite_block_sequence(
+    out: list[str], start: int, limit: int, key_indent: int, prefixes: dict[str, str]
+) -> None:
+    """Rewrite id tokens in the `- VALUE` entries of a block-style sequence
+    beginning at `start`, in place.
+
+    The sequence ends at the first line that isn't an entry indented deeper
+    than the key itself -- YAML also permits an entry at the key's own
+    indentation, which is accepted too, since the alternative is silently
+    skipping half of a legally-written list. A blank line inside the
+    sequence is passed over; anything else ends it, so a following sibling
+    key is never walked into.
+    """
+    for i in range(start, limit):
+        line = out[i]
+        if not line.strip():
+            continue
+        m = _SEQ_ENTRY_RE.match(line)
+        if m is None or len(m.group(1)) < key_indent:
+            return
+        indent, sep, value, trail = m.groups()
+        new_value = _rewrite_id_tokens(value, prefixes)
+        if new_value != value:
+            out[i] = f"{indent}-{sep}{new_value}{trail}"
 
 
 def _rewrite_one_key(
@@ -536,6 +574,9 @@ class RevisionResult:
     baselines_updated: list[str] = field(default_factory=list)
     baselines_skipped_no_standard: list[str] = field(default_factory=list)
     seals_updated: list[str] = field(default_factory=list)
+    # "file:line  OLD-ID" for every prose mention of a renamed id left behind
+    # -- see _stale_prose_references().
+    stale_references: list[str] = field(default_factory=list)
     dry_run: bool = False
 
 
@@ -729,7 +770,49 @@ def apply(
         baselines_updated=baselines_updated,
         baselines_skipped_no_standard=baselines_skipped,
         seals_updated=seals_updated,
+        stale_references=_stale_prose_references(project_after, id_changes),
     )
+
+
+def _stale_prose_references(project: Project, id_changes: dict[str, str]) -> list[str]:
+    """Every prose mention of an id this operation renamed that no longer
+    resolves to anything, as "file:line  OLD-ID -> NEW-ID".
+
+    Only structured references move (see `_rewrite_reference_ids`): an id
+    written into a rationale, a log entry's body, or a narrative page is
+    deliberately left alone, because rewriting prose means editing a
+    sentence -- including, for a sealed append-only entry, one that is not
+    supposed to change. But leaving it alone silently is the wrong other
+    half: a bare `CON-THM-001` that used to autolink renders as dead plain
+    text afterward with no diagnostic at all, and the operation reports
+    success. So the engine doesn't guess, and it doesn't go quiet either --
+    it says exactly which lines it did not touch and now can't resolve.
+
+    A token that still resolves -- to a live item, or through some item's
+    `former_ids:` -- is not stale and is not reported.
+    """
+    if not id_changes:
+        return []
+
+    def resolves(token: str) -> bool:
+        return token in project.items or token in project.former_ids
+
+    sources = {item.source_file for item in project.local_items}
+    sources |= {page.source_file for page in project.pages}
+
+    out: list[str] = []
+    for rel in sorted(sources):
+        path = os.path.join(project.root, *rel.split("/"))
+        try:
+            with open(path, "r", encoding="utf-8") as fh:
+                lines = fh.read().splitlines()
+        except OSError:
+            continue
+        for lineno, line in enumerate(lines, start=1):
+            for token in dict.fromkeys(_ID_TOKEN_RE.findall(line)):
+                if token in id_changes and not resolves(token):
+                    out.append(f"{rel}:{lineno}  {token} -> {id_changes[token]}")
+    return out
 
 
 # --------------------------------------------------------- hash carry-forward

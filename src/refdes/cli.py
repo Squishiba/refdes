@@ -574,6 +574,18 @@ def _print_revision_result(result, dry_run: bool) -> int:
         )
     if result.seals_updated:
         print(f"seals carried forward: {', '.join(result.seals_updated)}")
+    if result.stale_references:
+        # Not a failure -- prose is deliberately never rewritten -- but never
+        # silent either: these lines used to resolve and no longer do. On
+        # stdout with the rest of the success report, not stderr, so it can't
+        # interleave above the step header it belongs to.
+        print(
+            f"\n{len(result.stale_references)} prose mention(s) of a renamed id "
+            "left behind -- these no longer resolve, and were not rewritten "
+            "(a rename never edits prose):"
+        )
+        for ref in result.stale_references:
+            print(f"  {ref}")
     return 0
 
 
@@ -594,6 +606,10 @@ def cmd_standard_upgrade(args) -> int:
     ok = True
     for step in steps:
         print(f"v{step.from_version} -> v{step.to_version}:")
+        # A refused step reports on stderr; without this the two streams
+        # interleave and the refusal lands above the header naming the step
+        # it belongs to.
+        sys.stdout.flush()
         status = _print_revision_result(step.result, dry_run=False)
         if status != 0:
             ok = False

@@ -7038,6 +7038,152 @@ def test_revise_leaves_a_prose_mention_of_the_renamed_id_untouched(compound_pref
     assert "The thermal budget in CON-THM-001 drives this choice." in text
 
 
+BLOCK_STYLE_SCHEMA = (
+    "site: { title: T, out: _site }\n"
+    "link_types:\n"
+    "  constrained_by: { inverse: constrains, label: \"Constrained by\" }\n"
+    "  addresses: { inverse: addressed_by, label: \"Addresses\" }\n"
+    "types:\n"
+    "  constraint:\n"
+    "    prefix: CON\n"
+    "    fields:\n"
+    "      text:  { type: text, required: true }\n"
+    "      limit: { type: limit, required: true }\n"
+    "  decision:\n"
+    "    prefix: DEC\n"
+    "    fields:\n"
+    "      title: { type: text, required: true }\n"
+    "    links:\n"
+    "      constrained_by: [constraint]\n"
+    "  log:\n"
+    "    prefix: LOG\n"
+    "    fields:\n"
+    "      summary: { type: text, required: true }\n"
+    "    links:\n"
+    "      addresses: [constraint]\n"
+)
+
+
+@pytest.fixture
+def block_style_project(tmp_path):
+    """The same references `compound_prefix_project` writes in flow style,
+    written in the other legal YAML spelling instead: a bare key with
+    `- TARGET` entries under it, in both a Markdown item and a list file."""
+    (tmp_path / "refdes.yaml").write_text(BLOCK_STYLE_SCHEMA, encoding="utf-8")
+    items = tmp_path / "items"
+    items.mkdir()
+    (items / "con.yaml").write_text(
+        "defaults:\n  type: constraint\n  prefix: CON-THM\n"
+        "items:\n"
+        "  - id: CON-THM-001\n    text: Board power density\n    limit: \"<= 0.15 W/in^2\"\n",
+        encoding="utf-8",
+    )
+    (items / "dec.md").write_text(
+        "---\n"
+        "id: DEC-001\n"
+        "type: decision\n"
+        "title: Regulator topology\n"
+        "constrained_by:\n"
+        "  - CON-THM-001\n"
+        "---\n\n"
+        "Prose mentioning CON-THM-001.\n",
+        encoding="utf-8",
+    )
+    (items / "log.yaml").write_text(
+        "defaults:\n  type: log\n  prefix: LOG\n"
+        "items:\n"
+        "  - id: LOG-001\n    summary: Thermal review\n    addresses:\n      - CON-THM-001\n",
+        encoding="utf-8",
+    )
+    return tmp_path
+
+
+def test_revise_rewrites_a_block_style_link_target_list(block_style_project):
+    """Only flow-style values (`key: [A, B]`) had ever run through this
+    engine. A block-style list -- the idiomatic spelling, and what a
+    reference to a renamed id looks like in most real files -- was skipped,
+    which did not leave those references merely untouched: the rewritten
+    project then had a dangling link target, so the whole operation refused
+    and rolled back, reporting the symptom ("constrained_by points at
+    'CON-THM-001', which does not exist") and nothing about the cause."""
+    mapping = revise.Mapping(prefixes={"CON": "BND"})
+    result = revise.apply(str(block_style_project), mapping)
+    assert result.ok, result.errors
+    assert result.id_changes == {"CON-THM-001": "BND-THM-001"}
+
+    dec = (block_style_project / "items" / "dec.md").read_text(encoding="utf-8")
+    assert "constrained_by:\n  - BND-THM-001\n" in dec
+    log = (block_style_project / "items" / "log.yaml").read_text(encoding="utf-8")
+    assert "addresses:\n      - BND-THM-001\n" in log
+
+    project = load_project(config_path=str(block_style_project / "refdes.yaml"))
+    parse.load_items(project)
+    build_mod.build(project, seal_write=False, reseal=False, accept_board_move=False)
+    assert not project.errors, [str(d) for d in project.errors]
+
+
+def test_block_sequence_rewrite_stops_before_the_next_item(block_style_project):
+    """The walk down a block sequence must not run past the item it belongs
+    to and into the next one's own lines."""
+    (block_style_project / "items" / "log.yaml").write_text(
+        "defaults:\n  type: log\n  prefix: LOG\n"
+        "items:\n"
+        "  - id: LOG-001\n    summary: First\n    addresses:\n      - CON-THM-001\n"
+        "  - id: LOG-002\n    summary: Second\n",
+        encoding="utf-8",
+    )
+    mapping = revise.Mapping(prefixes={"CON": "BND"})
+    result = revise.apply(str(block_style_project), mapping)
+    assert result.ok, result.errors
+    log = (block_style_project / "items" / "log.yaml").read_text(encoding="utf-8")
+    assert "      - BND-THM-001\n" in log
+    assert "  - id: LOG-002\n" in log
+
+
+def test_revise_reports_prose_left_pointing_at_a_renamed_id(compound_prefix_project):
+    """Prose is deliberately never rewritten (see the test above), but leaving
+    it alone *silently* is the wrong other half: a bare id that used to
+    autolink renders as dead plain text afterward, and the command still
+    reports success. The engine now names every line it did not touch and can
+    no longer resolve."""
+    mapping = revise.Mapping(prefixes={"CON": "BND"})
+    result = revise.apply(str(compound_prefix_project), mapping)
+    assert result.ok, result.errors
+    assert any(
+        "items/dec.md" in ref and "CON-THM-001 -> BND-THM-001" in ref
+        for ref in result.stale_references
+    ), result.stale_references
+
+
+def test_a_prose_id_that_still_resolves_is_not_reported_as_stale(tmp_path):
+    """A mention that still resolves -- here through the renamed item's own
+    `former_ids:` -- is not stale and must not be reported."""
+    (tmp_path / "refdes.yaml").write_text(COMPOUND_PREFIX_SCHEMA, encoding="utf-8")
+    items = tmp_path / "items"
+    items.mkdir()
+    (items / "con.yaml").write_text(
+        "defaults:\n  type: constraint\n  prefix: CON-THM\n"
+        "items:\n"
+        "  - id: CON-THM-002\n    former_ids: [CON-THM-001]\n"
+        "    text: Board power density\n    limit: \"<= 0.15 W/in^2\"\n",
+        encoding="utf-8",
+    )
+    (items / "dec.md").write_text(
+        "---\n"
+        "id: DEC-001\n"
+        "type: decision\n"
+        "title: Regulator topology\n"
+        "constrained_by: [CON-THM-002]\n"
+        "---\n\n"
+        "Prose mentioning CON-THM-001, which still resolves.\n",
+        encoding="utf-8",
+    )
+    mapping = revise.Mapping(prefixes={"CON": "BND"})
+    result = revise.apply(str(tmp_path), mapping)
+    assert result.ok, result.errors
+    assert result.stale_references == []
+
+
 def test_revise_relabels_a_compound_prefix_in_the_id_ledger(compound_prefix_project):
     (compound_prefix_project / ".refdes").mkdir()
     (compound_prefix_project / ".refdes" / "ids.yaml").write_text(
