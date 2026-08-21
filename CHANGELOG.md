@@ -9,6 +9,51 @@ and this project uses [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- `hardware@3`: `constraint` is renamed to `bound`, prefix `CON` -> `BND`,
+  and `bound` additively gains `refines: [bound]` alongside its existing
+  `derives_from: [requirement, bound]`. `requirement` and `constraint` read
+  as near-synonyms in plain English -- a constraint colloquially *is* a
+  requirement -- which is what produced the authoring mix-up this comes
+  from; `bound` doesn't have that problem, and it names the `limit:` field
+  that makes the type mechanically distinct. Before this, only
+  `requirement` could `refines:`, so a constraint narrowing another
+  constraint had nowhere to say so; `derives_from:` stays, since the two
+  answer different questions and only `derives_from:` may cross into
+  `requirement`. `hardware@1` and `@2` are untouched. `refdes standard
+  upgrade --to 3` applies the rename, ids included; moving the pin by hand
+  instead now gets a diagnostic naming the rename rather than a bare
+  "unknown type 'constraint'." with no did-you-mean (the two names are too
+  dissimilar for difflib to suggest anything).
+- `refdes schema --graph`: Mermaid flowchart source for the project's
+  actual type/link graph -- the same resolved schema `--json` emits, walked
+  with a different renderer, so a preset or project overlay changing a verb
+  can't leave a hand-drawn diagram silently stale. The worked example in
+  [links](docs/links.md#starter-link-types) is generated from it.
+- A generated site sidebar, replacing the top nav bar: narrative pages and
+  project-wide reports first, then one collapsible group per board or
+  workspace holding that scope's own pages and reports, boards nesting
+  inside the workspace their items resolve into. A group renders
+  pre-expanded when the page being read lives inside it, the current page's
+  link carries `aria-current="page"`, and below a narrow viewport the whole
+  tree collapses behind one "Navigation" line -- a CSS-only toggle, so it
+  still works with JavaScript disabled. A page's own in-document contents
+  list additionally highlights the section in view as you scroll, where
+  JavaScript is available.
+- A quoted bare-numeric `id:` (`id: "042"`) is expanded against the item's
+  prefix by `refdes id` and frozen at exactly the number the author typed,
+  rather than being handed the next free one. A number at or below the
+  current high-water mark for that prefix -- already live, or burned by a
+  since-deleted item -- is refused with an error naming the number to beat,
+  never silently renumbered. An *unquoted* one is refused outright: YAML
+  resolves a leading zero as octal (`id: 042` parses to 34, not 42), so by
+  the time the value arrives it may already be the wrong number with nothing
+  left to recover the intent from.
+- An already-id'd item whose id doesn't match the prefix its own `type:` or
+  `prefix:` would derive is now a build error rather than passing silently.
+  Checked as "starts with", so a free-form category segment typed straight
+  into the id (`CON-IO-004` against a bare `prefix: CON`) is correct, not a
+  mismatch. Never auto-corrected: the id is the one string every link,
+  backlink, and ledger entry is keyed on.
 - `refdes revise <mapping-file>`: rewrites project-local vocabulary (type
   names, field names scoped per type, link verb names, id prefixes) across
   every item file in one operation, from a hand-written old->new mapping.
@@ -55,6 +100,33 @@ and this project uses [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- A `---`-fenced block partway down a multi-item Markdown file whose YAML
+  didn't parse -- or parsed to something that isn't a mapping -- was skipped
+  with no diagnostic at all. The item vanished from the project, its body
+  text folded into the previous item's, and the build exited 0 with zero
+  errors. The file's own head block always reported both conditions; every
+  later block now reports them identically, at the real failing line.
+- Deleting a sealed append-only entry was undetected. Editing one was
+  already a build error, but removing it outright produced a clean build, a
+  clean `audit`, and an orphaned hash left in the seal file forever --
+  the louder half of the same tamper-evidence question. Now reported the
+  same way, with the same (optionally board-scoped) `--reseal` escape hatch,
+  which drops the orphaned seal. An id still live under a different board,
+  or claimed by another item's `former_ids:`, is present rather than
+  deleted and is not reported.
+- `refdes revise`/`refdes standard upgrade` never rewrote a block-style
+  link target list (a bare `key:` with `- TARGET` entries under it) -- only
+  flow style had ever run through the engine. That didn't leave those
+  references merely untouched: the rewritten project then had a dangling
+  link target, so the whole operation refused and rolled back for any
+  project writing its links the idiomatic way, reporting the symptom and
+  nothing about the cause.
+- Both also reported success while leaving prose mentions of a renamed id
+  pointing at nothing. Prose is still deliberately never rewritten --
+  editing a sentence, including a sealed one, is not a rename's business --
+  but every mention that no longer resolves (to a live item, or through some
+  item's `former_ids:`) is now listed with its file and line, across items
+  and narrative pages alike.
 - An explicit `null` on an enum field no longer bypasses its schema default
   and the enum check that skips any `None` value -- it's coalesced into
   absent, same as an omitted key, and reported when it happens.
