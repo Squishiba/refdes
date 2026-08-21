@@ -4548,7 +4548,12 @@ def test_outstanding_work_is_aggregated_into_summary_lines():
 def test_log_entries_are_sealed_and_edits_are_caught():
     project = _project()
     entry = project.items["LOG-A-003"]
-    seals = seal.load_seals(project)
+    # Read the seal from whichever board the entry resolves to, not from the
+    # base file: seals are split per board, so hard-coding board="" only
+    # happened to work while this project's log entries resolved to no board
+    # at all -- an incidental fact about where one file sat, not a property
+    # of sealing.
+    seals = seal.load_seals(project, board=entry.board)
     assert seals.get(entry.id) == entry.content_hash
 
     entry.fields["summary"] = "edited after the fact"
