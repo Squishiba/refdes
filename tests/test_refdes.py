@@ -7573,6 +7573,31 @@ def test_cli_release_blocked_prints_gate_table(lifecycle_project, capsys):
     assert not os.path.isfile(lifecycle_project / ".refdes" / "baselines" / "rel-a.yaml")
 
 
+def test_the_whole_gate_table_lands_on_one_stream(lifecycle_project, capsys):
+    """Rows used to pick their stream individually -- FAIL to stderr, pass and
+    skipped to stdout -- so under any redirection the table arrived split
+    across two files with its ordering destroyed. That is CI, which is the
+    one place this report has to stay readable. The block is a failure report,
+    so all of it goes to stderr, and none of it leaks into stdout."""
+    status = cli_mod.main(["-c", str(lifecycle_project / "refdes.yaml"), "release", "rel-a"])
+    captured = capsys.readouterr()
+    assert status == 1
+
+    assert "FAIL" in captured.err
+    # Every row, not just the failing ones.
+    for name in ("draft_items", "unpinned_citations", "uncovered_requirements",
+                 "unverified_requirements", "info_check_failures",
+                 "unaccepted_board_moves"):
+        assert name in captured.err, name
+
+    # No gate row on stdout: a row there is one that split off from the table.
+    gate_rows = [
+        line for line in captured.out.splitlines()
+        if line.startswith(("  pass ", "  FAIL ", "  skipped "))
+    ]
+    assert gate_rows == [], gate_rows
+
+
 def test_cli_release_success_prints_log_nudge(lifecycle_project, capsys):
     (lifecycle_project / "items" / "reqs.yaml").write_text(
         "defaults: { type: requirement }\n"

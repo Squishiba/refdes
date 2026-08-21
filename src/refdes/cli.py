@@ -178,7 +178,17 @@ def cmd_build(args) -> int:
     return 0
 
 
-def _print_gate_table(results: list) -> None:
+def _print_gate_table(results: list, stream) -> None:
+    """The whole table on one stream, chosen by the caller.
+
+    Row-by-row stream selection (FAIL to stderr, everything else to stdout)
+    scrambled the table under any redirection -- which is to say in CI, the
+    one place it most needs to be readable: the passes arrived in one file
+    and the failures, the rows that matter, in another, with no way left to
+    tell what order they were printed in. A gate table is one block of
+    output, so it goes to one place; the block as a whole lands on stderr
+    exactly when it is a failure report.
+    """
     for r in results:
         line = f"  {r.status:<8} {r.name}"
         if r.offenders:
@@ -186,7 +196,7 @@ def _print_gate_table(results: list) -> None:
             if len(r.offenders) > 6:
                 shown += f", ... ({len(r.offenders)} total)"
             line += f"  {shown}"
-        print(line, file=sys.stderr if r.status == "FAIL" else sys.stdout)
+        print(line, file=stream)
 
 
 def _run_stamp(args, kind: str) -> int:
@@ -214,8 +224,9 @@ def _run_stamp(args, kind: str) -> int:
     _report(project)
 
     if outcome.status == "gate_failed":
+        sys.stdout.flush()  # keep the report below the diagnostics it follows
         print(f"\n{kind} {args.name!r} blocked -- not stamped:", file=sys.stderr)
-        _print_gate_table(outcome.gate_results)
+        _print_gate_table(outcome.gate_results, sys.stderr)
         return 1
 
     if outcome.status == "conflict":

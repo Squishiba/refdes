@@ -1,4 +1,4 @@
-# The design-debate preset, layered on hardware@1.
+# The design-debate preset, layered on hardware@2.
 #
 # Records the argument that produces a decision, not just the decision itself:
 # debate -> option(s) -> claim(s) -> position(s). Bundled but not enabled by
