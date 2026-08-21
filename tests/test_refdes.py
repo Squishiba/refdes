@@ -7199,6 +7199,55 @@ def test_revise_relabels_a_compound_prefix_in_the_id_ledger(compound_prefix_proj
 
 # --------------------------------------------- hardware@3: constraint -> bound
 
+def test_an_item_still_typed_constraint_at_v3_names_the_rename(tmp_path):
+    """The type-level counterpart of the `constraint.title` -> `constraint.text`
+    diagnostic (finding 4). Without it, moving the pin to v3 by hand reports a
+    bare "unknown type 'constraint'." on every item in the project, and
+    difflib's did-you-mean offers nothing: `constraint` and `bound` are not
+    close enough to suggest."""
+    (tmp_path / "refdes.yaml").write_text(
+        "site: { title: T, out: _site }\n"
+        "standard: { base: hardware, version: 3, presets: [] }\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "items").mkdir()
+    (tmp_path / "items" / "i.yaml").write_text(
+        "items:\n"
+        "  - id: CON-001\n    type: constraint\n    text: Board power density\n"
+        "    limit: \"<= 0.15 W/in^2\"\n",
+        encoding="utf-8",
+    )
+    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    parse.load_items(project)
+    messages = [d.message for d in project.errors]
+    assert any(
+        "it is now 'bound'" in m and "hardware@3" in m and "standard upgrade" in m
+        for m in messages
+    ), messages
+
+
+def test_the_rename_hint_stays_quiet_where_the_new_type_does_not_exist(tmp_path):
+    """A hand-rolled schema that has never heard of either name must get the
+    ordinary unknown-type error, not advice to rename into a type it has no
+    declaration for."""
+    (tmp_path / "refdes.yaml").write_text(
+        "site: { title: T, out: _site }\n"
+        "types:\n"
+        "  widget: { prefix: WID, fields: { text: { type: text, required: true } } }\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "items").mkdir()
+    (tmp_path / "items" / "i.yaml").write_text(
+        "items:\n  - id: CON-001\n    type: constraint\n    text: Nope.\n",
+        encoding="utf-8",
+    )
+    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    parse.load_items(project)
+    messages = [d.message for d in project.errors]
+    assert any("unknown type 'constraint'" in m for m in messages), messages
+    assert not any("it is now 'bound'" in m for m in messages), messages
+
+
 def test_hardware_v3_renames_constraint_to_bound_and_gains_refines(tmp_path):
     """finding 10 (narrower version): `bound` replaces `constraint`, prefix
     `CON` -> `BND`, additively gaining `refines: [bound]` alongside its

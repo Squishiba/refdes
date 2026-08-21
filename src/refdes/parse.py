@@ -46,6 +46,19 @@ _RENAMED_FIELDS: dict[tuple[str, str], str] = {
     ("constraint", "title"): "text",
 }
 
+# Types renamed by a standard-library version bump, old name -> new name
+# (hardware v2's `constraint` -> v3's `bound`). The same reasoning as
+# _RENAMED_FIELDS one level up: without this, moving the pin forward by hand
+# reports a bare "unknown type 'constraint'." on every item in the project,
+# and difflib's did-you-mean is no help at all here -- `constraint` and
+# `bound` share almost no characters, so no suggestion is offered. Only ever
+# consulted when the *new* name is a real type in the merged schema, so a
+# hand-rolled project that has never heard of either name can't be told to
+# rename something into a type it doesn't have.
+_RENAMED_TYPES: dict[str, str] = {
+    "constraint": "bound",
+}
+
 
 class _LineLoader(yaml.SafeLoader):
     """SafeLoader that tags each mapping with the source line of its first key."""
@@ -293,11 +306,31 @@ def _build_item(
                 file=rel, line=line,
             )
         else:
-            project.error(
-                f"unknown type {type_name!r}.{_suggest(str(type_name), list(project.types))}",
-                file=rel,
-                line=line,
-            )
+            renamed_to = _RENAMED_TYPES.get(str(type_name))
+            if renamed_to is not None and renamed_to in project.types:
+                if project.standard_base and project.standard_version is not None:
+                    where = f"{project.standard_base}@{project.standard_version}"
+                    fix = (
+                        f"If you moved standard.version: forward by hand, put it "
+                        f"back and run 'refdes standard upgrade --to "
+                        f"{project.standard_version}' instead -- that rewrites every "
+                        f"item, and the ids too, since the prefix moved with it."
+                    )
+                else:
+                    where = "this project's schema"
+                    fix = "Rename it here, or see 'refdes revise' to rewrite the project."
+                project.error(
+                    f"unknown type {type_name!r} -- it is now {renamed_to!r} in "
+                    f"{where}. {fix}",
+                    file=rel,
+                    line=line,
+                )
+            else:
+                project.error(
+                    f"unknown type {type_name!r}.{_suggest(str(type_name), list(project.types))}",
+                    file=rel,
+                    line=line,
+                )
         return None
 
     item_id, numeric_id_hint, id_rejected = _resolve_id_value(project, raw.get("id"), rel, line)
