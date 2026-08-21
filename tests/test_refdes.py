@@ -2468,6 +2468,81 @@ def test_later_defaults_block_in_markdown_is_now_an_error_not_silent(tmp_path):
     assert project.items["DEC-401"].type == "decision"
 
 
+def test_malformed_later_markdown_block_is_reported_not_silently_dropped(tmp_path):
+    """The same silent-drop shape as the `defaults:` bug above, one step
+    quieter: a later `---`-fenced block that opens with a `key:` line -- so it
+    was plainly meant as an item -- but whose YAML doesn't parse used to be
+    skipped with no diagnostic at all. The item vanished from the project, its
+    body text was folded into the *previous* item's, and the build exited 0
+    with zero errors. The very first block in the same file has always
+    reported this; every later one now reports it identically."""
+    (tmp_path / "refdes.yaml").write_text(SECTIONS_SCHEMA, encoding="utf-8")
+    (tmp_path / "items").mkdir()
+    (tmp_path / "items" / "i.md").write_text(
+        "---\n"
+        "defaults:\n"
+        "  type: requirement\n"
+        "---\n"
+        "---\n"
+        "id: REQ-601\n"
+        "text: The first requirement.\n"
+        "---\n"
+        "Body one.\n"
+        "\n"
+        "---\n"
+        "id: REQ-602\n"
+        'text: "unclosed quote\n'
+        "---\n"
+        "Body two.\n"
+        "\n"
+        "---\n"
+        "id: REQ-603\n"
+        "text: The third requirement.\n"
+        "---\n",
+        encoding="utf-8",
+    )
+    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    parse.load_items(project)
+    bad = [d for d in project.errors if "invalid YAML front-matter" in d.message]
+    assert bad, [str(d) for d in project.errors]
+    # Reported inside the offending block, not blamed on line 1 of the file.
+    assert bad[0].line >= 12
+    assert "REQ-602" not in project.items
+    # Everything around it still parses -- one bad block is not a parse abort.
+    assert "REQ-601" in project.items
+    assert "REQ-603" in project.items
+
+
+def test_later_markdown_block_that_is_not_a_mapping_is_reported(tmp_path):
+    """A block that parses cleanly but isn't a mapping is the other half of
+    the same gap -- also silently skipped before, also already reported when
+    it happens to be the file's own head block."""
+    (tmp_path / "refdes.yaml").write_text(SECTIONS_SCHEMA, encoding="utf-8")
+    (tmp_path / "items").mkdir()
+    (tmp_path / "items" / "i.md").write_text(
+        "---\n"
+        "defaults:\n"
+        "  type: requirement\n"
+        "---\n"
+        "---\n"
+        "id: REQ-611\n"
+        "text: The first requirement.\n"
+        "---\n"
+        "Body one.\n"
+        "\n"
+        "---\n"
+        "key: value\n"
+        "- a stray sequence entry\n"
+        "---\n",
+        encoding="utf-8",
+    )
+    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    parse.load_items(project)
+    assert any(
+        "front-matter" in d.message and d.line > 1 for d in project.errors
+    ), [str(d) for d in project.errors]
+
+
 def test_section_marker_must_name_a_real_string(tmp_path):
     (tmp_path / "refdes.yaml").write_text(SECTIONS_SCHEMA, encoding="utf-8")
     (tmp_path / "items").mkdir()

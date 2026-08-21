@@ -478,11 +478,22 @@ def parse_markdown_file(project: Project, path: str) -> list[Item]:
         next_line = lines[open_i + 1] if open_i + 1 < len(lines) else ""
         if not KEY_LINE_RE.match(next_line):
             continue
+        # Past this point the block opens with a `key:` line, so it was meant
+        # as an item -- a malformed one must be reported, never skipped. A
+        # silent `continue` here dropped the whole item from the project with
+        # a clean, zero-error build, and folded its body text into the
+        # previous item's, which is the same class of harm as the later
+        # `defaults:` block below (and strictly quieter: that one at least
+        # produced a warning). The very first block already reports both of
+        # these; every later one now reports them identically.
         try:
             parsed = _yaml_mapping("\n".join(lines[open_i + 1 : close_i]))
-        except yaml.YAMLError:
-            parsed = None
+        except yaml.YAMLError as exc:
+            message, err_line = _yaml_error_report(exc, lines, offset=open_i + 1)
+            project.error(f"invalid YAML front-matter: {message}", file=rel, line=err_line)
+            continue
         if parsed is None:
+            project.error("front-matter must be a mapping", file=rel, line=open_i + 2)
             continue
         blocks.append((open_i, close_i, parsed))
 
