@@ -154,8 +154,66 @@ def verify(project: Project, write: bool = False, reseal: str | None = None) -> 
         elif changed:
             base_changed = True
 
+    if _report_deleted(project, base, write=write, reseal=reseal):
+        base_changed = True
+
     if write and base_changed:
         save_seals(project, base, board="")
+
+
+def _report_deleted(
+    project: Project, base: dict[str, str], write: bool, reseal: str | None
+) -> bool:
+    """Report every sealed entry that is no longer anywhere in the project.
+
+    Editing a sealed entry was already a build error; deleting one outright
+    was not detected at all -- a clean build, a clean `audit`, and an
+    orphaned hash left behind in the seal file. That is the louder half of
+    the same tamper-evidence question, so it is reported the same way, with
+    the same `--reseal` escape hatch for a deliberate removal.
+
+    "No longer anywhere" is deliberately generous: an id that is still live
+    under a *different* board (the lazy migration `verify()` performs above),
+    or that some item now claims through `former_ids:` after a renumbering,
+    is present, not deleted. Only a `write` run can actually drop the
+    orphaned entry, so a read-only `check` reports without mutating storage;
+    returning True lets the caller know the base file needs rewriting.
+    """
+    live = {item.id for item in project.local_items}
+    live |= set(project.former_ids)
+
+    base_changed = False
+    for board in sorted({""} | set(project.boards)):
+        seals = base if board == "" else load_seals(project, board)
+        orphans = sorted(item_id for item_id in seals if item_id not in live)
+        if not orphans:
+            continue
+        reseal_here = bool(reseal) and (reseal == RESEAL_ALL or reseal == board)
+        hint = f"--reseal {board}" if board else "--reseal"
+        for item_id in orphans:
+            if reseal_here:
+                project.warn(
+                    f"{item_id} was sealed as append-only and is no longer in the "
+                    "project -- accepting the removal and dropping its seal.",
+                    item_id=item_id,
+                )
+                if write:
+                    del seals[item_id]
+            else:
+                project.error(
+                    f"{item_id} is append-only and was sealed, but no item with "
+                    "that id is in the project any more. An append-only entry is "
+                    "corrected by appending one that `amends` it, never by "
+                    f"deleting it -- restore it, or run with {hint} if the removal "
+                    "is deliberate.",
+                    item_id=item_id,
+                )
+        if reseal_here and write:
+            if board:
+                save_seals(project, seals, board)
+            else:
+                base_changed = True
+    return base_changed
 
 
 def resealed_ids(project: Project) -> list[str]:
