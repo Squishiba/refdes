@@ -448,13 +448,19 @@ valid at whatever version it reached — never partway through a single
 step's own rewrite. Exits 1 on failure, 0 once every step to `--to N` has
 applied.
 
-> **The project must build clean first.** Both this and `refdes revise`
-> refuse outright if `refdes check` reports *any* error, so that a hash
-> change caused by the rename can't hide behind an already-broken build.
-> Note that a failing `checks:` result counts — a decision currently
-> violating a bound is an ordinary, often long-lived state of a real
-> project, and it will block the rename until it is resolved or the check
-> is downgraded with [`check_severity:`](checks.md#candidates-vs-decisions).
+> **The project must validate first — but a failing check is not that.**
+> Both this and `refdes revise` refuse if the project doesn't validate: an
+> item that doesn't parse, a missing required field, a link pointing at
+> nothing, a schema the data no longer satisfies. The rule is that a hash
+> change caused by the rename must not be able to hide behind an
+> already-broken document.
+>
+> A failing `checks:` result is explicitly **not** a blocker. It means the
+> arithmetic ran and the design does not currently meet a bound — the tool
+> working, and a state a board sits in for weeks at a time. A rename moves
+> the arithmetic and the limit together, so it cannot change a check's
+> verdict, and blocking on one would make these commands unusable on
+> exactly the projects most likely to need them.
 
 ---
 

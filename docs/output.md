@@ -118,6 +118,11 @@ structure — there is nothing to hand-maintain and no `nav:` tree to write.
   collapsible group holding its own pages and its own scoped reports, with
   boards nesting inside the workspace their items resolve into. A group
   renders already open when the page you are reading lives inside it.
+- A scope with no items of its own gets no group and no report pages — a
+  board can be registered before anything is in it. Within a populated
+  scope, only the reports that have something to show are written and
+  linked: no `log-<board>.html` without log entries, no
+  `references-<board>.html` without citations.
 - The link to the current page is marked `aria-current="page"`, so screen
   readers and the stylesheet agree on where you are.
 - Below a narrow viewport the whole tree collapses behind a single

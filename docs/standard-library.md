@@ -9,7 +9,7 @@ the package and resolved live, by reference, into every project that opts in.
 ```yaml
 standard:
   base: hardware
-  version: 3
+  version: 4
   presets: []
 ```
 
@@ -116,7 +116,7 @@ Bundled, curated extensions to the base standard, opted into by name:
 ```yaml
 standard:
   base: hardware
-  version: 3
+  version: 4
   presets: [design-debate]
 ```
 
@@ -339,6 +339,14 @@ had nowhere to say so. Both verbs stay, because they answer different
 questions — "what does this narrow" versus "what was this derived from" —
 and `derives_from:` alone can still cross into `requirement`, which
 `refines:` deliberately cannot.
+
+**`hardware@4`** — `component.equivalent` and `component.alternate` are
+restricted to `[component]` targets, where v1 to v3 wrote them as `[]`. An
+empty target list means *unrestricted*, which is what it deliberately means
+on `decision.blocked_by:`; on these two verbs it was a slip, and the shipped
+dictionary accepted `equivalent: [REQ-PWR-001]` on a component without a
+word while every version of the docs said component → component. Nothing
+else moves — the whole delta from v3 is two target lists.
 
 Every earlier version resolves exactly as it always has; nothing changes for
 a project that doesn't touch its pin.

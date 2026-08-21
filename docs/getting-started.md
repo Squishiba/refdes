@@ -31,7 +31,7 @@ site:
 
 standard:
   base: hardware
-  version: 3
+  version: 4
   presets: []
 
 id:
@@ -40,7 +40,7 @@ id:
 ```
 
 That's the whole file `refdes init` writes — rename the title to taste.
-`version: 3` is whatever the installed `refdes` currently bundles as newest,
+`version: 4` is whatever the installed `refdes` currently bundles as newest,
 never the literal word `"latest"` — a later `refdes` may write a higher
 number here; that's expected, not a sign this page is out of date. Nothing
 here defines a `requirement` or a `link_types:` block — that all comes from

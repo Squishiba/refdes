@@ -137,6 +137,21 @@ lint that catches a board quietly depending on another product's items, and
 lay out `items/` so that splitting later, when you actually need to, is a
 folder move rather than a renumbering.
 
+### A board with no items yet
+
+A board can be registered before it has anything in it — that is a normal
+way to start one. Until it does, it gets **no report pages and no nav
+group**: a `coverage-<board>.html` describing nothing is not a useful page,
+and the nav would either link an empty report or, worse, not link a page
+that had been written anyway. The moment the board's first item lands, its
+pages appear.
+
+The same applies one report down: a board with items but no [design
+log](design-log.md) entries gets no `log-<board>.html`, and one with no
+[citations](markdown.md#citing-a-datasheet) gets no
+`references-<board>.html`. Every scoped report that exists is linked from
+the sidebar, and every link resolves to a page that exists.
+
 ## Separate projects with imports
 
 Split into projects, each with its own `refdes.yaml`, and import the shared one:

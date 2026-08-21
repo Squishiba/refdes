@@ -135,21 +135,16 @@ citation's nested `part_number` (see [parts](parts.md)) has no item to link
 from — promoting it to a real `component` is what makes an equivalence claim
 possible, and is itself a reason to give it an item.
 
-> **Target types are not currently enforced.** These two verbs are the only
-> ones in the bundled standard whose target list is written `[]` — which the
-> loader reads as *unrestricted*, the same way `decision.blocked_by: []`
-> deliberately is — so `equivalent: [REQ-PWR-001]` on a component builds
-> clean today. Every other verb in the standard names its targets and is
-> checked. Until that is settled in a future standard version, a project
-> that wants the check can say so in its own overlay:
->
-> ```yaml
-> types:
->   component:
->     links:
->       equivalent: [component]
->       alternate:  [component]
-> ```
+Both are restricted to `component` targets, and that restriction is
+checked — `equivalent: [REQ-PWR-001]` on a component is a build error.
+
+> **Only from `hardware@4` onward.** v1 to v3 wrote both target lists as
+> `[]`, which the loader reads as *unrestricted* (the same way
+> `decision.blocked_by: []` deliberately is), so on those versions the same
+> line builds clean. A project pinned below v4 keeps that behaviour, since a
+> pinned version never changes under you; `refdes standard upgrade --to 4`
+> is what opts into the check, and it will refuse and roll back if an
+> existing link doesn't satisfy it — telling you which one.
 
 ### Equivalence is symmetric — the self-inverse link
 
