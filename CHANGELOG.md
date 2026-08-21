@@ -9,6 +9,20 @@ and this project uses [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- `hardware@4`: `component.equivalent` and `component.alternate` are
+  restricted to `[component]` targets, where v1-v3 wrote them as `[]`. An
+  empty target list means *unrestricted* -- which is what it deliberately
+  means on `decision.blocked_by:` -- so the shipped dictionary accepted
+  `equivalent: [REQ-PWR-001]` on a component with no diagnostic at all,
+  while the spec and every version of the docs said component -> component.
+  Nothing else moves: the whole delta from v3 is two target lists. It ships
+  a `migration.yaml` with no renames in it, since a restriction on what is
+  already written is not a rename -- an `equivalent: [CMP-019]` correct at
+  v3 is byte-for-byte correct at v4 -- but the upgrade step still
+  re-validates, so a link the restriction rejects surfaces as an ordinary
+  target-type error and the step is refused and rolled back rather than
+  pinning a project to a version its items don't satisfy. Projects pinned
+  below v4 are untouched, permissiveness included.
 - `hardware@3`: `constraint` is renamed to `bound`, prefix `CON` -> `BND`,
   and `bound` additively gains `refines: [bound]` alongside its existing
   `derives_from: [requirement, bound]`. `requirement` and `constraint` read
@@ -100,6 +114,33 @@ and this project uses [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- `refdes revise` and `refdes standard upgrade` refused to run on any
+  project with a failing `checks:` result. A decision currently violating a
+  bound is the tool working, not failing, and a state a real board sits in
+  for weeks -- this repository's own sample project ships one deliberately,
+  as the teaching example on the front page of the docs, and so could not be
+  migrated at all. The refusal now covers what it was actually for: a
+  document that doesn't validate (an item that doesn't parse, a missing
+  required field, a link pointing at nothing, a schema the data no longer
+  satisfies), where a hash change caused by the rename really could hide
+  behind an already-broken build. A rename moves the arithmetic and the
+  limit together and cannot change a check's verdict.
+- A registered board with no items was given a full set of six report pages
+  describing nothing, three of which the nav then declined to link -- so
+  they were unreachable as well as empty. The mirror image of the
+  boardless-items fix in 0.4.0: there, items with no page; here, pages with
+  no items. A *populated* board with no log entries had the same problem one
+  report down, getting a `log-<board>.html` nothing pointed at. Which
+  reports exist for a scope now comes from one function that both the nav
+  and the renderer read, so the sidebar and the output directory cannot
+  disagree in either direction. Workspaces get the same treatment.
+- This repository's own sample project reported six "no board" warnings on
+  every build, one per design-log entry: the `log` type declares its own
+  `board` field, so the reserved `board:` override the other Board A folders
+  use cannot reach it, and the file sat in `items/log/`, which is not a
+  registered board. Moved to `items/board-a/log.yaml`, where the path itself
+  matches the registry. Content hashes are unchanged, so all six seals
+  migrated into the board's own seal file untouched.
 - A check against a limit in an offset temperature unit (`<= 85 degC`, one
   of the six forms the limits table documents, and about the most obvious
   constraint a board has) aborted the whole command with an unhandled
