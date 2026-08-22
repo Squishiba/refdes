@@ -46,7 +46,11 @@ refreshed on save. Includes everything the CLI reports — unit mismatches, fail
 checks, broken links, unverified requirements, append-only violations.
 
 **Completion.** Type two or more uppercase letters, or `[[`, to get item IDs with
-their titles. After a field name like `status:`, you get that field's allowed
+their titles. Matching isn't limited to the id and title: the file an item is
+declared in and its board (when the project has boards) are also part of what
+gets matched, so typing `power` narrows the dropdown to items declared in
+`power.yaml`, or on the `power` board, even before you remember how its id
+starts. After a field name like `status:`, you get that field's allowed
 values from the schema. At the start of a front-matter line, once the current
 item's `type:` is known from context, you get that type's own field and link
 key names — the same data, just a second way of using it, and the piece that

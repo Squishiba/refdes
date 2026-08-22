@@ -36,6 +36,12 @@ and this project uses [Semantic Versioning](https://semver.org/).
   preview and write nothing, this one still writes -- only the seal-recording
   side effect is skipped. Output is watermarked with a "Draft build" banner
   on every page so a preview render can't be mistaken for the sealed site.
+- VS Code id completion (`editors/vscode/extension.js`) now also matches
+  against an item's source file and board, not just its id and title --
+  typing `power` narrows the dropdown to items declared in `power.yaml`, or
+  on the `power` board, exactly as typing `REQ-IO` narrows by id prefix
+  today. Both were already in the index payload `refdes index` sends the
+  extension; this is a filter-text change only.
 
 ### Fixed
 

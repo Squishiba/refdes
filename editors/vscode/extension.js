@@ -297,7 +297,14 @@ const completionProvider = {
       const c = new vscode.CompletionItem(item.id, vscode.CompletionItemKind.Reference);
       c.detail = item.title;
       c.documentation = itemMarkdown(item);
-      c.filterText = `${item.id} ${item.title}`;
+      // Finding 8: narrow by the file an item lives in, or its board, not
+      // just the id and title -- "power" matches an item declared in
+      // power.yaml even before its id is remembered. Both are already in
+      // the index payload (items_json() emits source: {file, line} and
+      // board: unconditionally on each item), so this is a filter-text
+      // change only, no new data to export.
+      const sourceFile = (item.source && item.source.file) || "";
+      c.filterText = `${item.id} ${item.title} ${sourceFile} ${item.board || ""}`.trim();
       return c;
     });
   },
