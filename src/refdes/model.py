@@ -358,6 +358,14 @@ class Item:
     # and a bare old_id in prose resolve to this item with a visible "formerly"
     # marker; see ids.collect_former_ids for collision handling and burning.
     former_ids: list[str] = field(default_factory=list)
+    # Finding 6: field names whose value came from the file's defaults:
+    # block rather than this item's own keys, and the source line of that
+    # defaults: block -- so a validation failure on one of them can say so
+    # and point there, instead of reporting it identically to a value the
+    # item actually wrote itself. Empty/None when the item overrode every
+    # inherited key, or the file has no defaults: at all.
+    inherited_fields: frozenset[str] = field(default_factory=frozenset)
+    defaults_line: int | None = None
 
     @property
     def title(self) -> str:

@@ -1865,6 +1865,112 @@ def test_prefix_validation_runs_as_part_of_a_real_build(tmp_path):
     )
 
 
+# ---------------------------------------- defaults: leaking across type: (finding 6)
+
+DEFAULTS_LEAK_SCHEMA = (
+    "site: { title: T, out: _site }\n"
+    "types:\n"
+    "  requirement:\n"
+    "    prefix: REQ\n"
+    "    fields:\n"
+    "      text: { type: text, required: true }\n"
+    "      status: { type: enum, choices: [draft, active, retired] }\n"
+    "  component:\n"
+    "    prefix: CMP\n"
+    "    fields:\n"
+    "      title: { type: text, required: true }\n"
+    "      status: { type: enum, choices: [candidate, selected, obsolete] }\n"
+)
+
+
+def _defaults_leak_project(tmp_path, items_yaml):
+    (tmp_path / "refdes.yaml").write_text(DEFAULTS_LEAK_SCHEMA, encoding="utf-8")
+    items = tmp_path / "items"
+    items.mkdir()
+    (items / "mixed.yaml").write_text(items_yaml, encoding="utf-8")
+    return tmp_path
+
+
+def test_inherited_default_failing_the_overridden_types_own_enum_names_the_defaults_line(
+    tmp_path,
+):
+    root = _defaults_leak_project(
+        tmp_path,
+        "defaults:\n  type: requirement\n  status: active\n"
+        "items:\n"
+        "  - id: REQ-001\n    text: A normal requirement.\n"
+        "  - id: CMP-001\n    type: component\n    title: Some part\n",
+    )
+    project = load_project(config_path=str(root / "refdes.yaml"))
+    parse.load_items(project, require_ids=False)
+    build_mod.build(project, seal_write=False, reseal=False)
+
+    error = next(d for d in project.errors if d.item_id == "CMP-001")
+    assert "inherited from this file's defaults:" in error.message
+    assert "not set on CMP-001 itself" in error.message
+    # The defaults: block's own first key ("type: requirement") is line 2 --
+    # not CMP-001's own line further down, which never wrote status: at all.
+    assert error.line == 2
+    assert error.file == "items/mixed.yaml"
+
+
+def test_a_value_the_item_actually_wrote_itself_is_reported_normally(tmp_path):
+    """The inherited-value framing must not leak onto a value an item wrote
+    on its own -- only a value it never stated should be called inherited."""
+    root = _defaults_leak_project(
+        tmp_path,
+        "defaults:\n  type: requirement\n"
+        "items:\n  - id: REQ-002\n    text: Something.\n    status: bogus\n",
+    )
+    project = load_project(config_path=str(root / "refdes.yaml"))
+    parse.load_items(project, require_ids=False)
+    build_mod.build(project, seal_write=False, reseal=False)
+
+    error = next(d for d in project.errors if d.item_id == "REQ-002")
+    assert "inherited from this file's defaults:" not in error.message
+    assert error.line == 4  # REQ-002's own line, not the defaults: block's
+
+
+def test_overriding_the_defaults_value_is_not_treated_as_inherited(tmp_path):
+    """An item that restates the same key defaults: also sets is not
+    inheriting anything -- its own value won, so a failure there is its own,
+    reported exactly as it always was."""
+    root = _defaults_leak_project(
+        tmp_path,
+        "defaults:\n  type: requirement\n  status: active\n"
+        "items:\n  - id: REQ-003\n    text: Overrides status itself.\n    status: bogus\n",
+    )
+    project = load_project(config_path=str(root / "refdes.yaml"))
+    parse.load_items(project, require_ids=False)
+    build_mod.build(project, seal_write=False, reseal=False)
+
+    error = next(d for d in project.errors if d.item_id == "REQ-003")
+    assert "inherited from this file's defaults:" not in error.message
+    assert error.line == 5  # REQ-003's own line, not the defaults: block's
+
+
+def test_defaults_leak_is_caught_the_same_way_in_markdown_files(tmp_path):
+    """parse_markdown_file's file-wide defaults: block (the first front-matter
+    block, when it's shaped as nothing but 'defaults:') merges the same way
+    parse_list_file's does -- same bug, same fix, same test shape."""
+    (tmp_path / "refdes.yaml").write_text(DEFAULTS_LEAK_SCHEMA, encoding="utf-8")
+    items = tmp_path / "items"
+    items.mkdir()
+    (items / "mixed.md").write_text(
+        "---\ndefaults:\n  type: requirement\n  status: active\n---\n"
+        "id: REQ-001\ntext: A normal requirement.\n---\n"
+        "id: CMP-001\ntype: component\ntitle: Some part\n---\n",
+        encoding="utf-8",
+    )
+    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    parse.load_items(project, require_ids=False)
+    build_mod.build(project, seal_write=False, reseal=False)
+
+    error = next(d for d in project.errors if d.item_id == "CMP-001")
+    assert "inherited from this file's defaults:" in error.message
+    assert error.line == 2  # the defaults: block's own first key line
+
+
 # ------------------------------------------------------------------ former_ids
 
 FORMER_IDS_SCHEMA = (

@@ -289,6 +289,8 @@ def _build_item(
     rel: str,
     line: int,
     body: str = "",
+    inherited: frozenset[str] = frozenset(),
+    defaults_line: int | None = None,
 ) -> Item | None:
     type_name = raw.get("type")
     if not type_name:
@@ -342,6 +344,8 @@ def _build_item(
         body=body,
         numeric_id_hint=numeric_id_hint,
         id_rejected=id_rejected,
+        inherited_fields=inherited,
+        defaults_line=defaults_line,
     )
 
     if not item.body and raw.get("body"):
@@ -531,10 +535,13 @@ def parse_markdown_file(project: Project, path: str) -> list[Item]:
         blocks.append((open_i, close_i, parsed))
 
     defaults: dict[str, Any] = {}
+    defaults_line: int | None = None
     start = 0
     first_keys = {k for k in blocks[0][2] if k != "__line__"}
     if first_keys == {"defaults"} and isinstance(blocks[0][2].get("defaults"), dict):
-        defaults = _strip_lines(blocks[0][2]["defaults"])
+        raw_defaults = blocks[0][2]["defaults"]
+        defaults_line = raw_defaults.get("__line__")
+        defaults = _strip_lines(raw_defaults)
         start = 1
     default_type = defaults.get("type")
 
@@ -580,11 +587,16 @@ def parse_markdown_file(project: Project, path: str) -> list[Item]:
             continue
 
         body = "\n".join(lines[close_i + 1 : body_end])
+        own_keys = {k for k in parsed if k != "__line__"}
+        inherited = frozenset(defaults) - own_keys
         merged: dict[str, Any] = dict(defaults)
         merged.update({k: v for k, v in parsed.items() if k != "__line__"})
         if not _apply_section(project, merged, section_type, section_line, rel, line):
             continue
-        item = _build_item(project, merged, rel, line=line, body=body)
+        item = _build_item(
+            project, merged, rel, line=line, body=body,
+            inherited=inherited, defaults_line=defaults_line,
+        )
         if item:
             out.append(item)
     return out
@@ -605,7 +617,9 @@ def parse_list_file(project: Project, path: str) -> list[Item]:
         project.error("list file must be a mapping with an 'items:' key", file=rel, line=1)
         return []
 
-    defaults = _strip_lines(raw.get("defaults") or {})
+    raw_defaults = raw.get("defaults") or {}
+    defaults_line = raw_defaults.get("__line__")
+    defaults = _strip_lines(raw_defaults)
     default_type = defaults.get("type")
 
     out: list[Item] = []
@@ -636,11 +650,16 @@ def parse_list_file(project: Project, path: str) -> list[Item]:
                 section_line = line
             continue
 
+        own_keys = {k for k in entry if k != "__line__"}
+        inherited = frozenset(defaults) - own_keys
         merged: dict[str, Any] = dict(defaults)
         merged.update({k: v for k, v in entry.items() if k != "__line__"})
         if not _apply_section(project, merged, section_type, section_line, rel, line):
             continue
-        item = _build_item(project, merged, rel, line=line)
+        item = _build_item(
+            project, merged, rel, line=line,
+            inherited=inherited, defaults_line=defaults_line,
+        )
         if item:
             out.append(item)
     return out

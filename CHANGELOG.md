@@ -47,6 +47,15 @@ and this project uses [Semantic Versioning](https://semver.org/).
   `_only_key()`'s own rule that a marker's one real key is `section`.
   Scoped to list files: a markdown section marker is a bare fenced block,
   not front matter, so there was never a bare-item schema to fix.
+- A file's `defaults:` merged onto every item unconditionally, including one
+  that overrode `type:` -- so a value only valid for the file's typical type
+  (e.g. `status: active`, a `requirement`/`bound` vocabulary) could fail
+  validation against a different type's own vocabulary on an item that never
+  wrote that value itself, with the error reported identically to one the
+  item actually typed. Items now carry which of their field values came from
+  `defaults:` rather than their own keys; a failure on one of them now says
+  so explicitly and points at the `defaults:` block's own line instead of
+  the item's.
 
 ## [0.5.0] - 2026-08-21
 

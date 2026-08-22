@@ -95,6 +95,31 @@ def _format_required_when(condition: dict[str, object]) -> str:
     return " and ".join(clauses)
 
 
+def _field_error(project: Project, item: Item, fname: str, message: str) -> None:
+    """Finding 6: a `defaults:` block is merged into every item in its file
+    unconditionally, regardless of whether the item overrode `type:` to
+    something the value doesn't apply to (`status: active` from a file's
+    `requirement` defaults, merged onto a `component` entry whose own status
+    vocabulary is `candidate`/`selected`/`obsolete`). When the failing value
+    is one `item` never wrote itself, say so and point at the `defaults:`
+    block instead of reporting it identically to a value the item actually
+    typed -- `defaults_line` is only ever unset when the file has no
+    `defaults:` at all, which is also exactly when a field can't be
+    inherited, so the two conditions can only ever agree.
+    """
+    if fname in item.inherited_fields and item.defaults_line is not None:
+        project.error(
+            f"{message} -- inherited from this file's defaults:, not set on "
+            f"{item.id or 'this item'} itself; defaults: doesn't apply to "
+            f"every value once an item overrides type:",
+            file=item.source_file, line=item.defaults_line, item_id=item.id,
+        )
+    else:
+        project.error(
+            message, file=item.source_file, line=item.source_line, item_id=item.id,
+        )
+
+
 def validate_items(project: Project) -> None:
     for item in project.local_items:
         spec = project.types[item.type]
@@ -126,30 +151,27 @@ def validate_items(project: Project) -> None:
 
                 close = difflib.get_close_matches(str(value), fspec.choices, n=1, cutoff=0.5)
                 hint = f" Did you mean {close[0]!r}?" if close else ""
-                project.error(
+                _field_error(
+                    project, item, fname,
                     f"{fname}: {value!r} is not one of {fspec.choices}.{hint}",
-                    file=item.source_file, line=item.source_line, item_id=item.id,
                 )
             elif fspec.type == "limit":
                 try:
                     calc.parse_limit(str(value))
                 except calc.CalcError as exc:
-                    project.error(
-                        f"{fname}: {exc}",
-                        file=item.source_file, line=item.source_line, item_id=item.id,
-                    )
+                    _field_error(project, item, fname, f"{fname}: {exc}")
             elif fspec.type == "citations":
                 if not isinstance(value, list):
-                    project.error(
+                    _field_error(
+                        project, item, fname,
                         f"{fname}: must be a list of citation entries",
-                        file=item.source_file, line=item.source_line, item_id=item.id,
                     )
                 else:
                     for index, entry in enumerate(value):
                         if not isinstance(entry, dict) or not entry.get("url"):
-                            project.error(
+                            _field_error(
+                                project, item, fname,
                                 f"{fname}[{index}]: each citation needs a 'url'",
-                                file=item.source_file, line=item.source_line, item_id=item.id,
                             )
 
 
