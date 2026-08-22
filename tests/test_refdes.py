@@ -4212,6 +4212,46 @@ def test_seal_storage_is_a_single_file_with_no_boards_registered(tmp_path):
     }
 
 
+# ------------------------------------------------------- build --dry-run (finding 5)
+
+DRY_RUN_SCHEMA = (
+    "site: { title: T, out: _site }\n"
+    "types:\n  log: { prefix: LOG, append_only: true, "
+    "fields: { summary: { type: text, required: true } } }\n"
+)
+
+
+@pytest.fixture
+def dry_run_project(tmp_path):
+    (tmp_path / "refdes.yaml").write_text(DRY_RUN_SCHEMA, encoding="utf-8")
+    items = tmp_path / "items"
+    items.mkdir()
+    (items / "log.yaml").write_text(
+        "defaults: { type: log, prefix: LOG }\n"
+        "items:\n  - id: LOG-001\n    summary: first entry\n",
+        encoding="utf-8",
+    )
+    return tmp_path
+
+
+def test_cli_build_dry_run_writes_html_but_no_seal(dry_run_project):
+    status = cli_mod.main(["-c", str(dry_run_project / "refdes.yaml"), "build", "--dry-run"])
+    assert status == 0
+    assert not (dry_run_project / ".refdes" / "log-seal.yaml").exists()
+
+    html = (dry_run_project / "_site" / "index.html").read_text(encoding="utf-8")
+    assert "draft-banner" in html
+
+
+def test_cli_build_without_dry_run_seals_and_has_no_watermark(dry_run_project):
+    status = cli_mod.main(["-c", str(dry_run_project / "refdes.yaml"), "build"])
+    assert status == 0
+    assert (dry_run_project / ".refdes" / "log-seal.yaml").is_file()
+
+    html = (dry_run_project / "_site" / "index.html").read_text(encoding="utf-8")
+    assert "draft-banner" not in html
+
+
 def test_cli_reseal_rejects_unknown_board(sealed_board_project, capsys):
     status = cli_mod.main(
         ["-c", str(sealed_board_project / "refdes.yaml"), "build", "--reseal", "nonexistent"]

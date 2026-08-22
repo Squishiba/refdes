@@ -29,6 +29,13 @@ and this project uses [Semantic Versioning](https://semver.org/).
   `body:` in `docs/authoring.md` -- previously only inferable by reading
   each field's `on_change:` mode in the schema itself (`note:` wasn't
   mentioned anywhere in the docs at all).
+- `refdes build --dry-run`: renders the site for real (same output
+  directory, real HTML) without sealing new log entries -- the one command
+  with a permanent side effect on an ordinary run that had no way to preview
+  first. Unlike `id`/`revise`/`stub-tests`'s own `--dry-run`, which print a
+  preview and write nothing, this one still writes -- only the seal-recording
+  side effect is skipped. Output is watermarked with a "Draft build" banner
+  on every page so a preview render can't be mistaken for the sealed site.
 
 ### Fixed
 

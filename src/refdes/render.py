@@ -578,7 +578,13 @@ def _write_html(out_dir: str, written: set[str], name: str, template, **context)
         fh.write(template.render(**context))
 
 
-def render_site(project: Project) -> str:
+def render_site(project: Project, draft: bool = False) -> str:
+    """`draft` (finding 5): true when this render came from `refdes build
+    --dry-run`, i.e. `seal_write=False` was passed to `build()` -- the site
+    is real and browsable, only the seal-recording side effect was skipped.
+    Threaded through as a template global so every page can say so, the same
+    way `check_state`/`coverage_of` already reach every template from here.
+    """
     out_dir = os.path.join(project.root, project.out_dir)
     os.makedirs(out_dir, exist_ok=True)
     written: set[str] = set()
@@ -589,6 +595,7 @@ def render_site(project: Project) -> str:
         trim_blocks=True,
         lstrip_blocks=True,
     )
+    env.globals["draft_build"] = draft
     env.globals["check_state"] = _check_state
     env.globals["coverage_of"] = project.coverage.get
     env.globals["blocked_chains_for"] = blocked_mod.by_item(project).get

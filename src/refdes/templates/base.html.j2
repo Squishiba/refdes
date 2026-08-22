@@ -43,6 +43,9 @@
 
 <div class="content">
 <main>
+{% if draft_build %}
+<div class="draft-banner">Draft build — not sealed. Run without --dry-run to seal and publish this site for real.</div>
+{% endif %}
 {% block content %}{% endblock %}
 </main>
 

@@ -23,11 +23,13 @@ Validate, evaluate, and render the site plus `items.json`.
 | `--reseal [BOARD]` | Accept edits to sealed append-only entries. Bare, accepts every board's; name one board to scope it, e.g. `--reseal power` |
 | `--accept-board-move` | Accept a recorded [board](multi-board.md) or [workspace](workspaces.md) change for an item |
 | `--require-citations` | Promote the unpinned-citation (info) and missing-cache-blob (warning) [citation](markdown.md#citing-a-datasheet) diagnostics to errors |
+| `--dry-run` | Render the site without sealing |
 
 ```bash
 refdes build
 refdes build -o public --keep-going
 refdes build --reseal power
+refdes build --dry-run
 ```
 
 Build also **seals** any new [log entries](design-log.md) it finds. Seals are
@@ -36,6 +38,14 @@ entries, `.refdes/log-seal.yaml` for entries with no board (the only file used
 at all when the project has no `boards:` registry). `--reseal <board>` only
 accepts edits to that board's own entries; every other board's still fail as a
 normal violation.
+
+`--dry-run` skips only that seal-recording side effect — the site is still
+rendered for real, to the same output directory, watermarked with a "Draft
+build" banner on every page. This is different from `id`/`revise`/
+`stub-tests`'s own `--dry-run`, which print a preview and write nothing: the
+whole point of running `build` is the rendered site, so a dry-run that wrote
+no HTML would be useless for "let me see what this looks like without
+committing to it yet."
 
 `--keep-going` is for local iteration when you want to look at the site despite a
 failing check. Do not use it in CI — it defeats the point.

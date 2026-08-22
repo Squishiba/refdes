@@ -164,14 +164,14 @@ def cmd_build(args) -> int:
         )
     build_mod.build(
         project,
-        seal_write=True,
+        seal_write=not args.dry_run,
         reseal=args.reseal,
         accept_board_move=args.accept_board_move,
         require_citations=args.require_citations,
     )
-    out_dir = render_mod.render_site(project)
+    out_dir = render_mod.render_site(project, draft=args.dry_run)
     status = _report(project, verbose=args.verbose)
-    print(f"site written to {out_dir}")
+    print(f"site written to {out_dir}" + (" (dry run, not sealed)" if args.dry_run else ""))
     if status and not args.keep_going:
         print("build completed with errors (use --keep-going to exit 0)", file=sys.stderr)
         return status
@@ -735,6 +735,14 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="accept a recorded board or workspace change for an item "
         "(recorded in `audit`)",
+    )
+    p_build.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="render the site without sealing (unlike id/revise/stub-tests, "
+        "this still writes real, browsable HTML -- only the seal-recording "
+        "side effect on not-yet-sealed log entries is skipped; the output "
+        "is watermarked as a draft)",
     )
     p_build.add_argument(
         "--require-citations",

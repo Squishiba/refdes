@@ -45,6 +45,17 @@ h1 { font-size: 26px; margin: 0 0 4px; }
 h2 { font-size: 18px; margin: 32px 0 10px; padding-bottom: 6px; border-bottom: 1px solid var(--line); }
 h3 { font-size: 14px; margin: 12px 0 6px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
 
+.draft-banner {
+  background: color-mix(in srgb, var(--warn) 15%, var(--bg));
+  border: 1px solid var(--warn);
+  color: var(--warn);
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin: 0 0 20px;
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
 .mono, code, pre { font-family: var(--mono); font-size: 13px; }
 .small { font-size: 12.5px; }
 .muted { color: var(--muted); }
