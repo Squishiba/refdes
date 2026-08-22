@@ -49,6 +49,28 @@ both. Separate the jobs and the mechanisms stop being load-bearing:
 
 None of that is bad code. All of it is the cost of one design choice.
 
+**The first concrete bug that *requires* this, rather than merely benefiting
+from it** (issue #6, finding 10 part 2): allocate `REQ-001`, delete that
+item, hand-type a *different* item with `id: REQ-001`, run `check`. It
+passes silently — the ledger's own "never reused, even after an item is
+deleted" guarantee, broken. Investigated at length (see the finding's own
+thread): every check considered — comparing against the ledger's `burned`
+ceiling, against the `allocated` list, against a hypothetical proper
+per-number burned set — either false-positives on ordinary projects (a
+hand-typed id sitting below some other, unrelated id's number is completely
+normal, not reuse) or fails to catch the repro. The reason is structural,
+not a gap in the checks tried: "the same item, never touched" and "the
+original item deleted, a different item hand-typed with its exact former
+id" produce **byte-identical on-disk state** — the same ledger entry, the
+same single item named `REQ-001` in the parsed project. No function
+computed from that state can return different answers for two inputs it
+cannot tell apart. This is exactly the identity/display split this document
+argues for: once a key is what a link resolves on and what a baseline
+records, the two histories stop being indistinguishable — the deleted
+item's key is simply gone (an ordinary `removed` diff line), and the new
+item mints its own, different key, however it happens to be labelled. See
+§6's Layer 4 for the mechanism that catches it once keys exist.
+
 ---
 
 ## 1. Key format
