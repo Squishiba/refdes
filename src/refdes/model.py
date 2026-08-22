@@ -188,6 +188,15 @@ class ItemType:
     links: dict[str, list[str]] = field(default_factory=dict)  # link name -> allowed target types
     preview: list[str] = field(default_factory=list)
     body_on_change: str = INVALIDATE
+    # hardware@3: true on requirement/bound, whose one content field is now
+    # body: -- folded in from the old text:, a field unification distinct
+    # from (and not) finding 3's own proposal. Enforced as a warning, not an
+    # error (see build.validate_items()): a requirement with no statement
+    # isn't one, but a stub still needs to be able to exist while it's being
+    # drafted. False everywhere else, including test (method: folded in too,
+    # but was never required itself, so folding it into body must not make
+    # body required there either).
+    body_required: bool = False
     append_only: bool = False  # sealed after first build; corrections go in new entries
     # Which `status` values count as "settled" when this type satisfies a
     # requirement or constraint. None means unconfigured: every link counts, same
@@ -370,12 +379,22 @@ class Item:
     @property
     def title(self) -> str:
         # `summary` is what a log entry calls its one-line description, and `name`
-        # what a component calls it. Without them those types fall back to their own
-        # ID, so every table that shows a title renders a column of bare IDs.
+        # what a component calls it. `text` stays in the chain for a hand-rolled
+        # project schema still free to declare a field by that name (hardware@3
+        # dropped it from requirement/bound, folding its role into body: below,
+        # but this fallback chain is engine-level, not standard-specific).
         for key in ("title", "text", "summary", "name"):
             value = self.fields.get(key)
             if value:
                 text = str(value).strip()
+                return text if len(text) <= 90 else text[:87].rstrip() + "…"
+        # A requirement/bound with no title: falls back here -- body is the
+        # sentence itself once text: no longer exists to hold it (hardware@3).
+        # `title`, when present, still wins above: a caption is meant to be
+        # the short label, not competing with the full sentence for the slot.
+        if self.body:
+            text = self.body.strip()
+            if text:
                 return text if len(text) <= 90 else text[:87].rstrip() + "…"
         return self.id
 

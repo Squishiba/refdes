@@ -1,0 +1,29 @@
+# The delta from hardware v2 to v3 -- what `refdes standard upgrade --to 3`
+# applies to a project pinned at v2. Read by revise.py, never by base.yaml's
+# own resolution: this file plays no part in what standard: {base: hardware,
+# version: 3} resolves to; it only describes how a project already on v2
+# moves its own existing content to match.
+#
+# v3's other change -- the new governed_by/governs link verb -- appears
+# nowhere here. It is purely additive: nothing existing needs to be renamed
+# for it to be usable, so there is nothing for this file to rewrite.
+#
+# fields: below renames text: -> body: on requirement/bound, and method: ->
+# body: on test, exactly the same shape v1 -> v2's own migration.yaml used
+# for constraint.title -> text. One difference from that rename worth
+# calling out: `body:` is a reserved key, not a schema field, so revise.py
+# additionally refuses (rather than silently overwriting) any item that
+# already has body content of its own before this migration ever touches
+# it -- see revise.check_body_merge_conflicts(), run alongside the ordinary
+# ambiguity check every apply() already performs.
+#
+# See docs/design/standard-library.md §3 for the versioning design this
+# implements.
+
+fields:
+  requirement:   # keyed by the OLD type name
+    text: body
+  bound:
+    text: body
+  test:
+    method: body

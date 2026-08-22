@@ -161,6 +161,14 @@ def new_item_text(type_name: str, spec: ItemType) -> str:
         lines.append(f"# {lname}: []  # target: {target_desc}")
     lines.append("---")
     lines.append("")
+    # body: is reserved, not a field, so it never shows up in the loop above
+    # -- without this, a type whose entire content lives there (hardware@3's
+    # requirement/bound) scaffolds with no hint that anything more is needed.
+    if spec.body_required:
+        lines.append("<!-- required: the content itself goes here. -->")
+    else:
+        lines.append("<!-- optional body. -->")
+    lines.append("")
     return "\n".join(lines)
 
 

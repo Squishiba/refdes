@@ -38,16 +38,20 @@ OVERRIDABLE = {"prefix", "board", "workspace"}
 # key) -> new key. A plain rename would otherwise surface as an unknown-field
 # warning on the old key plus a missing-required error on the new one --
 # accurate, but a miserable way to discover that the fix is "rename this key"
-# (finding 4: hardware v1's constraint.title -> v2's constraint.text). Scoped
-# to the type name alone, so it also flags a hand-rolled schema that happens
-# to name a type `constraint` and drop `title` for unrelated reasons -- an
-# acceptable false positive given how narrowly this table is meant to stay.
+# (finding 4: hardware v1's constraint.title -> v2's constraint.text; hardware
+# v2's requirement.text/bound.text/test.method -> v3's body:). Scoped to the
+# type name alone, so it also flags a hand-rolled schema that happens to name
+# a type `constraint` and drop `title` for unrelated reasons -- an acceptable
+# false positive given how narrowly this table is meant to stay.
 _RENAMED_FIELDS: dict[tuple[str, str], str] = {
     ("constraint", "title"): "text",
+    ("requirement", "text"): "body",
+    ("bound", "text"): "body",
+    ("test", "method"): "body",
 }
 
 # Types renamed by a standard-library version bump, old name -> new name
-# (hardware v2's `constraint` -> v3's `bound`). The same reasoning as
+# (hardware v1's `constraint` -> v2's `bound`). The same reasoning as
 # _RENAMED_FIELDS one level up: without this, moving the pin forward by hand
 # reports a bare "unknown type 'constraint'." on every item in the project,
 # and difflib's did-you-mean is no help at all here -- `constraint` and
@@ -399,7 +403,17 @@ def _build_item(
                 f"field.",
                 file=rel, line=line, item_id=item.id or "?",
             )
-            item.fields[new_key] = _strip_lines(value)
+            # `body:` (hardware@3's text:/method: -> body:) is reserved, not a
+            # field -- item.body, not item.fields, is where it belongs. Only
+            # takes over when nothing already populated it for real (the
+            # closing-fence prose in a markdown item, or an earlier key on the
+            # same entry), matching _build_item's own body-fallback rule
+            # below -- never silently overwrites real body content.
+            if new_key == "body":
+                if not item.body:
+                    item.body = str(value)
+            else:
+                item.fields[new_key] = _strip_lines(value)
         else:
             # A typo'd link name (`sattisfies:` for `satisfies:`) doesn't just lose a
             # field -- it drops a traceability edge, so it must fail the build rather

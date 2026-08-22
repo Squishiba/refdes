@@ -363,6 +363,7 @@ def load_project(config_path: str | None = None, start: str = ".") -> Project:
             raise SchemaError(
                 f"types.{tname}.body.on_change must be one of {list(ON_CHANGE_MODES)}"
             )
+        body_required = bool(body_cfg.get("required", False))
 
         satisfying_statuses = tspec.get("satisfying_statuses")
         if satisfying_statuses is not None:
@@ -400,6 +401,7 @@ def load_project(config_path: str | None = None, start: str = ".") -> Project:
             links=links,
             preview=list(tspec.get("preview") or []),
             body_on_change=body_on_change,
+            body_required=body_required,
             append_only=bool(tspec.get("append_only", False)),
             satisfying_statuses=satisfying_statuses,
             check_severity=check_severity,

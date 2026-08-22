@@ -18,11 +18,11 @@ defaults:
 
 items:
   - id: REQ-PWR-001
-    text: The unit shall operate from an input supply of 9 V to 36 V.
+    body: The unit shall operate from an input supply of 9 V to 36 V.
     source: Customer spec rev D, §3.1
 
   - id: REQ-PWR-002
-    text: The 3V3 rail shall supply 1.2 A continuous.
+    body: The 3V3 rail shall supply 1.2 A continuous.
     status: draft          # overrides the default
 ```
 
@@ -155,12 +155,13 @@ a list entry of its own in a list file, a fenced block of its own in Markdown.
 items:
   - section: requirement
   - id: REQ-IO-AI-001
-    text: The AI accelerator rail shall regulate to 0.85 V ±3%.
+    body: The AI accelerator rail shall regulate to 0.85 V ±3%.
   - id: REQ-IO-AI-002
-    text: The AI accelerator rail shall supply 40 A continuous.
+    body: The AI accelerator rail shall supply 40 A continuous.
 
   - section: bound
   - id: BND-IO-001
+    body: Onboard fusing budget.
     limit: "<= 5 A"
     rationale: Trace width on the outer layer at 1 oz copper.
 ```
@@ -170,13 +171,14 @@ items:
 section: requirement
 ---
 id: REQ-IO-AI-001
-text: The AI accelerator rail shall regulate to 0.85 V ±3%.
+body: The AI accelerator rail shall regulate to 0.85 V ±3%.
 ---
 
 ---
 section: bound
 ---
 id: BND-IO-001
+body: Onboard fusing budget.
 limit: "<= 5 A"
 rationale: Trace width on the outer layer at 1 oz copper.
 ---
@@ -251,9 +253,9 @@ Which fields are legal depends on the type, and is declared in `refdes.yaml`:
 types:
   requirement:
     fields:
-      text:    { type: text, required: true, on_change: invalidate }
       status:  { type: enum, choices: [draft, active, retired], default: draft }
       owner:   { type: person, on_change: log }
+    body: { on_change: invalidate, required: true }
 ```
 
 The [standard library](standard-library.md) already declares this for `requirement`
@@ -275,9 +277,17 @@ enforced; the rest are documentation for readers and for future validation.
 
 ### Titles
 
-An item's display title is its `title` field, or its `text` field if there is no
-`title`, or its ID if neither exists. This is why requirements use `text` (the
-requirement *is* the sentence) and decisions use `title`.
+An item's display title is its `title` field, its `text` field (a hand-rolled
+project schema is still free to use that name), its `body` (truncated to a
+sentence-length preview), its `summary`, its `name`, or its ID — the first of
+those it actually has, in that order. This is why a `requirement`/`bound`
+needs no `title:` at all in the common case: the sentence lives in `body:`,
+and the title falls back to *that*, truncated if it runs long — a decision or
+test, whose real content lives elsewhere (`options:`, a linked `checks:`),
+needs `title:` written explicitly instead, since there's no prose to fall
+back to. Write `title:` on a requirement/bound too once the sentence is long
+enough to want a short label of its own in a table; it wins over the body
+fallback whenever it's present.
 
 ### `source`, `note`, `rationale`, `body`
 

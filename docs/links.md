@@ -74,6 +74,7 @@ graph LR
   log -- amends --> log
   log -- records --> decision
   requirement -- refines --> requirement
+  requirement -- governed_by --> requirement
   test -- verifies --> requirement
   test -- verifies --> bound
 ```
@@ -86,6 +87,7 @@ or straight into anything that renders Mermaid.
 |---|---|---|
 | `refines` | `refined_by` | a requirement narrowing another requirement, or a bound narrowing another bound |
 | `derives_from` | `derived_by` | a bound derived from a requirement or another bound |
+| `governed_by` | `governs` | a requirement that must comply with a general rule stated in another requirement — see [below](#governed-by-vs-refines-vs-constrained-by) |
 | `satisfies` | `satisfied_by` | decision or component → requirement |
 | `constrained_by` | `constrains` | decision → bound |
 | `verifies` | `verified_by` | test → requirement or bound |
@@ -100,6 +102,33 @@ or straight into anything that renders Mermaid.
 
 Add your own by declaring them in `link_types` and listing them under a type's
 `links:`.
+
+### `governed_by` vs. `refines` vs. `constrained_by`
+
+Three verbs, three different questions, easy to reach for the wrong one:
+
+- **`refines`** — this is a narrower, more detailed version of *the same kind
+  of statement*: a board-level numeric rule refining a platform-level one,
+  same category of thing, different altitude.
+- **`constrained_by`** — a machine-checkable numeric limit, tied to
+  `limit:`/`checks:`. Reserved for `decision` → `bound`.
+- **`governed_by`** — neither of those. The declaring requirement is a
+  *different* fact (which specific inputs exist, say) that must comply with
+  a general rule stated elsewhere, without being a more detailed version of
+  that rule's own statement and without being a numeric limit at all:
+
+  ```yaml
+  - id: REQ-DIO-003
+    body: The main IO board shall provide isolated discrete inputs.
+    governed_by: [REQ-DIO-001]   # every digital channel needs 26V TVS protection
+  ```
+
+  `REQ-DIO-003` isn't a more detailed version of `REQ-DIO-001` — it's a
+  different fact that has to comply with a rule `REQ-DIO-001` already
+  established once it exists. Authored on the dependent requirement, the
+  same passive-form convention `constrained_by`/`constrains` and
+  `blocked_by`/`blocks` both already use; `governs`, the active/backlink
+  form, is computed.
 
 ## Part equivalence: `equivalent` and `alternate`
 

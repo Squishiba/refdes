@@ -479,19 +479,19 @@ Move a project's pinned `standard.version:` forward, rewriting every item
 file to match.
 
 ```bash
-refdes standard upgrade --to 2
+refdes standard upgrade --to 3
 ```
 
 Each bundled standard version ships its own `migration.yaml` — the delta
 from the version immediately before it (`hardware@2`'s renames
 `constraint.title` to `constraint.text` and the `constraint` type to
-`bound`, its `CON` prefix along with it). See [the versions shipped so
-far](standard-library.md#the-versions-shipped-so-far). Upgrading across
-several versions chains each intervening one's own migration, in order —
-`v1→v2`, then `v2→v3`, and so on — never merged into one combined rename,
-so a name a later version reuses (freed up by an earlier step) is never
-mistaken for a collision. The bundled `hardware` standard has one step
-today; the chaining is what keeps that true as it grows. Each step rewrites item
+`bound`, its `CON` prefix along with it; `hardware@3`'s renames
+`requirement.text`/`bound.text`/`test.method` to `body:`). See [the
+versions shipped so far](standard-library.md#the-versions-shipped-so-far).
+Upgrading across several versions chains each intervening one's own
+migration, in order — `v1→v2`, then `v2→v3`, and so on — never merged into
+one combined rename, so a name a later version reuses (freed up by an
+earlier step) is never mistaken for a collision. Each step rewrites item
 files, bumps `standard.version:` in `refdes.yaml`, and carries the affected
 items' content hashes forward in every stamped baseline and seal file, the
 same way `refdes revise` does (below) — see there for what that buys you.

@@ -12,5 +12,5 @@ defaults:
 
 items:
   - id: REQ-B-PWR-001
-    text: The board shall accept the same 9 V to 36 V input rail as Board A.
+    body: The board shall accept the same 9 V to 36 V input rail as Board A.
     source: Shared platform spec.

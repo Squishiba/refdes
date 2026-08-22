@@ -204,6 +204,43 @@ def check_ambiguous(project: Project, mapping: Mapping) -> list[str]:
     return errors
 
 
+def check_body_merge_conflicts(project: Project, mapping: Mapping) -> list[str]:
+    """Refuse a field rename that targets the reserved `body:` key wherever
+    an item already has body content of its own (list-file `body:`, or a
+    markdown item's prose after the closing fence).
+
+    `body:` isn't a schema field -- there is nothing in `spec.fields` for
+    `check_ambiguous`'s own "does the target already exist" check to find,
+    so a rename into it needs this instead. Without it, `_rewrite_one_key`
+    would rename the old field's key in place (e.g. `text:` ->
+    `body:` in front matter) while the item's *real* body -- whatever
+    `item.body` already held -- stays exactly where it is; whichever the
+    parser reads back after rewrite silently wins, and the other is an
+    orphaned, unreferenced key nothing reports as wrong. Caught here,
+    before anything is written, rather than trusted to the reload-and-
+    verify safety net: a value simply going missing produces no invalid
+    state for that net to catch.
+    """
+    errors: list[str] = []
+    for tname, frenames in mapping.fields.items():
+        targets_body = {old for old, new in frenames.items() if new == "body" and old != new}
+        if not targets_body:
+            continue
+        for item in project.local_items:
+            if item.type != tname:
+                continue
+            if not any(old in item.fields for old in targets_body):
+                continue
+            if item.body.strip():
+                errors.append(
+                    f"{item.source_file}:{item.source_line} [{item.id or '?'}] -- "
+                    f"can't rename {tname}.{'/'.join(sorted(targets_body))} to body: "
+                    f"this item already has its own body content, which the rename "
+                    f"would silently orphan or overwrite. Merge them by hand first."
+                )
+    return errors
+
+
 # --------------------------------------------------------- file-level rewrite
 
 # A `type:`/`section:` line's value is a type name wherever it appears --
@@ -681,6 +718,7 @@ def apply(
         )
 
     ambiguous = check_ambiguous(project_before, mapping)
+    ambiguous += check_body_merge_conflicts(project_before, mapping)
     if ambiguous:
         return RevisionResult(ok=False, errors=ambiguous)
 

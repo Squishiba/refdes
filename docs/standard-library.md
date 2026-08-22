@@ -368,6 +368,46 @@ the type is now `bound`, which is worth saying because `constraint` and
 `bound` share almost no letters, so a did-you-mean suggestion offers
 nothing.
 
+**`hardware@3`** — two changes, arriving together for the same reason `@2`'s
+three did: neither was ever published on its own.
+
+1. **A new link verb, `governed_by`** (inverse `governs`), authored on
+   `requirement`, targeting `[requirement]`. Fills a gap `refines` and
+   `constrained_by` both leave open: "this specific fact must comply with a
+   general rule stated elsewhere" is neither a narrower version of the same
+   statement (`refines`) nor a machine-checkable numeric limit
+   (`constrained_by`, reserved for `decision` → `bound`). Named and shaped to
+   match `constrained_by`/`constrains` and `blocked_by`/`blocks`: authored
+   passively from the affected item's side, with the active form computed as
+   the backlink.
+
+2. **`requirement.text`/`bound.text` merge into `body:`, and `test.method`
+   does too.** `title` and `body` become the only free-prose fields any type
+   carries. `title` becomes optional on `requirement`/`bound`, falling back
+   exactly as `Item.title` already does for every type missing one — write
+   `body:` and add `title:` only once the sentence is long enough to want a
+   short label in a table. `body:` is now `required: true` on both types,
+   the direct replacement for what `text: required: true` used to guarantee
+   — but enforced as a **warning**, not a build-blocking error: a
+   requirement with no statement isn't one, but a stub still needs to be
+   able to exist while it's being drafted. `method:` folds into `body:` on
+   the same reasoning, but was never `required:`, so `body:` isn't required
+   on `test`. `rationale`, `source`, `note`, and the log's `summary` all
+   stay: `rationale` because `required_when:` can require a field but not a
+   paragraph inside prose; `source`/`note` because they're `on_change: log`,
+   and folding either into an `invalidate` field would silently make a
+   provenance note invalidate downstream links; the log's `summary` because
+   it's required, and `log` isn't part of this change.
+
+`hardware@1` and `@2` resolve exactly as they always have.
+
+`refdes standard upgrade --to 3` renames `text:`/`method:` to `body:` in
+every item file that still writes them. `governed_by` needs no migration —
+purely additive, nothing existing to rename. The upgrade refuses (rolling
+back) rather than silently overwriting or orphaning content on any item that
+already has body content of its own before the rename — merge the two by
+hand first, then upgrade.
+
 ## `coverable`, `coverable_statuses`, `verifying_statuses`, and `required_when`
 
 These four are general schema-engine capabilities, not standard-specific

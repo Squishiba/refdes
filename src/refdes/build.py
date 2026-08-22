@@ -124,6 +124,14 @@ def validate_items(project: Project) -> None:
     for item in project.local_items:
         spec = project.types[item.type]
 
+        if spec.body_required and not item.body.strip():
+            project.warn(
+                "body: is empty -- title: is an optional short label, not a "
+                "substitute for the content itself. A warning, not an error, "
+                "so a stub can exist while it's still being drafted.",
+                file=item.source_file, line=item.source_line, item_id=item.id,
+            )
+
         for fname, fspec in spec.fields.items():
             value = item.fields.get(fname)
             effective_required = fspec.required or (

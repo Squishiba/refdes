@@ -9,11 +9,11 @@ items:
   - id: TST-PWR-001
     title: Input range sweep
     status: passing
-    method: Sweep the bench supply 9 V to 36 V in 1 V steps at full load; log rail regulation.
+    body: Sweep the bench supply 9 V to 36 V in 1 V steps at full load; log rail regulation.
     verifies: [REQ-PWR-001]
 
   - id: TST-PWR-002
     title: 3V3 rail load and ripple
     status: planned
-    method: Electronic load stepped to 1.2 A; measure ripple with a 20 MHz-limited probe.
+    body: Electronic load stepped to 1.2 A; measure ripple with a 20 MHz-limited probe.
     verifies: [REQ-PWR-002]

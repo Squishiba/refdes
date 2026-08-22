@@ -8,14 +8,14 @@ defaults:
 
 items:
   - id: BND-THM-001
-    # Renamed from CON-THM-001 by `refdes standard upgrade --to 3` (hardware@3
+    # Renamed from CON-THM-001 by `refdes standard upgrade --to 2` (hardware@2
     # renamed `constraint` to `bound`, prefix CON -> BND). The rename moves
     # structured references but never prose, so this records the old id here
     # instead: every "CON-THM-001" still written in a rationale, a source
     # note, or a sealed log entry keeps resolving, marked "(formerly
     # CON-THM-001)", without rewriting a single historical sentence.
     former_ids: [CON-THM-001]
-    text: Board power density
+    body: Board power density
     limit: "<= 0.15 W/in^2"
     rationale: >
       Natural convection only — the enclosure is sealed with no vents and no fan.
@@ -23,7 +23,7 @@ items:
     source: Enclosure spec rev C, p.14
 
   - id: BND-THM-002
-    text: Minimum converter efficiency
+    body: Minimum converter efficiency
     limit: ">= 0.90"
     rationale: >
       Every point of efficiency below this pushes dissipation past what the

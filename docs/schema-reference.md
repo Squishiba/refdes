@@ -177,11 +177,11 @@ types:
     prefix: BND
     label: Bound
     append_only: false
-    preview: [status, text, limit]
+    preview: [status, title, limit]
     coverable: true
     coverable_statuses: [active]
     fields:
-      text:   { type: text,  required: true, on_change: invalidate }
+      title:  { type: text, on_change: invalidate }
       limit:  { type: limit, required: true, on_change: invalidate }
       status: { type: enum, choices: [draft, active, retired],
                 default: draft, on_change: invalidate }
@@ -190,7 +190,7 @@ types:
     links:
       refines:      [bound]
       derives_from: [requirement, bound]
-    body: { on_change: invalidate }
+    body: { on_change: invalidate, required: true }
 ```
 
 | Key | Default | Purpose |
@@ -202,7 +202,7 @@ types:
 | `fields` | `{}` | Legal fields |
 | `include` | not set | Names of `field_sets:` entries merged into `fields:` before this type's own fields are applied |
 | `links` | `{}` | Legal links, mapped to allowed target types |
-| `body` | project default | `on_change` mode for the markdown body |
+| `body` | `on_change`: project default; `required`: `false` | `on_change` mode for the markdown body, and whether it must be non-empty (`required: true` — the bundled standard sets this on `requirement`/`bound`, hardware@3). Enforced as a **warning**, not a build-blocking error the way `required: true` is on an ordinary field — a stub can still exist while it's being drafted. |
 | `satisfying_statuses` | not set — every `satisfies:` link counts | `status` values that count as settled; see [coverage](coverage.md#which-statuses-count-as-satisfying) |
 | `check_severity` | `error` | Diagnostic level for a failing `checks:` entry on items of this type; see [checks](checks.md#candidates-vs-decisions) |
 | `coverable` | not set — falls back to name-based detection, see below | Whether items of this type get a `Coverage` object at all |

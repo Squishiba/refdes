@@ -7,6 +7,42 @@ and this project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Breaking
+
+- **The bundled standard moves to `hardware@3`.** Two changes, arriving
+  together because neither was ever published on its own:
+    1. A new link verb, `governed_by` (inverse `governs`), authored on
+       `requirement`, targeting `[requirement]` -- "this specific fact must
+       comply with a general rule stated elsewhere," a gap `refines` (a
+       narrower version of the *same* statement) and `constrained_by` (a
+       machine-checkable numeric limit, reserved for `decision` → `bound`)
+       both left open.
+    2. `requirement.text`/`bound.text` merge into `body:`, and `test.method`
+       does too -- `title` and `body` become the only free-prose fields any
+       type carries. `title` is now optional on `requirement`/`bound`,
+       falling back exactly as `Item.title` already does for every type
+       missing one. `body:` is `required: true` on both, the direct
+       replacement for what `text: required: true` used to guarantee, but
+       enforced as a **warning**, not a build-blocking error -- a
+       requirement with no statement isn't one, but a stub still needs to
+       exist while it's being drafted. `method:` was never required, so
+       folding it into `body:` doesn't make `body:` required on `test`.
+       `rationale`, `source`, `note`, and the log's `summary` all stay
+       exactly as they were.
+
+  `refdes init` pins `version: 3` from now on. `refdes new <type>` now hints
+  at `body:` after the closing fence -- it's reserved, not a schema field,
+  so it never showed up in the scaffold's per-field loop before this.
+
+  **A project pinned at `version: 1` or `version: 2` is completely
+  unaffected** and stays that way until it chooses otherwise. To move:
+  `refdes standard upgrade --to 3`, which renames `text:`/`method:` to
+  `body:` in every item file that still writes them, carries content hashes
+  forward in every stamped baseline and seal, and refuses (rolling back)
+  rather than silently overwriting or orphaning content on any item that
+  already has body content of its own -- merge the two by hand first, then
+  upgrade. `governed_by` needs no migration; it's purely additive.
+
 ### Added
 
 - `refdes index`'s output now includes `next_ids`, the next free number per

@@ -31,7 +31,7 @@ site:
 
 standard:
   base: hardware
-  version: 2
+  version: 3
   presets: []
 
 id:
@@ -40,7 +40,7 @@ id:
 ```
 
 That's the whole file `refdes init` writes — rename the title to taste.
-`version: 2` is whatever the installed `refdes` currently bundles as newest,
+`version: 3` is whatever the installed `refdes` currently bundles as newest,
 never the literal word `"latest"` — a later `refdes` may write a higher
 number here; that's expected, not a sign this page is out of date. Nothing
 here defines a `requirement` or a `link_types:` block — that all comes from
@@ -78,10 +78,10 @@ defaults:
   status: active
 
 items:
-  - text: The unit shall operate from an input supply of 9 V to 36 V.
+  - body: The unit shall operate from an input supply of 9 V to 36 V.
     source: Customer spec rev D, §3.1
 
-  - text: The 3V3 rail shall supply 1.2 A continuous.
+  - body: The 3V3 rail shall supply 1.2 A continuous.
     source: Customer spec rev D, §3.4
 ```
 
@@ -115,7 +115,7 @@ defaults:
 
 items:
   - id: BND-THM-001
-    text: Board power density
+    body: Board power density
     limit: "<= 0.15 W/in^2"
     rationale: >
       Natural convection only — the enclosure is sealed, with no vents and no fan.
@@ -216,7 +216,7 @@ items:
   - id: TST-PWR-001
     title: Input range sweep
     status: passing
-    method: Sweep 9 V to 36 V at full load; log rail regulation.
+    body: Sweep 9 V to 36 V at full load; log rail regulation.
     verifies: [REQ-PWR-001]
 ```
 
