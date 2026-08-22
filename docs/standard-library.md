@@ -42,7 +42,9 @@ the self-inverse `equivalent`/`alternate` pair on `component`. See
 Every type also carries `owner`/`last_reviewed` (the `stewardship` field set)
 and `source`/`note`/`tags` (`provenance`) — see [field_sets and
 `include:`](#field-sets-and-include) for how those are assembled without
-retyping five fields on every type.
+retyping five fields on every type, and [authoring: `source`, `note`,
+`rationale`, `body`](authoring.md#source-note-rationale-body) for what
+`source`/`note` are actually for, as distinct from `rationale`/`body`.
 
 ## Opting out
 

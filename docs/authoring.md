@@ -279,6 +279,33 @@ An item's display title is its `title` field, or its `text` field if there is no
 `title`, or its ID if neither exists. This is why requirements use `text` (the
 requirement *is* the sentence) and decisions use `title`.
 
+### `source`, `note`, `rationale`, `body`
+
+Four fields all hold prose beyond an item's own required content, and it's
+easy to reach for the wrong one without seeing them side by side. The real
+distinction is each field's [`on_change:`](change-tracking.md) mode:
+
+| Field | `on_change:` | What it's for |
+|---|---|---|
+| `source:` | `log` | Where a value or decision came from — a spec section, a datasheet, a conversation. Doesn't affect whether the item's content is still correct. |
+| `note:` | `log` | An aside that's neither where something came from nor part of the item's actual content — a loose "worth remembering" field. |
+| `rationale:` | `invalidate` | Why the content is correct. Part of the record: change it, and whatever depends on this item should be re-reviewed. |
+| `body:` | `invalidate` | Overflow content itself — a table, an image, extended prose the item's own fields have no room for. |
+
+`log` vs. `invalidate` is the line that matters, not the words themselves:
+`source`/`note` are metadata *about* an item, editable freely without ever
+making a downstream link suspect; `rationale`/`body` are part of what the
+item actually asserts, so a change there does. Choosing between `note:` and
+`rationale:` for something: if a change to it should flag things pointing at
+this item as needing another look, it's `rationale:` (or `body:`, if it's
+content rather than a *reason*); if not, it's `note:`.
+
+`source` and `note` come from `field_sets.provenance` (see [`field_sets` and
+`include:`](standard-library.md#field-sets-and-include)); `rationale` is
+declared per type, and required on some (`decision.rationale`, when `status:
+rejected`); `body` is a reserved key, not a field at all — see [bodies in
+list files](#bodies-in-list-files) and [reserved keys](#reserved-keys) below.
+
 ## Reserved keys
 
 These are never treated as fields:

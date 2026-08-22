@@ -25,6 +25,10 @@ and this project uses [Semantic Versioning](https://semver.org/).
   be switched on for this repo (Settings -> Pages -> Build and deployment ->
   Source: GitHub Actions) before the first run can deploy; not something
   this change can do on its own.
+- Documented the difference between `source:`, `note:`, `rationale:`, and
+  `body:` in `docs/authoring.md` -- previously only inferable by reading
+  each field's `on_change:` mode in the schema itself (`note:` wasn't
+  mentioned anywhere in the docs at all).
 
 ### Fixed
 
