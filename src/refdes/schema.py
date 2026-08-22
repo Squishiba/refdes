@@ -41,6 +41,7 @@ _KNOWN_SETTINGS = {
     "baseline_identity",
     "require_rejection_rationale",
     "publish_datasheets",
+    "lint_own_tags",
     "release_gate",
     "cross_workspace_severity",
 }
@@ -106,6 +107,12 @@ def _load_project_settings(root: str) -> dict[str, Any]:
             f"publish_datasheets must be true or false, got {publish_datasheets!r}"
         )
 
+    lint_own_tags = raw.get("lint_own_tags", False)
+    if not isinstance(lint_own_tags, bool):
+        raise _settings_error(
+            f"lint_own_tags must be true or false, got {lint_own_tags!r}"
+        )
+
     cross_workspace_severity = raw.get("cross_workspace_severity", WARNING)
     if cross_workspace_severity not in DIAGNOSTIC_LEVELS:
         raise _settings_error(
@@ -156,6 +163,7 @@ def _load_project_settings(root: str) -> dict[str, Any]:
         "baseline_identity": baseline_identity,
         "require_rejection_rationale": require_rejection_rationale,
         "publish_datasheets": publish_datasheets,
+        "lint_own_tags": lint_own_tags,
         "release_gate": release_gate,
         "cross_workspace_severity": cross_workspace_severity,
     }
@@ -511,6 +519,7 @@ def load_project(config_path: str | None = None, start: str = ".") -> Project:
         baseline_identity=settings["baseline_identity"],
         require_rejection_rationale=settings["require_rejection_rationale"],
         publish_datasheets=settings["publish_datasheets"],
+        lint_own_tags=settings["lint_own_tags"],
         release_gate=settings["release_gate"],
         cross_workspace_severity=settings["cross_workspace_severity"],
         preset_provided_types=preset_provided_types,

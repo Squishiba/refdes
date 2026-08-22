@@ -546,6 +546,15 @@ class Project:
     # should decide by default -- a deliberate change from pre-config behaviour,
     # which copied unconditionally.
     publish_datasheets: bool = False
+    # Finding 11: opt-in, following lint_tokens()'s own precedent -- an
+    # "untagged item" lint fires on nothing (tags: is almost always set once
+    # in a file's defaults: and inherited by everything in it), so the
+    # signal that actually means something is an item with no tags: *of its
+    # own*, which plenty of projects will reasonably not want the noise
+    # from. Default false: tags: is optional by design
+    # (field_sets.provenance, no required:), so this can't be an
+    # unconditional check.
+    lint_own_tags: bool = False
     release_gate: dict[str, dict[str, bool]] = field(default_factory=_default_release_gate)
     # Diagnostic level for an authored link crossing from one workspace into a
     # non-shared one (workspaces.py's cross-workspace lint). Configurable

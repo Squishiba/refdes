@@ -175,6 +175,44 @@ def validate_items(project: Project) -> None:
                             )
 
 
+def lint_own_tags(project: Project) -> None:
+    """Finding 11, sequenced after finding 9 (`refdes ls --tag`): warn on an
+    item with no `tags:` of its own -- opt-in, following `boards.lint_tokens()`'s
+    own precedent for an advisory lint, since `tags:` is optional by design
+    (`field_sets.provenance`, no `required:`) and plenty of projects will
+    reasonably not want the noise.
+
+    A bare presence check (warn when `tags:` is unset) would fire on
+    essentially nothing: `tags:` is almost always declared once in a file's
+    `defaults:` block, so every item in that file inherits a non-empty list
+    automatically, satisfying a presence check while changing nothing about
+    findability. `item.inherited_fields` (finding 6) is what makes the real
+    signal checkable at all -- an item whose `tags:` is entirely inherited
+    is exactly as hard to find as one with none, since a file-level tag set
+    is identical across every item in the file and just re-encodes which
+    file/board the item is already in.
+    """
+    if not project.lint_own_tags:
+        return
+    for item in project.local_items:
+        spec = project.types[item.type]
+        if "tags" not in spec.fields:
+            continue
+        if "tags" in item.inherited_fields:
+            project.warn(
+                "tags: are entirely inherited from this file's defaults: -- "
+                "no tags of its own, which makes it as hard to find later as "
+                "having none; add at least one item-specific tag",
+                file=item.source_file, line=item.source_line, item_id=item.id,
+            )
+        elif not item.fields.get("tags"):
+            project.warn(
+                "no tags: at all, which makes it harder to find later; add "
+                "at least one",
+                file=item.source_file, line=item.source_line, item_id=item.id,
+            )
+
+
 def validate_former_ids(project: Project) -> None:
     """Populate `project.former_ids` and flag one the linker can never reach.
 
@@ -1081,6 +1119,7 @@ def build(
     seal.verify(project, write=seal_write, reseal=reseal)
     boards_mod.verify(project, write=seal_write, accept_move=accept_board_move)
     boards_mod.lint_tokens(project)
+    lint_own_tags(project)
     compute_coverage(project)
     citations_mod.verify(project, require=require_citations)
     render_bodies(project)

@@ -1971,6 +1971,102 @@ def test_defaults_leak_is_caught_the_same_way_in_markdown_files(tmp_path):
     assert error.line == 2  # the defaults: block's own first key line
 
 
+# --------------------------------------------------- lint_own_tags (finding 11)
+
+LINT_TAGS_SCHEMA = (
+    "site: { title: T, out: _site }\n"
+    "types:\n"
+    "  requirement:\n"
+    "    prefix: REQ\n"
+    "    fields:\n"
+    "      text: { type: text, required: true }\n"
+    "      tags: { type: list, on_change: ignore }\n"
+    "  component:\n"
+    "    prefix: CMP\n"
+    "    fields:\n"
+    "      title: { type: text, required: true }\n"
+)
+
+
+def _lint_tags_project(tmp_path, items_yaml, enabled=True):
+    (tmp_path / "refdes.yaml").write_text(LINT_TAGS_SCHEMA, encoding="utf-8")
+    if enabled:
+        (tmp_path / "refdes-project.yaml").write_text("lint_own_tags: true\n", encoding="utf-8")
+    items = tmp_path / "items"
+    items.mkdir()
+    (items / "mixed.yaml").write_text(items_yaml, encoding="utf-8")
+    # A separate file/defaults: block, deliberately never mentioning tags: at
+    # all -- component doesn't declare the field, so merging a requirement
+    # file's own tags: onto it would trip the unrelated "unknown field"
+    # warning instead of exercising the type-with-no-tags-field skip this is
+    # meant to isolate.
+    (items / "untaggable.yaml").write_text(
+        "defaults:\n  type: component\n"
+        "items:\n  - id: CMP-001\n    title: A type with no tags field at all.\n",
+        encoding="utf-8",
+    )
+    return tmp_path
+
+
+LINT_TAGS_ITEMS = (
+    "defaults:\n  type: requirement\n  tags: [power]\n"
+    "items:\n"
+    "  - id: REQ-001\n    text: Only the file default tag.\n"
+    "  - id: REQ-002\n    text: Has its own tag too.\n    tags: [current limit]\n"
+    "  - id: REQ-003\n    text: Explicitly empty tags.\n    tags: []\n"
+)
+
+
+def _tags_lint_warnings(project):
+    """Isolate this lint's own warnings from unrelated ones (e.g. the
+    coverable: fallback notice, which fires for any project using a custom
+    requirement type without declaring it)."""
+    return [d for d in project.warnings if "tags:" in d.message]
+
+
+def test_lint_own_tags_is_off_by_default(tmp_path):
+    root = _lint_tags_project(tmp_path, LINT_TAGS_ITEMS, enabled=False)
+    project = load_project(config_path=str(root / "refdes.yaml"))
+    parse.load_items(project, require_ids=False)
+    build_mod.build(project, seal_write=False, reseal=False)
+    assert _tags_lint_warnings(project) == []
+
+
+def test_lint_own_tags_flags_inherited_only_and_fully_empty(tmp_path):
+    root = _lint_tags_project(tmp_path, LINT_TAGS_ITEMS)
+    project = load_project(config_path=str(root / "refdes.yaml"))
+    parse.load_items(project, require_ids=False)
+    build_mod.build(project, seal_write=False, reseal=False)
+
+    warnings = _tags_lint_warnings(project)
+    warned_ids = {d.item_id for d in warnings}
+    assert warned_ids == {"REQ-001", "REQ-003"}
+
+    inherited = next(d for d in warnings if d.item_id == "REQ-001")
+    assert "entirely inherited from this file's defaults:" in inherited.message
+
+    empty = next(d for d in warnings if d.item_id == "REQ-003")
+    assert "no tags: at all" in empty.message
+
+
+def test_lint_own_tags_is_silent_for_an_items_own_tags(tmp_path):
+    root = _lint_tags_project(tmp_path, LINT_TAGS_ITEMS)
+    project = load_project(config_path=str(root / "refdes.yaml"))
+    parse.load_items(project, require_ids=False)
+    build_mod.build(project, seal_write=False, reseal=False)
+    assert not any(d.item_id == "REQ-002" for d in project.warnings)
+
+
+def test_lint_own_tags_skips_a_type_with_no_tags_field(tmp_path):
+    """component has no tags: field declared at all -- must never be flagged
+    as if it were an item that failed to tag itself."""
+    root = _lint_tags_project(tmp_path, LINT_TAGS_ITEMS)
+    project = load_project(config_path=str(root / "refdes.yaml"))
+    parse.load_items(project, require_ids=False)
+    build_mod.build(project, seal_write=False, reseal=False)
+    assert not any(d.item_id == "CMP-001" for d in project.warnings)
+
+
 # ------------------------------------------------------------------ former_ids
 
 FORMER_IDS_SCHEMA = (
@@ -3514,6 +3610,7 @@ def test_project_settings_absent_file_matches_pre_config_defaults(tmp_path):
     assert project.baseline_identity == "os_user"
     assert project.require_rejection_rationale is True
     assert project.publish_datasheets is False
+    assert project.lint_own_tags is False
     assert project.release_gate == {
         "draft_items":                {"release": True,  "revision": False},
         "unpinned_citations":         {"release": True,  "revision": False},
@@ -3577,6 +3674,12 @@ def test_project_settings_require_rejection_rationale_must_be_boolean(tmp_path):
 def test_project_settings_publish_datasheets_must_be_boolean(tmp_path):
     config = _write_minimal_project(tmp_path, "publish_datasheets: on-request\n")
     with pytest.raises(SchemaError, match="publish_datasheets must be true or false"):
+        load_project(config_path=str(config))
+
+
+def test_project_settings_lint_own_tags_must_be_boolean(tmp_path):
+    config = _write_minimal_project(tmp_path, "lint_own_tags: sometimes\n")
+    with pytest.raises(SchemaError, match="lint_own_tags must be true or false"):
         load_project(config_path=str(config))
 
 

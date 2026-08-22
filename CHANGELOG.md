@@ -51,6 +51,18 @@ and this project uses [Semantic Versioning](https://semver.org/).
   `on_change: ignore`, so retagging never invalidates anything downstream,
   which is what makes it the right place to invest in findability, and what
   makes reaching it in search worth doing.
+- `lint_own_tags: true` (`refdes-project.yaml`, default off): warns on an
+  item whose `tags:` are entirely inherited from its file's `defaults:`, or
+  absent entirely -- as hard to find later as having no tags, since a
+  file-level tag set is identical across every item in the file and just
+  re-encodes which file it's already in. A bare presence check would fire
+  on almost nothing (`tags:` is nearly always set once in `defaults:`, so
+  every item in the file inherits a non-empty list); `inherited_fields`
+  (this release's `defaults:`-provenance tracking) is what makes the real
+  signal checkable. Opt-in, following `boards.lint_tokens()`'s own
+  precedent: `tags:` is optional by design, and plenty of projects won't
+  want the noise. Sequenced after `refdes ls --tag`/free-text search, since
+  the lint only points at something actionable once search can act on it.
 
 ### Fixed
 

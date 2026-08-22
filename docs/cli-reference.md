@@ -228,6 +228,15 @@ makes it the right place to invest in findability, and what makes searching
 it (not just the title) worth having. `--tag` narrows to tag-only matching,
 for when that's specifically what's meant.
 
+**`lint_own_tags: true`** in `refdes-project.yaml` (default off) warns on an
+item whose `tags:` are entirely inherited from its file's `defaults:` — as
+hard to find later as having none, since a file-level tag set is identical
+across every item in the file and just re-encodes which file it's already
+in. Off by default: `tags:` is optional, and plenty of projects won't want
+the noise. Worth turning on once `refdes ls --tag`/free-text search is
+actually part of how the project finds things — flagging under-tagged items
+is only useful once something can act on the flag.
+
 ---
 
 ## `refdes id`
