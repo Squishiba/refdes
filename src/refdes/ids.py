@@ -94,6 +94,37 @@ def high_water(project: Project, ledger: dict) -> dict[str, int]:
     return marks
 
 
+def orphaned_allocations(project: Project) -> list[str]:
+    """`ledger["allocated"]` entries with no live item and no `former_ids:`
+    explaining where they went -- informational only (issue #6, finding 10
+    part 2's narrower half). Surfaced by `refdes audit`, never `check`/
+    `build`: an id going missing from the ledger's perspective is the
+    *ordinary*, expected shape of deleting an item, not a defect, so this is
+    not a warning or an error anywhere else -- only worth a look.
+
+    This is NOT a fix for the finding's own reuse bug and must never be
+    presented as one: it only catches the moment between an item's deletion
+    and any later re-typing of the *same* id, and only if `refdes audit`
+    happens to run during that window. Finding 10's own repro deletes and
+    retypes in one edit, then runs `check` once at the end -- by then the
+    entry is no longer orphaned (the new item's id, being the identical
+    string, re-explains it), and nothing here or anywhere else can tell that
+    a swap happened. Two different histories -- "this item, never touched"
+    and "a different item, hand-typed with the exact former id" -- produce
+    byte-identical project state once both edits have already landed; see
+    docs/design/keys.md's "Why this is the root fix" for why closing that
+    fully needs identity that survives an id being retyped, not a sharper
+    check against what's on disk now.
+    """
+    ledger = load_ledger(project)
+    allocated = {str(entry) for entry in (ledger.get("allocated") or [])}
+    live = set(project.items)
+    former: set[str] = set()
+    for item in project.local_items:
+        former.update(item.former_ids)
+    return sorted(allocated - live - former)
+
+
 def prefix_for(project: Project, item: Item) -> str:
     if item.prefix_hint:
         return item.prefix_hint

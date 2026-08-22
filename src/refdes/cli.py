@@ -435,6 +435,28 @@ def cmd_audit(args) -> int:
     else:
         print("  (none)")
 
+    # Informational only -- issue #6, finding 10 part 2's narrower half. Not
+    # a warning or an error anywhere else: an id going missing from the
+    # ledger's perspective is the ordinary shape of deleting an item, not a
+    # defect. See ids.orphaned_allocations()'s own docstring for exactly
+    # what this does and does not catch -- in particular, it is NOT a fix
+    # for hand-typed id reuse after deletion; it only catches the moment
+    # between deletion and any later re-typing of the same id, if audit
+    # happens to run during that window.
+    orphaned = ids_mod.orphaned_allocations(project)
+    print("\nLedger entries with no live item and no former_ids: explaining them:")
+    if orphaned:
+        for entry_id in orphaned:
+            print(f"  {entry_id}")
+        print(
+            "  (deleted on purpose? nothing to do. renamed without recording\n"
+            "   former_ids:? worth adding. reused by a different item typed\n"
+            "   with this exact id? this list can't tell -- see finding 10\n"
+            "   part 2, docs/design/keys.md.)"
+        )
+    else:
+        print("  (none)")
+
     # "draft" is the state a project is in when nothing below has been
     # stamped -- not a command, nothing to run, so this is where that state
     # actually becomes visible (docs/design/lifecycle.md). `check`/`build`

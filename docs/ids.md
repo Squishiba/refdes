@@ -111,6 +111,28 @@ Someone reading revision B in two years must find that ID meaning what it meant
 then. **Commit this file** — if two branches allocate from different ledgers, they
 will hand out the same number.
 
+**This guarantee is enforced for numbers `refdes id` assigns, and for a
+quoted numeric hint it expands** ([choosing your own
+number](#choosing-your-own-number) above) — both are checked against the
+ledger before being written. It is **not** enforced for a fully hand-typed
+id: nothing stops `id: REQ-PWR-003` from being typed by hand after the item
+that originally held it was deleted, and `refdes check` accepts it silently.
+This is a known, investigated gap (issue #6, finding 10 part 2), not an
+oversight left unexamined — every check considered (comparing the new id's
+number against the ledger's high-water mark, or against the `allocated`
+list, in any combination) either false-positives on an ordinary project
+(most projects have hand-typed ids sitting below some other id's number
+under the same prefix, which is completely normal) or fails to catch a
+same-id reuse, because "the same item, never touched" and "a different item,
+hand-typed with the exact former id" produce byte-identical project state —
+nothing left over anywhere says which one happened. `refdes audit` reports
+`allocated` entries with no live item and no `former_ids:` explaining them,
+which catches the moment right after a deletion, before any retyping — but
+not a delete-and-retype done in the same edit, which closes that window
+before anything ever looks. Closing this fully needs identity that survives
+an id being retyped, which is what [`docs/design/keys.md`](design/keys.md)'s
+surrogate-key proposal is for.
+
 ## Prefixes
 
 The prefix comes from, in order:

@@ -2218,6 +2218,101 @@ def test_former_ids_shaped_like_a_legacy_underscore_id_only_link_explicitly(tmp_
     assert html.count('class="ref ref-former"') == 1  # only the explicit one resolved
 
 
+# ------------------------------------- orphaned ledger allocations (finding 10 Part 2, narrower)
+
+
+def _allocate_and_reload(root):
+    """Allocate REQ-001 for real (writes the ledger + the item file), then
+    return a freshly re-parsed project reflecting that write -- the shape
+    every test below needs before it can edit the item file out from under
+    the ledger's own memory of it."""
+    project = load_project(config_path=str(root / "refdes.yaml"))
+    parse.load_items(project, require_ids=False)
+    assignments = ids.allocate(project)
+    assert assignments and assignments[0][1] == "REQ-001"
+    return load_project(config_path=str(root / "refdes.yaml"))
+
+
+def test_orphaned_allocations_empty_while_the_item_is_still_live(tmp_path):
+    root = _former_ids_project(
+        tmp_path, "defaults: { type: requirement }\nitems:\n  - text: First item.\n"
+    )
+    project = _allocate_and_reload(root)
+    parse.load_items(project, require_ids=False)
+    assert ids.orphaned_allocations(project) == []
+
+
+def test_orphaned_allocations_flags_a_deleted_unexplained_id(tmp_path):
+    root = _former_ids_project(
+        tmp_path, "defaults: { type: requirement }\nitems:\n  - text: First item.\n"
+    )
+    _allocate_and_reload(root)
+    (root / "items" / "r.yaml").write_text("items: []\n", encoding="utf-8")
+    project = load_project(config_path=str(root / "refdes.yaml"))
+    parse.load_items(project, require_ids=False)
+    assert ids.orphaned_allocations(project) == ["REQ-001"]
+
+
+def test_orphaned_allocations_excludes_ids_explained_by_former_ids(tmp_path):
+    """A rename recorded properly -- the sanctioned path -- must never be
+    reported as if something went unexplained."""
+    root = _former_ids_project(
+        tmp_path, "defaults: { type: requirement }\nitems:\n  - text: First item.\n"
+    )
+    _allocate_and_reload(root)
+    (root / "items" / "r.yaml").write_text(
+        "defaults: { type: requirement }\n"
+        "items:\n  - id: REQ-002\n    text: Renamed.\n    former_ids: [REQ-001]\n",
+        encoding="utf-8",
+    )
+    project = load_project(config_path=str(root / "refdes.yaml"))
+    parse.load_items(project, require_ids=False)
+    assert ids.orphaned_allocations(project) == []
+
+
+def test_orphaned_allocations_cannot_see_a_same_id_reuse(tmp_path):
+    """The documented limitation, encoded as a test rather than left as a
+    claim in a docstring: once a different item is hand-typed with the
+    exact former id, the entry re-explains itself and this function goes
+    back to reporting nothing -- it is not a fix for finding 10's own
+    repro, only for the narrower window before the id is retyped."""
+    root = _former_ids_project(
+        tmp_path, "defaults: { type: requirement }\nitems:\n  - text: First item.\n"
+    )
+    _allocate_and_reload(root)
+    (root / "items" / "r.yaml").write_text(
+        "defaults: { type: requirement }\n"
+        "items:\n  - id: REQ-001\n    text: A different item, same reused id.\n",
+        encoding="utf-8",
+    )
+    project = load_project(config_path=str(root / "refdes.yaml"))
+    parse.load_items(project, require_ids=False)
+    assert ids.orphaned_allocations(project) == []
+
+
+def test_cli_audit_reports_orphaned_allocations(tmp_path, capsys):
+    root = _former_ids_project(
+        tmp_path, "defaults: { type: requirement }\nitems:\n  - text: First item.\n"
+    )
+    _allocate_and_reload(root)
+    (root / "items" / "r.yaml").write_text("items: []\n", encoding="utf-8")
+    assert cli_mod.main(["-c", str(root / "refdes.yaml"), "audit"]) == 0
+    out = capsys.readouterr().out
+    assert "Ledger entries with no live item and no former_ids: explaining them:" in out
+    assert "REQ-001" in out
+
+
+def test_cli_audit_orphaned_allocations_is_none_when_clean(tmp_path, capsys):
+    root = _former_ids_project(
+        tmp_path, "defaults: { type: requirement }\nitems:\n  - text: First item.\n"
+    )
+    _allocate_and_reload(root)
+    assert cli_mod.main(["-c", str(root / "refdes.yaml"), "audit"]) == 0
+    out = capsys.readouterr().out
+    section = out.split("Ledger entries with no live item")[1].split("\n\n")[0]
+    assert "(none)" in section
+
+
 def test_cli_audit_lists_former_ids(tmp_path, capsys):
     (tmp_path / "refdes.yaml").write_text(FORMER_IDS_SCHEMA, encoding="utf-8")
     items = tmp_path / "items"

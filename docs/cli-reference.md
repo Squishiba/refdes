@@ -305,8 +305,9 @@ into vendoring.
 
 Report everything that has been made less visible: fields excluded from
 invalidation, item-level overrides and their stated reasons, resealed log entries,
-[board](multi-board.md) and [workspace](workspaces.md) moves, what's changed
-since the last [revision and release](lifecycle.md), [blocked_by
+orphaned ledger allocations, [board](multi-board.md) and
+[workspace](workspaces.md) moves, what's changed since the last [revision and
+release](lifecycle.md), [blocked_by
 chains](links.md#blocked-by-and-the-cascade-report), imported projects,
 [citations](markdown.md#citing-a-datasheet), [parts](parts.md), and
 [former ids](ids.md#renumbering-former-ids).
@@ -325,6 +326,9 @@ Item-level overrides:
   REQ-PWR-004    owner -> ignore  — Owner rotates weekly during bring-up.
 
 Append-only entries edited after sealing:
+  (none)
+
+Ledger entries with no live item and no former_ids: explaining them:
   (none)
 
 Baselines:

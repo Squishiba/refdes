@@ -45,6 +45,14 @@ and this project uses [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- `refdes audit` reports `allocated` ledger entries with no live item and no
+  `former_ids:` explaining them (issue #6, finding 10 part 2's narrower,
+  informational half). Not a fix for hand-typed id reuse after deletion --
+  investigated at length and found undetectable from project state alone,
+  see `docs/ids.md`'s "Numbers are never reused" and
+  `docs/design/keys.md`'s "Why this is the root fix" -- only for the window
+  between a deletion and any later re-typing of the same id, and only when
+  `refdes audit` happens to run during it.
 - `refdes index`'s output now includes `next_ids`, the next free number per
   id prefix (one more than `ids.high_water()`'s own reported maximum,
   unioned across live items and the ledger's burned/allocated history). Lets
