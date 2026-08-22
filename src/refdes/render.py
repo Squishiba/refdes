@@ -12,6 +12,7 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 from . import blocked as blocked_mod
 from . import build as build_mod
 from . import citations as citations_mod
+from . import ids as ids_mod
 from . import nav as nav_mod
 from .model import Item, Project
 
@@ -435,6 +436,19 @@ def items_json(project: Project) -> dict:
         })
         items_out.append(entry)
     payload["items"] = items_out
+
+    # Finding 10 Part 1: the next id `refdes id` would hand out for each
+    # prefix, so an editor can offer it as a completion while a new item's
+    # id is still being typed by hand -- exactly the population id
+    # completion (finding 8) doesn't cover, since a brand-new item's id is
+    # precisely the one id that doesn't exist yet. Reuses high_water()
+    # as-is: no new ledger logic, just one more number than what it already
+    # reports as the highest seen per prefix.
+    ledger = ids_mod.load_ledger(project)
+    payload["next_ids"] = {
+        prefix: number + 1
+        for prefix, number in sorted(ids_mod.high_water(project, ledger).items())
+    }
 
     payload["diagnostics"] = [
         {

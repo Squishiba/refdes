@@ -1717,6 +1717,27 @@ def test_numeric_hint_colliding_with_a_burned_but_deleted_id_is_refused(tmp_path
     assert any("already used or was burned" in d.message for d in project.errors)
 
 
+def test_index_exposes_next_free_id_per_prefix(tmp_path):
+    """Finding 10 Part 1: an editor completing a partially-typed id needs
+    the next free number per prefix, unioned across live items and the
+    ledger's burned/allocated history -- exactly what high_water() already
+    computes, one more than its own reported maximum."""
+    root = _numeric_hint_project(
+        tmp_path,
+        "defaults:\n  type: requirement\n  prefix: CAN\n"
+        "items:\n  - id: CAN-001\n    text: Live.\n",
+    )
+    (root / ".refdes").mkdir()
+    (root / ".refdes" / "ids.yaml").write_text(
+        "burned:\n  CAN: 4\nallocated: [CAN-001]\n", encoding="utf-8"
+    )
+    project = load_project(config_path=str(root / "refdes.yaml"))
+    parse.load_items(project, require_ids=False)
+    build_mod.build(project, seal_write=False, reseal=False)
+    payload = render.items_json(project)
+    assert payload["next_ids"] == {"CAN": 5}
+
+
 def test_numeric_hint_two_items_requesting_the_same_number_only_one_wins(tmp_path):
     root = _numeric_hint_project(
         tmp_path,

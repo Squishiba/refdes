@@ -7,6 +7,15 @@ and this project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- `refdes index`'s output now includes `next_ids`, the next free number per
+  id prefix (one more than `ids.high_water()`'s own reported maximum,
+  unioned across live items and the ledger's burned/allocated history). Lets
+  an editor offer the next id as a completion while a new item's id is still
+  being hand-typed -- the one population id completion never covered, since
+  a brand-new item's id doesn't exist yet to be completed from.
+
 ### Fixed
 
 - The generated `.refdes/schema.json` had no branch for `section:` marker
