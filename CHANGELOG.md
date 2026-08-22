@@ -15,6 +15,16 @@ and this project uses [Semantic Versioning](https://semver.org/).
   an editor offer the next id as a completion while a new item's id is still
   being hand-typed -- the one population id completion never covered, since
   a brand-new item's id doesn't exist yet to be completed from.
+- A GitHub Actions workflow (`.github/workflows/docs.yml`) that runs
+  `refdes build` inside `docs-site/` on every push to `main` and publishes
+  the result to GitHub Pages. Before this there was no point between a
+  change landing on `main` and someone being able to browse the current
+  reference docs as an actual rendered refdes site -- `docs-site/`'s output
+  is gitignored on purpose (`_docs/`) and was never committed, so a human
+  had to clone the repo and run the build by hand. Requires GitHub Pages to
+  be switched on for this repo (Settings -> Pages -> Build and deployment ->
+  Source: GitHub Actions) before the first run can deploy; not something
+  this change can do on its own.
 
 ### Fixed
 

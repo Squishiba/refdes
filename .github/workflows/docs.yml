@@ -1,0 +1,57 @@
+# Publishes docs-site/ -- the second, independent refdes project this repo
+# dogfoods for its own reference docs (see docs-site/refdes.yaml) -- as a
+# GitHub Pages site. Before this workflow existed there was no point between
+# "a release lands" and "someone can browse the current docs as an actual
+# rendered refdes site" that didn't require a human to clone the repo and
+# run `refdes build` inside docs-site/ by hand (issue #6, finding 1).
+#
+# docs-site/ already builds cleanly standalone; this only adds the
+# publishing step on top of that, on every push to main so the site never
+# drifts from what's actually in docs/.
+name: Deploy docs
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Only one deployment at a time; let an in-flight one finish rather than
+# racing it, since GitHub Pages has no notion of ordering two concurrent
+# publishes.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install .
+      - name: Build docs-site
+        run: refdes build
+        working-directory: docs-site
+      - uses: actions/configure-pages@v5
+      # docs-site/refdes.yaml's site.out is ../_docs, i.e. _docs/ at the repo
+      # root -- the same directory .gitignore already keeps out of the tree.
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _docs
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
