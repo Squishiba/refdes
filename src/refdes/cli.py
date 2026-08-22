@@ -282,6 +282,64 @@ def cmd_index(args) -> int:
     return 0
 
 
+def _item_tags(item) -> list[str]:
+    tags = item.fields.get("tags")
+    if not tags:
+        return []
+    return [str(t) for t in tags] if isinstance(tags, list) else [str(tags)]
+
+
+def cmd_ls(args) -> int:
+    """A filterable, human-readable listing of existing items (finding 9).
+
+    `index --compact` is the same data, but a whole-project JSON blob built
+    for editor tooling -- unreadable without piping it through something
+    else, and with no way to ask a narrow question. This is the CLI-native
+    answer to "what already exists here", for everyone not using the VS
+    Code extension: a quick check over SSH, a scripted query, or reviewing
+    a PR diff and deciding what to reference.
+
+    Free-text matches title *and* `tags:` -- tags: is `on_change: ignore`
+    (freely re-tagged without invalidating anything downstream), which is
+    what makes it the right place to invest in findability in the first
+    place; the search has to actually reach it for that to matter.
+    """
+    project, _stale = _load(args, require_ids=False)
+    build_mod.build(project, seal_write=False, reseal=False)
+
+    query = " ".join(args.query).strip().lower()
+    file_filter = args.file.replace("\\", "/") if args.file else None
+
+    rows = []
+    for item in sorted(project.local_items, key=lambda i: i.id):
+        if args.type and item.type != args.type:
+            continue
+        if args.board and item.board != args.board:
+            continue
+        if file_filter and item.source_file != file_filter:
+            continue
+        tags = _item_tags(item)
+        if args.tag and not any(args.tag.lower() in t.lower() for t in tags):
+            continue
+        if query:
+            haystack = " ".join([item.title, *tags]).lower()
+            if query not in haystack:
+                continue
+        rows.append(item)
+
+    if not rows:
+        print("no items match")
+        return 0
+
+    id_w = max(len(i.id) for i in rows)
+    type_w = max(len(i.type) for i in rows)
+    board_w = max((len(i.board) for i in rows), default=0)
+    for item in rows:
+        board_col = f"{item.board:<{board_w}}  " if board_w else ""
+        print(f"{item.id:<{id_w}}  {item.type:<{type_w}}  {board_col}{item.title}")
+    return 0
+
+
 def cmd_id(args) -> int:
     project, _stale = _load(args, require_ids=False)
     if not project.pending:
@@ -826,6 +884,19 @@ def main(argv: list[str] | None = None) -> int:
         "--compact", action="store_true", help="minified output, for tooling"
     )
     p_index.set_defaults(func=cmd_index)
+
+    p_ls = sub.add_parser(
+        "ls", help="list existing items: id, type, board, title -- filterable"
+    )
+    p_ls.add_argument(
+        "query", nargs="*",
+        help="free text, matched against title and tags: (case-insensitive)",
+    )
+    p_ls.add_argument("--type", help="only items of this type")
+    p_ls.add_argument("--board", help="only items on this board")
+    p_ls.add_argument("--file", help="only items declared in this source file")
+    p_ls.add_argument("--tag", help="only items with a tag containing this text")
+    p_ls.set_defaults(func=cmd_ls)
 
     p_id = sub.add_parser("id", help="allocate IDs for items that have none")
     p_id.add_argument("--dry-run", action="store_true", help="show without writing")

@@ -8615,6 +8615,77 @@ def test_index_only_local_items_not_imports(blocks_project):
     assert "DEC-X-001" not in page.body_html  # ...but never in a generated index
 
 
+# --------------------------------------------------------------- ls (finding 9)
+
+
+def test_ls_lists_every_local_item(blocks_project, capsys):
+    status = cli_mod.main(["-c", str(blocks_project / "refdes.yaml"), "ls"])
+    assert status == 0
+    out = capsys.readouterr().out
+    for item_id in ("DEC-001", "DEC-002", "DEC-003", "REQ-001", "CMP-001", "TST-001"):
+        assert item_id in out
+
+
+def test_ls_filters_by_type(blocks_project, capsys):
+    cli_mod.main(["-c", str(blocks_project / "refdes.yaml"), "ls", "--type", "decision"])
+    out = capsys.readouterr().out
+    assert "DEC-001" in out and "DEC-002" in out and "DEC-003" in out
+    assert "REQ-001" not in out and "CMP-001" not in out
+
+
+def test_ls_filters_by_board(blocks_project, capsys):
+    cli_mod.main(["-c", str(blocks_project / "refdes.yaml"), "ls", "--board", "power"])
+    out = capsys.readouterr().out
+    assert "DEC-001" in out and "DEC-002" in out
+    assert "DEC-003" not in out  # on the thermal board, not power
+
+
+def test_ls_filters_by_tag(blocks_project, capsys):
+    """DEC-001 (tags: [layout, review]) and DEC-002 (tags: [review]) both
+    carry the review tag; DEC-003 has no tags: of its own at all."""
+    cli_mod.main(["-c", str(blocks_project / "refdes.yaml"), "ls", "--tag", "review"])
+    out = capsys.readouterr().out
+    assert "DEC-001" in out and "DEC-002" in out
+    assert "DEC-003" not in out
+
+
+def test_ls_free_text_matches_tags_not_just_title(blocks_project, capsys):
+    """'layout' appears in DEC-001's tags:, not in its title -- free text
+    has to reach tags: for this to mean anything (finding 9's whole point)."""
+    cli_mod.main(["-c", str(blocks_project / "refdes.yaml"), "ls", "layout"])
+    out = capsys.readouterr().out
+    assert "DEC-001" in out
+    assert "DEC-002" not in out
+    assert "DEC-003" not in out
+
+
+def test_ls_filters_by_source_file(blocks_project, capsys):
+    cli_mod.main(["-c", str(blocks_project / "refdes.yaml"), "ls", "--file", "items/dec-001.md"])
+    out = capsys.readouterr().out
+    assert "DEC-001" in out
+    assert "DEC-002" not in out
+
+
+def test_ls_no_match_reports_cleanly_and_exits_zero(blocks_project, capsys):
+    status = cli_mod.main(
+        ["-c", str(blocks_project / "refdes.yaml"), "ls", "no-such-thing-anywhere"]
+    )
+    assert status == 0
+    assert "no items match" in capsys.readouterr().out
+
+
+def test_ls_omits_the_board_column_when_the_project_has_no_boards(tmp_path, capsys):
+    root = _numeric_hint_project(
+        tmp_path,
+        "defaults:\n  type: requirement\n  prefix: CAN\n"
+        "items:\n  - id: CAN-001\n    text: A plain requirement.\n",
+    )
+    cli_mod.main(["-c", str(root / "refdes.yaml"), "ls"])
+    out = capsys.readouterr().out
+    assert "CAN-001" in out
+    assert "requirement" in out
+
+
 def test_cascade_up_follows_declared_links_within_trace_true_default(blocks_project):
     """`selects` is `trace: false` in this schema, so it's excluded from the
     default `via=` set -- CMP-001 must not appear."""

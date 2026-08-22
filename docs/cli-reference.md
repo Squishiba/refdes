@@ -1,7 +1,7 @@
 # CLI reference
 
 ```
-refdes [-c CONFIG] {build,check,revision,release,index,id,fetch,audit,init,new,schema,standard,revise,stub-tests,former-ids} [options]
+refdes [-c CONFIG] {build,check,revision,release,index,ls,id,fetch,audit,init,new,schema,standard,revise,stub-tests,former-ids} [options]
 ```
 
 | Global option | Effect |
@@ -190,6 +190,43 @@ This exists for editor tooling and scripts that need the index on every save —
 rendering hundreds of HTML files each time would make that unusable. Diagnostics
 come back as structured JSON under `diagnostics`, so nothing has to parse console
 output.
+
+---
+
+## `refdes ls`
+
+List existing items as aligned text: id, type, board, title. `index`'s
+CLI-native counterpart — the same underlying data, filterable and readable
+without piping it through something else. For anyone not using the VS Code
+extension: a quick check over SSH, a scripted query, or deciding what to
+reference while reviewing a PR diff.
+
+| Option | Effect |
+|---|---|
+| `--type TYPE` | Only items of this type |
+| `--board BOARD` | Only items on this board |
+| `--file PATH` | Only items declared in this source file |
+| `--tag TEXT` | Only items with a tag containing this text |
+| `QUERY` (positional, optional) | Free text, matched against title and `tags:`, case-insensitive |
+
+```bash
+refdes ls
+refdes ls --type bound --board platform
+refdes ls --file items/common/power.yaml
+refdes ls "current limit"
+refdes ls --tag "current limit"
+```
+
+The board column is omitted entirely when the project has no `boards:`
+registry, matching every other place board is conditionally shown.
+
+Free text matches `tags:` as well as the title — deliberately, since the
+real recall pattern is usually "I remember it was something about a current
+limit," not the exact wording or the id. `tags:` is `on_change: ignore`, so
+retagging never invalidates anything downstream; that asymmetry is what
+makes it the right place to invest in findability, and what makes searching
+it (not just the title) worth having. `--tag` narrows to tag-only matching,
+for when that's specifically what's meant.
 
 ---
 

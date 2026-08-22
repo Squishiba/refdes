@@ -42,6 +42,15 @@ and this project uses [Semantic Versioning](https://semver.org/).
   on the `power` board, exactly as typing `REQ-IO` narrows by id prefix
   today. Both were already in the index payload `refdes index` sends the
   extension; this is a filter-text change only.
+- `refdes ls`: a filterable, human-readable listing of existing items (id,
+  type, board, title), for everyone not using the VS Code extension --
+  `index`/`index --compact` is the same data but a whole-project JSON blob
+  built for editor tooling, with no filtering and unreadable without piping
+  it through something else. `--type`, `--board`, `--file`, `--tag`, and a
+  free-text positional query that matches title *and* `tags:` -- tags: is
+  `on_change: ignore`, so retagging never invalidates anything downstream,
+  which is what makes it the right place to invest in findability, and what
+  makes reaching it in search worth doing.
 
 ### Fixed
 
