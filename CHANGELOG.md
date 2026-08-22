@@ -7,6 +7,17 @@ and this project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- The generated `.refdes/schema.json` had no branch for `section:` marker
+  entries, so a YAML list file using them -- valid, and accepted by `refdes
+  check` -- failed to validate against its own schema in any editor
+  (`missing property "text"`, `matches multiple schemas`). Added a
+  `section_marker` branch to the list file's `items:` `oneOf`, mirroring
+  `_only_key()`'s own rule that a marker's one real key is `section`.
+  Scoped to list files: a markdown section marker is a bare fenced block,
+  not front matter, so there was never a bare-item schema to fix.
+
 ## [0.5.0] - 2026-08-21
 
 ### Added

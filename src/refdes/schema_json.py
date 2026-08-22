@@ -193,6 +193,19 @@ def build_schema(project: Project) -> dict[str, Any]:
         bare_refs.append({"$ref": f"#/$defs/{bare_key}"})
         entry_refs.append({"$ref": f"#/$defs/{entry_key}"})
 
+    # A `section: <type>` marker entry (finding 2, issue #6) -- YAML list
+    # files only, mirroring `_only_key()`'s own rule that a marker's one real
+    # key must be `section` and nothing else. A markdown section marker is a
+    # bare fenced block, not front matter, so there's no bare_item equivalent
+    # to add here: it was never something this schema validated.
+    defs["section_marker"] = {
+        "type": "object",
+        "properties": {"section": {"type": "string"}},
+        "required": ["section"],
+        "additionalProperties": False,
+    }
+    entry_refs.append({"$ref": "#/$defs/section_marker"})
+
     defs["bare_item"] = {"oneOf": bare_refs} if bare_refs else {"type": "object"}
     defs["list_file"] = {
         "type": "object",

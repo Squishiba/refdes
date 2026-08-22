@@ -15,6 +15,7 @@ import shutil
 import sys
 import textwrap
 
+import jsonschema
 import pytest
 import yaml
 
@@ -9595,6 +9596,41 @@ def test_build_schema_link_carries_target_description():
     satisfies = doc["$defs"]["decision__bare"]["properties"]["satisfies"]
     assert satisfies["type"] == "array"
     assert satisfies["description"] == "target: requirement"
+
+
+def test_build_schema_section_marker_validates_in_a_list_file(tmp_path):
+    """Finding 2 (issue #6): a bare `section: <type>` entry -- `_only_key()`'s
+    own rule for what makes one -- must validate against the *real* schema
+    editors consume, checked with the reference jsonschema library itself,
+    the same authoritative proof the finding used, not just a structural
+    read of build_schema()'s own output."""
+    (tmp_path / "refdes.yaml").write_text(
+        "site: { title: T, out: _site }\n"
+        "types:\n  requirement: { prefix: REQ, fields: { text: { type: text, required: true } } }\n",
+        encoding="utf-8",
+    )
+    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    doc = schema_json_mod.build_schema(project)
+    validator = jsonschema.Draft7Validator({"$ref": "#/$defs/list_file", "$defs": doc["$defs"]})
+
+    valid = {"items": [{"section": "requirement"}, {"id": "REQ-001", "type": "requirement", "text": "x"}]}
+    assert list(validator.iter_errors(valid)) == []
+
+    # additionalProperties: false still holds -- a marker isn't a free-for-all.
+    malformed = {"items": [{"section": "requirement", "extra": "bad"}]}
+    assert list(validator.iter_errors(malformed)) != []
+
+
+def test_build_schema_section_marker_is_list_file_only():
+    """Scoped to the YAML list-file shape -- a markdown section marker is a
+    bare fenced block, not front matter, so bare_item (the .md/single-entry
+    branch) has no equivalent to add."""
+    project = _build_at_repo_schema()
+    doc = schema_json_mod.build_schema(project)
+    assert "section_marker" in doc["$defs"]
+    assert {"$ref": "#/$defs/section_marker"} in doc["$defs"]["list_file"]["properties"]["items"]["items"]["oneOf"]
+    bare_refs = doc["$defs"]["bare_item"]["oneOf"]
+    assert {"$ref": "#/$defs/section_marker"} not in bare_refs
 
 
 def test_build_schema_additional_properties_false():
