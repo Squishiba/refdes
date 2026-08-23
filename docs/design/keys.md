@@ -14,7 +14,12 @@ diff, and merge.
 
 The decision is taken. This document specs it; it does not relitigate it.
 
-Design only. Nothing in this document has been implemented.
+**Implementation status:** §1 (key format) and the minting half of §2 are
+implemented (`refdes/keys.py`, wired into `cli._load()`). Everything else —
+link resolution on the key (§3), hashing on the key (§5), the corruption
+lint (§6), `refdes keys adopt` (§7), and any change to `revise.py` or
+`former_ids.py` — is still design only, deliberately sequenced as later
+work rather than landed alongside the format and minting in one pass.
 
 ---
 
@@ -89,7 +94,9 @@ k7f3m2q9x4b
 - **Alphabet** — Crockford base32, `0123456789abcdefghjkmnpqrstvwxyz`
   (32 symbols; `i`, `l`, `o`, `u` excluded).
 - **Entropy** — 10 × 5 = **50 bits**, from `secrets.token_bytes`.
-- **Check character** — Luhn mod 32 over the ten data characters.
+- **Check character** — Damm, over a fixed 32×32 totally anti-symmetric
+  quasigroup table (amended from the original recommendation of Luhn mod 32;
+  see below).
 - **Case** — lowercase, always. Never normalised on read: a key containing
   an uppercase character is malformed, not silently folded.
 
@@ -151,29 +158,59 @@ still fails resolution — it degrades to today's behaviour (a dangling
 reference), not to silent breakage. This is worth stating plainly so the
 check character is never mistaken for a safety guarantee it isn't.
 
-**Verified properties** of Luhn mod 32 over ten data characters, measured
-rather than recalled (3,000 minted keys, all valid; 170,500 single-character
-substitutions and 4,836 adjacent transpositions tested):
+**Decided: Damm, not Luhn mod 32 as originally recommended.** This section
+originally recommended Luhn mod 32 and treated Damm as a later upgrade "if
+there is appetite for the table now." There was: the user weighed the cost
+(a 1,024-entry table to construct and verify) against Luhn's one real gap and
+chose Damm outright, before any project had adopted keys and while the
+window from §9 point 5 was still open. The reasoning, for the record:
 
-| property | result |
-|---|---|
-| single-character substitutions rejected | **170,500 / 170,500 — 100%** |
-| adjacent transpositions rejected | 4,821 / 4,836 — 99.69% |
-| random 11-char strings accepted by chance | 3,077 / 100,000 ≈ 1/32 |
+**Verified properties**, measured rather than recalled the same way for both
+algorithms (3,000 minted keys, all valid in each case; 170,500 single-character
+substitutions and 4,836 adjacent transpositions tested against Luhn mod 32;
+1,023,000 single-character substitutions and 29,111 adjacent transpositions
+tested against Damm — the count differs only because the two runs iterated
+the alphabet/keys slightly differently, not because of any difference in
+method):
 
-100% on single-character substitution is exactly the stated goal. The 0.31%
-transposition gap is the known Luhn weakness — pairs differing by exactly
-half the modulus — and those still fail resolution as unknown keys.
+| property | Luhn mod 32 | Damm |
+|---|---|---|
+| single-character substitutions rejected | 170,500 / 170,500 — 100% | **1,023,000 / 1,023,000 — 100%** |
+| adjacent transpositions rejected | 4,821 / 4,836 — 99.69% | **29,111 / 29,111 — 100%** |
+| random 11-char strings accepted by chance | 3,077 / 100,000 ≈ 1/32 | 3,088 / 100,000 ≈ 1/32 |
 
-**Alternative considered: Damm.** A totally anti-symmetric quasigroup of
-order 32 catches 100% of both classes, with no special check symbol. It is
-strictly stronger. It is not recommended *first* because it needs a
-1,024-entry table constructed and verified, against a failure mode
-(transposition of machine-written characters) that barely occurs. Luhn mod 32
-is ~15 lines and delivers the stated requirement in full. Damm is a clean
-later upgrade if transposition coverage is ever wanted — but note it would
-change every existing key, so it is a decision with a short window. **If
-there is appetite for the table now, take Damm now.**
+Both hit 100% on single-character substitution, the stated primary goal.
+Where they differ is transposition: Luhn mod 32's 0.31% gap is pairs
+differing by exactly half the modulus — a known, structural weakness of the
+algorithm, not a measurement artefact — while a totally anti-symmetric
+quasigroup catches every adjacent transposition by construction, not by
+the luck of which pairs happen to get typed. That is a clean, provable
+property rather than "good enough in practice," and it is what tipped the
+decision: the marginal cost (one more source file holding a constant table,
+verified once by a property test, never touched again) was judged worth
+paying for a mechanism with no known gap, rather than one with a
+characterised 0.31% hole. Both numbers above stay in this document because
+the comparison is the argument — deleting the Luhn side would leave the
+decision unjustified.
+
+**What this changes downstream.** The check character is still purely a
+*diagnostic quality* mechanism (the "Bounded" paragraph above is unaffected
+by which algorithm computes it) — Damm does not change what correctness
+depends on, only how good the "your key is corrupt" diagnostic's coverage is.
+Layer 1 of §6 (well-formedness) is the only place the algorithm choice is
+externally visible; nothing about §2 through §5 depends on which check
+character scheme is in use.
+
+**The table itself is now a permanent compatibility contract.** The moment
+the first key is minted against a specific 32×32 table, that table cannot
+change again without invalidating every key minted under the old one — a
+corrupted-vs-valid verdict would silently flip for keys nobody touched. It
+must therefore be a **fixed constant compiled into the package**, never
+generated per-project, per-run, or written into a project's own files: a
+table that could vary between installs would make a key valid in one repo
+and corrupt in another, which defeats the entire point of a check character.
+This also closes §9 point 5 and the corresponding bullet in §10 — the
+decision is made, not a prototype question anymore.
 
 **Rejected: a leading sigil** (`k7f3m2q9x4b` with a mandated `k`). The `@`
 separator already marks the key structurally, and lowercase already
@@ -942,11 +979,18 @@ In rough order of how likely each is to change the design:
 4. **`--no-write` coverage.** Enumerate every write the tool performs during
    a load and confirm the flag suppresses all of them. This is the kind of
    flag that is 95% implemented and then dirties a CI tree via one forgotten
-   path.
+   path. **Status: partially done.** The flag exists and gates key minting
+   (the write this document's first implementation slice added); it does not
+   yet gate `.refdes/schema.json` regeneration, seals, the boards manifest, or
+   the id ledger, all of which `_load()` still writes unconditionally today.
+   This prototype item is therefore still open, narrowed to "everything
+   except key minting."
 
-5. **Damm versus Luhn**, but only if the answer might be Damm — the window
+5. ~~**Damm versus Luhn**, but only if the answer might be Damm — the window
    for changing the check algorithm closes the moment the first project
-   adopts keys.
+   adopts keys.~~ **Resolved: Damm.** Decided before any project adopted
+   keys, so the window was still open. See §1's amended "check character"
+   section for the reasoning and the measured numbers.
 
 ---
 
@@ -973,9 +1017,10 @@ assumptions:
   adoption would guarantee every project gets the benefit, at the cost of
   rewriting every item file in someone's tree without them asking.
 
-- **Luhn mod 32 rather than Damm** (§1). Chosen for simplicity against a
+- ~~**Luhn mod 32 rather than Damm** (§1). Chosen for simplicity against a
   failure mode that barely occurs; the transposition gap is real and
-  measured at 0.31%.
+  measured at 0.31%.~~ **Overturned.** This was the disagreement I most
+  expected, and it landed the other way: Damm, not Luhn. See §1.
 
 - **`key:` is hard-reserved, not overridable** (§3), unlike `prefix:` and
   `board:`. Identity should not be shadowable, but this is a genuine
