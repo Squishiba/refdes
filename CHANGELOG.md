@@ -45,6 +45,24 @@ and this project uses [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Surrogate keys, layer 1: format and minting** (`docs/design/keys.md`).
+  Every local item now gets an opaque, immutable 11-character `key:` --
+  10 random Crockford-base32 data characters plus a Damm check character,
+  minted automatically by any command that loads the project (`refdes/keys.py`,
+  wired into `cli._load()`) and written back next to `id:`, the same
+  write-back path `refdes id`/`former_ids:` already use. `key` joins
+  `parse.RESERVED` -- hard-reserved like `id`, not overridable like `prefix`,
+  so a hand-rolled schema declaring its own `key` field can't shadow
+  identity. A new global `--no-write` flag suppresses minting for a
+  genuinely read-only pass (CI, inspecting someone else's project, a
+  bisect); an item with no key yet still parses, validates, and builds --
+  a key is a precondition for being durably referenced, not for existing.
+  The design doc's own recommendation changed during implementation: the
+  check character is Damm, not the originally-recommended Luhn mod 32 --
+  see the doc's amended §1 for the measured numbers behind that call. This
+  is the format-and-minting slice only; link resolution, hashing, the
+  corruption lint, and `refdes keys adopt` are later layers and remain
+  design-only.
 - `refdes audit` reports `allocated` ledger entries with no live item and no
   `former_ids:` explaining them (issue #6, finding 10 part 2's narrower,
   informational half). Not a fix for hand-typed id reuse after deletion --

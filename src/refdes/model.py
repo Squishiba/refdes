@@ -329,6 +329,10 @@ class CalcLine:
 class Item:
     id: str
     type: str
+    # Opaque, immutable surrogate identity (docs/design/keys.md) -- "" until
+    # `keys.mint_missing()` assigns one. Reserved like `id`/`former_ids`, never
+    # a schema field a type can declare: identity must not be shadowable.
+    key: str = ""
     fields: dict[str, Any] = field(default_factory=dict)
     body: str = ""
     links: dict[str, list[str]] = field(default_factory=dict)

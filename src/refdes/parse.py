@@ -28,7 +28,7 @@ KEY_LINE_RE = re.compile(r"^[A-Za-z_][\w.-]*\s*:(\s|$)")
 # `body` is the markdown body, not a field. In a .md file it is the text after the
 # front-matter; in a list file it is a `body:` key, so a running log can be written
 # as a list without one file per daily entry.
-RESERVED = {"id", "type", "history", "body", "former_ids"}
+RESERVED = {"id", "type", "history", "body", "former_ids", "key"}
 # Reserved, but only when the item's own type does not already declare a field of
 # the same name -- so a schema that predates one of these keys keeps working
 # unchanged instead of having the field silently shadowed.
@@ -358,6 +358,10 @@ def _build_item(
     former_ids = raw.get("former_ids")
     if former_ids:
         item.former_ids = [str(v) for v in (former_ids if isinstance(former_ids, list) else [former_ids]) if v]
+
+    key = raw.get("key")
+    if key:
+        item.key = str(key).strip()
 
     history = raw.get("history")
     if isinstance(history, str):

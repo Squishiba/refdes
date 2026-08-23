@@ -11,6 +11,7 @@ from . import build as build_mod
 from . import citations as citations_mod
 from . import former_ids as former_ids_mod
 from . import ids as ids_mod
+from . import keys as keys_mod
 from . import lifecycle as lifecycle_mod
 from . import parse as parse_mod
 from . import render as render_mod
@@ -47,6 +48,15 @@ def _load(args, require_ids: bool = True) -> tuple[Project, bool]:
     # (docs/design/standard-library.md §12).
     schema_was_stale = schema_json_mod.write_schema(project)
     parse_mod.load_items(project, require_ids=require_ids)
+    # Same posture, extended to surrogate keys (docs/design/keys.md §2): a key
+    # has none of what makes `refdes id` a deliberate, separate step, so any
+    # command that already loads the project fills in missing ones as a side
+    # effect. `--no-write` is the escape for a genuinely read-only pass (CI
+    # checking out a tree, inspecting someone else's project, a bisect over
+    # historical commits) -- note this is the *only* write `--no-write`
+    # currently gates; the flag's full scope per the design doc (schema.json,
+    # seals, the boards manifest, the id ledger) is unimplemented.
+    keys_mod.mint_missing(project, write=not args.no_write)
     return project, schema_was_stale
 
 
@@ -793,6 +803,13 @@ def main(argv: list[str] | None = None) -> int:
         description="Reference documentation for hardware design decisions.",
     )
     parser.add_argument("-c", "--config", help="path to refdes.yaml")
+    parser.add_argument(
+        "--no-write",
+        action="store_true",
+        help="never modify anything under items/ or .refdes/ (currently: "
+        "suppresses surrogate-key minting; see docs/design/keys.md §2) -- for "
+        "CI, inspecting someone else's project, or a bisect over history",
+    )
     sub = parser.add_subparsers(dest="command", required=True)
 
     p_build = sub.add_parser("build", help="render the HTML site and items.json")
