@@ -28,6 +28,7 @@ from typing import Callable
 
 import yaml
 
+from . import build as build_mod
 from .model import INFO, RELEASE_GATE_DEFAULTS, Item, Project, SchemaError
 
 BASELINES_DIR = ".refdes/baselines"
@@ -163,11 +164,100 @@ def _save_baseline_file(project: Project, data: dict) -> str:
 
 def _items_map(project: Project) -> dict[str, dict]:
     """`project.local_items` only -- imports are excluded from baselines the
-    same way they're excluded from coverage and validation."""
+    same way they're excluded from coverage and validation.
+
+    `hash_format` records which content-hash definition `hash` was computed
+    under (build.HASH_FORMAT -- currently 2, docs/design/keys.md §5)
+    directly on every freshly-stamped entry, so a reader of this baseline
+    later never has to guess: absent means format 1 (a baseline stamped
+    before keys existed, or an entry migrate_hash_format() below left
+    untouched because it couldn't account for it), present and current
+    means it's directly comparable to a freshly computed hash.
+    """
     return {
-        item.id: {"hash": item.content_hash, "type": item.type, "title": item.title}
+        item.id: {
+            "hash": item.content_hash, "type": item.type, "title": item.title,
+            "hash_format": build_mod.HASH_FORMAT,
+        }
         for item in project.local_items
     }
+
+
+# --------------------------------------------------------- hash-format migration
+
+
+@dataclass
+class BaselineMigration:
+    """What happened when a stamped baseline was checked for hash-format-1
+    (pre-keys) entries -- see migrate_hash_format()'s docstring for the rule.
+    `changed` is whether the baseline file itself was rewritten (only true
+    when `carried` is non-empty and `write` was set)."""
+
+    carried: list[str] = field(default_factory=list)       # format-1 entries safely upgraded
+    uncomparable: list[str] = field(default_factory=list)  # format-1 entries genuinely stale
+    changed: bool = False
+
+
+def migrate_hash_format(project: Project, baseline: Baseline, write: bool = True) -> BaselineMigration:
+    """docs/design/keys.md §5's "conditional carry-forward" rule (option c),
+    applied to one already-loaded baseline, in place.
+
+    A baseline stamped before keys existed recorded every entry's hash under
+    the old definition (link targets hashed as display-id text) -- it has no
+    `hash_format` key at all, since the field didn't exist yet. Comparing
+    that hash directly against a freshly computed hash_format-2 hash would
+    make every single item in that baseline look changed, which is false:
+    nothing about their content moved, only the *definition* of the hash did.
+
+    The rule, for each format-1 entry (recorded id `item_id`, stored hash
+    `old_hash`): find the live item still using that id, and recompute what
+    its hash would be *right now* under the OLD definition
+    (build.legacy_hash_for). If that recomputed old-format hash matches what
+    was actually stored, the item's content has demonstrably not changed
+    since the baseline was stamped -- so the item's *current* hash_format-2
+    hash (already sitting on item.content_hash from this build) is the
+    correct new-format hash of the baseline's own content, and the entry is
+    safely rewritten in place (`carried`). If it does not match, the item
+    genuinely changed since the stamp, for a reason that has nothing to do
+    with hash formats -- that entry is left exactly as it was, still
+    format 1, and reported as `uncomparable` rather than guessed at. An id
+    with no live item at all (deleted, or renamed with no `former_ids:`
+    recorded) is left alone too: that is the ordinary "removed" case
+    diff_against() already reports, not a migration failure.
+
+    `write=False` computes the same report without touching the file --
+    the `--no-write` posture (docs/design/keys.md §2), threaded through by
+    every caller below.
+    """
+    report = BaselineMigration()
+    for item_id, entry in baseline.items.items():
+        if "hash_format" in entry:
+            continue  # already hash_format 2 (or a later format): nothing to do
+        item = project.items.get(item_id)
+        if item is None:
+            continue  # no live item to recompute against -- an ordinary removal
+        if build_mod.legacy_hash_for(item, project) != entry.get("hash"):
+            report.uncomparable.append(item_id)
+            continue
+        entry["hash"] = item.content_hash
+        entry["hash_format"] = build_mod.HASH_FORMAT
+        report.carried.append(item_id)
+
+    if report.carried and write:
+        data = {
+            "kind": baseline.kind, "name": baseline.name,
+            "stamped_at": baseline.stamped_at, "stamped_by": baseline.stamped_by,
+            "refdes_version": baseline.refdes_version,
+        }
+        if baseline.standard is not None:
+            data["standard"] = baseline.standard
+        if baseline.gate is not None:
+            data["gate"] = baseline.gate
+        data["items"] = dict(sorted(baseline.items.items()))
+        _save_baseline_file(project, data)
+        report.changed = True
+
+    return report
 
 
 def _now_iso() -> str:
@@ -375,7 +465,7 @@ class StampOutcome:
     conflict_detail: str = ""
 
 
-def stamp(project: Project, kind: str, name: str) -> StampOutcome:
+def stamp(project: Project, kind: str, name: str, write: bool = True) -> StampOutcome:
     """Stamp `name` as a `kind` ("revision" | "release") baseline.
 
     Caller's responsibility, both already true by the time this runs: the
@@ -384,11 +474,19 @@ def stamp(project: Project, kind: str, name: str) -> StampOutcome:
     unconditional error floor (docs/design/lifecycle.md §1) is checked by
     the caller against the same `project.errors` every other command uses,
     not re-checked here.
+
+    `write` only gates the hash-format migration below, not the stamp
+    itself: an existing same-name baseline stamped before keys existed has
+    to be migrated (or at least compared correctly) before its `.items` can
+    be checked against a fresh `items_map` at all, or a byte-identical
+    re-run would misreport as "conflict" purely because of the format
+    change, not any real content difference (docs/design/keys.md §5).
     """
     items_map = _items_map(project)
 
     existing = load_baseline(project, name)
     if existing is not None:
+        migrate_hash_format(project, existing, write=write)
         if existing.kind == kind and existing.items == items_map:
             # Byte-identical re-run: skip entirely, file untouched -- not even
             # stamped_at rewritten, mirroring `refdes fetch` skipping an
@@ -450,12 +548,22 @@ class DiffResult:
     unchanged_count: int
 
 
-def diff_against(project: Project, baseline: Baseline) -> DiffResult:
+def diff_against(project: Project, baseline: Baseline, write: bool = True) -> DiffResult:
     """Item-scoped, hash-only: which local items changed, were added, or were
     removed since `baseline` was stamped. Not field-level -- that's one
     `git diff` away once you know which two commits to compare (this
     function is precisely what supplies that scope), and is deliberately
-    left to git rather than reimplemented (docs/design/lifecycle.md §3)."""
+    left to git rather than reimplemented (docs/design/lifecycle.md §3).
+
+    Migrates `baseline` from hash_format 1 to 2 first, in place (§5) -- a
+    baseline stamped before keys existed would otherwise show every one of
+    its items as "changed" purely because the hash *definition* moved, which
+    isn't the question this function exists to answer. `write` threads
+    through to migrate_hash_format() (`--no-write`, docs/design/keys.md §2);
+    defaults True so former_ids.propose(), which calls this without knowing
+    about the flag, keeps its existing unconditional-load behaviour.
+    """
+    migrate_hash_format(project, baseline, write=write)
     current = _items_map(project)
     changed, added = [], []
     unchanged = 0

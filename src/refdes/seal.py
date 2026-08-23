@@ -62,6 +62,48 @@ def save_seals(project: Project, seals: dict[str, str], board: str = "") -> None
         yaml.safe_dump({"sealed": seals}, fh, sort_keys=True, default_flow_style=False)
 
 
+def _matches_sealed_hash(recorded: str, item: Item, project: Project) -> tuple[bool, str]:
+    """Compare a stored seal hash against `item`'s current one, folding in
+    the hash-format migration (docs/design/keys.md §5) so a seal written
+    before keys existed doesn't read as tampered purely because the hash
+    *definition* changed underneath it.
+
+    Returns `(matches, hash_to_store)`. Three outcomes:
+
+    - `recorded == item.content_hash`: unchanged under the current
+      (hash_format-2) definition -- the ordinary case for any seal written
+      since keys landed. `(True, recorded)`, nothing to do.
+    - `recorded` doesn't match the current hash, but does match what the
+      item would have hashed to under the *old* (hash_format-1) definition
+      (`build.legacy_hash_for`): the content hasn't actually changed since
+      this was sealed, only the hash definition has. `(True,
+      item.content_hash)` -- the caller upgrades the stored value in place.
+      Seals have no per-entry `hash_format` field to persist (unlike
+      baselines: a seal is a flat `{id: hash}` map with no room for one) --
+      but none is needed, because once the value is upgraded it *is* a
+      hash_format-2 hash, indistinguishable from one sealed fresh under the
+      current code. The migration is self-describing by construction, not
+      by a recorded flag.
+    - Neither matches: a real edit since sealing, format aside.
+      `(False, recorded)` -- an ordinary violation, exactly as before this
+      migration existed.
+
+    A deferred import of `build` avoids a cycle: `build.py` already imports
+    `seal` (its own `build()` calls `seal.verify()`), so `seal` importing
+    `build` at module level would be circular. By the time this function
+    runs, `build` has always finished importing (`compute_hashes`, whose
+    output this compares against, already ran), so the deferred import is
+    safe and cheap -- Python caches the module after the first import.
+    """
+    from . import build as build_mod
+
+    if recorded == item.content_hash:
+        return True, recorded
+    if recorded == build_mod.legacy_hash_for(item, project):
+        return True, item.content_hash
+    return False, recorded
+
+
 def append_only_items(project: Project, board: str | None = None) -> list[Item]:
     """Local append-only items, optionally narrowed to one board's own ("" included)."""
     items = [
@@ -123,7 +165,16 @@ def verify(project: Project, write: bool = False, reseal: str | None = None) -> 
                     seals[item.id] = item.content_hash
                     changed = True
                 continue
-            if recorded == item.content_hash:
+            ok, upgraded = _matches_sealed_hash(recorded, item, project)
+            if ok:
+                if upgraded != recorded and write:
+                    # Hash-format migration (docs/design/keys.md §5): content
+                    # is unchanged, only the hash definition moved -- upgrade
+                    # silently, same posture as the fresh-seal branch above,
+                    # not the reseal-with-a-warning branch below (nothing was
+                    # actually edited here).
+                    seals[item.id] = upgraded
+                    changed = True
                 continue
 
             if reseal_here:
@@ -217,7 +268,13 @@ def _report_deleted(
 
 
 def resealed_ids(project: Project) -> list[str]:
-    """Entries whose recorded seal, on any board, no longer matches their current hash."""
+    """Entries whose recorded seal, on any board, no longer matches their
+    current hash -- audit-only, so a read that never writes (`refdes audit`
+    doesn't `seal.verify(write=True)` first). Uses the same hash-format-aware
+    comparison `verify()` does (_matches_sealed_hash): otherwise, the first
+    `audit` run after adopting keys would list every sealed entry in the
+    project as "resealed", when nothing was actually touched -- only the
+    hash definition moved (docs/design/keys.md §5)."""
     base = load_seals(project, board="")
     out: list[str] = []
     for board in _boards_in_play(project):
@@ -227,9 +284,11 @@ def resealed_ids(project: Project) -> list[str]:
                 seals.setdefault(item_id, h)
         else:
             seals = base
-        out.extend(
-            item.id
-            for item in append_only_items(project, board=board)
-            if item.id in seals and seals[item.id] != item.content_hash
-        )
+        for item in append_only_items(project, board=board):
+            recorded = seals.get(item.id)
+            if recorded is None:
+                continue
+            ok, _upgraded = _matches_sealed_hash(recorded, item, project)
+            if not ok:
+                out.append(item.id)
     return out

@@ -226,7 +226,7 @@ def _run_stamp(args, kind: str) -> int:
     if project.errors:
         return _report(project)
 
-    outcome = lifecycle_mod.stamp(project, kind=kind, name=args.name)
+    outcome = lifecycle_mod.stamp(project, kind=kind, name=args.name, write=not args.no_write)
     # Diagnostics (including a stamped_by git_identity fallback warning, which
     # resolve_stamped_by() only adds on the path that actually stamps) print
     # through the same _report() every other command uses, before the
@@ -486,13 +486,15 @@ def cmd_audit(args) -> int:
 
     if latest_any:
         print(f"\nSince last revision ({latest_any.name}, {latest_any.stamped_at}):")
-        _print_baseline_diff(lifecycle_mod.diff_against(project, latest_any))
+        _print_baseline_diff(lifecycle_mod.diff_against(project, latest_any, write=not args.no_write))
     else:
         print("\nSince last revision: (no revision stamped yet)")
 
     if latest_release:
         print(f"\nSince last release ({latest_release.name}, {latest_release.stamped_at}):")
-        _print_baseline_diff(lifecycle_mod.diff_against(project, latest_release))
+        _print_baseline_diff(
+            lifecycle_mod.diff_against(project, latest_release, write=not args.no_write)
+        )
     else:
         print("\nSince last release: (no release stamped yet)")
 

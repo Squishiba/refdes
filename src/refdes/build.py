@@ -245,6 +245,54 @@ def validate_former_ids(project: Project) -> None:
         )
 
 
+def _key_index(project: Project) -> dict[str, Item]:
+    """Every item that has a surrogate key (docs/design/keys.md), keyed by
+    that key. Built fresh on every call rather than cached on Project: it's
+    cheap (one dict comprehension over items already parsed into memory),
+    and a cached copy would need its own invalidation story every time an
+    item's key changes (a reparse after `keys.mint_missing()` writes new
+    ones, in particular). Two items sharing a key would make this dict lose
+    one of them silently -- that is a Layer-2 corruption-lint concern
+    (docs/design/keys.md §6, not implemented yet), not this function's job;
+    catching the collision belongs to a check that runs regardless of
+    whether any link ever exercises it.
+    """
+    return {item.key: item for item in project.items.values() if item.key}
+
+
+def resolve_link_target(by_key: dict[str, Item], project: Project, target: str) -> Item | None:
+    """Resolve one structured link's target string to the item it names.
+
+    Composite form `DISPLAY-ID@key` (docs/design/keys.md §3): resolution
+    uses only the key, the part after `@` -- the display half is
+    tool-maintained (refreshed when the target renames) and never consulted
+    for resolution, not even as a fallback when the key doesn't resolve.
+    That is deliberate, not an oversight: falling back to the display text
+    would resurrect exactly the ambiguity keys exist to remove (two items
+    momentarily sharing a stale display id after a rename, say). A bare
+    display id (no `@` -- an author-typed reference before `refdes` has
+    expanded it, or a target that has no key yet to expand into) resolves
+    by direct id lookup, exactly as before keys existed.
+
+    No `former_ids:` fallback here: that is a prose-only mechanism
+    (`validate_former_ids` / `_linkify`'s "(formerly X)" marker). A
+    structured link (`satisfies:`, `refines:`, ...) must name a still-live
+    id or key directly, same as always.
+
+    Introduced alongside the hashing change (compute_hashes below already
+    needs to resolve targets that *might* be composites, so hashing stays
+    correct once link rewriting lands) but not yet wired into resolve_links()
+    itself -- until link rewriting actually writes a composite anywhere,
+    every target this sees is still a bare display id, so resolve_links()
+    keeps its own plain lookup for now rather than claiming a behaviour
+    change that hasn't landed yet.
+    """
+    if "@" in target:
+        _display, _, key = target.partition("@")
+        return by_key.get(key)
+    return project.items.get(target)
+
+
 def resolve_links(project: Project) -> None:
     for item in project.items.values():
         spec = project.types.get(item.type)
@@ -603,6 +651,79 @@ def run_checks(project: Project) -> None:
 
 # ------------------------------------------------------------------- content hashing
 
+# Bumped whenever what compute_hashes() feeds into the hash changes in a way
+# that would churn every existing hash for a reason unrelated to content --
+# so far, exactly once: docs/design/keys.md §5, switching link targets from
+# display-id text to resolved keys. Recorded per baseline entry (lifecycle.py)
+# so a partially-migrated baseline stays precisely describable; consulted by
+# the migration in lifecycle.py/seal.py, never by an ordinary build.
+HASH_FORMAT = 2
+
+
+def _hash_payload(item: Item, spec: ItemType, project: Project, link_values) -> dict[str, object]:
+    """Everything compute_hashes() and legacy_hash_for() have in common: which
+    fields/body enter the hash, and under what normalization. The one thing
+    that differs between "current" and "pre-keys" hashing is how a link's
+    *targets* turn into hashable values, so that piece is the caller's job
+    (`link_values`, called once per link name with that link's raw target
+    list, returning what to hash for it) -- everything else here is shared,
+    so the two hash definitions can never drift apart from each other by
+    accident.
+    """
+    payload: dict[str, object] = {"type": item.type}
+
+    for fname in sorted(item.fields):
+        mode = item.on_change_for(fname, spec, project.default_on_change)
+        if mode == INVALIDATE:
+            payload[fname] = item.fields[fname]
+
+    for lname in sorted(item.links):
+        payload[f"link:{lname}"] = link_values(item.links[lname])
+
+    # Same precedence as fields: item field override > whole-item mode > schema.
+    body_mode = item.on_change_for("body", spec, spec.body_on_change)
+    if body_mode == INVALIDATE:
+        normalized = re.sub(r"\s+", " ", item.body).strip()
+        payload["body"] = normalized
+
+    return payload
+
+
+def _hash_blob(payload: dict[str, object]) -> str:
+    blob = json.dumps(payload, sort_keys=True, default=str)
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:16]
+
+
+def _link_hash_token(by_key: dict[str, Item], project: Project, target: str) -> str:
+    """The value one link target contributes to its owner's content hash
+    (docs/design/keys.md §5). Three cases, deliberately distinct so none of
+    them can ever collide with each other or with a real key:
+
+    - Resolves, and the target has a key: the key itself. This is the whole
+      point -- renaming the target's display id changes nothing here, so
+      renaming it changes nothing about *this* item's hash either.
+    - Resolves, but the target has no key yet (§2: a keyless item stays
+      fully usable, it just isn't durably referenced yet): a sentinel built
+      from the target's *current* id, tagged so it can never be mistaken for
+      a real key (no real key contains "!" or ":"). This is deliberately
+      NOT rename-stable -- that instability is correct, not a bug: a link
+      can't be rename-immune to a target that has no immutable identity to
+      pin to yet. `refdes check`'s existing "N item(s) have no key yet" info
+      line is what surfaces this state; it doesn't need a second diagnostic
+      raised from inside hashing.
+    - Doesn't resolve at all: a different tagged sentinel, built from the
+      raw target text. `resolve_links()` already reports this exact case as
+      a build error elsewhere in the same build (it runs first, see
+      build()) -- this only needs to be deterministic and distinct from the
+      other two cases, not to raise a second diagnostic for the same fault.
+    """
+    item = resolve_link_target(by_key, project, target)
+    if item is None:
+        return f"!unresolved:{target}"
+    if item.key:
+        return item.key
+    return f"!nokey:{item.id}"
+
 
 def compute_hashes(project: Project) -> None:
     """Hash only the fields whose on_change mode is `invalidate`.
@@ -612,27 +733,62 @@ def compute_hashes(project: Project) -> None:
     modes are indistinguishable here. `log` is reserved for a future history layer
     and currently behaves as `ignore`. Imported items keep the hash their own
     project computed.
+
+    Link targets are hashed as their *resolved keys* (docs/design/keys.md
+    §5), not as the composite text and not as the display id -- see
+    _link_hash_token for the three cases and why each is safe. This is the
+    one change §5 calls load-bearing: renaming a target's display id no
+    longer touches the hash of anything that links to it, whether the
+    on-disk reference is still a bare id or has already been expanded to a
+    `DISPLAY@key` composite by links.expand_missing.
+
+    Two things stay deliberately absent from the payload, same as before
+    keys existed: the display id (unchanged -- it was never hashed), and,
+    new here, the item's *own* key. Hashing an item's own key would mean
+    minting one -- an identity-only event with no content behind it --
+    rewrites that item's hash for no content reason, and the first time
+    every item in a project adopts a key at once, that would be every
+    item's hash in the project. Identity is what a hash's key-lookups point
+    at from other items; it is not itself content to be hashed.
     """
+    by_key = _key_index(project)
     for item in project.local_items:
         spec = project.types[item.type]
-        payload: dict[str, object] = {"type": item.type}
+        payload = _hash_payload(
+            item, spec, project,
+            link_values=lambda targets: sorted(
+                _link_hash_token(by_key, project, t) for t in targets
+            ),
+        )
+        item.content_hash = _hash_blob(payload)
 
-        for fname in sorted(item.fields):
-            mode = item.on_change_for(fname, spec, project.default_on_change)
-            if mode == INVALIDATE:
-                payload[fname] = item.fields[fname]
 
-        for lname in sorted(item.links):
-            payload[f"link:{lname}"] = sorted(item.links[lname])
+def legacy_hash_for(item: Item, project: Project) -> str:
+    """The content hash this item would have had under the pre-keys
+    (`hash_format` 1) definition, recomputed from its *current* parsed
+    state -- link targets hashed as bare display-id text, exactly what
+    compute_hashes() did before docs/design/keys.md §5 landed.
 
-        # Same precedence as fields: item field override > whole-item mode > schema.
-        body_mode = item.on_change_for("body", spec, spec.body_on_change)
-        if body_mode == INVALIDATE:
-            normalized = re.sub(r"\s+", " ", item.body).strip()
-            payload["body"] = normalized
+    Deliberately not "whatever the target string looks like right now": if
+    links.expand_missing has already rewritten a target to a `DISPLAY@key`
+    composite, only the display half (everything before '@') goes into this
+    reconstruction, because that is what the *original*, pre-adoption hash
+    was computed from. Using the live composite text here would make an
+    item that has not actually changed look changed, purely because its own
+    link syntax was upgraded -- exactly the false positive the hash-format
+    migration exists to avoid.
 
-        blob = json.dumps(payload, sort_keys=True, default=str)
-        item.content_hash = hashlib.sha256(blob.encode("utf-8")).hexdigest()[:16]
+    Used only by the one-time baseline/seal hash-format migration
+    (lifecycle.migrate_hash_format, seal.verify's carry-forward comparison)
+    to decide whether a stored old-format hash still matches current
+    content. Never called during an ordinary build.
+    """
+    spec = project.types[item.type]
+    payload = _hash_payload(
+        item, spec, project,
+        link_values=lambda targets: sorted(t.split("@", 1)[0] for t in targets),
+    )
+    return _hash_blob(payload)
 
 
 # -------------------------------------------------------------------------- markdown
