@@ -13,6 +13,7 @@ from . import former_ids as former_ids_mod
 from . import ids as ids_mod
 from . import keys as keys_mod
 from . import lifecycle as lifecycle_mod
+from . import links as links_mod
 from . import parse as parse_mod
 from . import render as render_mod
 from . import revise as revise_mod
@@ -34,6 +35,34 @@ def _fix_console() -> None:
             pass
 
 
+def _parse_items(
+    project: Project, require_ids: bool, discard: tuple[int, int] | None
+) -> tuple[int, int]:
+    """Parse (or re-parse) project.items/pending, returning the (start, end)
+    index range this call's own diagnostics occupy in project.diagnostics.
+
+    `discard`, when given, is that same kind of range from a PREVIOUS parse
+    of this project, removed before this one runs. That matters because
+    keys.mint_missing()/links.expand_missing() write into the source tree
+    and then need a fresh parse: minting inserts a `key:` line, which shifts
+    every subsequent line number in that file -- and item.source_line, read
+    from the *original* parse, is exactly what a later write-back (link
+    expansion's own, or a following reload) keys on. Without discarding the
+    stale range first, reparsing would simply re-derive the same parse-time
+    diagnostics (a missing-id error, a malformed-YAML error, ...) from the
+    now-current files and append them a second time, on top of the first
+    parse's now-outdated set -- silently doubling every such diagnostic
+    rather than describing the project once, correctly.
+    """
+    if discard is not None:
+        del project.diagnostics[discard[0] : discard[1]]
+        project.items = {}
+        project.pending = []
+    start = len(project.diagnostics)
+    parse_mod.load_items(project, require_ids=require_ids)
+    return start, len(project.diagnostics)
+
+
 def _load(args, require_ids: bool = True) -> tuple[Project, bool]:
     """Returns (project, schema_was_stale) -- the second only ever True when
     a `.refdes/schema.json` from a previous run predates the current
@@ -47,7 +76,8 @@ def _load(args, require_ids: bool = True) -> tuple[Project, bool]:
     # `build` already applies to .refdes/boards.yaml and the ID ledger
     # (docs/design/standard-library.md §12).
     schema_was_stale = schema_json_mod.write_schema(project)
-    parse_mod.load_items(project, require_ids=require_ids)
+    parse_span = _parse_items(project, require_ids, discard=None)
+
     # Same posture, extended to surrogate keys (docs/design/keys.md §2): a key
     # has none of what makes `refdes id` a deliberate, separate step, so any
     # command that already loads the project fills in missing ones as a side
@@ -56,7 +86,22 @@ def _load(args, require_ids: bool = True) -> tuple[Project, bool]:
     # historical commits) -- note this is the *only* write `--no-write`
     # currently gates; the flag's full scope per the design doc (schema.json,
     # seals, the boards manifest, the id ledger) is unimplemented.
-    keys_mod.mint_missing(project, write=not args.no_write)
+    minted = keys_mod.mint_missing(project, write=not args.no_write)
+    if minted:
+        parse_span = _parse_items(project, require_ids, discard=parse_span)
+
+    # §3: expand a bare link reference that resolves to a keyed item into the
+    # frozen `DISPLAY-ID@key` composite. Must run after minting (a target
+    # needs its own key before there's anything to expand into). The rewrite
+    # itself happens in place (same line count, so it doesn't shift anything
+    # on its own) but still needs a reparse afterward, for the same reason
+    # every write-back does: build() below must see `item.links` holding the
+    # composite text that's now actually on disk, not the bare text this
+    # in-memory project was parsed with.
+    expanded = links_mod.expand_missing(project, write=not args.no_write)
+    if expanded:
+        _parse_items(project, require_ids, discard=parse_span)
+
     return project, schema_was_stale
 
 

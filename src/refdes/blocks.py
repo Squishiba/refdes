@@ -272,7 +272,14 @@ def _walk(
     item = project.items.get(current_id)
     if item is None:
         return []
-    edges = item.links if direction == "up" else item.backlinks
+    # resolved_links, not links, for "up": a target may be `DISPLAY@key`
+    # composite text (docs/design/keys.md §3), and every id this function
+    # walks with (current_id, and every target_id below) ends up passed
+    # straight back into project.items.get() -- which was never keyed by
+    # that composite string. backlinks needs no such swap: it is always
+    # populated with the *linking* item's own id (build.resolve_links()),
+    # which is never composite.
+    edges = item.resolved_links if direction == "up" else item.backlinks
     allowed = via if direction == "up" else via_inverses
 
     children: list[CascadeNode] = []

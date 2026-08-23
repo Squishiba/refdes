@@ -279,13 +279,9 @@ def resolve_link_target(by_key: dict[str, Item], project: Project, target: str) 
     structured link (`satisfies:`, `refines:`, ...) must name a still-live
     id or key directly, same as always.
 
-    Introduced alongside the hashing change (compute_hashes below already
-    needs to resolve targets that *might* be composites, so hashing stays
-    correct once link rewriting lands) but not yet wired into resolve_links()
-    itself -- until link rewriting actually writes a composite anywhere,
-    every target this sees is still a bare display id, so resolve_links()
-    keeps its own plain lookup for now rather than claiming a behaviour
-    change that hasn't landed yet.
+    Also used by compute_hashes (build.py's own _link_hash_token), so hashing
+    stays correct regardless of whether a target is still a bare id or has
+    already been expanded to a composite by links.expand_missing.
     """
     if "@" in target:
         _display, _, key = target.partition("@")
@@ -294,6 +290,7 @@ def resolve_link_target(by_key: dict[str, Item], project: Project, target: str) 
 
 
 def resolve_links(project: Project) -> None:
+    by_key = _key_index(project)
     for item in project.items.values():
         spec = project.types.get(item.type)
         if spec is None:  # imported item of an undeclared type
@@ -301,7 +298,7 @@ def resolve_links(project: Project) -> None:
         for link_name, targets in item.links.items():
             allowed = spec.links.get(link_name, [])
             for target_id in targets:
-                target = project.items.get(target_id)
+                target = resolve_link_target(by_key, project, target_id)
                 if target is None:
                     project.error(
                         f"{link_name} points at {target_id!r}, which does not exist",
@@ -317,6 +314,7 @@ def resolve_links(project: Project) -> None:
                     continue
                 inverse = project.inverse_of.get(link_name, f"{link_name}_by")
                 target.backlinks.setdefault(inverse, []).append(item.id)
+                item.resolved_links.setdefault(link_name, []).append(target.id)
 
 
 # Preserved exactly for the name-based coverable/verifier fallback below -- the
@@ -435,15 +433,20 @@ def compute_coverage(project: Project) -> None:
             continue
 
         cov = Coverage(item_id=item.id)
-        # Each edge may be declared from either end.
+        # Each edge may be declared from either end. resolved_links, not
+        # links: these targets get looked up in project.items directly
+        # below, and links may hold `DISPLAY@key` composite text now
+        # (docs/design/keys.md §3) that project.items was never keyed by --
+        # resolved_links is resolve_links()'s own output, already resolved
+        # to each target's current, plain display id.
         cov.addressed_by = sorted(
             set(item.backlinks.get("addressed_by", []))
-            | set(item.links.get("addresses", []))
+            | set(item.resolved_links.get("addresses", []))
         )
 
         satisfying_ids = sorted(
             set(item.backlinks.get("satisfied_by", []))
-            | set(item.links.get("satisfies", []))
+            | set(item.resolved_links.get("satisfies", []))
         )
         settled: list[str] = []
         claimed: list[str] = []
@@ -462,7 +465,7 @@ def compute_coverage(project: Project) -> None:
 
         verifying_ids = sorted(
             set(item.backlinks.get("verified_by", []))
-            | set(item.links.get("verified_by", []))
+            | set(item.resolved_links.get("verified_by", []))
         )
         verified: list[str] = []
         for verifier_id in verifying_ids:

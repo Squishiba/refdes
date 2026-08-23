@@ -53,7 +53,12 @@ def _paths_to_roots(project: Project, node_id: str, guard: int) -> list[list[str
     if guard <= 0:
         return [[node_id]]
     node = project.items.get(node_id)
-    targets = node.links.get("blocked_by", []) if node else []
+    # resolved_links, not links: a target may be `DISPLAY@key` composite text
+    # (docs/design/keys.md §3) by the time this walks it, and project.items
+    # is keyed by plain display id, never by that composite string.
+    # resolve_links() has already done this resolution once; reuse it rather
+    # than re-deriving it here.
+    targets = node.resolved_links.get("blocked_by", []) if node else []
     if not targets:
         return [[node_id]]
     paths: list[list[str]] = []
@@ -101,7 +106,7 @@ def resolve(project: Project) -> None:
             return
 
     for item in project.local_items:
-        for target_id in item.links.get("blocked_by", []):
+        for target_id in item.resolved_links.get("blocked_by", []):
             stale = _is_settled(target_id, project)
             if stale:
                 target = project.items[target_id]

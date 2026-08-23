@@ -45,6 +45,50 @@ and this project uses [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Surrogate keys, layer 2: hashing on the key, and link expansion**
+  (`docs/design/keys.md`). Two changes, landed together because the second
+  has to be provably neutral against the first:
+    1. **Content hashing** (`build.compute_hashes`, `HASH_FORMAT = 2`): a
+       link target now contributes its *resolved key* to the owning item's
+       content hash, not the display-id text. Renaming an item's display id
+       no longer churns the hash of anything that links to it -- verified
+       empirically against this repo's own project (renaming `REQ-PWR-002`
+       changed 0 of the 19 other items' hashes, including all 6 that link to
+       it) rather than merely asserted. An existing stamped baseline or
+       seal, recorded under the pre-keys hash definition, is carried
+       forward automatically the first time it's next compared or verified:
+       if the item's content demonstrably hasn't changed (its hash under
+       the *old* definition still matches what's stored), the stored hash
+       is silently upgraded in place; if it doesn't match, the entry is
+       left untouched and reported as `uncomparable` rather than guessed
+       at. Baselines record which format each entry is in (`hash_format:`);
+       seals, having no per-entry field to spend on it, self-describe by
+       construction once upgraded (see `seal._matches_sealed_hash`).
+    2. **Link expansion** (`refdes/links.py`): a bare `satisfies: [REQ-001]`
+       is expanded in place to `satisfies: [REQ-001@k7f3m2q9x4b]` the first
+       time it resolves to a keyed item, the same automatic-side-effect
+       posture key minting already has, gated by the same `--no-write`.
+       Resolution now reads only the part after `@`; the display half is
+       never consulted, not even as a fallback for an unresolvable key.
+       Frozen once written -- this module never rewrites a composite it
+       already produced, and never touches a flow-style list entry
+       (`- {id: X, satisfies: [Y]}`), a disclosed, narrow gap left bare
+       rather than half-handled.
+
+  Fixing hashing surfaced five other places that resolved a link target by
+  treating it as a bare display id and would otherwise have silently
+  misbehaved the moment a target got composite-expanded: `blocked.py`'s
+  chain/root resolution, `blocks.py`'s `{{cascade}}` walker, coverage's
+  satisfied/verified/addressed accounting, the cross-workspace lint, and
+  `stub-tests`'s already-covered check. All five now read a new
+  `Item.resolved_links` field (`resolve_links`'s own resolved output)
+  instead of raw `links`. `checks: [{value, against}]` is a separate
+  mechanism, not a `links:` reference, and is not covered by expansion --
+  `against:` stays a bare id and is not yet rename-safe.
+
+  Still design-only: the corruption lint, `refdes keys adopt`, the
+  display-half refresh-on-rename mechanism, and anything in `revise.py` or
+  `former_ids.py`.
 - **Surrogate keys, layer 1: format and minting** (`docs/design/keys.md`).
   Every local item now gets an opaque, immutable 11-character `key:` --
   10 random Crockford-base32 data characters plus a Damm check character,

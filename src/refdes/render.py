@@ -159,7 +159,14 @@ def _trace_view(item: Item, project: Project) -> dict:
     self_inverse: dict[str, list[str]] = {}
     outgoing: dict[str, list[str]] = {}
     incoming: dict[str, list[str]] = {}
-    for name, targets in item.links.items():
+    # resolved_links, not links: this feeds the rendered Traceability panel,
+    # so it must show a clean, resolving display id -- never the raw
+    # `DISPLAY-ID@key` composite text (docs/design/keys.md §3), which is a
+    # key never meant to be read by a human at all, let alone shown on a
+    # page. A target that failed to resolve is simply absent here, exactly
+    # as resolve_links() already reported it via project.error() -- there is
+    # no build to render cleanly in that case anyway.
+    for name, targets in item.resolved_links.items():
         ltype = project.link_types.get(name)
         if ltype is not None and ltype.inverse == name:
             self_inverse.setdefault(name, []).extend(targets)

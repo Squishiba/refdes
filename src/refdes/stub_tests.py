@@ -38,12 +38,31 @@ def _already_covered(project: Project, verifier_types: set[str]) -> set[str]:
     two-phase author-then-allocate flow, same as anything `refdes new`
     scaffolds), so `resolve_links()` never sees its `verifies:` edge and
     the target's `backlinks` stay empty until `refdes id` runs. Reading
-    `verifies:`/`verified_by:` directly off every item -- allocated or
-    not -- is what keeps two `stub-tests` runs in a row, with no `refdes
-    id` in between, from generating a duplicate for the same requirement.
+    `verifies:`/`verified_by:` directly off every pending item -- rather
+    than through resolve_links()'s output -- is what keeps two `stub-tests`
+    runs in a row, with no `refdes id` in between, from generating a
+    duplicate for the same requirement.
+
+    Two loops, not one over `list(project.items.values()) + project.pending`,
+    because they need to read a *different* field. An already-idd item's
+    `verifies:`/`verified_by:` may be `DISPLAY@key` composite text by now
+    (docs/design/keys.md §3, links.expand_missing) -- resolved_links (this
+    item's own resolve_links() output, already resolved to plain display
+    ids) is what's comparable against the plain ids `covered` is checked
+    against elsewhere in this module. A pending item, having no id, was
+    never reached by resolve_links() (it only walks project.items) or by
+    links.expand_missing() (which only walks project.local_items, for the
+    same reason) -- its `verifies:`/`verified_by:` is guaranteed to still be
+    bare text, so `links` is read directly; there is nothing to resolve a
+    composite out of yet.
     """
     covered: set[str] = set()
-    for item in list(project.items.values()) + project.pending:
+    for item in project.items.values():
+        if item.type in verifier_types:
+            covered.update(item.resolved_links.get("verifies", []))
+        if item.resolved_links.get("verified_by"):
+            covered.add(item.id)
+    for item in project.pending:
         if item.type in verifier_types:
             covered.update(item.links.get("verifies", []))
         if item.links.get("verified_by"):

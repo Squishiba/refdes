@@ -14,12 +14,66 @@ diff, and merge.
 
 The decision is taken. This document specs it; it does not relitigate it.
 
-**Implementation status:** §1 (key format) and the minting half of §2 are
-implemented (`refdes/keys.py`, wired into `cli._load()`). Everything else —
-link resolution on the key (§3), hashing on the key (§5), the corruption
-lint (§6), `refdes keys adopt` (§7), and any change to `revise.py` or
-`former_ids.py` — is still design only, deliberately sequenced as later
-work rather than landed alongside the format and minting in one pass.
+**Implementation status:** §1 (key format), §2 (minting), §3 (composite
+expansion and key-based resolution), and §5 (hashing on the key, plus the
+baseline/seal hash-format migration) are implemented (`refdes/keys.py`,
+`refdes/links.py`, and changes to `build.py`, `lifecycle.py`, `seal.py`,
+`blocked.py`, `blocks.py`, `workspaces.py`, `stub_tests.py`, `render.py` --
+see "What §3/§5 turned out to need beyond the spec" below). The corruption
+lint (§6), `refdes keys adopt` (§7), the display-half refresh-on-rename
+mechanism (§3), and any change to `revise.py` or `former_ids.py` are still
+design only.
+
+**What §3/§5 turned out to need beyond the spec, implementing it:**
+
+- **Every consumer that walks the link graph, not just the ones the spec
+  named.** §5 anticipated `resolve_links` and `compute_hashes` needing to
+  resolve a composite target to a key. It undercounted: `blocked.py`'s
+  chain/root resolution, `blocks.py`'s `{{cascade}}` walker, the
+  satisfied/verified/addressed union in `build.compute_coverage`,
+  `workspaces.py`'s cross-workspace lint, and `stub_tests.py`'s
+  already-covered check all independently did a raw
+  `project.items.get(<link target string>)`, which silently stops matching
+  the moment a target is composite-expanded -- not a crash, in every case
+  but one, just quietly wrong (a blocked chain misreporting its own root as
+  itself, a satisfied-but-not-verified requirement counted as settled
+  regardless of its verifier's actual status, `stub-tests` re-generating a
+  test it already wrote). Fixed with one new field, `Item.resolved_links`
+  (resolve_links()'s own resolved-to-current-display-id output), which
+  every one of those consumers now reads instead of raw `links`. Caught by
+  the existing test suite, not anticipated in advance -- three unrelated
+  tests broke on the first full run after the hashing change, each pointing
+  at a different one of these consumers.
+- **The item-position write-back needs a reparse in between.** `cli._load()`
+  already had one write-back phase (key minting); adding a second (link
+  expansion) that depends on the first one's *output* (a target needs its
+  key before there's anything to expand into) means the file on disk has
+  changed shape by the time expansion runs, and `item.source_line` (captured
+  at the original parse) no longer points at the right line for anything
+  minting touched. Fixed by re-parsing after any write-back phase that
+  actually wrote something -- discarding that phase's own now-stale
+  diagnostics first, or they'd be reported twice.
+- **`checks: [{value, against}]` is not a `links:` reference and is not
+  covered.** It resolves an id the same way a link does, but it isn't
+  declared through `spec.links`/`item.links` at all -- it's a field entry
+  inside `checks:`. `links.expand_missing` never sees it, so `against:`
+  stays a bare display id and is not rename-safe under this implementation.
+  A real, disclosed gap, not an oversight.
+- **Flow-style entries need the write-back to prove what it actually
+  wrote, not just what it meant to.** The first draft of `links.py` computed
+  candidate rewrites from `item.links` (structured, parsed data) and
+  reported all of them as done regardless of whether the regex-based
+  write-back actually found and rewrote the matching line -- which it
+  silently doesn't for a flow-style entry (`- {id: X, satisfies: [Y]}`).
+  That would have left the in-memory project and the on-disk file
+  disagreeing about whether a link had been expanded. Fixed by having the
+  write-back functions return exactly which targets they found and
+  rewrote, and only reporting/updating those.
+- **Imports have no key to expand into.** A link to an item from another,
+  imported project can never be composite-expanded, because `imports.py`'s
+  payload doesn't carry a `key` field today. Real, disclosed, not fixed
+  here -- closing it means extending the cross-project export/import
+  contract, a separate change with its own collision considerations.
 
 ---
 

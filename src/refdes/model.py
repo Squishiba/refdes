@@ -335,7 +335,29 @@ class Item:
     key: str = ""
     fields: dict[str, Any] = field(default_factory=dict)
     body: str = ""
+    # Raw target text exactly as authored/stored -- a bare display id, or,
+    # once links.expand_missing() has run, a `DISPLAY-ID@key` composite
+    # (docs/design/keys.md §3). This is what build.compute_hashes() and any
+    # write-back reads; nothing that merely *traverses* the graph should
+    # read it directly (see resolved_links below).
     links: dict[str, list[str]] = field(default_factory=dict)
+    # Every link target's *current, resolved, always-bare* display id --
+    # build.resolve_links()'s own output, populated once per build from
+    # links above (build.resolve_link_target handles the composite case).
+    # Every consumer that walks the item graph rather than hashing or
+    # rewriting it (blocked.py, blocks.py's cascade walker, the coverage
+    # satisfied/verified/addressed union below in build.py,
+    # workspaces.py's cross-workspace lint, stub_tests.py) reads this, not
+    # `links` -- reading raw `links` directly would silently break the
+    # moment a target is composite-expanded, since `DISPLAY@key` is not a
+    # key project.items is ever indexed by. A target that failed to
+    # resolve, or resolved to a disallowed type, is absent here exactly as
+    # resolve_links() already reported it via project.error(). Empty for
+    # every item in project.pending: resolve_links() only ever reaches
+    # project.items, the same reason links.expand_missing() only ever
+    # reaches project.local_items (both need a live id to be reachable at
+    # all).
+    resolved_links: dict[str, list[str]] = field(default_factory=dict)
     backlinks: dict[str, list[str]] = field(default_factory=dict)
     source_file: str = ""
     source_line: int = 1
