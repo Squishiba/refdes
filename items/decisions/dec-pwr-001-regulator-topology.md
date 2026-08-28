@@ -1,4 +1,5 @@
 ---
+key: fd24s541bbt
 id: DEC-PWR-001
 type: decision
 title: 3V3 rail regulator topology
@@ -7,8 +8,8 @@ date: 2026-03-14
 owner: J. Bin
 tags: [power, thermal]
 board: board-a   # folder predates the boards: registry; see refdes.yaml
-satisfies: [REQ-PWR-002, REQ-PWR-003]
-constrained_by: [BND-THM-001]
+satisfies: [REQ-PWR-002@rgsmdxz3w5m, REQ-PWR-003@na934tg83df]
+constrained_by: [BND-THM-001@cw45e0ks00n]
 options:
   - name: LDO (TPS7A4700)
     verdict: rejected

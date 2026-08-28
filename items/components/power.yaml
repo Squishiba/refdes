@@ -7,7 +7,8 @@ defaults:
   board: board-a   # folder predates the boards: registry; see refdes.yaml
 
 items:
-  - id: CMP-PWR-001
+  - key: pktmysgxn8x
+    id: CMP-PWR-001
     title: TPS62913 synchronous buck converter
     part_number: TPS62913
     status: selected

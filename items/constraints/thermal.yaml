@@ -7,7 +7,8 @@ defaults:
   board: board-a   # folder predates the boards: registry; see refdes.yaml
 
 items:
-  - id: BND-THM-001
+  - key: cw45e0ks00n
+    id: BND-THM-001
     # Renamed from CON-THM-001 by `refdes standard upgrade --to 2` (hardware@2
     # renamed `constraint` to `bound`, prefix CON -> BND). The rename moves
     # structured references but never prose, so this records the old id here
@@ -22,7 +23,8 @@ items:
       Above this density the board exceeds 85 °C at the 55 °C ambient rating.
     source: Enclosure spec rev C, p.14
 
-  - id: BND-THM-002
+  - key: 9sga3wyj9mm
+    id: BND-THM-002
     body: Minimum converter efficiency
     limit: ">= 0.90"
     rationale: >

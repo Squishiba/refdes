@@ -11,6 +11,7 @@ defaults:
   status: active
 
 items:
-  - id: REQ-B-PWR-001
+  - key: bv170ga0xfk
+    id: REQ-B-PWR-001
     body: The board shall accept the same 9 V to 36 V input rail as Board A.
     source: Shared platform spec.

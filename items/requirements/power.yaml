@@ -10,21 +10,25 @@ defaults:
   board: board-a   # folder predates the boards: registry; see refdes.yaml
 
 items:
-  - id: REQ-PWR-001
+  - key: 1zn5skrv6k3
+    id: REQ-PWR-001
     body: The unit shall operate from an input supply of 9 V to 36 V.
     source: Customer spec rev D, §3.1
 
-  - id: REQ-PWR-002
+  - key: rgsmdxz3w5m
+    id: REQ-PWR-002
     body: The 3V3 rail shall supply 1.2 A continuous with less than 50 mV peak-to-peak ripple.
     source: Customer spec rev D, §3.4
 
-  - id: REQ-PWR-003
+  - key: na934tg83df
+    id: REQ-PWR-003
     body: Converter efficiency shall exceed 90 % at half load.
     rationale: Drives the thermal budget in a sealed enclosure with no forced airflow.
     source: Derived from CON-THM-001.
-    refines: [REQ-PWR-002]
+    refines: [REQ-PWR-002@rgsmdxz3w5m]
 
-  - id: REQ-PWR-004
+  - key: g0yfcpq2700
+    id: REQ-PWR-004
     body: The 3V3 rail shall remain within regulation during a 12 V to 9 V input step.
     status: draft
     owner: A. Rivera
@@ -34,6 +38,7 @@ items:
       reason: "Owner rotates weekly during bring-up; not a meaningful change."
 
   # No id yet — `refdes id` will allocate REQ-PWR-005 and write it back here.
-  - id: REQ-PWR-005
+  - key: k4t54vx2mxj
+    id: REQ-PWR-005
     body: The unit shall tolerate a sustained 40 V input transient for 100 ms.
     status: draft

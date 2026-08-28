@@ -6,14 +6,16 @@ defaults:
   board: board-a   # folder predates the boards: registry; see refdes.yaml
 
 items:
-  - id: TST-PWR-001
+  - key: 1a5z96z8c0g
+    id: TST-PWR-001
     title: Input range sweep
     status: passing
     body: Sweep the bench supply 9 V to 36 V in 1 V steps at full load; log rail regulation.
-    verifies: [REQ-PWR-001]
+    verifies: [REQ-PWR-001@1zn5skrv6k3]
 
-  - id: TST-PWR-002
+  - key: p2yypetstjh
+    id: TST-PWR-002
     title: 3V3 rail load and ripple
     status: planned
     body: Electronic load stepped to 1.2 A; measure ripple with a 20 MHz-limited probe.
-    verifies: [REQ-PWR-002]
+    verifies: [REQ-PWR-002@rgsmdxz3w5m]
