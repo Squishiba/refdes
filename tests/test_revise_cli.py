@@ -14,6 +14,54 @@ from refdes import cli as cli_mod
 from refdes import lifecycle
 from refdes.schema import SchemaError
 
+STALE_SCHEMA = """\
+site: { title: "Stale arithmetic test", out: _site }
+types:
+  decision:
+    prefix: DEC
+    fields:
+      status: { type: enum, choices: [proposed, accepted, superseded], default: proposed }
+  note:
+    prefix: NOTE
+    fields:
+      tag: { type: text }
+"""
+
+
+@pytest.fixture
+def stale_project(tmp_path):
+    """DEC-001/DEC-002 both start `proposed` with the identical calc block;
+    DEC-003 is `proposed` with no calc block at all; NOTE-001 has a calc
+    block but its type declares no `status` field. Covers, in one fixture,
+    every combination the signal's applicability rule needs to distinguish."""
+    (tmp_path / "refdes.yaml").write_text(STALE_SCHEMA, encoding="utf-8")
+    items = tmp_path / "items"
+    items.mkdir()
+    (items / "decisions.yaml").write_text(
+        "defaults: { type: decision }\n"
+        "items:\n"
+        "  - id: DEC-001\n"
+        "    status: proposed\n"
+        '    body: "```calc\\nP : W = 3.3 V * 1.2 A\\n```"\n'
+        "  - id: DEC-002\n"
+        "    status: proposed\n"
+        '    body: "```calc\\nP : W = 3.3 V * 1.2 A\\n```"\n'
+        "  - id: DEC-003\n"
+        "    status: proposed\n"
+        "    body: No calc block here, just prose.\n",
+        encoding="utf-8",
+    )
+    (items / "notes.yaml").write_text(
+        "defaults: { type: note }\n"
+        "items:\n"
+        "  - id: NOTE-001\n"
+        "    tag: v1\n"
+        '    body: "```calc\\nx : W = 1 V * 1 A\\n```"\n',
+        encoding="utf-8",
+    )
+    return tmp_path
+
+
 # --------------------------------------------------------------------- diff
 
 
@@ -249,4 +297,168 @@ def test_audit_reports_both_diffs(lifecycle_project, capsys):
     assert status == 0
     assert "Since last revision (rev-a" in out
     assert "Since last release: (no release stamped yet)" in out
+
+
+# ----------------------------------------------------- stale arithmetic signal
+
+
+def test_stale_arithmetic_flags_status_moved_with_calc_unchanged(stale_project):
+    project = _lc_build(stale_project)
+    lifecycle.stamp(project, kind="revision", name="rev-a")
+
+    (stale_project / "items" / "decisions.yaml").write_text(
+        "defaults: { type: decision }\n"
+        "items:\n"
+        "  - id: DEC-001\n"
+        "    status: accepted\n"  # moved, calc untouched
+        '    body: "```calc\\nP : W = 3.3 V * 1.2 A\\n```"\n'
+        "  - id: DEC-002\n"
+        "    status: proposed\n"
+        '    body: "```calc\\nP : W = 3.3 V * 1.2 A\\n```"\n'
+        "  - id: DEC-003\n"
+        "    status: proposed\n"
+        "    body: No calc block here, just prose.\n",
+        encoding="utf-8",
+    )
+    project2 = _lc_build(stale_project)
+    baseline = lifecycle.load_baseline(project2, "rev-a")
+    diff = lifecycle.diff_against(project2, baseline)
+    assert diff.changed == ["DEC-001"]
+    assert diff.stale_arithmetic == ["DEC-001"]
+
+
+def test_stale_arithmetic_not_flagged_when_calc_moves_too(stale_project):
+    """The bug this signal exists to catch is verdict-without-arithmetic --
+    a decision that also updated its own numbers isn't that bug, whatever
+    else changed about it."""
+    project = _lc_build(stale_project)
+    lifecycle.stamp(project, kind="revision", name="rev-a")
+
+    (stale_project / "items" / "decisions.yaml").write_text(
+        "defaults: { type: decision }\n"
+        "items:\n"
+        "  - id: DEC-001\n"
+        "    status: proposed\n"
+        '    body: "```calc\\nP : W = 3.3 V * 1.2 A\\n```"\n'
+        "  - id: DEC-002\n"
+        "    status: accepted\n"  # moved, and so did the calc block
+        '    body: "```calc\\nP : W = 5 V * 1 A\\n```"\n'
+        "  - id: DEC-003\n"
+        "    status: proposed\n"
+        "    body: No calc block here, just prose.\n",
+        encoding="utf-8",
+    )
+    project2 = _lc_build(stale_project)
+    baseline = lifecycle.load_baseline(project2, "rev-a")
+    diff = lifecycle.diff_against(project2, baseline)
+    assert diff.changed == ["DEC-002"]
+    assert diff.stale_arithmetic == []
+
+
+def test_stale_arithmetic_not_flagged_without_a_calc_block(stale_project):
+    """Most items in most projects have no calc block at all -- that has to
+    stay silent, not error or guess, even when its verdict genuinely moves."""
+    project = _lc_build(stale_project)
+    lifecycle.stamp(project, kind="revision", name="rev-a")
+
+    (stale_project / "items" / "decisions.yaml").write_text(
+        "defaults: { type: decision }\n"
+        "items:\n"
+        "  - id: DEC-001\n"
+        "    status: proposed\n"
+        '    body: "```calc\\nP : W = 3.3 V * 1.2 A\\n```"\n'
+        "  - id: DEC-002\n"
+        "    status: proposed\n"
+        '    body: "```calc\\nP : W = 3.3 V * 1.2 A\\n```"\n'
+        "  - id: DEC-003\n"
+        "    status: accepted\n"  # moved, no calc block to be stale
+        "    body: No calc block here, just prose.\n",
+        encoding="utf-8",
+    )
+    project2 = _lc_build(stale_project)
+    baseline = lifecycle.load_baseline(project2, "rev-a")
+    diff = lifecycle.diff_against(project2, baseline)
+    assert diff.changed == ["DEC-003"]
+    assert diff.stale_arithmetic == []
+
+
+def test_stale_arithmetic_not_flagged_without_a_status_field(stale_project):
+    """NOTE-001 has a calc block but its type declares no `status` field --
+    there's no verdict for this signal to compare, whatever else about the
+    item changes."""
+    project = _lc_build(stale_project)
+    lifecycle.stamp(project, kind="revision", name="rev-a")
+
+    (stale_project / "items" / "notes.yaml").write_text(
+        "defaults: { type: note }\n"
+        "items:\n"
+        "  - id: NOTE-001\n"
+        "    tag: v2\n"  # changed; calc block itself untouched
+        '    body: "```calc\\nx : W = 1 V * 1 A\\n```"\n',
+        encoding="utf-8",
+    )
+    project2 = _lc_build(stale_project)
+    baseline = lifecycle.load_baseline(project2, "rev-a")
+    diff = lifecycle.diff_against(project2, baseline)
+    assert diff.changed == ["NOTE-001"]
+    assert diff.stale_arithmetic == []
+
+
+def test_stale_arithmetic_silent_against_a_baseline_that_predates_the_signal(stale_project):
+    """A baseline stamped before this feature existed has no `verdict`/
+    `calc_hash` to compare against -- silence, not a guess, and not an
+    'uncomparable' report either (unlike the hash-format migration, there's
+    nothing to migrate: the field is just absent until the next stamp)."""
+    (stale_project / ".refdes" / "baselines").mkdir(parents=True)
+    (stale_project / ".refdes" / "baselines" / "old.yaml").write_text(
+        "kind: revision\n"
+        "name: old\n"
+        "stamped_at: '2026-01-01T00:00:00Z'\n"
+        "stamped_by: someone\n"
+        "refdes_version: 0.3.0\n"
+        "items:\n"
+        "  DEC-001: { hash: 0000000000000000, type: decision, title: '', "
+        "hash_format: 2 }\n",
+        encoding="utf-8",
+    )
+    project = _lc_build(stale_project)  # DEC-001 is still `proposed` here
+    baseline = lifecycle.load_baseline(project, "old")
+    diff = lifecycle.diff_against(project, baseline)
+    assert "DEC-001" in diff.changed  # hash mismatch against the bogus stored hash
+    assert diff.stale_arithmetic == []
+
+
+def test_stale_arithmetic_silent_with_no_baseline_stamped_at_all(stale_project, capsys):
+    """Extends test_draft_project_is_the_regression_case: a project that has
+    never stamped anything has no prior point to have drifted from, so
+    'stale' can't be asked yet -- audit must not mention it."""
+    status = cli_mod.main(["-c", str(stale_project / "refdes.yaml"), "audit"])
+    out = capsys.readouterr().out
+    assert status == 0
+    assert "(no revision stamped yet)" in out
+    assert "stale arithmetic" not in out
+
+
+def test_audit_prints_the_stale_arithmetic_annotation(stale_project, capsys):
+    project = _lc_build(stale_project)
+    lifecycle.stamp(project, kind="revision", name="rev-a")
+
+    (stale_project / "items" / "decisions.yaml").write_text(
+        "defaults: { type: decision }\n"
+        "items:\n"
+        "  - id: DEC-001\n"
+        "    status: accepted\n"
+        '    body: "```calc\\nP : W = 3.3 V * 1.2 A\\n```"\n'
+        "  - id: DEC-002\n"
+        "    status: proposed\n"
+        '    body: "```calc\\nP : W = 3.3 V * 1.2 A\\n```"\n'
+        "  - id: DEC-003\n"
+        "    status: proposed\n"
+        "    body: No calc block here, just prose.\n",
+        encoding="utf-8",
+    )
+    status = cli_mod.main(["-c", str(stale_project / "refdes.yaml"), "audit"])
+    out = capsys.readouterr().out
+    assert status == 0
+    assert "DEC-001 -- stale arithmetic: status changed, calc block did not" in out
     assert "(3 unchanged)" in out

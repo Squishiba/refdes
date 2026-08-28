@@ -442,6 +442,8 @@ def cmd_fetch(args) -> int:
 def _print_baseline_diff(diff) -> None:
     changed = ", ".join(diff.changed)
     print(f"  changed   {len(diff.changed)}" + (f"   {changed}" if changed else ""))
+    for item_id in diff.stale_arithmetic:
+        print(f"    {item_id} -- stale arithmetic: status changed, calc block did not")
     added = ", ".join(diff.added)
     print(f"  added     {len(diff.added)}" + (f"   {added}" if added else ""))
     print(f"  removed   {len(diff.removed)}")

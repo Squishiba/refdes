@@ -269,6 +269,29 @@ with no other information is nearly useless six months later. `type` and
 properties) and turn a removed-item diff line into `REQ-OLD-002 (requirement)
 "Legacy input protection" — removed`.
 
+**`verdict` and `calc_hash` — an explicit, narrow exception, not a reversal
+of §3's principle.** §3 below says this diff is item-scoped and deliberately
+stores no old field values, to avoid the new machinery general field-level
+diffing would need. `docs/design/stale-arithmetic-signal.md` adds exactly
+two per-item fields anyway: `verdict` (a copy of the item's own `status`
+value, present only when the item's type declares a verdict-bearing
+`status` field — stored raw, the same way `title` already is) and
+`calc_hash` (a hash of the item's own ` ```calc ` block source text,
+present only when it has one). Both are omitted entirely, not written as
+null, when they don't apply — which is most items in most projects.
+
+This is a real exception and is written down as one on purpose, so a
+reader who finds a field-level value sitting in a baseline file doesn't
+have to wonder whether §3's principle was quietly abandoned somewhere. It's
+bounded in a way general field-level diffing wouldn't be: these two fields
+answer exactly one question — did this item's verdict move since baseline
+while its arithmetic didn't — and cannot be used to reconstruct what any
+*other* field used to say. `refines:` changing, `rationale:` changing,
+`title:` changing (title is already stored, but not compared) — none of
+that is recoverable from a baseline file even with this exception in place.
+See `lifecycle.Baseline.items`'s own docstring for the same note next to
+the code, and §3 below for where this plugs into the diff itself.
+
 ### `stamped_by`: configurable source, defaults to the OS username
 
 **Settled by user decision.** `stamped_by` has two selectable sources — the
@@ -446,6 +469,15 @@ scoped by a list refdes already computed instead of a human guessing which
 of forty items are worth looking at. (Resolving "commit at old baseline"
 itself — e.g. from the baseline file's own git blame — is squarely the
 parked git-reader layer's job; see §5.)
+
+**One exception, `stale_arithmetic`, and it stays an exception.** §2's
+`verdict`/`calc_hash` fields let `diff_against` answer one specific
+field-level question — did the item's verdict move while its calc block
+didn't — without reaching for `git diff` (`docs/design/
+stale-arithmetic-signal.md`). This doesn't undo the paragraph above: it's
+two purpose-built probes answering one yes/no question each, not a general
+old-value store, and every other "what changed within an item" question
+still has no answer here and still goes to `git diff` exactly as described.
 
 ---
 

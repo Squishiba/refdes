@@ -697,6 +697,32 @@ def _hash_blob(payload: dict[str, object]) -> str:
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:16]
 
 
+def calc_hash_for(item: Item) -> str | None:
+    """A hash of just item's ```calc block(s) -- the second, narrower probe
+    docs/design/stale-arithmetic-signal.md needs alongside content_hash, so
+    lifecycle.diff_against can tell "the calc block changed" apart from "the
+    item changed" without storing the block's actual text anywhere.
+
+    None (not a hash of an empty payload) when the item has no calc block at
+    all -- most items -- so lifecycle._items_map can omit the baseline field
+    entirely rather than recording a hash that can never mean anything.
+
+    Normalized the same way _hash_payload normalizes body text (collapse
+    whitespace, strip), so reflowing a calc block's comments or indentation
+    doesn't register as the arithmetic having changed. Deliberately reads
+    item.body directly rather than item.calcs/calc_values: this hashes the
+    block's *source* -- the expressions themselves -- not its evaluated
+    results, which is what "the arithmetic" means for this signal. A result
+    changing because an upstream value moved, with this item's own block
+    untouched, is a different question this function doesn't answer.
+    """
+    blocks = calc.extract_blocks(item.body)
+    if not blocks:
+        return None
+    normalized = [re.sub(r"\s+", " ", block).strip() for block in blocks]
+    return _hash_blob({"calc_blocks": normalized})
+
+
 def _link_hash_token(by_key: dict[str, Item], project: Project, target: str) -> str:
     """The value one link target contributes to its owner's content hash
     (docs/design/keys.md §5). Three cases, deliberately distinct so none of

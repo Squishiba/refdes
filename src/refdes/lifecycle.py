@@ -75,6 +75,21 @@ class Baseline:
     stamped_at: str
     stamped_by: str
     refdes_version: str
+    # Per item: hash, type, title, hash_format (see _items_map) -- plus,
+    # exceptionally, `verdict` and `calc_hash` when they apply.
+    #
+    # docs/design/lifecycle.md §3 says a baseline diff is item-scoped and
+    # deliberately does not store old field values, to avoid the new
+    # machinery general field-level diffing would need. `verdict` (a copy of
+    # the item's own `status` value, stored the same way `title` already is)
+    # and `calc_hash` (a hash of the item's ```calc block source, alongside
+    # the existing whole-item `hash`) are a narrow, deliberate exception to
+    # that, not a reversal of it -- see docs/design/stale-arithmetic-signal.md
+    # and lifecycle.md §3's own note on this. They exist for exactly one
+    # purpose (lifecycle.diff_against's stale_arithmetic list: did the
+    # verdict move while the arithmetic didn't) and reconstruct nothing else
+    # about an item's prior state -- unlike general field-level diffing, there
+    # is no way to ask this baseline what any *other* field used to be.
     items: dict[str, dict] = field(default_factory=dict)
     gate: dict[str, str] | None = None
     # {base, version} the project was pinned to when this baseline was
@@ -173,14 +188,33 @@ def _items_map(project: Project) -> dict[str, dict]:
     before keys existed, or an entry migrate_hash_format() below left
     untouched because it couldn't account for it), present and current
     means it's directly comparable to a freshly computed hash.
+
+    `verdict` and `calc_hash` are docs/design/stale-arithmetic-signal.md's
+    two probes, and are the one deliberate exception to this module's
+    "assembly, not new machinery" framing above -- see the note on
+    `Baseline.items` for why that's a bounded exception and not a reversal
+    of it. Both are per-item *optional*: `verdict` only for a type with a
+    verdict-bearing `status` field (`_verdict_field_name`), `calc_hash` only
+    for an item with at least one ```calc block (`build_mod.calc_hash_for`
+    returns None otherwise) -- omitted entirely, not written as null/empty,
+    when they don't apply. That covers most items in a typical project: no
+    `status` field, or no `calc` block, or both.
     """
-    return {
-        item.id: {
+    out = {}
+    for item in project.local_items:
+        entry: dict[str, object] = {
             "hash": item.content_hash, "type": item.type, "title": item.title,
             "hash_format": build_mod.HASH_FORMAT,
         }
-        for item in project.local_items
-    }
+        spec = project.types.get(item.type)
+        field_name = _verdict_field_name(spec) if spec is not None else None
+        if field_name is not None:
+            entry["verdict"] = item.fields.get(field_name)
+        calc_hash = build_mod.calc_hash_for(item)
+        if calc_hash is not None:
+            entry["calc_hash"] = calc_hash
+        out[item.id] = entry
+    return out
 
 
 # --------------------------------------------------------- hash-format migration
@@ -323,6 +357,19 @@ def _draft_field_name(item_type) -> str | None:
     §2), so no second "what counts as a status field" convention is invented."""
     fspec = item_type.fields.get("status")
     if fspec is not None and fspec.type == "enum" and "draft" in (fspec.choices or []):
+        return "status"
+    return None
+
+
+def _verdict_field_name(item_type) -> str | None:
+    """The field docs/design/stale-arithmetic-signal.md calls verdict-bearing:
+    the same field-literally-named-`status`, `type: enum` convention
+    _draft_field_name uses above, minus the "'draft' is one of its choices"
+    narrowing -- a type like `decision`, whose status list has no `draft`
+    choice at all, still reaches a verdict via `status`, so this signal isn't
+    restricted to types that also happen to have a draft state."""
+    fspec = item_type.fields.get("status")
+    if fspec is not None and fspec.type == "enum":
         return "status"
     return None
 
@@ -546,6 +593,54 @@ class DiffResult:
     added: list[str]
     removed: list[tuple[str, str, str]]  # id, type, title
     unchanged_count: int
+    # Subset of `changed` (docs/design/stale-arithmetic-signal.md): this
+    # item's verdict-bearing `status` moved since `baseline`, but its ```calc
+    # block's source text did not. Always [] for a baseline that predates
+    # this field (no `verdict`/`calc_hash` recorded to compare against) --
+    # a false negative, never a false positive; see _stale_arithmetic below.
+    stale_arithmetic: list[str]
+
+
+def _stale_arithmetic(project: Project, baseline: Baseline, changed: list[str]) -> list[str]:
+    """The one-shot transition signal: which of `changed` moved verdict
+    without moving arithmetic, per docs/design/stale-arithmetic-signal.md.
+
+    Deliberately scoped to `changed` rather than every local item -- an item
+    whose `hash` didn't move can't have moved its `status` either, since
+    `status` is itself part of what `hash` covers (an `invalidate` field).
+    Nothing here is a second hash comparison of the same fact; it's asking
+    a narrower question of the items already known to have moved.
+
+    Silent (via `continue`, never an error) for exactly the cases the design
+    doc requires silence for: `old` lacks `verdict`/`calc_hash` (baseline
+    stamped before this signal existed, or the item didn't qualify for one
+    or both fields at stamp time); the live item is gone, or its type no
+    longer declares a verdict-bearing `status` field; the verdict itself
+    didn't move (the hash changed for some other reason); or the item has no
+    calc block *now* (its calc block was removed, which is itself a change,
+    not staleness -- calc_hash_for returning None is a real "no" here, not
+    a missing-data case, since a present `old["calc_hash"]` already proved
+    the item had a block at baseline time).
+    """
+    out = []
+    for item_id in changed:
+        old = baseline.items.get(item_id, {})
+        if "verdict" not in old or "calc_hash" not in old:
+            continue
+        item = project.items.get(item_id)
+        if item is None:
+            continue
+        spec = project.types.get(item.type)
+        field_name = _verdict_field_name(spec) if spec is not None else None
+        if field_name is None:
+            continue
+        if item.fields.get(field_name) == old["verdict"]:
+            continue
+        current_calc_hash = build_mod.calc_hash_for(item)
+        if current_calc_hash is None or current_calc_hash != old["calc_hash"]:
+            continue
+        out.append(item_id)
+    return sorted(out)
 
 
 def diff_against(project: Project, baseline: Baseline, write: bool = True) -> DiffResult:
@@ -553,7 +648,10 @@ def diff_against(project: Project, baseline: Baseline, write: bool = True) -> Di
     removed since `baseline` was stamped. Not field-level -- that's one
     `git diff` away once you know which two commits to compare (this
     function is precisely what supplies that scope), and is deliberately
-    left to git rather than reimplemented (docs/design/lifecycle.md §3).
+    left to git rather than reimplemented (docs/design/lifecycle.md §3) --
+    `stale_arithmetic` below is a narrow, explicit exception to that (see
+    `Baseline.items` and docs/design/stale-arithmetic-signal.md), not a
+    second field-level diff mechanism.
 
     Migrates `baseline` from hash_format 1 to 2 first, in place (§5) -- a
     baseline stamped before keys existed would otherwise show every one of
@@ -580,11 +678,13 @@ def diff_against(project: Project, baseline: Baseline, write: bool = True) -> Di
         for item_id, entry in baseline.items.items()
         if item_id not in current
     )
+    changed = sorted(changed)
     return DiffResult(
         baseline_name=baseline.name,
         stamped_at=baseline.stamped_at,
-        changed=sorted(changed),
+        changed=changed,
         added=sorted(added),
         removed=removed,
         unchanged_count=unchanged,
+        stale_arithmetic=_stale_arithmetic(project, baseline, changed),
     )
