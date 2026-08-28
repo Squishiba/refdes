@@ -79,9 +79,13 @@ auto-corrected: it's the string every link and the ledger are keyed on.
 Typo, deleted item, or a failed import. Check the import errors first — they
 cascade.
 
-**`satisfies may point at ['requirement'], but BND-THM-001 is a bound`**
-Wrong link type. A decision `satisfies` requirements and is `constrained_by`
-bounds.
+**`constrained_by may point at ['bound'], but REQ-PWR-002 is a requirement`**
+Wrong link type. `constrained_by` is reserved for the limit-bearing case —
+a `bound` and `checks:` actually involved — and only ever targets `bound`.
+To point at a requirement instead, use `satisfies` (decision/component,
+also reaches `bound`) or `governed_by`/`refines` (requirement) — see
+[`governed_by` vs. `refines` vs.
+`constrained_by`](links.md#governed_by-vs-refines-vs-constrained_by).
 
 **A reference in prose did not become a link.**
 Bare IDs only link when they resolve. A near miss like `REQ-PWR-2` instead of

@@ -4,9 +4,12 @@
 # version: 3} resolves to; it only describes how a project already on v2
 # moves its own existing content to match.
 #
-# v3's other change -- the new governed_by/governs link verb -- appears
-# nowhere here. It is purely additive: nothing existing needs to be renamed
-# for it to be usable, so there is nothing for this file to rewrite.
+# v3's other changes -- the governed_by/governs link verb, satisfies
+# widening to [requirement, bound] on decision/component, and component's
+# new constrained_by/checks -- appear nowhere here either. All purely
+# additive (a widened target list or a new field/link accepts everything a
+# narrower one already did): nothing existing needs to be renamed for any
+# of it to be usable, so there is nothing for this file to rewrite.
 #
 # fields: below renames text: -> body: on requirement/bound, and method: ->
 # body: on test, exactly the same shape v1 -> v2's own migration.yaml used

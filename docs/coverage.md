@@ -59,6 +59,43 @@ picture:
 Imported items are excluded regardless — an upstream project's coverage gaps
 are that project's problem.
 
+## Which links feed coverage
+
+**Deliberate convention, not an accident of naming:** every link this
+standard authors to make a coverage claim is active voice —
+`satisfies`, `verifies`, `addresses` — and coverage is computed from
+*only* the three backlinks their inverses produce: `satisfied_by`,
+`verified_by`, `addressed_by` (`build.compute_coverage`). Every link
+authored in the passive `X_by` form instead — `constrained_by`,
+`governed_by`, `blocked_by` — is deliberately kept out of that computation.
+None of `constrains`, `governs`, or `blocks` (their own backlinks) is ever
+read by it either.
+
+The name is the signal: if you're authoring a link to make something count
+as done, reach for the active form. If what you're authoring is a passive
+`..._by`, it traces a relationship without ever closing coverage on its
+own — most concretely, **`constrained_by` does not feed coverage**,
+however strongly the name suggests otherwise. A decision that only
+`constrained_by`'s a bound leaves it exactly as open as if no link existed
+at all; `satisfies` is what closes it (see the
+[`governed_by` vs. `constrained_by`](links.md#governed_by-vs-refines-vs-constrained_by)
+distinction).
+
+This holds without exception across the bundled standard's own vocabulary —
+checked, not assumed. One general engine capability is worth flagging rather
+than glossing over, though: [links are declarable from either
+end](links.md#back-links-are-computed), and coverage's read of `verified_by`
+is intentionally symmetric with `verifies` (`build._verifier_type_names`) to
+support a legacy spelling where a requirement declares `verified_by: [test]`
+directly instead of the test declaring `verifies:`. Authored that way,
+`verified_by` — despite the `_by` suffix — *is* the coverage-feeding form.
+The bundled standard itself never authors this way (`test.links.verifies:
+[requirement, bound]` is always the spelling in `base.yaml`), so the
+convention holds unbroken within this vocabulary as shipped — but it is a
+standard-library authoring choice, not a rule the schema engine itself
+enforces, and a project overlay that reaches for the legacy `verified_by:`
+spelling is the one place the passive form does feed coverage.
+
 ## The coverage page
 
 `coverage.html` is one table, least-covered first, with a column per stage —

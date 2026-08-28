@@ -62,9 +62,12 @@ graph LR
   bound -- derives_from --> requirement
   bound -- derives_from --> bound
   component -- satisfies --> requirement
+  component -- satisfies --> bound
+  component -- constrained_by --> bound
   component -- equivalent --> component
   component -- alternate --> component
   decision -- satisfies --> requirement
+  decision -- satisfies --> bound
   decision -- constrained_by --> bound
   decision -- supersedes --> decision
   decision -- selects --> component
@@ -75,6 +78,7 @@ graph LR
   log -- records --> decision
   requirement -- refines --> requirement
   requirement -- governed_by --> requirement
+  requirement -- governed_by --> bound
   test -- verifies --> requirement
   test -- verifies --> bound
 ```
@@ -87,9 +91,9 @@ or straight into anything that renders Mermaid.
 |---|---|---|
 | `refines` | `refined_by` | a requirement narrowing another requirement, or a bound narrowing another bound |
 | `derives_from` | `derived_by` | a bound derived from a requirement or another bound |
-| `governed_by` | `governs` | a requirement that must comply with a general rule stated in another requirement — see [below](#governed-by-vs-refines-vs-constrained-by) |
-| `satisfies` | `satisfied_by` | decision or component → requirement |
-| `constrained_by` | `constrains` | decision → bound |
+| `governed_by` | `governs` | a requirement that must comply with a general rule stated in another requirement or bound — see [below](#governed-by-vs-refines-vs-constrained-by) |
+| `satisfies` | `satisfied_by` | decision or component → requirement or bound |
+| `constrained_by` | `constrains` | decision or component → bound — traceability only, does **not** feed [coverage](coverage.md#which-links-feed-coverage) |
 | `verifies` | `verified_by` | test → requirement or bound |
 | `selects` | `selected_by` | decision → component |
 | `addresses` | `addressed_by` | log entry → requirement or bound |
@@ -110,12 +114,15 @@ Three verbs, three different questions, easy to reach for the wrong one:
 - **`refines`** — this is a narrower, more detailed version of *the same kind
   of statement*: a board-level numeric rule refining a platform-level one,
   same category of thing, different altitude.
-- **`constrained_by`** — a machine-checkable numeric limit, tied to
-  `limit:`/`checks:`. Reserved for `decision` → `bound`.
+- **`constrained_by`** — a machine-checkable numeric limit, the case where a
+  `bound` and `checks:` are actually involved. `decision`/`component` →
+  `bound`.
 - **`governed_by`** — neither of those. The declaring requirement is a
   *different* fact (which specific inputs exist, say) that must comply with
-  a general rule stated elsewhere, without being a more detailed version of
-  that rule's own statement and without being a numeric limit at all:
+  a general rule stated elsewhere — a rule that may itself be a plain
+  requirement or a numeric bound — without being a more detailed version of
+  that rule's own statement, and without this specific fact being a numeric
+  limit itself:
 
   ```yaml
   - id: REQ-DIO-003
@@ -129,6 +136,14 @@ Three verbs, three different questions, easy to reach for the wrong one:
   same passive-form convention `constrained_by`/`constrains` and
   `blocked_by`/`blocks` both already use; `governs`, the active/backlink
   form, is computed.
+
+  This reads close enough to `constrained_by` that it's worth being direct
+  about why both exist rather than one: `constrained_by` is for the
+  limit-bearing case, where a `bound` and `checks:` are actually in play;
+  `governed_by` is for a rule that isn't numeric at all — "must comply with"
+  in prose, nothing to evaluate. Two different relationships, not two words
+  for the same one. Neither feeds [coverage](coverage.md#which-links-feed-coverage)
+  — see there for why, and which links do.
 
 ## Part equivalence: `equivalent` and `alternate`
 

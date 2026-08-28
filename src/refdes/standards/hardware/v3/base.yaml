@@ -8,22 +8,39 @@
 # needs to trust that it matches the spec, since the spec is the place to
 # argue about it, not this file.
 #
-# Changed from v2, in two parts, arriving together as one version because
-# neither was ever published on its own:
+# Changed from v2, in three parts, arriving together as one version because
+# none was ever published on its own:
 #
 # 1. A new link verb: `governed_by` (inverse `governs`), authored on
-#    `requirement`, targeting `[requirement]`. Fills a real gap `refines`
-#    and `constrained_by` both leave open: "this specific fact must comply
-#    with a general rule stated elsewhere" is neither "a narrower version of
-#    the same statement" (`refines` — same category of thing, different
-#    altitude) nor "a machine-checkable numeric limit" (`constrained_by` —
-#    reserved for `decision` → `bound`, tied to `limit:`/`checks:`). Named
-#    and shaped to match the convention `constrained_by`/`constrains` and
-#    `blocked_by`/`blocks` already establish twice: authored from the
-#    *affected* item's side using the passive form, with the active form
-#    computed as the backlink.
+#    `requirement`, targeting `[requirement, bound]`. Fills a real gap
+#    `refines` and `constrained_by` both leave open: "this specific fact
+#    must comply with a general rule stated elsewhere" is neither "a
+#    narrower version of the same statement" (`refines` — same category of
+#    thing, different altitude) nor "a machine-checkable numeric limit"
+#    (`constrained_by` — the limit-bearing case, where a bound and `checks:`
+#    are actually involved). Named and shaped to match the convention
+#    `constrained_by`/`constrains` and `blocked_by`/`blocks` already
+#    establish twice: authored from the *affected* item's side using the
+#    passive form, with the active form computed as the backlink. Widened to
+#    also target `bound` (not just `requirement`) for the same reason
+#    `constrained_by` and `refines` both already do: a general rule worth
+#    complying with is stated exactly as often as a bound as a requirement.
 #
-# 2. `requirement.text` and `bound.text` merge into `body:` — not the
+# 2. `satisfies` widens to `[requirement, bound]` on both `decision` and
+#    `component` (was `[requirement]` on each) — a bound could be verified
+#    or addressed, but never *satisfied*, which meant it could never be
+#    fully covered by design work no matter how much existed. Coverage is
+#    computed strictly from the `addressed_by`/`satisfied_by`/`verified_by`
+#    backlinks (`build.compute_coverage`); `constrained_by`/`constrains`
+#    contributes to none of them and stays a traceability-only edge (see
+#    "Which links feed coverage" in docs/coverage.md) — this widening is
+#    what actually closes the gap, not a documentation fix. `component`
+#    also gains `constrained_by: [bound]` (it previously had no path to a
+#    bound at all) and a `checks:` field, so a component can demonstrate
+#    compliance with a bound directly rather than a `decision` having to be
+#    invented purely to host the check.
+#
+# 3. `requirement.text` and `bound.text` merge into `body:` — not the
 #    `requirement.text -> title` rename an earlier, retired proposal
 #    considered, but a broader unification: `title` and `body` become the
 #    only free-prose fields any type carries. `title` becomes OPTIONAL on
@@ -100,7 +117,7 @@ types:
     include: [provenance, stewardship]
     links:
       refines:     [requirement]
-      governed_by: [requirement]
+      governed_by: [requirement, bound]
     body: { on_change: invalidate, required: true }
 
   bound:
@@ -136,7 +153,7 @@ types:
       checks:    { type: checks, on_change: invalidate }
     include: [provenance, stewardship]
     links:
-      satisfies:      [requirement]
+      satisfies:      [requirement, bound]
       constrained_by: [bound]
       supersedes:     [decision]
       selects:        [component]
@@ -168,11 +185,13 @@ types:
       status:      { type: enum, choices: [candidate, selected, obsolete], default: candidate, on_change: invalidate }
       rationale:   { type: text, on_change: invalidate, required_when: {links: alternate} }
       datasheets:  { type: citations, on_change: invalidate }
+      checks:      { type: checks, on_change: invalidate }
     include: [provenance, stewardship]
     links:
-      satisfies:  [requirement]
-      equivalent: [component]
-      alternate:  [component]
+      satisfies:      [requirement, bound]
+      constrained_by: [bound]
+      equivalent:     [component]
+      alternate:      [component]
     body: { on_change: invalidate }
 
   log:

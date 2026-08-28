@@ -9,15 +9,28 @@ and this project uses [Semantic Versioning](https://semver.org/).
 
 ### Breaking
 
-- **The bundled standard moves to `hardware@3`.** Two changes, arriving
-  together because neither was ever published on its own:
+- **The bundled standard moves to `hardware@3`.** Three changes, arriving
+  together because none was ever published on its own:
     1. A new link verb, `governed_by` (inverse `governs`), authored on
-       `requirement`, targeting `[requirement]` -- "this specific fact must
-       comply with a general rule stated elsewhere," a gap `refines` (a
-       narrower version of the *same* statement) and `constrained_by` (a
-       machine-checkable numeric limit, reserved for `decision` → `bound`)
-       both left open.
-    2. `requirement.text`/`bound.text` merge into `body:`, and `test.method`
+       `requirement`, targeting `[requirement, bound]` -- "this specific
+       fact must comply with a general rule stated elsewhere," a gap
+       `refines` (a narrower version of the *same* statement) and
+       `constrained_by` (a machine-checkable numeric limit, the case where a
+       `bound` and `checks:` are actually involved) both left open.
+    2. `satisfies` widens to `[requirement, bound]` on `decision` and
+       `component` (each was `[requirement]`) -- a `bound` could be
+       `verified` or `addressed` but never *satisfied*, permanently
+       uncoverable regardless of how much design work answered to it, since
+       coverage reads only the `addressed_by`/`satisfied_by`/`verified_by`
+       backlinks and `constrained_by` was never one of them (see
+       [coverage.md](docs/coverage.md#which-links-feed-coverage)).
+       `component` also gains `constrained_by: [bound]` (previously no path
+       to a bound at all) and a `checks:` field, so a component can
+       demonstrate compliance with a bound without a `decision` invented
+       purely to host the check. Reviewed against real authoring before
+       release (issue #7 findings 7 and 22) and folded into this version
+       rather than shipped narrow and corrected later as a breaking `@4`.
+    3. `requirement.text`/`bound.text` merge into `body:`, and `test.method`
        does too -- `title` and `body` become the only free-prose fields any
        type carries. `title` is now optional on `requirement`/`bound`,
        falling back exactly as `Item.title` already does for every type
@@ -41,7 +54,7 @@ and this project uses [Semantic Versioning](https://semver.org/).
   forward in every stamped baseline and seal, and refuses (rolling back)
   rather than silently overwriting or orphaning content on any item that
   already has body content of its own -- merge the two by hand first, then
-  upgrade. `governed_by` needs no migration; it's purely additive.
+  upgrade. Parts 1 and 2 need no migration; both are purely additive.
 
 ### Added
 

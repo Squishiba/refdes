@@ -1,4 +1,8 @@
-"""hardware@2: the whole v1 -> v2 delta -- and: hardware@3 (finding 7, field unification).
+"""hardware@2: the whole v1 -> v2 delta -- and: hardware@3 (finding 7's field
+unification, governed_by, and the issue #7 findings 7/22 course-correction
+before release: governed_by widened to [requirement, bound], satisfies
+widened to [requirement, bound] on decision/component, component gains
+constrained_by/checks).
 
 Split out of the original monolithic tests/test_refdes.py.
 """
@@ -274,7 +278,8 @@ def test_upgrade_refuses_when_an_equivalence_no_longer_satisfies_v2(tmp_path):
     assert "version: 1" in (tmp_path / "refdes.yaml").read_text(encoding="utf-8")
 
 
-# ------------------------------------------------------ hardware@3 (finding 7, field unification)
+# ------------------------------------------------------ hardware@3 (finding 7,
+# field unification, and the issue #7 finding 7/22 widening)
 
 
 def test_standard_upgrade_v2_to_v3_renames_text_and_method_to_body(tmp_path):
@@ -414,3 +419,169 @@ def test_v3_governed_by_link_resolves_its_backlink(tmp_path):
     assert not project.errors, [str(d) for d in project.errors]
     assert project.items["REQ-002"].links["governed_by"] == ["REQ-001"]
     assert project.items["REQ-001"].backlinks["governs"] == ["REQ-002"]
+
+
+def test_v3_governed_by_also_reaches_a_bound(tmp_path):
+    """Widened per issue #7 finding 7 (revised) and the user's own call: kept
+    as a distinct verb from constrained_by (a non-numeric rule vs. the
+    limit-bearing case), and widened the same way constrained_by/refines
+    already reach bound -- a general rule is stated as often against a bound
+    as against a requirement. `governed_by:` is still declared only on
+    `requirement.links` (a bound doesn't author it), so the widening is
+    about the *target*, not who can author it."""
+    (tmp_path / "refdes.yaml").write_text(
+        "site: { title: T, out: _site }\n"
+        "standard: { base: hardware, version: 3, presets: [] }\n",
+        encoding="utf-8",
+    )
+    items = tmp_path / "items"
+    items.mkdir()
+    (items / "bnd.yaml").write_text(
+        "defaults: { type: bound, prefix: BND, status: active }\n"
+        "items:\n  - id: BND-001\n    body: Digital channels need 26V TVS protection.\n"
+        "    limit: \">= 26 V\"\n",
+        encoding="utf-8",
+    )
+    (items / "req.yaml").write_text(
+        "defaults: { type: requirement, prefix: REQ, status: active }\n"
+        "items:\n"
+        "  - id: REQ-001\n    body: The main IO board shall provide isolated discrete inputs.\n"
+        "    governed_by: [BND-001]\n",
+        encoding="utf-8",
+    )
+    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    parse.load_items(project, require_ids=False)
+    build_mod.build(project, seal_write=False, reseal=False)
+    assert not project.errors, [str(d) for d in project.errors]
+    assert project.items["REQ-001"].links["governed_by"] == ["BND-001"]
+    assert project.items["BND-001"].backlinks["governs"] == ["REQ-001"]
+
+
+def _cmp_bnd_project(tmp_path, *, decision_extra="", component_extra=""):
+    """One requirement-shaped bound (BND-001, >= 1.4 A) and, optionally, a
+    decision and/or component pointing at it -- shared by the finding-7/22
+    tests below so each one only writes the one link line it's testing."""
+    (tmp_path / "refdes.yaml").write_text(
+        "site: { title: T, out: _site }\n"
+        "standard: { base: hardware, version: 3, presets: [] }\n",
+        encoding="utf-8",
+    )
+    items = tmp_path / "items"
+    items.mkdir()
+    (items / "bnd.yaml").write_text(
+        "defaults: { type: bound, prefix: BND, status: active }\n"
+        "items:\n  - id: BND-001\n    body: Digital output drive.\n    limit: \">= 1.4 A\"\n",
+        encoding="utf-8",
+    )
+    if decision_extra:
+        (items / "dec.yaml").write_text(
+            "defaults: { type: decision, prefix: DEC }\n"
+            f"items:\n  - id: DEC-001\n    title: Driver selection.\n{decision_extra}",
+            encoding="utf-8",
+        )
+    if component_extra:
+        (items / "cmp.yaml").write_text(
+            "defaults: { type: component, prefix: CMP, status: selected }\n"
+            f"items:\n  - id: CMP-001\n    title: Digital output driver.\n{component_extra}",
+            encoding="utf-8",
+        )
+    return tmp_path
+
+
+def test_v3_component_gains_constrained_by_a_bound(tmp_path):
+    """component previously had no bound-reaching link at all (finding 7)."""
+    root = _cmp_bnd_project(
+        tmp_path, component_extra="    constrained_by: [BND-001]\n"
+    )
+    project = load_project(config_path=str(root / "refdes.yaml"))
+    parse.load_items(project, require_ids=False)
+    build_mod.build(project, seal_write=False, reseal=False)
+    assert not project.errors, [str(d) for d in project.errors]
+    assert project.items["CMP-001"].links["constrained_by"] == ["BND-001"]
+    assert project.items["BND-001"].backlinks["constrains"] == ["CMP-001"]
+
+
+def test_v3_component_checks_needs_no_engine_change(tmp_path):
+    """finding 7's other half: a component can now demonstrate compliance
+    with a bound directly via checks:, with no decision invented purely to
+    host the check. run_checks() already iterates every local item -- this
+    only has to prove the schema lets a component declare checks: at all."""
+    root = _cmp_bnd_project(
+        tmp_path,
+        component_extra=(
+            "    checks:\n"
+            "      - value: I_drive\n        against: BND-001\n"
+        ),
+    )
+    (root / "items" / "cmp.yaml").write_text(
+        "defaults: { type: component, prefix: CMP, status: selected }\n"
+        "items:\n"
+        "  - id: CMP-001\n    title: Digital output driver.\n"
+        "    body: |\n"
+        "      ```calc\n"
+        "      I_drive : A = 1.5 A\n"
+        "      ```\n"
+        "    checks:\n"
+        "      - value: I_drive\n        against: BND-001\n",
+        encoding="utf-8",
+    )
+    project = load_project(config_path=str(root / "refdes.yaml"))
+    parse.load_items(project, require_ids=False)
+    build_mod.build(project, seal_write=False, reseal=False)
+    assert not project.errors, [str(d) for d in project.errors]
+    result = project.items["CMP-001"].checks[0]
+    assert result.ok is True
+    assert result.value_name == "I_drive"
+
+
+def test_v3_decision_satisfies_a_bound_reaches_satisfied_stage(tmp_path):
+    """The finding-22 reproduction, run against this repo's own fix rather
+    than the isolated scratch project the finding used: before this change,
+    an accepted decision's only link to a bound was constrained_by, which
+    build.compute_coverage never reads -- BND-001 stayed 'open' with every
+    backlink list empty despite the decision. satisfies: [requirement,
+    bound] is what actually closes it."""
+    root = _cmp_bnd_project(
+        tmp_path,
+        decision_extra="    status: accepted\n    satisfies: [BND-001]\n",
+    )
+    project = load_project(config_path=str(root / "refdes.yaml"))
+    parse.load_items(project, require_ids=False)
+    build_mod.build(project, seal_write=False, reseal=False)
+    assert not project.errors, [str(d) for d in project.errors]
+    cov = project.coverage["BND-001"]
+    assert cov.satisfied_by == ["DEC-001"]
+    assert cov.stage == "satisfied"
+
+
+def test_v3_component_satisfies_a_bound_reaches_satisfied_stage(tmp_path):
+    """Same reproduction, component side -- finding 22 widens both."""
+    root = _cmp_bnd_project(
+        tmp_path, component_extra="    satisfies: [BND-001]\n"
+    )
+    project = load_project(config_path=str(root / "refdes.yaml"))
+    parse.load_items(project, require_ids=False)
+    build_mod.build(project, seal_write=False, reseal=False)
+    assert not project.errors, [str(d) for d in project.errors]
+    cov = project.coverage["BND-001"]
+    assert cov.satisfied_by == ["CMP-001"]
+    assert cov.stage == "satisfied"
+
+
+def test_v3_constrained_by_alone_still_never_feeds_coverage(tmp_path):
+    """The negative half of the finding-22 reproduction: constrained_by is
+    unchanged and still contributes nothing to coverage on its own -- a
+    decision that only constrained_by's a bound leaves it exactly as open
+    as no link at all. This is what makes the satisfies-widening the actual
+    fix rather than a redundant one."""
+    root = _cmp_bnd_project(
+        tmp_path,
+        decision_extra="    status: accepted\n    constrained_by: [BND-001]\n",
+    )
+    project = load_project(config_path=str(root / "refdes.yaml"))
+    parse.load_items(project, require_ids=False)
+    build_mod.build(project, seal_write=False, reseal=False)
+    assert not project.errors, [str(d) for d in project.errors]
+    cov = project.coverage["BND-001"]
+    assert cov.satisfied_by == []
+    assert cov.stage == "open"

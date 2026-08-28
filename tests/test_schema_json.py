@@ -71,7 +71,8 @@ def test_build_schema_link_carries_target_description():
     doc = schema_json_mod.build_schema(project)
     satisfies = doc["$defs"]["decision__bare"]["properties"]["satisfies"]
     assert satisfies["type"] == "array"
-    assert satisfies["description"] == "target: requirement"
+    # decision.satisfies widened to [requirement, bound] (issue #7 finding 22)
+    assert satisfies["description"] == "target: requirement, bound"
 
 
 def test_build_schema_section_marker_validates_in_a_list_file(tmp_path):

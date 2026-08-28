@@ -368,20 +368,44 @@ the type is now `bound`, which is worth saying because `constraint` and
 `bound` share almost no letters, so a did-you-mean suggestion offers
 nothing.
 
-**`hardware@3`** — two changes, arriving together for the same reason `@2`'s
-three did: neither was ever published on its own.
+**`hardware@3`** — three changes, arriving together for the same reason `@2`'s
+three did: none was ever published on its own.
 
 1. **A new link verb, `governed_by`** (inverse `governs`), authored on
-   `requirement`, targeting `[requirement]`. Fills a gap `refines` and
+   `requirement`, targeting `[requirement, bound]`. Fills a gap `refines` and
    `constrained_by` both leave open: "this specific fact must comply with a
    general rule stated elsewhere" is neither a narrower version of the same
    statement (`refines`) nor a machine-checkable numeric limit
-   (`constrained_by`, reserved for `decision` → `bound`). Named and shaped to
-   match `constrained_by`/`constrains` and `blocked_by`/`blocks`: authored
-   passively from the affected item's side, with the active form computed as
-   the backlink.
+   (`constrained_by`, the case where a `bound` and `checks:` are actually
+   involved). Named and shaped to match `constrained_by`/`constrains` and
+   `blocked_by`/`blocks`: authored passively from the affected item's side,
+   with the active form computed as the backlink. Targets `bound` as well as
+   `requirement` for the same reason `constrained_by`/`refines` both already
+   do — a general rule is stated as often against a bound as a requirement.
 
-2. **`requirement.text`/`bound.text` merge into `body:`, and `test.method`
+2. **`satisfies` widens to `[requirement, bound]`** on both `decision` and
+   `component` (each was `[requirement]`) — before this, a `bound` could be
+   `verified` or `addressed` but never *satisfied*, so it could never be
+   fully covered no matter how much design work answered to it (coverage is
+   computed strictly from the `addressed_by`/`satisfied_by`/`verified_by`
+   backlinks; `constrained_by`/`constrains` feeds none of them — see
+   [which links feed coverage](coverage.md#which-links-feed-coverage)).
+   `component` also gains `constrained_by: [bound]`, which it previously had
+   no path to at all, and a `checks:` field, so a component can demonstrate
+   compliance with a bound directly rather than a `decision` having to be
+   invented purely to host the check — `run_checks()` already iterates every
+   local item, so this needed no engine change.
+
+   This course-corrects, before release, what an earlier draft of this
+   version shipped as a plain new-verb addition (`governed_by` targeting
+   `requirement` only, `satisfies` untouched): reviewing the standard
+   against real authoring (issue #7 findings 7 and 22) surfaced both the
+   missing `bound` target on `governed_by`/`component` and the fact that
+   `constrained_by` was never wired into coverage in the first place. Since
+   `hardware@3` had not tagged yet, both are folded into the one version
+   rather than shipped narrow and corrected later as a breaking `@4`.
+
+3. **`requirement.text`/`bound.text` merge into `body:`, and `test.method`
    does too.** `title` and `body` become the only free-prose fields any type
    carries. `title` becomes optional on `requirement`/`bound`, falling back
    exactly as `Item.title` already does for every type missing one — write
@@ -402,11 +426,12 @@ three did: neither was ever published on its own.
 `hardware@1` and `@2` resolve exactly as they always have.
 
 `refdes standard upgrade --to 3` renames `text:`/`method:` to `body:` in
-every item file that still writes them. `governed_by` needs no migration —
-purely additive, nothing existing to rename. The upgrade refuses (rolling
-back) rather than silently overwriting or orphaning content on any item that
-already has body content of its own before the rename — merge the two by
-hand first, then upgrade.
+every item file that still writes them. Parts 1 and 2 need no migration —
+a widened target list or a new field/link accepts everything a narrower one
+already did, so there's nothing existing to rename. The upgrade refuses
+(rolling back) rather than silently overwriting or orphaning content on any
+item that already has body content of its own before the rename — merge the
+two by hand first, then upgrade.
 
 ## `coverable`, `coverable_statuses`, `verifying_statuses`, and `required_when`
 
