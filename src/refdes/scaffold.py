@@ -16,7 +16,7 @@ from . import build as build_mod
 from . import parse as parse_mod
 from . import standards
 from .build import _format_required_when
-from .model import ItemType, Project, SchemaError
+from .model import ItemType, SchemaError
 from .schema import load_project
 
 

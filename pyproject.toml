@@ -39,7 +39,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0", "build>=1.0", "twine>=5.0", "jsonschema>=4.0"]
+dev = ["pytest>=8.0", "build>=1.0", "twine>=5.0", "jsonschema>=4.0", "ruff>=0.6"]
 
 [project.urls]
 Homepage = "https://github.com/Squishiba/refdes"
@@ -67,3 +67,22 @@ refdes = ["templates/*.j2", "templates/assets/*", "standards/**/*.yaml"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+# Ruff is the fast mechanical gate that runs before pytest: it catches the
+# undefined names, unused imports and shadowed variables that a coding agent
+# produces most often, in milliseconds rather than a full test run.
+#
+# The rule set is deliberately conservative -- ruff's defaults (real pycodestyle
+# errors + pyflakes) plus import sorting. No style opinions, so a clean run
+# means "nothing is actually broken", not "this matches someone's taste".
+#
+# NOT enabled: `ruff format`. It would rewrite 55 of 59 files (~3,900 lines) on
+# first run, which would bury every real change under a reformat. Adopt it later
+# as its own deliberate commit if you want it.
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+extend-exclude = ["_site", "dist", "docs-site", ".venv", "ornith-docs"]
+
+[tool.ruff.lint]
+extend-select = ["I"]   # I = import sorting (isort)

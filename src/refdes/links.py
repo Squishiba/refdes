@@ -58,7 +58,7 @@ def _item_spans(rel: str, lines: list[str], items: list[Item]) -> list[tuple[Ite
     ordered = sorted(items, key=lambda i: i.source_line)
     spans: list[tuple[Item, int, int]] = []
     if rel.endswith(".md"):
-        fence_lines = [i for i, l in enumerate(lines) if parse_mod.FENCE_RE.match(l)]
+        fence_lines = [i for i, line in enumerate(lines) if parse_mod.FENCE_RE.match(line)]
         for item in ordered:
             start = item.source_line - 1
             close = next((f for f in fence_lines if f > start - 1), len(lines))

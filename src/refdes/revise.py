@@ -36,8 +36,7 @@ import yaml
 
 from . import build as build_mod
 from . import ids as ids_mod
-from . import lifecycle
-from . import parse
+from . import lifecycle, parse
 from . import seal as seal_mod
 from . import standards as standards_mod
 from .model import CHECK_VIOLATION, Item, Project, SchemaError
@@ -297,7 +296,7 @@ def _item_spans(rel: str, lines: list[str], items: list[Item]) -> list[tuple[Ite
     ordered = sorted(items, key=lambda i: i.source_line)
     spans: list[tuple[Item, int, int]] = []
     if rel.endswith(".md"):
-        fence_lines = [i for i, l in enumerate(lines) if parse.FENCE_RE.match(l)]
+        fence_lines = [i for i, line in enumerate(lines) if parse.FENCE_RE.match(line)]
         for item in ordered:
             start = item.source_line - 1  # 0-indexed first front-matter line
             close = next((f for f in fence_lines if f > start - 1), len(lines))

@@ -502,7 +502,7 @@ def parse_markdown_file(project: Project, path: str) -> list[Item]:
         text = fh.read()
     lines = text.split("\n")
 
-    fence_idx = [i for i, l in enumerate(lines) if FENCE_RE.match(l)]
+    fence_idx = [i for i, line in enumerate(lines) if FENCE_RE.match(line)]
     if len(fence_idx) < 2 or fence_idx[0] != 0:
         project.error("no YAML front-matter (file must start with '---')", file=rel, line=1)
         return []

@@ -148,7 +148,6 @@ def _dimensionless(fn, name: str):
     def apply(v: Value) -> Value:
         if not v.nom.dimensionless:
             raise CalcError(f"{name}() needs a dimensionless argument, got {v.nom.units:~P}")
-        import math
 
         wrap = lambda q: Q(fn(float(q.to("dimensionless").magnitude)), "dimensionless")  # noqa: E731
         return Value(wrap(v.nom), wrap(v.lo), wrap(v.hi))
