@@ -710,6 +710,7 @@ def evaluate_block(
     source: str,
     env: dict[str, Value],
     start_line: int | None = None,
+    origins: dict[str, int | None] | None = None,
 ) -> list[CalcOutcome]:
     """Evaluate one ```calc block, threading `env` through the lines.
 
@@ -717,9 +718,18 @@ def evaluate_block(
     line (`source.splitlines()[0]`), or None when the caller has no source
     position for it (see Item.body_line) -- every CalcOutcome.line is then
     None too, rather than a guess.
+
+    `origins` maps every name already assigned -- in this block or an earlier
+    one -- to the line it was first assigned on, and is mutated in place so a
+    caller threading the same dict across every block of one item (exactly
+    how `env` itself is already threaded, per the "not shared between items"
+    rule in docs/math.md) gets whole-item duplicate detection for free. A
+    fresh call with no `origins` only catches a repeat within this one call.
     """
     outcomes: list[CalcOutcome] = []
     names = assigned_names(source)
+    if origins is None:
+        origins = {}
 
     for offset, raw_line in enumerate(source.splitlines()):
         line_number = start_line + offset if start_line is not None else None
@@ -765,6 +775,22 @@ def evaluate_block(
                 continue
             name, expression = match.group(1), match.group(2)
 
+        if name in origins:
+            first_line = origins[name]
+            first_where = f"line {first_line}" if first_line is not None else "earlier in this item"
+            here_where = f"line {line_number}" if line_number is not None else "here"
+            outcomes.append(
+                CalcOutcome(
+                    name, expression, comment, None,
+                    f"{name!r} is assigned twice in this item -- first at "
+                    f"{first_where}, again at {here_where}. A name can only be "
+                    f"assigned once per item (blocks share one item-wide scope); "
+                    f"rename one of them, e.g. {name!r} -> {name + '_2'!r}.",
+                    annotation, line=line_number,
+                )
+            )
+            continue
+
         warning = check_ambiguity(expression, names)
         try:
             value = evaluate_assignment(expression, env)
@@ -784,6 +810,7 @@ def evaluate_block(
             continue
 
         env[name] = value
+        origins[name] = line_number
         outcomes.append(
             CalcOutcome(name, expression, comment, value, None, annotation,
                         warning, line=line_number)

@@ -130,6 +130,118 @@ def test_misplaced_tolerance_error_reaches_the_build_diagnostic(tmp_path):
     assert "calc 'P': a tolerance belongs on the right-hand side — P : W = V * I ± 10%" == message
 
 
+# ------------------------------------------------------- duplicate assignment
+
+
+def test_duplicate_assignment_within_one_block_is_an_error():
+    outcomes = calc.evaluate_block("x = 5 V\nx = 2 A", {})
+    assert outcomes[0].error is None
+    assert outcomes[1].error is not None
+    assert "assigned twice" in outcomes[1].error
+
+
+def test_duplicate_assignment_across_blocks_is_caught_when_origins_is_shared():
+    """This is exactly how build.run_calcs threads `origins` across every
+    block of one item -- the same way it already threads `env`."""
+    env: dict = {}
+    origins: dict = {}
+    first = calc.evaluate_block("x = 5 V", env, start_line=10, origins=origins)
+    second = calc.evaluate_block("x = 2 A", env, start_line=20, origins=origins)
+    assert first[0].error is None
+    assert second[0].error is not None
+    assert "line 10" in second[0].error
+    assert "line 20" in second[0].error
+
+
+def test_duplicate_assignment_not_caught_across_blocks_without_shared_origins():
+    """Documents the contract: a fresh `origins` per call only catches a
+    repeat within that one call, exactly like a fresh `env` would."""
+    env: dict = {}
+    first = calc.evaluate_block("x = 5 V", env)
+    second = calc.evaluate_block("x = 2 A", env)
+    assert first[0].error is None
+    assert second[0].error is None
+
+
+def test_legitimate_forward_reference_is_not_a_duplicate():
+    """A name used on the right-hand side of a later, different assignment is
+    not a redefinition of anything -- only reusing a name as the left-hand
+    side twice is."""
+    env: dict = {}
+    outcomes = calc.evaluate_block("x = 5 V\ny = x * 2", env)
+    assert outcomes[0].error is None
+    assert outcomes[1].error is None
+
+
+def test_a_failed_first_attempt_does_not_block_a_retry():
+    """The first line never actually defined `x` (it errored), so rewriting it
+    under the same name is a fix, not a collision."""
+    outcomes = calc.evaluate_block("x = 3.3 V + 1.2 A\nx = 3.3 V", {})
+    assert outcomes[0].error is not None  # dimensional mismatch
+    assert outcomes[1].error is None  # not flagged as a duplicate
+
+
+def test_duplicate_assignment_across_blocks_fails_the_build(tmp_path):
+    (tmp_path / "refdes.yaml").write_text(
+        "site: { title: T, out: _site }\n"
+        "types:\n  decision: { prefix: DEC, fields: {} }\n",
+        encoding="utf-8",
+    )
+    items = tmp_path / "items"
+    items.mkdir()
+    (items / "dec.md").write_text(
+        "---\nid: DEC-001\ntype: decision\n---\n\n"
+        "```calc\nx = 5 V\n```\n\n"
+        "```calc\nx = 2 A\n```\n",
+        encoding="utf-8",
+    )
+    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    parse.load_items(project)
+    build_mod.build(project)
+    message = next(d.message for d in project.errors if "assigned twice" in d.message)
+    assert "'x' is assigned twice in this item" in message
+    assert "first at line" in message and "again at line" in message
+    # Both locations are real, distinct lines in the source file, not the same
+    # coarse item-level line repeated twice -- that would defeat the point.
+    import re
+
+    first_line, second_line = (int(n) for n in re.findall(r"line (\d+)", message))
+    assert first_line != second_line
+    source = (items / "dec.md").read_text(encoding="utf-8").splitlines()
+    assert source[first_line - 1].strip() == "x = 5 V"
+    assert source[second_line - 1].strip() == "x = 2 A"
+
+    # The diagnostic's own file:line points at the duplicate, not the item's
+    # front-matter -- what makes "jump to the error" land somewhere useful.
+    diag = next(d for d in project.errors if "assigned twice" in d.message)
+    assert diag.line == second_line
+
+
+def test_same_name_in_different_items_does_not_collide(tmp_path):
+    """Two items in one file, each with their own calc block naming `x`, must
+    build clean -- variables are item-scoped, not file-scoped (docs/math.md)."""
+    (tmp_path / "refdes.yaml").write_text(
+        "site: { title: T, out: _site }\n"
+        "types:\n  decision: { prefix: DEC, fields: {} }\n",
+        encoding="utf-8",
+    )
+    items = tmp_path / "items"
+    items.mkdir()
+    (items / "dec.md").write_text(
+        "---\nid: DEC-001\ntype: decision\n---\n\n"
+        "```calc\nx = 5 V\n```\n"
+        "---\nid: DEC-002\ntype: decision\n---\n\n"
+        "```calc\nx = 2 A\n```\n",
+        encoding="utf-8",
+    )
+    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    parse.load_items(project)
+    build_mod.build(project)
+    assert not any("assigned twice" in d.message for d in project.errors)
+    assert project.items["DEC-001"].calc_values["x"] == "5 V"
+    assert project.items["DEC-002"].calc_values["x"] == "2 A"
+
+
 # ----------------------------------------------------------- source position
 
 
@@ -191,7 +303,8 @@ def test_calc_line_position_reaches_items_json(tmp_path):
 def test_body_line_is_none_for_a_list_file_item():
     """A list file's `body:` key has no cheap per-line position (see
     Item.body_line's docstring) -- calc line numbers degrade to None rather
-    than a guess."""
+    than a guess, and the duplicate-assignment message still works, just
+    without pinpointing a line."""
     project = _project()
     checked = 0
     for item in project.local_items:

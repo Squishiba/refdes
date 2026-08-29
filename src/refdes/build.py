@@ -546,9 +546,13 @@ def compute_coverage(project: Project) -> None:
 def run_calcs(project: Project) -> None:
     for item in project.local_items:
         env: dict[str, calc.Value] = {}
+        # name -> line first assigned, threaded across every block of this item
+        # exactly like `env` -- what lets evaluate_block catch a name reused in
+        # a later block, not just within one block.
+        origins: dict[str, int | None] = {}
         for block, offset in calc.extract_blocks_with_lines(item.body):
             start_line = item.body_line + offset if item.body_line is not None else None
-            for outcome in calc.evaluate_block(block, env, start_line=start_line):
+            for outcome in calc.evaluate_block(block, env, start_line=start_line, origins=origins):
                 line = CalcLine(
                     name=outcome.name,
                     expression=outcome.expression,
