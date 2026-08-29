@@ -1,982 +1,874 @@
-# Threads: collapsing `log` and `decision` into one append-only type — design spec
+# Threads: collapsing `log` and `decision` into a chain of ordinary items — design spec
 
 ## Decision (recap)
 
-`log` and `decision` collapse into a single type, **`thread`**: an
-append-only sequence of **entries**. A decision is not a separate kind of
-item — it is simply the entry that concludes a thread. Current state is a
-**per-field fold**: for each foldable field, the value comes from the most
-recent entry that set it. Everything else in the project — coverage,
-checks, hashing, baselines, rendering — reads that fold, not a single
-item's fields.
+`decision` retires. `log` absorbs its fields. Every entry — narrative note
+or concluding verdict — is an **ordinary item** of one type. An entry
+declares its predecessor with a link, `follows:`, written by the tool, not
+typed by the author. A **thread** is not a container and not an item: it is
+the connected chain of entries reachable by walking `follows:`
+backward and its computed inverse, `followed_by:`, forward. What a thread
+"currently concludes" is answered by walking forward from any entry in the
+chain to its tip(s) and folding per field, the same rule as before, over a
+different population.
 
 The decision is taken. This document specs it; it does not relitigate it.
 
-**Status: design only.** Nothing here is implemented. §9 lists what should
-be prototyped before any of it is.
+**Status: design only.** Nothing here is implemented.
+
+**Scope note on concurrent work:** this document does not touch, and makes
+no claim about, `standards/hardware/v3/base.yaml`, any file under `docs/`
+other than this one, `CHANGELOG.md`, or `calc.py`/anything about calc-block
+evaluation semantics — those are other sessions' work in progress.
+Anywhere this spec would eventually touch one of those files (§5's type
+merge, §7's migration file), it says so and stops there.
 
 ---
 
-## Background: what changed since this was "considered and not adopted"
+## What changed, and why the previous draft is wrong
 
-`docs/design/` had no threads document until now because issue #7's
-finding 17 recorded this exact architecture — "event-sourced threads
-replacing the log/decision split" — as considered and rejected. Its
-analysis holds up well and its objection list is the right one; it is
-reproduced here because this document builds directly on top of it rather
-than re-deriving it:
+The prior version of this document specced a thread as one item containing
+a nested `entries:` list — a new sub-structure, with its own key-minting
+scope, its own document format problem (no existing shape holds several
+independently-timestamped prose bodies in one item), and a two-hash model
+to keep "was this entry tampered with" separate from "did the thread's
+fold change."
 
-> Two of the four objections are easy, and are conceded: **status** ("last
-> entry that set one wins") is a straightforward fold; **supersession**
-> becomes thread continuation. **Checks** are harder — the projection has to
-> be a per-field fold, not a terminal-entry read, because the comparison
-> against a bound has to stay live. **Link target identity** is the
-> unresolved one: a link needs either a mutable target (the thread, which
-> silently changes meaning on every append) or an immutable one (an entry,
-> which is stale by design) — "git resolves exactly this with two kinds of
-> name... the thread model implies needing both, which is an *addition* to
-> the id system, not a simplification of it."
->
-> Net assessment: two types collapse into one, in exchange for a projection
-> engine, per-field folding, and a two-tier identity scheme — and every
-> consumer... stops reading stored state and starts reading computed state.
-> That is a different tool, not a refactor.
+That is not the model. **Each entry is a full, ordinary item** — the same
+kind of thing a `log` entry already is today, parsed by the same code,
+hashed by the same code, sealed by the same code, capable of living in a
+`.md` file or a `.yaml` list file exactly as it can today. The thread is
+not a container; it is a property of the link graph. This resolves the
+worst compromise in the previous draft (§1's "no multi-entry document
+format exists" problem) for free — there is nothing new to hold multiple
+entries, because there is no longer a container to hold them in.
 
-Two things have changed since that finding was written, and they are why
-this is being specced now rather than left closed:
-
-1. **Surrogate keys (`docs/design/keys.md`) already built the two-tier
-   identity scheme finding 17 said was missing.** An opaque, immutable key
-   plus a mutable, human-facing display label is exactly "git's branches
-   and commits." A thread gets a key; each entry gets a key, minted the
-   identical way (§1). This was finding 17's hardest, structural objection,
-   and it is resolved as a side effect of unrelated work, not by anything
-   invented here.
-
-2. **The hashing objection doesn't survive either, and threads arguably
-   improve it.** Today one hash (`item.content_hash`) is reused for two
-   different questions: "has this content been tampered with since it was
-   sealed" (`seal.py`'s `_matches_sealed_hash`, `seal.py:65-104`, compares
-   the stored seal directly against `item.content_hash`) and "has this
-   content changed since the last baseline" (`lifecycle._items_map`,
-   `lifecycle.py:165-183`, stores that same hash). Under threads these
-   become genuinely different computations over genuinely different data —
-   an **entry hash** (immutable, breaks on any edit to history — tampering)
-   and a **fold hash** (moves on every legitimate append — a real update) —
-   see §3. Conflating them today isn't wrong, exactly; it just means "was
-   this rewritten" and "did this change" have always been the same
-   question because an item was always a single, atomic thing. A thread
-   isn't, and the two-hash model is what keeps them from re-collapsing into
-   one by accident.
-
-What genuinely remains, per finding 17 and confirmed by working through the
-rest of this document: **per-field folding, the checks question, and the
-breadth of the change across every consumer that reads stored state.**
-Those are specced below, not waved away. §8 in particular is written to
-name every consumer concretely, per finding 17's own closing complaint that
-"every consumer... stops reading stored state and starts reading computed
-state" deserves an actual list, not a gesture.
+What survives from the previous draft, reused rather than re-derived: the
+two-tier identity argument from `docs/design/keys.md` (still the thing that
+makes this safe), most of the coverage/checks analysis (still correct once
+"which item declares this field" is answered by a graph walk instead of a
+list scan), and the observation that `records`/`recorded_by` (finding 16)
+dissolves. What does not survive: the nested-entry document format, the
+two-hash model (§4 — this model needs *zero* new hashing machinery), and
+the entry-pinned link composite (§2 replaces it with something the old
+draft explicitly said it would need if entries got real independent
+identity — they now do, so the composite trick is unnecessary). See the
+closing section for the full diff.
 
 ---
 
-## 1. The type and its entries
+## 1. The chain
 
-### The shape
+### The link
 
-One type, `thread`, replacing `log` and `decision` in the standard. A
-thread has:
-
-- **Thread-level fields** — set once, not per-entry: `id`, `key`, `type`,
-  `prefix`/`board`/`workspace` overrides, `former_ids`, item-level
-  `history` overrides. These are exactly the reserved/overridable keys
-  `parse.RESERVED`/`OVERRIDABLE` already recognize on any item — nothing
-  new here.
-- **`entries:`** — a new reserved key, an ordered list of entries. Reserved
-  the same way `key:` is (`parse.RESERVED`, alongside `id`, `type`,
-  `history`, `body`, `former_ids`) — not an overridable field a type could
-  shadow, for the same reason identity-adjacent keys aren't shadowable.
-
-Each entry is a small record, not an item:
+One new link type, `follows:` — inverse `followed_by:` — declared on the
+merged `log` type (§5), restricted to `log` targets:
 
 ```yaml
-entries:
-  - key: k7f3m2q9x4b
-    date: 2026-02-24
-    author: J. Bin
-    body: |
-      Back of the envelope: (12 V − 3.3 V) × 1.2 A is 10.4 W in the pass
-      element. The enclosure budget is under a watt for the whole power
-      stage. Not a marginal call, so I did not model it further.
-    addresses: [REQ-PWR-002]
+link_types:
+  follows: { inverse: followed_by, label: "Follows" }
 
-  - key: k2p9w3x1r7
-    date: 2026-03-19
-    author: J. Bin
-    body: |
-      Re-read my own bench notes. The 93% figure was at 12V in, not worst
-      case; at 36V it drops to 91%.
-    status: in_progress
-
-  - key: kb4h8m1z2t
-    date: 2026-04-02
-    author: J. Bin
-    title: Buck converter, not LDO, for the 3V3 rail
-    status: accepted
-    rationale: LDO dissipates 10.4W worst case against a <1W enclosure
-      budget; buck topology meets efficiency and thermal bounds together.
-    satisfies: [REQ-PWR-002, REQ-PWR-003]
-    constrained_by: [BND-THM-001]
-    checks:
-      - value: eff
-        against: BND-THM-002
-    body: |
-      Buck at 92% typ / 88% worst-case efficiency clears BND-THM-002 with
-      margin; LDO analysis above is the ruled-out alternative.
-    ```calc
-    eff = 0.88
-    ```
+types:
+  log:
+    links:
+      follows: [log]
+      # ...satisfies, constrained_by, addresses, etc. -- §5
 ```
 
-- **`key:`** — every entry's own opaque identity, minted the identical way
-  and at the identical moment an item's `key:` is (`keys.mint_missing`,
-  §2 of `docs/design/keys.md`), just scoped one level down: instead of one
-  key per item, one key per item *and* one per entry in its `entries:`
-  list. No new minting mechanism, no new alphabet, no new check character —
-  the existing 11-character Crockford-base32-plus-Damm key, generated and
-  validated identically. This is the concrete form of "a thread has a key,
-  each entry has a key" from the brief, and it is what actually closes
-  finding 17's link-target-identity gap (§4).
-- **`date:`** — required, exactly as on a `log` entry today. Display/sort
-  field for the rendered timeline, **not** what determines fold order —
-  see "ordering," below.
-- **`author:`**, **`body:`** — unchanged from today's `log` entry.
-- Everything else on an entry is a **foldable field**: any scalar field the
-  type declares (`status`, `title`, `rationale`), any structured field
-  (`options`, `checks`), and any link name the type declares
-  (`satisfies`, `constrained_by`, `selects`, `blocked_by`, `addresses`,
-  `supersedes`). An entry declares only the fields it actually has
-  something to say about — most entries are log-shaped (a `body` and
-  maybe one link), and only the terminal entry looks decision-shaped
-  (`status: accepted`, `rationale`, `checks`). This is precisely the
-  "several paragraphs of I²C-vs-SPI deliberation living inside what is
-  nominally a verdict" problem finding 17 named — under threads that
-  deliberation is its own entries, and the verdict entry can be short.
+An entry declares at most its immediate predecessor(s) — plural, because a
+merge entry closing a fork (§6) declares more than one. This mirrors every
+other link in this vocabulary (`blocked_by` names only the direct blocker;
+the chain, like the blocker chain, is walked by a dedicated pass, not
+declared transitively by the author).
 
-### Ordering: append position, not `date:`
+### The head is inferred, never marked
 
-Fold order is **physical position in `entries:`**, the same thing
-append-only sealing already treats as ground truth (an entry is sealed the
-moment it is first built, in place — `seal.py`'s whole model already
-assumes "sealed" means "this position in this file, at this point in
-time"). `date:` stays a **display-only** field for the rendered timeline,
-decoupled from fold order, exactly as it already is decoupled from log
-entries' physical order today (`docs/design-log.md`: "`date` — required;
-orders the timeline" is a rendering statement, not a data-model one).
+**An entry with no `follows:` is a head.** No new field, no
+`is_thread_start: true` marker, nothing to remember to set. This follows
+the same convention the rest of the schema already uses for "the absence
+of a declaration is itself meaningful" — `coverable_statuses:` unset means
+one specific default (`coverage.md`); `blocked_by: []` unset means
+unrestricted (`standard-library.md` §9). Here, unset means "nothing
+precedes this," which is simply true the first time anyone writes about a
+topic, and needs no author action to be correctly recorded.
 
-This has to be decoupled on purpose: a backdated entry ("writing up notes
-from last week's bench session") must not retroactively change what the
-fold currently resolves to. If fold order followed `date:`, appending an
-entry dated in the past could silently reorder the fold and flip which
-entry is "most recent" for some field — a correction with a surprising
-side effect on unrelated fields. Pinning fold order to append position
-means the fold only ever moves forward, matching the append-only guarantee
-entries already carry individually (§3).
+**Rejected: an explicit head marker.** It would have to stay
+consistent with `follows:`'s absence by construction (a head that also
+declares `follows:` is nonsensical), which makes it redundant data with a
+consistency rule to enforce, for no benefit inference doesn't already
+give for free.
 
-### Physical format — a real gap, not glossed over
+### The chain link is written by the tool
 
-**This is the one place where the shape doesn't fall out for free, and it
-deserves to be named plainly rather than assumed away.** Today's two
-physical item shapes (`parse.py`'s module docstring; schema-reference.md's
-`schema_json.md` §12 "two document shapes") are:
-
-- a bare `.md` file, front matter plus one prose body
-- a list-file `.yaml` entry, `{id, ..., body}` inside an `items:` array
-
-Neither shape has a slot for "one item, several independently-timestamped
-prose bodies." A `.yaml` list-file thread works today's `entries:` shape
-cleanly — this is exactly the shape `docs/design-log.md`'s `body: |` block
-scalars already use, just nested one level deeper. But **a single-item
-`.md` file, the format most real decisions use today** (`checks.md`'s own
-example item lives at
-`items/decisions/dec-pwr-001-regulator-topology.md`) **has no way to
-represent a thread's multiple entries at all** — front matter is one YAML
-document, and the body is "everything after the closing fence," singular.
-
-Two ways forward, neither free:
-
-- **Threads are YAML-list-file-only.** Cheapest to implement — `entries:`
-  is just another list-valued field, no parser change beyond making
-  `entries:` reserved. Cost: every decision currently authored as its own
-  `.md` file for readability (a `.yaml` list-file `body: |` block scalar
-  is legal but reads worse than a real Markdown file for a paragraph of
-  prose) loses that authoring ergonomics. This is a real, disclosed
-  regression for exactly the kind of item — a substantial, prose-heavy
-  decision — this design is aimed at, not an edge case.
-- **A new `.md` multi-entry shape** — some delimiter marking entry
-  boundaries inside one Markdown file (a repeated front-matter block, one
-  per entry, similar to a multi-document YAML stream). This keeps the
-  authoring ergonomics but is real, unbuilt parser surface: `parse.py` is
-  740 lines built around exactly two shapes, and a third shape means a new
-  boundary-detection pass, new source-line tracking per entry (today
-  `item.source_line` is one number; an entry needs its own), and a new
-  write-back target for `keys.mint_missing` to append an entry's `key:`
-  into the right sub-block.
-
-**Recommendation: start with the list-file-only shape, and prototype the
-`.md` shape as a fast-follow if the ergonomics regression proves painful in
-practice (§9 item 1).** Shipping the smaller, real thing first and
-measuring is cheaper than guessing at a new document format's shape before
-anyone has written a thread by hand.
-
----
-
-## 2. The per-field fold
-
-### The rule
-
-For thread `T` with entries `e₁ ... eₙ` in append order, and foldable field
-`F`:
-
-> `fold(T, F)` = the value of `F` on the highest-indexed `eᵢ` that declares
-> `F` at all. If no entry ever declares `F`, `fold(T, F)` is undefined —
-> exactly like an item today that never sets an optional field.
-
-The crucial part, easy to get wrong: **an entry that omits `F` does not
-clear it.** The fold is "most recent entry *that set this field*," not
-"most recent entry, whichever fields it happens to carry." This has to be
-the rule, not a simplification of it, because the alternative — the whole
-latest entry wins, field by field, present or absent — silently loses
-history the moment a later entry doesn't restate something an earlier one
-said. Worked example, using the thread above:
-
-| Field | Fold source | Fold value |
-|---|---|---|
-| `status` | entry 3 (`kb4h8m1z2t`) — last to set it | `accepted` |
-| `addresses` | entry 1 (`k7f3m2q9x4b`) — the only entry to set it; entries 2–3 never mention it | `[REQ-PWR-002]` |
-| `satisfies` | entry 3 — the only entry to set it | `[REQ-PWR-002, REQ-PWR-003]` |
-| `title` | entry 3 — the only entry to set it | `Buck converter, not LDO, for the 3V3 rail` |
-| `rationale` | entry 3 | the LDO-vs-buck sentence |
-| `checks` | entry 3 | `[{value: eff, against: BND-THM-002}]` |
-
-Note `addresses` and `satisfies` **coexist** in the fold — the requirement
-is simultaneously "addressed" (from entry 1, never retracted) and
-"satisfied" (from entry 3). That is not an accident of this example; it is
-the load-bearing property that makes the fold correct for coverage (§5)
-without inventing a retraction mechanism: a thread's arc from
-investigation to verdict naturally *adds* link names as it goes
-(`addresses` early, `satisfies` once settled) rather than replacing one
-with another, so "last entry to set each field" already produces the right
-cumulative picture without every entry having to restate everything that
-still applies.
-
-**Retraction, if ever needed, is explicit.** An entry can set a field to
-`null` to clear a prior fold value on purpose — the identical convention
-`docs/design/standard-library.md` §2 already uses for a project overlay
-removing an inherited schema field (`field: null` deletes it). This is
-listed as available, not as something the MVP needs: nothing in this
-design requires it, since the ordinary case (a link that stops being
-declared) is already handled correctly by "absence doesn't clear."
-
-### What folds, what doesn't
-
-| Kind | Folds? |
-|---|---|
-| `status`, `title`, `rationale`, and any other scalar field the type declares | yes |
-| `options`, `checks` (structured fields) | yes — whole value, most recent entry to declare it |
-| Any link name (`satisfies`, `addresses`, `constrained_by`, `blocked_by`, `selects`) | yes |
-| `body` | **no** — every entry's body renders in the timeline; there is no single "current body," only the sequence. This is the thing the fold explicitly does not collapse, because collapsing it is exactly what would lose the deliberation. |
-| `date`, `author`, entry `key` | not foldable — per-entry metadata, not thread state |
-| Thread-level fields (`id`, `key`, `prefix`, `board`, `workspace`, `former_ids`) | not foldable — set once, outside `entries:` entirely |
-
-### `required:` against a fold
-
-`required: true` (and `required_when:`) validates **against the fold, once,
-at build time** — not per-entry. A field can legitimately be unset on
-every entry except the one that finally sets it (the common case: `status`
-absent on every investigation entry, present only on the terminal one),
-and that is not a validation failure at any point along the way, because
-validation only ever asks "what does the fold currently say," the same
-question it asks of an ordinary item's `fields` dict today.
-
-`required_when:` composes with the fold exactly the same way:
-`decision.rationale`'s existing rule, `required_when: {status: rejected}`,
-becomes `required_when: {status: rejected}` evaluated against
-`fold(T, "status")` and `fold(T, "rationale")` — a thread whose folded
-status is `rejected` and whose folded rationale is undefined fails the
-build, at the thread's own `id`/`source_line` (of the terminal entry that
-set `status: rejected`, so the diagnostic points at the entry someone
-would actually edit):
-
-```
-ERROR items/main-io/threads.yaml:50 [THR-IO-002] — 'rationale' is required
-  when status is 'rejected' (required_when: {status: rejected}); entry
-  k2p9w3x1r7 set status: rejected but no entry has set rationale
-```
-
-This is a genuinely new diagnostic shape (naming the offending *entry*, not
-just the item), but it is a small, mechanical extension of the existing
-`required_when` error — no new validation *rule*, just a fold-aware source
-for the value it checks and a fold-aware source for the location it blames.
-
----
-
-## 3. Hashing, seals and baselines — the two-hash model
-
-### What each hash covers
-
-Two hashes, deliberately answering different questions, replacing the one
-hash (`item.content_hash`) that answers both today:
-
-**Entry hash** — computed once, the first time an entry is built (the
-moment it is sealed), over that entry's own on-disk content: every field it
-declares (regardless of `on_change`; today's append-only seal already
-hashes the *whole* item this way, not just `invalidate` fields — see
-`seal._matches_sealed_hash`, which compares against `item.content_hash`,
-which in turn is `invalidate`-only... which is itself worth flagging as a
-**pre-existing gap this design does not need to inherit**: a `log` field
-marked `on_change: log`/`ignore` today can be edited on a sealed entry
-without tripping the seal, because sealing piggybacks on the
-content-invalidation hash instead of hashing the entry's full content. An
-entry hash under threads should hash **everything** the entry declares,
-full stop — sealing is a tamper question, not a significance question, and
-those are exactly the two questions §"Background" above says this design
-separates. This closes a real, latent gap as a side effect, not a new
-requirement invented for its own sake) plus its `body`, normalized the same
-way body hashing already normalizes whitespace.
+The author never types a key. They write what they'd write today —
+a reference to *something* in the thread they mean to continue, most
+naturally the head's own display id, since that's the only stable,
+memorable name a chain has:
 
 ```yaml
-sealed:
-  k7f3m2q9x4b: {thread: THR-PWR-002, hash: b85d98cb24ab9e56}
-  k2p9w3x1r7:  {thread: THR-PWR-002, hash: 4a1f7c30ee92b108}
-  kb4h8m1z2t:  {thread: THR-PWR-002, hash: 9f03e6b7a1cd4402}
+# authored
+- date: 2026-04-02
+  author: J. Bin
+  follows: [LOG-A-001]
+  summary: Buck converter, not LDO, for the 3V3 rail
+  status: accepted
+  ...
 ```
 
-Immutable forever once sealed. Editing entry `k2p9w3x1r7`'s body — or
-adding a link to it, or changing its `date:` — is caught exactly the way an
-edited `log` entry is caught today: `refdes check` verifies without
-writing, `refdes build` seals anything new, `--reseal` is the same
-disclosed escape hatch. **Appending a new entry to the thread never touches
-an existing entry's seal**, because the seal is keyed on the entry's own
-key, not the thread's — this is the direct payoff of giving entries their
-own identity rather than only sealing at the thread level.
-
-**Fold hash** — a *thread-level* hash, over the current fold's
-`invalidate`-mode fields (and folded links, and whichever entry's body
-currently backs the thread's `body_on_change`, if any type declares one) —
-structurally identical to `_hash_payload` (`build.py:666-692`) today,
-except every `item.fields[fname]` lookup becomes `fold(T, fname)`, and
-every `item.links[lname]` becomes `fold(T, lname)`. This is what a baseline
-stores and what a suspect-link comparison uses (change-tracking.md's whole
-mechanism): it moves every time an entry legitimately changes what the
-fold currently says, because that's precisely what a content hash is for —
-detecting a real change, not detecting tampering.
+On the next writable build, this resolves — and freezes — exactly the way
+an ordinary composite reference already does (`docs/design/keys.md` §3):
+the write-back pass walks forward from whatever `LOG-A-001` currently
+resolves to, along `followed_by:` backlinks, to the chain's **current
+tip**, and rewrites the line to that tip's bare key:
 
 ```yaml
-# .refdes/baselines/rev-c.yaml
-items:
-  kb4h8m1z2t: {id: THR-PWR-002, hash: 673e6ba11269f350, type: thread,
-               title: "Buck converter, not LDO, for the 3V3 rail",
-               hash_format: 3}
+# after the next build
+- date: 2026-04-02
+  author: J. Bin
+  follows: [k2p9w3x1r7]
+  summary: Buck converter, not LDO, for the 3V3 rail
+  status: accepted
+  ...
 ```
 
-Note the baseline entry keys on **the thread's own key**, per
-`docs/design/keys.md` §5's existing spec (baselines key on the surrogate,
-not the id) — nothing new here, threads simply are the item being keyed.
-`hash_format: 3` marks this as a fold hash rather than a hash_format-2
-single-item hash, so a mixed-era project (some items, some threads) stays
-precisely describable the same way §5's `hash_format` field already
-handles the keys-adoption transition — see §7 for what a project with
-existing hash_format-2 baselines needs when it migrates.
+Two things are worth being precise about, because they are easy to get
+subtly wrong:
 
-### Why two hashes and not one
+- **This reuses the write-back *mechanism*
+  (`ids.insert_into_markdown`/`insert_into_list`, keys.md §3) but not its
+  *resolution logic*.** Ordinary composite expansion is a static lookup:
+  "what key does this display id currently name." Chain resolution is a
+  graph walk: "starting from whatever this reference names, follow
+  `followed_by:` to the end." A reference to *any* entry in the chain —
+  not just the head — resolves the same way, which is the forgiving
+  behavior a human actually wants ("continue after DEC-PWR-001" should
+  work even if DEC-PWR-001 is three entries back by the time the build
+  runs).
+- **Resolution happens exactly once, at the moment `follows:` is still a
+  bare display-id reference.** Once frozen to a bare key, no later build
+  ever re-resolves it — for the identical reason a composite's key half is
+  never re-resolved once written (keys.md §3, case 3: "an unknown key is
+  an error, and the display half is deliberately not used as a fallback").
+  Re-resolving on every build would mean an entry's declared predecessor
+  could silently change out from under it as the chain grows — exactly
+  the kind of silent identity drift keys exist to prevent. An entry's
+  place in the chain, once recorded, is as permanent as the entry itself.
 
-Restating the mechanism from "Background" concretely: appending entry 3
-above (the verdict) changes the **fold hash** (status, satisfies, checks
-all newly set) but touches **no existing entry hash** — entries 1 and 2's
-seals are exactly as they were. A baseline diff correctly reports "this
-thread changed" (fold hash moved); `refdes check` correctly reports "no
-tampering" (every entry hash still matches its seal). Today, with one hash
-serving both jobs, this same append would either have to *not* be an
-append-only item at all (so the content hash can move freely — today's
-`decision`), or it would have to be forbidden entirely (today's `log`,
-where the only way to add information is a brand-new item). Threads are
-the first type where "this content is allowed to keep growing" and "this
-content, once written, must never be silently rewritten" are simultaneously
-true of the *same* record — which is exactly why one hash stops being
-enough.
+### A concrete, realistic fork — the reason resolving to "the tip" isn't a guarantee against branching
 
-### Baselines: what "removed"/"changed"/"added" mean now
+Two engineers, working from the same starting point, each add an entry
+referencing `LOG-A-001` before either has seen the other's work:
 
-`lifecycle.diff_against` (`lifecycle.py:551-590`) is item-scoped and
-hash-only; under threads it stays exactly that shape, just diffing fold
-hashes instead of item hashes — no change to its *logic*, only to what
-populates `current = _items_map(project)` for a thread (the fold hash and
-folded title, not a single item's own hash/title). One genuinely new
-question: **a thread with a new entry appended, but whose fold is
-byte-identical to before** (an entry that only adds `body` prose, setting
-no foldable field at all — a pure narrative addition) has an unchanged
-fold hash. Is that `changed` or not? **Recommendation: not changed**,
-consistent with the hash's whole job description ("has this item's
-*substance* changed") — but this means a baseline diff can under-report
-thread activity purely narrative appends don't move. `refdes audit`'s
-"Since last revision" summary should therefore report entry counts
-alongside the hash-based changed/added/removed columns for threads
-specifically, so a reviewer isn't misled into thinking a thread with five
-new entries and no status change is quiet:
+```yaml
+# author A, local build, resolves LOG-A-001's *current* tip -> itself is now the tip
+- follows: [k_A_prev_tip]     # frozen against what A's checkout knew
 
-```
-Since last revision (rev-c, 2026-08-10T09:12:00Z):
-  changed   2   THR-PWR-002, THR-IO-005
-  added     1   THR-PWR-004
-  removed   0
-  threads with new entries but unchanged fold: 1
-    THR-PWR-006 — 3 new entries, fold unchanged
-  (36 unchanged)
+# author B, local build, on an older checkout, same starting reference
+- follows: [k_A_prev_tip]     # frozen against the *same* prior tip -- B never saw A's entry
 ```
 
-This is new surface, not a reuse of anything existing — flagged rather
-than folded silently into the existing counts, because it answers a
-question ("did anyone write anything") the changed/unchanged hash split
-was never built to answer and shouldn't be stretched to cover.
+Both builds are individually correct — each resolved against the tip its
+own checkout could see. Once both land in the same tree, two entries now
+share one predecessor: a fork, produced by nothing more than ordinary
+concurrent editing, not a bug in either build. §6 covers what happens next.
 
 ---
 
-## 4. Links
+## 2. Identity: entries with a key and no display id
 
-### Which key a link targets
+### The place that assumes every item has one
 
-**By default, a link targets the thread, not an entry** — the mutable,
-"current state of this deliberation" identity, resolved and hashed exactly
-the way an item is today (`links.expand_missing` writes
-`satisfies: [THR-PWR-002@kb4...]` — the thread's own key, minted at thread
-creation, never an entry's key). This is the right default because it
-matches what an author means the overwhelming majority of the time:
-`REQ-PWR-003`'s `satisfied_by` should mean "whatever this thread currently
-concludes," tracking the thread as it evolves (including a later
-`superseded`/re-litigated status), not "what entry `kb4h8m1z2t` specifically
-said on 2026-04-02."
+`parse.load_items` (`parse.py:701-731`) is where this gets decided today.
+An item with no `id:` is added to `project.pending`, and — unless the
+caller passed `require_ids=False` (only `refdes id` itself, `revise.py`,
+and `scaffold.py` do) — a hard build error is raised: `"item has no id —
+run 'refdes id' to allocate one."` Critically, **a pending item never
+enters `project.items` at all.** It sits in a separate list, invisible to
+every downstream pass — `compute_coverage`, `compute_hashes`, `run_checks`,
+`render_site`, the backlink computation — all of which iterate
+`project.items.values()`/`project.local_items`, never `project.pending`.
 
-**Pinning to a specific entry is the deliberate exception**, written with
-an entry-scoped composite: `THR-PWR-002@kb4h8m1z2t#k2p9w3x1r7` — the
-thread's own display-id-and-key composite, plus a second `#`-separated
-segment naming the entry key. Two things make this syntactically safe,
-both already established: keys.md §3 already reserves `@` (not `#`) as the
-composite separator specifically because `#` mid-scalar in block-style YAML
-silently truncates the line as a comment — so an entry pin's `#` segment
-has to sit *after* the already-resolved `@key`, never adjacent to
-whitespace, and the write-back that appends it must never introduce a
-space before it. This is a real, sharp edge worth prototyping (§9 item 1),
-not a hand-wave: `THR-PWR-002@kb4h8m1z2t #k2p9w3x1r7` (stray space) would
-silently drop the entry pin exactly the way keys.md §3 documented `#`
-dropping the key entirely.
+This is the actual, concrete assumption to fix, and it is stronger than
+"a few call sites assume a string is an id." Today, "no id" doesn't mean
+"a valid, minimal identity state" — it means "not yet a real project
+member, waiting to become one." A chain entry that is *never* going to get
+an id needs to be a real project member on arrival: hashed, sealed,
+coverage-eligible, renderable, exactly like anything else. `project.pending`
+cannot become that state without contradicting what it's for.
 
-When would anyone write the entry-pinned form? Genuinely rare — mainly
-external citation and audit trail cases: "the schematic note from
-2026-08-12 cites the reasoning as it stood in entry `k2p9w3x1r7`, before it
-was superseded" is a claim about a moment in time, not about the thread's
-current conclusion, and only the pinned form is honest about that. Ordinary
-project-internal traceability (`satisfies`, `constrained_by`, `verifies`)
-should almost always use the thread form; **the schema does not
-distinguish the two syntactically** — both are legal wherever a link to a
-`thread`-typed item is legal — so this is an authoring convention worth
-documenting, not an enforced rule. Enforcing it (say, forbidding entry-pins
-on `satisfies:`) was considered and rejected: it's exactly the kind of
-judgment call (§10 of keys.md makes the same call about prefixes) that
-should stay a human decision, not a schema restriction with edge cases no
-one anticipated.
+### The fix: `project.items` keyed by surrogate key, not display id
 
-### Resolving an entry-pinned link
+`parse.py:740` (`project.items[item.id] = item`) and every place that
+constructs, looks up, or iterates that dict needs to stop treating "the
+dict key" and "the display id" as the same thing. Concretely:
 
-An entry-pinned composite resolves to **the thread**, for every purpose
-that already reads `resolved_links` (coverage, `{{cascade}}`, the blocked
-chain walk) — an entry isn't independently a link target for graph-walking
-purposes, only for hover-preview and rendering purposes, where it matters
-*which* entry was cited. Concretely: `item.resolved_links` stays exactly
-the shape it is today (thread display ids), and a new,
-narrower field — `item.resolved_entry_pins: dict[str, dict[str, str]]`,
-link name → target thread id → pinned entry key, populated only for the
-subset of targets that used the entry-pinned form — carries the extra
-precision for rendering alone. Every consumer that walks the graph
-structurally (coverage, blocked_by, cascade) can ignore this field entirely
-and be correct; only the item-page renderer and the hover-preview generator
-need to consult it, to show "as of entry k2p9w3x1r7" instead of the
-thread's live current state in that one preview card.
+- `Project.items: dict[str, Item]` — **re-keyed on `item.key`.** Every item
+  gets a key on the same schedule it already does (`keys.mint_missing`,
+  keys.md §2), so this dict is populated the moment an item is parsed and
+  minted, id or no id.
+- `Project.items_by_id: dict[str, str]` — a new, small secondary index
+  (display id → key), built alongside. Every place that currently does
+  `project.items[some_id_string]` — `build.py:239,911`, `blocked.py:112`,
+  `cli.py:842`, `former_ids.py:89,127,138,139,160`, `imports.py:100`,
+  `ids.py:413`, `render.py:101,103` — is a lookup by a **known display id**
+  in a context that only ever deals with id-having items already (the id
+  ledger, `former_ids`, an explicit rename target): those sites are
+  unaffected in behavior, just rewritten as
+  `project.items[project.items_by_id[some_id_string]]` or a small
+  `project.item_by_id(id) -> Item | None` helper wrapping that.
+- **General link-target resolution** — `build.resolve_link_target`, and
+  the `_key_index` it already builds (`build.py:248`) for composite
+  `DISPLAY@key` targets — gains a third case: a bare token that is neither
+  a known display id nor a `DISPLAY@key` composite, but *is* a
+  well-formed key on its own (11 characters, valid Damm check), resolves
+  directly against `_key_index`. This is the only place `follows:`'s bare-
+  key targets are actually resolved as links, and it is a small, additive
+  case next to the two `resolve_link_target` already handles.
 
-### Authored on a thread, and pointing at one — both directions unchanged
+This is a real, if mechanical, restructuring — not a two-line patch — and
+it is worth naming plainly as the load-bearing engine change this document
+requires that the previous draft didn't: **every item, not just chain
+entries, moves from "identified by what it's called" to "identified by
+what it is," with the display id demoted to an optional, secondary label.**
+That is exactly the trajectory keys.md was already on (§8: "the display id
+... stops being load-bearing"); this is where that trajectory reaches its
+logical end, because a chain entry is the first case where "load-bearing"
+would otherwise mean "this item cannot exist without a name nobody needs
+to give it."
 
-**Outgoing** — a thread's entries declare links exactly as today's
-`decision`/`log` items do (`satisfies:`, `constrained_by:`,
-`blocked_by:`, `addresses:`), just per-entry and folded (§2). No new
-authoring convention.
+### The rule that decides "pending" vs. "permanently id-less"
 
-**Incoming** — every backlink computation (`inverse_of`, `item.backlinks`)
-operates on the fold, i.e. `Project.folded_items[thread.key].links`, not on
-any single entry — a requirement's `satisfied_by` backlink comes from
-threads whose *current fold* says `satisfies: [that requirement]`,
-regardless of which entry set it. This is the "virtual item" framing used
-throughout this document (see §5): once a fold is computed, it exposes
-`.fields`/`.links`/`.type` in the identical shape `Item` does, and the
-inverse-link computation, which already operates generically over any
-object with that shape, needs no thread-specific branch at all.
+One precise addition to `parse._resolve_id_value`/`load_items`
+(`parse.py:238-287`, `701-731`): an item with no `id:` **and** a non-empty
+`follows:` is not pending. It skips `project.pending` and the
+`require_ids` error entirely, and is added straight to the (now key-keyed)
+`project.items`. An item with no `id:` and no `follows:` behaves exactly
+as it does today — pending, needs `refdes id`, same diagnostic. The
+signal is deliberately the same field that already decides head-vs-
+continuation (§1): a continuation entry is, by definition, one that
+declares where it continues from, and that is the only fact needed to
+tell "doesn't have an id yet" apart from "was never going to have one."
 
-### `supersedes` — one case dissolves, one case doesn't
+```
+follows: absent, id: absent   -> pending (unchanged) -- a head-to-be
+follows: absent, id: present  -> ordinary item (unchanged) -- a named head
+follows: present, id: absent  -> NEW: permanently id-less, enters project.items directly
+follows: present, id: present -> ordinary item (unchanged) -- a citable continuation, if wanted
+```
 
-Finding 17 says supersession "becomes thread continuation, arguably
-cleaner than an explicit `supersedes:` edge." That is correct for exactly
-one of two cases decision's `supersedes:` covers today, and conflating
-them would be a real regression, so it is worth separating precisely:
+Nothing stops an author from giving a continuation entry an id anyway —
+some entries are worth citing individually (a schematic note referencing
+one specific bench measurement). Nothing requires it. This is the concrete
+form of "only the start of a thread needs a human-facing id": it's a
+default, not a restriction.
 
-- **Revisiting the same decision** — new information changes the verdict
-  on the *same* question ("we said LDO was fine at 12V, worst-case is
-  36V, revise to buck"). This is thread continuation: append an entry with
-  a new `status`, no `supersedes:` link needed, exactly finding 17's claim.
-- **A new, distinct decision replacing an old, closed one** — a different
-  thread entirely (different root question, different entries, possibly a
-  different author, opened long after the first thread concluded) that
-  happens to make an earlier thread's conclusion moot. This is **not**
-  thread continuation — it is two separate threads, and `supersedes:`
-  **stays a real, authored, cross-thread link**, folded exactly like any
-  other link (§2), targeting the other thread's key.
+### `refdes id`, the ledger, and `former_ids`
 
-Both cases exist in real projects; only the first is the one finding 17's
-"arguably cleaner" claim actually applies to.
+**Unaffected, because they only ever act on items that already have —
+or are actively requesting — a display id.** An id-less continuation entry
+never enters `project.pending`, so `refdes id` never sees it, never burns
+a ledger number for it, never has anything to allocate. This matches
+keys.md §8's own reframing of the ledger as "external-citation hygiene,
+not an identity mechanism" precisely: an entry nobody will ever cite by
+number simply never needs to reserve one, which is the ledger working
+exactly as designed rather than a gap in it.
 
-### What dissolves entirely
+`former_ids:` needs no new interaction either, for a related reason: it
+answers "does this old string still resolve," which only matters for
+items that *used to have* a display id. Migration (§7) does not strip ids
+from any existing item — every currently-id'd `log`/`decision` item keeps
+its id exactly as it is. The id-less state only ever arises for a *new*
+entry an author chooses not to name, so there is no "an item lost its id,
+now what resolves the old citation" case for this design to solve.
 
-`amends:`/`amended_by:` and `records:`/`recorded_by:` are both retired as
-link verbs, for the same underlying reason — appending to the same thread
-now does what a cross-item link used to do:
+### Rendering: the slug
 
-- **`amends`** — a same-thread correction is just the next entry; no link
-  needed. A correction to an *unrelated* thread's entry (rare — genuinely
-  a different topic) has no replacement mechanism specced here; it becomes
-  a prose cross-reference (`[[THR-...]]`) or, if it recurs often enough in
-  practice, a small new link verb — out of scope for this document, since
-  nothing in the record of real usage shows it as more than a rare case.
-- **`records`** — finding 16 exists entirely to fix a symptom of the
-  log/decision split (a sealed log entry can't add `records:` pointing at
-  a decision created after it was sealed, without breaking the seal).
-  Under threads there is no split to bridge: the entry that documents "this
-  is why we decided" and the entry that says "here is the decision" are
-  positions in the *same* append-only list, not two items connected by a
-  link at all. Finding 16's proposed fix (`recorded_by: [log]` on
-  `decision`, using the existing either-end declaration mechanism) becomes
-  unnecessary — not because it was wrong, but because the problem it
-  solves no longer exists once there's no seal boundary between the
-  deliberation and its conclusion.
+`Item.slug` (`model.py:427-429`) is `self.id.lower()` — the page filename.
+For an id-less entry, this needs a fallback: `self.id.lower() if self.id
+else self.key`. Page URLs for id-less entries become
+`k2p9w3x1r7.html` — not meant for a human to type, exactly the same
+posture keys already have generally (nobody is expected to type a key by
+hand; they follow a link to it). `{{index}}` blocks and listing pages
+(`refdes ls`) that enumerate a type now also enumerate id-less entries;
+their "ID" column shows blank or the key, which is a minor, disclosed
+rendering wrinkle, not a defect — the item is real and belongs in the
+listing regardless of whether it has a citable name.
 
 ---
 
-## 5. Coverage
+## 3. What a thread "currently concludes"
 
-### The virtual-item pattern
+### Folding survives, but what it folds over changes
 
-Nearly every question in this section reduces to the same move, so it is
-worth stating once rather than per-subsection: define a fold projection
-that exposes `.fields`, `.resolved_links`, and `.type` in the identical
-shape `Item` already does, computed once per build into
-`Project.folded_items: dict[str, FoldedItem]` (keyed by thread key,
-alongside `project.items` keyed by display id — a thread needs both
-lookups for exactly the reasons an item does today). Every consumer listed
-below is then a **one-line dispatch** — "if this item's type declares
-`entries: true`, read `project.folded_items[item.key]` instead of `item`
-itself" — rather than a rewrite of the consumer's own logic. This is the
-concrete mechanism behind every "the shape doesn't change, only what
-'current' resolves to does" claim below, including the stale-arithmetic
-signal's own forward-compat note (§6) and finding 17's concession that
-status folding is "a straightforward fold."
+The per-field fold rule from the previous draft is *correct* and is kept
+verbatim:
 
-### `satisfying_statuses` / `verifying_statuses` under a fold
+> For field `F`, the current value is whatever the most recent entry *that
+> declared `F`* said, walking backward from the tip. An entry that omits
+> `F` does not clear it.
 
-Today (`build.py:453-462`): `satisfier.fields.get("status")` checked
-against `satisfier_spec.satisfying_statuses`. Under threads:
-`fold(T, "status")` checked against the identical list — **the exact same
-comparison, sourced from the fold instead of `item.fields` directly.** The
-five coverage stages (open/addressed/claimed/satisfied/verified,
-`coverage.md`) are unchanged in meaning; what changes is only that a
-"decision" contributing to `claimed`/`satisfied` is now a thread's fold
-rather than a standalone item, and a thread can move backward through
-those categories in a way a `decision` item never could (append an entry
-that reopens `status: on_hold` after `accepted` — the fold genuinely
-un-settles). That reversibility is new and worth naming as a real, if
-narrow, behavior change: today, once a decision is `accepted`, an item's
-coverage contribution only ever strengthens over the item's life (nothing
-un-accepts a decision short of hand-editing it, which would itself trip
-the content hash as an ordinary "changed" item). Under threads,
-un-settling is a first-class, auditable, append-only operation — this is
-one of the real *wins* the fold buys (§"Background"'s "total immutability"
-point), not a defect, but it means `coverage.html`'s "satisfied" stage can
-legitimately regress between two builds with nothing wrong, and that is
-worth a line in the coverage docs when this ships.
+What changes is what's being folded. Previously: a list nested inside one
+item. Now: a set of separate items discovered by a graph walk along
+`follows:`/`followed_by:`.
 
-### `addressed_by`, and why the per-field fold gets this right without a special case
+### Is folding even still needed, or does ordinary link resolution already do the job?
 
-Walked through concretely in §2's worked example: `addresses` and
-`satisfies` coexist in one thread's fold because neither entry retracts
-the other. `compute_coverage`'s existing union
-(`cov.addressed_by = backlinks ∪ resolved_links["addresses"]`,
-`build.py:442-445`) needs no new logic here — it already unions across
-*every local item* that backlinks or resolves an `addresses:` edge; under
-threads that union is simply over folded items instead of raw items. The
-one thing worth flagging (already covered in §2, restated here because
-it's a coverage-specific consequence): if this design is ever extended
-with the optional explicit-`null` retraction (§2), a thread author who
-*does* clear a prior `addresses:` edge would cause a requirement to move
-backward from `addressed` toward `open` — again, correctly reflecting
-"this thread no longer claims to have worked on that," but a genuine new
-way for coverage to regress that today's items structurally cannot
-produce.
+Worth asking honestly rather than assuming, because there's a real case
+where it *isn't* needed: `compute_coverage` (`build.py:453-462`) already
+unions across every item that declares `satisfies:`/backlinks
+`satisfied_by`, and checks `satisfier.fields.get("status")` — the status
+of *whichever entry actually declared the link*. If a thread's terminal
+entry restates both `status: accepted` and `satisfies: [REQ-PWR-002]` on
+itself (the common case — a verdict entry naturally carries both), **no
+fold is needed at all**: `satisfier` already *is* the entry with the
+current status, and today's coverage code works completely unmodified.
 
-### `records`/`recorded_by` dissolves; nothing replaces it in coverage
+The fold is needed for the case that isn't guaranteed: an entry that
+declares `satisfies:` without also restating `status:` on itself — because
+an earlier entry set `status: accepted` and nothing since has touched it.
+Nothing enforces that authors always co-locate every relevant field on the
+one entry declaring the link, and assuming they do would be exactly the
+kind of silent, unenforced convention this project's own design docs
+routinely flag as a real risk (see `coverage.md`'s own "claimed but not
+settled... bit a real migration" story for what happens when a status
+check silently reads the wrong thing). So: **fold, but scoped narrowly** —
+whenever a consumer needs "the current value of field `F` for the thread
+this entry belongs to," resolve it by walking forward from that entry to
+the chain's tip(s) and applying the fold rule, rather than trusting that
+the entry in hand already carries the answer.
 
-`records`/`recorded_by` never fed `compute_coverage` at all (it isn't in
-the satisfied/verified/addressed union — cross-checked against
-`build.py:427-479`, which reads `addressed_by`, `satisfied_by`,
-`verified_by` only). Its dissolution (§4) has **zero coverage impact** —
-worth stating plainly since finding 16 was framed as a traceability
-problem, not a coverage one, and this confirms that framing: nothing here
-needs replacing on the coverage side.
+### A lazy walk, not a persistent registry
 
-### Checks stay live, against the *current* fold
+The previous draft proposed a global `Project.folded_items` table keyed
+by one canonical identity per thread. That doesn't survive contact with
+merges (§6): a merge entry can join two previously-independent chains,
+each with its own head, into one connected component with two heads and
+one tip — there is no longer a single key that uniquely names "the
+thread" the way there was when a thread was one container item. Trying to
+maintain one is solving a problem that doesn't need solving.
 
-The brief's settled point, restated precisely in fold terms: `checks:` is
-a foldable field (§2) — `fold(T, "checks")` is the most recent entry's
-`checks:` list. **The comparison inside each check stays exactly as live
-as it is today** (`build.py:628-644`, `calc.parse_limit(target.fields["limit"])`
-re-parsed fresh every build): revising the target bound still flips the
-check's pass/fail with no edit to the thread, because the live-evaluation
-code path is completely unaware that its `item` argument is now a fold
-projection rather than a real item — this is the payoff of the
-virtual-item pattern applying cleanly here too. What *does* change from
-today: the `env` a check's `value:` resolves against (`item._env`,
-`build.py:573`, populated by evaluating `calc` blocks) has to be the env of
-**the same entry that declared the `checks:` entry being evaluated** — not
-the thread's terminal entry's calc blocks in general, because two
-different entries in the same thread could each carry their own,
-independent calc blocks (an early feasibility estimate, a later verified
-figure) and a `checks:` entry must resolve against the calc block that
-sits in the *same* entry, never a different one's. This is a real,
-concrete new piece of bookkeeping (`env` becomes per-entry, not per-item),
-directly answering the brief's "the fold takes the most recent entry
-carrying a calc block" instruction — the fold applies to *which entry's
-calc/checks pair is current*, and within that pair, resolution is
-unchanged.
+Instead: a small utility (new module, playing the same role `blocked.py`
+plays for the blocker chain — walk, detect cycles, report) —
 
-### What's left of the "checks vs. decisions" (`check_severity`) split
+```python
+def resolve_current(project: Project, start_key: str, field: str) -> Any | None:
+    """Walk forward from `start_key` along `followed_by:` to every reachable
+    tip, and return the value of `field` from the highest-indexed entry
+    (by chain distance from `start_key`) that declares it. `None` if no
+    entry in the reachable chain ever declares `field`.
+    """
+```
 
-Unaffected — `check_severity` is still a type-level setting
-(`ItemType.check_severity`, `model.py:210`), and a `thread`-typed item
-inherits it exactly like any other type. Nothing about folding touches
-which diagnostic level a failing check reports at.
+— called on demand, from exactly the places that need "the current value,"
+not precomputed for every item on every build. This is cheaper when only a
+few threads are actually queried (coverage only calls it for items that
+already have a `satisfies:`/`verifies:` backlink) and it sidesteps the
+multi-head problem entirely: the walk starts from a specific entry (the one
+that declared the link being evaluated), not from "the thread," so there is
+never a question of which of several heads is canonical.
+
+### `satisfying_statuses` under this model
+
+Today (`build.py:453-462`): `allowed = satisfier_spec.satisfying_statuses;
+satisfier.fields.get("status") in allowed`. Under this model:
+
+```python
+status = satisfier.fields.get("status")
+if status is None:
+    status = chains.resolve_current(project, satisfier.key, "status")
+allowed = satisfier_spec.satisfying_statuses
+```
+
+One extra fallback step, only taken when the declaring entry itself is
+silent on `status` — the common case (entry restates its own status)
+never pays for the walk at all. This is a small, precise change to
+`compute_coverage`, not a rewrite of it.
+
+### Checks stay live — and this needs no fold at all
+
+`checks:` and its owning `calc` blocks are declared and evaluated on **one
+entry** (`build.py:576-652`) exactly as `decision.checks:` is today — a
+`checks:` entry, its referenced `value:`, and the `calc` block that
+defines it all have to live on the *same* item already (checks.md: "`value`
+must be a variable defined by a `calc` block in the **same item**"). Under
+this model that constraint is unchanged and needs no chain-awareness at
+all: whichever entry declares `checks:` also declares the calc block it
+checks, on itself, and the live comparison against the target's *current*
+`limit:` (`build.py:628-644`) is completely unaffected, because it was
+never item-identity-dependent in the first place — it re-parses the
+target's `limit:` fresh every build regardless of which item is asking.
+This is a genuine simplification over the previous draft, which invented a
+per-entry-`env` resolution problem that doesn't exist once entries are
+separate items: there's no ambiguity to resolve, because there's no
+container in which two different entries' calc blocks could be confused
+with each other.
+
+### Branching's effect on "current"
+
+If `resolve_current`'s walk reaches more than one tip (an unmerged fork,
+§6), the fold for a field with different values at different tips is
+genuinely ambiguous. **Recommendation: treat it as undefined**, the same
+outcome as "no entry ever set this field" — a forked, unmerged thread
+cannot be read as `satisfied` even if one of its tips independently says
+`accepted`, because a fork is, by construction, not yet a single
+conclusion. It can still be `claimed` (the union-based `claimed`/`satisfied`
+split in `coverage.md` already distinguishes "linked, not yet settled"
+from "settled"), which is the right coverage stage for "someone has
+concluded something here, but the thread hasn't reconciled" — reusing an
+existing distinction instead of inventing a sixth coverage stage for forks.
 
 ---
 
-## 6. The stale-arithmetic signal — confirming the reframe, precisely
+## 4. Hashing and seals
 
-`docs/design/stale-arithmetic-signal.md` already sketched this ("Forward-
-compat with threads") without designing it, on the theory that keeping the
-verdict probe and the calc probe independent would make the reframe small.
-Working through the actual fold mechanics above confirms that claim, and
-this section states exactly what changes and what doesn't, rather than
-leaving it as a promise.
+### Confirmed: unchanged, per entry
 
-**Today's condition** (baseline `B` vs. current build, for item `X`):
-1. `X`'s type declares a `status` field.
-2. `X`'s body has a `calc` block.
-3. `X.fields["status"]` differs from what `B` recorded.
-4. The normalized text of `X`'s calc block hashes the same as what `B`
-   recorded.
+**Each entry is an ordinary item, so its own hash and its own seal work
+exactly as they do today, with zero new machinery.** `compute_hashes`
+(`build.py:731-766`) computes `item.content_hash` over the entry's own
+`invalidate` fields, links, and body — unmodified. `seal.py`, in its
+entirety, is unaffected: an append-only-typed entry is sealed the first
+time it's built, and any edit to it — including an edit to its
+`follows:` link, once frozen — is caught the same way an edited `log`
+entry is caught today. **Appending to a chain means creating a brand-new
+item; it never touches an existing entry's hash or seal, because nothing
+about appending edits an existing file.** This is the direct, complete
+answer to why the previous draft's two-hash model doesn't exist under this
+one: that model existed to solve a problem — one item, multiple mutable-
+yet-sealed sub-records — that this model doesn't have. An entry is never
+simultaneously "still growing" and "already sealed"; it's sealed, full
+stop, the moment it's first built, exactly like `log` today.
 
-**Under threads**, for thread `T`, both stored probes move from "the
-item's one value" to "the fold's current value," and the comparison logic
-is untouched:
+One thing worth confirming rather than assuming: sealing today hashes via
+`item.content_hash`, which is `invalidate`-fields-only
+(`seal._matches_sealed_hash`, `seal.py:65-104`, compares directly against
+it) — so a field marked `on_change: log`/`ignore` can already be edited on
+a sealed entry today without tripping the seal. That's a pre-existing
+gap, orthogonal to this design, not something threads introduce or need to
+fix; noted so it isn't mistaken for a new problem.
 
-1. `T`'s type declares a `status` field (unchanged — a type-level check).
-2. `fold(T, "checks")`'s owning entry has a `calc` block (the entry that
-   currently backs the folded `checks:` — see §5's per-entry-env note).
-3. `fold(T, "status")` differs from what `B` recorded.
-4. The normalized calc-block text of **the entry that currently backs
-   `fold(T, "checks")`** hashes the same as what `B` recorded.
+### What, if anything, still needs a thread-level hash
 
-The baseline gains the identical two fields the original design specified
-(`verdict`, `calc_hash`), just sourced from the fold instead of
-`item.fields["status"]`/the item's own calc block — no new baseline
-machinery beyond what §3 already needs for the fold hash itself, since
-`verdict`/`calc_hash` are the same kind of "small extra probe alongside the
-hash" the original design already argued for as a narrow, disclosed
-exception to `lifecycle.py`'s "assembly, not new machinery" posture. **The
-one piece worth calling out as slightly larger than "no change":** probe 4
-is no longer simply "this item's calc block," because a thread can carry
-several entries each with their own calc block over its life — the probe
-has to be pinned to *whichever entry currently backs the folded checks*,
-which means the baseline's `calc_hash` field needs to key off the same
-per-entry resolution §5 introduces for live check evaluation, not
-recompute independently. That's a real dependency between this feature and
-§5's per-entry-env bookkeeping, not a new mechanism of its own — the
-reframe is as small as the original document claimed, provided it's built
-*after* §5's fold-and-per-entry-env plumbing exists, not before.
+**Nothing load-bearing.** Coverage, checks, and the release gate all read
+the fold's *values* directly (§3), not a hash of them — there's no
+tamper-detection or change-detection question that a chain-level hash
+would answer that per-entry hashing doesn't already answer on its own. If
+`REQ-PWR-002`'s `satisfied_by` moves from one entry to a newer one (the
+chain grew, and the new tip took over the `satisfies:` declaration), that
+already shows up as an ordinary backlink change — no new hash needed to
+notice it.
+
+One place a **derived, optional, reporting-only** digest is genuinely
+useful: `refdes audit`'s "since last baseline" summary. A chain that
+gained five narrative entries but no field-level change reads as
+completely silent under hash-based diffing (§3 of the previous draft
+flagged exactly this case) — worth a coarse "has anything happened here"
+signal for a human skimming the report, computed at report time by
+hashing the sorted list of the chain's own entry hashes (a hash-of-hashes,
+purely for display), never stored, never compared against anything but
+itself between two `audit` runs. This is optional polish, not required for
+correctness, and it needs no new baseline field to exist — see next.
+
+### Baselines need no new fields at all
+
+This is a real, positive simplification over the previous draft, worth
+stating plainly: `lifecycle._items_map` (`lifecycle.py:165-183`) already
+records one row per local item — `{hash, type, title, hash_format}` — and
+under this model an entry *is* a local item, so it already gets a row,
+with no change to the baseline schema whatsoever. `diff_against`
+(`lifecycle.py:551-590`) is item-scoped and hash-only already; it reports
+a new entry as `added`, exactly correct — a chain growing by one entry
+*is* one item added, which is the truest possible description of what
+happened. Nothing about "which thread this belongs to" needs recording in
+the baseline for `diff_against`'s own job.
+
+The one place this matters for a *different* consumer:
+`docs/design/stale-arithmetic-signal.md`'s forward-compat note
+anticipated needing a fold sourced from "the thread" rather than one
+item — under this model, that reframes as: reconstruct "the chain's
+status/calc state as of the baseline" by walking the *same*
+`resolve_current` logic (§3), restricted to only the entries the baseline
+itself recorded (filter the walk to keys present in `baseline.items`),
+and compare that against `resolve_current` over the *current* project.
+Two walks, same function, different scopes — no new baseline fields, no
+new stored probes, because the baseline's existing per-item rows already
+carry everything the reconstruction needs.
+
+---
+
+## 5. Does `decision` still exist?
+
+**No — recommend retiring it, with `log` absorbing its fields.** Argued,
+not assumed:
+
+`decision`'s distinguishing properties today are: mutable (`status`,
+`rationale`, `checks` can all be edited in place) and not append-only.
+Under this model, **every entry is append-only** — revising a verdict
+means appending a new entry, never editing an old one, which is the
+entire premise of the chain. That erases the one structural property that
+justified `decision` being a separate, differently-behaved type from
+`log` in the first place. What's left distinguishing them is purely which
+*optional* fields an entry happens to use — a terse note sets `date`,
+`author`, `body`, maybe `addresses`; a verdict entry additionally sets
+`status`, `rationale`, `checks`, `satisfies`. Nothing in the schema engine
+needs two types to express "this item uses a larger subset of its type's
+optional fields than that one does" — that's what optional fields already
+mean, and forcing a rigid type boundary between "narrative" and "verdict"
+would make the natural, common case (one entry that both reports a bench
+result *and* moves the status forward) awkward to write.
+
+`log` is the type that survives and absorbs, not the reverse, because it
+was already closer to this model's shape — already `append_only: true`,
+already the type whose whole authoring convention is "add to it most days"
+(`docs/design-log.md`). The unified type:
+
+```yaml
+types:
+  log:
+    prefix: LOG
+    label: Log entry
+    plural: Log entries
+    append_only: true
+    preview: [date, author, status, summary]
+    satisfying_statuses: [accepted]     # from decision
+    check_severity: error               # from decision
+    fields:
+      date:      { type: date, required: true, on_change: invalidate }
+      summary:   { type: text, required: true, on_change: invalidate }
+      author:    { type: person, on_change: invalidate }
+      status:    { type: enum, on_change: invalidate,
+                   choices: [proposed, in_progress, accepted, on_hold, rejected, superseded] }
+      rationale: { type: text, on_change: invalidate, required_when: {status: rejected} }
+      options:   { type: options, on_change: invalidate }
+      checks:    { type: checks, on_change: invalidate }
+    include: [provenance]
+    links:
+      follows:        [log]         # new -- §1
+      addresses:      [requirement, bound]
+      satisfies:      [requirement]  # from decision
+      constrained_by: [bound]        # from decision
+      selects:        [component]    # from decision
+      supersedes:     [log]          # from decision, retargeted -- §6
+      blocked_by:     []             # from decision
+    body: { on_change: invalidate }
+```
+
+Real, disclosed field-level decisions this makes, each worth naming:
+
+- **`title` (decision) is dropped in favor of `summary` (log)**, already
+  required, already serving the same "one-line label" role. This is the
+  same kind of field unification `hardware@3` already did once
+  (`text:`/`method:` → `body:`, `model.py:191-198`'s comment on
+  `body_required`) — precedent exists in this codebase for exactly this
+  move, not a novel risk.
+- **`status` becomes optional** (it's required on `decision` today, not
+  declared at all on `log`). A narrative entry legitimately never sets it;
+  `satisfying_statuses`/`required_when: {status: rejected}` both already
+  tolerate an absent field correctly (§2 of `standard-library.md`).
+- **`stewardship` (`owner`, `last_reviewed`) is dropped**, matching `log`'s
+  existing exclusion of it (`standard-library.md` §1: "an append-only
+  entry has no reviewer rotation") — a verdict entry doesn't get a
+  reviewer-rotation field back just because it absorbed `decision`'s job.
+- **`option` (the design-debate preset) is untouched.** This merge is
+  scoped to `log`/`decision` only, matching the scoping discipline
+  `standard-library.md` already uses when it explicitly declines to widen
+  a change beyond its stated target.
+
+### What this costs the standard
+
+This is standard-content, not engine content (mirroring the split keys.md
+§7 already drew) — it lands in `standards/hardware/v4/base.yaml` and a
+real `migration.yaml`, neither written here (another session owns
+`v3/base.yaml`; a `v4` is this design's business once it's implemented,
+not this document's). §7 covers what that migration has to do.
+
+---
+
+## 6. Branching and merging
+
+### Two entries claiming the same predecessor
+
+**Legal, not an error.** §1's worked example shows this arising from
+ordinary concurrent editing, with nobody doing anything wrong — forbidding
+it outright would forbid a normal, recoverable outcome of two people
+working at once, and this is a file-based tool with no locking mechanism
+that could prevent it in the first place. Detected the same way the
+`blocked_by` cycle walk already is (`standard-library.md` §9: "checked
+once, as a dedicated build step... after ordinary link resolution"),
+reusing that pattern for a chain-fork check instead of a cycle check:
+
+```
+INFO items/main-io/log.yaml:40 [LOG-A-009] — this thread has forked: both
+  LOG-A-009 and LOG-A-011 declare follows: [k2p9w3x1r7]. Coverage and
+  checks treat an unmerged fork as unsettled -- append an entry declaring
+  follows: [both tips] to reconcile it, or leave the fork if the two
+  continuations are genuinely independent.
+```
+
+`info`, not `error` or even `warning` by default — matching the
+`blocked_by` stale-check's own reasoning (`standard-library.md` §9): a
+project with active parallel investigation trips this normally, and it
+would be noise at a higher severity. `refdes audit` always shows it
+regardless of visibility settings, the same posture every other `info`
+finding in this area already takes.
+
+### Merging
+
+An entry closes a fork by declaring `follows:` on more than one tip —
+already legal syntax (`follows:` is a list, like every other link), no new
+schema shape:
+
+```yaml
+- date: 2026-04-05
+  author: J. Bin
+  follows: [k_tip_a, k_tip_b]
+  summary: Reconciled -- going with the buck topology from the parallel
+    thermal analysis; the EMI concern from the other branch is addressed
+    by the added ferrite bead (see BND-EMI-004).
+  status: accepted
+```
+
+After this entry, `resolve_current`'s walk from either original tip
+reaches this single new tip — the fork is closed, `satisfying_statuses`
+can settle again (§3).
+
+### Cycles
+
+A hard build error, reusing `blocked_by`'s exact cycle-detection shape
+(`standard-library.md` §9) against the new edge type — `follows:` asserts
+a DAG the identical way `blocked_by:` does, and nothing about the check
+itself needs to differ beyond which link name it walks.
+
+### A chain superseding one that isn't its own
+
+**`supersedes:` stays a real, ordinary, cross-chain link**, distinct from
+`follows:`, and the distinction matters: `follows:` says "I continue *this*
+deliberation"; `supersedes:` says "I am a different, later deliberation
+that makes an old, separate one moot." These answer different questions
+and collapsing them would be wrong — a thread revising its own conclusion
+(new information, same question) is thread continuation via `follows:`,
+no `supersedes:` needed; a wholly separate decision replacing an old,
+already-concluded one (different question, different chain, opened
+independently) is `supersedes:`, targeting the old chain's — most
+naturally its head's — display id, resolved and folded exactly like
+`satisfies:` or any other ordinary link. Nothing about `supersedes:`
+needs chain-awareness at all; it's an inter-chain edge, not an intra-chain
+one.
+
+### `amends:` — decoupled from chain topology, not retired
+
+The previous draft retired `amends:` on the theory that a same-thread
+correction is just the next entry. That's still true for the common case,
+but it isn't the whole of what `amends:` does today: `docs/design-log.md`
+lets an entry amend *any* earlier entry, not only the current tip — a
+correction discovered later can point at exactly the entry it corrects,
+even if other entries happened in between. Under strict `follows:`-only
+chaining, pointing at anything other than the current tip *is* branching
+(§6, above) — which may be exactly right (a correction really is a
+divergence from what was believed) but conflates two different facts:
+"where does this sit in the chain" and "what, specifically, does this
+correct." **Recommendation: keep `amends:` as a plain, non-chain-forming
+annotation** — an ordinary link that names what an entry corrects without
+affecting `follows:`/`followed_by:` topology or the fold at all. An entry
+can (and typically will) declare both: `follows:` for its place in the
+chain, `amends:` for what it's correcting, which may or may not be its own
+immediate predecessor.
+
+`records:`/`recorded_by:` — finding 16's whole problem — still dissolves,
+for the reason the previous draft gave: the deliberation and its
+conclusion are positions in the same chain now, no cross-item link needed
+to associate them. A genuinely cross-chain "this entry's reasoning also
+fed a different, unrelated decision" case is rare enough in the record of
+real usage that this document doesn't propose a replacement mechanism for
+it — same disclosed gap `amends:` has for a cross-chain correction, use
+prose (`[[...]]`) until it proves common enough to need more.
 
 ---
 
 ## 7. Migration
 
-### Both a standard version bump and an engine change — same split keys.md already drew
+### Simpler than the previous draft's, and worth saying so plainly
 
-`docs/design/keys.md` §7 argued keys are "orthogonal to the standard
-library... an engine and storage concern, exactly like the content hash,
-the id ledger, or the board manifest." Threads split the identical way,
-and for the identical reason:
+The previous draft needed a `former_ids`-shaped propose/confirm tool to
+*group* existing items into new containers — real, substantial, new
+machinery. **This model needs no grouping step for correctness at all.**
+Every existing `log` item stays exactly what it is (already the surviving
+type). Every existing `decision` item becomes a `log` item with its fields
+carried over — a mechanical, per-item rename, structurally identical in
+shape to the `text:`/`method:` → `body:` migration `hardware@3` already
+shipped (`standards/hardware/v3/migration.yaml`), reusing `revise.py`'s
+existing atomic-rewrite engine (`apply()`) with no new transaction model
+needed:
 
-- **Engine layer** (new, standard-independent): the `entries:` reserved
-  key and its parser support (§1), per-entry key minting (§1), the fold
-  computation and `Project.folded_items` (§5), the two-hash model and
-  per-entry seals (§3), entry-pinned link composites (§4). None of this
-  mentions `log`, `decision`, or any bundled type name. A schema declares
-  a type as thread-shaped with a new `ItemType` flag:
+```yaml
+# sketch of standards/hardware/v4/migration.yaml -- fields: section only,
+# for illustration; the real file is another session's/a later change's to write
+fields:
+  decision:            # keyed by the OLD type name
+    title: null         # dropped -- summary already exists and serves the role (§5)
+types:
+  decision: log         # type rename; decision's own fields merge into log's
+```
 
-  ```yaml
-  types:
-    thread:
-      entries: true          # new engine-level flag, orthogonal to the standard
-      prefix: THR
-      ...
-  ```
+No item loses its id. No item's content hash needs reconstructing beyond
+what a type rename already requires (the type name is itself part of the
+hash payload, `build.py:676` — a `decision` → `log` rename already
+legitimately changes the hash the same way any type rename does today,
+and `revise.py`'s existing baseline/seal carry-forward machinery
+(`_carry_forward_baselines`, `_carry_forward_seals`) already handles
+exactly this case, unmodified). **This is the standard `refdes standard
+upgrade --to N` path this project already has, not new machinery.**
 
-  A `standard: none` project, or one pinned at `hardware@1`–`@3`, gets
-  none of this until it opts in — exactly keys' posture. A bespoke project
-  could declare its own `entries: true` type today, once the engine ships
-  it, with no standard-library involvement at all.
+### What migration does *not* do
 
-- **Standard layer**: `hardware@4`'s `base.yaml` replaces the `log` and
-  `decision` type declarations (`standards/hardware/v3/base.yaml:123-193`)
-  with one `thread` declaration, `entries: true`, merging their field sets
-  (`satisfies`, `constrained_by`, `selects`, `blocked_by` from `decision`;
-  `addresses` from `log`; both keep `status`/`rationale`/`options`/`checks`
-  as foldable), and a real `migration.yaml` doing the project-content
-  transform, below.
+**It does not retroactively construct `follows:` chains.** An existing
+project's `log`/`decision` items become standalone, id-having, `follows:`-
+less heads — single-entry threads, one per existing item, with zero data
+loss and zero risk. This is correct and sufficient: nothing about
+coverage, checks, hashing, or rendering requires an item to be part of a
+multi-entry chain; a chain of length one is exactly as valid as one of
+length five (§1: absence of `follows:` just means "nothing precedes
+this," which is true).
 
-### The project-content migration is not a mechanical rename
+**Reconstructing historical chains — inferring `follows:` edges from
+existing `records:`/`addresses:` overlap between old `log` and `decision`
+items — is optional, best-effort, separate tooling**, decoupled entirely
+from the type-merge migration above. It would reuse the same
+confidence-scored propose/confirm shape `former_ids.propose` already has
+(43 lines, `former_ids.py`), for the identical reason: matching "which log
+entries led to this decision" from indirect evidence (shared `addresses:`
+targets, proximity in `date:`) is a similarity-scoring problem, not a
+mechanical one, and should stay opt-in and human-confirmed rather than
+folded into the required upgrade path. Whether this is ever built is a
+separate decision from whether `hardware@4` ships at all.
 
-Every existing `hardware@N → @N+1` migration
-(`standards/hardware/v3/migration.yaml` is the current example: renaming
-`text:` → `body:` on two types) is a 1:1, per-field, mechanically reversible
-rewrite — `revise.py`'s existing `apply()` engine (compute every rewrite in
-memory, verify, write once, roll back on any failure) is built entirely
-around that shape. **Collapsing N `log` items and M `decision` items into
-fewer `thread` items with reordered, re-keyed entries is a different kind
-of transform** — it has to *group* items, not just rewrite fields on each
-one independently, and grouping is where it stops being mechanical:
+### Standard version, or engine change, or both
 
-1. **Confident grouping** — a `log` item that already declares
-   `records: [DEC-X]` (or `DEC-X` already declares the finding-16-shaped
-   `recorded_by: [log]`) has an explicit, unambiguous edge to fold into.
-   These become one thread, log entries first (by `date:`), the decision
-   last.
-2. **Heuristic grouping** — a `log` item with no `records:` edge, but
-   whose `addresses:` target set overlaps a `decision`'s `satisfies:`
-   target set, is a plausible same-thread candidate, not a certain one.
-   This is structurally the same confidence-scoring problem
-   `former_ids.propose` already solves for a different question (matching
-   same-type items across a renumbering by similarity) — reuse its
-   propose-then-confirm shape (`former_ids.py`'s `propose`, 43 lines),
-   not `revise.apply()`'s atomic-transaction shape. `refdes standard
-   upgrade --to 4` should print a proposed grouping and require
-   confirmation (or a hand-edited grouping file) before writing anything,
-   the same posture `refdes standard remove-preset`'s dry-run already
-   takes for a different kind of consequential change.
-3. **No group at all** — a `log` item that addresses nothing any decision
-   satisfies, or a `decision` with no log entries pointing at it at all
-   (a terse, standalone decision — common) — becomes a **single-entry
-   thread**, its one existing item folding into one entry unchanged. This
-   is the common, easy case and should be the default outcome whenever
-   grouping confidence is low, rather than guessing.
-4. **Genuinely ambiguous** — a `log` entry `records:`-linked to *two*
-   decisions (legal today, `records: [decision]` is a list), or a `log`
-   entry amending another `log` entry that itself belongs to a different
-   proposed group. These need a human call; the migration tool's job is to
-   surface the conflict, not silently pick one, mirroring the ambiguity
-   reporting `revise.check_ambiguous` already does for the ordinary
-   rename case.
-
-This is real, new migration machinery — closer in size and shape to a
-second `former_ids.py` than to an extension of `revise.py`'s existing
-engine. It is the single largest unknown in this document's cost estimate
-(§9 item 3).
-
-### What happens to old ids
-
-Entries have keys, not display ids (§1) — a former standalone `LOG-A-003`
-becomes an entry with no citable id of its own once folded into a thread.
-Two consequences, both worth stating rather than discovering later:
-
-- **`former_ids:` moves to the thread**, coarsened: `THR-PWR-002` records
-  `former_ids: [LOG-A-003, LOG-A-004, DEC-PWR-001]` (every id that folded
-  into it), so an old external citation to any of them still resolves —
-  but resolves to the *whole thread*, losing the entry-level precision the
-  citation originally had. A schematic sheet from 2025 citing `LOG-A-003`
-  will, after migration, land on a page showing the whole deliberation
-  arc rather than the one entry it meant. This is a real, disclosed loss
-  of precision for old citations, not a silent one — `former_ids`'s
-  existing "(formerly LOG-A-003)" marker still fires, it just now marks a
-  thread instead of an entry.
-- **A finer alternative — anchor links** (`THR-PWR-002.html#k7f3m2q9x4b`,
-  or a rendered per-entry "formerly LOG-A-003" marker positioned next to
-  the specific entry it used to be) is possible and would close this gap,
-  but it needs the migration to record a former-id-to-*entry-key* mapping,
-  not just a former-id-to-thread-key one — a real extension to
-  `former_ids:`'s current thread-only shape. Flagged as a nice-to-have,
-  not required for a first cut (§9).
-
-### Existing baselines and seals
-
-`docs/design/keys.md` §5(c)'s conditional-carry-forward rule (recompute
-the old-format hash from current content; carry forward only if it
-matches) is the right shape here too, but it cannot be reused verbatim,
-because there is no longer a 1:1 mapping from an old baseline entry (one
-`log` or `decision` id) to one new entry (one thread key) — a baseline
-recorded five old ids that are about to become five entries of *one*
-thread. The migration has to rewrite baseline/seal entries *through* the
-same grouping decision §"project-content migration" makes, not
-independently of it: an old baseline's `LOG-A-003: {hash: ...}` becomes a
-seal entry for one specific *entry* key inside a specific thread (§3), and
-an old baseline's `DEC-PWR-001: {hash: ...}` becomes the *fold hash* of
-whatever thread it landed in — which is **not** simply "carry the old hash
-forward," because the fold hash is a different computation over
-potentially-different inputs (folded across the whole thread, not one
-item's own fields) even when the content genuinely hasn't changed. This
-needs its own conditional check, parallel in spirit to §5(c) but not
-literally reusable: recompute what the *fold* hash would be from the
-grouped, migrated content, and only claim "unchanged since baseline" when
-that matches a *reconstruction* of the old per-item hash from the same
-grouped content — meaningfully more computation than a straight carry-
-forward, and another concrete argument for prototyping the migration path
-against a real project with stamped baselines before committing (§9 item
-3, shared with the grouping question above since they're the same
-underlying data).
+Both, and the split is the identical one keys.md §7 already drew for a
+different feature: the engine layer (`follows:`/`followed_by:` as a link
+type any project can declare; the id-optional item state, §2; the
+`resolve_current` walk, §3) is standard-independent — a bespoke
+`standard: none` project can declare its own chainable type today, once
+the engine ships this, with no involvement from the bundled standard at
+all. The standard layer (`hardware@4` merging `log`/`decision`) is a
+version bump on top of that engine capability, exactly as `hardware@3`'s
+`body:` unification was a version bump on top of engine capabilities that
+already existed independently.
 
 ---
 
-## 8. What breaks — every consumer that reads stored state
-
-Named concretely, per file, rather than gestured at:
+## 8. What breaks — per file, concretely
 
 | Consumer | File | What changes |
 |---|---|---|
-| Content hashing | `build.py:655-767` (`compute_hashes`, `_hash_payload`, `_link_hash_token`) | Splits into entry hash (§3, new) and fold hash (§3, `_hash_payload` reused verbatim against a fold instead of `item.fields`/`item.links`) |
-| Coverage | `build.py:380-540` (`compute_coverage`) | Reads folded items for any `entries: true` type (§5); `satisfying_statuses`/`verifying_statuses` checks unchanged in logic, changed in source |
-| Checks | `build.py:576-652` (`run_checks`) | `checks:`/`env` resolution becomes per-entry-scoped (§5); live comparison against a bound's `limit:` is unaffected |
-| Append-only sealing | `seal.py`, whole file (294 lines) | Rewritten for per-entry seals instead of per-item; `--reseal` semantics need an entry-level scope option alongside the existing board-level one; the `content_hash`-reuse gap noted in §3 is closed as a side effect |
-| Baselines | `lifecycle.py:165-260` (`_items_map`, `migrate_hash_format`), `:551-590` (`diff_against`) | Keys on thread key + fold hash (§3); `diff_against`'s logic is unchanged, its inputs are fold-based; new "entries added, fold unchanged" reporting (§3) |
-| The stale-arithmetic signal | not yet implemented; `docs/design/stale-arithmetic-signal.md` | Both stored probes move from item-scoped to fold-scoped (§6); depends on §5's per-entry-env plumbing existing first |
-| Link resolution | `links.py` (266 lines), `build.resolve_link_target` | Two-tier resolution: thread-key composites (unchanged from keys.md §3) plus the new entry-pinned composite form (§4); `item.resolved_links` stays thread-scoped, a new `resolved_entry_pins` field carries the extra precision |
-| Rendering | `render.py` (917 lines) | Thread pages need an entry timeline (reusing `design-log.md`'s existing timeline rendering) *plus* a folded-summary panel (reusing `decision`'s existing verdict/rationale/checks rendering) on one page; hover previews for entry-pinned links show the pinned entry, not the live fold |
-| `{{index}}`/`{{cascade}}` generated blocks | `blocks.py` (448 lines) | `{{index by="status" type="thread"}}` groups by `fold(T, "status")`, not a literal field — needs the virtual-item read (§5); `{{cascade}}`'s walk already operates on `resolved_links`, so it is largely unaffected once that's fold-backed |
-| `blocked_by`/the cascade report | `blocked.py` (141 lines) | Root-cause walk and the stale-blocker diagnostic (`standard-library.md` §9) both read a blocker's settled status via `satisfying_statuses`/`verifying_statuses` against the fold — same one-line dispatch as coverage |
-| `revise`/migration engine | `revise.py` (1,127 lines) | The existing atomic rewrite engine is reused for ordinary field renames within threads (unaffected fields); the log+decision collapse itself needs new, `former_ids`-shaped propose/confirm machinery (§7), not an extension of `apply()` |
-| Cross-workspace lint | `workspaces.py` (136 lines) | Reads `resolved_links`; unaffected once that's fold-backed, same as `{{cascade}}` |
-| `stub-tests` dedup | `stub_tests.py` (167 lines) | Dedupes by declared `verifies:` edge via `resolved_links`; unaffected for the same reason |
-| The release gate | `lifecycle.py` — `_rule_draft_items`, `_draft_field_name` (`:317-339`) | `draft_items` reads `fold(T, "status")` instead of `item.fields.get("status")`; `uncovered_requirements`/`unverified_requirements` unaffected (they read `project.coverage`, already fold-aware via §5) |
-| Schema | `schema.py` (531 lines), `schema-reference.md` | New `entries: bool` flag on `ItemType` (§1/§7); schema validation needs to distinguish thread-level fields from entry-level foldable ones — genuinely new schema surface, not a reused mechanism |
-| JSON Schema emission | `schema_json.py` (286 lines) | A thread's emitted schema needs an `entries:` array branch with its own per-field shape, distinct from the top-level item branch — a third document shape alongside the two `standard-library.md` §12 already specifies |
-| CLI | `cli.py` (1,211 lines) | No new command is strictly required — appending an entry is "edit the file," matching today's log-entry authoring model exactly (`design-log.md`: "Log entries suit a list file — you add to it most days") — but `refdes standard upgrade --to 4`'s propose/confirm flow (§7) is new, non-trivial CLI surface |
+| Item storage | `parse.py:701-740` (`load_items`, `_resolve_id_value`) | `project.items` re-keyed on `item.key`; new rule distinguishing "pending" from "permanently id-less" via `follows:` presence (§2) |
+| Project model | `model.py` (`Project.items`, new `Project.items_by_id`) | Re-keying (§2); `Item.slug` falls back to `self.key` when `self.id` is empty |
+| Link-target resolution | `build.py:248` (`_key_index`), `build.resolve_link_target` | New third case: a bare, well-formed key with no display half resolves directly (§2) — this is the only place `follows:`'s targets actually get resolved |
+| Chain write-back | new, alongside `links.expand_missing` (`links.py`) | Reuses `ids.insert_into_markdown`/`insert_into_list` (mechanism), new resolution logic: walk forward to the current tip, freeze once (§1) |
+| Coverage | `build.py:380-540` (`compute_coverage`) | Small, precise addition: fall back to `resolve_current(..., "status")` only when the declaring entry itself doesn't set `status` (§3) |
+| Checks | `build.py:576-652` (`run_checks`) | **Unaffected** — confirmed, not merely assumed (§3) |
+| Hashing | `build.py:655-767` (`compute_hashes`) | **Unaffected** — confirmed (§4) |
+| Seals | `seal.py`, whole file | **Unaffected** — confirmed (§4) |
+| Baselines | `lifecycle.py:165-260`, `:551-590` | **Unaffected** — no new fields (§4); the stale-arithmetic signal's forward-compat note reframes as two scoped walks, no new baseline schema |
+| Fork/cycle detection | new module, shaped like `blocked.py` (141 lines) | Chain-fork `info` diagnostic and `follows:` cycle `error`, both reusing `blocked_by`'s existing walk-and-detect pattern (§6) |
+| The chain-fold utility | new module | `resolve_current` (§3) — the one genuinely new piece of query machinery this design adds |
+| `former_ids` / the id ledger | `former_ids.py`, `ids.py` | **Unaffected** — confirmed (§2) |
+| Rendering | `render.py` | Page slugs for id-less items fall back to key (§2); a chain view (reusing `design-log.md`'s existing timeline rendering, plus a "currently concludes" panel sourced from `resolve_current`) — no new document type, an extension of existing item-page rendering |
+| `{{index}}`/`{{cascade}}` | `blocks.py` (448 lines) | `{{index by="status" type="log"}}` needs the same `resolve_current` fallback coverage uses, for the identical reason (§3); `{{cascade}}`'s existing walk is otherwise unaffected |
+| `blocked_by` cascade | `blocked.py` | Unaffected in its own logic; its cycle-detection *pattern* is reused (not shared code) for `follows:` (§6) |
+| `revise`/migration engine | `revise.py` (1,127 lines) | **Reused as-is** for the type-merge migration (§7) — no new transaction model, unlike the previous draft's conclusion |
+| Schema | `schema.py`, `schema-reference.md` | New link type `follows`/`followed_by`; no new schema *surface* beyond an ordinary link declaration — no `entries:` shape, no per-entry sub-schema, both eliminated relative to the previous draft |
+| CLI | `cli.py` | No new command strictly required — appending a continuation entry is "write the file, run a writable command," identical to writing a `log` entry today |
 
-**What does *not* need to change:** `calc.py` (777 lines, evaluation logic
-is calc-block-scoped already, unaware of items at all), `citations.py` (438
-lines, citation resolution is per-field regardless of which item declares
-the field), `boards.py`/`nav.py`/`pages.py` (board/workspace/page
-machinery is orthogonal to item vs. thread), `parts.py`-shaped indexing
-(§10 of `standard-library.md`, keyed on field name not item shape), the
-Damm check character and key-minting mechanism itself (reused as-is, §1).
-
----
-
-## 9. What to prototype before committing
-
-In order of how likely each is to change the design:
-
-1. **The entry-pinned link composite, round-tripped through the real
-   write-back path.** `THR-PWR-002@kb4h8m1z2t#k2p9w3x1r7` needs to survive
-   flow-style entries, block sequences, and the same write-back hazards
-   keys.md §9 item 1 already flagged for the single-`@` case — doubled
-   here, since there are now two separator characters in one string
-   instead of one.
-2. **A real `.md` multi-entry format, or the decision to live without one**
-   (§1). This is the one open question in this document with no
-   recommendation attached beyond "start without it" — prototype a
-   plausible delimiter shape and read it as an author would before
-   deciding whether the ergonomics loss of list-file-only threads is
-   acceptable in practice.
-3. **The log+decision grouping migration, against this repository's own
-   project** (20 items, per `docs/design/keys.md` §7's own adoption
-   test). Confirm the confident/heuristic/none split (§7) actually
-   produces sensible threads on real data, and that the baseline/seal
-   reconstruction (§7, closing paragraph) behaves correctly against a
-   project with items genuinely changed since their last stamp, not just
-   the easy unchanged case.
-4. **The per-entry `env`/calc-block resolution for checks** (§5). This is
-   the piece of machinery this document introduces with the least direct
-   precedent in the current codebase (today, `item._env` is one dict per
-   item; under threads it needs to become "one dict per entry that
-   declares calc blocks," looked up by whichever entry backs the current
-   `checks:` fold) — worth confirming against a thread with two
-   independent calc blocks in two different entries before assuming the
-   design in §5 is sufficient.
-5. **Coverage regression from status un-settling** (§5's "a thread can
-   move backward through coverage stages"). Build a small test project
-   where a thread's status flips `accepted` → `on_hold` → `accepted` again
-   across three builds, and confirm every downstream surface
-   (`coverage.html`, the release gate, `refdes audit`'s baseline diff)
-   describes that history sensibly rather than just the current snapshot.
+**What does *not* need to change, beyond what §4/§8 above already
+confirms:** `citations.py`, `calc.py` (explicitly out of scope for this
+document — another session's work), `boards.py`/`nav.py`/`pages.py`,
+`workspaces.py`, `stub_tests.py` — all of these read `resolved_links`,
+which is unaffected in shape; the only new thing they'd need is the same
+`resolve_current` fallback coverage uses, and only if they turn out to
+query a field that isn't reliably co-located with the link declaration,
+which — unlike coverage's `satisfying_statuses` — none of them currently
+do.
 
 ---
 
 ## Scale
 
-**Rough estimate, not measured** (unlike `docs/design/keys.md` §4's line
-tables, which were counted against working code — nothing here has been
-built yet to count against): this touches a meaningfully larger fraction
-of the ~12,100-line engine than keys did. Keys added one new concept
-(identity) threaded through existing single-item machinery; threads add a
-new *document shape* (one item, many entries) underneath machinery that
-has assumed "one item, one set of fields, one hash" since the first line
-of `parse.py` was written. The consumers in §8's table span build.py,
-seal.py, lifecycle.py, links.py, render.py, blocks.py, blocked.py,
-schema.py, schema_json.py, and revise.py — nine of the ten largest modules
-in the codebase — though the *virtual-item* pattern (§5) is specifically
-designed to keep most of that contact to a one-line dispatch per call
-site rather than a rewrite, so line count is a poor proxy for risk here:
-the real cost concentrates in a small number of genuinely new pieces
-(the fold engine itself, per-entry sealing, the entry-pinned link
-resolver, and the migration's grouping logic) rather than being spread
-evenly across the touched files. Those four are exactly §9's prototype
-list, in the order that matters most.
+Meaningfully smaller than the previous draft's estimate, and it's worth
+being explicit about why: the previous draft's cost concentrated in a
+projection engine, a two-hash model, a new document format, and a
+bespoke migration tool — four separate pieces of substantial new
+machinery. This model needs one new piece of real machinery
+(`resolve_current` and the fork/cycle check that goes with it, together
+well under `blocked.py`'s 141 lines), one structural but mechanical
+refactor (`project.items` re-keyed on surrogate key, §2 — touching perhaps
+a dozen call sites, each a small, well-understood change), and confirms —
+rather than invents — that hashing, seals, baselines, and checks need
+**no changes at all**. The standard-layer migration reuses existing,
+proven machinery outright (§7). If the previous draft was "a third to a
+half of the engine has some contact with this," this one is closer to
+"three or four files gain real new logic, a dozen more gain a small,
+mechanical fix, and the rest are confirmed unaffected."
 
 ---
 
-## Where you might disagree
+## Where the new model is worse, honestly
 
-- **Entry-pinned links resolve to the thread for graph-walking purposes,
-  never to the entry itself** (§4). If a project wants coverage or
-  `blocked_by` to treat "satisfied as of this specific entry" as
-  meaningfully different from "satisfied, currently," this document's
-  model doesn't support that — it was a deliberate simplification to keep
-  the virtual-item pattern from needing two parallel graphs.
-- **List-file-only threads, with the `.md` multi-entry shape deferred**
-  (§1). This trades real authoring ergonomics for a smaller first cut. If
-  the ergonomics loss turns out to matter more than expected, the honest
-  fix is prototyping item 2 sooner, not shipping the smaller version
-  permanently.
-- **The migration's grouping step needs a human-confirmed propose step,
-  not an atomic mechanical transaction** (§7). This is slower and more
-  disruptive to run than every prior `standard upgrade` step, and is the
-  single biggest departure from this project's existing migration
-  discipline. An alternative — ship threads only for *new* content, and
-  leave existing `log`/`decision` items exactly as they are, unmigrated,
-  forever — avoids this cost entirely at the price of every real project
-  living with both shapes side by side indefinitely. Not recommended here,
-  but a legitimate fallback if §9 item 3's prototype turns out badly.
-- **Sealing hashes an entry's full content, not just its `invalidate`
-  fields** (§3), a behavior change from how `log` items are sealed today.
-  This closes a real gap, but it is still a change in what "tampering"
-  means for anyone relying on today's (arguably accidental) looser
-  behavior.
+- **Branching is a real new failure mode a nested-entry model structurally
+  couldn't have.** A list inside one item can't fork; a graph of separate
+  items can, and does, from nothing more than ordinary concurrent editing
+  (§1's worked example). This needs its own diagnostic and its own
+  coverage-stage rule (§3, §6) — real, new complexity the previous draft's
+  wrong model didn't have to solve, precisely because it was wrong in a
+  way that happened to avoid this problem.
+- **The fold is a graph walk across files, not a list scan within one.**
+  Cheaper to author into (no new document format), more expensive to
+  compute and reason about — `resolve_current` has to cross file
+  boundaries and handle a DAG with possibly multiple heads and multiple
+  tips, where the previous (wrong) model's fold was a single, bounded,
+  in-memory list.
+- **An entry's place in a narrative is no longer visually contiguous.**
+  Today's `log.yaml` list file shows a whole conversation in one place,
+  read top to bottom. Under this model, a chain's entries can legitimately
+  scatter across different files (different boards, different authors'
+  working files) with only the `follows:` graph — not physical proximity —
+  showing they belong together. The rendered chain view (§8) exists
+  specifically to compensate for this; it is a compensating mechanism,
+  not evidence the underlying authoring experience is as good as reading
+  one file top to bottom.
+
+## Where it's better
+
+- **No new document format.** The previous draft's single largest,
+  least-resolved cost (§1 in that draft) is eliminated outright — entries
+  are ordinary items in the two shapes that already exist.
+- **Hashing and seals need zero new machinery**, confirmed in §4, against
+  the previous draft's two-hash model — a real, load-bearing piece of
+  complexity that turns out not to be needed once entries have independent
+  identity.
+- **Migration reuses `revise.py`'s existing engine outright** (§7),
+  against the previous draft's bespoke propose/confirm tool — because
+  there is no grouping step required for correctness, only an optional,
+  decoupled, best-effort one.
+- **Checks need no per-entry-env resolution problem** (§3) — that
+  complexity in the previous draft was an artifact of entries sharing a
+  container; it doesn't exist once each entry is independently the thing
+  that owns its own calc blocks, exactly as `decision` already is today.
+
+---
+
+## Diff from the previous draft, summarized
+
+| | Previous draft | This draft |
+|---|---|---|
+| An entry is | a sub-record inside one `thread` item | an ordinary item |
+| Document format | new, unbuilt (`.md` multi-entry shape needed) | none needed — existing `.md`/`.yaml` shapes work unchanged |
+| Chain/thread identity | the container item's own key | emergent from the `follows:`/`followed_by:` graph; no single canonical key once merges exist |
+| Link target for "continue this" | a new `#`-separated entry-pin composite | a bare key, written by a tool-mediated write-back reusing the existing composite mechanism |
+| Hashing/seals | two-hash model (entry hash + fold hash), new machinery | unchanged, per-entry, zero new machinery |
+| Baselines | new fold-hash fields per thread | no new fields |
+| Coverage/checks | virtual-item projection table, computed per build | small, targeted fallback (`resolve_current`), called on demand |
+| `decision` as a type | not fully resolved — flagged as an open question leaning toward keeping it | retired; merges into `log` |
+| Migration | bespoke propose/confirm grouping tool, required | mechanical type-merge via existing `revise.py`; grouping is optional and decoupled |
+| Branching | not addressed (the container model couldn't fork) | first-class: forks are legal, detected, foldable-to-undefined until merged |
+| Biggest new risk | the multi-entry document format | `project.items` re-keying (§2) and branching (§6) |
