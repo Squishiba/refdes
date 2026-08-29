@@ -130,6 +130,77 @@ def test_misplaced_tolerance_error_reaches_the_build_diagnostic(tmp_path):
     assert "calc 'P': a tolerance belongs on the right-hand side — P : W = V * I ± 10%" == message
 
 
+# ----------------------------------------------------------- source position
+
+
+def test_extract_blocks_with_lines_offset_matches_block_position():
+    body = "prose\n\n```calc\nx = 1\n```\n\nmore prose\n\n```calc\ny = 2\n```\n"
+    blocks = calc.extract_blocks_with_lines(body)
+    lines = body.split("\n")
+    assert lines[blocks[0][1]] == "x = 1"
+    assert lines[blocks[1][1]] == "y = 2"
+
+
+def test_calc_line_records_absolute_source_position(tmp_path):
+    (tmp_path / "refdes.yaml").write_text(
+        "site: { title: T, out: _site }\n"
+        "types:\n  decision: { prefix: DEC, fields: {} }\n",
+        encoding="utf-8",
+    )
+    items = tmp_path / "items"
+    items.mkdir()
+    source = (
+        "---\nid: DEC-001\ntype: decision\n---\n\n"
+        "prose\n\n```calc\nV = 3.3 V\nI = 1.2 A\n```\n"
+    )
+    (items / "dec.md").write_text(source, encoding="utf-8")
+    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    parse.load_items(project)
+    build_mod.build(project)
+    item = project.items["DEC-001"]
+    lines = source.splitlines()
+    by_name = {c.name: c for c in item.calcs}
+    assert lines[by_name["V"].line - 1].strip() == "V = 3.3 V"
+    assert lines[by_name["I"].line - 1].strip() == "I = 1.2 A"
+
+
+def test_calc_line_position_reaches_items_json(tmp_path):
+    from refdes import render
+
+    (tmp_path / "refdes.yaml").write_text(
+        "site: { title: T, out: _site }\n"
+        "types:\n  decision: { prefix: DEC, fields: {} }\n",
+        encoding="utf-8",
+    )
+    items = tmp_path / "items"
+    items.mkdir()
+    (items / "dec.md").write_text(
+        "---\nid: DEC-001\ntype: decision\n---\n\n```calc\nV = 3.3 V\n```\n",
+        encoding="utf-8",
+    )
+    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    parse.load_items(project)
+    build_mod.build(project)
+    payload = render.items_json(project)
+    item_json = next(i for i in payload["items"] if i["id"] == "DEC-001")
+    expected_line = project.items["DEC-001"].calcs[0].line
+    assert item_json["calcs"][0]["line"] == expected_line
+    assert isinstance(expected_line, int)
+
+
+def test_body_line_is_none_for_a_list_file_item():
+    """A list file's `body:` key has no cheap per-line position (see
+    Item.body_line's docstring) -- calc line numbers degrade to None rather
+    than a guess."""
+    project = _project()
+    checked = 0
+    for item in project.local_items:
+        if item.source_file.endswith((".yaml", ".yml")) and item.body:
+            assert item.body_line is None
+            checked += 1
+    assert checked > 0  # otherwise this is vacuously true -- confirm the fixture still has one
+
+
 def test_mil_is_a_length_not_pints_angular_mil():
     """pint reads a bare `mil` as the NATO angular mil, which is dimensionless.
 

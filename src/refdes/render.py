@@ -425,6 +425,7 @@ def items_json(project: Project) -> dict:
                     "result": c.result,
                     "bounds": c.bounds,
                     "error": c.error,
+                    "line": c.line,
                 }
                 for c in item.calcs
             ],

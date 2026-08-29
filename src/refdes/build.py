@@ -546,24 +546,27 @@ def compute_coverage(project: Project) -> None:
 def run_calcs(project: Project) -> None:
     for item in project.local_items:
         env: dict[str, calc.Value] = {}
-        for block in calc.extract_blocks(item.body):
-            for outcome in calc.evaluate_block(block, env):
+        for block, offset in calc.extract_blocks_with_lines(item.body):
+            start_line = item.body_line + offset if item.body_line is not None else None
+            for outcome in calc.evaluate_block(block, env, start_line=start_line):
                 line = CalcLine(
                     name=outcome.name,
                     expression=outcome.expression,
                     comment=outcome.comment,
                     annotation=outcome.annotation,
+                    line=outcome.line,
                 )
+                diag_line = outcome.line if outcome.line is not None else item.source_line
                 if outcome.warning:
                     project.warn(
                         f"calc {outcome.name}: {outcome.warning}",
-                        file=item.source_file, line=item.source_line, item_id=item.id,
+                        file=item.source_file, line=diag_line, item_id=item.id,
                     )
                 if outcome.error:
                     line.error = outcome.error
                     project.error(
                         f"calc {outcome.name or outcome.expression!r}: {outcome.error}",
-                        file=item.source_file, line=item.source_line, item_id=item.id,
+                        file=item.source_file, line=diag_line, item_id=item.id,
                     )
                 else:
                     line.result = calc.format_value(outcome.value, project.sigfigs)

@@ -323,6 +323,11 @@ class CalcLine:
     comment: str = ""
     error: str | None = None
     annotation: str = ""    # declared unit, e.g. "W" in `P_diss : W = ...`
+    # Absolute 1-indexed source line this assignment was written on, or None
+    # when the owning item's body has no known position (see Item.body_line).
+    # What lets an editor match a calc result to *its* line rather than the
+    # first line that happens to share its name.
+    line: int | None = None
 
 
 @dataclass
@@ -361,6 +366,13 @@ class Item:
     backlinks: dict[str, list[str]] = field(default_factory=dict)
     source_file: str = ""
     source_line: int = 1
+    # Absolute 1-indexed line of body's own first line in source_file -- distinct
+    # from source_line (the front-matter's), since calc diagnostics and the
+    # editor extension need to point *inside* the body. None when body did not
+    # come from a markdown file's own text (a list file's `body:` key has no
+    # cheap per-line position without deeper YAML-loader surgery), in which case
+    # calc line numbers fall back to source_line rather than guessing.
+    body_line: int | None = None
     # Populated during build:
     calcs: list[CalcLine] = field(default_factory=list)
     checks: list[CheckResult] = field(default_factory=list)

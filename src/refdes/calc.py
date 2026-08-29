@@ -670,6 +670,9 @@ class CalcOutcome:
     error: str | None
     annotation: str = ""
     warning: str | None = None
+    # Absolute 1-indexed source line, or None when the caller didn't supply
+    # evaluate_block a start_line to compute one from.
+    line: int | None = None
 
 
 def assigned_names(source: str) -> set[str]:
@@ -703,12 +706,23 @@ def convert_value(value: Value, unit: str) -> Value:
         raise CalcError(f"unknown unit {unit!r} in declaration") from exc
 
 
-def evaluate_block(source: str, env: dict[str, Value]) -> list[CalcOutcome]:
-    """Evaluate one ```calc block, threading `env` through the lines."""
+def evaluate_block(
+    source: str,
+    env: dict[str, Value],
+    start_line: int | None = None,
+) -> list[CalcOutcome]:
+    """Evaluate one ```calc block, threading `env` through the lines.
+
+    `start_line` is the absolute 1-indexed source line of this block's first
+    line (`source.splitlines()[0]`), or None when the caller has no source
+    position for it (see Item.body_line) -- every CalcOutcome.line is then
+    None too, rather than a guess.
+    """
     outcomes: list[CalcOutcome] = []
     names = assigned_names(source)
 
-    for raw_line in source.splitlines():
+    for offset, raw_line in enumerate(source.splitlines()):
+        line_number = start_line + offset if start_line is not None else None
         line = raw_line.rstrip()
         if not line.strip() or line.strip().startswith("#"):
             continue
@@ -736,7 +750,7 @@ def evaluate_block(source: str, env: dict[str, Value]) -> list[CalcOutcome]:
                         name, expression, comment, None,
                         "a tolerance belongs on the right-hand side — "
                         f"{name} : {unit_part} = {expression} ± {tol_part}",
-                        annotation,
+                        annotation, line=line_number,
                     )
                 )
                 continue
@@ -745,7 +759,8 @@ def evaluate_block(source: str, env: dict[str, Value]) -> list[CalcOutcome]:
             if not match:
                 outcomes.append(
                     CalcOutcome("", line.strip(), comment, None,
-                                "expected an assignment of the form 'name = expression'")
+                                "expected an assignment of the form 'name = expression'",
+                                line=line_number)
                 )
                 continue
             name, expression = match.group(1), match.group(2)
@@ -757,21 +772,36 @@ def evaluate_block(source: str, env: dict[str, Value]) -> list[CalcOutcome]:
                 value = convert_value(value, annotation)
         except CalcError as exc:
             outcomes.append(
-                CalcOutcome(name, expression, comment, None, str(exc), annotation, warning)
+                CalcOutcome(name, expression, comment, None, str(exc), annotation,
+                            warning, line=line_number)
             )
             continue
         except Exception as exc:  # pint and math surface a variety of types
             outcomes.append(
-                CalcOutcome(name, expression, comment, None, str(exc), annotation, warning)
+                CalcOutcome(name, expression, comment, None, str(exc), annotation,
+                            warning, line=line_number)
             )
             continue
 
         env[name] = value
         outcomes.append(
-            CalcOutcome(name, expression, comment, value, None, annotation, warning)
+            CalcOutcome(name, expression, comment, value, None, annotation,
+                        warning, line=line_number)
         )
     return outcomes
 
 
 def extract_blocks(body: str) -> list[str]:
-    return CALC_BLOCK_RE.findall(body)
+    return [block for block, _ in extract_blocks_with_lines(body)]
+
+
+def extract_blocks_with_lines(body: str) -> list[tuple[str, int]]:
+    """Like extract_blocks, but paired with each block's 0-indexed line offset
+    within `body` -- the piece a caller needs to turn a line number inside the
+    block into an absolute source line (add Item.body_line)."""
+    out = []
+    for match in CALC_BLOCK_RE.finditer(body):
+        block = match.group(1)
+        offset = body.count("\n", 0, match.start(1))
+        out.append((block, offset))
+    return out

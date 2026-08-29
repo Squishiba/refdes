@@ -382,7 +382,13 @@ function updateCalcDecorations(editor) {
 
     const item = byId.get(itemIdAtLine(document, i));
     if (!item) continue;
-    const calc = (item.calcs || []).find((c) => c.name === assign[1]);
+    // Match by source line, not by name: two calc blocks in the same item can
+    // assign the same name (refdes now rejects that at build time, but an
+    // unbuilt or stale-index document can still show it), and `.find()` by
+    // name alone always grabbed the first one, decorating every later
+    // same-named line with the first line's stale result. `line` is 1-indexed
+    // from `refdes index`; `i` here is 0-indexed.
+    const calc = (item.calcs || []).find((c) => c.line === i + 1);
     if (!calc) continue;
 
     const label = calc.error

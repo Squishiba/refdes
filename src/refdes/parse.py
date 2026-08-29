@@ -295,6 +295,7 @@ def _build_item(
     body: str = "",
     inherited: frozenset[str] = frozenset(),
     defaults_line: int | None = None,
+    body_line: int | None = None,
 ) -> Item | None:
     type_name = raw.get("type")
     if not type_name:
@@ -346,6 +347,7 @@ def _build_item(
         source_file=rel,
         source_line=line,
         body=body,
+        body_line=body_line,
         numeric_id_hint=numeric_id_hint,
         id_rejected=id_rejected,
         inherited_fields=inherited,
@@ -605,6 +607,7 @@ def parse_markdown_file(project: Project, path: str) -> list[Item]:
             continue
 
         body = "\n".join(lines[close_i + 1 : body_end])
+        body_line = close_i + 2
         own_keys = {k for k in parsed if k != "__line__"}
         inherited = frozenset(defaults) - own_keys
         merged: dict[str, Any] = dict(defaults)
@@ -613,7 +616,7 @@ def parse_markdown_file(project: Project, path: str) -> list[Item]:
             continue
         item = _build_item(
             project, merged, rel, line=line, body=body,
-            inherited=inherited, defaults_line=defaults_line,
+            inherited=inherited, defaults_line=defaults_line, body_line=body_line,
         )
         if item:
             out.append(item)
