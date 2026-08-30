@@ -1,6 +1,10 @@
 # Stale-arithmetic signal — design spec
 
-Design only. Nothing in this document has been implemented.
+**Implemented**, as of v0.5.0 (unreleased) — `lifecycle._stale_arithmetic` and
+the `stale_arithmetic` field on `lifecycle.Baseline`/diff output. This header
+is stale from an earlier draft; see `git log -- docs/design/stale-arithmetic-signal.md`
+and `lifecycle.py` for the landed shape, which this document's prose still
+describes accurately.
 
 ## The problem
 

@@ -4,6 +4,37 @@ This project has a self-describing tool: use it to verify claims instead of
 recalling them. Confident-but-wrong output has happened here before — treat
 that as the default risk, not the exception.
 
+## Current state, briefly
+
+- The bundled standard is at **`hardware@3`, itself unreleased** (see
+  `CHANGELOG.md`'s `[Unreleased]` section and `src/refdes/standards/hardware/v3/`).
+  Don't assume `hardware@2` behavior still holds, and don't cite `hardware@3`
+  as shipped in a release — it isn't yet.
+- **Surrogate keys (`docs/design/keys.md`) are partially landed.** Key
+  minting, composite-link expansion (`DISPLAY-ID@key`), and hashing-on-key
+  are implemented; the corruption lint, `refdes keys adopt`, the
+  display-half refresh-on-rename, and any `revise.py`/`former_ids.py` change
+  are still design only. Concretely: `Item.links` holds the raw, possibly
+  composite target text (what hashing/write-back reads) — **anything that
+  merely walks the link graph should read `Item.resolved_links` instead**
+  (always-bare, always-current display ids), never raw `links` directly,
+  or it will silently stop matching the moment a target is
+  composite-expanded. See `model.py`'s `Item.links`/`resolved_links`
+  docstrings.
+- **`ruff check .` does NOT pass clean** — currently ~99 pre-existing
+  findings, because the installed ruff's default rule set is broader than
+  `pyproject.toml`'s `[tool.ruff]` comment assumes (that config only adds
+  `I`/import-sorting on top of ruff's defaults; it was never meant to imply
+  a clean baseline). A green `ruff check .` is not a valid completion gate
+  today — scope any ruff-driven cleanup to the specific rule(s) and file(s)
+  you're actually touching (e.g. `ruff check <files> --select <RULE>`), and
+  don't try to silence unrelated pre-existing findings as a side effect.
+- **Multiple sessions have historically worked this checkout concurrently.**
+  Never `git stash` — a stash you can't be certain is redundant strands
+  another session's in-flight work, and dropping one you didn't create can
+  destroy it outright. Run `git status` before assuming the tree is yours;
+  if it's dirty in a way you didn't cause, investigate before touching it.
+
 ## Before writing any claim about the schema (types, fields, link types, presets)
 
 Run `refdes schema` (from a directory with a `refdes.yaml`) and check the JSON

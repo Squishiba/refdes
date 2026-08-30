@@ -22,7 +22,14 @@ what it leaves for field sets and for two related backlog items to still do,
 what it costs existing projects to adopt, and how a project selects it (and
 optional presets on top of it) at `init` time and afterward.
 
-Design only. Nothing in this document has been implemented.
+**Implemented**, as of v0.5.0 (unreleased) — `refdes/standards.py` and the
+bundled dictionaries under `refdes/standards/hardware/{v1,v2,v3}/`, including
+merge/override, `field_sets`/`include:`, versioning and pinning, migrations,
+and `--standard`/`--preset` at `init`. The bundled standard is currently
+pinned at `hardware@3`, itself unreleased. This header is stale from an
+earlier draft; the document's prose describes the landed shape accurately —
+verify specifics against `standards.py` rather than assuming this file is
+current.
 
 ---
 

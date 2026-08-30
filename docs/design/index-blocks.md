@@ -36,7 +36,12 @@ page (there is no "this" to compute against). The split is: item-scoped
 generation lives on items, project-scoped generation lives on pages. Neither
 kind of block is legal in the other kind of document.
 
-Design only. Nothing in this document has been implemented.
+**Implemented**, as of v0.5.0 (unreleased) — `{{index}}` and `{{cascade}}`
+(`refdes/blocks.py`) and figure identity/numbering (`build.py`'s
+`_apply_figure_attrs`/`resolve_figures`, the `fig:` reference namespace).
+This header is stale from an earlier draft; the document's prose describes
+the landed shape accurately — verify specifics against `blocks.py`/`build.py`
+rather than assuming this file is current.
 
 ---
 

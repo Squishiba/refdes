@@ -25,7 +25,12 @@ agreed." The build mode itself is never called "draft" anywhere in the
 interface — only described that way in prose — to keep that word meaning one
 thing.
 
-Design only. Nothing in this document has been implemented.
+**Implemented**, as of v0.5.0 (unreleased) — `refdes revision`/`refdes
+release` (`cli.py:cmd_revision`/`cmd_release`/`_run_stamp`) and the readiness
+gate and baseline stamping in `lifecycle.py`. This header is stale from an
+earlier draft; the document's prose describes the landed shape accurately —
+verify specifics against `lifecycle.py`/`cli.py` rather than assuming this
+file is current.
 
 ---
 
