@@ -63,3 +63,10 @@ per the rules above — not one long unverified pass.
 
 When asserting a fact about behavior, name the file (and command, if you ran
 one) you verified it against, so it's fast for a human to spot-check.
+
+
+## When working on a task, document your changes
+
+Specifically in the directory `in-prog-logs/` as text files. Name the file
+after the task you were working on; write your incremental progress down here,
+what difficulties you may have had, and if the task was finished or not.
