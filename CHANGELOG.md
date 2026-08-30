@@ -9,6 +9,21 @@ and this project uses [Semantic Versioning](https://semver.org/).
 
 ### Breaking
 
+- **A `calc` name assigned twice in one item is now a build error, not a
+  silent overwrite.** Variables are shared across every `calc` block in an
+  item (`docs/math.md`) through one item-wide `env` dict, so a name reused in
+  a second block, or a second time in the same block, silently kept
+  whichever definition ran last -- both `{{NAME}}` interpolation and any
+  `checks:` entry against that name read whatever value happened to win,
+  regardless of where in the document it appeared. That's a correctness bug
+  (the wrong value picked up silently), not a cosmetic one, so it's an error
+  rather than a warning: a project that happened to rely on the overwrite,
+  even unintentionally, will now fail to build until the duplicate is
+  renamed. The message names the variable and both source lines (built on
+  the previous entry's line tracking): `'x' is assigned twice in this item
+  -- first at line 12, again at line 21. ... rename one of them, e.g. 'x' ->
+  'x_2'.` A name reused across *different* items is unaffected -- scope
+  still resets per item, unchanged from before.
 - **The bundled standard moves to `hardware@3`.** Three changes, arriving
   together because none was ever published on its own:
     1. A new link verb, `governed_by` (inverse `governs`), authored on
@@ -185,6 +200,19 @@ and this project uses [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- `calc` build diagnostics (errors and warnings) always pointed at the
+  item's front-matter line, never at the assignment that actually caused
+  them -- unhelpful the moment an item had more than one `calc` block or
+  more than one line in a block. `CalcLine`/`items.json` now carry each
+  assignment's absolute source line (`Item.body_line`, computed from the
+  closing front-matter fence for a markdown item; `None` for a list file's
+  `body:` key, which has no cheap per-line position without deeper
+  YAML-loader surgery, so its calc diagnostics still fall back to the
+  item's own line). The VS Code extension's inline decorations had the same
+  problem one level up: they matched a calc result to a line by name alone
+  (`Array.find`), so two lines assigning the same name always decorated
+  both with the *first* one's result. They now match by source line
+  instead.
 - The generated `.refdes/schema.json` had no branch for `section:` marker
   entries, so a YAML list file using them -- valid, and accepted by `refdes
   check` -- failed to validate against its own schema in any editor

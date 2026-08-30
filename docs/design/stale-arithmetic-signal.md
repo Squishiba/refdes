@@ -130,9 +130,11 @@ Since last revision (rev-c, 2026-08-10T09:12:00Z):
   (38 unchanged)
 ```
 
-This is exactly the `-- stale: ...` inline-annotation shape the (also
-design-only) blocked-chains section of `docs/design/standard-library.md`
-already uses for the same "flag it inline in the existing report" instinct.
+This is exactly the `-- stale: ...` inline-annotation shape the
+blocked-chains section of `docs/design/standard-library.md` uses for the
+same "flag it inline in the existing report" instinct -- that section has
+since shipped (`blocked.py`), unlike this document at the time this was
+written.
 
 Firing "once" falls out of the existing mechanics for free, without any
 extra bookkeeping: the signal only ever compares against the *latest*
