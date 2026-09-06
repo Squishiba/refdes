@@ -71,9 +71,9 @@ def _equivalence_project(tmp_path, version, target_id="REQ-001"):
     """A component declaring `equivalent:` at a target that is not a
     component, against a given pinned standard version."""
     (tmp_path / "refdes.yaml").write_text(
-        "site: { title: T, out: _site }\n"
-        "standard: { base: hardware, version: %d, presets: [] }\n"
-        "id: { width: 3, ledger: .refdes/ids.yaml }\n" % version,
+        f"site: {{ title: T, out: _site }}\n"
+        f"standard: {{ base: hardware, version: {version}, presets: [] }}\n"
+        f"id: {{ width: 3, ledger: .refdes/ids.yaml }}\n",
         encoding="utf-8",
     )
     (tmp_path / "items").mkdir()
@@ -82,7 +82,7 @@ def _equivalence_project(tmp_path, version, target_id="REQ-001"):
         "  - id: REQ-001\n    type: requirement\n    text: A requirement.\n"
         "    status: active\n"
         "  - id: CMP-001\n    type: component\n    title: A capacitor.\n"
-        "    equivalent: [%s]\n" % target_id,
+        f"    equivalent: [{target_id}]\n",
         encoding="utf-8",
     )
     project = load_project(config_path=str(tmp_path / "refdes.yaml"))

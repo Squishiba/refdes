@@ -551,7 +551,7 @@ def _temperature_project(tmp_path, limit, value="40 degC"):
     (items / "b.yaml").write_text(
         "items:\n"
         "  - id: BND-001\n    type: bound\n    text: Junction temperature\n"
-        '    limit: "%s"\n' % limit,
+        f'    limit: "{limit}"\n',
         encoding="utf-8",
     )
     (items / "d.md").write_text(
@@ -564,7 +564,7 @@ def _temperature_project(tmp_path, limit, value="40 degC"):
         "  - value: T_j\n"
         "    against: BND-001\n"
         "---\n\n"
-        "```calc\nT_j : degC = %s\n```\n" % value,
+        f"```calc\nT_j : degC = {value}\n```\n",
         encoding="utf-8",
     )
     project = load_project(config_path=str(tmp_path / "refdes.yaml"))

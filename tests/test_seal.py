@@ -127,7 +127,7 @@ def _load_and_build(root, **kwargs):
 
 def _empty_the_board_log(root, board, prefix):
     (root / "items" / board / "log.yaml").write_text(
-        "defaults: { type: log, prefix: %s }\nitems: []\n" % prefix, encoding="utf-8"
+        f"defaults: {{ type: log, prefix: {prefix} }}\nitems: []\n", encoding="utf-8"
     )
 
 
