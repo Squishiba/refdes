@@ -686,15 +686,26 @@ and is **optional**, absent from most projects; **`refdes.yaml`** is retired.
 declares *which* schema the project uses, not what the schema is — putting it
 in the schema file would force every standard-library project to carry a schema
 file solely to say "I use hardware@2," and the common case now is a dozen lines
-of `site:`/`standard:`/`id:` with no `types:` block at all. Cost, as the finding
-gives it: the config filename is referenced in about fourteen places
-(`CONFIG_NAME`, `find_config()`, `revise.py`, `scaffold.py`, `schema_json.py`,
-plus five diagnostic `file="refdes.yaml"` strings), all mechanical; the hard part
-is that every existing project needs its config split in two and `refdes revise`
-cannot help, because it rewrites item files, not config layout — so this needs a
-dedicated one-shot migration command or a documented manual procedure, and it is
-a breaking change that belongs at a version boundary. Finding 27 needs this
-settled first, to know which file `equations:` belongs in.
+of `site:`/`standard:`/`id:` with no `types:` block at all. Cost, honestly: the
+config filename is referenced in fifty-one places across thirteen modules (the
+six the estimate named — `CONFIG_NAME`/`find_config()` in `schema.py`,
+`revise.py`, `scaffold.py`, `schema_json.py`, plus five diagnostic
+`file="refdes.yaml"` strings in `imports.py` and `build.py` — and also `cli.py`,
+`calc.py`, `pages.py`, `workspaces.py`, `boards.py`, `model.py`,
+`standards.py`), all of them source references — which was the estimate's
+mistake: it stopped at the source tree, and any finding that touches a
+widely-used filename or field name should count the test suite too, because
+that is where the footprint actually lives. The suite held 489 references
+across all 32 test files; 10 of those files define a `types:`/`link_types:`
+overlay, so they needed a two-way fixture split rather than a rename, and
+because 27 files under `tests/` import `helpers.py`, a shared conftest helper
+had to land before any parallel batch could run — the fixture migration had to
+be phased. The rename is still mechanical; the hard part is that every existing
+project needs its config split in two and `refdes revise` cannot help, because
+it rewrites item files, not config layout — so this needs a dedicated one-shot
+migration command or a documented manual procedure, and it is a breaking change
+that belongs at a version boundary. Finding 27 needs this settled first, to
+know which file `equations:` belongs in.
 
 **Status: outstanding.** `schema.py` still names its two files `CONFIG_NAME =
 "refdes.yaml"` and `PROJECT_SETTINGS_NAME = "refdes-project.yaml"`, with the
