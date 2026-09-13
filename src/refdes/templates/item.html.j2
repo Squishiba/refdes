@@ -112,8 +112,8 @@
           {% endif %}
         </td>
         <td>
-          <a href="{{ c.spec.url }}" target="_blank" rel="noopener">{{ c.spec.url }}</a>
-          {% if c.local_path %}<br><a href="assets/{{ c.local_path }}">local copy</a>{% endif %}
+          <a href="{{ c.spec.url }}{% if c.spec.page %}#page={{ c.spec.page }}{% endif %}" target="_blank" rel="noopener">{{ c.spec.url }}</a>
+          {% if c.local_path %}<br><a href="assets/{{ c.local_path }}{% if c.spec.page %}#page={{ c.spec.page }}{% endif %}">local copy</a>{% endif %}
         </td>
         <td class="mono">{{ c.spec.rev or '—' }}</td>
         <td class="mono">{{ c.spec.page or '—' }}</td>

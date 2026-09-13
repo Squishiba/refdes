@@ -683,6 +683,43 @@ def test_vendored_citation_pdf_is_copied_into_the_site_when_published(citation_p
     assert "local copy" in html
 
 
+def test_citation_page_deep_links_upstream_and_local_copy_hrefs(citation_project):
+    """A citation WITH `page:` puts '#page=N' on the href of both links — the
+    upstream URL and the published local copy — while the visible link text
+    stays the bare URL. Asserted on the href attribute itself, not a loose
+    substring: the page number is already printed in a table cell, so a naive
+    `"page=14" in html` check would pass even if the href were untouched."""
+    data = b"%PDF-1.4 vendored bytes"
+    sha = hashlib.sha256(data).hexdigest()
+    _write_citation_lockfile(
+        citation_project,
+        {"https://example.com/ds.pdf": {"sha256": sha, "fetched": "2026-01-01T00:00:00Z", "vendored": True}},
+    )
+    _write_vendor_blob(citation_project, sha, ".pdf", data)
+    _enable_publish_datasheets(citation_project)
+    project = _cite_build(citation_project)
+    out = render.render_site(project)
+    html = open(os.path.join(out, "cmp-001.html"), encoding="utf-8").read()
+    assert 'href="https://example.com/ds.pdf#page=14" target="_blank" rel="noopener">https://example.com/ds.pdf</a>' in html
+    assert f'<a href="assets/datasheets/{sha}.pdf#page=14">local copy</a>' in html
+
+
+def test_citation_without_page_keeps_bare_href(citation_project):
+    """A citation WITHOUT `page:` renders the href bare — no '#page=' fragment
+    anywhere on the item page."""
+    (citation_project / "items" / "cmp.yaml").write_text(
+        "defaults: {type: component}\n"
+        "items:\n  - id: CMP-001\n    title: t\n"
+        "    datasheets:\n      - url: https://example.com/ds.pdf\n",
+        encoding="utf-8",
+    )
+    project = _cite_build(citation_project)
+    out = render.render_site(project)
+    html = open(os.path.join(out, "cmp-001.html"), encoding="utf-8").read()
+    assert 'href="https://example.com/ds.pdf"' in html
+    assert "#page=" not in html
+
+
 def test_nav_shows_references_link_only_when_citations_exist(citation_project):
     project = _cite_build(citation_project)
     out = render.render_site(project)
