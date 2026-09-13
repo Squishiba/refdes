@@ -48,6 +48,36 @@ produced. A finding with a sharp, mechanical acceptance test is a candidate;
 a finding whose correctness depends on taste, on a design tradeoff, or on
 noticing an absence (a case that silently doesn't fire) is not.
 
+Two clauses, added after ten tasks were delegated to small/local models this
+session and independently verified:
+
+1. **Loudness is mostly a property of the task specification, not of the
+   task.** Every delegation that went well this session named the quiet
+   failure mode in the prompt and required a discriminating test for it —
+   and the tests those prompts produced were what made the verdicts
+   verdicts: a task told "an unknown tag must error, not silently render an
+   empty table" produced a fixture built so an OR implementation would
+   diverge from an AND one; a task told "prove the link RESOLVES, not just
+   that it parses" asserted on backlinks, which only the resolver
+   populates; a task told "a substring check would pass with the href
+   untouched" asserted the whole attribute. So: a quiet failure mode
+   disqualifies a finding only if it **cannot be made loud by the spec**.
+   Most can.
+2. **What actually stays off a smaller model is work whose design is
+   unsettled** — taste, unresolved tradeoffs, no written spec — not work
+   that is merely consequential. Consequence is what an acceptance test is
+   for; unsettled design is the one thing a test cannot supply.
+
+**The stance behind the revisions below:** prefer finding empirically where
+a model breaks over pre-judging it. A wrong delegation costs a revert; a
+wrong pre-judgment costs work never attempted, which leaves no trace and so
+never gets corrected. Ten delegated tasks this session performed well above
+what the verdicts below assumed — one local model reviewing another model's
+work found a real XSS (an item title containing `</script>` breaking out of
+the preview-data script element) that the human-facing orchestrator had
+missed. The verdicts here were revised on that basis and may be revised
+again.
+
 Only entries where this was actually decided carry a **Local model:**
 verdict. Where I've extrapolated the rule to an item nobody explicitly
 ruled on, it's marked **(not decided — my read)** so it isn't mistaken for
@@ -127,13 +157,17 @@ issue #7.)
 **Status: outstanding.** No grouping type exists in any bundled standard
 version.
 
-**Local model: not suitable.** The whole point of this type is what it must
-*not* do (not coverable, not a satisfaction target) — the failure mode is a
-silently-too-permissive implementation that looks like it works until
-someone accidentally claims a group and coverage goes quiet about it. That's
-the "reports success while doing nothing" failure this project is
-characteristically bad at catching, and exactly what the suitability rule
-above says to keep off a smaller model.
+**Local model: suitable, IF the task specifies negative tests.** The whole
+point of this type is what it must *not* do (not coverable, not a
+satisfaction target), and the failure mode is a silently-too-permissive
+implementation that looks like it works until someone accidentally claims a
+group and coverage goes quiet about it. But that failure is directly
+testable, and the task must name the tests: assert that a group is **not**
+coverable, and assert that a group **cannot** be a `satisfies:` target.
+Those two negative assertions turn "too permissive" from a silent outcome
+into a failing test — under clause 1 of the rule above, that is the whole
+difference between suitable and not. Without them named in the task, this
+verdict reverts.
 
 ### 15 — A form-based authoring surface
 
@@ -149,17 +183,25 @@ exposed (`refdes index --compact`) or already requested by other findings.
 **Decision — scope.** Explicitly a *view over plain text*, not a database:
 the file stays the complete truth, `refdes check`/git diffs/CI/hand-editing
 all keep working unchanged, and the CLI must remain able to do everything
-the form can do. **Depends on findings 8, 9, 10, and 13** (id completion by
-file/board, `refdes ls`, `next_ids` for id pre-fill, and this backlog's own
-finding 13) — the finding's own dependency table lists exactly these.
+the form can do. The finding's own dependency table lists **findings 8, 9,
+10, and 13** (id completion by file/board, `refdes ls`, `next_ids` for id
+pre-fill, and this backlog's own finding 13) as blockers. **That list is now
+stale — all four have shipped**, verified against this tree: finding 8 in
+`1044c96` (the extension's completion `filterText` now includes each item's
+source file and board, `editors/vscode/extension.js`); finding 9 as
+`refdes ls` (`cmd_ls` and its `ls` subparser in `src/refdes/cli.py`);
+finding 10 as `next_ids` in the index payload (`payload["next_ids"]`,
+`src/refdes/render.py`); and finding 13 in `1cf3e88`.
 
 **Status: outstanding.** No `CustomTextEditorProvider` exists in
 `editors/vscode/extension.js`.
 
-**Local model: not suitable.** This is design-judgment-heavy UI work with no
-mechanical acceptance test — "does this feel like the right form" isn't
-something a failing test catches, and it's an epic depending on four other
-findings landing first.
+**Local model: not suitable.** This one survives the revised rule unchanged:
+it is design-judgment-heavy UI work with no mechanical acceptance test —
+"does this feel like the right form" isn't something a failing test catches,
+and no wording in a task spec makes it so. Its dependencies are no longer
+the obstacle (all four blockers have shipped, above); what keeps it off a
+smaller model is the unsettled design, not the waiting.
 
 ### 16 — `recorded_by: [log]` on `decision`
 
@@ -268,13 +310,23 @@ would need to learn about fragments too, or at least flag them as stale.
 **Status: outstanding.** `EXPLICIT_REF_RE` (`build.py:28`) still has no `#`
 in its character class; citations have no `id:` field or reference form.
 
-**Local model: not suitable.** Two distinct, interacting mechanisms (generic
-field fragments and citation identity) plus a `revise.py` staleness
-interaction to get right — this is exactly the kind of "did I actually wire
-every consumer" problem `docs/design/keys.md` documents costing real,
-disclosed effort even for its authors; a smaller model is more likely to
-ship a fragment that resolves for the common case and silently doesn't
-validate or doesn't get flagged stale by `revise`.
+**Local model: split — the fragment-syntax half suitable, the rest not.**
+The `EXPLICIT_REF_RE` half is a regex change of exactly the shape finding 18
+was (`3a2fced`), which a local model completed correctly this session: one
+character class, with the finding's own repro strings
+(`[[EXP-CMP-001#part_number]]` rendering instead of appearing as literal
+text) turning straight into a discriminating test, and a wrong regex failing
+either as a failed test or as today's visible literal text — loud either way.
+The other two pieces stay **not suitable**: the citation-identity namespace
+(a declared `id:` on citation entries plus a `[[cite:<id>]]` reference form)
+is a new mechanism rather than a widened one, and the `revise.py`
+`_stale_prose_references` wiring is the "did I actually wire every consumer"
+problem `docs/design/keys.md` documents costing real, disclosed effort even
+for its authors — an absence, which clause 1 only forgives when the spec can
+make it fire, and here the spec would have to invent the mechanism first.
+
+Two distinct, interacting mechanisms is the shape that stays in hand; only
+the widened-regex half qualifies.
 
 ### 20 — Generate per-type item examples into the docs
 
@@ -292,13 +344,16 @@ and a schema skeleton isn't an item.
 abstractly only; no generated-example step exists anywhere in the docs
 build.
 
-**Local model (not decided — my read): not suitable.** The finding itself
-flags the real wrinkle — `docs-site/refdes.yaml` pins no `standard:`, so the
-generator has to run against a *different*, standard-pinned project and get
-injected into docs built from `docs-site/`. Getting that wiring subtly
-wrong produces docs that build successfully and show stale or wrong
-examples — quiet, not loud, which is the failure mode the suitability rule
-above is written to keep away from a smaller model.
+**Local model (not decided — my read): suitable, IF the gate is specified.**
+The finding itself flags the real wrinkle — `docs-site/refdes.yaml` pins no
+`standard:`, so the generator has to run against a *different*,
+standard-pinned project and get injected into docs built from `docs-site/`,
+and getting that wiring subtly wrong produces docs that build successfully
+while showing stale or wrong examples. That stops being quiet the moment the
+task states its acceptance test: **assert that the injected example equals
+`refdes new <type>` output for the pinned standard version.** With that
+assertion in the task, stale-or-wrong wiring fails the build instead of
+shipping; without it, the quiet failure stands and this verdict reverts.
 
 ### 21 — `extends:` — single-level type inheritance
 
@@ -318,12 +373,18 @@ behavior.
 `schema.py`; `standards.resolve_schema()`'s layered merge is base → presets
 → project overlay only, with no type→type axis.
 
-**Local model: not suitable.** This changes link-target-validation semantics
-project-wide (universal substitution touches every `[requirement]` target
-across the standard and every preset) — getting substitution scope subtly
-wrong is a silent over- or under-acceptance of link targets, not a crash,
-and the finding's own design-questions section shows how much judgment went
-into even deciding the substitution rule was safe.
+**Local model: not suitable to design, suitable to implement once specced.**
+What was hard here was the judgement — whether universal (Liskov)
+substitution is safe across every `[requirement]` target in the standard and
+every preset, where getting substitution scope subtly wrong is a silent over-
+or under-acceptance of link targets rather than a crash — and that judgement
+is already made, in the finding, including the reversal of its own earlier
+opt-in-marker draft. Per this file's own header rule, the entry earns a
+`docs/design/` document first; once that document states the substitution
+rule and the coverage-grouping default, the implementation is testable, and
+link-target validation is already mechanically tested in this codebase.
+Until the spec exists this is design-unsettled work under clause 2, and
+stays off.
 
 ### 22 — Widen `satisfies` to `[requirement, bound]` — DONE
 
@@ -404,14 +465,20 @@ be a hard error, mirroring the existing unregistered-board error.
 `schema.py`'s `BoardSpec`; coverage in `build.py` is computed per item id
 only, with no board dimension.
 
-**Local model: not suitable.** Depends on finding 14 (the grouping type)
-landing first, touches coverage computation itself (the single most
-consequential place in this codebase for a silent wrong-answer, per finding
-24's own framing — "the failure mode is silent and optimistic"), and the
-finding's own "one detail to settle during implementation" (an unregistered
-group must hard-error, or a typo silently discharges an entire board's
-obligations) is precisely the kind of edge a smaller model is liable to
-skip without anyone noticing until much later.
+**Local model: suitable once finding 14 lands.** The dependency on finding
+14 stands — there is no group to name in `conforms_to:` until the grouping
+type exists, and coverage computation should not be touched before that
+target's own negative tests do. What changed is the feared edge: an
+unregistered group named in `conforms_to:` must hard-error, or a typo
+silently discharges an entire board's obligations — which is the same shape
+as finding 13's unknown-tag case, implemented correctly this session
+precisely because the task named it ("an unknown tag must error, not
+silently render an empty table"), with a fixture that made an AND
+implementation diverge from an OR one. Naming that edge in the task makes it
+loud, so consequence alone — coverage being the most consequential silent
+wrong-answer place in this codebase, per finding 24's own framing ("the
+failure mode is silent and optimistic") — is no longer disqualifying under
+clause 1 of the rule above.
 
 ---
 
@@ -466,16 +533,19 @@ finding — recorded from conversation, not from the document.)
 hardware v3's `migration.yaml` carrying hardware@2 content across. Accepted
 deliberately: hardware@3 is unreleased, and existing hardware@2 content is
 migratable by `refdes standard upgrade`, so this is the only point at which the
-rename is cheap.
+rename is cheap. (Not in the finding — recorded from conversation, not from
+the document.)
 
 **Decision — scope is v3 only.** `hardware/v1/base.yaml` and `v2/base.yaml` are
 frozen, already-released shapes; the split is not retrofitted into them.
+(Not in the finding — recorded from conversation, not from the document.)
 
 **Decision — Part 2 is deferred, not rejected.** Replacing `url:` with a
 scheme-dispatched `path:` that accepts repo-local files was set aside until
 refdes' core is in better shape. **Finding 26 depends on it** — the finding
 says so itself: a file has to be citable before a calc value can be drawn from
 it — so 26 is parked for the same reason, not because it was judged wrong.
+(Not in the finding — recorded from conversation, not from the document.)
 
 **Status: Part 1 done, Part 2 deferred.** Part 1 shipped in `f8e7ee0`:
 hardware@3's `field_sets:` has a third entry `citations: {citations: {type:
