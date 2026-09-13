@@ -160,6 +160,7 @@ types:
       supersedes:     [decision]
       selects:        [component]
       blocked_by:     []   # empty target list = unrestricted
+      recorded_by:    [log]
     body: { on_change: invalidate }
 
   test:

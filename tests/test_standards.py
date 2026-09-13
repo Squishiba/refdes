@@ -104,6 +104,33 @@ def test_standard_hardware_v1_still_has_constraint_title(tmp_path):
     assert constraint.preview == ["status", "limit", "rationale"]
 
 
+def test_hardware_v3_decision_declares_recorded_by_and_the_link_resolves(tmp_path):
+    """A sealed log can never point forward at a decision written after it, so
+    the decision carries the `recorded_by:` end of the existing records/
+    recorded_by pair (backlog finding 16)."""
+    (tmp_path / "refdes.yaml").write_text(
+        "site: { title: T, out: _site }\n"
+        "standard: { base: hardware, version: 3, presets: [] }\n",
+        encoding="utf-8",
+    )
+    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    assert project.types["decision"].links["recorded_by"] == ["log"]
+
+    (tmp_path / "items").mkdir()
+    (tmp_path / "items" / "i.yaml").write_text(
+        "items:\n"
+        "  - id: LOG-001\n    type: log\n    date: 2024-01-01\n    summary: Deliberating.\n"
+        "  - id: DEC-001\n    type: decision\n    title: Decided afterwards.\n"
+        "    status: accepted\n    recorded_by: [LOG-001]\n",
+        encoding="utf-8",
+    )
+    project = _build_at(tmp_path)
+
+    assert not project.errors
+    assert project.items["DEC-001"].resolved_links["recorded_by"] == ["LOG-001"]
+    assert project.items["LOG-001"].backlinks["records"] == ["DEC-001"]
+
+
 def test_standard_version_must_be_a_pinned_integer(tmp_path):
     (tmp_path / "refdes.yaml").write_text(
         "site: { title: T, out: _site }\n"
