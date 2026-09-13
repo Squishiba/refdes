@@ -8,7 +8,7 @@
 # needs to trust that it matches the spec, since the spec is the place to
 # argue about it, not this file.
 #
-# Changed from v2, in three parts, arriving together as one version because
+# Changed from v2, in four parts, arriving together as one version because
 # none was ever published on its own:
 #
 # 1. A new link verb: `governed_by` (inverse `governs`), authored on
@@ -67,6 +67,24 @@
 #    invalidate downstream links; the log's `summary` because it is
 #    required, and log is not part of this change at all.
 #
+# 4. A new type: `group` (prefix GRP) — names a collection of items as a
+#    thing ("the PCIe interface spec") without letting that thing stand in
+#    for its members. Membership is declared by the *member*, pointing at
+#    the group with `part_of` (inverse `contains`, computed as the group's
+#    backlink view); the group never lists its members, so a group can
+#    never silently enlarge its own meaning as its contents grow. The two
+#    properties this type exists to guarantee are negative ones: it is
+#    `coverable: false` — a group never appears in coverage and never
+#    acquires a coverage stage — and it is not a `satisfies:` target: the
+#    `satisfies` target lists on `decision`/`component` stay
+#    `[requirement, bound]`, so obligations are still discharged item by
+#    item. A group that could be satisfied would silently discharge its
+#    members' obligations — the group-reference failure mode this addition
+#    was framed against (backlog finding 14, citing the DEC-IO-006
+#    migration note). `part_of` is declared on requirement/bound/decision/
+#    test/component — spec content — not on `log`, whose entries are records
+#    of activity rather than things a spec group collects.
+#
 # v1 and v2 are untouched and still resolve exactly as they always have; a
 # project pinned there sees no difference from any of this. `refdes standard
 # upgrade --to 3` renames `text:`/`method:` to `body:` in every item file
@@ -102,6 +120,7 @@ link_types:
   supersedes:     { inverse: superseded_by, label: "Supersedes",  trace: false }
   selects:        { inverse: selected_by,   label: "Selects" }
   blocked_by:     { inverse: blocks,        label: "Blocked by" }
+  part_of:        { inverse: contains,      label: "Part of" }
   equivalent:     { inverse: equivalent,    label: "Equivalent" }   # self-inverse
   alternate:      { inverse: alternate,     label: "Alternate" }    # self-inverse
 
@@ -120,6 +139,7 @@ types:
     links:
       refines:     [requirement]
       governed_by: [requirement, bound]
+      part_of:     [group]
     body: { on_change: invalidate, required: true }
 
   bound:
@@ -137,6 +157,7 @@ types:
     links:
       refines:      [bound]
       derives_from: [requirement, bound]
+      part_of:      [group]
     body: { on_change: invalidate, required: true }
 
   decision:
@@ -161,6 +182,7 @@ types:
       selects:        [component]
       blocked_by:     []   # empty target list = unrestricted
       recorded_by:    [log]
+      part_of:        [group]
     body: { on_change: invalidate }
 
   test:
@@ -174,6 +196,7 @@ types:
     include: [provenance, stewardship]
     links:
       verifies: [requirement, bound]
+      part_of:  [group]
     body: { on_change: invalidate }
 
   component:
@@ -194,7 +217,24 @@ types:
       constrained_by: [bound]
       equivalent:     [component]
       alternate:      [component]
+      part_of:        [group]
     body: { on_change: invalidate }
+
+  # A named collection of items, not a thing that owes or discharges
+  # obligations. `coverable: false` keeps it out of coverage entirely; it
+  # is deliberately absent from every `satisfies:` target list, so nothing
+  # may claim it. It declares no membership links of its own — members
+  # point here with `part_of`, and `contains` is only ever the computed
+  # inverse backlink (docs/design/backlog.md finding 14).
+  group:
+    prefix: GRP
+    label: Group
+    preview: [title]
+    coverable: false
+    fields:
+      title: { type: text, required: true, on_change: log }
+    include: [provenance, stewardship]
+    body: { on_change: log }
 
   log:
     prefix: LOG

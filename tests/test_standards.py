@@ -604,3 +604,90 @@ def test_require_rejection_rationale_false_drops_the_condition(tmp_path):
     )
     project = load_project(config_path=str(tmp_path / "refdes.yaml"))
     assert project.types["decision"].fields["rationale"].required_when is None
+
+
+# ------------------------------------------------- the group type (finding 14)
+
+GROUP_SCHEMA = (
+    "site: { title: T, out: _site }\n"
+    "standard: { base: hardware, version: 3, presets: [] }\n"
+)
+
+
+def _group_project(tmp_path, extra_items=""):
+    """A hardware@3 project with one group and one active requirement that
+    declares itself `part_of` it, plus any extra items the test needs."""
+    (tmp_path / "refdes.yaml").write_text(GROUP_SCHEMA, encoding="utf-8")
+    (tmp_path / "items").mkdir()
+    (tmp_path / "items" / "i.yaml").write_text(
+        "items:\n"
+        "  - id: GRP-001\n    type: group\n    title: The PCIe interface spec.\n"
+        "  - id: REQ-001\n    type: requirement\n"
+        "    body: The PCIe link runs at 8 GT/s.\n"
+        "    status: active\n    part_of: [GRP-001]\n"
+        + extra_items,
+        encoding="utf-8",
+    )
+    return _build_at(tmp_path)
+
+
+def test_group_is_declared_and_not_coverable(tmp_path):
+    (tmp_path / "refdes.yaml").write_text(GROUP_SCHEMA, encoding="utf-8")
+    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    group = project.types["group"]
+    assert group.prefix == "GRP"
+    assert group.coverable is False
+    # Membership flows one way: the group declares no members-listing link.
+    assert "contains" not in group.links
+    assert project.link_types["part_of"].inverse == "contains"
+
+
+def test_group_never_appears_in_coverage(tmp_path):
+    """Negative property A: a group with members stays out of the coverage
+    computation entirely -- no row, no stage -- while its members are covered
+    normally. A group that entered coverage would report a stage no decision
+    can legitimately settle, and `satisfies:` cannot point at it to fix that."""
+    project = _group_project(tmp_path)
+    assert not project.errors
+
+    # The member is a coverage row; the group is not.
+    assert "REQ-001" in project.coverage
+    assert "GRP-001" not in project.coverage
+
+    # And nothing anywhere in the coverage output names the group -- no
+    # stage, no open/unverified finding, no diagnostic keyed to it.
+    assert all(cov.item_id != "GRP-001" for cov in project.coverage.values())
+    assert not [d for d in project.warnings if d.item_id == "GRP-001"]
+    assert not [d for d in project.errors if d.item_id == "GRP-001"]
+
+
+def test_group_cannot_be_a_satisfies_target(tmp_path):
+    """Negative property B: `satisfies: [GRP-001]` is a hard error, not a
+    silently-accepted claim. Asserting the message names the type ("is a
+    group"), not mere nonexistence, so this fails on an implementation that
+    lets satisfies target groups -- the silently-too-permissive case."""
+    project = _group_project(
+        tmp_path,
+        "  - id: DEC-001\n    type: decision\n    title: Claims the whole spec.\n"
+        "    status: accepted\n    satisfies: [GRP-001]\n",
+    )
+
+    errors = [d for d in project.errors if d.item_id == "DEC-001"]
+    assert errors, "satisfies: [GRP-001] was accepted with no error"
+    assert any(
+        "satisfies" in d.message and "is a group" in d.message for d in errors
+    ), [d.message for d in errors]
+
+    # The claim is not merely reported-and-kept: it resolves nowhere, so it
+    # cannot settle anything even as a side effect.
+    assert "GRP-001" not in project.items["DEC-001"].resolved_links.get("satisfies", [])
+    assert "DEC-001" not in project.items["GRP-001"].backlinks.get("satisfied_by", [])
+
+
+def test_part_of_resolves_and_the_group_sees_members_through_contains(tmp_path):
+    """Positive path C: the member's `part_of` resolves, and the group's
+    view of its members is the computed `contains` inverse backlink."""
+    project = _group_project(tmp_path)
+    assert not project.errors
+    assert project.items["REQ-001"].resolved_links["part_of"] == ["GRP-001"]
+    assert project.items["GRP-001"].backlinks["contains"] == ["REQ-001"]
