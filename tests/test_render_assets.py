@@ -1,4 +1,4 @@
-"""images and assets -- and: site.assets:, figure/caption, pages + images, stale output, figure identity/numbering, explicit reference regression.
+"""images and assets -- and: site.assets:, figure/caption, pages + images, stale output, figure identity/numbering, explicit reference regression, preview-data payload safety.
 
 Split out of the original monolithic tests/test_refdes.py.
 """
@@ -6,6 +6,7 @@ Split out of the original monolithic tests/test_refdes.py.
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 
 import pytest
@@ -509,3 +510,50 @@ def test_explicit_item_reference_does_not_nest_duplicate_links(blocks_project):
     html = project.items["REQ-001"].body_html
     assert html.count("<a") == 1
     assert '<a class="ref" href="con-001.html" data-ref="CON-001">CON-001</a>' in html
+
+
+# ---------------------------------------------------------- preview-data payload safety
+
+EVIL_TITLE = "T</script><script>alert(1)</script>"
+
+
+def test_preview_data_escapes_script_close(tmp_path):
+    """An item title containing `</script>` must not break out of the
+    preview-data script element (render.py escapes < and > at dumps time).
+
+    base.html.j2 embeds previews_json with `| safe` because autoescaping the
+    quotes would break JSON.parse(dataEl.textContent) in app.js, so the
+    escaping has to happen when the JSON is produced. Both escapes are valid
+    JSON string escapes, so the decoded payload must round-trip byte-for-byte."""
+    (tmp_path / "refdes.yaml").write_text(COVERAGE_SCHEMA, encoding="utf-8")
+    items = tmp_path / "items"
+    items.mkdir()
+    (items / "dec-a.md").write_text(
+        "---\n"
+        "id: DEC-A-001\n"
+        "type: decision\n"
+        f"title: \"{EVIL_TITLE}\"\n"
+        "status: accepted\n"
+        "---\n",
+        encoding="utf-8",
+    )
+
+    out = _build_and_render(tmp_path)
+    html = open(os.path.join(out, "index.html"), encoding="utf-8").read()
+
+    # 1. The breakout is gone: the rendered page must not contain the literal
+    #    </script><script> sequence the title used to emit verbatim.
+    assert "</script><script>" not in html
+
+    # 2. The escaping happened at dump time: the \u003c escaped form is what
+    #    actually lands inside the preview-data payload.
+    marker = '<script id="preview-data" type="application/json">'
+    start = html.index(marker) + len(marker)
+    end = html.index("</script>", start)
+    payload_text = html[start:end]
+    assert "\\u003c" in payload_text
+
+    # 3. And it decodes back: the payload's title reads out exactly as the
+    #    original, proving the escapes are serialization-only, not corruption.
+    payload = json.loads(payload_text)
+    assert payload["DEC-A-001"]["title"] == EVIL_TITLE

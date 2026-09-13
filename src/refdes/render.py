@@ -628,6 +628,15 @@ def render_site(project: Project, draft: bool = False) -> str:
 
     previews = preview_payload(project)
     previews_json = json.dumps(previews, ensure_ascii=False)
+    # json.dumps does not escape < or >, and this string is embedded verbatim
+    # (`| safe`) in a <script id="preview-data"> element in base.html.j2, so an
+    # author-controlled title like `</script><script>...</script>` would close
+    # the element at parse time and turn the rest of the title into live markup.
+    # The escaping has to happen at dump time, not in the template: autoescape
+    # would escape the quotes too and break JSON.parse(dataEl.textContent) in
+    # app.js, whereas these are valid JSON string escapes, which JSON.parse
+    # decodes back to the original characters -- the payload value is unchanged.
+    previews_json = previews_json.replace("<", "\\u003c").replace(">", "\\u003e")
 
     by_type: dict[str, list[Item]] = {}
     for item in sorted(project.items.values(), key=lambda i: i.id):
