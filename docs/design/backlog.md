@@ -9,7 +9,7 @@ detail, alternatives considered, a "what I'd prototype first" section) once
 someone actually starts implementing it — until then, this is the whole
 record.
 
-Verified against the actual codebase as of commit `a077cb2` (2026-09-13,
+Verified against the actual codebase as of commit `72ccf1d` (2026-09-13,
 `main`). Re-check before trusting an "outstanding" or "done" mark that's more
 than a few commits old — this file decays exactly like the implementation
 status headers on the spec docs do.
@@ -707,6 +707,103 @@ left behind in the retired file is a setting that silently stops applying —
 `site.out`, `id.width`, a board registry going quiet, not an error. That, plus
 the migration command for other people's projects, is the no-op-that-looks-like-
 success case the rule above is written to keep away from a smaller model.
+
+---
+
+## Internal review, findings 29–31
+
+Recorded from this session's code review — unlike findings 12–24 and
+25–28, these come from no GitHub attachment; the source note in each entry
+says so.
+
+### 29 — Figure references never resolve inside log entry bodies
+
+**Source: internal review, not issue #7.** `log.html.j2:42` renders
+`entry.body_html | safe` bare, while the other three body-rendering sites
+wrap in `figured()`: `item.html.j2:62` (`figured(item.body_html)`),
+`document.html.j2:78` (`anchored(figured(item.body_html))`), and
+`page.html.j2:19` (`figured(page.body_html)`). `figured()` is the
+per-document figure pass (`_figured`, `render.py:44-52`): it numbers every
+`{id="..."}` figure across the document's bodies, then substitutes the two
+deferred markers `resolve_figures` consumes (`build.py:1143-1177`) — the
+`<span class="fig-num" data-fig="...">` number placeholder emitted by
+`_apply_figure_attrs` (`build.py:1080`) and the
+`<span class="fig-ref-pending" ...>` that a `[[fig:id]]` becomes in
+`_linkify` (`build.py:905-910`). A log entry's body runs through
+`_apply_figure_attrs` and `_linkify` like every other item's, so
+`entry.body_html` carries both markers — the log template just never runs
+the substitution that resolves them. The reader sees an empty spot where
+"Figure N" should be (a caption that reads "— text", the number never
+filled) and an invisible span where a `[[fig:id]]` link should be —
+unresolved, unbeknownst to the author or the build. The fix spans two lines
+like the other three sites, plus one wiring detail: the log page write
+(`render.py:731-737`) passes no `figured` closure at all, so it would need
+one built over the log entries' bodies the way the document page's is
+(`render.py:777-779`) — numbering is per-document, and a figure in a log
+entry is only "rendered on this page" if its body is in the closure's list.
+
+**Status: outstanding.** `log.html.j2:42` still renders `entry.body_html |
+safe` with no `figured()` call, and `render.py:731-737` still passes no
+`figured` closure to the log page.
+
+**Local model (not decided — my read): suitable.** The failure is visible in
+the output (empty number, no link), not a silent wrong answer, and a test
+asserting the log page renders the resolved "Figure N" link flags both
+halves of the missing wiring at once — nothing unsettled in the design, it
+is the same mechanism the other three sites already use.
+
+### 30 — `_esc` does not escape single quotes
+
+**Source: internal review, not issue #7.** Both `_esc` helpers —
+`build.py:864-871` and `blocks.py:70-77` — escape `&`, `<`, `>`, and `"`
+but not `'`. Latent, not a live bug: every generated attribute in these two
+modules is double-quoted today — the `data-*` attributes on the
+`fig-ref-pending` and `fig-num` markers (`build.py:905-909,1080`), the
+`style=`/`id=` attributes `_apply_figure_attrs` emits (`build.py:1062,1079`),
+and in `blocks.py` every `_esc` call lands in a text node, never an
+attribute. A `'` inside double quotes is harmless HTML, and the escaping
+hole opens only for a single-quoted attribute — but a bare apostrophe in
+ordinary prose is all it takes, so the moment anyone adds a single-quoted
+generated attribute the breakout exists with no warning at build time. The
+fix is one more `.replace("'", "&#39;")` line in both helpers.
+
+**Status: outstanding — latent, not a live bug.** Both `_esc` helpers still
+omit `'`, and every generated attribute is still double-quoted.
+
+**Local model (not decided — my read): suitable.** Two one-line
+replacements, and a test asserting `'` escapes in the same spot `"` already
+does makes the regression loud; nothing about this depends on taste or
+unsettled design.
+
+### 31 — No test covers the text-node XSS case
+
+**Source: internal review, not issue #7.** Escaping is on and does handle
+this case today — this is a coverage gap, not a live vulnerability. Jinja
+autoescaping was silently off (`select_autoescape(["html"])` matches the
+template-name suffix and every template is `*.html.j2`, so it returned
+False for all of them) until this session's `render.py:600-608`
+(`autoescape=True`, commit `5a1f212`), and the preview-data payload — the
+one remaining `| safe` sink (`base.html.j2:60`) — was separately hardened
+with `<`/`>` escaped to `\u003c`/`\u003e` at dump time (`render.py:629-639`,
+commit `b88f2f1`). The two regression tests pin exactly those two contexts:
+`test_citation_page_value_is_html_escaped` (`tests/test_citations.py:723-745`),
+an attribute-context breakout of a citation `page:` value, and
+`test_preview_data_escapes_script_close` (`tests/test_render_assets.py:517-559`),
+the JSON payload. Nothing exercises the plain text-node case — an item
+title like `T<script>alert(1)</script>` rendered where
+`{{ item.title }}` appears (`index.html.j2:54,81`, `coverage.html.j2:48`).
+That site is precisely where a future `| safe` addition would silently
+reopen an escaping hole with no failing test to catch it.
+
+**Status: outstanding (test-coverage gap).** Autoescaping is on
+(`render.py:608`), but no test renders an evil title into a text node and
+asserts the escape.
+
+**Local model (not decided — my read): suitable.** The task is its own
+acceptance test — render an evil-titled project and assert both that the
+escaped form appears in `index.html`/`coverage.html` and that the raw
+`<script>` never does. The quiet-failure mode this gap warns about is made
+loud by the test itself; nothing unsettled in the design.
 
 ---
 
