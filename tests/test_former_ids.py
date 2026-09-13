@@ -6,6 +6,7 @@ Split out of the original monolithic tests/test_refdes.py.
 from __future__ import annotations
 
 import pytest
+from conftest import write_project_config
 
 from refdes import build as build_mod
 from refdes import cli as cli_mod
@@ -23,7 +24,7 @@ FORMER_IDS_SCHEMA = (
 
 
 def _former_ids_project(tmp_path, items_yaml):
-    (tmp_path / "refdes.yaml").write_text(FORMER_IDS_SCHEMA, encoding="utf-8")
+    write_project_config(tmp_path, FORMER_IDS_SCHEMA)
     items = tmp_path / "items"
     items.mkdir()
     (items / "r.yaml").write_text(items_yaml, encoding="utf-8")
@@ -31,7 +32,7 @@ def _former_ids_project(tmp_path, items_yaml):
 
 
 def _former_ids_build(root):
-    project = load_project(config_path=str(root / "refdes.yaml"))
+    project = load_project(config_path=str(root / "refdes-project.yaml"))
     parse.load_items(project, require_ids=False)
     build_mod.build(project, seal_write=False, reseal=False)
     return project
@@ -45,7 +46,7 @@ def test_former_ids_are_burned_so_the_allocator_never_reissues_them(tmp_path):
         "  - id: REQ-001\n    text: Renumbered item.\n    former_ids: [REQ-050]\n"
         "  - text: Brand new, no id yet.\n",
     )
-    project = load_project(config_path=str(root / "refdes.yaml"))
+    project = load_project(config_path=str(root / "refdes-project.yaml"))
     parse.load_items(project, require_ids=False)
     assignments = ids.allocate(project)
     assert assignments[0][1] == "REQ-051"  # not REQ-002 -- REQ-050 stays burned
@@ -95,7 +96,7 @@ def test_former_ids_claimed_by_two_items_is_an_error(tmp_path):
 
 
 def test_former_ids_resolve_bracketed_reference_with_a_formerly_marker(tmp_path):
-    (tmp_path / "refdes.yaml").write_text(FORMER_IDS_SCHEMA, encoding="utf-8")
+    write_project_config(tmp_path, FORMER_IDS_SCHEMA)
     items = tmp_path / "items"
     items.mkdir()
     (items / "r.yaml").write_text(
@@ -117,7 +118,7 @@ def test_former_ids_resolve_bracketed_reference_with_a_formerly_marker(tmp_path)
 
 
 def test_former_ids_resolve_bare_reference_when_it_fits_the_bare_pattern(tmp_path):
-    (tmp_path / "refdes.yaml").write_text(FORMER_IDS_SCHEMA, encoding="utf-8")
+    write_project_config(tmp_path, FORMER_IDS_SCHEMA)
     items = tmp_path / "items"
     items.mkdir()
     (items / "r.yaml").write_text(
@@ -139,7 +140,7 @@ def test_former_ids_shaped_like_a_legacy_underscore_id_only_link_explicitly(tmp_
     """`BARE_REF_RE` requires a `-<digits>` suffix, so an underscore-style former
     id like the CAN_00 example in finding 12 can never bare-autolink -- must
     stay reachable via [[CAN_00]], and the gap must be visible, not silent."""
-    (tmp_path / "refdes.yaml").write_text(FORMER_IDS_SCHEMA, encoding="utf-8")
+    write_project_config(tmp_path, FORMER_IDS_SCHEMA)
     items = tmp_path / "items"
     items.mkdir()
     (items / "r.yaml").write_text(
@@ -171,11 +172,11 @@ def _allocate_and_reload(root):
     return a freshly re-parsed project reflecting that write -- the shape
     every test below needs before it can edit the item file out from under
     the ledger's own memory of it."""
-    project = load_project(config_path=str(root / "refdes.yaml"))
+    project = load_project(config_path=str(root / "refdes-project.yaml"))
     parse.load_items(project, require_ids=False)
     assignments = ids.allocate(project)
     assert assignments and assignments[0][1] == "REQ-001"
-    return load_project(config_path=str(root / "refdes.yaml"))
+    return load_project(config_path=str(root / "refdes-project.yaml"))
 
 
 def test_orphaned_allocations_empty_while_the_item_is_still_live(tmp_path):
@@ -193,7 +194,7 @@ def test_orphaned_allocations_flags_a_deleted_unexplained_id(tmp_path):
     )
     _allocate_and_reload(root)
     (root / "items" / "r.yaml").write_text("items: []\n", encoding="utf-8")
-    project = load_project(config_path=str(root / "refdes.yaml"))
+    project = load_project(config_path=str(root / "refdes-project.yaml"))
     parse.load_items(project, require_ids=False)
     assert ids.orphaned_allocations(project) == ["REQ-001"]
 
@@ -210,7 +211,7 @@ def test_orphaned_allocations_excludes_ids_explained_by_former_ids(tmp_path):
         "items:\n  - id: REQ-002\n    text: Renamed.\n    former_ids: [REQ-001]\n",
         encoding="utf-8",
     )
-    project = load_project(config_path=str(root / "refdes.yaml"))
+    project = load_project(config_path=str(root / "refdes-project.yaml"))
     parse.load_items(project, require_ids=False)
     assert ids.orphaned_allocations(project) == []
 
@@ -230,7 +231,7 @@ def test_orphaned_allocations_cannot_see_a_same_id_reuse(tmp_path):
         "items:\n  - id: REQ-001\n    text: A different item, same reused id.\n",
         encoding="utf-8",
     )
-    project = load_project(config_path=str(root / "refdes.yaml"))
+    project = load_project(config_path=str(root / "refdes-project.yaml"))
     parse.load_items(project, require_ids=False)
     assert ids.orphaned_allocations(project) == []
 
@@ -241,7 +242,7 @@ def test_cli_audit_reports_orphaned_allocations(tmp_path, capsys):
     )
     _allocate_and_reload(root)
     (root / "items" / "r.yaml").write_text("items: []\n", encoding="utf-8")
-    assert cli_mod.main(["-c", str(root / "refdes.yaml"), "audit"]) == 0
+    assert cli_mod.main(["-c", str(root / "refdes-project.yaml"), "audit"]) == 0
     out = capsys.readouterr().out
     assert "Ledger entries with no live item and no former_ids: explaining them:" in out
     assert "REQ-001" in out
@@ -252,14 +253,14 @@ def test_cli_audit_orphaned_allocations_is_none_when_clean(tmp_path, capsys):
         tmp_path, "defaults: { type: requirement }\nitems:\n  - text: First item.\n"
     )
     _allocate_and_reload(root)
-    assert cli_mod.main(["-c", str(root / "refdes.yaml"), "audit"]) == 0
+    assert cli_mod.main(["-c", str(root / "refdes-project.yaml"), "audit"]) == 0
     out = capsys.readouterr().out
     section = out.split("Ledger entries with no live item")[1].split("\n\n")[0]
     assert "(none)" in section
 
 
 def test_cli_audit_lists_former_ids(tmp_path, capsys):
-    (tmp_path / "refdes.yaml").write_text(FORMER_IDS_SCHEMA, encoding="utf-8")
+    write_project_config(tmp_path, FORMER_IDS_SCHEMA)
     items = tmp_path / "items"
     items.mkdir()
     (items / "r.yaml").write_text(
@@ -267,14 +268,14 @@ def test_cli_audit_lists_former_ids(tmp_path, capsys):
         "items:\n  - id: REQ-001\n    text: Renumbered.\n    former_ids: [REQ-050]\n",
         encoding="utf-8",
     )
-    assert cli_mod.main(["-c", str(tmp_path / "refdes.yaml"), "audit"]) == 0
+    assert cli_mod.main(["-c", str(tmp_path / "refdes-project.yaml"), "audit"]) == 0
     out = capsys.readouterr().out
     assert "Former IDs:" in out
     assert "REQ-050" in out and "REQ-001" in out
 
 
 def test_items_json_exports_former_ids(tmp_path):
-    (tmp_path / "refdes.yaml").write_text(FORMER_IDS_SCHEMA, encoding="utf-8")
+    write_project_config(tmp_path, FORMER_IDS_SCHEMA)
     items = tmp_path / "items"
     items.mkdir()
     (items / "r.yaml").write_text(
@@ -292,7 +293,7 @@ def test_items_json_exports_former_ids(tmp_path):
 
 
 def _propose_build(root):
-    project = load_project(config_path=str(root / "refdes.yaml"))
+    project = load_project(config_path=str(root / "refdes-project.yaml"))
     parse.load_items(project, require_ids=False)
     build_mod.build(project, seal_write=False, reseal=False)
     return project
@@ -399,7 +400,7 @@ def test_cli_former_ids_propose_shows_candidates_then_writes_on_confirm(tmp_path
         encoding="utf-8",
     )
 
-    status = cli_mod.main(["-c", str(root / "refdes.yaml"), "former-ids", "propose"])
+    status = cli_mod.main(["-c", str(root / "refdes-project.yaml"), "former-ids", "propose"])
     assert status == 0
     out = capsys.readouterr().out
     assert "REQ-001" in out and "REQ-002" in out
@@ -407,7 +408,7 @@ def test_cli_former_ids_propose_shows_candidates_then_writes_on_confirm(tmp_path
     assert "former_ids: [REQ-001]" not in (root / "items" / "r.yaml").read_text(encoding="utf-8")
 
     status = cli_mod.main(
-        ["-c", str(root / "refdes.yaml"), "former-ids", "propose", "--confirm", "REQ-001"]
+        ["-c", str(root / "refdes-project.yaml"), "former-ids", "propose", "--confirm", "REQ-001"]
     )
     assert status == 0
     out = capsys.readouterr().out

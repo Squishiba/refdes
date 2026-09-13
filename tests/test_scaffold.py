@@ -9,6 +9,7 @@ import json
 import os
 
 import pytest
+from conftest import write_project_config
 from helpers import _build_at_repo_schema
 
 from refdes import cli as cli_mod
@@ -48,7 +49,7 @@ def test_preset_providers_maps_names_to_the_preset():
 
 def test_init_writes_the_exact_documented_file(tmp_path):
     path = scaffold_mod.init(str(tmp_path))
-    assert path == str(tmp_path / "refdes.yaml")
+    assert path == str(tmp_path / "refdes-project.yaml")
     text = open(path, encoding="utf-8").read()
     assert "types:" not in text
     assert "link_types:" not in text
@@ -88,7 +89,7 @@ def test_init_preset_with_standard_none_is_a_load_time_error(tmp_path):
 
 
 def test_init_refuses_to_overwrite_an_existing_config(tmp_path):
-    (tmp_path / "refdes.yaml").write_text("site: {title: t, out: _site}\n", encoding="utf-8")
+    write_project_config(tmp_path, "site: {title: t, out: _site}\n")
     with pytest.raises(SchemaError, match="already exists"):
         scaffold_mod.init(str(tmp_path))
 
@@ -133,7 +134,7 @@ def test_cli_init_end_to_end(tmp_path, monkeypatch, capsys):
     monkeypatch.chdir(tmp_path)
     status = cli_mod.main(["init"])
     assert status == 0
-    assert (tmp_path / "refdes.yaml").is_file()
+    assert (tmp_path / "refdes-project.yaml").is_file()
     assert (tmp_path / ".vscode" / "settings.json").is_file()
     out = capsys.readouterr().out
     assert f"standard: hardware@{standards.latest_version('hardware')}" in out
@@ -198,7 +199,7 @@ def test_new_item_text_links_are_commented_out_with_target_hint():
 
 def test_cli_new_unknown_type_reports_a_hint(tmp_path, capsys):
     scaffold_mod.init(str(tmp_path))
-    status = cli_mod.main(["-c", str(tmp_path / "refdes.yaml"), "new", "decisoin"])
+    status = cli_mod.main(["-c", str(tmp_path / "refdes-project.yaml"), "new", "decisoin"])
     assert status == 1
     err = capsys.readouterr().err
     assert "unknown type 'decisoin'" in err
@@ -207,7 +208,7 @@ def test_cli_new_unknown_type_reports_a_hint(tmp_path, capsys):
 
 def test_cli_new_known_type_prints_scaffold(tmp_path, capsys):
     scaffold_mod.init(str(tmp_path))
-    status = cli_mod.main(["-c", str(tmp_path / "refdes.yaml"), "new", "requirement"])
+    status = cli_mod.main(["-c", str(tmp_path / "refdes-project.yaml"), "new", "requirement"])
     assert status == 0
     out = capsys.readouterr().out
     assert "type: requirement" in out
@@ -219,7 +220,7 @@ def test_cli_new_known_type_prints_scaffold(tmp_path, capsys):
 def test_add_preset_appends_to_the_list(tmp_path):
     scaffold_mod.init(str(tmp_path))
     scaffold_mod.add_preset(str(tmp_path), "design-debate")
-    text = (tmp_path / "refdes.yaml").read_text(encoding="utf-8")
+    text = (tmp_path / "refdes-project.yaml").read_text(encoding="utf-8")
     assert "presets: [design-debate]" in text
 
 
@@ -237,7 +238,7 @@ def test_add_preset_already_selected_is_an_error(tmp_path):
 
 def test_add_preset_preserves_hand_written_comments(tmp_path):
     scaffold_mod.init(str(tmp_path))
-    config_path = tmp_path / "refdes.yaml"
+    config_path = tmp_path / "refdes-project.yaml"
     text = config_path.read_text(encoding="utf-8")
     text = text.replace("site:", "# A hand-written comment nobody wants lost.\nsite:")
     config_path.write_text(text, encoding="utf-8")
@@ -250,7 +251,7 @@ def test_add_preset_preserves_hand_written_comments(tmp_path):
 def test_remove_preset_removes_from_the_list(tmp_path):
     scaffold_mod.init(str(tmp_path), presets=["design-debate"])
     scaffold_mod.remove_preset(str(tmp_path), "design-debate")
-    text = (tmp_path / "refdes.yaml").read_text(encoding="utf-8")
+    text = (tmp_path / "refdes-project.yaml").read_text(encoding="utf-8")
     assert "presets: []" in text
 
 
@@ -276,22 +277,22 @@ def test_remove_preset_reports_orphaned_items_before_writing(tmp_path):
     # The report ran, but the config change still applied -- this command's
     # job is to surface the consequence, not block an author who already
     # decided to accept it.
-    text = (tmp_path / "refdes.yaml").read_text(encoding="utf-8")
+    text = (tmp_path / "refdes-project.yaml").read_text(encoding="utf-8")
     assert "presets: []" in text
     # No leftover scratch file.
-    assert not (tmp_path / "refdes.yaml.scratch").exists()
+    assert not (tmp_path / "refdes-project.yaml.scratch").exists()
 
 
 def test_cli_standard_add_and_remove_preset(tmp_path, capsys):
     scaffold_mod.init(str(tmp_path))
-    config = str(tmp_path / "refdes.yaml")
+    config = str(tmp_path / "refdes-project.yaml")
     status = cli_mod.main(["-c", config, "standard", "add-preset", "design-debate"])
     assert status == 0
-    assert "design-debate" in (tmp_path / "refdes.yaml").read_text(encoding="utf-8")
+    assert "design-debate" in (tmp_path / "refdes-project.yaml").read_text(encoding="utf-8")
 
     status = cli_mod.main(["-c", config, "standard", "remove-preset", "design-debate"])
     assert status == 0
-    assert "presets: []" in (tmp_path / "refdes.yaml").read_text(encoding="utf-8")
+    assert "presets: []" in (tmp_path / "refdes-project.yaml").read_text(encoding="utf-8")
 
 
 def test_cli_standard_remove_preset_exit_code_reflects_errors(tmp_path):
@@ -302,7 +303,7 @@ def test_cli_standard_remove_preset_exit_code_reflects_errors(tmp_path):
         "---\nid: DB-001\ntype: debate\ntitle: An open question.\nstatus: open\n---\n",
         encoding="utf-8",
     )
-    config = str(tmp_path / "refdes.yaml")
+    config = str(tmp_path / "refdes-project.yaml")
     status = cli_mod.main(["-c", config, "standard", "remove-preset", "design-debate"])
     assert status == 1
 
@@ -318,7 +319,7 @@ def test_unknown_type_matching_a_preset_names_it(tmp_path):
         "---\nid: DB-001\ntype: debate\ntitle: An open question.\nstatus: open\n---\n",
         encoding="utf-8",
     )
-    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
     parse.load_items(project)
     assert any(
         "unknown type 'debate'" in d.message
@@ -334,7 +335,7 @@ def test_unknown_type_with_no_preset_match_is_the_ordinary_message(tmp_path):
     (items / "x.md").write_text(
         "---\nid: X-001\ntype: totallymadeup\ntitle: t.\n---\n", encoding="utf-8"
     )
-    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
     parse.load_items(project)
     msg = next(d.message for d in project.errors if "unknown type" in d.message)
     assert "provided by" not in msg
@@ -349,7 +350,7 @@ def test_unknown_link_matching_a_preset_names_it(tmp_path):
         "resolved_by: []\n---\n",
         encoding="utf-8",
     )
-    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
     parse.load_items(project)
     assert any(
         "unknown field 'resolved_by'" in d.message

@@ -6,6 +6,7 @@ Split out of the original monolithic tests/test_refdes.py.
 from __future__ import annotations
 
 import yaml
+from conftest import write_project_config
 
 from refdes import build as build_mod
 from refdes import cli as cli_mod
@@ -38,7 +39,7 @@ LINKS_SCHEMA = (
 
 
 def _links_project(tmp_path, items_yaml):
-    (tmp_path / "refdes.yaml").write_text(LINKS_SCHEMA, encoding="utf-8")
+    write_project_config(tmp_path, LINKS_SCHEMA)
     items = tmp_path / "items"
     items.mkdir()
     (items / "r.yaml").write_text(items_yaml, encoding="utf-8")
@@ -50,7 +51,7 @@ def _keyed_links_project(tmp_path, items_yaml):
     the starting state most of this section's tests want, since expansion
     and hashing both need a target's key to exist first."""
     root = _links_project(tmp_path, items_yaml)
-    config = str(root / "refdes.yaml")
+    config = str(root / "refdes-project.yaml")
     project = load_project(config_path=config)
     parse.load_items(project)
     keys_mod.mint_missing(project)
@@ -63,7 +64,7 @@ def test_resolve_link_target_bare_and_composite_forms(tmp_path):
         "defaults: { type: requirement }\n"
         "items:\n  - id: REQ-001\n    text: Target.\n",
     )
-    project = load_project(config_path=str(root / "refdes.yaml"))
+    project = load_project(config_path=str(root / "refdes-project.yaml"))
     parse.load_items(project)
     target = project.items["REQ-001"]
     by_key = {target.key: target}
@@ -83,7 +84,7 @@ def test_resolve_link_target_unknown_key_does_not_fall_back_to_display_text(tmp_
         "defaults: { type: requirement }\n"
         "items:\n  - id: REQ-001\n    text: Target.\n",
     )
-    project = load_project(config_path=str(root / "refdes.yaml"))
+    project = load_project(config_path=str(root / "refdes-project.yaml"))
     parse.load_items(project)
     by_key = {project.items["REQ-001"].key: project.items["REQ-001"]}
 
@@ -112,7 +113,7 @@ def test_hash_is_neutral_to_renaming_a_linked_items_display_id(tmp_path):
         "  - id: REQ-001\n    text: Target.\n"
         "  - id: REQ-002\n    text: Source.\n    refines: [REQ-001]\n",
     )
-    config = str(root / "refdes.yaml")
+    config = str(root / "refdes-project.yaml")
     project = load_project(config_path=config)
     parse.load_items(project)
     keys_mod.mint_missing(project)
@@ -155,7 +156,7 @@ def test_hash_is_neutral_to_expanding_a_bare_link_into_composite_form(tmp_path):
         "  - id: REQ-001\n    text: Target.\n"
         "  - id: REQ-002\n    text: Source.\n    refines: [REQ-001]\n",
     )
-    config = str(root / "refdes.yaml")
+    config = str(root / "refdes-project.yaml")
 
     project = load_project(config_path=config)
     parse.load_items(project)
@@ -185,7 +186,7 @@ def test_expand_missing_rewrites_same_line_list_and_freezes_it(tmp_path):
         "  - id: REQ-001\n    text: Target.\n"
         "  - id: REQ-002\n    text: Source.\n    refines: [REQ-001]\n",
     )
-    project = load_project(config_path=str(root / "refdes.yaml"))
+    project = load_project(config_path=str(root / "refdes-project.yaml"))
     parse.load_items(project)
 
     written = links_mod.expand_missing(project)
@@ -202,7 +203,7 @@ def test_expand_missing_rewrites_same_line_list_and_freezes_it(tmp_path):
 
     # Frozen: a second pass finds nothing left to expand, and never touches
     # the composite it already wrote.
-    project2 = load_project(config_path=str(root / "refdes.yaml"))
+    project2 = load_project(config_path=str(root / "refdes-project.yaml"))
     parse.load_items(project2)
     assert links_mod.expand_missing(project2) == []
     assert (root / "items" / "r.yaml").read_text(encoding="utf-8") == text
@@ -216,7 +217,7 @@ def test_expand_missing_rewrites_block_style_sequence(tmp_path):
         "  - id: REQ-001\n    text: Target.\n"
         "  - id: REQ-002\n    text: Source.\n    refines:\n      - REQ-001\n",
     )
-    project = load_project(config_path=str(root / "refdes.yaml"))
+    project = load_project(config_path=str(root / "refdes-project.yaml"))
     parse.load_items(project)
 
     written = links_mod.expand_missing(project)
@@ -227,13 +228,14 @@ def test_expand_missing_rewrites_block_style_sequence(tmp_path):
     assert f"- {new}" in text
     assert "- REQ-001\n" not in text  # the bare line is gone, not duplicated
 
-    reparsed = load_project(config_path=str(root / "refdes.yaml"))
+    reparsed = load_project(config_path=str(root / "refdes-project.yaml"))
     parse.load_items(reparsed)
     assert reparsed.items["REQ-002"].links["refines"] == [new]
 
 
 def test_expand_missing_rewrites_markdown_front_matter(tmp_path):
-    (tmp_path / "refdes.yaml").write_text(
+    write_project_config(
+        tmp_path,
         "site: { title: T, out: _site }\n"
         "link_types:\n  refines: { inverse: refined_by, label: Refines }\n"
         "types:\n"
@@ -241,7 +243,6 @@ def test_expand_missing_rewrites_markdown_front_matter(tmp_path):
         "    prefix: DEC\n    label: Decision\n"
         "    fields:\n      title: { type: text, required: true }\n"
         "    links:\n      refines: [decision]\n",
-        encoding="utf-8",
     )
     (tmp_path / "items").mkdir()
     (tmp_path / "items" / "a.md").write_text(
@@ -251,7 +252,7 @@ def test_expand_missing_rewrites_markdown_front_matter(tmp_path):
         "---\nid: DEC-002\ntype: decision\ntitle: Source.\nrefines: [DEC-001]\n---\n",
         encoding="utf-8",
     )
-    config = str(tmp_path / "refdes.yaml")
+    config = str(tmp_path / "refdes-project.yaml")
     project = load_project(config_path=config)
     parse.load_items(project)
     keys_mod.mint_missing(project)
@@ -283,7 +284,7 @@ def test_expand_missing_skips_flow_style_entries(tmp_path):
         "  - id: REQ-001\n    text: Target.\n"
         "  - {id: REQ-002, text: Source., refines: [REQ-001]}\n",
     )
-    project = load_project(config_path=str(root / "refdes.yaml"))
+    project = load_project(config_path=str(root / "refdes-project.yaml"))
     parse.load_items(project)
 
     assert links_mod.expand_missing(project) == []
@@ -307,7 +308,7 @@ def test_expand_missing_skips_a_target_with_no_key_yet(tmp_path):
         "  - id: REQ-001\n    text: Target.\n"
         "  - id: REQ-002\n    text: Source.\n    refines: [REQ-001]\n",
     )
-    project = load_project(config_path=str(root / "refdes.yaml"))
+    project = load_project(config_path=str(root / "refdes-project.yaml"))
     parse.load_items(project)
     assert project.items["REQ-001"].key == ""  # never minted in this test
 
@@ -324,7 +325,7 @@ def test_no_write_suppresses_link_expansion_and_reports_one_info_line(tmp_path):
         "  - id: REQ-001\n    text: Target.\n"
         "  - id: REQ-002\n    text: Source.\n    refines: [REQ-001]\n",
     )
-    config = str(root / "refdes.yaml")
+    config = str(root / "refdes-project.yaml")
     before = (root / "items" / "r.yaml").read_text(encoding="utf-8")
 
     status = cli_mod.main(["-c", config, "--no-write", "check", "--verbose"])
@@ -372,7 +373,7 @@ def _write_legacy_baseline(root, name: str, items: dict) -> None:
 
 
 def _built_links_project(root):
-    config = str(root / "refdes.yaml")
+    config = str(root / "refdes-project.yaml")
     project = load_project(config_path=config)
     parse.load_items(project)
     build_mod.build(project, seal_write=False, reseal=False)
@@ -471,12 +472,12 @@ def test_stamp_same_name_after_hash_format_change_is_unchanged_not_conflict(tmp_
 
 
 def test_seal_migration_silently_upgrades_an_unedited_entry_and_still_catches_a_real_edit(tmp_path):
-    (tmp_path / "refdes.yaml").write_text(
+    write_project_config(
+        tmp_path,
         "site: { title: T, out: _site }\n"
         "types:\n"
         "  log:\n    prefix: LOG\n    label: Log\n    append_only: true\n"
         "    fields:\n      summary: { type: text, required: true }\n",
-        encoding="utf-8",
     )
     items = tmp_path / "items"
     items.mkdir()
@@ -484,7 +485,7 @@ def test_seal_migration_silently_upgrades_an_unedited_entry_and_still_catches_a_
         "defaults: { type: log }\nitems:\n  - id: LOG-001\n    summary: First.\n",
         encoding="utf-8",
     )
-    config = str(tmp_path / "refdes.yaml")
+    config = str(tmp_path / "refdes-project.yaml")
     project = load_project(config_path=config)
     parse.load_items(project)
     build_mod.build(project, seal_write=False, reseal=False)

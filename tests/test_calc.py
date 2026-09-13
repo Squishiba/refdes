@@ -6,6 +6,7 @@ Split out of the original monolithic tests/test_refdes.py.
 from __future__ import annotations
 
 import pytest
+from conftest import write_project_config
 from helpers import _project
 
 from refdes import build as build_mod
@@ -154,10 +155,10 @@ def test_misplaced_tolerance_plus_minus_spelling_is_also_caught():
 
 
 def test_misplaced_tolerance_error_reaches_the_build_diagnostic(tmp_path):
-    (tmp_path / "refdes.yaml").write_text(
+    write_project_config(
+        tmp_path,
         "site: { title: T, out: _site }\n"
         "types:\n  decision: { prefix: DEC, fields: {} }\n",
-        encoding="utf-8",
     )
     items = tmp_path / "items"
     items.mkdir()
@@ -166,7 +167,7 @@ def test_misplaced_tolerance_error_reaches_the_build_diagnostic(tmp_path):
         "```calc\nV = 3.3 V\nI = 1.2 A\nP : W ± 10% = V * I\n```\n",
         encoding="utf-8",
     )
-    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
     parse.load_items(project)
     build_mod.build(project)
     message = next(d.message for d in project.errors if "P" in d.message)
@@ -225,10 +226,10 @@ def test_a_failed_first_attempt_does_not_block_a_retry():
 
 
 def test_duplicate_assignment_across_blocks_fails_the_build(tmp_path):
-    (tmp_path / "refdes.yaml").write_text(
+    write_project_config(
+        tmp_path,
         "site: { title: T, out: _site }\n"
         "types:\n  decision: { prefix: DEC, fields: {} }\n",
-        encoding="utf-8",
     )
     items = tmp_path / "items"
     items.mkdir()
@@ -238,7 +239,7 @@ def test_duplicate_assignment_across_blocks_fails_the_build(tmp_path):
         "```calc\nx = 2 A\n```\n",
         encoding="utf-8",
     )
-    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
     parse.load_items(project)
     build_mod.build(project)
     message = next(d.message for d in project.errors if "assigned twice" in d.message)
@@ -263,10 +264,10 @@ def test_duplicate_assignment_across_blocks_fails_the_build(tmp_path):
 def test_same_name_in_different_items_does_not_collide(tmp_path):
     """Two items in one file, each with their own calc block naming `x`, must
     build clean -- variables are item-scoped, not file-scoped (docs/math.md)."""
-    (tmp_path / "refdes.yaml").write_text(
+    write_project_config(
+        tmp_path,
         "site: { title: T, out: _site }\n"
         "types:\n  decision: { prefix: DEC, fields: {} }\n",
-        encoding="utf-8",
     )
     items = tmp_path / "items"
     items.mkdir()
@@ -277,7 +278,7 @@ def test_same_name_in_different_items_does_not_collide(tmp_path):
         "```calc\nx = 2 A\n```\n",
         encoding="utf-8",
     )
-    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
     parse.load_items(project)
     build_mod.build(project)
     assert not any("assigned twice" in d.message for d in project.errors)
@@ -297,10 +298,10 @@ def test_extract_blocks_with_lines_offset_matches_block_position():
 
 
 def test_calc_line_records_absolute_source_position(tmp_path):
-    (tmp_path / "refdes.yaml").write_text(
+    write_project_config(
+        tmp_path,
         "site: { title: T, out: _site }\n"
         "types:\n  decision: { prefix: DEC, fields: {} }\n",
-        encoding="utf-8",
     )
     items = tmp_path / "items"
     items.mkdir()
@@ -309,7 +310,7 @@ def test_calc_line_records_absolute_source_position(tmp_path):
         "prose\n\n```calc\nV = 3.3 V\nI = 1.2 A\n```\n"
     )
     (items / "dec.md").write_text(source, encoding="utf-8")
-    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
     parse.load_items(project)
     build_mod.build(project)
     item = project.items["DEC-001"]
@@ -322,10 +323,10 @@ def test_calc_line_records_absolute_source_position(tmp_path):
 def test_calc_line_position_reaches_items_json(tmp_path):
     from refdes import render
 
-    (tmp_path / "refdes.yaml").write_text(
+    write_project_config(
+        tmp_path,
         "site: { title: T, out: _site }\n"
         "types:\n  decision: { prefix: DEC, fields: {} }\n",
-        encoding="utf-8",
     )
     items = tmp_path / "items"
     items.mkdir()
@@ -333,7 +334,7 @@ def test_calc_line_position_reaches_items_json(tmp_path):
         "---\nid: DEC-001\ntype: decision\n---\n\n```calc\nV = 3.3 V\n```\n",
         encoding="utf-8",
     )
-    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
     parse.load_items(project)
     build_mod.build(project)
     payload = render.items_json(project)
@@ -588,7 +589,7 @@ TEMPERATURE_SCHEMA = (
 
 
 def _temperature_project(tmp_path, limit, value="40 degC"):
-    (tmp_path / "refdes.yaml").write_text(TEMPERATURE_SCHEMA, encoding="utf-8")
+    write_project_config(tmp_path, TEMPERATURE_SCHEMA)
     items = tmp_path / "items"
     items.mkdir()
     (items / "b.yaml").write_text(
@@ -610,7 +611,7 @@ def _temperature_project(tmp_path, limit, value="40 degC"):
         f"```calc\nT_j : degC = {value}\n```\n",
         encoding="utf-8",
     )
-    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
     parse.load_items(project)
     build_mod.build(project)
     return project
@@ -796,13 +797,13 @@ def test_a_cycle_installed_bypassing_validation_is_still_not_a_hang(equation_reg
 
 
 def _equation_config(tmp_path, equations_yaml):
-    (tmp_path / "refdes.yaml").write_text(
+    config = write_project_config(
+        tmp_path,
         "site: { title: E, out: _site }\n"
         "types:\n  decision: { prefix: DEC, fields: {} }\n"
         f"{equations_yaml}",
-        encoding="utf-8",
     )
-    return load_project(config_path=str(tmp_path / "refdes.yaml"))
+    return load_project(config_path=str(config))
 
 
 CURRENT_LIMIT_YAML = """\
@@ -814,7 +815,7 @@ equations:
 """
 
 
-def test_equations_load_from_refdes_yaml(tmp_path):
+def test_equations_load_from_the_project_config(tmp_path):
     project = _equation_config(tmp_path, CURRENT_LIMIT_YAML)
     assert list(project.equations) == ["current_limit"]
     assert project.equations["current_limit"].params == ["K", "V", "R"]
@@ -824,11 +825,11 @@ def test_equations_load_from_refdes_yaml(tmp_path):
 
 
 def test_an_equation_call_in_a_calc_block_reaches_the_build(tmp_path):
-    (tmp_path / "refdes.yaml").write_text(
+    write_project_config(
+        tmp_path,
         "site: { title: E, out: _site }\n"
         "types:\n  decision: { prefix: DEC, fields: {} }\n"
         f"{CURRENT_LIMIT_YAML}",
-        encoding="utf-8",
     )
     items = tmp_path / "items"
     items.mkdir()
@@ -837,7 +838,7 @@ def test_an_equation_call_in_a_calc_block_reaches_the_build(tmp_path):
         "```calc\nCLIM_out1 : A = current_limit(2500, 0.8 V, 3.3 kohm)\n```\n",
         encoding="utf-8",
     )
-    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
     parse.load_items(project)
     build_mod.build(project)
     assert not project.errors
@@ -852,14 +853,14 @@ def test_a_project_without_equations_installs_none(tmp_path):
     assert calc.EQUATIONS == {}
 
 
-def test_a_builtin_equation_name_in_refdes_yaml_is_an_error(tmp_path):
+def test_a_builtin_equation_name_in_the_project_config_is_an_error(tmp_path):
     with pytest.raises(SchemaError, match="built-in function"):
         _equation_config(
             tmp_path, "equations:\n  sqrt: { params: [x], expr: 'x * 2' }\n"
         )
 
 
-def test_an_equation_cycle_in_refdes_yaml_is_an_error(tmp_path):
+def test_an_equation_cycle_in_the_project_config_is_an_error(tmp_path):
     with pytest.raises(SchemaError) as excinfo:
         _equation_config(
             tmp_path,

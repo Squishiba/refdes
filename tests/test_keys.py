@@ -6,6 +6,7 @@ Split out of the original monolithic tests/test_refdes.py.
 from __future__ import annotations
 
 import yaml
+from conftest import write_project_config
 
 from refdes import build as build_mod
 from refdes import cli as cli_mod
@@ -167,7 +168,7 @@ KEYS_SCHEMA = (
 
 
 def _keys_project(tmp_path, items_yaml):
-    (tmp_path / "refdes.yaml").write_text(KEYS_SCHEMA, encoding="utf-8")
+    write_project_config(tmp_path, KEYS_SCHEMA)
     items = tmp_path / "items"
     items.mkdir()
     (items / "r.yaml").write_text(items_yaml, encoding="utf-8")
@@ -180,7 +181,7 @@ def test_mint_missing_assigns_and_writes_back_a_key_for_an_idd_item(tmp_path):
         "defaults: { type: requirement }\n"
         "items:\n  - id: REQ-001\n    text: Already has an id.\n",
     )
-    project = load_project(config_path=str(root / "refdes.yaml"))
+    project = load_project(config_path=str(root / "refdes-project.yaml"))
     parse.load_items(project, require_ids=False)
     written = keys_mod.mint_missing(project)
 
@@ -195,7 +196,7 @@ def test_mint_missing_assigns_and_writes_back_a_key_for_an_idd_item(tmp_path):
     assert text.count("key:") == 1
 
     # Durable: reparsing sees the same key, and mints nothing new.
-    project2 = load_project(config_path=str(root / "refdes.yaml"))
+    project2 = load_project(config_path=str(root / "refdes-project.yaml"))
     parse.load_items(project2, require_ids=False)
     assert project2.items["REQ-001"].key == new_key
     assert keys_mod.mint_missing(project2) == []
@@ -208,7 +209,7 @@ def test_mint_missing_assigns_a_key_to_a_pending_item_with_no_id_yet(tmp_path):
         tmp_path,
         "defaults: { type: requirement }\nitems:\n  - text: No id yet.\n",
     )
-    project = load_project(config_path=str(root / "refdes.yaml"))
+    project = load_project(config_path=str(root / "refdes-project.yaml"))
     parse.load_items(project, require_ids=False)
     assert len(project.pending) == 1
 
@@ -224,16 +225,16 @@ def test_mint_missing_assigns_a_key_to_a_pending_item_with_no_id_yet(tmp_path):
 
 
 def test_mint_missing_writes_back_into_markdown_front_matter(tmp_path):
-    (tmp_path / "refdes.yaml").write_text(
+    write_project_config(
+        tmp_path,
         "site: { title: T, out: _site }\n"
         "types:\n  decision: { prefix: DEC, fields: { title: { type: text, required: true } } }\n",
-        encoding="utf-8",
     )
     (tmp_path / "items").mkdir()
     path = tmp_path / "items" / "d.md"
     path.write_text("---\nid: DEC-001\ntype: decision\ntitle: Md form.\n---\n", encoding="utf-8")
 
-    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
     parse.load_items(project, require_ids=False)
     written = keys_mod.mint_missing(project)
     assert len(written) == 1
@@ -244,7 +245,7 @@ def test_mint_missing_writes_back_into_markdown_front_matter(tmp_path):
     assert front_matter.count("key:") == 1
     assert f"key: {new_key}" in front_matter
 
-    reparsed = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    reparsed = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
     parse.load_items(reparsed, require_ids=False)
     assert reparsed.items["DEC-001"].key == new_key
 
@@ -255,7 +256,7 @@ def test_mint_missing_writes_back_inside_a_flow_style_entry(tmp_path):
         "defaults: { type: requirement }\n"
         "items:\n  - {id: REQ-001, text: flow style entry}\n",
     )
-    project = load_project(config_path=str(root / "refdes.yaml"))
+    project = load_project(config_path=str(root / "refdes-project.yaml"))
     parse.load_items(project, require_ids=False)
     written = keys_mod.mint_missing(project)
     assert len(written) == 1
@@ -272,7 +273,7 @@ def test_mint_missing_never_reassigns_an_existing_key(tmp_path):
         "defaults: { type: requirement }\n"
         "items:\n  - id: REQ-001\n    key: k7f3m2q9x4b\n    text: Already keyed.\n",
     )
-    project = load_project(config_path=str(root / "refdes.yaml"))
+    project = load_project(config_path=str(root / "refdes-project.yaml"))
     parse.load_items(project, require_ids=False)
     assert project.items["REQ-001"].key == "k7f3m2q9x4b"
     assert keys_mod.mint_missing(project) == []
@@ -285,7 +286,7 @@ def test_no_write_suppresses_minting_and_reports_one_project_level_info(tmp_path
         "defaults: { type: requirement }\n"
         "items:\n  - id: REQ-001\n    text: A.\n  - id: REQ-002\n    text: B.\n",
     )
-    project = load_project(config_path=str(root / "refdes.yaml"))
+    project = load_project(config_path=str(root / "refdes-project.yaml"))
     parse.load_items(project, require_ids=False)
     written = keys_mod.mint_missing(project, write=False)
 
@@ -305,7 +306,7 @@ def test_no_write_singular_item_wording(tmp_path):
     root = _keys_project(
         tmp_path, "defaults: { type: requirement }\nitems:\n  - id: REQ-001\n    text: A.\n"
     )
-    project = load_project(config_path=str(root / "refdes.yaml"))
+    project = load_project(config_path=str(root / "refdes-project.yaml"))
     parse.load_items(project, require_ids=False)
     keys_mod.mint_missing(project, write=False)
     info = [d for d in project.diagnostics if d.level == "info"]
@@ -319,7 +320,7 @@ def test_keyless_item_stays_fully_usable(tmp_path):
     root = _keys_project(
         tmp_path, "defaults: { type: requirement }\nitems:\n  - id: REQ-001\n    text: A.\n"
     )
-    project = load_project(config_path=str(root / "refdes.yaml"))
+    project = load_project(config_path=str(root / "refdes-project.yaml"))
     parse.load_items(project, require_ids=False)
     build_mod.build(project, seal_write=False, reseal=False)
     assert not project.errors
@@ -331,11 +332,11 @@ def test_key_is_reserved_and_not_shadowable_by_a_same_named_field(tmp_path):
     """§3: key: is hard-reserved like id:/former_ids:, not overridable like
     prefix:/board: -- a hand-rolled type declaring its own 'key' field must
     not be able to shadow identity."""
-    (tmp_path / "refdes.yaml").write_text(
+    write_project_config(
+        tmp_path,
         "site: { title: T, out: _site }\n"
         "types:\n"
         "  widget: { prefix: WID, fields: { key: { type: text, required: true } } }\n",
-        encoding="utf-8",
     )
     items = tmp_path / "items"
     items.mkdir()
@@ -344,7 +345,7 @@ def test_key_is_reserved_and_not_shadowable_by_a_same_named_field(tmp_path):
         "items:\n  - id: WID-001\n    key: not a schema value, this is identity\n",
         encoding="utf-8",
     )
-    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
     parse.load_items(project, require_ids=False)
     item = project.items["WID-001"]
     # The hand-typed value was consumed as the surrogate key, not as the
@@ -357,7 +358,7 @@ def test_cli_check_mints_keys_by_default(tmp_path):
     root = _keys_project(
         tmp_path, "defaults: { type: requirement }\nitems:\n  - id: REQ-001\n    text: A.\n"
     )
-    status = cli_mod.main(["-c", str(root / "refdes.yaml"), "check"])
+    status = cli_mod.main(["-c", str(root / "refdes-project.yaml"), "check"])
     assert status == 0
     text = (root / "items" / "r.yaml").read_text(encoding="utf-8")
     assert "key:" in text
@@ -368,7 +369,7 @@ def test_cli_no_write_leaves_the_source_tree_untouched(tmp_path):
         tmp_path, "defaults: { type: requirement }\nitems:\n  - id: REQ-001\n    text: A.\n"
     )
     before = (root / "items" / "r.yaml").read_text(encoding="utf-8")
-    status = cli_mod.main(["-c", str(root / "refdes.yaml"), "--no-write", "check"])
+    status = cli_mod.main(["-c", str(root / "refdes-project.yaml"), "--no-write", "check"])
     assert status == 0
     after = (root / "items" / "r.yaml").read_text(encoding="utf-8")
     assert before == after

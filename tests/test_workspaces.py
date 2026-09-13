@@ -10,6 +10,7 @@ import os
 
 import pytest
 import yaml
+from conftest import write_project_config
 from helpers import _build_at
 
 from refdes import boards as boards_mod
@@ -59,10 +60,11 @@ types:
 
 @pytest.fixture
 def workspace_project(tmp_path):
-    (tmp_path / "refdes.yaml").write_text(WORKSPACE_CONFIG, encoding="utf-8")
-    (tmp_path / "refdes-project.yaml").write_text(
-        "item_layout: workspace\n", encoding="utf-8"
-    )
+    # `item_layout: workspace` is a setting, so it belongs in the marker the
+    # helper just wrote -- appended there rather than written over it.
+    config = write_project_config(tmp_path, WORKSPACE_CONFIG)
+    with config.open("a", encoding="utf-8") as fh:
+        fh.write("item_layout: workspace\n")
 
     platform = tmp_path / "items" / "platform" / "shared"
     platform.mkdir(parents=True)
@@ -144,14 +146,14 @@ def test_workspace_override_beats_the_path(workspace_project):
 def test_workspace_override_works_even_under_flat_layout(tmp_path):
     """The override is layout-independent; only the path fallback needs
     item_layout: workspace."""
-    (tmp_path / "refdes.yaml").write_text(
+    write_project_config(
+        tmp_path,
         "site: { title: T, out: _site }\n"
         "workspaces:\n  platform: { label: Platform }\n"
         "types:\n"
         "  requirement:\n"
         "    prefix: REQ\n"
         "    fields:\n      text: { type: text, required: true }\n",
-        encoding="utf-8",
     )
     items = tmp_path / "items"
     items.mkdir()
@@ -248,9 +250,11 @@ def test_derived_coverage_never_trips_the_lint(workspace_project):
 
 
 def test_cross_workspace_severity_is_configurable(workspace_project):
-    (workspace_project / "refdes-project.yaml").write_text(
-        "item_layout: workspace\ncross_workspace_severity: error\n", encoding="utf-8"
-    )
+    # The marker already carries the fixture's settings (item_layout included),
+    # so the severity is appended rather than written over them.
+    config = workspace_project / "refdes-project.yaml"
+    with config.open("a", encoding="utf-8") as fh:
+        fh.write("cross_workspace_severity: error\n")
     project = _build_at(workspace_project)
     assert any(
         d.item_id == "DEC-B-001" and "hidden dependency" in d.message
@@ -281,11 +285,13 @@ def test_lint_ignores_imported_items_on_either_end(workspace_project):
         }),
         encoding="utf-8",
     )
-    config = open(workspace_project / "refdes.yaml", encoding="utf-8").read()
+    config = open(workspace_project / "refdes-project.yaml", encoding="utf-8").read()
     config += (
         '\nimports:\n  - name: upstream\n    items: upstream/items.json\n'
     )
-    (workspace_project / "refdes.yaml").write_text(config, encoding="utf-8")
+    # Already-split text read back from the marker: written straight back, so
+    # the helper cannot mistake it for a combined config and drop the overlay.
+    (workspace_project / "refdes-project.yaml").write_text(config, encoding="utf-8")
     (workspace_project / "items" / "product-a" / "board-a" / "extra.yaml").write_text(
         "items:\n"
         "  - id: DEC-A-003\n    type: decision\n    title: Satisfies an import.\n"
@@ -300,15 +306,15 @@ def test_lint_ignores_imported_items_on_either_end(workspace_project):
 
 
 def test_board_and_workspace_names_may_not_collide(tmp_path):
-    (tmp_path / "refdes.yaml").write_text(
+    write_project_config(
+        tmp_path,
         "site: { title: T, out: _site }\n"
         "boards:\n  power: { label: Power }\n"
         "workspaces:\n  power: { label: Power }\n"
         "types:\n  requirement: { prefix: REQ, fields: { text: { type: text } } }\n",
-        encoding="utf-8",
     )
     with pytest.raises(SchemaError, match="declared as both a board and a workspace"):
-        load_project(config_path=str(tmp_path / "refdes.yaml"))
+        load_project(config_path=str(tmp_path / "refdes-project.yaml"))
 
 
 def test_workspace_drift_warns_and_accept_board_move_clears_it(workspace_project):
@@ -356,7 +362,7 @@ def test_audit_reports_workspace_moves(workspace_project):
     (workspace_project / "items" / "product-a" / "board-a" / "reqs.yaml").rename(
         workspace_project / "items" / "product-b" / "board-b" / "moved-req.yaml"
     )
-    project2 = load_project(config_path=str(workspace_project / "refdes.yaml"))
+    project2 = load_project(config_path=str(workspace_project / "refdes-project.yaml"))
     parse.load_items(project2)
     build_mod.build(project2)  # audit never writes
     assert ("REQ-A-001", "product-a", "product-b") in project2.workspace_moves
@@ -364,7 +370,7 @@ def test_audit_reports_workspace_moves(workspace_project):
 
 def test_check_workspace_flag_scopes_item_count(workspace_project, capsys):
     cli_mod.main(
-        ["-c", str(workspace_project / "refdes.yaml"), "check", "--workspace", "product-a"]
+        ["-c", str(workspace_project / "refdes-project.yaml"), "check", "--workspace", "product-a"]
     )
     out = capsys.readouterr().out
     # product-a has exactly REQ-A-001, DEC-A-001, DEC-A-002.
@@ -373,7 +379,7 @@ def test_check_workspace_flag_scopes_item_count(workspace_project, capsys):
 
 def test_check_workspace_flag_hides_other_workspaces_warnings(workspace_project, capsys):
     status = cli_mod.main(
-        ["-c", str(workspace_project / "refdes.yaml"), "check", "--workspace", "product-a"]
+        ["-c", str(workspace_project / "refdes-project.yaml"), "check", "--workspace", "product-a"]
     )
     # A valid workspace with warnings-only findings exits clean -- the contrast
     # with test_check_unknown_workspace_flag_is_a_clear_error's exit 1 below.
@@ -385,7 +391,7 @@ def test_check_workspace_flag_hides_other_workspaces_warnings(workspace_project,
 
 def test_check_unknown_workspace_flag_is_a_clear_error(workspace_project, capsys):
     status = cli_mod.main(
-        ["-c", str(workspace_project / "refdes.yaml"), "check", "--workspace", "nope"]
+        ["-c", str(workspace_project / "refdes-project.yaml"), "check", "--workspace", "nope"]
     )
     err = capsys.readouterr().err
     assert status == 1

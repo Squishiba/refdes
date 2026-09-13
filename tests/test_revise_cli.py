@@ -8,6 +8,7 @@ from __future__ import annotations
 import os
 
 import pytest
+from conftest import write_project_config
 from helpers import _lc_build, _pin_lifecycle_citation
 
 from refdes import cli as cli_mod
@@ -34,7 +35,7 @@ def stale_project(tmp_path):
     DEC-003 is `proposed` with no calc block at all; NOTE-001 has a calc
     block but its type declares no `status` field. Covers, in one fixture,
     every combination the signal's applicability rule needs to distinguish."""
-    (tmp_path / "refdes.yaml").write_text(STALE_SCHEMA, encoding="utf-8")
+    write_project_config(tmp_path, STALE_SCHEMA)
     items = tmp_path / "items"
     items.mkdir()
     (items / "decisions.yaml").write_text(
@@ -185,7 +186,9 @@ def test_valid_baseline_names_are_accepted():
 
 
 def test_cli_revision_stamps_and_reports(lifecycle_project, capsys):
-    status = cli_mod.main(["-c", str(lifecycle_project / "refdes.yaml"), "revision", "rev-a"])
+    status = cli_mod.main(
+        ["-c", str(lifecycle_project / "refdes-project.yaml"), "revision", "rev-a"]
+    )
     out = capsys.readouterr().out
     assert status == 0
     assert "revision 'rev-a' stamped: 3 items." in out
@@ -193,7 +196,9 @@ def test_cli_revision_stamps_and_reports(lifecycle_project, capsys):
 
 
 def test_cli_release_blocked_prints_gate_table(lifecycle_project, capsys):
-    status = cli_mod.main(["-c", str(lifecycle_project / "refdes.yaml"), "release", "rel-a"])
+    status = cli_mod.main(
+        ["-c", str(lifecycle_project / "refdes-project.yaml"), "release", "rel-a"]
+    )
     captured = capsys.readouterr()
     assert status == 1
     assert "blocked -- not stamped" in captured.err
@@ -208,7 +213,9 @@ def test_the_whole_gate_table_lands_on_one_stream(lifecycle_project, capsys):
     across two files with its ordering destroyed. That is CI, which is the
     one place this report has to stay readable. The block is a failure report,
     so all of it goes to stderr, and none of it leaks into stdout."""
-    status = cli_mod.main(["-c", str(lifecycle_project / "refdes.yaml"), "release", "rel-a"])
+    status = cli_mod.main(
+        ["-c", str(lifecycle_project / "refdes-project.yaml"), "release", "rel-a"]
+    )
     captured = capsys.readouterr()
     assert status == 1
 
@@ -242,7 +249,9 @@ def test_cli_release_success_prints_log_nudge(lifecycle_project, capsys):
         encoding="utf-8",
     )
     _pin_lifecycle_citation(lifecycle_project)
-    status = cli_mod.main(["-c", str(lifecycle_project / "refdes.yaml"), "release", "rel-a"])
+    status = cli_mod.main(
+        ["-c", str(lifecycle_project / "refdes-project.yaml"), "release", "rel-a"]
+    )
     out = capsys.readouterr().out
     assert status == 0
     assert "all gates passed" in out
@@ -250,7 +259,7 @@ def test_cli_release_success_prints_log_nudge(lifecycle_project, capsys):
 
 
 def test_cli_invalid_name_exits_2(lifecycle_project, capsys):
-    status = cli_mod.main(["-c", str(lifecycle_project / "refdes.yaml"), "revision", ".."])
+    status = cli_mod.main(["-c", str(lifecycle_project / "refdes-project.yaml"), "revision", ".."])
     err = capsys.readouterr().err
     assert status == 2
     assert "not a valid revision/release name" in err
@@ -258,17 +267,17 @@ def test_cli_invalid_name_exits_2(lifecycle_project, capsys):
 
 def test_cli_floor_violation_blocks_both_commands(tmp_path):
     """The unconditional error floor -- the same one `check` already has."""
-    (tmp_path / "refdes.yaml").write_text(
+    write_project_config(
+        tmp_path,
         "site: { title: T, out: _site }\n"
         "types:\n  requirement: { prefix: REQ, fields: { text: { type: text, required: true } } }\n",
-        encoding="utf-8",
     )
     (tmp_path / "items").mkdir()
     (tmp_path / "items" / "r.yaml").write_text(
         "defaults: { type: requirement }\nitems:\n  - id: REQ-001\n",  # missing required text
         encoding="utf-8",
     )
-    status = cli_mod.main(["-c", str(tmp_path / "refdes.yaml"), "revision", "rev-a"])
+    status = cli_mod.main(["-c", str(tmp_path / "refdes-project.yaml"), "revision", "rev-a"])
     assert status == 1
     assert not os.path.isdir(tmp_path / ".refdes" / "baselines")
 
@@ -277,10 +286,10 @@ def test_draft_project_is_the_regression_case(lifecycle_project, capsys):
     """A project that never stamps anything behaves exactly as today: check/
     build are unaffected, and audit reports the draft state rather than
     erroring on the absence of any baseline."""
-    status = cli_mod.main(["-c", str(lifecycle_project / "refdes.yaml"), "check"])
+    status = cli_mod.main(["-c", str(lifecycle_project / "refdes-project.yaml"), "check"])
     assert status == 0  # no build errors from lifecycle machinery existing
 
-    status2 = cli_mod.main(["-c", str(lifecycle_project / "refdes.yaml"), "audit"])
+    status2 = cli_mod.main(["-c", str(lifecycle_project / "refdes-project.yaml"), "audit"])
     out = capsys.readouterr().out
     assert status2 == 0
     assert "(none stamped yet -- project is in draft)" in out
@@ -292,7 +301,7 @@ def test_audit_reports_both_diffs(lifecycle_project, capsys):
     project = _lc_build(lifecycle_project)
     lifecycle.stamp(project, kind="revision", name="rev-a")
 
-    status = cli_mod.main(["-c", str(lifecycle_project / "refdes.yaml"), "audit"])
+    status = cli_mod.main(["-c", str(lifecycle_project / "refdes-project.yaml"), "audit"])
     out = capsys.readouterr().out
     assert status == 0
     assert "Since last revision (rev-a" in out
@@ -432,7 +441,7 @@ def test_stale_arithmetic_silent_with_no_baseline_stamped_at_all(stale_project, 
     """Extends test_draft_project_is_the_regression_case: a project that has
     never stamped anything has no prior point to have drifted from, so
     'stale' can't be asked yet -- audit must not mention it."""
-    status = cli_mod.main(["-c", str(stale_project / "refdes.yaml"), "audit"])
+    status = cli_mod.main(["-c", str(stale_project / "refdes-project.yaml"), "audit"])
     out = capsys.readouterr().out
     assert status == 0
     assert "(no revision stamped yet)" in out
@@ -457,7 +466,7 @@ def test_audit_prints_the_stale_arithmetic_annotation(stale_project, capsys):
         "    body: No calc block here, just prose.\n",
         encoding="utf-8",
     )
-    status = cli_mod.main(["-c", str(stale_project / "refdes.yaml"), "audit"])
+    status = cli_mod.main(["-c", str(stale_project / "refdes-project.yaml"), "audit"])
     out = capsys.readouterr().out
     assert status == 0
     assert "DEC-001 -- stale arithmetic: status changed, calc block did not" in out
