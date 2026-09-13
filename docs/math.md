@@ -63,7 +63,7 @@ library reads a bare "mil" as the *angular* mil — a dimensionless artillery un
 so Refdes aliases it. They display as `th` (thou), which is the same unit under its
 unambiguous name.
 
-Add your own aliases in `refdes.yaml`:
+Add your own aliases in `refdes-project.yaml`:
 
 ```yaml
 units:
@@ -158,7 +158,7 @@ results are candidates for renaming, and only sub-products are collapsed — in
 exactly as written.
 
 Which units are candidates is set by `units.preferred` in
-[`refdes.yaml`](schema-reference.md). Only single-symbol units belong there.
+[`refdes-project.yaml`](schema-reference.md). Only single-symbol units belong there.
 
 ## Functions
 
@@ -172,8 +172,9 @@ under-wide bounds would be worse than no support.
 ## Project equations
 
 A formula you retype per output, per rail, per input is a formula you will get
-wrong in one of them. `equations:` in [`refdes.yaml`](schema-reference.md)
-declares named expressions, callable from any calc block on the site:
+wrong in one of them. `equations:` is a project setting, so it lives in
+[`refdes-project.yaml`](schema-reference.md), and declares named expressions
+callable from any calc block on the site:
 
 ```yaml
 equations:

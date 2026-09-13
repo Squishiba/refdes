@@ -249,7 +249,7 @@ Both are first-class. A list entry with a `body:` covers most middle cases.
 
 ## Fields
 
-Which fields are legal depends on the type, and is declared in `refdes.yaml`:
+Which fields are legal depends on the type, and is declared in `refdes-schema.yaml`:
 
 ```yaml
 types:

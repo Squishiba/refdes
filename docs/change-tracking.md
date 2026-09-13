@@ -107,7 +107,7 @@ links work the same way.
 If fields can be excluded from invalidation, somebody could quietly downgrade one
 to hide a substantive change. Two things close that:
 
-1. The policy lives in `refdes.yaml`, in the repo, versioned like anything else.
+1. The policy lives in `refdes-schema.yaml`, in the repo, versioned like anything else.
 2. `refdes audit` lists everything currently suppressed.
 
 ```

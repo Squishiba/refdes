@@ -6,6 +6,14 @@ that as the default risk, not the exception.
 
 ## Current state, briefly
 
+- **The project config is two files; `refdes.yaml` is retired.**
+  `refdes-project.yaml` is the project marker and holds *all* project
+  settings — `site:`, `standard:`, `id:`, `boards:`, `workspaces:`,
+  `units:`, `history:`, `equations:`, and the process settings like
+  `sigfigs:` and `release_gate:`. `refdes-schema.yaml` is optional and
+  holds only the project's own `types:`/`link_types:`/`field_sets:`
+  overlay — most projects never have one, and a `types:` left in
+  `refdes-project.yaml` is an error, not a silent merge.
 - The bundled standard is at **`hardware@3`, itself unreleased** (see
   `CHANGELOG.md`'s `[Unreleased]` section and `src/refdes/standards/hardware/v3/`).
   Don't assume `hardware@2` behavior still holds, and don't cite `hardware@3`
@@ -37,7 +45,7 @@ that as the default risk, not the exception.
 
 ## Before writing any claim about the schema (types, fields, link types, presets)
 
-Run `refdes schema` (from a directory with a `refdes.yaml`) and check the JSON
+Run `refdes schema` (from a directory with a `refdes-project.yaml`) and check the JSON
 output — not memory, not something read earlier in this same session. It's
 faster and harder to get wrong than reading
 `src/refdes/standards/hardware/v1/base.yaml` by eye.

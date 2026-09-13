@@ -36,7 +36,7 @@ build time.
 
 | Reference | Covers |
 |---|---|
-| [Schema reference](schema-reference.md) | Every key in `refdes.yaml` |
+| [Schema reference](schema-reference.md) | Every key in `refdes-project.yaml` and `refdes-schema.yaml` |
 | [CLI reference](cli-reference.md) | Every command and flag |
 | [Output formats](output.md) | The generated site and `items.json` |
 | [Troubleshooting](troubleshooting.md) | Error messages and what to do about them |

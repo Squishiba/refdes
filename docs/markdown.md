@@ -145,7 +145,7 @@ target gets no warning at build time, at any point.
 
 For a handful of local files linked to by hand (a schematic PDF, a BOM
 spreadsheet) rather than embedded as an image, declare an opt-in
-`site.assets:` directory in `refdes.yaml` and point the link at its
+`site.assets:` directory in `refdes-project.yaml` and point the link at its
 destination under `assets/`:
 
 ```yaml

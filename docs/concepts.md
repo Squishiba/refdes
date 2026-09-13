@@ -11,8 +11,8 @@ test, a log entry. An item has
 - **links** to other items,
 - an optional **markdown body**.
 
-Item types are not hard-coded. They are declared in `refdes.yaml`, so adding a
-`thermal_zone` type is a config change, not a code change. See the
+Item types are not hard-coded. They are declared in `refdes-schema.yaml`, so
+adding a `thermal_zone` type is a config change, not a code change. See the
 [schema reference](schema-reference.md).
 
 ## Links are edges, declarable from either end

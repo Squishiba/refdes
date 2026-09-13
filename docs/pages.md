@@ -15,7 +15,7 @@ Drop markdown in `pages/`:
 
 ```
 my-board/
-  refdes.yaml
+  refdes-project.yaml
   items/
   pages/
     index.md
@@ -112,12 +112,16 @@ A project with no items at all is just a website. That is how this documentation
 built:
 
 ```yaml
+# refdes-project.yaml
 site:
   title: "Refdes"
   out: ../_docs
   pages: ../docs
   nav: [index, getting-started, concepts]
+```
 
+```yaml
+# refdes-schema.yaml
 types:
   note:
     prefix: NOTE

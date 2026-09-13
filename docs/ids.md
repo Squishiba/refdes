@@ -141,7 +141,7 @@ The prefix comes from, in order:
    markdown file — see [authoring](authoring.md#prefix-per-item))
 2. `defaults.prefix` in a list file or a markdown file's leading `defaults:`
    block (`REQ-PWR`)
-3. the type's `prefix` in `refdes.yaml` (`REQ`)
+3. the type's `prefix` in `refdes-schema.yaml` (`REQ`)
 
 Prefixes may contain hyphens, which is how you get `REQ-PWR-001` and `BND-THM-001`
 from the same `requirement`/`bound` types.
@@ -165,7 +165,7 @@ the id to *start with* the declared prefix, not equal it exactly.
 
 ## Width
 
-`id.width` in `refdes.yaml` sets zero-padding:
+`id.width` in `refdes-project.yaml` sets zero-padding:
 
 ```yaml
 id:
@@ -254,7 +254,7 @@ REQ   -   PWR   -   AI   - 004
 TYPE      BOARD      CATEGORY  NNN
 ```
 
-- **Type** is the type's own prefix (`REQ`), from `refdes.yaml`.
+- **Type** is the type's own prefix (`REQ`), from `refdes-schema.yaml`.
 - **Board** is a token folded into `prefix:` — `REQ-PWR` — exactly as
   described above. It is expressed through `prefix:`, not derived from
   anything: there is no board- or workspace-aware id segment, and this is

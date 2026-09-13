@@ -3,7 +3,7 @@
 ## Declaring links
 
 Links are fields whose values are item IDs. Which link names are legal on a type,
-and what they may point at, is declared in `refdes.yaml`:
+and what they may point at, is declared in `refdes-schema.yaml`:
 
 ```yaml
 types:
