@@ -10,6 +10,7 @@ Split out of the original monolithic tests/test_refdes.py.
 from __future__ import annotations
 
 import yaml
+from conftest import write_project_config
 from helpers import PARTS_SCHEMA
 
 from refdes import build as build_mod
@@ -24,10 +25,10 @@ def test_an_item_still_typed_constraint_at_v2_names_the_rename(tmp_path):
     bare "unknown type 'constraint'." on every item in the project, and
     difflib's did-you-mean offers nothing: `constraint` and `bound` are not
     close enough to suggest."""
-    (tmp_path / "refdes.yaml").write_text(
+    write_project_config(
+        tmp_path,
         "site: { title: T, out: _site }\n"
         "standard: { base: hardware, version: 2, presets: [] }\n",
-        encoding="utf-8",
     )
     (tmp_path / "items").mkdir()
     (tmp_path / "items" / "i.yaml").write_text(
@@ -36,7 +37,7 @@ def test_an_item_still_typed_constraint_at_v2_names_the_rename(tmp_path):
         "    limit: \"<= 0.15 W/in^2\"\n",
         encoding="utf-8",
     )
-    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
     parse.load_items(project)
     messages = [d.message for d in project.errors]
     assert any(
@@ -49,18 +50,18 @@ def test_the_rename_hint_stays_quiet_where_the_new_type_does_not_exist(tmp_path)
     """A hand-rolled schema that has never heard of either name must get the
     ordinary unknown-type error, not advice to rename into a type it has no
     declaration for."""
-    (tmp_path / "refdes.yaml").write_text(
+    write_project_config(
+        tmp_path,
         "site: { title: T, out: _site }\n"
         "types:\n"
         "  widget: { prefix: WID, fields: { text: { type: text, required: true } } }\n",
-        encoding="utf-8",
     )
     (tmp_path / "items").mkdir()
     (tmp_path / "items" / "i.yaml").write_text(
         "items:\n  - id: CON-001\n    type: constraint\n    text: Nope.\n",
         encoding="utf-8",
     )
-    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
     parse.load_items(project)
     messages = [d.message for d in project.errors]
     assert any("unknown type 'constraint'" in m for m in messages), messages
@@ -70,11 +71,11 @@ def test_the_rename_hint_stays_quiet_where_the_new_type_does_not_exist(tmp_path)
 def _equivalence_project(tmp_path, version, target_id="REQ-001"):
     """A component declaring `equivalent:` at a target that is not a
     component, against a given pinned standard version."""
-    (tmp_path / "refdes.yaml").write_text(
+    write_project_config(
+        tmp_path,
         f"site: {{ title: T, out: _site }}\n"
         f"standard: {{ base: hardware, version: {version}, presets: [] }}\n"
         f"id: {{ width: 3, ledger: .refdes/ids.yaml }}\n",
-        encoding="utf-8",
     )
     (tmp_path / "items").mkdir()
     (tmp_path / "items" / "i.yaml").write_text(
@@ -85,7 +86,7 @@ def _equivalence_project(tmp_path, version, target_id="REQ-001"):
         f"    equivalent: [{target_id}]\n",
         encoding="utf-8",
     )
-    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
     parse.load_items(project)
     build_mod.build(project)
     return project
@@ -107,10 +108,10 @@ def test_hardware_v2_restricts_equivalent_and_alternate_to_components(tmp_path):
 
 def test_hardware_v2_still_allows_a_component_to_component_equivalence(tmp_path):
     """The restriction must not catch the case it exists to describe."""
-    (tmp_path / "refdes.yaml").write_text(
+    write_project_config(
+        tmp_path,
         "site: { title: T, out: _site }\n"
         "standard: { base: hardware, version: 2, presets: [] }\n",
-        encoding="utf-8",
     )
     (tmp_path / "items").mkdir()
     (tmp_path / "items" / "i.yaml").write_text(
@@ -120,7 +121,7 @@ def test_hardware_v2_still_allows_a_component_to_component_equivalence(tmp_path)
         "  - id: CMP-002\n    type: component\n    title: Second source.\n",
         encoding="utf-8",
     )
-    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
     parse.load_items(project)
     build_mod.build(project)
     assert not project.errors, [str(d) for d in project.errors]
@@ -162,12 +163,12 @@ def test_the_parts_fixture_matches_the_bundled_standard():
 def test_hardware_v1_still_resolves_constraint_unchanged(tmp_path):
     """v2 is a new pinned version, not an edit to an old one -- a project
     still pinned at v1 sees no difference at all."""
-    (tmp_path / "refdes.yaml").write_text(
+    write_project_config(
+        tmp_path,
         "site: { title: T, out: _site }\n"
         "standard: { base: hardware, version: 1, presets: [] }\n",
-        encoding="utf-8",
     )
-    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
     assert "bound" not in project.types
     assert project.types["constraint"].prefix == "CON"
     assert "title" in project.types["constraint"].fields
@@ -187,10 +188,10 @@ def test_standard_upgrade_v1_to_v2_applies_the_whole_collapsed_delta(tmp_path):
     this repository uses, structured references through both a link and a
     `checks:` entry, and an equivalence that must survive untouched while the
     restriction on it starts being enforced."""
-    (tmp_path / "refdes.yaml").write_text(
+    write_project_config(
+        tmp_path,
         "site: { title: T, out: _site }\n"
         "standard: { base: hardware, version: 1, presets: [] }\n",
-        encoding="utf-8",
     )
     items = tmp_path / "items"
     items.mkdir()
@@ -242,7 +243,7 @@ def test_standard_upgrade_v1_to_v2_applies_the_whole_collapsed_delta(tmp_path):
     # Nothing renames an equivalence; the restriction only starts being checked.
     assert "equivalent: [CMP-002]" in (items / "cmp.yaml").read_text(encoding="utf-8")
 
-    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
     assert project.standard_version == 2
     parse.load_items(project)
     build_mod.build(project, seal_write=False, reseal=False, accept_board_move=False)
@@ -254,10 +255,10 @@ def test_upgrade_refuses_when_an_equivalence_no_longer_satisfies_v2(tmp_path):
     about it -- but the step still re-validates, and a component pointing
     `equivalent` at a non-component is refused and rolled back rather than
     pinned to a version its own items don't satisfy."""
-    (tmp_path / "refdes.yaml").write_text(
+    write_project_config(
+        tmp_path,
         "site: { title: T, out: _site }\n"
         "standard: { base: hardware, version: 1, presets: [] }\n",
-        encoding="utf-8",
     )
     (tmp_path / "items").mkdir()
     (tmp_path / "items" / "i.yaml").write_text(
@@ -275,7 +276,7 @@ def test_upgrade_refuses_when_an_equivalence_no_longer_satisfies_v2(tmp_path):
         steps[0].result.errors
     )
     # Rolled back: the pin did not move.
-    assert "version: 1" in (tmp_path / "refdes.yaml").read_text(encoding="utf-8")
+    assert "version: 1" in (tmp_path / "refdes-project.yaml").read_text(encoding="utf-8")
 
 
 # ------------------------------------------------------ hardware@3 (finding 7,
@@ -286,10 +287,10 @@ def test_standard_upgrade_v2_to_v3_renames_text_and_method_to_body(tmp_path):
     """End-to-end against the real bundled standard: requirement.text and
     bound.text both become body:, test.method becomes body: too, and the
     upgraded project validates clean against v3's own body_required rule."""
-    (tmp_path / "refdes.yaml").write_text(
+    write_project_config(
+        tmp_path,
         "site: { title: T, out: _site }\n"
         "standard: { base: hardware, version: 2, presets: [] }\n",
-        encoding="utf-8",
     )
     items = tmp_path / "items"
     items.mkdir()
@@ -322,7 +323,7 @@ def test_standard_upgrade_v2_to_v3_renames_text_and_method_to_body(tmp_path):
     assert "body: Sweep 9 V to 36 V." in tst_text
     assert "method:" not in tst_text
 
-    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
     assert project.standard_version == 3
     parse.load_items(project)
     build_mod.build(project, seal_write=False, reseal=False, accept_board_move=False)
@@ -335,10 +336,10 @@ def test_upgrade_refuses_when_an_item_already_has_its_own_body(tmp_path):
     """A requirement that already carries prose body content (in addition to
     text:) must not have that content silently orphaned or overwritten by
     the text: -> body: rename -- refused and rolled back instead."""
-    (tmp_path / "refdes.yaml").write_text(
+    write_project_config(
+        tmp_path,
         "site: { title: T, out: _site }\n"
         "standard: { base: hardware, version: 2, presets: [] }\n",
-        encoding="utf-8",
     )
     (tmp_path / "items").mkdir()
     (tmp_path / "items" / "req.md").write_text(
@@ -353,16 +354,16 @@ def test_upgrade_refuses_when_an_item_already_has_its_own_body(tmp_path):
     assert any("already has its own body content" in e for e in steps[0].result.errors), (
         steps[0].result.errors
     )
-    assert "version: 2" in (tmp_path / "refdes.yaml").read_text(encoding="utf-8")
+    assert "version: 2" in (tmp_path / "refdes-project.yaml").read_text(encoding="utf-8")
 
 
 def test_v3_requirement_body_is_required_but_only_a_warning(tmp_path):
     """A requirement with no statement isn't one -- but this is enforced as
     a warning, not a build-blocking error, so a stub can exist mid-draft."""
-    (tmp_path / "refdes.yaml").write_text(
+    write_project_config(
+        tmp_path,
         "site: { title: T, out: _site }\n"
         "standard: { base: hardware, version: 3, presets: [] }\n",
-        encoding="utf-8",
     )
     (tmp_path / "items").mkdir()
     (tmp_path / "items" / "req.yaml").write_text(
@@ -370,7 +371,7 @@ def test_v3_requirement_body_is_required_but_only_a_warning(tmp_path):
         "items:\n  - id: REQ-001\n    title: Just a caption, no body.\n",
         encoding="utf-8",
     )
-    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
     parse.load_items(project, require_ids=False)
     build_mod.build(project, seal_write=False, reseal=False)
     assert project.errors == []
@@ -380,10 +381,10 @@ def test_v3_requirement_body_is_required_but_only_a_warning(tmp_path):
 
 
 def test_v3_requirement_title_is_optional_and_falls_back_to_body(tmp_path):
-    (tmp_path / "refdes.yaml").write_text(
+    write_project_config(
+        tmp_path,
         "site: { title: T, out: _site }\n"
         "standard: { base: hardware, version: 3, presets: [] }\n",
-        encoding="utf-8",
     )
     (tmp_path / "items").mkdir()
     (tmp_path / "items" / "req.yaml").write_text(
@@ -391,7 +392,7 @@ def test_v3_requirement_title_is_optional_and_falls_back_to_body(tmp_path):
         "items:\n  - id: REQ-001\n    body: The unit shall operate from 9 V to 36 V.\n",
         encoding="utf-8",
     )
-    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
     parse.load_items(project, require_ids=False)
     build_mod.build(project, seal_write=False, reseal=False)
     assert not project.errors, [str(d) for d in project.errors]
@@ -399,10 +400,10 @@ def test_v3_requirement_title_is_optional_and_falls_back_to_body(tmp_path):
 
 
 def test_v3_governed_by_link_resolves_its_backlink(tmp_path):
-    (tmp_path / "refdes.yaml").write_text(
+    write_project_config(
+        tmp_path,
         "site: { title: T, out: _site }\n"
         "standard: { base: hardware, version: 3, presets: [] }\n",
-        encoding="utf-8",
     )
     (tmp_path / "items").mkdir()
     (tmp_path / "items" / "req.yaml").write_text(
@@ -413,7 +414,7 @@ def test_v3_governed_by_link_resolves_its_backlink(tmp_path):
         "    governed_by: [REQ-001]\n",
         encoding="utf-8",
     )
-    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
     parse.load_items(project, require_ids=False)
     build_mod.build(project, seal_write=False, reseal=False)
     assert not project.errors, [str(d) for d in project.errors]
@@ -429,10 +430,10 @@ def test_v3_governed_by_also_reaches_a_bound(tmp_path):
     as against a requirement. `governed_by:` is still declared only on
     `requirement.links` (a bound doesn't author it), so the widening is
     about the *target*, not who can author it."""
-    (tmp_path / "refdes.yaml").write_text(
+    write_project_config(
+        tmp_path,
         "site: { title: T, out: _site }\n"
         "standard: { base: hardware, version: 3, presets: [] }\n",
-        encoding="utf-8",
     )
     items = tmp_path / "items"
     items.mkdir()
@@ -449,7 +450,7 @@ def test_v3_governed_by_also_reaches_a_bound(tmp_path):
         "    governed_by: [BND-001]\n",
         encoding="utf-8",
     )
-    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
     parse.load_items(project, require_ids=False)
     build_mod.build(project, seal_write=False, reseal=False)
     assert not project.errors, [str(d) for d in project.errors]
@@ -461,10 +462,10 @@ def _cmp_bnd_project(tmp_path, *, decision_extra="", component_extra=""):
     """One requirement-shaped bound (BND-001, >= 1.4 A) and, optionally, a
     decision and/or component pointing at it -- shared by the finding-7/22
     tests below so each one only writes the one link line it's testing."""
-    (tmp_path / "refdes.yaml").write_text(
+    write_project_config(
+        tmp_path,
         "site: { title: T, out: _site }\n"
         "standard: { base: hardware, version: 3, presets: [] }\n",
-        encoding="utf-8",
     )
     items = tmp_path / "items"
     items.mkdir()
@@ -493,7 +494,7 @@ def test_v3_component_gains_constrained_by_a_bound(tmp_path):
     root = _cmp_bnd_project(
         tmp_path, component_extra="    constrained_by: [BND-001]\n"
     )
-    project = load_project(config_path=str(root / "refdes.yaml"))
+    project = load_project(config_path=str(root / "refdes-project.yaml"))
     parse.load_items(project, require_ids=False)
     build_mod.build(project, seal_write=False, reseal=False)
     assert not project.errors, [str(d) for d in project.errors]
@@ -525,7 +526,7 @@ def test_v3_component_checks_needs_no_engine_change(tmp_path):
         "      - value: I_drive\n        against: BND-001\n",
         encoding="utf-8",
     )
-    project = load_project(config_path=str(root / "refdes.yaml"))
+    project = load_project(config_path=str(root / "refdes-project.yaml"))
     parse.load_items(project, require_ids=False)
     build_mod.build(project, seal_write=False, reseal=False)
     assert not project.errors, [str(d) for d in project.errors]
@@ -545,7 +546,7 @@ def test_v3_decision_satisfies_a_bound_reaches_satisfied_stage(tmp_path):
         tmp_path,
         decision_extra="    status: accepted\n    satisfies: [BND-001]\n",
     )
-    project = load_project(config_path=str(root / "refdes.yaml"))
+    project = load_project(config_path=str(root / "refdes-project.yaml"))
     parse.load_items(project, require_ids=False)
     build_mod.build(project, seal_write=False, reseal=False)
     assert not project.errors, [str(d) for d in project.errors]
@@ -559,7 +560,7 @@ def test_v3_component_satisfies_a_bound_reaches_satisfied_stage(tmp_path):
     root = _cmp_bnd_project(
         tmp_path, component_extra="    satisfies: [BND-001]\n"
     )
-    project = load_project(config_path=str(root / "refdes.yaml"))
+    project = load_project(config_path=str(root / "refdes-project.yaml"))
     parse.load_items(project, require_ids=False)
     build_mod.build(project, seal_write=False, reseal=False)
     assert not project.errors, [str(d) for d in project.errors]
@@ -578,7 +579,7 @@ def test_v3_constrained_by_alone_still_never_feeds_coverage(tmp_path):
         tmp_path,
         decision_extra="    status: accepted\n    constrained_by: [BND-001]\n",
     )
-    project = load_project(config_path=str(root / "refdes.yaml"))
+    project = load_project(config_path=str(root / "refdes-project.yaml"))
     parse.load_items(project, require_ids=False)
     build_mod.build(project, seal_write=False, reseal=False)
     assert not project.errors, [str(d) for d in project.errors]

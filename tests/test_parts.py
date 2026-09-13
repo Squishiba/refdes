@@ -8,6 +8,7 @@ from __future__ import annotations
 import os
 
 import pytest
+from conftest import write_project_config
 from helpers import COVERAGE_SCHEMA, PARTS_SCHEMA, _build_at
 
 from refdes import build as build_mod
@@ -66,7 +67,7 @@ datasheets:
 
 @pytest.fixture
 def parts_project(tmp_path):
-    (tmp_path / "refdes.yaml").write_text(PARTS_SCHEMA, encoding="utf-8")
+    write_project_config(tmp_path, PARTS_SCHEMA)
     for (workspace, board, name), text in PARTS_ITEMS.items():
         d = tmp_path / "items" / workspace / board
         d.mkdir(parents=True, exist_ok=True)
@@ -75,7 +76,7 @@ def parts_project(tmp_path):
 
 
 def _parts_build(root):
-    project = load_project(config_path=str(root / "refdes.yaml"))
+    project = load_project(config_path=str(root / "refdes-project.yaml"))
     parse.load_items(project)
     build_mod.build(project)
     return project
@@ -176,7 +177,7 @@ def test_component_page_links_to_also_used_elsewhere(parts_project):
 
 
 def test_audit_reports_a_parts_section(parts_project, capsys):
-    cli_mod.main(["-c", str(parts_project / "refdes.yaml"), "audit"])
+    cli_mod.main(["-c", str(parts_project / "refdes-project.yaml"), "audit"])
     out = capsys.readouterr().out
     assert "Parts:" in out
     assert "STM32G474" in out
@@ -189,7 +190,7 @@ def test_audit_parts_section_breaks_out_workspaces(parts_project, capsys):
     """CMP-001 (alpha) and CMP-002 (beta) share STM32G474 -- a project with a
     workspaces: registry should see that split named, the same way boards
     already are."""
-    cli_mod.main(["-c", str(parts_project / "refdes.yaml"), "audit"])
+    cli_mod.main(["-c", str(parts_project / "refdes-project.yaml"), "audit"])
     out = capsys.readouterr().out
     assert "— workspaces: alpha, beta" in out
 
@@ -198,7 +199,8 @@ def test_audit_parts_section_omits_workspace_line_for_a_flat_project(tmp_path, c
     """A project with no workspaces: registry never populates item.workspace
     at all, so the line must not appear -- not even empty -- rather than
     growing a confusing always-blank row."""
-    (tmp_path / "refdes.yaml").write_text(
+    write_project_config(
+        tmp_path,
         "site: {title: t, out: _site}\n"
         "boards:\n  power: {label: Power}\n"
         "types:\n"
@@ -207,7 +209,6 @@ def test_audit_parts_section_omits_workspace_line_for_a_flat_project(tmp_path, c
         "    fields:\n"
         "      title: {type: text, required: true}\n"
         "      part_number: {type: text}\n",
-        encoding="utf-8",
     )
     items = tmp_path / "items"
     items.mkdir()
@@ -216,7 +217,7 @@ def test_audit_parts_section_omits_workspace_line_for_a_flat_project(tmp_path, c
         "part_number: TPS62913\nboard: power\n---\n",
         encoding="utf-8",
     )
-    cli_mod.main(["-c", str(tmp_path / "refdes.yaml"), "audit"])
+    cli_mod.main(["-c", str(tmp_path / "refdes-project.yaml"), "audit"])
     out = capsys.readouterr().out
     assert "— board: power" in out
     assert "workspace" not in out
@@ -236,7 +237,7 @@ def test_nav_parts_link_present_when_parts_exist(parts_project):
 
 
 def test_nav_parts_link_absent_with_no_part_numbers(tmp_path):
-    (tmp_path / "refdes.yaml").write_text(COVERAGE_SCHEMA, encoding="utf-8")
+    write_project_config(tmp_path, COVERAGE_SCHEMA)
     items = tmp_path / "items"
     items.mkdir()
     (items / "req-a.md").write_text(

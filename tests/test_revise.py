@@ -9,6 +9,7 @@ import os
 
 import pytest
 import yaml
+from conftest import write_project_config
 from helpers import REPO, _build_at
 
 from refdes import build as build_mod
@@ -30,7 +31,7 @@ REVISE_SCHEMA = (
 
 @pytest.fixture
 def revise_project(tmp_path):
-    (tmp_path / "refdes.yaml").write_text(REVISE_SCHEMA, encoding="utf-8")
+    write_project_config(tmp_path, REVISE_SCHEMA)
     items = tmp_path / "items"
     items.mkdir()
     (items / "i.yaml").write_text(
@@ -48,7 +49,7 @@ def test_revise_renames_a_prefix_standalone_no_schema_change_needed(tmp_path):
     rename category that always works standalone -- confirmed here, then
     the field/type cases (which do need the schema to move too) get their
     own tests below via mutate_config."""
-    (tmp_path / "refdes.yaml").write_text(REVISE_SCHEMA, encoding="utf-8")
+    write_project_config(tmp_path, REVISE_SCHEMA)
     (tmp_path / "items").mkdir()
     (tmp_path / "items" / "i.yaml").write_text(
         "defaults:\n  type: bound\n  prefix: BND\n"
@@ -68,13 +69,13 @@ def test_revise_renames_a_prefix_standalone_no_schema_change_needed(tmp_path):
 
 def test_revise_renames_type_and_prefix_atomically_with_schema_via_mutate_config(tmp_path):
     """Type and prefix renames need the schema to move with the data --
-    plain revise doesn't touch refdes.yaml, but a caller-supplied
+    plain revise doesn't touch refdes-schema.yaml, but a caller-supplied
     mutate_config (what standards.py's upgrade chain uses) can make the two
     move together as one verified operation."""
-    (tmp_path / "refdes.yaml").write_text(
+    write_project_config(
+        tmp_path,
         "site: { title: T, out: _site }\n"
         "types:\n  constraint: { prefix: CON, fields: { text: { type: text, required: true } } }\n",
-        encoding="utf-8",
     )
     (tmp_path / "items").mkdir()
     (tmp_path / "items" / "i.yaml").write_text(
@@ -85,12 +86,15 @@ def test_revise_renames_type_and_prefix_atomically_with_schema_via_mutate_config
     mapping = revise.Mapping(types={"constraint": "bound"}, prefixes={"CON": "BND"})
 
     def bump(config_path):
-        with open(config_path, encoding="utf-8") as fh:
+        # revise hands the callback refdes-project.yaml's own path; the type
+        # declarations this rename moves now live in refdes-schema.yaml beside it.
+        schema_path = os.path.join(os.path.dirname(config_path), "refdes-schema.yaml")
+        with open(schema_path, encoding="utf-8") as fh:
             text = fh.read()
         text = text.replace("constraint:", "bound:").replace(
             "constraint, prefix: CON", "bound, prefix: BND"
         )
-        with open(config_path, "w", encoding="utf-8") as fh:
+        with open(schema_path, "w", encoding="utf-8") as fh:
             fh.write(text)
 
     result = revise.apply(str(tmp_path), mapping, mutate_config=bump)
@@ -142,7 +146,7 @@ VIOLATING_SCHEMA = (
 def violating_project(tmp_path):
     """A project whose build fails on a *check* -- the design does not meet a
     declared limit -- and on nothing else. The tool working, not failing."""
-    (tmp_path / "refdes.yaml").write_text(VIOLATING_SCHEMA, encoding="utf-8")
+    write_project_config(tmp_path, VIOLATING_SCHEMA)
     items = tmp_path / "items"
     items.mkdir()
     (items / "con.yaml").write_text(
@@ -226,11 +230,11 @@ def test_a_missing_required_field_still_blocks_a_rename(violating_project):
 def test_standard_upgrade_runs_on_a_project_with_a_failing_check(tmp_path):
     """The end-to-end version of the same thing, through the bundled
     standard's own chain rather than a hand-written mapping."""
-    (tmp_path / "refdes.yaml").write_text(
+    write_project_config(
+        tmp_path,
         "site: { title: T, out: _site }\n"
         "standard: { base: hardware, version: 1, presets: [] }\n"
         "id: { width: 3, ledger: .refdes/ids.yaml }\n",
-        encoding="utf-8",
     )
     (tmp_path / "items").mkdir()
     (tmp_path / "items" / "b.yaml").write_text(
@@ -248,15 +252,15 @@ def test_standard_upgrade_runs_on_a_project_with_a_failing_check(tmp_path):
     assert [(s.from_version, s.to_version) for s in steps] == [(1, 2)]
     assert steps[0].result.ok, steps[0].result.errors
     assert steps[0].result.id_changes == {"CON-001": "BND-001"}
-    assert "version: 2" in (tmp_path / "refdes.yaml").read_text(encoding="utf-8")
+    assert "version: 2" in (tmp_path / "refdes-project.yaml").read_text(encoding="utf-8")
 
 
 def test_revise_refuses_ambiguous_target_already_in_use(tmp_path):
-    (tmp_path / "refdes.yaml").write_text(
+    write_project_config(
+        tmp_path,
         "site: { title: T, out: _site }\n"
         "types:\n"
         "  bound: { prefix: BND, fields: { label: { type: text }, text: { type: text } } }\n",
-        encoding="utf-8",
     )
     (tmp_path / "items").mkdir()
     (tmp_path / "items" / "i.yaml").write_text(
@@ -273,14 +277,15 @@ def test_revise_refuses_ambiguous_target_already_in_use(tmp_path):
 def test_revise_refuses_a_self_contradictory_mapping():
     """Two different old names both wanting the same new name -- caught
     without even needing a project, since the mapping contradicts itself."""
-    project = load_project(config_path=os.path.join(REPO, "refdes.yaml"))
+    project = load_project(config_path=os.path.join(REPO, "refdes-project.yaml"))
     mapping = revise.Mapping(prefixes={"REQ": "R", "RSK": "R"})
     errors = revise.check_ambiguous(project, mapping)
     assert any("collides" in e for e in errors)
 
 
 def _label_schema(tmp_path) -> None:
-    (tmp_path / "refdes.yaml").write_text(
+    write_project_config(
+        tmp_path,
         "site: { title: T, out: _site }\n"
         "types:\n"
         "  bound:\n"
@@ -288,17 +293,19 @@ def _label_schema(tmp_path) -> None:
         "    fields:\n"
         "      label: { type: text, required: true }\n"
         "      limit: { type: limit, required: true }\n",
-        encoding="utf-8",
     )
 
 
 def _bump_label_field_to_text(config_path: str) -> None:
-    with open(config_path, encoding="utf-8") as fh:
+    # The field declaration lives in the schema overlay, not the settings file
+    # revise passes here (see revise.apply's mutate_config contract).
+    schema_path = os.path.join(os.path.dirname(config_path), "refdes-schema.yaml")
+    with open(schema_path, encoding="utf-8") as fh:
         text = fh.read()
     text = text.replace(
         "label: { type: text, required: true }", "text:  { type: text, required: true }"
     )
-    with open(config_path, "w", encoding="utf-8") as fh:
+    with open(schema_path, "w", encoding="utf-8") as fh:
         fh.write(text)
 
 
@@ -322,7 +329,7 @@ def label_project(tmp_path):
 def test_revise_carries_baseline_hash_forward(label_project):
     """The core promise: a cosmetic rename must not make an untouched
     baseline suddenly report every item as 'changed'."""
-    project = load_project(config_path=str(label_project / "refdes.yaml"))
+    project = load_project(config_path=str(label_project / "refdes-project.yaml"))
     parse.load_items(project)
     build_mod.build(project, seal_write=False, reseal=False, accept_board_move=False)
     assert not project.errors
@@ -335,7 +342,7 @@ def test_revise_carries_baseline_hash_forward(label_project):
     assert result.ok, result.errors
     assert result.baselines_updated == ["rev-a"]
 
-    project2 = load_project(config_path=str(label_project / "refdes.yaml"))
+    project2 = load_project(config_path=str(label_project / "refdes-project.yaml"))
     baseline = lifecycle.load_baseline(project2, "rev-a")
     new_hash = baseline.items["BND-001"]["hash"]
     assert new_hash != old_hash
@@ -349,7 +356,8 @@ def test_revise_carries_baseline_hash_forward(label_project):
 
 
 def _log_schema(tmp_path) -> None:
-    (tmp_path / "refdes.yaml").write_text(
+    write_project_config(
+        tmp_path,
         "site: { title: T, out: _site }\n"
         "types:\n"
         "  log:\n"
@@ -357,17 +365,18 @@ def _log_schema(tmp_path) -> None:
         "    append_only: true\n"
         "    fields:\n"
         "      summary: { type: text, required: true }\n",
-        encoding="utf-8",
     )
 
 
 def _bump_summary_field_to_note(config_path: str) -> None:
-    with open(config_path, encoding="utf-8") as fh:
+    # See _bump_label_field_to_text: the declaration is in refdes-schema.yaml.
+    schema_path = os.path.join(os.path.dirname(config_path), "refdes-schema.yaml")
+    with open(schema_path, encoding="utf-8") as fh:
         text = fh.read()
     text = text.replace(
         "summary: { type: text, required: true }", "note:    { type: text, required: true }"
     )
-    with open(config_path, "w", encoding="utf-8") as fh:
+    with open(schema_path, "w", encoding="utf-8") as fh:
         fh.write(text)
 
 
@@ -390,7 +399,7 @@ def test_revise_carries_seal_hash_forward(log_project):
     diff -- the caveat finding 12 flagged beyond what the finding itself
     stated. A cosmetic field rename on a sealed log entry must not turn a
     clean build into a seal-violation failure."""
-    project = load_project(config_path=str(log_project / "refdes.yaml"))
+    project = load_project(config_path=str(log_project / "refdes-project.yaml"))
     parse.load_items(project)
     build_mod.build(project, seal_write=True)
     assert not project.errors
@@ -402,12 +411,12 @@ def test_revise_carries_seal_hash_forward(log_project):
     assert result.seals_updated == ["(base)"]
 
     reloaded_seals = seal.load_seals(
-        load_project(config_path=str(log_project / "refdes.yaml")), board=""
+        load_project(config_path=str(log_project / "refdes-project.yaml")), board=""
     )
     assert reloaded_seals.keys() == {"LOG-001"}
     assert reloaded_seals["LOG-001"] != old_hash
 
-    project2 = load_project(config_path=str(log_project / "refdes.yaml"))
+    project2 = load_project(config_path=str(log_project / "refdes-project.yaml"))
     parse.load_items(project2)
     build_mod.build(project2, seal_write=False, reseal=False, accept_board_move=False)
     assert not project2.errors
@@ -422,7 +431,7 @@ def test_plain_revise_ignores_a_baselines_missing_standard_field(label_project):
     forward. The chained, standard-upgrade case where a missing standard:
     genuinely has to be skipped is tested separately, where the ambiguity
     is real."""
-    project = load_project(config_path=str(label_project / "refdes.yaml"))
+    project = load_project(config_path=str(label_project / "refdes-project.yaml"))
     parse.load_items(project)
     build_mod.build(project, seal_write=False, reseal=False, accept_board_move=False)
     lifecycle.stamp(project, kind="revision", name="rev-a")
@@ -477,16 +486,16 @@ def test_standard_upgrade_skips_a_baseline_with_no_recorded_standard(tmp_path, m
 
     project_root = tmp_path / "proj"
     (project_root / "items").mkdir(parents=True)
-    (project_root / "refdes.yaml").write_text(
+    write_project_config(
+        project_root,
         "site: { title: T, out: _site }\nstandard: { base: fake, version: 1, presets: [] }\n",
-        encoding="utf-8",
     )
     (project_root / "items" / "i.yaml").write_text(
         "defaults:\n  type: widget\n  prefix: WID\n"
         "items:\n  - id: WID-001\n    title: A widget.\n",
         encoding="utf-8",
     )
-    project = load_project(config_path=str(project_root / "refdes.yaml"))
+    project = load_project(config_path=str(project_root / "refdes-project.yaml"))
     parse.load_items(project)
     build_mod.build(project, seal_write=False, reseal=False, accept_board_move=False)
     lifecycle.stamp(project, kind="revision", name="rev-a")
@@ -537,9 +546,9 @@ def test_apply_standard_upgrade_chains_multiple_versions(tmp_path, monkeypatch):
     )
     project_root = tmp_path / "proj"
     (project_root / "items").mkdir(parents=True)
-    (project_root / "refdes.yaml").write_text(
+    write_project_config(
+        project_root,
         "site: { title: T, out: _site }\nstandard: { base: fake, version: 1, presets: [] }\n",
-        encoding="utf-8",
     )
     (project_root / "items" / "i.yaml").write_text(
         "defaults:\n  type: widget\n  prefix: WID\n"
@@ -555,7 +564,7 @@ def test_apply_standard_upgrade_chains_multiple_versions(tmp_path, monkeypatch):
     assert "d: Original value." in text
     assert "a:" not in text and "b:" not in text and "c:" not in text
 
-    final_project = load_project(config_path=str(project_root / "refdes.yaml"))
+    final_project = load_project(config_path=str(project_root / "refdes-project.yaml"))
     assert final_project.standard_version == 4
 
 
@@ -591,9 +600,9 @@ def test_apply_standard_upgrade_reused_field_name_across_versions(tmp_path, monk
     )
     project_root = tmp_path / "proj"
     (project_root / "items").mkdir(parents=True)
-    (project_root / "refdes.yaml").write_text(
+    write_project_config(
+        project_root,
         "site: { title: T, out: _site }\nstandard: { base: fake, version: 1, presets: [] }\n",
-        encoding="utf-8",
     )
     (project_root / "items" / "i.yaml").write_text(
         "defaults:\n  type: widget\n  prefix: WID\n"
@@ -609,7 +618,7 @@ def test_apply_standard_upgrade_reused_field_name_across_versions(tmp_path, monk
     assert "text: Title value." in text
     assert "title: Notes value." in text
 
-    final_project = load_project(config_path=str(project_root / "refdes.yaml"))
+    final_project = load_project(config_path=str(project_root / "refdes-project.yaml"))
     parse.load_items(final_project)
     build_mod.build(final_project, seal_write=False, reseal=False, accept_board_move=False)
     assert not final_project.errors
@@ -643,7 +652,7 @@ def compound_prefix_project(tmp_path):
     compound prefix (`CON-THM`, base `CON` plus a board token) that a
     `decision` elsewhere references both through a `links:` field and a
     `checks:` entry, plus a prose mention that must never be rewritten."""
-    (tmp_path / "refdes.yaml").write_text(COMPOUND_PREFIX_SCHEMA, encoding="utf-8")
+    write_project_config(tmp_path, COMPOUND_PREFIX_SCHEMA)
     items = tmp_path / "items"
     items.mkdir()
     (items / "con.yaml").write_text(
@@ -673,7 +682,7 @@ def test_revise_renames_a_compound_prefix_built_on_the_renamed_base(compound_pre
     """`ids.split_id`'s `PREFIX-NNN` shape treats a board-token-suffixed
     prefix (`CON-THM`) as one atomic string, so a bare dict lookup against
     `mapping.prefixes` (`{CON: BND}`) would silently miss it -- this project's
-    own `refdes.yaml` documents exactly this convention (`REQ-PWR`, `CON-THM`,
+    own `refdes-project.yaml` documents exactly this convention (`REQ-PWR`, `CON-THM`,
     `DEC-PWR`, `TST-PWR`). Confirms the item's own `prefix:`/`id:` move.
     Prefix-only mapping, deliberately: renaming `types:` needs the schema to
     move with it (see `mutate_config`, covered by its own dedicated test
@@ -690,10 +699,10 @@ def test_revise_renames_a_compound_prefix_built_on_the_renamed_base(compound_pre
 def test_revise_does_not_rename_an_unrelated_prefix_sharing_a_letters(tmp_path):
     """`CONFIG` must never match a `CON` rename -- the required separator is
     the hyphen itself, not just the leading letters."""
-    (tmp_path / "refdes.yaml").write_text(
+    write_project_config(
+        tmp_path,
         "site: { title: T, out: _site }\n"
         "types:\n  widget: { prefix: CONFIG, fields: { text: { type: text, required: true } } }\n",
-        encoding="utf-8",
     )
     (tmp_path / "items").mkdir()
     (tmp_path / "items" / "i.yaml").write_text(
@@ -724,7 +733,7 @@ def test_revise_rewrites_a_link_value_and_a_checks_against_value(compound_prefix
     assert "constrained_by: [BND-THM-001]" in text
     assert "against: BND-THM-001" in text
 
-    project = load_project(config_path=str(compound_prefix_project / "refdes.yaml"))
+    project = load_project(config_path=str(compound_prefix_project / "refdes-project.yaml"))
     parse.load_items(project)
     build_mod.build(project, seal_write=False, reseal=False, accept_board_move=False)
     assert not project.errors
@@ -772,7 +781,7 @@ def block_style_project(tmp_path):
     """The same references `compound_prefix_project` writes in flow style,
     written in the other legal YAML spelling instead: a bare key with
     `- TARGET` entries under it, in both a Markdown item and a list file."""
-    (tmp_path / "refdes.yaml").write_text(BLOCK_STYLE_SCHEMA, encoding="utf-8")
+    write_project_config(tmp_path, BLOCK_STYLE_SCHEMA)
     items = tmp_path / "items"
     items.mkdir()
     (items / "con.yaml").write_text(
@@ -819,7 +828,7 @@ def test_revise_rewrites_a_block_style_link_target_list(block_style_project):
     log = (block_style_project / "items" / "log.yaml").read_text(encoding="utf-8")
     assert "addresses:\n      - BND-THM-001\n" in log
 
-    project = load_project(config_path=str(block_style_project / "refdes.yaml"))
+    project = load_project(config_path=str(block_style_project / "refdes-project.yaml"))
     parse.load_items(project)
     build_mod.build(project, seal_write=False, reseal=False, accept_board_move=False)
     assert not project.errors, [str(d) for d in project.errors]
@@ -861,7 +870,7 @@ def test_revise_reports_prose_left_pointing_at_a_renamed_id(compound_prefix_proj
 def test_a_prose_id_that_still_resolves_is_not_reported_as_stale(tmp_path):
     """A mention that still resolves -- here through the renamed item's own
     `former_ids:` -- is not stale and must not be reported."""
-    (tmp_path / "refdes.yaml").write_text(COMPOUND_PREFIX_SCHEMA, encoding="utf-8")
+    write_project_config(tmp_path, COMPOUND_PREFIX_SCHEMA)
     items = tmp_path / "items"
     items.mkdir()
     (items / "con.yaml").write_text(
