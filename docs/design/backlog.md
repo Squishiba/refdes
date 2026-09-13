@@ -9,20 +9,32 @@ detail, alternatives considered, a "what I'd prototype first" section) once
 someone actually starts implementing it — until then, this is the whole
 record.
 
-Verified against the actual codebase as of commit `cd6bf4a` (2026-08-29,
+Verified against the actual codebase as of commit `a077cb2` (2026-09-13,
 `main`). Re-check before trusting an "outstanding" or "done" mark that's more
 than a few commits old — this file decays exactly like the implementation
 status headers on the spec docs do.
 
 ## Source
 
-Findings 12–24 below come from GitHub issue #7, whose body is a fetched
-attachment, not a file in this repo:
-<https://github.com/user-attachments/files/31488284/refdes-feedback.md>
-(fetched 2026-08-29). Read in full before writing this — summaries below are
-my own reading of that document, not a re-statement of anyone else's
-paraphrase; where a shorthand I'd previously been given didn't match what
-the document actually says, that's flagged inline in the entry.
+Two documents, both GitHub attachments on issue #7, neither a file in this
+repo:
+
+- **Findings 12–24** come from the attachment that is the issue's *body*:
+  <https://github.com/user-attachments/files/31488284/refdes-feedback.md>
+  (fetched 2026-08-29).
+- **Findings 25–28** come from a *second* attachment, posted as a **comment**
+  on the same issue on 2026-09-01 under "More, newer suggestions added":
+  <https://github.com/user-attachments/files/31711415/refdes-feedback.md>
+  (read in full 2026-09-13). It is a fresh posting against 0.5.0 that retires
+  the 0.4.0-era findings it verified as shipped and renumbers 1–28, so its
+  1–24 are the findings already recorded above and only **25–28 are new to
+  this file**. Where the two documents differ, the newer one is what the
+  finding says now.
+
+Read in full before writing this — summaries below are my own reading of those
+documents, not a re-statement of anyone else's paraphrase; where a shorthand
+I'd previously been given didn't match what the document actually says, that's
+flagged inline in the entry.
 
 ## The local-model-suitability rule
 
@@ -56,8 +68,13 @@ the real tradeoff (bare date+summary entries are fine as YAML; a log entry
 carrying prose body belongs in `.md`), and say explicitly that markdown files
 hold multiple items.
 
-**Status: outstanding.** Both the `docs/authoring.md` passage and the
-`parse.py:30` comment still state the false rationale verbatim, unchanged.
+**Status: done.** Shipped in `8e33c08`. `docs/authoring.md`'s "Bodies in list
+files" passage and `parse.py`'s `RESERVED` comment now state the real tradeoff
+in the same words: a `.md` file already holds many items sharing one
+`defaults:` block, so the question is not file count but whether the entry
+carries prose — a bare date-and-summary log entry as a list entry, one with a
+paragraph to it in `.md`, `body:` covering the middle. No schema change, as
+scoped.
 
 **Local model: suitable.** Scoped to two files, the wrong text and its
 replacement are both given in the finding, and a reviewer can check the
@@ -71,8 +88,11 @@ follow board or type lines (finding 9's argument). Scoped deliberately as
 one more fixed, named, single-valued parameter — not a query language — to
 stay inside `blocks.py`'s own stated non-goal.
 
-**Status: outstanding.** `blocks.py`'s `index` `BlockSpec` still declares
-only `optional=("board",)` — no `tag`.
+**Status: done.** Shipped in `1cf3e88`. `blocks.py`'s `index` `BlockSpec` is
+now `optional=("board", "tag")`, and `_render_index` validates `tag` against
+the tag set present on the project's local items with the same `_suggest` hint
+`board=` uses, then ANDs it with `board=` in the single comprehension that
+selects items — still one fixed named parameter, no query language.
 
 **Local model: suitable.** One parameter added to one `BlockSpec`, one
 filter clause in `_render_index`, validated against the project's known tag
@@ -153,9 +173,10 @@ pair at the `link_types:` level in every bundled version) — the fix is
 declaring `recorded_by: [log]` on `decision`'s own `links:` block, verified
 end-to-end against a real sealed log in the finding.
 
-**Status: outstanding.** `decision.links` (hardware@3) declares
-`satisfies`/`constrained_by`/`supersedes`/`selects`/`blocked_by` — no
-`recorded_by`.
+**Status: done.** Shipped in `3c52c4e`. `decision.links` (hardware@3) now
+declares `recorded_by: [log]` alongside
+`satisfies`/`constrained_by`/`supersedes`/`selects`/`blocked_by` — one line,
+no new verb, exactly as scoped.
 
 **Worth flagging: this may become moot.** `docs/design/threads.md` (design
 only, not implemented — see its own status header) states explicitly that
@@ -216,9 +237,13 @@ spelling that works (bare `Ω`) is the one least used. Suggested fix: move
 `Ω`/`µ`/`μ`/`°` into the continuation character class too, and admit `%` as
 its own unit-run alternative rather than a `_SEGMENT` character.
 
-**Status: outstanding.** `calc.py`'s `_SEGMENT`/`_UNIT_RUN` are unchanged
-from what the finding describes — `Ω` still first-position-only, `%` still
-only reachable through `PERCENT_RE`'s tolerance special case.
+**Status: done.** Shipped in `3a2fced`. `_SEGMENT`'s continuation class is now
+`[A-Za-z0-9_Ωµμ°]*` (both mu codepoints), so `kΩ`/`MΩ` lex, and `_UNIT_RUN`
+admits `%` as its own alternative — `(?:{_SEGMENT}(?:[/·]{_SEGMENT})*|%)` —
+rather than as a segment character, so `%` cannot leak into the middle of an
+ordinary unit. `PERCENT_RE`'s tolerance pre-parse still runs first, so `± 15%`
+keeps its "15% of the value" meaning, and the parse failure that remains now
+names the offending expression instead of a bare `invalid syntax`.
 
 **Local model: suitable.** The fix site is two regex literals plus (at
 minimum) a better error message; the finding gives exact repro strings and
@@ -340,10 +365,15 @@ outline rather than crying wolf.
 **Decision — the two parts are independent.** Part 1 should ship on its own;
 it does not need Part 2's dependency or its fetch-time resolution machinery.
 
-**Status: outstanding (both parts).** `CitationSpec` carries `page` but
-templates only render it into a `<td>`, never into an `href`
-(`item.html.j2:119`, `document.html.j2:127`); there is no `section:` field
-and no outline-resolution code anywhere in `citations.py`.
+**Status: Part 1 done, Part 2 outstanding.** Part 1 shipped in `a077cb2`:
+`item.html.j2` now appends `#page={{ c.spec.page }}` to *both* citation hrefs —
+the upstream link and the published `local copy` link — guarded on `page` being
+set, with the visible link text unchanged. Part 2 is neither built nor decided:
+there is still no `section:` field, no outline-resolution code in
+`citations.py`, and no `pypdf` extra in `pyproject.toml` (the only optional
+extra is `dev`). `document.html.j2` and `references.html.j2` were deliberately
+left alone — the latter groups by URL across citers, where a per-citation page
+would be misattributed.
 
 **Local model: Part 1 suitable, Part 2 not decided.** Part 1 is a template
 change of the form "append `#page={{ c.spec.page }}` to an existing href,
@@ -382,6 +412,231 @@ finding's own "one detail to settle during implementation" (an unregistered
 group must hard-error, or a typo silently discharges an entire board's
 obligations) is precisely the kind of edge a smaller model is liable to
 skip without anyone noticing until much later.
+
+---
+
+## GitHub issue #7 (second attachment), findings 25–28
+
+### 25 — Citations belong in an includable field set; `url:` should become one `path:`
+
+Two halves. **Part 1:** in hardware@2, `citations` is declared exactly once in
+the whole standard — `component.datasheets` — so no other type can cite
+anything, which means a *decision* cannot cite the document it was derived
+from. The finding's own example is this repo's `DEC-IO-002`, which cites the
+TPS1H200A datasheet at `page: "22"` (the page the current-limit equation its
+calc block implements comes from) and can only do so because this project runs
+a hand-rolled schema; migrating onto the bundled standard would drop that
+citation with nowhere to put it. The proposed mechanism is the one the standard
+already has — a third `field_sets:` entry pulled in per type by `include:` —
+so any type, or a project overlay, opts in without the standard guessing who
+needs it. **Part 2:** `CitationSpec` (`url`/`rev`/`page`/`part_number`/`vendor`
+plus fetch-time provenance in the lockfile) models an *upstream*, so a
+schematic PDF that lives in the repo and was never fetched has no
+representation at all; this repo's workaround, `schematic_page: "7"`, is a bare
+number with nothing to click and no way to know page 7 still shows what it
+showed — finding 23's dead end minus even a document. The reason to make it a
+citation rather than a markdown link is `citations.py`'s sha256 pin:
+`site.assets:` already copies PDFs into `_site/assets/` and a prose link works
+today, but a prose link keeps pointing at the new revision silently, while a
+pinned citation reports `hash_mismatch` when the schematic moves. The finding
+asks for **one** `path:` field, not `path:` alongside `url:` ("where the
+document is" is one idea — two keys would be the synonym defect this document
+keeps finding), dispatching on scheme: a URL scheme means fetched/hashed/
+optionally vendored exactly as today, anything else means repo-relative, hashed
+at build time by the `_sha256_file()` `citations.py` already has. Two explicit
+rules: repo-relative means relative (absolute paths and drive letters rejected
+— a Windows `C:\` vs `c:`-scheme ambiguity, and non-portable anyway), and
+`vendor: true` on a local path is a hard error, not silently ignored. It also
+flags a migration caveat: `revise.py`'s `Mapping.fields` renames item-level
+fields only, so a `url:` → `path:` rename *inside* a citation entry is invisible
+to it — as are the sub-keys of `options:` and `checks:`.
+
+**Decision — one field name, not two.** The finding proposes a `references`
+field set holding *two* fields, `datasheets` and `documents`. That was
+considered and **rejected in favour of a single field name, `citations`**:
+once citations are includable, a decision citing a schematic needs no
+differently-named field than a component citing a datasheet, so two names would
+be an arbitrary split kept forever. `citations` was chosen over `references`
+because it matches the existing field *type* name and `citations.py` — the set,
+the field, and the module are one concept with one spelling. (Not in the
+finding — recorded from conversation, not from the document.)
+
+**Decision — the breaking rename is accepted.** `component.datasheets` became
+`component.citations`, with a `component: {datasheets: citations}` entry in
+hardware v3's `migration.yaml` carrying hardware@2 content across. Accepted
+deliberately: hardware@3 is unreleased, and existing hardware@2 content is
+migratable by `refdes standard upgrade`, so this is the only point at which the
+rename is cheap.
+
+**Decision — scope is v3 only.** `hardware/v1/base.yaml` and `v2/base.yaml` are
+frozen, already-released shapes; the split is not retrofitted into them.
+
+**Decision — Part 2 is deferred, not rejected.** Replacing `url:` with a
+scheme-dispatched `path:` that accepts repo-local files was set aside until
+refdes' core is in better shape. **Finding 26 depends on it** — the finding
+says so itself: a file has to be citable before a calc value can be drawn from
+it — so 26 is parked for the same reason, not because it was judged wrong.
+
+**Status: Part 1 done, Part 2 deferred.** Part 1 shipped in `f8e7ee0`:
+hardware@3's `field_sets:` has a third entry `citations: {citations: {type:
+citations, on_change: invalidate}}`, and both `component` and `decision` now
+`include: [provenance, stewardship, citations]`, with the `migration.yaml`
+rename above and this repo's own `items/components/power.yaml` moved over.
+Part 2 is unbuilt: `CitationSpec` still has `url`, no `path`, and the lockfile
+is still keyed by url.
+
+**Local model: Part 1 suitable (and shipped), Part 2 (not decided — my read)
+not suitable.** Part 1 is a field-set declaration plus a rename entry, with a
+migration test asserting the old key resolves to the new one. Part 2's edges are
+the quiet kind: scheme dispatch that misclassifies a Windows path, `vendor:`
+silently ignored instead of refusing, and — worst — the `revise.py` blind spot
+the finding itself names, where a `url:` → `path:` migration that isn't
+implemented simply *doesn't happen* and `standard upgrade` reports success.
+
+### 26 — Calc values sourced from a repo-local file (spreadsheet, schematic, netlist)
+
+Hardware arithmetic lives in spreadsheets — power budgets, thermal models,
+tolerance stackups, derating tables — and refdes has no spreadsheet support of
+any kind, so a value computed in a shared budget gets retyped into a calc block
+and silently diverges the moment the model is updated. The objection the finding
+sets itself is that a value pulled from `Sheet1!B14` is opaque — no visible
+derivation, no unit checking — which is exactly the failure `DEC-IO-002`'s body
+describes about its old Quarto python block. It clears that objection by
+comparison, not assertion: `V_cl = 0.8 V` in that same calc block came from
+page 22 of a datasheet, equally derivation-free, and is trusted because it is
+cited and hash-pinned. A spreadsheet-sourced value with the same treatment is on
+identical footing, and a spreadsheet committed to the repo is on *better*
+footing than a fetched PDF because git history covers it too. Recording **both**
+the file hash and the extracted value in the lockfile turns a row inserted
+upstream into a visible value diff (`1.85 → 2.3`) rather than a silent
+substitution — surfacing, not preventing, which is how this tool handles this
+class of problem. Four constraints each do real work: **named ranges, not cell
+addresses** (detection is the fallback, prevention is better where it's free —
+the same lesson as named calc values, `[[fig:id]]`, and ids never derived from
+position, learned three times over); **extraction at fetch time into
+`.refdes/citations.yaml`, never during a build** (builds stay hermetic, and the
+extracted value lands as a reviewable line in a git diff); **units stay declared
+refdes-side** (a sheet in mW extracted into a `: W` declaration is a silent
+1000× error, but identical to mistyping a datasheet figure — a reason to keep
+the unit annotation prominent, not to refuse); and **CSV first, xlsx as an
+optional extra** (`openpyxl` on top of the current four dependencies; CSV needs
+nothing beyond the stdlib, and named ranges are an xlsx concept whose CSV
+analogue is a header-keyed lookup). The reader is an extension point, not a
+spreadsheet special case: an LTspice `.asc` `SYMATTR Value 10k` is plain text,
+QSpice's `.qsch` likewise, Falstad encodes a whole circuit in its URL fragment,
+and Altium's binary `.SchDoc`/`.PcbDoc` are deliberately excluded in favour of
+the CSV BOM/netlist exports — which generalises to any EDA tool that can export,
+and keeps a solo project from signing up to track three vendor formats
+indefinitely. The point of a schematic reader is **drift detection, not
+navigation**: comparing the simulation's `R1` against a decision's
+`CLR = 3.3 kohm` catches the value-changed-in-one-place failure a hashed
+screenshot cannot. And **read-only is a hard boundary, not a first-release
+limit** — writing values back inverts the authority direction (the schematic
+becomes derived, which is backwards, and round-trips the moment an engineer
+edits it) and changes the failure class from "the document is wrong" to
+"refdes corrupted my schematic."
+
+**Status: outstanding — and parked behind finding 25's Part 2.** No `xlsx`/`csv`/
+`openpyxl` reference exists anywhere in the package, and the lockfile records
+hashes only, never extracted values. The finding states the dependency itself: a
+citation has to be able to name a repo-local file before a calc value can be
+drawn from one.
+
+**Local model (not decided — my read): not suitable.** The mechanical parts
+(a CSV reader, a lockfile field) are easy, but the correctness claim is "the
+value extracted is the value that was in that named range," and a reader that
+extracts the *wrong* cell does so with a hash that matches and a build that
+passes — a wrong answer with no failing test anywhere, which is this project's
+characteristic bug. The pluggable-reader boundary is also a design decision
+about what third parties will maintain, not a thing to get right by analogy.
+
+### 27 — Project-defined reusable equations callable from any calc block
+
+The same expression gets retyped across items — a current limit per output, a
+thermal rise per rail, a divider ratio per input — each copy an independent
+typos opportunity, with no single place to correct a formula that turns out to
+be wrong. Most of the machinery already exists: `calc.py` has a function
+registry and full call support, and `_eval_node`'s `ast.Call` branch already
+resolves the name, rejects keyword arguments, checks arity against `MULTI_ARG`,
+evaluates arguments through the same `Value` arithmetic as everything else, and
+produces a proper diagnostic for an unknown name. What's missing is any way for
+a project to add an entry. Implementation is small because `evaluate(expression,
+env)` is already parameterised on its environment — a user equation is "bind the
+parameters into an env, `evaluate` the stored expression," no new evaluator and
+no new parser. Proposed shape is an `equations:` map of `params`/`expr`/`note`
+called as `current_limit(2500, 0.8 V, 3.3 kohm) ± 15%`. Two properties come free
+from building on the existing evaluator and are worth stating so they aren't
+reinvented: units flow from the arguments, so parameters need no declared
+dimensions and passing `3.3 kg` where a resistance belongs is an ordinary
+dimensionality error at the call site; and tolerance propagates automatically,
+because `Value` arithmetic already does it. Three rules to fix early: shadowing
+a built-in (`sqrt`, `min`, …) is a hard error rather than a silent override; an
+equation referring to another equation is allowed but cycle-checked, the way
+`blocked_by` already is; arity is already enforced by the existing call path.
+Definitions belong in **project settings alongside `units:`** — not an item type
+(calc values are item-local today, so equations-as-items means opening that
+boundary, and Ohm's law isn't a design record; a `note:`/`source:` on the
+definition covers provenance), and not a per-board file (math isn't
+board-specific, and two boards defining `current_limit` differently creates a
+resolution question that needn't exist). One project-wide namespace. Which file
+that is, is finding 28's question.
+
+**Status: outstanding.** `calc.py`'s registry is still the built-in set, and no
+`equations:` key exists in project settings or the schema.
+
+**Local model (not decided — my read): suitable.** The evaluator work is
+"bind params, recurse," and the failure modes the finding names are all loud by
+construction — unknown function, wrong arity, wrong dimensions at the call site,
+a cycle reported the way `blocked_by` reports one. The two rules that are *not*
+loud if skipped (silent built-in shadowing, an equation cycle) are exactly the
+two a test can pin, and the finding states them as rules rather than
+preferences.
+
+### 28 — Make the config split honest: project settings in one file, schema overlay in another
+
+The complaint that started this was "`refdes.yaml` isn't immediately clear what
+it means," and the cause turns out not to be the name. There are already two
+config files, and `refdes-project.yaml`'s own header states the intended
+division — "Presentation and behaviour, not schema — refdes.yaml defines item
+types, links, and change-tracking policy; this file is process policy and
+formatting preference" — while the contents contradict it in both directions:
+`site:`, `units:`, `id:` and `boards:` sit in `refdes.yaml` (presentation,
+formatting preference, behaviour, structure — all project settings by the
+stated rule), and `item_layout:` sits in `refdes-project.yaml` despite being
+schema-adjacent structure. `history:` is the one key correctly placed. So
+`refdes.yaml` reads as unclear because it holds two unrelated things while a
+sibling file claims to own half of them, and renaming it alone would not fix
+that. The proposal is one honest line with both files named for their contents:
+**`refdes-project.yaml`** holds *all* project settings — everything in it today
+plus `site:`, `id:`, `boards:`, `units:`, `history:`, `workspaces:`,
+`standard:` — and becomes the project-root marker; **`refdes-schema.yaml`**
+holds *only* the project's own overlay (`types:`, `link_types:`, `field_sets:`)
+and is **optional**, absent from most projects; **`refdes.yaml`** is retired.
+`standard:` goes with project settings rather than with schema because it
+declares *which* schema the project uses, not what the schema is — putting it
+in the schema file would force every standard-library project to carry a schema
+file solely to say "I use hardware@2," and the common case now is a dozen lines
+of `site:`/`standard:`/`id:` with no `types:` block at all. Cost, as the finding
+gives it: the config filename is referenced in about fourteen places
+(`CONFIG_NAME`, `find_config()`, `revise.py`, `scaffold.py`, `schema_json.py`,
+plus five diagnostic `file="refdes.yaml"` strings), all mechanical; the hard part
+is that every existing project needs its config split in two and `refdes revise`
+cannot help, because it rewrites item files, not config layout — so this needs a
+dedicated one-shot migration command or a documented manual procedure, and it is
+a breaking change that belongs at a version boundary. Finding 27 needs this
+settled first, to know which file `equations:` belongs in.
+
+**Status: outstanding.** `schema.py` still names its two files `CONFIG_NAME =
+"refdes.yaml"` and `PROJECT_SETTINGS_NAME = "refdes-project.yaml"`, with the
+same split (and the same contradiction) as when the finding was written.
+
+**Local model (not decided — my read): not suitable.** The fourteen rename sites
+are mechanical, but the acceptance condition is "every existing project still
+loads, with every setting still read from the file it now lives in," and a key
+left behind in the retired file is a setting that silently stops applying —
+`site.out`, `id.width`, a board registry going quiet, not an error. That, plus
+the migration command for other people's projects, is the no-op-that-looks-like-
+success case the rule above is written to keep away from a smaller model.
 
 ---
 
