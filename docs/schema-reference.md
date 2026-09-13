@@ -284,8 +284,8 @@ Four field *names* have behaviour attached regardless of declared type:
 | `part_number` | Indexed into [the parts page](parts.md), on any type that declares it, alongside the nested `part_number` inside any `citations:` entry |
 
 `citations` is different: it is keyed off the declared **type**, not a fixed
-field name, so a project can call the field `datasheets`, `references`,
-anything. Any field declared `type: citations` gets a `url` (required), plus
+field name, so a project can call the field `references`, `sources`,
+anything — the hardware standard calls it `citations`. Any field declared `type: citations` gets a `url` (required), plus
 `rev`, `page`, `part_number`, and `vendor` per entry, its own table on the
 item page, and an entry in `references.html` — see [citing a
 datasheet](markdown.md#citing-a-datasheet), [CLI

@@ -189,7 +189,7 @@ per-item `board` for a [`boards:`](multi-board.md) registry, top-level
       "title": "3V3 rail regulator topology",
       "fields": { "status": "accepted", "options": [ ... ] },
       "citations": {
-        "datasheets": [
+        "citations": [
           { "url": "https://www.ti.com/lit/ds/symlink/tps62913.pdf",
             "state": "ok", "pinned": true, "vendored": false,
             "sha256": "9f2c...", "fetched": "2026-03-01T12:00:00Z",
@@ -245,7 +245,7 @@ entry is just what was written in the item (`url`, `rev`, `page`, `part_number`,
 
 ```json
 "citations": {
-  "datasheets": [
+  "citations": [
     { "url": "...", "state": "ok", "pinned": true, "vendored": false,
       "sha256": "9f2c...", "fetched": "2026-03-01T12:00:00Z",
       "local_path": "", "detail": "" }

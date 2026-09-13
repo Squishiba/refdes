@@ -82,6 +82,8 @@ field_sets:
   stewardship:
     owner:         { type: person, on_change: log }
     last_reviewed: { type: date,   on_change: ignore }
+  citations:
+    citations: { type: citations, on_change: invalidate }
 
 link_types:
   # trace: false on amends/records/supersedes/addresses -- none of these is
@@ -151,7 +153,7 @@ types:
       date:      { type: date, on_change: log }
       options:   { type: options, on_change: invalidate }
       checks:    { type: checks, on_change: invalidate }
-    include: [provenance, stewardship]
+    include: [provenance, stewardship, citations]
     links:
       satisfies:      [requirement, bound]
       constrained_by: [bound]
@@ -184,9 +186,8 @@ types:
       refdes:      { type: list, on_change: log }
       status:      { type: enum, choices: [candidate, selected, obsolete], default: candidate, on_change: invalidate }
       rationale:   { type: text, on_change: invalidate, required_when: {links: alternate} }
-      datasheets:  { type: citations, on_change: invalidate }
       checks:      { type: checks, on_change: invalidate }
-    include: [provenance, stewardship]
+    include: [provenance, stewardship, citations]
     links:
       satisfies:      [requirement, bound]
       constrained_by: [bound]

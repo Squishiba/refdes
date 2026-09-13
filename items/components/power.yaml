@@ -1,5 +1,5 @@
 # Components referenced by DEC-PWR-001's regulator-topology decision. See
-# docs/markdown.md#citing-a-datasheet for how `datasheets:` works.
+# docs/markdown.md#citing-a-datasheet for how `citations:` works.
 
 defaults:
   type: component
@@ -12,7 +12,7 @@ items:
     title: TPS62913 synchronous buck converter
     part_number: TPS62913
     status: selected
-    datasheets:
+    citations:
       - url: https://www.ti.com/lit/ds/symlink/tps62913.pdf
         rev: E
         page: "14"

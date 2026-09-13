@@ -1288,7 +1288,7 @@ declaration:
 2. The nested `part_number` key inside every `citations:`-typed field's
    entries (`CitationSpec.part_number`, `citations.py:37,118`) — present on
    *any* type that declares a `citations:` field, not only `component`. §1's
-   standard only puts one on `component.datasheets`, but §2 lets a project
+   standard only puts one on `component.citations`, but §2 lets a project
    add a `citations:` field to any type, and the nested key follows it
    there automatically. This is the case that covers "cited a datasheet for
    it, never made a component item" — a part that's real enough to have a

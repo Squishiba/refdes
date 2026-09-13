@@ -6,15 +6,21 @@
 #
 # v3's other changes -- the governed_by/governs link verb, satisfies
 # widening to [requirement, bound] on decision/component, and component's
-# new constrained_by/checks -- appear nowhere here either. All purely
+# new constrained_by/checks -- appear nowhere here. Those are purely
 # additive (a widened target list or a new field/link accepts everything a
-# narrower one already did): nothing existing needs to be renamed for any
-# of it to be usable, so there is nothing for this file to rewrite.
+# narrower one already did), so nothing existing needs to be renamed for
+# any of them to be usable.
 #
-# fields: below renames text: -> body: on requirement/bound, and method: ->
-# body: on test, exactly the same shape v1 -> v2's own migration.yaml used
-# for constraint.title -> text. One difference from that rename worth
-# calling out: `body:` is a reserved key, not a schema field, so revise.py
+# Not every v3 change is additive, though: citations moved from a field
+# hardcoded onto component alone into a field set both component and
+# decision include, under one field name, so a decision can cite a
+# document too. That renames component's `datasheets:` to `citations:`,
+# and this file rewrites it.
+#
+# fields: below renames text: -> body: on requirement/bound, method: ->
+# body: on test, and datasheets: -> citations: on component -- exactly the
+# same shape v1 -> v2's own migration.yaml used for constraint.title ->
+# text. One difference from that rename worth calling out: `body:` is a reserved key, not a schema field, so revise.py
 # additionally refuses (rather than silently overwriting) any item that
 # already has body content of its own before this migration ever touches
 # it -- see revise.check_body_merge_conflicts(), run alongside the ordinary
@@ -30,3 +36,5 @@ fields:
     text: body
   test:
     method: body
+  component:
+    datasheets: citations

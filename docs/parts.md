@@ -18,7 +18,7 @@ item type.
    promoted to its own `component` item:
 
    ```yaml
-   datasheets:
+   citations:
      - url: https://www.ti.com/lit/ds/symlink/lm358.pdf
        part_number: LM358
    ```

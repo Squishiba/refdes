@@ -169,7 +169,7 @@ A structured `citations` field type, declared per item type:
 types:
   component:
     fields:
-      datasheets: { type: citations, on_change: invalidate }
+      citations: { type: citations, on_change: invalidate }
 ```
 
 An item declares intent only — a url, and optionally a rev, page,
@@ -178,7 +178,7 @@ part_number, and whether the bytes should be vendored:
 ```yaml
 - id: CMP-PWR-001
   title: TPS62913 synchronous buck converter
-  datasheets:
+  citations:
     - url: https://www.ti.com/lit/ds/symlink/tps62913.pdf
       rev: E
       page: "14"
