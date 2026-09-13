@@ -169,6 +169,55 @@ or more. Trigonometric functions are **not** available — intervals through
 non-monotonic functions need range analysis that is not implemented, and silently
 under-wide bounds would be worse than no support.
 
+## Project equations
+
+A formula you retype per output, per rail, per input is a formula you will get
+wrong in one of them. `equations:` in [`refdes.yaml`](schema-reference.md)
+declares named expressions, callable from any calc block on the site:
+
+```yaml
+equations:
+  current_limit:
+    params: [K, V, R]
+    expr: K * V / R
+    note: TPS1H200A datasheet p.22
+```
+
+```calc
+CLIM_out1 : A = current_limit(2500, 0.8 V, 3.3 kohm) ± 15%
+```
+
+`note:` is provenance — a datasheet page, an application note — and nothing at
+build time reads it. It is there so the person correcting the formula knows
+where it came from.
+
+Calling an equation is not a new evaluator: the arguments bind to `params` and
+the body is evaluated exactly as if you had written it inline. Two things follow
+from that:
+
+- **Units come from the arguments.** Parameters declare no dimensions; the body's
+  arithmetic has them. `current_limit` returns amps because `V / kohm` does, and
+  passing `3.3 kg` where a resistance belongs is an ordinary dimensionality error
+  at the call site — `declared as A but the expression evaluates to V/kg` — not a
+  new error to learn.
+- **Tolerances propagate.** `± 15%` on an equation result behaves exactly as it
+  does on any other expression, and a tolerance carried by an argument reaches the
+  result through it.
+
+Three rules:
+
+- An equation may call another equation. A cycle is a build error naming the path
+  that closes the loop — `equation cycle: a -> b -> a` — the way a `blocked_by`
+  cycle already is.
+- An equation cannot shadow a built-in. `sqrt` has to mean one thing everywhere on
+  the site, so redefining it is rejected rather than silently preferred.
+- Arity is checked against `params` by the same call path that checks `sqrt()`
+  takes its one argument: `current_limit() takes 3 argument(s) (K, V, R), got 2`.
+
+The namespace is project-wide, like `units:`. Equations are not board-specific,
+and two boards defining `current_limit` differently would create a resolution
+question that needn't exist.
+
 ## Errors you will see
 
 ```
@@ -176,6 +225,7 @@ cannot add V and A — the units do not match
 cannot divide by a value whose tolerance range includes zero
 unknown unit 'wat'
 unknown function 'sin'; available: abs, exp, ln, log10, max, min, sqrt
+equation cycle: a -> b -> a
 exponent must be dimensionless
 declared as W but the expression evaluates to V/A
 ```

@@ -9,6 +9,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from .calc import Equation
+
 # on_change modes. Only `invalidate` does anything today: compute_hashes()
 # (build.py) is the sole consumer and only checks for INVALIDATE, so `log` and
 # `ignore` are currently indistinguishable -- both are excluded from the content
@@ -540,6 +542,10 @@ class Project:
     id_ledger: str
     preferred_units: list[str]
     unit_aliases: dict[str, str] = field(default_factory=dict)
+    # `equations:` from refdes.yaml, keyed by name. Evaluation reads calc.EQUATIONS
+    # (the live registry load_project installs); this is the loaded definition, for
+    # anything that reports on the project's vocabulary.
+    equations: dict[str, Equation] = field(default_factory=dict)
     items: dict[str, Item] = field(default_factory=dict)
     pages: list[Page] = field(default_factory=list)
     pages_dir: str = "pages"

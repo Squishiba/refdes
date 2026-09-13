@@ -8,7 +8,7 @@ from typing import Any
 
 import yaml
 
-from . import standards
+from . import calc, standards
 from .model import (
     BASELINE_IDENTITIES,
     DIAGNOSTIC_LEVELS,
@@ -169,6 +169,77 @@ def _load_project_settings(root: str) -> dict[str, Any]:
     }
 
 
+def _load_equations(raw: dict[str, Any]) -> dict[str, calc.Equation]:
+    """Load and validate refdes.yaml's `equations:` block.
+
+    A project-wide vocabulary of named expressions callable from any calc block
+    (docs/math.md), sitting alongside `units:` because it plays the same role:
+    project-wide vocabulary that fixes how an expression is read.
+
+    Structure is checked here because that is where a bad definition has a file and
+    a name to report against; the two semantic rules (no built-in shadowing, no
+    cycles) are `calc.validate_equations`'s, and run again inside
+    `calc.set_equations` so nothing can install a registry that skipped them.
+    """
+    block = raw.get("equations") or {}
+    if not isinstance(block, dict):
+        raise SchemaError(
+            "equations must be a mapping of equation name to its definition"
+        )
+
+    equations: dict[str, calc.Equation] = {}
+    for name, spec in block.items():
+        spec = spec or {}
+        if not isinstance(spec, dict):
+            raise SchemaError(
+                f"equations.{name} must be a mapping with 'params' and 'expr'"
+            )
+        for key in spec:
+            if key not in ("params", "expr", "note"):
+                raise SchemaError(
+                    f"equations.{name}.{key} is not valid -- only 'params', "
+                    "'expr', and 'note' are recognized"
+                )
+
+        params = spec.get("params") or []
+        if not isinstance(params, list):
+            raise SchemaError(
+                f"equations.{name}.params must be a list of parameter names"
+            )
+        params = [str(p) for p in params]
+        for param in params:
+            if not calc.EQUATION_NAME_RE.match(param):
+                raise SchemaError(
+                    f"equations.{name}.params names {param!r}, which is not a "
+                    "usable name (letters, digits, underscores)"
+                )
+        if len(set(params)) != len(params):
+            raise SchemaError(
+                f"equations.{name}.params lists a parameter twice -- a parameter "
+                "can only be bound once"
+            )
+
+        expr = spec.get("expr")
+        if not isinstance(expr, str) or not expr.strip():
+            raise SchemaError(
+                f"equations.{name}.expr must be a non-empty expression"
+            )
+        try:
+            calc.parse_expression(expr)
+        except calc.CalcError as exc:
+            raise SchemaError(f"equations.{name}.expr: {exc}") from exc
+
+        equations[str(name)] = calc.Equation(
+            str(name), params, expr.strip(), str(spec.get("note") or "")
+        )
+
+    try:
+        calc.validate_equations(equations)
+    except calc.CalcError as exc:
+        raise SchemaError(f"equations: {exc}") from exc
+    return equations
+
+
 def find_config(start: str = ".") -> str:
     """Walk up from `start` looking for refdes.yaml."""
     here = os.path.abspath(start)
@@ -270,6 +341,7 @@ def load_project(config_path: str | None = None, start: str = ".") -> Project:
 
     root = os.path.dirname(os.path.abspath(path))
     settings = _load_project_settings(root)
+    equations = _load_equations(raw)
 
     site = raw.get("site") or {}
     id_cfg = raw.get("id") or {}
@@ -497,7 +569,7 @@ def load_project(config_path: str | None = None, start: str = ".") -> Project:
                 standard_cfg["base"], version
             )
 
-    return Project(
+    project = Project(
         title=site.get("title", "Design Reference"),
         out_dir=site.get("out", "_site"),
         version=str(site.get("version") or ""),
@@ -513,6 +585,7 @@ def load_project(config_path: str | None = None, start: str = ".") -> Project:
         id_ledger=id_cfg.get("ledger", ".refdes/ids.yaml"),
         preferred_units=list(units.get("preferred") or []),
         unit_aliases=dict(units.get("aliases") or {}),
+        equations=equations,
         root=root,
         boards=boards,
         workspaces=workspaces,
@@ -529,3 +602,8 @@ def load_project(config_path: str | None = None, start: str = ".") -> Project:
         standard_base=standard_base,
         standard_version=standard_version,
     )
+    # Install the equation registry alongside the unit config. Loading a project
+    # is what fixes how its expressions read, and build.py applies unit aliases
+    # the same way -- a project with no `equations:` resets it to empty.
+    calc.set_equations(equations)
+    return project

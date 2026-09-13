@@ -10,6 +10,7 @@ from helpers import _project
 
 from refdes import build as build_mod
 from refdes import calc, parse
+from refdes.model import SchemaError
 from refdes.schema import load_project
 
 # ------------------------------------------------------------------------- calc
@@ -655,3 +656,230 @@ def test_a_temperature_range_limit_still_gets_a_real_margin(tmp_path):
     difference -- so offset units are not ambiguous there and never were."""
     project = _temperature_project(tmp_path, "0 degC .. 60 degC")
     assert project.items["DEC-001"].checks[0].margin is not None
+
+
+# ------------------------------------------------- project-defined equations
+
+
+@pytest.fixture
+def equation_registry():
+    """An equation namespace this test can overwrite, restored afterwards --
+    `calc.EQUATIONS` is project-wide state, exactly like the unit aliases."""
+    saved = dict(calc.EQUATIONS)
+    yield calc
+    calc.set_equations(saved)
+
+
+CURRENT_LIMIT = calc.Equation(
+    "current_limit", ["K", "V", "R"], "K * V / R", "TPS1H200A datasheet p.22"
+)
+
+
+def test_a_project_equation_evaluates_with_units_from_its_arguments(equation_registry):
+    """The feature itself. Nothing about a body is special: units come from the
+    arguments, so a parameter needs no declared dimension."""
+    equation_registry.set_equations({"current_limit": CURRENT_LIMIT})
+    value = calc.evaluate("current_limit(2500, 0.8 V, 3.3 kohm)", {})
+    assert value.nom.to("A").magnitude == pytest.approx(2500 * 0.8 / 3300)
+    assert value.dimensionality == calc.Q(1, "A").dimensionality
+
+
+def test_equations_compose(equation_registry):
+    """An equation body is an expression like any other, so it may call another
+    equation -- which is exactly why cycles need a rule of their own."""
+    equation_registry.set_equations({
+        "current_limit": CURRENT_LIMIT,
+        "pwr": calc.Equation("pwr", ["V", "I"], "V * I"),
+        "rail": calc.Equation("rail", ["V"], "pwr(V, current_limit(2500, V, 3.3 kohm))"),
+    })
+    value = calc.evaluate("rail(0.8 V)", {})
+    assert value.nom.to("W").magnitude == pytest.approx(0.8 * (2500 * 0.8 / 3300))
+    assert value.dimensionality == calc.Q(1, "W").dimensionality
+
+
+def test_a_wrong_dimension_argument_is_caught_by_the_unit_assertion(equation_registry):
+    """`3.3 kg` where a resistance belongs is not a new kind of error. The call
+    site's own unit assertion catches it the way it catches any other
+    dimensional drift, because the equation returned an ordinary value."""
+    equation_registry.set_equations({"current_limit": CURRENT_LIMIT})
+    outcomes = calc.evaluate_block(
+        "CLIM_out1 : A = current_limit(2500, 0.8 V, 3.3 kg)", {}
+    )
+    assert outcomes[0].error is not None
+    assert "declared as A but the expression evaluates to" in outcomes[0].error
+
+
+def test_a_wrong_dimension_argument_errors_inside_the_equation_body(equation_registry):
+    """Where the body's own arithmetic is what fails, the diagnostic is the
+    ordinary one, raised while evaluating the call."""
+    equation_registry.set_equations(
+        {"series": calc.Equation("series", ["a", "b"], "a + b")}
+    )
+    with pytest.raises(calc.CalcError, match="units do not match"):
+        calc.evaluate("series(1 kohm, 3.3 kg)", {})
+
+
+def test_tolerance_propagates_through_an_equation_result(equation_registry):
+    """`Value` arithmetic already propagates, so a ± on an equation result
+    behaves exactly as it does on any other expression."""
+    equation_registry.set_equations({"current_limit": CURRENT_LIMIT})
+    value = calc.evaluate_assignment(
+        "current_limit(2500, 0.8 V, 3.3 kohm) ± 15%", {}
+    )
+    assert value.has_width
+    assert value.lo.magnitude == pytest.approx(value.nom.magnitude * 0.85)
+    assert value.hi.magnitude == pytest.approx(value.nom.magnitude * 1.15)
+    assert value.dimensionality == calc.Q(1, "A").dimensionality
+
+
+def test_a_tolerance_in_an_argument_propagates_through_an_equation(equation_registry):
+    """The other direction: a tolerance carried by an argument reaches the
+    result, because arguments are evaluated as `Value`s like everything else."""
+    equation_registry.set_equations({"current_limit": CURRENT_LIMIT})
+    env = {"Vin": calc.evaluate_assignment("0.8 V ± 10%", {})}
+    value = calc.evaluate("current_limit(2500, Vin, 3.3 kohm)", env)
+    assert value.has_width
+    assert value.lo.magnitude == pytest.approx(value.nom.magnitude * 0.9)
+
+
+def test_arity_is_enforced_by_the_existing_call_path(equation_registry):
+    """Not reimplemented: the call path that already checks `sqrt()` checks an
+    equation against its declared `params`."""
+    equation_registry.set_equations({"current_limit": CURRENT_LIMIT})
+    with pytest.raises(calc.CalcError, match=r"current_limit\(\) takes 3 argument"):
+        calc.evaluate("current_limit(2500, 0.8 V)", {})
+
+
+def test_an_unknown_equation_name_still_names_what_is_available(equation_registry):
+    equation_registry.set_equations({"current_limit": CURRENT_LIMIT})
+    with pytest.raises(calc.CalcError) as excinfo:
+        calc.evaluate("current_limi(2500, 0.8 V, 3.3 kohm)", {})
+    message = str(excinfo.value)
+    assert "unknown function 'current_limi'" in message
+    assert "current_limit" in message  # the equation is offered alongside...
+    assert "sqrt" in message  # ...every built-in
+
+
+def test_an_equation_cannot_shadow_a_builtin(equation_registry):
+    """A silent override would make every other expression on the site compute
+    the wrong thing with nothing to say so, so the rule is a hard error."""
+    with pytest.raises(calc.CalcError, match="built-in function"):
+        equation_registry.set_equations(
+            {"sqrt": calc.Equation("sqrt", ["x"], "x * 2")}
+        )
+    assert "sqrt" not in calc.EQUATIONS
+    assert calc.evaluate("sqrt(4 m^2)", {}).nom.magnitude == pytest.approx(2.0)
+
+
+def test_an_equation_cycle_is_reported_not_followed(equation_registry):
+    """Reported the way `blocked_by` cycles are -- the path that closes the
+    loop -- rather than hanging the build on infinite recursion."""
+    with pytest.raises(calc.CalcError, match=r"equation cycle: a -> b -> a"):
+        equation_registry.set_equations({
+            "a": calc.Equation("a", ["x"], "b(x)"),
+            "b": calc.Equation("b", ["x"], "a(x)"),
+        })
+
+
+def test_a_cycle_installed_bypassing_validation_is_still_not_a_hang(equation_registry):
+    """The runtime backstop: even a registry populated without going through
+    `set_equations` reports the cycle instead of recursing forever."""
+    calc.EQUATIONS.update({
+        "a": calc.Equation("a", ["x"], "b(x)"),
+        "b": calc.Equation("b", ["x"], "a(x)"),
+    })
+    with pytest.raises(calc.CalcError, match="equation cycle"):
+        calc.evaluate("a(1)", {})
+
+
+# ------------------------------------------------ equations in project config
+
+
+def _equation_config(tmp_path, equations_yaml):
+    (tmp_path / "refdes.yaml").write_text(
+        "site: { title: E, out: _site }\n"
+        "types:\n  decision: { prefix: DEC, fields: {} }\n"
+        f"{equations_yaml}",
+        encoding="utf-8",
+    )
+    return load_project(config_path=str(tmp_path / "refdes.yaml"))
+
+
+CURRENT_LIMIT_YAML = """\
+equations:
+  current_limit:
+    params: [K, V, R]
+    expr: K * V / R
+    note: TPS1H200A datasheet p.22
+"""
+
+
+def test_equations_load_from_refdes_yaml(tmp_path):
+    project = _equation_config(tmp_path, CURRENT_LIMIT_YAML)
+    assert list(project.equations) == ["current_limit"]
+    assert project.equations["current_limit"].params == ["K", "V", "R"]
+    assert project.equations["current_limit"].note == "TPS1H200A datasheet p.22"
+    value = calc.evaluate("current_limit(2500, 0.8 V, 3.3 kohm)", {})
+    assert value.nom.to("A").magnitude == pytest.approx(2500 * 0.8 / 3300)
+
+
+def test_an_equation_call_in_a_calc_block_reaches_the_build(tmp_path):
+    (tmp_path / "refdes.yaml").write_text(
+        "site: { title: E, out: _site }\n"
+        "types:\n  decision: { prefix: DEC, fields: {} }\n"
+        f"{CURRENT_LIMIT_YAML}",
+        encoding="utf-8",
+    )
+    items = tmp_path / "items"
+    items.mkdir()
+    (items / "dec.md").write_text(
+        "---\nid: DEC-001\ntype: decision\n---\n\n"
+        "```calc\nCLIM_out1 : A = current_limit(2500, 0.8 V, 3.3 kohm)\n```\n",
+        encoding="utf-8",
+    )
+    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    parse.load_items(project)
+    build_mod.build(project)
+    assert not project.errors
+    assert project.items["DEC-001"].calcs[0].result == "0.6061 A"
+
+
+def test_a_project_without_equations_installs_none(tmp_path):
+    """Loading a project replaces the namespace rather than merging into the
+    last one, so one project's equations can't leak into the next build."""
+    calc.set_equations({"current_limit": CURRENT_LIMIT})
+    _equation_config(tmp_path, "")
+    assert calc.EQUATIONS == {}
+
+
+def test_a_builtin_equation_name_in_refdes_yaml_is_an_error(tmp_path):
+    with pytest.raises(SchemaError, match="built-in function"):
+        _equation_config(
+            tmp_path, "equations:\n  sqrt: { params: [x], expr: 'x * 2' }\n"
+        )
+
+
+def test_an_equation_cycle_in_refdes_yaml_is_an_error(tmp_path):
+    with pytest.raises(SchemaError) as excinfo:
+        _equation_config(
+            tmp_path,
+            "equations:\n"
+            "  a: { params: [x], expr: 'b(x)' }\n"
+            "  b: { params: [x], expr: 'a(x)' }\n",
+        )
+    assert "equation cycle: a -> b -> a" in str(excinfo.value)
+
+
+def test_an_equation_body_that_does_not_parse_is_caught_at_load(tmp_path):
+    """A broken body is a config error naming the equation, not a surprise for
+    whoever first calls it three weeks later."""
+    with pytest.raises(SchemaError, match="could not parse"):
+        _equation_config(tmp_path, "equations:\n  bad: { params: [], expr: '1 +' }\n")
+
+
+def test_an_unknown_equation_definition_key_is_an_error(tmp_path):
+    with pytest.raises(SchemaError, match="only 'params'"):
+        _equation_config(
+            tmp_path,
+            "equations:\n  ok: { params: [x], expr: 'x', unit: A }\n",
+        )

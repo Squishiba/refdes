@@ -173,6 +173,126 @@ FUNCTIONS = _build_functions()
 MULTI_ARG = {"min", "max"}
 
 
+# ---------------------------------------------------------------- project equations
+
+
+@dataclass
+class Equation:
+    """A named expression declared in `refdes.yaml`'s `equations:` and callable
+    from any calc block: `current_limit(2500, 0.8 V, 3.3 kohm)`.
+
+    Calling one is not a `FUNCTIONS` call: the arguments bind to `params` in a
+    fresh environment and `expr` goes back through `evaluate`, so units, tolerances,
+    and every diagnostic are exactly what the body would produce written inline.
+    `note` is provenance (a datasheet page), read by whoever edits the definition
+    and by nothing at build time.
+    """
+
+    name: str
+    params: list[str]
+    expr: str
+    note: str = ""
+
+
+# One project-wide namespace, replaced wholesale by `set_equations` on config
+# load -- the same posture `set_unit_aliases` already takes.
+EQUATIONS: dict[str, Equation] = {}
+
+# `_q` is the quantity literal the lexer emits, intercepted ahead of any registry
+# lookup, so an equation registered under it could never be reached.
+RESERVED_NAMES = {"_q"}
+
+EQUATION_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def set_equations(equations: dict[str, Equation] | None) -> None:
+    """Replace the project equation namespace, validating it first.
+
+    Validation lives here rather than in the caller so "shadowing a built-in is a
+    hard error" has no route around it: nothing can populate `EQUATIONS` without
+    passing `validate_equations`.
+    """
+    equations = dict(equations or {})
+    validate_equations(equations)
+    EQUATIONS.clear()
+    EQUATIONS.update(equations)
+
+
+def validate_equations(equations: dict[str, Equation]) -> None:
+    """Reject an equation that shadows a built-in, and any cycle between them.
+
+    Shadowing is an error rather than an override because `sqrt` has to mean one
+    thing in every expression on the site: a project silently redefining it makes
+    every other block's arithmetic wrong, and nothing downstream can tell.
+
+    Cycles follow `blocked.py`'s precedent for `blocked_by` -- the walk reports the
+    path that closes the loop and the build stops on it, rather than recursing.
+    """
+    for name in equations:
+        if name in FUNCTIONS:
+            raise CalcError(
+                f"{name!r} is a built-in function; a project equation cannot "
+                "shadow it — rename the equation"
+            )
+        if name in RESERVED_NAMES:
+            raise CalcError(f"{name!r} is reserved; a project equation cannot use it")
+        if not EQUATION_NAME_RE.match(str(name)):
+            raise CalcError(
+                f"{name!r} is not a usable equation name; use letters, digits, "
+                "and underscores, starting with a letter or underscore"
+            )
+    for name in equations:
+        _walk_equation_cycle(name, equations, [])
+
+
+def _equation_references(eq: Equation, equations: dict[str, Equation]) -> list[str]:
+    """Equation names this body calls. A parameter of the same name binds locally,
+    so it is not a reference to the equation."""
+    params = set(eq.params)
+    found = []
+    for node in ast.walk(parse_expression(eq.expr)):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+            name = node.func.id
+            if name not in params and name in equations and name not in found:
+                found.append(name)
+    return found
+
+
+def _walk_equation_cycle(
+    name: str, equations: dict[str, Equation], path: list[str]
+) -> None:
+    if name in path:
+        raise CalcError(f"equation cycle: {' -> '.join([*path, name])}")
+    for dep in _equation_references(equations[name], equations):
+        _walk_equation_cycle(dep, equations, [*path, name])
+
+
+# Equations currently mid-evaluation. `validate_equations` should make this
+# unreachable; it is the backstop for a registry populated some other way, so a
+# cycle is still a diagnostic rather than a RecursionError.
+_equation_stack: list[str] = []
+
+
+def _call_equation(eq: Equation, node: ast.Call, env: dict[str, Value]) -> Value:
+    if node.keywords:
+        raise CalcError("keyword arguments are not supported")
+    if len(node.args) != len(eq.params):
+        expected = ", ".join(eq.params) if eq.params else "none"
+        raise CalcError(
+            f"{eq.name}() takes {len(eq.params)} argument(s) ({expected}), "
+            f"got {len(node.args)}"
+        )
+    args = [_eval_node(a, env) for a in node.args]
+    if eq.name in _equation_stack:
+        raise CalcError(f"equation cycle: {' -> '.join([*_equation_stack, eq.name])}")
+    local = dict(zip(eq.params, args))
+    _equation_stack.append(eq.name)
+    try:
+        return _eval_node(parse_expression(eq.expr), local)
+    finally:
+        _equation_stack.pop()
+
+
 # --------------------------------------------------------------------------- lexing
 
 # A bare unit may only follow a numeric literal, and contains no whitespace.
@@ -334,9 +454,11 @@ def _eval_node(node: ast.AST, env: dict[str, Value]) -> Value:
             return quantity(str(args[0]), str(args[1]))
         fn = FUNCTIONS.get(name)
         if fn is None:
-            raise CalcError(
-                f"unknown function {name!r}; available: {', '.join(sorted(FUNCTIONS))}"
-            )
+            eq = EQUATIONS.get(name)
+            if eq is None:
+                available = ", ".join(sorted([*FUNCTIONS, *EQUATIONS]))
+                raise CalcError(f"unknown function {name!r}; available: {available}")
+            return _call_equation(eq, node, env)
         if node.keywords:
             raise CalcError("keyword arguments are not supported")
         args = [_eval_node(a, env) for a in node.args]
@@ -349,15 +471,22 @@ def _eval_node(node: ast.AST, env: dict[str, Value]) -> Value:
     raise CalcError(f"{type(node).__name__} is not allowed in an expression")
 
 
-def evaluate(expression: str, env: dict[str, Value]) -> Value:
+def parse_expression(expression: str):
+    """Lex and parse an expression into an `ast.Expression`, without evaluating it.
+
+    Split out so a stored expression (a project equation's body) can be checked
+    for syntax when it is declared, not the first time something calls it."""
     source = _lex(expression)
     try:
-        tree = ast.parse(source, mode="eval")
+        return ast.parse(source, mode="eval")
     except SyntaxError as exc:
         raise CalcError(
             f"could not parse expression {expression!r}: {exc.msg}"
         ) from exc
-    return _eval_node(tree, env)
+
+
+def evaluate(expression: str, env: dict[str, Value]) -> Value:
+    return _eval_node(parse_expression(expression), env)
 
 
 # ------------------------------------------------------------------- tolerance forms
