@@ -31,8 +31,15 @@ ROOT = os.path.dirname(os.path.abspath(__file__))
 PYPROJECT = os.path.join(ROOT, "pyproject.toml")
 EXT_MANIFEST = os.path.join(ROOT, "editors", "vscode", "package.json")
 VENV_PY = os.path.join(ROOT, ".venv", "Scripts", "python.exe")
+CHANGELOG = os.path.join(ROOT, "CHANGELOG.md")
+FRAGMENTS_DIR = os.path.join(ROOT, "changelog.d")
 
 SEMVER = re.compile(r"^\d+\.\d+\.\d+$")
+
+# The Keep a Changelog categories this project uses, in the order subheadings
+# must appear inside `## [Unreleased]` (Breaking first -- this project's
+# convention today).
+CHANGELOG_CATEGORIES = ("breaking", "added", "changed", "fixed", "removed")
 
 
 def _fix_console() -> None:
@@ -157,6 +164,150 @@ def write_ext_version(version: str) -> None:
         fh.write(new_text)
 
 
+# --------------------------------------------------------------------------- changelog fragments
+
+
+def fragment_category(name: str) -> str:
+    """Category of a fragment file name, e.g. 'citations-field-set.breaking.md' -> 'breaking'.
+
+    Refuses anything that is not <slug>.<category>.md with the category in the
+    project's set, rather than guessing what the file might mean.
+    """
+    base, ext = os.path.splitext(name)
+    if ext != ".md":
+        raise Abort(f"{name!r} is not a changelog fragment: expected <slug>.<category>.md")
+    category = base.rsplit(".", 1)[-1]
+    if category not in CHANGELOG_CATEGORIES:
+        raise Abort(
+            f"{name!r} has category {category!r}; expected one of "
+            f"{', '.join(CHANGELOG_CATEGORIES)} (changelog.d/<slug>.<category>.md)"
+        )
+    return category
+
+
+def _fragment_bullets(contents: list[str], nl: str) -> list[str]:
+    """Normalize fragment contents into bullets, each ending with exactly one nl."""
+    bullets = []
+    for content in contents:
+        text = content.strip()
+        text = text.replace("\r\n", "\n").replace("\r", "\n").replace("\n", nl)
+        if not text.endswith(nl):
+            text += nl
+        bullets.append(text)
+    return bullets
+
+
+def _append_fragments(body: str, contents: list[str], nl: str) -> str:
+    """Append fragment bullets at the end of an existing section's body.
+
+    The section's own text is left untouched; the new bullets go after the
+    last existing bullet, before the body's trailing blank-line separator.
+    """
+    if not contents:
+        return body
+    bullets = _fragment_bullets(contents, nl)
+    lines = body.splitlines(keepends=True)
+    content_idx = [i for i, line in enumerate(lines) if line.strip()]
+    if not content_idx:
+        # Empty section: new bullets replace the bare blank line(s) faithfully.
+        return nl + nl.join(bullets) + nl
+    insert = nl + nl.join(bullets)
+    lines[content_idx[-1] + 1 : content_idx[-1] + 1] = [insert]
+    return "".join(lines)
+
+
+def assemble_fragments(changelog_text: str, fragments: dict[str, str]) -> str:
+    """Fold pending fragments into the changelog's `[Unreleased]` section.
+
+    Pure: takes the current changelog text and the fragment contents -- keyed
+    by fragment file name, as read from changelog.d/ -- and *returns* the new
+    changelog text, doing no file I/O itself. That is what makes it checkable
+    without cutting a release.
+
+    Fragments are grouped by the category in their file name and inserted under
+    the matching `###` subheading inside `## [Unreleased]`, creating the
+    subheading when the category has none yet. Subheadings come out in
+    CHANGELOG_CATEGORIES order (Breaking first, per this project's convention).
+    Everything already in the file is preserved verbatim: existing bullets are
+    never reordered or rewritten, and fragment bullets are appended after a
+    section's last existing bullet.
+    """
+    nl = "\r\n" if "\r\n" in changelog_text else "\n"
+
+    grouped: dict[str, list[str]] = {}
+    for name, content in fragments.items():
+        grouped.setdefault(fragment_category(name), []).append(content)
+
+    if not grouped:
+        return changelog_text
+
+    unreleased = re.search(r"^## \[Unreleased\]\s*$", changelog_text, re.M)
+    if not unreleased:
+        raise Abort("CHANGELOG.md has no `## [Unreleased]` section to fold fragments into")
+    region_start = unreleased.end()
+    next_release = re.search(r"^## ", changelog_text[region_start:], re.M)
+    region_end = region_start + next_release.start() if next_release else len(changelog_text)
+    region = changelog_text[region_start:region_end]
+
+    headings = list(re.finditer(r"^### (?P<name>[A-Za-z]+)\r?$", region, re.M))
+    prefix = region[: headings[0].start()] if headings else region
+
+    by_name: dict[str, tuple[str, str]] = {}
+    for i, match in enumerate(headings):
+        name = match.group("name").lower()
+        if name not in CHANGELOG_CATEGORIES:
+            raise Abort(
+                f"[Unreleased] has `### {match.group('name')}`, which is not one of "
+                f"{', '.join(CHANGELOG_CATEGORIES)} -- fold such changes into the "
+                "changelog by hand or drop that subheading first"
+            )
+        if name in by_name:
+            raise Abort(
+                f"[Unreleased] has two `### {match.group('name')}` subheadings; "
+                "merge them before cutting a release"
+            )
+        # + 1 skips the heading line's own newline, which `heading + nl` re-adds.
+        body_start = match.end() + 1
+        body_end = headings[i + 1].start() if i + 1 < len(headings) else len(region)
+        by_name[name] = (match.group(0), region[body_start:body_end])
+
+    chunks = [prefix]
+    for cat in CHANGELOG_CATEGORIES:
+        if cat in by_name:
+            heading, body = by_name[cat]
+            chunks.append(heading + nl)
+            chunks.append(_append_fragments(body, grouped.get(cat, []), nl))
+        elif cat in grouped:
+            chunks.append(f"### {cat.title()}{nl}")
+            chunks.append(nl + nl.join(_fragment_bullets(grouped[cat], nl)) + nl)
+    return changelog_text[:region_start] + "".join(chunks) + changelog_text[region_end:]
+
+
+def read_fragments() -> dict[str, str]:
+    """Read the pending fragments from changelog.d/, keyed by file name.
+
+    Returns {} when the directory does not exist. README.md is documentation,
+    not a fragment; any other file that is not <slug>.<category>.md is refused
+    rather than guessed at.
+    """
+    if not os.path.isdir(FRAGMENTS_DIR):
+        return {}
+    fragments: dict[str, str] = {}
+    for name in sorted(os.listdir(FRAGMENTS_DIR)):
+        if name == "README.md":
+            continue
+        path = os.path.join(FRAGMENTS_DIR, name)
+        if os.path.isdir(path):
+            raise Abort(f"changelog.d contains a directory, {name}, not a fragment")
+        fragment_category(name)
+        with open(path, encoding="utf-8") as fh:
+            content = fh.read()
+        if not content.strip():
+            raise Abort(f"{name} is empty; write the bullet(s) it should contribute or delete it")
+        fragments[name] = content
+    return fragments
+
+
 # --------------------------------------------------------------------------- flows
 
 
@@ -171,12 +322,35 @@ def release_cli(version: str, dry_run: bool) -> None:
     say("tests passed")
 
     if dry_run:
+        pending = read_fragments()
+        if pending:
+            say(
+                "dry run: " + ", ".join(sorted(pending))
+                + " would be folded into CHANGELOG.md and deleted"
+            )
+        else:
+            say("dry run: no pending changelog fragments")
         say("dry run: stopping before any file is modified")
         return
 
     step("Bumping the version")
     write_cli_version(version)
     say(f"pyproject.toml -> {version}")
+
+    step("Folding changelog fragments")
+    fragments = read_fragments()
+    if not fragments:
+        say("no pending fragments")
+    else:
+        with open(CHANGELOG, encoding="utf-8") as fh:
+            changelog_text = fh.read()
+        new_text = assemble_fragments(changelog_text, fragments)
+        with open(CHANGELOG, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(new_text)
+        for name in fragments:
+            os.remove(os.path.join(FRAGMENTS_DIR, name))
+        noun = "fragment" if len(fragments) == 1 else "fragments"
+        say(f"folded {len(fragments)} {noun} into CHANGELOG.md and deleted them")
 
     step("Cleaning previous build outputs")
     # `build` does not clean up after itself, and `twine upload dist/*` uploads
