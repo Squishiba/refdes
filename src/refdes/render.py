@@ -7,7 +7,7 @@ import os
 import re
 import shutil
 
-from jinja2 import Environment, FileSystemLoader, select_autoescape
+from jinja2 import Environment, FileSystemLoader
 
 from . import blocked as blocked_mod
 from . import build as build_mod
@@ -599,7 +599,13 @@ def render_site(project: Project, draft: bool = False) -> str:
 
     env = Environment(
         loader=FileSystemLoader(TEMPLATE_DIR),
-        autoescape=select_autoescape(["html"]),
+        # autoescape=True, not select_autoescape(["html"]): select_autoescape
+        # matches on the template name's SUFFIX, and every template here is
+        # named *.html.j2 -- ending in ".j2", not ".html" -- so it returned
+        # False for every template and nothing was ever escaped. Every template
+        # in this project is HTML, so escaping can simply always be on; the
+        # intentional raw-markup sites are already marked | safe below.
+        autoescape=True,
         trim_blocks=True,
         lstrip_blocks=True,
     )

@@ -720,6 +720,31 @@ def test_citation_without_page_keeps_bare_href(citation_project):
     assert "#page=" not in html
 
 
+def test_citation_page_value_is_html_escaped(citation_project):
+    """Author-controlled citation `page:` must be escaped on the rendered item
+    page: `page: 14" onmouseover="alert(1)` would otherwise break out of the
+    href attribute and inject a handler. Regression for autoescaping being
+    silently disabled — `select_autoescape(["html"])` matches on the template
+    name's suffix, and every template is named *.html.j2, so it returned False
+    for all of them."""
+    (citation_project / "items" / "cmp.yaml").write_text(
+        "defaults: {type: component}\n"
+        "items:\n  - id: CMP-001\n    title: t\n"
+        "    datasheets:\n      - url: https://example.com/ds.pdf\n"
+        "        page: '14\" onmouseover=\"alert(1)'\n",
+        encoding="utf-8",
+    )
+    project = _cite_build(citation_project)
+    out = render.render_site(project)
+    html = open(os.path.join(out, "cmp-001.html"), encoding="utf-8").read()
+    # The unescaped attribute would be `onmouseover="alert(1)` breaking out of
+    # the href; that must be gone...
+    assert 'onmouseover="' not in html
+    # ...and the escaped form (quote rendered as the `&#34;` entity) present
+    # instead, both in the #page= href fragment and the page table cell.
+    assert "onmouseover=&#34;" in html
+
+
 def test_nav_shows_references_link_only_when_citations_exist(citation_project):
     project = _cite_build(citation_project)
     out = render.render_site(project)
