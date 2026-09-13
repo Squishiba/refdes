@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import os
 
+from conftest import write_project_config
 from helpers import _build_at
 
 from refdes import render
@@ -67,10 +68,10 @@ def test_page_colliding_with_a_generated_report_is_an_error(paged_project):
 
 def test_pages_only_project_may_use_report_names_freely(tmp_path):
     """With no items there are no generated reports, so coverage.md is fine."""
-    (tmp_path / "refdes.yaml").write_text(
+    write_project_config(
+        tmp_path,
         "site:\n  title: Docs\n  out: _site\n  pages: pages\n"
         "types:\n  note:\n    prefix: NOTE\n",
-        encoding="utf-8",
     )
     pages = tmp_path / "pages"
     pages.mkdir()
@@ -85,10 +86,10 @@ def test_pages_only_project_may_use_report_names_freely(tmp_path):
 
 def test_docs_site_builds_with_no_items_at_all(tmp_path):
     """A pages-only project is a plain website; nothing item-shaped is required."""
-    (tmp_path / "refdes.yaml").write_text(
+    write_project_config(
+        tmp_path,
         'site:\n  title: Docs\n  out: _site\n  pages: pages\n'
         "types:\n  note:\n    prefix: NOTE\n",
-        encoding="utf-8",
     )
     pages = tmp_path / "pages"
     pages.mkdir()

@@ -8,7 +8,8 @@ from __future__ import annotations
 import json
 
 import pytest
-from helpers import BLOCKS_SCHEMA, _build_at, _numeric_hint_project
+from conftest import write_project_config
+from helpers import BLOCKS_SCHEMA, NUMERIC_HINT_SCHEMA, _build_at
 
 from refdes import cli as cli_mod
 
@@ -217,7 +218,7 @@ def test_index_only_local_items_not_imports(blocks_project):
     schema = BLOCKS_SCHEMA + (
         '\nimports:\n  - name: platform\n    items: upstream.json\n    version: "1"\n'
     )
-    (blocks_project / "refdes.yaml").write_text(schema, encoding="utf-8")
+    write_project_config(blocks_project, schema)
     _page_with_block(blocks_project, '{{index by="status" type="decision"}}')
     project, page = _index_page(blocks_project)
     assert not project.errors
@@ -229,7 +230,7 @@ def test_index_only_local_items_not_imports(blocks_project):
 
 
 def test_ls_lists_every_local_item(blocks_project, capsys):
-    status = cli_mod.main(["-c", str(blocks_project / "refdes.yaml"), "ls"])
+    status = cli_mod.main(["-c", str(blocks_project / "refdes-project.yaml"), "ls"])
     assert status == 0
     out = capsys.readouterr().out
     for item_id in ("DEC-001", "DEC-002", "DEC-003", "REQ-001", "CMP-001", "TST-001"):
@@ -237,14 +238,14 @@ def test_ls_lists_every_local_item(blocks_project, capsys):
 
 
 def test_ls_filters_by_type(blocks_project, capsys):
-    cli_mod.main(["-c", str(blocks_project / "refdes.yaml"), "ls", "--type", "decision"])
+    cli_mod.main(["-c", str(blocks_project / "refdes-project.yaml"), "ls", "--type", "decision"])
     out = capsys.readouterr().out
     assert "DEC-001" in out and "DEC-002" in out and "DEC-003" in out
     assert "REQ-001" not in out and "CMP-001" not in out
 
 
 def test_ls_filters_by_board(blocks_project, capsys):
-    cli_mod.main(["-c", str(blocks_project / "refdes.yaml"), "ls", "--board", "power"])
+    cli_mod.main(["-c", str(blocks_project / "refdes-project.yaml"), "ls", "--board", "power"])
     out = capsys.readouterr().out
     assert "DEC-001" in out and "DEC-002" in out
     assert "DEC-003" not in out  # on the thermal board, not power
@@ -253,7 +254,7 @@ def test_ls_filters_by_board(blocks_project, capsys):
 def test_ls_filters_by_tag(blocks_project, capsys):
     """DEC-001 (tags: [layout, review]) and DEC-002 (tags: [review]) both
     carry the review tag; DEC-003 has no tags: of its own at all."""
-    cli_mod.main(["-c", str(blocks_project / "refdes.yaml"), "ls", "--tag", "review"])
+    cli_mod.main(["-c", str(blocks_project / "refdes-project.yaml"), "ls", "--tag", "review"])
     out = capsys.readouterr().out
     assert "DEC-001" in out and "DEC-002" in out
     assert "DEC-003" not in out
@@ -262,7 +263,7 @@ def test_ls_filters_by_tag(blocks_project, capsys):
 def test_ls_free_text_matches_tags_not_just_title(blocks_project, capsys):
     """'layout' appears in DEC-001's tags:, not in its title -- free text
     has to reach tags: for this to mean anything (finding 9's whole point)."""
-    cli_mod.main(["-c", str(blocks_project / "refdes.yaml"), "ls", "layout"])
+    cli_mod.main(["-c", str(blocks_project / "refdes-project.yaml"), "ls", "layout"])
     out = capsys.readouterr().out
     assert "DEC-001" in out
     assert "DEC-002" not in out
@@ -270,7 +271,7 @@ def test_ls_free_text_matches_tags_not_just_title(blocks_project, capsys):
 
 
 def test_ls_filters_by_source_file(blocks_project, capsys):
-    cli_mod.main(["-c", str(blocks_project / "refdes.yaml"), "ls", "--file", "items/dec-001.md"])
+    cli_mod.main(["-c", str(blocks_project / "refdes-project.yaml"), "ls", "--file", "items/dec-001.md"])
     out = capsys.readouterr().out
     assert "DEC-001" in out
     assert "DEC-002" not in out
@@ -278,19 +279,24 @@ def test_ls_filters_by_source_file(blocks_project, capsys):
 
 def test_ls_no_match_reports_cleanly_and_exits_zero(blocks_project, capsys):
     status = cli_mod.main(
-        ["-c", str(blocks_project / "refdes.yaml"), "ls", "no-such-thing-anywhere"]
+        ["-c", str(blocks_project / "refdes-project.yaml"), "ls", "no-such-thing-anywhere"]
     )
     assert status == 0
     assert "no items match" in capsys.readouterr().out
 
 
 def test_ls_omits_the_board_column_when_the_project_has_no_boards(tmp_path, capsys):
-    root = _numeric_hint_project(
-        tmp_path,
+    # Inlined from helpers._numeric_hint_project, which still writes the retired
+    # single-file config; the assertions are unchanged.
+    write_project_config(tmp_path, NUMERIC_HINT_SCHEMA)
+    items = tmp_path / "items"
+    items.mkdir()
+    (items / "r.yaml").write_text(
         "defaults:\n  type: requirement\n  prefix: CAN\n"
         "items:\n  - id: CAN-001\n    text: A plain requirement.\n",
+        encoding="utf-8",
     )
-    cli_mod.main(["-c", str(root / "refdes.yaml"), "ls"])
+    cli_mod.main(["-c", str(tmp_path / "refdes-project.yaml"), "ls"])
     out = capsys.readouterr().out
     assert "CAN-001" in out
     assert "requirement" in out
@@ -395,7 +401,7 @@ types:
 
 @pytest.fixture
 def diamond_project(tmp_path):
-    (tmp_path / "refdes.yaml").write_text(DIAMOND_SCHEMA, encoding="utf-8")
+    write_project_config(tmp_path, DIAMOND_SCHEMA)
     items = tmp_path / "items"
     items.mkdir()
     # NODE-001 -> NODE-002 -> NODE-004, NODE-001 -> NODE-003 -> NODE-004:

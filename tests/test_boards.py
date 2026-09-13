@@ -8,6 +8,7 @@ from __future__ import annotations
 import os
 
 import pytest
+from conftest import write_project_config
 from helpers import BOARD_CONFIG, _build_at, _project
 
 from refdes import boards as boards_mod
@@ -43,7 +44,7 @@ def test_unregistered_path_segment_warns_that_it_has_no_board(board_project):
 
 
 def test_item_directly_under_items_warns_that_it_has_no_board(tmp_path):
-    (tmp_path / "refdes.yaml").write_text(BOARD_CONFIG, encoding="utf-8")
+    write_project_config(tmp_path, BOARD_CONFIG)
     items = tmp_path / "items"
     items.mkdir(parents=True, exist_ok=True)
     (items / "loose.yaml").write_text(
@@ -75,7 +76,7 @@ def test_item_level_board_override_does_not_warn_about_no_board(board_project):
 
 
 def test_explicit_board_override_must_be_registered(tmp_path):
-    (tmp_path / "refdes.yaml").write_text(BOARD_CONFIG, encoding="utf-8")
+    write_project_config(tmp_path, BOARD_CONFIG)
     items = tmp_path / "items" / "shared"
     items.mkdir(parents=True)
     (items / "r.yaml").write_text(
@@ -96,11 +97,11 @@ def test_token_lint_warns_on_prefix_mismatch(board_project):
 
 
 def test_token_lint_is_silent_without_a_declared_token(tmp_path):
-    (tmp_path / "refdes.yaml").write_text(
+    write_project_config(
+        tmp_path,
         "site: { title: T, out: _site }\n"
         "boards:\n  board-a: { label: Board A }\n"  # no token
         "types:\n  requirement: { prefix: REQ, fields: { text: { type: text } } }\n",
-        encoding="utf-8",
     )
     items = tmp_path / "items" / "board-a"
     items.mkdir(parents=True)
@@ -117,16 +118,16 @@ def test_boards_registry_absent_is_inert(tmp_path):
     """No `boards:` block: every item's board stays empty, matching today.
 
     A dedicated, standalone fixture on purpose -- not a copy of this repo's own
-    `refdes.yaml`, and not built from `_project()`, because that config now
+    `refdes-project.yaml`, and not built from `_project()`, because that config now
     registers real boards (see test_real_project_registers_boards_and_renders_
     board_pages below). This is the regression guarantee that a project with no
     `boards:` block at all stays completely unaffected, kept independent of
     whatever the sample project does.
     """
-    (tmp_path / "refdes.yaml").write_text(
+    write_project_config(
+        tmp_path,
         "site: { title: T, out: _site }\n"
         "types:\n  requirement: { prefix: REQ, fields: { text: { type: text } } }\n",
-        encoding="utf-8",
     )
     items = tmp_path / "items" / "requirements"
     items.mkdir(parents=True)
@@ -183,14 +184,14 @@ def _nav_hrefs(nodes):
 @pytest.fixture
 def empty_board_project(tmp_path):
     """A registry declaring two boards where only one has any items."""
-    (tmp_path / "refdes.yaml").write_text(
+    write_project_config(
+        tmp_path,
         "site: { title: T, out: _site }\n"
         "boards:\n"
         "  board-a: { label: Board A }\n"
         "  board-z: { label: Board Z }\n"
         "types:\n"
         "  requirement: { prefix: REQ, fields: { text: { type: text, required: true } } }\n",
-        encoding="utf-8",
     )
     items = tmp_path / "items" / "board-a"
     items.mkdir(parents=True)
@@ -250,14 +251,14 @@ def test_every_report_the_nav_links_is_written_and_vice_versa(
 def test_a_populated_board_with_no_log_gets_no_log_page(tmp_path):
     """Not only the empty-board case: a board that has items but no log
     entries was still given a `log-<board>.html` the nav declined to link."""
-    (tmp_path / "refdes.yaml").write_text(
+    write_project_config(
+        tmp_path,
         "site: { title: T, out: _site }\n"
         "boards:\n  board-a: { label: Board A }\n"
         "types:\n"
         "  requirement: { prefix: REQ, fields: { text: { type: text, required: true } } }\n"
         "  log:\n    prefix: LOG\n    append_only: true\n    fields:\n"
         "      summary: { type: text, required: true }\n",
-        encoding="utf-8",
     )
     items = tmp_path / "items" / "board-a"
     items.mkdir(parents=True)
@@ -274,11 +275,11 @@ def test_a_populated_board_with_no_log_gets_no_log_page(tmp_path):
 
 
 def test_board_path_alias_matches_a_differently_named_folder(tmp_path):
-    (tmp_path / "refdes.yaml").write_text(
+    write_project_config(
+        tmp_path,
         "site: { title: T, out: _site }\n"
         "boards:\n  board-a: { label: Board A, path: brdA }\n"
         "types:\n  requirement: { prefix: REQ, fields: { text: { type: text } } }\n",
-        encoding="utf-8",
     )
     items = tmp_path / "items" / "brdA"
     items.mkdir(parents=True)
@@ -292,16 +293,16 @@ def test_board_path_alias_matches_a_differently_named_folder(tmp_path):
 
 
 def test_boards_registry_rejects_duplicate_path_segments(tmp_path):
-    (tmp_path / "refdes.yaml").write_text(
+    write_project_config(
+        tmp_path,
         "site: { title: T, out: _site }\n"
         "boards:\n"
         "  board-a: { label: A, path: shared }\n"
         "  board-b: { label: B, path: shared }\n"
         "types:\n  requirement: { prefix: REQ }\n",
-        encoding="utf-8",
     )
     with pytest.raises(SchemaError, match="items/shared/"):
-        load_project(config_path=str(tmp_path / "refdes.yaml"))
+        load_project(config_path=str(tmp_path / "refdes-project.yaml"))
 
 
 # --------------------------------------------------------------- board drift
@@ -359,7 +360,7 @@ def test_audit_reports_board_moves(board_project):
     (board_project / "items" / "board-a" / "r.yaml").rename(
         board_project / "items" / "board-b" / "moved.yaml"
     )
-    project2 = load_project(config_path=str(board_project / "refdes.yaml"))
+    project2 = load_project(config_path=str(board_project / "refdes-project.yaml"))
     parse.load_items(project2)
     build_mod.build(project2)  # audit never writes
     assert ("REQ-A-001", "board-a", "board-b") in project2.board_moves
@@ -410,7 +411,7 @@ def test_audit_reports_a_board_move_off_the_registry(board_project):
     (board_project / "items" / "board-a").rename(
         board_project / "items" / "board-a-renamed"
     )
-    project2 = load_project(config_path=str(board_project / "refdes.yaml"))
+    project2 = load_project(config_path=str(board_project / "refdes-project.yaml"))
     parse.load_items(project2)
     build_mod.build(project2)  # audit never writes
     assert ("REQ-A-001", "board-a", "") in project2.board_moves

@@ -8,6 +8,7 @@ from __future__ import annotations
 import os
 
 import pytest
+from conftest import write_project_config
 from helpers import REPO, _build_at
 
 from refdes import nav as nav_mod
@@ -22,10 +23,10 @@ def unboarded_project(tmp_path):
     `paged_project` (which copies this repo's own config, and this repo now
     registers boards -- see test_real_project_registers_boards_and_renders_
     board_pages)."""
-    (tmp_path / "refdes.yaml").write_text(
+    write_project_config(
+        tmp_path,
         "site: { title: T, out: _site, pages: pages }\n"
         "types:\n  requirement: { prefix: REQ, fields: { text: { type: text } } }\n",
-        encoding="utf-8",
     )
     items = tmp_path / "items"
     items.mkdir()
@@ -137,11 +138,11 @@ def test_nav_tree_groups_pages_and_reports_under_their_board(board_project):
 
 
 def test_nav_group_appears_for_a_page_only_board_with_no_items(tmp_path):
-    (tmp_path / "refdes.yaml").write_text(
+    write_project_config(
+        tmp_path,
         "site: { title: T, out: _site, pages: pages }\n"
         "boards:\n  power: { label: Power }\n"
         "types:\n  note: { prefix: NOTE }\n",
-        encoding="utf-8",
     )
     pages = tmp_path / "pages"
     pages.mkdir()
