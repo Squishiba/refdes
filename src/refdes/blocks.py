@@ -82,6 +82,17 @@ def _suggest(value: str, known) -> str:
     return f" Did you mean {close[0]!r}?" if close else ""
 
 
+def _item_tags(item: Item) -> list[str]:
+    """An item's tags as a list of strings, whatever shape `tags:` was stored
+    in (schema-declared `list`, or a single scalar -- same lenient read
+    `refdes ls` uses; duplicated rather than imported for the same circular-
+    import reason _ATTR_RE is)."""
+    tags = item.fields.get("tags")
+    if not tags:
+        return []
+    return [str(t) for t in tags] if isinstance(tags, list) else [str(tags)]
+
+
 def _parse_params(rest: str) -> dict[str, str]:
     return {
         m.group(1): m.group(2) if m.group(2) is not None else m.group(3)
@@ -120,6 +131,7 @@ def _render_index(project: Project, params: dict[str, str]) -> str:
     type_name = params["type"]
     by_field = params["by"]
     board = params.get("board")
+    tag = params.get("tag")
 
     spec = project.types.get(type_name)
     if spec is None:
@@ -140,10 +152,18 @@ def _render_index(project: Project, params: dict[str, str]) -> str:
     if board is not None and board not in project.boards:
         raise _BlockError(f"unknown board {board!r}.{_suggest(board, project.boards)}")
 
+    known_tags = {
+        t for item in project.local_items for t in _item_tags(item)
+    }
+    if tag is not None and tag not in known_tags:
+        raise _BlockError(f"unknown tag {tag!r}.{_suggest(tag, known_tags)}")
+
     items = [
         item
         for item in project.local_items
-        if item.type == type_name and (board is None or item.board == board)
+        if item.type == type_name
+        and (board is None or item.board == board)
+        and (tag is None or tag in _item_tags(item))
     ]
 
     groups: dict[str, list[Item]] = defaultdict(list)
@@ -390,7 +410,7 @@ def _render_cascade(project: Project, params: dict[str, str]) -> str:
 
 _REGISTRY: dict[str, BlockSpec] = {
     "index": BlockSpec(
-        name="index", required=("by", "type"), optional=("board",), render=_render_index
+        name="index", required=("by", "type"), optional=("board", "tag"), render=_render_index
     ),
     "cascade": BlockSpec(
         name="cascade",

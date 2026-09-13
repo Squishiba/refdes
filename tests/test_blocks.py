@@ -75,6 +75,49 @@ def test_index_board_scoping(blocks_project):
     assert "DEC-002" not in page.body_html
 
 
+def test_index_tag_scoping(blocks_project):
+    """tag= narrows to exactly the items carrying that tag -- DEC-001
+    (tags: [layout, review]) and DEC-002 (tags: [review]) carry review;
+    DEC-003 has no tags: of its own."""
+    _page_with_block(blocks_project, '{{index by="status" type="decision" tag="review"}}')
+    project, page = _index_page(blocks_project)
+    assert not project.errors
+    assert "DEC-001" in page.body_html
+    assert "DEC-002" in page.body_html
+    assert "DEC-003" not in page.body_html
+
+
+def test_index_tag_and_board_scope_together(blocks_project):
+    """board= and tag= AND, they don't OR. With both set, an item matching
+    only one filter must stay out: DEC-004 carries the review tag but lives
+    on the thermal board, so tag="review" board="power" (which DEC-001 and
+    DEC-002 both match) must exclude it; an OR implementation would let it
+    in under its tag alone."""
+    (blocks_project / "items" / "dec-004.md").write_text(
+        "---\nid: DEC-004\ntype: decision\ntitle: Thermal design review.\n"
+        "status: proposed\ntags: [review]\nboard: thermal\n---\n",
+        encoding="utf-8",
+    )
+    _page_with_block(
+        blocks_project, '{{index by="status" type="decision" tag="review" board="power"}}'
+    )
+    project, page = _index_page(blocks_project)
+    assert not project.errors
+    assert "DEC-001" in page.body_html
+    assert "DEC-002" in page.body_html
+    assert "DEC-003" not in page.body_html  # matches neither filter
+    assert "DEC-004" not in page.body_html  # matches tag= only -- the AND, not OR
+
+
+def test_index_unknown_tag_suggests_a_correction(blocks_project):
+    _page_with_block(blocks_project, '{{index by="status" type="decision" tag="reviw"}}')
+    project, _page = _index_page(blocks_project)
+    assert any(
+        "unknown tag 'reviw'" in d.message and "Did you mean 'review'?" in d.message
+        for d in project.errors
+    )
+
+
 def test_index_empty_result_is_not_an_error(blocks_project):
     # TST-001 has no board, so board="thermal" matches zero test items.
     _page_with_block(blocks_project, '{{index by="title" type="test" board="thermal"}}')

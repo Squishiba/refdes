@@ -43,6 +43,7 @@ rendered as one table per group.
 | `type` | yes | The item type to list. Must be a declared type. |
 | `by` | yes | The field to group by. Must be a `text`, `enum`, `date`, `person`, `list`, or `quantity` field declared on `type`. |
 | `board` | no | Scope to one board's items only. Must be a declared board. |
+| `tag` | no | Scope to items carrying this tag only. Must be a tag some local item actually carries in its `tags:` field. |
 
 Each distinct value of `by` becomes its own `<h4>` heading and a two-column
 table (ID, Title) beneath it, items sorted by ID within a group. A list-valued
@@ -125,7 +126,7 @@ other refdes diagnostic holds to:
 
 ```
 {{index by="status" type="decision" sortt="asc"}} — unknown parameter
-    'sortt'. index accepts: by, type, board.
+    'sortt'. index accepts: by, type, board, tag.
 ```
 
 A block that fails validation renders a visible `⚠` marker in its place on
