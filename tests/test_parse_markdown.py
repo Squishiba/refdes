@@ -11,6 +11,7 @@ import textwrap
 
 import pytest
 import yaml
+from conftest import write_project_config
 from helpers import REPO
 
 from refdes import ids, parse
@@ -53,7 +54,8 @@ Body of the second decision.
 
 @pytest.fixture
 def flow_style_project(tmp_path):
-    shutil.copy(os.path.join(REPO, "refdes.yaml"), tmp_path / "refdes.yaml")
+    shutil.copy(os.path.join(REPO, "refdes-project.yaml"), tmp_path / "refdes-project.yaml")
+    shutil.copy(os.path.join(REPO, "refdes-schema.yaml"), tmp_path / "refdes-schema.yaml")
     items = tmp_path / "items" / "requirements"
     items.mkdir(parents=True)
     (items / "tmp.yaml").write_text(FLOW_STYLE_LIST_FILE, encoding="utf-8")
@@ -62,7 +64,7 @@ def flow_style_project(tmp_path):
 
 def test_allocation_into_flow_style_entry_stays_valid_yaml(flow_style_project):
     """`- {text: ...}` must gain an id without breaking the flow mapping (#1 P1-13)."""
-    project = load_project(config_path=str(flow_style_project / "refdes.yaml"))
+    project = load_project(config_path=str(flow_style_project / "refdes-project.yaml"))
     parse.load_items(project, require_ids=False)
     ids.allocate(project)
 
@@ -93,7 +95,7 @@ def test_unclosed_flow_entry_is_refused_not_corrupted(flow_style_project):
         ),
         encoding="utf-8",
     )
-    project = load_project(config_path=str(flow_style_project / "refdes.yaml"))
+    project = load_project(config_path=str(flow_style_project / "refdes-project.yaml"))
     parse.load_items(project, require_ids=False)
     before = path.read_text(encoding="utf-8")
     ids.allocate(project)
@@ -125,7 +127,7 @@ def test_a_refused_write_back_is_not_reported_as_allocated(flow_style_project):
         ),
         encoding="utf-8",
     )
-    project = load_project(config_path=str(flow_style_project / "refdes.yaml"))
+    project = load_project(config_path=str(flow_style_project / "refdes-project.yaml"))
     parse.load_items(project, require_ids=False)
     assignments = ids.allocate(project)
 
@@ -157,7 +159,7 @@ def test_one_refused_write_back_does_not_block_its_neighbours(flow_style_project
         ),
         encoding="utf-8",
     )
-    project = load_project(config_path=str(flow_style_project / "refdes.yaml"))
+    project = load_project(config_path=str(flow_style_project / "refdes-project.yaml"))
     parse.load_items(project, require_ids=False)
     assignments = ids.allocate(project)
 
@@ -170,7 +172,8 @@ def test_one_refused_write_back_does_not_block_its_neighbours(flow_style_project
 
 @pytest.fixture
 def multi_item_project(tmp_path):
-    shutil.copy(os.path.join(REPO, "refdes.yaml"), tmp_path / "refdes.yaml")
+    shutil.copy(os.path.join(REPO, "refdes-project.yaml"), tmp_path / "refdes-project.yaml")
+    shutil.copy(os.path.join(REPO, "refdes-schema.yaml"), tmp_path / "refdes-schema.yaml")
     items = tmp_path / "items" / "decisions"
     items.mkdir(parents=True)
     (items / "multi.md").write_text(MULTI_ITEM_DECISION_MD, encoding="utf-8")
@@ -178,7 +181,7 @@ def multi_item_project(tmp_path):
 
 
 def test_multi_item_markdown_file_parses_each_item_separately(multi_item_project):
-    project = load_project(config_path=str(multi_item_project / "refdes.yaml"))
+    project = load_project(config_path=str(multi_item_project / "refdes-project.yaml"))
     parse.load_items(project, require_ids=False)
     assert not project.errors
 
@@ -197,7 +200,7 @@ def test_multi_item_markdown_file_parses_each_item_separately(multi_item_project
 
 
 def test_multi_item_source_lines_point_at_each_items_own_fence(multi_item_project):
-    project = load_project(config_path=str(multi_item_project / "refdes.yaml"))
+    project = load_project(config_path=str(multi_item_project / "refdes-project.yaml"))
     parse.load_items(project, require_ids=False)
     text = (
         (multi_item_project / "items" / "decisions" / "multi.md")
@@ -212,7 +215,8 @@ def test_multi_item_source_lines_point_at_each_items_own_fence(multi_item_projec
 
 def test_today_style_single_item_file_is_unaffected(tmp_path):
     """A one-document file, unchanged, must parse identically to before."""
-    shutil.copy(os.path.join(REPO, "refdes.yaml"), tmp_path / "refdes.yaml")
+    shutil.copy(os.path.join(REPO, "refdes-project.yaml"), tmp_path / "refdes-project.yaml")
+    shutil.copy(os.path.join(REPO, "refdes-schema.yaml"), tmp_path / "refdes-schema.yaml")
     items = tmp_path / "items" / "decisions"
     items.mkdir(parents=True)
     text = open(
@@ -221,7 +225,7 @@ def test_today_style_single_item_file_is_unaffected(tmp_path):
     ).read()
     (items / "dec.md").write_text(text, encoding="utf-8")
 
-    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
     parse.load_items(project, require_ids=False)
     assert not project.errors
     assert len(project.items) == 1
@@ -232,7 +236,8 @@ def test_today_style_single_item_file_is_unaffected(tmp_path):
 
 def test_literal_horizontal_rule_stays_in_the_body(tmp_path):
     """A `---` not followed by a YAML key is prose, not a second item."""
-    shutil.copy(os.path.join(REPO, "refdes.yaml"), tmp_path / "refdes.yaml")
+    shutil.copy(os.path.join(REPO, "refdes-project.yaml"), tmp_path / "refdes-project.yaml")
+    shutil.copy(os.path.join(REPO, "refdes-schema.yaml"), tmp_path / "refdes-schema.yaml")
     items = tmp_path / "items" / "decisions"
     items.mkdir(parents=True)
     (items / "one.md").write_text(
@@ -246,7 +251,7 @@ def test_literal_horizontal_rule_stays_in_the_body(tmp_path):
         "More text after a horizontal rule.\n",
         encoding="utf-8",
     )
-    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
     parse.load_items(project, require_ids=False)
     assert not project.errors
     assert len(project.items) == 1
@@ -257,7 +262,8 @@ def test_literal_horizontal_rule_stays_in_the_body(tmp_path):
 
 def test_horizontal_rule_with_no_closing_fence_stays_literal(tmp_path):
     """Key-shaped text after a `---` with nothing later to close it stays prose."""
-    shutil.copy(os.path.join(REPO, "refdes.yaml"), tmp_path / "refdes.yaml")
+    shutil.copy(os.path.join(REPO, "refdes-project.yaml"), tmp_path / "refdes-project.yaml")
+    shutil.copy(os.path.join(REPO, "refdes-schema.yaml"), tmp_path / "refdes-schema.yaml")
     items = tmp_path / "items" / "decisions"
     items.mkdir(parents=True)
     (items / "one.md").write_text(
@@ -271,7 +277,7 @@ def test_horizontal_rule_with_no_closing_fence_stays_literal(tmp_path):
         "Note: this looks like a key but there is no closing fence.\n",
         encoding="utf-8",
     )
-    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
     parse.load_items(project, require_ids=False)
     assert not project.errors
     assert len(project.items) == 1
@@ -280,20 +286,22 @@ def test_horizontal_rule_with_no_closing_fence_stays_literal(tmp_path):
 
 
 def test_defaults_block_alone_with_no_items_is_an_error(tmp_path):
-    shutil.copy(os.path.join(REPO, "refdes.yaml"), tmp_path / "refdes.yaml")
+    shutil.copy(os.path.join(REPO, "refdes-project.yaml"), tmp_path / "refdes-project.yaml")
+    shutil.copy(os.path.join(REPO, "refdes-schema.yaml"), tmp_path / "refdes-schema.yaml")
     items = tmp_path / "items" / "decisions"
     items.mkdir(parents=True)
     (items / "empty.md").write_text(
         "---\ndefaults:\n  type: decision\n---\n\nJust prose, no item.\n",
         encoding="utf-8",
     )
-    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
     parse.load_items(project, require_ids=False)
     assert any("no items" in d.message for d in project.errors)
 
 
 def test_refdes_id_writes_back_into_each_items_own_fence(tmp_path):
-    shutil.copy(os.path.join(REPO, "refdes.yaml"), tmp_path / "refdes.yaml")
+    shutil.copy(os.path.join(REPO, "refdes-project.yaml"), tmp_path / "refdes-project.yaml")
+    shutil.copy(os.path.join(REPO, "refdes-schema.yaml"), tmp_path / "refdes-schema.yaml")
     items = tmp_path / "items" / "decisions"
     items.mkdir(parents=True)
     path = items / "multi.md"
@@ -304,7 +312,7 @@ def test_refdes_id_writes_back_into_each_items_own_fence(tmp_path):
         encoding="utf-8",
     )
 
-    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
     parse.load_items(project, require_ids=False)
     assignments = ids.allocate(project)
     assert [new_id for _item, new_id in assignments] == [
@@ -314,7 +322,7 @@ def test_refdes_id_writes_back_into_each_items_own_fence(tmp_path):
 
     # Re-parse from disk: both ids landed at the right fence, and each item still
     # has its own distinct body.
-    project2 = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    project2 = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
     parse.load_items(project2, require_ids=False)
     assert "Body one." in project2.items["DEC-MULTI-001"].body
     assert "Body two." in project2.items["DEC-MULTI-002"].body
@@ -335,7 +343,7 @@ def test_section_elides_type_in_a_yaml_list_file(tmp_path):
     """Finding 6, built instead of the type-keyed items: mapping. A `section:`
     entry asserts the type for everything after it, so items no longer need
     to restate `type:` even though the file mixes two of them."""
-    (tmp_path / "refdes.yaml").write_text(SECTIONS_SCHEMA, encoding="utf-8")
+    write_project_config(tmp_path, SECTIONS_SCHEMA)
     (tmp_path / "items").mkdir()
     (tmp_path / "items" / "i.yaml").write_text(
         "items:\n"
@@ -346,7 +354,7 @@ def test_section_elides_type_in_a_yaml_list_file(tmp_path):
         "  - id: DEC-001\n    title: Elided via a second section.\n",
         encoding="utf-8",
     )
-    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
     parse.load_items(project)
     assert not project.errors
     assert not project.warnings
@@ -359,7 +367,7 @@ def test_section_elides_type_in_multi_item_markdown(tmp_path):
     """The Markdown spelling of the same marker: a fenced block whose only
     key is `section:`, as close to the list-file spelling as the format
     allows."""
-    (tmp_path / "refdes.yaml").write_text(SECTIONS_SCHEMA, encoding="utf-8")
+    write_project_config(tmp_path, SECTIONS_SCHEMA)
     (tmp_path / "items").mkdir()
     (tmp_path / "items" / "i.md").write_text(
         "---\n"
@@ -380,7 +388,7 @@ def test_section_elides_type_in_multi_item_markdown(tmp_path):
         "---\n",
         encoding="utf-8",
     )
-    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
     parse.load_items(project)
     assert not project.errors
     assert not project.warnings
@@ -395,7 +403,7 @@ def test_item_contradicting_its_section_is_an_error_not_a_silent_override(tmp_pa
     type -- a default is a fallback. Under a section, the container has
     already asserted what its items are, so a contradicting item is an
     error naming the conflict."""
-    (tmp_path / "refdes.yaml").write_text(SECTIONS_SCHEMA, encoding="utf-8")
+    write_project_config(tmp_path, SECTIONS_SCHEMA)
     (tmp_path / "items").mkdir()
     (tmp_path / "items" / "i.yaml").write_text(
         "items:\n"
@@ -403,7 +411,7 @@ def test_item_contradicting_its_section_is_an_error_not_a_silent_override(tmp_pa
         "  - id: DEC-201\n    type: decision\n    title: Contradicts the active section.\n",
         encoding="utf-8",
     )
-    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
     parse.load_items(project)
     assert any(
         "declares type 'decision'" in d.message and "section: requirement" in d.message
@@ -416,7 +424,7 @@ def test_file_defaults_type_conflicting_with_a_section_is_an_error(tmp_path):
     """Composition rule: if a file-level `defaults:` names a type and a
     section asserts a different one, that's the file contradicting itself --
     an error naming both, not a silent pick-a-winner."""
-    (tmp_path / "refdes.yaml").write_text(SECTIONS_SCHEMA, encoding="utf-8")
+    write_project_config(tmp_path, SECTIONS_SCHEMA)
     (tmp_path / "items").mkdir()
     (tmp_path / "items" / "i.yaml").write_text(
         "defaults:\n  type: requirement\n"
@@ -425,7 +433,7 @@ def test_file_defaults_type_conflicting_with_a_section_is_an_error(tmp_path):
         "  - id: DEC-301\n    title: Never legitimately typed.\n",
         encoding="utf-8",
     )
-    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
     parse.load_items(project)
     assert any(
         "section: decision" in d.message and "defaults: {type: requirement}" in d.message
@@ -436,7 +444,8 @@ def test_file_defaults_type_conflicting_with_a_section_is_an_error(tmp_path):
 def test_section_composes_with_defaults_for_non_type_fields(tmp_path):
     """A file-level `defaults:` still supplies every other field exactly as
     today; a section only ever asserts `type:`, nothing else."""
-    (tmp_path / "refdes.yaml").write_text(
+    write_project_config(
+        tmp_path,
         "site: { title: T, out: _site }\n"
         "types:\n"
         "  requirement:\n"
@@ -444,7 +453,6 @@ def test_section_composes_with_defaults_for_non_type_fields(tmp_path):
         "    fields:\n"
         "      text:   { type: text, required: true }\n"
         "      status: { type: enum, choices: [draft, active], default: draft }\n",
-        encoding="utf-8",
     )
     (tmp_path / "items").mkdir()
     (tmp_path / "items" / "i.yaml").write_text(
@@ -454,7 +462,7 @@ def test_section_composes_with_defaults_for_non_type_fields(tmp_path):
         "  - id: REQ-401\n    text: Gets status from file defaults, type from the section.\n",
         encoding="utf-8",
     )
-    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
     parse.load_items(project)
     assert not project.errors
     item = project.items["REQ-401"]
@@ -470,7 +478,7 @@ def test_later_defaults_block_in_markdown_is_now_an_error_not_silent(tmp_path):
     type -- reproduced here exactly as found: an intended requirement lands
     as a decision, with nothing louder than an 'unknown field' warning to
     notice by. Must error now, independent of the section feature."""
-    (tmp_path / "refdes.yaml").write_text(SECTIONS_SCHEMA, encoding="utf-8")
+    write_project_config(tmp_path, SECTIONS_SCHEMA)
     (tmp_path / "items").mkdir()
     (tmp_path / "items" / "i.md").write_text(
         "---\n"
@@ -493,7 +501,7 @@ def test_later_defaults_block_in_markdown_is_now_an_error_not_silent(tmp_path):
         "---\n",
         encoding="utf-8",
     )
-    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
     parse.load_items(project)
     assert any(
         "'defaults:' only applies as the very first block" in d.message
@@ -513,7 +521,7 @@ def test_malformed_later_markdown_block_is_reported_not_silently_dropped(tmp_pat
     body text was folded into the *previous* item's, and the build exited 0
     with zero errors. The very first block in the same file has always
     reported this; every later one now reports it identically."""
-    (tmp_path / "refdes.yaml").write_text(SECTIONS_SCHEMA, encoding="utf-8")
+    write_project_config(tmp_path, SECTIONS_SCHEMA)
     (tmp_path / "items").mkdir()
     (tmp_path / "items" / "i.md").write_text(
         "---\n"
@@ -538,7 +546,7 @@ def test_malformed_later_markdown_block_is_reported_not_silently_dropped(tmp_pat
         "---\n",
         encoding="utf-8",
     )
-    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
     parse.load_items(project)
     bad = [d for d in project.errors if "invalid YAML front-matter" in d.message]
     assert bad, [str(d) for d in project.errors]
@@ -554,7 +562,7 @@ def test_later_markdown_block_that_is_not_a_mapping_is_reported(tmp_path):
     """A block that parses cleanly but isn't a mapping is the other half of
     the same gap -- also silently skipped before, also already reported when
     it happens to be the file's own head block."""
-    (tmp_path / "refdes.yaml").write_text(SECTIONS_SCHEMA, encoding="utf-8")
+    write_project_config(tmp_path, SECTIONS_SCHEMA)
     (tmp_path / "items").mkdir()
     (tmp_path / "items" / "i.md").write_text(
         "---\n"
@@ -573,7 +581,7 @@ def test_later_markdown_block_that_is_not_a_mapping_is_reported(tmp_path):
         "---\n",
         encoding="utf-8",
     )
-    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
     parse.load_items(project)
     assert any(
         "front-matter" in d.message and d.line > 1 for d in project.errors
@@ -581,7 +589,7 @@ def test_later_markdown_block_that_is_not_a_mapping_is_reported(tmp_path):
 
 
 def test_section_marker_must_name_a_real_string(tmp_path):
-    (tmp_path / "refdes.yaml").write_text(SECTIONS_SCHEMA, encoding="utf-8")
+    write_project_config(tmp_path, SECTIONS_SCHEMA)
     (tmp_path / "items").mkdir()
     (tmp_path / "items" / "i.yaml").write_text(
         "items:\n"
@@ -589,7 +597,7 @@ def test_section_marker_must_name_a_real_string(tmp_path):
         "  - id: REQ-501\n    type: requirement\n    text: Unaffected by the bad marker.\n",
         encoding="utf-8",
     )
-    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
     parse.load_items(project)
     assert any("'section:' must name a type" in d.message for d in project.errors)
     assert project.items["REQ-501"].type == "requirement"
