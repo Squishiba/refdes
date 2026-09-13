@@ -10,6 +10,7 @@ import os
 
 import pytest
 import yaml
+from conftest import write_project_config
 from helpers import _build_and_render, _build_at
 
 from refdes import build as build_mod
@@ -52,7 +53,7 @@ items:
 
 @pytest.fixture
 def citation_project(tmp_path):
-    (tmp_path / "refdes.yaml").write_text(CITATION_SCHEMA, encoding="utf-8")
+    write_project_config(tmp_path, CITATION_SCHEMA)
     items = tmp_path / "items"
     items.mkdir()
     (items / "cmp.yaml").write_text(CITATION_ITEM, encoding="utf-8")
@@ -60,7 +61,7 @@ def citation_project(tmp_path):
 
 
 def _cite_build(root, **kw):
-    project = load_project(config_path=str(root / "refdes.yaml"))
+    project = load_project(config_path=str(root / "refdes-project.yaml"))
     parse.load_items(project)
     build_mod.build(project, **kw)
     return project
@@ -90,7 +91,7 @@ def _fake_fetcher(data: bytes = b"%PDF-1.4 fake"):
 
 
 def test_citations_field_must_be_a_list(tmp_path):
-    (tmp_path / "refdes.yaml").write_text(CITATION_SCHEMA, encoding="utf-8")
+    write_project_config(tmp_path, CITATION_SCHEMA)
     items = tmp_path / "items"
     items.mkdir()
     (items / "cmp.yaml").write_text(
@@ -103,7 +104,7 @@ def test_citations_field_must_be_a_list(tmp_path):
 
 
 def test_citation_entry_without_url_is_an_error(tmp_path):
-    (tmp_path / "refdes.yaml").write_text(CITATION_SCHEMA, encoding="utf-8")
+    write_project_config(tmp_path, CITATION_SCHEMA)
     items = tmp_path / "items"
     items.mkdir()
     (items / "cmp.yaml").write_text(
@@ -153,7 +154,10 @@ def test_hash_only_citation_is_ok_with_no_local_file_needed(citation_project):
 
 
 def _enable_publish_datasheets(root):
-    (root / "refdes-project.yaml").write_text("publish_datasheets: true\n", encoding="utf-8")
+    # refdes-project.yaml is the settings file itself now, so this appends the
+    # one setting rather than replacing the file the fixture just wrote.
+    with open(root / "refdes-project.yaml", "a", encoding="utf-8") as fh:
+        fh.write("publish_datasheets: true\n")
 
 
 def test_vendored_citation_ok_when_blob_matches(citation_project):
@@ -313,10 +317,10 @@ def test_items_json_citations_cache_missing(citation_project):
 
 
 def test_items_json_citations_empty_for_items_without_citation_fields(tmp_path):
-    (tmp_path / "refdes.yaml").write_text(
+    write_project_config(
+        tmp_path,
         "site: { title: T, out: _site }\n"
         "types:\n  requirement: { prefix: REQ, fields: { text: { type: text } } }\n",
-        encoding="utf-8",
     )
     items = tmp_path / "items" / "requirements"
     items.mkdir(parents=True)
@@ -358,7 +362,7 @@ items:
 
 
 def test_inconsistent_vendor_flags_across_citers_warns(tmp_path):
-    (tmp_path / "refdes.yaml").write_text(CITATION_SCHEMA, encoding="utf-8")
+    write_project_config(tmp_path, CITATION_SCHEMA)
     items = tmp_path / "items"
     items.mkdir()
     (items / "cmp.yaml").write_text(INCONSISTENT_VENDOR_ITEMS, encoding="utf-8")
@@ -384,7 +388,7 @@ def test_content_hash_unaffected_by_lockfile_changes(citation_project):
 
 
 def test_fetch_all_pins_every_cited_url(citation_project):
-    project = load_project(config_path=str(citation_project / "refdes.yaml"))
+    project = load_project(config_path=str(citation_project / "refdes-project.yaml"))
     parse.load_items(project)
     results = citations_mod.fetch_all(project, fetcher=_fake_fetcher())
     assert len(results) == 1
@@ -411,7 +415,7 @@ items:
 
 @pytest.fixture
 def two_url_project(tmp_path):
-    (tmp_path / "refdes.yaml").write_text(CITATION_SCHEMA, encoding="utf-8")
+    write_project_config(tmp_path, CITATION_SCHEMA)
     items = tmp_path / "items"
     items.mkdir()
     (items / "cmp.yaml").write_text(TWO_URL_ITEMS, encoding="utf-8")
@@ -419,14 +423,14 @@ def two_url_project(tmp_path):
 
 
 def test_fetch_scoped_to_item(two_url_project):
-    project = load_project(config_path=str(two_url_project / "refdes.yaml"))
+    project = load_project(config_path=str(two_url_project / "refdes-project.yaml"))
     parse.load_items(project)
     results = citations_mod.fetch_all(project, item_id="CMP-001", fetcher=_fake_fetcher())
     assert [r.url for r in results] == ["https://example.com/a.pdf"]
 
 
 def test_fetch_scoped_to_url(two_url_project):
-    project = load_project(config_path=str(two_url_project / "refdes.yaml"))
+    project = load_project(config_path=str(two_url_project / "refdes-project.yaml"))
     parse.load_items(project)
     results = citations_mod.fetch_all(
         project, url="https://example.com/b.pdf", fetcher=_fake_fetcher()
@@ -435,14 +439,14 @@ def test_fetch_scoped_to_url(two_url_project):
 
 
 def test_fetch_unknown_item_raises(citation_project):
-    project = load_project(config_path=str(citation_project / "refdes.yaml"))
+    project = load_project(config_path=str(citation_project / "refdes-project.yaml"))
     parse.load_items(project)
     with pytest.raises(citations_mod.CitationError, match="CMP-999"):
         citations_mod.fetch_all(project, item_id="CMP-999", fetcher=_fake_fetcher())
 
 
 def test_fetch_url_not_cited_raises(citation_project):
-    project = load_project(config_path=str(citation_project / "refdes.yaml"))
+    project = load_project(config_path=str(citation_project / "refdes-project.yaml"))
     parse.load_items(project)
     with pytest.raises(citations_mod.CitationError, match="cites"):
         citations_mod.fetch_all(
@@ -451,7 +455,7 @@ def test_fetch_url_not_cited_raises(citation_project):
 
 
 def test_fetch_skips_already_pinned_unless_update(citation_project):
-    project = load_project(config_path=str(citation_project / "refdes.yaml"))
+    project = load_project(config_path=str(citation_project / "refdes-project.yaml"))
     parse.load_items(project)
 
     first = citations_mod.fetch_all(project, fetcher=_fake_fetcher(b"version one"))
@@ -470,7 +474,7 @@ def test_fetch_records_error_without_raising(citation_project):
     def bad_fetcher(url):
         raise OSError("network unreachable")
 
-    project = load_project(config_path=str(citation_project / "refdes.yaml"))
+    project = load_project(config_path=str(citation_project / "refdes-project.yaml"))
     parse.load_items(project)
     results = citations_mod.fetch_all(project, fetcher=bad_fetcher)
     assert results[0].error == "network unreachable"
@@ -486,7 +490,7 @@ def test_refresh_detects_drift(citation_project):
         citation_project,
         {"https://example.com/ds.pdf": {"sha256": sha_old, "fetched": "2026-01-01T00:00:00Z", "vendored": False}},
     )
-    project = load_project(config_path=str(citation_project / "refdes.yaml"))
+    project = load_project(config_path=str(citation_project / "refdes-project.yaml"))
     parse.load_items(project)
     drift = citations_mod.refresh(project, fetcher=_fake_fetcher(b"new bytes"))
     assert len(drift) == 1
@@ -502,13 +506,13 @@ def test_refresh_no_drift_when_hash_matches(citation_project):
         citation_project,
         {"https://example.com/ds.pdf": {"sha256": sha, "fetched": "2026-01-01T00:00:00Z", "vendored": False}},
     )
-    project = load_project(config_path=str(citation_project / "refdes.yaml"))
+    project = load_project(config_path=str(citation_project / "refdes-project.yaml"))
     parse.load_items(project)
     assert citations_mod.refresh(project, fetcher=_fake_fetcher(data)) == []
 
 
 def test_refresh_skips_unpinned(citation_project):
-    project = load_project(config_path=str(citation_project / "refdes.yaml"))
+    project = load_project(config_path=str(citation_project / "refdes-project.yaml"))
     parse.load_items(project)
     assert citations_mod.refresh(project, fetcher=_fake_fetcher()) == []
 
@@ -519,7 +523,7 @@ def test_refresh_writes_nothing(citation_project):
         citation_project,
         {"https://example.com/ds.pdf": {"sha256": sha_old, "fetched": "2026-01-01T00:00:00Z", "vendored": False}},
     )
-    project = load_project(config_path=str(citation_project / "refdes.yaml"))
+    project = load_project(config_path=str(citation_project / "refdes-project.yaml"))
     parse.load_items(project)
     citations_mod.refresh(project, fetcher=_fake_fetcher(b"new bytes"))
     assert citations_mod.load_lockfile(project)["https://example.com/ds.pdf"]["sha256"] == sha_old
@@ -534,7 +538,7 @@ def test_refresh_warns_on_fetch_failure_not_drift(citation_project):
     def bad_fetcher(url):
         raise OSError("timeout")
 
-    project = load_project(config_path=str(citation_project / "refdes.yaml"))
+    project = load_project(config_path=str(citation_project / "refdes-project.yaml"))
     parse.load_items(project)
     drift = citations_mod.refresh(project, fetcher=bad_fetcher)
     assert drift == []
@@ -546,7 +550,7 @@ def test_refresh_warns_on_fetch_failure_not_drift(citation_project):
 
 def test_cli_fetch_pins_via_monkeypatched_network(citation_project, monkeypatch, capsys):
     monkeypatch.setattr(citations_mod, "fetch_bytes", lambda url, timeout=30.0: b"%PDF-1.4 x")
-    code = cli_mod.main(["-c", str(citation_project / "refdes.yaml"), "fetch"])
+    code = cli_mod.main(["-c", str(citation_project / "refdes-project.yaml"), "fetch"])
     assert code == 0
     out = capsys.readouterr().out
     assert "fetched" in out
@@ -554,7 +558,7 @@ def test_cli_fetch_pins_via_monkeypatched_network(citation_project, monkeypatch,
 
 
 def test_cli_fetch_unknown_item_returns_nonzero(citation_project, capsys):
-    code = cli_mod.main(["-c", str(citation_project / "refdes.yaml"), "fetch", "--item", "CMP-999"])
+    code = cli_mod.main(["-c", str(citation_project / "refdes-project.yaml"), "fetch", "--item", "CMP-999"])
     assert code == 1
     assert "CMP-999" in capsys.readouterr().err
 
@@ -566,7 +570,7 @@ def test_cli_check_refresh_detects_drift(citation_project, monkeypatch, capsys):
         {"https://example.com/ds.pdf": {"sha256": sha_old, "fetched": "2026-01-01T00:00:00Z", "vendored": False}},
     )
     monkeypatch.setattr(citations_mod, "fetch_bytes", lambda url, timeout=30.0: b"new bytes")
-    code = cli_mod.main(["-c", str(citation_project / "refdes.yaml"), "check", "--refresh"])
+    code = cli_mod.main(["-c", str(citation_project / "refdes-project.yaml"), "check", "--refresh"])
     assert code == 1
     assert "drifted" in capsys.readouterr().out
 
@@ -577,21 +581,21 @@ def test_cli_check_without_refresh_never_touches_the_network(citation_project, m
 
     monkeypatch.setattr(citations_mod, "fetch_bytes", boom)
     # An unpinned citation is only a warning, so plain `check` still exits 0.
-    assert cli_mod.main(["-c", str(citation_project / "refdes.yaml"), "check"]) == 0
+    assert cli_mod.main(["-c", str(citation_project / "refdes-project.yaml"), "check"]) == 0
 
 
 def test_cli_build_require_citations_promotes_to_error(citation_project, capsys):
-    code = cli_mod.main(["-c", str(citation_project / "refdes.yaml"), "build", "--require-citations"])
+    code = cli_mod.main(["-c", str(citation_project / "refdes-project.yaml"), "build", "--require-citations"])
     assert code == 1
     assert "has no fetched record" in capsys.readouterr().err
 
 
 def test_cli_build_without_require_citations_still_succeeds(citation_project):
-    assert cli_mod.main(["-c", str(citation_project / "refdes.yaml"), "build"]) == 0
+    assert cli_mod.main(["-c", str(citation_project / "refdes-project.yaml"), "build"]) == 0
 
 
 def test_cli_check_hides_info_diagnostics_by_default(citation_project, capsys):
-    code = cli_mod.main(["-c", str(citation_project / "refdes.yaml"), "check"])
+    code = cli_mod.main(["-c", str(citation_project / "refdes-project.yaml"), "check"])
     assert code == 0
     out = capsys.readouterr().out
     assert "has no fetched record" not in out
@@ -599,7 +603,7 @@ def test_cli_check_hides_info_diagnostics_by_default(citation_project, capsys):
 
 
 def test_cli_check_verbose_shows_info_diagnostics(citation_project, capsys):
-    code = cli_mod.main(["-c", str(citation_project / "refdes.yaml"), "check", "--verbose"])
+    code = cli_mod.main(["-c", str(citation_project / "refdes-project.yaml"), "check", "--verbose"])
     assert code == 0
     out = capsys.readouterr().out
     assert "INFO" in out
@@ -608,7 +612,7 @@ def test_cli_check_verbose_shows_info_diagnostics(citation_project, capsys):
 
 
 def test_cli_audit_lists_citations(citation_project, capsys):
-    code = cli_mod.main(["-c", str(citation_project / "refdes.yaml"), "audit"])
+    code = cli_mod.main(["-c", str(citation_project / "refdes-project.yaml"), "audit"])
     assert code == 0
     out = capsys.readouterr().out
     assert "Citations:" in out
@@ -777,7 +781,7 @@ types:
 
 @pytest.fixture
 def board_citation_project(tmp_path):
-    (tmp_path / "refdes.yaml").write_text(BOARD_CITATION_SCHEMA, encoding="utf-8")
+    write_project_config(tmp_path, BOARD_CITATION_SCHEMA)
     a = tmp_path / "items" / "board-a"
     a.mkdir(parents=True)
     (a / "c.yaml").write_text(

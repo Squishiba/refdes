@@ -10,6 +10,7 @@ import json
 import os
 
 import pytest
+from conftest import write_project_config
 from helpers import COVERAGE_SCHEMA, REPO, _build_and_render, _build_at
 
 from refdes import build as build_mod
@@ -44,7 +45,7 @@ status: accepted
 
 @pytest.fixture
 def image_project(tmp_path):
-    (tmp_path / "refdes.yaml").write_text(COVERAGE_SCHEMA, encoding="utf-8")
+    write_project_config(tmp_path, COVERAGE_SCHEMA)
     items = tmp_path / "items"
     items.mkdir()
     (items / "dec-a.md").write_text(IMAGE_ITEM, encoding="utf-8")
@@ -56,7 +57,7 @@ def image_project(tmp_path):
 
 def test_missing_image_src_errors_present_and_remote_do_not(image_project):
     """A dangling image src must fail the build now that a resolving one works."""
-    project = load_project(config_path=str(image_project / "refdes.yaml"))
+    project = load_project(config_path=str(image_project / "refdes-project.yaml"))
     parse.load_items(project)
     build_mod.build(project)
 
@@ -68,7 +69,7 @@ def test_missing_image_src_errors_present_and_remote_do_not(image_project):
 
 
 def test_present_local_image_is_registered_and_rewritten(image_project):
-    project = load_project(config_path=str(image_project / "refdes.yaml"))
+    project = load_project(config_path=str(image_project / "refdes-project.yaml"))
     parse.load_items(project)
     build_mod.build(project)
 
@@ -83,7 +84,7 @@ def test_present_local_image_is_registered_and_rewritten(image_project):
 
 
 def test_local_image_is_copied_into_the_site(image_project):
-    project = load_project(config_path=str(image_project / "refdes.yaml"))
+    project = load_project(config_path=str(image_project / "refdes-project.yaml"))
     parse.load_items(project)
     build_mod.build(project)
     out = render.render_site(project)
@@ -99,7 +100,7 @@ def test_editing_an_image_changes_its_url_and_prunes_the_old_one(image_project):
     bytes in place must not silently serve stale content from a cache under
     the same URL -- the filename itself has to change, and the old one must
     not linger in _site/."""
-    project = load_project(config_path=str(image_project / "refdes.yaml"))
+    project = load_project(config_path=str(image_project / "refdes-project.yaml"))
     parse.load_items(project)
     build_mod.build(project)
     out = render.render_site(project)
@@ -110,7 +111,7 @@ def test_editing_an_image_changes_its_url_and_prunes_the_old_one(image_project):
     new_bytes = b"\x89PNG\r\n\x1a\n\x00extra"
     (image_project / "items" / "figures" / "present.png").write_bytes(new_bytes)
 
-    project2 = load_project(config_path=str(image_project / "refdes.yaml"))
+    project2 = load_project(config_path=str(image_project / "refdes-project.yaml"))
     parse.load_items(project2)
     build_mod.build(project2)
     out2 = render.render_site(project2)
@@ -122,7 +123,7 @@ def test_editing_an_image_changes_its_url_and_prunes_the_old_one(image_project):
 
 
 def test_deleting_an_image_reference_prunes_its_copied_asset(image_project):
-    project = load_project(config_path=str(image_project / "refdes.yaml"))
+    project = load_project(config_path=str(image_project / "refdes-project.yaml"))
     parse.load_items(project)
     build_mod.build(project)
     out = render.render_site(project)
@@ -149,7 +150,7 @@ def test_asset_colliding_with_a_template_reserved_name_is_an_error(tmp_path):
         'site: {title: "Coverage Test", out: _site}',
         'site: {title: "Coverage Test", out: _site, assets: ["style.css"]}',
     )
-    (tmp_path / "refdes.yaml").write_text(schema, encoding="utf-8")
+    write_project_config(tmp_path, schema)
     items = tmp_path / "items"
     items.mkdir()
     (items / "req-a.md").write_text(
@@ -159,7 +160,7 @@ def test_asset_colliding_with_a_template_reserved_name_is_an_error(tmp_path):
     clobber_dir.mkdir()
     (clobber_dir / "logo.png").write_text("SHOULD NOT LAND HERE", encoding="utf-8")
 
-    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
     parse.load_items(project)
     build_mod.build(project)
     out = render.render_site(project)
@@ -179,7 +180,7 @@ SITE_ASSETS_SCHEMA = COVERAGE_SCHEMA.replace(
 
 @pytest.fixture
 def site_assets_project(tmp_path):
-    (tmp_path / "refdes.yaml").write_text(SITE_ASSETS_SCHEMA, encoding="utf-8")
+    write_project_config(tmp_path, SITE_ASSETS_SCHEMA)
     items = tmp_path / "items"
     items.mkdir()
     (items / "req-a.md").write_text(
@@ -204,13 +205,13 @@ def test_site_assets_missing_directory_warns(tmp_path):
         'site: {title: "Coverage Test", out: _site}',
         'site: {title: "Coverage Test", out: _site, assets: [nope]}',
     )
-    (tmp_path / "refdes.yaml").write_text(schema, encoding="utf-8")
+    write_project_config(tmp_path, schema)
     items = tmp_path / "items"
     items.mkdir()
     (items / "req-a.md").write_text(
         "---\nid: REQ-A-001\ntype: requirement\ntext: t.\n---\n", encoding="utf-8"
     )
-    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
     parse.load_items(project)
     build_mod.build(project)
     assert any("'nope' is not a directory" in d.message for d in project.warnings)
@@ -236,7 +237,7 @@ status: accepted
 
 @pytest.fixture
 def figure_project(tmp_path):
-    (tmp_path / "refdes.yaml").write_text(COVERAGE_SCHEMA, encoding="utf-8")
+    write_project_config(tmp_path, COVERAGE_SCHEMA)
     items = tmp_path / "items"
     items.mkdir()
     (items / "dec-a.md").write_text(FIGURE_ITEM, encoding="utf-8")
@@ -247,7 +248,7 @@ def figure_project(tmp_path):
 
 
 def test_figure_attrs_wrap_the_image_and_set_width_and_caption(figure_project):
-    project = load_project(config_path=str(figure_project / "refdes.yaml"))
+    project = load_project(config_path=str(figure_project / "refdes-project.yaml"))
     parse.load_items(project)
     build_mod.build(project)
     html = project.items["DEC-A-001"].body_html
@@ -259,7 +260,7 @@ def test_figure_attrs_wrap_the_image_and_set_width_and_caption(figure_project):
 
 
 def test_figure_caption_falls_back_to_alt_when_not_given(figure_project):
-    project = load_project(config_path=str(figure_project / "refdes.yaml"))
+    project = load_project(config_path=str(figure_project / "refdes-project.yaml"))
     parse.load_items(project)
     build_mod.build(project)
     html = project.items["DEC-A-001"].body_html
@@ -269,7 +270,7 @@ def test_figure_caption_falls_back_to_alt_when_not_given(figure_project):
 
 
 def test_image_with_no_suffix_is_never_wrapped_in_a_figure(figure_project):
-    project = load_project(config_path=str(figure_project / "refdes.yaml"))
+    project = load_project(config_path=str(figure_project / "refdes-project.yaml"))
     parse.load_items(project)
     build_mod.build(project)
     html = project.items["DEC-A-001"].body_html
@@ -283,8 +284,12 @@ def test_image_with_no_suffix_is_never_wrapped_in_a_figure(figure_project):
 # ------------------------------------------------------------- pages + images
 
 def test_pages_get_the_same_image_resolution_and_copy(tmp_path):
-    config = open(os.path.join(REPO, "refdes.yaml"), encoding="utf-8").read()
-    (tmp_path / "refdes.yaml").write_text(config, encoding="utf-8")
+    # This repo's own config, read back as the combined text the helper splits.
+    config = "".join(
+        open(os.path.join(REPO, name), encoding="utf-8").read()
+        for name in ("refdes-project.yaml", "refdes-schema.yaml")
+    )
+    write_project_config(tmp_path, config)
     pages = tmp_path / "pages"
     pages.mkdir()
     (pages / "index.md").write_text(
@@ -324,7 +329,7 @@ text: Gets deleted.
 
 @pytest.fixture
 def prune_project(tmp_path):
-    (tmp_path / "refdes.yaml").write_text(COVERAGE_SCHEMA, encoding="utf-8")
+    write_project_config(tmp_path, COVERAGE_SCHEMA)
     items = tmp_path / "items"
     items.mkdir()
     for name, text in PRUNE_ITEMS.items():
@@ -382,7 +387,7 @@ FIG_PNG = b"\x89PNG\r\n\x1a\n"
 
 @pytest.fixture
 def fig_project(tmp_path):
-    (tmp_path / "refdes.yaml").write_text(FIG_SCHEMA, encoding="utf-8")
+    write_project_config(tmp_path, FIG_SCHEMA)
     items = tmp_path / "items"
     items.mkdir()
     figures = items / "figures"
@@ -525,7 +530,7 @@ def test_preview_data_escapes_script_close(tmp_path):
     quotes would break JSON.parse(dataEl.textContent) in app.js, so the
     escaping has to happen when the JSON is produced. Both escapes are valid
     JSON string escapes, so the decoded payload must round-trip byte-for-byte."""
-    (tmp_path / "refdes.yaml").write_text(COVERAGE_SCHEMA, encoding="utf-8")
+    write_project_config(tmp_path, COVERAGE_SCHEMA)
     items = tmp_path / "items"
     items.mkdir()
     (items / "dec-a.md").write_text(

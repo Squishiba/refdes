@@ -8,6 +8,7 @@ from __future__ import annotations
 import os
 import shutil
 
+from conftest import write_project_config
 from helpers import COVERAGE_SCHEMA, REPO
 
 from refdes import build as build_mod
@@ -23,7 +24,7 @@ def test_invalid_yaml_in_a_list_file_reports_the_real_line_not_always_1(tmp_path
     gotcha this finding is nominally about. A literal tab in indentation is a
     clean repro: YAML disallows it outright, and PyYAML's own mark lands
     exactly on the offending line."""
-    (tmp_path / "refdes.yaml").write_text(COVERAGE_SCHEMA, encoding="utf-8")
+    write_project_config(tmp_path, COVERAGE_SCHEMA)
     items = tmp_path / "items"
     items.mkdir()
     (items / "bad.yaml").write_text(
@@ -34,7 +35,7 @@ def test_invalid_yaml_in_a_list_file_reports_the_real_line_not_always_1(tmp_path
         "\ttext: tabbed\n",
         encoding="utf-8",
     )
-    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
     parse.load_items(project)
 
     yaml_errors = [d for d in project.errors if "invalid YAML" in d.message]
@@ -48,7 +49,7 @@ def test_invalid_yaml_in_markdown_front_matter_reports_the_real_line(tmp_path):
     file starting after the opening fence, so the exception's own mark (which
     is relative to that slice) needs the slice's offset added back, or the
     reported line would be wrong in a new way instead of just defaulting to 1."""
-    (tmp_path / "refdes.yaml").write_text(COVERAGE_SCHEMA, encoding="utf-8")
+    write_project_config(tmp_path, COVERAGE_SCHEMA)
     items = tmp_path / "items"
     items.mkdir()
     (items / "bad.md").write_text(
@@ -60,7 +61,7 @@ def test_invalid_yaml_in_markdown_front_matter_reports_the_real_line(tmp_path):
         "---\n",
         encoding="utf-8",
     )
-    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
     parse.load_items(project)
 
     yaml_errors = [d for d in project.errors if "invalid YAML front-matter" in d.message]
@@ -73,7 +74,7 @@ def test_bare_gte_limit_gets_a_quoting_hint(tmp_path):
     """A bare '>=' value is read by YAML as a folded-block-scalar indicator,
     not a comparison -- the resulting scanner error should carry a targeted
     hint saying so, not just PyYAML's raw internals message."""
-    (tmp_path / "refdes.yaml").write_text(COVERAGE_SCHEMA, encoding="utf-8")
+    write_project_config(tmp_path, COVERAGE_SCHEMA)
     items = tmp_path / "items"
     items.mkdir()
     (items / "bad.yaml").write_text(
@@ -83,7 +84,7 @@ def test_bare_gte_limit_gets_a_quoting_hint(tmp_path):
         "    limit: >= 9 V\n",
         encoding="utf-8",
     )
-    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
     parse.load_items(project)
 
     yaml_errors = [d for d in project.errors if "invalid YAML" in d.message]
@@ -97,7 +98,7 @@ def test_bare_gt_hint_fires_on_any_field_not_just_limit(tmp_path):
     """The finding is explicit that this must be scoped to the line's actual
     content, not to a field literally named `limit` -- the same YAML gotcha
     hits any field."""
-    (tmp_path / "refdes.yaml").write_text(COVERAGE_SCHEMA, encoding="utf-8")
+    write_project_config(tmp_path, COVERAGE_SCHEMA)
     items = tmp_path / "items"
     items.mkdir()
     (items / "bad.yaml").write_text(
@@ -106,7 +107,7 @@ def test_bare_gt_hint_fires_on_any_field_not_just_limit(tmp_path):
         "    text: > shall be greater than something\n",
         encoding="utf-8",
     )
-    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
     parse.load_items(project)
 
     yaml_errors = [d for d in project.errors if "invalid YAML" in d.message]
@@ -117,7 +118,7 @@ def test_bare_gt_hint_fires_on_any_field_not_just_limit(tmp_path):
 def test_other_yaml_errors_get_no_quoting_hint(tmp_path):
     """The hint must not fire on an unrelated malformed-YAML failure -- an
     unterminated flow sequence has nothing to do with the '>' gotcha."""
-    (tmp_path / "refdes.yaml").write_text(COVERAGE_SCHEMA, encoding="utf-8")
+    write_project_config(tmp_path, COVERAGE_SCHEMA)
     items = tmp_path / "items"
     items.mkdir()
     (items / "bad.yaml").write_text(
@@ -126,7 +127,7 @@ def test_other_yaml_errors_get_no_quoting_hint(tmp_path):
         "    text: [ unterminated\n",
         encoding="utf-8",
     )
-    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
     parse.load_items(project)
 
     yaml_errors = [d for d in project.errors if "invalid YAML" in d.message]
@@ -153,7 +154,7 @@ DEFAULTS_LEAK_SCHEMA = (
 
 
 def _defaults_leak_project(tmp_path, items_yaml):
-    (tmp_path / "refdes.yaml").write_text(DEFAULTS_LEAK_SCHEMA, encoding="utf-8")
+    write_project_config(tmp_path, DEFAULTS_LEAK_SCHEMA)
     items = tmp_path / "items"
     items.mkdir()
     (items / "mixed.yaml").write_text(items_yaml, encoding="utf-8")
@@ -170,7 +171,7 @@ def test_inherited_default_failing_the_overridden_types_own_enum_names_the_defau
         "  - id: REQ-001\n    text: A normal requirement.\n"
         "  - id: CMP-001\n    type: component\n    title: Some part\n",
     )
-    project = load_project(config_path=str(root / "refdes.yaml"))
+    project = load_project(config_path=str(root / "refdes-project.yaml"))
     parse.load_items(project, require_ids=False)
     build_mod.build(project, seal_write=False, reseal=False)
 
@@ -191,7 +192,7 @@ def test_a_value_the_item_actually_wrote_itself_is_reported_normally(tmp_path):
         "defaults:\n  type: requirement\n"
         "items:\n  - id: REQ-002\n    text: Something.\n    status: bogus\n",
     )
-    project = load_project(config_path=str(root / "refdes.yaml"))
+    project = load_project(config_path=str(root / "refdes-project.yaml"))
     parse.load_items(project, require_ids=False)
     build_mod.build(project, seal_write=False, reseal=False)
 
@@ -209,7 +210,7 @@ def test_overriding_the_defaults_value_is_not_treated_as_inherited(tmp_path):
         "defaults:\n  type: requirement\n  status: active\n"
         "items:\n  - id: REQ-003\n    text: Overrides status itself.\n    status: bogus\n",
     )
-    project = load_project(config_path=str(root / "refdes.yaml"))
+    project = load_project(config_path=str(root / "refdes-project.yaml"))
     parse.load_items(project, require_ids=False)
     build_mod.build(project, seal_write=False, reseal=False)
 
@@ -222,7 +223,7 @@ def test_defaults_leak_is_caught_the_same_way_in_markdown_files(tmp_path):
     """parse_markdown_file's file-wide defaults: block (the first front-matter
     block, when it's shaped as nothing but 'defaults:') merges the same way
     parse_list_file's does -- same bug, same fix, same test shape."""
-    (tmp_path / "refdes.yaml").write_text(DEFAULTS_LEAK_SCHEMA, encoding="utf-8")
+    write_project_config(tmp_path, DEFAULTS_LEAK_SCHEMA)
     items = tmp_path / "items"
     items.mkdir()
     (items / "mixed.md").write_text(
@@ -231,7 +232,7 @@ def test_defaults_leak_is_caught_the_same_way_in_markdown_files(tmp_path):
         "id: CMP-001\ntype: component\ntitle: Some part\n---\n",
         encoding="utf-8",
     )
-    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
     parse.load_items(project, require_ids=False)
     build_mod.build(project, seal_write=False, reseal=False)
 
@@ -258,9 +259,12 @@ LINT_TAGS_SCHEMA = (
 
 
 def _lint_tags_project(tmp_path, items_yaml, enabled=True):
-    (tmp_path / "refdes.yaml").write_text(LINT_TAGS_SCHEMA, encoding="utf-8")
+    write_project_config(tmp_path, LINT_TAGS_SCHEMA)
     if enabled:
-        (tmp_path / "refdes-project.yaml").write_text("lint_own_tags: true\n", encoding="utf-8")
+        # refdes-project.yaml is the settings file itself now, so this appends
+        # the one setting instead of replacing what was just written.
+        with open(tmp_path / "refdes-project.yaml", "a", encoding="utf-8") as fh:
+            fh.write("lint_own_tags: true\n")
     items = tmp_path / "items"
     items.mkdir()
     (items / "mixed.yaml").write_text(items_yaml, encoding="utf-8")
@@ -295,7 +299,7 @@ def _tags_lint_warnings(project):
 
 def test_lint_own_tags_is_off_by_default(tmp_path):
     root = _lint_tags_project(tmp_path, LINT_TAGS_ITEMS, enabled=False)
-    project = load_project(config_path=str(root / "refdes.yaml"))
+    project = load_project(config_path=str(root / "refdes-project.yaml"))
     parse.load_items(project, require_ids=False)
     build_mod.build(project, seal_write=False, reseal=False)
     assert _tags_lint_warnings(project) == []
@@ -303,7 +307,7 @@ def test_lint_own_tags_is_off_by_default(tmp_path):
 
 def test_lint_own_tags_flags_inherited_only_and_fully_empty(tmp_path):
     root = _lint_tags_project(tmp_path, LINT_TAGS_ITEMS)
-    project = load_project(config_path=str(root / "refdes.yaml"))
+    project = load_project(config_path=str(root / "refdes-project.yaml"))
     parse.load_items(project, require_ids=False)
     build_mod.build(project, seal_write=False, reseal=False)
 
@@ -320,7 +324,7 @@ def test_lint_own_tags_flags_inherited_only_and_fully_empty(tmp_path):
 
 def test_lint_own_tags_is_silent_for_an_items_own_tags(tmp_path):
     root = _lint_tags_project(tmp_path, LINT_TAGS_ITEMS)
-    project = load_project(config_path=str(root / "refdes.yaml"))
+    project = load_project(config_path=str(root / "refdes-project.yaml"))
     parse.load_items(project, require_ids=False)
     build_mod.build(project, seal_write=False, reseal=False)
     assert not any(d.item_id == "REQ-002" for d in project.warnings)
@@ -330,7 +334,7 @@ def test_lint_own_tags_skips_a_type_with_no_tags_field(tmp_path):
     """component has no tags: field declared at all -- must never be flagged
     as if it were an item that failed to tag itself."""
     root = _lint_tags_project(tmp_path, LINT_TAGS_ITEMS)
-    project = load_project(config_path=str(root / "refdes.yaml"))
+    project = load_project(config_path=str(root / "refdes-project.yaml"))
     parse.load_items(project, require_ids=False)
     build_mod.build(project, seal_write=False, reseal=False)
     assert not any(d.item_id == "CMP-001" for d in project.warnings)
@@ -339,8 +343,14 @@ def test_lint_own_tags_skips_a_type_with_no_tags_field(tmp_path):
 # ------------------------------------------------------------- reserved prefix key
 
 
+def _copy_repo_config(tmp_path):
+    """Copy this repo's own two config files into `tmp_path`."""
+    for name in ("refdes-project.yaml", "refdes-schema.yaml"):
+        shutil.copy(os.path.join(REPO, name), tmp_path / name)
+
+
 def test_per_item_prefix_overrides_file_defaults_in_a_list_file(tmp_path):
-    shutil.copy(os.path.join(REPO, "refdes.yaml"), tmp_path / "refdes.yaml")
+    _copy_repo_config(tmp_path)
     items = tmp_path / "items" / "requirements"
     items.mkdir(parents=True)
     (items / "mixed.yaml").write_text(
@@ -351,7 +361,7 @@ def test_per_item_prefix_overrides_file_defaults_in_a_list_file(tmp_path):
         "    body: Uses its own prefix.\n",
         encoding="utf-8",
     )
-    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
     parse.load_items(project, require_ids=False)
     assignments = ids.allocate(project)
     got = {item.body: new_id for item, new_id in assignments}
@@ -362,7 +372,7 @@ def test_per_item_prefix_overrides_file_defaults_in_a_list_file(tmp_path):
 
 
 def test_per_item_prefix_overrides_file_defaults_in_markdown(tmp_path):
-    shutil.copy(os.path.join(REPO, "refdes.yaml"), tmp_path / "refdes.yaml")
+    _copy_repo_config(tmp_path)
     items = tmp_path / "items" / "decisions"
     items.mkdir(parents=True)
     (items / "multi.md").write_text(
@@ -371,7 +381,7 @@ def test_per_item_prefix_overrides_file_defaults_in_markdown(tmp_path):
         "---\nprefix: DEC-OWN\ntitle: Uses its own prefix\n---\n\nBody.\n",
         encoding="utf-8",
     )
-    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
     parse.load_items(project, require_ids=False)
     assignments = ids.allocate(project)
     got = {item.fields["title"]: new_id for item, new_id in assignments}

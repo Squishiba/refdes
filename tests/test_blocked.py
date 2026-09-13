@@ -8,6 +8,7 @@ from __future__ import annotations
 import os
 
 import pytest
+from conftest import write_project_config
 from helpers import COVERAGE_SCHEMA, _build_at
 
 from refdes import cli as cli_mod
@@ -84,7 +85,7 @@ blocked_by: [DEC-002]
 
 @pytest.fixture
 def blocked_project(tmp_path):
-    (tmp_path / "refdes.yaml").write_text(BLOCKED_SCHEMA, encoding="utf-8")
+    write_project_config(tmp_path, BLOCKED_SCHEMA)
     items = tmp_path / "items"
     items.mkdir()
     for name, text in BLOCKED_ITEMS.items():
@@ -213,12 +214,12 @@ def test_coverage_aggregate_line_excluded_when_claimers_trace_different_roots(bl
 
 
 def test_audit_reports_blocked_chains(blocked_project):
-    status = cli_mod.main(["-c", str(blocked_project / "refdes.yaml"), "audit"])
+    status = cli_mod.main(["-c", str(blocked_project / "refdes-project.yaml"), "audit"])
     assert status == 0
 
 
 def test_audit_blocked_chains_section(blocked_project, capsys):
-    cli_mod.main(["-c", str(blocked_project / "refdes.yaml"), "audit"])
+    cli_mod.main(["-c", str(blocked_project / "refdes-project.yaml"), "audit"])
     out = capsys.readouterr().out
     assert "Blocked chains:" in out
     assert "DEC-002 <- DEC-001 (on_hold, root)" in out
@@ -226,13 +227,13 @@ def test_audit_blocked_chains_section(blocked_project, capsys):
 
 
 def test_audit_blocked_chains_section_is_none_with_no_edges(tmp_path, capsys):
-    (tmp_path / "refdes.yaml").write_text(COVERAGE_SCHEMA, encoding="utf-8")
+    write_project_config(tmp_path, COVERAGE_SCHEMA)
     items = tmp_path / "items"
     items.mkdir()
     (items / "req-a.md").write_text(
         "---\nid: REQ-A-001\ntype: requirement\ntext: t.\n---\n", encoding="utf-8"
     )
-    cli_mod.main(["-c", str(tmp_path / "refdes.yaml"), "audit"])
+    cli_mod.main(["-c", str(tmp_path / "refdes-project.yaml"), "audit"])
     out = capsys.readouterr().out
     assert "Blocked chains:\n  (none)" in out
 
@@ -241,7 +242,7 @@ def test_audit_marks_a_stale_chain(blocked_project, capsys):
     text = (blocked_project / "items" / "dec-001.md").read_text(encoding="utf-8")
     text = text.replace("status: on_hold", "status: accepted")
     (blocked_project / "items" / "dec-001.md").write_text(text, encoding="utf-8")
-    cli_mod.main(["-c", str(blocked_project / "refdes.yaml"), "audit"])
+    cli_mod.main(["-c", str(blocked_project / "refdes-project.yaml"), "audit"])
     out = capsys.readouterr().out
     assert "stale: edge still declared, blocker settled" in out
 

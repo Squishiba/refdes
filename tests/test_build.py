@@ -8,6 +8,7 @@ from __future__ import annotations
 import os
 
 import pytest
+from conftest import write_project_config
 from helpers import COVERAGE_SCHEMA, _build_at, _project
 
 from refdes import build as build_mod
@@ -18,7 +19,7 @@ from refdes.schema import SchemaError, load_project
 
 def test_settled_decision_satisfies_but_unsettled_only_claims(coverage_project):
     """A requirement's only satisfier being `on_hold` must not read as satisfied (#1 P1-1)."""
-    project = load_project(config_path=str(coverage_project / "refdes.yaml"))
+    project = load_project(config_path=str(coverage_project / "refdes-project.yaml"))
     parse.load_items(project)
     build_mod.build(project)
 
@@ -36,9 +37,9 @@ def test_settled_decision_satisfies_but_unsettled_only_claims(coverage_project):
 def test_satisfying_statuses_absent_keeps_old_behavior(coverage_project):
     """A type with no satisfying_statuses: configured still counts every link (back-compat)."""
     schema = COVERAGE_SCHEMA.replace("    satisfying_statuses: [accepted]\n", "")
-    (coverage_project / "refdes.yaml").write_text(schema, encoding="utf-8")
+    write_project_config(coverage_project, schema)
 
-    project = load_project(config_path=str(coverage_project / "refdes.yaml"))
+    project = load_project(config_path=str(coverage_project / "refdes-project.yaml"))
     parse.load_items(project)
     build_mod.build(project)
 
@@ -76,10 +77,9 @@ types:
 
 
 def test_satisfying_statuses_requires_a_status_field(tmp_path):
-    path = tmp_path / "refdes.yaml"
-    path.write_text(NO_STATUS_FIELD_SCHEMA, encoding="utf-8")
+    write_project_config(tmp_path, NO_STATUS_FIELD_SCHEMA)
     with pytest.raises(SchemaError, match="satisfying_statuses"):
-        load_project(config_path=str(path))
+        load_project(config_path=str(tmp_path / "refdes-project.yaml"))
 
 
 # ---------------------------------------------------- coverage warning aggregation
@@ -147,7 +147,7 @@ COVERAGE_AGGREGATION_ITEMS = {
 
 @pytest.fixture
 def coverage_aggregation_project(tmp_path):
-    (tmp_path / "refdes.yaml").write_text(COVERAGE_AGGREGATION_SCHEMA, encoding="utf-8")
+    write_project_config(tmp_path, COVERAGE_AGGREGATION_SCHEMA)
     items = tmp_path / "items"
     items.mkdir()
     for name, text in COVERAGE_AGGREGATION_ITEMS.items():
@@ -156,7 +156,7 @@ def coverage_aggregation_project(tmp_path):
 
 
 def _build_coverage_project(path):
-    project = load_project(config_path=str(path / "refdes.yaml"))
+    project = load_project(config_path=str(path / "refdes-project.yaml"))
     parse.load_items(project)
     build_mod.build(project)
     return project
@@ -218,7 +218,7 @@ def test_first_test_item_makes_unverified_warnings_reappear(coverage_project):
         "      verifies: [requirement]\n"
         "    body: { on_change: invalidate }\n"
     )
-    (coverage_project / "refdes.yaml").write_text(schema, encoding="utf-8")
+    write_project_config(coverage_project, schema)
     (coverage_project / "items" / "tst.md").write_text(
         "---\nid: TST-UNRELATED-001\ntype: test\ntitle: An unrelated test.\n---\n",
         encoding="utf-8",
@@ -243,7 +243,7 @@ DRY_RUN_SCHEMA = (
 
 @pytest.fixture
 def dry_run_project(tmp_path):
-    (tmp_path / "refdes.yaml").write_text(DRY_RUN_SCHEMA, encoding="utf-8")
+    write_project_config(tmp_path, DRY_RUN_SCHEMA)
     items = tmp_path / "items"
     items.mkdir()
     (items / "log.yaml").write_text(
@@ -255,7 +255,7 @@ def dry_run_project(tmp_path):
 
 
 def test_cli_build_dry_run_writes_html_but_no_seal(dry_run_project):
-    status = cli_mod.main(["-c", str(dry_run_project / "refdes.yaml"), "build", "--dry-run"])
+    status = cli_mod.main(["-c", str(dry_run_project / "refdes-project.yaml"), "build", "--dry-run"])
     assert status == 0
     assert not (dry_run_project / ".refdes" / "log-seal.yaml").exists()
 
@@ -264,7 +264,7 @@ def test_cli_build_dry_run_writes_html_but_no_seal(dry_run_project):
 
 
 def test_cli_build_without_dry_run_seals_and_has_no_watermark(dry_run_project):
-    status = cli_mod.main(["-c", str(dry_run_project / "refdes.yaml"), "build"])
+    status = cli_mod.main(["-c", str(dry_run_project / "refdes-project.yaml"), "build"])
     assert status == 0
     assert (dry_run_project / ".refdes" / "log-seal.yaml").is_file()
 
@@ -274,7 +274,7 @@ def test_cli_build_without_dry_run_seals_and_has_no_watermark(dry_run_project):
 
 def test_cli_reseal_rejects_unknown_board(sealed_board_project, capsys):
     status = cli_mod.main(
-        ["-c", str(sealed_board_project / "refdes.yaml"), "build", "--reseal", "nonexistent"]
+        ["-c", str(sealed_board_project / "refdes-project.yaml"), "build", "--reseal", "nonexistent"]
     )
     assert status != 0
     captured = capsys.readouterr()
@@ -282,7 +282,7 @@ def test_cli_reseal_rejects_unknown_board(sealed_board_project, capsys):
 
 
 def test_cli_build_reseal_scoped_to_board(sealed_board_project, capsys):
-    assert cli_mod.main(["-c", str(sealed_board_project / "refdes.yaml"), "build"]) == 0
+    assert cli_mod.main(["-c", str(sealed_board_project / "refdes-project.yaml"), "build"]) == 0
 
     log_a = sealed_board_project / "items" / "board-a" / "log.yaml"
     log_a.write_text(
@@ -291,7 +291,7 @@ def test_cli_build_reseal_scoped_to_board(sealed_board_project, capsys):
     )
 
     status = cli_mod.main(
-        ["-c", str(sealed_board_project / "refdes.yaml"), "build", "--reseal", "board-a"]
+        ["-c", str(sealed_board_project / "refdes-project.yaml"), "build", "--reseal", "board-a"]
     )
     assert status == 0
 
@@ -326,7 +326,7 @@ def cross_board_project(tmp_path):
     that breaks if `check --board` ever scopes the file walk instead of just the
     report: board-b's own folder never mentions REQ-A-001 at all.
     """
-    (tmp_path / "refdes.yaml").write_text(CROSS_BOARD_CONFIG, encoding="utf-8")
+    write_project_config(tmp_path, CROSS_BOARD_CONFIG)
     a = tmp_path / "items" / "board-a"
     a.mkdir(parents=True)
     (a / "req.md").write_text(
@@ -354,7 +354,7 @@ def test_cli_check_board_scopes_the_report_not_the_link_walk(cross_board_project
     """`--board board-b` must still resolve REQ-A-001 -- it just doesn't get
     reported, since board-b's own item count is 1 (DEC-B-001 only)."""
     status = cli_mod.main(
-        ["-c", str(cross_board_project / "refdes.yaml"), "check", "--board", "board-b"]
+        ["-c", str(cross_board_project / "refdes-project.yaml"), "check", "--board", "board-b"]
     )
     out = capsys.readouterr().out
     assert status == 0
@@ -363,7 +363,7 @@ def test_cli_check_board_scopes_the_report_not_the_link_walk(cross_board_project
 
 def test_check_board_filters_diagnostics_to_that_board(board_project, capsys):
     status = cli_mod.main(
-        ["-c", str(board_project / "refdes.yaml"), "check", "--board", "board-b"]
+        ["-c", str(board_project / "refdes-project.yaml"), "check", "--board", "board-b"]
     )
     out = capsys.readouterr().out
     assert status == 0
@@ -379,7 +379,7 @@ def test_check_board_always_shows_project_level_diagnostics(board_project, capsy
     --board must never hide it -- here, the project-wide 'no coverage' summary
     warning that `check` always emits for this fixture's uncovered items."""
     status = cli_mod.main(
-        ["-c", str(board_project / "refdes.yaml"), "check", "--board", "board-a"]
+        ["-c", str(board_project / "refdes-project.yaml"), "check", "--board", "board-a"]
     )
     out = capsys.readouterr().out
     assert status == 0
@@ -387,7 +387,7 @@ def test_check_board_always_shows_project_level_diagnostics(board_project, capsy
 
 
 def test_check_without_board_flag_is_unaffected_by_the_feature(board_project, capsys):
-    assert cli_mod.main(["-c", str(board_project / "refdes.yaml"), "check"]) == 0
+    assert cli_mod.main(["-c", str(board_project / "refdes-project.yaml"), "check"]) == 0
     out = capsys.readouterr().out
     assert "REQ-WRONG-001" in out
     assert "REQ-S-001" in out
@@ -398,7 +398,7 @@ def test_check_without_board_flag_is_unaffected_by_the_feature(board_project, ca
 
 def test_cli_check_board_rejects_unknown_board(board_project, capsys):
     status = cli_mod.main(
-        ["-c", str(board_project / "refdes.yaml"), "check", "--board", "bord-a"]
+        ["-c", str(board_project / "refdes-project.yaml"), "check", "--board", "bord-a"]
     )
     assert status == 1
     err = capsys.readouterr().err
