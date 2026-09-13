@@ -1,4 +1,10 @@
-"""Load refdes.yaml into a Project."""
+"""Load a project's two config files into a Project.
+
+`refdes-project.yaml` is the project marker and holds every project setting;
+`refdes-schema.yaml` is the optional overlay holding only the project's own
+`types:`/`link_types:`/`field_sets:`. `refdes.yaml` is retired -- a project
+carrying one gets an error naming both replacements, never a silent ignore.
+"""
 
 from __future__ import annotations
 
@@ -27,13 +33,37 @@ from .model import (
     WorkspaceSpec,
 )
 
-CONFIG_NAME = "refdes.yaml"
-
-# Project-level presentation/behaviour settings, committed alongside refdes.yaml
-# but deliberately not in it -- refdes.yaml is schema (types, links, boards);
-# this is process policy and formatting preference. See docs/design/lifecycle.md
-# and docs/design/standard-library.md for the design discussions behind these.
+# The project marker: every project setting lives here, and finding this file
+# is what makes a directory a refdes project.
 PROJECT_SETTINGS_NAME = "refdes-project.yaml"
+
+# The project's own schema overlay -- `types:`, `link_types:`, `field_sets:`
+# only. Optional: most projects take their whole vocabulary from the bundled
+# standard and never need one.
+SCHEMA_NAME = "refdes-schema.yaml"
+
+# Retired. A project still carrying it gets LEGACY_CONFIG_ERROR, never a
+# silent ignore: a setting left behind in it would stop applying quietly.
+LEGACY_CONFIG_NAME = "refdes.yaml"
+
+# Back-compatible alias: CONFIG_NAME now names the marker.
+CONFIG_NAME = PROJECT_SETTINGS_NAME
+
+# The three namespaces the overlay file owns.
+SCHEMA_KEYS = frozenset({"types", "link_types", "field_sets"})
+
+# The setting keys that moved here from the retired refdes.yaml.
+_PROJECT_SETTING_KEYS = {
+    "site",
+    "id",
+    "boards",
+    "workspaces",
+    "units",
+    "history",
+    "standard",
+    "equations",
+    "imports",
+}
 
 _KNOWN_SETTINGS = {
     "sigfigs",
@@ -44,30 +74,43 @@ _KNOWN_SETTINGS = {
     "lint_own_tags",
     "release_gate",
     "cross_workspace_severity",
-}
+} | _PROJECT_SETTING_KEYS
+
+LEGACY_CONFIG_ERROR = (
+    f"{LEGACY_CONFIG_NAME} is retired. Split it into the two files it became: "
+    f"move every project setting (site:, id:, boards:, workspaces:, units:, "
+    f"history:, standard:, equations:, imports:, and the process settings like "
+    f"sigfigs: and release_gate:) into {PROJECT_SETTINGS_NAME}, which is now the "
+    f"project marker, and move any schema overlay (types:, link_types:, "
+    f"field_sets:) into {SCHEMA_NAME}, which is optional -- omit it entirely if "
+    f"the project declares no types of its own. Then delete {LEGACY_CONFIG_NAME}: "
+    f"nothing is read from it any more, so a key left behind there is a setting "
+    f"that silently stops applying."
+)
+
+
+def _legacy_config_error() -> SchemaError:
+    return SchemaError(LEGACY_CONFIG_ERROR)
 
 
 def _settings_error(message: str) -> SchemaError:
     return SchemaError(f"{PROJECT_SETTINGS_NAME}: {message}")
 
 
-def _load_project_settings(root: str) -> dict[str, Any]:
-    """Load and validate `refdes-project.yaml`, sibling to `refdes.yaml`.
+def _validate_settings(raw: dict[str, Any]) -> dict[str, Any]:
+    """Validate a project settings mapping and resolve every default.
 
-    Absent entirely, every setting takes the default matching pre-config
-    behaviour -- except `publish_datasheets`, whose default is a deliberate
-    behaviour change (see `Project.publish_datasheets`'s docstring).
+    A setting left at its default behaves exactly as pre-config behaviour did --
+    except `publish_datasheets`, whose default is a deliberate change (see
+    `Project.publish_datasheets`'s docstring).
     """
-    path = os.path.join(root, PROJECT_SETTINGS_NAME)
-    if not os.path.isfile(path):
-        raw: dict[str, Any] = {}
-    else:
-        with open(path, "r", encoding="utf-8") as fh:
-            raw = yaml.safe_load(fh) or {}
-        if not isinstance(raw, dict):
-            raise _settings_error("must be a mapping of setting name to value")
-
     for key in raw:
+        if key in SCHEMA_KEYS:
+            raise _settings_error(
+                f"{key} does not belong here -- the project's own schema overlay "
+                f"lives in {SCHEMA_NAME}, which holds types:, link_types: and "
+                f"field_sets: and nothing else"
+            )
         if key not in _KNOWN_SETTINGS:
             import difflib
 
@@ -169,8 +212,36 @@ def _load_project_settings(root: str) -> dict[str, Any]:
     }
 
 
+def _load_schema_overlay(root: str) -> dict[str, Any]:
+    """Load the project's own `refdes-schema.yaml`, or {} when it has none.
+
+    Optional by design: a project taking its whole vocabulary from the bundled
+    standard declares nothing here and the file simply does not exist. It owns
+    exactly three keys -- anything else in it is a setting that belongs in
+    `refdes-project.yaml`, and saying so is what keeps a half-migrated project
+    from losing a setting in silence.
+    """
+    path = os.path.join(root, SCHEMA_NAME)
+    if not os.path.isfile(path):
+        return {}
+    with open(path, "r", encoding="utf-8") as fh:
+        raw = yaml.safe_load(fh) or {}
+    if not isinstance(raw, dict):
+        raise SchemaError(f"{SCHEMA_NAME}: must be a mapping of schema key to value")
+    for key in raw:
+        if key in SCHEMA_KEYS:
+            continue
+        what = "a project setting" if key in _KNOWN_SETTINGS else "not a schema key"
+        raise SchemaError(
+            f"{SCHEMA_NAME}: {key!r} is {what} -- this file holds only types:, "
+            f"link_types: and field_sets:; every setting lives in "
+            f"{PROJECT_SETTINGS_NAME}"
+        )
+    return raw
+
+
 def _load_equations(raw: dict[str, Any]) -> dict[str, calc.Equation]:
-    """Load and validate refdes.yaml's `equations:` block.
+    """Load and validate the project's `equations:` block.
 
     A project-wide vocabulary of named expressions callable from any calc block
     (docs/math.md), sitting alongside `units:` because it plays the same role:
@@ -241,18 +312,32 @@ def _load_equations(raw: dict[str, Any]) -> dict[str, calc.Equation]:
 
 
 def find_config(start: str = ".") -> str:
-    """Walk up from `start` looking for refdes.yaml."""
+    """Walk up from `start` looking for the project marker, refdes-project.yaml.
+
+    A directory holding only the retired refdes.yaml is not a project: the walk
+    reports the split rather than the generic "not found", because that error is
+    how a user discovers the change.
+    """
     here = os.path.abspath(start)
+    legacy: str | None = None
     while True:
-        candidate = os.path.join(here, CONFIG_NAME)
+        candidate = os.path.join(here, PROJECT_SETTINGS_NAME)
         if os.path.isfile(candidate):
             return candidate
+        if legacy is None and os.path.isfile(os.path.join(here, LEGACY_CONFIG_NAME)):
+            legacy = os.path.join(here, LEGACY_CONFIG_NAME)
         parent = os.path.dirname(here)
         if parent == here:
-            raise SchemaError(
-                f"no {CONFIG_NAME} found in {os.path.abspath(start)} or any parent directory"
-            )
+            break
         here = parent
+    if legacy is not None:
+        raise _legacy_config_error()
+    raise SchemaError(
+        f"no {PROJECT_SETTINGS_NAME} found in {os.path.abspath(start)} or any parent "
+        f"directory -- that file is the project marker, and holds every project "
+        f"setting; {SCHEMA_NAME} is the optional overlay holding only types:, "
+        f"link_types: and field_sets:"
+    )
 
 
 def _validate_required_when(types: dict[str, ItemType]) -> None:
@@ -336,11 +421,30 @@ def _validate_link_targets(types: dict[str, ItemType]) -> None:
 
 def load_project(config_path: str | None = None, start: str = ".") -> Project:
     path = config_path or find_config(start)
+    if os.path.basename(os.path.abspath(path)) == LEGACY_CONFIG_NAME:
+        raise _legacy_config_error()
     with open(path, "r", encoding="utf-8") as fh:
         raw: dict[str, Any] = yaml.safe_load(fh) or {}
+    if not isinstance(raw, dict):
+        raise _settings_error("must be a mapping of setting name to value")
 
     root = os.path.dirname(os.path.abspath(path))
-    settings = _load_project_settings(root)
+    # Checked against the resolved root, not just the path we were handed: a
+    # project carrying both files is half-migrated, and reading only one of
+    # them is the silent partial load this split exists to make impossible.
+    if os.path.isfile(os.path.join(root, LEGACY_CONFIG_NAME)):
+        raise _legacy_config_error()
+
+    # Settings are validated first, against the settings file's own keys: a
+    # `types:` left in refdes-project.yaml is a half-migration, and merging
+    # before checking would let it pass as a schema key instead of naming it.
+    settings = _validate_settings(raw)
+    overlay = _load_schema_overlay(root)
+    # The two are disjoint by validation, so one dict is all
+    # standards.resolve_schema needs: `standard:` from the settings, the
+    # project's own types:/link_types:/field_sets: from the overlay.
+    raw = {**raw, **overlay}
+
     equations = _load_equations(raw)
 
     site = raw.get("site") or {}
@@ -357,7 +461,7 @@ def load_project(config_path: str | None = None, start: str = ".") -> Project:
     # standard: {base, version, presets} resolves fresh, here, on every load --
     # never a scaffold copy. See standards.py and docs/design/standard-library.md
     # §3. `resolved_link_types`/`resolved_types` are plain dicts in exactly the
-    # shape refdes.yaml's own link_types:/types: would use, already merged across
+    # shape refdes-schema.yaml's own link_types:/types: would use, already merged across
     # base -> presets -> this project's own overlay, with `include:` resolved
     # into `fields:` -- everything below reads them exactly as it always read
     # raw.get("link_types")/raw.get("types") directly.
@@ -483,7 +587,10 @@ def load_project(config_path: str | None = None, start: str = ".") -> Project:
         )
 
     if not types:
-        raise SchemaError(f"{path} declares no item types")
+        raise SchemaError(
+            f"{path} declares no item types -- add a standard: block, or a "
+            f"types: block in {SCHEMA_NAME}"
+        )
 
     _validate_required_when(types)
     _validate_link_targets(types)

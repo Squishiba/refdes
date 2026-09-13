@@ -102,7 +102,7 @@ def validate_boards(project: Project) -> None:
     for page in project.pages:
         if page.board and page.board not in project.boards:
             project.error(
-                f"page board: {page.board!r} is not declared in refdes.yaml's "
+                f"page board: {page.board!r} is not declared in refdes-project.yaml's "
                 f"boards: registry",
                 file=page.source_file,
             )
@@ -119,7 +119,7 @@ def validate_workspaces(project: Project) -> None:
         if page.workspace and page.workspace not in project.workspaces:
             project.error(
                 f"page workspace: {page.workspace!r} is not declared in "
-                f"refdes.yaml's workspaces: registry",
+                f"refdes-project.yaml's workspaces: registry",
                 file=page.source_file,
             )
             page.workspace = ""

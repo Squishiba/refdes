@@ -1,11 +1,12 @@
 """Resolve `standard:` into merged, plain-dict `link_types:`/`types:`.
 
 Live reference resolution (docs/design/standard-library.md §3): a project's
-refdes.yaml never contains a copy of the standard's types/link_types/field_sets
--- only a pointer to them (`standard: {base, version, presets}`). This module
-resolves that pointer fresh against the bundled package data on every
-`load_project()` call and returns plain dicts in exactly the shape
-refdes.yaml's own `link_types:`/`types:` would use, so schema.py's existing
+Neither config file ever contains a copy of the standard's types/link_types/
+field_sets -- `refdes-project.yaml` holds only a pointer to them
+(`standard: {base, version, presets}`). This module resolves that pointer fresh
+against the bundled package data on every `load_project()` call and returns
+plain dicts in exactly the shape `refdes-schema.yaml`'s own
+`link_types:`/`types:` would use, so schema.py's existing
 per-type/per-field parsing loop can consume them without caring whether they
 came from the bundle, a preset, a project overlay, or some mix of the three.
 

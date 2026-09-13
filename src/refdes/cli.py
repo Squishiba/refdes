@@ -66,7 +66,7 @@ def _parse_items(
 def _load(args, require_ids: bool = True) -> tuple[Project, bool]:
     """Returns (project, schema_was_stale) -- the second only ever True when
     a `.refdes/schema.json` from a previous run predates the current
-    `refdes.yaml`, which every caller except `cmd_check` ignores; `check`
+    `refdes-project.yaml`, which every caller except `cmd_check` ignores; `check`
     surfaces it as the one narrow trip-wire for the gap this command's own
     aggressive regeneration doesn't otherwise close."""
     project = load_project(config_path=args.config)
@@ -164,7 +164,7 @@ def cmd_check(args) -> int:
     project, schema_was_stale = _load(args)
     if schema_was_stale:
         project.warn(
-            ".refdes/schema.json was older than refdes.yaml -- refreshed. If your "
+            ".refdes/schema.json was older than refdes-project.yaml -- refreshed. If your "
             "editor's completion looked stale, it should catch up now."
         )
     if args.board and args.board not in project.boards:
@@ -173,7 +173,7 @@ def cmd_check(args) -> int:
         close = difflib.get_close_matches(args.board, list(project.boards), n=1, cutoff=0.5)
         hint = f" Did you mean {close[0]!r}?" if close else ""
         project.error(
-            f"--board {args.board!r} is not a board declared in refdes.yaml's "
+            f"--board {args.board!r} is not a board declared in refdes-project.yaml's "
             f"boards: registry.{hint}"
         )
     if args.workspace and args.workspace not in project.workspaces:
@@ -185,7 +185,7 @@ def cmd_check(args) -> int:
         hint = f" Did you mean {close[0]!r}?" if close else ""
         project.error(
             f"--workspace {args.workspace!r} is not a workspace declared in "
-            f"refdes.yaml's workspaces: registry.{hint}"
+            f"refdes-project.yaml's workspaces: registry.{hint}"
         )
     # `check` never writes: it verifies existing seals without creating new ones.
     # The whole project still parses and resolves links regardless of --board/
@@ -214,7 +214,7 @@ def cmd_build(args) -> int:
         close = difflib.get_close_matches(args.reseal, list(project.boards), n=1, cutoff=0.5)
         hint = f" Did you mean {close[0]!r}?" if close else ""
         project.error(
-            f"--reseal {args.reseal!r} is not a board declared in refdes.yaml's "
+            f"--reseal {args.reseal!r} is not a board declared in refdes-project.yaml's "
             f"boards: registry.{hint}"
         )
     build_mod.build(
@@ -851,7 +851,7 @@ def main(argv: list[str] | None = None) -> int:
         prog="refdes",
         description="Reference documentation for hardware design decisions.",
     )
-    parser.add_argument("-c", "--config", help="path to refdes.yaml")
+    parser.add_argument("-c", "--config", help="path to refdes-project.yaml")
     parser.add_argument(
         "--no-write",
         action="store_true",
@@ -1022,8 +1022,8 @@ def main(argv: list[str] | None = None) -> int:
 
     p_init = sub.add_parser(
         "init",
-        help="write a minimal refdes.yaml that points at the standard",
-        description="Write a minimal refdes.yaml in the current directory -- "
+        help="write a minimal refdes-project.yaml that points at the standard",
+        description="Write a minimal refdes-project.yaml in the current directory -- "
         "site:/standard:/id: only, no types:/link_types:/field_sets: -- plus "
         ".vscode/settings.json wiring up schema completion for items/**/*.yaml. "
         "standard: points at the standard library rather than copying it; "

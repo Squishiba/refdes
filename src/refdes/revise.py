@@ -547,7 +547,7 @@ def _rename_prefix(prefix: str, prefixes: dict[str, str]) -> str | None:
     can't distinguish "REQ-PWR" (one atomic prefix) from "REQ" + a board
     token, so a bare dict lookup against `mapping.prefixes` silently misses
     every item using this project's own documented convention (`REQ-PWR`,
-    `CON-THM`, `DEC-PWR`, `TST-PWR` -- see refdes.yaml's boards: comment).
+    `CON-THM`, `DEC-PWR`, `TST-PWR` -- see refdes-project.yaml's boards: comment).
     The required separator is the hyphen itself, not just the substring, so
     an unrelated prefix that happens to start with the same letters (`CONFIG`)
     never matches.
@@ -613,7 +613,7 @@ class RevisionResult:
     # "file:line  OLD-ID" for every prose mention of a renamed id left behind
     # -- see _stale_prose_references().
     stale_references: list[str] = field(default_factory=list)
-    # True when this step changed refdes.yaml itself -- today, a standard
+    # True when this step changed refdes-project.yaml itself -- today, a standard
     # upgrade bumping `standard.version:`. Distinguishes "no item file needed
     # rewriting, and the pin moved" from "this mapping does not apply here",
     # which look identical from changed_files alone.
@@ -678,14 +678,14 @@ def apply(
     all of that is clean does anything actually get written -- files, the id
     ledger, baselines, seals, in that order.
 
-    `mutate_config`, if given, is called with refdes.yaml's own path *after*
+    `mutate_config`, if given, is called with refdes-project.yaml's own path *after*
     old hashes are captured and item files are rewritten, but *before* the
     rewritten project is reloaded and verified -- `standards.py`'s upgrade
     chain uses this to bump `standard.version:` atomically with the file
     rewrite it's paired with, so "before" (old version, old files) and
     "after" (new version, new files) are each independently valid and there
     is never a real on-disk moment where the two disagree. Plain `revise`
-    passes none: it only ever touches item files, never refdes.yaml's own
+    passes none: it only ever touches item files, never refdes-project.yaml's own
     schema declarations (see the module docstring's "Where" scope), so a
     type or required-field rename through it needs the project's schema to
     already agree with the new names -- if it doesn't, "after" verification
@@ -702,7 +702,7 @@ def apply(
     the whole project (everything any of them could reference) is now
     confirmed consistent with the "after" version too.
     """
-    config_path = os.path.join(project_root, "refdes.yaml")
+    config_path = os.path.join(project_root, "refdes-project.yaml")
     project_before = _load_and_validate(config_path)
     blocking = _blocking_errors(project_before)
     if blocking:
@@ -1015,7 +1015,7 @@ _VERSION_FLOW_RE = re.compile(r"(version:\s*)\d+")
 
 
 def _bump_standard_version(config_path: str, new_version: int) -> None:
-    """Rewrite refdes.yaml's own `standard: {..., version: N, ...}` in
+    """Rewrite refdes-project.yaml's own `standard: {..., version: N, ...}` in
     place, block or flow style -- the one piece of schema.py's territory
     revise.py ever touches, and only this one number, only for a bundled
     standard's own upgrade (never for plain `revise`, which has no
@@ -1087,7 +1087,7 @@ def apply_standard_upgrade(project_root: str, to_version: int) -> list[UpgradeSt
     independently verified (apply()'s own safety model), so the project is
     left at a fully valid, if not fully upgraded, version.
     """
-    config_path = os.path.join(project_root, "refdes.yaml")
+    config_path = os.path.join(project_root, "refdes-project.yaml")
     project = load_project(config_path=config_path)
     if not project.standard_base:
         raise SchemaError(

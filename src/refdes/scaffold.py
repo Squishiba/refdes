@@ -70,7 +70,7 @@ def init(
     presets: list[str] | None = None,
     write_vscode_settings: bool = True,
 ) -> str:
-    """Write a minimal `refdes.yaml` that points at the standard rather than
+    """Write a minimal `refdes-project.yaml` that points at the standard rather than
     copying it (docs/design/standard-library.md §3) -- no `types:`,
     `link_types:`, or `field_sets:` key anywhere in the file; that absence
     is the point. `standard=None` writes `standard: none`, the explicit
@@ -78,7 +78,7 @@ def init(
     "latest": resolved here, once, to the concrete integer the installed
     tool currently ships as newest.
 
-    Returns the path written. Raises SchemaError if refdes.yaml already
+    Returns the path written. Raises SchemaError if refdes-project.yaml already
     exists at the target, or if `presets` is given with `standard=None`
     (every preset's types target base types, so presets require a base).
     """
@@ -88,7 +88,7 @@ def init(
             "presets require a base standard; set standard.base or drop presets:"
         )
 
-    config_path = os.path.join(target_dir, "refdes.yaml")
+    config_path = os.path.join(target_dir, "refdes-project.yaml")
     if os.path.exists(config_path):
         raise SchemaError(f"{config_path} already exists -- refdes init refuses to overwrite it")
 
@@ -180,7 +180,7 @@ _PRESETS_RE = re.compile(r"(presets:\s*)\[([^\]]*)\]")
 
 def _edit_presets_list(raw_text: str, mutate) -> str:
     """A minimal, comment-preserving text edit of `standard.presets: [...]`
-    -- refdes.yaml is hand-authored and hand-commented, unlike the tool's
+    -- refdes-project.yaml is hand-authored and hand-commented, unlike the tool's
     own machine-owned lockfiles, so this never re-serializes the whole file
     (which would silently drop every comment). Only supports the flow-style
     list `refdes init` itself always writes; a block-style list is left for
@@ -188,7 +188,7 @@ def _edit_presets_list(raw_text: str, mutate) -> str:
     match = _PRESETS_RE.search(raw_text)
     if match is None:
         raise SchemaError(
-            "could not find a 'presets: [...]' list to edit in refdes.yaml -- "
+            "could not find a 'presets: [...]' list to edit in refdes-project.yaml -- "
             "if standard.presets: is written in block-list style, edit it by hand"
         )
     current = [p.strip() for p in match.group(2).split(",") if p.strip()]
@@ -213,7 +213,7 @@ def add_preset(project_root: str, preset_name: str) -> None:
     append it to `standard.presets:`. On the next load its types, links,
     and field sets simply join the merged schema -- no migration step, no
     re-running init (docs/design/standard-library.md §8)."""
-    config_path = os.path.join(project_root, "refdes.yaml")
+    config_path = os.path.join(project_root, "refdes-project.yaml")
     with open(config_path, encoding="utf-8") as fh:
         raw_text = fh.read()
     raw = yaml.safe_load(raw_text) or {}
@@ -251,7 +251,7 @@ def remove_preset(project_root: str, preset_name: str) -> list:
     this command's whole job is to surface the consequence, not to block an
     author who has already decided to accept it.
     """
-    config_path = os.path.join(project_root, "refdes.yaml")
+    config_path = os.path.join(project_root, "refdes-project.yaml")
     with open(config_path, encoding="utf-8") as fh:
         raw_text = fh.read()
     raw = yaml.safe_load(raw_text) or {}

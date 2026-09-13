@@ -266,18 +266,25 @@ def write_schema(project: Project) -> bool:
     committed, regenerated as a cheap side effect of every command that
     already loads the project (docs/design/standard-library.md §12).
     Returns whether the file that was there before this write was already
-    stale (older than `refdes.yaml`) -- `refdes check`'s own narrow
-    trip-wire for the one gap aggressive regeneration doesn't close: a bare
-    yaml-language-server setup with no refdes-aware watcher has nothing to
-    re-trigger a refresh between a `refdes.yaml` edit and the next CLI
-    invocation.
+    stale (older than whichever of the two config files changed most recently)
+    -- `refdes check`'s own narrow trip-wire for the one gap aggressive
+    regeneration doesn't close: a bare yaml-language-server setup with no
+    refdes-aware watcher has nothing to re-trigger a refresh between a config
+    edit and the next CLI invocation.
     """
     path = os.path.join(project.root, SCHEMA_REL_PATH)
-    config_path = os.path.join(project.root, "refdes.yaml")
+    config_mtime = max(
+        (
+            os.path.getmtime(os.path.join(project.root, name))
+            for name in ("refdes-project.yaml", "refdes-schema.yaml")
+            if os.path.isfile(os.path.join(project.root, name))
+        ),
+        default=None,
+    )
     was_stale = (
         os.path.isfile(path)
-        and os.path.isfile(config_path)
-        and os.path.getmtime(path) < os.path.getmtime(config_path)
+        and config_mtime is not None
+        and os.path.getmtime(path) < config_mtime
     )
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as fh:

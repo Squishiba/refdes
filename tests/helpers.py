@@ -20,7 +20,7 @@ REPO = os.path.join(os.path.dirname(__file__), "..")
 
 
 def _project():
-    project = load_project(config_path=os.path.join(REPO, "refdes.yaml"))
+    project = load_project(config_path=os.path.join(REPO, "refdes-project.yaml"))
     parse.load_items(project)
     build_mod.build(project)
     return project
@@ -94,7 +94,7 @@ satisfies: [REQ-B-001]
 
 
 def _build_and_render(root):
-    project = load_project(config_path=str(root / "refdes.yaml"))
+    project = load_project(start=str(root))
     parse.load_items(project)
     build_mod.build(project)
     return render.render_site(project)
@@ -118,7 +118,7 @@ def _numeric_hint_project(tmp_path, items_yaml):
 
 
 def _build_at(root):
-    project = load_project(config_path=str(root / "refdes.yaml"))
+    project = load_project(start=str(root))
     parse.load_items(project)
     build_mod.build(project)
     return project
@@ -273,7 +273,7 @@ LIFECYCLE_COMPONENT = (
 
 
 def _lc_build(root):
-    project = load_project(config_path=str(root / "refdes.yaml"))
+    project = load_project(start=str(root))
     parse.load_items(project)
     build_mod.build(project, seal_write=False, reseal=False, accept_board_move=False)
     return project
@@ -450,4 +450,4 @@ types:
 def _build_at_repo_schema():
     """A real project resolving the bundled hardware@2 standard, for
     refdes new / JSON schema tests that need its actual field shapes."""
-    return load_project(config_path=os.path.join(REPO, "refdes.yaml"))
+    return load_project(config_path=os.path.join(REPO, "refdes-project.yaml"))

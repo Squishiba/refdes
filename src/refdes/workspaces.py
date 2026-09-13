@@ -61,7 +61,7 @@ def resolve(project: Project) -> None:
             if item.workspace_hint not in project.workspaces:
                 project.error(
                     f"workspace: {item.workspace_hint!r} is not declared in "
-                    f"refdes.yaml's workspaces: registry",
+                    f"refdes-project.yaml's workspaces: registry",
                     file=item.source_file, line=item.source_line, item_id=item.id,
                 )
                 continue

@@ -1,7 +1,7 @@
 """Board scoping: which board an item belongs to, and drift between builds.
 
 Opt-in. A board is one path segment under `items/`, matched against the
-`boards:` registry in refdes.yaml -- the first segment under `item_layout:
+`boards:` registry in refdes-project.yaml -- the first segment under `item_layout:
 flat` (today's `items/<board>/`), the second under `item_layout: workspace`
 (`items/<workspace>/<board>/`, see workspaces.py). With no registry, every
 function here is a no-op and every item's `board` stays "" -- an existing
@@ -82,7 +82,7 @@ def resolve(project: Project) -> None:
         if item.board_hint:
             if item.board_hint not in project.boards:
                 project.error(
-                    f"board: {item.board_hint!r} is not declared in refdes.yaml's "
+                    f"board: {item.board_hint!r} is not declared in refdes-project.yaml's "
                     f"boards: registry",
                     file=item.source_file, line=item.source_line, item_id=item.id,
                 )

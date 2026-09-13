@@ -1,0 +1,9 @@
+# The documentation project's own schema overlay: types, link_types, field_sets
+# only. Optional — a project that takes its whole vocabulary from the bundled
+# standard has no file here at all.
+
+# A schema is still required, but nothing here uses it.
+types:
+  note:
+    prefix: NOTE
+    label: Note

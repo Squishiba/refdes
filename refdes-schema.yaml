@@ -1,0 +1,25 @@
+# This project's own schema overlay.
+#
+# Optional, and the only file of its kind: it holds `types:`, `link_types:` and
+# `field_sets:` and nothing else. Everything the project *sets* -- site, id,
+# boards, units, history, the standard pin, process policy -- lives in
+# refdes-project.yaml, which is also what makes this directory a project.
+#
+# Most projects have no file here at all: the bundled standard named by
+# `standard:` in refdes-project.yaml supplies the vocabulary, and there is
+# nothing to add. See docs/schema-reference.md and
+# docs/design/standard-library.md.
+
+# The one field the standard doesn't know about: this project's log entries
+# carry a hand-typed `board:` field predating the boards: registry in
+# refdes-project.yaml (see that registry's own comment). It shadows the
+# reserved `board:` override -- a type's own field always wins -- so that key
+# scopes nothing on a log entry; the entries are board-scoped by living in
+# items/board-a/, like everything else. Retiring the field would be tidier
+# still, but it would change every entry's content hash, and log entries are
+# sealed append-only.
+# Everything else about `log` comes from the standard unchanged.
+types:
+  log:
+    fields:
+      board: { type: text, on_change: invalidate }

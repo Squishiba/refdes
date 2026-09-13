@@ -1,10 +1,73 @@
 # Refdes project settings.
 #
-# Presentation and behaviour, not schema -- refdes.yaml defines item types,
-# links, and change-tracking policy; this file is process policy and
-# formatting preference for the same project. Optional: a project with no
-# refdes-project.yaml behaves exactly as if every setting below were left at
-# its default.
+# This file is the project marker: finding it is what makes a directory a refdes
+# project, and it holds every setting the project makes -- site identity, id
+# width, the board and workspace registries, units, change-tracking policy,
+# which standard the project is pinned to, and the process/formatting
+# preferences below. The one thing it does not hold is the project's own schema
+# overlay (types:, link_types:, field_sets:), which lives in
+# refdes-schema.yaml and is absent from most projects.
+#
+# (Before this split these were two files, refdes.yaml and refdes-project.yaml,
+# each holding part of both jobs. refdes.yaml is retired; a project still
+# carrying one gets an error naming both replacements rather than a silent
+# partial load.)
+
+site:
+  title: "Example Board — Design Reference"
+  out: _site
+
+id:
+  width: 3                      # REQ-PWR-004. Set generously now; changing it later is painful.
+  ledger: .refdes/ids.yaml   # burned IDs are never reused
+
+history:
+  # Applied to any field that does not declare its own on_change.
+  default: invalidate
+
+# Named units to collapse derived results into, so V*A renders as "W" rather than
+# "ampere * volt". Only single-symbol units belong here: a unit you wrote yourself,
+# like in^2, is always left exactly as you wrote it.
+units:
+  preferred: [W, V, A, ohm, F, H, Hz, J, N, Pa, K, s, m, g]
+
+  # House units. `mil` and `mils` already map to `thou` by default, because pint
+  # reads a bare "mil" as the angular mil rather than a thousandth of an inch.
+  aliases: {}
+
+# The standard dictionary: requirement, bound, decision, test, component,
+# log, plus the standard link vocabulary -- resolved live against the
+# installed refdes package on every load, never copied into this file. See
+# docs/design/standard-library.md for what it covers and why pinning a plain
+# integer (not "latest") is the whole point.
+standard:
+  base: hardware
+  version: 3
+  presets: []
+
+# Opt-in board registry for a family of boards sharing this project. Absent
+# entirely, an item's board stays unset and the site is unaffected -- see
+# docs/multi-board.md. A board is the first path segment under items/, matched
+# against this registry, and overridable per item (or per file's defaults:)
+# with the reserved `board:` key -- used below for Board A, whose items live in
+# folders that predate this registry (items/requirements, items/constraints,
+# items/decisions) rather than in items/board-a/. Board B is new enough to just
+# live in items/board-b/ and needs no override.
+#
+# The one exception is the design log, which the override cannot reach: the
+# `log` type declares its own `board` field (see refdes-schema.yaml), so it
+# lives in items/board-a/ and is scoped by its path like Board B's items are.
+#
+# Board A declares no `token:` on purpose: its prefixes (REQ-PWR, BND-THM,
+# DEC-PWR, TST-PWR) predate board tokens and were frozen before this registry
+# existed, so there is no letter to check them against. See docs/ids.md on
+# adopting board-token prefixes from the start next time.
+boards:
+  board-a:
+    label: "Board A"
+  board-b:
+    label: "Board B"
+    token: B
 
 # Significant figures for formatted quantities in calc results and check
 # messages (e.g. "3.96 W"). 1-15.
@@ -12,7 +75,7 @@ sigfigs: 4
 
 # How items/ is laid out. "flat" is items/<board>/ (this project's own
 # layout); "workspace" adds one more path segment, items/<workspace>/<board>/,
-# read against a workspaces: registry in refdes.yaml. See docs/workspaces.md.
+# read against a workspaces: registry in this file. See docs/workspaces.md.
 # This project declares no workspaces:, so "flat" is the only sensible value.
 item_layout: flat
 

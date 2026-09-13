@@ -8,6 +8,7 @@ from __future__ import annotations
 import os
 
 import pytest
+from conftest import write_project_config
 from helpers import _build_at
 
 from refdes import build as build_mod
@@ -23,10 +24,13 @@ MINIMAL_PROJECT_SCHEMA = (
 
 
 def _write_minimal_project(tmp_path, settings_yaml: str | None = None):
-    (tmp_path / "refdes.yaml").write_text(MINIMAL_PROJECT_SCHEMA, encoding="utf-8")
+    """The two real files, from one combined schema constant plus settings text
+    appended to the marker. Returns the marker's path, what load_project reads."""
+    config = write_project_config(tmp_path, MINIMAL_PROJECT_SCHEMA)
     if settings_yaml is not None:
-        (tmp_path / "refdes-project.yaml").write_text(settings_yaml, encoding="utf-8")
-    return tmp_path / "refdes.yaml"
+        with config.open("a", encoding="utf-8") as fh:
+            fh.write(settings_yaml)
+    return config
 
 
 def test_project_settings_absent_file_matches_pre_config_defaults(tmp_path):
@@ -158,7 +162,9 @@ def test_project_settings_unknown_top_level_key_is_a_schema_error(tmp_path):
 
 
 def test_project_settings_file_must_be_a_mapping(tmp_path):
-    config = _write_minimal_project(tmp_path, "- not\n- a\n- mapping\n")
+    write_project_config(tmp_path, MINIMAL_PROJECT_SCHEMA)
+    config = tmp_path / "refdes-project.yaml"
+    config.write_text("- not\n- a\n- mapping\n", encoding="utf-8")
     with pytest.raises(SchemaError, match="must be a mapping"):
         load_project(config_path=str(config))
 
@@ -166,12 +172,14 @@ def test_project_settings_file_must_be_a_mapping(tmp_path):
 def test_sigfigs_flows_through_calc_formatting(tmp_path):
     """Project.sigfigs, resolved once at load, reaches calc.format_value via
     build.run_calcs without every caller threading a digits= parameter."""
-    (tmp_path / "refdes.yaml").write_text(
+    write_project_config(
+        tmp_path,
         "site: { title: T, out: _site }\n"
         "types:\n  decision: { prefix: DEC, fields: {} }\n",
-        encoding="utf-8",
     )
-    (tmp_path / "refdes-project.yaml").write_text("sigfigs: 2\n", encoding="utf-8")
+    (tmp_path / "refdes-project.yaml").write_text(
+        "site: { title: T, out: _site }\nsigfigs: 2\n", encoding="utf-8"
+    )
     items = tmp_path / "items"
     items.mkdir()
     (items / "dec.md").write_text(
@@ -179,21 +187,23 @@ def test_sigfigs_flows_through_calc_formatting(tmp_path):
         "```calc\nP = 3.3 V * 1.2 A\n```\n",
         encoding="utf-8",
     )
-    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    project = load_project(start=str(tmp_path))
     parse.load_items(project)
     build_mod.build(project)
     assert project.items["DEC-001"].calcs[0].result == "4 W"  # 2 sigfigs, not "3.96 W"
 
 
 def test_sigfigs_flows_through_check_messages(tmp_path):
-    (tmp_path / "refdes.yaml").write_text(
+    write_project_config(
+        tmp_path,
         "site: { title: T, out: _site }\n"
         "types:\n"
         "  constraint: { prefix: CON, fields: { limit: { type: limit, required: true } } }\n"
         "  decision: { prefix: DEC, fields: {} }\n",
-        encoding="utf-8",
     )
-    (tmp_path / "refdes-project.yaml").write_text("sigfigs: 2\n", encoding="utf-8")
+    (tmp_path / "refdes-project.yaml").write_text(
+        "site: { title: T, out: _site }\nsigfigs: 2\n", encoding="utf-8"
+    )
     items = tmp_path / "items"
     items.mkdir()
     (items / "con.yaml").write_text(
@@ -212,7 +222,7 @@ def test_sigfigs_flows_through_check_messages(tmp_path):
         "```calc\nx : A = 0.6061 A\n```\n",
         encoding="utf-8",
     )
-    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    project = load_project(start=str(tmp_path))
     parse.load_items(project)
     build_mod.build(project)
     check = project.items["DEC-001"].checks[0]

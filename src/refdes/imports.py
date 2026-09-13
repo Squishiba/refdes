@@ -28,7 +28,7 @@ def load_imports(project: Project) -> None:
             project.error(
                 f"import {spec.name!r}: no artifact at {path}. Build the upstream "
                 f"project first, or fix the path.",
-                file="refdes.yaml",
+                file="refdes-project.yaml",
             )
             continue
 
@@ -45,7 +45,7 @@ def load_imports(project: Project) -> None:
                 f"import {spec.name!r} is pinned to version {spec.version!r} but the "
                 f"artifact declares {upstream_version or '<none>'!r}. Rebuild the "
                 f"upstream project or update the pin deliberately.",
-                file="refdes.yaml",
+                file="refdes-project.yaml",
             )
             continue
 
@@ -69,7 +69,7 @@ def _absorb(project: Project, origin: str, version: str, data: dict) -> None:
                 f"import {origin!r} defines {item_id!r}, which already exists "
                 f"({where}). IDs must be unique across every imported project — "
                 f"give each project its own prefix.",
-                file="refdes.yaml",
+                file="refdes-project.yaml",
             )
             continue
 
@@ -94,7 +94,7 @@ def _absorb(project: Project, origin: str, version: str, data: dict) -> None:
                 f"import {origin!r}: {item_id} has type {item.type!r}, which this "
                 f"project's schema does not declare. It will render, but its fields "
                 f"are not validated.",
-                file="refdes.yaml",
+                file="refdes-project.yaml",
             )
 
         project.items[item_id] = item

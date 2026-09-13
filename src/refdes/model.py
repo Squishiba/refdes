@@ -38,7 +38,7 @@ CHECK_VIOLATION = "check_violation"
 
 
 # refdes-project.yaml: project-level presentation/behaviour settings, distinct
-# from refdes.yaml's schema. See schema.py's loader for validation.
+# from refdes-project.yaml's schema. See schema.py's loader for validation.
 # "flat" is today's items/<board>/; "workspace" adds one more path segment,
 # items/<workspace>/<board>/ -- a fixed choice, not a path template, so the
 # tool never has to promise arbitrary nesting depth. See boards.py/workspaces.py
@@ -68,7 +68,7 @@ def _default_release_gate() -> dict[str, dict[str, bool]]:
 
 
 class SchemaError(Exception):
-    """Raised for any configuration-time problem in refdes.yaml, refdes-project.yaml,
+    """Raised for any configuration-time problem in refdes-project.yaml, refdes-project.yaml,
     or the standard library bundle -- never for a per-item build-time diagnostic,
     which goes through Project.error() instead. Defined here, not in schema.py or
     standards.py, so both can raise it without importing each other."""
@@ -542,7 +542,7 @@ class Project:
     id_ledger: str
     preferred_units: list[str]
     unit_aliases: dict[str, str] = field(default_factory=dict)
-    # `equations:` from refdes.yaml, keyed by name. Evaluation reads calc.EQUATIONS
+    # `equations:` from refdes-project.yaml, keyed by name. Evaluation reads calc.EQUATIONS
     # (the live registry load_project installs); this is the loaded definition, for
     # anything that reports on the project's vocabulary.
     equations: dict[str, Equation] = field(default_factory=dict)

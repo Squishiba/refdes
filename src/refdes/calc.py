@@ -178,7 +178,7 @@ MULTI_ARG = {"min", "max"}
 
 @dataclass
 class Equation:
-    """A named expression declared in `refdes.yaml`'s `equations:` and callable
+    """A named expression declared in `refdes-project.yaml`'s `equations:` and callable
     from any calc block: `current_limit(2500, 0.8 V, 3.3 kohm)`.
 
     Calling one is not a `FUNCTIONS` call: the arguments bind to `params` in a

@@ -1279,7 +1279,7 @@ def collect_static_assets(project: Project) -> None:
     for rel_dir in project.asset_dirs:
         full_dir = os.path.join(project.root, rel_dir)
         if not os.path.isdir(full_dir):
-            project.warn(f"site.assets entry {rel_dir!r} is not a directory", file="refdes.yaml")
+            project.warn(f"site.assets entry {rel_dir!r} is not a directory", file="refdes-project.yaml")
             continue
         for dirpath, _dirnames, filenames in os.walk(full_dir):
             for name in filenames:
