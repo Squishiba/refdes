@@ -5,14 +5,28 @@ problem. Errors fail the build; warnings do not.
 
 ## Items and fields
 
-**`no refdes.yaml found in ... or any parent directory`**
-You are not inside a project. `cd` into one, or pass `-c path/to/refdes.yaml`.
+**`no refdes-project.yaml found in ... or any parent directory`**
+You are not inside a project — `refdes-project.yaml` is the project marker,
+and commands search upward from the current directory for it. `cd` into one,
+or pass `-c path/to/refdes-project.yaml`.
+
+**`refdes.yaml is retired. Split it into the two files it became: ...`**
+Your project still carries the old single-file config, which the loader now
+refuses rather than reading quietly. Move every project setting — `site:`,
+`id:`, `boards:`, `workspaces:`, `units:`, `history:`, `standard:`,
+`equations:`, `imports:`, and the process settings like `sigfigs:` and
+`release_gate:` — into `refdes-project.yaml`, and move any
+`types:`/`link_types:`/`field_sets:` into the optional `refdes-schema.yaml`
+(omit that file entirely if your whole vocabulary comes from the standard).
+Then delete `refdes.yaml` — nothing is read from it any more, so a key left
+behind is a setting that silently stops applying.
 
 **`item has no 'type'`**
 Add `type:` to the item, or to `defaults:` in the list file.
 
 **`unknown type 'requirment'. Did you mean 'requirement'?`**
-Typo, or a type not declared in `refdes.yaml`.
+Typo, or a type the merged schema doesn't declare — neither the bundled
+standard (with any presets) nor your own `refdes-schema.yaml` defines it.
 
 **`no YAML front-matter (file must start with '---')`**
 A `.md` file under `items/` needs front-matter. If it is not an item, move it out

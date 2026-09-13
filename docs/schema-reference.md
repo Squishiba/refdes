@@ -1,28 +1,38 @@
 # Schema reference
 
-Every key in `refdes.yaml`. A project is any folder containing this file;
-commands search upward from the current directory to find it.
+Every key in `refdes-project.yaml` — the project marker, and the home of
+every project setting. The three schema keys (`types:`, `link_types:`,
+`field_sets:`) are the one exception: they are the project's own schema
+overlay, and they live in the optional `refdes-schema.yaml`, which most
+projects never have — a project taking its whole vocabulary from a bundled
+standard needs only the settings file. A project is any folder containing
+`refdes-project.yaml`; commands search upward from the current directory to
+find it. Each section below says which file its key belongs in.
 
 ## Top level
 
 ```yaml
+# refdes-project.yaml — every project setting
 site:        { ... }   # title, output directory, version
 id:          { ... }   # ID width and ledger location
 history:     { ... }   # default on_change mode
 units:       { ... }   # preferred display units
 standard:    { ... }   # the bundled standard dictionary, or "none"
-field_sets:  { ... }   # reusable field groups, include:d by a type
-link_types:  { ... }   # relationships and their inverses
-types:       { ... }   # item types
 imports:     [ ... ]   # other projects to read
 boards:      { ... }   # opt-in board registry
 workspaces:  { ... }   # opt-in workspace registry, one level above boards
+
+# refdes-schema.yaml — optional, only when the project declares its own schema
+field_sets:  { ... }   # reusable field groups, include:d by a type
+link_types:  { ... }   # relationships and their inverses
+types:       { ... }   # item types
 ```
 
 `standard:` (or its absence) determines where `link_types:`/`types:` start
-from before this file's own blocks are applied on top — see [the standard
-library](standard-library.md) for the full picture. Everything below describes
-the merged result, regardless of where each piece came from.
+from before the project's own `refdes-schema.yaml` blocks are applied on top —
+see [the standard library](standard-library.md) for the full picture.
+Everything below describes the merged result, regardless of which file each
+piece came from.
 
 ---
 
@@ -109,10 +119,11 @@ standard:
 
 Points at the bundled standard dictionary instead of hand-declaring
 `link_types:`/`types:`/`field_sets:` from scratch. Resolved fresh, from the
-installed `refdes` package, on every load — this file never contains a copy of
-what the standard declares, only the pointer to it. Absent entirely, or the
-string `standard: none`, means no standard: every type, link, and field set
-comes only from this file, exactly like every project before this existed.
+installed `refdes` package, on every load — `refdes-project.yaml` never
+contains a copy of what the standard declares, only the pointer to it. Absent
+entirely, or the string `standard: none`, means no standard: every type,
+link, and field set comes only from the project's own `refdes-schema.yaml`,
+exactly like every project before this existed.
 
 | Key | Required | Purpose |
 |---|---|---|
@@ -120,7 +131,8 @@ comes only from this file, exactly like every project before this existed.
 | `version` | yes | A pinned integer, e.g. `1` — never the string `"latest"` |
 | `presets` | no, defaults to `[]` | Optional bundled extensions layered on top, e.g. `[design-debate]` |
 
-This file's own `link_types:`/`types:`/`field_sets:` are merged on top of the
+The project's own `link_types:`/`types:`/`field_sets:` — written in
+`refdes-schema.yaml` — are merged on top of the
 resolved standard, not replacing it — see [the standard
 library](standard-library.md#overriding-and-extending) for the merge rules
 (add a field, remove one, redeclare an enum, add or remove a whole type).
@@ -130,6 +142,7 @@ library](standard-library.md#overriding-and-extending) for the merge rules
 ## `field_sets`
 
 ```yaml
+# refdes-schema.yaml
 field_sets:
   provenance:
     source: { type: text, on_change: log }
@@ -138,7 +151,8 @@ field_sets:
 
 Named, reusable groups of field definitions, `include:`d by one or more types
 instead of being retyped on each. The standard is authored this way internally
-(`provenance`, `stewardship`); a project can declare its own for fields
+(`provenance`, `stewardship`); a project declares its own in
+`refdes-schema.yaml` for fields
 repeated across its own custom types. See [the standard
 library](standard-library.md#field-sets-and-include) for `include:`'s merge
 order against a type's own fields.
@@ -148,6 +162,7 @@ order against a type's own fields.
 ## `link_types`
 
 ```yaml
+# refdes-schema.yaml
 link_types:
   satisfies:   { inverse: satisfied_by, label: "Satisfies" }
   verified_by: { inverse: verifies,     label: "Verified by" }
@@ -172,6 +187,7 @@ explicit `via=` follows every link type where `trace` is still `true`.
 ## `types`
 
 ```yaml
+# refdes-schema.yaml
 types:
   bound:
     prefix: BND
@@ -296,7 +312,8 @@ formats](output.md#items-json).
 
 `requirement`, `bound`, `decision`, `component`, `test`, `log` — the
 [standard library](standard-library.md) ships these by default, so most
-projects never declare `types:` at all. A project may still add, remove, or
+projects never declare `types:` at all — and have no `refdes-schema.yaml`
+either. A project may still add, remove, or
 override any of them under `standard:`'s merge rules, or declare its own from
 scratch under `standard: none`. Nothing in the code depends on these
 particular names — `coverable:`/`coverable_statuses:`/`verifying_statuses:`
@@ -388,7 +405,8 @@ error at project-load time naming both sides.
 
 ## Item-level `history`
 
-Not part of `refdes.yaml`, but the counterpart to it. In an item's
+Not part of either config file, but the counterpart to the `history:`
+setting in `refdes-project.yaml`. In an item's
 front-matter:
 
 ```yaml

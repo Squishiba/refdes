@@ -1,23 +1,25 @@
 # The standard library
 
-A new project's `refdes.yaml` doesn't need to declare `requirement`,
+A new project's `refdes-project.yaml` doesn't need to declare `requirement`,
 `bound`, or any of the usual hardware-traceability vocabulary by hand.
 `refdes` ships a **standard dictionary** — six item types, their fields, their
 status lifecycles, and the link vocabulary connecting them — bundled inside
 the package and resolved live, by reference, into every project that opts in.
 
 ```yaml
+# refdes-project.yaml
 standard:
   base: hardware
   version: 2
   presets: []
 ```
 
-That's the entire `standard:` block a project needs. No `types:`,
-`link_types:`, or `field_sets:` key has to appear anywhere in `refdes.yaml` —
-their absence is the point: this file records a *pointer* to the standard, not
-a copy of it. See [schema reference](schema-reference.md#standard) for the
-key-by-key syntax.
+That's the entire `standard:` block a project needs, and it sits in
+`refdes-project.yaml` alongside the project's other settings. No `types:`,
+`link_types:`, or `field_sets:` key has to appear anywhere — most projects
+have no `refdes-schema.yaml` at all — and their absence is the point:
+`standard:` records a *pointer* to the standard, not a copy of it. See
+[schema reference](schema-reference.md#standard) for the key-by-key syntax.
 
 ## What's in it
 
@@ -49,18 +51,25 @@ retyping five fields on every type, and [authoring: `source`, `note`,
 ## Opting out
 
 `standard: none`, or omitting `standard:` entirely, is the explicit escape
-hatch: nothing is pre-seeded, and `types:`/`link_types:` are fully authored by
-the project, exactly like every `refdes` project before this feature existed.
-A config written before this feature shipped needs no changes to keep working.
+hatch: nothing is pre-seeded, and `types:`/`link_types:`/`field_sets:` are
+fully authored by the project in `refdes-schema.yaml`, exactly like every
+`refdes` project before this feature existed — one file for the schema
+instead of one file holding everything. A project that never adopted the
+standard keeps exactly the vocabulary it always had — the split only
+relocates it: schema keys into `refdes-schema.yaml`, settings into
+`refdes-project.yaml`.
 
 ## Overriding and extending
 
-The project's own `types:`/`link_types:`/`field_sets:` blocks are **merged**
-on top of the resolved standard, not replaced by it. A `types.<name>:` block
+The project's own `types:`/`link_types:`/`field_sets:` blocks — written in
+`refdes-schema.yaml`, the optional file that holds the project's schema
+overlay and nothing else — are **merged** on top of the resolved standard,
+not replaced by it. A `types.<name>:` block
 naming a type the standard already provides is merged into it field-by-field;
 naming something new adds a type from scratch.
 
 ```yaml
+# refdes-schema.yaml
 types:
   requirement:
     fields:
@@ -82,6 +91,7 @@ types:
   declares `selects: [component]`, naming both sides.
 
 ```yaml
+# refdes-schema.yaml
 types:
   component: null   # errors here if any type still declares a link to it
 ```
@@ -92,6 +102,7 @@ Reusable groups of field definitions, declared once and pulled into a type
 with `include:`. The standard is built this way internally:
 
 ```yaml
+# refdes-schema.yaml
 field_sets:
   provenance:
     source: { type: text, on_change: log }
@@ -107,15 +118,16 @@ types:
 Included fields are merged in list order (a later `include:` wins over an
 earlier one on a name collision), then the type's own `fields:` are applied on
 top — a type's own declaration always wins over anything it includes. A
-project can declare its own `field_sets:` for fields repeated across its own
-custom types; they merge with the standard's, by name, under the same rules as
-everything else here.
+project declares its own `field_sets:` in `refdes-schema.yaml` for fields
+repeated across its own custom types; they merge with the standard's, by
+name, under the same rules as everything else here.
 
 ## Presets
 
 Bundled, curated extensions to the base standard, opted into by name:
 
 ```yaml
+# refdes-project.yaml
 standard:
   base: hardware
   version: 2
@@ -179,10 +191,12 @@ The same wording appears for a link name a since-removed preset provided
 
 ## `refdes init`
 
-Writes a minimal `refdes.yaml` in the current directory — `site:`,
-`standard:`, `id:` only, no `types:`/`link_types:`/`field_sets:` — plus
-`.vscode/settings.json` wiring up schema completion for `items/**/*.yaml`
-(see [editor support](#editor-support-json-schema-emission) below).
+Writes a minimal `refdes-project.yaml` in the current directory — `site:`,
+`standard:`, `id:` only, no `types:`/`link_types:`/`field_sets:` and no
+`refdes-schema.yaml` either: a project with nothing of its own to add to the
+standard doesn't get one — plus `.vscode/settings.json` wiring up schema
+completion for `items/**/*.yaml` (see [editor
+support](#editor-support-json-schema-emission) below).
 
 ```bash
 refdes init                            # hardware@<latest>, no presets
@@ -244,7 +258,8 @@ independently drift on what a field or link means.
 
 `refdes schema --json` emits a JSON Schema describing the project's
 **actual merged schema** — base at its pinned version, plus selected
-presets, plus the project's own overlay — not the built-in standard in the
+presets, plus the project's own `refdes-schema.yaml` overlay — not the
+built-in standard in the
 abstract, so it's correct for a project that has customized anything.
 Covers field names and types per item type, legal `status` (and every other
 enum field's) values, link verb names with their allowed target types
@@ -264,8 +279,9 @@ function of the current config regenerated as a cheap side effect of every
 command that already loads the project (`build`, `check`, `index`, `id`,
 `fetch`, `audit`). `refdes schema --json` is the explicit, standalone form,
 for piping into something else or inspecting directly. `refdes check` also
-does one cheap mtime comparison — `.refdes/schema.json` older than
-`refdes.yaml` — and warns (then refreshes) if a stale copy somehow survived
+does one cheap mtime comparison — `.refdes/schema.json` older than whichever
+of `refdes-project.yaml`/`refdes-schema.yaml` changed most recently — and
+warns (then refreshes) if a stale copy somehow survived
 between commands, the one narrow gap a bare yaml-language-server setup with
 no refdes-aware watcher can hit.
 

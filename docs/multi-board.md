@@ -154,10 +154,11 @@ the sidebar, and every link resolves to a page that exists.
 
 ## Separate projects with imports
 
-Split into projects, each with its own `refdes.yaml`, and import the shared one:
+Split into projects, each with its own `refdes-project.yaml`, and import the
+shared one:
 
 ```yaml
-# board-a/refdes.yaml
+# board-a/refdes-project.yaml
 imports:
   - name: platform
     items: ../platform-interfaces/_site/items.json
@@ -167,7 +168,7 @@ imports:
 The upstream project declares its version:
 
 ```yaml
-# platform-interfaces/refdes.yaml
+# platform-interfaces/refdes-project.yaml
 site:
   title: "Platform Interfaces"
   out: _site
@@ -206,7 +207,7 @@ cross-project suspect links work once the history layer lands.
 If the pin and the artifact disagree, the import is refused:
 
 ```
-ERROR refdes.yaml — import 'platform' is pinned to version '2026.3' but the
+ERROR refdes-project.yaml — import 'platform' is pinned to version '2026.3' but the
       artifact declares '2026.4'. Rebuild the upstream project or update the pin
       deliberately.
 ```
@@ -241,7 +242,7 @@ Nobody had to remember which boards were affected.
 error:
 
 ```
-ERROR refdes.yaml — import 'platform' defines 'IFC-CAN-001', which already
+ERROR refdes-project.yaml — import 'platform' defines 'IFC-CAN-001', which already
       exists (items/interfaces/local.yaml:4). IDs must be unique across every
       imported project — give each project its own prefix.
 ```
