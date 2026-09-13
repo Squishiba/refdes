@@ -24,7 +24,7 @@ and this project uses [Semantic Versioning](https://semver.org/).
   -- first at line 12, again at line 21. ... rename one of them, e.g. 'x' ->
   'x_2'.` A name reused across *different* items is unaffected -- scope
   still resets per item, unchanged from before.
-- **The bundled standard moves to `hardware@3`.** Three changes, arriving
+- **The bundled standard moves to `hardware@3`.** Five changes, arriving
   together because none was ever published on its own:
     1. A new link verb, `governed_by` (inverse `governs`), authored on
        `requirement`, targeting `[requirement, bound]` -- "this specific
@@ -57,6 +57,22 @@ and this project uses [Semantic Versioning](https://semver.org/).
        folding it into `body:` doesn't make `body:` required on `test`.
        `rationale`, `source`, `note`, and the log's `summary` all stay
        exactly as they were.
+    4. `citations` moves out of `component`'s hand-rolled field list into
+       an includable `field_sets:` entry under the one field name
+       `citations:`, included by both `component` and `decision`.
+       `component.datasheets` is renamed `component.citations` -- breaking
+       -- and `decision` gains the same field, so a decision can cite the
+       document its reasoning came from instead of only a component being
+       able to name its datasheets. `refdes standard upgrade --to 3`
+       carries the rename (`datasheets:` -> `citations:`), with the same
+       hash-carrying, refuse-and-roll-back behaviour as the rest of the
+       migration.
+    5. `decision` gains `recorded_by: [log]` -- the inverse of a `log`'s
+       existing `records:` verb, now declared on `decision`'s own `links:`
+       block. A sealed log entry folds its links into its content hash and
+       so can never be edited to point forward at a decision written after
+       it; `recorded_by:` lets the decision itself point back at the entry
+       that recorded it. Purely additive.
 
   `refdes init` pins `version: 3` from now on. `refdes new <type>` now hints
   at `body:` after the closing fence -- it's reserved, not a schema field,
@@ -65,11 +81,13 @@ and this project uses [Semantic Versioning](https://semver.org/).
   **A project pinned at `version: 1` or `version: 2` is completely
   unaffected** and stays that way until it chooses otherwise. To move:
   `refdes standard upgrade --to 3`, which renames `text:`/`method:` to
-  `body:` in every item file that still writes them, carries content hashes
-  forward in every stamped baseline and seal, and refuses (rolling back)
-  rather than silently overwriting or orphaning content on any item that
-  already has body content of its own -- merge the two by hand first, then
-  upgrade. Parts 1 and 2 need no migration; both are purely additive.
+  `body:` in every item file that still writes them and `datasheets:` to
+  `citations:` on any component that still writes it, carries content
+  hashes forward in every stamped baseline and seal, and refuses (rolling
+  back) rather than silently overwriting or orphaning content on any item
+  that already has body content of its own -- merge the two by hand first,
+  then upgrade. Parts 1, 2, and 5 need no migration; all three are purely
+  additive.
 
 ### Added
 
@@ -197,6 +215,13 @@ and this project uses [Semantic Versioning](https://semver.org/).
   precedent: `tags:` is optional by design, and plenty of projects won't
   want the noise. Sequenced after `refdes ls --tag`/free-text search, since
   the lint only points at something actionable once search can act on it.
+- `{{index}}` gains a `tag="..."` parameter scoping the listing to items
+  carrying that tag -- the same single named filter `board=` already is,
+  validated against the tags some local item actually carries (with the
+  usual did-you-mean on anything else, and deliberately not a query
+  language). `tags:` is the one grouping field that follows neither board
+  nor type lines, and `{{index}}` was the only surface unable to select
+  on it.
 
 ### Fixed
 
@@ -230,6 +255,33 @@ and this project uses [Semantic Versioning](https://semver.org/).
   `defaults:` rather than their own keys; a failure on one of them now says
   so explicitly and points at the `defaults:` block's own line instead of
   the item's.
+- The calc lexer rejected a prefixed non-ASCII unit: its unit pattern only
+  admitted `Ω`, `µ`/`μ`, and `°` in the leading character class, so `kΩ`
+  and `MΩ` -- with the prefix in front -- failed to parse while a bare `Ω`
+  worked, and `%` was reachable only through the tolerance pre-parse, so a
+  bare percent (`85 %`) failed as a raw syntax error with no hint. The
+  non-ASCII unit characters are now legal anywhere in a unit segment, and
+  `%` reads as its own percent-quantity alternative. A declaration that
+  fails to parse now also names the expression that failed, not just the
+  parser's message.
+- A citation's recorded `page:` went nowhere: it was stored and printed in
+  the table cell but never reached the link. A citation carrying a page
+  number now appends `#page=N` (the standard PDF fragment) to both the
+  remote citation's href and the vendored "local copy" href.
+- Jinja autoescaping was silently disabled project-wide and is now actually
+  on. It was enabled via `select_autoescape(["html"])`, which matches a
+  template's name by suffix -- and every template here is named
+  `*.html.j2`, ending in `.j2`, so the callback returned `False` for all
+  of them and no output was ever escaped; author-controlled YAML reached
+  HTML attributes raw. The templates already marked every intentional
+  raw-markup site `| safe`, which is what enabling escaping gives back.
+- The preview-data JSON embedded in each rendered page could be broken out
+  of its `<script id="preview-data">` element: `json.dumps` doesn't escape
+  `<` or `>`, so an item title containing `</script>` closed the element
+  at parse time and turned the rest of the title into live markup. `<`
+  and `>` are now escaped (`\u003c`/`\u003e`) at dump time -- valid JSON
+  escapes that `JSON.parse` decodes back to the original characters, so
+  the payload value is unchanged.
 
 ## [0.5.0] - 2026-08-21
 
