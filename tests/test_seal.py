@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import os
 
+from conftest import write_project_config
 from helpers import _build_at
 
 from refdes import build as build_mod
@@ -107,7 +108,7 @@ def test_build_migrates_legacy_seal_entries_into_the_boards_own_file(sealed_boar
     seal.save_seals(project, {"LOG-A-001": legacy_hash}, board="")
 
     # A fresh project, built once with seal_write=True -- a real `refdes build`.
-    project2 = load_project(config_path=str(sealed_board_project / "refdes.yaml"))
+    project2 = load_project(config_path=str(sealed_board_project / "refdes-project.yaml"))
     parse.load_items(project2)
     build_mod.build(project2, seal_write=True)
 
@@ -119,7 +120,7 @@ def _load_and_build(root, **kwargs):
     """Load and build in one pass with the given seal flags -- unlike
     `_build_at`, which always runs a default (no-reseal) build first, and so
     would record a violation before the caller's own flags ever applied."""
-    project = load_project(config_path=str(root / "refdes.yaml"))
+    project = load_project(config_path=str(root / "refdes-project.yaml"))
     parse.load_items(project)
     build_mod.build(project, **kwargs)
     return project
@@ -184,7 +185,8 @@ def test_a_renumbered_entry_claimed_by_former_ids_is_not_a_deletion(tmp_path):
     """`former_ids:` is exactly the mechanism for an id retired in favour of a
     new one, so its old seal entry has not been deleted -- the entry is still
     in the project, under a new name."""
-    (tmp_path / "refdes.yaml").write_text(
+    write_project_config(
+        tmp_path,
         "site: { title: T, out: _site }\n"
         "id: { width: 3 }\n"
         "types:\n"
@@ -193,7 +195,6 @@ def test_a_renumbered_entry_claimed_by_former_ids_is_not_a_deletion(tmp_path):
         "    append_only: true\n"
         "    fields:\n"
         "      summary: { type: text, required: true }\n",
-        encoding="utf-8",
     )
     (tmp_path / "items").mkdir()
     (tmp_path / "items" / "log.yaml").write_text(
@@ -216,11 +217,11 @@ def test_a_renumbered_entry_claimed_by_former_ids_is_not_a_deletion(tmp_path):
 
 
 def test_seal_storage_is_a_single_file_with_no_boards_registered(tmp_path):
-    (tmp_path / "refdes.yaml").write_text(
+    write_project_config(
+        tmp_path,
         "site: { title: T, out: _site }\n"
         "types:\n  log: { prefix: LOG, append_only: true, "
         "fields: { summary: { type: text, required: true } } }\n",
-        encoding="utf-8",
     )
     items = tmp_path / "items"
     items.mkdir()

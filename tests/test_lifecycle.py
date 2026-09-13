@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import os
 
+from conftest import write_project_config
 from helpers import LIFECYCLE_ITEMS, _check_severity_project, _lc_build, _pin_lifecycle_citation
 
 from refdes import build as build_mod
@@ -40,10 +41,12 @@ def test_unverified_requirements_disabled_by_default_for_release(lifecycle_proje
 
 
 def test_unverified_requirements_when_explicitly_enabled_excludes_draft(lifecycle_project):
-    (lifecycle_project / "refdes-project.yaml").write_text(
-        "release_gate:\n  unverified_requirements: { release: true }\n",
-        encoding="utf-8",
-    )
+    # Append: `refdes-project.yaml` is the marker holding site:/standard:/types:,
+    # so overwriting it would silently test a different project.
+    with (lifecycle_project / "refdes-project.yaml").open(
+        "a", encoding="utf-8"
+    ) as fh:
+        fh.write("release_gate:\n  unverified_requirements: { release: true }\n")
     project = _lc_build(lifecycle_project)
     results = {r.name: r for r in lifecycle.evaluate_gate(project, "release")}
     assert results["unverified_requirements"].offenders == ["REQ-001"]
@@ -142,17 +145,20 @@ def test_stamp_records_the_pinned_standard_version(tmp_path):
     """A baseline records `refdes_version` (the tool) but nothing said which
     *vocabulary* version produced its hashes -- revise.py needs this to know
     where to start migrating an existing baseline from."""
-    (tmp_path / "refdes.yaml").write_text(
-        "site: { title: T, out: _site }\n"
-        "standard: { base: hardware, version: 2, presets: [] }\n",
-        encoding="utf-8",
+    project = load_project(
+        config_path=str(
+            write_project_config(
+                tmp_path,
+                "site: { title: T, out: _site }\n"
+                "standard: { base: hardware, version: 2, presets: [] }\n",
+            )
+        )
     )
     (tmp_path / "items").mkdir()
     (tmp_path / "items" / "i.yaml").write_text(
         "items:\n  - id: REQ-001\n    type: requirement\n    text: A requirement.\n",
         encoding="utf-8",
     )
-    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
     parse.load_items(project)
     build_mod.build(project, seal_write=False, reseal=False, accept_board_move=False)
     assert project.standard_base == "hardware"
@@ -190,12 +196,15 @@ def test_baseline_written_before_this_field_existed_loads_as_none(tmp_path):
         "items: {}\n",
         encoding="utf-8",
     )
-    (tmp_path / "refdes.yaml").write_text(
-        "site: {title: t, out: _site}\n"
-        "types:\n  requirement: { prefix: REQ, fields: { text: { type: text } } }\n",
-        encoding="utf-8",
+    project = load_project(
+        config_path=str(
+            write_project_config(
+                tmp_path,
+                "site: {title: t, out: _site}\n"
+                "types:\n  requirement: { prefix: REQ, fields: { text: { type: text } } }\n",
+            )
+        )
     )
-    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
     baseline = lifecycle.load_baseline(project, "old")
     assert baseline.standard is None
 

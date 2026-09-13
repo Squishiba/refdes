@@ -6,6 +6,7 @@ Split out of the original monolithic tests/test_refdes.py.
 from __future__ import annotations
 
 import pytest
+from conftest import write_project_config
 
 from refdes import build as build_mod
 from refdes import cli as cli_mod
@@ -88,7 +89,7 @@ satisfies: [REQ-002]
 
 @pytest.fixture
 def stub_project(tmp_path):
-    (tmp_path / "refdes.yaml").write_text(STUB_SCHEMA, encoding="utf-8")
+    write_project_config(tmp_path, STUB_SCHEMA)
     items = tmp_path / "items"
     items.mkdir()
     for name, text in STUB_ITEMS.items():
@@ -97,7 +98,7 @@ def stub_project(tmp_path):
 
 
 def _stub_build(root):
-    project = load_project(config_path=str(root / "refdes.yaml"))
+    project = load_project(config_path=str(root / "refdes-project.yaml"))
     parse.load_items(project, require_ids=False)
     build_mod.build(project, seal_write=False, reseal=False)
     return project
@@ -229,11 +230,11 @@ def test_groups_by_board(stub_project):
 
 
 def test_no_verifier_type_is_an_error(tmp_path):
-    (tmp_path / "refdes.yaml").write_text(
+    write_project_config(
+        tmp_path,
         "site: {title: t, out: _site}\n"
         "types:\n  requirement: {prefix: REQ, coverable: true, "
         "fields: {text: {type: text, required: true}}}\n",
-        encoding="utf-8",
     )
     (tmp_path / "items").mkdir()
     (tmp_path / "items" / "req.md").write_text(
@@ -253,7 +254,7 @@ def test_ambiguous_verifier_type_requires_type_flag(stub_project):
         "    links:\n"
         "      verifies: [requirement]\n"
     )
-    (stub_project / "refdes.yaml").write_text(text, encoding="utf-8")
+    write_project_config(stub_project, text)
     project = _stub_build(stub_project)
     with pytest.raises(SchemaError, match="multiple types declare 'verifies'"):
         stub_tests_mod.generate(project)
@@ -270,7 +271,9 @@ def test_nothing_to_do_returns_empty_list(stub_project):
 
 
 def test_cli_stub_tests_end_to_end(stub_project, capsys):
-    status = cli_mod.main(["-c", str(stub_project / "refdes.yaml"), "stub-tests"])
+    status = cli_mod.main(
+        ["-c", str(stub_project / "refdes-project.yaml"), "stub-tests"]
+    )
     assert status == 0
     out = capsys.readouterr().out
     assert "wrote 2 stub test(s)" in out
@@ -282,16 +285,20 @@ def test_cli_stub_tests_refuses_when_the_project_has_errors(stub_project, capsys
     (stub_project / "items" / "broken.md").write_text(
         "---\nid: BAD-001\ntype: nonexistent\ntitle: t.\n---\n", encoding="utf-8"
     )
-    status = cli_mod.main(["-c", str(stub_project / "refdes.yaml"), "stub-tests"])
+    status = cli_mod.main(
+        ["-c", str(stub_project / "refdes-project.yaml"), "stub-tests"]
+    )
     assert status == 1
     assert not (stub_project / "items" / "power" / "stub-tests.md").exists()
 
 
 def test_cli_stub_tests_reports_nothing_to_do(stub_project, capsys):
-    cli_mod.main(["-c", str(stub_project / "refdes.yaml"), "stub-tests"])
+    cli_mod.main(["-c", str(stub_project / "refdes-project.yaml"), "stub-tests"])
     ids.allocate(_stub_build(stub_project))
     capsys.readouterr()
-    status = cli_mod.main(["-c", str(stub_project / "refdes.yaml"), "stub-tests"])
+    status = cli_mod.main(
+        ["-c", str(stub_project / "refdes-project.yaml"), "stub-tests"]
+    )
     assert status == 0
     out = capsys.readouterr().out
     assert "no coverable item is missing a verifying test" in out

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 
 import pytest
 from helpers import REPO, _build_at
@@ -56,12 +57,17 @@ def importing_project(tmp_path):
     (tmp_path / "upstream" / "items.json").write_text(
         json.dumps(UPSTREAM), encoding="utf-8"
     )
-    config = open(os.path.join(REPO, "refdes.yaml"), encoding="utf-8").read()
-    config += (
-        '\nimports:\n  - name: platform\n'
-        '    items: upstream/items.json\n    version: "2026.3"\n'
+    shutil.copy(
+        os.path.join(REPO, "refdes-project.yaml"), tmp_path / "refdes-project.yaml"
     )
-    (tmp_path / "refdes.yaml").write_text(config, encoding="utf-8")
+    shutil.copy(
+        os.path.join(REPO, "refdes-schema.yaml"), tmp_path / "refdes-schema.yaml"
+    )
+    with (tmp_path / "refdes-project.yaml").open("a", encoding="utf-8") as fh:
+        fh.write(
+            '\nimports:\n  - name: platform\n'
+            '    items: upstream/items.json\n    version: "2026.3"\n'
+        )
     items = tmp_path / "items" / "decisions"
     items.mkdir(parents=True)
     (items / "pins.md").write_text(BOARD_DECISION, encoding="utf-8")

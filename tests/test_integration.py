@@ -9,6 +9,7 @@ import os
 import shutil
 
 import pytest
+from conftest import write_project_config
 from helpers import CHECK_SEVERITY_SCHEMA, REPO, _build_at, _check_severity_project, _project
 
 from refdes import build as build_mod
@@ -29,7 +30,12 @@ def test_example_project_builds_and_catches_the_thermal_violation():
 
 def _io_check_project(tmp_path, *, tolerance):
     """A single toleranced (or exact) check violating a `<=` constraint."""
-    shutil.copy(os.path.join(REPO, "refdes.yaml"), tmp_path / "refdes.yaml")
+    shutil.copy(
+        os.path.join(REPO, "refdes-project.yaml"), tmp_path / "refdes-project.yaml"
+    )
+    shutil.copy(
+        os.path.join(REPO, "refdes-schema.yaml"), tmp_path / "refdes-schema.yaml"
+    )
     items = tmp_path / "items"
     items.mkdir()
     (items / "io.yaml").write_text(
@@ -115,9 +121,9 @@ def test_check_severity_rejects_an_unrecognized_value(tmp_path):
     bad_schema = CHECK_SEVERITY_SCHEMA.replace(
         "check_severity: info", "check_severity: nonsense"
     )
-    (tmp_path / "refdes.yaml").write_text(bad_schema, encoding="utf-8")
+    write_project_config(tmp_path, bad_schema)
     with pytest.raises(SchemaError, match="check_severity"):
-        load_project(config_path=str(tmp_path / "refdes.yaml"))
+        load_project(config_path=str(tmp_path / "refdes-project.yaml"))
 
 
 def test_check_severity_info_still_errors_on_a_malformed_check_entry(tmp_path):

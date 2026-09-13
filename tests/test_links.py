@@ -6,6 +6,7 @@ Split out of the original monolithic tests/test_refdes.py.
 from __future__ import annotations
 
 import pytest
+from conftest import write_project_config
 from helpers import COVERAGE_SCHEMA
 
 from refdes import build as build_mod
@@ -37,7 +38,7 @@ sattisfies: [REQ-A-001]
 
 @pytest.fixture
 def typo_link_project(tmp_path):
-    (tmp_path / "refdes.yaml").write_text(COVERAGE_SCHEMA, encoding="utf-8")
+    write_project_config(tmp_path, COVERAGE_SCHEMA)
     items = tmp_path / "items"
     items.mkdir()
     for name, text in TYPO_LINK_ITEMS.items():
@@ -47,7 +48,7 @@ def typo_link_project(tmp_path):
 
 def test_misspelled_link_key_errors_instead_of_silently_dropping(typo_link_project):
     """`sattisfies:` must fail the build, not warn while quietly losing the edge (#1 P1-3)."""
-    project = load_project(config_path=str(typo_link_project / "refdes.yaml"))
+    project = load_project(config_path=str(typo_link_project / "refdes-project.yaml"))
     parse.load_items(project)
 
     assert any(
@@ -71,7 +72,8 @@ def test_constraint_title_renamed_to_text_gives_a_specific_diagnostic(tmp_path):
     that hasn't migrated gets the *type* rename diagnostic instead (below).
     The field table stays, because a hand-rolled schema in this shape is
     exactly the other case its docstring says it covers."""
-    (tmp_path / "refdes.yaml").write_text(
+    write_project_config(
+        tmp_path,
         "site: { title: T, out: _site }\n"
         "types:\n"
         "  constraint:\n"
@@ -79,7 +81,6 @@ def test_constraint_title_renamed_to_text_gives_a_specific_diagnostic(tmp_path):
         "    fields:\n"
         "      text:  { type: text, required: true }\n"
         "      limit: { type: limit, required: true }\n",
-        encoding="utf-8",
     )
     (tmp_path / "items").mkdir()
     (tmp_path / "items" / "i.yaml").write_text(
@@ -88,7 +89,7 @@ def test_constraint_title_renamed_to_text_gives_a_specific_diagnostic(tmp_path):
         '    limit: "<= 1 W"\n',
         encoding="utf-8",
     )
-    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
     parse.load_items(project)
 
     rename_errors = [
@@ -113,10 +114,10 @@ def test_constraint_title_on_hardware_v1_is_unaffected(tmp_path):
     rename diagnostic must not fire -- confirming it's scoped to schemas
     where the rename actually applies, not fired unconditionally by type
     name alone."""
-    (tmp_path / "refdes.yaml").write_text(
+    write_project_config(
+        tmp_path,
         "site: { title: T, out: _site }\n"
         "standard: { base: hardware, version: 1, presets: [] }\n",
-        encoding="utf-8",
     )
     (tmp_path / "items").mkdir()
     (tmp_path / "items" / "i.yaml").write_text(
@@ -125,7 +126,7 @@ def test_constraint_title_on_hardware_v1_is_unaffected(tmp_path):
         '    limit: "<= 1 W"\n',
         encoding="utf-8",
     )
-    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
     parse.load_items(project)
     build_mod.build(project)
     assert not project.errors
@@ -135,7 +136,7 @@ def test_constraint_title_on_hardware_v1_is_unaffected(tmp_path):
 
 def test_unrecognized_field_far_from_any_link_still_only_warns(tmp_path):
     """A genuine unknown field with no close link name must keep warning, not error."""
-    (tmp_path / "refdes.yaml").write_text(COVERAGE_SCHEMA, encoding="utf-8")
+    write_project_config(tmp_path, COVERAGE_SCHEMA)
     items = tmp_path / "items"
     items.mkdir()
     (items / "dec-a.md").write_text(
@@ -150,7 +151,7 @@ completely_unrelated_nonsense: yes
 """,
         encoding="utf-8",
     )
-    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
     parse.load_items(project)
 
     assert any("completely_unrelated_nonsense" in d.message for d in project.warnings)
