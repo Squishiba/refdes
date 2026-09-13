@@ -72,6 +72,16 @@ stayed clean (nothing dirty before or after).
   surrogate-keys section (other than the header commit hash in the intro).
 - Any code, test, or CHANGELOG file.
 
+## Verification
+
+- `python -m pytest tests/ -q` → **663 passed** in 24.32s (no code changed).
+- `git status --short` after editing → exactly `docs/design/backlog.md` and
+  this log.
+- Every file:line reference in the three entries was checked against the
+  tree before writing (details above); the two commit hashes cited in entry
+  31 (`5a1f212`, `b88f2f1`) were confirmed in `git log` of `main`.
+
 ## Status
 
-Finished pending verification below.
+Finished. Committed as `3facda0` (design: record three findings from this
+session's code review). Not pushed.
