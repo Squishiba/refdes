@@ -177,10 +177,15 @@ MULTI_ARG = {"min", "max"}
 
 # A bare unit may only follow a numeric literal, and contains no whitespace.
 # Segments are joined with '/' or '·'; exponents use '^'.
+# Ω, µ (U+00B5), μ (U+03BC) and ° are legal anywhere in a segment, not just
+# first: prefixed resistances (`kΩ`, `MΩ`) put Ω after the prefix, which is the
+# normal spelling. `%` is its own alternative in the run, not a segment
+# character, so `85 %` reads as a percent quantity without letting `%` leak
+# into the middle of an ordinary unit.
 # Brackets are the escape hatch: `0.5 [h]` is unambiguously half an hour even when
 # a variable named `h` is in scope, and anything goes inside them.
-_SEGMENT = r"[A-Za-zΩµμ°][A-Za-z0-9_]*(?:\^-?\d+)?"
-_UNIT_RUN = rf"{_SEGMENT}(?:[/·]{_SEGMENT})*"
+_SEGMENT = r"[A-Za-zΩµμ°][A-Za-z0-9_Ωµμ°]*(?:\^-?\d+)?"
+_UNIT_RUN = rf"(?:{_SEGMENT}(?:[/·]{_SEGMENT})*|%)"
 _NUMBER = r"\d+(?:\.\d+)?(?:[eE][-+]?\d+)?"
 QUANTITY_RE = re.compile(
     rf"(?<![A-Za-z0-9_.])({_NUMBER})\s*(?:\[\s*([^\]]+?)\s*\]|({_UNIT_RUN}))?"
@@ -349,7 +354,9 @@ def evaluate(expression: str, env: dict[str, Value]) -> Value:
     try:
         tree = ast.parse(source, mode="eval")
     except SyntaxError as exc:
-        raise CalcError(f"could not parse expression: {exc.msg}") from exc
+        raise CalcError(
+            f"could not parse expression {expression!r}: {exc.msg}"
+        ) from exc
     return _eval_node(tree, env)
 
 

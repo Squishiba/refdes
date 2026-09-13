@@ -60,6 +60,48 @@ def test_compound_unit_segments_are_never_ambiguous():
     assert outcomes[1].warning is None
 
 
+def test_prefixed_ohm_parses_not_just_a_bare_ohm():
+    """Backlog finding 18: Ω was only in the unit pattern's leading character
+    class, so `kΩ` and `MΩ` -- the normal spelling for resistances -- failed
+    while a bare `Ω` parsed."""
+    env = {}
+    outcomes = calc.evaluate_block("R1 = 4.7 kΩ\nR2 = 10 MΩ", env)
+    assert [o.error for o in outcomes] == [None, None]
+    assert env["R1"].nom.to("ohm").magnitude == pytest.approx(4700.0)
+    assert env["R2"].nom.to("ohm").magnitude == pytest.approx(1.0e7)
+
+
+def test_percent_parses_outside_a_tolerance():
+    """Backlog finding 18: `%` was only reachable through the tolerance
+    pre-parse, so `85 %` failed with a raw Python syntax error."""
+    env = {}
+    outcomes = calc.evaluate_block("d = 85 %", env)
+    assert outcomes[0].error is None
+    assert env["d"].nom.to("dimensionless").magnitude == pytest.approx(0.85)
+
+
+def test_percent_scales_a_quantity():
+    env = {}
+    outcomes = calc.evaluate_block("drop = 100 V * 5 %", env)
+    assert outcomes[0].error is None
+    assert env["drop"].nom.to("V").magnitude == pytest.approx(5.0)
+
+
+def test_percent_tolerance_still_routes_through_the_percent_form():
+    """The tolerance pre-parse must keep winning for `± 15%`: it means 15% of
+    the value, not 15 percent-units added to it."""
+    v = calc.evaluate_assignment("12 V ± 15%", {})
+    assert v.nom.to("V").magnitude == pytest.approx(12.0)
+    assert v.lo.to("V").magnitude == pytest.approx(10.2)
+    assert v.hi.to("V").magnitude == pytest.approx(13.8)
+
+
+def test_malformed_unit_error_names_the_expression():
+    with pytest.raises(calc.CalcError) as exc:
+        calc.parse_quantity("3.3 V/")
+    assert "3.3 V/" in str(exc.value)
+
+
 @pytest.mark.parametrize(
     "source,expected",
     [("x = 1.4 inch", "1.4 in"), ("x = 0.5 h", "0.5 h"), ("x = 12 V", "12 V")],
