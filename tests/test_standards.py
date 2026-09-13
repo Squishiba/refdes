@@ -9,6 +9,7 @@ import os
 
 import pytest
 import yaml
+from conftest import write_project_config
 from helpers import _build_at
 
 from refdes import build as build_mod
@@ -27,21 +28,21 @@ def test_standard_none_is_identical_to_omitting_standard(tmp_path):
         "standard: none\n"
         "types:\n  requirement: { prefix: REQ, fields: { text: { type: text } } }\n"
     )
-    (a / "refdes.yaml").write_text(schema, encoding="utf-8")
-    (b / "refdes.yaml").write_text(schema.replace("standard: none\n", ""), encoding="utf-8")
-    pa = load_project(config_path=str(a / "refdes.yaml"))
-    pb = load_project(config_path=str(b / "refdes.yaml"))
+    write_project_config(a, schema)
+    write_project_config(b, schema.replace("standard: none\n", ""))
+    pa = load_project(config_path=str(a / "refdes-project.yaml"))
+    pb = load_project(config_path=str(b / "refdes-project.yaml"))
     assert set(pa.types) == set(pb.types) == {"requirement"}
     assert pa.link_types == pb.link_types
 
 
 def test_standard_hardware_v1_resolves_the_six_types(tmp_path):
-    (tmp_path / "refdes.yaml").write_text(
+    write_project_config(
+        tmp_path,
         "site: { title: T, out: _site }\n"
         "standard: { base: hardware, version: 1, presets: [] }\n",
-        encoding="utf-8",
     )
-    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
     assert set(project.types) == {
         "requirement", "constraint", "decision", "test", "component", "log",
     }
@@ -59,12 +60,12 @@ def test_standard_hardware_v2_carries_the_whole_v1_delta(tmp_path):
     `equivalent`/`alternate` restricted to components. They were developed as
     three internal steps and never published separately, so they ship as one
     version rather than three."""
-    (tmp_path / "refdes.yaml").write_text(
+    write_project_config(
+        tmp_path,
         "site: { title: T, out: _site }\n"
         "standard: { base: hardware, version: 2, presets: [] }\n",
-        encoding="utf-8",
     )
-    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
     assert "constraint" not in project.types
 
     bound = project.types["bound"]
@@ -92,12 +93,12 @@ def test_standard_hardware_v2_carries_the_whole_v1_delta(tmp_path):
 
 def test_standard_hardware_v1_still_has_constraint_title(tmp_path):
     """v1 must stay byte-identical forever -- adding v2 must not touch it."""
-    (tmp_path / "refdes.yaml").write_text(
+    write_project_config(
+        tmp_path,
         "site: { title: T, out: _site }\n"
         "standard: { base: hardware, version: 1, presets: [] }\n",
-        encoding="utf-8",
     )
-    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
     constraint = project.types["constraint"]
     assert "title" in constraint.fields
     assert "text" not in constraint.fields
@@ -108,12 +109,12 @@ def test_hardware_v3_decision_declares_recorded_by_and_the_link_resolves(tmp_pat
     """A sealed log can never point forward at a decision written after it, so
     the decision carries the `recorded_by:` end of the existing records/
     recorded_by pair (backlog finding 16)."""
-    (tmp_path / "refdes.yaml").write_text(
+    write_project_config(
+        tmp_path,
         "site: { title: T, out: _site }\n"
         "standard: { base: hardware, version: 3, presets: [] }\n",
-        encoding="utf-8",
     )
-    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
     assert project.types["decision"].links["recorded_by"] == ["log"]
 
     (tmp_path / "items").mkdir()
@@ -132,42 +133,42 @@ def test_hardware_v3_decision_declares_recorded_by_and_the_link_resolves(tmp_pat
 
 
 def test_standard_version_must_be_a_pinned_integer(tmp_path):
-    (tmp_path / "refdes.yaml").write_text(
+    write_project_config(
+        tmp_path,
         "site: { title: T, out: _site }\n"
         "standard: { base: hardware, version: latest, presets: [] }\n",
-        encoding="utf-8",
     )
     with pytest.raises(SchemaError, match="pinned integer"):
-        load_project(config_path=str(tmp_path / "refdes.yaml"))
+        load_project(config_path=str(tmp_path / "refdes-project.yaml"))
 
 
 def test_standard_unknown_base_is_rejected(tmp_path):
-    (tmp_path / "refdes.yaml").write_text(
+    write_project_config(
+        tmp_path,
         "site: { title: T, out: _site }\n"
         "standard: { base: nope, version: 1, presets: [] }\n",
-        encoding="utf-8",
     )
     with pytest.raises(SchemaError, match="standard.base must be one of"):
-        load_project(config_path=str(tmp_path / "refdes.yaml"))
+        load_project(config_path=str(tmp_path / "refdes-project.yaml"))
 
 
 def test_pinning_a_version_that_does_not_exist_is_a_clear_error(tmp_path):
-    (tmp_path / "refdes.yaml").write_text(
+    write_project_config(
+        tmp_path,
         "site: { title: T, out: _site }\n"
         "standard: { base: hardware, version: 99, presets: [] }\n",
-        encoding="utf-8",
     )
     with pytest.raises(SchemaError, match="standard.version 99 does not exist"):
-        load_project(config_path=str(tmp_path / "refdes.yaml"))
+        load_project(config_path=str(tmp_path / "refdes-project.yaml"))
 
 
 def test_design_debate_preset_adds_its_types(tmp_path):
-    (tmp_path / "refdes.yaml").write_text(
+    write_project_config(
+        tmp_path,
         "site: { title: T, out: _site }\n"
         "standard: { base: hardware, version: 1, presets: [design-debate] }\n",
-        encoding="utf-8",
     )
-    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
     assert {"debate", "option", "claim", "position"} <= set(project.types)
     assert project.types["option"].check_severity == "info"
 
@@ -224,7 +225,8 @@ def test_two_presets_colliding_with_each_other_is_a_hard_error(tmp_path, monkeyp
 
 
 def test_overlay_adds_field_removes_field_and_redeclares_enum(tmp_path):
-    (tmp_path / "refdes.yaml").write_text(
+    write_project_config(
+        tmp_path,
         "site: { title: T, out: _site }\n"
         "standard: { base: hardware, version: 1, presets: [] }\n"
         "types:\n"
@@ -234,9 +236,8 @@ def test_overlay_adds_field_removes_field_and_redeclares_enum(tmp_path):
         "      rationale: null\n"
         "      status: { type: enum, choices: [draft, active, retired, deprecated],\n"
         "                default: draft, on_change: invalidate }\n",
-        encoding="utf-8",
     )
-    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
     req = project.types["requirement"]
     assert "erratum_ref" in req.fields
     assert "rationale" not in req.fields
@@ -245,7 +246,8 @@ def test_overlay_adds_field_removes_field_and_redeclares_enum(tmp_path):
 
 
 def test_overlay_adds_a_brand_new_type_alongside_the_standard(tmp_path):
-    (tmp_path / "refdes.yaml").write_text(
+    write_project_config(
+        tmp_path,
         "site: { title: T, out: _site }\n"
         "standard: { base: hardware, version: 1, presets: [] }\n"
         "types:\n"
@@ -253,23 +255,22 @@ def test_overlay_adds_a_brand_new_type_alongside_the_standard(tmp_path):
         "    prefix: WID\n"
         "    fields:\n"
         "      name: { type: text, required: true }\n",
-        encoding="utf-8",
     )
-    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
     assert "widget" in project.types
     assert "requirement" in project.types  # the standard's own types are untouched
 
 
 def test_removing_a_type_something_still_targets_is_a_load_error(tmp_path):
-    (tmp_path / "refdes.yaml").write_text(
+    write_project_config(
+        tmp_path,
         "site: { title: T, out: _site }\n"
         "standard: { base: hardware, version: 1, presets: [] }\n"
         "types:\n"
         "  component: null\n",
-        encoding="utf-8",
     )
     with pytest.raises(SchemaError, match="selects.*'component'"):
-        load_project(config_path=str(tmp_path / "refdes.yaml"))
+        load_project(config_path=str(tmp_path / "refdes-project.yaml"))
 
 
 FALLBACK_COVERAGE_SCHEMA = """\
@@ -314,7 +315,7 @@ def test_coverable_fallback_warns_once_per_type_and_keeps_requirement_only_asymm
     """No type here declares `coverable:`, so both requirement and constraint
     fall back to the old name-based convention -- but only requirement keeps
     getting the per-item warnings, exactly like before `coverable:` existed."""
-    (tmp_path / "refdes.yaml").write_text(FALLBACK_COVERAGE_SCHEMA, encoding="utf-8")
+    write_project_config(tmp_path, FALLBACK_COVERAGE_SCHEMA)
     (tmp_path / "items").mkdir()
     (tmp_path / "items" / "i.yaml").write_text(FALLBACK_COVERAGE_ITEMS, encoding="utf-8")
     project = _build_at(tmp_path)
@@ -341,7 +342,7 @@ def test_explicit_coverable_extends_warnings_beyond_the_fallback_names(tmp_path)
         "  constraint:\n    prefix: CON\n",
         "  constraint:\n    prefix: CON\n    coverable: true\n",
     )
-    (tmp_path / "refdes.yaml").write_text(schema, encoding="utf-8")
+    write_project_config(tmp_path, schema)
     (tmp_path / "items").mkdir()
     (tmp_path / "items" / "i.yaml").write_text(FALLBACK_COVERAGE_ITEMS, encoding="utf-8")
     project = _build_at(tmp_path)
@@ -357,7 +358,8 @@ def test_explicit_coverable_extends_warnings_beyond_the_fallback_names(tmp_path)
 
 
 def test_coverable_statuses_excludes_unlisted_statuses_entirely(tmp_path):
-    (tmp_path / "refdes.yaml").write_text(
+    write_project_config(
+        tmp_path,
         "site: { title: T, out: _site }\n"
         "types:\n"
         "  requirement:\n"
@@ -367,7 +369,6 @@ def test_coverable_statuses_excludes_unlisted_statuses_entirely(tmp_path):
         "    fields:\n"
         "      text:   { type: text, required: true }\n"
         "      status: { type: enum, choices: [draft, active, retired], default: draft }\n",
-        encoding="utf-8",
     )
     (tmp_path / "items").mkdir()
     (tmp_path / "items" / "i.yaml").write_text(
@@ -386,7 +387,8 @@ def test_explicit_null_enum_field_gets_default_applied_and_reported(tmp_path):
     the enum check the way it silently did before -- it should behave exactly like
     an absent key: get the default, and say so, rather than being treated as an
     already-resolved value with nothing to check."""
-    (tmp_path / "refdes.yaml").write_text(
+    write_project_config(
+        tmp_path,
         "site: { title: T, out: _site }\n"
         "types:\n"
         "  requirement:\n"
@@ -396,7 +398,6 @@ def test_explicit_null_enum_field_gets_default_applied_and_reported(tmp_path):
         "    fields:\n"
         "      text:   { type: text, required: true }\n"
         "      status: { type: enum, choices: [draft, active, retired], default: draft }\n",
-        encoding="utf-8",
     )
     (tmp_path / "items").mkdir()
     (tmp_path / "items" / "i.yaml").write_text(
@@ -415,7 +416,8 @@ def test_explicit_null_enum_field_gets_default_applied_and_reported(tmp_path):
 
 
 def test_verifying_statuses_filters_which_links_count_as_verified(tmp_path):
-    (tmp_path / "refdes.yaml").write_text(
+    write_project_config(
+        tmp_path,
         "site: { title: T, out: _site }\n"
         "link_types:\n"
         "  verifies: { inverse: verified_by, label: Verifies }\n"
@@ -433,7 +435,6 @@ def test_verifying_statuses_filters_which_links_count_as_verified(tmp_path):
         "      status: { type: enum, choices: [planned, passing], default: planned }\n"
         "    links:\n"
         "      verifies: [requirement]\n",
-        encoding="utf-8",
     )
     (tmp_path / "items").mkdir()
     (tmp_path / "items" / "i.yaml").write_text(
@@ -454,7 +455,8 @@ def test_verifying_statuses_filters_which_links_count_as_verified(tmp_path):
 
 
 def test_field_sets_include_expands_with_own_fields_winning(tmp_path):
-    (tmp_path / "refdes.yaml").write_text(
+    write_project_config(
+        tmp_path,
         "site: { title: T, out: _site }\n"
         "field_sets:\n"
         "  provenance:\n"
@@ -467,16 +469,16 @@ def test_field_sets_include_expands_with_own_fields_winning(tmp_path):
         "    fields:\n"
         "      text:   { type: text, required: true }\n"
         "      source: { type: text, on_change: invalidate }\n",
-        encoding="utf-8",
     )
-    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
     req = project.types["requirement"]
     assert "tags" in req.fields
     assert req.fields["source"].on_change == "invalidate"  # own field beats the include
 
 
 def test_include_unknown_field_set_errors_at_load(tmp_path):
-    (tmp_path / "refdes.yaml").write_text(
+    write_project_config(
+        tmp_path,
         "site: { title: T, out: _site }\n"
         "types:\n"
         "  requirement:\n"
@@ -484,10 +486,9 @@ def test_include_unknown_field_set_errors_at_load(tmp_path):
         "    include: [nope]\n"
         "    fields:\n"
         "      text: { type: text, required: true }\n",
-        encoding="utf-8",
     )
     with pytest.raises(SchemaError, match="unknown field_set 'nope'"):
-        load_project(config_path=str(tmp_path / "refdes.yaml"))
+        load_project(config_path=str(tmp_path / "refdes-project.yaml"))
 
 
 REQUIRED_WHEN_SCHEMA = """\
@@ -503,7 +504,7 @@ types:
 
 
 def test_required_when_enforces_only_when_the_condition_matches(tmp_path):
-    (tmp_path / "refdes.yaml").write_text(REQUIRED_WHEN_SCHEMA, encoding="utf-8")
+    write_project_config(tmp_path, REQUIRED_WHEN_SCHEMA)
     (tmp_path / "items").mkdir()
     (tmp_path / "items" / "i.yaml").write_text(
         "items:\n"
@@ -523,7 +524,8 @@ def test_required_when_enforces_only_when_the_condition_matches(tmp_path):
 
 
 def test_required_when_links_condition(tmp_path):
-    (tmp_path / "refdes.yaml").write_text(
+    write_project_config(
+        tmp_path,
         "site: { title: T, out: _site }\n"
         "link_types:\n"
         "  alternate: { inverse: alternate, label: Alternate }\n"
@@ -535,7 +537,6 @@ def test_required_when_links_condition(tmp_path):
         "      rationale: { type: text, required_when: { links: alternate } }\n"
         "    links:\n"
         "      alternate: []\n",
-        encoding="utf-8",
     )
     (tmp_path / "items").mkdir()
     (tmp_path / "items" / "i.yaml").write_text(
@@ -551,21 +552,22 @@ def test_required_when_links_condition(tmp_path):
 
 
 def test_required_when_dangling_enum_value_errors_at_load(tmp_path):
-    (tmp_path / "refdes.yaml").write_text(
+    write_project_config(
+        tmp_path,
         "site: { title: T, out: _site }\n"
         "standard: { base: hardware, version: 1, presets: [] }\n"
         "types:\n"
         "  decision:\n"
         "    fields:\n"
         "      status: { type: enum, choices: [proposed, accepted], default: proposed }\n",
-        encoding="utf-8",
     )
     with pytest.raises(SchemaError, match="not among status's declared choices"):
-        load_project(config_path=str(tmp_path / "refdes.yaml"))
+        load_project(config_path=str(tmp_path / "refdes-project.yaml"))
 
 
 def test_required_when_and_required_together_is_a_load_error(tmp_path):
-    (tmp_path / "refdes.yaml").write_text(
+    write_project_config(
+        tmp_path,
         "site: { title: T, out: _site }\n"
         "types:\n"
         "  widget:\n"
@@ -573,36 +575,36 @@ def test_required_when_and_required_together_is_a_load_error(tmp_path):
         "    fields:\n"
         "      x: { type: text, required: true, required_when: { y: z } }\n"
         "      y: { type: enum, choices: [z], default: z }\n",
-        encoding="utf-8",
     )
     with pytest.raises(SchemaError, match="both 'required: true' and 'required_when:'"):
-        load_project(config_path=str(tmp_path / "refdes.yaml"))
+        load_project(config_path=str(tmp_path / "refdes-project.yaml"))
 
 
 def test_required_when_unknown_link_errors_at_load(tmp_path):
-    (tmp_path / "refdes.yaml").write_text(
+    write_project_config(
+        tmp_path,
         "site: { title: T, out: _site }\n"
         "types:\n"
         "  widget:\n"
         "    prefix: WID\n"
         "    fields:\n"
         "      rationale: { type: text, required_when: { links: nope } }\n",
-        encoding="utf-8",
     )
     with pytest.raises(SchemaError, match="not a declared link"):
-        load_project(config_path=str(tmp_path / "refdes.yaml"))
+        load_project(config_path=str(tmp_path / "refdes-project.yaml"))
 
 
 def test_require_rejection_rationale_false_drops_the_condition(tmp_path):
-    (tmp_path / "refdes.yaml").write_text(
+    config = write_project_config(
+        tmp_path,
         "site: { title: T, out: _site }\n"
         "standard: { base: hardware, version: 1, presets: [] }\n",
-        encoding="utf-8",
     )
-    (tmp_path / "refdes-project.yaml").write_text(
-        "require_rejection_rationale: false\n", encoding="utf-8"
-    )
-    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    # Appended, not overwritten: refdes-project.yaml is the marker holding the
+    # standard too, so a second write here would drop it.
+    with config.open("a", encoding="utf-8") as fh:
+        fh.write("require_rejection_rationale: false\n")
+    project = load_project(config_path=str(config))
     assert project.types["decision"].fields["rationale"].required_when is None
 
 
@@ -617,7 +619,7 @@ GROUP_SCHEMA = (
 def _group_project(tmp_path, extra_items=""):
     """A hardware@3 project with one group and one active requirement that
     declares itself `part_of` it, plus any extra items the test needs."""
-    (tmp_path / "refdes.yaml").write_text(GROUP_SCHEMA, encoding="utf-8")
+    write_project_config(tmp_path, GROUP_SCHEMA)
     (tmp_path / "items").mkdir()
     (tmp_path / "items" / "i.yaml").write_text(
         "items:\n"
@@ -632,8 +634,8 @@ def _group_project(tmp_path, extra_items=""):
 
 
 def test_group_is_declared_and_not_coverable(tmp_path):
-    (tmp_path / "refdes.yaml").write_text(GROUP_SCHEMA, encoding="utf-8")
-    project = load_project(config_path=str(tmp_path / "refdes.yaml"))
+    write_project_config(tmp_path, GROUP_SCHEMA)
+    project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
     group = project.types["group"]
     assert group.prefix == "GRP"
     assert group.coverable is False
