@@ -27,7 +27,7 @@ python -m venv .venv && ./.venv/Scripts/python.exe -m pip install -e .
 ## Commands
 
 ```bash
-refdes init      # write a minimal refdes.yaml pointing at the standard library
+refdes init      # write a minimal refdes-project.yaml pointing at the standard library
 refdes build     # render _site/ and items.json
 refdes check     # validate without rendering; non-zero exit on errors
 refdes index     # print items.json to stdout, for tooling
@@ -184,8 +184,10 @@ Every field declares what a change to it means:
 | `ignore` | no | no | no |
 
 The timeline column is design intent for the parked git-history layer, so
-`log` and `ignore` behave identically today. Set per field in `refdes.yaml`,
-overridable per item (with a required `reason:`). The content hash is computed over `invalidate` fields only, which is
+`log` and `ignore` behave identically today. Set per field in the schema (a
+project's own fields in `refdes-schema.yaml`; the project-wide default in
+`history:` in `refdes-project.yaml`), overridable per item (with a required
+`reason:`). The content hash is computed over `invalidate` fields only, which is
 what stops an owner change from marking fifty links suspect.
 
 `refdes audit` lists everything currently suppressed. Suppression is allowed;
@@ -286,8 +288,9 @@ build warns when an item's id prefix does not contain it — a lint, not a
 rename. `.refdes/boards.yaml` records which board each item was on at the last
 build (commit it, the same as `.refdes/ids.yaml`); moving a file into a
 different board's folder warns on the next build instead of silently
-re-scoping it. This repo's own [`items/`](items/) and [`refdes.yaml`](refdes.yaml)
-register two boards as a worked example. See [multiple boards](docs/multi-board.md)
+re-scoping it. This repo's own [`items/`](items/) and
+[`refdes-project.yaml`](refdes-project.yaml) register two boards as a worked
+example. See [multiple boards](docs/multi-board.md)
 for the rest, including per-board token linting and drift acceptance.
 
 When boards need to ship, version, or be owned separately, split them into projects

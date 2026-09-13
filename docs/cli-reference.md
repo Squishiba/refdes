@@ -6,7 +6,7 @@ refdes [-c CONFIG] {build,check,revision,release,index,ls,id,fetch,audit,init,ne
 
 | Global option | Effect |
 |---|---|
-| `-c`, `--config PATH` | Use this `refdes.yaml`. Default: search upward from the current directory. |
+| `-c`, `--config PATH` | Use this `refdes-project.yaml`. Default: search upward from the current directory. |
 
 Exit codes: `0` success, `1` errors found, `2` configuration error.
 
@@ -390,7 +390,7 @@ never appears there rather than showing up empty.
 
 ## `refdes init`
 
-Write a minimal `refdes.yaml` in the current directory, plus
+Write a minimal `refdes-project.yaml` in the current directory, plus
 `.vscode/settings.json`. See [the standard library](standard-library.md#refdes-init).
 
 | Option | Effect |
@@ -404,7 +404,7 @@ refdes init --standard none
 refdes init --preset design-debate
 ```
 
-Refuses to run if `refdes.yaml` already exists in the current directory.
+Refuses to run if `refdes-project.yaml` already exists in the current directory.
 
 ---
 
@@ -496,7 +496,7 @@ Upgrading across several versions chains each intervening one's own
 migration, in order — `v1→v2`, then `v2→v3`, and so on — never merged into
 one combined rename, so a name a later version reuses (freed up by an
 earlier step) is never mistaken for a collision. Each step rewrites item
-files, bumps `standard.version:` in `refdes.yaml`, and carries the affected
+files, bumps `standard.version:` in `refdes-project.yaml`, and carries the affected
 items' content hashes forward in every stamped baseline and seal file, the
 same way `refdes revise` does (below) — see there for what that buys you.
 A baseline stamped before it recorded which standard version it started at
@@ -563,9 +563,9 @@ targeting the same new one, or a target name already in use) is refused
 up front; a rename the rewrite can't locate, or that leaves the rewritten
 project invalid, is refused and rolled back completely, never partially
 applied. A type or required-field rename needs the schema to move with
-the data — `revise` alone only touches item files, never `refdes.yaml`'s
+the data — `revise` alone only touches item files, never `refdes-schema.yaml`'s
 own `types:`/`link_types:` — so on a hand-rolled schema, pair the rename
-with your own edit to `refdes.yaml` (in whichever order makes both sides
+with your own edit to `refdes-schema.yaml` (in whichever order makes both sides
 agree once both are done).
 
 **Structured references move; prose does not.** A link's own target list —

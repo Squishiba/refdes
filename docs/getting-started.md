@@ -17,7 +17,8 @@ On macOS or Linux the interpreter is `.venv/bin/python`. Everything below assume
 
 ## 1. Create the project
 
-A project is any folder containing `refdes.yaml`.
+A project is any folder containing `refdes-project.yaml` — the file is the
+project marker, and it holds every project setting.
 
 ```bash
 mkdir my-board && cd my-board
@@ -44,17 +45,19 @@ That's the whole file `refdes init` writes — rename the title to taste.
 never the literal word `"latest"` — a later `refdes` may write a higher
 number here; that's expected, not a sign this page is out of date. Nothing
 here defines a `requirement` or a `link_types:` block — that all comes from
-the pinned standard, resolved live from the installed `refdes` package. See
-[the standard library](standard-library.md) for what it covers, and `refdes
-init --standard none` if you'd rather author every type by hand, as every
-project did before this existed. `init` also writes `.vscode/settings.json`,
-wiring up field/link completion for `items/**/*.yaml` files if you're using
-VS Code — see [editor
+the pinned standard, resolved live from the installed `refdes` package. If
+you define types of your own, they go in an optional `refdes-schema.yaml`
+beside this file — that one holds only `types:`, `link_types:`, and
+`field_sets:`. See [the standard library](standard-library.md) for what it
+covers, and `refdes init --standard none` if you'd rather author every type
+by hand, as every project did before this existed. `init` also writes
+`.vscode/settings.json`, wiring up field/link completion for
+`items/**/*.yaml` files if you're using VS Code — see [editor
 support](standard-library.md#editor-support-json-schema-emission).
 
 ```
 my-board/
-  refdes.yaml
+  refdes-project.yaml
   .vscode/settings.json
   items/
 ```
