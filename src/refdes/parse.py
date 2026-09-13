@@ -26,8 +26,10 @@ FENCE_RE = re.compile(r"^---[ \t]*$")
 # to be read as a new item's front-matter rather than a literal horizontal rule.
 KEY_LINE_RE = re.compile(r"^[A-Za-z_][\w.-]*\s*:(\s|$)")
 # `body` is the markdown body, not a field. In a .md file it is the text after the
-# front-matter; in a list file it is a `body:` key, so a running log can be written
-# as a list without one file per daily entry.
+# front-matter; in a list file it is a `body:` key. A .md file already holds many
+# items sharing one `defaults:` block, so the tradeoff is not file count but whether
+# an entry carries prose: a bare date+summary log entry is fine as a list entry, one
+# carrying a prose body belongs in .md.
 RESERVED = {"id", "type", "history", "body", "former_ids", "key"}
 # Reserved, but only when the item's own type does not already declare a field of
 # the same name -- so a schema that predates one of these keys keeps working

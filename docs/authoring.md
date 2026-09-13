@@ -34,8 +34,10 @@ A file with more than one type in it — see [Sections](#sections) below.
 
 ### Bodies in list files
 
-Use a `body:` key with a YAML block scalar. This is what makes a running log
-practical without one file per entry:
+Use a `body:` key with a YAML block scalar. A `.md` file already holds many items
+sharing one `defaults:` block, so the tradeoff is not file count but whether an
+entry carries prose: a bare date-and-summary log entry is fine as a list entry,
+one with a paragraph to it belongs in `.md`, and `body:` covers the middle.
 
 ```yaml
 items:
