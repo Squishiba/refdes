@@ -110,7 +110,12 @@ NUMERIC_HINT_SCHEMA = (
 
 
 def _numeric_hint_project(tmp_path, items_yaml):
-    (tmp_path / "refdes.yaml").write_text(NUMERIC_HINT_SCHEMA, encoding="utf-8")
+    # Local import: conftest imports this module at module level, so importing
+    # conftest back at module level here would be a cycle. By call time pytest
+    # has fully loaded conftest, so this resolves cleanly.
+    from conftest import write_project_config
+
+    write_project_config(tmp_path, NUMERIC_HINT_SCHEMA)
     items = tmp_path / "items"
     items.mkdir()
     (items / "r.yaml").write_text(items_yaml, encoding="utf-8")
@@ -200,7 +205,12 @@ types:
 
 def _check_severity_project(tmp_path, *, item_type, item_id, prefix, checks_extra=""):
     """One item of `item_type`, with a failing check against CON-IO-004."""
-    (tmp_path / "refdes.yaml").write_text(CHECK_SEVERITY_SCHEMA, encoding="utf-8")
+    # Local import: conftest imports this module at module level, so importing
+    # conftest back at module level here would be a cycle. By call time pytest
+    # has fully loaded conftest, so this resolves cleanly.
+    from conftest import write_project_config
+
+    write_project_config(tmp_path, CHECK_SEVERITY_SCHEMA)
     items = tmp_path / "items"
     items.mkdir()
     (items / "con.yaml").write_text(
