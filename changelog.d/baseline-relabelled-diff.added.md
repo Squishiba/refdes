@@ -1,0 +1,1 @@
+- Baseline diffs now report display-id renames as `relabelled` when the baseline and current item share a surrogate key, instead of reporting a removal and addition.

@@ -907,20 +907,23 @@ above): nothing here depends on taste or an unsettled tradeoff.
 ## Surrogate keys — remaining layers
 
 `docs/design/keys.md` §1 (key format), §2 (minting), §3 (composite
-expansion, display-half refresh, and key-based resolution), §5 (hashing on
-the key, plus the baseline/seal hash-format migration), and §6 Layers 1-5
-(well-formedness, uniqueness, unknown-key resolution, the latest-baseline
-lint, and the informational audit of older baselines) are implemented — see
-that document's own implementation-status header for the module list.
+expansion, display-half refresh, and key-based resolution), §5 (key-based
+hashing, hash-format migration, dual-shape readers, conditional storage
+conversion planning, relabelled diffs, and key-stable seal verification),
+and §6 Layers 1-5 (well-formedness, uniqueness, unknown-key resolution, the
+latest-baseline lint, and the informational audit of older baselines) are
+implemented — see that document's own implementation-status header for the
+module list. New stamps and seals conservatively retain display-id-keyed
+storage until explicit adoption.
 
-**Status: partially implemented.** The full corruption lint (§6 Layers 1-5)
-is implemented. What's decided but not yet built:
+**Status: partially implemented.** What's decided but not yet built:
 
-- **`refdes keys adopt` (§7)** — one explicit, transactional command for an
-  existing project: mint every key, expand every link reference to
-  composite form, re-key baselines and seals under §5(c)'s conditional
-  carry-forward rule, reusing `revise.apply`'s existing compute-in-memory/
-  verify/write-or-roll-back safety model wholesale.
+- **`refdes keys adopt` (§7)** — wire the implemented minting, composite
+  expansion, and `keys.plan_surrogate_storage()` conversion plan into one
+  explicit transaction; write the planned key-keyed baselines and seals
+  only after the reloaded project verifies as clean, using
+  `revise.apply`'s existing compute-in-memory/verify/write-or-roll-back
+  safety model.
 - **The subtractive cleanup in `revise.py`/`former_ids.py` (§4)** — roughly
   166 lines of `revise.py`'s prefix-rename machinery (`_rewrite_reference_ids`,
   `_rewrite_block_sequence`, `_rewrite_id_tokens`, `_rename_prefix`,

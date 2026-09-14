@@ -13,6 +13,7 @@ from conftest import write_project_config
 from helpers import REPO, _build_at
 
 from refdes import build as build_mod
+from refdes import keys as keys_mod
 from refdes import lifecycle, parse, revise, seal, standards
 from refdes.schema import load_project
 
@@ -907,3 +908,83 @@ def test_revise_relabels_a_compound_prefix_in_the_id_ledger(compound_prefix_proj
     ledger_text = (compound_prefix_project / ".refdes" / "ids.yaml").read_text(encoding="utf-8")
     assert "BND-THM: 1" in ledger_text
     assert "CON-THM" not in ledger_text
+
+
+def test_revise_preserves_keyed_baseline_identity_across_prefix_rename(tmp_path):
+    key = keys_mod.mint()
+    write_project_config(tmp_path, REVISE_SCHEMA)
+    (tmp_path / "items").mkdir()
+    (tmp_path / "items" / "i.yaml").write_text(
+        "defaults:\n  type: bound\n  prefix: BND\n"
+        "items:\n"
+        f"  - id: BND-001\n    key: {key}\n"
+        "    text: Board power density\n    limit: \"<= 0.15 W/in^2\"\n",
+        encoding="utf-8",
+    )
+    project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
+    parse.load_items(project)
+    build_mod.build(project, seal_write=False, reseal=False)
+    lifecycle.stamp(project, kind="revision", name="rev-a")
+    baseline = lifecycle.load_baseline(project, "rev-a")
+    conversion = keys_mod.plan_surrogate_storage(project, baseline.items, {})
+    lifecycle._save_baseline_file(
+        project,
+        {
+            "kind": baseline.kind,
+            "name": baseline.name,
+            "stamped_at": baseline.stamped_at,
+            "stamped_by": baseline.stamped_by,
+            "refdes_version": baseline.refdes_version,
+            "items": conversion.baseline_items,
+        },
+    )
+
+    result = revise.apply(str(tmp_path), revise.Mapping(prefixes={"BND": "LIM"}))
+
+    assert result.ok, result.errors
+    assert result.baselines_updated == []
+    project2 = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
+    parse.load_items(project2)
+    build_mod.build(project2, seal_write=False, reseal=False)
+    baseline2 = lifecycle.load_baseline(project2, "rev-a")
+    assert baseline2.items[key]["id"] == "BND-001"
+    diff = lifecycle.diff_against(project2, baseline2)
+    assert diff.relabelled == [("BND-001", "LIM-001", key)]
+    assert diff.added == []
+    assert diff.removed == []
+
+
+def test_revise_leaves_keyed_seal_untouched_on_display_rename(tmp_path):
+    key = keys_mod.mint()
+    _log_schema(tmp_path)
+    (tmp_path / "items").mkdir()
+    (tmp_path / "items" / "log.yaml").write_text(
+        "defaults:\n  type: log\n  prefix: LOG\n"
+        f"items:\n  - id: LOG-001\n    key: {key}\n    summary: First entry.\n",
+        encoding="utf-8",
+    )
+    project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
+    parse.load_items(project)
+    build_mod.build(project, seal_write=False, reseal=False)
+    seal.save_seals(
+        project,
+        {
+            key: {
+                "id": "LOG-001",
+                "hash": project.items["LOG-001"].content_hash,
+                "hash_format": 2,
+            }
+        },
+    )
+    path = seal.seal_path(project)
+    before = open(path, encoding="utf-8").read()
+
+    result = revise.apply(str(tmp_path), revise.Mapping(prefixes={"LOG": "EVT"}))
+
+    assert result.ok, result.errors
+    assert result.seals_updated == []
+    assert open(path, encoding="utf-8").read() == before
+    project2 = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
+    parse.load_items(project2)
+    build_mod.build(project2, seal_write=False, reseal=False)
+    assert project2.seal_violations == []

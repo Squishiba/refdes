@@ -13,6 +13,8 @@ from __future__ import annotations
 import os
 import secrets
 from collections import defaultdict
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 
 from . import ids as ids_mod
 from .model import Diagnostic, Item, Project
@@ -194,6 +196,127 @@ def _baseline_identity(record_id: str, entry: dict) -> tuple[str, str] | None:
     if isinstance(display_id, str) and display_id:
         return record_id, display_id
     return None
+
+
+@dataclass
+class SurrogateStoragePlan:
+    """Write-free §5 storage conversion for one baseline and one seal file."""
+
+    baseline_items: dict[str, dict] = field(default_factory=dict)
+    seals: dict[str, object] = field(default_factory=dict)
+    baseline_uncomparable: list[str] = field(default_factory=list)
+    seal_uncomparable: list[str] = field(default_factory=list)
+
+
+def _item_for_baseline_entry(project: Project, record_id: str, entry: dict) -> Item | None:
+    identity = _baseline_identity(record_id, entry)
+    if identity is None:
+        return project.items.get(record_id)
+    key, _display_id = identity
+    return next((item for item in project.local_items if item.key == key), None)
+
+
+def _hash_in_format(item: Item, project: Project, hash_format: int) -> str | None:
+    from . import build as build_mod
+
+    if hash_format == build_mod.HASH_FORMAT:
+        return item.content_hash
+    if hash_format == 1:
+        return build_mod.legacy_hash_for(item, project)
+    return None
+
+
+def plan_surrogate_storage(
+    project: Project,
+    baseline_items: Mapping[str, Mapping],
+    seals: Mapping[str, object],
+) -> SurrogateStoragePlan:
+    """Plan §5's key-keyed baseline/seal storage without mutating or writing.
+
+    Already key-keyed entries are copied through, making the operation
+    idempotent. A display-id-keyed entry moves only when its live item is
+    identified and its stored hash still describes that item's current
+    content under the entry's recorded format. Format-1 hashes are then
+    carried to the current format. Anything else remains display-id keyed,
+    is explicitly marked format 1, and is reported as uncomparable.
+    """
+    from . import build as build_mod
+
+    plan = SurrogateStoragePlan()
+    for record_id, original in baseline_items.items():
+        entry = dict(original)
+        if isinstance(entry.get("id"), str) and entry["id"]:
+            plan.baseline_items[record_id] = entry
+            continue
+
+        display_id = record_id
+        item = _item_for_baseline_entry(project, record_id, entry)
+        try:
+            hash_format = int(entry.get("hash_format", 1))
+        except (TypeError, ValueError):
+            hash_format = -1
+        expected = _hash_in_format(item, project, hash_format) if item is not None else None
+        if item is not None and item.key and expected == entry.get("hash"):
+            converted = dict(entry)
+            converted.pop("key", None)
+            converted["id"] = display_id
+            if hash_format == 1:
+                converted["hash"] = item.content_hash
+            converted["hash_format"] = build_mod.HASH_FORMAT
+            plan.baseline_items[item.key] = converted
+            continue
+
+        entry["hash_format"] = 1
+        plan.baseline_items[record_id] = entry
+        plan.baseline_uncomparable.append(display_id)
+
+    by_display_id = {item.id: item for item in project.local_items}
+    for record_id, original in seals.items():
+        if isinstance(original, Mapping):
+            entry = dict(original)
+            if isinstance(entry.get("id"), str) and entry["id"]:
+                plan.seals[record_id] = entry
+                continue
+            recorded_hash = entry.get("hash")
+            try:
+                hash_format = int(entry.get("hash_format", 1))
+            except (TypeError, ValueError):
+                hash_format = -1
+        else:
+            entry = {"hash": original}
+            recorded_hash = original
+            hash_format = 0  # unversioned seals may contain either format
+
+        item = by_display_id.get(record_id)
+        matched_format = hash_format
+        if item is not None and hash_format == 0:
+            if recorded_hash == item.content_hash:
+                matched_format = build_mod.HASH_FORMAT
+            elif recorded_hash == build_mod.legacy_hash_for(item, project):
+                matched_format = 1
+        expected = (
+            _hash_in_format(item, project, matched_format)
+            if item is not None and matched_format in (1, build_mod.HASH_FORMAT)
+            else None
+        )
+        if item is not None and item.key and expected == recorded_hash:
+            converted = dict(entry)
+            converted["id"] = record_id
+            if matched_format == 1:
+                converted["hash"] = item.content_hash
+            converted["hash_format"] = build_mod.HASH_FORMAT
+            plan.seals[item.key] = converted
+            continue
+
+        entry["hash_format"] = 1
+        plan.seals[record_id] = entry
+        plan.seal_uncomparable.append(record_id)
+
+    plan.baseline_items = dict(sorted(plan.baseline_items.items()))
+    plan.seals = dict(sorted(plan.seals.items()))
+    plan.baseline_uncomparable.sort()
+    plan.seal_uncomparable.sort()
+    return plan
 
 
 def _validate_latest_baseline(project: Project) -> None:

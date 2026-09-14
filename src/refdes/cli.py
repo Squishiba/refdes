@@ -453,6 +453,9 @@ def _print_baseline_diff(diff) -> None:
     print(f"  removed   {len(diff.removed)}")
     for item_id, item_type, title in diff.removed:
         print(f"    {item_id} ({item_type}) {title!r} — no longer in the project")
+    print(f"  relabelled {len(diff.relabelled)}")
+    for old_id, new_id, key in diff.relabelled:
+        print(f"    {old_id} -> {new_id}   ({key})")
     print(f"  ({diff.unchanged_count} unchanged)")
 
 

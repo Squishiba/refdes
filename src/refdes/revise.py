@@ -924,27 +924,47 @@ def _carry_forward_baselines(
     from_standard = standard_transition[0] if standard_transition else None
     to_standard = standard_transition[1] if standard_transition else None
     for baseline in lifecycle.list_baselines(project):
+        indexes = lifecycle._baseline_indexes(baseline.items)
         if standard_transition is not None and baseline.standard != from_standard:
-            if any(old_id in baseline.items for old_id in old_hashes):
+            if any(
+                lifecycle._match_baseline_entry(
+                    indexes,
+                    old_id,
+                    {"key": project.items[old_id].key} if project.items[old_id].key else {},
+                )
+                is not None
+                for old_id in old_hashes
+            ):
                 skipped.append(baseline.name)
             continue
         changed = False
         new_items = dict(baseline.items)
         for old_id, old_hash in old_hashes.items():
-            entry = new_items.get(old_id)
-            if entry is None:
+            item = project.items[old_id]
+            matched = lifecycle._match_baseline_entry(
+                indexes, old_id, {"key": item.key} if item.key else {}
+            )
+            if matched is None:
                 continue
+            record_id, _display_id, entry = matched
             if entry.get("hash") != old_hash:
                 # Stale for an unrelated reason (a real content edit since
                 # this baseline was stamped) -- swapping it in would hide
-                # that, so this id is left untouched rather than guessed at.
+                # that, so this identity is left untouched rather than guessed at.
                 continue
-            new_id = id_changes.get(old_id, old_id)
             new_entry = dict(entry)
             new_entry["hash"] = new_hashes.get(old_id, entry["hash"])
-            del new_items[old_id]
-            new_items[new_id] = new_entry
-            changed = True
+            if "id" in entry:
+                # Key-keyed baselines preserve the display id at stamp time:
+                # that historical label is what makes `relabelled` observable.
+                new_record_id = record_id
+            else:
+                new_record_id = id_changes.get(old_id, old_id)
+            if new_record_id != record_id:
+                del new_items[record_id]
+            new_items[new_record_id] = new_entry
+            if new_record_id != record_id or new_entry != entry:
+                changed = True
 
         advance = from_standard is not None and baseline.standard == from_standard
         if changed or advance:
@@ -978,12 +998,12 @@ def _carry_forward_seals(
     new_hashes: dict[str, str],
     id_changes: dict[str, str],
 ) -> list[str]:
-    """Swap the same old-hash-for-new (and id key, for a prefix rename) in
-    every per-board (and the base) seal file. The same hash that drives
-    baseline diffs also drives seal.py's append-only comparison, and a seal
-    mismatch is a build ERROR, not a noisy diff -- a purely cosmetic rename
-    left uncovered here would turn a clean build into a failing one on every
-    sealed log entry it touched."""
+    """Carry matching hashes forward in every legacy or key-keyed seal file.
+
+    A display rename moves a legacy seal's outer key. A §5 seal is already
+    keyed by immutable identity, so its recorded display label remains the
+    historical label and an id-only rename does not touch the file.
+    """
     updated: list[str] = []
     boards = {""} | set(project.boards)
     for board in sorted(boards):
@@ -994,13 +1014,24 @@ def _carry_forward_seals(
         changed = False
         new_seals = dict(seals)
         for old_id, old_hash in old_hashes.items():
-            recorded = new_seals.get(old_id)
-            if recorded is None or recorded != old_hash:
+            item = project.items[old_id]
+            found = seal_mod._find_seal(new_seals, item)
+            if found is None:
                 continue
-            new_id = id_changes.get(old_id, old_id)
-            del new_seals[old_id]
-            new_seals[new_id] = new_hashes.get(old_id, recorded)
-            changed = True
+            record_id, value, recorded, _hash_format = found
+            if recorded != old_hash:
+                continue
+            if isinstance(value, dict) and value.get("id"):
+                new_record_id = record_id
+            else:
+                new_record_id = id_changes.get(old_id, old_id)
+            new_hash = new_hashes.get(old_id, recorded)
+            new_value = seal_mod._with_seal_hash(value, new_hash, hash_format=2)
+            if new_record_id != record_id:
+                del new_seals[record_id]
+            new_seals[new_record_id] = new_value
+            if new_record_id != record_id or new_value != value:
+                changed = True
         if changed:
             seal_mod.save_seals(project, new_seals, board)
             updated.append(board or "(base)")

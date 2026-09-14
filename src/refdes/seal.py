@@ -21,6 +21,7 @@ board it hasn't been physically migrated out to yet -- see `verify()`.
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 
 import yaml
 
@@ -45,16 +46,73 @@ def seal_path(project: Project, board: str = "") -> str:
     return os.path.join(project.root, ".refdes", name)
 
 
-def load_seals(project: Project, board: str = "") -> dict[str, str]:
+SealValue = str | dict[str, object]
+Seals = dict[str, SealValue]
+
+
+def _seal_parts(
+    record_id: str, value: SealValue
+) -> tuple[str | None, str, str, int | None]:
+    """Return key, recorded display id, hash, and format for either shape."""
+    if isinstance(value, Mapping):
+        entry = dict(value)
+        display_id = entry.get("id")
+        if isinstance(display_id, str) and display_id:
+            key = record_id
+        else:
+            key = None
+            display_id = record_id
+        recorded = str(entry.get("hash", ""))
+        raw_format = entry.get("hash_format")
+        try:
+            hash_format = int(raw_format) if raw_format is not None else None
+        except (TypeError, ValueError):
+            hash_format = -1
+        return key, display_id, recorded, hash_format
+    return None, record_id, str(value), None
+
+
+def _find_seal(
+    seals: Seals, item: Item
+) -> tuple[str, SealValue, str, int | None] | None:
+    """Find an item's seal by surrogate first, then by legacy display id."""
+    if item.key:
+        keyed = seals.get(item.key)
+        if keyed is not None:
+            key, _display_id, recorded, hash_format = _seal_parts(item.key, keyed)
+            if key == item.key:
+                return item.key, keyed, recorded, hash_format
+    legacy = seals.get(item.id)
+    if legacy is None:
+        return None
+    key, _display_id, recorded, hash_format = _seal_parts(item.id, legacy)
+    if key is not None:
+        return None
+    return item.id, legacy, recorded, hash_format
+
+
+def _with_seal_hash(value: SealValue, new_hash: str, hash_format: int) -> SealValue:
+    if not isinstance(value, Mapping):
+        return new_hash
+    entry = dict(value)
+    entry["hash"] = new_hash
+    entry["hash_format"] = hash_format
+    return entry
+
+
+def load_seals(project: Project, board: str = "") -> Seals:
     path = seal_path(project, board)
     if not os.path.isfile(path):
         return {}
     with open(path, "r", encoding="utf-8") as fh:
         data = yaml.safe_load(fh) or {}
-    return dict(data.get("sealed") or {})
+    return {
+        str(record_id): dict(value) if isinstance(value, Mapping) else str(value)
+        for record_id, value in (data.get("sealed") or {}).items()
+    }
 
 
-def save_seals(project: Project, seals: dict[str, str], board: str = "") -> None:
+def save_seals(project: Project, seals: Seals, board: str = "") -> None:
     path = seal_path(project, board)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as fh:
@@ -62,44 +120,23 @@ def save_seals(project: Project, seals: dict[str, str], board: str = "") -> None
         yaml.safe_dump({"sealed": seals}, fh, sort_keys=True, default_flow_style=False)
 
 
-def _matches_sealed_hash(recorded: str, item: Item, project: Project) -> tuple[bool, str]:
-    """Compare a stored seal hash against `item`'s current one, folding in
-    the hash-format migration (docs/design/keys.md §5) so a seal written
-    before keys existed doesn't read as tampered purely because the hash
-    *definition* changed underneath it.
+def _matches_sealed_hash(
+    recorded: str, item: Item, project: Project, hash_format: int | None = None
+) -> tuple[bool, str]:
+    """Compare a stored seal hash against the item's current hash.
 
-    Returns `(matches, hash_to_store)`. Three outcomes:
-
-    - `recorded == item.content_hash`: unchanged under the current
-      (hash_format-2) definition -- the ordinary case for any seal written
-      since keys landed. `(True, recorded)`, nothing to do.
-    - `recorded` doesn't match the current hash, but does match what the
-      item would have hashed to under the *old* (hash_format-1) definition
-      (`build.legacy_hash_for`): the content hasn't actually changed since
-      this was sealed, only the hash definition has. `(True,
-      item.content_hash)` -- the caller upgrades the stored value in place.
-      Seals have no per-entry `hash_format` field to persist (unlike
-      baselines: a seal is a flat `{id: hash}` map with no room for one) --
-      but none is needed, because once the value is upgraded it *is* a
-      hash_format-2 hash, indistinguishable from one sealed fresh under the
-      current code. The migration is self-describing by construction, not
-      by a recorded flag.
-    - Neither matches: a real edit since sealing, format aside.
-      `(False, recorded)` -- an ordinary violation, exactly as before this
-      migration existed.
-
-    A deferred import of `build` avoids a cycle: `build.py` already imports
-    `seal` (its own `build()` calls `seal.verify()`), so `seal` importing
-    `build` at module level would be circular. By the time this function
-    runs, `build` has always finished importing (`compute_hashes`, whose
-    output this compares against, already ran), so the deferred import is
-    safe and cheap -- Python caches the module after the first import.
+    An explicit per-entry format is authoritative for §5 key-keyed or
+    uncomparable entries. A legacy scalar has no marker, so it retains the
+    historical current-first, legacy-second detection: a legacy-format match
+    is safely carried forward to the current hash, while neither match is a
+    real edit.
     """
+
     from . import build as build_mod
 
-    if recorded == item.content_hash:
+    if hash_format in (None, build_mod.HASH_FORMAT) and recorded == item.content_hash:
         return True, recorded
-    if recorded == build_mod.legacy_hash_for(item, project):
+    if hash_format in (None, 1) and recorded == build_mod.legacy_hash_for(item, project):
         return True, item.content_hash
     return False, recorded
 
@@ -124,19 +161,14 @@ def _boards_in_play(project: Project) -> list[str]:
 def verify(project: Project, write: bool = False, reseal: str | None = None) -> None:
     """Check sealed entries per board, and seal any new ones when `write` is set.
 
-    `reseal` is `None`/falsy (verify only), `RESEAL_ALL` (accept edits on every
-    board), or one registered board's key (accept edits only for that board's
-    own entries -- every other board's still fail as a normal violation).
+    Both legacy display-id-keyed seals and §5 surrogate-keyed entries are
+    accepted, including a mixture in one file. New seals deliberately retain
+    the legacy scalar shape until the project runs `refdes keys adopt`.
 
-    Migration from the pre-board single seal file is lazy and lookback-only: an
-    item that used to be sealed in the base file and has since come to resolve
-    onto a board is still checked against that old hash (never silently treated
-    as brand new), by falling back to the base file for any id the board's own
-    file doesn't have yet. Only a `write`-enabled run (`build`, never `check`)
-    then physically moves that entry into the board's own file and drops it from
-    the base one -- so a read-only `check` never mutates seal storage, but still
-    catches a real edit against a project that has not been `build`t since
-    adopting boards.
+    Migration from the pre-board single seal file is lazy and lookback-only:
+    an item that used to be sealed in the base file and has since moved onto
+    a board is still checked there first, then physically moved only on a
+    write-enabled build.
     """
     base = load_seals(project, board="")
     base_changed = False
@@ -147,33 +179,33 @@ def verify(project: Project, write: bool = False, reseal: str | None = None) -> 
         if board:
             seals = load_seals(project, board)
             for item in entries:
-                if item.id not in seals and item.id in base:
-                    # Pulled in from the legacy file: this board's own file needs
-                    # writing even though nothing about the seal itself changed,
-                    # or the entry would vanish once it's pruned from `base` below.
-                    seals[item.id] = base[item.id]
-                    changed = True
+                if _find_seal(seals, item) is not None:
+                    continue
+                inherited = _find_seal(base, item)
+                if inherited is None:
+                    continue
+                record_id, value, _recorded, _hash_format = inherited
+                seals[record_id] = value
+                changed = True
         else:
             seals = base
 
         reseal_here = reseal == RESEAL_ALL or reseal == board
 
         for item in sorted(entries, key=lambda i: i.id):
-            recorded = seals.get(item.id)
-            if recorded is None:
+            found = _find_seal(seals, item)
+            if found is None:
                 if write:
                     seals[item.id] = item.content_hash
                     changed = True
                 continue
-            ok, upgraded = _matches_sealed_hash(recorded, item, project)
+            record_id, value, recorded, hash_format = found
+            ok, upgraded = _matches_sealed_hash(recorded, item, project, hash_format)
             if ok:
                 if upgraded != recorded and write:
-                    # Hash-format migration (docs/design/keys.md §5): content
-                    # is unchanged, only the hash definition moved -- upgrade
-                    # silently, same posture as the fresh-seal branch above,
-                    # not the reseal-with-a-warning branch below (nothing was
-                    # actually edited here).
-                    seals[item.id] = upgraded
+                    seals[record_id] = _with_seal_hash(
+                        value, upgraded, hash_format=2
+                    )
                     changed = True
                 continue
 
@@ -183,7 +215,9 @@ def verify(project: Project, write: bool = False, reseal: str | None = None) -> 
                     f"now {item.content_hash}). This is recorded in the audit output.",
                     file=item.source_file, line=item.source_line, item_id=item.id,
                 )
-                seals[item.id] = item.content_hash
+                seals[record_id] = _with_seal_hash(
+                    value, item.content_hash, hash_format=2
+                )
                 changed = True
             else:
                 project.seal_violations.append(item.id)
@@ -200,7 +234,9 @@ def verify(project: Project, write: bool = False, reseal: str | None = None) -> 
                 save_seals(project, seals, board)
             if write:
                 for item in entries:
-                    if base.pop(item.id, None) is not None:
+                    inherited = _find_seal(base, item)
+                    if inherited is not None:
+                        del base[inherited[0]]
                         base_changed = True
         elif changed:
             base_changed = True
@@ -213,51 +249,44 @@ def verify(project: Project, write: bool = False, reseal: str | None = None) -> 
 
 
 def _report_deleted(
-    project: Project, base: dict[str, str], write: bool, reseal: str | None
+    project: Project, base: Seals, write: bool, reseal: str | None
 ) -> bool:
-    """Report every sealed entry that is no longer anywhere in the project.
-
-    Editing a sealed entry was already a build error; deleting one outright
-    was not detected at all -- a clean build, a clean `audit`, and an
-    orphaned hash left behind in the seal file. That is the louder half of
-    the same tamper-evidence question, so it is reported the same way, with
-    the same `--reseal` escape hatch for a deliberate removal.
-
-    "No longer anywhere" is deliberately generous: an id that is still live
-    under a *different* board (the lazy migration `verify()` performs above),
-    or that some item now claims through `former_ids:` after a renumbering,
-    is present, not deleted. Only a `write` run can actually drop the
-    orphaned entry, so a read-only `check` reports without mutating storage;
-    returning True lets the caller know the base file needs rewriting.
-    """
-    live = {item.id for item in project.local_items}
-    live |= set(project.former_ids)
+    """Report sealed identities that no current item or former id claims."""
+    live_ids = {item.id for item in project.local_items}
+    live_ids |= set(project.former_ids)
+    live_keys = {item.key for item in project.local_items if item.key}
 
     base_changed = False
     for board in sorted({""} | set(project.boards)):
         seals = base if board == "" else load_seals(project, board)
-        orphans = sorted(item_id for item_id in seals if item_id not in live)
+        orphans = []
+        for record_id, value in seals.items():
+            key, display_id, _recorded, _hash_format = _seal_parts(record_id, value)
+            is_live = key in live_keys if key is not None else display_id in live_ids
+            if is_live:
+                continue
+            orphans.append((record_id, display_id))
         if not orphans:
             continue
         reseal_here = bool(reseal) and (reseal == RESEAL_ALL or reseal == board)
         hint = f"--reseal {board}" if board else "--reseal"
-        for item_id in orphans:
+        for record_id, display_id in sorted(orphans, key=lambda pair: pair[1]):
             if reseal_here:
                 project.warn(
-                    f"{item_id} was sealed as append-only and is no longer in the "
-                    "project -- accepting the removal and dropping its seal.",
-                    item_id=item_id,
+                    f"{display_id} was sealed as append-only and is no longer in "
+                    "the project -- accepting the removal and dropping its seal.",
+                    item_id=display_id,
                 )
                 if write:
-                    del seals[item_id]
+                    del seals[record_id]
             else:
                 project.error(
-                    f"{item_id} is append-only and was sealed, but no item with "
-                    "that id is in the project any more. An append-only entry is "
-                    "corrected by appending one that `amends` it, never by "
+                    f"{display_id} is append-only and was sealed, but no item with "
+                    "that id is in the project any more. An append-only entry "
+                    "is corrected by appending one that `amends` it, never by "
                     f"deleting it -- restore it, or run with {hint} if the removal "
                     "is deliberate.",
-                    item_id=item_id,
+                    item_id=display_id,
                 )
         if reseal_here and write:
             if board:
@@ -268,27 +297,19 @@ def _report_deleted(
 
 
 def resealed_ids(project: Project) -> list[str]:
-    """Entries whose recorded seal, on any board, no longer matches their
-    current hash -- audit-only, so a read that never writes (`refdes audit`
-    doesn't `seal.verify(write=True)` first). Uses the same hash-format-aware
-    comparison `verify()` does (_matches_sealed_hash): otherwise, the first
-    `audit` run after adopting keys would list every sealed entry in the
-    project as "resealed", when nothing was actually touched -- only the
-    hash definition moved (docs/design/keys.md §5)."""
+    """Entries whose recorded seal no longer matches their current item."""
     base = load_seals(project, board="")
     out: list[str] = []
     for board in _boards_in_play(project):
-        if board:
-            seals = load_seals(project, board)
-            for item_id, h in base.items():
-                seals.setdefault(item_id, h)
-        else:
-            seals = base
+        seals = load_seals(project, board) if board else base
         for item in append_only_items(project, board=board):
-            recorded = seals.get(item.id)
-            if recorded is None:
+            found = _find_seal(seals, item)
+            if found is None and board:
+                found = _find_seal(base, item)
+            if found is None:
                 continue
-            ok, _upgraded = _matches_sealed_hash(recorded, item, project)
+            _record_id, _value, recorded, hash_format = found
+            ok, _upgraded = _matches_sealed_hash(recorded, item, project, hash_format)
             if not ok:
                 out.append(item.id)
     return out

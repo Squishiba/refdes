@@ -1,0 +1,23 @@
+Task: implement docs/design/keys.md §5 surrogate-keyed baseline and seal storage support, without implementing keys adopt.
+
+Progress:
+- Started from a clean fast-forward to main.
+- Added mixed legacy/key-keyed baseline matching for stamping, migration, diffing, stale-arithmetic lookup, and revise carry-forward.
+- Added the relabelled diff category and CLI output.
+- Added mixed legacy/key-keyed seal loading, verification, deletion auditing, reseal auditing, board migration, and revise carry-forward.
+- Added a pure plan_surrogate_storage conversion API using §5(c) conditional hash carry-forward.
+- Kept fresh revision/release stamps and fresh seals in the legacy display-id-keyed shape as the conservative compatibility choice; keys adopt will call the conversion plan later.
+- Added tmp_path regression coverage for mixed baseline files, conversion outcomes and purity, relabelled diffs, keyed seal display renames, and revise behavior.
+
+Difficulties:
+- The repository LSP server returned -32601 for textDocument/references; call sites were instead enumerated with the repository search tool.
+
+Verification:
+- Focused affected regression suite: 153 passed.
+- Sabotage check: disabled relabelled collection; its named regression failed, then passed after restoration.
+- Sabotage check: disabled surrogate-key seal lookup; the seal-rename regression failed on unwanted seal-file mutation, then passed after restoration.
+- Full suite before final rebase: 736 passed.
+
+- Post-rebase full suite: 736 passed.
+
+Status: finished.

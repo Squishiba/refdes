@@ -15,15 +15,19 @@ diff, and merge.
 The decision is taken. This document specs it; it does not relitigate it.
 
 **Implementation status:** §1 (key format), §2 (minting), §3 (composite
-expansion, display-half refresh, and key-based resolution), §5 (hashing on
-the key, plus the baseline/seal hash-format migration), and §6 Layers 1-5
-(well-formedness, uniqueness, unknown-key resolution, the latest-baseline
-lint, and the older-baseline audit) are implemented (`refdes/keys.py`,
-`refdes/links.py`, and changes to `build.py`, `cli.py`, `lifecycle.py`,
-`seal.py`, `blocked.py`, `blocks.py`, `workspaces.py`, `stub_tests.py`, and
-`render.py` -- see "What §3/§5 turned out to need beyond the spec" below).
-`refdes keys adopt` (§7) and any change to `revise.py` or `former_ids.py` are
-still design only.
+expansion, display-half refresh, and key-based resolution), §5 (key-based
+hashing; hash-format migration; mixed legacy/surrogate-keyed baseline and
+seal readers; conditional, write-free storage conversion plans; keyed
+rename diffs and seal verification), and §6 Layers 1-5 (well-formedness,
+uniqueness, unknown-key resolution, the latest-baseline lint, and the
+older-baseline audit) are implemented (`refdes/keys.py`, `refdes/links.py`,
+and changes to `build.py`, `cli.py`, `lifecycle.py`, `seal.py`, `revise.py`,
+`blocked.py`, `blocks.py`, `workspaces.py`, `stub_tests.py`, and `render.py`
+-- see "What §3/§5 turned out to need beyond the spec" below). New stamps
+and seals deliberately keep the legacy display-id-keyed shape until
+adoption, preserving existing-user output. `refdes keys adopt` (§7) still
+needs to invoke the conversion plan and transactionally write its results;
+the subtractive `revise.py`/`former_ids.py` cleanup remains design only.
 
 **What §3/§5 turned out to need beyond the spec, implementing it:**
 

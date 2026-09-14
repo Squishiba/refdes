@@ -5,6 +5,8 @@ Split out of the original monolithic tests/test_refdes.py.
 
 from __future__ import annotations
 
+from copy import deepcopy
+
 import yaml
 from conftest import write_project_config
 
@@ -725,3 +727,173 @@ def test_cli_no_write_leaves_the_source_tree_untouched(tmp_path):
     assert status == 0
     after = (root / "items" / "r.yaml").read_text(encoding="utf-8")
     assert before == after
+
+
+def test_mixed_shape_baseline_drives_diff_and_layer_four_lint(tmp_path):
+    key_1 = keys_mod.mint()
+    key_2 = keys_mod.mint()
+    root = _keys_project(
+        tmp_path,
+        "defaults: { type: requirement }\n"
+        "items:\n"
+        f"  - id: REQ-001\n    key: {key_1}\n    text: Legacy-shaped.\n"
+        f"  - id: REQ-002\n    key: {key_2}\n    text: Key-shaped.\n",
+    )
+    project = _built_keys_project(root)
+    _write_key_baseline(
+        root,
+        "mixed",
+        "2026-01-01T00:00:00Z",
+        {
+            "REQ-001": {
+                "key": key_1,
+                "hash": project.items["REQ-001"].content_hash,
+                "hash_format": 2,
+                "type": "requirement",
+                "title": "Legacy-shaped.",
+            },
+            key_2: {
+                "id": "REQ-002",
+                "hash": project.items["REQ-002"].content_hash,
+                "hash_format": 2,
+                "type": "requirement",
+                "title": "Key-shaped.",
+            },
+        },
+    )
+
+    project2 = _built_keys_project(root)
+    diff = lifecycle.diff_against(project2, lifecycle.load_baseline(project2, "mixed"))
+    assert diff.changed == []
+    assert diff.added == []
+    assert diff.removed == []
+    assert lifecycle.stamp(project2, kind="revision", name="mixed").status == "unchanged"
+    assert diff.relabelled == []
+    assert diff.unchanged_count == 2
+    assert not any("key changed" in diagnostic.message for diagnostic in project2.errors)
+
+    replacement_key = keys_mod.mint()
+    path = root / "items" / "r.yaml"
+    path.write_text(
+        path.read_text(encoding="utf-8").replace(
+            f"    key: {key_2}\n", f"    key: {replacement_key}\n"
+        ),
+        encoding="utf-8",
+    )
+    corrupted = _built_keys_project(root)
+    assert any(
+        f"key changed since baseline 'mixed': was '{key_2}', now '{replacement_key}'"
+        in diagnostic.message
+        for diagnostic in corrupted.errors
+    )
+
+
+def test_storage_conversion_conditionally_rekeys_and_reports_uncomparable(tmp_path):
+    key_1 = keys_mod.mint()
+    key_2 = keys_mod.mint()
+    root = _keys_project(
+        tmp_path,
+        "defaults: { type: requirement }\n"
+        "items:\n"
+        f"  - id: REQ-001\n    key: {key_1}\n    text: Unchanged.\n"
+        f"    refines: [REQ-002@{key_2}]\n"
+        f"  - id: REQ-002\n    key: {key_2}\n    text: Changed.\n"
+        "  - id: REQ-003\n    text: Keyless.\n",
+    )
+    project = _built_keys_project(root)
+    legacy_hash = build_mod.legacy_hash_for(project.items["REQ-001"], project)
+    assert legacy_hash != project.items["REQ-001"].content_hash
+    baseline_items = {
+        "REQ-001": {
+            "key": key_1,
+            "hash": legacy_hash,
+            "type": "requirement",
+            "title": "Unchanged.",
+        },
+        "REQ-002": {
+            "key": key_2,
+            "hash": "stale",
+            "hash_format": 2,
+            "type": "requirement",
+            "title": "Changed.",
+        },
+        "REQ-003": {
+            "hash": project.items["REQ-003"].content_hash,
+            "hash_format": 2,
+            "type": "requirement",
+            "title": "Keyless.",
+        },
+    }
+    seals = {
+        "REQ-001": legacy_hash,
+        "REQ-002": "stale",
+        "REQ-003": project.items["REQ-003"].content_hash,
+    }
+    original_baseline = deepcopy(baseline_items)
+    original_seals = deepcopy(seals)
+
+    plan = keys_mod.plan_surrogate_storage(project, baseline_items, seals)
+
+    assert baseline_items == original_baseline
+    assert seals == original_seals
+    assert plan.baseline_items[key_1] == {
+        "hash": project.items["REQ-001"].content_hash,
+        "type": "requirement",
+        "title": "Unchanged.",
+        "id": "REQ-001",
+        "hash_format": 2,
+    }
+    assert plan.baseline_items["REQ-002"]["hash"] == "stale"
+    assert plan.baseline_items["REQ-002"]["hash_format"] == 1
+    assert plan.baseline_items["REQ-003"]["hash_format"] == 1
+    assert plan.baseline_uncomparable == ["REQ-002", "REQ-003"]
+    assert plan.seals[key_1] == {
+        "hash": project.items["REQ-001"].content_hash,
+        "id": "REQ-001",
+        "hash_format": 2,
+    }
+    assert plan.seals["REQ-002"] == {"hash": "stale", "hash_format": 1}
+    assert plan.seals["REQ-003"]["hash_format"] == 1
+    assert plan.seal_uncomparable == ["REQ-002", "REQ-003"]
+
+
+def test_keyed_baseline_rename_is_relabelled_not_removed_and_added(tmp_path, capsys):
+    key = keys_mod.mint()
+    root = _keys_project(
+        tmp_path,
+        "defaults: { type: requirement }\n"
+        f"items:\n  - id: REQ-001\n    key: {key}\n    text: Same item.\n",
+    )
+    before = _built_keys_project(root)
+    _write_key_baseline(
+        root,
+        "rev-a",
+        "2026-01-01T00:00:00Z",
+        {
+            key: {
+                "id": "REQ-001",
+                "hash": before.items["REQ-001"].content_hash,
+                "hash_format": 2,
+                "type": "requirement",
+                "title": "Same item.",
+            }
+        },
+    )
+    item_path = root / "items" / "r.yaml"
+    item_path.write_text(
+        item_path.read_text(encoding="utf-8").replace("id: REQ-001", "id: REQ-009"),
+        encoding="utf-8",
+    )
+    after = _built_keys_project(root)
+
+    diff = lifecycle.diff_against(after, lifecycle.load_baseline(after, "rev-a"))
+    assert diff.changed == []
+    assert diff.added == []
+    assert diff.removed == []
+    assert diff.relabelled == [("REQ-001", "REQ-009", key)]
+    assert diff.unchanged_count == 0
+
+    cli_mod._print_baseline_diff(diff)
+    output = capsys.readouterr().out
+    assert "  relabelled 1\n" in output
+    assert f"    REQ-001 -> REQ-009   ({key})\n" in output

@@ -29,6 +29,7 @@ from typing import Callable
 import yaml
 
 from . import build as build_mod
+from . import keys as keys_mod
 from .model import INFO, RELEASE_GATE_DEFAULTS, Item, Project, SchemaError
 
 BASELINES_DIR = ".refdes/baselines"
@@ -101,6 +102,77 @@ class Baseline:
     # project's *current* pin happens to be, which could simply be wrong.
     standard: dict[str, object] | None = None
 
+
+
+def _baseline_indexes(
+    items: dict[str, dict],
+) -> tuple[
+    dict[str, tuple[str, str, dict]],
+    dict[str, tuple[str, str, dict]],
+]:
+    """Index either §5 baseline shape by surrogate key and display id."""
+    by_key: dict[str, tuple[str, str, dict]] = {}
+    by_display_id: dict[str, tuple[str, str, dict]] = {}
+    for record_id, entry in items.items():
+        identity = keys_mod._baseline_identity(record_id, entry)
+        key, display_id = identity if identity is not None else (None, record_id)
+        indexed = (record_id, display_id, entry)
+        by_display_id[display_id] = indexed
+        if key is not None:
+            by_key[key] = indexed
+    return by_key, by_display_id
+
+
+def _match_baseline_entry(
+    indexes: tuple[
+        dict[str, tuple[str, str, dict]],
+        dict[str, tuple[str, str, dict]],
+    ],
+    item_id: str,
+    entry: dict,
+) -> tuple[str, str, dict] | None:
+    """Match by key when both sides have one; otherwise by display id."""
+    by_key, by_display_id = indexes
+    key = entry.get("key")
+    if isinstance(key, str) and key:
+        matched = by_key.get(key)
+        if matched is not None:
+            return matched
+    matched = by_display_id.get(item_id)
+    if matched is None:
+        return None
+    old_identity = keys_mod._baseline_identity(matched[0], matched[2])
+    if key and old_identity is not None:
+        return None
+    return matched
+
+
+def _same_baseline_items(stored: dict[str, dict], current: dict[str, dict]) -> bool:
+    """Semantic equality across display-id-keyed and key-keyed storage."""
+    if len(stored) != len(current):
+        return False
+    indexes = _baseline_indexes(stored)
+    matched_records: set[str] = set()
+    for item_id, current_entry in current.items():
+        matched = _match_baseline_entry(indexes, item_id, current_entry)
+        if matched is None:
+            return False
+        record_id, stored_id, stored_entry = matched
+        if stored_id != item_id or record_id in matched_records:
+            return False
+        matched_records.add(record_id)
+        left = dict(stored_entry)
+        right = dict(current_entry)
+        left.pop("id", None)
+        stored_identity = keys_mod._baseline_identity(record_id, stored_entry)
+        if stored_identity is not None:
+            left.pop("key", None)
+            right.pop("key", None)
+        else:
+            right.pop("key", None)
+        if left != right:
+            return False
+    return len(matched_records) == len(stored)
 
 def _load_baseline_file(path: str) -> Baseline:
     with open(path, "r", encoding="utf-8") as fh:
@@ -273,18 +345,20 @@ def migrate_hash_format(project: Project, baseline: Baseline, write: bool = True
     every caller below.
     """
     report = BaselineMigration()
-    for item_id, entry in baseline.items.items():
+    for record_id, entry in baseline.items.items():
         if "hash_format" in entry:
             continue  # already hash_format 2 (or a later format): nothing to do
-        item = project.items.get(item_id)
+        identity = keys_mod._baseline_identity(record_id, entry)
+        display_id = identity[1] if identity is not None else record_id
+        item = keys_mod._item_for_baseline_entry(project, record_id, entry)
         if item is None:
             continue  # no live item to recompute against -- an ordinary removal
         if build_mod.legacy_hash_for(item, project) != entry.get("hash"):
-            report.uncomparable.append(item_id)
+            report.uncomparable.append(display_id)
             continue
         entry["hash"] = item.content_hash
         entry["hash_format"] = build_mod.HASH_FORMAT
-        report.carried.append(item_id)
+        report.carried.append(display_id)
 
     if report.carried and write:
         data = {
@@ -545,13 +619,7 @@ def stamp(project: Project, kind: str, name: str, write: bool = True) -> StampOu
     existing = load_baseline(project, name)
     if existing is not None:
         migrate_hash_format(project, existing, write=write)
-        comparable_items = {}
-        for item_id, entry in items_map.items():
-            comparable_entry = dict(entry)
-            if "key" not in existing.items.get(item_id, {}):
-                comparable_entry.pop("key", None)
-            comparable_items[item_id] = comparable_entry
-        if existing.kind == kind and existing.items == comparable_items:
+        if existing.kind == kind and _same_baseline_items(existing.items, items_map):
             # Byte-identical re-run: skip entirely, file untouched -- not even
             # stamped_at rewritten, mirroring `refdes fetch` skipping an
             # already-pinned url. No gate re-evaluation: nothing is being
@@ -609,6 +677,7 @@ class DiffResult:
     changed: list[str]
     added: list[str]
     removed: list[tuple[str, str, str]]  # id, type, title
+    relabelled: list[tuple[str, str, str]]  # old id, new id, surrogate key
     unchanged_count: int
     # Subset of `changed` (docs/design/stale-arithmetic-signal.md): this
     # item's verdict-bearing `status` moved since `baseline`, but its ```calc
@@ -618,7 +687,9 @@ class DiffResult:
     stale_arithmetic: list[str]
 
 
-def _stale_arithmetic(project: Project, baseline: Baseline, changed: list[str]) -> list[str]:
+def _stale_arithmetic(
+    project: Project, changed: list[str], old_entries: dict[str, dict]
+) -> list[str]:
     """The one-shot transition signal: which of `changed` moved verdict
     without moving arithmetic, per docs/design/stale-arithmetic-signal.md.
 
@@ -641,7 +712,7 @@ def _stale_arithmetic(project: Project, baseline: Baseline, changed: list[str]) 
     """
     out = []
     for item_id in changed:
-        old = baseline.items.get(item_id, {})
+        old = old_entries.get(item_id, {})
         if "verdict" not in old or "calc_hash" not in old:
             continue
         item = project.items.get(item_id)
@@ -680,20 +751,37 @@ def diff_against(project: Project, baseline: Baseline, write: bool = True) -> Di
     """
     migrate_hash_format(project, baseline, write=write)
     current = _items_map(project)
+    indexes = _baseline_indexes(baseline.items)
     changed, added = [], []
+    relabelled: list[tuple[str, str, str]] = []
+    old_entries: dict[str, dict] = {}
+    matched_records: set[str] = set()
     unchanged = 0
     for item_id, entry in current.items():
-        old = baseline.items.get(item_id)
-        if old is None:
+        matched = _match_baseline_entry(indexes, item_id, entry)
+        if matched is None:
             added.append(item_id)
-        elif old.get("hash") != entry["hash"]:
+            continue
+        record_id, old_id, old = matched
+        matched_records.add(record_id)
+        old_entries[item_id] = old
+        key = entry.get("key")
+        if key and old_id != item_id:
+            relabelled.append((old_id, item_id, str(key)))
+        if old.get("hash") != entry["hash"]:
             changed.append(item_id)
-        else:
+        elif old_id == item_id:
             unchanged += 1
     removed = sorted(
-        (item_id, str(entry.get("type", "")), str(entry.get("title", "")))
-        for item_id, entry in baseline.items.items()
-        if item_id not in current
+        (
+            keys_mod._baseline_identity(record_id, entry)[1]
+            if keys_mod._baseline_identity(record_id, entry) is not None
+            else record_id,
+            str(entry.get("type", "")),
+            str(entry.get("title", "")),
+        )
+        for record_id, entry in baseline.items.items()
+        if record_id not in matched_records
     )
     changed = sorted(changed)
     return DiffResult(
@@ -702,6 +790,7 @@ def diff_against(project: Project, baseline: Baseline, write: bool = True) -> Di
         changed=changed,
         added=sorted(added),
         removed=removed,
+        relabelled=sorted(relabelled),
         unchanged_count=unchanged,
-        stale_arithmetic=_stale_arithmetic(project, baseline, changed),
+        stale_arithmetic=_stale_arithmetic(project, changed, old_entries),
     )

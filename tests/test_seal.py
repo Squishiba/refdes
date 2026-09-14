@@ -11,6 +11,7 @@ from conftest import write_project_config
 from helpers import _build_at
 
 from refdes import build as build_mod
+from refdes import keys as keys_mod
 from refdes import parse, seal
 from refdes.schema import load_project
 
@@ -238,4 +239,60 @@ def test_seal_storage_is_a_single_file_with_no_boards_registered(tmp_path):
     assert not any(n.startswith("log-seal-") for n in names)
     assert seal.load_seals(project, board="") == {
         "LOG-001": project.items["LOG-001"].content_hash
+    }
+
+
+def test_keyed_seal_survives_display_id_rename_without_violation(tmp_path):
+    key = keys_mod.mint()
+    legacy_key = keys_mod.mint()
+    write_project_config(
+        tmp_path,
+        "site: { title: T, out: _site }\n"
+        "types:\n"
+        "  log:\n"
+        "    prefix: LOG\n"
+        "    append_only: true\n"
+        "    fields: { summary: { type: text, required: true } }\n",
+    )
+    items = tmp_path / "items"
+    items.mkdir()
+    item_path = items / "log.yaml"
+    item_path.write_text(
+        "defaults: { type: log }\n"
+        "items:\n"
+        f"  - id: LOG-001\n    key: {key}\n    summary: First.\n"
+        f"  - id: LOG-002\n    key: {legacy_key}\n    summary: Legacy-shaped.\n",
+        encoding="utf-8",
+    )
+    project = _load_and_build(tmp_path, seal_write=False, reseal=False)
+    seal.save_seals(
+        project,
+        {
+            key: {
+                "id": "LOG-001",
+                "hash": project.items["LOG-001"].content_hash,
+                "hash_format": 2,
+            },
+            "LOG-002": project.items["LOG-002"].content_hash,
+        },
+    )
+    seal_path = tmp_path / ".refdes" / "log-seal.yaml"
+    before = seal_path.read_text(encoding="utf-8")
+
+    item_path.write_text(
+        item_path.read_text(encoding="utf-8").replace("id: LOG-001", "id: LOG-009"),
+        encoding="utf-8",
+    )
+    renamed = _load_and_build(tmp_path, seal_write=True, reseal=False)
+
+    assert renamed.seal_violations == []
+    assert not renamed.errors
+    assert seal_path.read_text(encoding="utf-8") == before
+    assert seal.load_seals(renamed) == {
+        key: {
+            "id": "LOG-001",
+            "hash": renamed.items["LOG-009"].content_hash,
+            "hash_format": 2,
+        },
+        "LOG-002": renamed.items["LOG-002"].content_hash,
     }
