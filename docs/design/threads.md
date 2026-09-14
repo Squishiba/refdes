@@ -66,6 +66,21 @@ and any rendering of a chain as such. See `src/refdes/parse.py`
 `item_by_id`/`add_item`, `provisional_handle`, `Item.slug`), and
 `tests/test_threads.py`.
 
+**Phase 2b implemented** (engine only): §3's lazy walk and §6's diagnostics.
+`src/refdes/chains.py` builds a key-based `follows:` graph (predecessors and
+successors, each target resolved through `build.resolve_link_target`, never
+off `backlinks`/`resolved_links` — those carry display ids an id-less entry
+does not have), and offers `tips()` and `resolve_current()`'s per-field fold
+(more than one reachable tip → undefined; otherwise the nearest entry that
+declares the field wins, and two equidistant declarations that disagree are
+undefined), plus a build step after `resolve_links` reporting one fork `info`
+per forked entry and one `follows` cycle `error` per cycle. Still not
+implemented: the `follows:` write-back/freeze (Phase 2a), coverage's fallback
+to `resolve_current` and any rendering of a chain (Phase 3), and `hardware@3`
+declaring `follows:` at all (Phase 4) — so nothing here is visible to a
+project whose schema does not declare a link literally named `follows:`. See
+`tests/test_chains.py`.
+
 ---
 
 ## What changed, and why the previous draft is wrong

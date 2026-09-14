@@ -12,6 +12,7 @@ from markdown_it import MarkdownIt
 
 from . import blocked as blocked_mod
 from . import blocks as blocks_mod
+from . import chains as chains_mod
 from . import boards as boards_mod
 from . import calc, dates, imports, seal
 from . import citations as citations_mod
@@ -1767,6 +1768,7 @@ def build(
     ids_mod.validate_prefixes(project)
     keys_mod.validate(project)
     resolve_links(project)
+    chains_mod.resolve(project)
     validate_conforms_to(project)
     workspaces_mod.lint_cross_workspace_references(project)
     blocked_mod.resolve(project)
