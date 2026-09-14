@@ -17,6 +17,7 @@ from . import calc, dates, imports, seal
 from . import citations as citations_mod
 from . import ids as ids_mod
 from . import keys as keys_mod
+from . import nav as nav_mod
 from . import pages as pages_mod
 from . import workspaces as workspaces_mod
 from .model import (
@@ -566,6 +567,15 @@ def compute_board_coverage(project: Project) -> None:
         return
     warned_fallback_types: set[str] = set()
     for bname, spec in sorted(project.boards.items()):
+        # A board with no items of its own gets no report pages at all, so its
+        # warning must not point at a coverage page that will never be written.
+        # nav.scope_reports is render's own condition for the page set -- it
+        # decides emptiness from the board's items alone, so asking it here
+        # before citations have been verified is still the same answer, and
+        # this cannot drift from what actually lands in _site/.
+        has_coverage_page = bool(
+            spec.conforms_to and nav_mod.scope_reports(project, board=bname)
+        )
         for group_id in spec.conforms_to:
             group = project.items.get(group_id)
             if group is None:
@@ -586,11 +596,11 @@ def compute_board_coverage(project: Project) -> None:
                 project.board_coverage[(member.id, bname)] = cov
                 if cov.stage in ("satisfied", "verified"):
                     continue
+                pointer = f" — see coverage-{bname}.html" if has_coverage_page else ""
                 project.warn(
                     f"{member.id} is not satisfied on board {bname!r} "
                     f"(board conforms to {group_id}) -- its "
-                    f"{cov.stage} stage counts only {bname}'s own items "
-                    f"— see coverage-{bname}.html",
+                    f"{cov.stage} stage counts only {bname}'s own items{pointer}",
                     file=member.source_file,
                     line=member.source_line,
                     item_id=member.id,

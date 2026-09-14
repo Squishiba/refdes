@@ -135,7 +135,9 @@ boards:
 
 The targets are [`group` items](standard-library.md) (`hardware@3`, prefix
 `GRP`), and the members point at their group with `part_of:` — the group never
-lists its members. For every member of a group a board conforms to, the build
+lists its members. `conforms_to:` is a **list of strings**: a bare
+`conforms_to: GRP-DBG` is a configuration error, not a one-letter-per-error
+surprise. For every member of a group a board conforms to, the build
 computes that member's coverage a second time, counting **only that board's own
 satisfiers**, and warns on any pair still short of `satisfied`:
 
@@ -159,11 +161,24 @@ ERROR refdes-project.yaml — boards.board-a conforms_to 'GRP-DBUG', which does
         to it
 ```
 
+So is a `conforms_to:` that is not a list of group ids, reported once at load
+rather than once per character of a bare string:
+
+```
+configuration error: boards.board-a conforms_to must be a list of group ids,
+        got 'GRP-DBG' -- write conforms_to: [GRP-DBG]
+```
+
 `coverage-<board>.html` grows a **Conforming contracts** table listing those
 members with their stage on that board, even when the requirement itself lives
 on another board, and the project-wide coverage page marks any item with
 `not yet satisfied on boards: board-b`. A project with no `conforms_to:`
 anywhere renders exactly the coverage output it always did.
+
+A board with **no items of its own** still owes the contract, so it still gets
+the warning — but [no report pages](#a-board-with-no-items-yet), and that
+warning therefore leaves out the `— see coverage-<board>.html` pointer it would
+otherwise print.
 
 ### When this stops working
 

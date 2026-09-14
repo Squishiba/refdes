@@ -427,6 +427,30 @@ def _validate_link_targets(types: dict[str, ItemType]) -> None:
                     )
 
 
+def _conforms_to(bname: str, value: Any) -> list[str]:
+    """A board's `conforms_to:` as a list of group ids.
+
+    A bare string here would otherwise be iterated character by character, so
+    `conforms_to: GRP-001` produced one "does not exist" error per letter -- a
+    screenful of them to explain a missing pair of brackets. Rejected at load,
+    the way every other malformed `boards:` entry is.
+    """
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise SchemaError(
+            f"boards.{bname} conforms_to must be a list of group ids, got "
+            f"{value!r} -- write conforms_to: [GRP-001]"
+        )
+    for target in value:
+        if not isinstance(target, str):
+            raise SchemaError(
+                f"boards.{bname} conforms_to must be a list of group ids, got "
+                f"the non-string entry {target!r}"
+            )
+    return list(value)
+
+
 def load_project(config_path: str | None = None, start: str = ".") -> Project:
     path = config_path or find_config(start)
     if os.path.basename(os.path.abspath(path)) == LEGACY_CONFIG_NAME:
@@ -625,7 +649,7 @@ def load_project(config_path: str | None = None, start: str = ".") -> Project:
             label=bspec.get("label", bname),
             token=str(bspec.get("token") or ""),
             path=str(bspec.get("path") or ""),
-            conforms_to=[str(g) for g in (bspec.get("conforms_to") or [])],
+            conforms_to=_conforms_to(bname, bspec.get("conforms_to")),
         )
         segment = spec.path_segment
         if segment in path_owner:

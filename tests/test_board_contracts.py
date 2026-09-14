@@ -15,6 +15,7 @@ from conftest import write_project_config
 from helpers import _build_at
 
 from refdes import parse, render
+from refdes.schema import SchemaError
 
 CONFORMS_SCHEMA = """\
 site: {title: "Conforms test", out: _site}
@@ -258,6 +259,70 @@ def test_conforms_to_naming_a_non_group_is_a_hard_error(tmp_path):
     assert errors, "conforms_to at a requirement was accepted with no error"
     assert "not a group" in errors[0].message
     assert not project.board_coverage
+
+
+def test_conforms_to_as_a_bare_string_is_one_error_not_one_per_letter(tmp_path):
+    """`conforms_to: GRP-001` is a typo for `[GRP-001]`, not a list of one-letter groups."""
+    _write(tmp_path, GROUP)
+    write_project_config(
+        tmp_path,
+        CONFORMS_SCHEMA.replace("conforms_to: [GRP-001]", "conforms_to: GRP-001"),
+    )
+    with pytest.raises(SchemaError) as excinfo:
+        _build_at(tmp_path)
+    message = str(excinfo.value)
+    assert "board-a" in message
+    assert "must be a list" in message
+    # The old behavior: the string iterated per character, one error each.
+    assert "does not exist" not in message
+
+
+def test_conforms_to_with_a_non_string_element_is_an_error(tmp_path):
+    _write(tmp_path, GROUP)
+    write_project_config(
+        tmp_path,
+        CONFORMS_SCHEMA.replace("conforms_to: [GRP-001]", "conforms_to: [GRP-001, 5]"),
+    )
+    with pytest.raises(SchemaError) as excinfo:
+        _build_at(tmp_path)
+    message = str(excinfo.value)
+    assert "board-a" in message
+    assert "must be a list" in message
+    assert "5" in message
+
+
+# ------------------------------------------------------- the warning's pointer
+
+
+def test_an_itemless_board_warns_without_pointing_at_a_missing_page(tmp_path):
+    """Board B owes the contract but has no items, so it gets no report pages."""
+    _write(tmp_path, {**GROUP, **REQUIREMENT, **_decision("board-a", "DEC-A-001")})
+    project = _render(tmp_path)
+    warned = [
+        d.message
+        for d in project.warnings
+        if d.item_id == "REQ-001" and "board-b" in d.message
+    ]
+    assert len(warned) == 1
+    assert "coverage-board-b.html" not in warned[0]
+    assert not os.path.exists(
+        os.path.join(str(tmp_path), "_site", "coverage-board-b.html")
+    )
+
+
+def test_a_board_with_items_still_points_at_its_coverage_page(tmp_path):
+    _write(
+        tmp_path,
+        {**GROUP, **REQUIREMENT, **BOARD_B_ITEM, **_decision("board-a", "DEC-A-001")},
+    )
+    project = _build_at(tmp_path)
+    warned = [
+        d.message
+        for d in project.warnings
+        if d.item_id == "REQ-001" and "board-b" in d.message
+    ]
+    assert len(warned) == 1
+    assert "coverage-board-b.html" in warned[0]
 
 
 # ------------------------------------------------------------------- reporting
