@@ -808,9 +808,11 @@ title like `T<script>alert(1)</script>` rendered where
 That site is precisely where a future `| safe` addition would silently
 reopen an escaping hole with no failing test to catch it.
 
-**Status: outstanding (test-coverage gap).** Autoescaping is on
-(`render.py:608`), but no test renders an evil title into a text node and
-asserts the escape.
+**Status: closed.** `tests/test_text_node_escaping.py` renders an item titled
+`T<script>alert(1)</script>` and asserts on both `index.html` and
+`coverage.html` that the escaped `&lt;script&gt;` form appears and the raw
+`<script>alert(1)</script>` does not. Sabotage-checked: adding `| safe` to
+the `item.title` renders in `index.html.j2` makes the index test fail.
 
 **Local model (not decided — my read): suitable.** The task is its own
 acceptance test — render an evil-titled project and assert both that the
