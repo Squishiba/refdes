@@ -25,6 +25,7 @@ from collections.abc import Mapping
 
 import yaml
 
+from . import keys as keys_mod
 from .model import Item, Project
 
 SEAL_FILE = ".refdes/log-seal.yaml"
@@ -131,12 +132,18 @@ def load_seals(project: Project, board: str = "") -> Seals:
     }
 
 
+def format_seals(seals: Seals) -> str:
+    """Serialize seals identically for adoption planning and persistence."""
+    return _HEADER + yaml.safe_dump(
+        {"sealed": seals}, sort_keys=True, default_flow_style=False
+    )
+
+
 def save_seals(project: Project, seals: Seals, board: str = "") -> None:
     path = seal_path(project, board)
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w", encoding="utf-8") as fh:
-        fh.write(_HEADER)
-        yaml.safe_dump({"sealed": seals}, fh, sort_keys=True, default_flow_style=False)
+    with open(path, "w", encoding="utf-8", newline="") as fh:
+        fh.write(format_seals(seals))
 
 
 def _matches_sealed_hash(
@@ -202,8 +209,8 @@ def verify(project: Project, write: bool = False, reseal: str | None = None) -> 
     is never accepted by resealing.
 
     Both legacy display-id-keyed scalars and §5 surrogate-keyed dictionaries
-    are accepted, including mixtures in one file. New seals deliberately keep
-    the legacy scalar shape until ``refdes keys adopt``.
+    are accepted, including mixtures in one file. New seals use the keyed
+    shape after the project records explicit adoption.
 
     Pre-board history is migrated lazily and lookback-only: when an item now
     resolves onto a board but its seal remains in the base file, verification
@@ -234,12 +241,18 @@ def verify(project: Project, write: bool = False, reseal: str | None = None) -> 
             seals = base
 
         reseal_here = reseal == RESEAL_ALL or reseal == board
-
         for item in sorted(entries, key=lambda i: i.id):
             found = _find_seal(seals, item, live_keys)
             if found is None:
                 if write:
-                    seals[item.id] = item.content_hash
+                    if keys_mod.is_adopted(project) and item.key:
+                        seals[item.key] = {
+                            "id": item.id,
+                            "hash": item.content_hash,
+                            "hash_format": 2,
+                        }
+                    else:
+                        seals[item.id] = item.content_hash
                     changed = True
                 continue
             record_id, value, recorded, hash_format = found

@@ -488,10 +488,30 @@ class FileRewrite:
     rel: str
     before: str
     after: str
+    existed: bool = True
+
+
+def write_rewrites(rewrites: list[FileRewrite]) -> None:
+    """Write a computed set using the transaction engine's exact text mode."""
+    for rewrite in rewrites:
+        os.makedirs(os.path.dirname(rewrite.path), exist_ok=True)
+        with open(rewrite.path, "w", encoding="utf-8", newline="") as fh:
+            fh.write(rewrite.after)
+
+
+def restore_rewrites(rewrites: list[FileRewrite]) -> None:
+    """Restore every computed set member, including removing new files."""
+    for rewrite in rewrites:
+        if not rewrite.existed:
+            if os.path.isfile(rewrite.path):
+                os.remove(rewrite.path)
+            continue
+        with open(rewrite.path, "w", encoding="utf-8", newline="") as fh:
+            fh.write(rewrite.before)
 
 
 def _rewrite_file(project: Project, path: str, rel: str, mapping: Mapping) -> tuple[FileRewrite, list[str]]:
-    with open(path, "r", encoding="utf-8") as fh:
+    with open(path, "r", encoding="utf-8", newline="") as fh:
         text = fh.read()
     newline = _newline_style(text)
     lines = text.splitlines()
@@ -746,9 +766,7 @@ def apply(
     if dry_run:
         return RevisionResult(ok=True, dry_run=True, changed_files=[r.rel for r in rewrites])
 
-    for rw in rewrites:
-        with open(rw.path, "w", encoding="utf-8", newline="") as fh:
-            fh.write(rw.after)
+    write_rewrites(rewrites)
 
     original_ledger = _relabel_ledger(project_before, mapping.prefixes)
     original_seals = _capture_seal_files(project_before)
@@ -756,9 +774,7 @@ def apply(
         config_before = fh.read()
 
     def _rollback() -> None:
-        for rw in rewrites:
-            with open(rw.path, "w", encoding="utf-8", newline="") as fh:
-                fh.write(rw.before)
+        restore_rewrites(rewrites)
         if original_ledger is not None:
             _restore_ledger(project_before, original_ledger)
         _restore_seal_files(original_seals)

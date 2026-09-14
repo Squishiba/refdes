@@ -15,11 +15,16 @@ import secrets
 from collections import defaultdict
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 from . import ids as ids_mod
 from .model import Diagnostic, Item, Project
 
+if TYPE_CHECKING:
+    from .revise import FileRewrite
+
 ALPHABET = "0123456789abcdefghjkmnpqrstvwxyz"  # Crockford base32 -- i, l, o, u excluded
+ADOPTION_MARKER = ".refdes/keys-adopted"
 _INDEX = {ch: i for i, ch in enumerate(ALPHABET)}
 
 DATA_LEN = 10
@@ -400,6 +405,92 @@ def audit_historical_baselines(project: Project) -> list[Diagnostic]:
     return diagnostics
 
 
+@dataclass
+class MintPlan:
+    assignments: list[tuple[Item, str]] = field(default_factory=list)
+    rewrites: list[FileRewrite] = field(default_factory=list)
+    remaining: int = 0
+
+
+def adoption_marker_path(project: Project) -> str:
+    return os.path.join(project.root, *ADOPTION_MARKER.split("/"))
+
+
+def is_adopted(project: Project) -> bool:
+    """Whether explicit surrogate-key adoption has completed for ``project``."""
+    return os.path.isfile(adoption_marker_path(project))
+
+
+def missing_assignments(project: Project) -> list[tuple[Item, str]]:
+    """Mint in-memory assignments for every keyless local or pending item."""
+    candidates = [item for item in project.pending if not item.key]
+    candidates += [item for item in project.local_items if not item.key]
+    return [(item, mint()) for item in candidates]
+
+
+def plan_missing(
+    project: Project,
+    source_texts: Mapping[str, str] | None = None,
+    assignments: list[tuple[Item, str]] | None = None,
+) -> MintPlan:
+    """Plan key assignments and source rewrites without writing any file.
+
+    ``source_texts`` lets a transaction layer compose link expansion and key
+    insertion while preserving the original serialization. Link expansion
+    does not change line counts, so parsed source positions remain valid.
+    """
+    from .revise import FileRewrite
+
+    planned_assignments = (
+        missing_assignments(project) if assignments is None else assignments
+    )
+    candidates = [item for item, _new_key in planned_assignments]
+    plan = MintPlan(assignments=list(planned_assignments))
+    if not candidates:
+        return plan
+
+    by_file: dict[str, list[tuple[Item, str]]] = defaultdict(list)
+    for item, new_key in plan.assignments:
+        by_file[item.source_file].append((item, new_key))
+
+    failed: set[int] = set()
+    for rel, entries in by_file.items():
+        path = os.path.join(project.root, rel)
+        if source_texts is not None and rel in source_texts:
+            text = source_texts[rel]
+        else:
+            with open(path, "r", encoding="utf-8", newline="") as fh:
+                text = fh.read()
+        newline = "\r\n" if "\r\n" in text else "\n"
+        lines = text.splitlines()
+
+        for item, new_key in sorted(entries, key=lambda e: e[0].source_line, reverse=True):
+            if rel.endswith(".md"):
+                lines = ids_mod.insert_into_markdown(lines, item.source_line, f"key: {new_key}")
+            else:
+                updated = ids_mod.insert_into_list(lines, item.source_line, "key", new_key)
+                if updated is None:
+                    project.error(
+                        f"could not write key {new_key} back into the source",
+                        file=rel, line=item.source_line,
+                    )
+                    failed.add(id(item))
+                    continue
+                lines = updated
+
+        after = newline.join(lines) + newline
+        if after != text:
+            plan.rewrites.append(FileRewrite(path=path, rel=rel, before=text, after=after))
+
+    plan.assignments = [
+        (item, new_key)
+        for item, new_key in plan.assignments
+        if id(item) not in failed
+    ]
+    plan.remaining = len(candidates) - len(plan.assignments)
+    return plan
+
+
 def mint_missing(project: Project, write: bool = True) -> list[tuple[Item, str]]:
     """Assign a key to every local item that doesn't have one yet, and write
     it back into the source file.
@@ -418,59 +509,22 @@ def mint_missing(project: Project, write: bool = True) -> list[tuple[Item, str]]
     a fresh one on every read-only run would make the same item resolve to a
     different key from one invocation to the next.
     """
-    candidates = [item for item in project.pending if not item.key]
-    candidates += [item for item in project.local_items if not item.key]
-    if not candidates:
+    assignments = missing_assignments(project)
+    if not assignments:
         return []
-
     if not write:
-        _report_missing(project, len(candidates))
+        _report_missing(project, len(assignments))
         return []
 
-    assignments = [(item, mint()) for item in candidates]
+    from .revise import write_rewrites
 
-    by_file: dict[str, list[tuple[Item, str]]] = defaultdict(list)
-    for item, new_key in assignments:
-        by_file[item.source_file].append((item, new_key))
-
-    failed: set[int] = set()
-
-    for rel, entries in by_file.items():
-        path = os.path.join(project.root, rel)
-        with open(path, "r", encoding="utf-8") as fh:
-            text = fh.read()
-        newline = "\r\n" if "\r\n" in text else "\n"
-        lines = text.splitlines()
-
-        # Bottom-up so earlier line numbers stay valid as we insert -- same
-        # discipline ids.allocate() and former_ids.confirm() use for the
-        # same reason.
-        for item, new_key in sorted(entries, key=lambda e: e[0].source_line, reverse=True):
-            if rel.endswith(".md"):
-                lines = ids_mod.insert_into_markdown(lines, item.source_line, f"key: {new_key}")
-            else:
-                updated = ids_mod.insert_into_list(lines, item.source_line, "key", new_key)
-                if updated is None:
-                    project.error(
-                        f"could not write key {new_key} back into the source",
-                        file=rel, line=item.source_line,
-                    )
-                    failed.add(id(item))
-                    continue
-                lines = updated
-
-        with open(path, "w", encoding="utf-8", newline="") as fh:
-            fh.write(newline.join(lines) + newline)
-
-    written = [(item, new_key) for item, new_key in assignments if id(item) not in failed]
-    for item, new_key in written:
+    plan = plan_missing(project, assignments=assignments)
+    write_rewrites(plan.rewrites)
+    for item, new_key in plan.assignments:
         item.key = new_key
-
-    still_missing = len(candidates) - len(written)
-    if still_missing:
-        _report_missing(project, still_missing)
-
-    return written
+    if plan.remaining:
+        _report_missing(project, plan.remaining)
+    return plan.assignments
 
 
 def _report_missing(project: Project, count: int) -> None:

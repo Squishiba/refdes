@@ -17,17 +17,16 @@ The decision is taken. This document specs it; it does not relitigate it.
 **Implementation status:** §1 (key format), §2 (minting), §3 (composite
 expansion, display-half refresh, and key-based resolution), §5 (key-based
 hashing; hash-format migration; mixed legacy/surrogate-keyed baseline and
-seal readers; conditional, write-free storage conversion plans; keyed
-rename diffs and seal verification), and §6 Layers 1-5 (well-formedness,
-uniqueness, unknown-key resolution, the latest-baseline lint, and the
-older-baseline audit) are implemented (`refdes/keys.py`, `refdes/links.py`,
-and changes to `build.py`, `cli.py`, `lifecycle.py`, `seal.py`, `revise.py`,
-`blocked.py`, `blocks.py`, `workspaces.py`, `stub_tests.py`, and `render.py`
--- see "What §3/§5 turned out to need beyond the spec" below). New stamps
-and seals deliberately keep the legacy display-id-keyed shape until
-adoption, preserving existing-user output. `refdes keys adopt` (§7) still
-needs to invoke the conversion plan and transactionally write its results;
-the subtractive `revise.py`/`former_ids.py` cleanup remains design only.
+seal readers; conditional storage conversion; keyed rename diffs and seal
+verification), §6 Layers 1-5 (well-formedness, uniqueness, unknown-key
+resolution, the latest-baseline lint, and the older-baseline audit), and §7
+(`refdes keys adopt`) are implemented (`refdes/adopt.py`, `refdes/keys.py`,
+`refdes/links.py`, and changes to `build.py`, `cli.py`, `lifecycle.py`,
+`seal.py`, `revise.py`, `blocked.py`, `blocks.py`, `workspaces.py`,
+`stub_tests.py`, and `render.py` -- see "What §3/§5 turned out to need beyond
+the spec" below). Adoption records `.refdes/keys-adopted`; subsequent stamps
+and new seals use the surrogate-keyed shape. The subtractive
+`revise.py`/`former_ids.py` cleanup remains design only.
 
 **What §3/§5 turned out to need beyond the spec, implementing it:**
 
@@ -877,26 +876,44 @@ breaking change and belongs in the changelog with that framing.
 
 ### `refdes keys adopt`
 
-Adoption should be **one explicit, transactional command**, even though
-minting is otherwise automatic — because adoption rewrites every item file
-and every baseline at once, and that deserves to be a reviewable commit
-rather than a side effect of someone running `refdes check`.
+Adoption is **one explicit, transactional command**, even though minting is
+otherwise automatic — because adoption rewrites every item file and every
+baseline at once, and that deserves to be a reviewable commit rather than a
+side effect of someone running `refdes check`.
 
 ```
 $ refdes keys adopt
 minted 20 key(s)
 expanded 34 link reference(s) to composite form
-baselines rebased: rev-b (17/17 entries carried), rev-c (20/20 entries carried)
-seals rebased: board-a (6 entries)
-  .refdes/log-seal-board-a.yaml
-Nothing else changed. Review the diff before committing.
+baselines rebased:
+  rev-b (17/17 entries carried)
+  rev-c (20/20 entries carried)
+seals rebased:
+  .refdes/log-seal-board-a.yaml (6/6 entries carried)
+changed files:
+  ...
+Review the diff before committing.
 ```
 
-It reuses `revise.apply`'s existing safety model wholesale — compute every
-rewrite in memory, verify the reloaded project is as clean as the original,
-write only then, roll back completely on any failure. That machinery already
-exists, is tested, and is exactly the right shape. Adoption should cost
-little new code beyond the minting and the composite expansion.
+`--dry-run` computes and prints this same plan without writing. A second run
+is byte-for-byte idempotent and reports `nothing to do -- project already
+adopted`.
+
+**Adoption detection is one marker:** `.refdes/keys-adopted`, containing the
+format version `1`. The marker is created in the same transaction and should
+be committed with the rewritten files. A project is adopted exactly when
+that marker exists. This is deliberately more explicit than inferring state
+from baseline/seal shapes: a project with no history has no shape to inspect,
+and §5(c) can intentionally leave an uncomparable historical entry in the
+legacy shape. Those entries are named on every adoption run; the marker lets
+new history use key-keyed storage without pretending the old entry was
+comparable.
+
+The implementation reuses `revise.apply`'s file-rewrite and byte-restoration
+primitives. It computes every item, baseline, seal, and marker rewrite in
+memory; writes the staged set once; reloads and fully validates the project;
+and restores every touched file (removing a newly-created marker) if either
+writing or validation fails.
 
 **Ordering inside the transaction**, which matters:
 
@@ -905,7 +922,15 @@ little new code beyond the minting and the composite expansion.
    the last moment at which that is the resolution rule)
 3. re-key baselines and seals, carrying hashes forward under §5(c)'s
    conditional rule
-4. reload, fully validate, and only then write
+4. write the staged set, reload, and fully validate; restore every original
+   byte on any failure
+
+One implementation detail mattered for source preservation: link-token edits
+are rendered against the original line layout before planned `key:` lines are
+inserted. The semantic order is still mint-then-expand — assigned keys are
+already present in memory — but composing the text in that physical order
+keeps parsed source-line coordinates valid and preserves flow mappings,
+block sequences, quotes, Markdown front matter, and CRLF.
 
 ### What happens to existing links written as bare display ids
 
@@ -1031,6 +1056,11 @@ In rough order of how likely each is to change the design:
    scalars. This is where I would expect to find the sharp edges, and it is
    cheap to test exhaustively.
 
+   **Status: implemented.** Adoption tests cover flow lists, block sequences,
+   quoted scalars, one-line flow mappings, defaults blocks, Markdown front
+   matter, and CRLF, and the command composes the two source-preserving plans
+   without reserializing item files.
+
 2. **The diff, on a real rename.** Take this repository, adopt keys on a
    branch, rename `BND-THM` → `THM`, and read the resulting diff as a
    reviewer. If it is not obviously *more* readable than today's, the
@@ -1042,6 +1072,12 @@ In rough order of how likely each is to change the design:
    Prototype it against a project where some items *have* changed since the
    baseline, and confirm the uncomparable entries are reported rather than
    quietly rebased.
+
+   **Status: implemented.** The adoption regression fixture contains both
+   base/per-board seals and a stamped baseline with one item edited after the
+   stamp. The unchanged hashes carry; the edited entry stays legacy and is
+   printed by display id. A sabotaged mid-write failure verifies byte-for-byte
+   rollback.
 
 4. **`--no-write` coverage.** Enumerate every write the tool performs during
    a load and confirm the flag suppresses all of them. This is the kind of

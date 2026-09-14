@@ -7,6 +7,7 @@ import json
 import os
 import sys
 
+from . import adopt as adopt_mod
 from . import build as build_mod
 from . import citations as citations_mod
 from . import former_ids as former_ids_mod
@@ -792,6 +793,59 @@ def cmd_standard_upgrade(args) -> int:
     return 0 if ok else 1
 
 
+def cmd_keys_adopt(args) -> int:
+    result = adopt_mod.apply(_standard_project_root(args), dry_run=args.dry_run)
+    if not result.ok:
+        print("would refuse:" if args.dry_run else "refused:", file=sys.stderr)
+        for error in result.errors:
+            print(f"  {error}", file=sys.stderr)
+        return 1
+
+    if result.already_adopted:
+        print("nothing to do -- project already adopted")
+    elif args.dry_run:
+        print(f"would mint {result.minted} key(s)")
+        print(
+            f"would expand {result.expanded} link reference(s) "
+            "to composite form"
+        )
+    else:
+        print(f"minted {result.minted} key(s)")
+        print(
+            f"expanded {result.expanded} link reference(s) "
+            "to composite form"
+        )
+
+    if result.baselines and not result.already_adopted:
+        heading = "baselines would be rebased:" if args.dry_run else "baselines rebased:"
+        print(heading)
+        for baseline in result.baselines:
+            print(
+                f"  {baseline.name} "
+                f"({baseline.carried}/{baseline.total} entries carried)"
+            )
+    for baseline in result.baselines:
+        for item_id in baseline.uncomparable:
+            print(f"  uncomparable baseline entry {baseline.name}: {item_id}")
+
+    if result.seals and not result.already_adopted:
+        heading = "seals would be rebased:" if args.dry_run else "seals rebased:"
+        print(heading)
+        for seal in result.seals:
+            print(f"  {seal.file} ({seal.carried}/{seal.total} entries carried)")
+    for seal in result.seals:
+        for item_id in seal.uncomparable:
+            print(f"  uncomparable seal entry {seal.file}: {item_id}")
+
+    if result.changed_files:
+        heading = "files that would change:" if args.dry_run else "changed files:"
+        print(heading)
+        for rel in result.changed_files:
+            print(f"  {rel}")
+        print("Review the diff before committing.")
+    return 0
+
+
 def cmd_stub_tests(args) -> int:
     project, _stale = _load(args, require_ids=False)
     build_mod.build(project, seal_write=False, reseal=False)
@@ -1139,6 +1193,23 @@ def main(argv: list[str] | None = None) -> int:
         help="target standard.version: to upgrade to",
     )
     p_standard_upgrade.set_defaults(func=cmd_standard_upgrade)
+
+    p_keys = sub.add_parser(
+        "keys",
+        help="manage immutable surrogate-key storage",
+    )
+    keys_sub = p_keys.add_subparsers(dest="keys_command", required=True)
+    p_keys_adopt = keys_sub.add_parser(
+        "adopt",
+        help="transactionally adopt key-keyed baselines and seals",
+        description="Mint every missing local key, expand structured links, "
+        "re-key every baseline and seal file, then reload and fully validate "
+        "the project. Any failure restores every touched file.",
+    )
+    p_keys_adopt.add_argument(
+        "--dry-run", action="store_true", help="show the complete plan without writing"
+    )
+    p_keys_adopt.set_defaults(func=cmd_keys_adopt)
 
     p_revise = sub.add_parser(
         "revise",

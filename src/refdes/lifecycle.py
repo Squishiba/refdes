@@ -130,14 +130,15 @@ def _match_baseline_entry(
     item_id: str,
     entry: dict,
 ) -> tuple[str, str, dict] | None:
-    """Match by key when both sides have one; otherwise by display id."""
+    """Match either current storage shape by key, then by display id."""
     by_key, by_display_id = indexes
-    key = entry.get("key")
-    if isinstance(key, str) and key:
+    identity = keys_mod.baseline_identity(item_id, entry)
+    key, display_id = identity if identity is not None else (None, item_id)
+    if key:
         matched = by_key.get(key)
         if matched is not None:
             return matched
-    matched = by_display_id.get(item_id)
+    matched = by_display_id.get(display_id)
     if matched is None:
         return None
     old_identity = keys_mod.baseline_identity(matched[0], matched[2])
@@ -153,11 +154,15 @@ def _same_baseline_items(stored: dict[str, dict], current: dict[str, dict]) -> b
     indexes = _baseline_indexes(stored)
     matched_records: set[str] = set()
     for item_id, current_entry in current.items():
+        current_identity = keys_mod.baseline_identity(item_id, current_entry)
+        current_display_id = (
+            current_identity[1] if current_identity is not None else item_id
+        )
         matched = _match_baseline_entry(indexes, item_id, current_entry)
         if matched is None:
             return False
         record_id, stored_id, stored_entry = matched
-        if stored_id != item_id or record_id in matched_records:
+        if stored_id != current_display_id or record_id in matched_records:
             return False
         matched_records.add(record_id)
         left = dict(stored_entry)
@@ -221,72 +226,60 @@ def latest(baselines: list[Baseline], kind: str | None = None) -> Baseline | Non
     return max(candidates, key=lambda b: b.stamped_at)
 
 
-def _save_baseline_file(project: Project, data: dict) -> str:
-    """Two dump passes, not one: `default_flow_style=None` (PyYAML's
-    per-node heuristic) would flow-style *both* `gate:` and each item entry,
-    which makes `gate:` -- one rule per line is what's actually worth
-    git-diffing -- collapse into a wrapped blob. So the head (kind through
-    gate) is dumped block-style, and each item entry is dumped individually
-    flow-style (still through `yaml.safe_dump`, so a title with a colon or
-    quote in it is escaped correctly, not hand-formatted) -- the shape
-    docs/design/lifecycle.md §2 shows.
-    """
-    path = baseline_path(project, data["name"])
-    os.makedirs(os.path.dirname(path), exist_ok=True)
+def format_baseline(data: dict) -> str:
+    """Serialize one baseline identically for planning and persistence."""
     items = data["items"]
     head = {k: v for k, v in data.items() if k != "items"}
-    with open(path, "w", encoding="utf-8") as fh:
-        fh.write(_HEADER)
-        fh.write(yaml.safe_dump(head, sort_keys=False, default_flow_style=False))
-        if not items:
-            fh.write("items: {}\n")
-        else:
-            fh.write("items:\n")
-            for item_id, entry in items.items():
-                line = yaml.safe_dump(
-                    entry, default_flow_style=True, sort_keys=False, allow_unicode=True
-                ).strip()
-                fh.write(f"  {item_id}: {line}\n")
+    out = _HEADER + yaml.safe_dump(
+        head, sort_keys=False, default_flow_style=False
+    )
+    if not items:
+        return out + "items: {}\n"
+    out += "items:\n"
+    for item_id, entry in items.items():
+        line = yaml.safe_dump(
+            entry, default_flow_style=True, sort_keys=False, allow_unicode=True
+        ).strip()
+        out += f"  {item_id}: {line}\n"
+    return out
+
+
+def _save_baseline_file(project: Project, data: dict) -> str:
+    """Persist ``format_baseline``'s source-reviewable baseline shape."""
+    path = baseline_path(project, data["name"])
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8", newline="") as fh:
+        fh.write(format_baseline(data))
     return path
 
 
 def _items_map(project: Project) -> dict[str, dict]:
-    """`project.local_items` only -- imports are excluded from baselines the
-    same way they're excluded from coverage and validation.
+    """Snapshot local items in the project's adopted or legacy shape.
 
-    `key` records the item's immutable surrogate key for the baseline
-    corruption lint (docs/design/keys.md §6 Layers 4-5). It remains optional:
-    a pre-keys baseline, or a baseline deliberately stamped under
-    `--no-write` before keys had been minted, has no identity evidence for
-    that entry and the lint must skip it rather than guess.
+    Explicit adoption is recorded by ``keys.ADOPTION_MARKER``. Adopted
+    projects key each entry by immutable surrogate and carry the display id
+    inside; legacy projects key by display id and carry the surrogate inside.
+    Readers accept both shapes, including mixtures left by an uncomparable
+    historical entry.
 
-    `hash_format` records which content-hash definition `hash` was computed
-    under (build.HASH_FORMAT -- currently 2, docs/design/keys.md §5)
-    directly on every freshly-stamped entry, so a reader of this baseline
-    later never has to guess: absent means format 1 (a baseline stamped
-    before keys existed, or an entry migrate_hash_format() below left
-    untouched because it couldn't account for it), present and current
-    means it's directly comparable to a freshly computed hash.
-
-    `verdict` and `calc_hash` are docs/design/stale-arithmetic-signal.md's
-    two probes, and are the one deliberate exception to this module's
-    "assembly, not new machinery" framing above -- see the note on
-    `Baseline.items` for why that's a bounded exception and not a reversal
-    of it. Both are per-item *optional*: `verdict` only for a type with a
-    verdict-bearing `status` field (`_verdict_field_name`), `calc_hash` only
-    for an item with at least one ```calc block (`build_mod.calc_hash_for`
-    returns None otherwise) -- omitted entirely, not written as null/empty,
-    when they don't apply. That covers most items in a typical project: no
-    `status` field, or no `calc` block, or both.
+    ``hash_format`` records which content-hash definition produced ``hash``.
+    ``verdict`` and ``calc_hash`` are the narrow stale-arithmetic probes
+    described by docs/design/stale-arithmetic-signal.md.
     """
     out = {}
+    adopted = keys_mod.is_adopted(project)
     for item in project.local_items:
         entry: dict[str, object] = {
             "hash": item.content_hash, "type": item.type, "title": item.title,
             "hash_format": build_mod.HASH_FORMAT,
         }
-        if item.key:
-            entry["key"] = item.key
+        if adopted and item.key:
+            record_id = item.key
+            entry["id"] = item.id
+        else:
+            record_id = item.id
+            if item.key:
+                entry["key"] = item.key
         spec = project.types.get(item.type)
         field_name = _verdict_field_name(spec) if spec is not None else None
         if field_name is not None:
@@ -294,7 +287,7 @@ def _items_map(project: Project) -> dict[str, dict]:
         calc_hash = build_mod.calc_hash_for(item)
         if calc_hash is not None:
             entry["calc_hash"] = calc_hash
-        out[item.id] = entry
+        out[record_id] = entry
     return out
 
 
@@ -758,19 +751,21 @@ def diff_against(project: Project, baseline: Baseline, write: bool = True) -> Di
     matched_records: set[str] = set()
     unchanged = 0
     for item_id, entry in current.items():
+        identity = keys_mod.baseline_identity(item_id, entry)
+        current_id = identity[1] if identity is not None else item_id
+        key = identity[0] if identity is not None else entry.get("key")
         matched = _match_baseline_entry(indexes, item_id, entry)
         if matched is None:
-            added.append(item_id)
+            added.append(current_id)
             continue
         record_id, old_id, old = matched
         matched_records.add(record_id)
-        old_entries[item_id] = old
-        key = entry.get("key")
-        if key and old_id != item_id:
-            relabelled.append((old_id, item_id, str(key)))
+        old_entries[current_id] = old
+        if key and old_id != current_id:
+            relabelled.append((old_id, current_id, str(key)))
         if old.get("hash") != entry["hash"]:
-            changed.append(item_id)
-        elif old_id == item_id:
+            changed.append(current_id)
+        elif old_id == current_id:
             unchanged += 1
     removed = sorted(
         (

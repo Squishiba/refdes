@@ -18,9 +18,14 @@ from __future__ import annotations
 import os
 import re
 from collections import defaultdict
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 from . import parse as parse_mod
 from .model import Item, Project
+
+if TYPE_CHECKING:
+    from .revise import FileRewrite
 
 # A structured-link target token, either a bare display id or a composite.
 # Matching is deliberately confined to parsed link fields by the write-back
@@ -194,28 +199,25 @@ def _rewrite_item_links(
     return applied
 
 
-def expand_missing(project: Project, write: bool = True) -> list[tuple[Item, str, str, str]]:
-    """Expand bare link targets and refresh stale composite display halves.
+@dataclass
+class LinkExpansionPlan:
+    rewrites: list[tuple[Item, str, str, str]] = field(default_factory=list)
+    files: list[FileRewrite] = field(default_factory=list)
+    expansion_count: int = 0
+    remaining: int = 0
 
-    Both operations use the same source-preserving write-back. Returns
-    ``(item, link_name, old_target, new_target)`` for every target actually
-    rewritten.
 
-    A composite's key half is immutable. If it resolves and its display half
-    is stale, the display text is refreshed unless that old text is now the
-    id of a different live item. That crossed-reference signature is warned
-    about and left untouched. An unknown key is likewise untouched here so
-    build.resolve_links() can report the Layer-3 error.
+def plan_expansion(
+    project: Project,
+    source_texts: dict[str, str] | None = None,
+) -> LinkExpansionPlan:
+    """Plan composite expansion and stale-label refresh without writing."""
+    from .revise import FileRewrite
 
-    Must run after keys.mint_missing() in the same load (cli._load()) because
-    a bare target needs a durable key before it can be expanded. Bare targets
-    that are dangling, external and keyless, or whose minting failed remain
-    fully usable under the existing display-id resolution rule.
-    """
-    rewrites: list[tuple[Item, str, str, str]] = []
-    expansion_count = 0
+    candidates: list[tuple[Item, str, str, str]] = []
     replacements_by_item: dict[int, dict[str, str]] = defaultdict(dict)
     by_key = {item.key: item for item in project.items.values() if item.key}
+    expansion_count = 0
 
     for item in project.local_items:
         for link_name, targets in item.links.items():
@@ -249,28 +251,25 @@ def expand_missing(project: Project, write: bool = True) -> list[tuple[Item, str
                         continue
                     new_target = f"{resolved.id}@{key}"
 
-                rewrites.append((item, link_name, target, new_target))
+                candidates.append((item, link_name, target, new_target))
                 replacements_by_item[id(item)][target] = new_target
 
-    if not rewrites:
-        return []
+    plan = LinkExpansionPlan(expansion_count=expansion_count)
+    if not candidates:
+        return plan
 
-    if not write:
-        if expansion_count:
-            _report_missing(project, expansion_count)
-        return []
-
-    files_touched = sorted({item.source_file for item, *_ in rewrites})
+    files_touched = sorted({item.source_file for item, *_ in candidates})
     applied_by_item: dict[int, set[str]] = defaultdict(set)
     for rel in files_touched:
         path = os.path.join(project.root, rel)
-        with open(path, "r", encoding="utf-8") as fh:
-            text = fh.read()
+        if source_texts is not None and rel in source_texts:
+            text = source_texts[rel]
+        else:
+            with open(path, "r", encoding="utf-8", newline="") as fh:
+                text = fh.read()
         newline = "\r\n" if "\r\n" in text else "\n"
         lines = text.splitlines()
 
-        # Every item in this file, not just the ones being rewritten --
-        # _item_spans needs the full set to bound each span correctly.
         file_items = [i for i in project.local_items if i.source_file == rel]
         for item, start, end in _item_spans(rel, lines, file_items):
             repl = replacements_by_item.get(id(item))
@@ -279,9 +278,6 @@ def expand_missing(project: Project, write: bool = True) -> list[tuple[Item, str
                     lines, start, end, item, repl
                 )
 
-        # A link inherited from file defaults has one physical spelling shared
-        # by every inheriting item. Rewrite that spelling once, then attribute
-        # the applied targets to each item whose parsed links came from it.
         defaults_groups: dict[tuple[int, str], list[Item]] = defaultdict(list)
         for item in file_items:
             if item.defaults_line is None or id(item) not in replacements_by_item:
@@ -302,32 +298,64 @@ def expand_missing(project: Project, write: bool = True) -> list[tuple[Item, str
                 own_targets = replacements_by_item[id(item)]
                 applied_by_item[id(item)] |= applied & own_targets.keys()
 
-        new_text = newline.join(lines) + newline
-        if new_text != text:
-            with open(path, "w", encoding="utf-8", newline="") as fh:
-                fh.write(new_text)
+        after = newline.join(lines) + newline
+        if after != text:
+            plan.files.append(FileRewrite(path=path, rel=rel, before=text, after=after))
 
-    # Only report/apply in memory what the source pass actually matched.
-    written = [
+    plan.rewrites = [
         (item, link_name, old, new)
-        for item, link_name, old, new in rewrites
+        for item, link_name, old, new in candidates
         if old in applied_by_item.get(id(item), ())
     ]
+    written_expansions = sum(
+        1 for _item, _name, old, _new in plan.rewrites if "@" not in old
+    )
+    plan.remaining = expansion_count - written_expansions
+    return plan
 
+
+def expand_missing(project: Project, write: bool = True) -> list[tuple[Item, str, str, str]]:
+    """Expand bare link targets and refresh stale composite display halves.
+
+    Both operations use the same source-preserving write-back. Returns
+    ``(item, link_name, old_target, new_target)`` for every target actually
+    rewritten.
+
+    A composite's key half is immutable. If it resolves and its display half
+    is stale, the display text is refreshed unless that old text is now the
+    id of a different live item. That crossed-reference signature is warned
+    about and left untouched. An unknown key is likewise untouched here so
+    build.resolve_links() can report the Layer-3 error.
+
+    Must run after keys.mint_missing() in the same load (cli._load()) because
+    a bare target needs a durable key before it can be expanded. Bare targets
+    that are dangling, external and keyless, or whose minting failed remain
+    fully usable under the existing display-id resolution rule.
+    """
+    plan = plan_expansion(project)
+    if not plan.rewrites:
+        return []
+    if not write:
+        if plan.expansion_count:
+            _report_missing(project, plan.expansion_count)
+        return []
+
+    from .revise import write_rewrites
+
+    write_rewrites(plan.files)
+    replacements_by_item: dict[int, dict[str, str]] = defaultdict(dict)
+    for item, _link_name, old, new in plan.rewrites:
+        replacements_by_item[id(item)][old] = new
     for item in project.local_items:
-        applied = applied_by_item.get(id(item))
-        if not applied:
+        replacements = replacements_by_item.get(id(item))
+        if not replacements:
             continue
-        repl = replacements_by_item[id(item)]
         for link_name, targets in item.links.items():
-            item.links[link_name] = [repl[t] if t in applied else t for t in targets]
+            item.links[link_name] = [replacements.get(target, target) for target in targets]
 
-    written_expansions = sum(1 for _item, _name, old, _new in written if "@" not in old)
-    still_missing = expansion_count - written_expansions
-    if still_missing:
-        _report_missing(project, still_missing)
-
-    return written
+    if plan.remaining:
+        _report_missing(project, plan.remaining)
+    return plan.rewrites
 
 
 def _report_missing(project: Project, count: int) -> None:
