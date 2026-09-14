@@ -952,7 +952,8 @@ implementation-status header for the module list. Adoption is explicit and
 transactional; the self-describing `.refdes/keys-adopted.yaml` marker records
 it, and new stamps/seals then use key-keyed storage.
 
-**Status: partially implemented.** One decided cleanup remains:
+**Status: partially implemented.** One decided cleanup remains, deferred by
+Jared on 2026-09-14:
 
 - **The subtractive cleanup in `revise.py`/`former_ids.py` (§4)** — roughly
   166 lines of `revise.py`'s prefix-rename machinery (`_rewrite_reference_ids`,

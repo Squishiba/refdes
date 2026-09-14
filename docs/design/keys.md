@@ -27,8 +27,10 @@ implemented (`refdes/adopt.py`, `refdes/keys.py`, `refdes/links.py`,
 `stub_tests.py`, and `render.py` -- see "What §3/§5 turned out to need beyond
 the spec" below). Adoption records `.refdes/keys-adopted.yaml`; subsequent
 stamps, new seals, and membership-manifest writes use the surrogate-keyed
-shape. The subtractive `revise.py`/`former_ids.py` cleanup remains design
-only.
+shape. This repository is itself adopted — commit `0a37b1b` ("keys: adopt
+surrogate keys on the root project"); see §7, "This repository's own
+project". The subtractive `revise.py`/`former_ids.py` cleanup (§4) remains
+design only, deferred by Jared 2026-09-14.
 
 **What §3/§5 turned out to need beyond the spec, implementing it:**
 
@@ -987,10 +989,27 @@ only keys.
 
 ### This repository's own project
 
-20 items, 6 sealed log entries, no baselines currently stamped, and a
-`.refdes/ids.yaml` with four burned prefixes. It is a good adoption test
-precisely because it exercises the sealed-log path and the compound-prefix
-convention. Worth doing on a branch and reading the whole diff.
+Adopted on a branch and landed as commit `0a37b1b` ("keys: adopt surrogate
+keys on the root project"). Automatic minting and expansion had already
+keyed every item and every link, so the run minted **0 keys** and expanded
+**0 links**; what it changed was storage shape: `.refdes/log-seal-board-a.yaml`
+re-keyed with **6/6 hashes carried**, `.refdes/boards.yaml` re-keyed
+**21/22** with one stale entry (`CON-THM-002`, no live item) dropped, and
+`.refdes/keys-adopted.yaml` added. `refdes check` produced an identical
+diagnostic set before and after (1 error, 2 warnings, 20 items) — no seal
+violation, no new diagnostic.
+
+It was a good adoption test precisely because it exercises the sealed-log
+path and the compound-prefix convention: 20 items, 6 sealed log entries, no
+baselines currently stamped, and a `.refdes/ids.yaml` with four burned
+prefixes — with the caveat that the baseline half of §5(c)'s conditional
+carry-forward was *not* exercised here (this project has no stamped
+baselines; it is covered by the `tmp_path` tests in `tests/test_keys_adopt.py`,
+§9 item 3).
+
+One observation worth carrying forward: the re-keyed files are re-sorted by
+surrogate key, so the one-time adoption diff moves every line of the seal
+and membership manifests even though no hash changed.
 
 ---
 
@@ -1107,17 +1126,30 @@ In rough order of how likely each is to change the design:
    composite shape is wrong and should be revisited before it is baked into
    every file.
 
+   **Status: done — composite shape kept.** The rename ran on this
+   repository's own adopted project (trial commit `3226700`, `REQ-PWR-001` →
+   `REQ-PWR-010`): the only changes were the item's `id:` line and the
+   display half of each inbound composite (`verifies:
+   [REQ-PWR-001@1zn5skrv6k3]` → `[REQ-PWR-010@1zn5skrv6k3]`, and the same
+   in `addresses:`). Key halves unchanged, no seal violation. Jared
+   reviewed the diff and found it acceptable — §10's eleven-characters
+   bullet is decided on that evidence.
+
 3. **Adoption on a project with sealed log entries and stamped baselines.**
    §5(c)'s conditional carry-forward is the subtlest part of this design.
    Prototype it against a project where some items *have* changed since the
    baseline, and confirm the uncomparable entries are reported rather than
    quietly rebased.
 
-   **Status: implemented.** The adoption regression fixture contains both
-   base/per-board seals and a stamped baseline with one item edited after the
-   stamp. The unchanged hashes carry; the edited entry stays legacy and is
-   printed by display id. A sabotaged mid-write failure verifies byte-for-byte
-   rollback.
+   **Status: implemented.** The `tmp_path` tests in `tests/test_keys_adopt.py`
+   cover both halves of this prototype: the fixture contains base/per-board
+   seals *and* a stamped baseline with one item edited after the stamp —
+   the unchanged hashes carry, the edited entry stays legacy in
+   `hash_format: 1` and is printed by display id — and a sabotaged
+   mid-write failure verifies byte-for-byte rollback. The real project's
+   adoption (§7) exercised only the *seals* half: this repository has
+   sealed logs but no stamped baselines, so the baseline half of §5(c) is
+   carried by those tests, not by the real project.
 
 4. **`--no-write` coverage.** Enumerate every write the tool performs during
    a load and confirm the flag suppresses all of them. This is the kind of
@@ -1170,7 +1202,9 @@ assumptions:
   asymmetry with the existing reserved-key rules and it will surprise
   someone who knows those rules well.
 
-- **Eleven characters.** Long enough to be safe, long enough to be noticed
-  in every link line. If line noise turns out to dominate the reading
-  experience in prototype (2), the honest response is to reconsider 8+1 with
-  eyes open about §1's table, not to quietly hope.
+- **Decision, 2026-09-14: eleven characters stays** (§1). Long enough to be
+  safe, long enough to be noticed in every link line. The open question was
+  prototype (2)'s line noise, and the prototype has now run (§9 item 2):
+  Jared read the rename diff on this repository's own project (`verifies:
+  [REQ-PWR-001@1zn5skrv6k3]` → `[REQ-PWR-010@1zn5skrv6k3]`) and found the
+  line noise acceptable. 8+1 is not being reached for; §1's table stands.
