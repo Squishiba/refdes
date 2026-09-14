@@ -318,9 +318,11 @@ would need to learn about fragments too, or at least flag them as stale.
 **Status: Part A done, Part B outstanding.** `EXPLICIT_REF_RE` now admits
 `ID#field` (and `ID#field|label`), and `_linkify` renders it as a link to that
 field's row on the target's page — never as the field's value. `item.html.j2`
-gives every declared field an `id="field-<name>"` anchor, including the
-declared-but-empty ones, which get an invisible row rather than leaving the
-reference pointing at an id that does not exist. An undeclared field is a
+gives every declared field an `id="field-<name>"` anchor: on its table row, on
+the section that renders it instead of a row (`options`, `checks`, a citations
+field), or — declared but empty — on a collapsed empty row. Not `hidden`: an
+element with no layout box is never scrolled to, so a hidden placeholder is a
+link that navigates nowhere. An undeclared field is a
 warning naming item, field, and type; an unknown item with a fragment warns
 exactly as an unknown item without one. Tests: `tests/test_field_refs.py`.
 Part B is untouched: citations still have no declared `id:` and no

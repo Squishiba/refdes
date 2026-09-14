@@ -81,3 +81,38 @@ it always resolves against the item's own page from wherever it is written.
 - `[[ID@key#field]]` does not match (the `@` is not in the target class). Per
   instruction: composite ids only appear in structured link fields, never in
   prose, so no key handling was added.
+
+---
+
+## Review round (2026-09-14): make the anchors land somewhere real
+
+Two defects in the first pass, both about where a fragment link actually goes.
+
+1. The declared-but-empty placeholder was `<tr ... hidden>`. A `hidden` element
+   has no layout box and a browser will not scroll to one, so the link
+   navigated nowhere. Now `<tr id="field-NAME" class="field-anchor"><td
+   colspan="3"></td></tr>`, collapsed by a rule in `style.css`
+   (`.fields tr.field-anchor, .fields tr.field-anchor td`) whose specificity
+   beats `.fields td`'s padding.
+2. `options`, `checks` and citations-typed fields are skipped by the fields
+   table because they render in their own section further down the page, so
+   their anchor pointed at a row that does not exist. `item.html.j2` now
+   computes `in_section` per field (options -> `item.fields.get('options')`,
+   checks -> `item.checks`, citations -> `item.citations`) and puts
+   `id="field-NAME"` on the section instead, falling back to the placeholder row
+   only when the section does not render. `citation_fields` is collected before
+   the table; the citations section carries the id only when the type declares
+   exactly one citations-typed field, since one section serves them all and an
+   id cannot be repeated — with two, each gets its own placeholder row. No id is
+   emitted twice on a page.
+
+Tests added to `tests/test_field_refs.py`:
+`test_empty_field_anchor_keeps_a_layout_box`,
+`test_a_field_rendered_in_its_own_section_anchors_on_the_section`,
+`test_a_field_rendered_in_its_checks_section_anchors_there`,
+`test_a_citations_field_anchors_on_the_citations_section`,
+`test_an_empty_section_field_falls_back_to_the_placeholder_row`.
+Each was sabotage-checked: dropping a section id, or putting `hidden` back on the
+placeholder, fails exactly the test that covers it.
+
+Full suite: `python -m pytest -q` -> 752 passed.

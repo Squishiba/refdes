@@ -76,7 +76,10 @@ prose, so it cannot go stale under you. The link text is `ID#field` unless you
 give a `|label`. The field must be declared on the target item's type — one
 that isn't is a warning naming the item, the field, and the type, and renders
 in red like any other unresolved reference. A field that is declared but empty
-on that item links fine (the row exists, it just has nothing in it).
+on that item links fine — you land on a collapsed empty row where the row would
+have been. And a field whose content is shown in its own section rather than a
+table row (`options`, `checks`, a citations field) links to **that section**, so
+the fragment lands on the content, not on the table.
 
 ## Images and other local files
 

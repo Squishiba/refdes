@@ -292,7 +292,9 @@ or `[[CMP-001#part_number|the MPN]]` — which links to that field's row on the
 target's page instead of to the page itself. It links; it never inlines the
 value, so a fragment cannot go stale when the field changes. The field has to
 be declared on the target's type: an undeclared one is a warning naming the
-item, the field, and the type.
+item, the field, and the type. A field shown in its own section — `options`,
+`checks`, a citations field — links to that section; a field declared but empty
+links to the collapsed row where it would have been.
 
 A `[[fig:some-id]]` reference — the same `[[...]]` envelope, a `fig:` prefix —
 resolves to a numbered figure instead of an item. See [width and
