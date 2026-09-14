@@ -316,16 +316,43 @@ each of `YYYY`, `MM`, and `DD` with a repeated separator
 (`src/refdes/dates.py:49-58`). This repository currently declares
 `date_format: YYYY-MM-DD` (`refdes-project.yaml:28-30`).
 
+### CLI parity
+
+The backlog's scope decision is explicit: the CLI must remain able to do
+everything the form can do (`docs/design/backlog.md:183-186`). Here “able”
+means semantic authoring parity, not necessarily one flag for every form
+control. The plain files remain the public authoring interface:
+
+| Editor operation | Existing non-browser path |
+|---|---|
+| Edit a field or body | Edit the YAML/Markdown source and run `refdes check`. |
+| Add/remove a link | Edit the declared link field; a writable load expands a bare target to a composite (`src/refdes/cli.py:94-104`). |
+| Create an item | Run `refdes new TYPE`, write the scaffold, then `refdes id`; writable loading mints its key and expands links (`src/refdes/scaffold.py:134-172`; `src/refdes/cli.py:403-420,82-104`). |
+| Amend a sealed log | Create a new log by the same path and author its `amends:` link; never mutate the sealed entry. |
+
+The browser adds safe source manipulation and aggregates those steps into one
+transaction, but it adds no browser-only state or semantic operation. A
+transactional create with initial links has no one-command CLI twin today;
+the same final state is nevertheless reachable through `new`, source editing,
+`id`, and a writable check/build. Likewise, “amend this log” is a pre-filled
+ordinary log plus `amends`, not a new lifecycle operation.
+
+The transaction, allocation-planning, and item-intent layers must be ordinary
+Python services, not code buried in HTTP handlers. A future CLI can call them
+if scripted atomic edits become a real need. The recommendation for v1 is not
+to invent a large `refdes item set` flag language merely to mirror widgets;
+whether parity requires an atomic one-command CLI is called out under “Where
+you might disagree.”
+
 ## Server and refresh architecture
 
 ### Process boundary
 
 The command imports refdes modules in-process; it does not shell out to a
-configurable command. One process owns one project, one write lock, one
-in-memory project revision, and one per-launch preview directory. A small
-stdlib HTTP server is sufficient for the local-only first version. A framework
-would add installation and patching cost without changing the single-user
-request model.
+configurable command. One process owns one project, one write lock, and one
+in-memory project revision. A small stdlib HTTP server is sufficient for the
+local-only first version. A framework would add installation and patching cost
+without changing the single-user request model.
 
 The browser protocol is operation-oriented rather than filesystem-oriented:
 
@@ -347,10 +374,18 @@ state, and a revision token. It is versioned independently from `items.json`;
 
 ### Preview freshness
 
-On launch, the server performs a side-effect-free load/build and renders a
-per-launch preview using the current Jinja templates. After a successful save,
-it performs one full in-process rebuild and refreshes that preview before
-reporting success. A client poll of a lightweight revision endpoint updates
+On launch, the server performs a Slice 0 side-effect-free load/build and
+renders a per-launch preview using the current Jinja templates. Preview output
+lives in an OS temporary directory outside the project—on Windows, under the
+current user's `%TEMP%`—never in `_site/`. It is removed on normal exit; a
+later launch may prune stale same-user preview directories left by a crash.
+
+After a successful save, the server performs one full in-process rebuild
+through that same side-effect-free path (`seal_write=False`) and refreshes the
+temporary preview before reporting success. Saving or previewing an unsealed
+log therefore never seals it and never writes incidental `.refdes/` state.
+Only a normal, explicitly invoked write-enabled `refdes build` seals new
+append-only entries. A client poll of a lightweight revision endpoint updates
 open clean pages; no WebSocket dependency is needed.
 
 For edits made outside the browser, the server polls mtimes and then confirms
@@ -472,17 +507,23 @@ second “mostly read-only” loader.
 
 ### Revision and conflict detection
 
-Every editor model carries a server-issued revision containing hashes of all
-semantic project inputs, plus git HEAD and index identity when git is
-available. Before a mutation, the server acquires its write lock, recomputes
-the revision, and requires an exact match. This catches another browser tab,
-VS Code, a CLI write, a branch switch, a commit/reset, or staging changes made
-since the form loaded. Disk content is authoritative even outside git.
+Every editor model carries a server-issued revision containing content hashes
+of all semantic project inputs. Before a mutation, the server acquires its
+write lock, recomputes those hashes, and requires an exact match. File content
+is the conflict proof: this catches another browser tab, VS Code, a CLI write,
+a checkout/reset that changes working files, or any edit outside git.
 
-A mismatch returns a conflict, never a last-write-wins save. The UI shows which
-files, HEAD, or index changed and offers reload plus a textual diff. Automatic
-three-way merging is deferred; YAML merge guesses are not a first-version
-safety feature.
+Git HEAD, branch, index identity, and dirty state are separate advisory
+metadata, not part of the revision token. A commit or `git add` that leaves
+working bytes unchanged shows a notice and does not invalidate a dirty form.
+If a git operation also changes a semantic input, its content hash causes the
+conflict. This avoids making unrelated staging in VS Code destroy editor work
+while still showing that the review context moved.
+
+A content mismatch returns a conflict, never a last-write-wins save. The UI
+shows which files changed and separately reports any HEAD/index movement, with
+reload plus textual-diff choices. Automatic three-way merging is deferred;
+YAML merge guesses are not a first-version safety feature.
 
 Symlink/reparse-target changes are part of path revalidation at save time, not
 trusted from the earlier load.
@@ -495,14 +536,18 @@ changes.
 
 The gate is delta-based:
 
-- block every error attached to the edited/new item, even if a textually
-  identical diagnostic existed before;
-- block every newly introduced project error;
+- block every newly introduced project or item error;
+- for a pre-existing error on the edited item, block only when the edit
+  touches that diagnostic's attributed field, body, link, or reserved value
+  and the candidate still has the error;
+- allow an unrelated edit on the same item when its pre-existing error was
+  caused elsewhere—for example, a body correction while a target deleted in
+  another file leaves an existing dangling-link error;
 - block structural invariants regardless of diagnostic diff: parse loss,
   duplicate/corrupt key or ID, illegal link target, sealed mutation, path
   escape, or unintended semantic change to another item;
-- show pre-existing errors elsewhere without blocking a save that does not
-  worsen them; and
+- show other pre-existing errors without blocking a save that does not worsen
+  them; and
 - show warnings and failing engineering checks, but do not treat a computed
   check violation as source corruption.
 
@@ -513,9 +558,12 @@ errors except check violations (`src/refdes/revise.py:624-646`). An item editor
 needs the narrower delta rule.
 
 Diagnostics are compared by stable structured identity—level/code, item key or
-source, field/line where available, and message arguments—not only rendered
-English. If current diagnostics do not expose enough structure, that model
-must be enriched before relying on the delta gate.
+source, field/body/link path where available, and message arguments—not only
+rendered English. Field-path attribution is a prerequisite for applying the
+second bullet. An unattributed pre-existing error is shown but does not block
+an unrelated edit; hard invariants still do. The diagnostic model must be
+enriched before the delta gate ships if current diagnostics cannot make that
+distinction.
 
 ### Transaction model
 
@@ -533,14 +581,31 @@ One save proceeds as follows:
 4. Load and fully build a source overlay in memory with PyYAML authoritative.
 5. Prove the fidelity and semantic postconditions, seal rule, and diagnostic
    delta before touching live files.
-6. Write same-directory temporary files, flush them, and record a durable
-   transaction journal containing originals and intended replacements.
+6. Write same-directory replacement files, flush them, and record originals,
+   intended replacements, and their hashes in
+   `.refdes/editor-transaction/`.
 7. Replace each destination atomically. If any replacement fails, restore every
-   destination already replaced. On the next launch, recover any journal left
-   by process or machine failure before loading the project.
+   destination already replaced.
 8. Reload and fully validate from live disk. A mismatch restores the originals.
-9. On success, remove the journal, issue a new revision, rebuild preview, and
-   return post-save diagnostics and changed paths.
+9. On success, remove the journal directory, issue a new revision, rebuild the
+   temporary preview through the side-effect-free path, and return post-save
+   diagnostics and changed paths.
+
+The journal is inside the project so every refdes process can discover it
+without a machine-global registry, and on the same volume as ordinary project
+files. It is deliberately **not gitignored**: normal success removes it, while
+a crash must become loud in `git status` rather than hide a directory holding
+source backups. This matches the repository's existing policy that durable
+`.refdes/` state is tracked unless specifically identified as disposable
+(`.gitignore:19-34`). It must never be committed.
+
+Every refdes command that loads a project checks for the journal before
+parsing any source and refuses if one exists. The error names the transaction
+and instructs the user to run a dedicated `refdes recover` command. Recovery
+runs before normal project loading, verifies the recorded hashes, restores all
+originals, and removes the journal only after the before-state is complete.
+`check`, `build`, `id`, and other commands must never continue over a possibly
+half-applied editor save; recovery is not deferred until the next `serve`.
 
 A multi-file operation is not made magically atomic by the filesystem; the
 journal makes it recoverable and the lock prevents this server from
@@ -558,27 +623,33 @@ that seal by surrogate key.
 
 A sealed item never receives enabled controls and the mutation endpoint repeats
 the check under the write lock. There is no browser “reseal” escape hatch.
-An append-only item not yet sealed may be edited; the UI warns that a normal
-write-enabled build will seal it.
+An append-only item not yet sealed may be edited. The UI explains that the
+editor's post-save rebuild and preview are side-effect-free and do **not** seal
+it; only a separately invoked, ordinary write-enabled `refdes build` does.
 
 ## Security
 
 Local-only is a security boundary, not permission to omit checks.
 
-- Bind only `127.0.0.1` on an ephemeral port by default. The first version has
-  no `--host 0.0.0.0` or remote mode.
-- Require the exact `Host: 127.0.0.1:<chosen-port>` value on every request.
-  Reject other hosts before routing. This blocks DNS-rebinding requests that
-  reach loopback with an attacker-controlled Host header.
+- Bind only IPv4 `127.0.0.1` on an ephemeral port. IPv6 loopback (`::1`) is
+  not bound, and the first version has no `--host 0.0.0.0` or remote mode.
+- Accept only `Host: 127.0.0.1:<chosen-port>` or
+  `Host: localhost:<chosen-port>` on every request; reject every other host
+  before routing. The printed canonical URL uses `127.0.0.1`. A manually typed
+  `localhost` URL works when the OS resolves it to IPv4; if it resolves only
+  to `::1`, the UI cannot be reached and the printed IPv4 URL is the remedy.
+  These two exact hostnames still block DNS-rebinding requests that reach
+  loopback with an attacker-controlled Host header.
 - Generate at least 256 random bits per launch. Print a Jupyter-style startup
   URL carrying the token, remove it from the address bar with
   `history.replaceState`, and require it in a dedicated header on every
   mutation. Compare in constant time; never persist or include it in rendered
   files/logs.
-- On every mutation, require an `Origin` exactly matching the printed loopback
-  origin. Reject missing, `null`, cross-origin, and unexpected Referer/Origin
-  combinations. Send no permissive CORS headers and use `SameSite=Strict` for
-  any session cookie.
+- On every mutation, require an `Origin` exactly matching the accepted Host
+  and bound port (`http://127.0.0.1:<port>` or
+  `http://localhost:<port>`). Reject missing, `null`, cross-origin, and
+  mismatched Host/Origin combinations. Send no permissive CORS headers and
+  use `SameSite=Strict` for any session cookie.
 - Apply a restrictive CSP to the editor: packaged same-origin scripts/styles,
   no remote code, no inline script, no framing by other origins, and no plugin
   content. The built Markdown path already disables raw HTML
@@ -653,12 +724,14 @@ This is standalone keys work, not editor-only plumbing.
 
 ### Slice 1 — existing fields and bodies
 
-- Add `refdes serve`, loopback security, editor model, revision polling, git
-  status display, and read-only rendered preview.
+- Add `refdes serve`, loopback security, editor model, content-revision
+  polling, advisory git status, and side-effect-free rendered preview in an
+  OS temporary directory.
 - Implement item-span source patches, field controls, inherited-value behavior,
   Markdown body editing, and server-side preview.
-- Implement transaction journal, conflict checks, delta diagnostics, and sealed
-  read-only enforcement.
+- Implement transaction journal/recovery checks across every project-loading
+  command, conflict checks, attributed delta diagnostics, and sealed read-only
+  enforcement.
 - Keep display ID/type/key read-only.
 
 ### Slice 2 — structured links
@@ -708,11 +781,16 @@ The design is implementable when each of these outcomes can be demonstrated:
 - The log date is written in a non-default configured order/separator and
   reparses as the selected calendar date.
 - A sealed log has no editable UI and a forged mutation request is rejected.
-- A pre-existing unrelated error does not block a repair; a new item error or
-  newly introduced project error does.
-- External disk, index, or HEAD change causes a conflict instead of overwrite.
-- Killing the process between two replacements leaves a journal that the next
-  launch restores before serving.
+- Saving or previewing an unsealed log does not create a seal or modify
+  `.refdes/`; a later ordinary write-enabled `refdes build` seals it.
+- A pre-existing unrelated error, including one elsewhere on the same item,
+  does not block a repair; touching its attributed field requires fixing it,
+  and any newly introduced error blocks.
+- External semantic-file content changes cause a conflict instead of overwrite;
+  HEAD/index-only movement produces a visible notice without discarding work.
+- Killing the process between two replacements leaves a visible
+  `.refdes/editor-transaction/`; every project-loading command refuses until
+  `refdes recover` restores it.
 - Requests with a wrong Host, Origin, or token cannot mutate; a path traversal,
   absolute path, ADS path, or escaping reparse point cannot read or write.
 - A transient Windows sharing violation retries; a persistent one rolls back
@@ -741,9 +819,11 @@ These are recommendations, not decisions. Jared should make the final calls.
 - **No display-ID rename in v1 — recommended, Jared to decide.** The refresh
   path has now landed, but the editor should depend on it only after it has
   been exercised independently.
-- **Delta validation — recommended, Jared to decide.** Block all errors on the
-  edited item and newly introduced errors, but permit repairs in an already
-  broken project.
+- **Delta validation — recommended, Jared to decide.** Block new errors and
+  pre-existing errors whose attributed field the edit touches; permit
+  unrelated repairs even on the same broken item. The stricter alternative is
+  to block on every error attached to the item, but that prevents a body fix
+  when a dangling link elsewhere on the item is unchanged.
 - **Existing-image references only in v1 — recommended, Jared to decide.** A
   picker covers authoring syntax without silently adding binary file management
   to the source transaction.
@@ -755,6 +835,16 @@ These are recommendations, not decisions. Jared should make the final calls.
 - **Full rebuild after save — recommended, Jared to decide.** The measured
   1.06-second command is acceptable today. Incremental rendering adds cache
   invalidation before there is evidence it is needed.
+- **CLI parity means semantic reachability, not identical atomic commands —
+  recommended, Jared to decide.** All v1 results remain achievable through
+  `new`, plain-text editing, `id`, and check/build; the browser merely
+  aggregates them safely. If the recorded parity decision instead requires
+  every browser transaction to have a one-command twin, add a CLI over the
+  same intent/transaction service before shipping.
+- **Git identity is advisory, content is the conflict proof — recommended,
+  Jared to decide.** Blocking on HEAD/index identity is more conservative, but
+  it makes an unrelated `git add` invalidate every dirty form without
+  protecting any working-tree bytes.
 
 ## Open questions for Jared
 
@@ -771,3 +861,6 @@ These are recommendations, not decisions. Jared should make the final calls.
    or should preview and editor remain visually separate even while served?
 8. Should read-only API routes require the launch token too? This document
    recommends yes; writes require it either way.
+9. Confirm whether CLI parity means semantic reachability through existing
+   commands and plain-text edits, or requires a one-command transactional twin
+   for browser saves and creation.
