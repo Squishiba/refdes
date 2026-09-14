@@ -16,17 +16,19 @@ The decision is taken. This document specs it; it does not relitigate it.
 
 **Implementation status:** §1 (key format), §2 (minting), §3 (composite
 expansion, display-half refresh, and key-based resolution), §5 (key-based
-hashing; hash-format migration; mixed legacy/surrogate-keyed baseline and
-seal readers; conditional storage conversion; keyed rename diffs and seal
-verification), §6 Layers 1-5 (well-formedness, uniqueness, unknown-key
-resolution, the latest-baseline lint, and the older-baseline audit), and §7
-(`refdes keys adopt`) are implemented (`refdes/adopt.py`, `refdes/keys.py`,
-`refdes/links.py`, and changes to `build.py`, `cli.py`, `lifecycle.py`,
+hashing; hash-format migration; mixed legacy/surrogate-keyed baseline, seal,
+and membership-manifest readers; conditional storage conversion; keyed
+rename diffs, seal verification, and membership drift), §6 Layers 1-5
+(well-formedness, uniqueness, unknown-key resolution, the latest-baseline
+lint, and the older-baseline audit), and §7 (`refdes keys adopt`) are
+implemented (`refdes/adopt.py`, `refdes/keys.py`, `refdes/links.py`,
+`refdes/boards.py`, and changes to `build.py`, `cli.py`, `lifecycle.py`,
 `seal.py`, `revise.py`, `blocked.py`, `blocks.py`, `workspaces.py`,
 `stub_tests.py`, and `render.py` -- see "What §3/§5 turned out to need beyond
 the spec" below). Adoption records `.refdes/keys-adopted.yaml`; subsequent
-stamps and new seals use the surrogate-keyed shape. The subtractive
-`revise.py`/`former_ids.py` cleanup remains design only.
+stamps, new seals, and membership-manifest writes use the surrogate-keyed
+shape. The subtractive `revise.py`/`former_ids.py` cleanup remains design
+only.
 
 **What §3/§5 turned out to need beyond the spec, implementing it:**
 
@@ -716,6 +718,29 @@ The payoff is direct: today, renaming a sealed log entry's id requires
 fails with a seal violation — an *error*, not a diff. Under keys, a rename
 touches the seal file not at all.
 
+### Board and workspace membership
+
+`.refdes/boards.yaml` is drift state rather than hash evidence, but it has
+the same identity requirement. In an adopted project each `boards:` and
+`workspaces:` entry is keyed by surrogate and carries its current display id:
+
+```yaml
+boards:
+  k7f3m2q9x4a: {id: REQ-IO-AI-001, board: board-a}
+workspaces:
+  k7f3m2q9x4a: {id: REQ-IO-AI-001, workspace: product-a}
+```
+
+Readers accept legacy display-id scalars and keyed mappings per entry. They
+match a live item's key first; a keyed entry's old readable id cannot claim
+a different live item that later reuses that id. This makes a rename plus a
+board or workspace move visible as a move rather than a new item.
+
+New writes use this shape only after the adoption marker exists; non-adopted
+projects and keyless items retain the legacy shape. Writable builds refresh
+the carried display id and silently prune memberships for deleted items.
+Read-only checks never mutate the file.
+
 ### `hash_format: 2` and what happens on adoption
 
 Changing what `link:` hashes changes every hash of every item that has
@@ -876,9 +901,10 @@ breaking change and belongs in the changelog with that framing.
 ### `refdes keys adopt`
 
 Adoption is **one explicit, transactional command**, even though minting is
-otherwise automatic — because adoption rewrites every item file and every
-baseline at once, and that deserves to be a reviewable commit rather than a
-side effect of someone running `refdes check`.
+otherwise automatic — because adoption rewrites every item file, every
+baseline, every seal, and the membership manifest at once, and that deserves
+to be a reviewable commit rather than a side effect of someone running
+`refdes check`.
 
 ```
 $ refdes keys adopt
@@ -889,6 +915,8 @@ baselines rebased:
   rev-c (20/20 entries carried)
 seals rebased:
   .refdes/log-seal-board-a.yaml (6/6 entries carried)
+membership manifests rebased:
+  .refdes/boards.yaml (20/20 entries carried)
 changed files:
   ...
 Review the diff before committing.
@@ -904,7 +932,8 @@ self-describing YAML file whose header says that it was written by
 
 ```yaml
 # Refdes surrogate-key adoption state.
-# Commit this file: it tells future stamps and seals to use key-keyed storage.
+# Commit this file: it tells future stamps, seals, and membership manifests
+# to use key-keyed storage.
 # Written by `refdes keys adopt`; do not edit it by hand.
 adopted: true
 format: 1
@@ -919,10 +948,10 @@ Those entries are named on every adoption run; the marker lets new history
 use key-keyed storage without pretending the old entry was comparable.
 
 The implementation reuses `revise.apply`'s file-rewrite and byte-restoration
-primitives. It computes every item, baseline, seal, and marker rewrite in
-memory; writes the staged set once; reloads and fully validates the project;
-and restores every touched file (removing a newly-created marker) if either
-writing or validation fails.
+primitives. It computes every item, baseline, seal, membership-manifest, and
+marker rewrite in memory; writes the staged set once; reloads and fully
+validates the project; and restores every touched file (removing a newly
+created marker) if either writing or validation fails.
 
 **Ordering inside the transaction**, which matters:
 
@@ -931,7 +960,9 @@ writing or validation fails.
    the last moment at which that is the resolution rule)
 3. re-key baselines and seals, carrying hashes forward under §5(c)'s
    conditional rule
-4. write the staged set, reload, and fully validate; restore every original
+4. re-key identifiable board and workspace memberships; keep and report any
+   legacy entry whose item cannot be identified
+5. write the staged set, reload, and fully validate; restore every original
    byte on any failure
 
 One implementation detail mattered for source preservation: link-token edits

@@ -19,10 +19,12 @@ ordinary thing to do deliberately.
 from __future__ import annotations
 
 import os
-from typing import Callable
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field
 
 import yaml
 
+from . import keys as keys_mod
 from .ids import split_id
 from .model import Item, Project
 
@@ -140,8 +142,31 @@ def manifest_path(project: Project) -> str:
     return os.path.join(project.root, MANIFEST_FILE)
 
 
-def load_manifest(project: Project) -> dict[str, dict[str, str]]:
-    """`{"boards": {item_id: board_key}, "workspaces": {item_id: workspace_key}}`.
+MembershipValue = str | dict[str, object]
+Memberships = dict[str, MembershipValue]
+Manifest = dict[str, Memberships]
+
+_HEADER = (
+    "# Refdes membership drift manifest. Records which board -- and, once\n"
+    "# workspaces: is in use, which workspace -- each item was on the last\n"
+    "# time the project was built, so a file moving either -- usually a move\n"
+    "# to the wrong folder -- is a warning instead of a silent surprise.\n"
+    "# Legacy projects key entries by display id. Adopted projects key entries by surrogate key\n"
+    "# and carry the current display id inside each entry for readability.\n"
+)
+
+
+def _load_memberships(data: object) -> Memberships:
+    if not isinstance(data, Mapping):
+        return {}
+    return {
+        str(record_id): dict(value) if isinstance(value, Mapping) else str(value)
+        for record_id, value in data.items()
+    }
+
+
+def load_manifest(project: Project) -> Manifest:
+    """Load legacy display-id scalars and adopted surrogate-keyed entries.
 
     One file, two independent sections -- loaded and saved together so neither
     verify() pass can clobber the other's half when only one of `boards:` /
@@ -153,60 +178,221 @@ def load_manifest(project: Project) -> dict[str, dict[str, str]]:
     with open(path, "r", encoding="utf-8") as fh:
         data = yaml.safe_load(fh) or {}
     return {
-        "boards": dict(data.get("boards") or {}),
-        "workspaces": dict(data.get("workspaces") or {}),
+        "boards": _load_memberships(data.get("boards")),
+        "workspaces": _load_memberships(data.get("workspaces")),
     }
 
 
-def save_manifest(project: Project, manifest: dict[str, dict[str, str]]) -> None:
-    path = manifest_path(project)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    header = (
-        "# Refdes membership drift manifest. Records which board -- and, once\n"
-        "# workspaces: is in use, which workspace -- each item was on the last\n"
-        "# time the project was built, so a file moving either -- usually a move\n"
-        "# to the wrong folder -- is a warning instead of a silent surprise.\n"
-    )
-    payload: dict[str, dict[str, str]] = {"boards": manifest.get("boards", {})}
+def format_manifest(project: Project, manifest: Manifest) -> str:
+    """Serialize the manifest identically for adoption and persistence."""
+    payload: dict[str, Memberships] = {"boards": manifest.get("boards", {})}
     # Omitted entirely for a project that has never used workspaces:, so a
     # boards-only project's manifest stays exactly the shape it always was.
     if project.workspaces or manifest.get("workspaces"):
         payload["workspaces"] = manifest.get("workspaces", {})
-    with open(path, "w", encoding="utf-8") as fh:
-        fh.write(header)
-        yaml.safe_dump(payload, fh, sort_keys=True, default_flow_style=False)
+    return _HEADER + yaml.safe_dump(payload, sort_keys=True, default_flow_style=False)
+
+
+def save_manifest(project: Project, manifest: Manifest) -> None:
+    path = manifest_path(project)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8", newline="") as fh:
+        fh.write(format_manifest(project, manifest))
+
+
+def _membership_parts(
+    record_id: str, value: MembershipValue, kind: str
+) -> tuple[str | None, str, str]:
+    """Return surrogate key, recorded display id, and membership for either shape."""
+    if isinstance(value, Mapping):
+        entry = dict(value)
+        display_id = entry.get("id")
+        if isinstance(display_id, str) and display_id:
+            return record_id, display_id, str(entry.get(kind, ""))
+    return None, record_id, str(value)
+
+
+def _find_membership(
+    memberships: Memberships,
+    item: Item,
+    kind: str,
+    live_keys: set[str],
+) -> tuple[str, MembershipValue, str] | None:
+    """Find an entry by surrogate, recorded display id, then legacy id.
+
+    A recorded display id on a keyed entry is only a fallback when no live
+    local item owns that entry's key. Otherwise it remains the old readable
+    label of its actual owner and must not claim a new item reusing that id.
+    """
+    if item.key:
+        keyed = memberships.get(item.key)
+        if keyed is not None:
+            key, _display_id, recorded = _membership_parts(item.key, keyed, kind)
+            if key == item.key:
+                return item.key, keyed, recorded
+    for record_id, value in memberships.items():
+        key, display_id, recorded = _membership_parts(record_id, value, kind)
+        if key is not None and key not in live_keys and display_id == item.id:
+            return record_id, value, recorded
+    legacy = memberships.get(item.id)
+    if legacy is None:
+        return None
+    key, _display_id, recorded = _membership_parts(item.id, legacy, kind)
+    if key is not None:
+        return None
+    return item.id, legacy, recorded
+
+
+def _store_membership(
+    adopted: bool,
+    memberships: Memberships,
+    item: Item,
+    kind: str,
+    value: str,
+    previous_record_id: str | None = None,
+) -> bool:
+    if adopted and item.key:
+        record_id = item.key
+        stored: MembershipValue = {"id": item.id, kind: value}
+    else:
+        record_id = item.id
+        stored = value
+
+    changed = False
+    if previous_record_id is not None and previous_record_id != record_id:
+        del memberships[previous_record_id]
+        changed = True
+    if memberships.get(record_id) != stored:
+        memberships[record_id] = stored
+        changed = True
+    return changed
+
+
+def _prune_stale(project: Project, memberships: Memberships, kind: str) -> bool:
+    """Drop memberships whose immutable or legacy identity is no longer local."""
+    live_ids = {item.id for item in project.local_items}
+    live_ids |= set(project.former_ids)
+    live_keys = {item.key for item in project.local_items if item.key}
+    stale = []
+    for record_id, value in memberships.items():
+        key, display_id, _recorded = _membership_parts(record_id, value, kind)
+        is_live = key in live_keys if key is not None else display_id in live_ids
+        if not is_live:
+            stale.append(record_id)
+    for record_id in stale:
+        del memberships[record_id]
+    return bool(stale)
+
+
+@dataclass
+class ManifestStoragePlan:
+    """Write-free conversion of both membership sections for key adoption."""
+
+    manifest: Manifest = field(
+        default_factory=lambda: {"boards": {}, "workspaces": {}}
+    )
+    carried: int = 0
+    total: int = 0
+    unidentified: list[str] = field(default_factory=list)
+
+
+def plan_surrogate_storage(project: Project, manifest: Manifest) -> ManifestStoragePlan:
+    """Convert identifiable legacy memberships without guessing at the rest."""
+    plan = ManifestStoragePlan()
+    by_display_id = {item.id: item for item in project.local_items}
+    by_former_id = {
+        old_id: by_display_id[current_id]
+        for old_id, current_id in project.former_ids.items()
+        if current_id in by_display_id
+    }
+
+    for section, kind in (("boards", "board"), ("workspaces", "workspace")):
+        original = manifest.get(section, {})
+        plan.total += len(original)
+        converted: Memberships = {}
+
+        # Preserve already-adopted entries first. Exact current display ids then
+        # take priority over former ids when old additive manifests contain both.
+        for record_id, value in original.items():
+            key, _display_id, _membership = _membership_parts(record_id, value, kind)
+            if key is not None:
+                converted[record_id] = dict(value)
+                plan.carried += 1
+
+        legacy_ids = [
+            record_id
+            for record_id, value in original.items()
+            if _membership_parts(record_id, value, kind)[0] is None
+        ]
+        ordered_ids = [record_id for record_id in legacy_ids if record_id in by_display_id]
+        ordered_ids += [
+            record_id
+            for record_id in legacy_ids
+            if record_id not in by_display_id and record_id in by_former_id
+        ]
+        ordered_ids += [
+            record_id
+            for record_id in legacy_ids
+            if record_id not in by_display_id and record_id not in by_former_id
+        ]
+        for record_id in ordered_ids:
+            value = original[record_id]
+            _key, _display_id, membership = _membership_parts(record_id, value, kind)
+            item = by_display_id.get(record_id) or by_former_id.get(record_id)
+            if item is not None and item.key:
+                keyed: MembershipValue = {"id": item.id, kind: membership}
+                existing = converted.get(item.key)
+                if existing is None:
+                    converted[item.key] = keyed
+                    plan.carried += 1
+                    continue
+                _existing_key, _existing_id, existing_membership = _membership_parts(
+                    item.key, existing, kind
+                )
+                if existing_membership == membership:
+                    plan.carried += 1
+                    continue
+            converted[record_id] = value
+            plan.unidentified.append(f"{section}: {record_id}")
+
+        plan.manifest[section] = dict(sorted(converted.items()))
+
+    plan.unidentified.sort()
+    return plan
 
 
 def _verify_membership(
     project: Project,
-    manifest: dict[str, str],
+    manifest: Memberships,
     moves: list[tuple[str, str, str]],
     current: Callable[[Item], str],
     kind: str,
     write: bool,
     accept_move: bool,
+    adopted: bool,
 ) -> bool:
-    """One kind's worth of drift-checking (`"board"` or `"workspace"`).
-
-    Same shape either way: compare the resolved value against what was last
-    recorded, warn (never error) on a change, and record it in `moves` --
-    `--accept-board-move` is the one flag that accepts both kinds, since they
-    share this one manifest file and the same "moving this is an ordinary
-    thing to do on purpose" posture.
-    """
+    """Compare one kind of resolved membership against either manifest shape."""
     changed = False
+    live_keys = {item.key for item in project.local_items if item.key}
     for item in sorted(project.local_items, key=lambda i: i.id):
         value = current(item)
-        recorded = manifest.get(item.id)
-        if not value and recorded is None:
+        found = _find_membership(manifest, item, kind, live_keys)
+        if not value and found is None:
             continue  # never assigned -- resolve()'s own diagnostic covers this
 
-        if recorded is None:
+        if found is None:
             if write:
-                manifest[item.id] = value
-                changed = True
+                changed = _store_membership(
+                    adopted, manifest, item, kind, value
+                ) or changed
             continue
+
+        record_id, _stored, recorded = found
         if recorded == value:
+            if write:
+                changed = _store_membership(
+                    adopted, manifest, item, kind, value, record_id
+                ) or changed
             continue
 
         moves.append((item.id, recorded, value))
@@ -229,8 +415,9 @@ def _verify_membership(
                 f"{kind} move accepted: {item.id} {accepted}",
                 file=item.source_file, line=item.source_line, item_id=item.id,
             )
-            manifest[item.id] = value
-            changed = True
+            changed = _store_membership(
+                adopted, manifest, item, kind, value, record_id
+            ) or changed
         else:
             project.warn(
                 warning,
@@ -245,18 +432,24 @@ def verify(project: Project, write: bool = False, accept_move: bool = False) -> 
         return
 
     manifest = load_manifest(project)
+    adopted = keys_mod.is_adopted(project) if write else False
     changed = False
+    if write:
+        changed = _prune_stale(project, manifest["boards"], "board") or changed
+        changed = (
+            _prune_stale(project, manifest["workspaces"], "workspace") or changed
+        )
 
     if project.boards:
         changed = _verify_membership(
             project, manifest["boards"], project.board_moves,
-            lambda item: item.board, "board", write, accept_move,
+            lambda item: item.board, "board", write, accept_move, adopted,
         ) or changed
 
     if project.workspaces:
         changed = _verify_membership(
             project, manifest["workspaces"], project.workspace_moves,
-            lambda item: item.workspace, "workspace", write, accept_move,
+            lambda item: item.workspace, "workspace", write, accept_move, adopted,
         ) or changed
 
     if write and changed:

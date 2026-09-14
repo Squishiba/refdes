@@ -837,6 +837,22 @@ def cmd_keys_adopt(args) -> int:
         for item_id in seal.uncomparable:
             print(f"  uncomparable seal entry {seal.file}: {item_id}")
 
+    if result.memberships and not result.already_adopted:
+        heading = (
+            "membership manifests would be rebased:"
+            if args.dry_run
+            else "membership manifests rebased:"
+        )
+        print(heading)
+        for membership in result.memberships:
+            print(
+                f"  {membership.file} "
+                f"({membership.carried}/{membership.total} entries carried)"
+            )
+    for membership in result.memberships:
+        for identity in membership.unidentified:
+            print(f"  unidentified membership entry {identity}")
+
     if result.changed_files:
         heading = "files that would change:" if args.dry_run else "changed files:"
         print(heading)

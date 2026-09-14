@@ -8,11 +8,13 @@ from __future__ import annotations
 import os
 
 import pytest
+import yaml
 from conftest import write_project_config
 from helpers import BOARD_CONFIG, _build_at, _project
 
 from refdes import boards as boards_mod
 from refdes import build as build_mod
+from refdes import keys as keys_mod
 from refdes import nav as nav_mod
 from refdes import parse, render
 from refdes.schema import SchemaError, load_project
@@ -432,3 +434,147 @@ def test_item_that_never_had_a_board_does_not_trigger_drift(board_project):
         if d.item_id == "REQ-S-001" and d.message.startswith("no board")
     ]
     assert len(warned) == 1
+
+
+def _adopted_board_project(tmp_path):
+    write_project_config(
+        tmp_path,
+        "site: { title: T, out: _site }\n"
+        "boards:\n"
+        "  board-a: { label: Board A }\n"
+        "  board-b: { label: Board B }\n"
+        "types:\n"
+        "  requirement:\n"
+        "    prefix: REQ\n"
+        "    fields: { text: { type: text, required: true } }\n",
+    )
+    board_a = tmp_path / "items" / "board-a"
+    board_a.mkdir(parents=True)
+    (tmp_path / "items" / "board-b").mkdir()
+    key = keys_mod.mint()
+    item_path = board_a / "r.yaml"
+    item_path.write_text(
+        "defaults: { type: requirement }\n"
+        f"items:\n  - id: REQ-A-001\n    key: {key}\n    text: Original.\n",
+        encoding="utf-8",
+    )
+    marker = tmp_path / keys_mod.ADOPTION_MARKER
+    marker.parent.mkdir(exist_ok=True)
+    marker.write_text("adopted: true\nformat: 1\n", encoding="utf-8")
+    return key, item_path
+
+
+def test_adopted_build_writes_manifest_entries_by_key_with_display_id(tmp_path):
+    key, _item_path = _adopted_board_project(tmp_path)
+
+    project = _build_at(tmp_path)
+    build_mod.build(project, seal_write=True)
+
+    assert boards_mod.load_manifest(project)["boards"] == {
+        key: {"id": "REQ-A-001", "board": "board-a"}
+    }
+    text = (tmp_path / boards_mod.MANIFEST_FILE).read_text(encoding="utf-8")
+    assert "Adopted projects key entries by surrogate key" in text
+
+
+def test_renamed_item_without_board_move_refreshes_manifest_display_id(tmp_path):
+    key, item_path = _adopted_board_project(tmp_path)
+    seed = _build_at(tmp_path)
+    build_mod.build(seed, seal_write=True)
+    item_path.write_text(
+        item_path.read_text(encoding="utf-8").replace("id: REQ-A-001", "id: REQ-A-009"),
+        encoding="utf-8",
+    )
+
+    renamed = _build_at(tmp_path)
+    build_mod.build(renamed, seal_write=True)
+
+    assert not renamed.board_moves
+    assert boards_mod.load_manifest(renamed)["boards"] == {
+        key: {"id": "REQ-A-009", "board": "board-a"}
+    }
+
+
+def test_renamed_item_moved_to_another_board_still_warns(tmp_path):
+    _key, item_path = _adopted_board_project(tmp_path)
+    seed = _build_at(tmp_path)
+    build_mod.build(seed, seal_write=True)
+    moved_path = tmp_path / "items" / "board-b" / "moved.yaml"
+    item_path.rename(moved_path)
+    moved_path.write_text(
+        moved_path.read_text(encoding="utf-8").replace("id: REQ-A-001", "id: REQ-B-009"),
+        encoding="utf-8",
+    )
+
+    moved = _build_at(tmp_path)
+
+    assert ("REQ-B-009", "board-a", "board-b") in moved.board_moves
+    assert any(
+        diagnostic.item_id == "REQ-B-009"
+        and "moved from board 'board-a' to 'board-b'" in diagnostic.message
+        for diagnostic in moved.warnings
+    )
+
+
+def test_renamed_keyed_manifest_entry_does_not_claim_reused_old_id(tmp_path):
+    original_key, item_path = _adopted_board_project(tmp_path)
+    seed = _build_at(tmp_path)
+    build_mod.build(seed, seal_write=True)
+    item_path.write_text(
+        item_path.read_text(encoding="utf-8").replace("id: REQ-A-001", "id: REQ-A-009"),
+        encoding="utf-8",
+    )
+    reused_key = keys_mod.mint()
+    (tmp_path / "items" / "board-b" / "reused.yaml").write_text(
+        "defaults: { type: requirement }\n"
+        f"items:\n  - id: REQ-A-001\n    key: {reused_key}\n    text: New item.\n",
+        encoding="utf-8",
+    )
+
+    reused = _build_at(tmp_path)
+
+    assert not any(item_id == "REQ-A-001" for item_id, _old, _new in reused.board_moves)
+    assert not reused.board_moves
+    assert original_key != reused_key
+
+
+def test_deleted_item_manifest_entry_is_pruned_only_by_write_enabled_build(tmp_path):
+    first_key, item_path = _adopted_board_project(tmp_path)
+    deleted_key = keys_mod.mint()
+    item_path.write_text(
+        item_path.read_text(encoding="utf-8")
+        + f"  - id: REQ-A-002\n    key: {deleted_key}\n    text: Delete me.\n",
+        encoding="utf-8",
+    )
+    seed = _build_at(tmp_path)
+    build_mod.build(seed, seal_write=True)
+    manifest_path = tmp_path / boards_mod.MANIFEST_FILE
+    before_check = manifest_path.read_bytes()
+    item_path.write_text(
+        "defaults: { type: requirement }\n"
+        f"items:\n  - id: REQ-A-001\n    key: {first_key}\n    text: Original.\n",
+        encoding="utf-8",
+    )
+
+    checked = _build_at(tmp_path)
+
+    assert manifest_path.read_bytes() == before_check
+    assert deleted_key in boards_mod.load_manifest(checked)["boards"]
+
+    build_mod.build(checked, seal_write=True)
+
+    assert deleted_key not in boards_mod.load_manifest(checked)["boards"]
+
+
+def test_non_adopted_unchanged_manifest_is_byte_identical(board_project):
+    seed = _build_at(board_project)
+    build_mod.build(seed, seal_write=True)
+    manifest_path = board_project / boards_mod.MANIFEST_FILE
+    before = manifest_path.read_bytes()
+
+    unchanged = _build_at(board_project)
+    build_mod.build(unchanged, seal_write=True)
+
+    assert manifest_path.read_bytes() == before
+    raw = yaml.safe_load(before)
+    assert isinstance(raw["boards"]["REQ-A-001"], str)

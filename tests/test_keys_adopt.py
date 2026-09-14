@@ -6,6 +6,7 @@ import yaml
 from conftest import write_project_config
 
 from refdes import adopt as adopt_mod
+from refdes import boards as boards_mod
 from refdes import build as build_mod
 from refdes import cli as cli_mod
 from refdes import keys as keys_mod
@@ -200,6 +201,68 @@ def test_adopt_rekeys_every_baseline_and_seal_and_reports_uncomparable(
         assert all("id" in value for value in stored.values())
 
 
+def test_adopt_converts_membership_manifest_reports_unknown_and_is_idempotent(
+    tmp_path, capsys
+):
+    write_project_config(
+        tmp_path,
+        ADOPT_SCHEMA
+        + "boards:\n"
+        "  board-a: { label: Board A }\n"
+        "  board-b: { label: Board B }\n"
+        "workspaces:\n"
+        "  product-a: { label: Product A }\n",
+    )
+    item_dir = tmp_path / "items" / "board-a"
+    item_dir.mkdir(parents=True)
+    (item_dir / "r.yaml").write_text(
+        "items:\n"
+        "  - id: REQ-001\n"
+        "    type: requirement\n"
+        "    title: Current item\n"
+        "    workspace: product-a\n",
+        encoding="utf-8",
+    )
+    manifest_path = tmp_path / boards_mod.MANIFEST_FILE
+    manifest_path.parent.mkdir(exist_ok=True)
+    manifest_path.write_text(
+        "boards:\n"
+        "  REQ-001: board-a\n"
+        "  LOST-001: board-b\n"
+        "workspaces:\n"
+        "  REQ-001: product-a\n"
+        "  LOST-001: product-z\n",
+        encoding="utf-8",
+    )
+    config = str(tmp_path / "refdes-project.yaml")
+
+    assert cli_mod.main(["-c", config, "keys", "adopt"]) == 0
+    output = capsys.readouterr().out
+    assert "membership manifests rebased:" in output
+    assert ".refdes/boards.yaml (2/4 entries carried)" in output
+    assert "unidentified membership entry boards: LOST-001" in output
+    assert "unidentified membership entry workspaces: LOST-001" in output
+
+    project = _project(tmp_path)
+    live_key = project.items["REQ-001"].key
+    manifest = boards_mod.load_manifest(project)
+    assert manifest["boards"] == {
+        live_key: {"id": "REQ-001", "board": "board-a"},
+        "LOST-001": "board-b",
+    }
+    assert manifest["workspaces"] == {
+        live_key: {"id": "REQ-001", "workspace": "product-a"},
+        "LOST-001": "product-z",
+    }
+    adopted_bytes = _snapshot(tmp_path)
+
+    assert cli_mod.main(["-c", config, "keys", "adopt"]) == 0
+    second_output = capsys.readouterr().out
+    assert "nothing to do -- project already adopted" in second_output
+    assert "unidentified membership entry boards: LOST-001" in second_output
+    assert _snapshot(tmp_path) == adopted_bytes
+
+
 def test_adopt_dry_run_writes_nothing(tmp_path, capsys):
     _write_shape_project(tmp_path)
     before = _snapshot(tmp_path)
@@ -217,12 +280,18 @@ def test_adopt_mid_write_failure_restores_every_file_byte_for_byte(
     tmp_path, monkeypatch
 ):
     _write_shape_project(tmp_path)
+    manifest_path = tmp_path / boards_mod.MANIFEST_FILE
+    manifest_path.parent.mkdir(exist_ok=True)
+    manifest_path.write_text("boards:\n  REQ-001: board-a\n", encoding="utf-8")
     before = _snapshot(tmp_path)
     real_write = adopt_mod.revise.write_rewrites
 
     def sabotage(rewrites):
-        real_write(rewrites[:2])
-        raise OSError("sabotaged after two writes")
+        real_write(rewrites)
+        assert yaml.safe_load(manifest_path.read_text(encoding="utf-8"))["boards"] != {
+            "REQ-001": "board-a"
+        }
+        raise OSError("sabotaged after every staged write")
 
     monkeypatch.setattr(adopt_mod.revise, "write_rewrites", sabotage)
     result = adopt_mod.apply(str(tmp_path))

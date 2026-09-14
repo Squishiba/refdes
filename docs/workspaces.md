@@ -134,23 +134,29 @@ which is a different, stricter kind of dependency than this lint tracks.
 
 ## Drift
 
-`.refdes/boards.yaml` — the same file board drift already used — gained a
-second section:
+`.refdes/boards.yaml` — the same file board drift uses — carries a second
+section. In an adopted project both sections use the item's surrogate key:
 
 ```yaml
 boards:
-  DEC-A-001: board-a
+  k7f3m2q9x4a:
+    id: DEC-A-001
+    board: board-a
 workspaces:
-  DEC-A-001: product-a
+  k7f3m2q9x4a:
+    id: DEC-A-001
+    workspace: product-a
 ```
 
-Moving a file across a workspace boundary warns exactly like a board move
-does, and `refdes build --accept-board-move` accepts both kinds together —
-there is no separate `--accept-workspace-move` flag, since they share one
-manifest and the same "moving this is an ordinary thing to do on purpose"
-posture. `refdes audit` lists workspace moves in their own section, next to
-board moves. A project that has never declared `workspaces:` never gets a
-`workspaces:` section written into the manifest at all.
+Legacy `DEC-A-001: product-a` scalars remain readable, and non-adopted
+projects keep writing that legacy shape. Moving a file across a workspace
+boundary warns exactly like a board move does, including when its display id
+is renamed in the same change. `refdes build --accept-board-move` accepts
+both kinds together — there is no separate `--accept-workspace-move` flag,
+since they share one manifest and the same "moving this is an ordinary thing
+to do on purpose" posture. `refdes audit` lists workspace moves in their own
+section, next to board moves. A project that has never declared `workspaces:`
+never gets a `workspaces:` section written into the manifest at all.
 
 ## Rendered pages and nav
 

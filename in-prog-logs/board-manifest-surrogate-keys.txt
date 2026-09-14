@@ -1,0 +1,22 @@
+Task: key .refdes/boards.yaml by surrogate identity after adoption
+
+2026-09-14 research:
+- Fast-forwarded the worker branch to main before inspection.
+- Read boards.py drift loading/writing/verification and build.py call ordering.
+- Read seal.py dual-shape matching/live-key guard/deletion handling, lifecycle.py baseline dual-shape storage, keys.py adoption marker/storage planning, and adopt.py transaction/reporting.
+- Read board/workspace/adoption tests and the relevant design/user documentation.
+- Confirmed board verification runs after former_ids collection and uses seal_write as its write gate.
+- Implementation plan: preserve mixed legacy/keyed entries, match by live key first, write keyed records only after adoption, refresh embedded display ids, prune only on write, and stage manifest conversion in adopt.py's FileRewrite transaction.
+
+2026-09-14 implementation:
+- Added mixed legacy/keyed manifest loading, live-key-guarded identity lookup, adopted writes, display-id refresh, and write-only stale pruning in boards.py.
+- Added transactional membership conversion and reporting to keys adopt. Unidentified entries stay legacy; item rewrites, manifest, and marker roll back together.
+- Added tmp_path regressions for adopted storage, rename/no-move, rename-plus-move, old-id reuse, stale pruning, legacy byte stability, conversion/reporting/idempotence, and rollback.
+- Confirmed the rename-plus-move and live-key guard tests each fail under targeted runtime sabotage, then restored normal lookup and passed all board/workspace/adoption tests (59 passed).
+- Updated multi-board, workspace, and surrogate-key design docs and added the changelog fragment.
+
+2026-09-14 verification:
+- Rebased onto current main (already current).
+- Full suite after rebase: 781 passed.
+
+Status: finished.

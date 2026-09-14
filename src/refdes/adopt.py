@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 
+from . import boards as boards_mod
 from . import build as build_mod
 from . import keys as keys_mod
 from . import lifecycle, revise
@@ -15,7 +16,7 @@ from .model import SchemaError
 
 _MARKER_TEXT = """\
 # Refdes surrogate-key adoption state.
-# Commit this file: it tells future stamps and seals to use key-keyed storage.
+# Commit this file: future stamps, seals, and membership manifests use key-keyed storage.
 # Written by `refdes keys adopt`; do not edit it by hand.
 adopted: true
 format: 1
@@ -39,6 +40,14 @@ class SealAdoption:
 
 
 @dataclass
+class MembershipAdoption:
+    file: str
+    carried: int
+    total: int
+    unidentified: list[str] = field(default_factory=list)
+
+
+@dataclass
 class AdoptionResult:
     ok: bool
     errors: list[str] = field(default_factory=list)
@@ -46,6 +55,7 @@ class AdoptionResult:
     expanded: int = 0
     baselines: list[BaselineAdoption] = field(default_factory=list)
     seals: list[SealAdoption] = field(default_factory=list)
+    memberships: list[MembershipAdoption] = field(default_factory=list)
     changed_files: list[str] = field(default_factory=list)
     dry_run: bool = False
     already_adopted: bool = False
@@ -189,6 +199,34 @@ def apply(project_root: str, dry_run: bool = False) -> AdoptionResult:
             )
         )
 
+    memberships = []
+    membership_path = boards_mod.manifest_path(project)
+    if os.path.isfile(membership_path):
+        original = boards_mod.load_manifest(project)
+        storage = boards_mod.plan_surrogate_storage(project, original)
+        with open(membership_path, "r", encoding="utf-8", newline="") as fh:
+            before = fh.read()
+        after = boards_mod.format_manifest(project, storage.manifest)
+        if after != before:
+            rewrites.append(
+                revise.FileRewrite(
+                    path=membership_path,
+                    rel=boards_mod.MANIFEST_FILE,
+                    before=before,
+                    after=after,
+                )
+            )
+        if storage.total:
+            memberships.append(
+                MembershipAdoption(
+                    file=boards_mod.MANIFEST_FILE,
+                    carried=storage.carried,
+                    total=storage.total,
+                    unidentified=storage.unidentified,
+                )
+            )
+
+
     marker_path = keys_mod.adoption_marker_path(project)
     marker_existed = os.path.isfile(marker_path)
     marker_was_adopted = keys_mod.is_adopted(project)
@@ -214,6 +252,7 @@ def apply(project_root: str, dry_run: bool = False) -> AdoptionResult:
         expanded=link_plan.expansion_count - link_plan.remaining,
         baselines=baselines,
         seals=seals,
+        memberships=memberships,
         changed_files=changed_files,
         dry_run=dry_run,
         already_adopted=marker_was_adopted and not changed_files,

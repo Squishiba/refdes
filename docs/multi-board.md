@@ -107,18 +107,32 @@ existed. `refdes build --reseal board-a` accepts an edit only to board-a's own
 sealed entries.
 
 **Drift is a warning, not silent.** `.refdes/boards.yaml` records which board each
-item was on at the last build — commit it, the same as `.refdes/ids.yaml`. Move a
-file to a different board's folder and the next build warns:
+item was on at the last build — commit it, the same as `.refdes/ids.yaml`. Legacy
+projects key each entry by display id; after `refdes keys adopt`, the immutable
+surrogate is the map key and the current display id stays inside for readability:
+
+```yaml
+boards:
+  k7f3m2q9x4a:
+    id: REQ-PWR-004
+    board: board-a
+```
+
+Readers accept either shape, including a mixed manifest left by an entry adoption
+could not identify. Keyed membership follows an item across a display-id rename,
+so renaming it and moving it to another board in the same change still warns:
 
 ```
-WARNING items/board-b/requirements.yaml:9 [REQ-PWR-004] — REQ-PWR-004 moved from
+WARNING items/board-b/requirements.yaml:9 [REQ-PWR-009] — REQ-PWR-009 moved from
         board 'board-a' to 'board-b' since the last build. Run 'refdes build
         --accept-board-move' if this is deliberate, or move the file back.
 ```
 
 Run `refdes build --accept-board-move` to accept it; `refdes audit` lists every
 accepted and outstanding move. Unlike a sealed log entry, a board move is never a
-build error — moving a file is an ordinary thing to do on purpose.
+build error — moving a file is an ordinary thing to do on purpose. A writable
+build also silently prunes membership for deleted items; read-only `refdes check`
+never changes the manifest.
 
 ### Conforming to a shared contract
 

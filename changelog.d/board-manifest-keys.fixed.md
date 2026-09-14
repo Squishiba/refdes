@@ -1,0 +1,1 @@
+- Key board and workspace membership drift by immutable surrogate after `refdes keys adopt`, so renamed items retain their membership history, rename-plus-move changes still warn, deleted memberships are pruned on writable builds, and legacy manifests remain compatible.
