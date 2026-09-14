@@ -349,6 +349,23 @@ def resolve_link_target(by_key: dict[str, Item], project: Project, target: str) 
     return project.items.get(target)
 
 
+def _unknown_key_message(pointer: str, target_id: str) -> str:
+    """Layer-3 diagnostic (docs/design/keys.md §6) for a composite whose key
+    does not resolve to any item. Shared, not duplicated, between structured
+    links (`resolve_links`) and `checks: against:` (`run_checks`) -- both
+    point at a target the same way, and the doc is explicit that the
+    diagnostic is reused rather than copied. `pointer` supplies only the verb
+    phrase ("refines points at" / "check against"); the rest of the message,
+    including the deliberate no-display-id-fallback framing, is identical.
+    """
+    label, _, key = target_id.partition("@")
+    return (
+        f"{pointer} key {key!r} (labelled {label}), which no item declares. "
+        "The label may be stale; the key is what resolves. Either the target "
+        "was deleted, or this reference predates it."
+    )
+
+
 def resolve_links(project: Project) -> None:
     by_key = _key_index(project)
     for item in project.items.values():
@@ -376,13 +393,7 @@ def resolve_links(project: Project) -> None:
                 target = resolve_link_target(by_key, project, target_id)
                 if target is None:
                     if "@" in target_id:
-                        label, _, key = target_id.partition("@")
-                        message = (
-                            f"{link_name} points at key {key!r} (labelled {label}), "
-                            "which no item declares. The label may be stale; the "
-                            "key is what resolves. Either the target was deleted, "
-                            "or this reference predates it."
-                        )
+                        message = _unknown_key_message(f"{link_name} points at", target_id)
                     else:
                         message = f"{link_name} points at {target_id!r}, which does not exist"
                     project.error(
@@ -808,6 +819,7 @@ _CHECK_EMITTERS = {ERROR: Project.error, WARNING: Project.warn, INFO: Project.in
 
 
 def run_checks(project: Project) -> None:
+    by_key = _key_index(project)
     for item in project.local_items:
         spec = project.types.get(item.type)
         check_severity = spec.check_severity if spec else ERROR
@@ -835,13 +847,41 @@ def run_checks(project: Project) -> None:
                 continue
 
             name, target_id = str(entry["value"]), str(entry["against"])
-            result = CheckResult(value_name=name, against=target_id)
 
-            target = project.items.get(target_id)
+            # `against:` accepts a bare display id or a `DISPLAY-ID@key`
+            # composite, resolved exactly as a structured link target is
+            # (docs/design/keys.md §3) -- reusing resolve_link_target and the
+            # same Layer 1/3 diagnostics rather than re-implementing either.
+            if "@" in target_id:
+                label, _, key = target_id.partition("@")
+                malformed = keys_mod.malformed_key_message(
+                    key, context=f" in check against target (labelled {label})",
+                )
+                if malformed is not None:
+                    project.error(
+                        malformed,
+                        file=item.source_file, line=item.source_line, item_id=item.id,
+                    )
+                    item.checks.append(CheckResult(value_name=name, against=target_id))
+                    continue
+
+            target = resolve_link_target(by_key, project, target_id)
+            # Diagnostics and rendering always show the target's current
+            # display id, never the raw composite text (docs/design/keys.md
+            # §3) -- a rename refreshes the stored label, not the result of
+            # a single build's resolution.
+            display_against = target.id if target is not None else target_id
+            result = CheckResult(value_name=name, against=display_against)
+
             if target is None:
-                result.detail = f"{target_id} does not exist"
+                if "@" in target_id:
+                    result.detail = f"key {target_id.partition('@')[2]!r} does not resolve"
+                    message = _unknown_key_message("check against", target_id)
+                else:
+                    result.detail = f"{target_id} does not exist"
+                    message = f"check against {target_id!r}, which does not exist"
                 project.error(
-                    f"check against {target_id!r}, which does not exist",
+                    message,
                     file=item.source_file, line=item.source_line, item_id=item.id,
                 )
             elif name not in env:
@@ -851,9 +891,9 @@ def run_checks(project: Project) -> None:
                     file=item.source_file, line=item.source_line, item_id=item.id,
                 )
             elif not target.fields.get("limit"):
-                result.detail = f"{target_id} has no 'limit' to check against"
+                result.detail = f"{display_against} has no 'limit' to check against"
                 project.error(
-                    f"check against {target_id}, which declares no limit",
+                    f"check against {display_against}, which declares no limit",
                     file=item.source_file, line=item.source_line, item_id=item.id,
                 )
             else:
@@ -865,7 +905,7 @@ def run_checks(project: Project) -> None:
                     result.limit = limit.text
                     result.margin = limit.margin(env[name])
                     if not ok:
-                        message = f"{name} violates {target_id}: {detail}"
+                        message = f"{name} violates {display_against}: {detail}"
                         if env[name].has_width and limit.kind in ("<=", "<", ">=", ">"):
                             message += f" (nominal {result.actual})"
                         emit_violation(
@@ -876,7 +916,7 @@ def run_checks(project: Project) -> None:
                 except calc.CalcError as exc:
                     result.detail = str(exc)
                     project.error(
-                        f"check {name} against {target_id}: {exc}",
+                        f"check {name} against {display_against}: {exc}",
                         file=item.source_file, line=item.source_line, item_id=item.id,
                     )
 
@@ -886,29 +926,44 @@ def run_checks(project: Project) -> None:
 # ------------------------------------------------------------------- content hashing
 
 # Bumped whenever what compute_hashes() feeds into the hash changes in a way
-# that would churn every existing hash for a reason unrelated to content --
-# so far, exactly once: docs/design/keys.md §5, switching link targets from
-# display-id text to resolved keys. Recorded per baseline entry (lifecycle.py)
-# so a partially-migrated baseline stays precisely describable; consulted by
-# the migration in lifecycle.py/seal.py, never by an ordinary build.
-HASH_FORMAT = 2
+# that would churn every existing hash for a reason unrelated to content.
+# Two bumps so far, both docs/design/keys.md §5:
+#   2 -- link targets switched from display-id text to resolved keys.
+#   3 (2026-09-14) -- `checks: against:` entries that resolve to a keyed
+#      item are likewise reduced to that key; an unresolved or keyless
+#      target keeps its raw text, same as a link target does.
+# Recorded per baseline entry (lifecycle.py) so a partially-migrated baseline
+# stays precisely describable; consulted by the migration in
+# lifecycle.py/seal.py/keys.py, never by an ordinary build.
+HASH_FORMAT = 3
 
 
-def _hash_payload(item: Item, spec: ItemType, project: Project, link_values) -> dict[str, object]:
-    """Everything compute_hashes() and legacy_hash_for() have in common: which
-    fields/body enter the hash, and under what normalization. The one thing
-    that differs between "current" and "pre-keys" hashing is how a link's
-    *targets* turn into hashable values, so that piece is the caller's job
-    (`link_values`, called once per link name with that link's raw target
-    list, returning what to hash for it) -- everything else here is shared,
-    so the two hash definitions can never drift apart from each other by
-    accident.
+def _hash_payload(
+    item: Item,
+    spec: ItemType,
+    project: Project,
+    link_values,
+    checks_values=None,
+) -> dict[str, object]:
+    """Everything compute_hashes() and hash_for_format() have in common: which
+    fields/body enter the hash, and under what normalization. The two things
+    that differ between hash-format definitions are how a link's *targets*
+    turn into hashable values (`link_values`, called once per link name with
+    that link's raw target list) and, from format 3 on, how a `checks:`
+    entry's `against:` does (`checks_values`, called once with the raw
+    `checks:` list; ``None`` leaves `checks:` hashed verbatim, as every
+    format before 3 did) -- everything else here is shared, so the hash
+    definitions can never drift apart from each other by accident.
     """
     payload: dict[str, object] = {"type": item.type}
 
     for fname in sorted(item.fields):
         mode = item.on_change_for(fname, spec, project.default_on_change)
-        if mode == INVALIDATE:
+        if mode != INVALIDATE:
+            continue
+        if fname == "checks" and checks_values is not None:
+            payload[fname] = checks_values(item.fields[fname])
+        else:
             payload[fname] = item.fields[fname]
 
     for lname in sorted(item.links):
@@ -985,6 +1040,36 @@ def _link_hash_token(by_key: dict[str, Item], project: Project, target: str) -> 
     return f"!nokey:{item.id}"
 
 
+def _checks_hash_value(by_key: dict[str, Item], project: Project, entries) -> object:
+    """The value `checks:` contributes to its owner's content hash under
+    HASH_FORMAT 3 (docs/design/keys.md §5, decided 2026-09-14): each entry's
+    `against:` reduced to the target's resolved key, exactly as a link
+    target is (_link_hash_token) -- renaming the checked-against item's
+    display id then changes nothing about the checking item's hash.
+
+    An entry that isn't a well-formed {value, against} mapping is left
+    exactly as parsed -- run_checks() reports its own diagnostic for that
+    shape and this only needs to not crash on it. A target that does not
+    resolve, or resolves to a keyless item, keeps its *raw* `against:` text
+    (the `!unresolved:`/`!nokey:` sentinels are how _link_hash_token signals
+    those cases, and neither is stable across an edit -- unlike a real key,
+    a bare id or a stale composite must still be able to invalidate).
+    """
+    if not isinstance(entries, list):
+        return entries
+    reduced = []
+    for entry in entries:
+        if not isinstance(entry, dict) or "against" not in entry:
+            reduced.append(entry)
+            continue
+        token = _link_hash_token(by_key, project, str(entry["against"]))
+        new_entry = dict(entry)
+        if not token.startswith("!"):
+            new_entry["against"] = token
+        reduced.append(new_entry)
+    return reduced
+
+
 def compute_hashes(project: Project) -> None:
     """Hash only the fields whose on_change mode is `invalidate`.
 
@@ -994,61 +1079,93 @@ def compute_hashes(project: Project) -> None:
     and currently behaves as `ignore`. Imported items keep the hash their own
     project computed.
 
-    Link targets are hashed as their *resolved keys* (docs/design/keys.md
-    §5), not as the composite text and not as the display id -- see
-    _link_hash_token for the three cases and why each is safe. This is the
-    one change §5 calls load-bearing: renaming a target's display id no
-    longer touches the hash of anything that links to it, whether the
-    on-disk reference is still a bare id or has already been expanded to a
-    `DISPLAY@key` composite by links.expand_missing.
+    Link targets, and (from HASH_FORMAT 3) `checks: against:` targets that
+    resolve to a keyed item, are hashed as their *resolved keys*
+    (docs/design/keys.md §5), not as composite text and not as the display
+    id -- see _link_hash_token for the three cases and why each is safe.
+    This is the change §5 calls load-bearing: renaming a target's display id
+    no longer touches the hash of anything that links to it or checks
+    against it, whether the on-disk reference is still bare or has already
+    been expanded to a `DISPLAY@key` composite.
 
     Two things stay deliberately absent from the payload, same as before
-    keys existed: the display id (unchanged -- it was never hashed), and,
-    new here, the item's *own* key. Hashing an item's own key would mean
-    minting one -- an identity-only event with no content behind it --
-    rewrites that item's hash for no content reason, and the first time
-    every item in a project adopts a key at once, that would be every
-    item's hash in the project. Identity is what a hash's key-lookups point
-    at from other items; it is not itself content to be hashed.
+    keys existed: the display id (unchanged -- it was never hashed), and
+    the item's *own* key. Hashing an item's own key would mean minting one
+    -- an identity-only event with no content behind it -- rewrites that
+    item's hash for no content reason, and the first time every item in a
+    project adopts a key at once, that would be every item's hash in the
+    project. Identity is what a hash's key-lookups point at from other
+    items; it is not itself content to be hashed.
     """
-    by_key = _key_index(project)
+    payload_for = hash_payload_builder(project, HASH_FORMAT)
     for item in project.local_items:
         spec = project.types[item.type]
-        payload = _hash_payload(
+        item.content_hash = _hash_blob(payload_for(item, spec))
+
+
+def hash_payload_builder(project: Project, hash_format: int):
+    """A ``(item, spec) -> payload`` closure computing _hash_payload() under
+    ``hash_format``'s definition, reused by compute_hashes() (current
+    format) and hash_for_format() (any earlier one) so the two can never
+    define "current" and "historical" hashing differently by accident.
+
+    Format 1 (pre-keys): link targets hashed as bare display-id text,
+    `checks:` hashed verbatim. Format 2 (docs/design/keys.md §5): link
+    targets hashed as resolved keys, `checks:` still verbatim. Format 3
+    (§5, 2026-09-14): format 2, plus `checks: against:` entries reduced to
+    a resolved key the same way (_checks_hash_value).
+    """
+    if hash_format <= 1:
+        return lambda item, spec: _hash_payload(
             item, spec, project,
-            link_values=lambda targets: sorted(
-                _link_hash_token(by_key, project, t) for t in targets
-            ),
+            link_values=lambda targets: sorted(t.split("@", 1)[0] for t in targets),
         )
-        item.content_hash = _hash_blob(payload)
+    by_key = _key_index(project)
+    checks_values = (
+        (lambda entries: _checks_hash_value(by_key, project, entries))
+        if hash_format >= 3 else None
+    )
+    return lambda item, spec: _hash_payload(
+        item, spec, project,
+        link_values=lambda targets: sorted(
+            _link_hash_token(by_key, project, t) for t in targets
+        ),
+        checks_values=checks_values,
+    )
 
 
-def legacy_hash_for(item: Item, project: Project) -> str:
-    """The content hash this item would have had under the pre-keys
-    (`hash_format` 1) definition, recomputed from its *current* parsed
-    state -- link targets hashed as bare display-id text, exactly what
-    compute_hashes() did before docs/design/keys.md §5 landed.
+def hash_for_format(item: Item, project: Project, hash_format: int) -> str:
+    """The content hash this item would have under hash-format
+    ``hash_format``, recomputed from its *current* parsed state.
 
     Deliberately not "whatever the target string looks like right now": if
     links.expand_missing has already rewritten a target to a `DISPLAY@key`
-    composite, only the display half (everything before '@') goes into this
-    reconstruction, because that is what the *original*, pre-adoption hash
-    was computed from. Using the live composite text here would make an
-    item that has not actually changed look changed, purely because its own
-    link syntax was upgraded -- exactly the false positive the hash-format
-    migration exists to avoid.
+    composite, format 1's reconstruction only uses the display half
+    (everything before '@'), because that is what the *original*,
+    pre-adoption hash was computed from. Using the live composite text here
+    would make an item that has not actually changed look changed, purely
+    because its own link syntax was upgraded -- exactly the false positive
+    the hash-format migration exists to avoid. The same reasoning applies to
+    `checks: against:` under format 3 (_checks_hash_value keeps a target's
+    raw text whenever it isn't safely reducible).
 
-    Used only by the one-time baseline/seal hash-format migration
-    (lifecycle.migrate_hash_format, seal.verify's carry-forward comparison)
-    to decide whether a stored old-format hash still matches current
-    content. Never called during an ordinary build.
+    Used only by the hash-format migration (lifecycle.migrate_hash_format,
+    seal._matches_sealed_hash's carry-forward comparison, and
+    keys.plan_surrogate_storage/`refdes keys adopt`, all through
+    keys.hash_in_format, the one shared caller) to decide whether a stored
+    old-format hash still matches current content. Never called during an
+    ordinary build.
     """
     spec = project.types[item.type]
-    payload = _hash_payload(
-        item, spec, project,
-        link_values=lambda targets: sorted(t.split("@", 1)[0] for t in targets),
-    )
+    payload = hash_payload_builder(project, hash_format)(item, spec)
     return _hash_blob(payload)
+
+
+def legacy_hash_for(item: Item, project: Project) -> str:
+    """hash_for_format(item, project, 1) -- kept as its own name because it
+    predates hash_for_format and is still the common case callers reach for
+    when they mean specifically "the pre-keys hash"."""
+    return hash_for_format(item, project, 1)
 
 
 # -------------------------------------------------------------------------- markdown

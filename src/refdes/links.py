@@ -199,12 +199,93 @@ def _rewrite_item_links(
     return applied
 
 
+def _rewrite_check_targets(
+    out: list[str], start: int, end: int, replacements: dict[str, str]
+) -> set[str]:
+    """Rewrite every `against:` value within an item's `checks:` entries.
+
+    Unlike a named link field, which appears at most once per item,
+    `checks:` can hold several entries and each has its own `against:` --
+    so every matching line in the span is rewritten, not just the first
+    (docs/design/keys.md's "checks: against:" gap). Both shapes an entry
+    can take are handled with the same helpers link fields already use:
+    `- value: X` / `  against: Y` (direct field line) and one-line
+    `- {value: X, against: Y}` (flow mapping, via _rewrite_flow_mapping_field
+    -- its `- {...}` prefix check already matches a checks entry exactly the
+    way it matches an item written in flow style).
+    """
+    limit = min(end, len(out))
+    against_re = _field_or_link_line_re("against")
+    applied: set[str] = set()
+    for i in range(max(0, start), limit):
+        match = against_re.match(out[i])
+        if match:
+            indent, rest = match.groups()
+            if not rest.strip():
+                continue  # `against:` is always a single scalar target
+            new_rest, hit = _rewrite_tokens(rest, replacements)
+            if hit:
+                out[i] = f"{indent}against:{new_rest}"
+            applied |= hit
+            continue
+        new_line, hit = _rewrite_flow_mapping_field(out[i], "against", replacements)
+        if hit:
+            out[i] = new_line
+            applied |= hit
+    return applied
+
+
 @dataclass
 class LinkExpansionPlan:
     rewrites: list[tuple[Item, str, str, str]] = field(default_factory=list)
     files: list[FileRewrite] = field(default_factory=list)
     expansion_count: int = 0
     remaining: int = 0
+
+
+def _planned_target(
+    project: Project, by_key: dict[str, Item], pointer: str, item: Item, target: str
+) -> str | None:
+    """The rewritten form of one reference target, or ``None`` if it needs no
+    rewrite right now. The three §3 refresh cases (docs/design/keys.md),
+    shared between plan_expansion (structured links) and
+    plan_check_expansion (`checks: against:`) so the rule can't drift
+    between the two:
+
+    - Bare, and the target has a key: expand to the composite.
+    - Composite, key resolves, display half already current: nothing to do.
+    - Composite, key resolves, display half stale and now names a
+      *different* live item: refuse and warn -- the crossed-reference
+      signature of a bad merge, named with ``pointer`` (e.g. "refines" or
+      "check against").
+    - Composite, key resolves, display half stale and names nothing live
+      (the ordinary rename), or the target is bare with no key yet, or the
+      key doesn't resolve at all: handled by the two branches above --
+      either expanded, refreshed, or left untouched respectively.
+    """
+    if "@" not in target:
+        resolved = project.items.get(target)
+        if resolved is None or not resolved.key:
+            return None
+        return f"{target}@{resolved.key}"
+
+    old_display, _, key = target.partition("@")
+    resolved = by_key.get(key)
+    if resolved is None or old_display == resolved.id:
+        return None
+    other = project.items.get(old_display)
+    if other is not None and other is not resolved and old_display not in resolved.former_ids:
+        project.warn(
+            f"{pointer} references {target!r}, but that key is "
+            f"{resolved.id} and {old_display} is a different live "
+            "item. Refusing to refresh the label until you confirm "
+            "which was meant.",
+            file=item.source_file,
+            line=item.source_line,
+            item_id=item.id,
+        )
+        return None
+    return f"{resolved.id}@{key}"
 
 
 def plan_expansion(
@@ -222,34 +303,11 @@ def plan_expansion(
     for item in project.local_items:
         for link_name, targets in item.links.items():
             for target in targets:
+                new_target = _planned_target(project, by_key, link_name, item, target)
+                if new_target is None:
+                    continue
                 if "@" not in target:
-                    resolved = project.items.get(target)
-                    if resolved is None or not resolved.key:
-                        continue
-                    new_target = f"{target}@{resolved.key}"
                     expansion_count += 1
-                else:
-                    old_display, _, key = target.partition("@")
-                    resolved = by_key.get(key)
-                    if resolved is None or old_display == resolved.id:
-                        continue
-                    other = project.items.get(old_display)
-                    if (
-                        other is not None
-                        and other is not resolved
-                        and old_display not in resolved.former_ids
-                    ):
-                        project.warn(
-                            f"{link_name} references {target!r}, but that key is "
-                            f"{resolved.id} and {old_display} is a different live "
-                            "item. Refusing to refresh the label until you confirm "
-                            "which was meant.",
-                            file=item.source_file,
-                            line=item.source_line,
-                            item_id=item.id,
-                        )
-                        continue
-                    new_target = f"{resolved.id}@{key}"
 
                 candidates.append((item, link_name, target, new_target))
                 replacements_by_item[id(item)][target] = new_target
@@ -370,6 +428,141 @@ def _report_missing(project: Project, count: int) -> None:
     noun = "reference has" if count == 1 else "references have"
     project.info(
         f"{count} link {noun} not been expanded to the composite form yet; "
+        "the next writable command will expand them. Run without --no-write, "
+        "or see docs/design/keys.md."
+    )
+
+
+# --------------------------------------------------- checks: against: (docs/design/keys.md)
+
+
+def plan_check_expansion(
+    project: Project,
+    source_texts: dict[str, str] | None = None,
+) -> LinkExpansionPlan:
+    """`checks: against:` counterpart of plan_expansion(). `against:` isn't a
+    `links:` reference -- it's a field entry inside `checks:` -- but it names
+    an item the same way a structured link target does, so it gets the same
+    treatment: reuses _planned_target for the §3 refresh rule and
+    _item_spans/_rewrite_check_targets for the source-preserving write-back,
+    rather than a second implementation of either.
+    """
+    from .revise import FileRewrite
+
+    candidates: list[tuple[Item, str, str, str]] = []
+    replacements_by_item: dict[int, dict[str, str]] = defaultdict(dict)
+    by_key = {item.key: item for item in project.items.values() if item.key}
+    expansion_count = 0
+
+    for item in project.local_items:
+        if "checks" in item.inherited_fields:
+            continue  # lives in file defaults, not this item's own span
+        entries = item.fields.get("checks")
+        if not isinstance(entries, list):
+            continue
+        for entry in entries:
+            if not isinstance(entry, dict) or "against" not in entry:
+                continue
+            target = str(entry["against"])
+            new_target = _planned_target(project, by_key, "check against", item, target)
+            if new_target is None:
+                continue
+            if "@" not in target:
+                expansion_count += 1
+            candidates.append((item, "against", target, new_target))
+            replacements_by_item[id(item)][target] = new_target
+
+    plan = LinkExpansionPlan(expansion_count=expansion_count)
+    if not candidates:
+        return plan
+
+    files_touched = sorted({item.source_file for item, *_ in candidates})
+    applied_by_item: dict[int, set[str]] = defaultdict(set)
+    for rel in files_touched:
+        path = os.path.join(project.root, rel)
+        if source_texts is not None and rel in source_texts:
+            text = source_texts[rel]
+        else:
+            with open(path, "r", encoding="utf-8", newline="") as fh:
+                text = fh.read()
+        newline = "\r\n" if "\r\n" in text else "\n"
+        lines = text.splitlines()
+
+        file_items = [i for i in project.local_items if i.source_file == rel]
+        for item, start, end in _item_spans(rel, lines, file_items):
+            repl = replacements_by_item.get(id(item))
+            if repl:
+                applied_by_item[id(item)] |= _rewrite_check_targets(lines, start, end, repl)
+
+        after = newline.join(lines) + newline
+        if after != text:
+            plan.files.append(FileRewrite(path=path, rel=rel, before=text, after=after))
+
+    plan.rewrites = [
+        (item, name, old, new)
+        for item, name, old, new in candidates
+        if old in applied_by_item.get(id(item), ())
+    ]
+    written_expansions = sum(
+        1 for _item, _name, old, _new in plan.rewrites if "@" not in old
+    )
+    plan.remaining = expansion_count - written_expansions
+    return plan
+
+
+def expand_missing_checks(
+    project: Project, write: bool = True
+) -> list[tuple[Item, str, str, str]]:
+    """Expand bare `checks: against:` targets and refresh stale composite
+    display halves -- the `checks:` counterpart of expand_missing(), run on
+    the same writable load path and gated by `--no-write` the same way
+    (cli._load()). Returns ``(item, "against", old_target, new_target)`` for
+    every target actually rewritten.
+
+    Must run after keys.mint_missing() for the same reason expand_missing()
+    must: a bare target needs a durable key before there is anything to
+    expand into. Safe to run either before or after expand_missing() itself
+    -- the two touch disjoint fields (`links` vs. `checks`) and never
+    contend for the same source line.
+    """
+    plan = plan_check_expansion(project)
+    if not plan.rewrites:
+        return []
+    if not write:
+        if plan.expansion_count:
+            _report_missing_checks(project, plan.expansion_count)
+        return []
+
+    from .revise import write_rewrites
+
+    write_rewrites(plan.files)
+    replacements_by_item: dict[int, dict[str, str]] = defaultdict(dict)
+    for item, _name, old, new in plan.rewrites:
+        replacements_by_item[id(item)][old] = new
+    for item in project.local_items:
+        replacements = replacements_by_item.get(id(item))
+        if not replacements:
+            continue
+        entries = item.fields.get("checks")
+        if not isinstance(entries, list):
+            continue
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            current = str(entry.get("against", ""))
+            if current in replacements:
+                entry["against"] = replacements[current]
+
+    if plan.remaining:
+        _report_missing_checks(project, plan.remaining)
+    return plan.rewrites
+
+
+def _report_missing_checks(project: Project, count: int) -> None:
+    """`checks:` counterpart of _report_missing() -- see its own docstring."""
+    noun = "reference has" if count == 1 else "references have"
+    project.info(
+        f"{count} check {noun} not been expanded to the composite form yet; "
         "the next writable command will expand them. Run without --no-write, "
         "or see docs/design/keys.md."
     )

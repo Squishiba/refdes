@@ -271,7 +271,7 @@ def test_keyed_seal_survives_display_id_rename_without_violation(tmp_path):
             key: {
                 "id": "LOG-001",
                 "hash": project.items["LOG-001"].content_hash,
-                "hash_format": 2,
+                "hash_format": build_mod.HASH_FORMAT,
             },
             "LOG-002": project.items["LOG-002"].content_hash,
         },
@@ -292,7 +292,7 @@ def test_keyed_seal_survives_display_id_rename_without_violation(tmp_path):
         key: {
             "id": "LOG-001",
             "hash": renamed.items["LOG-009"].content_hash,
-            "hash_format": 2,
+            "hash_format": build_mod.HASH_FORMAT,
         },
         "LOG-002": renamed.items["LOG-002"].content_hash,
     }
@@ -325,7 +325,7 @@ def test_write_verify_rejects_changed_key_and_content_without_fresh_seal(tmp_pat
             sealed_key: {
                 "id": "LOG-001",
                 "hash": project.items["LOG-001"].content_hash,
-                "hash_format": 2,
+                "hash_format": build_mod.HASH_FORMAT,
             }
         },
     )
@@ -382,7 +382,7 @@ def test_renamed_keyed_seal_does_not_claim_a_new_item_reusing_its_old_id(tmp_pat
             original_key: {
                 "id": "LOG-001",
                 "hash": original_hash,
-                "hash_format": 2,
+                "hash_format": build_mod.HASH_FORMAT,
             }
         },
     )
@@ -404,7 +404,7 @@ def test_renamed_keyed_seal_does_not_claim_a_new_item_reusing_its_old_id(tmp_pat
     assert stored[original_key] == {
         "id": "LOG-001",
         "hash": original_hash,
-        "hash_format": 2,
+        "hash_format": build_mod.HASH_FORMAT,
     }
     assert stored["LOG-001"] == reused.items["LOG-001"].content_hash
     assert reused.items["LOG-005"].content_hash == original_hash

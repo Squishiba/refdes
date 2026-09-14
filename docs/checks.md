@@ -120,6 +120,14 @@ checks:
 `against` must be an item with a `limit`, and may be
 [imported from another project](multi-board.md).
 
+You write a bare id, exactly as above. If the target has a durable key
+(every item does, once minted), the next command that writes to the project
+expands `against:` in place to `BND-THM-001@k7f3m2q9x4a` — the same
+rename-safe composite a structured link target uses. Resolution reads only
+the key half; the label is refreshed automatically if `BND-THM-001` is ever
+renamed, so renaming a bound never breaks, and never silently misdirects,
+a check that points at it.
+
 ## Worst case, not nominal
 
 When a value carries a tolerance, the check uses the bound hardest to satisfy:

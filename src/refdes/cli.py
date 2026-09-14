@@ -103,6 +103,14 @@ def _load(args, require_ids: bool = True) -> tuple[Project, bool]:
     # `item.links` holding the text now actually on disk.
     expanded = links_mod.expand_missing(project, write=not args.no_write)
     if expanded:
+        parse_span = _parse_items(project, require_ids, discard=parse_span)
+
+    # Same treatment for `checks: [{value, against}]` -- `against:` names an
+    # item the same way a link target does but isn't a `links:` reference,
+    # so expand_missing() alone never sees it (docs/design/keys.md's
+    # disclosed gap, closed). Same gating, same reparse-after-write need.
+    expanded_checks = links_mod.expand_missing_checks(project, write=not args.no_write)
+    if expanded_checks:
         _parse_items(project, require_ids, discard=parse_span)
 
     return project, schema_was_stale
@@ -872,10 +880,18 @@ def cmd_keys_adopt(args) -> int:
             f"would expand {result.expanded} link reference(s) "
             "to composite form"
         )
+        print(
+            f"would expand {result.checks_expanded} check reference(s) "
+            "to composite form"
+        )
     else:
         print(f"minted {result.minted} key(s)")
         print(
             f"expanded {result.expanded} link reference(s) "
+            "to composite form"
+        )
+        print(
+            f"expanded {result.checks_expanded} check reference(s) "
             "to composite form"
         )
 

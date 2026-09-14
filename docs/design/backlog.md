@@ -985,13 +985,18 @@ Jared on 2026-09-14:
   external-citation case, since the internal "which new item replaced this
   old id" question becomes a lookup instead of a guess.
 
-**Two disclosed gaps, not fixed by any of the above, and not scheduled:**
+**One disclosed gap remains open; the other closed 2026-09-14:**
 
 - **`checks: [{value, against}]` still resolves `against:` as a bare display
-  id.** It isn't a `links:` reference at all — it's a field entry inside
-  `checks:` — so `links.expand_missing()` never sees it and it is not
-  rename-safe under the current implementation. Keys.md calls this "a real,
-  disclosed gap, not an oversight."
+  id.** ~~It isn't a `links:` reference at all...~~ **Closed.** `against:`
+  now accepts the same `DISPLAY-ID@key` composite a link target does --
+  resolved through `build.resolve_link_target`, expanded/refreshed through
+  `links.plan_check_expansion`/`expand_missing_checks`, both reusing the §3
+  refresh rule and the Layer 1/3 diagnostics rather than reimplementing
+  either. Hashing needed `hash_format: 3` (docs/design/keys.md §5,
+  2026-09-14): `checks:` was never a `link:*` payload key, so reducing
+  `against:` to its resolved key for hashing is a hash-definition change of
+  its own, carried forward conditionally the same way format 2 was.
 - **Imported cross-project links carry no key.** `imports.py`'s payload has
   no `key` field today, so a link to an item from another, imported project
   can never be composite-expanded. Closing it means extending the

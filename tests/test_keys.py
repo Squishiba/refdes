@@ -841,7 +841,7 @@ def test_storage_conversion_conditionally_rekeys_and_reports_uncomparable(tmp_pa
         "type": "requirement",
         "title": "Unchanged.",
         "id": "REQ-001",
-        "hash_format": 2,
+        "hash_format": build_mod.HASH_FORMAT,
     }
     assert plan.baseline_items["REQ-002"]["hash"] == "stale"
     assert plan.baseline_items["REQ-002"]["hash_format"] == 1
@@ -850,7 +850,7 @@ def test_storage_conversion_conditionally_rekeys_and_reports_uncomparable(tmp_pa
     assert plan.seals[key_1] == {
         "hash": project.items["REQ-001"].content_hash,
         "id": "REQ-001",
-        "hash_format": 2,
+        "hash_format": build_mod.HASH_FORMAT,
     }
     assert plan.seals["REQ-002"] == {"hash": "stale", "hash_format": 1}
     assert plan.seals["REQ-003"]["hash_format"] == 1

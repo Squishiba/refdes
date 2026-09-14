@@ -54,6 +54,7 @@ class AdoptionResult:
     errors: list[str] = field(default_factory=list)
     minted: int = 0
     expanded: int = 0
+    checks_expanded: int = 0
     baselines: list[BaselineAdoption] = field(default_factory=list)
     seals: list[SealAdoption] = field(default_factory=list)
     memberships: list[MembershipAdoption] = field(default_factory=list)
@@ -95,29 +96,60 @@ def _seal_files(project) -> list[tuple[str, str, str]]:
     return found
 
 
+def _chain_rewrites(
+    *rewrite_lists: list[revise.FileRewrite],
+) -> list[revise.FileRewrite]:
+    """Merge sequentially-computed FileRewrite lists -- each stage computed
+    using the previous stage's output as its own ``source_texts`` -- into
+    one rewrite per file: the earliest ``before`` seen and the latest
+    ``after``. A no-op stage for a given file (it read but didn't change it)
+    contributes nothing, so the merge still finds that file's true original
+    text in whichever stage did touch it.
+    """
+    before_by_rel: dict[str, str] = {}
+    after_by_rel: dict[str, str] = {}
+    path_by_rel: dict[str, str] = {}
+    order: list[str] = []
+    for rewrites in rewrite_lists:
+        for rewrite in rewrites:
+            if rewrite.rel not in before_by_rel:
+                before_by_rel[rewrite.rel] = rewrite.before
+                order.append(rewrite.rel)
+            after_by_rel[rewrite.rel] = rewrite.after
+            path_by_rel[rewrite.rel] = rewrite.path
+    return [
+        revise.FileRewrite(
+            path=path_by_rel[rel], rel=rel,
+            before=before_by_rel[rel], after=after_by_rel[rel],
+        )
+        for rel in order
+        if before_by_rel[rel] != after_by_rel[rel]
+    ]
+
+
 def _compose_item_rewrites(project, assignments) -> tuple[list[revise.FileRewrite], object]:
-    """Compose link edits before key insertions so source line numbers stay valid."""
+    """Compose link and `checks: against:` edits before key insertions so
+    source line numbers stay valid. Each stage reads the previous stage's
+    output as its own `source_texts`, in the fixed order links -> checks ->
+    keys -- links and checks touch disjoint fields so their relative order
+    doesn't matter to the result, only that each sees what came before it.
+    """
     for item, new_key in assignments:
         item.key = new_key
 
     link_plan = links_mod.plan_expansion(project)
-    expanded_texts = {rewrite.rel: rewrite.after for rewrite in link_plan.files}
+    link_texts = {rewrite.rel: rewrite.after for rewrite in link_plan.files}
+
+    check_plan = links_mod.plan_check_expansion(project, source_texts=link_texts)
+    check_texts = dict(link_texts)
+    check_texts.update({rewrite.rel: rewrite.after for rewrite in check_plan.files})
+
     mint_plan = keys_mod.plan_missing(
-        project, source_texts=expanded_texts, assignments=assignments
+        project, source_texts=check_texts, assignments=assignments
     )
 
-    link_files = {rewrite.rel: rewrite for rewrite in link_plan.files}
-    mint_files = {rewrite.rel: rewrite for rewrite in mint_plan.rewrites}
-    composed = []
-    for rel in sorted(link_files.keys() | mint_files.keys()):
-        link_rewrite = link_files.get(rel)
-        mint_rewrite = mint_files.get(rel)
-        before = link_rewrite.before if link_rewrite is not None else mint_rewrite.before
-        after = mint_rewrite.after if mint_rewrite is not None else link_rewrite.after
-        path = link_rewrite.path if link_rewrite is not None else mint_rewrite.path
-        if before != after:
-            composed.append(revise.FileRewrite(path=path, rel=rel, before=before, after=after))
-    return composed, (mint_plan, link_plan)
+    composed = _chain_rewrites(link_plan.files, check_plan.files, mint_plan.rewrites)
+    return composed, (mint_plan, link_plan, check_plan)
 
 
 def apply(project_root: str, dry_run: bool = False) -> AdoptionResult:
@@ -139,14 +171,18 @@ def apply(project_root: str, dry_run: bool = False) -> AdoptionResult:
 
     assignments = keys_mod.missing_assignments(project)
     item_rewrites, plans = _compose_item_rewrites(project, assignments)
-    mint_plan, link_plan = plans
-    if mint_plan.remaining or link_plan.remaining:
+    mint_plan, link_plan, check_plan = plans
+    if mint_plan.remaining or link_plan.remaining or check_plan.remaining:
         errors = []
         if mint_plan.remaining:
             errors.append(f"could not write back {mint_plan.remaining} key(s)")
         if link_plan.remaining:
             errors.append(
                 f"could not expand {link_plan.remaining} local link reference(s)"
+            )
+        if check_plan.remaining:
+            errors.append(
+                f"could not expand {check_plan.remaining} local check reference(s)"
             )
         return AdoptionResult(ok=False, errors=errors, dry_run=dry_run)
 
@@ -252,6 +288,7 @@ def apply(project_root: str, dry_run: bool = False) -> AdoptionResult:
         ok=True,
         minted=len(mint_plan.assignments),
         expanded=link_plan.expansion_count - link_plan.remaining,
+        checks_expanded=check_plan.expansion_count - check_plan.remaining,
         baselines=baselines,
         seals=seals,
         memberships=memberships,

@@ -67,6 +67,20 @@ design only, deferred by Jared 2026-09-14.
   inside `checks:`. `links.expand_missing` never sees it, so `against:`
   stays a bare display id and is not rename-safe under this implementation.
   A real, disclosed gap, not an oversight.
+
+  **Closed 2026-09-14** (docs/design/backlog.md's matching entry marked
+  closed too). `against:` now accepts the same `DISPLAY-ID@key` composite a
+  link target does, resolved by `build.resolve_link_target` -- the exact
+  function links already use, not a copy. `links.plan_check_expansion` /
+  `expand_missing_checks` are the `checks:` counterparts of `plan_expansion`
+  / `expand_missing`, sharing the §3 refresh rule (bare-target expansion,
+  stale-label refresh, the crossed-reference warning) through one function,
+  `_planned_target`, so the rule can't drift between the two. Layer 1
+  (malformed key) and Layer 3 (unknown key, no display-id fallback)
+  diagnostics are reused the same way (`keys.malformed_key_message`, and a
+  new shared `build._unknown_key_message`). Hashing needed its own change,
+  since `checks:` was never a `link:*` payload key -- see §5's
+  `hash_format: 3`.
 - **Flow-style entries need the write-back to prove what it actually
   wrote, not just what it meant to.** The first draft of `links.py` computed
   candidate rewrites from `item.links` (structured, parsed data) and
@@ -638,6 +652,24 @@ for lname in sorted(item.links):
 With that change, a display rename churns nothing anywhere in the project.
 Without it, keys deliver readability and lose the main prize.
 
+**Decision, 2026-09-14: `hash_format: 3` — the same rule extends to
+`checks: against:`.** Closing the "checks: against: is not rename-safe"
+gap (above) means `against:` can now hold a composite too, and the same
+"renaming a target must not churn the hash" argument applies to it exactly
+as it applies to a link target. `hash_format: 2` only normalized `link:*`
+payload keys; `checks:` was hashed as one opaque field, raw `against:` text
+and all. Format 3 reduces a `checks:` entry's `against:` to the target's
+resolved key when it resolves to a keyed item, for both a bare display id
+and an already-composite spelling — same as `_link_hash_token` — and
+leaves it as raw text otherwise (unresolved, or resolved to a keyless
+item), so a change to an `against:` that *isn't* safely reducible still
+invalidates. This necessarily changes the hash of every existing item whose
+`checks:` already points at a keyed target, which is a hash-definition
+change like format 2's was — handled by the same conditional carry-forward
+below, extended to reconstruct format 2 (not just format 1) exactly, so a
+format-2 baseline or seal upgrades to 3 only when the item is provably
+unchanged.
+
 ### What is *not* hashed
 
 **The item's own key is not hashed.** Two reasons, both decisive:
@@ -769,7 +801,18 @@ uncomparable rather than guessed at.
 Record `hash_format` per entry, not per file, so a partially-carried
 baseline is precisely described. Same rule for seals.
 
----
+**Format 3 (2026-09-14) generalizes this to "the previous format," not just
+format 1.** A format-2 entry carries forward to 3 by the identical rule:
+compare the stored hash against `keys.hash_in_format(item, project, 2)`
+(the exact format-2 reconstruction, not an approximation); match, carry;
+mismatch, leave alone and report uncomparable. One shared helper --
+`keys.hash_in_format` -- answers "what would this item's hash be under
+format N" for every caller that needs it (`lifecycle.migrate_hash_format`,
+`seal._matches_sealed_hash`, `keys.plan_surrogate_storage`, and `refdes
+keys adopt` through it), so the comparison can't drift between them. A
+legacy scalar seal with no format marker of its own still tries the newest
+definition first, then each older one in turn (3, then 2, then 1) — same
+posture as before, just one format longer.
 
 ## 6. Corruption and detection
 

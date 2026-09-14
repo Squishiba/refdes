@@ -1082,7 +1082,7 @@ def _carry_forward_seals(
             else:
                 new_record_id = id_changes.get(old_id, old_id)
             new_hash = new_hashes.get(old_id, recorded)
-            new_value = seal_mod._with_seal_hash(value, new_hash, hash_format=2)
+            new_value = seal_mod._with_seal_hash(value, new_hash, hash_format=build_mod.HASH_FORMAT)
             if new_record_id != record_id:
                 del new_seals[record_id]
             new_seals[new_record_id] = new_value

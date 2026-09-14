@@ -279,7 +279,7 @@ def _items_map(project: Project) -> dict[str, dict]:
     that same surrogate and ``id`` preserves the human-facing label.
 
     ``hash_format`` records which content-hash definition produced ``hash``
-    (``build.HASH_FORMAT`` -- currently 2, docs/design/keys.md §5) directly
+    (``build.HASH_FORMAT`` -- currently 3, docs/design/keys.md §5) directly
     on every freshly-stamped entry, so a later reader never has to guess.
     Absent means format 1: either the baseline predates keys, or
     ``migrate_hash_format`` left the entry untouched because it could not
@@ -341,26 +341,29 @@ def migrate_hash_format(project: Project, baseline: Baseline, write: bool = True
 
     A baseline stamped before keys existed recorded every entry's hash under
     the old definition (link targets hashed as display-id text) -- it has no
-    `hash_format` key at all, since the field didn't exist yet. Comparing
-    that hash directly against a freshly computed hash_format-2 hash would
-    make every single item in that baseline look changed, which is false:
-    nothing about their content moved, only the *definition* of the hash did.
+    `hash_format` key at all, since the field didn't exist yet. A baseline
+    stamped under an earlier HASH_FORMAT (2: link targets as resolved keys,
+    `checks: against:` still raw text) carries that number instead. Either
+    way, comparing the stored hash directly against a freshly computed
+    current-format hash would make every single item in that baseline look
+    changed, which is false: nothing about their content moved, only the
+    *definition* of the hash did.
 
-    The rule, for each format-1 entry (recorded id `item_id`, stored hash
-    `old_hash`): find the live item still using that id, and recompute what
-    its hash would be *right now* under the OLD definition
-    (build.legacy_hash_for). If that recomputed old-format hash matches what
-    was actually stored, the item's content has demonstrably not changed
-    since the baseline was stamped -- so the item's *current* hash_format-2
-    hash (already sitting on item.content_hash from this build) is the
-    correct new-format hash of the baseline's own content, and the entry is
-    safely rewritten in place (`carried`). If it does not match, the item
-    genuinely changed since the stamp, for a reason that has nothing to do
-    with hash formats -- that entry is left exactly as it was, still
-    format 1, and reported as `uncomparable` rather than guessed at. An id
-    with no live item at all (deleted, or renamed with no `former_ids:`
-    recorded) is left alone too: that is the ordinary "removed" case
-    diff_against() already reports, not a migration failure.
+    The rule, for each entry not already at the current format (recorded id
+    `item_id`, stored hash `old_hash`, recorded format `old_format`): find
+    the live item still using that id, and recompute what its hash would be
+    *right now* under `old_format`'s definition (keys.hash_in_format). If
+    that recomputed old-format hash matches what was actually stored, the
+    item's content has demonstrably not changed since the baseline was
+    stamped -- so the item's *current* hash (already sitting on
+    item.content_hash from this build) is the correct current-format hash of
+    the baseline's own content, and the entry is safely rewritten in place
+    (`carried`). If it does not match, the item genuinely changed since the
+    stamp, for a reason that has nothing to do with hash formats -- that
+    entry is left exactly as it was and reported as `uncomparable` rather
+    than guessed at. An id with no live item at all (deleted, or renamed
+    with no `former_ids:` recorded) is left alone too: that is the ordinary
+    "removed" case diff_against() already reports, not a migration failure.
 
     `write=False` computes the same report without touching the file --
     the `--no-write` posture (docs/design/keys.md §2), threaded through by
@@ -368,14 +371,19 @@ def migrate_hash_format(project: Project, baseline: Baseline, write: bool = True
     """
     report = BaselineMigration()
     for record_id, entry in baseline.items.items():
-        if "hash_format" in entry:
-            continue  # already hash_format 2 (or a later format): nothing to do
+        try:
+            recorded_format = int(entry["hash_format"]) if "hash_format" in entry else 1
+        except (TypeError, ValueError):
+            recorded_format = -1
+        if recorded_format == build_mod.HASH_FORMAT:
+            continue  # already current: nothing to do
         identity = keys_mod.baseline_identity(record_id, entry)
         display_id = identity[1] if identity is not None else record_id
         item = keys_mod.item_for_baseline_entry(project, record_id, entry)
         if item is None:
             continue  # no live item to recompute against -- an ordinary removal
-        if build_mod.legacy_hash_for(item, project) != entry.get("hash"):
+        expected = keys_mod.hash_in_format(item, project, recorded_format)
+        if expected is None or expected != entry.get("hash"):
             report.uncomparable.append(display_id)
             continue
         entry["hash"] = item.content_hash

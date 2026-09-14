@@ -1056,7 +1056,7 @@ def test_revise_leaves_keyed_seal_untouched_on_display_rename(tmp_path):
             key: {
                 "id": "LOG-001",
                 "hash": project.items["LOG-001"].content_hash,
-                "hash_format": 2,
+                "hash_format": build_mod.HASH_FORMAT,
             }
         },
     )

@@ -223,13 +223,24 @@ def item_for_baseline_entry(project: Project, record_id: str, entry: dict) -> It
     return next((item for item in project.local_items if item.key == key), None)
 
 
-def _hash_in_format(item: Item, project: Project, hash_format: int) -> str | None:
+def hash_in_format(item: Item, project: Project, hash_format: int) -> str | None:
+    """item's content hash exactly as hash-format ``hash_format`` would
+    compute it right now, or ``None`` if ``hash_format`` isn't one this
+    build understands.
+
+    The one shared reconstruction every hash-format migration site uses --
+    lifecycle.migrate_hash_format, seal._matches_sealed_hash, and
+    plan_surrogate_storage below (which `refdes keys adopt` calls through)
+    -- so "does this stored hash still describe this item's current
+    content" is answered identically everywhere (docs/design/keys.md §5(c)).
+    A single shared helper, not four copies that could drift.
+    """
     from . import build as build_mod
 
     if hash_format == build_mod.HASH_FORMAT:
         return item.content_hash
-    if hash_format == 1:
-        return build_mod.legacy_hash_for(item, project)
+    if hash_format in (1, 2):
+        return build_mod.hash_for_format(item, project, hash_format)
     return None
 
 
@@ -262,13 +273,12 @@ def plan_surrogate_storage(
             hash_format = int(entry.get("hash_format", 1))
         except (TypeError, ValueError):
             hash_format = -1
-        expected = _hash_in_format(item, project, hash_format) if item is not None else None
+        expected = hash_in_format(item, project, hash_format) if item is not None else None
         if item is not None and item.key and expected == entry.get("hash"):
             converted = dict(entry)
             converted.pop("key", None)
             converted["id"] = display_id
-            if hash_format == 1:
-                converted["hash"] = item.content_hash
+            converted["hash"] = item.content_hash
             converted["hash_format"] = build_mod.HASH_FORMAT
             plan.baseline_items[item.key] = converted
             continue
@@ -297,20 +307,23 @@ def plan_surrogate_storage(
         item = by_display_id.get(record_id)
         matched_format = hash_format
         if item is not None and hash_format == 0:
-            if recorded_hash == item.content_hash:
-                matched_format = build_mod.HASH_FORMAT
-            elif recorded_hash == build_mod.legacy_hash_for(item, project):
-                matched_format = 1
+            # Legacy scalar seal, no format marker of its own -- try the
+            # newest definition first, then each older one (docs/design/
+            # keys.md §5(c)), same "newest wins" posture as everywhere else
+            # a format has to be inferred rather than read off the entry.
+            for candidate in (build_mod.HASH_FORMAT, 2, 1):
+                if recorded_hash == hash_in_format(item, project, candidate):
+                    matched_format = candidate
+                    break
         expected = (
-            _hash_in_format(item, project, matched_format)
-            if item is not None and matched_format in (1, build_mod.HASH_FORMAT)
+            hash_in_format(item, project, matched_format)
+            if item is not None and matched_format in (1, 2, build_mod.HASH_FORMAT)
             else None
         )
         if item is not None and item.key and expected == recorded_hash:
             converted = dict(entry)
             converted["id"] = record_id
-            if matched_format == 1:
-                converted["hash"] = item.content_hash
+            converted["hash"] = item.content_hash
             converted["hash_format"] = build_mod.HASH_FORMAT
             plan.seals[item.key] = converted
             continue

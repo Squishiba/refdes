@@ -151,35 +151,31 @@ def _matches_sealed_hash(
 ) -> tuple[bool, str]:
     """Compare a stored seal hash against `item`'s current one, folding in
     the hash-format migration (docs/design/keys.md §5) so a seal written
-    before keys existed does not read as tampered purely because the hash
-    definition changed underneath it.
+    under an earlier hash definition does not read as tampered purely
+    because the definition changed underneath it.
 
-    Returns ``(matches, hash_to_store)``. Three outcomes:
+    Returns ``(matches, hash_to_store)``. Two outcomes:
 
-    - The recorded hash equals ``item.content_hash`` under hash format 2:
-      unchanged; return it untouched.
-    - A format-1 or unversioned legacy hash instead equals
-      ``build.legacy_hash_for(item, project)``: content is unchanged and only
-      the definition moved, so return the current hash for safe carry-forward.
-    - Neither permitted definition matches: this is a real edit; return the
-      original hash with ``matches=False``.
+    - ``hash_format`` known (a key-keyed entry's own recorded format): the
+      recorded hash must match ``keys.hash_in_format(item, project,
+      hash_format)`` -- the one shared reconstruction every hash-format
+      migration site uses, not a copy of it.
+    - ``hash_format`` unknown (a legacy scalar seal, with no field for a
+      format marker of its own): try the newest definition first, then each
+      older one in turn (docs/design/keys.md §5(c)) -- the first that
+      matches identifies an unchanged entry, and a successful write upgrades
+      the scalar to the current hash.
 
-    Key-keyed dictionary entries persist ``hash_format`` per entry, including
-    partial-adoption failures. Legacy scalar seals have no field for a format
-    marker, but need none: checking current then legacy identifies an unchanged
-    entry, and a successful write upgrades the scalar to the current hash.
-
-    The deferred ``build`` import avoids a cycle: ``build.py`` imports this
-    module for ``verify()``, while this comparison needs ``legacy_hash_for``.
-    By call time build has finished importing and Python caches the module.
+    Neither permitted definition matching is a real edit; the original hash
+    is returned with ``matches=False``.
     """
-
     from . import build as build_mod
 
-    if hash_format in (None, build_mod.HASH_FORMAT) and recorded == item.content_hash:
-        return True, recorded
-    if hash_format in (None, 1) and recorded == build_mod.legacy_hash_for(item, project):
-        return True, item.content_hash
+    formats = (hash_format,) if hash_format is not None else (build_mod.HASH_FORMAT, 2, 1)
+    for fmt in formats:
+        expected = keys_mod.hash_in_format(item, project, fmt)
+        if expected is not None and recorded == expected:
+            return True, item.content_hash
     return False, recorded
 
 
@@ -219,6 +215,8 @@ def verify(project: Project, write: bool = False, reseal: str | None = None) -> 
     read-only ``check`` therefore never mutates seal storage while retaining
     the same tamper detection.
     """
+    from . import build as build_mod
+
     base = load_seals(project, board="")
     base_changed = False
     live_keys = {item.key for item in project.local_items if item.key}
@@ -249,7 +247,7 @@ def verify(project: Project, write: bool = False, reseal: str | None = None) -> 
                         seals[item.key] = {
                             "id": item.id,
                             "hash": item.content_hash,
-                            "hash_format": 2,
+                            "hash_format": build_mod.HASH_FORMAT,
                         }
                     else:
                         seals[item.id] = item.content_hash
@@ -270,7 +268,7 @@ def verify(project: Project, write: bool = False, reseal: str | None = None) -> 
             if ok:
                 if upgraded != recorded and write:
                     seals[record_id] = _with_seal_hash(
-                        value, upgraded, hash_format=2
+                        value, upgraded, hash_format=build_mod.HASH_FORMAT
                     )
                     changed = True
                 continue
@@ -282,7 +280,7 @@ def verify(project: Project, write: bool = False, reseal: str | None = None) -> 
                     file=item.source_file, line=item.source_line, item_id=item.id,
                 )
                 seals[record_id] = _with_seal_hash(
-                    value, item.content_hash, hash_format=2
+                    value, item.content_hash, hash_format=build_mod.HASH_FORMAT
                 )
                 changed = True
             else:
