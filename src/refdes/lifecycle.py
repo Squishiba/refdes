@@ -227,7 +227,15 @@ def latest(baselines: list[Baseline], kind: str | None = None) -> Baseline | Non
 
 
 def format_baseline(data: dict) -> str:
-    """Serialize one baseline identically for planning and persistence."""
+    """Two dump passes, not one: ``default_flow_style=None`` (PyYAML's
+    per-node heuristic) would flow-style both ``gate:`` and each item entry.
+    That collapses the gate -- where one rule per line is worth diffing --
+    into a wrapped blob. The head (kind through gate) is therefore dumped
+    block-style, while each item entry is dumped individually in flow style.
+    Both still go through ``yaml.safe_dump``, so titles containing colons or
+    quotes are escaped correctly rather than hand-formatted. This is the
+    source-reviewable shape shown in docs/design/lifecycle.md §2.
+    """
     items = data["items"]
     head = {k: v for k, v in data.items() if k != "items"}
     out = _HEADER + yaml.safe_dump(
@@ -254,7 +262,8 @@ def _save_baseline_file(project: Project, data: dict) -> str:
 
 
 def _items_map(project: Project) -> dict[str, dict]:
-    """Snapshot local items in the project's adopted or legacy shape.
+    """Snapshot ``project.local_items`` only; imports are excluded from
+    baselines the same way they are excluded from coverage and validation.
 
     Explicit adoption is recorded by ``keys.ADOPTION_MARKER``. Adopted
     projects key each entry by immutable surrogate and carry the display id
@@ -262,9 +271,29 @@ def _items_map(project: Project) -> dict[str, dict]:
     Readers accept both shapes, including mixtures left by an uncomparable
     historical entry.
 
-    ``hash_format`` records which content-hash definition produced ``hash``.
-    ``verdict`` and ``calc_hash`` are the narrow stale-arithmetic probes
-    described by docs/design/stale-arithmetic-signal.md.
+    In the legacy shape, ``key`` records the item's immutable surrogate for
+    the baseline corruption lint (docs/design/keys.md §6 Layers 4-5). It
+    remains optional: a pre-keys baseline, or one stamped under ``--no-write``
+    before keys were minted, has no identity evidence for that entry and the
+    lint must skip it rather than guess. In the adopted shape the map key is
+    that same surrogate and ``id`` preserves the human-facing label.
+
+    ``hash_format`` records which content-hash definition produced ``hash``
+    (``build.HASH_FORMAT`` -- currently 2, docs/design/keys.md §5) directly
+    on every freshly-stamped entry, so a later reader never has to guess.
+    Absent means format 1: either the baseline predates keys, or
+    ``migrate_hash_format`` left the entry untouched because it could not
+    account for it. Present and current means it is directly comparable to a
+    freshly computed hash.
+
+    ``verdict`` and ``calc_hash`` are
+    docs/design/stale-arithmetic-signal.md's two probes, and are the one
+    deliberate exception to this module's \"assembly, not new machinery\"
+    framing. Both are optional per item: ``verdict`` only for a type with a
+    verdict-bearing status field, and ``calc_hash`` only for an item with at
+    least one ``calc`` block. They exist solely to identify the bounded
+    verdict-without-arithmetic transition; unlike general field-level
+    history, they cannot reconstruct any other prior field value.
     """
     out = {}
     adopted = keys_mod.is_adopted(project)

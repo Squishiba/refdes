@@ -270,6 +270,8 @@ def plan_expansion(
         newline = "\r\n" if "\r\n" in text else "\n"
         lines = text.splitlines()
 
+        # Every item in this file, not just the ones being rewritten:
+        # _item_spans needs the full set to bound each span correctly.
         file_items = [i for i in project.local_items if i.source_file == rel]
         for item, start, end in _item_spans(rel, lines, file_items):
             repl = replacements_by_item.get(id(item))
@@ -278,6 +280,9 @@ def plan_expansion(
                     lines, start, end, item, repl
                 )
 
+        # A link inherited from file defaults has one physical spelling shared
+        # by every inheriting item. Rewrite that spelling once, then attribute
+        # the applied targets to each item whose parsed links came from it.
         defaults_groups: dict[tuple[int, str], list[Item]] = defaultdict(list)
         for item in file_items:
             if item.defaults_line is None or id(item) not in replacements_by_item:

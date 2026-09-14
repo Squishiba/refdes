@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import yaml
 from conftest import write_project_config
 
 from refdes import adopt as adopt_mod
@@ -105,6 +106,10 @@ def _write_shape_project(root):
 
 def test_adopt_preserves_supported_source_shapes_and_crlf(tmp_path, capsys):
     _write_shape_project(tmp_path)
+    empty_seal = tmp_path / ".refdes" / "log-seal.yaml"
+    empty_seal.parent.mkdir()
+    empty_seal.write_text(seal.format_seals({}), encoding="utf-8")
+    empty_seal_before = empty_seal.read_bytes()
     config = str(tmp_path / "refdes-project.yaml")
 
     assert cli_mod.main(["-c", config, "keys", "adopt"]) == 0
@@ -112,6 +117,7 @@ def test_adopt_preserves_supported_source_shapes_and_crlf(tmp_path, capsys):
     assert "minted 6 key(s)" in output
     assert "expanded 5 link reference(s) to composite form" in output
     assert "Review the diff before committing." in output
+    assert ".refdes/log-seal.yaml" not in output
 
     project = _project(tmp_path)
     target_key = project.items["REQ-001"].key
@@ -136,7 +142,11 @@ def test_adopt_preserves_supported_source_shapes_and_crlf(tmp_path, capsys):
     crlf = (tmp_path / "items" / "mapping.yaml").read_bytes()
     assert b"\r\n" in crlf
     assert b"\n" not in crlf.replace(b"\r\n", b"")
-    assert (tmp_path / keys_mod.ADOPTION_MARKER).read_text(encoding="utf-8") == "1\n"
+    marker_text = (tmp_path / keys_mod.ADOPTION_MARKER).read_text(encoding="utf-8")
+    assert "Commit this file" in marker_text
+    assert "Written by `refdes keys adopt`" in marker_text
+    assert yaml.safe_load(marker_text) == {"adopted": True, "format": 1}
+    assert empty_seal.read_bytes() == empty_seal_before
     assert cli_mod.main(["-c", config, "--no-write", "check"]) == 0
 
 

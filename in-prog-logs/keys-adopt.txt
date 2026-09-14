@@ -5,7 +5,7 @@ Progress:
 - Factored write/restore primitives from revise.apply without changing its transaction ordering.
 - Added write-free key and link source planners and source-preserving composition.
 - Added the explicit adoption transaction, CLI and --dry-run output.
-- Added `.refdes/keys-adopted` as the unambiguous adoption marker; keyed new baseline/seal shapes depend on it.
+- Added `.refdes/keys-adopted.yaml` as the self-describing, committed adoption marker; keyed new baseline/seal shapes depend on its parsed `adopted: true`.
 - Added tmp_path regression coverage for YAML/Markdown shapes, CRLF, baseline/seal carry-forward, named uncomparables, dry-run, idempotence, keyed future history, rename-safe seals, and sabotaged byte-for-byte rollback.
 - Targeted adoption tests pass (5 passed); related existing key/lifecycle/seal tests pass (89 passed); the pre-rebase full suite passes (743 passed).
 
@@ -14,3 +14,10 @@ Difficulties:
 - Imported artifacts still do not carry surrogate keys, so README's cross-project ID-collision warning remains a correctness requirement and was not relaxed.
 
 Status: implementation, documentation, changelog, smoke verification, and pre-rebase full-suite verification complete.
+
+Review follow-up:
+- Restored lifecycle hash-format and stale-arithmetic rationale, baseline serializer rationale, and source-planner safety comments.
+- Replaced the bare marker with self-describing `.refdes/keys-adopted.yaml`; detection requires parsed `adopted: true`.
+- Adoption now resolves the project settings name through `schema.PROJECT_SETTINGS_NAME`.
+- Empty seal files are neither rewritten nor listed as `0/0 entries carried`.
+- Follow-up adoption/storage tests pass (94 passed); the pre-rebase full suite passes (770 passed).

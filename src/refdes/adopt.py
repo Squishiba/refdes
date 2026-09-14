@@ -9,10 +9,17 @@ from . import build as build_mod
 from . import keys as keys_mod
 from . import lifecycle, revise
 from . import links as links_mod
+from . import schema as schema_mod
 from . import seal as seal_mod
 from .model import SchemaError
 
-_MARKER_TEXT = "1\n"
+_MARKER_TEXT = """\
+# Refdes surrogate-key adoption state.
+# Commit this file: it tells future stamps and seals to use key-keyed storage.
+# Written by `refdes keys adopt`; do not edit it by hand.
+adopted: true
+format: 1
+"""
 
 
 @dataclass
@@ -104,7 +111,7 @@ def _compose_item_rewrites(project, assignments) -> tuple[list[revise.FileRewrit
 
 def apply(project_root: str, dry_run: bool = False) -> AdoptionResult:
     """Plan, validate, and atomically apply explicit surrogate-key adoption."""
-    config_path = os.path.join(project_root, "refdes-project.yaml")
+    config_path = os.path.join(project_root, schema_mod.PROJECT_SETTINGS_NAME)
     try:
         project = revise._load_and_validate(config_path)
     except SchemaError as exc:
@@ -163,6 +170,8 @@ def apply(project_root: str, dry_run: bool = False) -> AdoptionResult:
     seals = []
     for rel, board, path in _seal_files(project):
         original = seal_mod.load_seals(project, board)
+        if not original:
+            continue
         storage = keys_mod.plan_surrogate_storage(project, {}, original)
         with open(path, "r", encoding="utf-8", newline="") as fh:
             before = fh.read()
@@ -182,11 +191,12 @@ def apply(project_root: str, dry_run: bool = False) -> AdoptionResult:
 
     marker_path = keys_mod.adoption_marker_path(project)
     marker_existed = os.path.isfile(marker_path)
+    marker_was_adopted = keys_mod.is_adopted(project)
     marker_before = ""
     if marker_existed:
         with open(marker_path, "r", encoding="utf-8", newline="") as fh:
             marker_before = fh.read()
-    if marker_before != _MARKER_TEXT:
+    if not marker_was_adopted:
         rewrites.append(
             revise.FileRewrite(
                 path=marker_path,
@@ -206,7 +216,7 @@ def apply(project_root: str, dry_run: bool = False) -> AdoptionResult:
         seals=seals,
         changed_files=changed_files,
         dry_run=dry_run,
-        already_adopted=marker_existed and not changed_files,
+        already_adopted=marker_was_adopted and not changed_files,
     )
     if dry_run or not rewrites:
         return result

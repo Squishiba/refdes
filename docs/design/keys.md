@@ -24,8 +24,8 @@ resolution, the latest-baseline lint, and the older-baseline audit), and §7
 `refdes/links.py`, and changes to `build.py`, `cli.py`, `lifecycle.py`,
 `seal.py`, `revise.py`, `blocked.py`, `blocks.py`, `workspaces.py`,
 `stub_tests.py`, and `render.py` -- see "What §3/§5 turned out to need beyond
-the spec" below). Adoption records `.refdes/keys-adopted`; subsequent stamps
-and new seals use the surrogate-keyed shape. The subtractive
+the spec" below). Adoption records `.refdes/keys-adopted.yaml`; subsequent
+stamps and new seals use the surrogate-keyed shape. The subtractive
 `revise.py`/`former_ids.py` cleanup remains design only.
 
 **What §3/§5 turned out to need beyond the spec, implementing it:**
@@ -898,15 +898,25 @@ Review the diff before committing.
 is byte-for-byte idempotent and reports `nothing to do -- project already
 adopted`.
 
-**Adoption detection is one marker:** `.refdes/keys-adopted`, containing the
-format version `1`. The marker is created in the same transaction and should
-be committed with the rewritten files. A project is adopted exactly when
-that marker exists. This is deliberately more explicit than inferring state
-from baseline/seal shapes: a project with no history has no shape to inspect,
-and §5(c) can intentionally leave an uncomparable historical entry in the
-legacy shape. Those entries are named on every adoption run; the marker lets
-new history use key-keyed storage without pretending the old entry was
-comparable.
+**Adoption detection is one marker:** `.refdes/keys-adopted.yaml`, a
+self-describing YAML file whose header says that it was written by
+`refdes keys adopt` and must be committed:
+
+```yaml
+# Refdes surrogate-key adoption state.
+# Commit this file: it tells future stamps and seals to use key-keyed storage.
+# Written by `refdes keys adopt`; do not edit it by hand.
+adopted: true
+format: 1
+```
+
+A project is adopted exactly when this file exists, parses as YAML, and
+contains `adopted: true`. The marker is created in the same transaction.
+This is deliberately more explicit than inferring state from baseline/seal
+shapes: a project with no history has no shape to inspect, and §5(c) can
+intentionally leave an uncomparable historical entry in the legacy shape.
+Those entries are named on every adoption run; the marker lets new history
+use key-keyed storage without pretending the old entry was comparable.
 
 The implementation reuses `revise.apply`'s file-rewrite and byte-restoration
 primitives. It computes every item, baseline, seal, and marker rewrite in

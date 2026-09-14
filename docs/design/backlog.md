@@ -949,8 +949,8 @@ conversion, relabelled diffs, and key-stable seal verification), §6 Layers
 latest-baseline lint, and the informational audit of older baselines), and
 §7 (`refdes keys adopt`) are implemented — see that document's own
 implementation-status header for the module list. Adoption is explicit and
-transactional; `.refdes/keys-adopted` records it, and new stamps/seals then
-use key-keyed storage.
+transactional; the self-describing `.refdes/keys-adopted.yaml` marker records
+it, and new stamps/seals then use key-keyed storage.
 
 **Status: partially implemented.** One decided cleanup remains:
 

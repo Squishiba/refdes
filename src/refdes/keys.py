@@ -17,6 +17,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+import yaml
+
 from . import ids as ids_mod
 from .model import Diagnostic, Item, Project
 
@@ -24,7 +26,7 @@ if TYPE_CHECKING:
     from .revise import FileRewrite
 
 ALPHABET = "0123456789abcdefghjkmnpqrstvwxyz"  # Crockford base32 -- i, l, o, u excluded
-ADOPTION_MARKER = ".refdes/keys-adopted"
+ADOPTION_MARKER = ".refdes/keys-adopted.yaml"
 _INDEX = {ch: i for i, ch in enumerate(ALPHABET)}
 
 DATA_LEN = 10
@@ -417,8 +419,13 @@ def adoption_marker_path(project: Project) -> str:
 
 
 def is_adopted(project: Project) -> bool:
-    """Whether explicit surrogate-key adoption has completed for ``project``."""
-    return os.path.isfile(adoption_marker_path(project))
+    """Whether the explicit adoption marker exists and declares adoption."""
+    try:
+        with open(adoption_marker_path(project), encoding="utf-8") as fh:
+            marker = yaml.safe_load(fh)
+    except (OSError, yaml.YAMLError):
+        return False
+    return isinstance(marker, Mapping) and marker.get("adopted") is True
 
 
 def missing_assignments(project: Project) -> list[tuple[Item, str]]:
@@ -464,6 +471,9 @@ def plan_missing(
         newline = "\r\n" if "\r\n" in text else "\n"
         lines = text.splitlines()
 
+        # Bottom-up so earlier line numbers stay valid as keys are inserted --
+        # the same discipline ids.allocate() and former_ids.confirm() use for
+        # the same reason.
         for item, new_key in sorted(entries, key=lambda e: e[0].source_line, reverse=True):
             if rel.endswith(".md"):
                 lines = ids_mod.insert_into_markdown(lines, item.source_line, f"key: {new_key}")
