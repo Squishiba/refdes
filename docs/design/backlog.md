@@ -340,9 +340,11 @@ labelled with the standard version. Deliberately *not* a `{{index}}`-family
 block — `blocks.py` only ever renders items that already exist in a project,
 and a schema skeleton isn't an item.
 
-**Status: outstanding.** `docs/schema-reference.md` documents types
-abstractly only; no generated-example step exists anywhere in the docs
-build.
+**Status: done.** `docs-site/gen_examples.py` injects live generator output
+into `docs/schema-reference.md` (shipped in `1e997b8`), with
+`tests/test_docs_examples.py` asserting the block matches live output and a
+`python docs-site/gen_examples.py --check` step in `.github/workflows/docs.yml`'s
+build job failing the docs deploy when the block goes stale.
 
 **Local model (not decided — my read): suitable, IF the gate is specified.**
 The finding itself flags the real wrinkle — `docs-site/refdes.yaml` pins no

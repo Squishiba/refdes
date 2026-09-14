@@ -1,5 +1,5 @@
 # Publishes docs-site/ -- the second, independent refdes project this repo
-# dogfoods for its own reference docs (see docs-site/refdes.yaml) -- as a
+# dogfoods for its own reference docs (see docs-site/refdes-project.yaml) -- as a
 # GitHub Pages site. Before this workflow existed there was no point between
 # "a release lands" and "someone can browse the current docs as an actual
 # rendered refdes site" that didn't require a human to clone the repo and
@@ -36,11 +36,13 @@ jobs:
         with:
           python-version: "3.11"
       - run: pip install .
+      - name: Check docs examples are current
+        run: python docs-site/gen_examples.py --check
       - name: Build docs-site
         run: refdes build
         working-directory: docs-site
       - uses: actions/configure-pages@v5
-      # docs-site/refdes.yaml's site.out is ../_docs, i.e. _docs/ at the repo
+      # docs-site/refdes-project.yaml's site.out is ../_docs, i.e. _docs/ at the repo
       # root -- the same directory .gitignore already keeps out of the tree.
       - uses: actions/upload-pages-artifact@v3
         with:
