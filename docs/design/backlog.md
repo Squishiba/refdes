@@ -154,8 +154,12 @@ aren't in the GitHub finding — the finding proposes the type's properties
 but not a verb name — so this is recorded from conversation, not from
 issue #7.)
 
-**Status: outstanding.** No grouping type exists in any bundled standard
-version.
+**Status: done.** Shipped in `1330dee`. hardware@3's `group` type (GRP prefix,
+`part_of` link, `contains` computed backlink) is declared in
+`src/refdes/standards/hardware/v3/base.yaml`; `coverable: false` keeps groups
+out of coverage, and every existing item type that should be able to join a
+group already declares `part_of: [group]` in the same file. See also
+`changelog.d/hardware-v3-group-type.added.md`.
 
 **Local model: suitable, IF the task specifies negative tests.** The whole
 point of this type is what it must *not* do (not coverable, not a
@@ -168,6 +172,9 @@ Those two negative assertions turn "too permissive" from a silent outcome
 into a failing test — under clause 1 of the rule above, that is the whole
 difference between suitable and not. Without them named in the task, this
 verdict reverts.
+
+_(Finding 14 has landed — the grouping type exists in hardware@3 — so the
+dependency blocking finding 24 below is removed.)_
 
 ### 15 — A form-based authoring surface
 
@@ -468,10 +475,8 @@ be a hard error, mirroring the existing unregistered-board error.
 `schema.py`'s `BoardSpec`; coverage in `build.py` is computed per item id
 only, with no board dimension.
 
-**Local model: suitable once finding 14 lands.** The dependency on finding
-14 stands — there is no group to name in `conforms_to:` until the grouping
-type exists, and coverage computation should not be touched before that
-target's own negative tests do. What changed is the feared edge: an
+**Local model: suitable.** Finding 14 has landed — the grouping type exists in
+hardware@3 — so the dependency is removed. The feared edge remains the same: an
 unregistered group named in `conforms_to:` must hard-error, or a typo
 silently discharges an entire board's obligations — which is the same shape
 as finding 13's unknown-tag case, implemented correctly this session
@@ -654,8 +659,12 @@ board-specific, and two boards defining `current_limit` differently creates a
 resolution question that needn't exist). One project-wide namespace. Which file
 that is, is finding 28's question.
 
-**Status: outstanding.** `calc.py`'s registry is still the built-in set, and no
-`equations:` key exists in project settings or the schema.
+**Status: done.** Shipped in `c96d96b`. `src/refdes/calc.py` now exposes
+`Equation`, `set_equations`, and `validate_equations`; `src/refdes/schema.py`
+loads an `equations:` block from `refdes-project.yaml` (validated in
+`_load_equations`), checks for cycles, shadowed builtins, and duplicate params,
+and hands the result to `calc.set_equations`. The project-wide namespace is
+wired end-to-end. See also `changelog.d/calc-project-equations.added.md`.
 
 **Local model (not decided — my read): suitable.** The evaluator work is
 "bind params, recurse," and the failure modes the finding names are all loud by
@@ -710,9 +719,14 @@ migration command or a documented manual procedure, and it is a breaking change
 that belongs at a version boundary. Finding 27 needs this settled first, to
 know which file `equations:` belongs in.
 
-**Status: outstanding.** `schema.py` still names its two files `CONFIG_NAME =
-"refdes.yaml"` and `PROJECT_SETTINGS_NAME = "refdes-project.yaml"`, with the
-same split (and the same contradiction) as when the finding was written.
+**Status: done.** Shipped in `aa94058`. `src/refdes/schema.py` now defines
+`PROJECT_SETTINGS_NAME = "refdes-project.yaml"`, `SCHEMA_NAME =
+"refdes-schema.yaml"`, and `LEGACY_CONFIG_NAME = "refdes.yaml"` — the latter
+triggers `LEGACY_CONFIG_ERROR` telling users to split and delete it. All
+project settings (including `site:`, `id:`, `boards:`, `units:`, `standard:`,
+`equations:`, etc.) live in `refdes-project.yaml`; the optional
+`refdes-schema.yaml` holds only `types:`/`link_types:`/`field_sets:` overlays.
+See also `changelog.d/config-split-two-files.breaking.md`.
 
 **Local model (not decided — my read): not suitable.** The fourteen rename sites
 are mechanical, but the acceptance condition is "every existing project still
@@ -885,10 +899,15 @@ known to conform to the effective format, `render.py:82`, `render.py:118`, and
 `render.py:249` sort on that parsed date, not the raw string. (Not in the
 finding — recorded from conversation.)
 
-**Status: outstanding.** All three sites (`render.py:82,118,249`) still sort on
-the raw string; a search of the whole tree finds no `date_format:` key
-anywhere; and `build.validate_items()`'s per-type dispatch (`build.py:157-183`)
-still has no `date` branch.
+**Status: done.** Shipped in `c0d1722`. `src/refdes/dates.py` provides
+`parse_date` (strict calendar-date parsing accepting `-`/`/`/`.` separators)
+and `validate_format`; `src/refdes/render.py`'s `_date_sort_key` calls
+`dates.parse_date(value, project.date_format)` to produce an ordinal for
+chronological sorting, and all three sort sites (`render.py:97`, `render.py:133`,
+`render.py:264`) now use it instead of a raw string key. `date_format:` is a
+project setting validated in `_validate_settings()` and defaults to strict ISO
+(`YYYY-MM-DD`); `build.validate_items()` rejects non-conforming dates as hard
+build errors. See also `changelog.d/date-format-log-sort.fixed.md`.
 
 **Local model (not decided — my read): suitable.** The bug itself is this
 project's characteristic failure — a build that reports success while ordering
