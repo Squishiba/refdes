@@ -75,13 +75,23 @@ def _seal_parts(
 def _find_seal(
     seals: Seals, item: Item
 ) -> tuple[str, SealValue, str, int | None] | None:
-    """Find an item's seal by surrogate first, then by legacy display id."""
+    """Find an item's seal by surrogate, recorded display id, then legacy id.
+
+    The recorded-id pass is corruption-sensitive: if the live item's key was
+    changed, the old key-keyed seal still belongs to this display id. Returning
+    it prevents a write-enabled build from treating edited content as new and
+    sealing it afresh.
+    """
     if item.key:
         keyed = seals.get(item.key)
         if keyed is not None:
             key, _display_id, recorded, hash_format = _seal_parts(item.key, keyed)
             if key == item.key:
                 return item.key, keyed, recorded, hash_format
+    for record_id, value in seals.items():
+        key, display_id, recorded, hash_format = _seal_parts(record_id, value)
+        if key is not None and display_id == item.id:
+            return record_id, value, recorded, hash_format
     legacy = seals.get(item.id)
     if legacy is None:
         return None
@@ -89,6 +99,13 @@ def _find_seal(
     if key is not None:
         return None
     return item.id, legacy, recorded, hash_format
+
+
+def _seal_key_mismatch(record_id: str, value: SealValue, item: Item) -> str | None:
+    recorded_key, _display_id, _hash, _format = _seal_parts(record_id, value)
+    if recorded_key is not None and recorded_key != item.key:
+        return recorded_key
+    return None
 
 
 def _with_seal_hash(value: SealValue, new_hash: str, hash_format: int) -> SealValue:
@@ -123,13 +140,29 @@ def save_seals(project: Project, seals: Seals, board: str = "") -> None:
 def _matches_sealed_hash(
     recorded: str, item: Item, project: Project, hash_format: int | None = None
 ) -> tuple[bool, str]:
-    """Compare a stored seal hash against the item's current hash.
+    """Compare a stored seal hash against `item`'s current one, folding in
+    the hash-format migration (docs/design/keys.md §5) so a seal written
+    before keys existed does not read as tampered purely because the hash
+    definition changed underneath it.
 
-    An explicit per-entry format is authoritative for §5 key-keyed or
-    uncomparable entries. A legacy scalar has no marker, so it retains the
-    historical current-first, legacy-second detection: a legacy-format match
-    is safely carried forward to the current hash, while neither match is a
-    real edit.
+    Returns ``(matches, hash_to_store)``. Three outcomes:
+
+    - The recorded hash equals ``item.content_hash`` under hash format 2:
+      unchanged; return it untouched.
+    - A format-1 or unversioned legacy hash instead equals
+      ``build.legacy_hash_for(item, project)``: content is unchanged and only
+      the definition moved, so return the current hash for safe carry-forward.
+    - Neither permitted definition matches: this is a real edit; return the
+      original hash with ``matches=False``.
+
+    Key-keyed dictionary entries persist ``hash_format`` per entry, including
+    partial-adoption failures. Legacy scalar seals have no field for a format
+    marker, but need none: checking current then legacy identifies an unchanged
+    entry, and a successful write upgrades the scalar to the current hash.
+
+    The deferred ``build`` import avoids a cycle: ``build.py`` imports this
+    module for ``verify()``, while this comparison needs ``legacy_hash_for``.
+    By call time build has finished importing and Python caches the module.
     """
 
     from . import build as build_mod
@@ -159,16 +192,23 @@ def _boards_in_play(project: Project) -> list[str]:
 
 
 def verify(project: Project, write: bool = False, reseal: str | None = None) -> None:
-    """Check sealed entries per board, and seal any new ones when `write` is set.
+    """Check sealed entries per board, and seal any new ones when requested.
 
-    Both legacy display-id-keyed seals and §5 surrogate-keyed entries are
-    accepted, including a mixture in one file. New seals deliberately retain
-    the legacy scalar shape until the project runs `refdes keys adopt`.
+    ``reseal`` is ``None``/falsy (verify only), ``RESEAL_ALL`` (accept edits
+    on every board), or one registered board key (accept edits only for that
+    board). A changed surrogate key is corruption, not an ordinary edit, and
+    is never accepted by resealing.
 
-    Migration from the pre-board single seal file is lazy and lookback-only:
-    an item that used to be sealed in the base file and has since moved onto
-    a board is still checked there first, then physically moved only on a
-    write-enabled build.
+    Both legacy display-id-keyed scalars and §5 surrogate-keyed dictionaries
+    are accepted, including mixtures in one file. New seals deliberately keep
+    the legacy scalar shape until ``refdes keys adopt``.
+
+    Pre-board history is migrated lazily and lookback-only: when an item now
+    resolves onto a board but its seal remains in the base file, verification
+    still checks that old entry rather than treating the item as new. Only a
+    write-enabled build moves it into the board file and prunes the base copy;
+    read-only ``check`` therefore never mutates seal storage while retaining
+    the same tamper detection.
     """
     base = load_seals(project, board="")
     base_changed = False
@@ -200,6 +240,16 @@ def verify(project: Project, write: bool = False, reseal: str | None = None) -> 
                     changed = True
                 continue
             record_id, value, recorded, hash_format = found
+            recorded_key = _seal_key_mismatch(record_id, value, item)
+            if recorded_key is not None:
+                project.seal_violations.append(item.id)
+                project.error(
+                    f"{item.id} is append-only and its key changed since it was "
+                    f"sealed: was {recorded_key!r}, now {item.key!r}. A key never "
+                    "changes legitimately; restore the sealed key from history.",
+                    file=item.source_file, line=item.source_line, item_id=item.id,
+                )
+                continue
             ok, upgraded = _matches_sealed_hash(recorded, item, project, hash_format)
             if ok:
                 if upgraded != recorded and write:
@@ -251,7 +301,21 @@ def verify(project: Project, write: bool = False, reseal: str | None = None) -> 
 def _report_deleted(
     project: Project, base: Seals, write: bool, reseal: str | None
 ) -> bool:
-    """Report sealed identities that no current item or former id claims."""
+    """Report every sealed entry whose identity is no longer in the project.
+
+    Editing a sealed entry was already an error; without this pass, deleting
+    one outright produced a clean build and left only an orphaned hash. That
+    is the louder half of the same tamper-evidence rule and uses the same
+    board-scoped reseal escape hatch.
+
+    "No longer anywhere" is deliberately generous. A legacy display id still
+    counts when it is live on another board or claimed through ``former_ids``.
+    A surrogate-keyed entry counts when either its immutable key is live or
+    its recorded display id is still live with a different key; the latter is
+    reported once as key corruption by ``verify()``, not again and
+    misleadingly as a deleted item here. Read-only checks report but never
+    remove entries.
+    """
     live_ids = {item.id for item in project.local_items}
     live_ids |= set(project.former_ids)
     live_keys = {item.key for item in project.local_items if item.key}
@@ -262,7 +326,11 @@ def _report_deleted(
         orphans = []
         for record_id, value in seals.items():
             key, display_id, _recorded, _hash_format = _seal_parts(record_id, value)
-            is_live = key in live_keys if key is not None else display_id in live_ids
+            is_live = (
+                key in live_keys or display_id in live_ids
+                if key is not None
+                else display_id in live_ids
+            )
             if is_live:
                 continue
             orphans.append((record_id, display_id))
@@ -297,7 +365,14 @@ def _report_deleted(
 
 
 def resealed_ids(project: Project) -> list[str]:
-    """Entries whose recorded seal no longer matches their current item."""
+    """Return sealed entries whose current content no longer matches.
+
+    Audit is read-only, so it cannot rely on ``verify(write=True)`` having
+    upgraded legacy hashes first. It therefore uses the same format-aware
+    comparison as verification; otherwise the first audit after adopting keys
+    would call every unchanged legacy seal "resealed". A key mismatch is also
+    returned as drift even when the content hash itself still matches.
+    """
     base = load_seals(project, board="")
     out: list[str] = []
     for board in _boards_in_play(project):
@@ -309,6 +384,9 @@ def resealed_ids(project: Project) -> list[str]:
             if found is None:
                 continue
             _record_id, _value, recorded, hash_format = found
+            if _seal_key_mismatch(_record_id, _value, item) is not None:
+                out.append(item.id)
+                continue
             ok, _upgraded = _matches_sealed_hash(recorded, item, project, hash_format)
             if not ok:
                 out.append(item.id)

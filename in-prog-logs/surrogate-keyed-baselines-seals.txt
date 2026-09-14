@@ -17,7 +17,12 @@ Verification:
 - Sabotage check: disabled relabelled collection; its named regression failed, then passed after restoration.
 - Sabotage check: disabled surrogate-key seal lookup; the seal-rename regression failed on unwanted seal-file mutation, then passed after restoration.
 - Full suite before final rebase: 736 passed.
-
 - Post-rebase full suite: 736 passed.
+- Review follow-up: changed-key keyed-seal lookup now reports a seal violation,
+  never writes a fresh seal, and suppresses the redundant orphan diagnostic.
+- Review sabotage check: disabled the recorded-display-id fallback; the named
+  laundering regression failed, then passed after restoration.
+- Review follow-up full suite: 737 passed.
+- Restored dual-shape seal rationale and made cross-module baseline helpers public.
 
-Status: finished.
+Status: finished, including review follow-up.

@@ -180,7 +180,7 @@ def validate(project: Project) -> None:
     _validate_latest_baseline(project)
 
 
-def _baseline_identity(record_id: str, entry: dict) -> tuple[str, str] | None:
+def baseline_identity(record_id: str, entry: dict) -> tuple[str, str] | None:
     """Return (key, display id) for keyed entries in either baseline shape.
 
     Baselines remain display-id keyed until `refdes keys adopt` lands, so new
@@ -208,8 +208,8 @@ class SurrogateStoragePlan:
     seal_uncomparable: list[str] = field(default_factory=list)
 
 
-def _item_for_baseline_entry(project: Project, record_id: str, entry: dict) -> Item | None:
-    identity = _baseline_identity(record_id, entry)
+def item_for_baseline_entry(project: Project, record_id: str, entry: dict) -> Item | None:
+    identity = baseline_identity(record_id, entry)
     if identity is None:
         return project.items.get(record_id)
     key, _display_id = identity
@@ -250,7 +250,7 @@ def plan_surrogate_storage(
             continue
 
         display_id = record_id
-        item = _item_for_baseline_entry(project, record_id, entry)
+        item = item_for_baseline_entry(project, record_id, entry)
         try:
             hash_format = int(entry.get("hash_format", 1))
         except (TypeError, ValueError):
@@ -330,7 +330,7 @@ def _validate_latest_baseline(project: Project) -> None:
     by_key = {item.key: item for item in project.local_items if item.key}
     by_display_id = {item.id: item for item in project.local_items}
     for record_id, entry in baseline.items.items():
-        identity = _baseline_identity(record_id, entry)
+        identity = baseline_identity(record_id, entry)
         if identity is None:
             continue
         old_key, display_id = identity
@@ -384,7 +384,7 @@ def audit_historical_baselines(project: Project) -> list[Diagnostic]:
         if baseline is latest:
             continue
         for record_id, entry in sorted(baseline.items.items()):
-            identity = _baseline_identity(record_id, entry)
+            identity = baseline_identity(record_id, entry)
             if identity is None:
                 continue
             old_key, display_id = identity

@@ -103,7 +103,6 @@ class Baseline:
     standard: dict[str, object] | None = None
 
 
-
 def _baseline_indexes(
     items: dict[str, dict],
 ) -> tuple[
@@ -114,7 +113,7 @@ def _baseline_indexes(
     by_key: dict[str, tuple[str, str, dict]] = {}
     by_display_id: dict[str, tuple[str, str, dict]] = {}
     for record_id, entry in items.items():
-        identity = keys_mod._baseline_identity(record_id, entry)
+        identity = keys_mod.baseline_identity(record_id, entry)
         key, display_id = identity if identity is not None else (None, record_id)
         indexed = (record_id, display_id, entry)
         by_display_id[display_id] = indexed
@@ -141,7 +140,7 @@ def _match_baseline_entry(
     matched = by_display_id.get(item_id)
     if matched is None:
         return None
-    old_identity = keys_mod._baseline_identity(matched[0], matched[2])
+    old_identity = keys_mod.baseline_identity(matched[0], matched[2])
     if key and old_identity is not None:
         return None
     return matched
@@ -164,7 +163,7 @@ def _same_baseline_items(stored: dict[str, dict], current: dict[str, dict]) -> b
         left = dict(stored_entry)
         right = dict(current_entry)
         left.pop("id", None)
-        stored_identity = keys_mod._baseline_identity(record_id, stored_entry)
+        stored_identity = keys_mod.baseline_identity(record_id, stored_entry)
         if stored_identity is not None:
             left.pop("key", None)
             right.pop("key", None)
@@ -173,6 +172,7 @@ def _same_baseline_items(stored: dict[str, dict], current: dict[str, dict]) -> b
         if left != right:
             return False
     return len(matched_records) == len(stored)
+
 
 def _load_baseline_file(path: str) -> Baseline:
     with open(path, "r", encoding="utf-8") as fh:
@@ -348,9 +348,9 @@ def migrate_hash_format(project: Project, baseline: Baseline, write: bool = True
     for record_id, entry in baseline.items.items():
         if "hash_format" in entry:
             continue  # already hash_format 2 (or a later format): nothing to do
-        identity = keys_mod._baseline_identity(record_id, entry)
+        identity = keys_mod.baseline_identity(record_id, entry)
         display_id = identity[1] if identity is not None else record_id
-        item = keys_mod._item_for_baseline_entry(project, record_id, entry)
+        item = keys_mod.item_for_baseline_entry(project, record_id, entry)
         if item is None:
             continue  # no live item to recompute against -- an ordinary removal
         if build_mod.legacy_hash_for(item, project) != entry.get("hash"):
@@ -774,8 +774,8 @@ def diff_against(project: Project, baseline: Baseline, write: bool = True) -> Di
             unchanged += 1
     removed = sorted(
         (
-            keys_mod._baseline_identity(record_id, entry)[1]
-            if keys_mod._baseline_identity(record_id, entry) is not None
+            keys_mod.baseline_identity(record_id, entry)[1]
+            if keys_mod.baseline_identity(record_id, entry) is not None
             else record_id,
             str(entry.get("type", "")),
             str(entry.get("title", "")),

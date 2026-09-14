@@ -296,3 +296,58 @@ def test_keyed_seal_survives_display_id_rename_without_violation(tmp_path):
         },
         "LOG-002": renamed.items["LOG-002"].content_hash,
     }
+
+
+def test_write_verify_rejects_changed_key_and_content_without_fresh_seal(tmp_path):
+    sealed_key = keys_mod.mint()
+    changed_key = keys_mod.mint()
+    write_project_config(
+        tmp_path,
+        "site: { title: T, out: _site }\n"
+        "types:\n"
+        "  log:\n"
+        "    prefix: LOG\n"
+        "    append_only: true\n"
+        "    fields: { summary: { type: text, required: true } }\n",
+    )
+    items = tmp_path / "items"
+    items.mkdir()
+    item_path = items / "log.yaml"
+    item_path.write_text(
+        "defaults: { type: log }\n"
+        f"items:\n  - id: LOG-001\n    key: {sealed_key}\n    summary: First.\n",
+        encoding="utf-8",
+    )
+    project = _load_and_build(tmp_path, seal_write=False, reseal=False)
+    seal.save_seals(
+        project,
+        {
+            sealed_key: {
+                "id": "LOG-001",
+                "hash": project.items["LOG-001"].content_hash,
+                "hash_format": 2,
+            }
+        },
+    )
+    seal_path = tmp_path / ".refdes" / "log-seal.yaml"
+    before = seal_path.read_text(encoding="utf-8")
+    item_path.write_text(
+        item_path.read_text(encoding="utf-8")
+        .replace(f"key: {sealed_key}", f"key: {changed_key}")
+        .replace("summary: First.", "summary: Edited."),
+        encoding="utf-8",
+    )
+
+    changed = _load_and_build(tmp_path, seal_write=True, reseal=False)
+
+    assert changed.seal_violations == ["LOG-001"]
+    assert any(
+        f"key changed since it was sealed: was '{sealed_key}', now '{changed_key}'"
+        in diagnostic.message
+        for diagnostic in changed.errors
+    )
+    assert not any("no item with that id" in diagnostic.message for diagnostic in changed.errors)
+    assert seal_path.read_text(encoding="utf-8") == before
+    assert set(seal.load_seals(changed)) == {sealed_key}
+    assert changed_key not in seal.load_seals(changed)
+    assert "LOG-001" not in seal.load_seals(changed)
