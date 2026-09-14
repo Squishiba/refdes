@@ -897,6 +897,90 @@ def test_a_prose_id_that_still_resolves_is_not_reported_as_stale(tmp_path):
     assert result.stale_references == []
 
 
+def test_revise_reports_a_stale_bracketed_field_fragment_after_an_id_rename(tmp_path):
+    """`[[OLD-ID#field]]` is still a mention of OLD-ID underneath the brackets
+    and the fragment -- the same whole-id staleness check that catches a bare
+    mention (finding 19 Part B) must catch this shape too."""
+    write_project_config(tmp_path, COMPOUND_PREFIX_SCHEMA)
+    items = tmp_path / "items"
+    items.mkdir()
+    (items / "con.yaml").write_text(
+        "defaults:\n  type: constraint\n  prefix: CON-THM\n"
+        "items:\n"
+        "  - id: CON-THM-001\n    text: Board power density\n    limit: \"<= 0.15 W/in^2\"\n",
+        encoding="utf-8",
+    )
+    (items / "dec.md").write_text(
+        "---\n"
+        "id: DEC-001\n"
+        "type: decision\n"
+        "title: Regulator topology\n"
+        "constrained_by: [CON-THM-001]\n"
+        "---\n\n"
+        "See [[CON-THM-001#limit]] for detail.\n",
+        encoding="utf-8",
+    )
+    mapping = revise.Mapping(prefixes={"CON": "BND"})
+    result = revise.apply(str(tmp_path), mapping)
+    assert result.ok, result.errors
+    assert any(
+        "items/dec.md" in ref and "CON-THM-001 -> BND-THM-001" in ref
+        for ref in result.stale_references
+    ), result.stale_references
+
+
+def test_revise_reports_a_stale_field_fragment_after_a_field_rename(tmp_path):
+    """`[[ID#old_field]]` goes stale the moment the mapping renames that field
+    on the id's own type -- even though the id itself never changed, so
+    `id_changes` alone would never have caught it."""
+    schema = (
+        "site: { title: T, out: _site }\n"
+        "types:\n"
+        "  constraint:\n"
+        "    prefix: CON\n"
+        "    fields:\n"
+        "      text:  { type: text, required: true }\n"
+        "      limit: { type: limit, required: true }\n"
+    )
+    write_project_config(tmp_path, schema)
+    items = tmp_path / "items"
+    items.mkdir()
+    (items / "con.yaml").write_text(
+        "defaults:\n  type: constraint\n  prefix: CON\n"
+        "items:\n"
+        "  - id: CON-001\n    text: Board power density\n    limit: \"<= 0.15 W/in^2\"\n",
+        encoding="utf-8",
+    )
+    (items / "dec.md").write_text(
+        "---\n"
+        "id: CON-002\n"
+        "type: constraint\n"
+        "text: something\n"
+        "limit: \"<= 1 W\"\n"
+        "---\n\n"
+        "See [[CON-001#text]] for detail.\n",
+        encoding="utf-8",
+    )
+    mapping = revise.Mapping(fields={"constraint": {"text": "rationale"}})
+    schema_path = tmp_path / "refdes-schema.yaml"
+
+    def mutate_config(config_path):
+        content = schema_path.read_text(encoding="utf-8")
+        content = content.replace(
+            "text:  { type: text, required: true }",
+            "rationale:  { type: text, required: true }",
+        )
+        schema_path.write_text(content, encoding="utf-8")
+
+    result = revise.apply(str(tmp_path), mapping, mutate_config=mutate_config)
+    assert result.ok, result.errors
+    assert result.id_changes == {}
+    assert any(
+        "items/dec.md" in ref and "CON-001#text -> CON-001#rationale" in ref
+        for ref in result.stale_references
+    ), result.stale_references
+
+
 def test_revise_relabels_a_compound_prefix_in_the_id_ledger(compound_prefix_project):
     (compound_prefix_project / ".refdes").mkdir()
     (compound_prefix_project / ".refdes" / "ids.yaml").write_text(

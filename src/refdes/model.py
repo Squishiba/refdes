@@ -269,6 +269,11 @@ class CitationSpec:
     page: str = ""
     part_number: str = ""
     vendor: bool = False
+    # Optional, project-wide-unique (finding 19 Part B) -- what `[[cite:<id>]]`
+    # in prose resolves to. "" when the entry declares none, which is most of
+    # them: giving a citation an id is only worth doing when something needs to
+    # reference this specific entry rather than the item that declares it.
+    id: str = ""
 
 
 @dataclass
@@ -600,6 +605,14 @@ class Project:
     # _apply_figure_attrs as each `{id="..."}` is seen; a second use of the
     # same id is a build error naming both locations.
     figures: dict[str, tuple[str, str, int | None]] = field(default_factory=dict)
+    # Citation id -> (owning item id, source file, source line) -- the same
+    # flat, project-wide namespace `figures` above already uses, minted from a
+    # citation entry's own optional `id:` (finding 19 Part B). Populated by
+    # build.validate_items as each entry is seen; a second use of the same id
+    # is a build error naming both locations. Unlike a figure, a citation
+    # always belongs to exactly one item and is never deferred to render time:
+    # every citation is known from parsed data alone, before any body renders.
+    citation_ids: dict[str, tuple[str, str, int | None]] = field(default_factory=dict)
     # Vendored datasheet copies to publish into the site: {dest path relative to
     # assets/ (flattened, e.g. "datasheets/<sha256>.pdf") -> absolute source
     # path in the vendor cache}. Populated by citations.verify() only when

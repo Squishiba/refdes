@@ -856,29 +856,53 @@ def apply(
         baselines_updated=baselines_updated,
         baselines_skipped_no_standard=baselines_skipped,
         seals_updated=seals_updated,
-        stale_references=_stale_prose_references(project_after, id_changes),
+        stale_references=_stale_prose_references(
+            project_before, project_after, id_changes, mapping.fields
+        ),
         config_updated=mutate_config is not None,
     )
 
 
-def _stale_prose_references(project: Project, id_changes: dict[str, str]) -> list[str]:
-    """Every prose mention of an id this operation renamed that no longer
-    resolves to anything, as "file:line  OLD-ID -> NEW-ID".
+def _stale_prose_references(
+    project_before: Project,
+    project: Project,
+    id_changes: dict[str, str],
+    field_renames: dict[str, dict[str, str]],
+) -> list[str]:
+    """Every prose mention this operation leaves pointing at something that no
+    longer resolves, as "file:line  OLD -> NEW" -- two independent ways a
+    rename can do that:
 
-    Only structured references move (see `_rewrite_reference_ids`): an id
-    written into a rationale, a log entry's body, or a narrative page is
-    deliberately left alone, because rewriting prose means editing a
-    sentence -- including, for a sealed append-only entry, one that is not
-    supposed to change. But leaving it alone silently is the wrong other
-    half: a bare `CON-THM-001` that used to autolink renders as dead plain
-    text afterward with no diagnostic at all, and the operation reports
-    success. So the engine doesn't guess, and it doesn't go quiet either --
-    it says exactly which lines it did not touch and now can't resolve.
+    Whole-id staleness: an id this operation renamed, still spelled the old
+    way, that no longer resolves to anything (a bare `CON-THM-001`, or the
+    id half of an explicit `[[CON-THM-001]]` or `[[CON-THM-001#field]]` --
+    `_ID_TOKEN_RE` matches the id either way, brackets and fragment along for
+    the ride). Only structured references move (see
+    `_rewrite_reference_ids`): an id written into a rationale, a log entry's
+    body, or a narrative page is deliberately left alone, because rewriting
+    prose means editing a sentence -- including, for a sealed append-only
+    entry, one that is not supposed to change. But leaving it alone silently
+    is the wrong other half: a bare id that used to autolink renders as dead
+    plain text afterward with no diagnostic at all, and the operation reports
+    success. So the engine doesn't guess, and it doesn't go quiet either -- it
+    says exactly which lines it did not touch and now can't resolve.
 
-    A token that still resolves -- to a live item, or through some item's
-    `former_ids:` -- is not stale and is not reported.
+    Field-fragment staleness: an explicit `[[ID#field]]` whose *id* still
+    resolves fine, but whose `field` named the old side of a field rename
+    this same mapping applied to that id's own (pre-rewrite) type -- the
+    fragment now names a field the target's type no longer declares, exactly
+    the "undeclared field" case `build._linkify` would warn about if it saw
+    this rewritten project, except prose is never rewritten so nothing ever
+    makes it run that check. `project_before` is what recovers the id's type
+    as it was named in the mapping (`field_renames` is keyed by the OLD type
+    name), since prose always still spells ids and fields the old way.
+
+    A whole-id mention that still resolves -- to a live item, or through some
+    item's `former_ids:` -- is not stale and is not reported; nor is a
+    fragment on it, since `_stale_prose_references` only ever gets called
+    with the delta this operation itself introduced.
     """
-    if not id_changes:
+    if not id_changes and not field_renames:
         return []
 
     def resolves(token: str) -> bool:
@@ -899,6 +923,21 @@ def _stale_prose_references(project: Project, id_changes: dict[str, str]) -> lis
             for token in dict.fromkeys(_ID_TOKEN_RE.findall(line)):
                 if token in id_changes and not resolves(token):
                     out.append(f"{rel}:{lineno}  {token} -> {id_changes[token]}")
+            if not field_renames:
+                continue
+            for m in build_mod.EXPLICIT_REF_RE.finditer(line):
+                target_id, target_field = m.group(1), m.group(2)
+                if not target_field or not resolves(target_id):
+                    continue
+                before_item = project_before.items.get(target_id)
+                if before_item is None:
+                    continue
+                frenames = field_renames.get(before_item.type)
+                if frenames and target_field in frenames:
+                    out.append(
+                        f"{rel}:{lineno}  {target_id}#{target_field} -> "
+                        f"{target_id}#{frenames[target_field]}"
+                    )
     return out
 
 

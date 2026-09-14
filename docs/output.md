@@ -240,7 +240,7 @@ per-item `board` for a [`boards:`](multi-board.md) registry, top-level
 
 `items[].fields` is authored intent only — for a `citations:`-typed field, each
 entry is just what was written in the item (`url`, `rev`, `page`, `part_number`,
-`vendor:`). What it *resolved to* is a separate, parallel structure,
+`vendor:`, `id`). What it *resolved to* is a separate, parallel structure,
 `items[].citations`, keyed by field name and ordered to match `fields[fname]`:
 
 ```json

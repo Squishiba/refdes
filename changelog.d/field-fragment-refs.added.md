@@ -8,6 +8,6 @@
   lands on a collapsed empty row in the fields table. A field whose content is
   shown in its own section — `options`, `checks`, a citations field — lands on
   that section.
-  Citations are not addressable this way — a fragment reaches the whole
-  `datasheets:` list, not one entry — and `revise.py` does not yet treat
-  fragments as stale-able prose. See [cross-references](links.md).
+  A citations field is not addressable this way — a fragment reaches the
+  whole `datasheets:` list, not one entry; see `citation-ids.added.md` for
+  addressing a single citation. See [cross-references](links.md).

@@ -315,7 +315,7 @@ declared-name-plus-build-time-validation precedent (`[[fig:id]]`,
 `{{CLIM}}`), not a curated allowlist. `revise.py`'s `_stale_prose_references`
 would need to learn about fragments too, or at least flag them as stale.
 
-**Status: Part A done, Part B outstanding.** `EXPLICIT_REF_RE` now admits
+**Status: done, both parts.** `EXPLICIT_REF_RE` now admits
 `ID#field` (and `ID#field|label`), and `_linkify` renders it as a link to that
 field's row on the target's page — never as the field's value. `item.html.j2`
 gives every declared field an `id="field-<name>"` anchor: on its table row, on
@@ -325,9 +325,30 @@ element with no layout box is never scrolled to, so a hidden placeholder is a
 link that navigates nowhere. An undeclared field is a
 warning naming item, field, and type; an unknown item with a fragment warns
 exactly as an unknown item without one. Tests: `tests/test_field_refs.py`.
-Part B is untouched: citations still have no declared `id:` and no
-`[[cite:<id>]]` reference form, and `revise.py`'s `_stale_prose_references`
-still knows nothing about fragments.
+
+**Part B**, shipped separately: a citation entry gains an optional declared
+`id:` (`CitationSpec.id`, validated against the same character class
+`EXPLICIT_REF_RE`'s own id group admits — an id outside it could never be
+addressed by `[[cite:...]]` anyway, so it's rejected at declaration instead
+of accepted and left permanently unreachable), unique across the whole
+project the same way a figure id is (`project.citation_ids`, populated and
+checked in `build.validate_items` since every citation is known from parsed
+data alone — no render-time deferral needed, unlike a figure's per-document
+numbering). `[[cite:<id>]]` (or `[[cite:<id>|label]]`) resolves directly
+against that registry to a link on the declaring item's own page
+(`<a class="ref cite-ref" href="...#cite-<id>">`); an unknown id warns and
+renders the missing-ref span, and a `#fragment` on a cite ref warns exactly
+as it does on a fig ref. `item.html.j2` puts `id="cite-<id>"` on the matching
+row in the Citations table. `revise.py`'s `_stale_prose_references` now
+reports a stale `[[ID#field]]` fragment two ways: the existing whole-id
+check already caught `[[OLD-ID#field]]` after an id rename (the id token
+underneath the brackets and fragment was always what `_ID_TOKEN_RE`
+matched); newly, `[[ID#old_field]]` is reported when the same rename mapping
+also renamed that field on the id's own (pre-rewrite) type, which
+`id_changes` alone could never catch since the id itself need not have
+changed. Tests: `tests/test_citation_ids.py`,
+`tests/test_revise.py::test_revise_reports_a_stale_bracketed_field_fragment_after_an_id_rename`
+and `::test_revise_reports_a_stale_field_fragment_after_a_field_rename`.
 
 **Local model: split — the fragment-syntax half suitable, the rest not.**
 The `EXPLICIT_REF_RE` half is a regex change of exactly the shape finding 18

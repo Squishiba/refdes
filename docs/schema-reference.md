@@ -321,11 +321,13 @@ Four field *names* have behaviour attached regardless of declared type:
 `citations` is different: it is keyed off the declared **type**, not a fixed
 field name, so a project can call the field `references`, `sources`,
 anything — the hardware standard calls it `citations`. Any field declared `type: citations` gets a `url` (required), plus
-`rev`, `page`, `part_number`, and `vendor` per entry, its own table on the
-item page, and an entry in `references.html` — see [citing a
+`rev`, `page`, `part_number`, `vendor`, and an optional `id` per entry, its
+own table on the item page, and an entry in `references.html` — see [citing a
 datasheet](markdown.md#citing-a-datasheet), [CLI
 reference](cli-reference.md#refdes-fetch), and [output
-formats](output.md#items-json).
+formats](output.md#items-json). A citation's `id`, when given, is what
+`[[cite:id]]` in prose resolves to — a project-wide-unique namespace, the
+same posture a figure's `id=` already has.
 
 ### Starter types
 

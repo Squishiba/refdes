@@ -64,11 +64,13 @@ The budget in BND-THM-001 drives this.        <- bare ID, autolinked
 See [[REQ-PWR-002|the input range]] instead.  <- explicit, custom text
 See [[fig:fig-curve]] for the efficiency curve. <- figure reference
 See [[CMP-001#part_number]] for the MPN.       <- explicit, one field on that page
+See [[cite:tps62913-ds]] for the datasheet.    <- citation reference
 ```
 
 Item references get hover previews. See [links](links.md). A `fig:`-prefixed
-id resolves to a numbered figure instead — see [width and
-captions](#width-and-captions) below.
+id resolves to a numbered figure instead, and a `cite:`-prefixed id resolves
+to a citation — see [width and captions](#width-and-captions) and [citing a
+datasheet](#citing-a-datasheet) below.
 
 A `#field` fragment links to **one field's row** on the target item's page. It
 is a link, not a substitution: the field's value is never copied into your
@@ -185,7 +187,7 @@ types:
 ```
 
 An item declares intent only — a url, and optionally a rev, page,
-part_number, and whether the bytes should be vendored:
+part_number, id, and whether the bytes should be vendored:
 
 ```yaml
 - id: CMP-PWR-001
@@ -196,7 +198,21 @@ part_number, and whether the bytes should be vendored:
       page: "14"
       part_number: TPS62913
       vendor: false
+      id: tps62913-ds
 ```
+
+`id` is optional, exactly like a figure's `id=` — give a citation one and
+`[[cite:tps62913-ds]]` anywhere in prose (or `[[cite:tps62913-ds|the
+datasheet]]` for custom text) links straight to **that citation's row** on
+`CMP-PWR-001`'s own page, the item that declared it — never to
+`references.html`, which groups by url across every citer instead of naming
+one entry. It must be unique across the whole project — one flat namespace,
+the same posture figure ids and item ids already have — since it can be
+referenced from any item or page, not just the one that declared it. A
+duplicate is a build error naming both locations; an id outside
+letters/digits/`-`/`_` is rejected at declaration, since it could never be
+addressed by `[[cite:...]]` anyway; an unresolved `[[cite:...]]` is a warning
+and renders in red, same as any other unresolved reference.
 
 That is all authoring requires. Everything else — the sha256, when it was
 fetched, whether it was vendored — is computed by `refdes fetch`, never

@@ -122,7 +122,7 @@
     <thead><tr><th></th><th>URL</th><th>Rev</th><th>Page</th><th>Part #</th><th>Vendor</th><th>Detail</th></tr></thead>
     <tbody>
     {% for c in item.citations %}
-      <tr>
+      <tr{% if c.spec.id %} id="cite-{{ c.spec.id }}"{% endif %}>
         <td>
           {% if c.state == 'ok' %}<span class="pill pill-pass">ok</span>
           {% elif c.state == 'hash_mismatch' %}<span class="pill pill-fail">hash mismatch</span>

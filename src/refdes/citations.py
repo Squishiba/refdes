@@ -117,6 +117,7 @@ def collect(project: Project) -> list[tuple[Item, CitationSpec]]:
                             page=str(entry.get("page") or ""),
                             part_number=str(entry.get("part_number") or ""),
                             vendor=bool(entry.get("vendor", False)),
+                            id=str(entry.get("id") or ""),
                         ),
                     )
                 )

@@ -79,6 +79,13 @@ FIG_REF_PENDING_RE = re.compile(
     r'<span class="fig-ref-pending" data-fig="([^"]*)" data-label="([^"]*)"'
     r' data-where-file="([^"]*)" data-where-line="([^"]*)" data-where-id="([^"]*)"></span>'
 )
+# A declared citation `id:` (finding 19 Part B) -- the same character set
+# EXPLICIT_REF_RE's own id group admits, so anything this rejects could never
+# be addressed by `[[cite:id]]` in the first place. Unlike a figure's `id=`
+# attribute, which is never format-checked and can end up silently
+# unreferenceable, a citation id is rejected outright at declaration time
+# instead of accepted and left permanently unreachable.
+CITATION_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
 
 # ----------------------------------------------------------------------- validation
@@ -211,6 +218,29 @@ def validate_items(project: Project) -> None:
                                 project, item, fname,
                                 f"{fname}[{index}]: each citation needs a 'url'",
                             )
+                            continue
+                        cite_id = entry.get("id")
+                        if not cite_id:
+                            continue
+                        cite_id = str(cite_id)
+                        if not CITATION_ID_RE.match(cite_id):
+                            _field_error(
+                                project, item, fname,
+                                f"{fname}[{index}].id: {cite_id!r} is not a valid "
+                                f"citation id (letters, digits, '-', '_' only)",
+                            )
+                            continue
+                        existing = project.citation_ids.get(cite_id)
+                        if existing is not None:
+                            owner, owner_file, owner_line = existing
+                            loc = f"{owner_file}:{owner_line}" if owner_line is not None else owner_file
+                            project.error(
+                                f"citation id {cite_id!r} is already used by {owner} ({loc}). "
+                                f"Citation ids must be unique across the project.",
+                                file=item.source_file, line=item.source_line, item_id=item.id,
+                            )
+                        else:
+                            project.citation_ids[cite_id] = (item.id, item.source_file, item.source_line)
 
 
 def lint_own_tags(project: Project) -> None:
@@ -1136,6 +1166,36 @@ def _linkify(
                 f'data-where-file="{_esc(where_file)}" '
                 f'data-where-line="{where_line if where_line is not None else ""}" '
                 f'data-where-id="{_esc(where_id) if where_id else ""}"></span>'
+            )
+        if explicit and field is not None and target_id.startswith("cite:"):
+            # Citations are addressed by their own id, not by field, exactly
+            # like figures.
+            project.warn(
+                f"reference to {target_id!r} has a #{field} fragment, which "
+                "citation references do not have",
+                file=where_file, line=where_line, item_id=where_id,
+            )
+            field = None
+        if explicit and target_id.startswith("cite:"):
+            # Not deferred, unlike fig: -- a citation belongs to exactly one
+            # item and always links to a row on that item's own page, never
+            # renumbered or reused across documents, so its existence and its
+            # href are both fully known from project.citation_ids the moment
+            # every item has been parsed and validated, well before any body
+            # renders.
+            cite_id = target_id[len("cite:") :]
+            entry = project.citation_ids.get(cite_id)
+            if entry is None:
+                project.warn(
+                    f"reference to citation {cite_id!r}, which does not exist",
+                    file=where_file, line=where_line, item_id=where_id,
+                )
+                return f'<span class="ref ref-missing" title="unknown citation">{label or cite_id}</span>'
+            owner_id, _owner_file, _owner_line = entry
+            owner = project.items[owner_id]
+            text = label or cite_id
+            return (
+                f'<a class="ref cite-ref" href="{owner.slug}.html#cite-{_esc(cite_id)}">{text}</a>'
             )
         target = project.items.get(target_id)
         if target is None:

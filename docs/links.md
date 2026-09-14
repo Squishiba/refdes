@@ -300,6 +300,13 @@ A `[[fig:some-id]]` reference — the same `[[...]]` envelope, a `fig:` prefix �
 resolves to a numbered figure instead of an item. See [width and
 captions](markdown.md#width-and-captions).
 
+A `[[cite:some-id]]` reference, likewise a `cite:` prefix, resolves to one
+citation's row on the page of the item that declared it — the citation's own
+`id:` must be given explicitly first, unlike a figure's. See [citing a
+datasheet](markdown.md#citing-a-datasheet). Like a figure reference, a
+`#field` fragment on either a `fig:` or `cite:` reference is a warning, not a
+link — neither is addressed by field.
+
 ## Hover previews
 
 Every reference shows a preview card on hover: type badge, ID, title, selected
