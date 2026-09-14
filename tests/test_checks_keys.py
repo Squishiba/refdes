@@ -436,6 +436,34 @@ def test_format2_baseline_with_checks_against_edited_item_is_uncomparable_not_up
     assert reloaded.items["DEC-001"]["hash_format"] == 2  # file itself untouched too
 
 
+def test_format2_baseline_stamped_bare_then_expanded_still_carries_to_3(tmp_path):
+    """The real historical order of events, not the self-consistent shortcut
+    the two tests above take: format 2 existed before `checks:` composites
+    did, so every format-2 stamp was necessarily made against *bare*
+    `against:` text. Only afterward does a writable load expand it to a
+    composite -- a pure syntax upgrade, no content change. Reconstructing
+    the format-2 hash from the now-composite source has to still match what
+    was stamped from the then-bare source, or an untouched item is wrongly
+    reported uncomparable instead of carried forward."""
+    root = _checks_project(tmp_path, _ONE_BOUND, _BLOCK_CHECKS)
+    config = str(root / "refdes-project.yaml")
+
+    project = _built(root)
+    assert "@" not in project.items["DEC-001"].fields["checks"][0]["against"]
+    _write_baseline(root, "rev-a", {"DEC-001": _format2_entry(project, "DEC-001")})
+
+    assert cli_mod.main(["-c", config, "check"]) == 0  # expand against: to composite
+    project2 = _built(root)
+    assert "@" in project2.items["DEC-001"].fields["checks"][0]["against"]
+
+    baseline = lifecycle.load_baseline(project2, "rev-a")
+    report = lifecycle.migrate_hash_format(project2, baseline, write=True)
+    assert report.carried == ["DEC-001"]
+    assert report.uncomparable == []
+    assert baseline.items["DEC-001"]["hash"] == project2.items["DEC-001"].content_hash
+    assert baseline.items["DEC-001"]["hash_format"] == build_mod.HASH_FORMAT
+
+
 _SEAL_SCHEMA = (
     "site: { title: T, out: _site }\n"
     "types:\n"
@@ -514,6 +542,50 @@ def test_format2_seal_with_checks_against_edited_item_is_caught_not_upgraded(tmp
     stored = seal.load_seals(project2)["LOG-001"]
     assert stored["hash"] == format2_hash  # left exactly as sealed, not laundered
     assert stored["hash_format"] == 2
+
+
+def test_format2_seal_key_keyed_stamped_bare_then_expanded_still_verifies(tmp_path):
+    """Same real-order-of-events scenario as the baseline test above, for a
+    key-keyed seal entry: sealed while `against:` was still bare (the only
+    way a format-2 seal could ever have been sealed), then a writable load
+    expands it to a composite with no content change. Verification must
+    still pass."""
+    root = _seal_project(tmp_path)
+    config = str(root / "refdes-project.yaml")
+
+    project = _loaded(root)
+    build_mod.build(project, seal_write=False, reseal=False)
+    assert "@" not in project.items["LOG-001"].fields["checks"][0]["against"]
+    format2_hash = build_mod.hash_for_format(project.items["LOG-001"], project, 2)
+    seal.save_seals(project, {"LOG-001": {"hash": format2_hash, "hash_format": 2}})
+
+    assert cli_mod.main(["-c", config, "check"]) == 0  # expand against: to composite
+
+    project2 = _loaded(root)
+    build_mod.build(project2, seal_write=True, reseal=False)
+    assert "LOG-001" not in project2.seal_violations
+    stored = seal.load_seals(project2)["LOG-001"]
+    assert stored["hash"] == project2.items["LOG-001"].content_hash
+    assert stored["hash_format"] == build_mod.HASH_FORMAT
+
+
+def test_format2_seal_legacy_scalar_stamped_bare_then_expanded_still_verifies(tmp_path):
+    """Same scenario again, for a legacy scalar seal (no format marker at
+    all -- _matches_sealed_hash must find the match by trying formats
+    newest-to-oldest, same as the key-keyed case above)."""
+    root = _seal_project(tmp_path)
+    config = str(root / "refdes-project.yaml")
+
+    project = _loaded(root)
+    build_mod.build(project, seal_write=False, reseal=False)
+    format2_hash = build_mod.hash_for_format(project.items["LOG-001"], project, 2)
+    seal.save_seals(project, {"LOG-001": format2_hash})
+
+    assert cli_mod.main(["-c", config, "check"]) == 0  # expand against: to composite
+
+    project2 = _loaded(root)
+    build_mod.build(project2, seal_write=True, reseal=False)
+    assert "LOG-001" not in project2.seal_violations
 
 
 # ------------------------------------------------------------ sabotage note

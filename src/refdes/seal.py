@@ -168,6 +168,10 @@ def _matches_sealed_hash(
 
     Neither permitted definition matching is a real edit; the original hash
     is returned with ``matches=False``.
+
+    The deferred ``build`` import avoids a cycle: ``build.py`` imports this
+    module for ``verify()``, while this comparison needs ``build.HASH_FORMAT``.
+    By call time build has finished importing and Python caches the module.
     """
     from . import build as build_mod
 

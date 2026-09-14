@@ -1040,6 +1040,36 @@ def _link_hash_token(by_key: dict[str, Item], project: Project, target: str) -> 
     return f"!nokey:{item.id}"
 
 
+def _checks_display_only(entries) -> object:
+    """The value `checks:` contributes to its owner's content hash under
+    HASH_FORMAT 1 and 2 (before `against:` reduced to a resolved key):
+    each entry's `against:` reduced to its display half only (everything
+    before '@'), mirroring the format-1 link reconstruction
+    (`t.split('@', 1)[0]` in hash_payload_builder).
+
+    Before HASH_FORMAT 3, `checks:` composites did not exist -- `against:`
+    was always bare, so a format-1 or format-2 hash was always computed
+    from bare text. `links.expand_missing_checks` (docs/design/keys.md §3)
+    can since have rewritten that same text to `DISPLAY@key` on disk, with
+    no content change at all. Reconstructing formats 1/2 from *that* text
+    verbatim would hash a string that never existed when those formats were
+    actually in force, making an untouched item look edited. Stripping back
+    to the display half undoes exactly that syntax upgrade, the same way
+    the link path already does for format 1.
+    """
+    if not isinstance(entries, list):
+        return entries
+    reduced = []
+    for entry in entries:
+        if not isinstance(entry, dict) or "against" not in entry:
+            reduced.append(entry)
+            continue
+        new_entry = dict(entry)
+        new_entry["against"] = str(entry["against"]).split("@", 1)[0]
+        reduced.append(new_entry)
+    return reduced
+
+
 def _checks_hash_value(by_key: dict[str, Item], project: Project, entries) -> object:
     """The value `checks:` contributes to its owner's content hash under
     HASH_FORMAT 3 (docs/design/keys.md §5, decided 2026-09-14): each entry's
@@ -1110,20 +1140,26 @@ def hash_payload_builder(project: Project, hash_format: int):
     define "current" and "historical" hashing differently by accident.
 
     Format 1 (pre-keys): link targets hashed as bare display-id text,
-    `checks:` hashed verbatim. Format 2 (docs/design/keys.md §5): link
-    targets hashed as resolved keys, `checks:` still verbatim. Format 3
-    (§5, 2026-09-14): format 2, plus `checks: against:` entries reduced to
-    a resolved key the same way (_checks_hash_value).
+    `checks: against:` hashed as its display half only (composites did not
+    exist yet for checks: at this format, so this undoes any expansion
+    links.expand_missing_checks has since done to the live source --
+    _checks_display_only). Format 2 (docs/design/keys.md §5): link targets
+    hashed as resolved keys, `checks: against:` still display-half-only for
+    the same reason -- `against:` composites didn't exist under format 2
+    either. Format 3 (§5, 2026-09-14): format 2, plus `checks: against:`
+    entries reduced to a resolved key the same way a link target is
+    (_checks_hash_value).
     """
     if hash_format <= 1:
         return lambda item, spec: _hash_payload(
             item, spec, project,
             link_values=lambda targets: sorted(t.split("@", 1)[0] for t in targets),
+            checks_values=_checks_display_only,
         )
     by_key = _key_index(project)
     checks_values = (
         (lambda entries: _checks_hash_value(by_key, project, entries))
-        if hash_format >= 3 else None
+        if hash_format >= 3 else _checks_display_only
     )
     return lambda item, spec: _hash_payload(
         item, spec, project,
@@ -1145,9 +1181,14 @@ def hash_for_format(item: Item, project: Project, hash_format: int) -> str:
     pre-adoption hash was computed from. Using the live composite text here
     would make an item that has not actually changed look changed, purely
     because its own link syntax was upgraded -- exactly the false positive
-    the hash-format migration exists to avoid. The same reasoning applies to
-    `checks: against:` under format 3 (_checks_hash_value keeps a target's
-    raw text whenever it isn't safely reducible).
+    the hash-format migration exists to avoid. `checks: against:` needs the
+    identical treatment under formats 1 *and* 2 (_checks_display_only):
+    `against:` composites did not exist at either format, so
+    links.expand_missing_checks rewriting a bare target to a composite on
+    the live source must not change either reconstruction either. Only
+    format 3 reduces a resolving `against:` to its key instead of stripping
+    it (_checks_hash_value); an unresolved or keyless target still keeps
+    its raw text there too.
 
     Used only by the hash-format migration (lifecycle.migrate_hash_format,
     seal._matches_sealed_hash's carry-forward comparison, and
