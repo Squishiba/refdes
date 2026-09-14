@@ -315,8 +315,17 @@ declared-name-plus-build-time-validation precedent (`[[fig:id]]`,
 `{{CLIM}}`), not a curated allowlist. `revise.py`'s `_stale_prose_references`
 would need to learn about fragments too, or at least flag them as stale.
 
-**Status: outstanding.** `EXPLICIT_REF_RE` (`build.py:28`) still has no `#`
-in its character class; citations have no `id:` field or reference form.
+**Status: Part A done, Part B outstanding.** `EXPLICIT_REF_RE` now admits
+`ID#field` (and `ID#field|label`), and `_linkify` renders it as a link to that
+field's row on the target's page — never as the field's value. `item.html.j2`
+gives every declared field an `id="field-<name>"` anchor, including the
+declared-but-empty ones, which get an invisible row rather than leaving the
+reference pointing at an id that does not exist. An undeclared field is a
+warning naming item, field, and type; an unknown item with a fragment warns
+exactly as an unknown item without one. Tests: `tests/test_field_refs.py`.
+Part B is untouched: citations still have no declared `id:` and no
+`[[cite:<id>]]` reference form, and `revise.py`'s `_stale_prose_references`
+still knows nothing about fragments.
 
 **Local model: split — the fragment-syntax half suitable, the rest not.**
 The `EXPLICIT_REF_RE` half is a regex change of exactly the shape finding 18

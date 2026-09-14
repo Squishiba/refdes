@@ -63,11 +63,20 @@ Substitutes a calc value from the same item.
 The budget in BND-THM-001 drives this.        <- bare ID, autolinked
 See [[REQ-PWR-002|the input range]] instead.  <- explicit, custom text
 See [[fig:fig-curve]] for the efficiency curve. <- figure reference
+See [[CMP-001#part_number]] for the MPN.       <- explicit, one field on that page
 ```
 
 Item references get hover previews. See [links](links.md). A `fig:`-prefixed
 id resolves to a numbered figure instead — see [width and
 captions](#width-and-captions) below.
+
+A `#field` fragment links to **one field's row** on the target item's page. It
+is a link, not a substitution: the field's value is never copied into your
+prose, so it cannot go stale under you. The link text is `ID#field` unless you
+give a `|label`. The field must be declared on the target item's type — one
+that isn't is a warning naming the item, the field, and the type, and renders
+in red like any other unresolved reference. A field that is declared but empty
+on that item links fine (the row exists, it just has nothing in it).
 
 ## Images and other local files
 

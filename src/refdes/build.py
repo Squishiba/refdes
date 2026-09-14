@@ -36,8 +36,15 @@ from .model import (
 # Explicit reference: [[REQ-PWR-002]] or [[REQ-PWR-002|the input range]]. The
 # ':' admits the "fig:" namespace (docs/design/index-blocks.md §9) -- item ids
 # are allocated as PREFIX-BOARD-NNN and never contain one, so this only ever
-# matches the new namespace on real projects, never an existing item id.
-EXPLICIT_REF_RE = re.compile(r"\[\[\s*([A-Za-z0-9\-_:]+)\s*(?:\|\s*([^\]]+?)\s*)?\]\]")
+# matches the new namespace on real projects, never an existing item id. The
+# optional '#field' fragment (finding 19 Part A) links to one field's row on
+# the target item's page; it is never inlined, and a composite `ID@key` target
+# is not admitted here because those only ever appear in structured link
+# fields, never in prose (docs/design/keys.md).
+EXPLICIT_REF_RE = re.compile(
+    r"\[\[\s*([A-Za-z0-9\-_:]+)(?:#([A-Za-z0-9_\-]+))?\s*"
+    r"(?:\|\s*([^\]]+?)\s*)?\]\]"
+)
 # Bare reference: REQ-PWR-002 appearing in prose.
 BARE_REF_RE = re.compile(r"(?<![\w\-/])([A-Z][A-Z0-9]*(?:-[A-Z0-9]+)*-\d{1,6})(?![\w\-])")
 # Inline calc value: {{P_diss}}
@@ -1072,7 +1079,41 @@ def _linkify(
 ) -> str:
     """Turn IDs into preview-bearing links, skipping code and pre regions."""
 
-    def link(target_id: str, label: str | None, explicit: bool) -> str:
+    def field_anchor(item: Item, field: str | None) -> str | None:
+        """`#field` checked against the target's own type, as an href suffix.
+
+        None means the type does not declare the field -- reported, never
+        swallowed, and the caller must not emit an anchor for it. A field that
+        is declared but empty on this item still resolves: item.html.j2 keeps
+        an anchor for every declared field, rendered or not.
+        """
+        if field is None:
+            return ""
+        spec = project.types.get(item.type)
+        if spec is not None and field in spec.fields:
+            return f"#field-{field}"
+        project.warn(
+            f"reference to {item.id!r} names field {field!r}, which type "
+            f"{item.type!r} does not declare",
+            file=where_file, line=where_line, item_id=where_id,
+        )
+        return None
+
+    def link(
+        target_id: str,
+        label: str | None,
+        explicit: bool,
+        field: str | None = None,
+    ) -> str:
+        if explicit and field is not None and target_id.startswith("fig:"):
+            # Figures are addressed by their own id, not by field; saying so
+            # beats silently dropping the fragment.
+            project.warn(
+                f"reference to {target_id!r} has a #{field} fragment, which "
+                "figure references do not have",
+                file=where_file, line=where_line, item_id=where_id,
+            )
+            field = None
         if explicit and target_id.startswith("fig:"):
             # Deferred: existence (anywhere, and in this document) can't be
             # known until every item/page has run _apply_figure_attrs and the
@@ -1094,9 +1135,10 @@ def _linkify(
                 # must see it landed somewhere else, not be quietly redirected
                 # (finding 12).
                 owner = project.items[former_owner_id]
+                anchor = field_anchor(owner, field) or ""
                 text = label or target_id
                 return (
-                    f'<a class="ref ref-former" href="{owner.slug}.html" '
+                    f'<a class="ref ref-former" href="{owner.slug}.html{anchor}" '
                     f'data-ref="{owner.id}">{text}</a>'
                     f'<span class="ref-former-marker" '
                     f'title="{owner.id} was formerly {target_id}">(formerly {target_id})</span>'
@@ -1108,9 +1150,16 @@ def _linkify(
                 )
                 return f'<span class="ref ref-missing" title="unknown item">{target_id}</span>'
             return target_id
-        text = label or target_id
+        anchor = field_anchor(target, field)
+        if anchor is None:
+            return (
+                f'<span class="ref ref-missing" title="unknown field">'
+                f"{label or f'{target_id}#{field}'}"
+                f"</span>"
+            )
+        text = label or (f"{target_id}#{field}" if field else target_id)
         return (
-            f'<a class="ref" href="{target.slug}.html" data-ref="{target.id}">{text}</a>'
+            f'<a class="ref" href="{target.slug}.html{anchor}" data-ref="{target.id}">{text}</a>'
         )
 
     def bare(segment: str) -> str:
@@ -1127,7 +1176,7 @@ def _linkify(
         last = 0
         for m in EXPLICIT_REF_RE.finditer(segment):
             chunks.append(bare(segment[last : m.start()]))
-            chunks.append(link(m.group(1), m.group(2), True))
+            chunks.append(link(m.group(1), m.group(3), True, m.group(2)))
             last = m.end()
         chunks.append(bare(segment[last:]))
         return "".join(chunks)

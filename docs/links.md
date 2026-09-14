@@ -287,6 +287,13 @@ suppress linking entirely.
 **Explicit `[[...]]` references are validated.** An unresolved one is a warning and
 renders in red, so use this form when a broken reference should be noticed.
 
+An explicit reference may carry a `#field` fragment — `[[CMP-001#part_number]]`,
+or `[[CMP-001#part_number|the MPN]]` — which links to that field's row on the
+target's page instead of to the page itself. It links; it never inlines the
+value, so a fragment cannot go stale when the field changes. The field has to
+be declared on the target's type: an undeclared one is a warning naming the
+item, the field, and the type.
+
 A `[[fig:some-id]]` reference — the same `[[...]]` envelope, a `fig:` prefix —
 resolves to a numbered figure instead of an item. See [width and
 captions](markdown.md#width-and-captions).

@@ -1,0 +1,83 @@
+# Finding 19 Part A — `[[ID#field]]` fragment references
+
+Scope as assigned: the fragment-syntax half only. Part B (citation identity,
+`[[cite:<id>]]`) and the `revise.py` `_stale_prose_references` wiring were
+explicitly out of scope and are untouched.
+
+Decided behavior (Jared, 2026-09-14): `[[EXP-CMP-001#part_number]]` renders as
+a LINK to that field's row on the target item's page — it does NOT inline the
+field's value.
+
+## What changed
+
+- `src/refdes/build.py`
+  - `EXPLICIT_REF_RE` gained an optional `(?:#([A-Za-z0-9_\-]+))?` group between
+    the target and the `|label` group. Group order is now 1=target, 2=fragment,
+    3=label, and the one call site in `_linkify.process` was updated to match.
+    `[[ID]]`, `[[ID|label]]`, `[[fig:id]]`, `[[fig:id|label]]` all match exactly
+    as before (the fragment group is optional and `#` was never in the target
+    character class, so nothing that did not match before fails to match now).
+  - `_linkify.link` takes a `field` argument. A valid fragment yields
+    `href="<slug>.html#field-<name>"`; default link text is `ID#field`
+    (consistent with `[[ID]]` rendering its own id), `|label` overrides it.
+  - New `_linkify.field_anchor` validates the fragment against the target's own
+    `ItemType.fields`. Undeclared -> `project.warn` naming item, field and type
+    (same level a plain unknown `[[ID]]` uses), rendered as the existing
+    `<span class="ref ref-missing">` treatment rather than a working-looking
+    link. Applied to the former-id path too, so `[[old_id#field]]` anchors on
+    the page the old id now resolves to.
+  - A `#fragment` on a `fig:` reference warns (figures are addressed by id)
+    and renders as the plain figure reference — never silently dropped.
+- `src/refdes/templates/item.html.j2` — each field row's `<tr>` now carries
+  `id="field-<name>"`.
+- Docs: `docs/markdown.md` (Cross-references), `docs/links.md` (Cross-references
+  in prose), finding 19's Status line in `docs/design/backlog.md`.
+- `changelog.d/field-fragment-refs.added.md`.
+- `tests/test_field_refs.py` — 9 tests.
+
+## What I found that the task assumed differently
+
+The task said "A field declared on the type but empty on this item is still a
+valid link (the row exists)". **It doesn't.** The template's loop skips the row
+entirely when the value is empty (`value not in (None, '', [])`), and also for
+`options`/`checks`/citations-typed fields, so an anchor on the rendered row
+alone would have left `[[CMP-001#vendor]]` pointing at an id that is not in the
+page — a dead anchor, which is exactly what the task said must not happen.
+
+Chosen fix: the `{% else %}` branch of that same condition emits an invisible
+anchor row, `<tr id="field-<name>" class="field-anchor" hidden></tr>`, so every
+field declared on the type has an anchor whether or not it has anything to
+show. Alternatives considered and rejected: always rendering the row (would
+paint an empty row for every unset field on every item page — a visible change
+to every page for an invisible feature); dropping the fragment at linkify time
+and linking to the bare page (silently loses what the author asked for);
+warning on empty-but-declared (the task says it is a valid link).
+
+Anchor-collision check: `item.html.j2` itself declares no `id` attributes at
+all, and `base.html.j2` has only `sidenav-toggle`, `preview-card`,
+`preview-data`. `field-<name>` (field names are schema identifiers) cannot
+collide with any of them. `document.html.j2` renders its own field tables
+without ids, which is fine: a fragment href is `<slug>.html#field-<name>`, so
+it always resolves against the item's own page from wherever it is written.
+
+## Verification
+
+- All 9 new tests were written first and confirmed to FAIL on the unfixed code
+  (fragment refs rendered as literal `[[...]]` text; no `id="field-..."` on the
+  page; no diagnostics).
+- Sabotage test on the undeclared-field diagnostic: relaxing
+  `field_anchor`'s check to `if spec is not None` (i.e. accepting any field
+  name on a known type) makes
+  `test_undeclared_field_is_a_diagnostic_naming_item_field_and_type` and
+  `test_undeclared_field_does_not_render_a_link` fail. Reverted.
+- Full suite: `python -m pytest -q` -> 746 passed.
+
+## Not done / follow-ups
+
+- Part B: citation identity (`id:` on citation entries, `[[cite:<id>]]`).
+- `revise.py::_stale_prose_references` still does not know about fragments —
+  out of scope by instruction, so a rename that breaks `[[ID#field]]` is not
+  reported by revise today.
+- `[[ID@key#field]]` does not match (the `@` is not in the target class). Per
+  instruction: composite ids only appear in structured link fields, never in
+  prose, so no key handling was added.
