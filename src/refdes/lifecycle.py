@@ -75,8 +75,8 @@ class Baseline:
     stamped_at: str
     stamped_by: str
     refdes_version: str
-    # Per item: hash, type, title, hash_format (see _items_map) -- plus,
-    # exceptionally, `verdict` and `calc_hash` when they apply.
+    # Per item: hash, type, title, hash_format, and the immutable surrogate
+    # key when one existed at stamp time (see _items_map) -- plus,
     #
     # docs/design/lifecycle.md §3 says a baseline diff is item-scoped and
     # deliberately does not store old field values, to avoid the new
@@ -181,6 +181,12 @@ def _items_map(project: Project) -> dict[str, dict]:
     """`project.local_items` only -- imports are excluded from baselines the
     same way they're excluded from coverage and validation.
 
+    `key` records the item's immutable surrogate key for the baseline
+    corruption lint (docs/design/keys.md §6 Layers 4-5). It remains optional:
+    a pre-keys baseline, or a baseline deliberately stamped under
+    `--no-write` before keys had been minted, has no identity evidence for
+    that entry and the lint must skip it rather than guess.
+
     `hash_format` records which content-hash definition `hash` was computed
     under (build.HASH_FORMAT -- currently 2, docs/design/keys.md §5)
     directly on every freshly-stamped entry, so a reader of this baseline
@@ -206,6 +212,8 @@ def _items_map(project: Project) -> dict[str, dict]:
             "hash": item.content_hash, "type": item.type, "title": item.title,
             "hash_format": build_mod.HASH_FORMAT,
         }
+        if item.key:
+            entry["key"] = item.key
         spec = project.types.get(item.type)
         field_name = _verdict_field_name(spec) if spec is not None else None
         if field_name is not None:
@@ -525,16 +533,24 @@ def stamp(project: Project, kind: str, name: str, write: bool = True) -> StampOu
     `write` only gates the hash-format migration below, not the stamp
     itself: an existing same-name baseline stamped before keys existed has
     to be migrated (or at least compared correctly) before its `.items` can
-    be checked against a fresh `items_map` at all, or a byte-identical
-    re-run would misreport as "conflict" purely because of the format
-    change, not any real content difference (docs/design/keys.md §5).
+    be checked against a fresh `items_map` at all. Its absent `key` metadata
+    must likewise stay absent for comparison rather than being manufactured
+    from the current item. Otherwise a byte-identical re-run would misreport
+    as "conflict" purely because the stored format gained new metadata, not
+    because any content changed (docs/design/keys.md §5).
     """
     items_map = _items_map(project)
 
     existing = load_baseline(project, name)
     if existing is not None:
         migrate_hash_format(project, existing, write=write)
-        if existing.kind == kind and existing.items == items_map:
+        comparable_items = {}
+        for item_id, entry in items_map.items():
+            comparable_entry = dict(entry)
+            if "key" not in existing.items.get(item_id, {}):
+                comparable_entry.pop("key", None)
+            comparable_items[item_id] = comparable_entry
+        if existing.kind == kind and existing.items == comparable_items:
             # Byte-identical re-run: skip entirely, file untouched -- not even
             # stamped_at rewritten, mirroring `refdes fetch` skipping an
             # already-pinned url. No gate re-evaluation: nothing is being

@@ -1,7 +1,7 @@
 """Surrogate keys: opaque, immutable per-item identity (docs/design/keys.md).
 
-Implements key minting plus the context-free portions of the corruption lint:
-well-formedness and uniqueness within one resolution scope. Link-target
+Implements key minting plus the corruption lint's context-free well-formedness
+and uniqueness checks and its baseline-backed identity checks. Link-target
 resolution diagnostics live in build.py, beside the resolver they replace.
 
 An item's key, once minted, is never regenerated and never rewritten. Nothing
@@ -15,7 +15,7 @@ import secrets
 from collections import defaultdict
 
 from . import ids as ids_mod
-from .model import Item, Project
+from .model import Diagnostic, Item, Project
 
 ALPHABET = "0123456789abcdefghjkmnpqrstvwxyz"  # Crockford base32 -- i, l, o, u excluded
 _INDEX = {ch: i for i, ch in enumerate(ALPHABET)}
@@ -133,10 +133,12 @@ def malformed_key_message(key: str, *, context: str = "") -> str | None:
 
 
 def validate(project: Project) -> None:
-    """Report §6 Layers 1-2 for every item in this resolution scope.
+    """Report §6 Layers 1, 2, and 4 for this project.
 
-    Pending items participate too: they already own durable keys even though
-    they do not yet have display ids and cannot be linked to until allocation.
+    Layers 1-2 cover the whole resolution scope. Pending items participate
+    too: they already own durable keys even though they do not yet have
+    display ids and cannot be linked to until allocation. Layer 4 compares
+    local items with the most recent revision or release baseline.
     """
     items = [*project.items.values(), *project.pending]
     by_key: dict[str, Item] = {}
@@ -172,6 +174,107 @@ def validate(project: Project) -> None:
             line=item.source_line,
             item_id=item.id or None,
         )
+
+    _validate_latest_baseline(project)
+
+
+def _baseline_identity(record_id: str, entry: dict) -> tuple[str, str] | None:
+    """Return (key, display id) for keyed entries in either baseline shape.
+
+    Baselines remain display-id keyed until `refdes keys adopt` lands, so new
+    stamps carry `key` inside each entry. The adopted shape specified by §5
+    instead keys the map by surrogate and carries `id` inside. Supporting
+    both here keeps the lint valid across that eventual clean cutover.
+    Pre-keys entries have neither marker and deliberately return None.
+    """
+    entry_key = entry.get("key")
+    if isinstance(entry_key, str) and entry_key:
+        return entry_key, str(entry.get("id", record_id))
+    display_id = entry.get("id")
+    if isinstance(display_id, str) and display_id:
+        return record_id, display_id
+    return None
+
+
+def _validate_latest_baseline(project: Project) -> None:
+    """Report §6 Layer 4 against the latest revision or release baseline."""
+    from . import lifecycle
+
+    baseline = lifecycle.latest(lifecycle.list_baselines(project))
+    if baseline is None:
+        return
+
+    by_key = {item.key: item for item in project.local_items if item.key}
+    by_display_id = {item.id: item for item in project.local_items}
+    for record_id, entry in baseline.items.items():
+        identity = _baseline_identity(record_id, entry)
+        if identity is None:
+            continue
+        old_key, display_id = identity
+        if old_key in by_key:
+            continue
+        item = by_display_id.get(display_id)
+        if item is None:
+            continue
+
+        if item.key:
+            message = (
+                f"key changed since baseline {baseline.name!r}: was {old_key!r}, "
+                f"now {item.key!r}. A key never changes legitimately. Every "
+                "reference and every baseline entry pointing at the old key now "
+                "dangles. Restore the old key; if the item really is a new one, "
+                "delete the key line and let it be re-minted, and give it a new "
+                "display id too."
+            )
+        else:
+            message = (
+                f"key deleted since baseline {baseline.name!r}: was {old_key!r}, "
+                "now no key is declared. A key never disappears legitimately. "
+                "Restore the old key; if the item really is a new one, let it be "
+                "re-minted and give it a new display id too."
+            )
+        project.error(
+            message,
+            file=item.source_file,
+            line=item.source_line,
+            item_id=item.id,
+        )
+
+
+def audit_historical_baselines(project: Project) -> list[Diagnostic]:
+    """Report §6 Layer 5 for keyed entries older than the latest baseline.
+
+    These are informational because a vanished key in old history may simply
+    identify an item that was legitimately deleted. The standing Layer-4
+    error covers only the latest baseline and is run separately by validate().
+    """
+    from . import lifecycle
+
+    baselines = lifecycle.list_baselines(project)
+    latest = lifecycle.latest(baselines)
+    if latest is None:
+        return []
+
+    current_keys = {item.key for item in project.local_items if item.key}
+    diagnostics: list[Diagnostic] = []
+    for baseline in sorted(baselines, key=lambda b: (b.stamped_at, b.name)):
+        if baseline is latest:
+            continue
+        for record_id, entry in sorted(baseline.items.items()):
+            identity = _baseline_identity(record_id, entry)
+            if identity is None:
+                continue
+            old_key, display_id = identity
+            if old_key in current_keys:
+                continue
+            project.info(
+                f"older baseline {baseline.name!r} references key {old_key!r} "
+                f"for {display_id}, which no current item declares. The item "
+                "may have been deleted legitimately; this is audit information, "
+                "not a build error."
+            )
+            diagnostics.append(project.diagnostics[-1])
+    return diagnostics
 
 
 def mint_missing(project: Project, write: bool = True) -> list[tuple[Item, str]]:

@@ -11,12 +11,12 @@ from conftest import write_project_config
 from refdes import build as build_mod
 from refdes import cli as cli_mod
 from refdes import keys as keys_mod
-from refdes import parse, render
+from refdes import lifecycle, parse, render
 from refdes.schema import load_project
 
 # ------------------------------------------------------------------------- keys
 #
-# covers §1 (key format), §2 minting, and §6 Layers 1-3 of the corruption
+# covers §1 (key format), §2 minting, and §6 Layers 1-5 of the corruption
 # lint. §5 (hashing) and §3's link-composite expansion have their own section
 # further down. `refdes keys adopt` (§7) remains design only.
 
@@ -183,6 +183,28 @@ def _built_keys_project(root):
     parse.load_items(project)
     build_mod.build(project, seal_write=False, reseal=False)
     return project
+
+
+def _stamp_keyed_baseline(root, name="rev-a"):
+    project = _built_keys_project(root)
+    outcome = lifecycle.stamp(project, kind="revision", name=name)
+    assert outcome.status == "stamped"
+    return project
+
+
+def _write_key_baseline(root, name, stamped_at, items):
+    path = root / ".refdes" / "baselines" / f"{name}.yaml"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    data = {
+        "kind": "revision",
+        "name": name,
+        "stamped_at": stamped_at,
+        "stamped_by": "tester",
+        "refdes_version": "0.0.0-test",
+        "items": items,
+    }
+    with open(path, "w", encoding="utf-8") as fh:
+        yaml.safe_dump(data, fh, sort_keys=False)
 
 
 def test_mint_missing_assigns_and_writes_back_a_key_for_an_idd_item(tmp_path):
@@ -504,6 +526,184 @@ def test_corruption_lint_accepts_valid_minted_keys_and_a_resolving_link(tmp_path
 
     assert not project.errors
     assert project.items["REQ-002"].resolved_links["refines"] == ["REQ-001"]
+
+
+def test_baseline_lint_errors_when_writable_check_remints_key_for_same_display_id(
+    tmp_path, capsys
+):
+    old_key = keys_mod.mint()
+    root = _keys_project(
+        tmp_path,
+        "defaults: { type: requirement }\n"
+        f"items:\n  - id: REQ-001\n    key: {old_key}\n    text: Same item.\n",
+    )
+    project = _stamp_keyed_baseline(root, "rev-a")
+    assert project.items["REQ-001"].key == old_key
+    baseline = lifecycle.load_baseline(project, "rev-a")
+    assert baseline.items["REQ-001"]["key"] == old_key
+
+    path = root / "items" / "r.yaml"
+    path.write_text(
+        path.read_text(encoding="utf-8").replace(f"    key: {old_key}\n", ""),
+        encoding="utf-8",
+    )
+    status = cli_mod.main(["-c", str(root / "refdes-project.yaml"), "check"])
+    captured = capsys.readouterr()
+
+    reparsed = load_project(config_path=str(root / "refdes-project.yaml"))
+    parse.load_items(reparsed)
+    new_key = reparsed.items["REQ-001"].key
+    assert new_key and new_key != old_key
+    assert status == 1
+    assert "key changed since baseline 'rev-a'" in captured.err
+    assert old_key in captured.err
+    assert new_key in captured.err
+    assert "Restore the old key" in captured.err
+
+
+def test_baseline_lint_errors_when_key_deleted_under_no_write(tmp_path, capsys):
+    old_key = keys_mod.mint()
+    root = _keys_project(
+        tmp_path,
+        "defaults: { type: requirement }\n"
+        f"items:\n  - id: REQ-001\n    key: {old_key}\n    text: Same item.\n",
+    )
+    _stamp_keyed_baseline(root, "rev-a")
+    path = root / "items" / "r.yaml"
+    keyless = path.read_text(encoding="utf-8").replace(f"    key: {old_key}\n", "")
+    path.write_text(keyless, encoding="utf-8")
+
+    status = cli_mod.main(
+        ["-c", str(root / "refdes-project.yaml"), "--no-write", "check"]
+    )
+    captured = capsys.readouterr()
+
+    assert status == 1
+    assert path.read_text(encoding="utf-8") == keyless
+    assert "key deleted since baseline 'rev-a'" in captured.err
+    assert old_key in captured.err
+    assert "now no key is declared" in captured.err
+
+
+def test_baseline_lint_allows_ordinary_display_id_rename_with_same_key(tmp_path):
+    key = keys_mod.mint()
+    root = _keys_project(
+        tmp_path,
+        "defaults: { type: requirement }\n"
+        f"items:\n  - id: REQ-001\n    key: {key}\n    text: Same item.\n",
+    )
+    _stamp_keyed_baseline(root)
+    path = root / "items" / "r.yaml"
+    path.write_text(
+        path.read_text(encoding="utf-8").replace("id: REQ-001", "id: REQ-002"),
+        encoding="utf-8",
+    )
+
+    project = _built_keys_project(root)
+
+    assert not any("key changed" in d.message or "key deleted" in d.message
+                   for d in project.errors)
+
+
+def test_baseline_lint_allows_replacement_at_same_position_with_same_title(tmp_path):
+    old_key = keys_mod.mint()
+    new_key = keys_mod.mint()
+    root = _keys_project(
+        tmp_path,
+        "defaults: { type: requirement }\n"
+        f"items:\n  - id: REQ-001\n    key: {old_key}\n    text: Same title.\n",
+    )
+    _stamp_keyed_baseline(root)
+    path = root / "items" / "r.yaml"
+    replacement = path.read_text(encoding="utf-8")
+    replacement = replacement.replace("id: REQ-001", "id: REQ-002")
+    replacement = replacement.replace(f"key: {old_key}", f"key: {new_key}")
+    path.write_text(replacement, encoding="utf-8")
+
+    project = _built_keys_project(root)
+
+    assert project.items["REQ-002"].source_line == 3
+    assert project.items["REQ-002"].title == "Same title."
+    assert not any("key changed" in d.message or "key deleted" in d.message
+                   for d in project.errors)
+
+
+def test_baseline_lint_skips_pre_keys_baseline_without_recorded_keys(tmp_path):
+    key = keys_mod.mint()
+    root = _keys_project(
+        tmp_path,
+        "defaults: { type: requirement }\n"
+        f"items:\n  - id: REQ-001\n    key: {key}\n    text: Current.\n",
+    )
+    _write_key_baseline(
+        root,
+        "pre-keys",
+        "2026-01-01T00:00:00Z",
+        {"REQ-001": {"hash": "legacy", "type": "requirement", "title": "Before keys."}},
+    )
+
+    project = _built_keys_project(root)
+
+    assert not any("key changed" in d.message or "key deleted" in d.message
+                   for d in project.errors)
+
+
+def test_audit_infos_for_vanished_key_in_older_baseline_without_check_error(
+    tmp_path, capsys
+):
+    vanished_key = keys_mod.mint()
+    current_key = keys_mod.mint()
+    root = _keys_project(
+        tmp_path,
+        "defaults: { type: requirement }\n"
+        f"items:\n  - id: REQ-001\n    key: {current_key}\n    text: Current.\n",
+    )
+    _write_key_baseline(
+        root,
+        "rev-old",
+        "2026-01-01T00:00:00Z",
+        {
+            "REQ-999": {
+                "hash": "old",
+                "type": "requirement",
+                "title": "Deleted.",
+                "hash_format": 2,
+                "key": vanished_key,
+            }
+        },
+    )
+    _write_key_baseline(
+        root,
+        "rev-current",
+        "2026-02-01T00:00:00Z",
+        {
+            "REQ-001": {
+                "hash": "current",
+                "type": "requirement",
+                "title": "Current.",
+                "hash_format": 2,
+                "key": current_key,
+            }
+        },
+    )
+
+    audit_status = cli_mod.main(
+        ["-c", str(root / "refdes-project.yaml"), "audit"]
+    )
+    audit_output = capsys.readouterr()
+    assert audit_status == 0
+    assert "INFO" in audit_output.out
+    assert "older baseline 'rev-old'" in audit_output.out
+    assert vanished_key in audit_output.out
+    assert "not a build error" in audit_output.out
+
+    check_status = cli_mod.main(
+        ["-c", str(root / "refdes-project.yaml"), "check"]
+    )
+    check_output = capsys.readouterr()
+    assert check_status == 0
+    assert "rev-old" not in check_output.out + check_output.err
+    assert vanished_key not in check_output.out + check_output.err
 
 
 def test_cli_check_mints_keys_by_default(tmp_path):

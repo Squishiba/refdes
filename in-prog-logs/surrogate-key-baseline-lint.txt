@@ -1,0 +1,19 @@
+Task: implement surrogate-key corruption lint Layers 4 and 5.
+
+2026-09-14
+- Fast-forwarded from main; already current.
+- Read docs/design/keys.md implementation status, §5 baselines/seals/hash-format adoption, and §6.
+- Traced baseline loading/diffing in lifecycle.py, key validation in keys.py/build.py, and check/audit execution in cli.py.
+- Confirmed baselines are currently display-id keyed; new entries need to carry the surrogate key for Layers 4-5, while pre-keys entries have no key and must be skipped.
+- Added Layer 4 validation against the latest baseline of either kind, using display-id equality as the only replacement discriminator.
+- Added Layer 5 informational audit diagnostics for older baselines.
+- Fresh baseline entries now record each available surrogate key; entries without key evidence remain skipped.
+- Added six focused tests covering reminted changes, no-write deletion, rename, legitimate replacement, pre-keys baselines, and older-baseline audit behavior.
+- Focused test run: tests/test_keys.py, 30 passed.
+- Updated keys design status/rule, backlog, and changelog fragment.
+- Sabotage-tested all six scenarios: disabling Layer 4 made both error tests fail; removing each rename/replacement/pre-keys guard made its negative test fail; disabling the Layer 5 scan made the audit test fail. Restored after every sabotage.
+- Targeted regression run after restoration: 92 passed across key, lifecycle, lifecycle CLI, and key-link/hash migration tests.
+- Ruff was unavailable in this environment (`python -m ruff`: module not installed).
+- Rebased successfully onto the latest local main with no conflicts.
+- Full post-rebase suite: 721 passed.
+Status: finished.

@@ -1,0 +1,1 @@
+- `refdes check` now rejects surrogate keys changed or removed from an item still carrying the same display id as the most recent revision or release baseline; `refdes audit` reports vanished keys referenced only by older baselines as informational history.

@@ -461,6 +461,7 @@ def cmd_audit(args) -> int:
     """Suppression is allowed; invisible suppression is not."""
     project, _stale = _load(args, require_ids=False)
     build_mod.build(project)
+    historical_key_infos = keys_mod.audit_historical_baselines(project)
 
     print("Schema fields not tracked as 'invalidate':")
     any_schema = False
@@ -549,6 +550,13 @@ def cmd_audit(args) -> int:
         )
     else:
         print("\nSince last release: (no release stamped yet)")
+
+    print("\nOlder baseline keys no current item declares:")
+    if historical_key_infos:
+        for diagnostic in historical_key_infos:
+            print(f"  {diagnostic}")
+    else:
+        print("  (none)")
 
     if project.boards:
         print("\nBoard moves since the manifest was last written:")

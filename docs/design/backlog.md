@@ -907,16 +907,14 @@ above): nothing here depends on taste or an unsettled tradeoff.
 
 `docs/design/keys.md` §1 (key format), §2 (minting), §3 (composite expansion
 and key-based resolution), §5 (hashing on the key, plus the baseline/seal
-hash-format migration), and §6 Layers 1-3 (well-formedness, uniqueness, and
-unknown-key resolution) are implemented — see that document's own
+hash-format migration), and §6 Layers 1-5 (well-formedness, uniqueness,
+unknown-key resolution, the latest-baseline lint, and the informational
+audit of older baselines) are implemented — see that document's own
 implementation-status header for the module list.
 
-**Status: partially implemented.** §6 Layers 1-3 are implemented. What's
-decided but not yet built:
+**Status: partially implemented.** The full corruption lint (§6 Layers 1-5)
+is implemented. What's decided but not yet built:
 
-- **The remaining corruption lint (§6 Layers 4-5)** — the baseline lint that
-  catches a changed-but-still-present key by cross-referencing the most recent
-  baseline, plus the informational audit of older baselines.
 - **`refdes keys adopt` (§7)** — one explicit, transactional command for an
   existing project: mint every key, expand every link reference to
   composite form, re-key baselines and seals under §5(c)'s conditional
@@ -949,10 +947,9 @@ decided but not yet built:
   cross-project export/import contract — "a separate change with its own
   collision considerations," per keys.md, not attempted here.
 
-**Local model: not assessed for any of the above.** All four remaining
-layers touch identity/correctness machinery directly (the corruption lint
-*is* the mechanism that catches identity corruption; the adoption command
-rewrites every item file and baseline in one transaction; the two disclosed
-gaps are already-known correctness holes). None of this was discussed
-against the suitability rule in conversation, and I'd rather leave it
-unmarked than guess at a rule this consequential.
+**Local model: not assessed for any of the above.** The remaining work
+touches identity/correctness machinery directly: adoption rewrites every
+item file and baseline in one transaction, refresh and cleanup alter rename
+semantics, and the two disclosed gaps are already-known correctness holes.
+None of this was discussed against the suitability rule in conversation,
+and I'd rather leave it unmarked than guess at a rule this consequential.

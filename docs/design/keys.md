@@ -16,14 +16,14 @@ The decision is taken. This document specs it; it does not relitigate it.
 
 **Implementation status:** §1 (key format), §2 (minting), §3 (composite
 expansion and key-based resolution), §5 (hashing on the key, plus the
-baseline/seal hash-format migration), and §6 Layers 1-3 (well-formedness,
-uniqueness, and unknown-key resolution) are implemented (`refdes/keys.py`,
-`refdes/links.py`, and changes to `build.py`, `lifecycle.py`, `seal.py`,
-`blocked.py`, `blocks.py`, `workspaces.py`, `stub_tests.py`, and `render.py`
--- see "What §3/§5 turned out to need beyond the spec" below). The remaining
-corruption lint layers (§6 Layers 4-5), `refdes keys adopt` (§7), the
-display-half refresh-on-rename mechanism (§3), and any change to `revise.py`
-or `former_ids.py` are still design only.
+baseline/seal hash-format migration), and §6 Layers 1-5 (well-formedness,
+uniqueness, unknown-key resolution, the latest-baseline lint, and the
+older-baseline audit) are implemented (`refdes/keys.py`, `refdes/links.py`,
+and changes to `build.py`, `cli.py`, `lifecycle.py`, `seal.py`, `blocked.py`,
+`blocks.py`, `workspaces.py`, `stub_tests.py`, and `render.py` -- see "What
+§3/§5 turned out to need beyond the spec" below). `refdes keys adopt` (§7),
+the display-half refresh-on-rename mechanism (§3), and any change to
+`revise.py` or `former_ids.py` are still design only.
 
 **What §3/§5 turned out to need beyond the spec, implementing it:**
 
@@ -809,9 +809,9 @@ For each entry in the baseline, keyed `K` with display id `D`:
 | situation | verdict |
 |---|---|
 | an item declares `K` | fine, whatever its display id now is |
-| no item declares `K`; an item at the same source position, or with display id `D`, or with the same title and type, declares `K′` | **key changed — error** |
-| no item declares `K`; nothing plausibly corresponds | item deleted — the ordinary `removed` diff line, not an error |
-| an item that the baseline recorded with key `K` now has no key at all | **key deleted — error** |
+| no item declares `K`; an item with display id `D` declares `K′` | **key changed — error** |
+| no item declares `K`; an item with display id `D` has no key | **key deleted — error** |
+| no item declares `K`; no item has display id `D` | item deleted — the ordinary `removed` diff line, not an error |
 
 ```
 ERROR   items/io/requirements.yaml:12 [REQ-IO-AI-001] — key changed since
@@ -826,21 +826,29 @@ Two properties worth calling out. First, it is **provable** — no similarity
 scoring, no confidence, no confirmation prompt, unlike `former-ids propose`
 today. Second, it is **cheap**: the baseline is already loaded for the diff.
 
-The one false positive to guard: legitimately *replacing* an item — deleting
-one and creating a different one that happens to occupy the same file
-position with a similar title. Handled by requiring the display id to be
-unchanged too before calling it a key change, and by the remedy in the
-diagnostic naming the deliberate path ("delete the key line... and give it a
-new display id too").
+**Decision, 2026-09-14:** the display id must match before a missing old key
+is called changed or deleted. Source position and title/type similarity are
+never evidence on their own. This guards the one false positive: legitimately
+*replacing* an item — deleting one and creating a different one that happens
+to occupy the same file position with the same or a similar title. The remedy
+in the diagnostic names that deliberate path ("delete the key line... and
+give it a new display id too").
+
+A baseline entry with no recorded key is skipped. In particular,
+pre-keys/`hash_format: 1` baselines carry no key evidence, so Layer 4 cannot
+make an identity claim about them. Conditional hash-format carry-forward
+does not manufacture that missing historical identity.
 
 ### Layer 5 — a key changed while a baseline references it
 
 Covered by layer 4 for the most recent baseline. For *older* baselines,
-recommend reporting at `info` in `refdes audit` rather than erroring in
-`check`: an old baseline referencing a key that no longer exists may simply
-predate a legitimate deletion, and turning that into a build error would
-make old baselines a liability. `audit` is where "what has drifted" already
-lives.
+report at `info` in `refdes audit` rather than erroring in `check`: an old
+baseline referencing a key that no longer exists may simply predate a
+legitimate deletion, and turning that into a build error would make old
+baselines a liability. `audit` is where "what has drifted" already lives.
+
+This is implemented alongside Layer 4 in `refdes/keys.py`; `cli.py` invokes
+the older-baseline scan only for `refdes audit`.
 
 ---
 
