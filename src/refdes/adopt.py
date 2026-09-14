@@ -45,6 +45,7 @@ class MembershipAdoption:
     carried: int
     total: int
     unidentified: list[str] = field(default_factory=list)
+    stale: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -223,6 +224,7 @@ def apply(project_root: str, dry_run: bool = False) -> AdoptionResult:
                     carried=storage.carried,
                     total=storage.total,
                     unidentified=storage.unidentified,
+                    stale=storage.stale,
                 )
             )
 

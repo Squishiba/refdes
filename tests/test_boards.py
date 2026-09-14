@@ -474,7 +474,8 @@ def test_adopted_build_writes_manifest_entries_by_key_with_display_id(tmp_path):
         key: {"id": "REQ-A-001", "board": "board-a"}
     }
     text = (tmp_path / boards_mod.MANIFEST_FILE).read_text(encoding="utf-8")
-    assert "Adopted projects key entries by surrogate key" in text
+    assert "Legacy projects key entries by display id." in text
+    assert "# by surrogate key and carry the current display id inside" in text
 
 
 def test_renamed_item_without_board_move_refreshes_manifest_display_id(tmp_path):

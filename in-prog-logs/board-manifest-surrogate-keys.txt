@@ -19,4 +19,13 @@ Task: key .refdes/boards.yaml by surrogate identity after adoption
 - Rebased onto current main (already current).
 - Full suite after rebase: 781 passed.
 
-Status: finished.
+2026-09-14 review follow-up:
+- Adoption now drops manifest entries that fail the same live-key/live-display-or-former-id test as writable-build pruning, inside the existing transaction.
+- Reporting distinguishes dropped stale entries from retained live-but-ambiguous legacy entries.
+- Restored the detailed _verify_membership rationale and rewrapped the manifest header.
+- Updated adoption/header regressions and the affected documentation.
+
+- Targeted board/workspace/adoption suite: 59 passed.
+- Full follow-up suite: 781 passed.
+
+Status: review follow-up finished.

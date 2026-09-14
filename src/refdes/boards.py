@@ -151,8 +151,8 @@ _HEADER = (
     "# workspaces: is in use, which workspace -- each item was on the last\n"
     "# time the project was built, so a file moving either -- usually a move\n"
     "# to the wrong folder -- is a warning instead of a silent surprise.\n"
-    "# Legacy projects key entries by display id. Adopted projects key entries by surrogate key\n"
-    "# and carry the current display id inside each entry for readability.\n"
+    "# Legacy projects key entries by display id. Adopted projects key entries\n"
+    "# by surrogate key and carry the current display id inside for readability.\n"
 )
 
 
@@ -268,17 +268,29 @@ def _store_membership(
     return changed
 
 
+def _membership_is_live(
+    record_id: str,
+    value: MembershipValue,
+    kind: str,
+    live_ids: set[str],
+    live_keys: set[str],
+) -> bool:
+    key, display_id, _recorded = _membership_parts(record_id, value, kind)
+    return key in live_keys if key is not None else display_id in live_ids
+
+
 def _prune_stale(project: Project, memberships: Memberships, kind: str) -> bool:
     """Drop memberships whose immutable or legacy identity is no longer local."""
     live_ids = {item.id for item in project.local_items}
     live_ids |= set(project.former_ids)
     live_keys = {item.key for item in project.local_items if item.key}
-    stale = []
-    for record_id, value in memberships.items():
-        key, display_id, _recorded = _membership_parts(record_id, value, kind)
-        is_live = key in live_keys if key is not None else display_id in live_ids
-        if not is_live:
-            stale.append(record_id)
+    stale = [
+        record_id
+        for record_id, value in memberships.items()
+        if not _membership_is_live(
+            record_id, value, kind, live_ids, live_keys
+        )
+    ]
     for record_id in stale:
         del memberships[record_id]
     return bool(stale)
@@ -294,10 +306,11 @@ class ManifestStoragePlan:
     carried: int = 0
     total: int = 0
     unidentified: list[str] = field(default_factory=list)
+    stale: list[str] = field(default_factory=list)
 
 
 def plan_surrogate_storage(project: Project, manifest: Manifest) -> ManifestStoragePlan:
-    """Convert identifiable legacy memberships without guessing at the rest."""
+    """Convert live, identifiable memberships and drop stale drift state."""
     plan = ManifestStoragePlan()
     by_display_id = {item.id: item for item in project.local_items}
     by_former_id = {
@@ -305,19 +318,28 @@ def plan_surrogate_storage(project: Project, manifest: Manifest) -> ManifestStor
         for old_id, current_id in project.former_ids.items()
         if current_id in by_display_id
     }
+    live_ids = set(by_display_id) | set(by_former_id)
+    live_keys = {item.key for item in project.local_items if item.key}
 
     for section, kind in (("boards", "board"), ("workspaces", "workspace")):
         original = manifest.get(section, {})
         plan.total += len(original)
         converted: Memberships = {}
 
-        # Preserve already-adopted entries first. Exact current display ids then
-        # take priority over former ids when old additive manifests contain both.
+        # Preserve live, already-adopted entries first. Exact current display
+        # ids then take priority over former ids when an old additive manifest
+        # contains both identities.
         for record_id, value in original.items():
             key, _display_id, _membership = _membership_parts(record_id, value, kind)
-            if key is not None:
-                converted[record_id] = dict(value)
-                plan.carried += 1
+            if key is None:
+                continue
+            if not _membership_is_live(
+                record_id, value, kind, live_ids, live_keys
+            ):
+                plan.stale.append(f"{section}: {record_id}")
+                continue
+            converted[record_id] = dict(value)
+            plan.carried += 1
 
         legacy_ids = [
             record_id
@@ -339,7 +361,10 @@ def plan_surrogate_storage(project: Project, manifest: Manifest) -> ManifestStor
             value = original[record_id]
             _key, _display_id, membership = _membership_parts(record_id, value, kind)
             item = by_display_id.get(record_id) or by_former_id.get(record_id)
-            if item is not None and item.key:
+            if item is None:
+                plan.stale.append(f"{section}: {record_id}")
+                continue
+            if item.key:
                 keyed: MembershipValue = {"id": item.id, kind: membership}
                 existing = converted.get(item.key)
                 if existing is None:
@@ -357,6 +382,7 @@ def plan_surrogate_storage(project: Project, manifest: Manifest) -> ManifestStor
 
         plan.manifest[section] = dict(sorted(converted.items()))
 
+    plan.stale.sort()
     plan.unidentified.sort()
     return plan
 
@@ -371,7 +397,14 @@ def _verify_membership(
     accept_move: bool,
     adopted: bool,
 ) -> bool:
-    """Compare one kind of resolved membership against either manifest shape."""
+    """One kind's worth of drift checking (`"board"` or `"workspace"`).
+
+    Both legacy display-id scalars and surrogate-keyed entries follow the same
+    rule: compare resolved membership with the last recorded value, warn
+    (never error) on a change, and record it in ``moves``. The shared
+    ``--accept-board-move`` flag accepts either kind because both live in this
+    manifest and share the same deliberate-move posture.
+    """
     changed = False
     live_keys = {item.key for item in project.local_items if item.key}
     for item in sorted(project.local_items, key=lambda i: i.id):

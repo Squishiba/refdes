@@ -118,9 +118,10 @@ boards:
     board: board-a
 ```
 
-Readers accept either shape, including a mixed manifest left by an entry adoption
-could not identify. Keyed membership follows an item across a display-id rename,
-so renaming it and moving it to another board in the same change still warns:
+Readers accept either shape, including a mixed manifest left by a live identity
+whose duplicate legacy memberships conflict. Keyed membership follows an item
+across a display-id rename, so renaming it and moving it to another board in the
+same change still warns:
 
 ```
 WARNING items/board-b/requirements.yaml:9 [REQ-PWR-009] — REQ-PWR-009 moved from
@@ -130,9 +131,9 @@ WARNING items/board-b/requirements.yaml:9 [REQ-PWR-009] — REQ-PWR-009 moved fr
 
 Run `refdes build --accept-board-move` to accept it; `refdes audit` lists every
 accepted and outstanding move. Unlike a sealed log entry, a board move is never a
-build error — moving a file is an ordinary thing to do on purpose. A writable
-build also silently prunes membership for deleted items; read-only `refdes check`
-never changes the manifest.
+build error — moving a file is an ordinary thing to do on purpose. Adoption and
+writable builds silently prune membership for deleted items; read-only
+`refdes check` never changes the manifest.
 
 ### Conforming to a shared contract
 

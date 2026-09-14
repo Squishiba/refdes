@@ -960,8 +960,8 @@ created marker) if either writing or validation fails.
    the last moment at which that is the resolution rule)
 3. re-key baselines and seals, carrying hashes forward under §5(c)'s
    conditional rule
-4. re-key identifiable board and workspace memberships; keep and report any
-   legacy entry whose item cannot be identified
+4. re-key live board and workspace memberships; silently drop entries with no
+   live identity, and keep/report only live entries whose identity is ambiguous
 5. write the staged set, reload, and fully validate; restore every original
    byte on any failure
 

@@ -852,6 +852,14 @@ def cmd_keys_adopt(args) -> int:
     for membership in result.memberships:
         for identity in membership.unidentified:
             print(f"  unidentified membership entry {identity}")
+        if membership.stale:
+            action = "would drop" if args.dry_run else "dropped"
+            count = len(membership.stale)
+            noun = "entry" if count == 1 else "entries"
+            print(
+                f"  {action} {count} stale membership {noun}: "
+                f"{', '.join(membership.stale)}"
+            )
 
     if result.changed_files:
         heading = "files that would change:" if args.dry_run else "changed files:"

@@ -201,7 +201,7 @@ def test_adopt_rekeys_every_baseline_and_seal_and_reports_uncomparable(
         assert all("id" in value for value in stored.values())
 
 
-def test_adopt_converts_membership_manifest_reports_unknown_and_is_idempotent(
+def test_adopt_drops_stale_memberships_reports_ambiguity_and_is_idempotent(
     tmp_path, capsys
 ):
     write_project_config(
@@ -218,6 +218,7 @@ def test_adopt_converts_membership_manifest_reports_unknown_and_is_idempotent(
     (item_dir / "r.yaml").write_text(
         "items:\n"
         "  - id: REQ-001\n"
+        "    former_ids: [REQ-OLD-001]\n"
         "    type: requirement\n"
         "    title: Current item\n"
         "    workspace: product-a\n",
@@ -228,6 +229,7 @@ def test_adopt_converts_membership_manifest_reports_unknown_and_is_idempotent(
     manifest_path.write_text(
         "boards:\n"
         "  REQ-001: board-a\n"
+        "  REQ-OLD-001: board-b\n"
         "  LOST-001: board-b\n"
         "workspaces:\n"
         "  REQ-001: product-a\n"
@@ -239,27 +241,29 @@ def test_adopt_converts_membership_manifest_reports_unknown_and_is_idempotent(
     assert cli_mod.main(["-c", config, "keys", "adopt"]) == 0
     output = capsys.readouterr().out
     assert "membership manifests rebased:" in output
-    assert ".refdes/boards.yaml (2/4 entries carried)" in output
-    assert "unidentified membership entry boards: LOST-001" in output
-    assert "unidentified membership entry workspaces: LOST-001" in output
+    assert ".refdes/boards.yaml (2/5 entries carried)" in output
+    assert "unidentified membership entry boards: REQ-OLD-001" in output
+    assert (
+        "dropped 2 stale membership entries: "
+        "boards: LOST-001, workspaces: LOST-001"
+    ) in output
 
     project = _project(tmp_path)
     live_key = project.items["REQ-001"].key
     manifest = boards_mod.load_manifest(project)
     assert manifest["boards"] == {
         live_key: {"id": "REQ-001", "board": "board-a"},
-        "LOST-001": "board-b",
+        "REQ-OLD-001": "board-b",
     }
     assert manifest["workspaces"] == {
         live_key: {"id": "REQ-001", "workspace": "product-a"},
-        "LOST-001": "product-z",
     }
     adopted_bytes = _snapshot(tmp_path)
 
     assert cli_mod.main(["-c", config, "keys", "adopt"]) == 0
     second_output = capsys.readouterr().out
     assert "nothing to do -- project already adopted" in second_output
-    assert "unidentified membership entry boards: LOST-001" in second_output
+    assert "unidentified membership entry boards: REQ-OLD-001" in second_output
     assert _snapshot(tmp_path) == adopted_bytes
 
 
