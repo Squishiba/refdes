@@ -2,7 +2,7 @@
 (docs/design/keys.md §3), layer 2 of the surrogate-key design.
 
 An author writes exactly what they write today -- `satisfies: [REQ-001]`.
-The tool expands it in place to `satisfies: [REQ-001@k7f3m2q9x4b]` the first
+The tool expands it in place to `satisfies: [REQ-001@k7f3m2q9x4a]` the first
 time it sees a bare reference that resolves to a keyed item, the same way
 `refdes id` already expands a bare-numeric `id: "042"` into a full id. Once
 written, a composite is frozen: this module never touches one again, and
@@ -29,8 +29,8 @@ from .model import Item, Project
 # NOT immediately followed by '@' -- the negative lookahead is what keeps
 # this from ever touching the display half of a target that is *already*
 # composite. Without it, re-running expansion over a line that already reads
-# `REQ-001@k7f3m2q9x4b` would match the bare "REQ-001" prefix of that very
-# composite and corrupt it into `REQ-001@k7f3m2q9x4b@k7f3m2q9x4b`.
+# `REQ-001@k7f3m2q9x4a` would match the bare "REQ-001" prefix of that very
+# composite and corrupt it into `REQ-001@k7f3m2q9x4a@k7f3m2q9x4a`.
 _LINK_TOKEN_RE = re.compile(r"\b[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)*-\d+\b(?!@)")
 
 

@@ -1,10 +1,8 @@
 """Surrogate keys: opaque, immutable per-item identity (docs/design/keys.md).
 
-Layer 1 of the design: the key format itself, and minting missing keys into
-freshly-loaded items. Everything downstream of that -- resolving links on the
-key instead of the display id, hashing on the key, the corruption lint, the
-`refdes keys adopt` migration -- is later work and lives elsewhere (or, as of
-this module, nowhere yet).
+Implements key minting plus the context-free portions of the corruption lint:
+well-formedness and uniqueness within one resolution scope. Link-target
+resolution diagnostics live in build.py, beside the resolver they replace.
 
 An item's key, once minted, is never regenerated and never rewritten. Nothing
 here ever changes an existing `item.key`.
@@ -102,6 +100,78 @@ def mint() -> str:
     and it costs nothing (docs/design/keys.md §1)."""
     data = "".join(ALPHABET[b % 32] for b in secrets.token_bytes(DATA_LEN))
     return data + check_char(data)
+
+
+def malformed_key_message(key: str, *, context: str = "") -> str | None:
+    """Return the Layer-1 corruption diagnostic for ``key``, if malformed.
+
+    ``context`` identifies a composite link occurrence; an item's own key
+    declaration leaves it empty. Length and alphabet must be checked before
+    computing the check character because ``check_char`` deliberately assumes
+    valid data.
+    """
+    if len(key) != KEY_LEN:
+        reason = f"expected exactly {KEY_LEN} characters"
+        expected = None
+    elif any(ch not in _INDEX for ch in key):
+        reason = "contains a character outside the key alphabet"
+        expected = None
+    else:
+        expected = check_char(key[:DATA_LEN])
+        if key[-1] == expected:
+            return None
+        reason = "check character mismatch"
+
+    message = (
+        f"key {key!r}{context} is malformed: {reason}. A key is written by "
+        "refdes and never edited by hand, so this line has been corrupted — "
+        "restore it from git rather than guessing."
+    )
+    if expected is not None:
+        message += f" (Expected check character {expected!r}.)"
+    return message
+
+
+def validate(project: Project) -> None:
+    """Report §6 Layers 1-2 for every item in this resolution scope.
+
+    Pending items participate too: they already own durable keys even though
+    they do not yet have display ids and cannot be linked to until allocation.
+    """
+    items = [*project.items.values(), *project.pending]
+    by_key: dict[str, Item] = {}
+
+    for item in items:
+        if not item.key:
+            continue
+
+        malformed = malformed_key_message(item.key)
+        if malformed is not None:
+            project.error(
+                malformed,
+                file=item.source_file,
+                line=item.source_line,
+                item_id=item.id or None,
+            )
+
+        owner = by_key.get(item.key)
+        if owner is None:
+            by_key[item.key] = item
+            continue
+
+        item_name = item.id or "an item without a display id"
+        owner_name = owner.id or "an item without a display id"
+        item_loc = f"{item.source_file}:{item.source_line}"
+        owner_loc = f"{owner.source_file}:{owner.source_line}"
+        project.error(
+            f"key {item.key!r} on {item_name} ({item_loc}) is already used by "
+            f"{owner_name} ({owner_loc}). A key is unique by construction; two "
+            "items sharing one means a line was duplicated. Delete the key "
+            "from one of them and rebuild — it will be re-minted.",
+            file=item.source_file,
+            line=item.source_line,
+            item_id=item.id or None,
+        )
 
 
 def mint_missing(project: Project, write: bool = True) -> list[tuple[Item, str]]:

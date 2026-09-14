@@ -901,16 +901,17 @@ above): nothing here depends on taste or an unsettled tradeoff.
 ## Surrogate keys — remaining layers
 
 `docs/design/keys.md` §1 (key format), §2 (minting), §3 (composite expansion
-and key-based resolution), and §5 (hashing on the key, plus the
-baseline/seal hash-format migration) are implemented — see that document's
-own implementation-status header for the module list. What's decided but not
-yet built:
+and key-based resolution), §5 (hashing on the key, plus the baseline/seal
+hash-format migration), and §6 Layers 1-3 (well-formedness, uniqueness, and
+unknown-key resolution) are implemented — see that document's own
+implementation-status header for the module list.
 
-- **The corruption lint (§6)** — four layers of detection that fall out of
-  one property (a key has no legitimate reason to ever change): malformed
-  key well-formedness, uniqueness-within-scope, unknown-key resolution
-  errors, and the baseline lint that catches a changed-but-still-present key
-  by cross-referencing the most recent baseline.
+**Status: partially implemented.** §6 Layers 1-3 are implemented. What's
+decided but not yet built:
+
+- **The remaining corruption lint (§6 Layers 4-5)** — the baseline lint that
+  catches a changed-but-still-present key by cross-referencing the most recent
+  baseline, plus the informational audit of older baselines.
 - **`refdes keys adopt` (§7)** — one explicit, transactional command for an
   existing project: mint every key, expand every link reference to
   composite form, re-key baselines and seals under §5(c)'s conditional

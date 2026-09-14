@@ -16,11 +16,9 @@ from refdes.schema import load_project
 
 # ------------------------------------------------------------------------- keys
 #
-# docs/design/keys.md: opaque, immutable surrogate identity. This section
-# covers §1 (key format) and the minting half of §2. §5 (hashing) and §3's
-# link-composite expansion have their own section further down, right after
-# this one. The corruption lint (§6) and `refdes keys adopt` (§7) are still
-# later layers, not implemented here.
+# covers §1 (key format), §2 minting, and §6 Layers 1-3 of the corruption
+# lint. §5 (hashing) and §3's link-composite expansion have their own section
+# further down. `refdes keys adopt` (§7) remains design only.
 
 _KEYS_IDX = {ch: i for i, ch in enumerate(keys_mod.ALPHABET)}
 
@@ -162,8 +160,13 @@ def test_check_char_is_deterministic_and_order_sensitive():
 
 KEYS_SCHEMA = (
     "site: { title: T, out: _site }\n"
+    "link_types:\n"
+    "  refines: { inverse: refined_by, label: Refines }\n"
     "types:\n"
-    "  requirement: { prefix: REQ, fields: { text: { type: text, required: true } } }\n"
+    "  requirement:\n"
+    "    prefix: REQ\n"
+    "    fields: { text: { type: text, required: true } }\n"
+    "    links: { refines: [requirement] }\n"
 )
 
 
@@ -173,6 +176,13 @@ def _keys_project(tmp_path, items_yaml):
     items.mkdir()
     (items / "r.yaml").write_text(items_yaml, encoding="utf-8")
     return tmp_path
+
+
+def _built_keys_project(root):
+    project = load_project(config_path=str(root / "refdes-project.yaml"))
+    parse.load_items(project)
+    build_mod.build(project, seal_write=False, reseal=False)
+    return project
 
 
 def test_mint_missing_assigns_and_writes_back_a_key_for_an_idd_item(tmp_path):
@@ -271,13 +281,13 @@ def test_mint_missing_never_reassigns_an_existing_key(tmp_path):
     root = _keys_project(
         tmp_path,
         "defaults: { type: requirement }\n"
-        "items:\n  - id: REQ-001\n    key: k7f3m2q9x4b\n    text: Already keyed.\n",
+        "items:\n  - id: REQ-001\n    key: k7f3m2q9x4a\n    text: Already keyed.\n",
     )
     project = load_project(config_path=str(root / "refdes-project.yaml"))
     parse.load_items(project, require_ids=False)
-    assert project.items["REQ-001"].key == "k7f3m2q9x4b"
+    assert project.items["REQ-001"].key == "k7f3m2q9x4a"
     assert keys_mod.mint_missing(project) == []
-    assert project.items["REQ-001"].key == "k7f3m2q9x4b"
+    assert project.items["REQ-001"].key == "k7f3m2q9x4a"
 
 
 def test_no_write_suppresses_minting_and_reports_one_project_level_info(tmp_path):
@@ -352,6 +362,148 @@ def test_key_is_reserved_and_not_shadowable_by_a_same_named_field(tmp_path):
     # type's own declared 'key' field.
     assert item.key == "not a schema value, this is identity"
     assert "key" not in item.fields
+
+
+def test_corruption_lint_rejects_a_key_with_the_wrong_length(tmp_path):
+    root = _keys_project(
+        tmp_path,
+        "defaults: { type: requirement }\n"
+        "items:\n  - id: REQ-001\n    key: k7f3m2q9x4\n    text: A.\n",
+    )
+
+    project = _built_keys_project(root)
+
+    assert len(project.errors) == 1
+    message = project.errors[0].message
+    assert "key 'k7f3m2q9x4' is malformed: expected exactly 11 characters" in message
+    assert "restore it from git rather than guessing" in message
+
+
+def test_corruption_lint_rejects_an_uppercase_key_character(tmp_path):
+    root = _keys_project(
+        tmp_path,
+        "defaults: { type: requirement }\n"
+        "items:\n  - id: REQ-001\n    key: K7f3m2q9x4b\n    text: A.\n",
+    )
+
+    project = _built_keys_project(root)
+
+    assert len(project.errors) == 1
+    message = project.errors[0].message
+    assert "key 'K7f3m2q9x4b' is malformed" in message
+    assert "outside the key alphabet" in message
+
+
+def test_corruption_lint_rejects_an_excluded_key_letter(tmp_path):
+    root = _keys_project(
+        tmp_path,
+        "defaults: { type: requirement }\n"
+        "items:\n  - id: REQ-001\n    key: k7f3i2q9x4b\n    text: A.\n",
+    )
+
+    project = _built_keys_project(root)
+
+    assert len(project.errors) == 1
+    message = project.errors[0].message
+    assert "key 'k7f3i2q9x4b' is malformed" in message
+    assert "outside the key alphabet" in message
+
+
+def test_corruption_lint_rejects_a_check_character_mismatch_with_expected_character(tmp_path):
+    root = _keys_project(
+        tmp_path,
+        "defaults: { type: requirement }\n"
+        "items:\n  - id: REQ-001\n    key: k7f3m2q9x4c\n    text: A.\n",
+    )
+
+    project = _built_keys_project(root)
+
+    assert len(project.errors) == 1
+    message = project.errors[0].message
+    assert "key 'k7f3m2q9x4c' is malformed: check character mismatch" in message
+    assert "Expected check character 'a'." in message
+    assert "restore it from git rather than guessing" in message
+
+
+def test_corruption_lint_rejects_a_duplicate_key_across_two_items(tmp_path):
+    root = _keys_project(
+        tmp_path,
+        "defaults: { type: requirement }\n"
+        "items:\n  - id: REQ-001\n    key: k7f3m2q9x4a\n    text: A.\n",
+    )
+    (root / "items" / "s.yaml").write_text(
+        "defaults: { type: requirement }\n"
+        "items:\n  - id: REQ-002\n    key: k7f3m2q9x4a\n    text: B.\n",
+        encoding="utf-8",
+    )
+
+    project = _built_keys_project(root)
+
+    assert len(project.errors) == 1
+    message = project.errors[0].message
+    assert "REQ-001" in message
+    assert "REQ-002" in message
+    assert "items/r.yaml:" in message
+    assert "items/s.yaml:" in message
+    assert "Delete the key from one of them and rebuild — it will be re-minted." in message
+
+
+def test_corruption_lint_rejects_an_undeclared_key_without_display_id_fallback(tmp_path):
+    root = _keys_project(
+        tmp_path,
+        "defaults: { type: requirement }\n"
+        "items:\n"
+        "  - id: REQ-001\n    key: k7f3m2q9x4a\n    text: Real target.\n"
+        "  - id: REQ-002\n    key: 00000000000\n    text: Source.\n"
+        "    refines: [REQ-001@k2p9w3x1r7s]\n",
+    )
+
+    project = _built_keys_project(root)
+
+    assert len(project.errors) == 1
+    message = project.errors[0].message
+    assert "refines points at key 'k2p9w3x1r7s' (labelled REQ-001)" in message
+    assert "which no item declares" in message
+    assert project.items["REQ-002"].resolved_links == {}
+    assert project.items["REQ-001"].backlinks == {}
+
+
+def test_corruption_lint_rejects_a_malformed_link_target_as_corruption(tmp_path):
+    root = _keys_project(
+        tmp_path,
+        "defaults: { type: requirement }\n"
+        "items:\n"
+        "  - id: REQ-001\n    key: k7f3m2q9x4a\n    text: Real target.\n"
+        "  - id: REQ-002\n    key: 00000000000\n    text: Source.\n"
+        "    refines: [REQ-001@k2p9w3x1r7]\n",
+    )
+
+    project = _built_keys_project(root)
+
+    assert len(project.errors) == 1
+    message = project.errors[0].message
+    assert "key 'k2p9w3x1r7' in refines target (labelled REQ-001) is malformed" in message
+    assert "expected exactly 11 characters" in message
+    assert "restore it from git rather than guessing" in message
+    assert "which no item declares" not in message
+
+
+def test_corruption_lint_accepts_valid_minted_keys_and_a_resolving_link(tmp_path):
+    target_key = keys_mod.mint()
+    source_key = keys_mod.mint()
+    root = _keys_project(
+        tmp_path,
+        "defaults: { type: requirement }\n"
+        "items:\n"
+        f"  - id: REQ-001\n    key: {target_key}\n    text: Target.\n"
+        f"  - id: REQ-002\n    key: {source_key}\n    text: Source.\n"
+        f"    refines: [REQ-001@{target_key}]\n",
+    )
+
+    project = _built_keys_project(root)
+
+    assert not project.errors
+    assert project.items["REQ-002"].resolved_links["refines"] == ["REQ-001"]
 
 
 def test_cli_check_mints_keys_by_default(tmp_path):

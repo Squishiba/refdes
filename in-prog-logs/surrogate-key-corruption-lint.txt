@@ -1,0 +1,22 @@
+Task: implement surrogate-key corruption lint, docs/design/keys.md §6 Layers 1-3 only.
+
+Progress:
+- Fast-forwarded from main before inspection; already up to date.
+- Read the implementation status, §1 key format/check character rationale, and §6 Layers 1-3.
+- Existing behavior: declared keys have no well-formedness validation; build._key_index silently keeps only the last item for a duplicate key; resolve_links rejects an unresolved composite target, and resolve_link_target already does not fall back to the display half, but the diagnostic is the generic "points at ... which does not exist" rather than the Layer 3 corruption diagnostic.
+- Decision from the spec: a malformed composite target is Layer 1 corruption, not Layer 3 unknown-key resolution. Layer 1 must run before resolution and suppress the generic missing-target message for that occurrence.
+- Source locations are tracked at item granularity (Item.source_file/source_line), not the exact key/link field line; diagnostics will follow the existing item-level convention.
+
+- Added keys.validate() for declaration well-formedness and resolution-scope uniqueness, including pending items.
+- Replaced resolve_links()'s generic missing-target diagnostic for composite targets with Layer 3 wording; malformed composite target keys are intercepted as Layer 1 corruption and never fall through to the unknown-key message or display-id fallback.
+- Added named regression tests for every required rejection and the clean-project case, plus a malformed-link-target boundary test.
+- Corrected the design's sample keys against the fixed Damm table: k7f3m2q9x4 has check character a, and k2p9w3x1r7 has check character s.
+- Updated keys.md and backlog.md status text; Layers 4-5 remain explicitly design only.
+- Added changelog.d/key-corruption-lint.added.md.
+- Targeted regression module after all additions/restoration: 24 passed.
+- Sabotage checks: disabling Layer 1 made all four malformed-declaration tests and the malformed-link-target test fail; disabling Layer 2 made the duplicate-key test fail; disabling Layer 3 made the undeclared-key/no-display-fallback test fail. Each production check was restored before the green run.
+- Full suite: 710 passed (`python -m pytest -q`).
+- Worktree CLI smoke (`PYTHONPATH=<worktree>/src refdes ... --no-write check`) rejected the well-formed undeclared composite key with the Layer 3 wording and did not follow the matching display label.
+- Scoped Ruff import-order check passed. The broader changed-file Ruff run still reports build.py's five pre-existing B023 loop-closure findings; no unrelated suppression or cleanup was added.
+
+Status: implementation and verification complete; commit pending.

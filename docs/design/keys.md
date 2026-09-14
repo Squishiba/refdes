@@ -15,14 +15,15 @@ diff, and merge.
 The decision is taken. This document specs it; it does not relitigate it.
 
 **Implementation status:** §1 (key format), §2 (minting), §3 (composite
-expansion and key-based resolution), and §5 (hashing on the key, plus the
-baseline/seal hash-format migration) are implemented (`refdes/keys.py`,
+expansion and key-based resolution), §5 (hashing on the key, plus the
+baseline/seal hash-format migration), and §6 Layers 1-3 (well-formedness,
+uniqueness, and unknown-key resolution) are implemented (`refdes/keys.py`,
 `refdes/links.py`, and changes to `build.py`, `lifecycle.py`, `seal.py`,
-`blocked.py`, `blocks.py`, `workspaces.py`, `stub_tests.py`, `render.py` --
-see "What §3/§5 turned out to need beyond the spec" below). The corruption
-lint (§6), `refdes keys adopt` (§7), the display-half refresh-on-rename
-mechanism (§3), and any change to `revise.py` or `former_ids.py` are still
-design only.
+`blocked.py`, `blocks.py`, `workspaces.py`, `stub_tests.py`, and `render.py`
+-- see "What §3/§5 turned out to need beyond the spec" below). The remaining
+corruption lint layers (§6 Layers 4-5), `refdes keys adopt` (§7), the
+display-half refresh-on-rename mechanism (§3), and any change to `revise.py`
+or `former_ids.py` are still design only.
 
 **What §3/§5 turned out to need beyond the spec, implementing it:**
 
@@ -140,7 +141,7 @@ item mints its own, different key, however it happens to be labelled. See
 Crockford base32, lowercase.**
 
 ```
-k7f3m2q9x4b
+k7f3m2q9x4a
 └────┬────┘└┬┘
   10 data   check
 ```
@@ -161,7 +162,7 @@ k7f3m2q9x4b
 A lowercase key can therefore never be mistaken for a bare display-id
 reference in prose, with no new exclusion rule anywhere. The same asymmetry
 makes keys trivially greppable and makes a key visually unmistakable inside
-a composite: `REQ-IO-AI-001@k7f3m2q9x4b` reads as label-then-key at a
+a composite: `REQ-IO-AI-001@k7f3m2q9x4a` reads as label-then-key at a
 glance, without knowing the syntax.
 
 ### Why 50 bits
@@ -266,7 +267,7 @@ and corrupt in another, which defeats the entire point of a check character.
 This also closes §9 point 5 and the corresponding bullet in §10 — the
 decision is made, not a prototype question anymore.
 
-**Rejected: a leading sigil** (`k7f3m2q9x4b` with a mandated `k`). The `@`
+**Rejected: a leading sigil** (`k7f3m2q9x4a` with a mandated `k`). The `@`
 separator already marks the key structurally, and lowercase already
 distinguishes it. A sigil costs a character in every link to restate what
 position and case already say. It also cannot be `@` itself: PyYAML rejects
@@ -389,7 +390,7 @@ satisfies: [REQ-IO-AI-001]
 The tool expands and freezes it:
 
 ```yaml
-satisfies: [REQ-IO-AI-001@k7f3m2q9x4b]
+satisfies: [REQ-IO-AI-001@k7f3m2q9x4a]
 ```
 
 **Resolution uses only the part after the separator.** The readable half is
@@ -408,11 +409,11 @@ Measured against PyYAML:
 
 | input | result |
 |---|---|
-| `satisfies: [REQ-001@k7f3m2q9x4b]` | ✅ `['REQ-001@k7f3m2q9x4b']` |
-| `satisfies:`<br>`  - REQ-001@k7f3m2q9x4b` | ✅ `['REQ-001@k7f3m2q9x4b']` |
-| `satisfies: [REQ-001#k7f3m2q9x4b]` | ✅ `['REQ-001#k7f3m2q9x4b']` |
-| `satisfies: [REQ-001 #k7f3m2q9x4b]` | ❌ **`ParserError`** |
-| `satisfies:`<br>`  - REQ-001 #k7f3m2q9x4b` | ⚠️ **`['REQ-001']`** — key silently dropped |
+| `satisfies: [REQ-001@k7f3m2q9x4a]` | ✅ `['REQ-001@k7f3m2q9x4a']` |
+| `satisfies:`<br>`  - REQ-001@k7f3m2q9x4a` | ✅ `['REQ-001@k7f3m2q9x4a']` |
+| `satisfies: [REQ-001#k7f3m2q9x4a]` | ✅ `['REQ-001#k7f3m2q9x4a']` |
+| `satisfies: [REQ-001 #k7f3m2q9x4a]` | ❌ **`ParserError`** |
+| `satisfies:`<br>`  - REQ-001 #k7f3m2q9x4a` | ⚠️ **`['REQ-001']`** — key silently dropped |
 
 The last row is the one that settles it. A stray space before `#` in
 block style is not an error: YAML reads the rest of the line as a comment,
@@ -426,9 +427,9 @@ is an ordinary character, confirmed above.
 
 ### Alternatives considered
 
-**Bare keys, `satisfies: [k7f3m2q9x4b]`.** Rejected — this undercuts the
-entire reason for staying in text. A diff showing `- k7f3m2q9x4b` `+
-k2p9w3x1r7` is unreviewable, and a merge conflict in one is unresolvable
+**Bare keys, `satisfies: [k7f3m2q9x4a]`.** Rejected — this undercuts the
+entire reason for staying in text. A diff showing `- k7f3m2q9x4a` `+
+k2p9w3x1r7s` is unreviewable, and a merge conflict in one is unresolvable
 without tooling. If links are unreadable, the format is a database with
 extra steps.
 
@@ -439,12 +440,12 @@ the first, cannot be merged independently of it, and must be consulted to
 read any link at all. It converts a local, self-describing reference into a
 lookup. The composite keeps the file self-describing.
 
-**Key first, `k7f3m2q9x4b@REQ-IO-AI-001`.** Rejected — the readable half
+**Key first, `k7f3m2q9x4a@REQ-IO-AI-001`.** Rejected — the readable half
 should lead because that is what a human scans, and because sorting a link
 list would otherwise sort by opaque key, scrambling an order that currently
 reads sensibly.
 
-**Structured, `satisfies: [{id: REQ-IO-AI-001, key: k7f3m2q9x4b}]`.**
+**Structured, `satisfies: [{id: REQ-IO-AI-001, key: k7f3m2q9x4a}]`.**
 Rejected — verbose, changes the shape of every link value, and breaks the
 hard requirement that an author writes what they write today.
 
@@ -452,7 +453,7 @@ hard requirement that an author writes what they write today.
 
 ```yaml
 - id: REQ-IO-AI-001
-  key: k7f3m2q9x4b
+  key: k7f3m2q9x4a
   text: The AI accelerator rail shall regulate to 0.85 V ±3%.
 ```
 
@@ -479,7 +480,7 @@ writable command. Three cases, deliberately not treated alike:
 
    ```
    WARNING items/io/decisions.md:14 [DEC-IO-005] — satisfies references
-           'REQ-IO-AI-001@k7f3m2q9x4b', but that key is REQ-IO-AI-004 and
+           'REQ-IO-AI-001@k7f3m2q9x4a', but that key is REQ-IO-AI-004 and
            REQ-IO-AI-001 is a different live item. Refusing to refresh the
            label until you confirm which was meant.
    ```
@@ -676,7 +677,7 @@ name: rev-c
 stamped_at: '2026-08-22T09:12:00Z'
 hash_format: 2
 items:
-  k7f3m2q9x4b: {id: REQ-IO-AI-001, hash: 673e6ba11269f350, type: requirement, title: ...}
+  k7f3m2q9x4a: {id: REQ-IO-AI-001, hash: 673e6ba11269f350, type: requirement, title: ...}
 ```
 
 This is what makes the diff say the true thing. Today, renaming an item
@@ -690,7 +691,7 @@ Since last revision (rev-c, 2026-08-21T09:12:00Z):
   changed   0
   added     0
   removed   0
-  relabelled 1   CON-THM-001 -> BND-THM-001   (k7f3m2q9x4b)
+  relabelled 1   CON-THM-001 -> BND-THM-001   (k7f3m2q9x4a)
   (17 unchanged)
 ```
 
@@ -705,7 +706,7 @@ readability.
 
 ```yaml
 sealed:
-  k7f3m2q9x4b: {id: LOG-A-001, hash: b85d98cb24ab9e56}
+  k7f3m2q9x4a: {id: LOG-A-001, hash: b85d98cb24ab9e56}
 ```
 
 The payoff is direct: today, renaming a sealed log entry's id requires
@@ -761,7 +762,7 @@ or fails its check character.
 ERROR   items/io/requirements.yaml:12 [REQ-IO-AI-001] — key 'k7f3m2q9x4c' is
         malformed: check character mismatch. A key is written by refdes and
         never edited by hand, so this line has been corrupted — restore it
-        from git rather than guessing. (Expected check character 'b'.)
+        from git rather than guessing. (Expected check character 'a'.)
 ```
 
 Note what this diagnostic can say *because* of the check character: **this
@@ -774,7 +775,7 @@ Two items claiming one key is a hard error, always, independent of any
 baseline:
 
 ```
-ERROR   items/io/requirements.yaml:18 [REQ-IO-AI-004] — key 'k7f3m2q9x4b' is
+ERROR   items/io/requirements.yaml:18 [REQ-IO-AI-004] — key 'k7f3m2q9x4a' is
         already used by REQ-IO-AI-001 (items/io/requirements.yaml:12). A key
         is unique by construction; two items sharing one means a line was
         duplicated. Delete the key from one of them and rebuild — it will be
@@ -792,7 +793,7 @@ used as a fallback:
 
 ```
 ERROR   items/io/decisions.md:8 [DEC-IO-005] — satisfies points at key
-        'k2p9w3x1r7' (labelled REQ-IO-AI-001), which no item declares. The
+        'k2p9w3x1r7s' (labelled REQ-IO-AI-001), which no item declares. The
         label may be stale; the key is what resolves. Either the target was
         deleted, or this reference predates it.
 ```
@@ -814,7 +815,7 @@ For each entry in the baseline, keyed `K` with display id `D`:
 
 ```
 ERROR   items/io/requirements.yaml:12 [REQ-IO-AI-001] — key changed since
-        baseline 'rev-c': was 'k7f3m2q9x4b', now 'k2p9w3x1r7'. A key never
+        baseline 'rev-c': was 'k7f3m2q9x4a', now 'k2p9w3x1r7s'. A key never
         changes legitimately. Every reference and every baseline entry
         pointing at the old key now dangles. Restore the old key; if the
         item really is a new one, delete the key line and let it be

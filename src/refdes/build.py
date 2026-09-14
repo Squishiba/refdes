@@ -16,11 +16,21 @@ from . import boards as boards_mod
 from . import calc, dates, imports, seal
 from . import citations as citations_mod
 from . import ids as ids_mod
+from . import keys as keys_mod
 from . import pages as pages_mod
 from . import workspaces as workspaces_mod
 from .model import (
-    CHECK_VIOLATION, ERROR, INFO, INVALIDATE, WARNING,
-    CalcLine, CheckResult, Coverage, Item, ItemType, Project,
+    CHECK_VIOLATION,
+    ERROR,
+    INFO,
+    INVALIDATE,
+    WARNING,
+    CalcLine,
+    CheckResult,
+    Coverage,
+    Item,
+    ItemType,
+    Project,
 )
 
 # Explicit reference: [[REQ-PWR-002]] or [[REQ-PWR-002|the input range]]. The
@@ -263,11 +273,11 @@ def _key_index(project: Project) -> dict[str, Item]:
     cheap (one dict comprehension over items already parsed into memory),
     and a cached copy would need its own invalidation story every time an
     item's key changes (a reparse after `keys.mint_missing()` writes new
-    ones, in particular). Two items sharing a key would make this dict lose
-    one of them silently -- that is a Layer-2 corruption-lint concern
-    (docs/design/keys.md §6, not implemented yet), not this function's job;
-    catching the collision belongs to a check that runs regardless of
-    whether any link ever exercises it.
+    ones, in particular).
+
+    keys.validate() has already reported every duplicate before this runs,
+    so a collision cannot make the build succeed even though this downstream
+    index necessarily retains only one of the colliding items.
     """
     return {item.key: item for item in project.items.values() if item.key}
 
@@ -310,11 +320,38 @@ def resolve_links(project: Project) -> None:
         for link_name, targets in item.links.items():
             allowed = spec.links.get(link_name, [])
             for target_id in targets:
+                if "@" in target_id:
+                    label, _, key = target_id.partition("@")
+                    malformed = keys_mod.malformed_key_message(
+                        key,
+                        context=f" in {link_name} target (labelled {label})",
+                    )
+                    if malformed is not None:
+                        project.error(
+                            malformed,
+                            file=item.source_file,
+                            line=item.source_line,
+                            item_id=item.id,
+                        )
+                        continue
+
                 target = resolve_link_target(by_key, project, target_id)
                 if target is None:
+                    if "@" in target_id:
+                        label, _, key = target_id.partition("@")
+                        message = (
+                            f"{link_name} points at key {key!r} (labelled {label}), "
+                            "which no item declares. The label may be stale; the "
+                            "key is what resolves. Either the target was deleted, "
+                            "or this reference predates it."
+                        )
+                    else:
+                        message = f"{link_name} points at {target_id!r}, which does not exist"
                     project.error(
-                        f"{link_name} points at {target_id!r}, which does not exist",
-                        file=item.source_file, line=item.source_line, item_id=item.id,
+                        message,
+                        file=item.source_file,
+                        line=item.source_line,
+                        item_id=item.id,
                     )
                     continue
                 if allowed and target.type not in allowed:
@@ -1322,6 +1359,7 @@ def build(
     validate_items(project)
     validate_former_ids(project)
     ids_mod.validate_prefixes(project)
+    keys_mod.validate(project)
     resolve_links(project)
     workspaces_mod.lint_cross_workspace_references(project)
     blocked_mod.resolve(project)
