@@ -14,7 +14,11 @@ from helpers import COVERAGE_SCHEMA, _build_at, _project
 from refdes import build as build_mod
 from refdes import calc, parse, render
 from refdes import cli as cli_mod
+from refdes.build import _esc as _build_esc
 from refdes.schema import SchemaError, load_project
+
+def test_build_esc_escapes_single_quotes():
+    assert _build_esc("builder's") == "builder&#39;s"
 
 
 def test_settled_decision_satisfies_but_unsettled_only_claims(coverage_project):

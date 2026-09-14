@@ -783,8 +783,8 @@ ordinary prose is all it takes, so the moment anyone adds a single-quoted
 generated attribute the breakout exists with no warning at build time. The
 fix is one more `.replace("'", "&#39;")` line in both helpers.
 
-**Status: outstanding — latent, not a live bug.** Both `_esc` helpers still
-omit `'`, and every generated attribute is still double-quoted.
+**Status: fixed.** Both `_esc` helpers now escape `'` as `&#39;` after the
+existing `&`, `<`, `>`, and `"` replacements.
 
 **Local model (not decided — my read): suitable.** Two one-line
 replacements, and a test asserting `'` escapes in the same spot `"` already

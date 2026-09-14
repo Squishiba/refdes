@@ -12,6 +12,11 @@ from conftest import write_project_config
 from helpers import BLOCKS_SCHEMA, NUMERIC_HINT_SCHEMA, _build_at
 
 from refdes import cli as cli_mod
+from refdes.blocks import _esc as _blocks_esc
+
+
+def test_blocks_esc_escapes_single_quotes():
+    assert _blocks_esc("block's") == "block&#39;s"
 
 
 def _page_with_block(project_root, directive):

@@ -1,0 +1,11 @@
+Finding 30: `_esc` does not escape single quotes
+
+Status: implementation and pre-commit verification complete.
+
+- Read docs/design/backlog.md finding 30 in full.
+- Located the two helpers in src/refdes/build.py and src/refdes/blocks.py.
+- Added one direct regression test per helper. Both tests failed before the fix because apostrophes were returned unchanged.
+- Added `.replace("'", "&#39;")` after the existing double-quote replacement in each helper, preserving ampersand replacement first.
+- Updated finding 30's status and added changelog.d/esc-single-quote.fixed.md.
+- Both targeted regression tests pass after the fix: 2 passed.
+- The pre-commit full suite passes: 715 passed.

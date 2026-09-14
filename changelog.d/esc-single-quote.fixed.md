@@ -1,0 +1,1 @@
+- Generated HTML now escapes single quotes too; this was latent hardening with no known live breakage.
