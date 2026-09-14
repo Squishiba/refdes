@@ -16,6 +16,7 @@ find it. Each section below says which file its key belongs in.
 site:        { ... }   # title, output directory, version
 id:          { ... }   # ID width and ledger location
 history:     { ... }   # default on_change mode
+date_format:  YYYY-MM-DD  # log-date order; default shown
 units:       { ... }   # preferred display units
 standard:    { ... }   # the bundled standard dictionary, or "none"
 imports:     [ ... ]   # other projects to read
@@ -92,6 +93,24 @@ decision.
 This entire surface only matters to a project under version control. Without a
 VCS there is no history layer to feed, and `history:` reduces to nothing more
 than a hash-exclusion list.
+
+---
+
+## `date_format`
+
+```yaml
+date_format: MM/DD/YYYY
+```
+
+Sets the project-wide order of the `YYYY`, `MM`, and `DD` placeholders used by
+fields whose schema type is `date`. The default is strict ISO order,
+`YYYY-MM-DD`. Each placeholder must appear exactly once.
+
+The separator written here is canonical in build errors, but input may use
+`-`, `/`, or `.` interchangeably: with `MM/DD/YYYY`, the values `01/25/2026`,
+`01-25-2026`, and `01.25.2026` are equivalent. A value with the wrong
+placeholder order, missing or extra separators, or an impossible calendar date
+is a build error naming the expected format.
 
 ---
 

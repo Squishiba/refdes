@@ -13,8 +13,10 @@ from markdown_it import MarkdownIt
 from . import blocked as blocked_mod
 from . import blocks as blocks_mod
 from . import boards as boards_mod
-from . import calc, citations as citations_mod, imports, pages as pages_mod, seal
+from . import calc, dates, imports, seal
+from . import citations as citations_mod
 from . import ids as ids_mod
+from . import pages as pages_mod
 from . import workspaces as workspaces_mod
 from .model import (
     CHECK_VIOLATION, ERROR, INFO, INVALIDATE, WARNING,
@@ -163,6 +165,16 @@ def validate_items(project: Project) -> None:
                     project, item, fname,
                     f"{fname}: {value!r} is not one of {fspec.choices}.{hint}",
                 )
+            elif fspec.type == "date":
+                try:
+                    dates.parse_date(value, project.date_format)
+                except ValueError:
+                    _field_error(
+                        project,
+                        item,
+                        fname,
+                        f"{fname}: {value!r} is not a valid date; expected {project.date_format}",
+                    )
             elif fspec.type == "limit":
                 try:
                     calc.parse_limit(str(value))

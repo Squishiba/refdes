@@ -25,6 +25,10 @@ history:
   # Applied to any field that does not declare its own on_change.
   default: invalidate
 
+# Log dates use these placeholders in this order. Input may use -, /, or .
+# interchangeably; this separator is canonical in diagnostics.
+date_format: YYYY-MM-DD
+
 # Named units to collapse derived results into, so V*A renders as "W" rather than
 # "ampere * volt". Only single-symbol units belong here: a unit you wrote yourself,
 # like in^2, is always left exactly as you wrote it.

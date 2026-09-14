@@ -33,6 +33,40 @@ def _write_minimal_project(tmp_path, settings_yaml: str | None = None):
     return config
 
 
+DATE_PROJECT_SCHEMA = """\
+site: { title: Date test, out: _site }
+types:
+  log:
+    prefix: LOG
+    fields:
+      date: { type: date, required: true }
+      summary: { type: text, required: true }
+"""
+
+
+def _write_date_project(tmp_path, entries, date_format: str | None = None):
+    format_setting = f"date_format: {date_format}\n" if date_format else ""
+    write_project_config(tmp_path, format_setting + DATE_PROJECT_SCHEMA)
+    items = tmp_path / "items"
+    items.mkdir()
+    item_lines = ["items:"]
+    for item_id, value in entries:
+        item_lines.extend(
+            [
+                f"  - id: {item_id}",
+                "    type: log",
+                f'    date: "{value}"',
+                f"    summary: Entry {item_id}",
+            ]
+        )
+    (items / "log.yaml").write_text("\n".join(item_lines) + "\n", encoding="utf-8")
+    return tmp_path
+
+
+def _date_errors(project):
+    return [d for d in project.errors if "expected " in d.message]
+
+
 def test_project_settings_absent_file_matches_pre_config_defaults(tmp_path):
     """A project with no refdes-project.yaml behaves exactly as today -- except
     publish_datasheets, whose default is a deliberate change (see its own
@@ -55,6 +89,113 @@ def test_project_settings_absent_file_matches_pre_config_defaults(tmp_path):
         "unaccepted_board_moves":     {"release": True,  "revision": False},
         "unaccepted_workspace_moves": {"release": True,  "revision": False},
     }
+
+
+def test_date_format_defaults_to_strict_iso(tmp_path):
+    root = _write_date_project(
+        tmp_path,
+        [("LOG-001", "2026-01-25"), ("LOG-002", "01/25/2026")],
+    )
+    project = _build_at(root)
+
+    assert project.date_format == "YYYY-MM-DD"
+    errors = _date_errors(project)
+    assert [(d.item_id, d.message) for d in errors] == [
+        (
+            "LOG-002",
+            "date: '01/25/2026' is not a valid date; expected YYYY-MM-DD",
+        )
+    ]
+
+
+def test_custom_date_format_accepts_interchangeable_separators(tmp_path):
+    root = _write_date_project(
+        tmp_path,
+        [
+            ("LOG-001", "01/25/2026"),
+            ("LOG-002", "01-25-2026"),
+            ("LOG-003", "01.25.2026"),
+            ("LOG-004", "2026-01-25"),
+        ],
+        date_format="MM/DD/YYYY",
+    )
+    project = _build_at(root)
+
+    assert project.date_format == "MM/DD/YYYY"
+    errors = _date_errors(project)
+    assert [(d.item_id, d.message) for d in errors] == [
+        (
+            "LOG-004",
+            "date: '2026-01-25' is not a valid date; expected MM/DD/YYYY",
+        )
+    ]
+
+
+def test_impossible_date_is_a_hard_error_naming_expected_format(tmp_path):
+    root = _write_date_project(
+        tmp_path,
+        [("LOG-001", "13/32/2026")],
+        date_format="MM/DD/YYYY",
+    )
+    project = _build_at(root)
+
+    assert [(d.item_id, d.message) for d in _date_errors(project)] == [
+        (
+            "LOG-001",
+            "date: '13/32/2026' is not a valid date; expected MM/DD/YYYY",
+        )
+    ]
+
+
+def test_date_format_setting_rejects_invalid_placeholder_shape(tmp_path):
+    config = _write_minimal_project(tmp_path, "date_format: YYYY/DD\n")
+    with pytest.raises(
+        SchemaError,
+        match="date_format must use YYYY, MM, and DD exactly once",
+    ):
+        load_project(config_path=str(config))
+
+
+def test_non_iso_log_dates_render_in_chronological_order(tmp_path):
+    root = _write_date_project(
+        tmp_path,
+        [
+            ("LOG-001", "12/31/2025"),
+            ("LOG-002", "01/15/2026"),
+            ("LOG-003", "02/01/2025"),
+        ],
+        date_format="MM/DD/YYYY",
+    )
+    project = _build_at(root)
+    assert not project.errors
+
+    out = render.render_site(project)
+    log_html = (tmp_path / out / "log.html").read_text(encoding="utf-8")
+    document_html = (tmp_path / out / "document.html").read_text(encoding="utf-8")
+    summary_html = (tmp_path / out / "summary.html").read_text(encoding="utf-8")
+
+    oldest_first = ["LOG-003", "LOG-001", "LOG-002"]
+    assert [
+        log_html.index(f'data-ref="{item_id}"')
+        for item_id in oldest_first
+    ] == sorted(log_html.index(f'data-ref="{item_id}"') for item_id in oldest_first)
+    assert [
+        document_html.index(f'<section class="doc-item" id="{item_id.lower()}">')
+        for item_id in oldest_first
+    ] == sorted(
+        document_html.index(f'<section class="doc-item" id="{item_id.lower()}">')
+        for item_id in oldest_first
+    )
+
+    newest_first = list(reversed(oldest_first))
+    recent_log_html = summary_html[summary_html.index("<h2>Recent design log</h2>") :]
+    assert [
+        recent_log_html.index(f'data-ref="{item_id}"')
+        for item_id in newest_first
+    ] == sorted(
+        recent_log_html.index(f'data-ref="{item_id}"')
+        for item_id in newest_first
+    )
 
 
 def test_project_settings_sigfigs_overrides_the_default(tmp_path):

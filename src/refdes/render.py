@@ -12,6 +12,7 @@ from jinja2 import Environment, FileSystemLoader
 from . import blocked as blocked_mod
 from . import build as build_mod
 from . import citations as citations_mod
+from . import dates
 from . import ids as ids_mod
 from . import nav as nav_mod
 from .model import Item, Project
@@ -62,6 +63,20 @@ def _in_scope(item: Item, board: str | None, workspace: str | None) -> bool:
     return True
 
 
+def _date_sort_key(
+    project: Project, item: Item, *, newest_first: bool = False
+) -> tuple[int, int, str]:
+    """Sort valid dates chronologically and keep absent/malformed values last."""
+    value = item.fields.get("date")
+    if value is None or str(value) == "":
+        return (1, 0, item.id)
+    try:
+        ordinal = dates.parse_date(value, project.date_format).toordinal()
+    except (TypeError, ValueError):
+        return (1, 0, item.id)
+    return (0, -ordinal if newest_first else ordinal, item.id)
+
+
 def _document_sections(
     project: Project, board: str | None = None, workspace: str | None = None
 ) -> list[tuple[str, list[Item]]]:
@@ -79,7 +94,7 @@ def _document_sections(
             if i.type == type_name and not i.external and _in_scope(i, board, workspace)
         ]
         if type_name == "log":
-            items.sort(key=lambda i: (str(i.fields.get("date", "")), i.id))
+            items.sort(key=lambda i: _date_sort_key(project, i))
         else:
             items.sort(key=lambda i: i.id)
         sections.append((spec.plural, items))
@@ -115,7 +130,7 @@ def _log_entries(
             for i in project.local_items
             if i.type == "log" and _in_scope(i, board, workspace)
         ),
-        key=lambda i: (str(i.fields.get("date", "")), i.id),
+        key=lambda i: _date_sort_key(project, i),
     )
 
 
@@ -246,8 +261,7 @@ def summary_payload(
 
     log_entries = sorted(
         (i for i in local if i.type == "log"),
-        key=lambda i: (str(i.fields.get("date", "")), i.id),
-        reverse=True,
+        key=lambda i: _date_sort_key(project, i, newest_first=True),
     )
 
     type_rows = []

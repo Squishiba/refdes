@@ -541,6 +541,7 @@ class Project:
     id_width: int
     id_ledger: str
     preferred_units: list[str]
+    date_format: str
     unit_aliases: dict[str, str] = field(default_factory=dict)
     # `equations:` from refdes-project.yaml, keyed by name. Evaluation reads calc.EQUATIONS
     # (the live registry load_project installs); this is the loaded definition, for

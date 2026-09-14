@@ -14,7 +14,7 @@ from typing import Any
 
 import yaml
 
-from . import calc, standards
+from . import calc, dates, standards
 from .model import (
     BASELINE_IDENTITIES,
     DIAGNOSTIC_LEVELS,
@@ -59,6 +59,7 @@ _PROJECT_SETTING_KEYS = {
     "boards",
     "workspaces",
     "units",
+    "date_format",
     "history",
     "standard",
     "equations",
@@ -117,6 +118,12 @@ def _validate_settings(raw: dict[str, Any]) -> dict[str, Any]:
             close = difflib.get_close_matches(str(key), sorted(_KNOWN_SETTINGS), n=1, cutoff=0.5)
             hint = f" Did you mean {close[0]!r}?" if close else ""
             raise _settings_error(f"unknown setting {key!r}.{hint}")
+
+    date_format = raw.get("date_format", dates.DEFAULT_DATE_FORMAT)
+    try:
+        dates.validate_format(date_format)
+    except (TypeError, ValueError) as exc:
+        raise _settings_error(f"date_format {exc}, got {date_format!r}") from exc
 
     sigfigs = raw.get("sigfigs", 4)
     if isinstance(sigfigs, bool) or not isinstance(sigfigs, int) or not (1 <= sigfigs <= 15):
@@ -201,6 +208,7 @@ def _validate_settings(raw: dict[str, Any]) -> dict[str, Any]:
             release_gate[rule_name][key] = value
 
     return {
+        "date_format": date_format,
         "sigfigs": sigfigs,
         "item_layout": item_layout,
         "baseline_identity": baseline_identity,
@@ -696,6 +704,7 @@ def load_project(config_path: str | None = None, start: str = ".") -> Project:
         root=root,
         boards=boards,
         workspaces=workspaces,
+        date_format=settings["date_format"],
         sigfigs=settings["sigfigs"],
         item_layout=settings["item_layout"],
         baseline_identity=settings["baseline_identity"],
