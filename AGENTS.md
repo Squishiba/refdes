@@ -78,3 +78,13 @@ one) you verified it against, so it's fast for a human to spot-check.
 Specifically in the directory `in-prog-logs/` as text files. Name the file
 after the task you were working on; write your incremental progress down here,
 what difficulties you may have had, and if the task was finished or not.
+
+## Temporary files go in .scratch/
+
+Temporary files -- scratch scripts, throwaway test projects, probe output --
+go in `.scratch/` at the repository root, which is gitignored. Do not delete
+them after the task and do not move them outside the repository; leave them
+in `.scratch/`. Never write outside your own working directory.
+
+Stage files explicitly by path (`git add -- <paths>`), never `git add -A` or
+`git add .`, so nothing unintended is committed.
