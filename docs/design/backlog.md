@@ -721,7 +721,7 @@ success case the rule above is written to keep away from a smaller model.
 
 ---
 
-## Internal review, findings 29–31
+## Internal review, findings 29–32
 
 Recorded from this session's code review — unlike findings 12–24 and
 25–28, these come from no GitHub attachment; the source note in each entry
@@ -815,6 +815,84 @@ acceptance test — render an evil-titled project and assert both that the
 escaped form appears in `index.html`/`coverage.html` and that the raw
 `<script>` never does. The quiet-failure mode this gap warns about is made
 loud by the test itself; nothing unsettled in the design.
+
+### 32 — Log entries sort by raw string, not by date, so mixed date formats silently produce a wrong chronological order
+
+**Source: internal review, not issue #7.** Three sort sites order `log` items
+by the same key, `(str(i.fields.get("date", "")), i.id)`: `render.py:82`
+(`_document_sections`, the linear-reading grouping), `render.py:118`
+(`_log_entries`), and `render.py:249` (`summary_payload`'s log list, sorted
+`reverse=True`). That is a lexicographic *string* sort, not a date sort. ISO
+format (`2026-03-16` — what every example in this project's own docs and item
+files already uses, e.g. `docs/authoring.md:45`, `docs/design-log.md:24`,
+`items/board-a/log.yaml:29`) happens to sort correctly as a string, because
+ISO is designed for that: fixed-width, most-significant field first, so year
+outranks month outranks day. Any other format does not: `03/16/2026` written
+for a March log entry sorts *before* `2026-01-05` written for a January entry
+that is chronologically earlier, because '0' < '2' at the first character, so
+the January entry lands below the March one regardless of actual chronology.
+
+No date parsing, coercion, or format validation exists anywhere in the
+schema/parse layer — verified against `src/refdes/schema.py`,
+`src/refdes/parse.py`, and `src/refdes/model.py`. `FieldSpec` records a
+field's `type:` as declared and never touches its values
+(`schema.py:518-526`); `parse.py` hands a `date:` value through unchanged as
+the raw string it was written in; and the one pass that validates values per
+type, `build.validate_items()` (`build.py:135-183`), dispatches on `enum`
+(choice membership), `limit` (parsing), and `citations` (shape) — `date` has
+no branch at all. A `type: date` field is accepted as an arbitrary string
+today with zero format checking; verified, not assumed.
+
+**Decision — `date_format:` is a top-level project setting.** Declared in
+`refdes-project.yaml` alongside the existing `units:` (`refdes-project.yaml:28-36`),
+`history:` (`refdes-project.yaml:24-26`), and `id:` (`refdes-project.yaml:20-22`)
+settings, which are the precedent for shape; its validation belongs in
+`_validate_settings()` (`schema.py:100`), and the key must be added to
+`_KNOWN_SETTINGS` (`schema.py:68`) or the settings file's unknown-key check
+(`schema.py:107-119`) will refuse to load it. (Not in the finding — recorded
+from conversation.)
+
+**Decision — the default is strict ISO.** If `date_format:` is never declared,
+refdes defaults to `YYYY-MM-DD` and rejects anything else. This is not a
+breaking change for a project already following the documented convention —
+only for one already silently mixing formats, which was already broken and
+just didn't know it. (Not in the finding — recorded from conversation.)
+
+**Decision — `-`, `/`, and `.` are interchangeable separators.** For whichever
+format is configured, all three are accepted (e.g. `date_format: MM/DD/YYYY`
+also accepts `MM-DD-YYYY` and `MM.DD.YYYY`), so the separator is not part of
+the declared format. (Not in the finding — recorded from conversation.)
+
+**Decision — a non-conforming date is a hard build error.** A value that does
+not match the effective format (declared or default) fails the build — never a
+silent accept, never a silent mis-sort — matching this project's existing
+"refuse rather than guess" posture (an unregistered board, an unknown
+`{{index}}` tag, and `vendor: true` on a local citation path are all hard
+errors for the same reason). Auto-detecting the format instead was explicitly
+rejected: a value like `01/02/2026` is genuinely ambiguous (Jan 2 or Feb 1)
+with no safe guess. (Not in the finding — recorded from conversation.)
+
+**Decision — the three sort sites sort on a parsed date.** Once a value is
+known to conform to the effective format, `render.py:82`, `render.py:118`, and
+`render.py:249` sort on that parsed date, not the raw string. (Not in the
+finding — recorded from conversation.)
+
+**Status: outstanding.** All three sites (`render.py:82,118,249`) still sort on
+the raw string; a search of the whole tree finds no `date_format:` key
+anywhere; and `build.validate_items()`'s per-type dispatch (`build.py:157-183`)
+still has no `date` branch.
+
+**Local model (not decided — my read): suitable.** The bug itself is this
+project's characteristic failure — a build that reports success while ordering
+the log wrongly — but the spec makes it loud, exactly as the rule above
+requires: the negative test (a non-conforming date value must be a hard build
+error) is sharp, mechanical, and nameable, and the discriminating sort test is
+equally concrete (two dates in the same declared format whose string and
+parsed orders diverge — `01/05/2027` vs `03/16/2026` under `date_format:
+MM/DD/YYYY` sorts one way as strings and the opposite as dates). The fix is
+bounded — one new setting validated in `_validate_settings()`, one conformance
+check, three sort-key changes — and the design is settled (the five decisions
+above): nothing here depends on taste or an unsettled tradeoff.
 
 ---
 
