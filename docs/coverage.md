@@ -117,6 +117,18 @@ collapsing the two is exactly what this page exists to avoid.
 Counts by stage appear at the top, and the site index carries an **Outstanding
 work** panel with the same rows. Each item's own page shows a coverage strip.
 
+### Coverage per board
+
+One platform-wide requirement — "every board uses the standard debug header" —
+is one item, so the table above goes `satisfied` the moment *any* board
+complies. A board that declares `conforms_to: [GRP-…]` gets the same four
+stages computed again for each member of that group, counting only that board's
+own satisfiers: `coverage-<board>.html` grows a **Conforming contracts** table,
+and a row on `coverage.html` gains `not yet satisfied on boards: board-b`. A
+satisfier with no board counts toward no board's per-board result, while still
+satisfying the item for the project as a whole. See
+[multiple boards](multi-board.md#conforming-to-a-shared-contract).
+
 ## Warnings
 
 Two of the five stages are individually uninteresting at scale — a project

@@ -120,6 +120,51 @@ Run `refdes build --accept-board-move` to accept it; `refdes audit` lists every
 accepted and outstanding move. Unlike a sealed log entry, a board move is never a
 build error — moving a file is an ordinary thing to do on purpose.
 
+### Conforming to a shared contract
+
+A platform-wide requirement — "every board with an ARM MCU uses the standard
+10-pin debug header" — is *one* item, so ordinary coverage reports it satisfied
+the moment any single board complies. Declare the obligation per board instead:
+
+```yaml
+boards:
+  board-a:
+    label: "Board A"
+    conforms_to: [GRP-DBG]   # group items whose members this board owes
+```
+
+The targets are [`group` items](standard-library.md) (`hardware@3`, prefix
+`GRP`), and the members point at their group with `part_of:` — the group never
+lists its members. For every member of a group a board conforms to, the build
+computes that member's coverage a second time, counting **only that board's own
+satisfiers**, and warns on any pair still short of `satisfied`:
+
+```
+WARNING items/board-a/requirements.yaml:9 [IFC-DBG-001] — IFC-DBG-001 is not
+        satisfied on board 'board-b' (board conforms to GRP-DBG) -- its open
+        stage counts only board-b's own items — see coverage-board-b.html
+```
+
+A satisfier with no board counts for no board: an unboarded decision still
+satisfies `IFC-DBG-001` for the project as a whole, and discharges nobody's
+per-board obligation.
+
+`conforms_to:` naming something that is not an existing group is a **build
+error**, not an empty obligation set — the same posture as an unregistered
+`board:`, because a typo here would silently discharge a whole board's work:
+
+```
+ERROR refdes-project.yaml — boards.board-a conforms_to 'GRP-DBUG', which does
+        not exist -- a group item must be declared before a board can conform
+        to it
+```
+
+`coverage-<board>.html` grows a **Conforming contracts** table listing those
+members with their stage on that board, even when the requirement itself lives
+on another board, and the project-wide coverage page marks any item with
+`not yet satisfied on boards: board-b`. A project with no `conforms_to:`
+anywhere renders exactly the coverage output it always did.
+
 ### When this stops working
 
 - **A board ships to a different customer** — you cannot hand over the site without

@@ -426,6 +426,170 @@ def _excluded_by_status(item: Item, spec: ItemType) -> bool:
     return False
 
 
+def _group_type_names(project: Project) -> set[str]:
+    """Which types are groups, derived from the schema rather than a type name.
+
+    A group is whatever some type's `part_of:` may point at -- in the bundled
+    hardware@3 standard that is exactly `group` (docs/design/backlog.md
+    finding 14). Deriving it keeps this generic the way `_verifier_type_names`
+    already is, and means a project with no `part_of:` declared anywhere has no
+    group types, so any `conforms_to:` target is an error rather than a hit.
+    """
+    names: set[str] = set()
+    for spec in project.types.values():
+        names.update(spec.links.get("part_of", []))
+    return names
+
+
+def validate_conforms_to(project: Project) -> None:
+    """Every `conforms_to:` target must name an existing group item.
+
+    A typo here would silently discharge a whole board's obligations -- the
+    same silent-and-optimistic failure an unregistered `board:` is a hard error
+    for (boards.resolve), so this matches that posture exactly: name the fix,
+    and do not let the build pass. Runs after resolve_links(), which is what
+    populates the `contains` backlinks the per-board coverage below reads.
+    """
+    if not project.boards:
+        return
+    group_types = _group_type_names(project)
+    for bname, spec in sorted(project.boards.items()):
+        for target in spec.conforms_to:
+            item = project.items.get(target)
+            if item is None:
+                project.error(
+                    f"boards.{bname} conforms_to {target!r}, which does not "
+                    f"exist -- a group item must be declared before a board can "
+                    f"conform to it",
+                    file="refdes-project.yaml",
+                )
+            elif item.type not in group_types:
+                project.error(
+                    f"boards.{bname} conforms_to {target!r}, which is a "
+                    f"{item.type}, not a group -- conforms_to names group items",
+                    file="refdes-project.yaml",
+                )
+
+
+def _board_gate(project: Project, board: str | None):
+    """Filter for the satisfiers/verifiers that count toward `board`.
+
+    `board is None` is the ordinary per-item coverage: everything counts, exactly
+    as before. Otherwise only items actually on that board count -- and an item
+    with no board counts for *no* board, so a satisfier sitting outside the
+    registry can never quietly discharge a per-board obligation (finding 24).
+    """
+    def keep(item_id: str) -> bool:
+        if board is None:
+            return True
+        other = project.items.get(item_id)
+        return other is not None and other.board == board
+
+    return keep
+
+
+def _coverage_for(
+    item: Item, project: Project, board: str | None = None
+) -> Coverage:
+    """One item's Coverage, optionally restricted to satisfiers on `board`.
+
+    Same rules either way -- the only difference is which linked items count.
+    """
+    keep = _board_gate(project, board)
+    cov = Coverage(item_id=item.id)
+    cov.addressed_by = sorted(
+        i
+        for i in set(item.backlinks.get("addressed_by", []))
+        | set(item.resolved_links.get("addresses", []))
+        if keep(i)
+    )
+
+    settled: list[str] = []
+    claimed: list[str] = []
+    for satisfier_id in sorted(
+        i
+        for i in set(item.backlinks.get("satisfied_by", []))
+        | set(item.resolved_links.get("satisfies", []))
+        if keep(i)
+    ):
+        satisfier = project.items.get(satisfier_id)
+        satisfier_spec = project.types.get(satisfier.type) if satisfier else None
+        allowed = satisfier_spec.satisfying_statuses if satisfier_spec else None
+        # Unconfigured type: every link counts as settled, same as before
+        # satisfying_statuses existed.
+        if allowed is not None and satisfier.fields.get("status") not in allowed:
+            claimed.append(satisfier_id)
+        else:
+            settled.append(satisfier_id)
+    cov.satisfied_by = settled
+    cov.claimed_by = claimed
+
+    verified: list[str] = []
+    for verifier_id in sorted(
+        i
+        for i in set(item.backlinks.get("verified_by", []))
+        | set(item.resolved_links.get("verified_by", []))
+        if keep(i)
+    ):
+        verifier = project.items.get(verifier_id)
+        verifier_spec = project.types.get(verifier.type) if verifier else None
+        allowed = verifier_spec.verifying_statuses if verifier_spec else None
+        # Unconfigured: every link counts, mirroring satisfying_statuses.
+        if allowed is None or (verifier and verifier.fields.get("status") in allowed):
+            verified.append(verifier_id)
+    cov.verified_by = verified
+    return cov
+
+
+def compute_board_coverage(project: Project) -> None:
+    """Per-(item, board) coverage for the members of each board's `conforms_to:` groups.
+
+    A platform-wide contract -- "every board with an ARM MCU uses the standard
+    debug header" -- is one requirement item, so per-item coverage reports it
+    satisfied the moment *any* board complies (docs/design/backlog.md finding
+    24). This computes the same four stages again, once per (item, board) pair,
+    counting only that board's own satisfiers, and warns on any pair still short
+    of `satisfied`.
+
+    Ordinary per-item coverage is untouched: this writes `project.board_coverage`
+    only, and a project with no `conforms_to:` gets an empty dict and no warnings
+    -- byte-identical output to before this existed.
+    """
+    if not project.boards:
+        return
+    warned_fallback_types: set[str] = set()
+    for bname, spec in sorted(project.boards.items()):
+        for group_id in spec.conforms_to:
+            group = project.items.get(group_id)
+            if group is None:
+                continue  # validate_conforms_to() already errored on this
+            for member_id in sorted(group.backlinks.get("contains", [])):
+                member = project.items.get(member_id)
+                if member is None:
+                    continue
+                member_spec = project.types.get(member.type)
+                if member_spec is None:
+                    continue
+                coverable, _via_fallback = _resolve_coverable(
+                    member_spec, project, warned_fallback_types
+                )
+                if not coverable or _excluded_by_status(member, member_spec):
+                    continue
+                cov = _coverage_for(member, project, board=bname)
+                project.board_coverage[(member.id, bname)] = cov
+                if cov.stage in ("satisfied", "verified"):
+                    continue
+                project.warn(
+                    f"{member.id} is not satisfied on board {bname!r} "
+                    f"(board conforms to {group_id}) -- its "
+                    f"{cov.stage} stage counts only {bname}'s own items "
+                    f"— see coverage-{bname}.html",
+                    file=member.source_file,
+                    line=member.source_line,
+                    item_id=member.id,
+                )
+
+
 def compute_coverage(project: Project) -> None:
     """Distinct notions of done, which people routinely conflate.
 
@@ -481,50 +645,14 @@ def compute_coverage(project: Project) -> None:
         if _excluded_by_status(item, spec):
             continue
 
-        cov = Coverage(item_id=item.id)
         # Each edge may be declared from either end. resolved_links, not
         # links: these targets get looked up in project.items directly
         # below, and links may hold `DISPLAY@key` composite text now
         # (docs/design/keys.md §3) that project.items was never keyed by --
         # resolved_links is resolve_links()'s own output, already resolved
         # to each target's current, plain display id.
-        cov.addressed_by = sorted(
-            set(item.backlinks.get("addressed_by", []))
-            | set(item.resolved_links.get("addresses", []))
-        )
-
-        satisfying_ids = sorted(
-            set(item.backlinks.get("satisfied_by", []))
-            | set(item.resolved_links.get("satisfies", []))
-        )
-        settled: list[str] = []
-        claimed: list[str] = []
-        for satisfier_id in satisfying_ids:
-            satisfier = project.items.get(satisfier_id)
-            satisfier_spec = project.types.get(satisfier.type) if satisfier else None
-            allowed = satisfier_spec.satisfying_statuses if satisfier_spec else None
-            # Unconfigured type: every link counts as settled, same as before
-            # satisfying_statuses existed.
-            if allowed is not None and satisfier.fields.get("status") not in allowed:
-                claimed.append(satisfier_id)
-            else:
-                settled.append(satisfier_id)
-        cov.satisfied_by = settled
-        cov.claimed_by = claimed
-
-        verifying_ids = sorted(
-            set(item.backlinks.get("verified_by", []))
-            | set(item.resolved_links.get("verified_by", []))
-        )
-        verified: list[str] = []
-        for verifier_id in verifying_ids:
-            verifier = project.items.get(verifier_id)
-            verifier_spec = project.types.get(verifier.type) if verifier else None
-            allowed = verifier_spec.verifying_statuses if verifier_spec else None
-            # Unconfigured: every link counts, mirroring satisfying_statuses.
-            if allowed is None or (verifier and verifier.fields.get("status") in allowed):
-                verified.append(verifier_id)
-        cov.verified_by = verified
+        cov = _coverage_for(item, project)
+        claimed = cov.claimed_by
         project.coverage[item.id] = cov
 
         # On the fallback path, only items literally named "requirement" get the
@@ -1362,6 +1490,7 @@ def build(
     ids_mod.validate_prefixes(project)
     keys_mod.validate(project)
     resolve_links(project)
+    validate_conforms_to(project)
     workspaces_mod.lint_cross_workspace_references(project)
     blocked_mod.resolve(project)
     run_calcs(project)
@@ -1372,6 +1501,7 @@ def build(
     boards_mod.lint_tokens(project)
     lint_own_tags(project)
     compute_coverage(project)
+    compute_board_coverage(project)
     citations_mod.verify(project, require=require_citations)
     render_bodies(project)
     render_pages(project)

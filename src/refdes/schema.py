@@ -625,6 +625,7 @@ def load_project(config_path: str | None = None, start: str = ".") -> Project:
             label=bspec.get("label", bname),
             token=str(bspec.get("token") or ""),
             path=str(bspec.get("path") or ""),
+            conforms_to=[str(g) for g in (bspec.get("conforms_to") or [])],
         )
         segment = spec.path_segment
         if segment in path_owner:

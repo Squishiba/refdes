@@ -45,7 +45,7 @@
   {% for item, cov in coverage_rows %}
     <tr class="stage-{{ cov.stage }}">
       <td><a class="ref" href="{{ item.slug }}.html" data-ref="{{ item.id }}">{{ item.id }}</a></td>
-      <td>{{ item.title }}</td>
+      <td>{{ item.title }}{% if unmet_boards and unmet_boards.get(item.id) %}<div class="muted contract-note">not yet satisfied on boards: {{ unmet_boards[item.id] | join(', ') }}</div>{% endif %}</td>
       <td><span class="pill pill-stage-{{ cov.stage }}">{{ cov.stage }}</span></td>
       {% for group in [cov.addressed_by, cov.claimed_by, cov.satisfied_by, cov.verified_by] %}
       {% set is_claimed_col = loop.index0 == 1 %}
@@ -69,5 +69,39 @@
   {% endfor %}
   </tbody>
 </table>
+
+{% if contract_rows %}
+{# Conforming contracts: this board's `conforms_to:` members, scored against
+   this board's own satisfiers only. Listed even when the requirement lives on
+   another board -- that is the point (docs/design/backlog.md finding 24). No
+   section at all for a board that conforms to nothing. #}
+<h2>Conforming contracts{% if conforms_to %} — {{ conforms_to | join(', ') }}{% endif %}</h2>
+<table class="grid coverage">
+  <thead>
+    <tr>
+      <th>ID</th><th>Title</th><th>Stage on this board</th>
+      <th>Claimed by</th><th>Satisfied by</th><th>Verified by</th>
+    </tr>
+  </thead>
+  <tbody>
+  {% for item, cov in contract_rows %}
+    <tr class="stage-{{ cov.stage }}">
+      <td><a class="ref" href="{{ item.slug }}.html" data-ref="{{ item.id }}">{{ item.id }}</a></td>
+      <td>{{ item.title }}</td>
+      <td><span class="pill pill-stage-{{ cov.stage }}">{{ cov.stage }}</span></td>
+      {% for group in [cov.claimed_by, cov.satisfied_by, cov.verified_by] %}
+      <td>
+        {% if group %}
+          {% for ref in group %}
+          <a class="ref" href="{{ ref | lower }}.html" data-ref="{{ ref }}">{{ ref }}</a>{% if not loop.last %}, {% endif %}
+          {% endfor %}
+        {% else %}<span class="muted">—</span>{% endif %}
+      </td>
+      {% endfor %}
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endif %}
 
 {% endblock %}

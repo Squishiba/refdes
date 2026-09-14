@@ -471,9 +471,14 @@ file-scoped grouping). Composes with finding 14's grouping type as the
 `conforms_to:` target. An unregistered group named in `conforms_to:` should
 be a hard error, mirroring the existing unregistered-board error.
 
-**Status: outstanding.** No `conforms_to:` exists anywhere in `boards.py` or
-`schema.py`'s `BoardSpec`; coverage in `build.py` is computed per item id
-only, with no board dimension.
+**Status: shipped.** `BoardSpec.conforms_to` (parsed in `schema.py`, hard-
+errored by `build.validate_conforms_to` when a target is not an existing group)
+drives `build.compute_board_coverage`, which computes the same four stages per
+(item, board) counting only that board's own satisfiers — an unboarded
+satisfier counts for no board — warns on every pair short of `satisfied`, and
+renders as a Conforming contracts table on `coverage-<board>.html` plus a
+"not yet satisfied on boards: …" note on the project-wide page. A project
+with no `conforms_to:` anywhere keeps its coverage output unchanged.
 
 **Local model: suitable.** Finding 14 has landed — the grouping type exists in
 hardware@3 — so the dependency is removed. The feared edge remains the same: an

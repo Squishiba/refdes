@@ -550,6 +550,7 @@ boards:
     label: "Board A"
     token: A
     path: brd-a
+    conforms_to: [GRP-DBG]   # group items whose members this board owes
 ```
 
 | Key | Required | Purpose |
@@ -557,6 +558,7 @@ boards:
 | `label` | no, defaults to the key | Display name on board-scoped pages |
 | `token` | no | Checked against item id prefixes; unset means no check |
 | `path` | no, defaults to the key | The `items/` path segment, if different from the key |
+| `conforms_to` | no | Group ids whose members get a per-(item, board) coverage result; a target that is not an existing group is a build error ([multiple boards](multi-board.md#conforming-to-a-shared-contract)) |
 
 Absent entirely, this key does nothing: no item gets a board, and the site is
 unaffected. With it, a board is the first path segment under `items/` matched

@@ -149,6 +149,12 @@ class BoardSpec:
     label: str
     token: str = ""  # optional; checked for consistency against item id prefixes
     path: str = ""   # alias for the items/ path segment; defaults to `name`
+    # Group item ids (`GRP-...`, hardware@3's `group` type) whose members this
+    # board owes a per-board coverage obligation to -- "every board conforms to
+    # the debug-header contract" (docs/design/backlog.md finding 24). A name
+    # that does not resolve to a group item is a hard error, never a silently
+    # empty obligation set.
+    conforms_to: list[str] = field(default_factory=list)
 
     @property
     def path_segment(self) -> str:
@@ -557,6 +563,11 @@ class Project:
     version: str = ""
     imports: list[ImportSpec] = field(default_factory=list)
     coverage: dict[str, Coverage] = field(default_factory=dict)
+    # Per-(item, board) coverage for the members of the groups named in a
+    # board's `conforms_to:` -- {(item_id, board_name): Coverage}. Stays empty
+    # for a project with no `conforms_to:` anywhere, which is what keeps such a
+    # project's coverage output exactly as it was (finding 24).
+    board_coverage: dict[tuple[str, str], Coverage] = field(default_factory=dict)
     blocked_chains: list[BlockedChain] = field(default_factory=list)
     # {name: preset_name} for every type/link_type any bundled preset at this
     # project's base@version declares, regardless of which presets are

@@ -121,6 +121,36 @@ def _coverage_rows(
     return rows
 
 
+_STAGE_ORDER = {"open": 0, "addressed": 1, "claimed": 2, "satisfied": 3, "verified": 4}
+
+
+def _contract_rows(project: Project, board: str) -> list[tuple[Item, object]]:
+    """Board B's conforming contracts: its `conforms_to:` members, per board.
+
+    Listed even when the requirement itself lives on another board -- that is
+    the whole point of finding 24 -- so this is NOT scoped by `_in_scope`.
+    Empty for a board with no `conforms_to:`, which is what keeps the coverage
+    page byte-identical for every project that has never used the key.
+    """
+    rows = [
+        (project.items[item_id], cov)
+        for (item_id, board_name), cov in project.board_coverage.items()
+        if board_name == board and item_id in project.items
+    ]
+    rows.sort(key=lambda row: (_STAGE_ORDER.get(row[1].stage, 9), row[0].id))
+    return rows
+
+
+def _unmet_boards(project: Project) -> dict[str, list[str]]:
+    """item id -> boards whose per-board result for it is still short of satisfied."""
+    unmet: dict[str, list[str]] = {}
+    for (item_id, board_name), cov in project.board_coverage.items():
+        if cov.stage in ("satisfied", "verified"):
+            continue
+        unmet.setdefault(item_id, []).append(board_name)
+    return {item_id: sorted(boards) for item_id, boards in unmet.items()}
+
+
 def _log_entries(
     project: Project, board: str | None = None, workspace: str | None = None
 ) -> list[Item]:
@@ -739,6 +769,7 @@ def render_site(project: Project, draft: bool = False) -> str:
         out_dir, written, "coverage.html", coverage_tpl,
         project=project,
         coverage_rows=coverage_rows,
+        unmet_boards=_unmet_boards(project),
         previews_json=previews_json,
     )
 
@@ -830,6 +861,8 @@ def render_site(project: Project, draft: bool = False) -> str:
             project=project,
             board=board_spec,
             coverage_rows=_coverage_rows(project, board=board_key),
+            contract_rows=_contract_rows(project, board_key),
+            conforms_to=board_spec.conforms_to,
             previews_json=previews_json,
         )
 
@@ -900,6 +933,7 @@ def render_site(project: Project, draft: bool = False) -> str:
             project=project,
             workspace=workspace_spec,
             coverage_rows=_coverage_rows(project, workspace=workspace_key),
+            unmet_boards=_unmet_boards(project),
             previews_json=previews_json,
         )
 
