@@ -193,8 +193,9 @@ source file and board, `editors/vscode/extension.js`); finding 9 as
 finding 10 as `next_ids` in the index payload (`payload["next_ids"]`,
 `src/refdes/render.py`); and finding 13 in `1cf3e88`.
 
-**Status: outstanding.** No `CustomTextEditorProvider` exists in
-`editors/vscode/extension.js`.
+**Status: design draft, not decided.** [`browser-editor.md`](browser-editor.md)
+compares the browser/editor shapes and recommends a local `refdes serve` with
+a separate `/edit/` shell over the same plain files. No implementation exists.
 
 **Local model: not suitable.** This one survives the revised rule unchanged:
 it is design-judgment-heavy UI work with no mechanical acceptance test —
