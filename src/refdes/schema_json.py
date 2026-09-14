@@ -277,7 +277,7 @@ def newest_config_file(project: Project) -> str | None:
     )
 
 
-def write_schema(project: Project) -> bool:
+def write_schema(project: Project, write: bool = True) -> bool:
     """Write `.refdes/schema.json` for the resolved project.
 
     A pure function of the current merged config -- gitignored, not
@@ -289,6 +289,11 @@ def write_schema(project: Project) -> bool:
     the one gap aggressive regeneration doesn't close: a bare
     yaml-language-server setup with no refdes-aware watcher has nothing to
     re-trigger a refresh between a config edit and the next CLI invocation.
+
+    `write=False` (the global `--no-write`, docs/design/keys.md §2) skips the
+    write but still computes and returns the same staleness verdict, so the
+    trip-wire diagnostic survives a read-only pass -- the user still learns
+    the file is stale, only it isn't fixed under their feet.
     """
     path = os.path.join(project.root, SCHEMA_REL_PATH)
     newest = newest_config_file(project)
@@ -298,6 +303,8 @@ def write_schema(project: Project) -> bool:
         and os.path.getmtime(path)
         < os.path.getmtime(os.path.join(project.root, newest))
     )
+    if not write:
+        return was_stale
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as fh:
         json.dump(build_schema(project), fh, indent=2)

@@ -1154,12 +1154,20 @@ In rough order of how likely each is to change the design:
 4. **`--no-write` coverage.** Enumerate every write the tool performs during
    a load and confirm the flag suppresses all of them. This is the kind of
    flag that is 95% implemented and then dirties a CI tree via one forgotten
-   path. **Status: partially done.** The flag exists and gates key minting
-   (the write this document's first implementation slice added); it does not
-   yet gate `.refdes/schema.json` regeneration, seals, the boards manifest, or
-   the id ledger, all of which `_load()` still writes unconditionally today.
-   This prototype item is therefore still open, narrowed to "everything
-   except key minting."
+   path. **Status: done.** The flag now gates every incidental write in the
+   load/check/build path — key minting, link expansion, `.refdes/schema.json`
+   regeneration (whose staleness diagnostic still fires, reporting "not
+   refreshed"), the seal files and the membership manifest (gated through
+   `build(seal_write=...)`), the baseline hash-format migration reached from
+   `former-ids propose`, and the baseline stamp itself (`revision`/`release`
+   report "would stamp" and write nothing). Explicit write commands either
+   honor the flag by running their existing dry-run (`id`, `revise`,
+   `keys adopt`, `stub-tests`) or refuse with exit 2 (`fetch`, `init`,
+   `standard upgrade`, `standard add-preset`/`remove-preset`,
+   `former-ids propose --confirm`); `new` and `schema` write nothing to
+   begin with. `build --no-write` still writes the site, per §2. The
+   enumeration is pinned by `tests/test_no_write.py`, which snapshots every
+   byte of the project tree before and after each load-type command.
 
 5. ~~**Damm versus Luhn**, but only if the answer might be Damm — the window
    for changing the check algorithm closes the moment the first project

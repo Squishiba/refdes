@@ -76,8 +76,10 @@ def _load(args, require_ids: bool = True) -> tuple[Project, bool]:
     # that reaches this point has already resolved the full merged schema,
     # so writing .refdes/schema.json here is the same housekeeping posture
     # `build` already applies to .refdes/boards.yaml and the ID ledger
-    # (docs/design/standard-library.md §12).
-    schema_was_stale = schema_json_mod.write_schema(project)
+    # (docs/design/standard-library.md §12). `--no-write` suppresses it but
+    # still gets the staleness verdict, so `check`'s trip-wire diagnostic
+    # survives a read-only pass (docs/design/keys.md §2).
+    schema_was_stale = schema_json_mod.write_schema(project, write=not args.no_write)
     parse_span = _parse_items(project, require_ids, discard=None)
 
     # Same posture, extended to surrogate keys (docs/design/keys.md §2): a key
@@ -85,9 +87,9 @@ def _load(args, require_ids: bool = True) -> tuple[Project, bool]:
     # command that already loads the project fills in missing ones as a side
     # effect. `--no-write` is the escape for a genuinely read-only pass (CI
     # checking out a tree, inspecting someone else's project, a bisect over
-    # historical commits) -- note this is the *only* write `--no-write`
-    # currently gates; the flag's full scope per the design doc (schema.json,
-    # seals, the boards manifest, the id ledger) is unimplemented.
+    # historical commits): it now gates every incidental write in the load
+    # path -- minting, expansion, schema.json here, and, in build(), the
+    # seals and the membership manifest (docs/design/keys.md §9 item 4).
     minted = keys_mod.mint_missing(project, write=not args.no_write)
     if minted:
         parse_span = _parse_items(project, require_ids, discard=parse_span)
@@ -104,6 +106,19 @@ def _load(args, require_ids: bool = True) -> tuple[Project, bool]:
         _parse_items(project, require_ids, discard=parse_span)
 
     return project, schema_was_stale
+
+
+def _refuse_no_write(command: str, what: str) -> int:
+    """Explicit write commands have no read-only story to tell under
+    `--no-write` (unlike the ones with a --dry-run, which get forced onto
+    it): running them means writing, so refuse loudly rather than write
+    silently (docs/design/keys.md §2)."""
+    print(
+        f"--no-write: {command} writes {what}; refusing to run it under "
+        "--no-write. Drop --no-write to run it for real.",
+        file=sys.stderr,
+    )
+    return 2
 
 
 def _visible(
@@ -168,10 +183,16 @@ def cmd_check(args) -> int:
         # across both config files, and a warning pointing at the wrong one
         # would send the user looking for an edit in a file they never touched.
         newest = schema_json_mod.newest_config_file(project)
-        project.warn(
-            f".refdes/schema.json was older than {newest} -- refreshed. If your "
-            "editor's completion looked stale, it should catch up now."
-        )
+        if args.no_write:
+            project.warn(
+                f".refdes/schema.json was older than {newest} -- not refreshed "
+                "(--no-write). Run without --no-write to refresh it."
+            )
+        else:
+            project.warn(
+                f".refdes/schema.json was older than {newest} -- refreshed. If your "
+                "editor's completion looked stale, it should catch up now."
+            )
     if args.board and args.board not in project.boards:
         import difflib
 
@@ -222,9 +243,18 @@ def cmd_build(args) -> int:
             f"--reseal {args.reseal!r} is not a board declared in refdes-project.yaml's "
             f"boards: registry.{hint}"
         )
+    if args.no_write and (args.reseal or args.accept_board_move):
+        print(
+            "note: --no-write -- --reseal/--accept-board-move record nothing; "
+            "the edits they would accept stay outstanding.",
+            file=sys.stderr,
+        )
     build_mod.build(
         project,
-        seal_write=not args.dry_run,
+        # --no-write gates the seal files and the membership manifest --
+        # both live under .refdes/ and neither is the site, which is the
+        # only thing build's own output is (docs/design/keys.md §2).
+        seal_write=not (args.dry_run or args.no_write),
         reseal=args.reseal,
         accept_board_move=args.accept_board_move,
         require_citations=args.require_citations,
@@ -297,6 +327,15 @@ def _run_stamp(args, kind: str) -> int:
         print(
             f"\n{kind} {args.name!r} unchanged since {outcome.stamped_at} -- "
             "nothing to stamp."
+        )
+        return 0
+
+    if outcome.status == "would_stamp":
+        # --no-write: every check passed, nothing was written.
+        rel_path = os.path.relpath(outcome.path, project.root).replace("\\", "/")
+        print(
+            f"\n{kind} {args.name!r} not stamped (--no-write): would stamp "
+            f"{outcome.item_count} items to {rel_path}."
         )
         return 0
 
@@ -401,6 +440,8 @@ def cmd_ls(args) -> int:
 
 
 def cmd_id(args) -> int:
+    if args.no_write:
+        args.dry_run = True  # --no-write: report the allocation, write nothing
     project, _stale = _load(args, require_ids=False)
     if not project.pending:
         print("no items are missing an id")
@@ -422,6 +463,10 @@ def cmd_id(args) -> int:
 
 def cmd_fetch(args) -> int:
     """The only command that touches the network. Pins and optionally vendors."""
+    if args.no_write:
+        return _refuse_no_write(
+            "fetch", "the .refdes/citations.yaml lockfile and .refdes/vendor/"
+        )
     project, _stale = _load(args, require_ids=False)
     try:
         results = citations_mod.fetch_all(
@@ -642,6 +687,11 @@ def cmd_audit(args) -> int:
 
 
 def cmd_init(args) -> int:
+    if args.no_write:
+        return _refuse_no_write(
+            "init", "refdes-project.yaml and .vscode/settings.json in the "
+            "current directory"
+        )
     standard = None if args.standard == "none" else args.standard
     presets = list(args.preset or [])
     path = scaffold_mod.init(os.getcwd(), standard=standard, presets=presets)
@@ -688,12 +738,16 @@ def _standard_project_root(args) -> str:
 
 
 def cmd_standard_add_preset(args) -> int:
+    if args.no_write:
+        return _refuse_no_write("standard add-preset", "refdes-project.yaml")
     scaffold_mod.add_preset(_standard_project_root(args), args.name)
     print(f"added preset {args.name!r} to standard.presets:")
     return 0
 
 
 def cmd_standard_remove_preset(args) -> int:
+    if args.no_write:
+        return _refuse_no_write("standard remove-preset", "refdes-project.yaml")
     diagnostics = scaffold_mod.remove_preset(_standard_project_root(args), args.name)
     for d in diagnostics:
         stream = sys.stderr if d.level == "error" else sys.stdout
@@ -764,6 +818,8 @@ def _print_revision_result(result, dry_run: bool) -> int:
 
 
 def cmd_revise(args) -> int:
+    if args.no_write:
+        args.dry_run = True  # --no-write: report the plan, write nothing
     project_root = _standard_project_root(args)
     try:
         mapping = revise_mod.load_mapping(args.mapping)
@@ -775,6 +831,11 @@ def cmd_revise(args) -> int:
 
 
 def cmd_standard_upgrade(args) -> int:
+    if args.no_write:
+        return _refuse_no_write(
+            "standard upgrade", "every item file it renames plus "
+            "refdes-project.yaml, and it has no dry-run"
+        )
     project_root = _standard_project_root(args)
     steps = revise_mod.apply_standard_upgrade(project_root, args.to)
     ok = True
@@ -794,6 +855,8 @@ def cmd_standard_upgrade(args) -> int:
 
 
 def cmd_keys_adopt(args) -> int:
+    if args.no_write:
+        args.dry_run = True  # --no-write: show the complete plan, write nothing
     result = adopt_mod.apply(_standard_project_root(args), dry_run=args.dry_run)
     if not result.ok:
         print("would refuse:" if args.dry_run else "refused:", file=sys.stderr)
@@ -871,6 +934,8 @@ def cmd_keys_adopt(args) -> int:
 
 
 def cmd_stub_tests(args) -> int:
+    if args.no_write:
+        args.dry_run = True  # --no-write: report the stubs, write nothing
     project, _stale = _load(args, require_ids=False)
     build_mod.build(project, seal_write=False, reseal=False)
     if project.errors:
@@ -897,10 +962,16 @@ def cmd_former_ids_propose(args) -> int:
     unrelated errors elsewhere in the project is still useful, so this only
     needs the project to parse, not to pass validate_items()/resolve_links().
     """
+    if args.no_write and args.confirm:
+        return _refuse_no_write(
+            "former-ids propose --confirm", "former_ids: into the item files"
+        )
     project, _stale = _load(args, require_ids=False)
     build_mod.build(project, seal_write=False, reseal=False)
     try:
-        candidates = former_ids_mod.propose(project, baseline_name=args.baseline)
+        candidates = former_ids_mod.propose(
+            project, baseline_name=args.baseline, write=not args.no_write
+        )
     except former_ids_mod.ProposeError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
@@ -948,9 +1019,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--no-write",
         action="store_true",
-        help="never modify anything under items/ or .refdes/ (currently: "
-        "suppresses surrogate-key minting; see docs/design/keys.md §2) -- for "
-        "CI, inspecting someone else's project, or a bisect over history",
+        help="never modify anything under items/ or .refdes/ -- suppresses "
+        "key minting, link expansion, .refdes/schema.json regeneration, "
+        "seals, the membership manifest, baseline stamps and the id ledger "
+        "(docs/design/keys.md §2); explicit write commands either report "
+        "what would change or refuse. 'refdes build --no-write' still "
+        "writes the site -- that is the command's own output, not a "
+        "side effect -- for CI, inspecting someone else's project, or a "
+        "bisect over history",
     )
     sub = parser.add_subparsers(dest="command", required=True)
 

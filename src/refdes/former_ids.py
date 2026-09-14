@@ -63,11 +63,18 @@ def _resolve_baseline(project: Project, baseline_name: str | None):
     return baseline
 
 
-def propose(project: Project, baseline_name: str | None = None) -> list[Candidate]:
+def propose(
+    project: Project, baseline_name: str | None = None, write: bool = True
+) -> list[Candidate]:
     """Best-match candidates, one per still-unresolved removed id, greedily
-    assigned by descending confidence so no added item is proposed twice."""
+    assigned by descending confidence so no added item is proposed twice.
+
+    `write` threads through to `lifecycle.diff_against`'s hash-format
+    migration -- `--no-write` must not rewrite a baseline file just to
+    propose candidates (docs/design/keys.md §2).
+    """
     baseline = _resolve_baseline(project, baseline_name)
-    diff = lifecycle.diff_against(project, baseline)
+    diff = lifecycle.diff_against(project, baseline, write=write)
 
     removed = [
         (old_id, old_type, old_title)

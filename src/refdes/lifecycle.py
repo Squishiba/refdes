@@ -627,14 +627,13 @@ def stamp(project: Project, kind: str, name: str, write: bool = True) -> StampOu
     the caller against the same `project.errors` every other command uses,
     not re-checked here.
 
-    `write` only gates the hash-format migration below, not the stamp
-    itself: an existing same-name baseline stamped before keys existed has
-    to be migrated (or at least compared correctly) before its `.items` can
-    be checked against a fresh `items_map` at all. Its absent `key` metadata
-    must likewise stay absent for comparison rather than being manufactured
-    from the current item. Otherwise a byte-identical re-run would misreport
-    as "conflict" purely because the stored format gained new metadata, not
-    because any content changed (docs/design/keys.md §5).
+    `write=False` (the global `--no-write`, docs/design/keys.md §2) writes
+    nothing at all: the existing-baseline hash-format migration is skipped
+    and, once every check below passes, the outcome is reported as
+    "would_stamp" with no file written -- the same "say what would change,
+    change nothing" posture the rest of the flag takes. The migration is
+    gated too because `.refdes/baselines/` is exactly what `--no-write`
+    promises not to touch.
     """
     items_map = _items_map(project)
 
@@ -682,6 +681,12 @@ def stamp(project: Project, kind: str, name: str, write: bool = True) -> StampOu
         data["gate"] = {r.name: r.status for r in gate_results}
     data["items"] = dict(sorted(items_map.items()))
 
+    if not write:
+        return StampOutcome(
+            kind=kind, name=name, status="would_stamp",
+            path=baseline_path(project, name), item_count=len(items_map),
+            stamped_at=stamped_at, stamped_by=stamped_by, gate_results=gate_results,
+        )
     path = _save_baseline_file(project, data)
     return StampOutcome(
         kind=kind, name=name, status="stamped", path=path, item_count=len(items_map),
@@ -768,8 +773,9 @@ def diff_against(project: Project, baseline: Baseline, write: bool = True) -> Di
     its items as "changed" purely because the hash *definition* moved, which
     isn't the question this function exists to answer. `write` threads
     through to migrate_hash_format() (`--no-write`, docs/design/keys.md §2);
-    defaults True so former_ids.propose(), which calls this without knowing
-    about the flag, keeps its existing unconditional-load behaviour.
+    defaults True for callers that load a project writably by construction,
+    and `cli` threads `not args.no_write` from both `audit` and
+    `former-ids propose`.
     """
     migrate_hash_format(project, baseline, write=write)
     current = _items_map(project)

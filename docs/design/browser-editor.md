@@ -714,6 +714,11 @@ maintain.
 
 ### Slice 0 — truly read-only loading
 
+**Status: the `--no-write` coverage bullet is done** (keys.md §9 item 4);
+the byte-identical-tree proof below is pinned by `tests/test_no_write.py`.
+The side-effect-free load/build API with source-overlay support remains
+open editor work.
+
 - Complete global `--no-write` coverage for every incidental source/metadata
   write.
 - Expose one side-effect-free load/build API with source-overlay support.
