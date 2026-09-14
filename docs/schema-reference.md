@@ -324,6 +324,184 @@ deliberately unchanged by the `hardware@2` rename, because its whole job is to
 reproduce what projects did before `coverable:` existed; it is removed in
 refdes 1.0.
 
+### Filled-in examples
+
+Field tables describe a type abstractly; the fastest way to see one is the
+front matter a new item of that type actually starts life with. Each example
+below is what `refdes new <type>` generates — the required fields with their
+placeholders, defaulted fields with their defaults, optional fields and links
+commented out with their type/choices hints — for every type the pinned
+standard resolves.
+
+<!-- BEGIN GENERATED per-type-examples -->
+Every example below is live `refdes new <type>` output -- the same
+`scaffold.new_item_text()` the CLI calls, run against the resolved
+**hardware@3** schema pinned in this repo's `refdes-project.yaml`, and
+written here by `python docs-site/gen_examples.py`. Do not hand-edit
+this block: `tests/test_docs_examples.py` fails if it differs from
+what the generator produces today.
+
+#### `requirement` — hardware@3
+
+```yaml
+---
+id:
+type: requirement
+# source:  # text
+# note:  # text
+# tags:  # list
+# owner:  # person
+# last_reviewed:  # date
+# title:  # text
+status: draft  # choices: draft, active, retired
+# rationale:  # text
+# refines: []  # target: requirement
+# governed_by: []  # target: requirement, bound
+# part_of: []  # target: group
+---
+
+<!-- required: the content itself goes here. -->
+```
+
+#### `bound` — hardware@3
+
+```yaml
+---
+id:
+type: bound
+# source:  # text
+# note:  # text
+# tags:  # list
+# owner:  # person
+# last_reviewed:  # date
+# title:  # text
+limit:  # required -- limit
+status: draft  # choices: draft, active, retired
+# rationale:  # text
+# refines: []  # target: bound
+# derives_from: []  # target: requirement, bound
+# part_of: []  # target: group
+---
+
+<!-- required: the content itself goes here. -->
+```
+
+#### `decision` — hardware@3
+
+```yaml
+---
+id:
+type: decision
+# source:  # text
+# note:  # text
+# tags:  # list
+# owner:  # person
+# last_reviewed:  # date
+# citations:  # citations
+title:  # required -- text
+status: proposed  # choices: proposed, in_progress, accepted, on_hold, rejected, superseded
+# rationale:  # text; required when status is 'rejected'
+# date:  # date
+# options:  # options
+# checks:  # checks
+# satisfies: []  # target: requirement, bound
+# constrained_by: []  # target: bound
+# supersedes: []  # target: decision
+# selects: []  # target: component
+# blocked_by: []  # target: any
+# recorded_by: []  # target: log
+# part_of: []  # target: group
+---
+
+<!-- optional body. -->
+```
+
+#### `test` — hardware@3
+
+```yaml
+---
+id:
+type: test
+# source:  # text
+# note:  # text
+# tags:  # list
+# owner:  # person
+# last_reviewed:  # date
+title:  # required -- text
+status: planned  # choices: planned, passing, failing, blocked
+# verifies: []  # target: requirement, bound
+# part_of: []  # target: group
+---
+
+<!-- optional body. -->
+```
+
+#### `component` — hardware@3
+
+```yaml
+---
+id:
+type: component
+# source:  # text
+# note:  # text
+# tags:  # list
+# owner:  # person
+# last_reviewed:  # date
+# citations:  # citations
+title:  # required -- text
+# part_number:  # text
+# refdes:  # list
+status: candidate  # choices: candidate, selected, obsolete
+# rationale:  # text; required when it has a link under 'alternate'
+# checks:  # checks
+# satisfies: []  # target: requirement, bound
+# constrained_by: []  # target: bound
+# equivalent: []  # target: component
+# alternate: []  # target: component
+# part_of: []  # target: group
+---
+
+<!-- optional body. -->
+```
+
+#### `group` — hardware@3
+
+```yaml
+---
+id:
+type: group
+# source:  # text
+# note:  # text
+# tags:  # list
+# owner:  # person
+# last_reviewed:  # date
+title:  # required -- text
+---
+
+<!-- optional body. -->
+```
+
+#### `log` — hardware@3
+
+```yaml
+---
+id:
+type: log
+# source:  # text
+# note:  # text
+# tags:  # list
+date:  # required -- date
+summary:  # required -- text
+# author:  # person
+# addresses: []  # target: requirement, bound
+# amends: []  # target: log
+# records: []  # target: decision
+---
+
+<!-- optional body. -->
+```
+<!-- END GENERATED per-type-examples -->
+
 ---
 
 ## `imports`
