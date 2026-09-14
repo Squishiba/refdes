@@ -5,6 +5,8 @@ Split out of the original monolithic tests/test_refdes.py.
 
 from __future__ import annotations
 
+import builtins
+
 import yaml
 from conftest import write_project_config
 
@@ -56,6 +58,25 @@ def _keyed_links_project(tmp_path, items_yaml):
     parse.load_items(project)
     keys_mod.mint_missing(project)
     return root
+
+
+def _expand_then_rename(root, old_id="REQ-001", new_id="REQ-003", *, former=False):
+    config = str(root / "refdes-project.yaml")
+    project = load_project(config_path=config)
+    parse.load_items(project)
+    target_key = project.items[old_id].key
+    written = links_mod.expand_missing(project)
+    assert written
+
+    path = root / "items" / "r.yaml"
+    text = path.read_text(encoding="utf-8")
+    replacement = f"id: {new_id}\n"
+    if former:
+        replacement += f"    former_ids: [{old_id}]\n"
+    renamed = text.replace(f"id: {old_id}\n", replacement, 1)
+    assert renamed != text
+    path.write_text(renamed, encoding="utf-8")
+    return config, path, target_key
 
 
 def test_resolve_link_target_bare_and_composite_forms(tmp_path):
@@ -178,7 +199,7 @@ def test_hash_is_neutral_to_expanding_a_bare_link_into_composite_form(tmp_path):
     assert hash_after == hash_before
 
 
-def test_expand_missing_rewrites_same_line_list_and_freezes_it(tmp_path):
+def test_expand_missing_rewrites_same_line_list_and_is_idempotent(tmp_path):
     root = _keyed_links_project(
         tmp_path,
         "defaults: { type: requirement }\n"
@@ -201,8 +222,8 @@ def test_expand_missing_rewrites_same_line_list_and_freezes_it(tmp_path):
     text = (root / "items" / "r.yaml").read_text(encoding="utf-8")
     assert f"refines: [{new}]" in text
 
-    # Frozen: a second pass finds nothing left to expand, and never touches
-    # the composite it already wrote.
+    # Already current: a second pass finds nothing to expand or refresh and
+    # leaves the composite untouched.
     project2 = load_project(config_path=str(root / "refdes-project.yaml"))
     parse.load_items(project2)
     assert links_mod.expand_missing(project2) == []
@@ -272,11 +293,7 @@ def test_expand_missing_rewrites_markdown_front_matter(tmp_path):
     assert reparsed.items["DEC-002"].links["refines"] == [new]
 
 
-def test_expand_missing_skips_flow_style_entries(tmp_path):
-    """A known, honestly-scoped gap (links.py's own module docstring and
-    _rewrite_item_links's): a flow-style list entry is never matched by the
-    key-name-opens-the-line pattern expansion depends on, so it stays bare.
-    §2's resolution rule keeps it fully working regardless."""
+def test_expand_missing_rewrites_link_inside_flow_mapping_entry(tmp_path):
     root = _keyed_links_project(
         tmp_path,
         "defaults: { type: requirement }\n"
@@ -287,14 +304,32 @@ def test_expand_missing_skips_flow_style_entries(tmp_path):
     project = load_project(config_path=str(root / "refdes-project.yaml"))
     parse.load_items(project)
 
-    assert links_mod.expand_missing(project) == []
+    written = links_mod.expand_missing(project)
+    assert len(written) == 1
+    _item, _link_name, _old, new = written[0]
     text = (root / "items" / "r.yaml").read_text(encoding="utf-8")
-    assert "REQ-001@" not in text
-    assert "refines: [REQ-001]" in text
+    assert f"refines: [{new}]" in text
+    assert "text: Source." in text
 
-    # Still fully usable -- the bare reference still resolves.
-    build_mod.build(project, seal_write=False, reseal=False)
-    assert not project.errors
+
+def test_expand_missing_rewrites_link_in_defaults_block(tmp_path):
+    root = _keyed_links_project(
+        tmp_path,
+        "defaults:\n"
+        "  type: requirement\n"
+        '  refines: ["REQ-001"]\n'
+        "items:\n"
+        "  - id: REQ-001\n    text: Target.\n"
+        "  - id: REQ-002\n    text: Source.\n",
+    )
+    project = load_project(config_path=str(root / "refdes-project.yaml"))
+    parse.load_items(project)
+    target_key = project.items["REQ-001"].key
+
+    written = links_mod.expand_missing(project)
+    assert len(written) == 2  # one shared spelling inherited by both items
+    text = (root / "items" / "r.yaml").read_text(encoding="utf-8")
+    assert f'refines: ["REQ-001@{target_key}"]' in text
 
 
 def test_expand_missing_skips_a_target_with_no_key_yet(tmp_path):
@@ -340,6 +375,162 @@ def test_no_write_suppresses_link_expansion_and_reports_one_info_line(tmp_path):
     info = [d for d in project.diagnostics if d.level == "info"]
     assert any("1 link reference has not been expanded" in d.message for d in info)
     assert any("--no-write" in d.message for d in info)
+
+
+# --------------------------------------------------- display-half refresh
+
+
+def test_rename_refreshes_flow_list_display_half_and_preserves_key(tmp_path):
+    root = _keyed_links_project(
+        tmp_path,
+        "defaults: { type: requirement }\n"
+        "items:\n"
+        "  - id: REQ-001\n    text: Target.\n"
+        "  - {id: REQ-002, text: Source., refines: [REQ-001]}\n",
+    )
+    config, path, target_key = _expand_then_rename(root, former=True)
+
+    assert cli_mod.main(["-c", config, "check"]) == 0
+    refreshed = path.read_text(encoding="utf-8")
+    assert f"refines: [REQ-003@{target_key}]" in refreshed
+    assert f"@{target_key}" in refreshed
+    assert "refines: [REQ-001@" not in refreshed
+
+
+def test_rename_refreshes_quoted_composite_in_block_sequence(tmp_path):
+    root = _keyed_links_project(
+        tmp_path,
+        "defaults: { type: requirement }\n"
+        "items:\n"
+        "  - id: REQ-001\n    text: Target.\n"
+        '  - id: REQ-002\n    text: Source.\n    refines:\n      - "REQ-001"\n',
+    )
+    config, path, target_key = _expand_then_rename(root)
+
+    assert cli_mod.main(["-c", config, "check"]) == 0
+    refreshed = path.read_text(encoding="utf-8")
+    assert f'- "REQ-003@{target_key}"' in refreshed
+
+
+def test_refresh_guard_warns_and_leaves_file_byte_for_byte_unchanged(tmp_path, capsys):
+    root = _keyed_links_project(
+        tmp_path,
+        "defaults: { type: requirement }\n"
+        "items:\n"
+        "  - id: REQ-003\n    text: Actual keyed target.\n"
+        "  - id: REQ-001\n    text: Different live item.\n"
+        "  - id: REQ-002\n    text: Source.\n    refines: [REQ-003]\n",
+    )
+    config = str(root / "refdes-project.yaml")
+    project = load_project(config_path=config)
+    parse.load_items(project)
+    target_key = project.items["REQ-003"].key
+    assert links_mod.expand_missing(project)
+
+    path = root / "items" / "r.yaml"
+    current = path.read_text(encoding="utf-8")
+    stale = current.replace(
+        f"refines: [REQ-003@{target_key}]",
+        f"refines: [REQ-001@{target_key}]",
+    )
+    assert stale != current
+    path.write_text(stale, encoding="utf-8")
+    before = path.read_bytes()
+
+    assert cli_mod.main(["-c", config, "check"]) == 0
+    output = capsys.readouterr().out
+    assert path.read_bytes() == before
+    assert "WARNING items/r.yaml:" in output
+    assert "[REQ-002]" in output
+    assert "refines references" in output
+    assert f"'REQ-001@{target_key}'" in output
+    assert "that key is REQ-003" in output
+    assert "REQ-001 is a different live item" in output
+    assert "Refusing to refresh the label" in output
+
+
+def test_no_write_leaves_stale_composite_bytes_unchanged(tmp_path):
+    root = _keyed_links_project(
+        tmp_path,
+        "defaults: { type: requirement }\n"
+        "items:\n"
+        "  - id: REQ-001\n    text: Target.\n"
+        "  - id: REQ-002\n    text: Source.\n    refines: [REQ-001]\n",
+    )
+    config, path, target_key = _expand_then_rename(root)
+    before = path.read_bytes()
+
+    assert cli_mod.main(["-c", config, "--no-write", "check"]) == 0
+    assert path.read_bytes() == before
+    assert f"refines: [REQ-001@{target_key}]" in before.decode()
+
+
+def test_second_load_after_refresh_performs_no_link_write(tmp_path, monkeypatch):
+    root = _keyed_links_project(
+        tmp_path,
+        "defaults: { type: requirement }\n"
+        "items:\n"
+        "  - id: REQ-001\n    text: Target.\n"
+        "  - id: REQ-002\n    text: Source.\n    refines: [REQ-001]\n",
+    )
+    config, _path, _target_key = _expand_then_rename(root)
+    assert cli_mod.main(["-c", config, "check"]) == 0
+
+    write_modes = []
+
+    def tracking_open(*args, **kwargs):
+        mode = args[1] if len(args) > 1 else kwargs.get("mode", "r")
+        if any(flag in mode for flag in "wax+"):
+            write_modes.append(mode)
+        return builtins.open(*args, **kwargs)
+
+    monkeypatch.setattr(links_mod, "open", tracking_open, raising=False)
+    assert cli_mod.main(["-c", config, "check"]) == 0
+    assert write_modes == []
+
+
+def test_refresh_does_not_rewrite_old_id_in_markdown_prose(tmp_path):
+    write_project_config(
+        tmp_path,
+        "site: { title: T, out: _site }\n"
+        "link_types:\n  refines: { inverse: refined_by, label: Refines }\n"
+        "types:\n"
+        "  decision:\n"
+        "    prefix: DEC\n    label: Decision\n"
+        "    fields:\n      title: { type: text, required: true }\n"
+        "    links:\n      refines: [decision]\n",
+    )
+    items = tmp_path / "items"
+    items.mkdir()
+    target_path = items / "a.md"
+    source_path = items / "b.md"
+    target_path.write_text(
+        "---\nid: DEC-001\ntype: decision\ntitle: Target.\n---\n",
+        encoding="utf-8",
+    )
+    source_path.write_text(
+        "---\nid: DEC-002\ntype: decision\ntitle: Source.\n"
+        "refines: [DEC-001]\n---\n"
+        "See [[DEC-001]] and bare DEC-001 in prose.\n",
+        encoding="utf-8",
+    )
+    config = str(tmp_path / "refdes-project.yaml")
+    project = load_project(config_path=config)
+    parse.load_items(project)
+    keys_mod.mint_missing(project)
+    project = load_project(config_path=config)
+    parse.load_items(project)
+    target_key = project.items["DEC-001"].key
+    assert links_mod.expand_missing(project)
+
+    target = target_path.read_text(encoding="utf-8")
+    target_path.write_text(target.replace("id: DEC-001", "id: DEC-003"), encoding="utf-8")
+    assert cli_mod.main(["-c", config, "check"]) == 0
+
+    refreshed = source_path.read_text(encoding="utf-8")
+    front_matter, body = refreshed.split("---\n", 2)[1:]
+    assert f"refines: [DEC-003@{target_key}]" in front_matter
+    assert body == "See [[DEC-001]] and bare DEC-001 in prose.\n"
 
 
 # ------------------------------------------------------------- hash-format migration

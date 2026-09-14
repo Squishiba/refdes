@@ -91,14 +91,13 @@ def _load(args, require_ids: bool = True) -> tuple[Project, bool]:
     if minted:
         parse_span = _parse_items(project, require_ids, discard=parse_span)
 
-    # §3: expand a bare link reference that resolves to a keyed item into the
-    # frozen `DISPLAY-ID@key` composite. Must run after minting (a target
-    # needs its own key before there's anything to expand into). The rewrite
-    # itself happens in place (same line count, so it doesn't shift anything
-    # on its own) but still needs a reparse afterward, for the same reason
-    # every write-back does: build() below must see `item.links` holding the
-    # composite text that's now actually on disk, not the bare text this
-    # in-memory project was parsed with.
+    # §3: maintain structured links as `DISPLAY-ID@key` composites. Bare
+    # references to keyed targets gain their key half; stale display halves
+    # refresh after a target rename unless the old label now names a different
+    # live item. Must run after minting (a target needs its own key before
+    # there's anything to expand into). The source rewrite keeps line counts
+    # stable but still needs a reparse afterward so build() below sees
+    # `item.links` holding the text now actually on disk.
     expanded = links_mod.expand_missing(project, write=not args.no_write)
     if expanded:
         _parse_items(project, require_ids, discard=parse_span)

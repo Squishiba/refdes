@@ -15,15 +15,15 @@ diff, and merge.
 The decision is taken. This document specs it; it does not relitigate it.
 
 **Implementation status:** §1 (key format), §2 (minting), §3 (composite
-expansion and key-based resolution), §5 (hashing on the key, plus the
-baseline/seal hash-format migration), and §6 Layers 1-5 (well-formedness,
-uniqueness, unknown-key resolution, the latest-baseline lint, and the
-older-baseline audit) are implemented (`refdes/keys.py`, `refdes/links.py`,
-and changes to `build.py`, `cli.py`, `lifecycle.py`, `seal.py`, `blocked.py`,
-`blocks.py`, `workspaces.py`, `stub_tests.py`, and `render.py` -- see "What
-§3/§5 turned out to need beyond the spec" below). `refdes keys adopt` (§7),
-the display-half refresh-on-rename mechanism (§3), and any change to
-`revise.py` or `former_ids.py` are still design only.
+expansion, display-half refresh, and key-based resolution), §5 (hashing on
+the key, plus the baseline/seal hash-format migration), and §6 Layers 1-5
+(well-formedness, uniqueness, unknown-key resolution, the latest-baseline
+lint, and the older-baseline audit) are implemented (`refdes/keys.py`,
+`refdes/links.py`, and changes to `build.py`, `cli.py`, `lifecycle.py`,
+`seal.py`, `blocked.py`, `blocks.py`, `workspaces.py`, `stub_tests.py`, and
+`render.py` -- see "What §3/§5 turned out to need beyond the spec" below).
+`refdes keys adopt` (§7) and any change to `revise.py` or `former_ids.py` are
+still design only.
 
 **What §3/§5 turned out to need beyond the spec, implementing it:**
 

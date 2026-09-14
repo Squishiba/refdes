@@ -1,0 +1,1 @@
+- Refresh stale display labels in `DISPLAY-ID@key` structured links after an item rename, while preserving the key and refusing ambiguous rewrites when the old label names another live item.

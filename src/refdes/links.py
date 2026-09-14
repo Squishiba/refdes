@@ -1,19 +1,16 @@
-"""Expand-and-freeze link targets to the `DISPLAY-ID@key` composite form
-(docs/design/keys.md §3), layer 2 of the surrogate-key design.
+"""Maintain structured links in the `DISPLAY-ID@key` composite form.
 
 An author writes exactly what they write today -- `satisfies: [REQ-001]`.
-The tool expands it in place to `satisfies: [REQ-001@k7f3m2q9x4a]` the first
-time it sees a bare reference that resolves to a keyed item, the same way
-`refdes id` already expands a bare-numeric `id: "042"` into a full id. Once
-written, a composite is frozen: this module never touches one again, and
-resolution (build.resolve_link_target) uses only the part after `@`.
+The tool expands it in place to `satisfies: [REQ-001@k7f3m2q9x4a]` when the
+target has a key. Resolution (build.resolve_link_target) uses only the key
+half.
 
-This only ever *adds* the key half. It never rewrites the display half when
-a target's own id later changes -- that "refresh, and one case that must not
-be silent" mechanism (docs/design/keys.md §3) is a separate, more involved
-piece (three cases, some of them diagnostic) and is not implemented here.
-Until it exists, a stale display half is cosmetic only: resolution never
-reads it.
+The display half is readable, tool-maintained context rather than identity.
+When the keyed target is renamed, the next writable load refreshes a stale
+display half unless it now names a different live item. That collision is
+left untouched and warned about because it is the signature of a crossed
+merge. Unknown keys are also left untouched for build.resolve_links() to
+report; neither case ever falls back to the display half.
 """
 
 from __future__ import annotations
@@ -25,13 +22,14 @@ from collections import defaultdict
 from . import parse as parse_mod
 from .model import Item, Project
 
-# A display-id-shaped token (same shape as ids.ID_RE / build.BARE_REF_RE),
-# NOT immediately followed by '@' -- the negative lookahead is what keeps
-# this from ever touching the display half of a target that is *already*
-# composite. Without it, re-running expansion over a line that already reads
-# `REQ-001@k7f3m2q9x4a` would match the bare "REQ-001" prefix of that very
-# composite and corrupt it into `REQ-001@k7f3m2q9x4a@k7f3m2q9x4a`.
-_LINK_TOKEN_RE = re.compile(r"\b[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)*-\d+\b(?!@)")
+# A structured-link target token, either a bare display id or a composite.
+# Matching is deliberately confined to parsed link fields by the write-back
+# helpers below, so prose references and unrelated scalar fields are never
+# candidates. The optional key half lets expansion and display-half refresh
+# share exactly the same source-preserving rewrite path.
+_LINK_TOKEN_RE = re.compile(
+    r"\b[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)*-\d+(?:@[0-9a-z]+)?\b"
+)
 
 
 def _field_or_link_line_re(key: str) -> re.Pattern:
@@ -71,18 +69,8 @@ def _item_spans(rel: str, lines: list[str], items: list[Item]) -> list[tuple[Ite
     return spans
 
 
-def _rewrite_block_sequence(
-    out: list[str], start: int, limit: int, key_indent: int, replacements: dict[str, str]
-) -> set[str]:
-    """Rewrite the `- VALUE` entries of a block-style sequence beginning at
-    `start`, in place. Ends at the first line that isn't an entry indented
-    at least as deep as the key itself; a blank line inside the sequence is
-    passed over, matching ordinary YAML.
-
-    Returns the subset of `replacements`' keys actually found and rewritten
-    -- see _rewrite_item_links's docstring for why the caller needs that,
-    not just a bare success/failure.
-    """
+def _rewrite_tokens(text: str, replacements: dict[str, str]) -> tuple[str, set[str]]:
+    """Apply exact target replacements within one known link value."""
     applied: set[str] = set()
 
     def _sub(mo: re.Match) -> str:
@@ -93,6 +81,14 @@ def _rewrite_block_sequence(
         applied.add(old)
         return new
 
+    return _LINK_TOKEN_RE.sub(_sub, text), applied
+
+
+def _rewrite_block_sequence(
+    out: list[str], start: int, limit: int, key_indent: int, replacements: dict[str, str]
+) -> set[str]:
+    """Rewrite the `- VALUE` entries of a block-style link sequence."""
+    applied: set[str] = set()
     for i in range(start, limit):
         line = out[i]
         if not line.strip():
@@ -101,104 +97,158 @@ def _rewrite_block_sequence(
         if m is None or len(m.group(1)) < key_indent:
             return applied
         indent, sep, value, trail = m.groups()
-        new_value = _LINK_TOKEN_RE.sub(_sub, value)
+        new_value, changed = _rewrite_tokens(value, replacements)
+        applied |= changed
         if new_value != value:
             out[i] = f"{indent}-{sep}{new_value}{trail}"
     return applied
 
 
+def _flow_value_end(line: str, start: int) -> int:
+    """End of a value in a one-line flow mapping, respecting nested syntax."""
+    depth = 0
+    quote = ""
+    escaped = False
+    for i in range(start, len(line)):
+        ch = line[i]
+        if quote:
+            if quote == '"' and ch == "\\" and not escaped:
+                escaped = True
+                continue
+            if ch == quote and not escaped:
+                quote = ""
+            escaped = False
+            continue
+        if ch in "'\"":
+            quote = ch
+        elif ch in "[{(":
+            depth += 1
+        elif ch in "]})":
+            if depth == 0:
+                return i
+            depth -= 1
+        elif ch == "," and depth == 0:
+            return i
+    return len(line)
+
+
+def _rewrite_flow_mapping_field(
+    line: str, key: str, replacements: dict[str, str]
+) -> tuple[str, set[str]]:
+    """Rewrite one field inside a one-line item/defaults flow mapping."""
+    brace = line.find("{")
+    if brace < 0:
+        return line, set()
+    prefix = line[:brace]
+    if not (
+        re.fullmatch(r"\s*-\s*", prefix)
+        or re.fullmatch(r"\s*defaults:\s*", prefix)
+    ):
+        return line, set()
+
+    field_re = re.compile(rf"(^|[{{,])(\s*){re.escape(key)}\s*:")
+    match = field_re.search(line, brace)
+    if match is None:
+        return line, set()
+    value_start = match.end()
+    value_end = _flow_value_end(line, value_start)
+    new_value, applied = _rewrite_tokens(line[value_start:value_end], replacements)
+    if not applied:
+        return line, set()
+    return line[:value_start] + new_value + line[value_end:], applied
+
+
+def _rewrite_link_field(
+    out: list[str], start: int, end: int, key: str, replacements: dict[str, str]
+) -> set[str]:
+    """Rewrite one named link field in a bounded item or defaults span."""
+    limit = min(end, len(out))
+    direct_re = _field_or_link_line_re(key)
+    for i in range(max(0, start), limit):
+        match = direct_re.match(out[i])
+        if match:
+            indent, rest = match.groups()
+            if not rest.strip():
+                return _rewrite_block_sequence(out, i + 1, limit, len(indent), replacements)
+            new_rest, applied = _rewrite_tokens(rest, replacements)
+            if applied:
+                out[i] = f"{indent}{key}:{new_rest}"
+            return applied
+
+        new_line, applied = _rewrite_flow_mapping_field(out[i], key, replacements)
+        if applied:
+            out[i] = new_line
+            return applied
+    return set()
+
+
 def _rewrite_item_links(
     out: list[str], start: int, end: int, item: Item, replacements: dict[str, str]
 ) -> set[str]:
-    """Rewrite `item`'s own bare link-target tokens named in `replacements`
-    (old text -> new composite text) within [start, end).
-
-    Handles both YAML spellings a link value can take: same-line
-    (`key: [A, B]` or `key: A`) and block-style (a bare `key:` with `- A`
-    entries following it, indented deeper). Does NOT handle flow-style list
-    entries (`- {id: ..., satisfies: [A]}`, everything on one line) --
-    `_field_or_link_line_re` requires the link's own key name to open the
-    line (after an optional leading `- `), which a flow-style entry's key
-    never does (the entry's *id* opens it instead). Such a line is simply
-    never matched, so it is left exactly as authored -- a bare reference,
-    which stays fully resolvable (§2's resolution rule), just not yet
-    composite-expanded. Bulk flow-style files (`- {id: ..., text: ...}`)
-    rarely carry links in this project's own conventions, so this is judged
-    an acceptable, honestly-scoped gap rather than a reason to build a
-    second, flow-aware rewrite path for this first pass.
-
-    Returns the subset of `replacements`' keys actually found and rewritten.
-    This matters, not just for logging: expand_missing() must not claim (in
-    its return value, or in item.links in memory) that a target was
-    expanded when the line it lives on was never matched -- a candidate
-    inside a flow-style entry is exactly that case, and claiming it anyway
-    would leave the in-memory project silently disagreeing with what is
-    actually on disk.
-    """
+    """Rewrite an item's own (non-defaulted) structured-link targets."""
     applied: set[str] = set()
-    limit = min(end, len(out))
     for key_name in item.links:
-        for i in range(start, limit):
-            m = _field_or_link_line_re(key_name).match(out[i])
-            if not m:
-                continue
-            indent, rest = m.groups()
-            if rest.strip():
-                def _sub(mo: re.Match) -> str:
-                    old = mo.group(0)
-                    new = replacements.get(old)
-                    if new is None:
-                        return old
-                    applied.add(old)
-                    return new
-
-                new_rest = _LINK_TOKEN_RE.sub(_sub, rest)
-                if new_rest != rest:
-                    out[i] = f"{indent}{key_name}:{new_rest}"
-            else:
-                applied |= _rewrite_block_sequence(out, i + 1, limit, len(indent), replacements)
-            break
+        if key_name in item.inherited_fields:
+            continue
+        applied |= _rewrite_link_field(out, start, end, key_name, replacements)
     return applied
 
 
 def expand_missing(project: Project, write: bool = True) -> list[tuple[Item, str, str, str]]:
-    """Expand every local item's bare-display-id link targets that resolve
-    to a keyed item into the frozen `DISPLAY-ID@key` composite, and persist
-    the rewrite. Returns (item, link_name, old_target, new_target) for every
-    target actually rewritten.
+    """Expand bare link targets and refresh stale composite display halves.
 
-    Must run after keys.mint_missing() in the same load (cli._load()) --
-    a target needs its own key before there's anything to expand into. A
-    target that is still bare after this call is one of:
+    Both operations use the same source-preserving write-back. Returns
+    ``(item, link_name, old_target, new_target)`` for every target actually
+    rewritten.
 
-    - a dangling reference (resolve_links() reports this separately, as it
-      always has -- expansion doesn't duplicate that diagnostic);
-    - a reference to an *external* (imported) item -- imports never carry a
-      key today (imports.py's payload doesn't export one), so a link into
-      another project can never be composite-expanded yet. This is a real,
-      known gap, not an oversight: closing it means adding `key` to the
-      items.json export and import payload, which is a separate change with
-      its own cross-project-collision considerations, not bundled in here;
-    - a target whose own key-minting failed this run (rare -- see
-      keys.mint_missing's own write-back-failure handling) or was skipped
-      by `--no-write`;
-    - already composite (frozen -- never touched again, see _LINK_TOKEN_RE);
-    - inside a flow-style list entry (see _rewrite_item_links's docstring).
+    A composite's key half is immutable. If it resolves and its display half
+    is stale, the display text is refreshed unless that old text is now the
+    id of a different live item. That crossed-reference signature is warned
+    about and left untouched. An unknown key is likewise untouched here so
+    build.resolve_links() can report the Layer-3 error.
 
-    None of these are errors here. §2's resolution rule keeps a bare
-    reference fully working regardless of why it never got expanded.
+    Must run after keys.mint_missing() in the same load (cli._load()) because
+    a bare target needs a durable key before it can be expanded. Bare targets
+    that are dangling, external and keyless, or whose minting failed remain
+    fully usable under the existing display-id resolution rule.
     """
     rewrites: list[tuple[Item, str, str, str]] = []
+    expansion_count = 0
     replacements_by_item: dict[int, dict[str, str]] = defaultdict(dict)
+    by_key = {item.key: item for item in project.items.values() if item.key}
+
     for item in project.local_items:
         for link_name, targets in item.links.items():
             for target in targets:
-                if "@" in target:
-                    continue  # already composite -- frozen
-                resolved = project.items.get(target)
-                if resolved is None or not resolved.key:
-                    continue
-                new_target = f"{target}@{resolved.key}"
+                if "@" not in target:
+                    resolved = project.items.get(target)
+                    if resolved is None or not resolved.key:
+                        continue
+                    new_target = f"{target}@{resolved.key}"
+                    expansion_count += 1
+                else:
+                    old_display, _, key = target.partition("@")
+                    resolved = by_key.get(key)
+                    if resolved is None or old_display == resolved.id:
+                        continue
+                    other = project.items.get(old_display)
+                    if (
+                        other is not None
+                        and other is not resolved
+                        and old_display not in resolved.former_ids
+                    ):
+                        project.warn(
+                            f"{link_name} references {target!r}, but that key is "
+                            f"{resolved.id} and {old_display} is a different live "
+                            "item. Refusing to refresh the label until you confirm "
+                            "which was meant.",
+                            file=item.source_file,
+                            line=item.source_line,
+                            item_id=item.id,
+                        )
+                        continue
+                    new_target = f"{resolved.id}@{key}"
+
                 rewrites.append((item, link_name, target, new_target))
                 replacements_by_item[id(item)][target] = new_target
 
@@ -206,11 +256,12 @@ def expand_missing(project: Project, write: bool = True) -> list[tuple[Item, str
         return []
 
     if not write:
-        _report_missing(project, len(rewrites))
+        if expansion_count:
+            _report_missing(project, expansion_count)
         return []
 
     files_touched = sorted({item.source_file for item, *_ in rewrites})
-    applied_by_item: dict[int, set[str]] = {}
+    applied_by_item: dict[int, set[str]] = defaultdict(set)
     for rel in files_touched:
         path = os.path.join(project.root, rel)
         with open(path, "r", encoding="utf-8") as fh:
@@ -224,15 +275,39 @@ def expand_missing(project: Project, write: bool = True) -> list[tuple[Item, str
         for item, start, end in _item_spans(rel, lines, file_items):
             repl = replacements_by_item.get(id(item))
             if repl:
-                applied_by_item[id(item)] = _rewrite_item_links(lines, start, end, item, repl)
+                applied_by_item[id(item)] |= _rewrite_item_links(
+                    lines, start, end, item, repl
+                )
 
-        with open(path, "w", encoding="utf-8", newline="") as fh:
-            fh.write(newline.join(lines) + newline)
+        # A link inherited from file defaults has one physical spelling shared
+        # by every inheriting item. Rewrite that spelling once, then attribute
+        # the applied targets to each item whose parsed links came from it.
+        defaults_groups: dict[tuple[int, str], list[Item]] = defaultdict(list)
+        for item in file_items:
+            if item.defaults_line is None or id(item) not in replacements_by_item:
+                continue
+            for link_name in item.links:
+                if link_name in item.inherited_fields:
+                    defaults_groups[(item.defaults_line, link_name)].append(item)
 
-    # Only report/apply-in-memory what the write-back pass actually matched
-    # on disk (applied_by_item) -- a candidate that fell through unmatched
-    # (a flow-style entry, see _rewrite_item_links) must stay bare in both
-    # places, or item.links in memory would silently disagree with the file.
+        first_item = min((item.source_line - 1 for item in file_items), default=len(lines))
+        for (defaults_line, link_name), inheritors in defaults_groups.items():
+            combined: dict[str, str] = {}
+            for item in inheritors:
+                combined.update(replacements_by_item[id(item)])
+            applied = _rewrite_link_field(
+                lines, defaults_line - 1, first_item, link_name, combined
+            )
+            for item in inheritors:
+                own_targets = replacements_by_item[id(item)]
+                applied_by_item[id(item)] |= applied & own_targets.keys()
+
+        new_text = newline.join(lines) + newline
+        if new_text != text:
+            with open(path, "w", encoding="utf-8", newline="") as fh:
+                fh.write(new_text)
+
+    # Only report/apply in memory what the source pass actually matched.
     written = [
         (item, link_name, old, new)
         for item, link_name, old, new in rewrites
@@ -247,7 +322,8 @@ def expand_missing(project: Project, write: bool = True) -> list[tuple[Item, str
         for link_name, targets in item.links.items():
             item.links[link_name] = [repl[t] if t in applied else t for t in targets]
 
-    still_missing = len(rewrites) - len(written)
+    written_expansions = sum(1 for _item, _name, old, _new in written if "@" not in old)
+    still_missing = expansion_count - written_expansions
     if still_missing:
         _report_missing(project, still_missing)
 

@@ -1,0 +1,20 @@
+Task: implement display-half refresh-on-rename from docs/design/keys.md §3.
+
+Progress:
+- Fast-forwarded from main before inspection; worktree was clean.
+- Read the implementation-status header, all of §3, and §9 point 1.
+- Inspected links.py write-back, cli._load(), ids insertion helpers, parsing/default metadata, link resolution, and existing key/link tests.
+- Implementation plan: extend links.py's existing targeted write-back so expansion and refresh share the same field/sequence rewriting path; add flow-mapping and defaults support; preserve exact source formatting outside target tokens; emit the §3 case-2 warning without modifying the file.
+- Implemented composite display-half refresh in links.expand_missing(), preserving key halves and sharing expansion's source writer.
+- Added the live-id collision guard warning and left unknown-key composites for build.resolve_links() diagnostics.
+- Extended the shared writer to quoted scalars, block sequences, one-line flow mappings, and inherited links in defaults blocks.
+- Added named regression tests for ordinary rename, block/quoted form, collision guard, --no-write, idempotence, prose isolation, flow mappings, and defaults.
+- Updated keys.md/backlog.md implementation status and added changelog.d/key-label-refresh.added.md.
+- Targeted verification: `python -m pytest -q tests/test_keys_links.py tests/test_keys.py` passed (46 tests).
+- Sabotage verification: disabled the case-1 refresh and confirmed `test_rename_refreshes_flow_list_display_half_and_preserves_key` failed; restored it and the test passed.
+- Sabotage verification: disabled the case-2 live-item guard and confirmed `test_refresh_guard_warns_and_leaves_file_byte_for_byte_unchanged` failed; restored it and the test passed.
+- LSP diagnostics are clean for links.py, cli.py, and test_keys_links.py. The scoped Ruff command could not run because Ruff is not installed in this environment.
+- Full pre-commit suite: `python -m pytest -q` passed (720 tests).
+- Rebased again onto current main after §6 Layers 4-5 landed; resolved the keys.md/backlog.md status conflicts to preserve both implementations. The final rebased full suite passed (728 tests).
+
+Status: finished.
