@@ -1,0 +1,5 @@
+# Refdes surrogate-key adoption state.
+# Commit this file: future stamps, seals, and membership manifests use key-keyed storage.
+# Written by `refdes keys adopt`; do not edit it by hand.
+adopted: true
+format: 1

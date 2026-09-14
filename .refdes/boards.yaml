@@ -2,26 +2,66 @@
 # workspaces: is in use, which workspace -- each item was on the last
 # time the project was built, so a file moving either -- usually a move
 # to the wrong folder -- is a warning instead of a silent surprise.
+# Legacy projects key entries by display id. Adopted projects key entries
+# by surrogate key and carry the current display id inside for readability.
 boards:
-  BND-THM-001: board-a
-  BND-THM-002: board-a
-  CMP-PWR-001: board-a
-  CON-THM-001: board-a
-  CON-THM-002: board-a
-  DEC-B-001: board-b
-  DEC-B-002: board-b
-  DEC-PWR-001: board-a
-  LOG-A-001: board-a
-  LOG-A-002: board-a
-  LOG-A-003: board-a
-  LOG-A-004: board-a
-  LOG-A-005: board-a
-  LOG-A-006: board-a
-  REQ-B-PWR-001: board-b
-  REQ-PWR-001: board-a
-  REQ-PWR-002: board-a
-  REQ-PWR-003: board-a
-  REQ-PWR-004: board-a
-  REQ-PWR-005: board-a
-  TST-PWR-001: board-a
-  TST-PWR-002: board-a
+  0ytcjcwycvy:
+    board: board-b
+    id: DEC-B-001
+  1a5z96z8c0g:
+    board: board-a
+    id: TST-PWR-001
+  1zn5skrv6k3:
+    board: board-a
+    id: REQ-PWR-001
+  5wh2j90t4hg:
+    board: board-a
+    id: LOG-A-001
+  88sacd9e4fm:
+    board: board-a
+    id: LOG-A-006
+  9sga3wyj9mm:
+    board: board-a
+    id: BND-THM-002
+  bv170ga0xfk:
+    board: board-b
+    id: REQ-B-PWR-001
+  cw45e0ks00n:
+    board: board-a
+    id: BND-THM-001
+  fd24s541bbt:
+    board: board-a
+    id: DEC-PWR-001
+  g0yfcpq2700:
+    board: board-a
+    id: REQ-PWR-004
+  jt190dzcymy:
+    board: board-a
+    id: LOG-A-005
+  k4t54vx2mxj:
+    board: board-a
+    id: REQ-PWR-005
+  kj5x7bmpc6c:
+    board: board-a
+    id: LOG-A-003
+  na934tg83df:
+    board: board-a
+    id: REQ-PWR-003
+  p2yypetstjh:
+    board: board-a
+    id: TST-PWR-002
+  pktmysgxn8x:
+    board: board-a
+    id: CMP-PWR-001
+  r1ezr3et1ye:
+    board: board-a
+    id: LOG-A-004
+  rgsmdxz3w5m:
+    board: board-a
+    id: REQ-PWR-002
+  t8818c96yb8:
+    board: board-b
+    id: DEC-B-002
+  wkq630vejxq:
+    board: board-a
+    id: LOG-A-002
