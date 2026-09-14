@@ -94,14 +94,14 @@ reads. Those two jobs want opposite properties.
 | meaningless — no prefix to mismatch | meaningful — the prefix *is* the point |
 | unique by construction | unique by convention and bookkeeping |
 
-Every mechanism in the columns below exists to force one string to satisfy
-both. Separate the jobs and the mechanisms stop being load-bearing:
+Before keys, every mechanism below forced one string to satisfy both jobs.
+Separating the jobs makes those mechanisms stop being load-bearing:
 
-- the **ledger** and burned numbers (`ids.py`) — a number must never be
+- the **ledger** and burned numbers (`ids.py`) — a number could never be
   reused because an old reference might still resolve to it
-- **expand-and-freeze** for bare-numeric ids, and **prefix validation** as a
-  hard error — because "the id is the one string every link, backlink, and
-  ledger entry is keyed on" (`ids.py:104-140`)
+- **expand-and-freeze** for bare-numeric ids, and the former **hard-error
+  prefix validation** — both followed from the old claim that "the id is the
+  one string every link, backlink, and ledger entry is keyed on"
 - the **`revise` engine's** prefix half — 363 of its 1091 lines (§4)
 - **`former_ids`** and its title-similarity inference — reconstructing an
   identity that was destroyed by a renumbering
@@ -570,12 +570,11 @@ and `prefix_for` stay. The ledger functions (`load_ledger`, `save_ledger`,
 survive but stop being load-bearing for correctness — see §8, which treats
 "should the ledger survive at all" as the real question it is.
 
-`validate_prefixes` (40 lines) stays but **relaxes from error to warning**.
-Its docstring today justifies the hard error explicitly: fixing a mismatch
-automatically "would change the one string every link, backlink, and ledger
-entry is keyed on." Under keys, that sentence is false — the id is keyed on
-by nothing. A mismatched prefix becomes what it always felt like: a
-cosmetic inconsistency worth flagging, not a build-stopping fault.
+`validate_prefixes` (40 lines) stays and now reports a **warning**, not an
+error. Its old docstring justified the hard error by saying a fix "would
+change the one string every link, backlink, and ledger entry is keyed on."
+Under keys, that sentence is false. A mismatched prefix is a cosmetic
+inconsistency worth flagging, not a build-stopping fault.
 
 ### The migration files and standard-version discipline
 
@@ -971,8 +970,8 @@ claimed to.
 ### Prefixes
 
 Unchanged as a convention and still worth having — `REQ-A-PWR` still tells a
-reader more than `REQ`. What changes is the *enforcement posture*:
-`validate_prefixes`'s hard error becomes a warning (§4), because its stated
+reader more than `REQ`. What changed is the *enforcement posture*:
+`validate_prefixes` now warns (§4), because its former blocking
 justification no longer holds.
 
 ### Should the ledger survive? — the real question
@@ -1107,10 +1106,10 @@ assumptions:
   may have expected keys to eliminate that too. Eliminating it means giving
   schema entities keys as well, which is a strictly larger design.
 
-- **`validate_prefixes` relaxes from error to warning** (§4, §8). If you
-  regard a mismatched prefix as a smell worth blocking on regardless of
-  whether it is load-bearing, keep it an error — nothing else in the design
-  depends on the change.
+- **Decision, 2026-09-14: `validate_prefixes` is a warning** (§4, §8).
+  A mismatched display prefix remains visible but does not block: surrogate
+  keys, not the display id, carry structured-link, backlink, baseline, and
+  seal identity.
 
 - **The ledger survives** (§8). I have given the counter-argument its due;
   this is the closest call in the document and the one I would most expect

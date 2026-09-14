@@ -1,0 +1,1 @@
+- Change an item ID whose prefix does not match its declared/type prefix from a build-blocking error to a visible warning. Surrogate keys now carry internal identity; the warning remains useful for human-readable IDs and external citations.

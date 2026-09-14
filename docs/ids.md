@@ -146,20 +146,21 @@ The prefix comes from, in order:
 Prefixes may contain hyphens, which is how you get `REQ-PWR-001` and `BND-THM-001`
 from the same `requirement`/`bound` types.
 
-**A hand-typed id must actually start with this prefix.** Declaring
-`prefix: CAN` and then typing `id: CNA-001` — a typo, not a deliberate
-choice — is caught as an ordinary `refdes check` error, not silently
-accepted:
+**A hand-typed id should start with this prefix.** Declaring `prefix: CAN`
+and then typing `id: CNA-001` — usually a typo, not a deliberate choice —
+is shown by `refdes check` as a nonblocking warning and is never silently
+rewritten:
 
 ```
-ERROR id 'CNA-001' does not match this item's prefix 'CAN' (from defaults:)
+WARNING id 'CNA-001' does not match this item's prefix 'CAN' (from defaults:)
 ```
 
 This is a pure comparison of two values the project already knows — no
-resolution, nothing ambient — and it is never auto-corrected. Fixing a
-mismatch automatically would rewrite the one string every link, backlink,
-and ledger entry is keyed on; get the id wrong on purpose or by accident and
-`refdes check` will tell you, but only you fix it. A free-form suffix typed
+resolution, nothing ambient. Surrogate keys now carry structured-link,
+backlink, baseline, and seal identity, so a display-prefix mismatch does not
+make the project invalid. The warning remains useful because prefixes carry
+human meaning and the display id still appears in external citations. Fix
+whichever value is wrong; only you change it. A free-form suffix typed
 directly into the id (see below) is not a mismatch — the check only requires
 the id to *start with* the declared prefix, not equal it exactly.
 

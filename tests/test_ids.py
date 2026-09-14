@@ -412,7 +412,7 @@ def test_cli_id_succeeds_and_reports_zero_when_nothing_is_pending(tmp_path):
 # --------------------------------------- prefix ("type segment") validation (finding 8 Parts 1/2)
 
 
-def test_prefix_mismatch_from_a_defaults_override_is_the_documented_error(tmp_path):
+def test_prefix_mismatch_from_a_defaults_override_is_the_documented_warning(tmp_path):
     root = _numeric_hint_project(
         tmp_path,
         "defaults:\n  type: requirement\n  prefix: CAN\n"
@@ -421,7 +421,7 @@ def test_prefix_mismatch_from_a_defaults_override_is_the_documented_error(tmp_pa
     project = load_project(config_path=str(root / "refdes-project.yaml"))
     parse.load_items(project, require_ids=False)
     ids.validate_prefixes(project)
-    message = next(d.message for d in project.errors if "CNA-001" in d.message)
+    message = next(d.message for d in project.warnings if "CNA-001" in d.message)
     assert message == "id 'CNA-001' does not match this item's prefix 'CAN' (from defaults:)"
 
 
@@ -433,7 +433,7 @@ def test_prefix_mismatch_against_the_types_own_default_names_the_type(tmp_path):
     project = load_project(config_path=str(root / "refdes-project.yaml"))
     parse.load_items(project, require_ids=False)
     ids.validate_prefixes(project)
-    message = next(d.message for d in project.errors if "XYZ-001" in d.message)
+    message = next(d.message for d in project.warnings if "XYZ-001" in d.message)
     assert message == (
         "id 'XYZ-001' does not match this item's prefix 'REQ' "
         "(the 'requirement' type's default)"
@@ -441,9 +441,8 @@ def test_prefix_mismatch_against_the_types_own_default_names_the_type(tmp_path):
 
 
 def test_prefix_mismatch_is_reported_not_silently_rewritten(tmp_path):
-    """A mismatch is Part 0's class of harm self-inflicted: auto-fixing an
-    *existing* id would change the string every link is keyed on. The file
-    must be untouched after a mismatch is reported."""
+    """A mismatch is visible but never auto-fixed: the display id remains a
+    human-facing convention even though surrogate keys carry identity."""
     root = _numeric_hint_project(
         tmp_path,
         "defaults:\n  type: requirement\n  prefix: CAN\n"
@@ -470,7 +469,7 @@ def test_prefix_with_a_free_form_category_segment_is_not_a_mismatch(tmp_path):
     project = load_project(config_path=str(root / "refdes-project.yaml"))
     parse.load_items(project, require_ids=False)
     ids.validate_prefixes(project)
-    assert not any("REQ-IO-004" in d.message for d in project.errors)
+    assert not any("REQ-IO-004" in d.message for d in project.diagnostics)
 
 
 def test_prefix_validation_skips_pending_items(tmp_path):
@@ -485,15 +484,16 @@ def test_prefix_validation_skips_pending_items(tmp_path):
     assert project.errors == []
 
 
-def test_prefix_validation_runs_as_part_of_a_real_build(tmp_path):
+def test_prefix_mismatch_is_a_nonblocking_warning_in_check_output(tmp_path, capsys):
     root = _numeric_hint_project(
         tmp_path,
         "defaults:\n  type: requirement\n  prefix: CAN\n"
         "items:\n  - id: CNA-001\n    text: Typo in the prefix.\n",
     )
-    project = load_project(config_path=str(root / "refdes-project.yaml"))
-    parse.load_items(project, require_ids=False)
-    build_mod.build(project, seal_write=False, reseal=False, accept_board_move=False)
-    assert any(
-        "does not match this item's prefix" in d.message for d in project.errors
+    status = cli_mod.main(
+        ["-c", str(root / "refdes-project.yaml"), "--no-write", "check"]
     )
+    output = capsys.readouterr().out
+    assert status == 0
+    assert "WARNING items/r.yaml:" in output
+    assert "id 'CNA-001' does not match this item's prefix 'CAN'" in output

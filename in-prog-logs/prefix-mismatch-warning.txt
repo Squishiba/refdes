@@ -1,0 +1,12 @@
+Task: relax `validate_prefixes` from error to warning, decided 2026-09-14.
+
+Progress:
+- Changed the diagnostic producer from Project.error to Project.warn.
+- Replaced the obsolete display-id-as-identity justification in the docstring.
+- Updated unit/CLI coverage to assert the warning is visible in `refdes check` output and does not affect its zero exit status.
+- Updated docs/ids.md, docs/troubleshooting.md, and docs/design/keys.md §4, §8, and §10.
+- Added changelog.d/prefix-mismatch-warning.changed.md.
+- Targeted prefix tests pass (23 passed); the pre-rebase full suite passes (743 passed).
+- A scratch-project `refdes --no-write check` smoke run printed the mismatch as a warning and exited with 0 errors.
+
+Status: implementation, documentation, changelog, smoke verification, and pre-rebase full-suite verification complete.

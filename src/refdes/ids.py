@@ -133,18 +133,15 @@ def prefix_for(project: Project, item: Item) -> str:
 
 
 def validate_prefixes(project: Project) -> None:
-    """Finding 8 Parts 1/2: an already-id'd item's own prefix -- the id
-    scheme's "type segment" -- must match what `prefix_for()` would derive
-    for it. `prefix_for()` was previously read only inside `allocate()`, for
-    a *pending* item choosing its id for the first time; this reaches the
-    opposite population, an item that already has a hand-typed id, doing
-    nothing but a static comparison of two already-known strings -- no
-    resolution, no ambient state.
+    """Finding 8 Parts 1/2: compare an already-id'd item's prefix with what
+    ``prefix_for()`` derives. This is a static comparison of two known
+    strings -- no resolution and no ambient state.
 
-    A mismatch is a loud, blocking error, never a silent rewrite: fixing it
-    automatically would change the one string every link, backlink, and
-    ledger entry is keyed on -- the same class of harm Part 0's write-back
-    bug caused by accident, self-inflicted here instead.
+    A mismatch is a visible warning, never a rewrite. Under surrogate keys,
+    structured links, backlinks, baselines, and seals no longer use the
+    display id as identity, so the old blocking justification was false.
+    The prefix still carries useful human meaning, and the ledger still
+    protects external citations, making the mismatch worth showing.
 
     Checked as "starts with", not "equals": Part 2's free-form category
     segment (`IO-AI`, `EXP-PCIE`) is typed straight into the id with no
@@ -162,7 +159,7 @@ def validate_prefixes(project: Project) -> None:
         if item.id.startswith(f"{expected}-"):
             continue
         source = "from defaults:" if item.prefix_hint else f"the {item.type!r} type's default"
-        project.error(
+        project.warn(
             f"id {item.id!r} does not match this item's prefix {expected!r} "
             f"({source})",
             file=item.source_file, line=item.source_line, item_id=item.id,

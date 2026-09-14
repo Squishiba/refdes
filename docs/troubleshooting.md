@@ -84,8 +84,8 @@ burned by an earlier item ...`**
 Pick a higher number, or leave `id:` blank and let `refdes id` choose one.
 
 **`id 'CNA-001' does not match this item's prefix 'CAN' (from defaults:)`**
-Typo in the id, or in the `prefix:` — fix whichever one is wrong. Never
-auto-corrected: it's the string every link and the ledger are keyed on.
+Usually a typo in the id or in `prefix:`. This warning never auto-corrects
+either value; surrogate keys keep it from blocking the build.
 
 ## Links
 
