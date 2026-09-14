@@ -77,6 +77,7 @@ class Baseline:
     refdes_version: str
     # Per item: hash, type, title, hash_format, and the immutable surrogate
     # key when one existed at stamp time (see _items_map) -- plus,
+    # exceptionally, `verdict` and `calc_hash` when they apply.
     #
     # docs/design/lifecycle.md §3 says a baseline diff is item-scoped and
     # deliberately does not store old field values, to avoid the new
