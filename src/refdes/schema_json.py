@@ -259,6 +259,23 @@ def build_graph(project: Project) -> str:
     return "\n".join(lines) + "\n"
 
 
+def newest_config_file(project: Project) -> str | None:
+    """The config file in `project.root` that changed most recently -- the one
+    whose mtime drives `write_schema`'s staleness check -- or None when
+    neither config file exists. `cli.py` names this file in the staleness
+    warning, so it must come from the same computation that decided the
+    schema was stale."""
+    return max(
+        (
+            name
+            for name in ("refdes-project.yaml", "refdes-schema.yaml")
+            if os.path.isfile(os.path.join(project.root, name))
+        ),
+        key=lambda name: os.path.getmtime(os.path.join(project.root, name)),
+        default=None,
+    )
+
+
 def write_schema(project: Project) -> bool:
     """Write `.refdes/schema.json` for the resolved project.
 
@@ -266,25 +283,19 @@ def write_schema(project: Project) -> bool:
     committed, regenerated as a cheap side effect of every command that
     already loads the project (docs/design/standard-library.md §12).
     Returns whether the file that was there before this write was already
-    stale (older than whichever of the two config files changed most recently)
-    -- `refdes check`'s own narrow trip-wire for the one gap aggressive
-    regeneration doesn't close: a bare yaml-language-server setup with no
-    refdes-aware watcher has nothing to re-trigger a refresh between a config
-    edit and the next CLI invocation.
+    stale (older than whichever of the two config files changed most recently,
+    per `newest_config_file`) -- `refdes check`'s own narrow trip-wire for
+    the one gap aggressive regeneration doesn't close: a bare
+    yaml-language-server setup with no refdes-aware watcher has nothing to
+    re-trigger a refresh between a config edit and the next CLI invocation.
     """
     path = os.path.join(project.root, SCHEMA_REL_PATH)
-    config_mtime = max(
-        (
-            os.path.getmtime(os.path.join(project.root, name))
-            for name in ("refdes-project.yaml", "refdes-schema.yaml")
-            if os.path.isfile(os.path.join(project.root, name))
-        ),
-        default=None,
-    )
+    newest = newest_config_file(project)
     was_stale = (
         os.path.isfile(path)
-        and config_mtime is not None
-        and os.path.getmtime(path) < config_mtime
+        and newest is not None
+        and os.path.getmtime(path)
+        < os.path.getmtime(os.path.join(project.root, newest))
     )
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as fh:

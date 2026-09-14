@@ -133,9 +133,12 @@ def test_stamped_by_defaults_to_os_username(lifecycle_project):
 
 
 def test_git_identity_success(lifecycle_project, monkeypatch):
-    (lifecycle_project / "refdes-project.yaml").write_text(
-        "baseline_identity: git_identity\n", encoding="utf-8"
-    )
+    # Append: `refdes-project.yaml` is the marker holding site:/standard:/id:,
+    # so overwriting it would silently test a different project.
+    with (lifecycle_project / "refdes-project.yaml").open(
+        "a", encoding="utf-8"
+    ) as fh:
+        fh.write("baseline_identity: git_identity\n")
     project = _lc_build(lifecycle_project)
 
     class _FakeResult:
@@ -149,9 +152,11 @@ def test_git_identity_success(lifecycle_project, monkeypatch):
 
 
 def test_git_identity_failure_falls_back_and_warns(lifecycle_project, monkeypatch):
-    (lifecycle_project / "refdes-project.yaml").write_text(
-        "baseline_identity: git_identity\n", encoding="utf-8"
-    )
+    # Append, not overwrite: see test_git_identity_success.
+    with (lifecycle_project / "refdes-project.yaml").open(
+        "a", encoding="utf-8"
+    ) as fh:
+        fh.write("baseline_identity: git_identity\n")
     project = _lc_build(lifecycle_project)
 
     def _boom(*a, **k):

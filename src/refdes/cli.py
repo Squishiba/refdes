@@ -65,10 +65,11 @@ def _parse_items(
 
 def _load(args, require_ids: bool = True) -> tuple[Project, bool]:
     """Returns (project, schema_was_stale) -- the second only ever True when
-    a `.refdes/schema.json` from a previous run predates the current
-    `refdes-project.yaml`, which every caller except `cmd_check` ignores; `check`
-    surfaces it as the one narrow trip-wire for the gap this command's own
-    aggressive regeneration doesn't otherwise close."""
+    a `.refdes/schema.json` from a previous run predates the newer of the two
+    config files (`refdes-project.yaml`/`refdes-schema.yaml`), which every
+    caller except `cmd_check` ignores; `check` surfaces it as the one narrow
+    trip-wire for the gap this command's own aggressive regeneration doesn't
+    otherwise close."""
     project = load_project(config_path=args.config)
     # A cheap side effect of loading, not a job of its own -- every command
     # that reaches this point has already resolved the full merged schema,
@@ -163,8 +164,12 @@ def _report(
 def cmd_check(args) -> int:
     project, schema_was_stale = _load(args)
     if schema_was_stale:
+        # Name the file that actually triggered it: the mtime check is a max
+        # across both config files, and a warning pointing at the wrong one
+        # would send the user looking for an edit in a file they never touched.
+        newest = schema_json_mod.newest_config_file(project)
         project.warn(
-            ".refdes/schema.json was older than refdes-project.yaml -- refreshed. If your "
+            f".refdes/schema.json was older than {newest} -- refreshed. If your "
             "editor's completion looked stale, it should catch up now."
         )
     if args.board and args.board not in project.boards:
