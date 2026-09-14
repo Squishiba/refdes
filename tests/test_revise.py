@@ -334,7 +334,7 @@ def test_revise_carries_baseline_hash_forward(label_project):
     parse.load_items(project)
     build_mod.build(project, seal_write=False, reseal=False, accept_board_move=False)
     assert not project.errors
-    old_hash = project.items["BND-001"].content_hash
+    old_hash = project.item_by_id("BND-001").content_hash
     outcome = lifecycle.stamp(project, kind="revision", name="rev-a")
     assert outcome.status == "stamped"
 
@@ -1055,7 +1055,7 @@ def test_revise_leaves_keyed_seal_untouched_on_display_rename(tmp_path):
         {
             key: {
                 "id": "LOG-001",
-                "hash": project.items["LOG-001"].content_hash,
+                "hash": project.item_by_id("LOG-001").content_hash,
                 "hash_format": build_mod.HASH_FORMAT,
             }
         },

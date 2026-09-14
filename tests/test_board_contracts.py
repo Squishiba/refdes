@@ -158,7 +158,7 @@ def test_a_satisfier_with_no_board_counts_for_no_board(tmp_path):
     """Per board only: an unboarded decision discharges nobody's obligation..."""
     _write(tmp_path, {**GROUP, **REQUIREMENT, **_decision("", "DEC-X-001")})
     project = _build_at(tmp_path)
-    assert project.items["DEC-X-001"].board == ""
+    assert project.item_by_id("DEC-X-001").board == ""
     assert project.board_coverage[("REQ-001", "board-a")].stage == "open"
     assert project.board_coverage[("REQ-001", "board-b")].stage == "open"
     # ...while the ordinary per-item coverage is exactly what it always was.
@@ -228,7 +228,7 @@ def test_a_group_member_no_board_still_gets_its_obligations(tmp_path):
         },
     )
     project = _build_at(tmp_path)
-    assert project.items["REQ-L-001"].board == ""
+    assert project.item_by_id("REQ-L-001").board == ""
     assert {b for (_i, b) in project.board_coverage} == {"board-a", "board-b"}
 
 

@@ -27,7 +27,7 @@ def _is_settled(target_id: str, project: Project) -> bool:
     that declares neither never triggers this check -- the same
     "unconfigured means nothing special happens" default `compute_coverage`
     already uses for the same two flags."""
-    target = project.items.get(target_id)
+    target = project.item_by_id(target_id)
     if target is None:
         return False
     spec = project.types.get(target.type)
@@ -52,10 +52,10 @@ def _paths_to_roots(project: Project, node_id: str, guard: int) -> list[list[str
     cycle check first, so this is never expected to actually hit it."""
     if guard <= 0:
         return [[node_id]]
-    node = project.items.get(node_id)
+    node = project.item_by_id(node_id)
     # resolved_links, not links: a target may be `DISPLAY@key` composite text
-    # (docs/design/keys.md §3) by the time this walks it, and project.items
-    # is keyed by plain display id, never by that composite string.
+    # (docs/design/keys.md §3) by the time this walks it, and project.item_by_id()
+    # resolves a plain display id, never that composite string.
     # resolve_links() has already done this resolution once; reuse it rather
     # than re-deriving it here.
     targets = node.resolved_links.get("blocked_by", []) if node else []
@@ -96,7 +96,7 @@ def resolve(project: Project) -> None:
             # closer_id's own declaration is the concrete edge whoever reads
             # this error would actually edit.
             closer_id = exc.path[-2]
-            closer = project.items.get(closer_id)
+            closer = project.item_by_id(closer_id)
             project.error(
                 f"blocked_by cycle: {' -> '.join(exc.path)}",
                 file=closer.source_file if closer else None,
@@ -109,7 +109,7 @@ def resolve(project: Project) -> None:
         for target_id in item.resolved_links.get("blocked_by", []):
             stale = _is_settled(target_id, project)
             if stale:
-                target = project.items[target_id]
+                target = project.item_by_id(target_id)
                 project.info(
                     f"blocked_by {target_id}, which is now "
                     f"{target.fields.get('status')!r} -- is it still blocked? "
@@ -120,7 +120,7 @@ def resolve(project: Project) -> None:
             for sub_path in _paths_to_roots(project, target_id, max_depth):
                 path = [item.id] + sub_path
                 root_id = path[-1]
-                root = project.items.get(root_id)
+                root = project.item_by_id(root_id)
                 project.blocked_chains.append(
                     BlockedChain(
                         item_id=item.id,

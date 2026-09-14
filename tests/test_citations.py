@@ -123,7 +123,7 @@ def test_unpinned_citation_is_info_by_default(citation_project):
     """Routine until `refdes fetch` runs (issue #3, finding 8) -- default-hidden
     info, not a warning that competes with actionable diagnostics."""
     project = _cite_build(citation_project)
-    status = project.items["CMP-001"].citations[0]
+    status = project.item_by_id("CMP-001").citations[0]
     assert status.state == "unpinned"
     assert any("has no fetched record" in d.message for d in project.infos)
     assert not any("has no fetched record" in d.message for d in project.warnings)
@@ -147,7 +147,7 @@ def test_hash_only_citation_is_ok_with_no_local_file_needed(citation_project):
         {"https://example.com/ds.pdf": {"sha256": "abc123", "fetched": "2026-01-01T00:00:00Z", "vendored": False}},
     )
     project = _cite_build(citation_project)
-    status = project.items["CMP-001"].citations[0]
+    status = project.item_by_id("CMP-001").citations[0]
     assert status.state == "ok"
     assert status.local_path == ""
     assert not project.warnings and not project.errors
@@ -171,7 +171,7 @@ def test_vendored_citation_ok_when_blob_matches(citation_project):
     )
     _write_vendor_blob(citation_project, sha, ".pdf", data)
     project = _cite_build(citation_project)
-    status = project.items["CMP-001"].citations[0]
+    status = project.item_by_id("CMP-001").citations[0]
     assert status.state == "ok"
     assert status.local_path == ""
     assert not project.errors
@@ -187,7 +187,7 @@ def test_vendored_citation_published_when_publish_datasheets_is_on(citation_proj
     _write_vendor_blob(citation_project, sha, ".pdf", data)
     _enable_publish_datasheets(citation_project)
     project = _cite_build(citation_project)
-    status = project.items["CMP-001"].citations[0]
+    status = project.item_by_id("CMP-001").citations[0]
     assert status.state == "ok"
     assert status.local_path == f"datasheets/{sha}.pdf"  # flattened, not .refdes/vendor/...
     assert not project.errors
@@ -202,7 +202,7 @@ def test_cache_missing_and_hash_mismatch_are_unaffected_by_publish_datasheets(ci
     )
     _enable_publish_datasheets(citation_project)
     project = _cite_build(citation_project)
-    status = project.items["CMP-001"].citations[0]
+    status = project.item_by_id("CMP-001").citations[0]
     assert status.state == "cache_missing"
     assert status.local_path == ""
 
@@ -213,7 +213,7 @@ def test_vendored_citation_cache_missing_when_blob_absent(citation_project):
         {"https://example.com/ds.pdf": {"sha256": "deadbeef", "fetched": "2026-01-01T00:00:00Z", "vendored": True}},
     )
     project = _cite_build(citation_project)
-    status = project.items["CMP-001"].citations[0]
+    status = project.item_by_id("CMP-001").citations[0]
     assert status.state == "cache_missing"
     assert any("is missing at" in d.message for d in project.warnings)
 
@@ -228,7 +228,7 @@ def test_vendored_citation_hash_mismatch_is_always_an_error(citation_project):
     )
     _write_vendor_blob(citation_project, sha, ".pdf", b"tampered bytes")
     project = _cite_build(citation_project)
-    status = project.items["CMP-001"].citations[0]
+    status = project.item_by_id("CMP-001").citations[0]
     assert status.state == "hash_mismatch"
     assert any("tampered or corrupt" in d.message for d in project.errors)
 
@@ -373,14 +373,14 @@ def test_inconsistent_vendor_flags_across_citers_warns(tmp_path):
 def test_content_hash_unaffected_by_lockfile_changes(citation_project):
     """Re-fetching a datasheet must never retroactively flag an item as edited."""
     project1 = _cite_build(citation_project)
-    hash1 = project1.items["CMP-001"].content_hash
+    hash1 = project1.item_by_id("CMP-001").content_hash
 
     _write_citation_lockfile(
         citation_project,
         {"https://example.com/ds.pdf": {"sha256": "abc", "fetched": "2026-01-01T00:00:00Z", "vendored": False}},
     )
     project2 = _cite_build(citation_project)
-    hash2 = project2.items["CMP-001"].content_hash
+    hash2 = project2.item_by_id("CMP-001").content_hash
     assert hash1 == hash2
 
 

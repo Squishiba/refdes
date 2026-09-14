@@ -64,7 +64,7 @@ def _expand_then_rename(root, old_id="REQ-001", new_id="REQ-003", *, former=Fals
     config = str(root / "refdes-project.yaml")
     project = load_project(config_path=config)
     parse.load_items(project)
-    target_key = project.items[old_id].key
+    target_key = project.item_by_id(old_id).key
     written = links_mod.expand_missing(project)
     assert written
 
@@ -87,7 +87,7 @@ def test_resolve_link_target_bare_and_composite_forms(tmp_path):
     )
     project = load_project(config_path=str(root / "refdes-project.yaml"))
     parse.load_items(project)
-    target = project.items["REQ-001"]
+    target = project.item_by_id("REQ-001")
     by_key = {target.key: target}
 
     assert build_mod.resolve_link_target(by_key, project, "REQ-001") is target
@@ -107,7 +107,7 @@ def test_resolve_link_target_unknown_key_does_not_fall_back_to_display_text(tmp_
     )
     project = load_project(config_path=str(root / "refdes-project.yaml"))
     parse.load_items(project)
-    by_key = {project.items["REQ-001"].key: project.items["REQ-001"]}
+    by_key = {project.item_by_id("REQ-001").key: project.item_by_id("REQ-001")}
 
     assert build_mod.resolve_link_target(by_key, project, "REQ-001@notarealkey") is None
 
@@ -138,7 +138,7 @@ def test_hash_is_neutral_to_renaming_a_linked_items_display_id(tmp_path):
     project = load_project(config_path=config)
     parse.load_items(project)
     keys_mod.mint_missing(project)
-    target_key = project.items["REQ-001"].key
+    target_key = project.item_by_id("REQ-001").key
     assert target_key
 
     text = (root / "items" / "r.yaml").read_text(encoding="utf-8")
@@ -149,7 +149,7 @@ def test_hash_is_neutral_to_renaming_a_linked_items_display_id(tmp_path):
     project = load_project(config_path=config)
     parse.load_items(project)
     build_mod.build(project, seal_write=False, reseal=False)
-    hash_before = project.items["REQ-002"].content_hash
+    hash_before = project.item_by_id("REQ-002").content_hash
     assert hash_before  # sanity: a hash was actually computed
 
     renamed = composite.replace("id: REQ-001\n", "id: REQ-999\n")
@@ -159,7 +159,7 @@ def test_hash_is_neutral_to_renaming_a_linked_items_display_id(tmp_path):
     project2 = load_project(config_path=config)
     parse.load_items(project2)
     build_mod.build(project2, seal_write=False, reseal=False)
-    hash_after = project2.items["REQ-002"].content_hash
+    hash_after = project2.item_by_id("REQ-002").content_hash
 
     assert hash_after == hash_before
 
@@ -182,7 +182,7 @@ def test_hash_is_neutral_to_expanding_a_bare_link_into_composite_form(tmp_path):
     project = load_project(config_path=config)
     parse.load_items(project)
     build_mod.build(project, seal_write=False, reseal=False)
-    hash_before = project.items["REQ-002"].content_hash
+    hash_before = project.item_by_id("REQ-002").content_hash
     text_before = (root / "items" / "r.yaml").read_text(encoding="utf-8")
     assert "REQ-001@" not in text_before  # still bare
 
@@ -194,7 +194,7 @@ def test_hash_is_neutral_to_expanding_a_bare_link_into_composite_form(tmp_path):
     project2 = load_project(config_path=config)
     parse.load_items(project2)
     build_mod.build(project2, seal_write=False, reseal=False)
-    hash_after = project2.items["REQ-002"].content_hash
+    hash_after = project2.item_by_id("REQ-002").content_hash
 
     assert hash_after == hash_before
 
@@ -251,7 +251,7 @@ def test_expand_missing_rewrites_block_style_sequence(tmp_path):
 
     reparsed = load_project(config_path=str(root / "refdes-project.yaml"))
     parse.load_items(reparsed)
-    assert reparsed.items["REQ-002"].links["refines"] == [new]
+    assert reparsed.item_by_id("REQ-002").links["refines"] == [new]
 
 
 def test_expand_missing_rewrites_markdown_front_matter(tmp_path):
@@ -290,7 +290,7 @@ def test_expand_missing_rewrites_markdown_front_matter(tmp_path):
 
     reparsed = load_project(config_path=config)
     parse.load_items(reparsed)
-    assert reparsed.items["DEC-002"].links["refines"] == [new]
+    assert reparsed.item_by_id("DEC-002").links["refines"] == [new]
 
 
 def test_expand_missing_rewrites_link_inside_flow_mapping_entry(tmp_path):
@@ -324,7 +324,7 @@ def test_expand_missing_rewrites_link_in_defaults_block(tmp_path):
     )
     project = load_project(config_path=str(root / "refdes-project.yaml"))
     parse.load_items(project)
-    target_key = project.items["REQ-001"].key
+    target_key = project.item_by_id("REQ-001").key
 
     written = links_mod.expand_missing(project)
     assert len(written) == 2  # one shared spelling inherited by both items
@@ -345,7 +345,7 @@ def test_expand_missing_skips_a_target_with_no_key_yet(tmp_path):
     )
     project = load_project(config_path=str(root / "refdes-project.yaml"))
     parse.load_items(project)
-    assert project.items["REQ-001"].key == ""  # never minted in this test
+    assert project.item_by_id("REQ-001").key == ""  # never minted in this test
 
     assert links_mod.expand_missing(project) == []
     text = (root / "items" / "r.yaml").read_text(encoding="utf-8")
@@ -424,7 +424,7 @@ def test_refresh_guard_warns_and_leaves_file_byte_for_byte_unchanged(tmp_path, c
     config = str(root / "refdes-project.yaml")
     project = load_project(config_path=config)
     parse.load_items(project)
-    target_key = project.items["REQ-003"].key
+    target_key = project.item_by_id("REQ-003").key
     assert links_mod.expand_missing(project)
 
     path = root / "items" / "r.yaml"
@@ -520,7 +520,7 @@ def test_refresh_does_not_rewrite_old_id_in_markdown_prose(tmp_path):
     keys_mod.mint_missing(project)
     project = load_project(config_path=config)
     parse.load_items(project)
-    target_key = project.items["DEC-001"].key
+    target_key = project.item_by_id("DEC-001").key
     assert links_mod.expand_missing(project)
 
     target = target_path.read_text(encoding="utf-8")
@@ -540,7 +540,7 @@ def _legacy_baseline_entry(project, item_id: str) -> dict:
     """The hash a hash_format-1 (pre-keys) stamp would have recorded for
     this item, right now -- built via build.legacy_hash_for so these tests
     don't hand-roll their own second implementation of the old format."""
-    item = project.items[item_id]
+    item = project.item_by_id(item_id)
     return {
         "hash": build_mod.legacy_hash_for(item, project),
         "type": item.type,
@@ -587,13 +587,13 @@ def test_baseline_migration_carries_forward_an_unedited_entry(tmp_path):
     assert report.carried == ["REQ-001"]
     assert report.uncomparable == []
     assert report.changed is True
-    assert baseline.items["REQ-001"]["hash"] == project.items["REQ-001"].content_hash
+    assert baseline.items["REQ-001"]["hash"] == project.item_by_id("REQ-001").content_hash
     assert baseline.items["REQ-001"]["hash_format"] == build_mod.HASH_FORMAT
 
     # Persisted, not just mutated in memory.
     reloaded = lifecycle.load_baseline(project, "rev-a")
     assert reloaded.items["REQ-001"]["hash_format"] == build_mod.HASH_FORMAT
-    assert reloaded.items["REQ-001"]["hash"] == project.items["REQ-001"].content_hash
+    assert reloaded.items["REQ-001"]["hash"] == project.item_by_id("REQ-001").content_hash
 
 
 def test_baseline_migration_reports_uncomparable_for_a_real_edit_without_rewriting(tmp_path):
@@ -680,7 +680,7 @@ def test_seal_migration_silently_upgrades_an_unedited_entry_and_still_catches_a_
     project = load_project(config_path=config)
     parse.load_items(project)
     build_mod.build(project, seal_write=False, reseal=False)
-    legacy_hash = build_mod.legacy_hash_for(project.items["LOG-001"], project)
+    legacy_hash = build_mod.legacy_hash_for(project.item_by_id("LOG-001"), project)
 
     seal_path = tmp_path / ".refdes" / "log-seal.yaml"
     seal_path.parent.mkdir(parents=True, exist_ok=True)
@@ -700,7 +700,7 @@ def test_seal_migration_silently_upgrades_an_unedited_entry_and_still_catches_a_
     parse.load_items(project3)
     build_mod.build(project3, seal_write=True, reseal=False)
     assert "LOG-001" not in project3.seal_violations
-    assert seal.load_seals(project3)["LOG-001"] == project3.items["LOG-001"].content_hash
+    assert seal.load_seals(project3)["LOG-001"] == project3.item_by_id("LOG-001").content_hash
     assert not any("resealed" in d.message for d in project3.warnings)
 
     # A real edit after the upgrade is still caught, exactly as before.

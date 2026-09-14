@@ -112,11 +112,11 @@ def _coverage_rows(
     project: Project, board: str | None = None, workspace: str | None = None
 ) -> list[tuple[Item, object]]:
     stage_order = {"open": 0, "addressed": 1, "claimed": 2, "satisfied": 3, "verified": 4}
-    rows = [
-        (project.items[item_id], cov)
-        for item_id, cov in project.coverage.items()
-        if item_id in project.items and _in_scope(project.items[item_id], board, workspace)
-    ]
+    rows = []
+    for item_id, cov in project.coverage.items():
+        item = project.item_by_id(item_id)
+        if item is not None and _in_scope(item, board, workspace):
+            rows.append((item, cov))
     rows.sort(key=lambda row: (stage_order.get(row[1].stage, 9), row[0].id))
     return rows
 
@@ -132,11 +132,13 @@ def _contract_rows(project: Project, board: str) -> list[tuple[Item, object]]:
     Empty for a board with no `conforms_to:`, which is what keeps the coverage
     page byte-identical for every project that has never used the key.
     """
-    rows = [
-        (project.items[item_id], cov)
-        for (item_id, board_name), cov in project.board_coverage.items()
-        if board_name == board and item_id in project.items
-    ]
+    rows = []
+    for (item_id, board_name), cov in project.board_coverage.items():
+        if board_name != board:
+            continue
+        item = project.item_by_id(item_id)
+        if item is not None:
+            rows.append((item, cov))
     rows.sort(key=lambda row: (_STAGE_ORDER.get(row[1].stage, 9), row[0].id))
     return rows
 

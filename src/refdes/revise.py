@@ -906,7 +906,7 @@ def _stale_prose_references(
         return []
 
     def resolves(token: str) -> bool:
-        return token in project.items or token in project.former_ids
+        return project.item_by_id(token) is not None or token in project.former_ids
 
     sources = {item.source_file for item in project.local_items}
     sources |= {page.source_file for page in project.pages}
@@ -929,7 +929,7 @@ def _stale_prose_references(
                 target_id, target_field = m.group(1), m.group(2)
                 if not target_field or not resolves(target_id):
                     continue
-                before_item = project_before.items.get(target_id)
+                before_item = project_before.item_by_id(target_id)
                 if before_item is None:
                     continue
                 frenames = field_renames.get(before_item.type)
@@ -985,7 +985,7 @@ def _carry_forward_baselines(
                 lifecycle._match_baseline_entry(
                     indexes,
                     old_id,
-                    {"key": project.items[old_id].key} if project.items[old_id].key else {},
+                    {"key": project.item_by_id(old_id).key} if project.item_by_id(old_id).key else {},
                 )
                 is not None
                 for old_id in old_hashes
@@ -995,7 +995,7 @@ def _carry_forward_baselines(
         changed = False
         new_items = dict(baseline.items)
         for old_id, old_hash in old_hashes.items():
-            item = project.items[old_id]
+            item = project.item_by_id(old_id)
             matched = lifecycle._match_baseline_entry(
                 indexes, old_id, {"key": item.key} if item.key else {}
             )
@@ -1070,7 +1070,7 @@ def _carry_forward_seals(
         changed = False
         new_seals = dict(seals)
         for old_id, old_hash in old_hashes.items():
-            item = project.items[old_id]
+            item = project.item_by_id(old_id)
             found = seal_mod._find_seal(new_seals, item, live_keys)
             if found is None:
                 continue

@@ -16,7 +16,7 @@ from collections import defaultdict
 
 import yaml
 
-from .model import Item, Project
+from .model import Item, Project, provisional_handle
 
 ID_RE = re.compile(r"^([A-Z][A-Z0-9]*(?:-[A-Z0-9]+)*)-(\d+)$")
 LIST_ENTRY_RE = re.compile(r"^(\s*)-(\s+)(\S.*)$")
@@ -118,7 +118,7 @@ def orphaned_allocations(project: Project) -> list[str]:
     """
     ledger = load_ledger(project)
     allocated = {str(entry) for entry in (ledger.get("allocated") or [])}
-    live = set(project.items)
+    live = set(project.items_by_id)
     former: set[str] = set()
     for item in project.local_items:
         former.update(item.former_ids)
@@ -192,7 +192,7 @@ def collect_former_ids(project: Project) -> None:
     """
     for item in project.local_items:
         for old_id in item.former_ids:
-            live = project.items.get(old_id)
+            live = project.item_by_id(old_id)
             if live is not None:
                 whose = "this item's own current id" if live is item else "still a live item id"
                 project.error(
@@ -407,7 +407,8 @@ def allocate(project: Project, dry_run: bool = False) -> list[tuple[Item, str]]:
 
     for item, new_id in written:
         item.id = new_id
-        project.items[new_id] = item
+        handle = project.add_item(item, item.key or provisional_handle(item))
+        project.items_by_id[new_id] = handle
     project.pending = [item for item in project.pending if id(item) in failed]
 
     return written

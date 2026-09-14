@@ -331,7 +331,7 @@ def test_sigfigs_flows_through_calc_formatting(tmp_path):
     project = load_project(start=str(tmp_path))
     parse.load_items(project)
     build_mod.build(project)
-    assert project.items["DEC-001"].calcs[0].result == "4 W"  # 2 sigfigs, not "3.96 W"
+    assert project.item_by_id("DEC-001").calcs[0].result == "4 W"  # 2 sigfigs, not "3.96 W"
 
 
 def test_sigfigs_flows_through_check_messages(tmp_path):
@@ -366,7 +366,7 @@ def test_sigfigs_flows_through_check_messages(tmp_path):
     project = load_project(start=str(tmp_path))
     parse.load_items(project)
     build_mod.build(project)
-    check = project.items["DEC-001"].checks[0]
+    check = project.item_by_id("DEC-001").checks[0]
     assert check.actual == "0.61 A"  # 2 sigfigs, not the default 4 (0.6061 A)
 
 

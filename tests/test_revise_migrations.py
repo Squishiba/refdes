@@ -328,8 +328,8 @@ def test_standard_upgrade_v2_to_v3_renames_text_and_method_to_body(tmp_path):
     parse.load_items(project)
     build_mod.build(project, seal_write=False, reseal=False, accept_board_move=False)
     assert not project.errors, [str(d) for d in project.errors]
-    assert project.items["REQ-001"].body == "The unit shall operate from 9 V to 36 V."
-    assert project.items["REQ-001"].title == "The unit shall operate from 9 V to 36 V."
+    assert project.item_by_id("REQ-001").body == "The unit shall operate from 9 V to 36 V."
+    assert project.item_by_id("REQ-001").title == "The unit shall operate from 9 V to 36 V."
 
 
 def test_upgrade_refuses_when_an_item_already_has_its_own_body(tmp_path):
@@ -396,7 +396,7 @@ def test_v3_requirement_title_is_optional_and_falls_back_to_body(tmp_path):
     parse.load_items(project, require_ids=False)
     build_mod.build(project, seal_write=False, reseal=False)
     assert not project.errors, [str(d) for d in project.errors]
-    assert project.items["REQ-001"].title == "The unit shall operate from 9 V to 36 V."
+    assert project.item_by_id("REQ-001").title == "The unit shall operate from 9 V to 36 V."
 
 
 def test_v3_governed_by_link_resolves_its_backlink(tmp_path):
@@ -418,8 +418,8 @@ def test_v3_governed_by_link_resolves_its_backlink(tmp_path):
     parse.load_items(project, require_ids=False)
     build_mod.build(project, seal_write=False, reseal=False)
     assert not project.errors, [str(d) for d in project.errors]
-    assert project.items["REQ-002"].links["governed_by"] == ["REQ-001"]
-    assert project.items["REQ-001"].backlinks["governs"] == ["REQ-002"]
+    assert project.item_by_id("REQ-002").links["governed_by"] == ["REQ-001"]
+    assert project.item_by_id("REQ-001").backlinks["governs"] == ["REQ-002"]
 
 
 def test_v3_governed_by_also_reaches_a_bound(tmp_path):
@@ -454,8 +454,8 @@ def test_v3_governed_by_also_reaches_a_bound(tmp_path):
     parse.load_items(project, require_ids=False)
     build_mod.build(project, seal_write=False, reseal=False)
     assert not project.errors, [str(d) for d in project.errors]
-    assert project.items["REQ-001"].links["governed_by"] == ["BND-001"]
-    assert project.items["BND-001"].backlinks["governs"] == ["REQ-001"]
+    assert project.item_by_id("REQ-001").links["governed_by"] == ["BND-001"]
+    assert project.item_by_id("BND-001").backlinks["governs"] == ["REQ-001"]
 
 
 def _cmp_bnd_project(tmp_path, *, decision_extra="", component_extra=""):
@@ -498,8 +498,8 @@ def test_v3_component_gains_constrained_by_a_bound(tmp_path):
     parse.load_items(project, require_ids=False)
     build_mod.build(project, seal_write=False, reseal=False)
     assert not project.errors, [str(d) for d in project.errors]
-    assert project.items["CMP-001"].links["constrained_by"] == ["BND-001"]
-    assert project.items["BND-001"].backlinks["constrains"] == ["CMP-001"]
+    assert project.item_by_id("CMP-001").links["constrained_by"] == ["BND-001"]
+    assert project.item_by_id("BND-001").backlinks["constrains"] == ["CMP-001"]
 
 
 def test_v3_component_checks_needs_no_engine_change(tmp_path):
@@ -530,7 +530,7 @@ def test_v3_component_checks_needs_no_engine_change(tmp_path):
     parse.load_items(project, require_ids=False)
     build_mod.build(project, seal_write=False, reseal=False)
     assert not project.errors, [str(d) for d in project.errors]
-    result = project.items["CMP-001"].checks[0]
+    result = project.item_by_id("CMP-001").checks[0]
     assert result.ok is True
     assert result.value_name == "I_drive"
 

@@ -306,7 +306,12 @@ def _items_map(project: Project) -> dict[str, dict]:
             record_id = item.key
             entry["id"] = item.id
         else:
-            record_id = item.id
+            # A permanently id-less item (docs/design/threads.md §2) has no
+            # display id to key this entry by -- falling back to `item.id`
+            # unconditionally would collide every such item on "". Its
+            # surrogate key is the next best identity available, even in the
+            # legacy (non-adopted) shape.
+            record_id = item.id or item.key
             if item.key:
                 entry["key"] = item.key
         spec = project.types.get(item.type)
@@ -531,7 +536,7 @@ def _coverable_offenders(project: Project, predicate: Callable[[str], bool]) -> 
     unverified_requirements rows)."""
     out = []
     for item_id, cov in project.coverage.items():
-        item = project.items.get(item_id)
+        item = project.item_by_id(item_id)
         if item is None or _is_draft(item, project):
             continue
         if predicate(cov.stage):
@@ -759,7 +764,7 @@ def _stale_arithmetic(
         old = old_entries.get(item_id, {})
         if "verdict" not in old or "calc_hash" not in old:
             continue
-        item = project.items.get(item_id)
+        item = project.item_by_id(item_id)
         if item is None:
             continue
         spec = project.types.get(item.type)

@@ -227,7 +227,7 @@ def test_index_only_local_items_not_imports(blocks_project):
     _page_with_block(blocks_project, '{{index by="status" type="decision"}}')
     project, page = _index_page(blocks_project)
     assert not project.errors
-    assert "DEC-X-001" in project.items  # imported, resolvable...
+    assert project.item_by_id("DEC-X-001") is not None  # imported, resolvable...
     assert "DEC-X-001" not in page.body_html  # ...but never in a generated index
 
 

@@ -329,7 +329,7 @@ def fetch_all(
     fetcher = fetcher or fetch_bytes
     entries = collect(project)
     if item_id is not None:
-        if item_id not in project.items:
+        if project.item_by_id(item_id) is None:
             raise CitationError(f"no item {item_id!r} in this project")
         entries = [(item, spec) for item, spec in entries if item.id == item_id]
         if not entries:

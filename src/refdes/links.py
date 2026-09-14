@@ -264,7 +264,7 @@ def _planned_target(
       either expanded, refreshed, or left untouched respectively.
     """
     if "@" not in target:
-        resolved = project.items.get(target)
+        resolved = project.item_by_id(target)
         if resolved is None or not resolved.key:
             return None
         return f"{target}@{resolved.key}"
@@ -273,7 +273,7 @@ def _planned_target(
     resolved = by_key.get(key)
     if resolved is None or old_display == resolved.id:
         return None
-    other = project.items.get(old_display)
+    other = project.item_by_id(old_display)
     if other is not None and other is not resolved and old_display not in resolved.former_ids:
         project.warn(
             f"{pointer} references {target!r}, but that key is "

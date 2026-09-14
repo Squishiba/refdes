@@ -18,7 +18,7 @@ def test_pages_render_without_being_items(paged_project):
     assert not project.errors
     assert {p.slug for p in project.pages} == {"index", "power"}
     # A page is not an item: no ID, no coverage obligations.
-    assert "index" not in project.items
+    assert project.item_by_id("index") is None
     assert len(project.items) == 1
 
 

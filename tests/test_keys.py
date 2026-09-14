@@ -232,7 +232,7 @@ def test_mint_missing_assigns_and_writes_back_a_key_for_an_idd_item(tmp_path):
     # Durable: reparsing sees the same key, and mints nothing new.
     project2 = load_project(config_path=str(root / "refdes-project.yaml"))
     parse.load_items(project2, require_ids=False)
-    assert project2.items["REQ-001"].key == new_key
+    assert project2.item_by_id("REQ-001").key == new_key
     assert keys_mod.mint_missing(project2) == []
 
 
@@ -281,7 +281,7 @@ def test_mint_missing_writes_back_into_markdown_front_matter(tmp_path):
 
     reparsed = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
     parse.load_items(reparsed, require_ids=False)
-    assert reparsed.items["DEC-001"].key == new_key
+    assert reparsed.item_by_id("DEC-001").key == new_key
 
 
 def test_mint_missing_writes_back_inside_a_flow_style_entry(tmp_path):
@@ -309,9 +309,9 @@ def test_mint_missing_never_reassigns_an_existing_key(tmp_path):
     )
     project = load_project(config_path=str(root / "refdes-project.yaml"))
     parse.load_items(project, require_ids=False)
-    assert project.items["REQ-001"].key == "k7f3m2q9x4a"
+    assert project.item_by_id("REQ-001").key == "k7f3m2q9x4a"
     assert keys_mod.mint_missing(project) == []
-    assert project.items["REQ-001"].key == "k7f3m2q9x4a"
+    assert project.item_by_id("REQ-001").key == "k7f3m2q9x4a"
 
 
 def test_no_write_suppresses_minting_and_reports_one_project_level_info(tmp_path):
@@ -325,8 +325,8 @@ def test_no_write_suppresses_minting_and_reports_one_project_level_info(tmp_path
     written = keys_mod.mint_missing(project, write=False)
 
     assert written == []
-    assert project.items["REQ-001"].key == ""
-    assert project.items["REQ-002"].key == ""
+    assert project.item_by_id("REQ-001").key == ""
+    assert project.item_by_id("REQ-002").key == ""
     text = (root / "items" / "r.yaml").read_text(encoding="utf-8")
     assert "key:" not in text  # --no-write must not touch the source file
 
@@ -358,7 +358,7 @@ def test_keyless_item_stays_fully_usable(tmp_path):
     parse.load_items(project, require_ids=False)
     build_mod.build(project, seal_write=False, reseal=False)
     assert not project.errors
-    assert project.items["REQ-001"].key == ""
+    assert project.item_by_id("REQ-001").key == ""
     assert any(e["id"] == "REQ-001" for e in render.items_json(project)["items"])
 
 
@@ -381,7 +381,7 @@ def test_key_is_reserved_and_not_shadowable_by_a_same_named_field(tmp_path):
     )
     project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
     parse.load_items(project, require_ids=False)
-    item = project.items["WID-001"]
+    item = project.item_by_id("WID-001")
     # The hand-typed value was consumed as the surrogate key, not as the
     # type's own declared 'key' field.
     assert item.key == "not a schema value, this is identity"
@@ -488,8 +488,8 @@ def test_corruption_lint_rejects_an_undeclared_key_without_display_id_fallback(t
     message = project.errors[0].message
     assert "refines points at key 'k2p9w3x1r7s' (labelled REQ-001)" in message
     assert "which no item declares" in message
-    assert project.items["REQ-002"].resolved_links == {}
-    assert project.items["REQ-001"].backlinks == {}
+    assert project.item_by_id("REQ-002").resolved_links == {}
+    assert project.item_by_id("REQ-001").backlinks == {}
 
 
 def test_corruption_lint_rejects_a_malformed_link_target_as_corruption(tmp_path):
@@ -527,7 +527,7 @@ def test_corruption_lint_accepts_valid_minted_keys_and_a_resolving_link(tmp_path
     project = _built_keys_project(root)
 
     assert not project.errors
-    assert project.items["REQ-002"].resolved_links["refines"] == ["REQ-001"]
+    assert project.item_by_id("REQ-002").resolved_links["refines"] == ["REQ-001"]
 
 
 def test_baseline_lint_errors_when_writable_check_remints_key_for_same_display_id(
@@ -540,7 +540,7 @@ def test_baseline_lint_errors_when_writable_check_remints_key_for_same_display_i
         f"items:\n  - id: REQ-001\n    key: {old_key}\n    text: Same item.\n",
     )
     project = _stamp_keyed_baseline(root, "rev-a")
-    assert project.items["REQ-001"].key == old_key
+    assert project.item_by_id("REQ-001").key == old_key
     baseline = lifecycle.load_baseline(project, "rev-a")
     assert baseline.items["REQ-001"]["key"] == old_key
 
@@ -554,7 +554,7 @@ def test_baseline_lint_errors_when_writable_check_remints_key_for_same_display_i
 
     reparsed = load_project(config_path=str(root / "refdes-project.yaml"))
     parse.load_items(reparsed)
-    new_key = reparsed.items["REQ-001"].key
+    new_key = reparsed.item_by_id("REQ-001").key
     assert new_key and new_key != old_key
     assert status == 1
     assert "key changed since baseline 'rev-a'" in captured.err
@@ -624,8 +624,8 @@ def test_baseline_lint_allows_replacement_at_same_position_with_same_title(tmp_p
 
     project = _built_keys_project(root)
 
-    assert project.items["REQ-002"].source_line == 3
-    assert project.items["REQ-002"].title == "Same title."
+    assert project.item_by_id("REQ-002").source_line == 3
+    assert project.item_by_id("REQ-002").title == "Same title."
     assert not any("key changed" in d.message or "key deleted" in d.message
                    for d in project.errors)
 
@@ -747,14 +747,14 @@ def test_mixed_shape_baseline_drives_diff_and_layer_four_lint(tmp_path):
         {
             "REQ-001": {
                 "key": key_1,
-                "hash": project.items["REQ-001"].content_hash,
+                "hash": project.item_by_id("REQ-001").content_hash,
                 "hash_format": 2,
                 "type": "requirement",
                 "title": "Legacy-shaped.",
             },
             key_2: {
                 "id": "REQ-002",
-                "hash": project.items["REQ-002"].content_hash,
+                "hash": project.item_by_id("REQ-002").content_hash,
                 "hash_format": 2,
                 "type": "requirement",
                 "title": "Key-shaped.",
@@ -801,8 +801,8 @@ def test_storage_conversion_conditionally_rekeys_and_reports_uncomparable(tmp_pa
         "  - id: REQ-003\n    text: Keyless.\n",
     )
     project = _built_keys_project(root)
-    legacy_hash = build_mod.legacy_hash_for(project.items["REQ-001"], project)
-    assert legacy_hash != project.items["REQ-001"].content_hash
+    legacy_hash = build_mod.legacy_hash_for(project.item_by_id("REQ-001"), project)
+    assert legacy_hash != project.item_by_id("REQ-001").content_hash
     baseline_items = {
         "REQ-001": {
             "key": key_1,
@@ -818,7 +818,7 @@ def test_storage_conversion_conditionally_rekeys_and_reports_uncomparable(tmp_pa
             "title": "Changed.",
         },
         "REQ-003": {
-            "hash": project.items["REQ-003"].content_hash,
+            "hash": project.item_by_id("REQ-003").content_hash,
             "hash_format": 2,
             "type": "requirement",
             "title": "Keyless.",
@@ -827,7 +827,7 @@ def test_storage_conversion_conditionally_rekeys_and_reports_uncomparable(tmp_pa
     seals = {
         "REQ-001": legacy_hash,
         "REQ-002": "stale",
-        "REQ-003": project.items["REQ-003"].content_hash,
+        "REQ-003": project.item_by_id("REQ-003").content_hash,
     }
     original_baseline = deepcopy(baseline_items)
     original_seals = deepcopy(seals)
@@ -837,7 +837,7 @@ def test_storage_conversion_conditionally_rekeys_and_reports_uncomparable(tmp_pa
     assert baseline_items == original_baseline
     assert seals == original_seals
     assert plan.baseline_items[key_1] == {
-        "hash": project.items["REQ-001"].content_hash,
+        "hash": project.item_by_id("REQ-001").content_hash,
         "type": "requirement",
         "title": "Unchanged.",
         "id": "REQ-001",
@@ -848,7 +848,7 @@ def test_storage_conversion_conditionally_rekeys_and_reports_uncomparable(tmp_pa
     assert plan.baseline_items["REQ-003"]["hash_format"] == 1
     assert plan.baseline_uncomparable == ["REQ-002", "REQ-003"]
     assert plan.seals[key_1] == {
-        "hash": project.items["REQ-001"].content_hash,
+        "hash": project.item_by_id("REQ-001").content_hash,
         "id": "REQ-001",
         "hash_format": build_mod.HASH_FORMAT,
     }
@@ -872,7 +872,7 @@ def test_keyed_baseline_rename_is_relabelled_not_removed_and_added(tmp_path, cap
         {
             key: {
                 "id": "REQ-001",
-                "hash": before.items["REQ-001"].content_hash,
+                "hash": before.item_by_id("REQ-001").content_hash,
                 "hash_format": 2,
                 "type": "requirement",
                 "title": "Same item.",

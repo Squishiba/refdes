@@ -112,7 +112,7 @@ def test_flat_layout_with_no_workspaces_is_unaffected(board_project):
     assert all(item.workspace == "" for item in project.local_items)
     assert not project.workspace_moves
     assert not any("workspace" in d.message.lower() for d in project.diagnostics)
-    assert project.items["REQ-A-001"].board == "board-a"  # boards: untouched
+    assert project.item_by_id("REQ-A-001").board == "board-a"  # boards: untouched
 
     build_mod.build(project, seal_write=True)
     manifest = boards_mod.load_manifest(project)
@@ -123,10 +123,10 @@ def test_flat_layout_with_no_workspaces_is_unaffected(board_project):
 
 def test_workspace_and_board_derive_from_the_two_path_segments(workspace_project):
     project = _build_at(workspace_project)
-    assert project.items["REQ-A-001"].workspace == "product-a"
-    assert project.items["REQ-A-001"].board == "board-a"
-    assert project.items["DEC-B-001"].workspace == "product-b"
-    assert project.items["DEC-B-001"].board == "board-b"
+    assert project.item_by_id("REQ-A-001").workspace == "product-a"
+    assert project.item_by_id("REQ-A-001").board == "board-a"
+    assert project.item_by_id("DEC-B-001").workspace == "product-b"
+    assert project.item_by_id("DEC-B-001").board == "board-b"
 
 
 def test_workspace_override_beats_the_path(workspace_project):
@@ -140,7 +140,7 @@ def test_workspace_override_beats_the_path(workspace_project):
         encoding="utf-8",
     )
     project = _build_at(workspace_project)
-    assert project.items["REQ-X-001"].workspace == "product-b"
+    assert project.item_by_id("REQ-X-001").workspace == "product-b"
 
 
 def test_workspace_override_works_even_under_flat_layout(tmp_path):
@@ -163,7 +163,7 @@ def test_workspace_override_works_even_under_flat_layout(tmp_path):
         encoding="utf-8",
     )
     project = _build_at(tmp_path)
-    assert project.items["REQ-001"].workspace == "platform"
+    assert project.item_by_id("REQ-001").workspace == "platform"
 
 
 def test_unregistered_workspace_override_is_a_build_error(workspace_project):
@@ -187,8 +187,8 @@ def test_no_second_path_segment_under_workspace_layout_warns(workspace_project):
         encoding="utf-8",
     )
     project = _build_at(workspace_project)
-    assert project.items["REQ-LONE-001"].workspace == "platform"
-    assert project.items["REQ-LONE-001"].board == ""
+    assert project.item_by_id("REQ-LONE-001").workspace == "platform"
+    assert project.item_by_id("REQ-LONE-001").board == ""
     assert any(
         d.item_id == "REQ-LONE-001"
         and "no second items/ path segment" in d.message
@@ -230,7 +230,7 @@ def test_lint_never_fires_from_the_backlink_direction(workspace_project):
     must never independently trip a second warning -- proving the lint walks
     item.links exclusively, never item.backlinks."""
     project = _build_at(workspace_project)
-    assert "DEC-B-001" in project.items["REQ-A-001"].backlinks.get("satisfied_by", [])
+    assert "DEC-B-001" in project.item_by_id("REQ-A-001").backlinks.get("satisfied_by", [])
     hits = [d for d in project.diagnostics if "hidden dependency" in d.message]
     assert len(hits) == 1
     assert hits[0].item_id == "DEC-B-001"

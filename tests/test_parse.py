@@ -368,7 +368,7 @@ def test_per_item_prefix_overrides_file_defaults_in_a_list_file(tmp_path):
     assert got["Uses the file default prefix."] == "REQ-DEFAULT-001"
     assert got["Uses its own prefix."] == "REQ-OVERRIDE-001"
     # `prefix:` is consumed, never stored as a field.
-    assert "prefix" not in project.items["REQ-OVERRIDE-001"].fields
+    assert "prefix" not in project.item_by_id("REQ-OVERRIDE-001").fields
 
 
 def test_per_item_prefix_overrides_file_defaults_in_markdown(tmp_path):

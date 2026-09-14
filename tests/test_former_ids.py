@@ -110,7 +110,7 @@ def test_former_ids_resolve_bracketed_reference_with_a_formerly_marker(tmp_path)
     )
     project = _former_ids_build(tmp_path)
     assert not project.errors
-    html = project.items["DEC-001"].body_html
+    html = project.item_by_id("DEC-001").body_html
     assert 'class="ref ref-former"' in html
     assert 'href="req-001.html"' in html
     assert 'data-ref="REQ-001"' in html
@@ -131,7 +131,7 @@ def test_former_ids_resolve_bare_reference_when_it_fits_the_bare_pattern(tmp_pat
         encoding="utf-8",
     )
     project = _former_ids_build(tmp_path)
-    html = project.items["DEC-001"].body_html
+    html = project.item_by_id("DEC-001").body_html
     assert 'class="ref ref-former"' in html
     assert "(formerly REQ-050)" in html
 
@@ -159,7 +159,7 @@ def test_former_ids_shaped_like_a_legacy_underscore_id_only_link_explicitly(tmp_
         and "[[CAN_00]]" in d.message
         for d in project.warnings
     )
-    html = project.items["DEC-001"].body_html
+    html = project.item_by_id("DEC-001").body_html
     assert "Bare mention CAN_00 stays plain text" in html
     assert html.count('class="ref ref-former"') == 1  # only the explicit one resolved
 

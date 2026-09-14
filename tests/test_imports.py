@@ -77,11 +77,11 @@ def importing_project(tmp_path):
 def test_imported_items_resolve_links_and_checks(importing_project):
     project = _build_at(importing_project)
     assert not project.errors
-    upstream = project.items["IFC-CAN-001"]
+    upstream = project.item_by_id("IFC-CAN-001")
     assert upstream.external is True
     assert upstream.origin == "platform"
     # 4.8 A over 2 pins is 2.4 A, inside the 3 A rating.
-    assert project.items["DEC-X-001"].checks[0].ok is True
+    assert project.item_by_id("DEC-X-001").checks[0].ok is True
 
 
 def test_upstream_change_fails_the_downstream_board(importing_project):
@@ -92,7 +92,7 @@ def test_upstream_change_fails_the_downstream_board(importing_project):
         json.dumps(tightened), encoding="utf-8"
     )
     project = _build_at(importing_project)
-    assert project.items["DEC-X-001"].checks[0].ok is False
+    assert project.item_by_id("DEC-X-001").checks[0].ok is False
 
 
 def test_version_pin_mismatch_refuses_the_import(importing_project):
@@ -104,7 +104,7 @@ def test_version_pin_mismatch_refuses_the_import(importing_project):
     )
     project = _build_at(importing_project)
     assert any("pinned to" in d.message for d in project.errors)
-    assert "IFC-CAN-001" not in project.items
+    assert project.item_by_id("IFC-CAN-001") is None
 
 
 def test_id_collision_across_projects_is_an_error(importing_project):
@@ -125,4 +125,4 @@ def test_imported_items_are_excluded_from_local_coverage(importing_project):
     """Upstream's coverage gaps are upstream's problem, not this board's."""
     project = _build_at(importing_project)
     assert "IFC-CAN-001" not in project.coverage
-    assert project.items["IFC-CAN-001"].content_hash == "upstreamhash01"
+    assert project.item_by_id("IFC-CAN-001").content_hash == "upstreamhash01"

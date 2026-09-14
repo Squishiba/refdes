@@ -123,7 +123,7 @@ def generate(
     for item_id in sorted(project.coverage):
         if item_id in covered:
             continue
-        item = project.items.get(item_id)
+        item = project.item_by_id(item_id)
         if item is None or item.external:
             continue
         groups.setdefault((item.workspace, item.board), []).append(item)

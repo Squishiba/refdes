@@ -121,7 +121,7 @@ def test_adopt_preserves_supported_source_shapes_and_crlf(tmp_path, capsys):
     assert ".refdes/log-seal.yaml" not in output
 
     project = _project(tmp_path)
-    target_key = project.items["REQ-001"].key
+    target_key = project.item_by_id("REQ-001").key
     assert target_key
     for item in project.local_items:
         assert item.key
@@ -249,7 +249,7 @@ def test_adopt_drops_stale_memberships_reports_ambiguity_and_is_idempotent(
     ) in output
 
     project = _project(tmp_path)
-    live_key = project.items["REQ-001"].key
+    live_key = project.item_by_id("REQ-001").key
     manifest = boards_mod.load_manifest(project)
     assert manifest["boards"] == {
         live_key: {"id": "REQ-001", "board": "board-a"},
@@ -335,7 +335,7 @@ def test_adopt_is_idempotent_and_new_history_is_keyed_and_rename_safe(
     assert set(baseline.items) == {item.key for item in project.local_items}
     assert all("id" in entry and "key" not in entry for entry in baseline.items.values())
     sealed = seal.load_seals(project)
-    log_key = project.items["LOG-001"].key
+    log_key = project.item_by_id("LOG-001").key
     assert sealed[log_key]["id"] == "LOG-001"
 
     item_path.write_text(

@@ -282,8 +282,8 @@ def test_same_name_in_different_items_does_not_collide(tmp_path):
     parse.load_items(project)
     build_mod.build(project)
     assert not any("assigned twice" in d.message for d in project.errors)
-    assert project.items["DEC-001"].calc_values["x"] == "5 V"
-    assert project.items["DEC-002"].calc_values["x"] == "2 A"
+    assert project.item_by_id("DEC-001").calc_values["x"] == "5 V"
+    assert project.item_by_id("DEC-002").calc_values["x"] == "2 A"
 
 
 # ----------------------------------------------------------- source position
@@ -313,7 +313,7 @@ def test_calc_line_records_absolute_source_position(tmp_path):
     project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
     parse.load_items(project)
     build_mod.build(project)
-    item = project.items["DEC-001"]
+    item = project.item_by_id("DEC-001")
     lines = source.splitlines()
     by_name = {c.name: c for c in item.calcs}
     assert lines[by_name["V"].line - 1].strip() == "V = 3.3 V"
@@ -339,7 +339,7 @@ def test_calc_line_position_reaches_items_json(tmp_path):
     build_mod.build(project)
     payload = render.items_json(project)
     item_json = next(i for i in payload["items"] if i["id"] == "DEC-001")
-    expected_line = project.items["DEC-001"].calcs[0].line
+    expected_line = project.item_by_id("DEC-001").calcs[0].line
     assert item_json["calcs"][0]["line"] == expected_line
     assert isinstance(expected_line, int)
 
@@ -522,7 +522,7 @@ def test_unreadable_limit_does_not_hint_on_a_tolerance_alone():
 
 
 def _hash_after(project, item_id, field, value):
-    item = project.items[item_id]
+    item = project.item_by_id(item_id)
     original = item.fields.get(field)
     item.fields[field] = value
     build_mod.compute_hashes(project)
@@ -535,14 +535,14 @@ def _hash_after(project, item_id, field, value):
 def test_log_field_does_not_disturb_the_content_hash():
     """Changing owner must not mark downstream links suspect."""
     project = _project()
-    before = project.items["REQ-PWR-001"].content_hash
+    before = project.item_by_id("REQ-PWR-001").content_hash
     assert _hash_after(project, "REQ-PWR-001", "owner", "Someone Else") == before
 
 
 def test_log_and_ignore_are_indistinguishable_for_hashing():
     """`log` is reserved for a future history layer; today it behaves as `ignore`."""
     project = _project()
-    before = project.items["REQ-PWR-001"].content_hash
+    before = project.item_by_id("REQ-PWR-001").content_hash
     log_hash = _hash_after(project, "REQ-PWR-001", "owner", "Someone Else")  # on_change: log
     ignore_hash = _hash_after(project, "REQ-PWR-001", "last_reviewed", "2020-01-01")  # on_change: ignore
     assert log_hash == before == ignore_hash
@@ -550,7 +550,7 @@ def test_log_and_ignore_are_indistinguishable_for_hashing():
 
 def test_invalidate_field_changes_the_content_hash():
     project = _project()
-    before = project.items["BND-THM-001"].content_hash
+    before = project.item_by_id("BND-THM-001").content_hash
     assert _hash_after(project, "BND-THM-001", "limit", "<= 1.5 W/in^2") != before
 
 
@@ -558,9 +558,9 @@ def test_item_level_override_beats_the_schema():
     """REQ-PWR-004 sets owner -> ignore, so even a `log` field goes fully silent."""
     project = _project()
     spec = project.types["requirement"]
-    item = project.items["REQ-PWR-004"]
+    item = project.item_by_id("REQ-PWR-004")
     assert item.on_change_for("owner", spec, project.default_on_change) == "ignore"
-    assert project.items["REQ-PWR-001"].on_change_for(
+    assert project.item_by_id("REQ-PWR-001").on_change_for(
         "owner", spec, project.default_on_change
     ) == "log"
 
@@ -627,7 +627,7 @@ def test_a_check_against_a_temperature_limit_does_not_crash(tmp_path, limit):
     *reading*. No test had ever evaluated a check against a temperature, and the
     sample project has none."""
     project = _temperature_project(tmp_path, limit)
-    result = project.items["DEC-001"].checks[0]
+    result = project.item_by_id("DEC-001").checks[0]
     assert result.ok, result.detail
     # The comparison itself is well-defined and still reported.
     assert "40" in result.detail
@@ -639,7 +639,7 @@ def test_a_temperature_margin_is_undefined_not_invented(tmp_path):
     sits -- so there is no number to report. `margin: None` is the same
     already-supported state an `==` limit produces."""
     project = _temperature_project(tmp_path, "<= 85 degC")
-    assert project.items["DEC-001"].checks[0].margin is None
+    assert project.item_by_id("DEC-001").checks[0].margin is None
 
 
 def test_an_absolute_temperature_scale_still_gets_a_real_margin(tmp_path):
@@ -647,7 +647,7 @@ def test_an_absolute_temperature_scale_still_gets_a_real_margin(tmp_path):
     a real number -- the None above is specific to offset units, not a blanket
     give-up on temperature."""
     project = _temperature_project(tmp_path, "<= 350 K", value="300 K")
-    margin = project.items["DEC-001"].checks[0].margin
+    margin = project.item_by_id("DEC-001").checks[0].margin
     assert margin is not None
     assert margin == pytest.approx((350 - 300) / 350, rel=1e-6)
 
@@ -656,7 +656,7 @@ def test_a_temperature_range_limit_still_gets_a_real_margin(tmp_path):
     """A range measures slack against its own span -- a difference divided by a
     difference -- so offset units are not ambiguous there and never were."""
     project = _temperature_project(tmp_path, "0 degC .. 60 degC")
-    assert project.items["DEC-001"].checks[0].margin is not None
+    assert project.item_by_id("DEC-001").checks[0].margin is not None
 
 
 # ------------------------------------------------- project-defined equations
@@ -842,7 +842,7 @@ def test_an_equation_call_in_a_calc_block_reaches_the_build(tmp_path):
     parse.load_items(project)
     build_mod.build(project)
     assert not project.errors
-    assert project.items["DEC-001"].calcs[0].result == "0.6061 A"
+    assert project.item_by_id("DEC-001").calcs[0].result == "0.6061 A"
 
 
 def test_a_project_without_equations_installs_none(tmp_path):

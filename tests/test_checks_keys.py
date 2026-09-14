@@ -97,7 +97,7 @@ def test_bare_against_expands_to_composite_on_writable_load(tmp_path):
     assert cli_mod.main(["-c", config, "check"]) == 0
 
     project = _loaded(root)
-    target_key = project.items["BND-001"].key
+    target_key = project.item_by_id("BND-001").key
     assert target_key
 
     text = (root / "items" / "dec.md").read_text(encoding="utf-8")
@@ -123,7 +123,7 @@ def test_expand_missing_checks_rewrites_flow_style_entry(tmp_path):
     assert cli_mod.main(["-c", config, "check"]) == 0
 
     project = _loaded(root)
-    target_key = project.items["BND-001"].key
+    target_key = project.item_by_id("BND-001").key
     text = (root / "items" / "dec.md").read_text(encoding="utf-8")
     assert f"{{value: I_total, against: BND-001@{target_key}}}" in text
 
@@ -134,7 +134,7 @@ def test_expand_missing_checks_rewrites_flow_style_entry(tmp_path):
 def _expand_then_rename_bound(root, old_id="BND-001", new_id="BND-099"):
     config = str(root / "refdes-project.yaml")
     project = _loaded(root)
-    target_key = project.items[old_id].key
+    target_key = project.item_by_id(old_id).key
     assert cli_mod.main(["-c", config, "check"]) == 0
 
     path = root / "items" / "bounds.yaml"
@@ -184,7 +184,7 @@ def test_rename_of_target_does_not_change_checking_items_content_hash(tmp_path):
     assert cli_mod.main(["-c", config, "check"]) == 0  # expand to composite
 
     before = _built(root)
-    hash_before = before.items["DEC-001"].content_hash
+    hash_before = before.item_by_id("DEC-001").content_hash
     assert hash_before
 
     path = root / "items" / "bounds.yaml"
@@ -193,7 +193,7 @@ def test_rename_of_target_does_not_change_checking_items_content_hash(tmp_path):
     assert cli_mod.main(["-c", config, "check"]) == 0  # refresh label
 
     after = _built(root)
-    hash_after = after.items["DEC-001"].content_hash
+    hash_after = after.item_by_id("DEC-001").content_hash
     assert hash_after == hash_before
 
 
@@ -206,8 +206,8 @@ def test_sabotage_hash_reduction_would_fail_without_it(tmp_path):
     assert cli_mod.main(["-c", config, "check"]) == 0
 
     project = _loaded(root)
-    dec = project.items["DEC-001"]
-    bnd = project.items["BND-001"]
+    dec = project.item_by_id("DEC-001")
+    bnd = project.item_by_id("BND-001")
     raw_checks = dec.fields["checks"]
     assert raw_checks[0]["against"] == f"BND-001@{bnd.key}"
 
@@ -217,7 +217,7 @@ def test_sabotage_hash_reduction_would_fail_without_it(tmp_path):
     cli_mod.main(["-c", config, "check"])
 
     project2 = _loaded(root)
-    raw_checks_after = project2.items["DEC-001"].fields["checks"]
+    raw_checks_after = project2.item_by_id("DEC-001").fields["checks"]
     # The raw text on disk DID change (the label refreshed) -- proving that
     # hashing it verbatim, instead of reducing it to the key, would churn.
     assert raw_checks_after[0]["against"] != raw_checks[0]["against"]
@@ -245,7 +245,7 @@ def test_stale_label_naming_a_different_live_item_warns_and_leaves_file_unchange
     assert cli_mod.main(["-c", config, "check"]) == 0
 
     project = _loaded(root)
-    target_key = project.items["BND-003"].key
+    target_key = project.item_by_id("BND-003").key
     current = dec_path.read_text(encoding="utf-8")
     stale = current.replace(f"against: BND-003@{target_key}", f"against: BND-001@{target_key}")
     assert stale != current
@@ -306,7 +306,7 @@ def test_check_passes_through_a_composite_against(tmp_path):
     assert cli_mod.main(["-c", config, "check"]) == 0  # expand
     project = _built(root)
     assert not project.errors
-    check = project.items["DEC-001"].checks[0]
+    check = project.item_by_id("DEC-001").checks[0]
     assert check.ok is True
     assert check.against == "BND-001"
 
@@ -317,7 +317,7 @@ def test_check_violation_reported_through_a_composite_against(tmp_path):
     cli_mod.main(["-c", config, "check"])  # expand -- a failing check still exits 1
     project = _built(root)
     assert any("violates BND-001" in d.message for d in project.errors)
-    check = project.items["DEC-001"].checks[0]
+    check = project.item_by_id("DEC-001").checks[0]
     assert check.ok is False
     assert check.against == "BND-001"  # current display id, not the raw composite
 
@@ -328,7 +328,7 @@ def test_check_against_display_id_refreshes_after_rename_in_rendering(tmp_path):
     cli_mod.main(["-c", config, "check"])  # refresh label on disk
 
     project = _built(root)
-    check = project.items["DEC-001"].checks[0]
+    check = project.item_by_id("DEC-001").checks[0]
     assert check.against == "BND-099"
 
 
@@ -343,7 +343,7 @@ def test_keys_adopt_expands_against_references_and_reports(tmp_path, capsys):
     assert result.checks_expanded == 1
 
     project = _loaded(root)
-    target_key = project.items["BND-001"].key
+    target_key = project.item_by_id("BND-001").key
     text = (root / "items" / "dec.md").read_text(encoding="utf-8")
     assert f"against: BND-001@{target_key}" in text
 
@@ -377,7 +377,7 @@ def _write_baseline(root, name, items):
 
 
 def _format2_entry(project, item_id):
-    item = project.items[item_id]
+    item = project.item_by_id(item_id)
     return {
         "hash": build_mod.hash_for_format(item, project, 2),
         "type": item.type,
@@ -400,12 +400,12 @@ def test_format2_baseline_with_checks_against_carries_forward_when_unchanged(tmp
     report = lifecycle.migrate_hash_format(project, baseline, write=True)
     assert report.carried == ["DEC-001"]
     assert report.uncomparable == []
-    assert baseline.items["DEC-001"]["hash"] == project.items["DEC-001"].content_hash
+    assert baseline.items["DEC-001"]["hash"] == project.item_by_id("DEC-001").content_hash
     assert baseline.items["DEC-001"]["hash_format"] == build_mod.HASH_FORMAT
 
     reloaded = lifecycle.load_baseline(project, "rev-a")
     assert reloaded.items["DEC-001"]["hash_format"] == build_mod.HASH_FORMAT
-    assert reloaded.items["DEC-001"]["hash"] == project.items["DEC-001"].content_hash
+    assert reloaded.items["DEC-001"]["hash"] == project.item_by_id("DEC-001").content_hash
 
 
 def test_format2_baseline_with_checks_against_edited_item_is_uncomparable_not_upgraded(
@@ -449,18 +449,18 @@ def test_format2_baseline_stamped_bare_then_expanded_still_carries_to_3(tmp_path
     config = str(root / "refdes-project.yaml")
 
     project = _built(root)
-    assert "@" not in project.items["DEC-001"].fields["checks"][0]["against"]
+    assert "@" not in project.item_by_id("DEC-001").fields["checks"][0]["against"]
     _write_baseline(root, "rev-a", {"DEC-001": _format2_entry(project, "DEC-001")})
 
     assert cli_mod.main(["-c", config, "check"]) == 0  # expand against: to composite
     project2 = _built(root)
-    assert "@" in project2.items["DEC-001"].fields["checks"][0]["against"]
+    assert "@" in project2.item_by_id("DEC-001").fields["checks"][0]["against"]
 
     baseline = lifecycle.load_baseline(project2, "rev-a")
     report = lifecycle.migrate_hash_format(project2, baseline, write=True)
     assert report.carried == ["DEC-001"]
     assert report.uncomparable == []
-    assert baseline.items["DEC-001"]["hash"] == project2.items["DEC-001"].content_hash
+    assert baseline.items["DEC-001"]["hash"] == project2.item_by_id("DEC-001").content_hash
     assert baseline.items["DEC-001"]["hash_format"] == build_mod.HASH_FORMAT
 
 
@@ -506,7 +506,7 @@ def test_format2_seal_with_checks_against_carries_forward_when_unchanged(tmp_pat
 
     project = _loaded(root)
     build_mod.build(project, seal_write=False, reseal=False)
-    format2_hash = build_mod.hash_for_format(project.items["LOG-001"], project, 2)
+    format2_hash = build_mod.hash_for_format(project.item_by_id("LOG-001"), project, 2)
     seal.save_seals(
         project, {"LOG-001": {"hash": format2_hash, "hash_format": 2}}
     )
@@ -515,7 +515,7 @@ def test_format2_seal_with_checks_against_carries_forward_when_unchanged(tmp_pat
     build_mod.build(project2, seal_write=True, reseal=False)
     assert "LOG-001" not in project2.seal_violations
     stored = seal.load_seals(project2)["LOG-001"]
-    assert stored["hash"] == project2.items["LOG-001"].content_hash
+    assert stored["hash"] == project2.item_by_id("LOG-001").content_hash
     assert stored["hash_format"] == build_mod.HASH_FORMAT
     assert not any("resealed" in d.message for d in project2.warnings)
 
@@ -527,7 +527,7 @@ def test_format2_seal_with_checks_against_edited_item_is_caught_not_upgraded(tmp
 
     project = _loaded(root)
     build_mod.build(project, seal_write=False, reseal=False)
-    format2_hash = build_mod.hash_for_format(project.items["LOG-001"], project, 2)
+    format2_hash = build_mod.hash_for_format(project.item_by_id("LOG-001"), project, 2)
     seal.save_seals(
         project, {"LOG-001": {"hash": format2_hash, "hash_format": 2}}
     )
@@ -555,8 +555,8 @@ def test_format2_seal_key_keyed_stamped_bare_then_expanded_still_verifies(tmp_pa
 
     project = _loaded(root)
     build_mod.build(project, seal_write=False, reseal=False)
-    assert "@" not in project.items["LOG-001"].fields["checks"][0]["against"]
-    format2_hash = build_mod.hash_for_format(project.items["LOG-001"], project, 2)
+    assert "@" not in project.item_by_id("LOG-001").fields["checks"][0]["against"]
+    format2_hash = build_mod.hash_for_format(project.item_by_id("LOG-001"), project, 2)
     seal.save_seals(project, {"LOG-001": {"hash": format2_hash, "hash_format": 2}})
 
     assert cli_mod.main(["-c", config, "check"]) == 0  # expand against: to composite
@@ -565,7 +565,7 @@ def test_format2_seal_key_keyed_stamped_bare_then_expanded_still_verifies(tmp_pa
     build_mod.build(project2, seal_write=True, reseal=False)
     assert "LOG-001" not in project2.seal_violations
     stored = seal.load_seals(project2)["LOG-001"]
-    assert stored["hash"] == project2.items["LOG-001"].content_hash
+    assert stored["hash"] == project2.item_by_id("LOG-001").content_hash
     assert stored["hash_format"] == build_mod.HASH_FORMAT
 
 
@@ -578,7 +578,7 @@ def test_format2_seal_legacy_scalar_stamped_bare_then_expanded_still_verifies(tm
 
     project = _loaded(root)
     build_mod.build(project, seal_write=False, reseal=False)
-    format2_hash = build_mod.hash_for_format(project.items["LOG-001"], project, 2)
+    format2_hash = build_mod.hash_for_format(project.item_by_id("LOG-001"), project, 2)
     seal.save_seals(project, {"LOG-001": format2_hash})
 
     assert cli_mod.main(["-c", config, "check"]) == 0  # expand against: to composite

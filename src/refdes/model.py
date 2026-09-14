@@ -451,7 +451,10 @@ class Item:
 
     @property
     def slug(self) -> str:
-        return self.id.lower()
+        # docs/design/threads.md §2: an item that will never get a display id
+        # (a chain entry declaring `follows:` but no `id:`) still needs a page
+        # filename -- its surrogate key, the one durable name it does have.
+        return self.id.lower() if self.id else self.key
 
     def on_change_for(self, field_name: str, spec: ItemType, default: str) -> str:
         """Precedence: item override > schema field > project default."""
@@ -465,6 +468,26 @@ class Item:
         if fs:
             return fs.on_change
         return default
+
+
+def provisional_handle(item: Item) -> str:
+    """A never-written, in-memory-only dict key for an item with no
+    surrogate key yet (docs/design/threads.md §2) -- an imported item
+    (imports carry no `key`), a local item parsed before `keys.mint_missing()`
+    runs (in particular anything under `--no-write`), or a permanently
+    id-less chain entry before its first writable build.
+
+    Prefixed with `~`, which is outside the key alphabet (`keys.ALPHABET`),
+    so this can never collide with, or be mistaken for, a real minted key --
+    Layer 1-3 key lint, `refdes keys adopt`, seals, baselines, and the board
+    manifest all key off `item.key` (empty here), never off this handle, so
+    none of them ever see it. Stable only for the lifetime of one parse: an
+    item keeps this handle only until the next reparse after minting gives
+    it a real key, and it is never persisted anywhere.
+    """
+    if item.origin:
+        return f"~{item.origin}:{item.id}"
+    return f"~{item.source_file}:{item.source_line}"
 
 
 @dataclass
@@ -558,7 +581,21 @@ class Project:
     # (the live registry load_project installs); this is the loaded definition, for
     # anything that reports on the project's vocabulary.
     equations: dict[str, Equation] = field(default_factory=dict)
+    # Keyed by surrogate key (docs/design/threads.md §2) -- or, for an item
+    # that has neither a key nor a display id yet (a keyless import, a
+    # keyless local item under `--no-write`, or a permanently id-less chain
+    # entry, §2's "pending vs. permanently id-less" rule), a provisional
+    # in-memory handle from `provisional_handle()` below. That handle is
+    # never written anywhere, never a valid key spelling, and never accepted
+    # as a link target -- every consumer that treats a string as *the* key
+    # reads `item.key` (empty for a provisional entry), never a dict key here.
     items: dict[str, Item] = field(default_factory=dict)
+    # Display id -> the same dict key `items` uses for that item (surrogate
+    # key or provisional handle). The reverse index a "look up by display id"
+    # site uses (item_by_id() below); items itself is no longer keyed by
+    # display id, so a lookup that means "the item people call REQ-001" must
+    # go through this, not `items[...]` directly.
+    items_by_id: dict[str, str] = field(default_factory=dict)
     pages: list[Page] = field(default_factory=list)
     pages_dir: str = "pages"
     nav_order: list[str] = field(default_factory=list)
@@ -668,6 +705,36 @@ class Project:
     def local_items(self) -> list[Item]:
         """Items authored here -- imports are read-only and not our problem."""
         return [i for i in self.items.values() if not i.external]
+
+    def item_by_id(self, display_id: str) -> Item | None:
+        """Look up an item by its *display* id -- never a surrogate key.
+
+        `items` is keyed by surrogate key (or a provisional handle), so a
+        site that means "the item people call REQ-001" resolves through
+        `items_by_id` first. Returns None for an unknown, blank, or
+        never-assigned display id, exactly as a plain dict `.get()` would.
+        """
+        key = self.items_by_id.get(display_id)
+        return self.items.get(key) if key is not None else None
+
+    def add_item(self, item: Item, handle: str) -> str:
+        """Add `item` to `items` under `handle`, without ever silently
+        dropping another item that happens to compute the same handle.
+
+        A hand-duplicated `key:` line (the exact corruption keys.validate()'s
+        Layer 2 exists to catch) would otherwise collide two items on the
+        same real key, and a plain dict assignment would silently keep only
+        the second -- the first vanishes from `items.values()` before
+        keys.validate() ever gets a chance to compare them and report it. On
+        a genuine collision the second item is stored under a disambiguated
+        handle instead (never a valid key spelling, never written anywhere),
+        so both stay reachable and the Layer 2 diagnostic still fires.
+        Returns the handle actually used.
+        """
+        if handle in self.items and self.items[handle] is not item:
+            handle = f"{handle}!dup:{item.source_file}:{item.source_line}"
+        self.items[handle] = item
+        return handle
 
     def error(self, message: str, **kw: Any) -> None:
         self.diagnostics.append(Diagnostic(ERROR, message, **kw))

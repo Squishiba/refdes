@@ -21,7 +21,7 @@ from refdes.schema import SchemaError, load_project
 
 def test_example_project_builds_and_catches_the_thermal_violation():
     project = _project()
-    decision = project.items["DEC-PWR-001"]
+    decision = project.item_by_id("DEC-PWR-001")
     by_name = {c.value_name: c for c in decision.checks}
     assert by_name["eff"].ok is True
     assert by_name["P_dens"].ok is False
@@ -72,7 +72,7 @@ def test_check_error_reports_worst_case_with_nominal_in_parens(tmp_path):
     the number a reader recognises from the calc block.
     """
     project = _io_check_project(tmp_path, tolerance=True)
-    check = project.items["DEC-IO-002"].checks[0]
+    check = project.item_by_id("DEC-IO-002").checks[0]
     assert check.ok is False
     message = next(d.message for d in project.errors if "BND-IO-004" in d.message)
     assert (
@@ -87,7 +87,7 @@ def test_check_error_omits_nominal_when_worst_case_equals_it(tmp_path):
     The parenthetical would be pure noise here, so it must not appear.
     """
     project = _io_check_project(tmp_path, tolerance=False)
-    check = project.items["DEC-IO-002"].checks[0]
+    check = project.item_by_id("DEC-IO-002").checks[0]
     assert check.ok is False
     message = next(d.message for d in project.errors if "BND-IO-004" in d.message)
     assert "CLIM violates BND-IO-004: worst case 0.697 A vs <= 600 mA" in message
@@ -99,7 +99,7 @@ def test_check_severity_info_does_not_error_or_block_the_build(tmp_path):
     project = _check_severity_project(
         tmp_path, item_type="option", item_id="OPT-IO-001", prefix="opt"
     )
-    check = project.items["OPT-IO-001"].checks[0]
+    check = project.item_by_id("OPT-IO-001").checks[0]
     assert check.ok is False  # the Checks table must still show the failure
     assert not project.errors
     info_messages = [d.message for d in project.infos]
@@ -111,7 +111,7 @@ def test_check_severity_defaults_to_error_when_unconfigured(tmp_path):
     project = _check_severity_project(
         tmp_path, item_type="decision", item_id="DEC-IO-001", prefix="dec"
     )
-    check = project.items["DEC-IO-001"].checks[0]
+    check = project.item_by_id("DEC-IO-001").checks[0]
     assert check.ok is False
     assert any("CLIM violates CON-IO-004" in d.message for d in project.errors)
     assert not project.infos
@@ -142,8 +142,8 @@ def test_check_severity_info_still_errors_on_a_malformed_check_entry(tmp_path):
 def test_backlinks_resolve_from_either_end_of_an_edge():
     """A test declaring `verifies` must appear as `verified_by` on the requirement."""
     project = _project()
-    assert project.items["REQ-PWR-002"].backlinks["verified_by"] == ["TST-PWR-002"]
-    assert project.items["REQ-PWR-002"].backlinks["satisfied_by"] == ["DEC-PWR-001"]
+    assert project.item_by_id("REQ-PWR-002").backlinks["verified_by"] == ["TST-PWR-002"]
+    assert project.item_by_id("REQ-PWR-002").backlinks["satisfied_by"] == ["DEC-PWR-001"]
 
 
 def test_coverage_separates_addressed_satisfied_and_verified():
@@ -185,7 +185,7 @@ def test_outstanding_work_is_aggregated_into_summary_lines():
         if c.stage != "open"
         and c.stage != "claimed"
         and not c.verified_by
-        and project.items[item_id].type == "requirement"
+        and project.item_by_id(item_id).type == "requirement"
     )
     assert open_count > 0 and unverified_count > 0  # otherwise this proves nothing
 
@@ -204,7 +204,7 @@ def test_outstanding_work_is_aggregated_into_summary_lines():
 
 def test_log_entries_are_sealed_and_edits_are_caught():
     project = _project()
-    entry = project.items["LOG-A-003"]
+    entry = project.item_by_id("LOG-A-003")
     # This repo's committed seal file predates the hash-format change
     # (docs/design/keys.md §5, link targets hashed as resolved keys), and
     # _project() never mints keys, so the seal's stored hash and
@@ -231,5 +231,5 @@ def test_log_amendments_are_links_not_edits():
     # should read it directly". resolved_links is the always-bare form
     # every other graph-walking consumer reads, and what this assertion
     # actually means to check: that the link resolves to LOG-A-003.
-    assert project.items["LOG-A-006"].resolved_links["amends"] == ["LOG-A-003"]
-    assert project.items["LOG-A-003"].backlinks["amended_by"] == ["LOG-A-006"]
+    assert project.item_by_id("LOG-A-006").resolved_links["amends"] == ["LOG-A-003"]
+    assert project.item_by_id("LOG-A-003").backlinks["amended_by"] == ["LOG-A-006"]

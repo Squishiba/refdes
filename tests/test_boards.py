@@ -22,13 +22,13 @@ from refdes.schema import SchemaError, load_project
 
 def test_board_is_derived_from_the_first_path_segment_under_items(board_project):
     project = _build_at(board_project)
-    assert project.items["REQ-A-001"].board == "board-a"
-    assert project.items["REQ-B-001"].board == "board-b"
+    assert project.item_by_id("REQ-A-001").board == "board-a"
+    assert project.item_by_id("REQ-B-001").board == "board-b"
 
 
 def test_unregistered_path_segment_gets_no_board(board_project):
     project = _build_at(board_project)
-    assert project.items["REQ-S-001"].board == ""
+    assert project.item_by_id("REQ-S-001").board == ""
 
 
 def test_unregistered_path_segment_warns_that_it_has_no_board(board_project):
@@ -55,7 +55,7 @@ def test_item_directly_under_items_warns_that_it_has_no_board(tmp_path):
         encoding="utf-8",
     )
     project = _build_at(tmp_path)
-    assert project.items["REQ-L-001"].board == ""
+    assert project.item_by_id("REQ-L-001").board == ""
     warned = [
         d for d in project.warnings
         if d.item_id == "REQ-L-001" and d.message.startswith("no board")
@@ -66,7 +66,7 @@ def test_item_directly_under_items_warns_that_it_has_no_board(tmp_path):
 
 def test_item_level_board_override_beats_the_path(board_project):
     project = _build_at(board_project)
-    assert project.items["REQ-S-002"].board == "board-a"
+    assert project.item_by_id("REQ-S-002").board == "board-a"
 
 
 def test_item_level_board_override_does_not_warn_about_no_board(board_project):
@@ -140,7 +140,7 @@ def test_boards_registry_absent_is_inert(tmp_path):
     )
     project = _build_at(tmp_path)
     assert project.boards == {}
-    assert project.items["REQ-001"].board == ""
+    assert project.item_by_id("REQ-001").board == ""
     out = render.render_site(project)
     assert not any(name.startswith("document-") for name in os.listdir(out))
     payload = render.items_json(project)
@@ -158,8 +158,8 @@ def test_real_project_registers_boards_and_renders_board_pages(tmp_path):
     """
     project = _project()
     assert set(project.boards) == {"board-a", "board-b"}
-    assert project.items["REQ-PWR-001"].board == "board-a"
-    assert project.items["REQ-B-PWR-001"].board == "board-b"
+    assert project.item_by_id("REQ-PWR-001").board == "board-a"
+    assert project.item_by_id("REQ-B-PWR-001").board == "board-b"
     project.out_dir = str(tmp_path / "_site")  # absolute: render outside the repo
     out = render.render_site(project)
     for board in ("board-a", "board-b"):
@@ -291,7 +291,7 @@ def test_board_path_alias_matches_a_differently_named_folder(tmp_path):
         encoding="utf-8",
     )
     project = _build_at(tmp_path)
-    assert project.items["REQ-A-001"].board == "board-a"
+    assert project.item_by_id("REQ-A-001").board == "board-a"
 
 
 def test_boards_registry_rejects_duplicate_path_segments(tmp_path):
@@ -328,7 +328,7 @@ def test_moving_a_file_to_another_board_warns_but_does_not_error(board_project):
     )
 
     project2 = _build_at(board_project)
-    assert project2.items["REQ-A-001"].board == "board-b"
+    assert project2.item_by_id("REQ-A-001").board == "board-b"
     assert ("REQ-A-001", "board-a", "board-b") in project2.board_moves
     assert not project2.errors
     assert any(
@@ -380,7 +380,7 @@ def test_a_move_off_the_registry_is_drift_too(board_project):
     )
 
     project2 = _build_at(board_project)
-    assert project2.items["REQ-A-001"].board == ""
+    assert project2.item_by_id("REQ-A-001").board == ""
     assert ("REQ-A-001", "board-a", "") in project2.board_moves
     assert not project2.errors
     assert any(

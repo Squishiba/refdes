@@ -218,7 +218,7 @@ class SurrogateStoragePlan:
 def item_for_baseline_entry(project: Project, record_id: str, entry: dict) -> Item | None:
     identity = baseline_identity(record_id, entry)
     if identity is None:
-        return project.items.get(record_id)
+        return project.item_by_id(record_id)
     key, _display_id = identity
     return next((item for item in project.local_items if item.key == key), None)
 

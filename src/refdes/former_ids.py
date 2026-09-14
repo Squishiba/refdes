@@ -84,7 +84,7 @@ def propose(
 
     added_by_type: dict[str, list[str]] = defaultdict(list)
     for item_id in diff.added:
-        item = project.items.get(item_id)
+        item = project.item_by_id(item_id)
         # Already carries its own former_ids -- not a candidate; confirm()
         # only ever adds a fresh entry, never merges into an existing one.
         if item is not None and not item.former_ids:
@@ -93,7 +93,7 @@ def propose(
     scored: list[Candidate] = []
     for old_id, old_type, old_title in removed:
         for new_id in added_by_type.get(old_type, []):
-            new_item = project.items[new_id]
+            new_item = project.item_by_id(new_id)
             confidence = difflib.SequenceMatcher(None, old_title, new_item.title).ratio()
             if confidence >= MIN_CONFIDENCE:
                 scored.append(
@@ -131,7 +131,7 @@ def confirm(project: Project, candidates: list[Candidate], old_ids: list[str]) -
     confirmed = [by_old_id[old_id] for old_id in old_ids]
     by_file: dict[str, list[Candidate]] = defaultdict(list)
     for c in confirmed:
-        by_file[project.items[c.new_id].source_file].append(c)
+        by_file[project.item_by_id(c.new_id).source_file].append(c)
 
     for rel, entries in by_file.items():
         path = os.path.join(project.root, rel)
@@ -142,8 +142,8 @@ def confirm(project: Project, candidates: list[Candidate], old_ids: list[str]) -
 
         # Rewrite bottom-up so earlier line numbers stay valid as we insert --
         # same discipline ids.allocate() uses for the same reason.
-        for c in sorted(entries, key=lambda c: project.items[c.new_id].source_line, reverse=True):
-            item = project.items[c.new_id]
+        for c in sorted(entries, key=lambda c: project.item_by_id(c.new_id).source_line, reverse=True):
+            item = project.item_by_id(c.new_id)
             if rel.endswith(".md"):
                 lines = ids_mod.insert_into_markdown(
                     lines, item.source_line, f"former_ids: [{c.old_id}]"
@@ -164,7 +164,7 @@ def confirm(project: Project, candidates: list[Candidate], old_ids: list[str]) -
             fh.write(newline.join(lines) + newline)
 
     for c in confirmed:
-        project.items[c.new_id].former_ids.append(c.old_id)
+        project.item_by_id(c.new_id).former_ids.append(c.old_id)
         project.former_ids[c.old_id] = c.new_id
 
     return confirmed

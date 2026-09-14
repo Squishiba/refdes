@@ -76,7 +76,7 @@ def test_present_local_image_is_registered_and_rewritten(image_project):
     assert "items/figures/present.png" in project.assets
     digest = _asset_hash(b"\x89PNG\r\n\x1a\n")
     assert project.assets["items/figures/present.png"] == f"items/figures/present.{digest}.png"
-    item = project.items["DEC-A-001"]
+    item = project.item_by_id("DEC-A-001")
     assert f'src="assets/items/figures/present.{digest}.png"' in item.body_html
     # A remote src is never touched or registered.
     assert "assets/https" not in item.body_html
@@ -251,7 +251,7 @@ def test_figure_attrs_wrap_the_image_and_set_width_and_caption(figure_project):
     project = load_project(config_path=str(figure_project / "refdes-project.yaml"))
     parse.load_items(project)
     build_mod.build(project)
-    html = project.items["DEC-A-001"].body_html
+    html = project.item_by_id("DEC-A-001").body_html
     digest = _asset_hash(b"\x89PNG\r\n\x1a\n")
 
     assert '<figure class="md-figure" style="width: 60%">' in html
@@ -263,7 +263,7 @@ def test_figure_caption_falls_back_to_alt_when_not_given(figure_project):
     project = load_project(config_path=str(figure_project / "refdes-project.yaml"))
     parse.load_items(project)
     build_mod.build(project)
-    html = project.items["DEC-A-001"].body_html
+    html = project.item_by_id("DEC-A-001").body_html
 
     assert '<figure class="md-figure" style="width: 40%">' in html
     assert "<figcaption>no caption given</figcaption>" in html
@@ -273,7 +273,7 @@ def test_image_with_no_suffix_is_never_wrapped_in_a_figure(figure_project):
     project = load_project(config_path=str(figure_project / "refdes-project.yaml"))
     parse.load_items(project)
     build_mod.build(project)
-    html = project.items["DEC-A-001"].body_html
+    html = project.item_by_id("DEC-A-001").body_html
     digest = _asset_hash(b"\x89PNG\r\n\x1a\n")
 
     assert f'<img src="assets/items/figures/present.{digest}.png" alt="plain, no suffix" />' in html
@@ -621,7 +621,7 @@ def test_explicit_item_reference_does_not_nest_duplicate_links(blocks_project):
         encoding="utf-8",
     )
     project = _build_at(blocks_project)
-    html = project.items["REQ-001"].body_html
+    html = project.item_by_id("REQ-001").body_html
     assert html.count("<a") == 1
     assert '<a class="ref" href="con-001.html" data-ref="CON-001">CON-001</a>' in html
 

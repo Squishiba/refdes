@@ -290,14 +290,14 @@ def _walk(
 ) -> list[CascadeNode]:
     if depth <= 0:
         return []
-    item = project.items.get(current_id)
+    item = project.item_by_id(current_id)
     if item is None:
         return []
     # resolved_links, not links, for "up": a target may be `DISPLAY@key`
     # composite text (docs/design/keys.md §3), and every id this function
     # walks with (current_id, and every target_id below) ends up passed
-    # straight back into project.items.get() -- which was never keyed by
-    # that composite string. backlinks needs no such swap: it is always
+    # straight back into project.item_by_id() -- which resolves a display id,
+    # never that composite string. backlinks needs no such swap: it is always
     # populated with the *linking* item's own id (build.resolve_links()),
     # which is never composite.
     edges = item.resolved_links if direction == "up" else item.backlinks
@@ -335,7 +335,7 @@ def _walk(
 def _render_node_list(nodes: list[CascadeNode], project: Project) -> str:
     parts = []
     for node in nodes:
-        item = project.items.get(node.item_id)
+        item = project.item_by_id(node.item_id)
         title = item.title if item else node.item_id
         text = f"{node.verb} {_esc(node.item_id)} — {_esc(title)}"
         if node.already_shown:
@@ -361,7 +361,7 @@ def _render_cascade(project: Project, params: dict[str, str]) -> str:
     depth_raw = params.get("depth", "3")
     via_raw = params.get("via")
 
-    root_item = project.items.get(root_id)
+    root_item = project.item_by_id(root_id)
     if root_item is None:
         raise _BlockError(f"{root_id} does not exist.")
 

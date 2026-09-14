@@ -58,6 +58,7 @@ def _parse_items(
     if discard is not None:
         del project.diagnostics[discard[0] : discard[1]]
         project.items = {}
+        project.items_by_id = {}
         project.pending = []
     start = len(project.diagnostics)
     parse_mod.load_items(project, require_ids=require_ids)
@@ -145,7 +146,7 @@ def _visible(
         if d.level == "info" and not verbose:
             continue
         if d.item_id is not None:
-            item = project.items.get(d.item_id)
+            item = project.item_by_id(d.item_id)
             if item is not None:
                 if board is not None and item.board != board:
                     continue
@@ -1019,7 +1020,7 @@ def cmd_former_ids_propose(args) -> int:
 
     print()
     for c in confirmed:
-        item = project.items[c.new_id]
+        item = project.item_by_id(c.new_id)
         print(f"wrote former_ids: [{c.old_id}] to {c.new_id} ({item.source_file})")
     return 1 if project.errors else 0
 

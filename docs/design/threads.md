@@ -23,6 +23,49 @@ evaluation semantics — those are other sessions' work in progress.
 Anywhere this spec would eventually touch one of those files (§5's type
 merge, §7's migration file), it says so and stops there.
 
+**Decisions since this spec, Jared, 2026-09-14:**
+
+- **The `log`/`decision` merge (§5) lands in `hardware@3`, not a new
+  `hardware@4`.** `hardware@3` is this repo's pinned version and is still
+  under `[Unreleased]` in `CHANGELOG.md` — nothing has shipped it yet, so
+  there is no released vocabulary the merge would otherwise have to bump
+  past. Every `hardware@4` reference below (§5, §7) is superseded by this;
+  read it as `hardware@3` wherever it appears. This does not change when the
+  merge itself lands — §5/§7 remain other sessions'/a later session's work,
+  scoped out of Phase 1 exactly as before — only which version number it
+  targets once it does.
+- **A frozen `follows:` target is stored as `DISPLAY-ID@key` whenever the
+  target entry has a display id** (readable, refreshed on rename like every
+  other composite link, `docs/design/keys.md` §3), **and as a bare key only
+  when the target entry has no display id.** §1's own worked example ("the
+  write-back pass ... rewrites the line to that tip's bare key") describes
+  only the second case; a chain tip that *does* have a display id (the
+  common case — most heads are still worth naming) freezes to the composite
+  form instead, exactly like `satisfies:`/`refines:`/every other structured
+  link. This is a consequence of §2's identity model, not a new mechanism:
+  `follows:` is an ordinary link, so it gets the ordinary composite-or-bare
+  rule based on whether *the target* happens to have a display id, with
+  nothing chain-specific about the choice.
+
+**Phase 1 implemented** (this session, 2026-09-14): §2's identity
+foundation — `Project.items` re-keyed on surrogate key (or, for an item
+with neither a key nor a display id yet, an in-memory-only provisional
+handle that is never written, never a valid key spelling, and never a link
+target, `model.provisional_handle`), the `Project.items_by_id` reverse
+index and `Project.item_by_id()` helper, the pending-vs-permanently-id-less
+rule (an item with no `id:` and a non-empty `follows:` is a real project
+member, not pending), and `Item.slug`'s key fallback. `follows:` itself
+resolves as an ordinary declared link (whatever engine capability already
+resolves `satisfies:` resolves it too) — nothing chain-aware was added.
+**Not implemented, still later phases:** `followed_by:` write-back/freeze
+resolution (the graph walk to a chain's current tip — today `follows:`
+resolves like any other link, to whatever it names directly), forks/cycles
+detection, `resolve_current`'s per-field fold, coverage's fallback to it,
+and any rendering of a chain as such. See `src/refdes/parse.py`
+(`load_items`), `src/refdes/model.py` (`Project.items`/`items_by_id`/
+`item_by_id`/`add_item`, `provisional_handle`, `Item.slug`), and
+`tests/test_threads.py`.
+
 ---
 
 ## What changed, and why the previous draft is wrong
@@ -119,7 +162,13 @@ On the next writable build, this resolves — and freezes — exactly the way
 an ordinary composite reference already does (`docs/design/keys.md` §3):
 the write-back pass walks forward from whatever `LOG-A-001` currently
 resolves to, along `followed_by:` backlinks, to the chain's **current
-tip**, and rewrites the line to that tip's bare key:
+tip**, and rewrites the line to that tip's key — as a bare key if the tip
+has no display id of its own (the common case once a chain has grown past
+its head through id-less continuations, §2), or as a `DISPLAY-ID@key`
+composite, refreshed on rename like any other structured link, if it does
+(decided 2026-09-14). The example below assumes the tip by then is a later,
+id-less continuation, which is why it freezes to a bare key rather than
+`LOG-A-004@k2p9w3x1r7` or similar:
 
 ```yaml
 # after the next build
@@ -577,10 +626,12 @@ Real, disclosed field-level decisions this makes, each worth naming:
 ### What this costs the standard
 
 This is standard-content, not engine content (mirroring the split keys.md
-§7 already drew) — it lands in `standards/hardware/v4/base.yaml` and a
-real `migration.yaml`, neither written here (another session owns
-`v3/base.yaml`; a `v4` is this design's business once it's implemented,
-not this document's). §7 covers what that migration has to do.
+§7 already drew) — it lands in `standards/hardware/v3/base.yaml` and a
+real `migration.yaml` (decided 2026-09-14: `v3` is still `[Unreleased]`, so
+the merge amends it directly rather than opening a `v4` — see the top-of-
+document decisions note), neither written here (another session owns
+`v3/base.yaml` today; this design's business once it's implemented, not
+this document's). §7 covers what that migration has to do.
 
 ---
 
@@ -695,14 +746,19 @@ machinery. **This model needs no grouping step for correctness at all.**
 Every existing `log` item stays exactly what it is (already the surviving
 type). Every existing `decision` item becomes a `log` item with its fields
 carried over — a mechanical, per-item rename, structurally identical in
-shape to the `text:`/`method:` → `body:` migration `hardware@3` already
-shipped (`standards/hardware/v3/migration.yaml`), reusing `revise.py`'s
-existing atomic-rewrite engine (`apply()`) with no new transaction model
-needed:
+shape to the `text:`/`method:` → `body:` migration `hardware@2` → `@3`
+already shipped, reusing `revise.py`'s existing atomic-rewrite engine
+(`apply()`) with no new transaction model needed. Decided 2026-09-14
+(top-of-document note): since `hardware@3` is still `[Unreleased]`, this
+amends `standards/hardware/v3/base.yaml` and `v3/migration.yaml` directly
+rather than opening a `v4` — there is no separate "v3 → v4" upgrade step
+for a project to run; a project pinned at `@3` simply picks up the merged
+type the moment `@3` ships:
 
 ```yaml
-# sketch of standards/hardware/v4/migration.yaml -- fields: section only,
-# for illustration; the real file is another session's/a later change's to write
+# sketch of an addition to standards/hardware/v3/migration.yaml -- fields:
+# section only, for illustration; the real file is another session's/a
+# later change's to write
 fields:
   decision:            # keyed by the OLD type name
     title: null         # dropped -- summary already exists and serves the role (§5)
@@ -740,7 +796,7 @@ entries led to this decision" from indirect evidence (shared `addresses:`
 targets, proximity in `date:`) is a similarity-scoring problem, not a
 mechanical one, and should stay opt-in and human-confirmed rather than
 folded into the required upgrade path. Whether this is ever built is a
-separate decision from whether `hardware@4` ships at all.
+separate decision from whether the merged `hardware@3` ships at all.
 
 ### Standard version, or engine change, or both
 
@@ -750,7 +806,8 @@ type any project can declare; the id-optional item state, §2; the
 `resolve_current` walk, §3) is standard-independent — a bespoke
 `standard: none` project can declare its own chainable type today, once
 the engine ships this, with no involvement from the bundled standard at
-all. The standard layer (`hardware@4` merging `log`/`decision`) is a
+all. The standard layer (`hardware@3` merging `log`/`decision`, decided
+2026-09-14 to amend the still-unreleased `@3` rather than open a `@4`) is a
 version bump on top of that engine capability, exactly as `hardware@3`'s
 `body:` unification was a version bump on top of engine capabilities that
 already existed independently.
@@ -864,7 +921,7 @@ mechanical fix, and the rest are confirmed unaffected."
 | An entry is | a sub-record inside one `thread` item | an ordinary item |
 | Document format | new, unbuilt (`.md` multi-entry shape needed) | none needed — existing `.md`/`.yaml` shapes work unchanged |
 | Chain/thread identity | the container item's own key | emergent from the `follows:`/`followed_by:` graph; no single canonical key once merges exist |
-| Link target for "continue this" | a new `#`-separated entry-pin composite | a bare key, written by a tool-mediated write-back reusing the existing composite mechanism |
+| Link target for "continue this" | a new `#`-separated entry-pin composite | a bare key or `DISPLAY-ID@key` composite (whichever the tip has, decided 2026-09-14), written by a tool-mediated write-back reusing the existing composite mechanism |
 | Hashing/seals | two-hash model (entry hash + fold hash), new machinery | unchanged, per-entry, zero new machinery |
 | Baselines | new fold-hash fields per thread | no new fields |
 | Coverage/checks | virtual-item projection table, computed per build | small, targeted fallback (`resolve_current`), called on demand |

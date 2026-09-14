@@ -17,7 +17,7 @@ from typing import Any
 
 import yaml
 
-from .model import ON_CHANGE_MODES, Item, Project
+from .model import ON_CHANGE_MODES, Item, Project, provisional_handle
 
 FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n?(.*)$", re.DOTALL)
 # A candidate fence line: `---` alone on its line.
@@ -706,7 +706,15 @@ def source_files(project: Project) -> list[str]:
 def load_items(project: Project, require_ids: bool = True) -> None:
     """Parse every source file into project.items, reporting duplicate IDs.
 
-    Items with no id yet go to project.pending so `refdes id` can allocate one.
+    Items with no id yet go to project.pending so `refdes id` can allocate
+    one -- unless the item declares a non-empty `follows:` (docs/design/
+    threads.md §2): a chain entry that names its predecessor is, by
+    definition, one that isn't waiting to become a real project member --
+    it already is one, and gets a key from minting like any other item.
+    `item.links.get("follows")` is read generically, not tied to any
+    particular type: whatever this project's schema declares a `follows:`
+    link on is what this rule applies to (nothing today ships one; a
+    project's own schema, or a later standard version, can).
     """
     for path in source_files(project):
         if path.endswith(".md"):
@@ -723,6 +731,9 @@ def load_items(project: Project, require_ids: bool = True) -> None:
                     # value instead of replacing it, corrupting the file the
                     # same way Part 0's original bug did.
                     continue
+                if item.links.get("follows"):
+                    project.add_item(item, item.key or provisional_handle(item))
+                    continue
                 project.pending.append(item)
                 if require_ids:
                     if item.numeric_id_hint:
@@ -734,12 +745,14 @@ def load_items(project: Project, require_ids: bool = True) -> None:
                         message = "item has no id — run 'refdes id' to allocate one"
                     project.error(message, file=item.source_file, line=item.source_line)
                 continue
-            existing = project.items.get(item.id)
-            if existing:
+            existing_key = project.items_by_id.get(item.id)
+            if existing_key is not None:
+                existing = project.items[existing_key]
                 project.error(
                     f"duplicate id {item.id!r} (also defined at "
                     f"{existing.source_file}:{existing.source_line})",
                     file=item.source_file, line=item.source_line, item_id=item.id,
                 )
                 continue
-            project.items[item.id] = item
+            handle = project.add_item(item, item.key or provisional_handle(item))
+            project.items_by_id[item.id] = handle

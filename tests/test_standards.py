@@ -128,8 +128,8 @@ def test_hardware_v3_decision_declares_recorded_by_and_the_link_resolves(tmp_pat
     project = _build_at(tmp_path)
 
     assert not project.errors
-    assert project.items["DEC-001"].resolved_links["recorded_by"] == ["LOG-001"]
-    assert project.items["LOG-001"].backlinks["records"] == ["DEC-001"]
+    assert project.item_by_id("DEC-001").resolved_links["recorded_by"] == ["LOG-001"]
+    assert project.item_by_id("LOG-001").backlinks["records"] == ["DEC-001"]
 
 
 def test_standard_version_must_be_a_pinned_integer(tmp_path):
@@ -408,7 +408,7 @@ def test_explicit_null_enum_field_gets_default_applied_and_reported(tmp_path):
     project = _build_at(tmp_path)
 
     assert not project.errors
-    assert project.items["REQ-001"].fields["status"] == "draft"
+    assert project.item_by_id("REQ-001").fields["status"] == "draft"
     assert any(
         d.item_id == "REQ-001" and "status" in d.message and "null" in d.message.lower()
         for d in project.warnings
@@ -448,7 +448,7 @@ def test_verifying_statuses_filters_which_links_count_as_verified(tmp_path):
     assert project.coverage["REQ-001"].verified_by == []
     assert project.coverage["REQ-001"].stage == "open"
 
-    project.items["TST-001"].fields["status"] = "passing"
+    project.item_by_id("TST-001").fields["status"] = "passing"
     build_mod.compute_coverage(project)
     assert project.coverage["REQ-001"].verified_by == ["TST-001"]
     assert project.coverage["REQ-001"].stage == "verified"
@@ -682,8 +682,8 @@ def test_group_cannot_be_a_satisfies_target(tmp_path):
 
     # The claim is not merely reported-and-kept: it resolves nowhere, so it
     # cannot settle anything even as a side effect.
-    assert "GRP-001" not in project.items["DEC-001"].resolved_links.get("satisfies", [])
-    assert "DEC-001" not in project.items["GRP-001"].backlinks.get("satisfied_by", [])
+    assert "GRP-001" not in project.item_by_id("DEC-001").resolved_links.get("satisfies", [])
+    assert "DEC-001" not in project.item_by_id("GRP-001").backlinks.get("satisfied_by", [])
 
 
 def test_part_of_resolves_and_the_group_sees_members_through_contains(tmp_path):
@@ -691,5 +691,5 @@ def test_part_of_resolves_and_the_group_sees_members_through_contains(tmp_path):
     view of its members is the computed `contains` inverse backlink."""
     project = _group_project(tmp_path)
     assert not project.errors
-    assert project.items["REQ-001"].resolved_links["part_of"] == ["GRP-001"]
-    assert project.items["GRP-001"].backlinks["contains"] == ["REQ-001"]
+    assert project.item_by_id("REQ-001").resolved_links["part_of"] == ["GRP-001"]
+    assert project.item_by_id("GRP-001").backlinks["contains"] == ["REQ-001"]

@@ -56,7 +56,7 @@ def test_misspelled_link_key_errors_instead_of_silently_dropping(typo_link_proje
     )
     assert not any("sattisfies" in d.message for d in project.warnings)
     # The edge really is dropped -- that's exactly why this must be an error.
-    assert project.items["DEC-A-001"].links == {}
+    assert project.item_by_id("DEC-A-001").links == {}
 
 
 def test_constraint_title_renamed_to_text_gives_a_specific_diagnostic(tmp_path):
@@ -106,7 +106,7 @@ def test_constraint_title_renamed_to_text_gives_a_specific_diagnostic(tmp_path):
 
     # The old value is used for the new field, so nothing downstream cascades
     # into a confusing secondary failure.
-    assert project.items["CON-001"].fields["text"] == "Old-style constraint."
+    assert project.item_by_id("CON-001").fields["text"] == "Old-style constraint."
 
 
 def test_constraint_title_on_hardware_v1_is_unaffected(tmp_path):
@@ -131,7 +131,7 @@ def test_constraint_title_on_hardware_v1_is_unaffected(tmp_path):
     build_mod.build(project)
     assert not project.errors
     assert not project.warnings
-    assert project.items["CON-001"].fields["title"] == "A constraint."
+    assert project.item_by_id("CON-001").fields["title"] == "A constraint."
 
 
 def test_unrecognized_field_far_from_any_link_still_only_warns(tmp_path):

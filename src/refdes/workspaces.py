@@ -112,13 +112,13 @@ def lint_cross_workspace_references(project: Project) -> None:
         if not item.workspace:
             continue
         # resolved_links, not links: a target may be `DISPLAY@key` composite
-        # text (docs/design/keys.md §3); project.items is keyed by plain
-        # display id, never by that composite string, so a direct lookup
+        # text (docs/design/keys.md §3); project.item_by_id() resolves a
+        # plain display id, never that composite string, so a direct lookup
         # against raw `links` text would silently stop matching the moment a
         # link gets expanded, and this lint would go blind to it.
         for link_name, targets in item.resolved_links.items():
             for target_id in targets:
-                target = project.items.get(target_id)
+                target = project.item_by_id(target_id)
                 if target is None or target.external:
                     continue
                 if not target.workspace or target.workspace == item.workspace:

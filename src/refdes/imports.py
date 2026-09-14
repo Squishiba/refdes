@@ -15,7 +15,7 @@ from __future__ import annotations
 import json
 import os
 
-from .model import Item, Project
+from .model import Item, Project, provisional_handle
 
 
 def load_imports(project: Project) -> None:
@@ -58,7 +58,7 @@ def _absorb(project: Project, origin: str, version: str, data: dict) -> None:
         if not item_id:
             continue
 
-        existing = project.items.get(item_id)
+        existing = project.item_by_id(item_id)
         if existing is not None:
             where = (
                 f"import {existing.origin!r}"
@@ -97,4 +97,8 @@ def _absorb(project: Project, origin: str, version: str, data: dict) -> None:
                 file="refdes-project.yaml",
             )
 
-        project.items[item_id] = item
+        # Imports carry no key (a real, disclosed gap -- docs/design/keys.md
+        # §2's "A bonus: imports"): a provisional handle keys this item until
+        # cross-project export/import learns to carry one.
+        handle = project.add_item(item, provisional_handle(item))
+        project.items_by_id[item_id] = handle

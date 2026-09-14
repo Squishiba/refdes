@@ -121,7 +121,7 @@ def test_id_write_back_fills_bare_id_key_in_place_not_a_second_key(tmp_path):
     # *last* one, so a still-broken file looks pending again here.
     project2 = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
     parse.load_items(project2, require_ids=False)
-    assert project2.items.get("CAN-001") is not None
+    assert project2.item_by_id("CAN-001") is not None
     assert not project2.pending, "the item must not still look unallocated on reparse"
 
     # A second run against an already-correct file must be a no-op, not another
@@ -165,7 +165,7 @@ def test_id_write_back_fills_bare_id_key_in_place_markdown(tmp_path):
 
     project2 = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
     parse.load_items(project2, require_ids=False)
-    assert project2.items.get("DEC-001") is not None
+    assert project2.item_by_id("DEC-001") is not None
     assert not project2.pending, "the item must not still look unallocated on reparse"
 
     assignments2 = ids.allocate(project2)
@@ -453,7 +453,7 @@ def test_prefix_mismatch_is_reported_not_silently_rewritten(tmp_path):
     parse.load_items(project, require_ids=False)
     ids.validate_prefixes(project)
     assert (root / "items" / "r.yaml").read_text(encoding="utf-8") == before
-    assert project.items["CNA-001"].id == "CNA-001"  # not corrected in memory either
+    assert project.item_by_id("CNA-001").id == "CNA-001"  # not corrected in memory either
 
 
 def test_prefix_with_a_free_form_category_segment_is_not_a_mismatch(tmp_path):

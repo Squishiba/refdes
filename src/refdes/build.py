@@ -296,7 +296,7 @@ def validate_former_ids(project: Project) -> None:
     for old_id, owner_id in project.former_ids.items():
         if BARE_REF_RE.fullmatch(old_id):
             continue
-        owner = project.items[owner_id]
+        owner = project.item_by_id(owner_id)
         project.warn(
             f"former_ids: {old_id!r} does not match the bare-reference shape "
             f"(PREFIX-NNN) and will never autolink in prose -- reference it "
@@ -346,7 +346,7 @@ def resolve_link_target(by_key: dict[str, Item], project: Project, target: str) 
     if "@" in target:
         _display, _, key = target.partition("@")
         return by_key.get(key)
-    return project.items.get(target)
+    return project.item_by_id(target)
 
 
 def _unknown_key_message(pointer: str, target_id: str) -> str:
@@ -504,7 +504,7 @@ def validate_conforms_to(project: Project) -> None:
     group_types = _group_type_names(project)
     for bname, spec in sorted(project.boards.items()):
         for target in spec.conforms_to:
-            item = project.items.get(target)
+            item = project.item_by_id(target)
             if item is None:
                 project.error(
                     f"boards.{bname} conforms_to {target!r}, which does not "
@@ -531,7 +531,7 @@ def _board_gate(project: Project, board: str | None):
     def keep(item_id: str) -> bool:
         if board is None:
             return True
-        other = project.items.get(item_id)
+        other = project.item_by_id(item_id)
         return other is not None and other.board == board
 
     return keep
@@ -561,7 +561,7 @@ def _coverage_for(
         | set(item.resolved_links.get("satisfies", []))
         if keep(i)
     ):
-        satisfier = project.items.get(satisfier_id)
+        satisfier = project.item_by_id(satisfier_id)
         satisfier_spec = project.types.get(satisfier.type) if satisfier else None
         allowed = satisfier_spec.satisfying_statuses if satisfier_spec else None
         # Unconfigured type: every link counts as settled, same as before
@@ -580,7 +580,7 @@ def _coverage_for(
         | set(item.resolved_links.get("verified_by", []))
         if keep(i)
     ):
-        verifier = project.items.get(verifier_id)
+        verifier = project.item_by_id(verifier_id)
         verifier_spec = project.types.get(verifier.type) if verifier else None
         allowed = verifier_spec.verifying_statuses if verifier_spec else None
         # Unconfigured: every link counts, mirroring satisfying_statuses.
@@ -618,11 +618,11 @@ def compute_board_coverage(project: Project) -> None:
             spec.conforms_to and nav_mod.scope_reports(project, board=bname)
         )
         for group_id in spec.conforms_to:
-            group = project.items.get(group_id)
+            group = project.item_by_id(group_id)
             if group is None:
                 continue  # validate_conforms_to() already errored on this
             for member_id in sorted(group.backlinks.get("contains", [])):
-                member = project.items.get(member_id)
+                member = project.item_by_id(member_id)
                 if member is None:
                     continue
                 member_spec = project.types.get(member.type)
@@ -704,11 +704,11 @@ def compute_coverage(project: Project) -> None:
             continue
 
         # Each edge may be declared from either end. resolved_links, not
-        # links: these targets get looked up in project.items directly
-        # below, and links may hold `DISPLAY@key` composite text now
-        # (docs/design/keys.md §3) that project.items was never keyed by --
-        # resolved_links is resolve_links()'s own output, already resolved
-        # to each target's current, plain display id.
+        # links: these targets get looked up via project.item_by_id() below,
+        # and links may hold `DISPLAY@key` composite text now (docs/design/
+        # keys.md §3) that item_by_id() can't resolve -- resolved_links is
+        # resolve_links()'s own output, already resolved to each target's
+        # current, plain display id.
         cov = _coverage_for(item, project)
         claimed = cov.claimed_by
         project.coverage[item.id] = cov
@@ -766,7 +766,7 @@ def compute_coverage(project: Project) -> None:
             f"— see coverage.html"
         )
     for root_id, items in sorted(unsettled_by_root.items()):
-        root = project.items.get(root_id)
+        root = project.item_by_id(root_id)
         status = root.fields.get("status") if root else None
         status_text = f" is {status}" if status else " is unsettled"
         project.warn(
@@ -1350,19 +1350,19 @@ def _linkify(
                 )
                 return f'<span class="ref ref-missing" title="unknown citation">{label or cite_id}</span>'
             owner_id, _owner_file, _owner_line = entry
-            owner = project.items[owner_id]
+            owner = project.item_by_id(owner_id)
             text = label or cite_id
             return (
                 f'<a class="ref cite-ref" href="{owner.slug}.html#cite-{_esc(cite_id)}">{text}</a>'
             )
-        target = project.items.get(target_id)
+        target = project.item_by_id(target_id)
         if target is None:
             former_owner_id = project.former_ids.get(target_id)
             if former_owner_id is not None:
                 # Resolves, but never silently -- a reader following an old id
                 # must see it landed somewhere else, not be quietly redirected
                 # (finding 12).
-                owner = project.items[former_owner_id]
+                owner = project.item_by_id(former_owner_id)
                 anchor = field_anchor(owner, field) or ""
                 text = label or target_id
                 return (

@@ -21,14 +21,14 @@ def test_seal_files_are_split_per_board(sealed_board_project):
     build_mod.build(project, seal_write=True)
 
     assert seal.load_seals(project, board="board-a") == {
-        "LOG-A-001": project.items["LOG-A-001"].content_hash
+        "LOG-A-001": project.item_by_id("LOG-A-001").content_hash
     }
     assert seal.load_seals(project, board="board-b") == {
-        "LOG-B-001": project.items["LOG-B-001"].content_hash
+        "LOG-B-001": project.item_by_id("LOG-B-001").content_hash
     }
     # No board: items keep using the base file, unchanged from before boards existed.
     assert seal.load_seals(project, board="") == {
-        "LOG-X-001": project.items["LOG-X-001"].content_hash
+        "LOG-X-001": project.item_by_id("LOG-X-001").content_hash
     }
     assert os.path.isfile(seal.seal_path(project, "board-a"))
     assert os.path.isfile(seal.seal_path(project, "board-b"))
@@ -39,8 +39,8 @@ def test_reseal_scoped_to_one_board_only_accepts_that_boards_edits(sealed_board_
     build_mod.build(project, seal_write=True)
 
     project2 = _build_at(sealed_board_project)
-    project2.items["LOG-A-001"].fields["summary"] = "edited"
-    project2.items["LOG-B-001"].fields["summary"] = "edited"
+    project2.item_by_id("LOG-A-001").fields["summary"] = "edited"
+    project2.item_by_id("LOG-B-001").fields["summary"] = "edited"
     build_mod.compute_hashes(project2)
     seal.verify(project2, write=True, reseal="board-a")
 
@@ -48,12 +48,12 @@ def test_reseal_scoped_to_one_board_only_accepts_that_boards_edits(sealed_board_
     assert "LOG-B-001" in project2.seal_violations
     assert (
         seal.load_seals(project2, board="board-a")["LOG-A-001"]
-        == project2.items["LOG-A-001"].content_hash
+        == project2.item_by_id("LOG-A-001").content_hash
     )
     # board-b's file is untouched: its edit was not accepted.
     assert (
         seal.load_seals(project2, board="board-b")["LOG-B-001"]
-        != project2.items["LOG-B-001"].content_hash
+        != project2.item_by_id("LOG-B-001").content_hash
     )
 
 
@@ -62,19 +62,19 @@ def test_reseal_bare_accepts_every_boards_edits(sealed_board_project):
     build_mod.build(project, seal_write=True)
 
     project2 = _build_at(sealed_board_project)
-    project2.items["LOG-A-001"].fields["summary"] = "edited"
-    project2.items["LOG-B-001"].fields["summary"] = "edited"
+    project2.item_by_id("LOG-A-001").fields["summary"] = "edited"
+    project2.item_by_id("LOG-B-001").fields["summary"] = "edited"
     build_mod.compute_hashes(project2)
     seal.verify(project2, write=True, reseal=seal.RESEAL_ALL)
 
     assert not project2.seal_violations
     assert (
         seal.load_seals(project2, board="board-a")["LOG-A-001"]
-        == project2.items["LOG-A-001"].content_hash
+        == project2.item_by_id("LOG-A-001").content_hash
     )
     assert (
         seal.load_seals(project2, board="board-b")["LOG-B-001"]
-        == project2.items["LOG-B-001"].content_hash
+        == project2.item_by_id("LOG-B-001").content_hash
     )
 
 
@@ -84,7 +84,7 @@ def test_check_finds_legacy_seal_history_without_writing(sealed_board_project):
     history via lookback -- not treat the entry as new, not error -- and must
     not create or touch any seal file while doing it."""
     project = _build_at(sealed_board_project)
-    legacy_hash = project.items["LOG-A-001"].content_hash
+    legacy_hash = project.item_by_id("LOG-A-001").content_hash
     seal.save_seals(project, {"LOG-A-001": legacy_hash}, board="")
     assert not os.path.isfile(seal.seal_path(project, "board-a"))
 
@@ -105,7 +105,7 @@ def test_check_catches_an_edit_against_legacy_seal_history(sealed_board_project)
 
 def test_build_migrates_legacy_seal_entries_into_the_boards_own_file(sealed_board_project):
     project = _build_at(sealed_board_project)
-    legacy_hash = project.items["LOG-A-001"].content_hash
+    legacy_hash = project.item_by_id("LOG-A-001").content_hash
     seal.save_seals(project, {"LOG-A-001": legacy_hash}, board="")
 
     # A fresh project, built once with seal_write=True -- a real `refdes build`.
@@ -238,7 +238,7 @@ def test_seal_storage_is_a_single_file_with_no_boards_registered(tmp_path):
     assert "log-seal.yaml" in names
     assert not any(n.startswith("log-seal-") for n in names)
     assert seal.load_seals(project, board="") == {
-        "LOG-001": project.items["LOG-001"].content_hash
+        "LOG-001": project.item_by_id("LOG-001").content_hash
     }
 
 
@@ -270,10 +270,10 @@ def test_keyed_seal_survives_display_id_rename_without_violation(tmp_path):
         {
             key: {
                 "id": "LOG-001",
-                "hash": project.items["LOG-001"].content_hash,
+                "hash": project.item_by_id("LOG-001").content_hash,
                 "hash_format": build_mod.HASH_FORMAT,
             },
-            "LOG-002": project.items["LOG-002"].content_hash,
+            "LOG-002": project.item_by_id("LOG-002").content_hash,
         },
     )
     seal_path = tmp_path / ".refdes" / "log-seal.yaml"
@@ -291,10 +291,10 @@ def test_keyed_seal_survives_display_id_rename_without_violation(tmp_path):
     assert seal.load_seals(renamed) == {
         key: {
             "id": "LOG-001",
-            "hash": renamed.items["LOG-009"].content_hash,
+            "hash": renamed.item_by_id("LOG-009").content_hash,
             "hash_format": build_mod.HASH_FORMAT,
         },
-        "LOG-002": renamed.items["LOG-002"].content_hash,
+        "LOG-002": renamed.item_by_id("LOG-002").content_hash,
     }
 
 
@@ -324,7 +324,7 @@ def test_write_verify_rejects_changed_key_and_content_without_fresh_seal(tmp_pat
         {
             sealed_key: {
                 "id": "LOG-001",
-                "hash": project.items["LOG-001"].content_hash,
+                "hash": project.item_by_id("LOG-001").content_hash,
                 "hash_format": build_mod.HASH_FORMAT,
             }
         },
@@ -375,7 +375,7 @@ def test_renamed_keyed_seal_does_not_claim_a_new_item_reusing_its_old_id(tmp_pat
         encoding="utf-8",
     )
     project = _load_and_build(tmp_path, seal_write=False, reseal=False)
-    original_hash = project.items["LOG-001"].content_hash
+    original_hash = project.item_by_id("LOG-001").content_hash
     seal.save_seals(
         project,
         {
@@ -406,6 +406,6 @@ def test_renamed_keyed_seal_does_not_claim_a_new_item_reusing_its_old_id(tmp_pat
         "hash": original_hash,
         "hash_format": build_mod.HASH_FORMAT,
     }
-    assert stored["LOG-001"] == reused.items["LOG-001"].content_hash
-    assert reused.items["LOG-005"].content_hash == original_hash
+    assert stored["LOG-001"] == reused.item_by_id("LOG-001").content_hash
+    assert reused.item_by_id("LOG-005").content_hash == original_hash
     assert seal.resealed_ids(reused) == []

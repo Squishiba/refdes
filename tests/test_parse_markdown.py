@@ -185,8 +185,8 @@ def test_multi_item_markdown_file_parses_each_item_separately(multi_item_project
     parse.load_items(project, require_ids=False)
     assert not project.errors
 
-    one = project.items["DEC-X-001"]
-    two = project.items["DEC-X-002"]
+    one = project.item_by_id("DEC-X-001")
+    two = project.item_by_id("DEC-X-002")
     assert one.fields["title"] == "First decision"
     assert two.fields["title"] == "Second decision"
     # `defaults:` applied to both, and each keeps its own body -- no leakage
@@ -207,8 +207,8 @@ def test_multi_item_source_lines_point_at_each_items_own_fence(multi_item_projec
         .read_text(encoding="utf-8")
         .splitlines()
     )
-    one = project.items["DEC-X-001"]
-    two = project.items["DEC-X-002"]
+    one = project.item_by_id("DEC-X-001")
+    two = project.item_by_id("DEC-X-002")
     assert text[one.source_line - 1].strip() == "id: DEC-X-001"
     assert text[two.source_line - 1].strip() == "id: DEC-X-002"
 
@@ -229,7 +229,7 @@ def test_today_style_single_item_file_is_unaffected(tmp_path):
     parse.load_items(project, require_ids=False)
     assert not project.errors
     assert len(project.items) == 1
-    item = project.items["DEC-PWR-001"]
+    item = project.item_by_id("DEC-PWR-001")
     assert item.source_line == 2
     assert item.body.startswith("\nThe 3V3 rail draws")
 
@@ -255,7 +255,7 @@ def test_literal_horizontal_rule_stays_in_the_body(tmp_path):
     parse.load_items(project, require_ids=False)
     assert not project.errors
     assert len(project.items) == 1
-    item = project.items["DEC-HR-001"]
+    item = project.item_by_id("DEC-HR-001")
     assert "More text after a horizontal rule." in item.body
     assert "---" in item.body
 
@@ -281,7 +281,7 @@ def test_horizontal_rule_with_no_closing_fence_stays_literal(tmp_path):
     parse.load_items(project, require_ids=False)
     assert not project.errors
     assert len(project.items) == 1
-    item = project.items["DEC-HR-002"]
+    item = project.item_by_id("DEC-HR-002")
     assert "Note: this looks like a key" in item.body
 
 
@@ -324,9 +324,9 @@ def test_refdes_id_writes_back_into_each_items_own_fence(tmp_path):
     # has its own distinct body.
     project2 = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
     parse.load_items(project2, require_ids=False)
-    assert "Body one." in project2.items["DEC-MULTI-001"].body
-    assert "Body two." in project2.items["DEC-MULTI-002"].body
-    assert "Body two." not in project2.items["DEC-MULTI-001"].body
+    assert "Body one." in project2.item_by_id("DEC-MULTI-001").body
+    assert "Body two." in project2.item_by_id("DEC-MULTI-002").body
+    assert "Body two." not in project2.item_by_id("DEC-MULTI-001").body
 
 
 # ------------------------------------------------------------------- sections
@@ -358,9 +358,9 @@ def test_section_elides_type_in_a_yaml_list_file(tmp_path):
     parse.load_items(project)
     assert not project.errors
     assert not project.warnings
-    assert project.items["REQ-001"].type == "requirement"
-    assert project.items["REQ-002"].type == "requirement"
-    assert project.items["DEC-001"].type == "decision"
+    assert project.item_by_id("REQ-001").type == "requirement"
+    assert project.item_by_id("REQ-002").type == "requirement"
+    assert project.item_by_id("DEC-001").type == "decision"
 
 
 def test_section_elides_type_in_multi_item_markdown(tmp_path):
@@ -392,9 +392,9 @@ def test_section_elides_type_in_multi_item_markdown(tmp_path):
     parse.load_items(project)
     assert not project.errors
     assert not project.warnings
-    assert project.items["DEC-101"].type == "decision"
-    assert "Body one." in project.items["DEC-101"].body
-    assert project.items["REQ-101"].type == "requirement"
+    assert project.item_by_id("DEC-101").type == "decision"
+    assert "Body one." in project.item_by_id("DEC-101").body
+    assert project.item_by_id("REQ-101").type == "requirement"
 
 
 def test_item_contradicting_its_section_is_an_error_not_a_silent_override(tmp_path):
@@ -417,7 +417,7 @@ def test_item_contradicting_its_section_is_an_error_not_a_silent_override(tmp_pa
         "declares type 'decision'" in d.message and "section: requirement" in d.message
         for d in project.errors
     )
-    assert "DEC-201" not in project.items
+    assert project.item_by_id("DEC-201") is None
 
 
 def test_file_defaults_type_conflicting_with_a_section_is_an_error(tmp_path):
@@ -465,7 +465,7 @@ def test_section_composes_with_defaults_for_non_type_fields(tmp_path):
     project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
     parse.load_items(project)
     assert not project.errors
-    item = project.items["REQ-401"]
+    item = project.item_by_id("REQ-401")
     assert item.type == "requirement"
     assert item.fields["status"] == "active"
 
@@ -510,7 +510,7 @@ def test_later_defaults_block_in_markdown_is_now_an_error_not_silent(tmp_path):
     # The first block's type is unaffected; the real fix (turn this into a
     # 'section: requirement' marker) is left to the author -- this test only
     # needs to confirm the mistake is no longer silent.
-    assert project.items["DEC-401"].type == "decision"
+    assert project.item_by_id("DEC-401").type == "decision"
 
 
 def test_malformed_later_markdown_block_is_reported_not_silently_dropped(tmp_path):
@@ -552,10 +552,10 @@ def test_malformed_later_markdown_block_is_reported_not_silently_dropped(tmp_pat
     assert bad, [str(d) for d in project.errors]
     # Reported inside the offending block, not blamed on line 1 of the file.
     assert bad[0].line >= 12
-    assert "REQ-602" not in project.items
+    assert project.item_by_id("REQ-602") is None
     # Everything around it still parses -- one bad block is not a parse abort.
-    assert "REQ-601" in project.items
-    assert "REQ-603" in project.items
+    assert project.item_by_id("REQ-601") is not None
+    assert project.item_by_id("REQ-603") is not None
 
 
 def test_later_markdown_block_that_is_not_a_mapping_is_reported(tmp_path):
@@ -600,4 +600,4 @@ def test_section_marker_must_name_a_real_string(tmp_path):
     project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
     parse.load_items(project)
     assert any("'section:' must name a type" in d.message for d in project.errors)
-    assert project.items["REQ-501"].type == "requirement"
+    assert project.item_by_id("REQ-501").type == "requirement"

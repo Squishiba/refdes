@@ -350,8 +350,8 @@ def cross_board_project(tmp_path):
 def test_check_board_scope_does_not_affect_link_resolution(cross_board_project):
     project = _build_at(cross_board_project)
     assert not project.errors
-    assert project.items["DEC-B-001"].links["satisfies"] == ["REQ-A-001"]
-    assert "DEC-B-001" in project.items["REQ-A-001"].backlinks.get("satisfied_by", [])
+    assert project.item_by_id("DEC-B-001").links["satisfies"] == ["REQ-A-001"]
+    assert "DEC-B-001" in project.item_by_id("REQ-A-001").backlinks.get("satisfied_by", [])
 
 
 def test_cli_check_board_scopes_the_report_not_the_link_walk(cross_board_project, capsys):
