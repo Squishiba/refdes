@@ -755,9 +755,12 @@ one built over the log entries' bodies the way the document page's is
 (`render.py:777-779`) — numbering is per-document, and a figure in a log
 entry is only "rendered on this page" if its body is in the closure's list.
 
-**Status: outstanding.** `log.html.j2:42` still renders `entry.body_html |
-safe` with no `figured()` call, and `render.py:731-737` still passes no
-`figured` closure to the log page.
+**Status: fixed.** `log.html.j2` now renders `figured(entry.body_html)`,
+and every log page write in `render.py` — the unscoped `log.html` plus the
+per-board and per-workspace `log-<key>.html` pages — passes a `figured`
+closure built over that page's own log entries' bodies, the same shape the
+document page uses. Covered by
+`tests/test_render_assets.py::test_figure_reference_resolves_on_the_log_page`.
 
 **Local model (not decided — my read): suitable.** The failure is visible in
 the output (empty number, no link), not a silent wrong answer, and a test

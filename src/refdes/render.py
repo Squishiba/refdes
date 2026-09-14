@@ -747,6 +747,7 @@ def render_site(project: Project, draft: bool = False) -> str:
         out_dir, written, "log.html", log_tpl,
         project=project,
         entries=log_entries,
+        figured=_figured(project, [entry.body_html for entry in log_entries]),
         previews_json=previews_json,
     )
 
@@ -833,11 +834,15 @@ def render_site(project: Project, draft: bool = False) -> str:
         )
 
         if "log" in board_reports:
+            board_log_entries = _log_entries(project, board=board_key)
             _write_html(
                 out_dir, written, f"log-{board_key}.html", log_tpl,
                 project=project,
                 board=board_spec,
-                entries=_log_entries(project, board=board_key),
+                entries=board_log_entries,
+                figured=_figured(
+                    project, [entry.body_html for entry in board_log_entries]
+                ),
                 previews_json=previews_json,
             )
 
@@ -899,11 +904,15 @@ def render_site(project: Project, draft: bool = False) -> str:
         )
 
         if "log" in ws_reports:
+            ws_log_entries = _log_entries(project, workspace=workspace_key)
             _write_html(
                 out_dir, written, f"log-{workspace_key}.html", log_tpl,
                 project=project,
                 workspace=workspace_spec,
-                entries=_log_entries(project, workspace=workspace_key),
+                entries=ws_log_entries,
+                figured=_figured(
+                    project, [entry.body_html for entry in ws_log_entries]
+                ),
                 previews_json=previews_json,
             )
 

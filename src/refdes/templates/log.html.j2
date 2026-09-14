@@ -39,7 +39,7 @@
     </div>
     {% endif %}
     {% if entry.body_html %}
-    <div class="tl-body body">{{ entry.body_html | safe }}</div>
+    <div class="tl-body body">{{ figured(entry.body_html) | safe }}</div>
     {% endif %}
   </li>
 {% endfor %}
