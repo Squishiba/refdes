@@ -627,13 +627,22 @@ def stamp(project: Project, kind: str, name: str, write: bool = True) -> StampOu
     the caller against the same `project.errors` every other command uses,
     not re-checked here.
 
-    `write=False` (the global `--no-write`, docs/design/keys.md §2) writes
-    nothing at all: the existing-baseline hash-format migration is skipped
-    and, once every check below passes, the outcome is reported as
-    "would_stamp" with no file written -- the same "say what would change,
-    change nothing" posture the rest of the flag takes. The migration is
-    gated too because `.refdes/baselines/` is exactly what `--no-write`
-    promises not to touch.
+    An existing same-name baseline stamped before keys existed has to be
+    migrated (or at least compared correctly) before its `.items` can be
+    checked against a fresh `items_map` at all. Its absent `key` metadata
+    must likewise stay absent for comparison rather than being manufactured
+    from the current item. Otherwise a byte-identical re-run would misreport
+    as "conflict" purely because the stored format gained new metadata, not
+    because any content changed (docs/design/keys.md §5).
+
+    `write=False` (the global `--no-write`, docs/design/keys.md §2) keeps
+    that migration but runs it in memory only: the baseline is migrated for
+    comparison, no baseline file is ever written, and once every check
+    below passes the outcome is reported as "would_stamp" -- the same "say
+    what would change, change nothing" posture the rest of the flag takes.
+    The migration's *write* is gated because `.refdes/baselines/` is
+    exactly what `--no-write` promises not to touch; its in-memory step is
+    not, because skipping it would make the comparison above lie.
     """
     items_map = _items_map(project)
 
