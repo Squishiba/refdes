@@ -351,3 +351,61 @@ def test_write_verify_rejects_changed_key_and_content_without_fresh_seal(tmp_pat
     assert set(seal.load_seals(changed)) == {sealed_key}
     assert changed_key not in seal.load_seals(changed)
     assert "LOG-001" not in seal.load_seals(changed)
+
+
+def test_renamed_keyed_seal_does_not_claim_a_new_item_reusing_its_old_id(tmp_path):
+    original_key = keys_mod.mint()
+    reused_id_key = keys_mod.mint()
+    write_project_config(
+        tmp_path,
+        "site: { title: T, out: _site }\n"
+        "types:\n"
+        "  log:\n"
+        "    prefix: LOG\n"
+        "    append_only: true\n"
+        "    fields: { summary: { type: text, required: true } }\n",
+    )
+    items = tmp_path / "items"
+    items.mkdir()
+    item_path = items / "log.yaml"
+    item_path.write_text(
+        "defaults: { type: log }\n"
+        f"items:\n  - id: LOG-001\n    key: {original_key}\n"
+        "    summary: Original entry.\n",
+        encoding="utf-8",
+    )
+    project = _load_and_build(tmp_path, seal_write=False, reseal=False)
+    original_hash = project.items["LOG-001"].content_hash
+    seal.save_seals(
+        project,
+        {
+            original_key: {
+                "id": "LOG-001",
+                "hash": original_hash,
+                "hash_format": 2,
+            }
+        },
+    )
+    item_path.write_text(
+        "defaults: { type: log }\n"
+        "items:\n"
+        f"  - id: LOG-005\n    key: {original_key}\n"
+        "    summary: Original entry.\n"
+        f"  - id: LOG-001\n    key: {reused_id_key}\n"
+        "    summary: Different new entry.\n",
+        encoding="utf-8",
+    )
+
+    reused = _load_and_build(tmp_path, seal_write=True, reseal=False)
+
+    assert reused.seal_violations == []
+    assert not reused.errors
+    stored = seal.load_seals(reused)
+    assert stored[original_key] == {
+        "id": "LOG-001",
+        "hash": original_hash,
+        "hash_format": 2,
+    }
+    assert stored["LOG-001"] == reused.items["LOG-001"].content_hash
+    assert reused.items["LOG-005"].content_hash == original_hash
+    assert seal.resealed_ids(reused) == []

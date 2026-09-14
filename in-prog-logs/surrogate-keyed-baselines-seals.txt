@@ -25,4 +25,11 @@ Verification:
 - Review follow-up full suite: 737 passed.
 - Restored dual-shape seal rationale and made cross-module baseline helpers public.
 
-Status: finished, including review follow-up.
+Second review follow-up:
+- Recorded-id fallback now applies only when the recorded surrogate key has no
+  live local owner, distinguishing key corruption from legitimate rename/id reuse.
+- Deletion and reseal auditing use the same live-key ownership rule.
+- Added a tmp_path rename-then-reuse regression; focused ownership checks: 4 passed.
+- Full suite: 738 passed.
+
+Status: second review follow-up finished.

@@ -73,14 +73,16 @@ def _seal_parts(
 
 
 def _find_seal(
-    seals: Seals, item: Item
+    seals: Seals, item: Item, live_keys: set[str]
 ) -> tuple[str, SealValue, str, int | None] | None:
     """Find an item's seal by surrogate, recorded display id, then legacy id.
 
     The recorded-id pass is corruption-sensitive: if the live item's key was
-    changed, the old key-keyed seal still belongs to this display id. Returning
-    it prevents a write-enabled build from treating edited content as new and
-    sealing it afresh.
+    changed, the old key-keyed seal still belongs to this display id. It may
+    claim that item only when no live local item owns the recorded key; a live
+    owner means the seal belongs to that owner and its recorded id is merely
+    the pre-rename label. This prevents both laundering and rename-then-reuse
+    false positives.
     """
     if item.key:
         keyed = seals.get(item.key)
@@ -90,7 +92,7 @@ def _find_seal(
                 return item.key, keyed, recorded, hash_format
     for record_id, value in seals.items():
         key, display_id, recorded, hash_format = _seal_parts(record_id, value)
-        if key is not None and display_id == item.id:
+        if key is not None and key not in live_keys and display_id == item.id:
             return record_id, value, recorded, hash_format
     legacy = seals.get(item.id)
     if legacy is None:
@@ -212,6 +214,7 @@ def verify(project: Project, write: bool = False, reseal: str | None = None) -> 
     """
     base = load_seals(project, board="")
     base_changed = False
+    live_keys = {item.key for item in project.local_items if item.key}
 
     for board in _boards_in_play(project):
         entries = append_only_items(project, board=board)
@@ -219,9 +222,9 @@ def verify(project: Project, write: bool = False, reseal: str | None = None) -> 
         if board:
             seals = load_seals(project, board)
             for item in entries:
-                if _find_seal(seals, item) is not None:
+                if _find_seal(seals, item, live_keys) is not None:
                     continue
-                inherited = _find_seal(base, item)
+                inherited = _find_seal(base, item, live_keys)
                 if inherited is None:
                     continue
                 record_id, value, _recorded, _hash_format = inherited
@@ -233,7 +236,7 @@ def verify(project: Project, write: bool = False, reseal: str | None = None) -> 
         reseal_here = reseal == RESEAL_ALL or reseal == board
 
         for item in sorted(entries, key=lambda i: i.id):
-            found = _find_seal(seals, item)
+            found = _find_seal(seals, item, live_keys)
             if found is None:
                 if write:
                     seals[item.id] = item.content_hash
@@ -284,7 +287,7 @@ def verify(project: Project, write: bool = False, reseal: str | None = None) -> 
                 save_seals(project, seals, board)
             if write:
                 for item in entries:
-                    inherited = _find_seal(base, item)
+                    inherited = _find_seal(base, item, live_keys)
                     if inherited is not None:
                         del base[inherited[0]]
                         base_changed = True
@@ -310,9 +313,10 @@ def _report_deleted(
 
     "No longer anywhere" is deliberately generous. A legacy display id still
     counts when it is live on another board or claimed through ``former_ids``.
-    A surrogate-keyed entry counts when either its immutable key is live or
-    its recorded display id is still live with a different key; the latter is
-    reported once as key corruption by ``verify()``, not again and
+    A surrogate-keyed entry first belongs to any live owner of its immutable
+    key, regardless of whether its recorded id was later reused. Only when no
+    live item owns that key may the recorded display id identify key
+    corruption; that case is reported once by ``verify()``, not again and
     misleadingly as a deleted item here. Read-only checks report but never
     remove entries.
     """
@@ -326,11 +330,12 @@ def _report_deleted(
         orphans = []
         for record_id, value in seals.items():
             key, display_id, _recorded, _hash_format = _seal_parts(record_id, value)
-            is_live = (
-                key in live_keys or display_id in live_ids
-                if key is not None
-                else display_id in live_ids
-            )
+            if key is None:
+                is_live = display_id in live_ids
+            elif key in live_keys:
+                is_live = True
+            else:
+                is_live = display_id in live_ids
             if is_live:
                 continue
             orphans.append((record_id, display_id))
@@ -374,13 +379,14 @@ def resealed_ids(project: Project) -> list[str]:
     returned as drift even when the content hash itself still matches.
     """
     base = load_seals(project, board="")
+    live_keys = {item.key for item in project.local_items if item.key}
     out: list[str] = []
     for board in _boards_in_play(project):
         seals = load_seals(project, board) if board else base
         for item in append_only_items(project, board=board):
-            found = _find_seal(seals, item)
+            found = _find_seal(seals, item, live_keys)
             if found is None and board:
-                found = _find_seal(base, item)
+                found = _find_seal(base, item, live_keys)
             if found is None:
                 continue
             _record_id, _value, recorded, hash_format = found

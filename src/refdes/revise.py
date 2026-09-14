@@ -1005,6 +1005,7 @@ def _carry_forward_seals(
     historical label and an id-only rename does not touch the file.
     """
     updated: list[str] = []
+    live_keys = {item.key for item in project.local_items if item.key}
     boards = {""} | set(project.boards)
     for board in sorted(boards):
         path = seal_mod.seal_path(project, board)
@@ -1015,7 +1016,7 @@ def _carry_forward_seals(
         new_seals = dict(seals)
         for old_id, old_hash in old_hashes.items():
             item = project.items[old_id]
-            found = seal_mod._find_seal(new_seals, item)
+            found = seal_mod._find_seal(new_seals, item, live_keys)
             if found is None:
                 continue
             record_id, value, recorded, _hash_format = found
