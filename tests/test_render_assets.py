@@ -541,6 +541,74 @@ def test_figure_reference_resolves_on_the_log_page(tmp_path):
     assert '<span class="fig-num"' not in html
 
 
+LOG_BOARD_FIG_SCHEMA = LOG_FIG_SCHEMA + """boards:
+  power: {label: Power}
+"""
+
+
+def test_figure_reference_resolves_on_the_per_board_log_page(tmp_path):
+    """The per-board log page is its own `_write_html` call with its own
+    `figured` closure over that board's entries, so `log.html` resolving a
+    figure says nothing about `log-<board>.html` doing the same."""
+    write_project_config(tmp_path, LOG_BOARD_FIG_SCHEMA)
+    items = tmp_path / "items" / "power"
+    items.mkdir(parents=True)
+    figures = items / "figures"
+    figures.mkdir()
+    (figures / "curve.png").write_bytes(FIG_PNG)
+    (items / "log-001.md").write_text(
+        "---\n"
+        "id: LOG-001\n"
+        "type: log\n"
+        "date: 2026-01-05\n"
+        "summary: Curve measured on the power board.\n"
+        "---\n\n"
+        "See [[fig:fig-curve]].\n\n"
+        '![the curve](figures/curve.png){id="fig-curve" caption="Efficiency"}\n',
+        encoding="utf-8",
+    )
+    out = _build_and_render(tmp_path)
+    html = open(os.path.join(out, "log-power.html"), encoding="utf-8").read()
+    assert "<figcaption>Figure 1 — Efficiency</figcaption>" in html
+    assert '<a class="ref fig-ref" href="#fig-curve">Figure 1</a>' in html
+    assert "fig-ref-pending" not in html
+    assert '<span class="fig-num"' not in html
+
+
+LOG_WORKSPACE_FIG_SCHEMA = LOG_FIG_SCHEMA + """workspaces:
+  product-a: {label: Product A}
+"""
+
+
+def test_figure_reference_resolves_on_the_per_workspace_log_page(tmp_path):
+    """Same gap on the workspace side: `log-<workspace>.html` is written from
+    a third call, with a `figured` closure over that workspace's entries."""
+    write_project_config(tmp_path, LOG_WORKSPACE_FIG_SCHEMA)
+    items = tmp_path / "items"
+    items.mkdir()
+    figures = items / "figures"
+    figures.mkdir()
+    (figures / "curve.png").write_bytes(FIG_PNG)
+    (items / "log-001.md").write_text(
+        "---\n"
+        "id: LOG-001\n"
+        "type: log\n"
+        "date: 2026-01-05\n"
+        "summary: Curve measured for product A.\n"
+        "workspace: product-a\n"
+        "---\n\n"
+        "See [[fig:fig-curve]].\n\n"
+        '![the curve](figures/curve.png){id="fig-curve" caption="Efficiency"}\n',
+        encoding="utf-8",
+    )
+    out = _build_and_render(tmp_path)
+    html = open(os.path.join(out, "log-product-a.html"), encoding="utf-8").read()
+    assert "<figcaption>Figure 1 — Efficiency</figcaption>" in html
+    assert '<a class="ref fig-ref" href="#fig-curve">Figure 1</a>' in html
+    assert "fig-ref-pending" not in html
+    assert '<span class="fig-num"' not in html
+
+
 # -------------------------------------------------- explicit reference regression
 
 def test_explicit_item_reference_does_not_nest_duplicate_links(blocks_project):
