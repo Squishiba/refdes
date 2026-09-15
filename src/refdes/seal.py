@@ -195,6 +195,24 @@ def append_only_items(project: Project, board: str | None = None) -> list[Item]:
     return items
 
 
+def is_sealed(project: Project, item: Item) -> bool:
+    """Whether ``item`` already has an append-only seal in any board file.
+
+    Follows freezing happens before board resolution in the normal load path,
+    so it must inspect every declared board rather than relying on
+    ``item.board``. A legacy base-file seal remains authoritative until a
+    writable build migrates it to its board-specific file.
+    """
+    spec = project.types.get(item.type)
+    if spec is None or not spec.append_only:
+        return False
+    live_keys = {candidate.key for candidate in project.local_items if candidate.key}
+    for board in sorted({""} | set(project.boards)):
+        if _find_seal(load_seals(project, board), item, live_keys) is not None:
+            return True
+    return False
+
+
 def _boards_in_play(project: Project) -> list[str]:
     """Every board key ("" included) at least one append-only item resolves to."""
     return sorted({item.board for item in append_only_items(project)})

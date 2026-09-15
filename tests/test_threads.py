@@ -35,7 +35,10 @@ FOLLOWS_SCHEMA = (
     "    prefix: LOG\n"
     "    label: Log entry\n"
     "    plural: Log entries\n"
-    "    fields: { summary: { type: text, required: true } }\n"
+    "    append_only: true\n"
+    "    fields:\n"
+    "      summary: { type: text, required: true }\n"
+    "      date: { type: date }\n"
     "    links: { follows: [log] }\n"
 )
 
@@ -278,3 +281,315 @@ def test_no_provisional_handle_ever_appears_in_a_written_file(tmp_path):
                 continue
             for handle in handles:
                 assert handle not in text
+
+
+# ---------------------------------------------------- Phase 2a: follows freezing
+
+
+def _minted_follows_project(tmp_path, items_yaml):
+    root = _follows_project(tmp_path, items_yaml)
+    project = load_project(config_path=str(root / "refdes-project.yaml"))
+    parse.load_items(project)
+    keys_mod.mint_missing(project)
+    project = load_project(config_path=str(root / "refdes-project.yaml"))
+    parse.load_items(project)
+    return root, project
+
+
+def _check(root, *, no_write=False):
+    args = ["-c", str(root / "refdes-project.yaml")]
+    if no_write:
+        args.append("--no-write")
+    return cli_mod.main([*args, "check"])
+
+
+def test_follows_freezes_to_the_current_tip_not_the_authored_head(tmp_path):
+    root, project = _minted_follows_project(
+        tmp_path,
+        "defaults: { type: log }\n"
+        "items:\n"
+        "  - id: LOG-001\n    summary: Head.\n"
+        "  - id: LOG-002\n    summary: Middle.\n"
+        "    follows: [placeholder-middle]\n"
+        "  - follows: [placeholder-tail]\n    summary: Tail.\n"
+        "  - id: LOG-004\n    summary: New.\n    follows: [LOG-001]\n",
+    )
+    head = project.item_by_id("LOG-001")
+    middle = project.item_by_id("LOG-002")
+    tail = next(item for item in project.local_items if not item.id)
+    path = root / "items" / "log.yaml"
+    path.write_text(
+        path.read_text(encoding="utf-8")
+        .replace("placeholder-middle", f"LOG-001@{head.key}")
+        .replace("placeholder-tail", middle.key),
+        encoding="utf-8",
+    )
+
+    assert _check(root) == 0
+    text = path.read_text(encoding="utf-8")
+    assert f"follows: [LOG-002@{middle.key}]" not in text
+    assert f"follows: [{tail.key}]" in text
+
+
+def test_follows_freezes_to_a_bare_key_for_an_idless_tip_and_resolves_it(tmp_path):
+    root, project = _minted_follows_project(
+        tmp_path,
+        "defaults: { type: log }\n"
+        "items:\n"
+        "  - id: LOG-001\n    summary: Head.\n"
+        "  - follows: [placeholder]\n    summary: Id-less tip.\n"
+        "  - id: LOG-003\n    summary: New.\n    follows: [LOG-001]\n",
+    )
+    head = project.item_by_id("LOG-001")
+    tip = next(item for item in project.local_items if not item.id)
+    path = root / "items" / "log.yaml"
+    path.write_text(
+        path.read_text(encoding="utf-8").replace("placeholder", f"LOG-001@{head.key}"),
+        encoding="utf-8",
+    )
+
+    assert _check(root) == 0
+    refreshed = load_project(config_path=str(root / "refdes-project.yaml"))
+    parse.load_items(refreshed)
+    build_mod.build(refreshed)
+    assert not refreshed.errors
+    assert refreshed.item_by_id("LOG-003").links["follows"] == [tip.key]
+    assert refreshed.item_by_id("LOG-003").resolved_links["follows"] == [""]
+
+
+def test_bare_key_follows_reports_malformed_and_unknown_key_layers(tmp_path):
+    valid_unknown = keys_mod.mint()
+    malformed = valid_unknown[:-1] + ("0" if valid_unknown[-1] != "0" else "1")
+    root = _follows_project(
+        tmp_path,
+        "defaults: { type: log }\n"
+        "items:\n"
+        "  - id: LOG-001\n    summary: Head.\n"
+        f"  - id: LOG-002\n    summary: Broken.\n    follows: [{malformed}]\n"
+        f"  - id: LOG-003\n    summary: Missing.\n    follows: [{valid_unknown}]\n",
+    )
+    project = load_project(config_path=str(root / "refdes-project.yaml"))
+    parse.load_items(project)
+    build_mod.build(project)
+
+    messages = [diagnostic.message for diagnostic in project.errors]
+    assert any(malformed in message and "malformed" in message for message in messages)
+    assert any(valid_unknown in message and "which no item declares" in message for message in messages)
+
+
+def test_forked_follows_stays_bare_and_names_every_tip(tmp_path, capsys):
+    root, project = _minted_follows_project(
+        tmp_path,
+        "defaults: { type: log }\n"
+        "items:\n"
+        "  - id: LOG-001\n    summary: Head.\n"
+        "  - id: LOG-002\n    summary: Fork A.\n    follows: [placeholder-a]\n"
+        "  - id: LOG-003\n    summary: Fork B.\n    follows: [placeholder-b]\n"
+        "  - id: LOG-004\n    summary: New.\n    follows: [LOG-001]\n",
+    )
+    head = project.item_by_id("LOG-001")
+    path = root / "items" / "log.yaml"
+    path.write_text(
+        path.read_text(encoding="utf-8")
+        .replace("placeholder-a", f"LOG-001@{head.key}")
+        .replace("placeholder-b", f"LOG-001@{head.key}"),
+        encoding="utf-8",
+    )
+    before = path.read_bytes()
+
+    assert _check(root) == 0
+    output = capsys.readouterr().out
+    assert path.read_bytes() == before
+    assert "LOG-002" in output and "LOG-003" in output
+    assert "pick one or list several to merge" in output.lower()
+
+
+def test_same_load_follows_freeze_in_date_then_source_order(tmp_path):
+    root, project = _minted_follows_project(
+        tmp_path,
+        "defaults: { type: log }\n"
+        "items:\n"
+        "  - id: LOG-001\n    date: 2026-01-01\n    summary: Head.\n"
+        "  - id: LOG-003\n    date: 2026-01-03\n    summary: Third.\n    follows: [LOG-001]\n"
+        "  - id: LOG-002\n    date: 2026-01-02\n    summary: Second.\n    follows: [LOG-001]\n"
+        "  - id: LOG-004\n    date: 2026-01-04\n    summary: Fourth.\n    follows: [LOG-001]\n",
+    )
+    assert _check(root) == 0
+    reparsed = load_project(config_path=str(root / "refdes-project.yaml"))
+    parse.load_items(reparsed)
+    assert reparsed.item_by_id("LOG-002").links["follows"] == [
+        f"LOG-001@{project.item_by_id('LOG-001').key}"
+    ]
+    assert reparsed.item_by_id("LOG-003").links["follows"] == [
+        f"LOG-002@{project.item_by_id('LOG-002').key}"
+    ]
+    assert reparsed.item_by_id("LOG-004").links["follows"] == [
+        f"LOG-003@{project.item_by_id('LOG-003').key}"
+    ]
+
+
+def test_new_follows_entry_never_freezes_against_itself(tmp_path):
+    root, project = _minted_follows_project(
+        tmp_path,
+        "defaults: { type: log }\n"
+        "items:\n"
+        "  - id: LOG-001\n    summary: Head.\n"
+        "  - id: LOG-002\n    summary: New.\n    follows: [LOG-001]\n",
+    )
+
+    assert _check(root) == 0
+    text = (root / "items" / "log.yaml").read_text(encoding="utf-8")
+    assert f"follows: [LOG-001@{project.item_by_id('LOG-001').key}]" in text
+    assert f"LOG-002@{project.item_by_id('LOG-002').key}" not in text
+
+
+def test_rename_refreshes_frozen_follows_label_without_hash_churn(tmp_path):
+    root, project = _minted_follows_project(
+        tmp_path,
+        "defaults: { type: log }\n"
+        "items:\n"
+        "  - id: LOG-001\n    summary: Head.\n"
+        "  - id: LOG-002\n    summary: New.\n    follows: [LOG-001]\n",
+    )
+    assert _check(root) == 0
+    before = load_project(config_path=str(root / "refdes-project.yaml"))
+    parse.load_items(before)
+    build_mod.build(before)
+    hash_before = before.item_by_id("LOG-002").content_hash
+    path = root / "items" / "log.yaml"
+    path.write_text(
+        path.read_text(encoding="utf-8").replace("id: LOG-001", "id: LOG-009"),
+        encoding="utf-8",
+    )
+
+    assert _check(root) == 0
+    after = load_project(config_path=str(root / "refdes-project.yaml"))
+    parse.load_items(after)
+    build_mod.build(after)
+    assert after.item_by_id("LOG-002").content_hash == hash_before
+    assert f"follows: [LOG-009@{project.item_by_id('LOG-001').key}]" in path.read_text(
+        encoding="utf-8"
+    )
+
+
+def test_no_write_leaves_bare_follows_and_second_writable_load_is_idempotent(tmp_path):
+    root, _project = _minted_follows_project(
+        tmp_path,
+        "defaults: { type: log }\n"
+        "items:\n"
+        "  - id: LOG-001\n    summary: Head.\n"
+        "  - id: LOG-002\n    summary: New.\n    follows: [LOG-001]\n",
+    )
+    path = root / "items" / "log.yaml"
+    before = path.read_bytes()
+
+    assert _check(root, no_write=True) == 0
+    assert path.read_bytes() == before
+    assert _check(root) == 0
+    frozen = path.read_bytes()
+    assert _check(root) == 0
+    assert path.read_bytes() == frozen
+
+
+def test_sealed_append_only_follows_is_not_rewritten(tmp_path, capsys):
+    root, _project = _minted_follows_project(
+        tmp_path,
+        "defaults: { type: log }\n"
+        "items:\n"
+        "  - id: LOG-001\n    summary: Head.\n"
+        "  - id: LOG-002\n    summary: New.\n    follows: [LOG-001]\n",
+    )
+    config = str(root / "refdes-project.yaml")
+    assert cli_mod.main(["-c", config, "build"]) == 0
+    path = root / "items" / "log.yaml"
+    text = path.read_text(encoding="utf-8")
+    path.write_text(
+        text.replace(text.split("follows: [", 1)[1].split("]", 1)[0], "LOG-001"),
+        encoding="utf-8",
+    )
+    before = path.read_bytes()
+
+    assert _check(root) == 0
+    assert path.read_bytes() == before
+    assert "already sealed" in capsys.readouterr().out
+
+
+def test_ordinary_addresses_still_expands_to_a_named_target_key(tmp_path):
+    write_project_config(
+        tmp_path,
+        "site: { title: T, out: _site }\n"
+        "link_types:\n"
+        "  addresses: { inverse: addressed_by, label: Addresses }\n"
+        "types:\n"
+        "  requirement:\n"
+        "    prefix: REQ\n"
+        "    fields: { text: { type: text, required: true } }\n"
+        "  log:\n"
+        "    prefix: LOG\n"
+        "    fields: { summary: { type: text, required: true } }\n"
+        "    links: { addresses: [requirement] }\n",
+    )
+    items = tmp_path / "items"
+    items.mkdir()
+    path = items / "items.yaml"
+    path.write_text(
+        "items:\n"
+        "  - id: REQ-001\n    type: requirement\n    text: Target\n"
+        "  - id: LOG-001\n    type: log\n    summary: Investigated\n"
+        "    addresses: [REQ-001]\n",
+        encoding="utf-8",
+    )
+
+    assert _check(tmp_path) == 0
+    project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
+    parse.load_items(project)
+    target = project.item_by_id("REQ-001")
+    assert f"addresses: [REQ-001@{target.key}]" in path.read_text(encoding="utf-8")
+
+
+def test_same_date_follows_freeze_uses_source_file_order(tmp_path):
+    write_project_config(tmp_path, FOLLOWS_SCHEMA)
+    items = tmp_path / "items"
+    items.mkdir()
+    (items / "head.yaml").write_text(
+        "defaults: { type: log }\nitems:\n"
+        "  - id: LOG-001\n    date: 2026-01-01\n    summary: Head\n",
+        encoding="utf-8",
+    )
+    (items / "a.yaml").write_text(
+        "defaults: { type: log }\nitems:\n"
+        "  - id: LOG-003\n    date: 2026-01-02\n    summary: First by file\n"
+        "    follows: [LOG-001]\n",
+        encoding="utf-8",
+    )
+    (items / "b.yaml").write_text(
+        "defaults: { type: log }\nitems:\n"
+        "  - id: LOG-002\n    date: 2026-01-02\n    summary: Second by file\n"
+        "    follows: [LOG-001]\n",
+        encoding="utf-8",
+    )
+    project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
+    parse.load_items(project)
+    keys_mod.mint_missing(project)
+
+    assert _check(tmp_path) == 0
+    project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
+    parse.load_items(project)
+    assert project.item_by_id("LOG-002").links["follows"] == [
+        f"LOG-003@{project.item_by_id('LOG-003').key}"
+    ]
+
+
+def test_follows_freeze_deduplicates_matching_merge_targets(tmp_path):
+    root, project = _minted_follows_project(
+        tmp_path,
+        "defaults: { type: log }\n"
+        "items:\n"
+        "  - id: LOG-001\n    summary: Head.\n"
+        "  - id: LOG-002\n    summary: Merge.\n    follows: [LOG-001, LOG-001]\n",
+    )
+
+    assert _check(root) == 0
+    text = (root / "items" / "log.yaml").read_text(encoding="utf-8")
+    frozen = f"LOG-001@{project.item_by_id('LOG-001').key}"
+    assert text.count(frozen) == 1

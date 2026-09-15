@@ -29,6 +29,15 @@ cover.
 Pointing at a nonexistent item, or at an item of a type the schema disallows, is a
 build error.
 
+When the target has a surrogate key, ordinary bare references are rewritten
+on the next writable load to `DISPLAY-ID@key`. The readable display half
+refreshes after a rename; the key remains the identity and is what resolves
+and hashes. `follows:` is the one exception while it is bare: it means
+"continue this thread", so the writable load first freezes it to the
+thread's current tip. A tip with a display ID becomes `DISPLAY-ID@key`; an
+id-less tip becomes its bare key. A frozen `follows:` link then follows the
+same rename-refresh rule as any other composite.
+
 ## Back-links are computed
 
 Each link type declares its inverse:

@@ -350,3 +350,33 @@ def test_adopt_is_idempotent_and_new_history_is_keyed_and_rename_safe(
     assert diff.relabelled == [("LOG-001", "LOG-009", log_key)]
     assert diff.added == []
     assert diff.removed == []
+
+
+def test_adopt_freezes_follows_inside_its_transaction(tmp_path, capsys):
+    schema = ADOPT_SCHEMA.replace(
+        "  amends: { inverse: amended_by, label: Amends }\n",
+        "  amends: { inverse: amended_by, label: Amends }\n"
+        "  follows: { inverse: followed_by, label: Follows }\n",
+    ).replace(
+        "    links:\n      amends: [log]\n",
+        "    links:\n      amends: [log]\n      follows: [log]\n",
+    )
+    write_project_config(tmp_path, schema)
+    items = tmp_path / "items"
+    items.mkdir()
+    path = items / "log.yaml"
+    path.write_text(
+        "defaults: { type: log }\n"
+        "items:\n"
+        "  - id: LOG-001\n    summary: Head\n"
+        "  - id: LOG-002\n    summary: Continuation\n    follows: [LOG-001]\n",
+        encoding="utf-8",
+    )
+    config = str(tmp_path / "refdes-project.yaml")
+
+    assert cli_mod.main(["-c", config, "keys", "adopt"]) == 0
+    output = capsys.readouterr().out
+    project = _project(tmp_path)
+    head = project.item_by_id("LOG-001")
+    assert f"froze 1 follows reference(s)" in output
+    assert f"follows: [LOG-001@{head.key}]" in path.read_text(encoding="utf-8")

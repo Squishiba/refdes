@@ -321,6 +321,20 @@ def _key_index(project: Project) -> dict[str, Item]:
     return {item.key: item for item in project.items.values() if item.key}
 
 
+def _is_bare_key_token(target: str) -> bool:
+    """Whether ``target`` has key-token shape rather than display-ID shape.
+
+    Display IDs are conventionally hyphenated. A separator-free,
+    11-character token is a key spelling, even when Layer 1 later finds it
+    corrupt (uppercase and excluded alphabet characters included).
+    """
+    return len(target) == keys_mod.KEY_LEN and "@" not in target and "-" not in target
+
+
+def _is_well_formed_bare_key(target: str) -> bool:
+    return _is_bare_key_token(target) and keys_mod.malformed_key_message(target) is None
+
+
 def resolve_link_target(by_key: dict[str, Item], project: Project, target: str) -> Item | None:
     """Resolve one structured link's target string to the item it names.
 
@@ -330,10 +344,9 @@ def resolve_link_target(by_key: dict[str, Item], project: Project, target: str) 
     for resolution, not even as a fallback when the key doesn't resolve.
     That is deliberate, not an oversight: falling back to the display text
     would resurrect exactly the ambiguity keys exist to remove (two items
-    momentarily sharing a stale display id after a rename, say). A bare
-    display id (no `@` -- an author-typed reference before `refdes` has
-    expanded it, or a target that has no key yet to expand into) resolves
-    by direct id lookup, exactly as before keys existed.
+    momentarily sharing a stale display id after a rename, say). A bare,
+    well-formed key resolves directly by key. Any other bare token remains a
+    display-ID lookup, preserving the authoring path for unfrozen links.
 
     No `former_ids:` fallback here: that is a prose-only mechanism
     (`validate_former_ids` / `_linkify`'s "(formerly X)" marker). A
@@ -347,19 +360,19 @@ def resolve_link_target(by_key: dict[str, Item], project: Project, target: str) 
     if "@" in target:
         _display, _, key = target.partition("@")
         return by_key.get(key)
+    if _is_well_formed_bare_key(target):
+        return by_key.get(target)
     return project.item_by_id(target)
 
 
 def _unknown_key_message(pointer: str, target_id: str) -> str:
-    """Layer-3 diagnostic (docs/design/keys.md §6) for a composite whose key
-    does not resolve to any item. Shared, not duplicated, between structured
-    links (`resolve_links`) and `checks: against:` (`run_checks`) -- both
-    point at a target the same way, and the doc is explicit that the
-    diagnostic is reused rather than copied. `pointer` supplies only the verb
-    phrase ("refines points at" / "check against"); the rest of the message,
-    including the deliberate no-display-id-fallback framing, is identical.
-    """
-    label, _, key = target_id.partition("@")
+    """Layer-3 diagnostic for a composite or bare key that does not resolve."""
+    label, separator, key = target_id.partition("@")
+    if not separator:
+        return (
+            f"{pointer} key {target_id!r}, which no item declares. Either the "
+            "target was deleted, or this reference predates it."
+        )
     return (
         f"{pointer} key {key!r} (labelled {label}), which no item declares. "
         "The label may be stale; the key is what resolves. Either the target "
@@ -376,11 +389,18 @@ def resolve_links(project: Project) -> None:
         for link_name, targets in item.links.items():
             allowed = spec.links.get(link_name, [])
             for target_id in targets:
-                if "@" in target_id:
+                bare_key = _is_bare_key_token(target_id)
+                if "@" in target_id or bare_key:
                     label, _, key = target_id.partition("@")
+                    if bare_key:
+                        key = target_id
                     malformed = keys_mod.malformed_key_message(
                         key,
-                        context=f" in {link_name} target (labelled {label})",
+                        context=(
+                            f" in {link_name} target (labelled {label})"
+                            if "@" in target_id
+                            else f" in {link_name} target"
+                        ),
                     )
                     if malformed is not None:
                         project.error(
@@ -393,7 +413,7 @@ def resolve_links(project: Project) -> None:
 
                 target = resolve_link_target(by_key, project, target_id)
                 if target is None:
-                    if "@" in target_id:
+                    if "@" in target_id or bare_key:
                         message = _unknown_key_message(f"{link_name} points at", target_id)
                     else:
                         message = f"{link_name} points at {target_id!r}, which does not exist"

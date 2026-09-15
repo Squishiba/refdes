@@ -1,0 +1,1 @@
+- Freeze bare `follows:` references to the current thread tip on writable loads, preserving immutable surrogate-key identity while refreshing readable labels after renames.

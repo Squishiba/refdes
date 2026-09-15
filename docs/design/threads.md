@@ -56,14 +56,17 @@ index and `Project.item_by_id()` helper, the pending-vs-permanently-id-less
 rule (an item with no `id:` and a non-empty `follows:` is a real project
 member, not pending), and `Item.slug`'s key fallback. `follows:` itself
 resolves as an ordinary declared link (whatever engine capability already
-resolves `satisfies:` resolves it too) — nothing chain-aware was added.
-**Not implemented, still later phases:** `followed_by:` write-back/freeze
-resolution (the graph walk to a chain's current tip — today `follows:`
-resolves like any other link, to whatever it names directly), forks/cycles
-detection, `resolve_current`'s per-field fold, coverage's fallback to it,
-and any rendering of a chain as such. See `src/refdes/parse.py`
-(`load_items`), `src/refdes/model.py` (`Project.items`/`items_by_id`/
-`item_by_id`/`add_item`, `provisional_handle`, `Item.slug`), and
+resolves `satisfies:` resolves it too).
+
+**Phase 2a implemented** (this session, 2026-09-14): bare-key link
+resolution and one-time `follows:` freezing. A writable load freezes a bare
+display-ID `follows:` reference to the current frozen-edge tip, stores a
+display-ID target as `DISPLAY-ID@key` (or an id-less target as its bare key),
+and leaves unmerged forks and sealed entries untouched with warnings.
+**Still later phases:** coverage's fallback to `resolve_current` and any
+rendering of a chain as such. See `src/refdes/parse.py` (`load_items`),
+`src/refdes/model.py` (`Project.items`/`items_by_id`/`item_by_id`/
+`add_item`, `provisional_handle`, `Item.slug`), and
 `tests/test_threads.py`.
 
 **Phase 2b implemented** (engine only): §3's lazy walk and §6's diagnostics.
@@ -75,11 +78,10 @@ does not have), and offers `tips()` and `resolve_current()`'s per-field fold
 declares the field wins, and two equidistant declarations that disagree are
 undefined), plus a build step after `resolve_links` reporting one fork `info`
 per forked entry and one `follows` cycle `error` per cycle. Still not
-implemented: the `follows:` write-back/freeze (Phase 2a), coverage's fallback
-to `resolve_current` and any rendering of a chain (Phase 3), and `hardware@3`
-declaring `follows:` at all (Phase 4) — so nothing here is visible to a
-project whose schema does not declare a link literally named `follows:`. See
-`tests/test_chains.py`.
+implemented: coverage's fallback to `resolve_current` and any rendering of a
+chain (Phase 3), and `hardware@3` declaring `follows:` at all (Phase 4) —
+so nothing here is visible to a project whose schema does not declare a link
+literally named `follows:`. See `tests/test_chains.py`.
 
 ---
 

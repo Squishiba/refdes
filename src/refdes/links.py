@@ -21,7 +21,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from . import parse as parse_mod
+from . import chains as chains_mod, dates, keys as keys_mod, parse as parse_mod, seal as seal_mod
 from .model import Item, Project
 
 if TYPE_CHECKING:
@@ -187,6 +187,64 @@ def _rewrite_link_field(
     return set()
 
 
+_FOLLOWS_VALUE_RE = re.compile(
+    r"(?:[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)*-\d+(?:@[0-9a-z]+)?|[0-9a-z]{11})"
+)
+
+
+def _follows_value(value: str) -> str | None:
+    value = value.strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
+        value = value[1:-1]
+    return value if _FOLLOWS_VALUE_RE.fullmatch(value) else None
+
+
+def _dedupe_follows_field(out: list[str], start: int, end: int) -> None:
+    """Drop duplicate frozen targets without reserializing the surrounding item.
+
+    Flow-style lists retain their original token spelling and whitespace for
+    every surviving value. A duplicate block-list row becomes blank instead
+    of shifting later source positions while this plan is still walking them.
+    """
+    limit = min(end, len(out))
+    direct_re = _field_or_link_line_re("follows")
+    for i in range(max(0, start), limit):
+        match = direct_re.match(out[i])
+        if match is None:
+            continue
+        indent, rest = match.groups()
+        if rest.strip():
+            bracketed = re.fullmatch(r"(\s*\[)(.*)(\]\s*)", rest)
+            if bracketed is None:
+                return
+            prefix, values, suffix = bracketed.groups()
+            seen: set[str] = set()
+            kept = []
+            for value in values.split(","):
+                token = _follows_value(value)
+                if token is not None and token in seen:
+                    continue
+                if token is not None:
+                    seen.add(token)
+                kept.append(value)
+            out[i] = f"{indent}follows:{prefix}{','.join(kept)}{suffix}"
+            return
+
+        seen = set()
+        for j in range(i + 1, limit):
+            entry = _SEQ_ENTRY_RE.match(out[j])
+            if entry is None or len(entry.group(1)) < len(indent):
+                return
+            token = _follows_value(entry.group(3))
+            if token is None:
+                continue
+            if token in seen:
+                out[j] = ""
+            else:
+                seen.add(token)
+        return
+
+
 def _rewrite_item_links(
     out: list[str], start: int, end: int, item: Item, replacements: dict[str, str]
 ) -> set[str]:
@@ -303,6 +361,12 @@ def plan_expansion(
     for item in project.local_items:
         for link_name, targets in item.links.items():
             for target in targets:
+                # `follows:` is chain-aware while still bare: expanding it to
+                # the named head would freeze the wrong predecessor. Once the
+                # freeze pass wrote a composite, it is an ordinary structured
+                # link again and receives the normal stale-label refresh.
+                if link_name == "follows" and "@" not in target:
+                    continue
                 new_target = _planned_target(project, by_key, link_name, item, target)
                 if new_target is None:
                     continue
@@ -431,6 +495,193 @@ def _report_missing(project: Project, count: int) -> None:
         "the next writable command will expand them. Run without --no-write, "
         "or see docs/design/keys.md."
     )
+
+
+
+# ----------------------------------------------------- follows: one-time freeze
+
+
+@dataclass
+class FollowsFreezePlan:
+    rewrites: list[tuple[Item, str, str, str]] = field(default_factory=list)
+    files: list[FileRewrite] = field(default_factory=list)
+    remaining: int = 0
+
+
+def _is_well_formed_key(target: str) -> bool:
+    return len(target) == keys_mod.KEY_LEN and keys_mod.malformed_key_message(target) is None
+
+
+def _frozen_follows_target(by_key: dict[str, Item], target: str) -> Item | None:
+    """Resolve only an already-frozen follows edge, never a bare display id."""
+    if "@" in target:
+        _display, _, key = target.partition("@")
+        return by_key.get(key)
+    return by_key.get(target) if _is_well_formed_key(target) else None
+
+
+def _follows_date_order(project: Project, item: Item) -> tuple[int, int, str, int]:
+    """D3's deterministic (date, file, source-position) order.
+
+    An invalid or absent date is left to build.validate_items() for its real
+    diagnostic and ordered after dated entries rather than guessed at.
+    """
+    value = item.fields.get("date")
+    try:
+        ordinal = dates.parse_date(value, project.date_format).toordinal()
+    except (TypeError, ValueError):
+        return (1, 0, item.source_file, item.source_line)
+    return (0, ordinal, item.source_file, item.source_line)
+
+
+def _tip_label(item: Item) -> str:
+    return item.id or item.key
+
+
+def _freeze_rewrite_plan(
+    project: Project,
+    candidates: list[tuple[Item, str, str, str]],
+    source_texts: dict[str, str] | None,
+) -> FollowsFreezePlan:
+    """Apply the established source-preserving link writers to freeze edits."""
+    from .revise import FileRewrite
+
+    plan = FollowsFreezePlan()
+    if not candidates:
+        return plan
+
+    replacements_by_item: dict[int, dict[str, str]] = defaultdict(dict)
+    for item, link_name, old, new in candidates:
+        replacements_by_item[id(item)][old] = new
+
+    applied_by_item: dict[int, set[str]] = defaultdict(set)
+    for rel in sorted({item.source_file for item, *_ in candidates}):
+        path = os.path.join(project.root, rel)
+        if source_texts is not None and rel in source_texts:
+            text = source_texts[rel]
+        else:
+            with open(path, "r", encoding="utf-8", newline="") as fh:
+                text = fh.read()
+        newline = "\r\n" if "\r\n" in text else "\n"
+        lines = text.splitlines()
+        file_items = [item for item in project.local_items if item.source_file == rel]
+        for item, start, end in _item_spans(rel, lines, file_items):
+            replacements = replacements_by_item.get(id(item))
+            if replacements:
+                applied_by_item[id(item)] |= _rewrite_link_field(
+                    lines, start, end, "follows", replacements
+                )
+                _dedupe_follows_field(lines, start, end)
+        after = newline.join(lines) + newline
+        if after != text:
+            plan.files.append(FileRewrite(path=path, rel=rel, before=text, after=after))
+
+    plan.rewrites = [
+        (item, link_name, old, new)
+        for item, link_name, old, new in candidates
+        if old in applied_by_item.get(id(item), ())
+    ]
+    plan.remaining = len(candidates) - len(plan.rewrites)
+    return plan
+
+
+def plan_follows_freeze(
+    project: Project, source_texts: dict[str, str] | None = None
+) -> FollowsFreezePlan:
+    """Freeze bare display-ID ``follows:`` references at each thread's tip.
+
+    The temporary forward graph contains only already-frozen edges. Processing
+    one item at a time prevents an authored merge's second reference from
+    seeing its owner as a tip; after that item's references are resolved, its
+    new frozen edges join the graph for the next item in D3 order.
+    """
+    _predecessors, followers = chains_mod.build_graph(project, frozen_only=True)
+    by_key = {item.key: item for item in project.items.values() if item.key}
+    handles = {id(item): handle for handle, item in project.items.items()}
+
+    def tips(start: Item, excluded: Item) -> list[Item]:
+        prospective = {
+            handle: [child for child in children if child is not excluded]
+            for handle, children in followers.items()
+        }
+        return chains_mod.tips(project, start, successors=prospective)
+
+    work: list[tuple[Item, list[tuple[str, Item]]]] = []
+    sealed_warned: set[int] = set()
+    for item in project.local_items:
+        bare = [
+            (target, project.item_by_id(target))
+            for target in item.links.get("follows", [])
+            if "@" not in target and not _is_well_formed_key(target)
+        ]
+        bare = [(target, target_item) for target, target_item in bare if target_item is not None]
+        if not bare:
+            continue
+        spec = project.types.get(item.type)
+        if spec and spec.append_only and seal_mod.is_sealed(project, item):
+            if id(item) not in sealed_warned:
+                project.warn(
+                    "follows is still bare, but this append-only entry is already sealed; "
+                    "leaving it unchanged because freezing would change its hash.",
+                    file=item.source_file,
+                    line=item.source_line,
+                    item_id=item.id,
+                )
+                sealed_warned.add(id(item))
+            continue
+        work.append((item, bare))
+
+    candidates: list[tuple[Item, str, str, str]] = []
+    for item, bare in sorted(work, key=lambda pair: _follows_date_order(project, pair[0])):
+        resolved: list[str] = []
+        for old, start in bare:
+            current_tips = tips(start, item)
+            if len(current_tips) != 1:
+                labels = ", ".join(_tip_label(tip) for tip in current_tips)
+                project.warn(
+                    f"follows {old!r} reaches unmerged tips: {labels}. "
+                    "Pick one or list several to merge; leaving this reference bare.",
+                    file=item.source_file,
+                    line=item.source_line,
+                    item_id=item.id,
+                )
+                continue
+            tip = current_tips[0]
+            if not tip.key:
+                continue
+            new = f"{tip.id}@{tip.key}" if tip.id else tip.key
+            if new not in resolved:
+                candidates.append((item, "follows", old, new))
+                resolved.append(new)
+        for target in resolved:
+            predecessor = _frozen_follows_target(by_key, target)
+            if predecessor is not None:
+                handle = handles.get(id(predecessor))
+                if handle is not None:
+                    followers.setdefault(handle, []).append(item)
+
+    return _freeze_rewrite_plan(project, candidates, source_texts)
+
+
+def freeze_follows(project: Project, write: bool = True) -> list[tuple[Item, str, str, str]]:
+    """Write one-time follows freezes after key minting and before build."""
+    plan = plan_follows_freeze(project)
+    if not plan.rewrites or not write:
+        return []
+
+    from .revise import write_rewrites
+
+    write_rewrites(plan.files)
+    replacements_by_item: dict[int, dict[str, str]] = defaultdict(dict)
+    for item, _link_name, old, new in plan.rewrites:
+        replacements_by_item[id(item)][old] = new
+    for item in project.local_items:
+        replacements = replacements_by_item.get(id(item))
+        if not replacements:
+            continue
+        targets = item.links.get("follows", [])
+        item.links["follows"] = list(dict.fromkeys(replacements.get(target, target) for target in targets))
+    return plan.rewrites
 
 
 # --------------------------------------------------- checks: against: (docs/design/keys.md)

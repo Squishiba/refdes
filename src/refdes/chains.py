@@ -48,8 +48,14 @@ def _start_handle(project: Project, start: Item | str) -> str | None:
     return _handles(project).get(id(item)) if item is not None else None
 
 
-def build_graph(project: Project) -> tuple[dict[str, list[Item]], dict[str, list[Item]]]:
-    """(predecessors, successors) for every `follows:` edge, keyed by node.
+def build_graph(
+    project: Project, *, frozen_only: bool = False
+) -> tuple[dict[str, list[Item]], dict[str, list[Item]]]:
+    """(predecessors, successors) for every ``follows:`` edge, keyed by node.
+
+    ``frozen_only`` excludes bare display-ID references so a write-back pass
+    can resolve new entries against the existing durable chain rather than
+    accidentally selecting an unfrozen entry as its own tip.
 
     A target that does not resolve is simply not an edge — `resolve_links`
     has already reported it as its own error, and this pass adds nothing to
@@ -71,6 +77,8 @@ def build_graph(project: Project) -> tuple[dict[str, list[Item]], dict[str, list
             continue
         seen: set[str] = set()
         for raw in targets:
+            if frozen_only and "@" not in raw and not build_mod._is_well_formed_bare_key(raw):
+                continue
             target = build_mod.resolve_link_target(by_key, project, raw)
             if target is None:
                 continue
@@ -108,13 +116,22 @@ def _tips_from(
     return tip_nodes
 
 
-def tips(project: Project, start: Item | str) -> list[Item]:
-    """Every entry reachable forward from `start` (inclusive) with no
-    successors of its own. A start with nothing after it is its own tip."""
+def tips(
+    project: Project,
+    start: Item | str,
+    *,
+    successors: dict[str, list[Item]] | None = None,
+) -> list[Item]:
+    """Every entry reachable forward from ``start`` with no successors.
+
+    ``successors`` lets a caller add a small, in-memory prospective edge set
+    while retaining this module's one traversal implementation.
+    """
     handle = _start_handle(project, start)
     if handle is None:
         return []
-    _, successors = build_graph(project)
+    if successors is None:
+        _, successors = build_graph(project)
     return _tips_from(handle, successors, _handles(project), project.items)
 
 

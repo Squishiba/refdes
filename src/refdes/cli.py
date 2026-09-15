@@ -114,6 +114,15 @@ def _load(args, require_ids: bool = True) -> tuple[Project, bool]:
     if expanded_checks:
         _parse_items(project, require_ids, discard=parse_span)
 
+    # A bare follows reference means "continue this thread", not "pin this
+    # named entry". Resolve it once to the current frozen-edge tip after keys
+    # exist, then reparse so build sees the durable composite-or-bare-key
+    # spelling. The same global --no-write gate that protects ordinary link
+    # expansion also protects this append-only-sensitive rewrite.
+    frozen_follows = links_mod.freeze_follows(project, write=not args.no_write)
+    if frozen_follows:
+        _parse_items(project, require_ids, discard=parse_span)
+
     return project, schema_was_stale
 
 
@@ -885,6 +894,10 @@ def cmd_keys_adopt(args) -> int:
             f"would expand {result.checks_expanded} check reference(s) "
             "to composite form"
         )
+        print(
+            f"would freeze {result.frozen_follows} follows reference(s) "
+            "at their thread tips"
+        )
     else:
         print(f"minted {result.minted} key(s)")
         print(
@@ -894,6 +907,10 @@ def cmd_keys_adopt(args) -> int:
         print(
             f"expanded {result.checks_expanded} check reference(s) "
             "to composite form"
+        )
+        print(
+            f"froze {result.frozen_follows} follows reference(s) "
+            "at their thread tips"
         )
 
     if result.baselines and not result.already_adopted:

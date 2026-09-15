@@ -51,14 +51,15 @@ class MembershipAdoption:
 @dataclass
 class AdoptionResult:
     ok: bool
-    errors: list[str] = field(default_factory=list)
     minted: int = 0
     expanded: int = 0
+    frozen_follows: int = 0
     checks_expanded: int = 0
     baselines: list[BaselineAdoption] = field(default_factory=list)
     seals: list[SealAdoption] = field(default_factory=list)
     memberships: list[MembershipAdoption] = field(default_factory=list)
     changed_files: list[str] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
     dry_run: bool = False
     already_adopted: bool = False
 
@@ -128,12 +129,7 @@ def _chain_rewrites(
 
 
 def _compose_item_rewrites(project, assignments) -> tuple[list[revise.FileRewrite], object]:
-    """Compose link and `checks: against:` edits before key insertions so
-    source line numbers stay valid. Each stage reads the previous stage's
-    output as its own `source_texts`, in the fixed order links -> checks ->
-    keys -- links and checks touch disjoint fields so their relative order
-    doesn't matter to the result, only that each sees what came before it.
-    """
+    """Compose link, check, follows, and key edits into one transaction."""
     for item, new_key in assignments:
         item.key = new_key
 
@@ -144,12 +140,18 @@ def _compose_item_rewrites(project, assignments) -> tuple[list[revise.FileRewrit
     check_texts = dict(link_texts)
     check_texts.update({rewrite.rel: rewrite.after for rewrite in check_plan.files})
 
+    follows_plan = links_mod.plan_follows_freeze(project, source_texts=check_texts)
+    follows_texts = dict(check_texts)
+    follows_texts.update({rewrite.rel: rewrite.after for rewrite in follows_plan.files})
+
     mint_plan = keys_mod.plan_missing(
-        project, source_texts=check_texts, assignments=assignments
+        project, source_texts=follows_texts, assignments=assignments
     )
 
-    composed = _chain_rewrites(link_plan.files, check_plan.files, mint_plan.rewrites)
-    return composed, (mint_plan, link_plan, check_plan)
+    composed = _chain_rewrites(
+        link_plan.files, check_plan.files, follows_plan.files, mint_plan.rewrites
+    )
+    return composed, (mint_plan, link_plan, check_plan, follows_plan)
 
 
 def apply(project_root: str, dry_run: bool = False) -> AdoptionResult:
@@ -171,8 +173,13 @@ def apply(project_root: str, dry_run: bool = False) -> AdoptionResult:
 
     assignments = keys_mod.missing_assignments(project)
     item_rewrites, plans = _compose_item_rewrites(project, assignments)
-    mint_plan, link_plan, check_plan = plans
-    if mint_plan.remaining or link_plan.remaining or check_plan.remaining:
+    mint_plan, link_plan, check_plan, follows_plan = plans
+    if (
+        mint_plan.remaining
+        or link_plan.remaining
+        or check_plan.remaining
+        or follows_plan.remaining
+    ):
         errors = []
         if mint_plan.remaining:
             errors.append(f"could not write back {mint_plan.remaining} key(s)")
@@ -183,6 +190,10 @@ def apply(project_root: str, dry_run: bool = False) -> AdoptionResult:
         if check_plan.remaining:
             errors.append(
                 f"could not expand {check_plan.remaining} local check reference(s)"
+            )
+        if follows_plan.remaining:
+            errors.append(
+                f"could not freeze {follows_plan.remaining} local follows reference(s)"
             )
         return AdoptionResult(ok=False, errors=errors, dry_run=dry_run)
 
@@ -292,6 +303,7 @@ def apply(project_root: str, dry_run: bool = False) -> AdoptionResult:
         baselines=baselines,
         seals=seals,
         memberships=memberships,
+        frozen_follows=len(follows_plan.rewrites),
         changed_files=changed_files,
         dry_run=dry_run,
         already_adopted=marker_was_adopted and not changed_files,
