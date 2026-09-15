@@ -1063,3 +1063,61 @@ def test_case_mismatch_between_path_and_disk_warns(tmp_path):
         pytest.skip("case-sensitive filesystem: the path is simply missing there")
     project = _cite_build(tmp_path)
     assert any("differs in case" in d.message for d in project.warnings)
+
+
+REFUSED_PATH_CASES = [
+    ("../outside.pdf", "escapes the project root"),
+    ("C:/x/main.pdf", "Windows drive letter"),
+    ("docs\\sch.pdf", "backslash"),
+]
+
+
+@pytest.mark.parametrize("command", ["check", "build"])
+@pytest.mark.parametrize("bad_path,reason", REFUSED_PATH_CASES)
+def test_cli_refused_citation_path_reports_error_not_traceback(
+    tmp_path, capsys, command, bad_path, reason
+):
+    _local_project(tmp_path, item_text=LOCAL_ITEM.replace("docs/sch.pdf", f"'{bad_path}'"))
+    code = cli_mod.main(["-c", str(tmp_path / "refdes-project.yaml"), command])
+    captured = capsys.readouterr()
+    combined = captured.out + captured.err
+    assert code != 0
+    assert "Traceback" not in combined
+    assert "[CMP-001]" in combined
+    assert reason in combined
+
+
+def test_cli_refused_path_does_not_stop_the_valid_citation(tmp_path, capsys):
+    _local_project(tmp_path)  # CMP-001 cites docs/sch.pdf, valid
+    (tmp_path / "items" / "bad.yaml").write_text(
+        LOCAL_ITEM.replace("CMP-001", "CMP-002").replace(
+            "docs/sch.pdf", "../outside.pdf"
+        ),
+        encoding="utf-8",
+    )
+    code = cli_mod.main(["-c", str(tmp_path / "refdes-project.yaml"), "fetch"])
+    captured = capsys.readouterr()
+    combined = captured.out + captured.err
+    assert code != 0
+    assert "Traceback" not in combined
+    assert "escapes the project root" in combined
+    records = citations_mod.load_lockfile(_load_only(tmp_path))
+    assert "docs/sch.pdf" in records  # the valid one still pinned
+    assert "../outside.pdf" not in records
+
+
+def test_refresh_skips_refused_paths_without_raising(tmp_path):
+    _local_project(
+        tmp_path, item_text=LOCAL_ITEM.replace("docs/sch.pdf", "../outside.pdf")
+    )
+    project = _load_only(tmp_path)
+    assert citations_mod.refresh(project, fetcher=lambda u: b"") == []
+
+
+def test_drive_letter_refusal_message_punctuation(tmp_path):
+    with pytest.raises(citations_mod.CitationError) as ei:
+        citations_mod.classify(str(tmp_path), "C:/x/main.pdf")
+    assert (
+        "without a scheme; this looks like a Windows drive letter, not a scheme"
+        in str(ei.value)
+    )

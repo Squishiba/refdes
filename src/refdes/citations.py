@@ -95,7 +95,7 @@ def classify(project_root: str, value: str) -> tuple[str, str]:
         return "remote", value
     if scheme:
         hint = (
-            " this looks like a Windows drive letter, not a scheme"
+            "; this looks like a Windows drive letter, not a scheme"
             if len(scheme) == 1
             else ""
         )
@@ -335,7 +335,11 @@ def verify(project: Project, require: bool = False) -> None:
         )
 
     for path, citers in grouped.items():
-        if classify(project.root, path)[0] != "remote":
+        try:
+            kind = classify(project.root, path)[0]
+        except CitationError:
+            continue  # refused path -- _resolve already flagged it; nothing to reconcile
+        if kind != "remote":
             continue  # vendor: on a local path is a validation error, not a flag to reconcile
         vendor_flags = {spec.vendor for _item, spec in citers}
         if len(vendor_flags) > 1:
@@ -530,7 +534,13 @@ def fetch_all(
     changed = False
 
     for target in sorted(wants_vendor):
-        kind, canon = classify(project.root, target)
+        try:
+            kind, canon = classify(project.root, target)
+        except CitationError as exc:
+            # A refused path is this one citation's failure, not the whole
+            # fetch's: report it and keep pinning the rest.
+            results.append(FetchResult(path=target, error=str(exc)))
+            continue
         want_vendor = wants_vendor[target]
         if kind == "local" and want_vendor:
             raise CitationError(
@@ -611,7 +621,11 @@ def refresh(project: Project, fetcher=None) -> list[DriftEntry]:
 
     drift: list[DriftEntry] = []
     for target in sorted(citers):
-        if classify(project.root, target)[0] != "remote":
+        try:
+            kind = classify(project.root, target)[0]
+        except CitationError:
+            continue  # refused path -- validate_items has already reported it
+        if kind != "remote":
             continue  # local -- verify() re-hashes it against the pin every run
         record = records.get(target)
         if record is None:

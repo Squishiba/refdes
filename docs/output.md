@@ -271,6 +271,7 @@ key:
 | `"cache_missing"` | Pinned and vendored, but the local blob is gone |
 | `"hash_mismatch"` | Vendored blob's hash no longer matches the pinned sha256 (always an error), or a cited local file changed since it was pinned (warning, error with `--require-citations`) |
 | `"missing"` | A cited local file does not exist (always an error) |
+| `"invalid"` | The `path:` itself is refused (escapes the project, drive letter, backslash, …) — validation already reported it with `file:line`; the citation is skipped, not resolved |
 
 `pinned` is `state != "unpinned"` — the one field to check "is this dependency
 tree fully pinned for a release" without enumerating `state` values yourself.
