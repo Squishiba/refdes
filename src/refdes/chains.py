@@ -12,6 +12,11 @@ The graph is built here from raw `follows:` targets resolved through
 while this module needs the durable `project.items` handles to implement
 chain-specific walks. Nodes are therefore identified by the surrogate key
 or provisional handle, and named in diagnostics by display id or key.
+
+Phase 3a perf: per-graph memoization of `resolve_current` by (component, field).
+The `ChainGraph` class wraps the (predecessors, successors) pair and caches
+connected-component ids and fold results so a thread of N entries costs O(N),
+not O(N²).
 """
 
 from __future__ import annotations
@@ -47,10 +52,105 @@ def _start_handle(project: Project, start: Item | str) -> str | None:
     return _handles(project).get(id(item)) if item is not None else None
 
 
+class ChainGraph:
+    """The follows graph with per-build memoization for `resolve_current`.
+
+    Instances are created by `build_graph` and passed through the build
+    pipeline. They unpack as `(predecessors, successors)` for backward
+    compatibility with existing call sites. The cache and component map
+    are built lazily on first use and never outlive the graph (one per build).
+    """
+
+    __slots__ = (
+        "_component_of",
+        "_handles",
+        "_items",
+        "_resolve_cache",
+        "predecessors",
+        "successors",
+    )
+
+    def __init__(
+        self,
+        predecessors: dict[str, list[Item]],
+        successors: dict[str, list[Item]],
+        handles: dict[int, str],
+        items: dict[str, Item],
+    ):
+        self.predecessors = predecessors
+        self.successors = successors
+        self._handles = handles
+        self._items = items
+        # Populated lazily by _ensure_components()
+        self._component_of: dict[str, int] | None = None
+        # (component_id, field) -> resolved value (or a sentinel for None)
+        self._resolve_cache: dict[tuple[int, str], Any] = {}
+
+    def __iter__(self):
+        """Unpack as (predecessors, successors) for backward compatibility."""
+        return iter((self.predecessors, self.successors))
+
+    def __eq__(self, other):
+        """Compare equal to (predecessors, successors) tuple for backward compatibility."""
+        if isinstance(other, tuple) and len(other) == 2:
+            return (self.predecessors, self.successors) == other
+        return NotImplemented
+
+    def _ensure_components(self) -> None:
+        """Compute connected-component id for every node in the graph.
+
+        Two nodes are in the same component iff they are connected by any
+        path of follows edges (forward or backward). This is exactly the set
+        of nodes that share the same `resolve_current` result for any field.
+        """
+        if self._component_of is not None:
+            return
+        comp: dict[str, int] = {}
+        comp_id = 0
+        # All nodes that appear anywhere in the graph
+        all_nodes = set(self.predecessors) | set(self.successors)
+        for node in all_nodes:
+            if node in comp:
+                continue
+            # BFS/DFS to mark the whole component
+            stack = [node]
+            comp[node] = comp_id
+            while stack:
+                cur = stack.pop()
+                for pred in self.predecessors.get(cur, []):
+                    ph = self._handles.get(id(pred))
+                    if ph is not None and ph not in comp:
+                        comp[ph] = comp_id
+                        stack.append(ph)
+                for succ in self.successors.get(cur, []):
+                    sh = self._handles.get(id(succ))
+                    if sh is not None and sh not in comp:
+                        comp[sh] = comp_id
+                        stack.append(sh)
+            comp_id += 1
+        self._component_of = comp
+
+    def component_id(self, handle: str) -> int | None:
+        """Return the component id for `handle`, or None if not in graph."""
+        self._ensure_components()
+        return self._component_of.get(handle)
+
+    def cache_get(self, component_id: int, field: str) -> tuple[bool, Any]:
+        """Check cache for (component_id, field). Returns (found, value)."""
+        key = (component_id, field)
+        if key in self._resolve_cache:
+            return True, self._resolve_cache[key]
+        return False, None
+
+    def cache_set(self, component_id: int, field: str, value: Any) -> None:
+        """Store resolved value for (component_id, field)."""
+        self._resolve_cache[(component_id, field)] = value
+
+
 def build_graph(
     project: Project, *, frozen_only: bool = False
-) -> tuple[dict[str, list[Item]], dict[str, list[Item]]]:
-    """(predecessors, successors) for every ``follows:`` edge, keyed by node.
+) -> ChainGraph:
+    """Build the follows graph, returning a `ChainGraph` with memoization.
 
     ``frozen_only`` excludes bare display-ID references so a write-back pass
     can resolve new entries against the existing durable chain rather than
@@ -58,7 +158,7 @@ def build_graph(
 
     A target that does not resolve is simply not an edge — `resolve_links`
     has already reported it as its own error, and this pass adds nothing to
-    say about it. A project with no `follows:` anywhere gets two empty maps.
+    say about it. A project with no `follows:` anywhere gets an empty graph.
 
     `build` is imported here rather than at module scope: build.py imports
     this module for its own build step, so a top-level import would be a
@@ -87,20 +187,23 @@ def build_graph(
             seen.add(target_handle)
             predecessors.setdefault(handle, []).append(target)
             successors.setdefault(target_handle, []).append(item)
-    return predecessors, successors
+    return ChainGraph(predecessors, successors, handles, project.items)
 
 
 def is_threaded(
     project: Project,
     item: Item,
     *,
-    graph: tuple[dict[str, list[Item]], dict[str, list[Item]]] | None = None,
+    graph: ChainGraph | tuple[dict[str, list[Item]], dict[str, list[Item]]] | None = None,
 ) -> bool:
     """Whether `item` participates in at least one resolved follows edge."""
     if graph is None:
         graph = build_graph(project)
+    # Accept both ChainGraph and the legacy tuple
+    predecessors = graph.predecessors if isinstance(graph, ChainGraph) else graph[0]
+    successors = graph.successors if isinstance(graph, ChainGraph) else graph[1]
     handle = _start_handle(project, item)
-    return handle is not None and (handle in graph[0] or handle in graph[1])
+    return handle is not None and (handle in predecessors or handle in successors)
 
 
 def _tips_from(
@@ -133,7 +236,7 @@ def tips(
     start: Item | str,
     *,
     successors: dict[str, list[Item]] | None = None,
-    graph: tuple[dict[str, list[Item]], dict[str, list[Item]]] | None = None,
+    graph: ChainGraph | tuple[dict[str, list[Item]], dict[str, list[Item]]] | None = None,
 ) -> list[Item]:
     """Every entry reachable forward from ``start`` with no successors.
 
@@ -145,9 +248,15 @@ def tips(
     handle = _start_handle(project, start)
     if handle is None:
         return []
-    if successors is None:
-        successors = graph[1] if graph is not None else build_graph(project)[1]
-    return _tips_from(handle, successors, _handles(project), project.items)
+    if isinstance(graph, ChainGraph):
+        succs = graph.successors
+    elif graph is not None:
+        succs = graph[1]
+    else:
+        succs = build_graph(project).successors
+    if successors is not None:
+        succs = successors
+    return _tips_from(handle, succs, _handles(project), project.items)
 
 
 def resolve_current(
@@ -155,7 +264,7 @@ def resolve_current(
     start: Item | str,
     field: str,
     *,
-    graph: tuple[dict[str, list[Item]], dict[str, list[Item]]] | None = None,
+    graph: ChainGraph | tuple[dict[str, list[Item]], dict[str, list[Item]]] | None = None,
 ) -> Any | None:
     """The chain's current value of `field`, per threads.md §3.
 
@@ -173,12 +282,22 @@ def resolve_current(
     file defaulting `status: proposed` would otherwise have every silent
     entry in it shadow the `accepted` its head actually wrote.
     ``graph`` lets repeated resolution in one build reuse the parsed follows
-    edges instead of rebuilding them for every entry.
+    edges instead of rebuilding them for every entry. When `graph` is a
+    `ChainGraph`, results are memoized per (connected component, field).
     """
-    if graph is None:
-        predecessors, successors = build_graph(project)
+    if isinstance(graph, ChainGraph):
+        cg = graph
+        predecessors, successors = cg.predecessors, cg.successors
+        handles = cg._handles
+        items = cg._items
     else:
-        predecessors, successors = graph
+        if graph is None:
+            predecessors, successors = build_graph(project)
+        else:
+            predecessors, successors = graph
+        handles = _handles(project)
+        items = project.items
+
     start_handle = _start_handle(project, start)
     if start_handle is None:
         return None
@@ -189,7 +308,6 @@ def resolve_current(
     roots: set[str] = set()
     stack = [start_handle]
     seen = {start_handle}
-    handles = _handles(project)
     while stack:
         node = stack.pop()
         preceding = predecessors.get(node, [])
@@ -203,12 +321,21 @@ def resolve_current(
     found_by_handle = {
         handles[id(tip)]
         for root in roots
-        for tip in _tips_from(root, successors, handles, project.items)
+        for tip in _tips_from(root, successors, handles, items)
     }
     if len(found_by_handle) != 1:
         return None
     tip_handle = next(iter(found_by_handle))
-    items = project.items
+
+    # If we have a ChainGraph, check the cache first
+    if isinstance(graph, ChainGraph):
+        comp_id = cg.component_id(tip_handle)
+        if comp_id is not None:
+            found, cached = cg.cache_get(comp_id, field)
+            if found:
+                return cached
+
+    # Perform the fold
     frontier = [tip_handle]
     visited = {tip_handle}
     while frontier:
@@ -220,7 +347,13 @@ def resolve_current(
         ]
         if declared:
             first = declared[0]
-            return first if all(value == first for value in declared) else None
+            result = first if all(value == first for value in declared) else None
+            # Cache the result if we have a ChainGraph
+            if isinstance(graph, ChainGraph):
+                comp_id = cg.component_id(tip_handle)
+                if comp_id is not None:
+                    cg.cache_set(comp_id, field, result)
+            return result
         nxt: list[str] = []
         for node in frontier:
             for predecessor in predecessors.get(node, []):
@@ -230,6 +363,11 @@ def resolve_current(
                 visited.add(ph)
                 nxt.append(ph)
         frontier = nxt
+    result = None
+    if isinstance(graph, ChainGraph):
+        comp_id = cg.component_id(tip_handle)
+        if comp_id is not None:
+            cg.cache_set(comp_id, field, result)
     return None
 
 
@@ -277,7 +415,7 @@ def _find_cycle(project: Project, predecessors: dict[str, list[Item]]) -> list[s
 def resolve(
     project: Project,
     *,
-    graph: tuple[dict[str, list[Item]], dict[str, list[Item]]] | None = None,
+    graph: ChainGraph | tuple[dict[str, list[Item]], dict[str, list[Item]]] | None = None,
 ) -> None:
     """Fork `info` and cycle `error` for `follows:` chains (threads.md §6).
 
@@ -287,7 +425,12 @@ def resolve(
     — two people editing concurrently is a normal, recoverable outcome, not
     a mistake. ``graph`` reuses a build-wide precomputed graph.
     """
-    predecessors, successors = graph if graph is not None else build_graph(project)
+    if isinstance(graph, ChainGraph):
+        predecessors, successors = graph.predecessors, graph.successors
+    elif graph is not None:
+        predecessors, successors = graph
+    else:
+        predecessors, successors = build_graph(project)
     if not predecessors:
         return  # no follows: anywhere -- nothing to report, nothing to walk
 

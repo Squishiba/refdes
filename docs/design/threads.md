@@ -46,6 +46,9 @@ merge, §7's migration file), it says so and stops there.
   `follows:` is an ordinary link, so it gets the ordinary composite-or-bare
   rule based on whether *the target* happens to have a display id, with
   nothing chain-specific about the choice.
+- **Phase 3a perf: memoized per component.** `resolve_current` caches its
+  result per (connected component, field) in the build-scoped `ChainGraph`,
+  so a thread of N entries costs O(N) instead of O(N²).
 
 **Phase 1 implemented** (this session, 2026-09-14): §2's identity
 foundation — `Project.items` re-keyed on surrogate key (or, for an item
