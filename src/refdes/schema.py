@@ -32,6 +32,7 @@ from .model import (
     SchemaError,
     WorkspaceSpec,
 )
+from .parse import yaml_safe_load
 
 # The project marker: every project setting lives here, and finding this file
 # is what makes a directory a refdes project.
@@ -233,7 +234,7 @@ def _load_schema_overlay(root: str) -> dict[str, Any]:
     if not os.path.isfile(path):
         return {}
     with open(path, "r", encoding="utf-8") as fh:
-        raw = yaml.safe_load(fh) or {}
+        raw = yaml_safe_load(fh) or {}
     if not isinstance(raw, dict):
         raise SchemaError(f"{SCHEMA_NAME}: must be a mapping of schema key to value")
     for key in raw:
@@ -456,7 +457,7 @@ def load_project(config_path: str | None = None, start: str = ".") -> Project:
     if os.path.basename(os.path.abspath(path)) == LEGACY_CONFIG_NAME:
         raise _legacy_config_error()
     with open(path, "r", encoding="utf-8") as fh:
-        raw: dict[str, Any] = yaml.safe_load(fh) or {}
+        raw: dict[str, Any] = yaml_safe_load(fh) or {}
     if not isinstance(raw, dict):
         raise _settings_error("must be a mapping of setting name to value")
 

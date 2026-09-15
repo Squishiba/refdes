@@ -14,7 +14,7 @@ import re
 import yaml
 
 from .model import Page, Project
-from .parse import FRONTMATTER_RE
+from .parse import FRONTMATTER_RE, yaml_safe_load
 
 H1_RE = re.compile(r"^#\s+(.+?)\s*$", re.MULTILINE)
 
@@ -64,7 +64,7 @@ def _read_page(project: Project, path: str, root: str) -> Page | None:
     match = FRONTMATTER_RE.match(text)
     if match:
         try:
-            loaded = yaml.safe_load(match.group(1)) or {}
+            loaded = yaml_safe_load(match.group(1)) or {}
             if isinstance(loaded, dict):
                 meta = loaded
             body = match.group(2)

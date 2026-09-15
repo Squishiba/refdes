@@ -27,6 +27,7 @@ import yaml
 from . import keys as keys_mod
 from .ids import split_id
 from .model import Item, Project
+from .parse import yaml_safe_load
 
 MANIFEST_FILE = ".refdes/boards.yaml"
 
@@ -176,7 +177,7 @@ def load_manifest(project: Project) -> Manifest:
     if not os.path.isfile(path):
         return {"boards": {}, "workspaces": {}}
     with open(path, "r", encoding="utf-8") as fh:
-        data = yaml.safe_load(fh) or {}
+        data = yaml_safe_load(fh) or {}
     return {
         "boards": _load_memberships(data.get("boards")),
         "workspaces": _load_memberships(data.get("workspaces")),

@@ -21,6 +21,7 @@ import yaml
 
 from . import ids as ids_mod
 from .model import Diagnostic, Item, Project
+from .parse import yaml_safe_load
 
 if TYPE_CHECKING:
     from .revise import FileRewrite
@@ -441,7 +442,7 @@ def is_adopted(project: Project) -> bool:
     """Whether the explicit adoption marker exists and declares adoption."""
     try:
         with open(adoption_marker_path(project), encoding="utf-8") as fh:
-            marker = yaml.safe_load(fh)
+            marker = yaml_safe_load(fh)
     except (OSError, yaml.YAMLError):
         return False
     return isinstance(marker, Mapping) and marker.get("adopted") is True

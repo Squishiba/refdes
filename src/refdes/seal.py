@@ -27,6 +27,7 @@ import yaml
 
 from . import keys as keys_mod
 from .model import Item, Project
+from .parse import yaml_safe_load
 
 SEAL_FILE = ".refdes/log-seal.yaml"
 RESEAL_ALL = "*"  # sentinel: --reseal with no board name means "every board"
@@ -125,7 +126,7 @@ def load_seals(project: Project, board: str = "") -> Seals:
     if not os.path.isfile(path):
         return {}
     with open(path, "r", encoding="utf-8") as fh:
-        data = yaml.safe_load(fh) or {}
+        data = yaml_safe_load(fh) or {}
     return {
         str(record_id): dict(value) if isinstance(value, Mapping) else str(value)
         for record_id, value in (data.get("sealed") or {}).items()

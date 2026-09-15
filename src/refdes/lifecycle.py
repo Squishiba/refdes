@@ -31,6 +31,7 @@ import yaml
 from . import build as build_mod
 from . import keys as keys_mod
 from .model import INFO, RELEASE_GATE_DEFAULTS, Item, Project, SchemaError
+from .parse import yaml_safe_load
 
 BASELINES_DIR = ".refdes/baselines"
 
@@ -181,7 +182,7 @@ def _same_baseline_items(stored: dict[str, dict], current: dict[str, dict]) -> b
 
 def _load_baseline_file(path: str) -> Baseline:
     with open(path, "r", encoding="utf-8") as fh:
-        data = yaml.safe_load(fh) or {}
+        data = yaml_safe_load(fh) or {}
     gate = data.get("gate")
     standard = data.get("standard")
     return Baseline(

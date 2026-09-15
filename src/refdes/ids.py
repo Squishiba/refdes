@@ -17,6 +17,7 @@ from collections import defaultdict
 import yaml
 
 from .model import Item, Project, provisional_handle
+from .parse import yaml_safe_load
 
 ID_RE = re.compile(r"^([A-Z][A-Z0-9]*(?:-[A-Z0-9]+)*)-(\d+)$")
 LIST_ENTRY_RE = re.compile(r"^(\s*)-(\s+)(\S.*)$")
@@ -54,7 +55,7 @@ def load_ledger(project: Project) -> dict:
     if not os.path.isfile(path):
         return {"burned": {}, "allocated": []}
     with open(path, "r", encoding="utf-8") as fh:
-        data = yaml.safe_load(fh) or {}
+        data = yaml_safe_load(fh) or {}
     data.setdefault("burned", {})
     data.setdefault("allocated", [])
     return data

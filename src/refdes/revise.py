@@ -40,6 +40,7 @@ from . import lifecycle, parse
 from . import seal as seal_mod
 from . import standards as standards_mod
 from .model import CHECK_VIOLATION, Item, Project, SchemaError
+from .parse import yaml_safe_load
 from .schema import load_project
 
 # -------------------------------------------------------------------- mapping
@@ -106,7 +107,7 @@ def mapping_from_dict(raw: dict[str, Any], source: str) -> Mapping:
       CON: BND
 
     Standalone from load_mapping() below so standards.py can read its own
-    migration.yaml files as plain dicts (via yaml.safe_load, no import of
+    migration.yaml files as plain dicts (via yaml_safe_load, no import of
     this module) and hand the result here -- keeps the dependency one-way
     (revise.py imports standards.py for the chain, not the reverse).
     """
@@ -124,7 +125,7 @@ def mapping_from_dict(raw: dict[str, Any], source: str) -> Mapping:
 
 def load_mapping(path: str) -> Mapping:
     with open(path, "r", encoding="utf-8") as fh:
-        raw = yaml.safe_load(fh) or {}
+        raw = yaml_safe_load(fh) or {}
     return mapping_from_dict(raw, path)
 
 

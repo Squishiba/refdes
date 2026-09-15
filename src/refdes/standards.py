@@ -23,6 +23,7 @@ from typing import Any
 import yaml
 
 from .model import SchemaError
+from .parse import yaml_safe_load
 
 _STANDARDS_ROOT = os.path.join(os.path.dirname(__file__), "standards")
 _KNOWN_BASES = ("hardware",)
@@ -168,7 +169,7 @@ def _load_standard(
 
 def _read_yaml(path: str) -> dict[str, Any]:
     with open(path, "r", encoding="utf-8") as fh:
-        return yaml.safe_load(fh) or {}
+        return yaml_safe_load(fh) or {}
 
 
 def _available_versions(base_name: str) -> list[str]:

@@ -35,6 +35,7 @@ from urllib.parse import urlparse
 import yaml
 
 from .model import CitationSpec, CitationStatus, Item, PartUsage, Project
+from .parse import yaml_safe_load
 
 LOCKFILE = ".refdes/citations.yaml"
 VENDOR_DIR = ".refdes/vendor"
@@ -68,7 +69,7 @@ def load_lockfile(project: Project) -> dict[str, dict]:
     if not os.path.isfile(path):
         return {}
     with open(path, "r", encoding="utf-8") as fh:
-        data = yaml.safe_load(fh) or {}
+        data = yaml_safe_load(fh) or {}
     return dict(data.get("citations") or {})
 
 

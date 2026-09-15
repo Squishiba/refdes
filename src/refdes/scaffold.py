@@ -17,6 +17,7 @@ from . import parse as parse_mod
 from . import standards
 from .build import _format_required_when
 from .model import ItemType, SchemaError
+from .parse import yaml_safe_load
 from .schema import load_project
 
 
@@ -216,7 +217,7 @@ def add_preset(project_root: str, preset_name: str) -> None:
     config_path = os.path.join(project_root, "refdes-project.yaml")
     with open(config_path, encoding="utf-8") as fh:
         raw_text = fh.read()
-    raw = yaml.safe_load(raw_text) or {}
+    raw = yaml_safe_load(raw_text) or {}
     standard_cfg = _read_standard_cfg(raw)
 
     base, version = standard_cfg.get("base"), standard_cfg.get("version")
@@ -254,7 +255,7 @@ def remove_preset(project_root: str, preset_name: str) -> list:
     config_path = os.path.join(project_root, "refdes-project.yaml")
     with open(config_path, encoding="utf-8") as fh:
         raw_text = fh.read()
-    raw = yaml.safe_load(raw_text) or {}
+    raw = yaml_safe_load(raw_text) or {}
     standard_cfg = _read_standard_cfg(raw)
     current = standard_cfg.get("presets") or []
     if preset_name not in current:

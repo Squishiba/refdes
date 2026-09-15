@@ -65,13 +65,15 @@ _RENAMED_TYPES: dict[str, str] = {
     "constraint": "bound",
 }
 
+_SafeLoaderClass = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
 
-class _LineLoader(yaml.SafeLoader):
-    """SafeLoader that tags each mapping with the source line of its first key."""
+
+class _LineLoader(_SafeLoaderClass):
+    """SafeLoader (C when libyaml installed, else pure-Python) that tags each mapping with line."""
 
 
 def _construct_mapping(loader: _LineLoader, node: yaml.MappingNode) -> dict:
-    mapping = yaml.SafeLoader.construct_mapping(loader, node, deep=True)
+    mapping = _SafeLoaderClass.construct_mapping(loader, node, deep=True)
     mapping["__line__"] = node.start_mark.line + 1
     return mapping
 
@@ -79,6 +81,11 @@ def _construct_mapping(loader: _LineLoader, node: yaml.MappingNode) -> dict:
 _LineLoader.add_constructor(
     yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, _construct_mapping
 )
+
+
+def yaml_safe_load(stream_or_text) -> Any:
+    """Load YAML with libyaml when available; same resolver/semantics as SafeLoader."""
+    return yaml.load(stream_or_text, Loader=_SafeLoaderClass)
 
 
 def _strip_lines(obj: Any) -> Any:
