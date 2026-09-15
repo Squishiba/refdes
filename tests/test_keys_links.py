@@ -747,6 +747,44 @@ def test_revision_reports_uncomparable_entries(tmp_path, capsys):
     assert "already stamped" in err  # the conflict itself is still reported
 
 
+def test_renamed_uncomparable_entry_reported_once(tmp_path):
+    """An entry that is BOTH uncomparable and relabelled (renamed since the
+    stamp, same key) is reported once, under its current display id: the
+    migration names entries by the id recorded at stamp time, so matching
+    the exclusion on the current id would let the rename slip the entry
+    back into `changed` while `uncomparable` still carried the old id."""
+    root = _keyed_links_project(
+        tmp_path,
+        "defaults: { type: requirement }\nitems:\n  - id: REQ-001\n    text: Renamed later.\n",
+    )
+    project = _built_links_project(root)
+    key = project.item_by_id("REQ-001").key
+    _write_legacy_baseline(
+        root,
+        "rev-a",
+        {
+            key: {
+                "id": "REQ-001",
+                "hash": "0" * 16,  # bogus: doesn't check out under format 2
+                "hash_format": 2,
+                "type": "requirement",
+                "title": "Renamed later.",
+            }
+        },
+    )
+    path = root / "items" / "r.yaml"
+    path.write_text(
+        path.read_text(encoding="utf-8").replace("id: REQ-001", "id: REQ-009"),
+        encoding="utf-8",
+    )
+    project2 = _built_links_project(root)
+
+    diff = lifecycle.diff_against(project2, lifecycle.load_baseline(project2, "rev-a"))
+    assert diff.uncomparable == ["REQ-009"]  # current id, once
+    assert diff.changed == []  # not double-reported as changed under the new id
+    assert diff.relabelled == [("REQ-001", "REQ-009", key)]  # the rename is still listed
+
+
 def test_stamp_same_name_after_hash_format_change_is_unchanged_not_conflict(tmp_path):
     """The false "conflict" this migration exists to prevent: re-stamping an
     unedited project under a name a hash_format-1 baseline already used must

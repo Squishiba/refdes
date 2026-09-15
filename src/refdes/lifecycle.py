@@ -753,6 +753,7 @@ class DiffResult:
     # cannot tell whether the content moved or only the definition did. They
     # appear here instead of in `changed` -- "changed" claims more than
     # "can't tell" -- and are deliberately not counted as unchanged either.
+    # Ids are the entry's current display id (see diff_against's docstring).
     uncomparable: list[str] = field(default_factory=list)
 
 
@@ -822,10 +823,15 @@ def diff_against(project: Project, baseline: Baseline, write: bool = True) -> Di
     Entries the migration reports as `uncomparable` -- content change or
     definition move, indistinguishable -- are reported on their own
     (`DiffResult.uncomparable`), never folded into `changed`, and never
-    counted as unchanged.
+    counted as unchanged. The migration names them by the id recorded at
+    stamp time, so the exclusion matches on the baseline side (`old_id`)
+    and each is reported once under its *current* display id -- a renamed
+    uncomparable entry would otherwise slip back into `changed` under the
+    new id while `uncomparable` still carried the old one.
     """
     migration = migrate_hash_format(project, baseline, write=write)
-    uncomparable = set(migration.uncomparable)
+    uncomparable_pending = set(migration.uncomparable)
+    uncomparable: list[str] = []
     current = _items_map(project)
     indexes = _baseline_indexes(baseline.items)
     changed, added = [], []
@@ -846,7 +852,9 @@ def diff_against(project: Project, baseline: Baseline, write: bool = True) -> Di
         old_entries[current_id] = old
         if key and old_id != current_id:
             relabelled.append((old_id, current_id, str(key)))
-        if current_id in uncomparable:
+        if old_id in uncomparable_pending:
+            uncomparable_pending.discard(old_id)
+            uncomparable.append(current_id)
             continue  # neither "changed" nor "unchanged" -- reported as uncomparable
         if old.get("hash") != entry["hash"]:
             changed.append(current_id)
@@ -873,5 +881,8 @@ def diff_against(project: Project, baseline: Baseline, write: bool = True) -> Di
         relabelled=sorted(relabelled),
         unchanged_count=unchanged,
         stale_arithmetic=_stale_arithmetic(project, changed, old_entries),
-        uncomparable=sorted(uncomparable),
+        # Anything the migration named but no current item matched stays in
+        # the report under the id it was recorded with -- dropping it would
+        # silently bury an entry we already know we can't check.
+        uncomparable=sorted(set(uncomparable) | uncomparable_pending),
     )
