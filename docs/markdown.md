@@ -224,6 +224,57 @@ changed since it was pinned is a warning naming every citer (review, then
 `refdes fetch --update --path <path>`), an error with `--require-citations`;
 a cited file that doesn't exist is an error, always.
 
+### Citing a section by name
+
+`page:` is a number you looked up by hand and re-check every revision.
+`section:` is the same citation written the way you actually think about it —
+the title of a heading in the document:
+
+```yaml
+- id: CMP-PWR-001
+  title: TPS62913 synchronous buck converter
+  citations:
+    - path: https://www.ti.com/lit/ds/symlink/tps62913.pdf
+      section: Application and Implementation
+      vendor: true
+      id: tps62913-ds
+```
+
+`refdes fetch` reads the PDF's own outline (its bookmarks) and records which
+page that title points at, in the lockfile alongside the sha256. Builds never
+open a PDF — they read the recorded page — so `build` and `check` stay offline
+and hermetic exactly as before. The resolved page fills the same two places
+`page:` does: the `#page=N` fragment on the link, and the Page column of the
+citations table.
+
+Titles are matched exactly and case-sensitively, after whitespace is collapsed
+(a heading the outline stored across two lines is one title). Nothing is fuzzy:
+a title that isn't in the outline is an error, not a guess. Resolution needs the
+bytes, so `section:` is allowed on a local `path:` citation and on a remote one
+with `vendor: true`; on a hash-only remote citation it is refused at build time,
+because those bytes are not guaranteed to be there next time.
+
+Resolving is never silent. `refdes fetch` prints a `FAILED` line and exits
+nonzero — naming the path, the section, and every item that cites it — when:
+
+| Situation | What the line says |
+|---|---|
+| The PDF has no outline at all | `has no outline (bookmarks); section: cannot be resolved` — cite `page:` instead |
+| No entry has that title | `no outline entry titled '…'`, plus the closest titles it did find |
+| Two entries have that title | every page it is on — the document is ambiguous, and taking the first would be a guess |
+| The PDF extra isn't installed | `section: needs the optional PDF extra: pip install refdes[pdf]` |
+| pypdf can't parse the file | the file and pypdf's own message, never a traceback |
+| `--update`, and the title is gone from the new revision | `the section you cited no longer exists in the new revision (was page N)` |
+
+A failed lookup does not undo the pin — the fetch succeeded, the lookup didn't.
+A section that fails to resolve is dropped from the lockfile rather than left
+pointing at a page the new bytes may not have.
+
+`page:` and `section:` on one citation are not an error, but they have to agree:
+if both are present and the resolved page differs, `build` warns naming both and
+**`page:` wins** — an explicit page is a decision, a resolved title is an
+inference.
+
 `id` is optional, exactly like a figure's `id=` — give a citation one and
 `[[cite:tps62913-ds]]` anywhere in prose (or `[[cite:tps62913-ds|the
 datasheet]]` for custom text) links straight to **that citation's row** on
@@ -270,6 +321,7 @@ inconsistent `vendor:` flags across items is a warning.
 | The local blob's hash no longer matches its recorded sha256 | **error, always** |
 | A cited local file doesn't exist | **error, always** |
 | A cited local file changed since it was pinned | warning naming every citer (error with `--require-citations`) |
+| A `section:` with no resolved page in the lockfile — never fetched, or fetched without `refdes[pdf]` installed | warning naming every citer (error with `--require-citations`) |
 
 The hash-mismatch case is never soft-failed — a corrupted or tampered local
 cache is not something `--require-citations` or its absence should decide.

@@ -561,6 +561,14 @@ def cmd_fetch(args) -> int:
         verb = "skipped" if r.skipped else "fetched"
         vendored = "vendored" if r.vendored else "hash-only"
         print(f"{verb:8} {r.path}  sha256={r.sha256[:12]}...  {vendored}")
+        for section, page in sorted(r.sections.items()):
+            print(f"         section {section!r} -> page {page}")
+        # The pin succeeded but the outline lookup did not: report it as its own
+        # failure, so a citation whose `section:` silently went unresolved can
+        # never look like a clean fetch.
+        for section_error in r.section_errors:
+            failed += 1
+            print(f"FAILED  {section_error}", file=sys.stderr)
     summary = f"{len(results)} citation(s) processed, {failed} failed"
     if load_errors:
         summary += (

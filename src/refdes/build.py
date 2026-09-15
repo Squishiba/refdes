@@ -253,6 +253,30 @@ def validate_items(project: Project) -> None:
                                 f"local file is already local",
                             )
                             continue
+                        if "section" in entry:
+                            section = entry["section"]
+                            if not isinstance(section, str) or not section.strip():
+                                _field_error(
+                                    project, item, fname,
+                                    f"{fname}[{index}]: section: must be a "
+                                    f"non-empty string naming an outline entry",
+                                )
+                                continue
+                            if kind == "remote" and not entry.get("vendor"):
+                                # Resolving a title needs the bytes, and for a
+                                # hash-only remote citation they are not
+                                # guaranteed to be local -- resolution would
+                                # depend on the network at fetch time and on
+                                # luck afterwards.
+                                _field_error(
+                                    project, item, fname,
+                                    f"{fname}[{index}]: section: on remote "
+                                    f"path {str(entry['path'])!r} needs "
+                                    f"vendor: true -- the bytes have to be "
+                                    f"local for its outline to be read; vendor "
+                                    f"this citation or cite a local path",
+                                )
+                                continue
                         cite_id = entry.get("id")
                         if not cite_id:
                             continue

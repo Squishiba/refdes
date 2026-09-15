@@ -39,7 +39,13 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0", "build>=1.0", "twine>=5.0", "jsonschema>=4.0", "ruff>=0.6"]
+# pypdf resolves a citation's `section:` against the pinned PDF's own outline,
+# at `refdes fetch` time only (finding 23 Part 2). Optional because it is the
+# only thing in refdes that reads a PDF, and it is imported lazily: a project
+# with no `section:` never needs it installed. `dev` carries it too so the test
+# suite builds real PDFs rather than skipping the tests that need them.
+pdf = ["pypdf>=4.0"]
+dev = ["pytest>=8.0", "build>=1.0", "twine>=5.0", "jsonschema>=4.0", "ruff>=0.6", "pypdf>=4.0"]
 
 [project.urls]
 Homepage = "https://github.com/Squishiba/refdes"

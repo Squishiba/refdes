@@ -168,6 +168,9 @@
     <thead><tr><th></th><th>Path</th><th>Rev</th><th>Page</th><th>Part #</th><th>Vendor</th><th>Detail</th></tr></thead>
     <tbody>
     {% for c in item.citations %}
+      {# Effective page for the link: an explicit `page:` wins, otherwise the
+         page `section:` resolved to at fetch time (finding 23 Part 2). #}
+      {% set cpage = c.spec.page or c.section_page %}
       <tr{% if c.spec.id %} id="cite-{{ c.spec.id }}"{% endif %}>
         <td>
           {% if c.state == 'ok' %}<span class="pill pill-pass">ok</span>
@@ -177,16 +180,16 @@
         </td>
         <td>
           {% if c.remote %}
-          <a href="{{ c.spec.path }}{% if c.spec.page %}#page={{ c.spec.page }}{% endif %}" target="_blank" rel="noopener">{{ c.spec.path }}</a>
+          <a href="{{ c.spec.path }}{% if cpage %}#page={{ cpage }}{% endif %}" target="_blank" rel="noopener">{{ c.spec.path }}</a>
           {% elif c.local_path %}
-          <a href="assets/{{ c.local_path }}{% if c.spec.page %}#page={{ c.spec.page }}{% endif %}">{{ c.spec.path }}</a>
+          <a href="assets/{{ c.local_path }}{% if cpage %}#page={{ cpage }}{% endif %}">{{ c.spec.path }}</a>
           {% else %}
           <code>{{ c.spec.path }}</code>
           {% endif %}
-          {% if c.remote and c.local_path %}<br><a href="assets/{{ c.local_path }}{% if c.spec.page %}#page={{ c.spec.page }}{% endif %}">local copy</a>{% endif %}
+          {% if c.remote and c.local_path %}<br><a href="assets/{{ c.local_path }}{% if cpage %}#page={{ cpage }}{% endif %}">local copy</a>{% endif %}
         </td>
         <td class="mono">{{ c.spec.rev or '—' }}</td>
-        <td class="mono">{{ c.spec.page or '—' }}</td>
+        <td class="mono">{{ cpage or '—' }}</td>
         <td class="mono">{{ c.spec.part_number or '—' }}</td>
         <td>{{ 'yes' if c.spec.vendor else 'no' }}</td>
         <td class="small">{{ c.detail }}</td>

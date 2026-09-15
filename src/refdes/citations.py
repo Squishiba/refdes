@@ -32,7 +32,9 @@ files inside the project, so `build` and `check` stay hermetic.
 
 from __future__ import annotations
 
+import difflib
 import hashlib
+import io
 import os
 import posixpath
 from collections import defaultdict
@@ -155,6 +157,194 @@ def case_mismatch(project_root: str, rel: str) -> str | None:
     return parent if mismatched else None
 
 
+# ------------------------------------------------------------- PDF outline
+#
+# `section:` resolution (finding 23 Part 2). A datasheet's own outline is the
+# only page number that survives a re-revision, so an author may cite the title
+# instead of a number. Resolution happens exclusively at `refdes fetch` time,
+# against the bytes being pinned -- `build`/`check` read the recorded page out
+# of the lockfile and never open a PDF. pypdf is an optional extra, imported
+# lazily here and nowhere else, so a project with no `section:` never needs it.
+
+PDF_EXTRA_ERROR = "section: needs the optional PDF extra: pip install refdes[pdf]"
+
+
+class SectionError(Exception):
+    """One `section:` that could not be resolved, with the message to show.
+
+    `kind` distinguishes the cases the author has to act on differently --
+    a PDF with no outline at all is not "the section disappeared", and a
+    section that resolved last time and does not now is the sharpest signal
+    of the set. Never collapse them: each is a different instruction."""
+
+    def __init__(self, section: str, message: str, kind: str):
+        super().__init__(message)
+        self.section = section
+        self.kind = kind
+
+
+# Kinds, in the words the messages use.
+KIND_NO_OUTLINE = "no_outline"
+KIND_NO_MATCH = "no_match"
+KIND_AMBIGUOUS = "ambiguous"
+KIND_GONE = "gone"
+KIND_UNREADABLE = "unreadable"
+KIND_NO_LOCAL_BYTES = "no_local_bytes"
+
+
+def _import_pypdf():
+    """Import pypdf lazily -- the one place in the codebase that touches it.
+
+    Raises SectionError (not ImportError) with the install hint, so a caller
+    without the extra gets a diagnostic naming the fix rather than a traceback
+    or, worse, a silently unresolved section.
+    """
+    try:
+        from pypdf import PdfReader
+    except ImportError as exc:  # pragma: no cover - exercised via monkeypatch
+        raise SectionError("", PDF_EXTRA_ERROR, "missing_extra") from exc
+    return PdfReader
+
+
+def _norm(title: str) -> str:
+    """Outline-title normalisation: strip, collapse internal whitespace.
+    Case-sensitive on purpose -- datasheet outlines capitalise section titles
+    the way the prose cites them, and a case-insensitive match would turn two
+    differently-titled entries into one."""
+    return " ".join((title or "").split())
+
+
+def _destination_page(reader, entry):
+    """The 1-based page an outline entry points at, or None when it has no
+    usable destination. An entry that cannot be resolved is left out of the
+    title list rather than failing the whole document: it is one dead bookmark,
+    not a broken PDF, and a cited title that happens to live behind it is then
+    reported as "no outline entry titled ..." -- which is what is true."""
+    try:
+        return reader.get_destination_page_number(entry) + 1
+    except Exception:  # noqa: BLE001 -- pypdf's resolvers raise whatever they like
+        return None
+
+
+def outline_titles(data: bytes) -> list[tuple[str, int]]:
+    """Every outline entry as (title, 1-based page), nested entries included.
+
+    [] means the PDF genuinely has no outline -- the caller reports that as its
+    own case, never as "section not found". A PDF pypdf cannot open raises
+    SectionError(kind=unreadable) carrying pypdf's own message.
+    """
+    PdfReader = _import_pypdf()
+    try:
+        reader = PdfReader(io.BytesIO(data))
+        outline = reader.outline
+    except Exception as exc:  # pypdf raises many types here, none of them ours
+        raise SectionError(
+            "", f"pypdf could not read the PDF: {exc}", KIND_UNREADABLE
+        ) from exc
+
+    out: list[tuple[str, int]] = []
+
+    def walk(items) -> None:
+        for entry in items:
+            if isinstance(entry, list):
+                walk(entry)
+                continue
+            title = getattr(entry, "title", None)
+            if title is None:
+                continue
+            page = _destination_page(reader, entry)
+            if page is None:
+                continue
+            out.append((str(title), page))
+
+    try:
+        walk(outline)
+    except Exception as exc:  # a malformed outline tree, not a bad section
+        raise SectionError(
+            "", f"pypdf could not read the PDF outline: {exc}", KIND_UNREADABLE
+        ) from exc
+    return out
+
+
+def match_outline_title(titles: list[tuple[str, int]], section: str) -> int:
+    """The page one `section:` string resolves to, or SectionError.
+
+    Exact match after normalisation, case-sensitive. Ambiguity is an error,
+    never "take the first": two entries with the same title is the document
+    telling you it cannot be resolved by title alone.
+    """
+    want = _norm(section)
+    matches = [page for title, page in titles if _norm(title) == want]
+    if len(matches) > 1:
+        raise SectionError(
+            section,
+            f"the outline has {len(matches)} entries titled {section!r} "
+            f"(pages {', '.join(str(p) for p in matches)}) -- cite page: instead",
+            KIND_AMBIGUOUS,
+        )
+    if matches:
+        return matches[0]
+    hints = difflib.get_close_matches(want, [_norm(t) for t, _p in titles], n=5)
+    hint = f"; closest outline titles: {', '.join(repr(h) for h in hints)}" if hints else ""
+    raise SectionError(
+        section, f"no outline entry titled {section!r}{hint}", KIND_NO_MATCH
+    )
+
+
+def resolve_sections(
+    data: bytes,
+    wanted: dict[str, list[str]],
+    previous: dict | None = None,
+) -> tuple[dict[str, int], list[SectionError]]:
+    """Resolve every cited section of one document's pinned bytes.
+
+    `wanted` maps a section string to the item ids citing it; `previous` is the
+    path's lockfile record from before this fetch, which is what turns a
+    no-longer-matching title into "the section you cited no longer exists in
+    the new revision (was page N)" instead of a generic not-found.
+
+    Returns (resolved map of section -> page, failures). A document with no
+    outline at all, or bytes pypdf cannot open, is ONE failure for the
+    document, not one per section -- the author's fix is the same for all of
+    them and repeating it buries the message.
+    """
+    try:
+        titles = outline_titles(data)
+    except SectionError as exc:
+        if exc.kind == "missing_extra":
+            return {}, [SectionError("", PDF_EXTRA_ERROR, exc.kind)]
+        return {}, [exc]
+    if not titles:
+        return {}, [
+            SectionError(
+                "",
+                "this PDF has no outline (bookmarks); section: cannot be "
+                "resolved -- cite page: instead",
+                KIND_NO_OUTLINE,
+            )
+        ]
+
+    resolved: dict[str, int] = {}
+    failures: list[SectionError] = []
+    prev_sections = (previous or {}).get("sections") or {}
+    for section in sorted(wanted):
+        try:
+            resolved[section] = match_outline_title(titles, section)
+        except SectionError as exc:
+            if exc.kind == KIND_NO_MATCH and section in prev_sections:
+                failures.append(
+                    SectionError(
+                        section,
+                        f"the section you cited no longer exists in the new "
+                        f"revision (was page {prev_sections[section]})",
+                        KIND_GONE,
+                    )
+                )
+            else:
+                failures.append(exc)
+    return resolved, failures
+
+
 # --------------------------------------------------------------------- lockfile
 
 
@@ -172,8 +362,9 @@ def save_lockfile(project: Project, records: dict[str, dict]) -> None:
     os.makedirs(os.path.dirname(path), exist_ok=True)
     header = (
         "# Refdes citation lockfile. Computed provenance for each cited path --\n"
-        "# sha256, fetch timestamp, vendored flag -- keyed by the citation's path:\n"
-        "# value (URL or project-relative file). Written only by `refdes fetch`.\n"
+        "# sha256, fetch timestamp, vendored flag, resolved sections -- keyed by\n"
+        "# the citation's path (URL or project-relative file). Written only by\n"
+        "# `refdes fetch`.\n"
         "# Never hand-edit the sha256.\n"
     )
     with open(path, "w", encoding="utf-8") as fh:
@@ -211,6 +402,7 @@ def collect(project: Project) -> list[tuple[Item, CitationSpec]]:
                             path=str(entry["path"]),
                             rev=str(entry.get("rev") or ""),
                             page=str(entry.get("page") or ""),
+                            section=str(entry.get("section") or ""),
                             part_number=str(entry.get("part_number") or ""),
                             vendor=bool(entry.get("vendor", False)),
                             id=str(entry.get("id") or ""),
@@ -319,12 +511,13 @@ def verify(project: Project, require: bool = False) -> None:
     changed_local: dict[str, list[str]] = defaultdict(list)
     for item, spec in entries:
         grouped[spec.path].append((item, spec))
-        item.citations.append(
-            _resolve(
-                project, item, spec, records.get(spec.path),
-                severity, unpinned_severity, changed_local,
-            )
+        record = records.get(spec.path)
+        status = _resolve(
+            project, item, spec, record,
+            severity, unpinned_severity, changed_local,
         )
+        _apply_section(project, item, spec, record, status, severity)
+        item.citations.append(status)
 
     for canon, citers in sorted(changed_local.items()):
         ids = ", ".join(sorted(set(citers)))
@@ -349,6 +542,41 @@ def verify(project: Project, require: bool = False) -> None:
                 f"across {ids} -- pick one so the vendoring decision is "
                 f"unambiguous"
             )
+
+
+def _apply_section(project, item, spec, record, status, severity) -> None:
+    """Attach the lockfile's resolved page for `spec.section` to `status`.
+
+    Reads the lockfile only -- a build never opens a PDF. All three outcomes
+    are visible: a resolved page goes on the href and into the page cell; no
+    resolved page (never fetched, or resolution failed) is reported with the
+    same posture as an unpinned pin, because rendering a section citation with
+    no page is the quiet wrong answer; and a `page:` that disagrees with the
+    resolved page warns naming both, with the author's explicit `page:` winning
+    for the href -- an explicit value is a decision, a resolved one an
+    inference.
+    """
+    if not spec.section or status.state == "invalid":
+        return
+    sections = (record or {}).get("sections") or {}
+    page = sections.get(spec.section)
+    if page is None:
+        status.detail = (
+            f"section {spec.section!r} of {spec.path} has no resolved page in "
+            f"the lockfile; run 'refdes fetch --path {spec.path}' to resolve it"
+        )
+        severity(
+            status.detail, file=item.source_file, line=item.source_line, item_id=item.id
+        )
+        return
+    status.section_page = str(page)
+    if spec.page and str(spec.page) != str(page):
+        project.warn(
+            f"citation to {spec.path} gives page: {spec.page!r} but section "
+            f"{spec.section!r} resolves to page {page}; the explicit page: is "
+            f"used for the link -- fix one or the other",
+            file=item.source_file, line=item.source_line, item_id=item.id,
+        )
 
 
 def _resolve(project, item, spec, record, severity, unpinned_severity, changed_local) -> CitationStatus:
@@ -491,6 +719,51 @@ class FetchResult:
     vendored: bool = False
     skipped: bool = False
     error: str = ""
+    # One line per `section:` that could not be resolved against the bytes that
+    # were just pinned. Separate from `error` because the pin itself succeeded
+    # -- the file was fetched fine, only the outline lookup failed -- and the
+    # caller must still report it loudly and exit non-zero.
+    section_errors: list[str] = field(default_factory=list)
+    # Sections that did resolve, as {section as written: page}, for the caller
+    # to print next to the pin.
+    sections: dict[str, int] = field(default_factory=dict)
+
+
+def _section_bytes(project, kind, canon, record):
+    """The pinned bytes to resolve a section against, for a path that was not
+    fetched this run (already pinned, no --update). (data, "") on success,
+    (None, message) when they are not on disk -- which for a remote citation
+    means it is not vendored, so nothing local can be opened.
+    """
+    if kind == "local":
+        target = os.path.join(project.root, canon)
+        if not os.path.isfile(target):
+            return None, f"local file {canon!r} is not on disk"
+        with open(target, "rb") as fh:
+            return fh.read(), ""
+    sha = str((record or {}).get("sha256") or "")
+    blob = vendor_path(project, sha, canon)
+    if not os.path.isfile(blob):
+        return None, (
+            "the vendored bytes are not in .refdes/vendor/, so the outline "
+            "cannot be read offline -- run 'refdes fetch --update --path "
+            f"{canon}' with the network available"
+        )
+    with open(blob, "rb") as fh:
+        return fh.read(), ""
+
+
+def _section_failure(canon: str, err: SectionError, sections: dict[str, list[str]]) -> str:
+    """One fetch-time section failure, naming the path, the section(s) and the
+    citing item ids -- the three things an author needs to act on it."""
+    if err.section:
+        ids = ", ".join(sorted(set(sections.get(err.section) or [])))
+        what = f"section {err.section!r} (cited by {ids})"
+    else:
+        names = ", ".join(repr(s) for s in sorted(sections))
+        who = sorted({i for group in sections.values() for i in group})
+        what = f"sections {names} (cited by {', '.join(who)})"
+    return f"{canon}: {what}: {err}"
 
 
 def fetch_all(
@@ -526,8 +799,15 @@ def fetch_all(
             raise CitationError(f"no citation in this project cites {path!r}")
 
     wants_vendor: dict[str, bool] = defaultdict(bool)
-    for _item, spec in entries:
+    # {path: {section as written: [citing item ids]}} -- what each path's
+    # outline has to be asked for, and whom to tell when the answer fails.
+    wants_sections: dict[str, dict[str, list[str]]] = defaultdict(
+        lambda: defaultdict(list)
+    )
+    for item, spec in entries:
         wants_vendor[spec.path] = wants_vendor[spec.path] or spec.vendor
+        if spec.section:
+            wants_sections[spec.path][spec.section].append(item.id)
 
     records = load_lockfile(project)
     results: list[FetchResult] = []
@@ -542,6 +822,10 @@ def fetch_all(
             results.append(FetchResult(path=target, error=str(exc)))
             continue
         want_vendor = wants_vendor[target]
+        sections = {
+            section: sorted(set(ids))
+            for section, ids in sorted(wants_sections.get(target, {}).items())
+        }
         if kind == "local" and want_vendor:
             raise CitationError(
                 f"vendor: on local citation path {canon!r} is meaningless -- "
@@ -549,14 +833,38 @@ def fetch_all(
             )
         if canon in records and not update:
             existing = records[canon]
-            results.append(
-                FetchResult(
-                    path=canon,
-                    sha256=str(existing.get("sha256") or ""),
-                    vendored=bool(existing.get("vendored")),
-                    skipped=True,
-                )
+            result = FetchResult(
+                path=canon,
+                sha256=str(existing.get("sha256") or ""),
+                vendored=bool(existing.get("vendored")),
+                skipped=True,
             )
+            # A `section:` added to an already-pinned citation still has to be
+            # resolved, or `refdes fetch` reports success while having done
+            # nothing about it. The bytes are on disk -- the file itself for a
+            # local path, the vendor blob for a vendored remote -- so this
+            # needs no network; when they are not, the reason is the error.
+            already = existing.get("sections") or {}
+            unresolved = {s: ids for s, ids in sections.items() if s not in already}
+            if unresolved:
+                data, why = _section_bytes(project, kind, canon, existing)
+                if data is None:
+                    err = SectionError("", why, KIND_NO_LOCAL_BYTES)
+                    result.section_errors.append(_section_failure(canon, err, unresolved))
+                else:
+                    resolved, failures = resolve_sections(data, unresolved, existing)
+                    merged = dict(already)
+                    merged.update(resolved)
+                    for failure in failures:
+                        for dropped in ([failure.section] if failure.section else list(unresolved)):
+                            merged.pop(dropped, None)
+                    existing["sections"] = merged
+                    changed = True
+                    result.sections = resolved
+                    result.section_errors = [
+                        _section_failure(canon, f, unresolved) for f in failures
+                    ]
+            results.append(result)
             continue
 
         try:
@@ -575,14 +883,41 @@ def fetch_all(
             with open(vendor_path(project, digest, canon), "wb") as fh:
                 fh.write(data)
 
-        records[canon] = {
+        # `previous` is what turns "no title matches" into "the section you
+        # cited no longer exists in the new revision (was page N)" on --update.
+        previous = records.get(canon)
+        record: dict = {
             "sha256": digest,
             "fetched": _now_iso(),
             "vendored": want_vendor,
             "bytes": len(data),
         }
+        resolved: dict[str, int] = {}
+        failures: list[SectionError] = []
+        if sections:
+            resolved, failures = resolve_sections(data, sections, previous)
+        # Sections resolved in an earlier run survive (another item may cite
+        # them and be out of this run's scope); a section that failed to
+        # resolve this time is dropped rather than left pointing at a page the
+        # new bytes may not have.
+        merged = dict((previous or {}).get("sections") or {})
+        merged.update(resolved)
+        for failure in failures:
+            for dropped in ([failure.section] if failure.section else list(sections)):
+                merged.pop(dropped, None)
+        if merged:
+            record["sections"] = merged
+        records[canon] = record
         changed = True
-        results.append(FetchResult(path=canon, sha256=digest, vendored=want_vendor))
+        results.append(
+            FetchResult(
+                path=canon,
+                sha256=digest,
+                vendored=want_vendor,
+                sections=resolved,
+                section_errors=[_section_failure(canon, f, sections) for f in failures],
+            )
+        )
 
     if changed:
         save_lockfile(project, records)

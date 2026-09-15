@@ -501,6 +501,7 @@ def _citations_json(item: Item) -> dict:
                 "sha256": status.sha256,
                 "fetched": status.fetched,
                 "local_path": status.local_path,
+                "section_page": status.section_page,
                 "detail": status.detail,
             }
         )

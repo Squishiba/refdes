@@ -588,15 +588,28 @@ outline rather than crying wolf.
 **Decision — the two parts are independent.** Part 1 should ship on its own;
 it does not need Part 2's dependency or its fetch-time resolution machinery.
 
-**Status: Part 1 done, Part 2 outstanding.** Part 1 shipped in `a077cb2`:
+**Status: both parts done.** Part 2 shipped as `section:`: `CitationSpec.section`
+(`model.py`) is authored intent, `resolve_sections()` (`citations.py`) walks the
+outline of the bytes being pinned with pypdf and records `{section: page}` in
+the lockfile record, and `_apply_section()` at build time reads that record and
+sets `CitationStatus.section_page` — no PDF is opened outside `refdes fetch`.
+Every failure is a `FAILED` line from `fetch` and a nonzero exit, naming the
+path, the section and every citer: no outline, no matching title (with
+`difflib` hints), an ambiguous title, an unreadable file, a missing
+`refdes[pdf]`, or — on `--update` — a previously resolved section that the new
+revision no longer has, reported with the page it used to be on. `page:` still
+wins where both are given, warning on disagreement. `section:` is refused at
+build time on a hash-only remote citation, since those bytes are not guaranteed
+local.
+
+Part 1 shipped in `a077cb2`:
 `item.html.j2` now appends `#page={{ c.spec.page }}` to *both* citation hrefs —
 the upstream link and the published `local copy` link — guarded on `page` being
-set, with the visible link text unchanged. Part 2 is neither built nor decided:
-there is still no `section:` field, no outline-resolution code in
-`citations.py`, and no `pypdf` extra in `pyproject.toml` (the only optional
-extra is `dev`). `document.html.j2` and `references.html.j2` were deliberately
-left alone — the latter groups by URL across citers, where a per-citation page
-would be misattributed.
+set, with the visible link text unchanged. Part 2 kept that template alone:
+`section_page` reaches the href through the same guarded expression, as the
+fallback when `page` is unset. `document.html.j2` and `references.html.j2`
+remain deliberately untouched — the latter groups by URL across citers, where a
+per-citation page would be misattributed.
 
 **Local model: Part 1 suitable, Part 2 not decided.** Part 1 is a template
 change of the form "append `#page={{ c.spec.page }}` to an existing href,

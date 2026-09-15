@@ -302,6 +302,11 @@ one works with the network down. `build` and `check` never do this themselves
 | `--path PATH` | Fetch only this cited path (url or project-relative file) |
 | `--update` | Re-fetch even if already pinned |
 
+A citation's `section:` is resolved here and nowhere else: the PDF's own
+outline is read once, at fetch time, and the page it points at is recorded in
+the lockfile. This is the only part of refdes that reads a PDF, and it needs
+the optional extra — `pip install refdes[pdf]`.
+
 ```bash
 refdes fetch
 refdes fetch --item CMP-PWR-001
@@ -310,13 +315,20 @@ refdes fetch --path https://www.ti.com/lit/ds/symlink/tps62913.pdf --update
 
 ```
 fetched  https://www.ti.com/lit/ds/symlink/tps62913.pdf  sha256=a1b2c3d4e5f6...  hash-only
+         section 'Application and Implementation' -> page 14
 1 citation(s) processed, 0 failed
 ```
 
 Already-pinned paths are skipped (reported as `skipped`) unless `--update` is
-given, so a routine re-run does not re-download anything. Updates
-`.refdes/citations.yaml`, and `.refdes/vendor/` for any citation that opted
-into vendoring.
+given, so a routine re-run does not re-download anything — but a `section:`
+added since the last run is still resolved then, from the bytes already on
+disk. Updates `.refdes/citations.yaml`, and `.refdes/vendor/` for any citation
+that opted into vendoring.
+
+A `section:` that cannot be resolved is reported as its own `FAILED` line and
+makes the exit code nonzero, even though the pin itself succeeded — see
+[citing a section by name](markdown.md#citing-a-section-by-name) for the six
+things that can go wrong and what each one says.
 
 ---
 

@@ -145,7 +145,7 @@ The print stylesheet hides all of this.
 - Rendered body, with calc blocks as evaluated tables and IDs autolinked
 - Options-considered panel for decisions, chosen and rejected
 - Checks table with pass/fail and the worst-case detail
-- Citations table for any `citations`-typed field — pinned/vendored state, rev, page, part number
+- Citations table for any `citations`-typed field — pinned/vendored state, rev, page, part number. The page is the authored `page:`, or the page a `section:` resolved to at fetch time
 - Traceability: outgoing and incoming links
 - Provenance: source `file:line`, and the content hash
 
@@ -193,7 +193,7 @@ per-item `board` for a [`boards:`](multi-board.md) registry, top-level
           { "path": "https://www.ti.com/lit/ds/symlink/tps62913.pdf",
             "state": "ok", "pinned": true, "vendored": false,
             "sha256": "9f2c...", "fetched": "2026-03-01T12:00:00Z",
-            "local_path": "", "detail": "" }
+            "local_path": "", "section_page": "14", "detail": "" }
         ]
       },
       "links": { "satisfies": ["REQ-PWR-002"], "constrained_by": ["BND-THM-001"] },
@@ -237,10 +237,12 @@ per-item `board` for a [`boards:`](multi-board.md) registry, top-level
 | `boards` / `items[].board` | Only present when the project declares a `boards:` registry |
 | `types[].fields[].type` | The field's declared type (`text`, `citations`, ...) — how a consumer finds "which field is my citations field" without being told out of band |
 | `items[].citations` | Resolved provenance, keyed by field name — local items only; empty `{}` for items with no `citations:`-typed field |
+| `citations[].section_page` | The page a `section:` resolved to, recorded by `refdes fetch` and read straight out of the lockfile — builds never open a PDF. Empty when the citation cites no section, or the section was never resolved (which `build` warns about); an authored `page:` still wins wherever both exist |
 
 `items[].fields` is authored intent only — for a `citations:`-typed field, each
-entry is just what was written in the item (`path`, `rev`, `page`, `part_number`,
-`vendor:`, `id`). What it *resolved to* is a separate, parallel structure,
+entry is just what was written in the item (`path`, `rev`, `page`, `section`,
+`part_number`, `vendor:`, `id`). What it *resolved to* is a separate, parallel
+structure,
 `items[].citations`, keyed by field name and ordered to match `fields[fname]`:
 
 ```json
@@ -248,7 +250,7 @@ entry is just what was written in the item (`path`, `rev`, `page`, `part_number`
   "citations": [
     { "path": "...", "state": "ok", "pinned": true, "vendored": false,
       "sha256": "9f2c...", "fetched": "2026-03-01T12:00:00Z",
-      "local_path": "", "detail": "" }
+      "local_path": "", "section_page": "14", "detail": "" }
   ]
 }
 ```

@@ -271,6 +271,12 @@ class CitationSpec:
     path: str
     rev: str = ""
     page: str = ""
+    # A human-written outline title from the document itself (finding 23 Part 2),
+    # resolved to a page number at `refdes fetch` time from the pinned bytes'
+    # PDF outline -- never during a build, which stays hermetic. The resolved
+    # page lands in the lockfile record under `sections:`, not here: this is
+    # still declared intent only.
+    section: str = ""
     part_number: str = ""
     vendor: bool = False
     # Optional, project-wide-unique (finding 19 Part B) -- what `[[cite:<id>]]`
@@ -303,6 +309,11 @@ class CitationStatus:
     # how the rendered citation link knows to point upstream instead of to a
     # local copy.
     local_path: str = ""
+    # The page `spec.section` resolved to in the lockfile (finding 23 Part 2),
+    # as a string ready for the `#page=N` fragment; "" when the citation has no
+    # `section:`, or when it has one with no resolved page (never fetched, or
+    # resolution failed) -- which `verify()` reports, never silently.
+    section_page: str = ""
 
 
 @dataclass
