@@ -170,6 +170,16 @@ def apply(project_root: str, dry_run: bool = False) -> AdoptionResult:
     except SchemaError as exc:
         return AdoptionResult(ok=False, errors=[f"project does not load: {exc}"], dry_run=dry_run)
 
+    # Checked before the generic build-error gate: adoption mints keys, and a
+    # hand-deleted key is exactly the item adoption must not mint for.
+    deleted = keys_mod.deleted_key_records(project)
+    if deleted:
+        return AdoptionResult(
+            ok=False,
+            errors=[keys_mod.deleted_key_message(record) for record in deleted],
+            dry_run=dry_run,
+        )
+
     blocking = revise._blocking_errors(project)
     if blocking:
         return AdoptionResult(

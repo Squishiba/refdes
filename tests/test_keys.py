@@ -530,7 +530,7 @@ def test_corruption_lint_accepts_valid_minted_keys_and_a_resolving_link(tmp_path
     assert project.item_by_id("REQ-002").resolved_links["refines"] == ["REQ-001"]
 
 
-def test_baseline_lint_errors_when_writable_check_remints_key_for_same_display_id(
+def test_writable_check_refuses_to_remint_a_key_deleted_from_a_baselined_item(
     tmp_path, capsys
 ):
     old_key = keys_mod.mint()
@@ -552,15 +552,16 @@ def test_baseline_lint_errors_when_writable_check_remints_key_for_same_display_i
     status = cli_mod.main(["-c", str(root / "refdes-project.yaml"), "check"])
     captured = capsys.readouterr()
 
+    # Decision 2026-09-15: the key is *not* re-minted during load, so the
+    # evidence survives and Layer 4 says "key deleted", not "key changed".
     reparsed = load_project(config_path=str(root / "refdes-project.yaml"))
     parse.load_items(reparsed)
-    new_key = reparsed.item_by_id("REQ-001").key
-    assert new_key and new_key != old_key
+    assert reparsed.item_by_id("REQ-001").key == ""
     assert status == 1
-    assert "key changed since baseline 'rev-a'" in captured.err
+    assert "key deleted since baseline 'rev-a'" in captured.err
+    assert "key changed" not in captured.err
     assert old_key in captured.err
-    assert new_key in captured.err
-    assert "Restore the old key" in captured.err
+    assert f"`key: {old_key}`" in captured.err
 
 
 def test_baseline_lint_errors_when_key_deleted_under_no_write(tmp_path, capsys):
@@ -585,6 +586,196 @@ def test_baseline_lint_errors_when_key_deleted_under_no_write(tmp_path, capsys):
     assert "key deleted since baseline 'rev-a'" in captured.err
     assert old_key in captured.err
     assert "now no key is declared" in captured.err
+
+
+# --- hand-deleted keys (docs/design/keys.md §6, decision 2026-09-15) ----------
+#
+# A deleted `key:` line used to be silently re-minted during load, so Layer 4
+# reported the misleading "key changed" and the evidence was already gone.
+# Now the item is left keyless, warned about at load, and reported as deleted.
+
+
+def test_writable_check_reports_a_deleted_key_without_reminting(tmp_path, capsys):
+    old_key = keys_mod.mint()
+    root = _keys_project(
+        tmp_path,
+        "defaults: { type: requirement }\n"
+        f"items:\n  - id: REQ-001\n    key: {old_key}\n    text: Same item.\n",
+    )
+    _stamp_keyed_baseline(root, "rev-a")
+    path = root / "items" / "r.yaml"
+    keyless = path.read_text(encoding="utf-8").replace(f"    key: {old_key}\n", "")
+    path.write_text(keyless, encoding="utf-8")
+
+    status = cli_mod.main(["-c", str(root / "refdes-project.yaml"), "check"])
+    captured = capsys.readouterr()
+
+    # The file is left keyless: no replacement key written over the evidence.
+    assert path.read_text(encoding="utf-8") == keyless
+    assert status == 1
+    assert "key deleted" in captured.err
+    assert "key changed" not in captured.err
+    assert old_key in captured.err
+    assert "baseline 'rev-a'" in captured.err
+    assert f"key: {old_key}" in captured.err
+    assert "new display id" in captured.err
+    assert "WARNING" in captured.out
+
+
+def test_restoring_the_deleted_key_clears_the_deleted_key_error(tmp_path, capsys):
+    old_key = keys_mod.mint()
+    root = _keys_project(
+        tmp_path,
+        "defaults: { type: requirement }\n"
+        f"items:\n  - id: REQ-001\n    key: {old_key}\n    text: Same item.\n",
+    )
+    _stamp_keyed_baseline(root, "rev-a")
+    path = root / "items" / "r.yaml"
+    path.write_text(
+        path.read_text(encoding="utf-8").replace(f"    key: {old_key}\n", ""),
+        encoding="utf-8",
+    )
+    assert cli_mod.main(["-c", str(root / "refdes-project.yaml"), "check"]) == 1
+
+    path.write_text(
+        path.read_text(encoding="utf-8").replace(
+            "id: REQ-001\n", f"id: REQ-001\n    key: {old_key}\n"
+        ),
+        encoding="utf-8",
+    )
+    capsys.readouterr()
+    status = cli_mod.main(["-c", str(root / "refdes-project.yaml"), "check"])
+    captured = capsys.readouterr()
+
+    assert status == 0
+    assert "key deleted" not in captured.out + captured.err
+    assert path.read_text(encoding="utf-8").count("key:") == 1
+
+
+def test_a_new_display_id_mints_a_fresh_key_for_a_replacement_item(tmp_path, capsys):
+    old_key = keys_mod.mint()
+    root = _keys_project(
+        tmp_path,
+        "defaults: { type: requirement }\n"
+        f"items:\n  - id: REQ-001\n    key: {old_key}\n    text: Same item.\n",
+    )
+    _stamp_keyed_baseline(root, "rev-a")
+    path = root / "items" / "r.yaml"
+    path.write_text(
+        path.read_text(encoding="utf-8")
+        .replace(f"    key: {old_key}\n", "")
+        .replace("id: REQ-001", "id: REQ-002"),
+        encoding="utf-8",
+    )
+
+    status = cli_mod.main(["-c", str(root / "refdes-project.yaml"), "check"])
+    captured = capsys.readouterr()
+
+    assert status == 0
+    assert "key deleted" not in captured.out + captured.err
+    reparsed = load_project(config_path=str(root / "refdes-project.yaml"))
+    parse.load_items(reparsed)
+    new_key = reparsed.item_by_id("REQ-002").key
+    assert new_key and new_key != old_key
+    assert f"key: {new_key}" in path.read_text(encoding="utf-8")
+
+
+def test_a_keyless_item_with_no_record_is_minted_silently(tmp_path, capsys):
+    root = _keys_project(
+        tmp_path,
+        "defaults: { type: requirement }\nitems:\n  - id: REQ-001\n    text: New.\n",
+    )
+
+    status = cli_mod.main(["-c", str(root / "refdes-project.yaml"), "check"])
+    captured = capsys.readouterr()
+
+    assert status == 0
+    assert "key deleted" not in captured.out + captured.err
+    assert "no key is declared" not in captured.out + captured.err
+    text = (root / "items" / "r.yaml").read_text(encoding="utf-8")
+    assert "key:" in text
+
+
+def test_a_key_keyed_seal_detects_a_deleted_key_without_a_baseline(tmp_path, capsys):
+    old_key = keys_mod.mint()
+    root = _keys_project(
+        tmp_path,
+        "defaults: { type: requirement }\n"
+        f"items:\n  - id: REQ-001\n    key: {old_key}\n    text: Same item.\n",
+    )
+    seals = root / ".refdes"
+    seals.mkdir()
+    (seals / "log-seal.yaml").write_text(
+        yaml.safe_dump({"sealed": {old_key: {"id": "REQ-001", "hash": "x"}}}),
+        encoding="utf-8",
+    )
+    path = root / "items" / "r.yaml"
+    keyless = path.read_text(encoding="utf-8").replace(f"    key: {old_key}\n", "")
+    path.write_text(keyless, encoding="utf-8")
+
+    status = cli_mod.main(["-c", str(root / "refdes-project.yaml"), "check"])
+    captured = capsys.readouterr()
+
+    assert status == 1
+    assert path.read_text(encoding="utf-8") == keyless
+    assert "key deleted" in captured.err
+    assert old_key in captured.err
+    assert "log-seal.yaml" in captured.err
+
+
+def test_disagreeing_records_are_both_named(tmp_path, capsys):
+    baseline_key = keys_mod.mint()
+    seal_key = keys_mod.mint()
+    root = _keys_project(
+        tmp_path,
+        "defaults: { type: requirement }\n"
+        f"items:\n  - id: REQ-001\n    key: {baseline_key}\n    text: Same item.\n",
+    )
+    _stamp_keyed_baseline(root, "rev-a")
+    seals = root / ".refdes"
+    (seals / "log-seal.yaml").write_text(
+        yaml.safe_dump({"sealed": {seal_key: {"id": "REQ-001", "hash": "x"}}}),
+        encoding="utf-8",
+    )
+    path = root / "items" / "r.yaml"
+    path.write_text(
+        path.read_text(encoding="utf-8").replace(f"    key: {baseline_key}\n", ""),
+        encoding="utf-8",
+    )
+
+    cli_mod.main(["-c", str(root / "refdes-project.yaml"), "--no-write", "check"])
+    captured = capsys.readouterr()
+
+    assert "records disagree" in captured.out + captured.err
+    assert seal_key in captured.out + captured.err
+    assert baseline_key in captured.out + captured.err
+
+
+def test_a_membership_record_detects_a_deleted_key(tmp_path, capsys):
+    old_key = keys_mod.mint()
+    root = _keys_project(
+        tmp_path,
+        "defaults: { type: requirement }\n"
+        f"items:\n  - id: REQ-001\n    key: {old_key}\n    text: Same item.\n",
+    )
+    boards = root / ".refdes"
+    boards.mkdir()
+    (boards / "boards.yaml").write_text(
+        yaml.safe_dump({"boards": {old_key: {"id": "REQ-001", "board": ""}}}),
+        encoding="utf-8",
+    )
+    path = root / "items" / "r.yaml"
+    keyless = path.read_text(encoding="utf-8").replace(f"    key: {old_key}\n", "")
+    path.write_text(keyless, encoding="utf-8")
+
+    status = cli_mod.main(
+        ["-c", str(root / "refdes-project.yaml"), "--no-write", "check"]
+    )
+    captured = capsys.readouterr()
+
+    assert status == 1
+    assert "key deleted" in captured.err
+    assert "membership manifest" in captured.err
 
 
 def test_baseline_lint_allows_ordinary_display_id_rename_with_same_key(tmp_path):

@@ -28,6 +28,7 @@ if TYPE_CHECKING:
 
 ALPHABET = "0123456789abcdefghjkmnpqrstvwxyz"  # Crockford base32 -- i, l, o, u excluded
 ADOPTION_MARKER = ".refdes/keys-adopted.yaml"
+MANIFEST_SOURCE = "the membership manifest (.refdes/boards.yaml)"
 _INDEX = {ch: i for i, ch in enumerate(ALPHABET)}
 
 DATA_LEN = 10
@@ -191,7 +192,24 @@ def validate(project: Project) -> None:
             item_id=item.id or None,
         )
 
+    _validate_deleted_keys(project)
     _validate_latest_baseline(project)
+
+
+def _validate_deleted_keys(project: Project) -> None:
+    """Report a hand-deleted key as its own error (§6, 2026-09-15).
+
+    Distinct from "key changed": nothing rewrote the key, the line was
+    deleted. Minting is skipped for these items, so this is the only thing
+    standing between a hand-deleted key and a silently re-minted one.
+    """
+    for record in deleted_key_records(project):
+        project.error(
+            deleted_key_message(record),
+            file=record.item.source_file,
+            line=record.item.source_line,
+            item_id=record.item.id,
+        )
 
 
 def baseline_identity(record_id: str, entry: dict) -> tuple[str, str] | None:
@@ -346,6 +364,156 @@ def plan_surrogate_storage(
     return plan
 
 
+@dataclass
+class DeletedKey:
+    """A keyless local item whose key is recorded in an existing record.
+
+    The record is what distinguishes a hand-deleted `key:` line from an item
+    that never had one: only a record can say what the old key was.
+    """
+
+    item: Item
+    key: str
+    source: str
+    conflicts: list[tuple[str, str]] = field(default_factory=list)
+
+
+def _keyed_record_map(entries: Mapping, source: str) -> dict[str, tuple[str, str]]:
+    """display id -> (key, source) for a key-keyed record map.
+
+    Seals and membership entries adopt the §5 shape (record id is the
+    surrogate, `id` inside is the display id) once a project has been
+    adopted; legacy display-id-keyed entries carry no key evidence and are
+    skipped, exactly like a pre-keys baseline entry in `baseline_identity`.
+    """
+    records: dict[str, tuple[str, str]] = {}
+    for record_id, value in entries.items():
+        if not isinstance(value, Mapping):
+            continue
+        display_id = value.get("id")
+        if not isinstance(display_id, str) or not display_id:
+            continue
+        records.setdefault(display_id, (str(record_id), source))
+    return records
+
+
+def _key_evidence_sources(project: Project) -> list[dict[str, tuple[str, str]]]:
+    """Every record map that remembers an item's key, in precedence order.
+
+    Baseline first (the Layer-4 authority), then the seal files, then the
+    membership manifest. The first source that records an item's key is the
+    one named in the diagnostic; the rest are consulted only to detect a
+    disagreement worth telling the user about.
+    """
+    from . import boards as boards_mod
+    from . import lifecycle
+    from . import seal as seal_mod
+
+    sources: list[dict[str, tuple[str, str]]] = []
+
+    baseline = lifecycle.latest(lifecycle.list_baselines(project))
+    if baseline is not None:
+        records: dict[str, tuple[str, str]] = {}
+        for record_id, entry in baseline.items.items():
+            identity = baseline_identity(record_id, entry)
+            if identity is None:
+                continue
+            old_key, display_id = identity
+            records.setdefault(display_id, (old_key, f"baseline {baseline.name!r}"))
+        sources.append(records)
+
+    for board in sorted({""} | set(project.boards)):
+        path = seal_mod.seal_path(project, board)
+        if not os.path.isfile(path):
+            continue
+        rel = os.path.relpath(path, project.root).replace(os.sep, "/")
+        sources.append(_keyed_record_map(seal_mod.load_seals(project, board), f"seal file {rel!r}"))
+
+    manifest = boards_mod.load_manifest(project)
+    membership = {}
+    membership.update(_keyed_record_map(manifest.get("boards", {}), MANIFEST_SOURCE))
+    membership.update(_keyed_record_map(manifest.get("workspaces", {}), MANIFEST_SOURCE))
+    sources.append(membership)
+    return sources
+
+
+def deleted_key_records(project: Project) -> list[DeletedKey]:
+    """Local items with no key whose key is still recorded elsewhere (§6).
+
+    The display id must match a recorded key, the same rule Layer 4 applies
+    before calling a missing key changed or deleted: source position and
+    title similarity are never evidence on their own. A key still declared by
+    a live item is not evidence of deletion either -- it belongs to that item.
+    """
+    candidates = [item for item in project.local_items if not item.key and item.id]
+    if not candidates:
+        return []
+    live_keys = {item.key for item in project.local_items if item.key}
+    sources = _key_evidence_sources(project)
+
+    found: list[DeletedKey] = []
+    for item in candidates:
+        evidence = [
+            record
+            for source in sources
+            if (record := source.get(item.id)) is not None
+            and record[0] not in live_keys
+        ]
+        if not evidence:
+            continue
+        key, source = evidence[0]
+        conflicts = [(k, s) for k, s in evidence[1:] if k != key]
+        found.append(DeletedKey(item=item, key=key, source=source, conflicts=conflicts))
+    return found
+
+
+def deleted_key_message(record: DeletedKey) -> str:
+    """The verbose §6 diagnostic for a hand-deleted key: what was lost,
+    where the old key is recorded, and both remedies spelled out."""
+    item = record.item
+    head = "key deleted"
+    if record.source.startswith("baseline "):
+        head += f" since {record.source}"
+    message = (
+        f"{head}: was {record.key!r}, now no key is declared. The old key is "
+        f"recorded for {item.id} in {record.source}. A key never disappears "
+        f"legitimately: every reference and every baseline entry pointing at "
+        f"{record.key!r}, and this item's history, now dangle."
+    )
+    if record.conflicts:
+        disagreement = "; ".join(f"{k!r} in {s}" for k, s in record.conflicts)
+        message += (
+            f" The records disagree about the old key -- {disagreement} -- so "
+            "check which one is right before restoring."
+        )
+    message += (
+        f" Restore it by adding this line back to {item.source_file} at line "
+        f"{item.source_line}: `key: {record.key}`. Or, if this really is a "
+        "new, different item, give it a new display id so it is not mistaken "
+        "for the old one -- a fresh key will then be minted for it."
+    )
+    return message
+
+
+def report_deleted_keys(project: Project) -> list[DeletedKey]:
+    """Warn at load time about every hand-deleted key (§6, 2026-09-15).
+
+    Minting a replacement would be the destructive thing to do here: it makes
+    every reference and history entry to the old key dangle and overwrites
+    the evidence, so these items are deliberately left keyless and the build
+    reports them.
+    """
+    records = deleted_key_records(project)
+    for record in records:
+        project.warn(
+            deleted_key_message(record),
+            file=record.item.source_file,
+            line=record.item.source_line,
+            item_id=record.item.id,
+        )
+    return records
+
+
 def _validate_latest_baseline(project: Project) -> None:
     """Report §6 Layer 4 against the latest revision or release baseline."""
     from . import lifecycle
@@ -367,22 +535,18 @@ def _validate_latest_baseline(project: Project) -> None:
         if item is None:
             continue
 
-        if item.key:
-            message = (
-                f"key changed since baseline {baseline.name!r}: was {old_key!r}, "
-                f"now {item.key!r}. A key never changes legitimately. Every "
-                "reference and every baseline entry pointing at the old key now "
-                "dangles. Restore the old key; if the item really is a new one, "
-                "delete the key line and let it be re-minted, and give it a new "
-                "display id too."
-            )
-        else:
-            message = (
-                f"key deleted since baseline {baseline.name!r}: was {old_key!r}, "
-                "now no key is declared. A key never disappears legitimately. "
-                "Restore the old key; if the item really is a new one, let it be "
-                "re-minted and give it a new display id too."
-            )
+        if not item.key:
+            # A keyless item is reported by the deleted-key check, which
+            # names the record the old key came from and both remedies.
+            continue
+        message = (
+            f"key changed since baseline {baseline.name!r}: was {old_key!r}, "
+            f"now {item.key!r}. A key never changes legitimately. Every "
+            "reference and every baseline entry pointing at the old key now "
+            "dangles. Restore the old key; if the item really is a new one, "
+            "delete the key line and let it be re-minted, and give it a new "
+            "display id too."
+        )
         project.error(
             message,
             file=item.source_file,
@@ -449,9 +613,20 @@ def is_adopted(project: Project) -> bool:
 
 
 def missing_assignments(project: Project) -> list[tuple[Item, str]]:
-    """Mint in-memory assignments for every keyless local or pending item."""
+    """Mint in-memory assignments for every keyless local or pending item.
+
+    An item whose deleted key is still recorded in a baseline, seal, or
+    membership entry is deliberately *not* a candidate: minting a replacement
+    would leave every reference and history entry to the old key dangling and
+    overwrite the only evidence of what was lost (`deleted_key_records`).
+    """
+    protected = {id(record.item) for record in deleted_key_records(project)}
     candidates = [item for item in project.pending if not item.key]
-    candidates += [item for item in project.local_items if not item.key]
+    candidates += [
+        item
+        for item in project.local_items
+        if not item.key and id(item) not in protected
+    ]
     return [(item, mint()) for item in candidates]
 
 
@@ -539,6 +714,7 @@ def mint_missing(project: Project, write: bool = True) -> list[tuple[Item, str]]
     a fresh one on every read-only run would make the same item resolve to a
     different key from one invocation to the next.
     """
+    report_deleted_keys(project)
     assignments = missing_assignments(project)
     if not assignments:
         return []

@@ -1,0 +1,57 @@
+Task: detect and report hand-deleted surrogate keys instead of silently
+re-minting them.
+
+2026-09-15
+- Fast-forwarded from main; already current.
+- Read docs/design/keys.md §2 (minting) and §6 Layer 4, then traced the load
+  path: cli._load() runs keys.mint_missing() BEFORE build(), so a hand-deleted
+  `key:` line was filled with a fresh key and Layer 4 then reported the
+  misleading "key changed" — with the evidence already written over.
+- Confirmed every minting caller funnels through keys.missing_assignments():
+  mint_missing (cli._load), adopt.apply, and plan_missing (keys plan). Gating
+  there covers `refdes id`, load-time minting, and adoption at once.
+- Added DeletedKey plus deleted_key_records()/deleted_key_message()/
+  report_deleted_keys() to keys.py. Evidence precedence is baseline ->
+  key-keyed seal files -> key-keyed membership manifest; the first source wins
+  and is the one named, and a later source with a different key is reported as
+  a disagreement instead of silently picked. Legacy display-id-keyed seal and
+  manifest entries carry no key evidence and are skipped, like pre-keys
+  baseline entries. A key still declared by a live item is never deletion
+  evidence.
+- seal.py and boards.py are imported lazily inside _key_evidence_sources();
+  both import keys at module level, so a top-level import would be circular.
+- Seal files are enumerated from project.boards plus the default board rather
+  than the filesystem, matching how the rest of the code resolves seal paths.
+- missing_assignments() now excludes items with a deleted-key record, so
+  nothing mints over the evidence; mint_missing() warns (project.warn) on both
+  the writable and --no-write paths, and validate() reports the Layer 4 ERROR
+  with the same verbose message: old key, the record it came from, that
+  references and history now dangle, and both remedies (restore `key: <old>`
+  or give the item a new display id, which then mints normally).
+- adopt.apply() refuses before the generic blocking-errors gate, so the user
+  gets the specific explanation rather than "project has existing build
+  errors".
+- Tests: added test_writable_check_reports_a_deleted_key_without_reminting,
+  test_restoring_the_deleted_key_clears_the_deleted_key_error,
+  test_a_new_display_id_mints_a_fresh_key_for_a_replacement_item,
+  test_a_keyless_item_with_no_record_is_minted_silently,
+  test_a_key_keyed_seal_detects_a_deleted_key_without_a_baseline,
+  test_disagreeing_records_are_both_named,
+  test_a_membership_record_detects_a_deleted_key (tests/test_keys.py) and
+  test_adopt_refuses_an_item_whose_key_was_hand_deleted
+  (tests/test_keys_adopt.py). The two minting tests are deliberately
+  pass-before-and-after: they pin down that ordinary minting is untouched.
+- Rewrote test_baseline_lint_errors_when_writable_check_remints_key_for_same_display_id
+  as test_writable_check_refuses_to_remint_a_key_deleted_from_a_baselined_item;
+  it asserted the old reminting behaviour that this task removes.
+- Verified the new tests fail before the change: exported main into a scratch
+  worktree, copied the new test files in, and 5 of them failed there
+  (writable-check x2, restore, seal, adopt). Sabotage-tested the no-remint
+  guard the same way — replacing the protected set with an empty set failed
+  those 4 keys tests; restored afterwards.
+- Updated docs/design/keys.md: §2 notes the one case that does not self-heal,
+  §6 Layer 4 gains the dated 2026-09-15 decision on the minting interaction.
+- Added changelog.d/deleted-key-report.fixed.md.
+- Full suite: 889 passed. Ruff clean on keys.py, adopt.py, test_keys.py
+  (test_keys_adopt.py has one pre-existing F541 on a line I did not touch).
+Status: finished.

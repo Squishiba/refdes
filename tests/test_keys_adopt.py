@@ -380,3 +380,35 @@ def test_adopt_freezes_follows_inside_its_transaction(tmp_path, capsys):
     head = project.item_by_id("LOG-001")
     assert f"froze 1 follows reference(s)" in output
     assert f"follows: [LOG-001@{head.key}]" in path.read_text(encoding="utf-8")
+
+
+def test_adopt_refuses_an_item_whose_key_was_hand_deleted(tmp_path, capsys):
+    """Decision 2026-09-15: adoption mints keys, so it must refuse the one
+    item whose missing key is recorded evidence rather than an omission."""
+    write_project_config(tmp_path, ADOPT_SCHEMA)
+    (tmp_path / "items").mkdir()
+    path = tmp_path / "items" / "requirements.yaml"
+    old_key = keys_mod.mint()
+    path.write_text(
+        "defaults: { type: requirement }\n"
+        f"items:\n  - id: REQ-001\n    key: {old_key}\n    title: Target\n",
+        encoding="utf-8",
+    )
+    config = str(tmp_path / "refdes-project.yaml")
+    project = _project(tmp_path)
+    assert lifecycle.stamp(project, kind="revision", name="rev-a").status == "stamped"
+    path.write_text(
+        path.read_text(encoding="utf-8").replace(f"    key: {old_key}\n", ""),
+        encoding="utf-8",
+    )
+    before = _snapshot(tmp_path)
+
+    assert cli_mod.main(["-c", config, "keys", "adopt"]) == 1
+    errors = capsys.readouterr().err
+
+    assert "key deleted" in errors
+    assert old_key in errors
+    assert "baseline 'rev-a'" in errors
+    assert f"`key: {old_key}`" in errors
+    assert _snapshot(tmp_path) == before
+    assert not (tmp_path / keys_mod.ADOPTION_MARKER).exists()

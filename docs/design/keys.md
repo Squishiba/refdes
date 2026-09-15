@@ -394,7 +394,12 @@ Resolution rule, stated once and applied everywhere:
 
 So a keyless project is a working project, and adoption is incremental
 rather than a flag day (§7). The keyless state self-heals on the next
-writable command.
+writable command — with one exception: an item whose display id is recorded
+**with** a key in the latest baseline, a key-keyed seal, or the key-keyed
+membership manifest is not a keyless item waiting to be filled in but a key
+that was deleted by hand, and minting over it would destroy the evidence.
+Minting skips it and the corruption lint reports it (§6 Layer 4, decision
+2026-09-15).
 
 Reporting: one project-level `info` line, not one per item —
 
@@ -904,6 +909,25 @@ ERROR   items/io/requirements.yaml:12 [REQ-IO-AI-001] — key changed since
         item really is a new one, delete the key line and let it be
         re-minted, and give it a new display id too.
 ```
+
+**Decision, 2026-09-15:** a *deleted* key must not be re-minted before it is
+reported. Minting runs in `cli._load()`, ahead of `build`, so a hand-deleted
+`key:` line used to be silently filled in with a fresh key and Layer 4 then
+reported "key changed" — wrong about what happened (nothing changed it; the
+user deleted it) and destructive: the new key was already written into the
+file, destroying the evidence and dangling every reference and history entry
+that named the old key.
+
+So minting asks first. Before assigning any key, `keys.mint_missing()`
+consults every record that remembers an item's key — the latest baseline, the
+key-keyed seal files, the key-keyed membership manifest — and an item whose
+display id is recorded there **with** a key is left keyless. It gets a
+`WARNING` at load time and the `key deleted` error above, both naming the old
+key, the record it came from, and the two remedies: restore the line, or give
+the item a new display id if it really is a different item, which lets a fresh
+key be minted. `refdes keys adopt` refuses outright for the same item rather
+than minting over it. An item with no key and no record anywhere is still
+minted silently, exactly as before.
 
 Two properties worth calling out. First, it is **provable** — no similarity
 scoring, no confidence, no confirmation prompt, unlike `former-ids propose`
