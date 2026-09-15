@@ -681,47 +681,38 @@ def _affected_ids(project: Project, mapping: Mapping) -> dict[str, str]:
 def _bare_reference_blockers(project: Project, mapping: Mapping) -> list[str]:
     """Every structured reference that still spells, bare, an id this prefix
     rename would move -- as file:line refusals. Bare references are what
-    key expansion could not reach (a `checks:` inherited from defaults: is
-    the known case, docs/design/keys.md's disclosed gap); rewriting them is
-    exactly what this engine no longer does, so a rename that would leave
-    one behind refuses instead."""
+    key expansion could not reach (a target whose item has no key, or one
+    the write-back could not locate); rewriting them is exactly what this
+    engine no longer does, so a rename that would leave one behind refuses
+    instead."""
     affected = _affected_ids(project, mapping)
     if not affected:
         return []
 
     blockers: list[str] = []
 
-    def check(item: Item, pointer: str, target: str, inherited: bool) -> None:
+    def check(item: Item, pointer: str, target: str) -> None:
         if "@" in target:
             return
         target_item = project.item_by_id(target)
         if target_item is None or target_item.id not in affected:
             return
-        note = (
-            " (inherited from defaults:, which key expansion does not reach -- "
-            "docs/design/keys.md's disclosed gap)" if inherited else ""
-        )
         blockers.append(
             f"{item.source_file}:{item.source_line} [{item.id or '?'}] {pointer}: "
             f"{target!r} is still a bare reference to an id this rename moves "
-            f"({target} -> {affected[target]}); key expansion could not reach it"
-            f"{note}, and revise does not rewrite bare references -- fix it by hand"
+            f"({target} -> {affected[target]}); key expansion could not reach it, "
+            "and revise does not rewrite bare references -- fix it by hand"
         )
 
     for item in project.local_items:
         for verb, targets in item.links.items():
             for target in targets:
-                check(item, verb, str(target), verb in item.inherited_fields)
+                check(item, verb, str(target))
         entries = item.fields.get("checks")
         if isinstance(entries, list):
             for entry in entries:
                 if isinstance(entry, dict) and "against" in entry:
-                    check(
-                        item,
-                        "check against",
-                        str(entry["against"]),
-                        "checks" in item.inherited_fields,
-                    )
+                    check(item, "check against", str(entry["against"]))
     return blockers
 
 

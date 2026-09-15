@@ -691,6 +691,13 @@ def freeze_follows(project: Project, write: bool = True) -> list[tuple[Item, str
 # --------------------------------------------------- checks: against: (docs/design/keys.md)
 
 
+def _checks_inherited(item: Item) -> bool:
+    """Whether this item's `checks:` come from its file's `defaults:` block
+    rather than from its own span -- in which case the text to rewrite lives
+    in the defaults block, shared by every inheriting item."""
+    return "checks" in item.inherited_fields
+
+
 def plan_check_expansion(
     project: Project,
     source_texts: dict[str, str] | None = None,
@@ -701,6 +708,12 @@ def plan_check_expansion(
     treatment: reuses _planned_target for the §3 refresh rule and
     _item_spans/_rewrite_check_targets for the source-preserving write-back,
     rather than a second implementation of either.
+
+    A `checks:` inherited from a file's `defaults:` block is handled the same
+    way plan_expansion() handles an inherited link: the defaults block's own
+    entries are rewritten once and the applied targets attributed to every
+    inheriting item. An item that declares `checks:` itself keeps using its
+    own span.
     """
     from .revise import FileRewrite
 
@@ -710,8 +723,6 @@ def plan_check_expansion(
     expansion_count = 0
 
     for item in project.local_items:
-        if "checks" in item.inherited_fields:
-            continue  # lives in file defaults, not this item's own span
         entries = item.fields.get("checks")
         if not isinstance(entries, list):
             continue
@@ -746,8 +757,31 @@ def plan_check_expansion(
         file_items = [i for i in project.local_items if i.source_file == rel]
         for item, start, end in _item_spans(rel, lines, file_items):
             repl = replacements_by_item.get(id(item))
-            if repl:
+            if repl and not _checks_inherited(item):
                 applied_by_item[id(item)] |= _rewrite_check_targets(lines, start, end, repl)
+
+        # `checks:` inherited from file defaults has one physical spelling
+        # shared by every inheriting item, exactly like an inherited link:
+        # rewrite it once in the defaults block, then attribute the applied
+        # targets to each item whose parsed checks came from it.
+        defaults_groups: dict[int, list[Item]] = defaultdict(list)
+        for item in file_items:
+            if item.defaults_line is None or id(item) not in replacements_by_item:
+                continue
+            if _checks_inherited(item):
+                defaults_groups[item.defaults_line].append(item)
+
+        first_item = min((item.source_line - 1 for item in file_items), default=len(lines))
+        for defaults_line, inheritors in defaults_groups.items():
+            combined: dict[str, str] = {}
+            for item in inheritors:
+                combined.update(replacements_by_item[id(item)])
+            applied = _rewrite_check_targets(
+                lines, defaults_line - 1, first_item, combined
+            )
+            for item in inheritors:
+                own_targets = replacements_by_item[id(item)]
+                applied_by_item[id(item)] |= applied & own_targets.keys()
 
         after = newline.join(lines) + newline
         if after != text:

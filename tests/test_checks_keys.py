@@ -601,3 +601,181 @@ def test_format2_seal_legacy_scalar_stamped_bare_then_expanded_still_verifies(tm
 # guard exists to prevent. Restored before landing; not left as a permanent
 # fault-injection test since there's no stable seam to sabotage without
 # duplicating the guard's own logic here.
+
+
+# ------------------------------------------- `checks:` inherited from defaults:
+#
+# A `checks:` written once in a file's `defaults:` block has a single physical
+# spelling shared by every item that inherits it -- exactly the shape
+# `links.plan_expansion()` already handles for an inherited link. Its
+# `against:` is expanded and refreshed there, once, and stays rename-safe for
+# every inheriting item (docs/design/keys.md §3).
+#
+# The list-file items below carry no calc block, so `run_checks` reports its
+# own "no calc value named" error on them; these assertions are about the
+# source text and the parsed target, so the exit code is not asserted.
+
+_DEFAULTS_LIST = (
+    "defaults:\n"
+    "  type: decision\n"
+    "  checks:\n"
+    "    - value: I_total\n"
+    "      against: BND-001\n"
+    "items:\n"
+    "  - id: DEC-001\n    title: First.\n"
+    "  - id: DEC-002\n    title: Second.\n"
+)
+
+
+def _defaults_project(tmp_path, decs_yaml=_DEFAULTS_LIST, bounds=None):
+    write_project_config(tmp_path, CHECKS_SCHEMA)
+    items = tmp_path / "items"
+    items.mkdir()
+    (items / "bounds.yaml").write_text(bounds or _ONE_BOUND, encoding="utf-8")
+    (items / "decs.yaml").write_text(decs_yaml, encoding="utf-8")
+    return tmp_path
+
+
+def test_defaults_inherited_checks_expand_once_in_the_defaults_block(tmp_path):
+    root = _defaults_project(tmp_path)
+    config = str(root / "refdes-project.yaml")
+    cli_mod.main(["-c", config, "check"])
+
+    project = _loaded(root)
+    key = project.item_by_id("BND-001").key
+    assert key
+
+    text = (root / "items" / "decs.yaml").read_text(encoding="utf-8")
+    assert text.count(f"against: BND-001@{key}") == 1  # once, in defaults:
+    assert "against: BND-001\n" not in text
+
+    built = _built(root)
+    for dec_id in ("DEC-001", "DEC-002"):
+        item = built.item_by_id(dec_id)
+        assert item.fields["checks"][0]["against"] == f"BND-001@{key}"
+        assert item.checks[0].against == "BND-001"  # resolves by key
+    assert not [d for d in built.errors if "does not exist" in d.message]
+
+
+def test_defaults_inherited_checks_rename_refreshes_once_and_hashes_hold(tmp_path):
+    root = _defaults_project(tmp_path)
+    config = str(root / "refdes-project.yaml")
+    cli_mod.main(["-c", config, "check"])  # expand
+
+    before = _built(root)
+    key = before.item_by_id("BND-001").key
+    hashes = {i: before.item_by_id(i).content_hash for i in ("DEC-001", "DEC-002")}
+    assert all(hashes.values())
+
+    path = root / "items" / "bounds.yaml"
+    text = path.read_text(encoding="utf-8")
+    path.write_text(text.replace("id: BND-001\n", "id: BND-099\n"), encoding="utf-8")
+    cli_mod.main(["-c", config, "check"])  # refresh the label
+
+    refreshed = (root / "items" / "decs.yaml").read_text(encoding="utf-8")
+    assert refreshed.count(f"against: BND-099@{key}") == 1
+    assert "BND-001@" not in refreshed
+
+    after = _built(root)
+    for dec_id, digest in hashes.items():
+        assert after.item_by_id(dec_id).content_hash == digest
+
+
+def test_no_write_leaves_defaults_inherited_checks_bare(tmp_path):
+    root = _defaults_project(tmp_path)
+    config = str(root / "refdes-project.yaml")
+    before = (root / "items" / "decs.yaml").read_bytes()
+
+    cli_mod.main(["-c", config, "--no-write", "check"])
+
+    assert (root / "items" / "decs.yaml").read_bytes() == before
+
+
+def test_item_overriding_checks_is_rewritten_in_its_own_span(tmp_path):
+    """The override keeps its own span: the defaults rewrite must not touch
+    it, and its own rewrite must not touch the defaults block."""
+    decs = (
+        "defaults:\n"
+        "  type: decision\n"
+        "  checks:\n"
+        "    - value: I_total\n      against: BND-001\n"
+        "items:\n"
+        "  - id: DEC-001\n    title: Inherits.\n"
+        "  - id: DEC-002\n    title: Overrides.\n"
+        "    checks:\n      - value: I_total\n        against: BND-002\n"
+    )
+    bounds = (
+        "defaults: { type: bound }\n"
+        "items:\n"
+        "  - id: BND-001\n    text: First.\n    limit: \"<= 10 A\"\n"
+        "  - id: BND-002\n    text: Second.\n    limit: \"<= 5 A\"\n"
+    )
+    root = _defaults_project(tmp_path, decs, bounds=bounds)
+    config = str(root / "refdes-project.yaml")
+    cli_mod.main(["-c", config, "check"])
+
+    project = _loaded(root)
+    key1 = project.item_by_id("BND-001").key
+    key2 = project.item_by_id("BND-002").key
+    text = (root / "items" / "decs.yaml").read_text(encoding="utf-8")
+    assert f"against: BND-001@{key1}" in text
+    assert f"against: BND-002@{key2}" in text
+    assert "against: BND-001\n" not in text and "against: BND-002\n" not in text
+
+    assert project.item_by_id("DEC-001").fields["checks"][0]["against"] == f"BND-001@{key1}"
+    assert project.item_by_id("DEC-002").fields["checks"][0]["against"] == f"BND-002@{key2}"
+
+
+def test_sabotage_disabling_the_defaults_group_leaves_the_block_bare(tmp_path, monkeypatch):
+    """Fault injection for the defaults-group rewrite: with an item never
+    reported as inheriting its `checks:`, the shared spelling falls back to
+    each item's own span -- which holds no `against:` line at all -- and
+    nothing is written. That is exactly the pre-fix behaviour, so the tests
+    above are load-bearing on this branch and not incidental."""
+    from refdes import links as links_mod
+
+    monkeypatch.setattr(links_mod, "_checks_inherited", lambda item: False)
+    root = _defaults_project(tmp_path)
+    config = str(root / "refdes-project.yaml")
+    cli_mod.main(["-c", config, "check"])  # mints keys; must not expand
+
+    path = root / "items" / "decs.yaml"
+    assert "against: BND-001\n" in path.read_text(encoding="utf-8")
+    before = path.read_bytes()
+
+    cli_mod.main(["-c", config, "check"])
+
+    assert path.read_bytes() == before
+
+
+def test_markdown_defaults_block_checks_expand_and_refresh(tmp_path):
+    """Markdown's leading `defaults:` block supports `checks:` the same way
+    (parse_markdown_file merges it under every item, inherited_fields and
+    defaults_line included), so it gets the same treatment."""
+    root = _checks_project(
+        tmp_path,
+        _ONE_BOUND,
+        "defaults:\n"
+        "  type: decision\n"
+        "  checks:\n"
+        "    - value: I_total\n      against: BND-001\n"
+        "---\n\n"
+        "---\nid: DEC-001\ntitle: First.\n",
+        decision_name="decs.md",
+    )
+    config = str(root / "refdes-project.yaml")
+    assert cli_mod.main(["-c", config, "check"]) == 0
+
+    project = _loaded(root)
+    key = project.item_by_id("BND-001").key
+    text = (root / "items" / "decs.md").read_text(encoding="utf-8")
+    assert text.count(f"against: BND-001@{key}") == 1
+
+    path = root / "items" / "bounds.yaml"
+    path.write_text(
+        path.read_text(encoding="utf-8").replace("id: BND-001\n", "id: BND-099\n"),
+        encoding="utf-8",
+    )
+    assert cli_mod.main(["-c", config, "check"]) == 0
+    refreshed = (root / "items" / "decs.md").read_text(encoding="utf-8")
+    assert f"against: BND-099@{key}" in refreshed and "BND-001@" not in refreshed

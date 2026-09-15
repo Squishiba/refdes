@@ -1,0 +1,81 @@
+# defaults-inherited `checks: against:` expansion
+
+Task: close the residual gap in the rename-safe `checks: against:` work — a
+`checks:` list inherited from a file's `defaults:` block was never expanded to
+`DISPLAY-ID@key` and never got its display half refreshed, because
+`links.plan_check_expansion` skipped every item with `checks` in
+`inherited_fields` and had none of the defaults-group handling
+`plan_expansion` has for links.
+
+## What changed
+
+- `src/refdes/links.py`
+  - New `_checks_inherited(item)` helper (`"checks" in item.inherited_fields`),
+    which doubles as the seam the sabotage test monkeypatches.
+  - `plan_check_expansion`: the `continue` for inherited items is gone, so an
+    inheriting item contributes candidates like any other. Its own-span rewrite
+    is now gated on `not _checks_inherited(item)`, and a `defaults_groups`
+    block mirrors `plan_expansion`'s: group inheritors by `defaults_line`,
+    merge their replacements, run `_rewrite_check_targets` once over
+    `[defaults_line - 1, first item line)`, and attribute the applied targets
+    back to every inheritor. Same `--no-write` gating (it lives in
+    `expand_missing_checks`, untouched) and the same crossed-reference warning
+    (it lives in `_planned_target`, untouched).
+  - Block and one-line flow defaults both work: `_rewrite_check_targets`
+    already tries the direct `against:` line and `_rewrite_flow_mapping_field`,
+    whose prefix check accepts `defaults: {...}`.
+- `src/refdes/revise.py`: `_bare_reference_blockers` no longer carries the
+  "inherited from defaults:, which key expansion does not reach" note — that
+  is no longer true for either links or checks, so the `inherited` parameter
+  went away with it. The blocker itself is unchanged: a bare reference to an
+  id the rename moves still refuses.
+- `changelog.d/checks-against-keys.fixed.md`: bullet appended to the existing
+  unreleased fragment.
+- `docs/design/keys.md`: one paragraph on the defaults-block hole in the same
+  closed-gap entry.
+
+## Tests
+
+`tests/test_checks_keys.py` (new section at the end):
+
+- `test_defaults_inherited_checks_expand_once_in_the_defaults_block`
+- `test_defaults_inherited_checks_rename_refreshes_once_and_hashes_hold`
+  (both inheriting items' `content_hash` compared before/after the rename)
+- `test_no_write_leaves_defaults_inherited_checks_bare`
+- `test_item_overriding_checks_is_rewritten_in_its_own_span`
+- `test_sabotage_disabling_the_defaults_group_leaves_the_block_bare`
+- `test_markdown_defaults_block_checks_expand_and_refresh`
+
+`tests/test_revise_keys_cleanup.py`:
+
+- `test_prefix_rename_succeeds_over_a_defaults_inherited_check`
+- `_no_mint`'s docstring no longer points at the defaults case as the
+  real-world survivor of a surviving bare reference.
+
+Confirmed failing on the unfixed code (verified by temporarily restoring the
+`continue` for inherited items, then removing it again): all of the above
+except `test_no_write_leaves_defaults_inherited_checks_bare`, which asserts
+that nothing is written and so is equally true before the fix — it is a
+regression guard, not a fix-demonstrating test. The sabotage test passes on
+the unfixed code by construction: it *is* the unfixed code path.
+
+## Notes / difficulties
+
+- Markdown's leading `defaults:` block does support `checks:`
+  (`parse_markdown_file` merges it under every item exactly like a list file,
+  `inherited_fields` and `defaults_line` included), so the Markdown case is
+  covered rather than skipped.
+- A YAML list-file item can't carry a calc block, so `run_checks` reports
+  "no calc value named …" on the list-file fixtures. The assertions there are
+  about source text and parsed targets, so those tests don't assert the exit
+  code; the Markdown and revise tests, which must build clean, put their
+  checks on items that do have calc blocks.
+- Inheriting items share one parsed `checks` list object (`dict(defaults)` is
+  a shallow copy), so `expand_missing_checks`'s in-memory write-back mutates
+  the shared entry once and every inheritor sees it — consistent with there
+  being one physical spelling, and idempotent on the second visit.
+- `keys adopt`'s `checks_expanded` counts references, not physical rewrites,
+  so N inheritors of one defaults entry report N — the same accounting
+  `plan_expansion` already produces for inherited links.
+
+Status: finished. Full suite green (`python -m pytest -q`).

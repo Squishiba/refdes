@@ -214,9 +214,8 @@ def test_dry_run_changed_files_match_the_real_run_including_refresh(tmp_path):
 def _no_mint(monkeypatch):
     """Sabotage the ensure pipeline's first step: with nothing minted, no
     bare reference can expand, so the guard is left facing exactly the
-    references it exists to refuse. The real-world survivor of this shape is
-    `checks:` inherited from defaults: (docs/design/keys.md's disclosed
-    expansion gap); this is the same state, reached deterministically."""
+    references it exists to refuse -- the state a target whose key cannot be
+    minted leaves behind, reached deterministically."""
     monkeypatch.setattr(keys_mod, "mint_missing", lambda project, write=True: [])
 
 
@@ -252,6 +251,49 @@ def test_guard_ignores_references_the_rename_does_not_move(keyed_project, monkey
     result = revise.apply(str(keyed_project), revise.Mapping(prefixes={"DEC": "ADR"}))
     assert result.ok, result.errors
     assert result.id_changes == {"DEC-001": "ADR-001"}
+
+
+def test_prefix_rename_succeeds_over_a_defaults_inherited_check(tmp_path):
+    """The one reference shape this guard used to refuse outright: a
+    `checks:` inherited from a file's `defaults:` block, whose single shared
+    spelling lives outside every item's own span. Expansion reaches it now,
+    so the rename goes through and the composite lands in the defaults
+    block once, refreshed to the moved display id."""
+    write_project_config(tmp_path, KEYS_SCHEMA)
+    items = tmp_path / "items"
+    items.mkdir()
+    (items / "con.yaml").write_text(
+        "defaults:\n  type: constraint\n  prefix: CON\n"
+        "items:\n"
+        "  - id: CON-001\n    text: Board power density\n    limit: \"<= 0.15 W/in^2\"\n",
+        encoding="utf-8",
+    )
+    (items / "decs.md").write_text(
+        "---\n"
+        "defaults:\n"
+        "  type: decision\n"
+        "  checks:\n"
+        "    - value: P_dens\n      against: CON-001\n"
+        "---\n\n"
+        "---\nid: DEC-001\ntitle: Regulator topology\n---\n\n"
+        "```calc\nP_dens : W/in^2 = 0.1 W/in^2\n```\n\n"
+        "---\nid: DEC-002\ntitle: Copper weight\n---\n\n"
+        "```calc\nP_dens : W/in^2 = 0.12 W/in^2\n```\n",
+        encoding="utf-8",
+    )
+
+    result = revise.apply(str(tmp_path), revise.Mapping(prefixes={"CON": "BND"}))
+    assert result.ok, result.errors
+    assert result.id_changes == {"CON-001": "BND-001"}
+
+    decs = (items / "decs.md").read_text(encoding="utf-8")
+    assert decs.count("against: BND-001@") == 1
+    assert "CON-001" not in decs
+
+    project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
+    parse.load_items(project)
+    build_mod.build(project, seal_write=False, reseal=False, accept_board_move=False)
+    assert not project.errors, [str(d) for d in project.errors]
 
 
 # ------------------------------------------------------- former-ids propose keys

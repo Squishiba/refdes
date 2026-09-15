@@ -93,6 +93,15 @@ check is gone.
   new shared `build._unknown_key_message`). Hashing needed its own change,
   since `checks:` was never a `link:*` payload key -- see §5's
   `hash_format: 3`.
+
+  A `checks:` inherited from a file's `defaults:` block was a second, quieter
+  hole in the same layer: the text lives in the defaults block, outside every
+  inheriting item's span, so a per-item rewrite could never reach it (and
+  `revise` had to refuse a prefix rename over it). `plan_check_expansion`
+  now handles it the way `plan_expansion` has always handled an inherited
+  link -- one rewrite of the shared spelling, its applied targets attributed
+  to every inheriting item -- so an inherited `against:` expands, refreshes
+  on rename, and stays hash-stable exactly like an item's own.
 - **Flow-style entries need the write-back to prove what it actually
   wrote, not just what it meant to.** The first draft of `links.py` computed
   candidate rewrites from `item.links` (structured, parsed data) and
