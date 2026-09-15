@@ -1,0 +1,12 @@
+- Update user-facing documentation for recently landed features:
+  - `refdes audit` baseline diff now includes `relabelled N` line (same surrogate key, new display id) with explanation
+  - Structured link targets rewritten to `DISPLAY-ID@key` composites; display half refreshes on rename; `--no-write` suppresses expansion
+  - `--no-write` global flag: documents all suppressed side effects and explicit write command behavior
+  - `refdes keys adopt`: new command section with `--dry-run`, report lines, adoption marker, transactional/idempotent behavior
+  - Surrogate keys: user-facing explanation in IDs guide covering identity, link resolution, baselines, seals, board membership, corruption detection
+  - Key corruption diagnostics: malformed key, duplicate key, key changed/deleted since baseline, older baseline audit info
+  - Content hash versioning (`hash_format`, currently 3): automatic migration for provably unchanged entries, `uncomparable` reporting
+  - Board manifest after adoption: key-keyed storage, stale entries pruned for deleted items
+  - Log ordering uses project's `date_format:` for chronological sorting
+  - `refdes check` warns when `.refdes/schema.json` is older than config (and "not refreshed" under `--no-write`)
+  - Fix `--no-write` help text and clarify `revision`/`release` accept global `--no-write`
