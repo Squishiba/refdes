@@ -324,3 +324,72 @@ def test_resolve_current_memoized_per_component(tmp_path):
     assert chains.resolve_current(project, head, "status") == "accepted"
     assert chains.resolve_current(project, middle, "status") == "accepted"
     assert chains.resolve_current(project, last, "status") == "accepted"
+
+
+def test_resolve_current_walks_component_once_per_field(tmp_path):
+    """The component walk (roots + tips + fold) runs once per (component, field).
+
+    We verify by checking that the component's tips are cached after the first
+    call, and subsequent calls for the same (component, field) don't add new
+    entries to the tips cache.
+    """
+    project = _project(
+        tmp_path,
+        "defaults: { type: log }\n"
+        "items:\n"
+        "  - id: LOG-001\n    summary: Head.\n    status: accepted\n"
+        "  - id: LOG-002\n    summary: Second.\n    follows: [LOG-001]\n"
+        "  - id: LOG-003\n    summary: Third.\n    follows: [LOG-002]\n"
+        "  - id: LOG-004\n    summary: Fourth.\n    follows: [LOG-003]\n"
+        "  - id: LOG-005\n    summary: Fifth.\n    follows: [LOG-004]\n",
+    )
+
+    cg = chains.build_graph(project)
+    head = _by_id(project, "LOG-001")
+    middle = _by_id(project, "LOG-003")
+    last = _by_id(project, "LOG-005")
+
+    # First call for status - computes and caches tips
+    assert chains.resolve_current(project, head, "status", graph=cg) == "accepted"
+    assert len(cg._component_tips) == 1  # tips cached for this component
+
+    # Second call for same field - should use cached tips
+    assert chains.resolve_current(project, middle, "status", graph=cg) == "accepted"
+    assert len(cg._component_tips) == 1  # no new tips computed
+
+    # Third call for same field - should use cached tips
+    assert chains.resolve_current(project, last, "status", graph=cg) == "accepted"
+    assert len(cg._component_tips) == 1  # still no new tips computed
+
+    # Different field - should compute tips again (new cache key)
+    assert chains.resolve_current(project, head, "summary", graph=cg) == "Fifth."
+    assert len(cg._component_tips) == 1  # tips already cached for component
+
+    # Forked thread: same component, fork -> caches None
+    fork_project = _project(
+        tmp_path,
+        "defaults: { type: log }\n"
+        "items:\n"
+        "  - id: LOG-001\n    summary: Head.\n    status: accepted\n"
+        "  - id: LOG-002\n    summary: Branch A.\n    follows: [LOG-001]\n"
+        "  - id: LOG-003\n    summary: Branch B.\n    follows: [LOG-001]\n",
+    )
+    fork_cg = chains.build_graph(fork_project)
+    fork_head = _by_id(fork_project, "LOG-001")
+    fork_a = _by_id(fork_project, "LOG-002")
+    fork_b = _by_id(fork_project, "LOG-003")
+
+    # First call walks and caches None (fork)
+    assert chains.resolve_current(fork_project, fork_head, "status", graph=fork_cg) is None
+    assert len(fork_cg._component_tips) == 1  # tips (both forks) cached
+    assert len(fork_cg._resolve_cache) == 1  # None cached for fork
+
+    # Second call for same field hits cache (None)
+    assert chains.resolve_current(fork_project, fork_a, "status", graph=fork_cg) is None
+    assert len(fork_cg._component_tips) == 1  # no new tips
+    assert len(fork_cg._resolve_cache) == 1  # cache hit
+
+    # Third call for same field hits cache
+    assert chains.resolve_current(fork_project, fork_b, "status", graph=fork_cg) is None
+    assert len(fork_cg._component_tips) == 1
+    assert len(fork_cg._resolve_cache) == 1

@@ -63,6 +63,7 @@ class ChainGraph:
 
     __slots__ = (
         "_component_of",
+        "_component_tips",
         "_handles",
         "_items",
         "_resolve_cache",
@@ -85,6 +86,8 @@ class ChainGraph:
         self._component_of: dict[str, int] | None = None
         # (component_id, field) -> resolved value (or a sentinel for None)
         self._resolve_cache: dict[tuple[int, str], Any] = {}
+        # component_id -> frozenset of tip handles (computed once per component)
+        self._component_tips: dict[int, frozenset[str]] = {}
 
     def __iter__(self):
         """Unpack as (predecessors, successors) for backward compatibility."""
@@ -145,6 +148,14 @@ class ChainGraph:
     def cache_set(self, component_id: int, field: str, value: Any) -> None:
         """Store resolved value for (component_id, field)."""
         self._resolve_cache[(component_id, field)] = value
+
+    def tips_get(self, component_id: int) -> frozenset[str] | None:
+        """Get cached tips for component, or None if not computed yet."""
+        return self._component_tips.get(component_id)
+
+    def tips_set(self, component_id: int, tips: frozenset[str]) -> None:
+        """Cache tips for component."""
+        self._component_tips[component_id] = tips
 
 
 def build_graph(
@@ -283,7 +294,9 @@ def resolve_current(
     entry in it shadow the `accepted` its head actually wrote.
     ``graph`` lets repeated resolution in one build reuse the parsed follows
     edges instead of rebuilding them for every entry. When `graph` is a
-    `ChainGraph`, results are memoized per (connected component, field).
+    `ChainGraph`, results are memoized per (connected component, field),
+    including the fork/no-tip cases. The component's tips are computed once
+    and cached, so every entry in a component pays the walk only once.
     """
     if isinstance(graph, ChainGraph):
         cg = graph
@@ -301,6 +314,14 @@ def resolve_current(
     start_handle = _start_handle(project, start)
     if start_handle is None:
         return None
+
+    # If we have a ChainGraph, check cache FIRST using component from start_handle
+    if isinstance(graph, ChainGraph):
+        comp_id = cg.component_id(start_handle)
+        if comp_id is not None:
+            found, cached = cg.cache_get(comp_id, field)
+            if found:
+                return cached
 
     # A fork can be behind `start`: start at every reachable head, then ask
     # for all tips in the connected thread rather than treating one branch as
@@ -323,17 +344,19 @@ def resolve_current(
         for root in roots
         for tip in _tips_from(root, successors, handles, items)
     }
-    if len(found_by_handle) != 1:
-        return None
-    tip_handle = next(iter(found_by_handle))
 
-    # If we have a ChainGraph, check the cache first
-    if isinstance(graph, ChainGraph):
-        comp_id = cg.component_id(tip_handle)
-        if comp_id is not None:
-            found, cached = cg.cache_get(comp_id, field)
-            if found:
-                return cached
+    # Cache the tips for this component if we have a ChainGraph
+    tips_frozen = frozenset(found_by_handle)
+    if isinstance(graph, ChainGraph) and comp_id is not None:
+        cg.tips_set(comp_id, tips_frozen)
+
+    if len(found_by_handle) != 1:
+        # Fork or no tip - cache None result
+        if isinstance(graph, ChainGraph) and comp_id is not None:
+            cg.cache_set(comp_id, field, None)
+        return None
+
+    tip_handle = next(iter(found_by_handle))
 
     # Perform the fold
     frontier = [tip_handle]
@@ -349,10 +372,8 @@ def resolve_current(
             first = declared[0]
             result = first if all(value == first for value in declared) else None
             # Cache the result if we have a ChainGraph
-            if isinstance(graph, ChainGraph):
-                comp_id = cg.component_id(tip_handle)
-                if comp_id is not None:
-                    cg.cache_set(comp_id, field, result)
+            if isinstance(graph, ChainGraph) and comp_id is not None:
+                cg.cache_set(comp_id, field, result)
             return result
         nxt: list[str] = []
         for node in frontier:
@@ -364,10 +385,8 @@ def resolve_current(
                 nxt.append(ph)
         frontier = nxt
     result = None
-    if isinstance(graph, ChainGraph):
-        comp_id = cg.component_id(tip_handle)
-        if comp_id is not None:
-            cg.cache_set(comp_id, field, result)
+    if isinstance(graph, ChainGraph) and comp_id is not None:
+        cg.cache_set(comp_id, field, result)
     return None
 
 
