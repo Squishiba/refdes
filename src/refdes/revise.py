@@ -30,7 +30,10 @@ from __future__ import annotations
 import os
 import re
 from dataclasses import dataclass, field
+from itertools import pairwise
 from typing import Any, Callable
+
+import yaml
 
 from . import build as build_mod
 from . import ids as ids_mod
@@ -505,6 +508,78 @@ def restore_rewrites(rewrites: list[FileRewrite]) -> None:
             continue
         with open(rewrite.path, "w", encoding="utf-8", newline="") as fh:
             fh.write(rewrite.before)
+
+
+def _parse_item_count(rel: str, text: str) -> int | None:
+    """How many items `text` parses into, or None when it no longer parses
+    as an item file at all (invalid YAML, wrong shape, an unparseable
+    front-matter block). A deliberately light re-check -- validity and item
+    count, not full schema validation -- used only by the write guard below;
+    None on either side of a comparison means "cannot judge", never "broken".
+    """
+    text = text.replace("\r\n", "\n")  # line shape, not byte fidelity
+    try:
+        if rel.endswith(".md"):
+            lines = text.split("\n")
+            fences = [i for i, line in enumerate(lines) if parse.FENCE_RE.match(line)]
+            if len(fences) < 2 or fences[0] != 0:
+                return None
+            count = 0
+            for open_i, close_i in pairwise(fences):
+                data = parse.yaml_safe_load("\n".join(lines[open_i + 1 : close_i]))
+                if data is None:
+                    continue
+                if not isinstance(data, dict):
+                    return None
+                keys = set(data)
+                if keys and keys not in ({"defaults"}, {"section"}):
+                    count += 1
+            return count
+        data = parse.yaml_safe_load(text)
+        if not isinstance(data, dict) or "items" not in data:
+            return None
+        entries = data.get("items") or []
+        if not isinstance(entries, list):
+            return None
+        return sum(
+            1 for e in entries if isinstance(e, dict) and set(e) != {"section"}
+        )
+    except (yaml.YAMLError, TypeError, ValueError, AttributeError):
+        return None
+
+
+def write_rewrites_verified(project, rewrites: list[FileRewrite]) -> None:
+    """Load-time write with a parse guard: no incidental write (key minting,
+    link/check expansion, follows freeze) may turn a parseable item file into
+    an unparseable one, or one that yields fewer items than it did before.
+
+    Same posture as apply()'s reload-and-verify, brought to the writes that
+    ride every `cli._load()`: each rewritten file is re-parsed from disk
+    immediately after writing; a file whose rewrite broke parsing (or lost
+    items) is restored to its exact original bytes and reported as an error
+    naming the file. Files that pass stay written. A file whose *original*
+    text this light check cannot judge (None) is left alone -- the guard
+    refuses over guessing, in both directions."""
+    if not rewrites:
+        return
+    write_rewrites(rewrites)
+    for rewrite in rewrites:
+        before_count = _parse_item_count(rewrite.rel, rewrite.before)
+        if before_count is None:
+            continue
+        with open(rewrite.path, "r", encoding="utf-8", newline="") as fh:
+            after = fh.read()
+        after_count = _parse_item_count(rewrite.rel, after)
+        if after_count is not None and after_count >= before_count:
+            continue
+        restore_rewrites([rewrite])
+        project.error(
+            "a load-time write to this file would have left it unparseable "
+            "or with fewer items -- the file was rolled back to its original "
+            "text; convert flow-style item mappings to block style",
+            file=rewrite.rel,
+            line=1,
+        )
 
 
 def _rewrite_file(project: Project, path: str, rel: str, mapping: Mapping) -> tuple[FileRewrite, list[str]]:

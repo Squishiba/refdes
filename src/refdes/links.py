@@ -471,9 +471,9 @@ def expand_missing(project: Project, write: bool = True) -> list[tuple[Item, str
             _report_missing(project, plan.expansion_count)
         return []
 
-    from .revise import write_rewrites
+    from .revise import write_rewrites_verified
 
-    write_rewrites(plan.files)
+    write_rewrites_verified(project, plan.files)
     replacements_by_item: dict[int, dict[str, str]] = defaultdict(dict)
     for item, _link_name, old, new in plan.rewrites:
         replacements_by_item[id(item)][old] = new
@@ -673,9 +673,9 @@ def freeze_follows(project: Project, write: bool = True) -> list[tuple[Item, str
     if not plan.rewrites or not write:
         return []
 
-    from .revise import write_rewrites
+    from .revise import write_rewrites_verified
 
-    write_rewrites(plan.files)
+    write_rewrites_verified(project, plan.files)
     replacements_by_item: dict[int, dict[str, str]] = defaultdict(dict)
     for item, _link_name, old, new in plan.rewrites:
         replacements_by_item[id(item)][old] = new
@@ -822,9 +822,9 @@ def expand_missing_checks(
             _report_missing_checks(project, plan.expansion_count)
         return []
 
-    from .revise import write_rewrites
+    from .revise import write_rewrites_verified
 
-    write_rewrites(plan.files)
+    write_rewrites_verified(project, plan.files)
     replacements_by_item: dict[int, dict[str, str]] = defaultdict(dict)
     for item, _name, old, new in plan.rewrites:
         replacements_by_item[id(item)][old] = new

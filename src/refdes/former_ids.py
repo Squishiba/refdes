@@ -189,9 +189,16 @@ def confirm(project: Project, candidates: list[Candidate], old_ids: list[str]) -
         for c in sorted(entries, key=lambda c: project.item_by_id(c.new_id).source_line, reverse=True):
             item = project.item_by_id(c.new_id)
             if rel.endswith(".md"):
-                lines = ids_mod.insert_into_markdown(
+                updated = ids_mod.insert_into_markdown(
                     lines, item.source_line, f"former_ids: [{c.old_id}]"
                 )
+                if updated is None:
+                    project.error(
+                        "could not write former_ids back into the source",
+                        file=rel, line=item.source_line, item_id=c.new_id,
+                    )
+                    continue
+                lines = updated
             else:
                 updated = ids_mod.insert_into_list(
                     lines, item.source_line, "former_ids", f"[{c.old_id}]"

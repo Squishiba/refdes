@@ -676,7 +676,17 @@ def plan_missing(
         # the same reason.
         for item, new_key in sorted(entries, key=lambda e: e[0].source_line, reverse=True):
             if rel.endswith(".md"):
-                lines = ids_mod.insert_into_markdown(lines, item.source_line, f"key: {new_key}")
+                updated = ids_mod.insert_into_markdown(lines, item.source_line, f"key: {new_key}")
+                if updated is None:
+                    project.error(
+                        f"could not write key {new_key} back into the source: "
+                        "key cannot be added to this flow-style front matter; "
+                        "rewrite it in block style",
+                        file=rel, line=item.source_line,
+                    )
+                    failed.add(id(item))
+                    continue
+                lines = updated
             else:
                 updated = ids_mod.insert_into_list(lines, item.source_line, "key", new_key)
                 if updated is None:
@@ -727,10 +737,10 @@ def mint_missing(project: Project, write: bool = True) -> list[tuple[Item, str]]
         _report_missing(project, len(assignments))
         return []
 
-    from .revise import write_rewrites
+    from .revise import write_rewrites_verified
 
     plan = plan_missing(project, assignments=assignments)
-    write_rewrites(plan.rewrites)
+    write_rewrites_verified(project, plan.rewrites)
     for item, new_key in plan.assignments:
         item.key = new_key
     if plan.remaining:

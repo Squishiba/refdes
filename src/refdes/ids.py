@@ -219,11 +219,19 @@ def collect_former_ids(project: Project) -> None:
 
 def insert_into_markdown(
     lines: list[str], line_no: int, new_line: str, old_value: str | None = None
-) -> list[str]:
+) -> list[str] | None:
     """Insert `new_line` as the first front-matter key (line_no is the first key line).
 
     Generic over what the key/value text is -- allocate() inserts `id: X`;
     former_ids.confirm() reuses this to insert `former_ids: [X]` the same way.
+
+    A flow-style front matter (`{id: X, type: y}`) cannot take a new line
+    above the `{...}` line -- a bare `key: value` line outside the braces is
+    not valid YAML next to a flow mapping, and inserting one there corrupted
+    the file on disk (every later load reported it unparseable). The new pair
+    is injected inside the braces instead, the way insert_into_list() already
+    does for flow list entries; a flow mapping that does not close on the
+    same line is refused (None) rather than guessed at.
 
     If the target line already *is* that same key, replace it in place
     instead of inserting a second occurrence above it. A duplicate key isn't
@@ -239,7 +247,26 @@ def insert_into_markdown(
     """
     index = max(0, line_no - 1)
     key = new_line.split(":", 1)[0].strip()
+    value = new_line.split(":", 1)[1].strip()
     value_pattern = _value_pattern(old_value)
+    if index < len(lines) and lines[index].lstrip().startswith("{"):
+        flow_match = FLOW_ENTRY_RE.match(lines[index].lstrip())
+        if not flow_match:
+            return None
+        inner = flow_match.group(1).strip()
+        # A key already present inside the braces is replaced in place,
+        # whatever it holds: unlike the block path there is no way to "insert
+        # above", and a second `key:` entry in one flow mapping would let
+        # YAML's last-wins rule pick the stale one -- the correctness bug the
+        # block path's replace-instead-of-insert rule exists to prevent.
+        existing_re = re.compile(rf"(^|,)(\s*){re.escape(key)}\s*:\s*[^,}}]*")
+        if existing_re.search(inner):
+            new_inner = existing_re.sub(
+                lambda m: f"{m.group(1)}{m.group(2)}{key}: {value}", inner, count=1
+            )
+        else:
+            new_inner = f"{key}: {value}" if not inner else f"{key}: {value}, {inner}"
+        return lines[:index] + [f"{{{new_inner}}}"] + lines[index + 1 :]
     if index < len(lines) and re.match(rf"^{re.escape(key)}:\s*{value_pattern}\s*$", lines[index]):
         return lines[:index] + [new_line] + lines[index + 1 :]
     return lines[:index] + [new_line] + lines[index:]
@@ -369,9 +396,17 @@ def allocate(project: Project, dry_run: bool = False) -> list[tuple[Item, str]]:
         for item, new_id in sorted(entries, key=lambda e: e[0].source_line, reverse=True):
             old_value = item.numeric_id_hint or None
             if rel.endswith(".md"):
-                lines = insert_into_markdown(
+                updated = insert_into_markdown(
                     lines, item.source_line, f"id: {new_id}", old_value=old_value
                 )
+                if updated is None:
+                    project.error(
+                        f"could not write id {new_id} back into the source",
+                        file=rel, line=item.source_line,
+                    )
+                    failed.add(id(item))
+                    continue
+                lines = updated
             else:
                 updated = insert_into_list(
                     lines, item.source_line, "id", new_id, old_value=old_value
