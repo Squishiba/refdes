@@ -176,11 +176,11 @@ row map itself. Do not use `csv.DictReader` alone: duplicate headers overwrite
 one another in a dict before the reader can diagnose them.
 
 The selected text is stripped only of ASCII space (`U+0020`) and horizontal tab
-(`U+0009`) at its ends, then must match
-`^[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?$` with `re.ASCII` **before**
-`decimal.Decimal` parses it. That explicit grammar admits only ASCII decimal
-forms; it rejects locale notation, units, underscores, non-ASCII digits, and
-non-ASCII whitespace. The parsed `Decimal` must be finite, and conversion to
+(`U+0009`) at its ends, then must satisfy
+`re.fullmatch(r"[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?", text, flags=re.ASCII)`
+**before** `decimal.Decimal` parses it. That explicit grammar admits only ASCII
+decimal forms; it rejects locale notation, units, underscores, non-ASCII digits,
+and non-ASCII whitespace. The parsed `Decimal` must be finite, and conversion to
 the float-backed calc magnitude must also be finite: overflow is an extraction
 error, not an infinite `Value`. The resulting finite value is stored as
 canonical decimal text (no exponent normalization requirement beyond
@@ -210,6 +210,7 @@ existing lock record unchanged when any requested key for it fails.
 | `1_000` | Error | `Decimal` accepts underscores, but an underscore is digit grouping and must not silently alter the source contract. |
 | Arabic-Indic `١٢٣`, fullwidth `１２`, or any other non-ASCII digit | Error | `Decimal` accepts Unicode digits; the reader accepts ASCII numeric notation only. |
 | A non-breaking space (`U+00A0`) or any other non-ASCII whitespace, including before `1` | Error | Only ASCII space/tab are trimmed; Unicode whitespace must not be silently erased. |
+| A quoted `value` cell containing `1` followed by a newline | Error | `re.fullmatch` must consume the entire cell; `^...$` would otherwise accept before a trailing newline. |
 | `1e999999` or another value that overflows when converted to calc's float-backed magnitude | Error | A finite `Decimal` is not sufficient if evaluation would receive infinity. |
 | Leading UTF-8 BOM on the file | Accepted; it is removed from the first header only | Common export form, handled deterministically. |
 | Malformed quoting, dangling quote, invalid UTF-8, or CSV parser error | Error with parser message and physical line when available | A permissive recovery can select a different row. |
@@ -657,7 +658,8 @@ not reader internals.
    fails loudly; `0` remains valid.
 5. `test_csv_source_rejects_unit_suffix_grouping_locale_unicode_and_overflow` —
    `100 mW`, quoted/unquoted `1,000`, quoted `1,23`, `1_000`, Arabic-Indic and
-   fullwidth digits, NBSP, and `1e999999` all fail before a wrong calc value.
+   fullwidth digits, NBSP, a quoted trailing newline, and `1e999999` all fail
+   before a wrong calc value.
 6. `test_csv_source_handles_utf8_bom_and_standard_quoted_context` — BOM only at
    start works; valid quoted fields do not shift selection.
 7. `test_csv_source_rejects_malformed_quote_and_ragged_row` — no best-effort
