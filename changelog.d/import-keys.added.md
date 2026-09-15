@@ -1,0 +1,1 @@
+- Imported `items.json` artifacts now carry surrogate keys, so cross-project links freeze to `DISPLAY-ID@key`, survive upstream display-ID renames, and refresh their readable labels.

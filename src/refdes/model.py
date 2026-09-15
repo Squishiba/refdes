@@ -468,10 +468,10 @@ class Item:
 
 def provisional_handle(item: Item) -> str:
     """A never-written, in-memory-only dict key for an item with no
-    surrogate key yet (docs/design/threads.md §2) -- an imported item
-    (imports carry no `key`), a local item parsed before `keys.mint_missing()`
-    runs (in particular anything under `--no-write`), or a permanently
-    id-less chain entry before its first writable build.
+    surrogate key yet (docs/design/threads.md §2) -- a keyless import from a
+    pre-key artifact, a local item parsed before `keys.mint_missing()` runs
+    (in particular anything under `--no-write`), or a permanently id-less
+    chain entry before its first writable build.
 
     Prefixed with `~`, which is outside the key alphabet (`keys.ALPHABET`),
     so this can never collide with, or be mistaken for, a real minted key --
@@ -600,6 +600,10 @@ class Project:
     root: str = "."
     version: str = ""
     imports: list[ImportSpec] = field(default_factory=list)
+    # `imports.load_imports()` absorbs the pinned artifact once per parsed
+    # project. The CLI needs imported keyed targets before source write-back
+    # expands a bare link; build() shares that same loaded graph afterward.
+    imports_loaded: bool = False
     coverage: dict[str, Coverage] = field(default_factory=dict)
     # Per-(item, board) coverage for the members of the groups named in a
     # board's `conforms_to:` -- {(item_id, board_name): Coverage}. Stays empty

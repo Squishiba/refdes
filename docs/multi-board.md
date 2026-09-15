@@ -275,7 +275,11 @@ something that no longer exists.
 | Show *your* incoming links | Show other projects' incoming links |
 
 They keep the content hash their own project computed, which is what makes
-cross-project suspect links work once the history layer lands.
+cross-project suspect links work once the history layer lands. Their artifact
+also carries each durable surrogate key: a writable downstream load expands a
+bare link to `DISPLAY-ID@key`, and an upstream display-ID rename refreshes its
+display half while the key keeps the target fixed. Older artifacts with no key
+remain display-ID-only imports.
 
 ### Version pinning
 
@@ -311,7 +315,7 @@ ERROR items/decisions/pins.md:2 [DEC-A-001] — I_pin violates IFC-CAN-001:
 
 Nobody had to remember which boards were affected.
 
-## ID uniqueness
+## ID and surrogate-key uniqueness
 
 **IDs must be unique across every project you import.** A collision is a hard
 error:
@@ -322,6 +326,11 @@ ERROR refdes-project.yaml — import 'platform' defines 'IFC-CAN-001', which alr
       imported project — give each project its own prefix.
 ```
 
+
+Surrogate keys have the same project-plus-import namespace: a malformed key in
+an artifact is reported on that import entry, and a duplicate key across a
+local item or two artifacts is a hard error naming both origins. This adds an
+immutable identity check; it does not relax the display-ID rule above.
 Give each project its own prefix namespace: `IFC-*` for platform, `REQ-A-*` for
 board A, `REQ-B-*` for board B. Refdes deliberately does not qualify references
 (`platform:IFC-CAN-001`) — that would tax every reference forever to solve a

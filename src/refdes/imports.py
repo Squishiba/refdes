@@ -15,10 +15,16 @@ from __future__ import annotations
 import json
 import os
 
+from . import keys as keys_mod
 from .model import Item, Project, provisional_handle
 
 
 def load_imports(project: Project) -> None:
+    """Absorb each pinned artifact once into this parsed project."""
+    if project.imports_loaded:
+        return
+    project.imports_loaded = True
+
     for spec in project.imports:
         path = spec.items_path
         if not os.path.isabs(path):
@@ -55,6 +61,17 @@ def load_imports(project: Project) -> None:
 def _absorb(project: Project, origin: str, version: str, data: dict) -> None:
     for raw in data.get("items", []):
         item_id = str(raw.get("id") or "")
+        raw_key = raw.get("key")
+        key = str(raw_key) if raw_key is not None else ""
+        if key:
+            malformed = keys_mod.malformed_key_message(key)
+            if malformed is not None:
+                project.error(
+                    f"import {origin!r}: {malformed}",
+                    file="refdes-project.yaml",
+                )
+                key = ""
+
         if not item_id:
             continue
 
@@ -76,6 +93,7 @@ def _absorb(project: Project, origin: str, version: str, data: dict) -> None:
         item = Item(
             id=item_id,
             type=str(raw.get("type") or ""),
+            key=key,
             fields=dict(raw.get("fields") or {}),
             links=dict(raw.get("links") or {}),
             source_file=f"<import:{origin}>",
@@ -97,8 +115,8 @@ def _absorb(project: Project, origin: str, version: str, data: dict) -> None:
                 file="refdes-project.yaml",
             )
 
-        # Imports carry no key (a real, disclosed gap -- docs/design/keys.md
-        # §2's "A bonus: imports"): a provisional handle keys this item until
-        # cross-project export/import learns to carry one.
-        handle = project.add_item(item, provisional_handle(item))
+        # Older artifacts have no `key` field. Keep their temporary handle,
+        # but store a keyed import under its durable identity so every local
+        # graph and link resolver sees the same cross-project key scope.
+        handle = project.add_item(item, item.key or provisional_handle(item))
         project.items_by_id[item_id] = handle

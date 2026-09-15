@@ -1,0 +1,9 @@
+2026-09-15
+
+Started cross-project surrogate-key support. Merged main fast-forward before edits. Mapped export/import/link load order and added regression tests before implementation. Pre-change failures confirmed for keyed export, malformed imported key, cross-origin duplicate key, and upstream rename retaining a frozen key. Existing keyless import tests remain the backward-compatibility coverage.
+
+Implemented nullable `key` export, backward-compatible keyed artifact absorption, Layer 1 artifact-key attribution, Layer 2 diagnostics that name local/import origins, and idempotent import loading before CLI composite expansion. The imported-target test builds two temporary projects, pins a key through an upstream rename, and confirms local display-half refresh plus hash stability. Updated the surrogate-key design/backlog notes, import docs, and changelog fragment. Running focused regressions.
+
+Focused regression verification passed: `python -m pytest -q tests/test_imports.py tests/test_threads.py tests/test_keys_links.py tests/test_checks_keys.py` (80 passed). Targeted import-sort lint passed for every touched Python file.
+
+Rebased onto current `main` immediately before final verification. Full suite passed: `python -m pytest -q` (906 passed).

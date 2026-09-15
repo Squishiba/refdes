@@ -172,8 +172,14 @@ def validate(project: Project) -> None:
 
         item_name = item.id or "an item without a display id"
         owner_name = owner.id or "an item without a display id"
-        item_loc = f"{item.source_file}:{item.source_line}"
-        owner_loc = f"{owner.source_file}:{owner.source_line}"
+        item_loc = (
+            f"import {item.origin!r}" if item.external
+            else f"local {item.source_file}:{item.source_line}"
+        )
+        owner_loc = (
+            f"import {owner.origin!r}" if owner.external
+            else f"local {owner.source_file}:{owner.source_line}"
+        )
         project.error(
             f"key {item.key!r} on {item_name} ({item_loc}) is already used by "
             f"{owner_name} ({owner_loc}). A key is unique by construction; two "

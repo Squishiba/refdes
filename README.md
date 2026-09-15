@@ -309,9 +309,12 @@ deliberately. Reading a live source folder gives you a spec that shifts under yo
 between builds.
 
 Imported items are read-only: you link to them, check against their limits, and get
-a reference page showing which of *your* items depend on them. They are excluded
-from your coverage and validation, and they keep the content hash their own project
-computed. A version mismatch or an ID collision is a hard error.
+a reference page showing which of *your* items depend on them. Their exported
+surrogate keys let writable loads freeze those links as `DISPLAY-ID@key`, so an
+upstream display-ID rename refreshes the readable half without retargeting the
+link. They are excluded from your coverage and validation, and they keep the
+content hash their own project computed. A version mismatch, ID collision, or
+surrogate-key collision is a hard error.
 
 **IDs must be unique across every project you import.** Give each project its own
 prefix. If you may ever split boards apart, adopt board-token prefixes now

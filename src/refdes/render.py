@@ -563,6 +563,10 @@ def items_json(project: Project) -> dict:
     for item in sorted(project.items.values(), key=lambda i: i.id):
         entry = {
             "id": item.id,
+            # A nullable, always-present field keeps the artifact schema
+            # stable: `null` means this output came from a read-only
+            # (--no-write) load before a local key could be persisted.
+            "key": item.key or None,
             "type": item.type,
             "title": item.title,
         }

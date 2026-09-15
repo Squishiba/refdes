@@ -1135,14 +1135,21 @@ that falls out for free.
 
 ### A bonus: imports
 
-The README currently warns that **"IDs must be unique across every project
-you import"**, and recommends adopting board-token prefixes early against
-the day projects are split. Under keys, cross-project *links* are immune to
-display-id collision — two projects can both have `REQ-001` and a link into
-either resolves correctly. Display-id uniqueness still matters for prose
-references and for human sanity, so the advice does not vanish, but it stops
-being a correctness requirement and becomes a readability one. Worth
-updating that passage at adoption time.
+`items.json` now exports every item's `key` as a nullable field: `null` only
+means the upstream artifact was produced from a genuinely keyless in-memory
+item, such as a `--no-write` load before minting can persist its key.
+`imports._absorb` keeps older artifacts with no `key` field on their existing
+provisional handle, but stores a keyed imported item under that key. A writable
+downstream load therefore expands a bare cross-project link to
+`DISPLAY-ID@key`; a later upstream display-id rename resolves through the same
+key and refreshes only the readable half.
+
+The key uniqueness scope is the local project plus every imported artifact.
+An imported malformed key is a Layer 1 error on its `refdes-project.yaml`
+`imports:` entry; a duplicate key is a Layer 2 error naming both local/import
+origins. The existing display-id collision rule is deliberately unchanged:
+**IDs must still be unique across every project you import**, because bare
+links, prose references, and the imported display-id index remain unqualified.
 
 ---
 

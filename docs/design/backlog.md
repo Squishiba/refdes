@@ -1105,7 +1105,7 @@ Jared on 2026-09-14:
   external-citation case, since the internal "which new item replaced this
   old id" question becomes a lookup instead of a guess.
 
-**One disclosed gap remains open; the other closed 2026-09-14:**
+**Both disclosed gaps are closed:**
 
 - **`checks: [{value, against}]` still resolves `against:` as a bare display
   id.** ~~It isn't a `links:` reference at all...~~ **Closed.** `against:`
@@ -1117,11 +1117,15 @@ Jared on 2026-09-14:
   2026-09-14): `checks:` was never a `link:*` payload key, so reducing
   `against:` to its resolved key for hashing is a hash-definition change of
   its own, carried forward conditionally the same way format 2 was.
-- **Imported cross-project links carry no key.** `imports.py`'s payload has
-  no `key` field today, so a link to an item from another, imported project
-  can never be composite-expanded. Closing it means extending the
-  cross-project export/import contract — "a separate change with its own
-  collision considerations," per keys.md, not attempted here.
+- **Imported cross-project links carry no key.** **Closed 2026-09-15.**
+  `render.items_json` now exports nullable item keys; `imports._absorb`
+  preserves pre-key artifacts as provisional entries but adds keyed imports
+  under their surrogate keys. `cli._load` therefore expands and refreshes
+  local composites against imported targets before `build.resolve_link_target`
+  resolves them. Layer 1 attributes malformed artifact keys to their
+  `imports:` entry, and Layer 2 treats the local project plus all artifacts
+  as one key namespace without changing the established display-id collision
+  rule.
 
 **Local model: not assessed for any of the above.** The remaining work
 touches identity/correctness machinery directly: adoption rewrites every

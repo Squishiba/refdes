@@ -12,6 +12,7 @@ from . import build as build_mod
 from . import citations as citations_mod
 from . import former_ids as former_ids_mod
 from . import ids as ids_mod
+from . import imports as imports_mod
 from . import keys as keys_mod
 from . import lifecycle as lifecycle_mod
 from . import links as links_mod
@@ -95,24 +96,26 @@ def _load(args, require_ids: bool = True) -> tuple[Project, bool]:
     if minted:
         parse_span = _parse_items(project, require_ids, discard=parse_span)
 
+    # Imported artifacts join the resolution scope before structured link
+    # expansion: a bare local link to an imported keyed item must freeze to
+    # the same composite form as a local target. load_imports() is idempotent,
+    # so build() reuses this populated graph.
+    imports_mod.load_imports(project)
+
     # §3: maintain structured links as `DISPLAY-ID@key` composites. Bare
     # references to keyed targets gain their key half; stale display halves
     # refresh after a target rename unless the old label now names a different
     # live item. Must run after minting (a target needs its own key before
-    # there's anything to expand into). The source rewrite keeps line counts
-    # stable but still needs a reparse afterward so build() below sees
-    # `item.links` holding the text now actually on disk.
-    expanded = links_mod.expand_missing(project, write=not args.no_write)
-    if expanded:
-        parse_span = _parse_items(project, require_ids, discard=parse_span)
+    # there's anything to expand into). The source rewrite updates item.links
+    # in memory and preserves line counts, so imported targets remain loaded.
+    links_mod.expand_missing(project, write=not args.no_write)
 
     # Same treatment for `checks: [{value, against}]` -- `against:` names an
-    # item the same way a link target does but isn't a `links:` reference,
-    # so expand_missing() alone never sees it (docs/design/keys.md's
-    # disclosed gap, closed). Same gating, same reparse-after-write need.
-    expanded_checks = links_mod.expand_missing_checks(project, write=not args.no_write)
-    if expanded_checks:
-        _parse_items(project, require_ids, discard=parse_span)
+    # item the same way a structured link target does but isn't a `links:`
+    # reference, so expand_missing() alone never sees it (docs/design/keys.md's
+    # disclosed gap, closed). The in-memory update above also keeps imported
+    # targets available for this companion expansion.
+    links_mod.expand_missing_checks(project, write=not args.no_write)
 
     # A bare follows reference means "continue this thread", not "pin this
     # named entry". Resolve it once to the current frozen-edge tip after keys
@@ -121,7 +124,12 @@ def _load(args, require_ids: bool = True) -> tuple[Project, bool]:
     # expansion also protects this append-only-sensitive rewrite.
     frozen_follows = links_mod.freeze_follows(project, write=not args.no_write)
     if frozen_follows:
+        # The follow-freeze writer is the one later source rewrite that still
+        # needs a reparse. Rebuild the imported portion of the resolution
+        # scope afterward so build() never sees a local-only graph.
+        project.imports_loaded = False
         _parse_items(project, require_ids, discard=parse_span)
+        imports_mod.load_imports(project)
 
     return project, schema_was_stale
 
