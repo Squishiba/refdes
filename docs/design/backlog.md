@@ -9,16 +9,21 @@ detail, alternatives considered, a "what I'd prototype first" section) once
 someone actually starts implementing it — until then, this is the whole
 record.
 
-Verified against the actual codebase as of commit `72ccf1d` (2026-09-13,
+Verified against the actual codebase as of commit `e73ffea` (2026-09-15,
 `main`). Re-check before trusting an "outstanding" or "done" mark that's more
 than a few commits old — this file decays exactly like the implementation
 status headers on the spec docs do.
 
 ## Source
 
-Two documents, both GitHub attachments on issue #7, neither a file in this
-repo:
+Two documents, GitHub attachments on issues #6 and #7, neither a file in
+this repo:
 
+- **Findings 1–11** come from the attachment on **issue #6**:
+  <https://github.com/user-attachments/files/31321364/refdes-feedback.md>
+  (posted 2026-08-21). The issue #7 documents re-post these same findings as
+  their 1–11; all eleven were implemented before this backlog file existed,
+  and are recorded in their own section below.
 - **Findings 12–24** come from the attachment that is the issue's *body*:
   <https://github.com/user-attachments/files/31488284/refdes-feedback.md>
   (fetched 2026-08-29).
@@ -82,6 +87,111 @@ Only entries where this was actually decided carry a **Local model:**
 verdict. Where I've extrapolated the rule to an item nobody explicitly
 ruled on, it's marked **(not decided — my read)** so it isn't mistaken for
 settled.
+
+---
+
+## GitHub issues #6/#7, findings 1–11
+
+All eleven shipped before this file existed, so these entries record what
+landed and where, not decisions still open. Titles are as GitHub states
+them (the 2026-09-01 re-posting; issue #6's attachment carries the same 1–11).
+
+### 1 — No published or CI-built copy of the reference docs site exists anywhere
+
+**Status: done.** Shipped in `089fdbe`: `.github/workflows/docs.yml` builds
+`docs-site/` and deploys it to GitHub Pages on every push to `main`
+(`actions/configure-pages` + `actions/deploy-pages`). `1f1ec03` later added
+the `docs-site/gen_examples.py --check` staleness gate to the same workflow's
+build job (finding 20).
+
+### 2 — `section:` markers validate fine in `refdes check` but fail every schema in the editor
+
+**Status: done.** Shipped in `c659c23`: `schema_json.py` emits a
+`section_marker` def — `section` the one key, `additionalProperties: false`,
+mirroring `parse.py`'s `_only_key()` rule — appended to the list file's
+`items:` `oneOf`, exactly as the finding scoped it (YAML list files only).
+
+### 3 — Unify `text:`/`title:` into one field name for `requirement`/`bound`
+
+**Status: done-differently.** The finding proposed renaming `text:` to a
+required `title:` on both types. What shipped instead, in `50cf460`
+(hardware@3, "text/method fold into body … field unification"), folded
+`text:` into a required `body:` and made `title:` optional on both — the
+opposite polarity. `v3/migration.yaml` carries `text:`/`method:` → `body:`
+across, with `revise.check_body_merge_conflicts` refusing rather than
+silently overwriting an item that already has its own body. No decision by
+Jared was recorded for the divergence; this states what shipped.
+
+### 4 — Nothing explains `note:` vs `source:` vs `rationale:` vs `body:`
+
+**Status: done.** Shipped in `dd203e3`: `docs/authoring.md` gained a
+"`source`, `note`, `rationale`, `body`" section laying the four out side by
+side with their `on_change:` split (`source`/`note` = `log`,
+`rationale`/`body` = `invalidate`), plus a pointer in `docs/standard-library.md`.
+
+### 5 — `refdes build` has no `--dry-run`, despite having a real, permanent side effect
+
+**Status: done.** Shipped in `c85deda`: `cmd_build` passes
+`seal_write=not (args.dry_run or args.no_write)`, and the finding's
+watermark half shipped too — `render_site(project, draft=…)` sets
+`env.globals["draft_build"]` (`render.py`), read by `base.html.j2`.
+
+### 6 — A file's `defaults:` leak type-specific values onto an item that overrides `type:`
+
+**Status: done.** Shipped in `10b7263`: `Item.inherited_fields` and
+`Item.defaults_line` (`model.py`) record which values came from the file's
+`defaults:` block and from which line, so a validation failure on an
+inherited value says so and points there instead of blaming the item
+(`parse.py`'s merge sites, `build.py`'s enum check).
+
+### 7 — `requirement` has no verb for "must comply with a rule stated elsewhere", and `component` has no path to `bound` at all
+
+The two versions of this finding differ. The revised one (identical in the
+issue #7 body and the 2026-09-01 comment) withdraws the original
+`governed_by`/`governs` proposal and asks instead to widen `constrained_by`
+to `[requirement, bound]` and declare it on `requirement` and `component`.
+
+**Status: done — the component half as revised, the requirement half superseded by decision.**
+The component side matches the revision in hardware@3 (`50cf460`):
+`component.links` carries `satisfies: [requirement, bound]` and
+`constrained_by: [bound]`, and `component` gained a `checks:` field. The
+requirement side did not: `requirement.links` carries
+`governed_by: [requirement, bound]` (inverse `governs`), shipped in the same
+commit from the *issue #6* version of this finding, before the revision
+existed.
+
+**Decision — keep `governed_by`.** Jared chose on 2026-09-15 to keep
+`governed_by` over the revised widen-`constrained_by` proposal. No rationale
+was recorded.
+
+### 8 — Item-id completion can't be narrowed by which file an item lives in
+
+**Status: done.** Shipped in `1044c96`: the extension's completion
+`filterText` now includes each item's source file and board alongside id and
+title (`editors/vscode/extension.js`).
+
+### 9 — There's no way to list or browse existing items from the CLI at all
+
+**Status: done.** Shipped in `491283e`: `refdes ls` (`cmd_ls`, `cli.py`)
+prints id, type, board, and title as aligned text — the board column omitted
+when the project has no boards — filterable by `--type`, `--board`, `--file`,
+and a free-text query that matches `tags:` as well as title.
+
+### 10 — Completing a partially-typed id should offer the next free number
+
+**Status: done.** Shipped in `c743328`: the index payload carries
+`next_ids` (`render.py`), the next number `refdes id` would hand out per
+prefix, reusing `ids.high_water()` as-is. The finding's part 2 (orphaned
+ledger allocations) landed separately and informationally in `ebc1c8f`, as
+a `refdes audit` report.
+
+### 11 — An "untagged item" lint would fire on nothing — the useful signal is an item with no tags *of its own*
+
+**Status: done.** Shipped in `a1bcdf0`: `build.lint_own_tags` warns when an
+item's `tags:` are entirely inherited (via finding 6's `inherited_fields`)
+or absent, skips types that declare no `tags:` field, and is opt-in via
+`lint_own_tags: true` — sequenced after finding 9 so the warning points at
+tags that are actually searchable.
 
 ---
 
