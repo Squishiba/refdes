@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import os
+from unittest.mock import patch
 
 from conftest import write_project_config
 
@@ -354,7 +355,7 @@ def test_follows_freezes_to_a_bare_key_for_an_idless_tip_and_resolves_it(tmp_pat
     build_mod.build(refreshed)
     assert not refreshed.errors
     assert refreshed.item_by_id("LOG-003").links["follows"] == [tip.key]
-    assert refreshed.item_by_id("LOG-003").resolved_links["follows"] == [""]
+    assert refreshed.item_by_id("LOG-003").resolved_links["follows"] == [tip.key]
 
 
 def test_bare_key_follows_reports_malformed_and_unknown_key_layers(tmp_path):
@@ -593,3 +594,188 @@ def test_follows_freeze_deduplicates_matching_merge_targets(tmp_path):
     text = (root / "items" / "log.yaml").read_text(encoding="utf-8")
     frozen = f"LOG-001@{project.item_by_id('LOG-001').key}"
     assert text.count(frozen) == 1
+
+
+# ----------------------------------------------------- Phase 3a: engine consumers
+
+PHASE_3A_SCHEMA = """\
+site: { title: T, out: _site }
+id: { width: 3 }
+link_types:
+  follows:  { inverse: followed_by, label: Follows }
+  satisfies: { inverse: satisfied_by, label: Satisfies }
+  part_of:  { inverse: contains, label: Part of }
+types:
+  requirement:
+    prefix: REQ
+    coverable: true
+    fields:
+      text: { type: text, required: true }
+    links: { part_of: [group] }
+  group:
+    prefix: GRP
+    fields:
+      title: { type: text, required: true }
+  log:
+    prefix: LOG
+    fields:
+      summary: { type: text, required: true }
+      status: { type: enum, choices: [proposed, accepted, on_hold] }
+    links:
+      follows: [log]
+      satisfies: [requirement]
+    satisfying_statuses: [accepted]
+"""
+
+
+def _phase_3a_project(tmp_path, item_files, *, config=PHASE_3A_SCHEMA):
+    write_project_config(tmp_path, config)
+    for path, text in item_files.items():
+        target = tmp_path / "items" / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(text, encoding="utf-8")
+    project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
+    parse.load_items(project)
+    if keys_mod.mint_missing(project):
+        project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
+        parse.load_items(project)
+    build_mod.build(project)
+    return project
+
+
+def test_idless_thread_satisfier_counts_and_backlink_resolves_by_ref(tmp_path):
+    project = _phase_3a_project(
+        tmp_path,
+        {
+            "req.yaml": "defaults: { type: requirement }\nitems:\n"
+            "  - id: REQ-001\n    text: Needs a verdict.\n",
+            "log.yaml": "defaults: { type: log }\nitems:\n"
+            "  - id: LOG-001\n    summary: Accepted verdict.\n    status: accepted\n"
+            "  - follows: [LOG-001]\n    summary: Id-less continuation.\n"
+            "    satisfies: [REQ-001]\n",
+        },
+    )
+
+    continuation = next(item for item in project.items.values() if not item.id)
+    ref = continuation.key
+    requirement = project.item_by_id("REQ-001")
+    assert requirement.backlinks["satisfied_by"] == [ref]
+    assert project.item_by_ref(ref) is continuation
+    assert project.coverage["REQ-001"].satisfied_by == [ref]
+
+
+def test_silent_satisfier_uses_current_thread_status(tmp_path):
+    project = _phase_3a_project(
+        tmp_path,
+        {
+            "req.yaml": "defaults: { type: requirement }\nitems:\n"
+            "  - id: REQ-001\n    text: Needs a verdict.\n",
+            "log.yaml": "defaults: { type: log }\nitems:\n"
+            "  - id: LOG-001\n    summary: Accepted verdict.\n    status: accepted\n"
+            "  - id: LOG-002\n    follows: [LOG-001]\n    summary: Claims the requirement.\n"
+            "    satisfies: [REQ-001]\n",
+        },
+    )
+
+    assert project.coverage["REQ-001"].satisfied_by == ["LOG-002"]
+
+
+def test_forked_silent_satisfier_remains_claimed(tmp_path):
+    with patch("refdes.build.chains_mod.resolve_current", wraps=build_mod.chains_mod.resolve_current) as current:
+        project = _phase_3a_project(
+            tmp_path,
+            {
+                "req.yaml": "defaults: { type: requirement }\nitems:\n"
+                "  - id: REQ-001\n    text: Needs a verdict.\n",
+                "log.yaml": "defaults: { type: log }\nitems:\n"
+                "  - id: LOG-001\n    summary: Accepted verdict.\n    status: accepted\n"
+                "  - id: LOG-002\n    follows: [LOG-001]\n    summary: Claims the requirement.\n"
+                "    satisfies: [REQ-001]\n"
+                "  - id: LOG-003\n    follows: [LOG-001]\n    summary: Competing continuation.\n",
+            },
+        )
+
+    coverage = project.coverage["REQ-001"]
+    assert current.called
+    assert coverage.claimed_by == ["LOG-002"]
+    assert coverage.satisfied_by == []
+
+
+def test_satisfier_declaring_status_settles_even_when_thread_forked(tmp_path):
+    with patch("refdes.build.chains_mod.resolve_current") as current:
+        project = _phase_3a_project(
+            tmp_path,
+            {
+                "req.yaml": "defaults: { type: requirement }\nitems:\n"
+                "  - id: REQ-001\n    text: Needs a verdict.\n",
+                "log.yaml": "defaults: { type: log }\nitems:\n"
+                "  - id: LOG-001\n    summary: Earlier verdict.\n    status: on_hold\n"
+                "  - id: LOG-002\n    follows: [LOG-001]\n    summary: Accepted claim.\n"
+                "    status: accepted\n    satisfies: [REQ-001]\n"
+                "  - id: LOG-003\n    follows: [LOG-001]\n    summary: Competing continuation.\n",
+            },
+        )
+
+    assert not current.called
+    assert project.coverage["REQ-001"].satisfied_by == ["LOG-002"]
+
+
+
+def test_inherited_status_does_not_count_as_satisfier_declaration(tmp_path):
+    project = _phase_3a_project(
+        tmp_path,
+        {
+            "req.yaml": "defaults: { type: requirement }\nitems:\n"
+            "  - id: REQ-001\n    text: Needs a verdict.\n",
+            "log.yaml": "defaults: { type: log, status: accepted }\nitems:\n"
+            "  - id: LOG-001\n    summary: Earlier verdict.\n    status: proposed\n"
+            "  - id: LOG-002\n    follows: [LOG-001]\n    summary: Silent claim.\n"
+            "    satisfies: [REQ-001]\n",
+        },
+    )
+
+    coverage = project.coverage["REQ-001"]
+    assert coverage.claimed_by == ["LOG-002"]
+    assert coverage.satisfied_by == []
+
+
+def test_board_coverage_uses_current_thread_status(tmp_path):
+    config = PHASE_3A_SCHEMA.replace(
+        "link_types:\n",
+        "boards:\n  board-a: { label: Board A, conforms_to: [GRP-001] }\nlink_types:\n",
+    )
+    project = _phase_3a_project(
+        tmp_path,
+        {
+            "board-a/group.yaml": "defaults: { type: group }\nitems:\n"
+            "  - id: GRP-001\n    title: Contract.\n",
+            "board-a/req.yaml": "defaults: { type: requirement }\nitems:\n"
+            "  - id: REQ-001\n    text: Needs a verdict.\n    part_of: [GRP-001]\n",
+            "board-a/log.yaml": "defaults: { type: log }\nitems:\n"
+            "  - id: LOG-001\n    summary: Accepted verdict.\n    status: accepted\n"
+            "  - id: LOG-002\n    follows: [LOG-001]\n    summary: Silent claim.\n"
+            "    satisfies: [REQ-001]\n",
+        },
+        config=config,
+    )
+
+    assert project.board_coverage[("REQ-001", "board-a")].satisfied_by == ["LOG-002"]
+
+
+def test_index_groups_silent_thread_entry_by_current_status(tmp_path):
+    (tmp_path / "pages").mkdir()
+    (tmp_path / "pages" / "index.md").write_text(
+        '# Log status\n\n{{index by="status" type="log"}}\n', encoding="utf-8"
+    )
+    project = _phase_3a_project(
+        tmp_path,
+        {
+            "log.yaml": "defaults: { type: log }\nitems:\n"
+            "  - id: LOG-001\n    summary: Accepted verdict.\n    status: accepted\n"
+            "  - id: LOG-002\n    follows: [LOG-001]\n    summary: Silent continuation.\n",
+        },
+    )
+
+    page = next(page for page in project.pages if page.slug == "index")
+    accepted = page.body_html.split("<h4>accepted</h4>", 1)[1].split("<h4>", 1)[0]
+    assert "LOG-002" in accepted

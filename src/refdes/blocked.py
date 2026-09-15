@@ -20,14 +20,14 @@ from . import blocks as blocks_mod
 from .model import BlockedChain, Project
 
 
-def _is_settled(target_id: str, project: Project) -> bool:
+def _is_settled(target_ref: str, project: Project) -> bool:
     """A blocker counts as settled when its own type declares
     `satisfying_statuses` (or, for a verifier-shaped type,
     `verifying_statuses`) and its current status is in that list. A type
     that declares neither never triggers this check -- the same
     "unconfigured means nothing special happens" default `compute_coverage`
     already uses for the same two flags."""
-    target = project.item_by_id(target_id)
+    target = project.item_by_ref(target_ref)
     if target is None:
         return False
     spec = project.types.get(target.type)
@@ -52,12 +52,9 @@ def _paths_to_roots(project: Project, node_id: str, guard: int) -> list[list[str
     cycle check first, so this is never expected to actually hit it."""
     if guard <= 0:
         return [[node_id]]
-    node = project.item_by_id(node_id)
-    # resolved_links, not links: a target may be `DISPLAY@key` composite text
-    # (docs/design/keys.md §3) by the time this walks it, and project.item_by_id()
-    # resolves a plain display id, never that composite string.
-    # resolve_links() has already done this resolution once; reuse it rather
-    # than re-deriving it here.
+    node = project.item_by_ref(node_id)
+    # resolved links carry display ids where available and keys otherwise;
+    # item_by_ref() preserves both id-bearing and id-less graph nodes.
     targets = node.resolved_links.get("blocked_by", []) if node else []
     if not targets:
         return [[node_id]]
@@ -88,20 +85,21 @@ def resolve(project: Project) -> None:
         if not item.links.get("blocked_by"):
             continue
         try:
+            item_ref = item.id or item.key
             blocks_mod.walk_cascade(
-                project, item.id, "up", {"blocked_by"}, max_depth, on_cycle="error"
+                project, item_ref, "up", {"blocked_by"}, max_depth, on_cycle="error"
             )
         except blocks_mod.CascadeCycleError as exc:
-            # exc.path ends [..., closer_id, target_id_already_in_path] --
-            # closer_id's own declaration is the concrete edge whoever reads
+            # exc.path ends [..., closer ref, target ref already in path] --
+            # the closer's own declaration is the concrete edge whoever reads
             # this error would actually edit.
-            closer_id = exc.path[-2]
-            closer = project.item_by_id(closer_id)
+            closer_ref = exc.path[-2]
+            closer = project.item_by_ref(closer_ref)
             project.error(
                 f"blocked_by cycle: {' -> '.join(exc.path)}",
                 file=closer.source_file if closer else None,
                 line=closer.source_line if closer else None,
-                item_id=closer_id,
+                item_id=closer.id if closer else closer_ref,
             )
             return
 
@@ -109,21 +107,23 @@ def resolve(project: Project) -> None:
         for target_id in item.resolved_links.get("blocked_by", []):
             stale = _is_settled(target_id, project)
             if stale:
-                target = project.item_by_id(target_id)
+                target = project.item_by_ref(target_id)
+                display_ref = (target.id or target.key) if target else target_id
                 project.info(
-                    f"blocked_by {target_id}, which is now "
+                    f"blocked_by {display_ref}, which is now "
                     f"{target.fields.get('status')!r} -- is it still blocked? "
                     "Remove the edge if resolved, or say in 'rationale' why it "
                     "still applies.",
                     file=item.source_file, line=item.source_line, item_id=item.id,
                 )
             for sub_path in _paths_to_roots(project, target_id, max_depth):
-                path = [item.id] + sub_path
+                item_ref = item.id or item.key
+                path = [item_ref] + sub_path
                 root_id = path[-1]
-                root = project.item_by_id(root_id)
+                root = project.item_by_ref(root_id)
                 project.blocked_chains.append(
                     BlockedChain(
-                        item_id=item.id,
+                        item_id=item_ref,
                         path=path,
                         root_id=root_id,
                         root_status=root.fields.get("status") if root else None,

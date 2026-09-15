@@ -37,6 +37,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Callable
 
+from . import chains as chains_mod
 from .model import Item, Project
 
 # A line that is nothing but one `{{...}}` directive -- its own markdown
@@ -167,9 +168,14 @@ def _render_index(project: Project, params: dict[str, str]) -> str:
         and (tag is None or tag in _item_tags(item))
     ]
 
+    chain_graph = chains_mod.build_graph(project)
     groups: dict[str, list[Item]] = defaultdict(list)
     for item in items:
-        value = item.fields.get(by_field)
+        declared = by_field in item.fields and by_field not in item.inherited_fields
+        if declared or not chains_mod.is_threaded(project, item, graph=chain_graph):
+            value = item.fields.get(by_field)
+        else:
+            value = chains_mod.resolve_current(project, item, by_field, graph=chain_graph)
         if value in (None, "", []):
             groups["(unset)"].append(item)
         elif isinstance(value, list):
@@ -290,16 +296,13 @@ def _walk(
 ) -> list[CascadeNode]:
     if depth <= 0:
         return []
-    item = project.item_by_id(current_id)
+    item = project.item_by_ref(current_id)
     if item is None:
         return []
-    # resolved_links, not links, for "up": a target may be `DISPLAY@key`
-    # composite text (docs/design/keys.md §3), and every id this function
-    # walks with (current_id, and every target_id below) ends up passed
-    # straight back into project.item_by_id() -- which resolves a display id,
-    # never that composite string. backlinks needs no such swap: it is always
-    # populated with the *linking* item's own id (build.resolve_links()),
-    # which is never composite.
+    # resolved_links and backlinks carry a display id when available or a
+    # surrogate key for id-less entries. item_by_ref() accepts both, while
+    # raw links may instead hold a DISPLAY@key composite that is not a graph
+    # reference.
     edges = item.resolved_links if direction == "up" else item.backlinks
     allowed = via if direction == "up" else via_inverses
 
@@ -335,9 +338,10 @@ def _walk(
 def _render_node_list(nodes: list[CascadeNode], project: Project) -> str:
     parts = []
     for node in nodes:
-        item = project.item_by_id(node.item_id)
-        title = item.title if item else node.item_id
-        text = f"{node.verb} {_esc(node.item_id)} — {_esc(title)}"
+        item = project.item_by_ref(node.item_id)
+        display_ref = (item.id or item.key) if item else node.item_id
+        title = item.title if item else display_ref
+        text = f"{node.verb} {_esc(display_ref)} — {_esc(title)}"
         if node.already_shown:
             parts.append(f'<li>{text} <span class="cascade-seen">(already shown above)</span></li>')
         else:

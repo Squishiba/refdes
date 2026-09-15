@@ -203,28 +203,30 @@ def _trace_view(item: Item, project: Project) -> dict:
     the same claim twice, differing only in which of the two items happened
     to type the YAML.
     """
+    def visible_ref(ref: str) -> str:
+        target = project.item_by_ref(ref)
+        return (target.id or target.key) if target else ref
+
     self_inverse: dict[str, list[str]] = {}
     outgoing: dict[str, list[str]] = {}
     incoming: dict[str, list[str]] = {}
-    # resolved_links, not links: this feeds the rendered Traceability panel,
-    # so it must show a clean, resolving display id -- never the raw
-    # `DISPLAY-ID@key` composite text (docs/design/keys.md §3), which is a
-    # key never meant to be read by a human at all, let alone shown on a
-    # page. A target that failed to resolve is simply absent here, exactly
-    # as resolve_links() already reported it via project.error() -- there is
-    # no build to render cleanly in that case anyway.
+    # resolved links and backlinks carry display IDs for named items and
+    # surrogate keys for id-less entries. Keep ordinary output byte-identical;
+    # an id-less entry renders as its durable key rather than an empty ref.
     for name, targets in item.resolved_links.items():
+        refs = [visible_ref(ref) for ref in targets]
         ltype = project.link_types.get(name)
         if ltype is not None and ltype.inverse == name:
-            self_inverse.setdefault(name, []).extend(targets)
+            self_inverse.setdefault(name, []).extend(refs)
         else:
-            outgoing[name] = targets
+            outgoing[name] = refs
     for name, sources in item.backlinks.items():
+        refs = [visible_ref(ref) for ref in sources]
         ltype = project.link_types.get(name)
         if ltype is not None and ltype.inverse == name:
-            self_inverse.setdefault(name, []).extend(sources)
+            self_inverse.setdefault(name, []).extend(refs)
         else:
-            incoming[name] = sources
+            incoming[name] = refs
     return {
         "outgoing": outgoing,
         "incoming": incoming,

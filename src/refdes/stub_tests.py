@@ -44,24 +44,17 @@ def _already_covered(project: Project, verifier_types: set[str]) -> set[str]:
     duplicate for the same requirement.
 
     Two loops, not one over `list(project.items.values()) + project.pending`,
-    because they need to read a *different* field. An already-idd item's
+    because they need to read a different field. An already-idd item's
     `verifies:`/`verified_by:` may be `DISPLAY@key` composite text by now
-    (docs/design/keys.md §3, links.expand_missing) -- resolved_links (this
-    item's own resolve_links() output, already resolved to plain display
-    ids) is what's comparable against the plain ids `covered` is checked
-    against elsewhere in this module. A pending item, having no id, was
-    never reached by resolve_links() (it only walks project.items) or by
-    links.expand_missing() (which only walks project.local_items, for the
-    same reason) -- its `verifies:`/`verified_by:` is guaranteed to still be
-    bare text, so `links` is read directly; there is nothing to resolve a
-    composite out of yet.
+    (docs/design/keys.md §3), while resolved links use a display id or
+    surrogate key reference; pending items have no resolved links yet.
     """
     covered: set[str] = set()
     for item in project.items.values():
         if item.type in verifier_types:
             covered.update(item.resolved_links.get("verifies", []))
         if item.resolved_links.get("verified_by"):
-            covered.add(item.id)
+            covered.add(item.id or item.key)
     for item in project.pending:
         if item.type in verifier_types:
             covered.update(item.links.get("verifies", []))

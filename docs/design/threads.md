@@ -14,7 +14,7 @@ different population.
 
 The decision is taken. This document specs it; it does not relitigate it.
 
-**Status: design only.** Nothing here is implemented.
+**Status: Phase 3a implemented.**
 
 **Scope note on concurrent work:** this document does not touch, and makes
 no claim about, `standards/hardware/v3/base.yaml`, any file under `docs/`
@@ -63,25 +63,23 @@ resolution and one-time `follows:` freezing. A writable load freezes a bare
 display-ID `follows:` reference to the current frozen-edge tip, stores a
 display-ID target as `DISPLAY-ID@key` (or an id-less target as its bare key),
 and leaves unmerged forks and sealed entries untouched with warnings.
-**Still later phases:** coverage's fallback to `resolve_current` and any
-rendering of a chain as such. See `src/refdes/parse.py` (`load_items`),
-`src/refdes/model.py` (`Project.items`/`items_by_id`/`item_by_id`/
-`add_item`, `provisional_handle`, `Item.slug`), and
-`tests/test_threads.py`.
+**Phase 3a implemented:** derived links retain an id-less entry's key rather
+than `""`; `Project.item_by_ref()` accepts the display-id-or-key form.
+Coverage (including per-board coverage) and `{{index by="status"}}` use
+`resolve_current` only when the linked entry does not declare the field.
+Chain rendering remains Phase 3b. See `tests/test_threads.py`.
 
 **Phase 2b implemented** (engine only): §3's lazy walk and §6's diagnostics.
 `src/refdes/chains.py` builds a key-based `follows:` graph (predecessors and
-successors, each target resolved through `build.resolve_link_target`, never
-off `backlinks`/`resolved_links` — those carry display ids an id-less entry
-does not have), and offers `tips()` and `resolve_current()`'s per-field fold
-(more than one reachable tip → undefined; otherwise the nearest entry that
-declares the field wins, and two equidistant declarations that disagree are
-undefined), plus a build step after `resolve_links` reporting one fork `info`
-per forked entry and one `follows` cycle `error` per cycle. Still not
-implemented: coverage's fallback to `resolve_current` and any rendering of a
-chain (Phase 3), and `hardware@3` declaring `follows:` at all (Phase 4) —
-so nothing here is visible to a project whose schema does not declare a link
-literally named `follows:`. See `tests/test_chains.py`.
+successors, each target resolved through `build.resolve_link_target`) and
+offers `tips()` and `resolve_current()`'s per-field fold. All heads
+reachable behind the queried entry contribute tips, so any unmerged fork is
+undefined; otherwise the nearest entry that declares the field wins, and two
+equidistant declarations that disagree are undefined. The build reports one
+fork `info` per open fork and one `follows` cycle `error` per cycle.
+`hardware@3` still does not declare `follows:` (Phase 4), so this remains
+available only to projects that declare the ordinary link themselves. See
+`tests/test_chains.py`.
 
 ---
 
@@ -398,10 +396,8 @@ kind of silent, unenforced convention this project's own design docs
 routinely flag as a real risk (see `coverage.md`'s own "claimed but not
 settled... bit a real migration" story for what happens when a status
 check silently reads the wrong thing). So: **fold, but scoped narrowly** —
-whenever a consumer needs "the current value of field `F` for the thread
-this entry belongs to," resolve it by walking forward from that entry to
-the chain's tip(s) and applying the fold rule, rather than trusting that
-the entry in hand already carries the answer.
+only when the entry does not itself declare the field, resolve it over the
+thread's connected chain rather than trusting an inherited/default value.
 
 ### A lazy walk, not a persistent registry
 
@@ -417,21 +413,19 @@ Instead: a small utility (new module, playing the same role `blocked.py`
 plays for the blocker chain — walk, detect cycles, report) —
 
 ```python
-def resolve_current(project: Project, start_key: str, field: str) -> Any | None:
-    """Walk forward from `start_key` along `followed_by:` to every reachable
-    tip, and return the value of `field` from the highest-indexed entry
-    (by chain distance from `start_key`) that declares it. `None` if no
-    entry in the reachable chain ever declares `field`.
+def resolve_current(project: Project, start: Item | str, field: str) -> Any | None:
+    """Walk the connected thread containing `start`, returning `field` from
+    the nearest declaration behind its sole tip. Return None for no
+    declaration, ambiguity, or an unmerged fork.
     """
 ```
 
 — called on demand, from exactly the places that need "the current value,"
-not precomputed for every item on every build. This is cheaper when only a
-few threads are actually queried (coverage only calls it for items that
-already have a `satisfies:`/`verifies:` backlink) and it sidesteps the
-multi-head problem entirely: the walk starts from a specific entry (the one
-that declared the link being evaluated), not from "the thread," so there is
-never a question of which of several heads is canonical.
+not precomputed for every item on every build. A precomputed graph can be
+passed by a bulk consumer such as coverage, so it does not rebuild the
+`follows:` edges per linked entry. This sidesteps the multi-head problem:
+all reachable heads contribute their tips, and a non-reconciled fork is
+therefore unambiguously unsettled.
 
 ### `satisfying_statuses` under this model
 
@@ -439,16 +433,17 @@ Today (`build.py:453-462`): `allowed = satisfier_spec.satisfying_statuses;
 satisfier.fields.get("status") in allowed`. Under this model:
 
 ```python
-status = satisfier.fields.get("status")
-if status is None:
-    status = chains.resolve_current(project, satisfier.key, "status")
+if "status" in satisfier.fields and "status" not in satisfier.inherited_fields:
+    status = satisfier.fields["status"]
+else:
+    status = chains.resolve_current(project, satisfier, "status")
 allowed = satisfier_spec.satisfying_statuses
 ```
 
-One extra fallback step, only taken when the declaring entry itself is
-silent on `status` — the common case (entry restates its own status)
-never pays for the walk at all. This is a small, precise change to
-`compute_coverage`, not a rewrite of it.
+The fallback is taken only when the declaring entry itself is silent on
+`status`; a file `defaults:` value is not a declaration. The common case
+(entry restates its own status) never pays for the walk. `verifying_statuses`
+uses the identical rule for a verifier entry.
 
 ### Checks stay live — and this needs no fold at all
 
@@ -471,17 +466,17 @@ with each other.
 
 ### Branching's effect on "current"
 
-If `resolve_current`'s walk reaches more than one tip (an unmerged fork,
-§6), the fold for a field with different values at different tips is
-genuinely ambiguous. **Recommendation: treat it as undefined**, the same
-outcome as "no entry ever set this field" — a forked, unmerged thread
-cannot be read as `satisfied` even if one of its tips independently says
-`accepted`, because a fork is, by construction, not yet a single
-conclusion. It can still be `claimed` (the union-based `claimed`/`satisfied`
-split in `coverage.md` already distinguishes "linked, not yet settled"
-from "settled"), which is the right coverage stage for "someone has
-concluded something here, but the thread hasn't reconciled" — reusing an
-existing distinction instead of inventing a sixth coverage stage for forks.
+If `resolve_current`'s walk finds more than one tip anywhere in the
+connected thread (an unmerged fork, §6), the fold is genuinely ambiguous.
+**Treat it as undefined** — the same outcome as "no entry ever set this
+field." A forked, unmerged thread cannot be read as `satisfied` even if
+one branch independently says `accepted`, because a fork is, by
+construction, not yet a single conclusion. It can still be `claimed` (the
+union-based `claimed`/`satisfied` split in `coverage.md` already
+distinguishes "linked, not yet settled" from "settled"), which is the
+right coverage stage for "someone has concluded something here, but the
+thread hasn't reconciled" — reusing an existing distinction instead of
+inventing a sixth coverage stage for forks.
 
 ---
 
@@ -839,7 +834,7 @@ already existed independently.
 | Project model | `model.py` (`Project.items`, new `Project.items_by_id`) | Re-keying (§2); `Item.slug` falls back to `self.key` when `self.id` is empty |
 | Link-target resolution | `build.py:248` (`_key_index`), `build.resolve_link_target` | New third case: a bare, well-formed key with no display half resolves directly (§2) — this is the only place `follows:`'s targets actually get resolved |
 | Chain write-back | new, alongside `links.expand_missing` (`links.py`) | Reuses `ids.insert_into_markdown`/`insert_into_list` (mechanism), new resolution logic: walk forward to the current tip, freeze once (§1) |
-| Coverage | `build.py:380-540` (`compute_coverage`) | Small, precise addition: fall back to `resolve_current(..., "status")` only when the declaring entry itself doesn't set `status` (§3) |
+| Coverage | `build.py` (`_coverage_for`, `compute_coverage`, `compute_board_coverage`) | Derived links use display-id-or-key refs. `satisfying_statuses` and `verifying_statuses` use `resolve_current(..., "status")` when the linked entry does not itself declare status; an unmerged fork is claimed, never satisfied. |
 | Checks | `build.py:576-652` (`run_checks`) | **Unaffected** — confirmed, not merely assumed (§3) |
 | Hashing | `build.py:655-767` (`compute_hashes`) | **Unaffected** — confirmed (§4) |
 | Seals | `seal.py`, whole file | **Unaffected** — confirmed (§4) |
@@ -847,22 +842,19 @@ already existed independently.
 | Fork/cycle detection | new module, shaped like `blocked.py` (141 lines) | Chain-fork `info` diagnostic and `follows:` cycle `error`, both reusing `blocked_by`'s existing walk-and-detect pattern (§6) |
 | The chain-fold utility | new module | `resolve_current` (§3) — the one genuinely new piece of query machinery this design adds |
 | `former_ids` / the id ledger | `former_ids.py`, `ids.py` | **Unaffected** — confirmed (§2) |
-| Rendering | `render.py` | Page slugs for id-less items fall back to key (§2); a chain view (reusing `design-log.md`'s existing timeline rendering, plus a "currently concludes" panel sourced from `resolve_current`) — no new document type, an extension of existing item-page rendering |
-| `{{index}}`/`{{cascade}}` | `blocks.py` (448 lines) | `{{index by="status" type="log"}}` needs the same `resolve_current` fallback coverage uses, for the identical reason (§3); `{{cascade}}`'s existing walk is otherwise unaffected |
-| `blocked_by` cascade | `blocked.py` | Unaffected in its own logic; its cycle-detection *pattern* is reused (not shared code) for `follows:` (§6) |
+| Rendering | `render.py` | Page slugs for id-less items fall back to key (§2); derived refs render as display ids when present and durable keys otherwise. Chain rendering remains a later phase. |
+| `{{index}}`/`{{cascade}}` | `blocks.py` | `{{index by="status"}}` uses the same current-value fallback for a silent thread entry; cascade resolves display-id-or-key graph refs. |
+| `blocked_by` cascade | `blocked.py` | Derived graph walks resolve display-id-or-key refs; its cycle-detection pattern is reused for `follows:`. |
 | `revise`/migration engine | `revise.py` (1,127 lines) | **Reused as-is** for the type-merge migration (§7) — no new transaction model, unlike the previous draft's conclusion |
 | Schema | `schema.py`, `schema-reference.md` | New link type `follows`/`followed_by`; no new schema *surface* beyond an ordinary link declaration — no `entries:` shape, no per-entry sub-schema, both eliminated relative to the previous draft |
 | CLI | `cli.py` | No new command strictly required — appending a continuation entry is "write the file, run a writable command," identical to writing a `log` entry today |
 
 **What does *not* need to change, beyond what §4/§8 above already
 confirms:** `citations.py`, `calc.py` (explicitly out of scope for this
-document — another session's work), `boards.py`/`nav.py`/`pages.py`,
-`workspaces.py`, `stub_tests.py` — all of these read `resolved_links`,
-which is unaffected in shape; the only new thing they'd need is the same
-`resolve_current` fallback coverage uses, and only if they turn out to
-query a field that isn't reliably co-located with the link declaration,
-which — unlike coverage's `satisfying_statuses` — none of them currently
-do.
+document — another session's work), `boards.py`/`nav.py`/`pages.py`, and
+the id ledger all remain chain-field agnostic. `workspaces.py` and
+`stub_tests.py` use the display-id-or-key derived-reference form but do not
+query thread fields, so neither needs `resolve_current`.
 
 ---
 

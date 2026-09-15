@@ -359,23 +359,19 @@ class Item:
     # write-back reads; nothing that merely *traverses* the graph should
     # read it directly (see resolved_links below).
     links: dict[str, list[str]] = field(default_factory=dict)
-    # Every link target's *current, resolved, always-bare* display id --
-    # build.resolve_links()'s own output, populated once per build from
-    # links above (build.resolve_link_target handles the composite case).
-    # Every consumer that walks the item graph rather than hashing or
-    # rewriting it (blocked.py, blocks.py's cascade walker, the coverage
-    # satisfied/verified/addressed union below in build.py,
-    # workspaces.py's cross-workspace lint, stub_tests.py) reads this, not
-    # `links` -- reading raw `links` directly would silently break the
-    # moment a target is composite-expanded, since `DISPLAY@key` is not a
-    # key project.items is ever indexed by. A target that failed to
-    # resolve, or resolved to a disallowed type, is absent here exactly as
-    # resolve_links() already reported it via project.error(). Empty for
-    # every item in project.pending: resolve_links() only ever reaches
-    # project.items, the same reason links.expand_missing() only ever
-    # reaches project.local_items (both need a live id to be reachable at
-    # all).
+    # Every link target's resolved reference: its display id when it has one,
+    # otherwise its surrogate key. build.resolve_links() populates this once
+    # per build from links above (build.resolve_link_target handles composites).
+    # The reference is collision-free: display ids contain "-<digits>" and
+    # keys never contain "-", so item_by_ref() can resolve either spelling.
+    # Every graph consumer (blocked.py, blocks.py's cascade walker, coverage,
+    # workspaces.py's cross-workspace lint, stub_tests.py, and render.py)
+    # reads this, not raw links -- raw links can carry DISPLAY@key text.
+    # Targets that fail to resolve or have a disallowed type are absent here,
+    # exactly as resolve_links() already reports them.
     resolved_links: dict[str, list[str]] = field(default_factory=dict)
+    # Inverse edges using the same resolved-reference representation as
+    # resolved_links. This keeps an id-less entry reachable in both directions.
     backlinks: dict[str, list[str]] = field(default_factory=dict)
     source_file: str = ""
     source_line: int = 1
@@ -716,6 +712,18 @@ class Project:
         """
         key = self.items_by_id.get(display_id)
         return self.items.get(key) if key is not None else None
+
+    def item_by_ref(self, ref: str) -> Item | None:
+        """Look up a derived-link reference: display id first, then key.
+
+        `resolved_links` and `backlinks` use this form so id-less entries
+        remain graph nodes rather than collapsing to ``""``. The two forms
+        cannot collide: display ids contain "-<digits>" and surrogate keys
+        never contain "-".
+        """
+        if not ref:
+            return None
+        return self.item_by_id(ref) or self.items.get(ref)
 
     def add_item(self, item: Item, handle: str) -> str:
         """Add `item` to `items` under `handle`, without ever silently

@@ -217,6 +217,12 @@ up as `claimed_by` on the requirement's coverage, and the requirement's stage
 caps at `claimed` instead of `satisfied`. Declaring `satisfying_statuses:`
 requires the type to have a `status` field; the project fails to load otherwise.
 
+For a thread entry that declares `satisfies:` but not `status:`, coverage
+uses the thread's current status. A `status:` inherited from the file's
+`defaults:` block is likewise not a declaration. An unmerged fork has no
+current status, so its claim remains `claimed`, never `satisfied`. The same
+rule applies to a verifier type's `verifying_statuses:`.
+
 | `satisfying_statuses:` | Behavior |
 |---|---|
 | not declared *(default)* | Every `satisfies:` link counts as satisfying, regardless of status — unchanged from before this existed |

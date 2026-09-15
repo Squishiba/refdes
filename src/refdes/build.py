@@ -440,8 +440,10 @@ def resolve_links(project: Project) -> None:
                     )
                     continue
                 inverse = project.inverse_of.get(link_name, f"{link_name}_by")
-                target.backlinks.setdefault(inverse, []).append(item.id)
-                item.resolved_links.setdefault(link_name, []).append(target.id)
+                source_ref = item.id or item.key
+                target_ref = target.id or target.key
+                target.backlinks.setdefault(inverse, []).append(source_ref)
+                item.resolved_links.setdefault(link_name, []).append(target_ref)
 
 
 # Preserved exactly for the name-based coverable/verifier fallback below -- the
@@ -557,17 +559,35 @@ def _board_gate(project: Project, board: str | None):
     with no board counts for *no* board, so a satisfier sitting outside the
     registry can never quietly discharge a per-board obligation (finding 24).
     """
-    def keep(item_id: str) -> bool:
+    def keep(ref: str) -> bool:
         if board is None:
             return True
-        other = project.item_by_id(item_id)
+        other = project.item_by_ref(ref)
         return other is not None and other.board == board
 
     return keep
 
+def _coverage_status(project: Project, entry: Item | None, chain_graph) -> object | None:
+    """Status coverage tests use an entry's declaration, then its thread.
+
+    This applies identically to `satisfying_statuses` and
+    `verifying_statuses`: a status inherited from a file `defaults:` block
+    is not the entry declaring it. For a thread entry the current thread
+    value is used instead; an unmerged fork resolves to None and cannot
+    settle either kind of coverage. A non-thread item keeps its established
+    effective-default behavior, preserving projects without `follows:`.
+    """
+    if entry is None:
+        return None
+    if "status" in entry.fields and "status" not in entry.inherited_fields:
+        return entry.fields["status"]
+    if not chains_mod.is_threaded(project, entry, graph=chain_graph):
+        return entry.fields.get("status")
+    return chains_mod.resolve_current(project, entry, "status", graph=chain_graph)
+
 
 def _coverage_for(
-    item: Item, project: Project, board: str | None = None
+    item: Item, project: Project, board: str | None = None, chain_graph=None
 ) -> Coverage:
     """One item's Coverage, optionally restricted to satisfiers on `board`.
 
@@ -590,12 +610,13 @@ def _coverage_for(
         | set(item.resolved_links.get("satisfies", []))
         if keep(i)
     ):
-        satisfier = project.item_by_id(satisfier_id)
+        satisfier = project.item_by_ref(satisfier_id)
         satisfier_spec = project.types.get(satisfier.type) if satisfier else None
         allowed = satisfier_spec.satisfying_statuses if satisfier_spec else None
         # Unconfigured type: every link counts as settled, same as before
         # satisfying_statuses existed.
-        if allowed is not None and satisfier.fields.get("status") not in allowed:
+        status = _coverage_status(project, satisfier, chain_graph)
+        if allowed is not None and status not in allowed:
             claimed.append(satisfier_id)
         else:
             settled.append(satisfier_id)
@@ -609,17 +630,18 @@ def _coverage_for(
         | set(item.resolved_links.get("verified_by", []))
         if keep(i)
     ):
-        verifier = project.item_by_id(verifier_id)
+        verifier = project.item_by_ref(verifier_id)
         verifier_spec = project.types.get(verifier.type) if verifier else None
         allowed = verifier_spec.verifying_statuses if verifier_spec else None
         # Unconfigured: every link counts, mirroring satisfying_statuses.
-        if allowed is None or (verifier and verifier.fields.get("status") in allowed):
+        status = _coverage_status(project, verifier, chain_graph)
+        if allowed is None or status in allowed:
             verified.append(verifier_id)
     cov.verified_by = verified
     return cov
 
 
-def compute_board_coverage(project: Project) -> None:
+def compute_board_coverage(project: Project, chain_graph=None) -> None:
     """Per-(item, board) coverage for the members of each board's `conforms_to:` groups.
 
     A platform-wide contract -- "every board with an ARM MCU uses the standard
@@ -651,7 +673,7 @@ def compute_board_coverage(project: Project) -> None:
             if group is None:
                 continue  # validate_conforms_to() already errored on this
             for member_id in sorted(group.backlinks.get("contains", [])):
-                member = project.item_by_id(member_id)
+                member = project.item_by_ref(member_id)
                 if member is None:
                     continue
                 member_spec = project.types.get(member.type)
@@ -662,7 +684,7 @@ def compute_board_coverage(project: Project) -> None:
                 )
                 if not coverable or _excluded_by_status(member, member_spec):
                     continue
-                cov = _coverage_for(member, project, board=bname)
+                cov = _coverage_for(member, project, board=bname, chain_graph=chain_graph)
                 project.board_coverage[(member.id, bname)] = cov
                 if cov.stage in ("satisfied", "verified"):
                     continue
@@ -677,7 +699,7 @@ def compute_board_coverage(project: Project) -> None:
                 )
 
 
-def compute_coverage(project: Project) -> None:
+def compute_coverage(project: Project, chain_graph=None) -> None:
     """Distinct notions of done, which people routinely conflate.
 
     addressed  — somebody has worked on it and written it up in the design log
@@ -732,13 +754,11 @@ def compute_coverage(project: Project) -> None:
         if _excluded_by_status(item, spec):
             continue
 
-        # Each edge may be declared from either end. resolved_links, not
-        # links: these targets get looked up via project.item_by_id() below,
-        # and links may hold `DISPLAY@key` composite text now (docs/design/
-        # keys.md §3) that item_by_id() can't resolve -- resolved_links is
-        # resolve_links()'s own output, already resolved to each target's
-        # current, plain display id.
-        cov = _coverage_for(item, project)
+        # Each edge may be declared from either end. resolved_links, not raw
+        # links: the raw form can hold `DISPLAY@key` composite text, while the
+        # derived form holds a display id or surrogate key reference that
+        # `_coverage_for()` resolves through `Project.item_by_ref()`.
+        cov = _coverage_for(item, project, chain_graph=chain_graph)
         claimed = cov.claimed_by
         project.coverage[item.id] = cov
 
@@ -1796,7 +1816,8 @@ def build(
     ids_mod.validate_prefixes(project)
     keys_mod.validate(project)
     resolve_links(project)
-    chains_mod.resolve(project)
+    chain_graph = chains_mod.build_graph(project)
+    chains_mod.resolve(project, graph=chain_graph)
     validate_conforms_to(project)
     workspaces_mod.lint_cross_workspace_references(project)
     blocked_mod.resolve(project)
@@ -1807,8 +1828,8 @@ def build(
     boards_mod.verify(project, write=seal_write, accept_move=accept_board_move)
     boards_mod.lint_tokens(project)
     lint_own_tags(project)
-    compute_coverage(project)
-    compute_board_coverage(project)
+    compute_coverage(project, chain_graph=chain_graph)
+    compute_board_coverage(project, chain_graph=chain_graph)
     citations_mod.verify(project, require=require_citations)
     render_bodies(project)
     render_pages(project)

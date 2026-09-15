@@ -6,13 +6,12 @@ predecessor", "Merging", "Cycles"). Same role for `follows:` that
 `blocked.py` plays for `blocked_by:` — a dedicated walk pass with cycle
 detection and diagnostics, run as a build step after link resolution.
 
-The graph is built here, from raw `follows:` targets resolved through
-`build.resolve_link_target`, rather than read off `backlinks`/
-`resolved_links`: those carry *display ids*, which an id-less continuation
-entry (threads.md §2) does not have. Nodes are therefore identified by the
-`project.items` dict key — the surrogate key when an item has one, its
-provisional handle otherwise — and named in diagnostics by display id, or
-by key when it has none.
+The graph is built here from raw `follows:` targets resolved through
+`build.resolve_link_target`, rather than read from `backlinks`/
+`resolved_links`: those derived maps are for ordinary graph consumers,
+while this module needs the durable `project.items` handles to implement
+chain-specific walks. Nodes are therefore identified by the surrogate key
+or provisional handle, and named in diagnostics by display id or key.
 """
 
 from __future__ import annotations
@@ -91,6 +90,19 @@ def build_graph(
     return predecessors, successors
 
 
+def is_threaded(
+    project: Project,
+    item: Item,
+    *,
+    graph: tuple[dict[str, list[Item]], dict[str, list[Item]]] | None = None,
+) -> bool:
+    """Whether `item` participates in at least one resolved follows edge."""
+    if graph is None:
+        graph = build_graph(project)
+    handle = _start_handle(project, item)
+    return handle is not None and (handle in graph[0] or handle in graph[1])
+
+
 def _tips_from(
     handle: str,
     successors: dict[str, list[Item]],
@@ -121,21 +133,30 @@ def tips(
     start: Item | str,
     *,
     successors: dict[str, list[Item]] | None = None,
+    graph: tuple[dict[str, list[Item]], dict[str, list[Item]]] | None = None,
 ) -> list[Item]:
     """Every entry reachable forward from ``start`` with no successors.
 
     ``successors`` lets a caller add a small, in-memory prospective edge set
-    while retaining this module's one traversal implementation.
+    while retaining this module's one traversal implementation. ``graph``
+    reuses a precomputed `(predecessors, successors)` pair for callers that
+    need many walks during one build.
     """
     handle = _start_handle(project, start)
     if handle is None:
         return []
     if successors is None:
-        _, successors = build_graph(project)
+        successors = graph[1] if graph is not None else build_graph(project)[1]
     return _tips_from(handle, successors, _handles(project), project.items)
 
 
-def resolve_current(project: Project, start: Item | str, field: str) -> Any | None:
+def resolve_current(
+    project: Project,
+    start: Item | str,
+    field: str,
+    *,
+    graph: tuple[dict[str, list[Item]], dict[str, list[Item]]] | None = None,
+) -> Any | None:
     """The chain's current value of `field`, per threads.md §3.
 
     Walk forward to the reachable tips; more than one tip (an unmerged fork,
@@ -151,17 +172,42 @@ def resolve_current(project: Project, start: Item | str, field: str) -> Any | No
     `item.inherited_fields`, and is not this entry declaring anything: a log
     file defaulting `status: proposed` would otherwise have every silent
     entry in it shadow the `accepted` its head actually wrote.
+    ``graph`` lets repeated resolution in one build reuse the parsed follows
+    edges instead of rebuilding them for every entry.
     """
-    found = tips(project, start)
-    if len(found) != 1:
-        return None
-    tip = found[0]
-    tip_handle = _handles(project).get(id(tip))
-    if tip_handle is None:
+    if graph is None:
+        predecessors, successors = build_graph(project)
+    else:
+        predecessors, successors = graph
+    start_handle = _start_handle(project, start)
+    if start_handle is None:
         return None
 
-    predecessors, _ = build_graph(project)
+    # A fork can be behind `start`: start at every reachable head, then ask
+    # for all tips in the connected thread rather than treating one branch as
+    # a settled subthread. A merge later reconverges these walks on one tip.
+    roots: set[str] = set()
+    stack = [start_handle]
+    seen = {start_handle}
     handles = _handles(project)
+    while stack:
+        node = stack.pop()
+        preceding = predecessors.get(node, [])
+        if not preceding:
+            roots.add(node)
+        for predecessor in preceding:
+            prev = handles.get(id(predecessor))
+            if prev is not None and prev not in seen:
+                seen.add(prev)
+                stack.append(prev)
+    found_by_handle = {
+        handles[id(tip)]
+        for root in roots
+        for tip in _tips_from(root, successors, handles, project.items)
+    }
+    if len(found_by_handle) != 1:
+        return None
+    tip_handle = next(iter(found_by_handle))
     items = project.items
     frontier = [tip_handle]
     visited = {tip_handle}
@@ -228,16 +274,20 @@ def _find_cycle(project: Project, predecessors: dict[str, list[Item]]) -> list[s
     return None
 
 
-def resolve(project: Project) -> None:
+def resolve(
+    project: Project,
+    *,
+    graph: tuple[dict[str, list[Item]], dict[str, list[Item]]] | None = None,
+) -> None:
     """Fork `info` and cycle `error` for `follows:` chains (threads.md §6).
 
     Runs after `resolve_links`, mirroring `blocked_mod.resolve`: the graph
     is only trustworthy once targets resolve. A cycle is a hard error
     reported once for the whole cycle; a fork is `info`, not even a warning
     — two people editing concurrently is a normal, recoverable outcome, not
-    a mistake.
+    a mistake. ``graph`` reuses a build-wide precomputed graph.
     """
-    predecessors, successors = build_graph(project)
+    predecessors, successors = graph if graph is not None else build_graph(project)
     if not predecessors:
         return  # no follows: anywhere -- nothing to report, nothing to walk
 

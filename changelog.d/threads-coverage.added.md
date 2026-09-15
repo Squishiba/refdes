@@ -1,0 +1,1 @@
+- Thread-aware coverage and `{{index}}` now use a silent entry's current thread status; id-less linked entries remain resolvable through their surrogate keys.

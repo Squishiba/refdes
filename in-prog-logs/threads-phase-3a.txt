@@ -1,0 +1,14 @@
+Task: THREADS PHASE 3a engine consumers.
+
+Plan:
+1. Replace derived-link display-id storage with a reference that is display id or surrogate key, and add Project.item_by_ref().
+2. Update every derived-link graph consumer, preserving display-id output for ordinary items and rendering id-less entries via their durable key.
+3. Reuse one follows graph across coverage/current-status resolution; apply fallback only when status is not declared (including default-inherited status).
+4. Extend index grouping, add focused regression tests and a generated-chain benchmark.
+5. Prove no-follows output parity with archive exports, rebase main, run the full suite, commit.
+
+Progress: fast-forward merge from main succeeded; worktree was clean. Read threads design, chains, build coverage, index blocks, model lookup, and all current backlinks/resolved_links consumers. Baseline regression and benchmark still pending.
+
+Progress: added item_by_ref(), derived display-id-or-key link references, chain-aware coverage/verifier status fallback, index grouping fallback, and id-less-safe derived graph consumers. Focused regressions failed first (six capability regressions; the direct declared-status preservation case passed as expected) and now pass. A five-run generated 500-entry-chain full-build benchmark measured main at 0.311445–0.323536 s and this branch at 0.559625–0.567141 s; the added cost is the deliberate silent-status current-thread resolution while one graph is shared by build diagnostics and both coverage passes. The 131-test affected-consumer suite passes. Remaining: archive-output parity, rebase, full suite, commit.
+
+Verification: after rebasing (already current with main), `python -m pytest -q` passed 879 tests. Clean `git archive` exports built with `refdes build --keep-going` (the root project retains one known design error) and `refdes index`: root output was byte-identical (41 generated files and index output). The docs-site index was byte-identical; its normal generated site differed only in the intentionally edited `coverage.html` and `design-threads.html`. Rebuilding the branch engine with those two documentation inputs copied from main produced all 34 docs-site files byte-identical to main.
