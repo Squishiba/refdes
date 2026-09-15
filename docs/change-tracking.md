@@ -102,6 +102,32 @@ mismatch later means the target moved and the link needs re-reviewing.
 Imported items keep the hash their own project computed, so cross-project suspect
 links work the same way.
 
+### Hash format versioning
+
+The content hash definition is versioned (`hash_format`, recorded per baseline
+and seal entry; currently **3**). When the hash definition changes (e.g. link
+targets switching from display-id text to resolved keys, or `checks: against:`
+entries being reduced to keys), a baseline stamped under the old definition
+would show every item as "changed" purely because the *definition* moved, not
+because content changed.
+
+**Migration is automatic where content is provably unchanged.** When a
+baseline is read (by `refdes audit`, `refdes revision`, `refdes release`, or
+`refdes keys adopt`), `migrate_hash_format` checks each entry not already at
+the current format: it finds the live item and recomputes its hash under the
+entry's recorded format. If that recomputed hash matches what was stored, the
+item's content demonstrably hasn't changed — the entry is safely rewritten in
+place to the current format (`carried`). If it doesn't match, the item
+genuinely changed since the stamp; the entry is left alone and reported as
+`uncomparable`. An item with no live counterpart (deleted, or renamed without
+`former_ids:`) is likewise left alone — that's the ordinary "removed" case.
+
+This conditional carry-forward (lifecycle.migrate_hash_format, also used by
+seal matching and `keys adopt`) means a partially-migrated baseline stays
+precisely describable: some entries at format 3, some at format 1 marked
+uncomparable. `refdes audit` lists `uncomparable` entries per baseline so the
+gap is visible, not silent.
+
 ## Auditing
 
 If fields can be excluded from invalidation, somebody could quietly downgrade one

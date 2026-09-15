@@ -9,7 +9,7 @@
 | `index.html` | Counts, failing checks, outstanding work, tables per type, diagnostics |
 | `summary.html` | The whole project at a glance: margins, every computed value, gaps |
 | `coverage.html` | The full [coverage](coverage.md) table, least-covered first |
-| `log.html` | The [design log](design-log.md) timeline, oldest first |
+| `log.html` | The [design log](design-log.md) timeline, oldest first — log entries are sorted by their `date:` field parsed using the project's `date_format:` (default `YYYY-MM-DD`) |
 | `references.html` | Every [citation](markdown.md#citing-a-datasheet) in the project, grouped by path |
 | `parts.html` | Every [part number](parts.md), exact-string indexed, with where-used backlinks |
 | `document.html` | Every item in one page, in reading order — the printable record |

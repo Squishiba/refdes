@@ -131,9 +131,16 @@ WARNING items/board-b/requirements.yaml:9 [REQ-PWR-009] — REQ-PWR-009 moved fr
 
 Run `refdes build --accept-board-move` to accept it; `refdes audit` lists every
 accepted and outstanding move. Unlike a sealed log entry, a board move is never a
-build error — moving a file is an ordinary thing to do on purpose. Adoption and
-writable builds silently prune membership for deleted items; read-only
-`refdes check` never changes the manifest.
+build error — moving a file is an ordinary thing to do on purpose.
+
+**After `refdes keys adopt`, the manifest is fully key-keyed.** `keys adopt`
+converts the manifest (via `boards.plan_surrogate_storage`): live, identifiable
+memberships are re-keyed by surrogate key; entries for items that no longer
+exist (deleted, or renamed without `former_ids:`) are dropped from the manifest
+and reported as `stale`. Legacy display-id-keyed entries that can't be matched
+to a live item by key or `former_ids:` are left in place and reported as
+`unidentified`. Read-only `refdes check` never changes the manifest; writable
+builds prune stale entries automatically once the project is adopted.
 
 ### Conforming to a shared contract
 

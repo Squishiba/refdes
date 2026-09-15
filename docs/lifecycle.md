@@ -164,6 +164,18 @@ A baseline's whole point is to stay legible after the live item is gone —
 `REQ-OLD-002 removed` means nothing six months later; `REQ-OLD-002
 (requirement) "Legacy input protection" — removed` does.
 
+### Hash format versioning
+
+Each baseline entry records `hash_format` (currently **3** — see `build.HASH_FORMAT`).
+When the hash definition evolves (format 1: display-id link targets; format 2:
+resolved-key link targets, raw `checks: against:`; format 3: `checks: against:`
+also reduced to keys), `migrate_hash_format` runs on load. It recomputes each
+legacy-format entry's hash under its recorded definition against the live item:
+if it matches, the entry is carried forward to the current format; if not, it
+is reported as `uncomparable` (the item genuinely changed). This keeps a
+baseline diff from falsely flagging every item as "changed" when only the hash
+definition moved. `refdes audit` lists `uncomparable` entries per baseline.
+
 ### `stamped_by`
 
 ```yaml
@@ -209,6 +221,7 @@ Since last revision (rev-c, 2026-08-10T09:12:00Z):
   changed   3   DEC-PWR-002, CMP-PWR-001, REQ-PWR-003
   added     1   TST-PWR-004
   removed   0
+  relabelled 1   REQ-PWR-009 -> REQ-PWR-012   (k7f3m2q9x4a)
   (38 unchanged)
 
 Since last release (rev-b, 2026-07-02T16:40:00Z):
@@ -216,8 +229,15 @@ Since last release (rev-b, 2026-07-02T16:40:00Z):
   added     4   TST-PWR-003, TST-PWR-004, DEC-PWR-003, CMP-PWR-005
   removed   1
     REQ-OLD-002 (requirement) "Legacy input protection" — no longer in the project
+  relabelled 2   REQ-PWR-009 -> REQ-PWR-012, BND-THM-001 -> BND-THM-004   (k7f3m2q9x4a, m9n2b5v8c1x)
   (31 unchanged)
 ```
+
+**`relabelled`** — items that have the same surrogate key but a new display ID.
+This happens when an item is renamed (its `id:` changed) after a baseline was
+stamped: the key is the immutable identity, so the baseline diff recognises it
+as the same item and reports it as `relabelled` rather than `removed` + `added`.
+The surrogate key is shown in parentheses.
 
 No baselines of a given kind yet → `(no revision stamped yet)` / `(no
 release stamped yet)`, not an error — `audit` already runs with zero

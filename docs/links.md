@@ -29,14 +29,39 @@ cover.
 Pointing at a nonexistent item, or at an item of a type the schema disallows, is a
 build error.
 
-When the target has a surrogate key, ordinary bare references are rewritten
-on the next writable load to `DISPLAY-ID@key`. The readable display half
-refreshes after a rename; the key remains the identity and is what resolves
-and hashes. `follows:` is the one exception while it is bare: it means
-"continue this thread", so the writable load first freezes it to the
-thread's current tip. A tip with a display ID becomes `DISPLAY-ID@key`; an
-id-less tip becomes its bare key. A frozen `follows:` link then follows the
-same rename-refresh rule as any other composite.
+### Structured link targets: composite form and automatic refresh
+
+When a link target has a surrogate key, the tool rewrites the bare reference
+in the source file to a composite `DISPLAY-ID@key` form on the next **writable**
+command (any command that loads the project without `--no-write`). For example:
+
+```yaml
+# Author writes:
+satisfies: [REQ-PWR-002]
+
+# Tool rewrites to (on next writable load):
+satisfies: [REQ-PWR-002@k7f3m2q9x4a]
+```
+
+**Authors always write bare IDs** — the composite form is written and
+maintained by the tool. The key half (after `@`) is the immutable identity;
+resolution and content hashing use only the key. The display half (before `@`)
+is readable context that the tool refreshes automatically when the target item
+is renamed: on the next writable load, a stale `OLD-ID@key` becomes
+`NEW-ID@key`.
+
+This expansion and refresh happens on every command that writes — `build`,
+`check`, `id`, `revision`, `release`, `audit`, `fetch`, `stub-tests`,
+`revise`, `standard upgrade`, `standard add-preset`, `standard remove-preset`,
+`keys adopt`, and `former-ids propose --confirm`. It is **suppressed by
+`--no-write`** (the global flag, placed before the subcommand), which makes
+the load read-only: bare references stay bare, stale display halves are not
+refreshed, and no source files are modified.
+
+`follows:` is the one exception while it is still bare: it means "continue
+this thread", so the first writable load freezes it to the thread's current
+tip (becoming `DISPLAY-ID@key` or a bare key for an id-less tip). Once frozen,
+it follows the same rename-refresh rule as any other composite.
 
 ## Back-links are computed
 

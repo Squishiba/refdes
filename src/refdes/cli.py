@@ -1091,13 +1091,15 @@ def main(argv: list[str] | None = None) -> int:
         "--no-write",
         action="store_true",
         help="never modify anything under items/ or .refdes/ -- suppresses "
-        "key minting, link expansion, .refdes/schema.json regeneration, "
-        "seals, the membership manifest, baseline stamps and the id ledger "
-        "(docs/design/keys.md §2); explicit write commands either report "
-        "what would change or refuse. 'refdes build --no-write' still "
-        "writes the site -- that is the command's own output, not a "
-        "side effect -- for CI, inspecting someone else's project, or a "
-        "bisect over history",
+        "key minting, link/check expansion to composite form, "
+        ".refdes/schema.json regeneration, seal recording, "
+        "board/workspace membership manifest, baseline stamping, "
+        "and the ID ledger (.refdes/ids.yaml); explicit write commands "
+        "either report what would change (id, revise, stub-tests, "
+        "revision, release) or refuse (fetch, init, standard upgrade, "
+        "standard add-preset/remove-preset, former-ids propose --confirm, "
+        "keys adopt). 'refdes build --no-write' still writes the site -- "
+        "that is the command's own output, not a side effect",
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -1186,8 +1188,9 @@ def main(argv: list[str] | None = None) -> int:
         description="Cut an internal checkpoint: stamps "
         ".refdes/baselines/<name>.yaml unconditionally, modulo the "
         "unconditional error floor (the same one 'check' already has). No "
-        "readiness gate. Takes exactly one argument and no flags -- there is "
-        "nothing to configure per run.",
+        "readiness gate. Takes exactly one argument (the name); the global "
+        "--no-write flag is accepted to report what would be stamped without "
+        "writing.",
     )
     p_revision.add_argument("name", help="baseline name, e.g. rev-b")
     p_revision.set_defaults(func=cmd_revision)
@@ -1200,7 +1203,8 @@ def main(argv: list[str] | None = None) -> int:
         "if every enabled rule passes. On failure, nothing is written and "
         "the blocking rules are printed. Running this when the project "
         "isn't ready *is* the check -- there is no --dry-run. Takes exactly "
-        "one argument and no flags.",
+        "one argument (the name); the global --no-write flag is accepted to "
+        "report what would be stamped without writing.",
     )
     p_release.add_argument("name", help="baseline name, e.g. rev-b")
     p_release.set_defaults(func=cmd_release)

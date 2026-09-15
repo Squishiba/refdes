@@ -7,8 +7,9 @@ refdes [-c CONFIG] {build,check,revision,release,index,ls,id,fetch,audit,init,ne
 | Global option | Effect |
 |---|---|
 | `-c`, `--config PATH` | Use this `refdes-project.yaml`. Default: search upward from the current directory. |
+| `--no-write` | Never modify anything under `items/` or `.refdes/`. Suppresses: key minting, link/check expansion to composite form, `.refdes/schema.json` regeneration, seal recording, board/workspace membership manifest, baseline stamping, and the ID ledger. Explicit write commands behave differently: commands with `--dry-run` (`id`, `revise`, `stub-tests`, `revision`, `release`) report what would change and write nothing; commands that fundamentally write (`fetch`, `init`, `standard upgrade`, `standard add-preset`, `standard remove-preset`, `former-ids propose --confirm`, `keys adopt`) **refuse to run** under `--no-write` and exit 2. `refdes build --no-write` still writes the site — that is the command's own output, not a side effect. |
 
-Exit codes: `0` success, `1` errors found, `2` configuration error.
+Exit codes: `0` success, `1` errors found, `2` configuration error (including `--no-write` refusal).
 
 ---
 
@@ -340,12 +341,14 @@ Since last revision (rev-c, 2026-08-10T09:12:00Z):
   changed   3   DEC-PWR-002, CMP-PWR-001, REQ-PWR-003
   added     1   TST-PWR-004
   removed   0
+  relabelled 1   REQ-PWR-009 -> REQ-PWR-012   (k7f3m2q9x4a)
   (12 unchanged)
 
 Since last release (rev-b, 2026-07-02T16:40:00Z):
   changed   9   CMP-PWR-001, DEC-PWR-001, DEC-PWR-002, REQ-PWR-002, ...
   added     4   TST-PWR-003, TST-PWR-004, DEC-PWR-003, CMP-PWR-005
   removed   0
+  relabelled 2   REQ-PWR-009 -> REQ-PWR-012, BND-THM-001 -> BND-THM-004   (k7f3m2q9x4a, m9n2b5v8c1x)
   (7 unchanged)
 
 Board moves since the manifest was last written:
@@ -378,7 +381,15 @@ The "Board moves" section only appears for a project that has declared a
 `workspaces:`. "Baselines" always appears — a project that has never run
 `refdes revision`/`refdes release` (still in **draft**) shows `(none stamped
 yet -- project is in draft)` there instead, and each "Since last..." section
-shows `(no revision/release stamped yet)`. The "Citations" section only
+shows `(no revision/release stamped yet)`.
+
+**`relabelled`** — items that have the same surrogate key but a new display ID.
+This happens when an item is renamed (its `id:` changed) after a baseline was
+stamped: the key is the immutable identity, so the baseline diff recognises it
+as the same item and reports it as `relabelled` rather than `removed` + `added`.
+The surrogate key is shown in parentheses.
+
+The "Citations" section only
 appears for a project that declares a `citations`-typed field somewhere and
 has at least one item using it; "Parts" only for one that has at least one
 `part_number`, from either source — see [parts](parts.md). Each part gets
@@ -688,6 +699,83 @@ inference only ever drafts a suggestion here — the `former_ids:` entry
 match recomputed on the fly. An id passed to `--confirm` that isn't among
 the currently proposed candidates is refused, not guessed at — re-run
 `propose` without `--confirm` first if the project has changed since.
+
+---
+
+## `refdes keys adopt`
+
+Explicitly adopt surrogate keys for an existing project. This is a
+one-time, transactional operation that:
+
+- Mints a surrogate key for every item that doesn't have one yet (written as
+  `key: <11-char>` in the source file)
+- Expands all structured link targets and `checks: against:` references to the
+  composite `DISPLAY-ID@key` form
+- Freezes bare `follows:` references at their thread tips
+- Rebases every baseline (`.refdes/baselines/*.yaml`) and seal file
+  (`.refdes/log-seal*.yaml`) to key-keyed storage, carrying forward entries
+  whose content is provably unchanged (older hashes migrate automatically;
+  entries that genuinely changed since the stamp are reported as
+  `uncomparable` and left in the legacy display-id-keyed form)
+- Converts the board/workspace membership manifest (`.refdes/boards.yaml`) to
+  key-keyed storage, dropping entries for items that no longer exist
+- Writes the adoption marker `.refdes/keys-adopted.yaml` (commit this file;
+  future stamps, seals, and manifests use key-keyed storage)
+
+| Option | Effect |
+|---|---|
+| `--dry-run` | Show the complete plan (keys to mint, links to expand, baselines/seals/manifests to rebase, files that would change) without writing anything |
+
+```bash
+refdes keys adopt --dry-run
+refdes keys adopt
+```
+
+**Report lines** (on success, without `--dry-run`):
+
+```
+minted 42 key(s)
+expanded 128 link reference(s) to composite form
+expanded 7 check reference(s) to composite form
+froze 3 follows reference(s) at their thread tips
+baselines rebased:
+  rev-c (41/41 entries carried)
+  rev-b (41/41 entries carried)
+seals rebased:
+  .refdes/log-seal.yaml (12/12 entries carried)
+  .refdes/log-seal-power.yaml (8/8 entries carried)
+membership manifests rebased:
+  .refdes/boards.yaml (35/35 entries carried)
+changed files:
+  items/power/requirements.yaml
+  items/thermal/decisions.md
+  .refdes/baselines/rev-c.yaml
+  .refdes/baselines/rev-b.yaml
+  .refdes/log-seal.yaml
+  .refdes/log-seal-power.yaml
+  .refdes/boards.yaml
+  .refdes/keys-adopted.yaml
+Review the diff before committing.
+```
+
+`uncomparable` entries (baseline or seal entries that genuinely changed since
+the stamp, so their old-format hash no longer matches the current content)
+are listed individually:
+
+```
+uncomparable baseline entry rev-a: REQ-OLD-002
+uncomparable seal entry .refdes/log-seal.yaml: LOG-A-005
+```
+
+`unidentified` membership entries (legacy display-id entries that can't be
+matched to a live item by key or former_ids) and `stale` entries (for deleted
+items) are reported similarly.
+
+The operation is **transactional and idempotent**: if any write fails, all
+changes are rolled back; running it again on an already-adopted project prints
+"nothing to do -- project already adopted" and exits 0. The project must
+validate cleanly (no build errors) before adoption runs — `keys adopt` refuses
+on a broken project.
 
 ---
 
