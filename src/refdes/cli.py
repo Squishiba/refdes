@@ -494,6 +494,14 @@ def cmd_fetch(args) -> int:
             "fetch", "the .refdes/citations.yaml lockfile and .refdes/vendor/"
         )
     project, _stale = _load(args, require_ids=False)
+    # A file that fails to parse is a load error, not a fetch failure -- but
+    # it is still a failure: every citation in that file was never loaded,
+    # so fetching cannot have processed it. Report the load errors (the same
+    # `ERROR  file:line` form check/_report use) and still pin what did load,
+    # then exit 1 for the run as a whole.
+    load_errors = project.errors
+    for d in load_errors:
+        print(str(d), file=sys.stderr)
     try:
         results = citations_mod.fetch_all(
             project, item_id=args.item, path=args.path, update=args.update
@@ -511,8 +519,14 @@ def cmd_fetch(args) -> int:
         verb = "skipped" if r.skipped else "fetched"
         vendored = "vendored" if r.vendored else "hash-only"
         print(f"{verb:8} {r.path}  sha256={r.sha256[:12]}...  {vendored}")
-    print(f"{len(results)} citation(s) processed, {failed} failed")
-    return 1 if failed else 0
+    summary = f"{len(results)} citation(s) processed, {failed} failed"
+    if load_errors:
+        summary += (
+            f"; {len(load_errors)} load error(s) -- citations in files "
+            "that failed to load were not processed"
+        )
+    print(summary)
+    return 1 if (failed or load_errors) else 0
 
 
 def _print_baseline_diff(diff) -> None:

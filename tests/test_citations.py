@@ -600,6 +600,36 @@ def test_cli_fetch_unknown_item_returns_nonzero(citation_project, capsys):
     assert "CMP-999" in capsys.readouterr().err
 
 
+def test_fetch_reports_load_errors_and_exits_nonzero(tmp_path, capsys):
+    """A file that fails to parse must not let fetch report success: the load
+    error prints to stderr, fetch exits 1, and the summary names the files
+    whose citations were not processed."""
+    write_project_config(tmp_path, CITATION_SCHEMA)
+    (tmp_path / "items").mkdir()
+    (tmp_path / "items" / "cmp.yaml").write_text(
+        "items:\n  - id: CMP-001\n    title: [broken\n", encoding="utf-8"
+    )
+    code = cli_mod.main(["-c", str(tmp_path / "refdes-project.yaml"), "fetch"])
+    captured = capsys.readouterr()
+    assert code == 1
+    assert "invalid YAML" in captured.err
+    assert "load error(s)" in captured.out
+    assert "citations in files that failed to load were not processed" in captured.out
+
+
+def test_fetch_with_load_errors_still_pins_valid_citations(tmp_path, capsys):
+    """A project with one broken file still fetches and pins what did load --
+    the bad file reports and fails the run, but doesn't freeze the rest."""
+    _local_project(tmp_path)  # CMP-001 cites docs/sch.pdf
+    (tmp_path / "items" / "bad.yaml").write_text(
+        "items:\n  - id: CMP-999\n    title: [broken\n", encoding="utf-8"
+    )
+    code = cli_mod.main(["-c", str(tmp_path / "refdes-project.yaml"), "fetch"])
+    assert code == 1
+    records = citations_mod.load_lockfile(_load_only(tmp_path))
+    assert "docs/sch.pdf" in records
+
+
 def test_cli_check_refresh_detects_drift(citation_project, monkeypatch, capsys):
     sha_old = hashlib.sha256(b"old").hexdigest()
     _write_citation_lockfile(

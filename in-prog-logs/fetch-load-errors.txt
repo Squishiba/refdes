@@ -1,0 +1,41 @@
+fetch-load-errors progress
+
+Task: `refdes fetch` on a project whose items YAML fails to parse printed
+"0 citation(s) processed, 0 failed" and exited 0 -- success while silently
+skipping every citation in the unparsed file. Fix in `cmd_fetch` only.
+
+- Sync: `git merge --ff-only main` before any edits succeeded (`Already up
+  to date` -- branch ao/refdes-69/root sits on origin/main tip 4496053).
+- Grounding: `_load()` never fails on a broken item file; parse_list_file()
+  records an `invalid YAML: ...` project.error (file/line) and returns no
+  items (`src/refdes/parse.py:672`). `cmd_fetch` (`src/refdes/cli.py:490`)
+  loaded the project, ran fetch_all() over the items that did load, printed
+  its summary, and returned `1 if failed else 0` -- load errors were never
+  printed and never affected the exit code. Repro confirmed on unfixed code.
+- Decision: `_report()`'s error stream (`print(str(d), file=sys.stderr)`,
+  the same loop cmd_id uses) is the "same format other commands use".
+  Diagnostics print right after `_load` (so they surface even if fetch_all
+  then raises CitationError), fetch processing is untouched, the summary
+  line gains "; N load error(s) -- citations in files that failed to load
+  were not processed" only when load_errors is non-empty, and the exit code
+  is `1 if (failed or load_errors) else 0`. No-error projects: identical
+  output and exit code (guarded append + `load_errors` empty).
+- Tests added to tests/test_citations.py (both confirmed FAILING on the
+  unfixed code first: exit was 0, summary claimed success):
+  - test_fetch_reports_load_errors_and_exits_nonzero: broken cmp.yaml only
+    -> exit 1, "invalid YAML" on stderr, summary names load errors.
+  - test_fetch_with_load_errors_still_pins_valid_citations: broken bad.yaml
+    + valid local cite via _local_project -> exit 1 and the lockfile still
+    pins docs/sch.pdf.
+- Changelog fragment: changelog.d/fetch-load-errors.fixed.md (one bullet).
+- Focused suite: `python -m pytest tests/test_citations.py -q` ->
+  75 passed.
+- Full suite: `python -m pytest -q` -> 972 passed (before final rebase).
+- Lint: `python -m ruff check src/refdes/cli.py tests/test_citations.py` ->
+  no findings in cli.py and none in the added test lines; the 13 reported
+  SIM115 findings in test_citations.py are all pre-existing `open(...)`
+  calls at lines 696-877, untouched.
+- Rebase `main` and rerun the full suite on the rebased result before the
+  final commit.
+
+Status: implementation and automated verification complete; commit pending.
