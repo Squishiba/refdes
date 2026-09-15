@@ -510,22 +510,30 @@ shipping; without it, the quiet failure stands and this verdict reverts.
 ### 21 — `extends:` — single-level type inheritance
 
 `bound` is structurally "a `requirement` that carries a number" — the two
-types duplicate nearly every field (`text`, `rationale`, the full `status:`
+types duplicate nearly every field (`title`, `rationale`, the full `status:`
 enum, `coverable`, `include:`, `body:`) for one real difference (`limit:`,
 required). Proposed: single-level `extends:` with universal (Liskov)
 substitution — any `[requirement]` link target accepts a `bound` too, no
 opt-in marker — reasoned through at length in the finding, including
 reversing its own earlier draft's opt-in-marker proposal once finding 22
 established that `satisfies` excluding bounds was a defect, not a deliberate
-boundary. Coverage grouping (bounds under requirements vs. their own
+boundary. The four `[requirement, bound]` link target lists collapse to
+`[requirement]`. Coverage grouping (bounds under requirements vs. their own
 section) becomes a project setting, defaulting to current (separate)
-behavior.
+behavior. `extends:` resolves on the fully merged schema (after base →
+presets → project overlay), so project overlays adding fields to `requirement`
+are inherited by `bound`. Adopting `extends:` for `bound` in `hardware@3`
+churns no hashes (`item.type` stays `"bound"`); no migration.yaml entry is
+needed. Preset adoption (design-debate's `debate`) waits for threads Phase 4.
 
 **Status: design draft.** Spec at [`docs/design/extends.md`](extends.md) —
-states the substitution rule (universal Liskov, no opt-in marker), coverage-
-grouping default (`coverage.group_inherited: false`), single-level
-enforcement, and hardware@3 adoption plan. Awaiting Jared's decisions on
-open questions (extends.md §9) before implementation.
+states the substitution rule (universal Liskov, no opt-in marker), ALLOW vs
+LISTING consumer classification (§3.2), coverage-grouping default
+(`coverage.group_inherited: false`), single-level enforcement, `include:` and
+`body:` inherited, `prefix`/`label`/`plural` declared by child, field
+override replaces whole definition, hardware@3 adoption for `bound` now
+(hash-neutral, no migration), preset adoption after threads Phase 4. Awaiting
+Jared's decisions on open questions (extends.md §9) before implementation.
 
 **Local model: not suitable to design, suitable to implement once specced.**
 What was hard here was the judgement — whether universal (Liskov)

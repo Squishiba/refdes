@@ -24,7 +24,7 @@ backlog entry (finding 21) requires before implementation begins.
 `hardware@v3/base.yaml` lines 128–161 declare `requirement` and `bound` as two
 independent types. They share:
 
-- `text:` / `title:` (v3 unified to `body:` + optional `title:`)
+- `title:` (optional) and `body:` (required)
 - `status:` enum (`draft`, `active`, `retired` with `default: draft`)
 - `rationale:`
 - `coverable: true`
@@ -36,9 +36,12 @@ The only genuine difference is `bound.limit:` — a required `limit` field.
 Everything else is structural duplication. The finding records that this
 duplication also propagates to four separate link target lists that each
 enumerate `[requirement, bound]` explicitly (`bound.derives_from`,
-`test.verifies`, `log.addresses`, `option.met_by` in the design-debate preset),
-and any future requirement-like subtype would need to be added to all of them
-manually.
+`test.verifies`, `log.addresses`, and the design-debate preset's
+`option.met_by`), and any future requirement-like subtype would need to be
+added to all of them manually. With `extends:`, those four lists collapse to
+`[requirement]` — `bound` (and any future subtype) is automatically allowed
+wherever `requirement` is. Separately, `component.constrained_by` is
+traceability-only (finding 7) and does not participate in substitution.
 
 ---
 
@@ -71,27 +74,34 @@ add/override, and scalar overrides (`prefix`, `label`, `plural`, `preview`,
 
 | Property | Inherited? | Notes |
 |---|---|---|
-| `fields` | **yes** (merged, child overrides by key) | Deep merge like `include:` field sets |
+| `fields` | **yes** (merged, child overrides by key) | Deep merge like `include:` field sets; includes fields contributed by parent's `include:` |
+| `include` | **yes** (child may override) | The finding names `include: [provenance, stewardship]` as duplication to remove |
 | `links` | **yes** (merged, child overrides by key) | Target lists replaced, not unioned |
 | `preview` | **yes** (replaced wholesale if child declares it) | |
+| `body` | **yes** (child may override) | The finding names `body:` as duplication to remove; `on_change`/`required` inherited unless overridden |
 | `coverable` | **yes** (child may override) | |
 | `coverable_statuses` | **yes** (child may override) | |
 | `satisfying_statuses` | **yes** (child may override) | |
 | `verifying_statuses` | **yes** (child may override) | |
 | `check_severity` | **yes** (child may override) | |
-| `status` enum `choices`/`default` | **yes** (child may override) | |
-| `prefix` | **no** | Identity-affecting; child must declare |
-| `label` | **no** | Child must declare |
-| `plural` | **no** | Child must declare |
-| `append_only` | **no** | Semantic boundary; child must declare |
-| `body` | **no** | `on_change`/`required` may differ; child must declare |
-| `include` | **no** | Composition mechanism, not inheritance; child declares own |
+| `append_only` | **yes** (child may NOT turn off if parent has `true` — Liskov) | Error if child sets `append_only: false` when parent has `true` |
+| `status` enum `choices`/`default` | **yes** (child may override) | Child overrides *replace* the whole enum definition, not extend |
+| `prefix` | **no** (error if missing) | Identity-affecting; child must declare |
+| `label` | **no** (error if missing) | Child must declare |
+| `plural` | **no** (error if missing) | Child must declare |
 
-Rationale: `prefix`/`label`/`plural`/`append_only`/`body` are **type-identity**
-properties — they affect hashing, rendering, sealing, and authoring conventions.
-Inheriting them would make a subtype silently adopt the parent's identity
-semantics, which is the opposite of what a deliberate specialization should do.
-`include:` is a field-set composition mechanism, orthogonal to type inheritance.
+Rationale: `prefix`/`label`/`plural` are **type-identity** properties — they
+affect hashing, rendering, sealing, and authoring conventions. Inheriting
+them would make a subtype silently adopt the parent's identity semantics,
+which is the opposite of what a deliberate specialization should do.
+
+`include:` and `body:` **are inherited** — the finding explicitly names
+`include: [provenance, stewardship]` and `body: { on_change: invalidate,
+required: true }` as the duplication to remove. A child may override either.
+
+A child may add fields/links and override a field definition (whole
+definition replaced, not deep-merged) or preview. A child may **NOT** make a
+parent-required field optional or turn `append_only` off (Liskov) — error.
 
 ### 2.3 Resolution order
 
@@ -101,9 +111,9 @@ semantics, which is the opposite of what a deliberate specialization should do.
 2. **Selected presets** (each a full `field_sets`/`link_types`/`types` overlay)
 3. **Project overlay** (`refdes-schema.yaml`)
 
-`extends:` resolution is a **fourth pass**, run *after* the three-layer merge
-produces a complete `types` map, but *before* `schema.py` constructs
-`ItemType` objects. Algorithm:
+`extends:` resolution is a **single, fourth pass**, run *after* the three-layer
+merge produces a complete `types` map (i.e., after `_merge_types()` returns),
+but *before* `schema.py` constructs `ItemType` objects. Algorithm:
 
 ```python
 def _resolve_extends(types: dict[str, Any]) -> dict[str, Any]:
@@ -145,9 +155,15 @@ def _resolve_extends(types: dict[str, Any]) -> dict[str, Any]:
 ```
 
 This runs in `standards.py` after `_merge_types()` (line 328) and before
-returning to `schema.py:load_project()` (line 500). The merged, `extends:`-free
-`types` dict then flows through the existing `schema.py` construction loop
-unchanged.
+returning to `schema.py:load_project()` (line 500). The merged,
+`extends:`-free `types` dict then flows through the existing `schema.py`
+construction loop unchanged.
+
+**Key consequence:** because `extends:` resolves on the *fully merged* schema,
+a project overlay that adds a field to `requirement` is automatically
+inherited by `bound`. Single-level enforcement and override legality
+(parent-required fields staying required, `append_only` not turned off) are
+checked on that merged result.
 
 ### 2.4 Composing with presets and project overlay
 
@@ -180,15 +196,24 @@ requirement-like subtype.
 
 ### 3.2 Consumers that must honour substitution
 
-| Consumer | File:line | Change required |
-|---|---|---|
-| Link target validation | `build.py:435` | Expand `allowed` with transitive subtypes before `target.type not in allowed` check |
-| Coverage (`_coverage_for`) | `build.py:589–641` | `satisfier_spec` lookup uses `project.types[satisfier.type]`; must also check parent's `satisfying_statuses`/`verifying_statuses` when subtype declares none |
-| `{{index type=}}` | `blocks.py:163` | Filter `item.type == type_name` → `item.type == type_name or is_subtype(item.type, type_name)` |
-| Nav / document sections | `render.py:90` | Grouping for coverage reports (see §4); item listing unchanged |
-| Schema JSON (completion) | `schema_json.py:146` | Emit subtype as its own branch *and* include in parent's discriminated union for completion |
-| Stub tests | `stub_tests.py` | `already_covered` check uses `resolved_links`; subtype links already resolve correctly via link validation |
-| Imports | `imports.py` | Cross-project link validation uses same `resolve_link_target`; inherits fix automatically |
+| Consumer | File:line | Kind | Change required |
+|---|---|---|---|
+| Link target validation | `build.py:435` | ALLOW | Expand `allowed` with transitive subtypes before `target.type not in allowed` check |
+| Schema JSON link-target completion | `schema_json.py:146` | ALLOW | Emit subtype in parent's discriminated union for completion |
+| Stub tests eligibility | `stub_tests.py` | ALLOW | `already_covered` check uses `resolved_links`; subtype links already resolve correctly via link validation |
+| Group/conforms_to type test | `build.py` coverage | ALLOW | Any type test that decides whether a type is in a set must use `is_subtype` |
+| `{{index type=}}` | `blocks.py:163` | LISTING | Filter `item.type == type_name` — **must NOT** include subtypes by default; opt-in parameter for subtype inclusion |
+| Nav / document sections | `render.py:90` | LISTING | Grouping for coverage reports (see §4); item listing unchanged |
+| `refdes ls --type` | `cli.py` | LISTING | Lists concrete type only by default; subtype inclusion is explicit opt-in |
+
+The **Kind** column distinguishes:
+- **ALLOW** — substitution applies: the consumer decides *whether something is
+  allowed* based on a type list. `is_subtype(child, parent)` must return true
+  here.
+- **LISTING** — substitution does **not** apply by default: the consumer
+  produces output grouped by or filtered to a concrete type. The concrete type
+  stays visible; subtype inclusion is an explicit opt-in (e.g. an index
+  parameter). The coverage-grouping setting (§4) controls presentation only.
 
 ### 3.3 Implementation: `is_subtype` helper
 
@@ -213,6 +238,15 @@ def is_subtype(child: str, parent: str, subtype_map: dict[str, set[str]]) -> boo
 transitive closure needed — but the function is written to accept it if the
 restriction is ever lifted.
 
+**ALLOW consumers** (link validation, schema_json completion, stub tests,
+group/conforms_to tests) call `is_subtype(target.type, allowed_type, map)`.
+
+**LISTING consumers** (`{{index type=}}`, nav/document sections, `refdes ls
+--type`) do **not** call `is_subtype` by default — they filter on
+`item.type == type_name` exactly. The coverage-grouping setting (§4) is a
+separate presentation control that groups subtypes under their parent for
+display; it does not change which items are listed.
+
 ---
 
 ## 4. Coverage grouping default
@@ -231,6 +265,11 @@ subtypes under their parent type's section (e.g., `bound` items appear under
 "Requirements" with a "(bound)" badge). The default `false` preserves today's
 output exactly — adopting `extends:` changes no existing project's coverage
 rendering.
+
+**This setting controls presentation only.** It does not affect which items
+participate in coverage computation (that is governed by the ALLOW consumers
+in §3.2), nor does it change `{{index type=}}`, `refdes ls --type`, or nav
+sections — those remain concrete-type listings by default.
 
 ### 4.2 Implementation
 
@@ -255,45 +294,44 @@ def _coverage_group_key(item: Item, project: Project, group_inherited: bool) -> 
 ### 5.1 Type name in hash
 
 `build.py:1007` (`_hash_payload`) includes `payload["type"] = item.type`. This
-**does not change** — the concrete type name stays in the hash. Consequence:
+**does not change** — the concrete type name stays in the hash. Because
+`bound: {extends: requirement}` keeps `item.type == "bound"` (the child type
+name is preserved, not replaced by the parent), adopting `extends:` churns **no
+hashes** as long as `bound` resolves to the same fields/links/body as today.
+The `type` field in the hash payload is the concrete type (`"bound"`), not the
+parent (`"requirement"`).
 
-- Converting `bound` from a standalone type to `extends: requirement` in a
-  standard changelog **churns content hashes** for every `bound` item (its
-  `type` field changes from `"bound"` to `"requirement"`).
-- This is the same as any type rename (`constraint` → `bound`, `text` →
-  `title`) and is handled by `revise.py`'s existing baseline/seal carry-forward
-  machinery (`_carry_forward_baselines`, `_carry_forward_seals`).
-
-### 5.2 Migration story for `hardware@3`
+### 5.2 Migration story for `hardware@3` — no migration needed
 
 Since `hardware@3` is still `[Unreleased]` (per `CHANGELOG.md` and `threads.md`
 top-of-document decision), it can **amend `base.yaml` directly** rather than
 opening a `hardware@4`:
 
-1. Change `bound` in `base.yaml` to declare `extends: requirement` + delta.
-2. Add `hardware@v3/migration.yaml`:
-   ```yaml
-   types:
-     bound: requirement   # type rename; delta fields carried by extends:
-   fields:
-     requirement:         # keyed by OLD type name
-       limit: null        # not a rename; limit is new on bound, so no field mapping needed
-   ```
-   (Actually, since `extends:` resolution happens at load time, the migration
-   only needs the type rename; the delta is expressed in the new `base.yaml`.)
+1. Change `bound` in `base.yaml` to declare `extends: requirement` + delta
+   (the `limit:` field).
+2. **No `migration.yaml` entry is needed.** A `types: {bound: requirement}`
+   entry would convert every `bound` into a `requirement`, changing
+   `item.type` and churning hashes — exactly what we avoid by using
+   `extends:` instead.
+3. The acceptance test is that every type's *resolved schema* (the
+   `ItemType` objects after `extends:` resolution) is identical before/after.
+   Compare the resolved `ItemType` definitions field-by-field, link-by-link,
+   scalar-by-scalar. If they match, the change is hash-, baseline-, and
+   seal-neutral — no migration, no `revise.py` carry-forward, no standard
+   upgrade path change.
 
-3. `refdes standard upgrade --to 3` runs `revise.apply()` with this mapping,
-   carrying hashes forward via the existing conditional rule (match old hash
-   → swap to new-format hash).
-
-**Cost:** one `migration.yaml` entry (~5 lines), standard upgrade path unchanged.
-**Benefit:** ~40 lines of duplication removed from `base.yaml`; design-debate
-preset can specialize `decision` instead of redeclaring it fully.
+**Cost:** ~40 lines of duplication removed from `base.yaml`, replaced with
+~15 lines of `extends: requirement` + delta.
+**Benefit:** design-debate preset can specialize `decision` instead of
+redeclaring it fully; future requirement-like subtypes need only declare
+their delta.
 
 ### 5.3 Existing projects on `hardware@2`
 
 Unaffected — they pin `version: 2` and see no `extends:` mechanism. Upgrading
-to `@3` follows the normal `refdes standard upgrade` path with hash carry-forward.
+to `@3` follows the normal `refdes standard upgrade` path. Since the resolved
+`bound` type is identical (same fields, links, body), and `item.type` stays
+`"bound"`, hashes do not churn — the upgrade is hash-neutral.
 
 ---
 
@@ -324,24 +362,37 @@ ERROR  refdes-schema.yaml:12 — types.thermal_bound.extends names 'bound',
 
 ## 7. `hardware@3` adoption and interaction with `threads.md`
 
-### 7.1 Recommendation: adopt in `hardware@3`
+### 7.1 Recommendation: adopt `bound extends requirement` in `hardware@3` now
 
 `hardware@3` is the pinned version for this repository and is still
 `[Unreleased]`. The `threads.md` decision (2026-09-14) states that the
 `log`/`decision` merge lands in `hardware@3`, not a new `hardware@4`.
-`extends:` is an orthogonal engine feature — adopting it for `bound` in the
+`extends:` for `bound` is an orthogonal engine feature — adopting it in the
 same version is consistent and avoids a version bump solely for this.
 
 **Cost:**
 - `base.yaml`: ~40 lines removed from `bound`, replaced with ~15 lines of
   `extends: requirement` + delta.
-- `migration.yaml`: one `types: {bound: requirement}` entry.
+- **No `migration.yaml` entry needed** — the resolved `bound` type is
+  identical, hashes don't churn.
 - Zero engine changes beyond the `extends:` implementation itself.
 
-**Interaction with threads:** None. `threads.md` Phase 4 merges `log` and
-`decision` into a unified `log` type with `follows:` chaining. `extends:`
-operates on the type system (`requirement`/`bound`); `threads` operates on
-the `log`/`decision` vocabulary. They touch disjoint type sets.
+### 7.2 Preset adoption waits for threads Phase 4
+
+The threads interaction is real for **presets**. The design-debate preset's
+`debate` type is substantially a `decision` (it shares `title`, `status`,
+`rationale`, `date`, `options`, `checks`, `include: [provenance, stewardship,
+citations]`, `satisfies: [requirement, bound]`, `constrained_by: [bound]`,
+`supersedes`, `selects`, `blocked_by`, `recorded_by: [log]`, `part_of:
+[group]`, `body:`). `threads.md` Phase 4 retires `decision` into `log` in
+`hardware@3` — when that lands, `debate` would extend the new unified `log`
+type (or a new `thread_entry` type), not `decision`.
+
+**State:** preset adoption of `extends:` waits until after threads Phase 4.
+Once `decision` is retired and the thread entry type exists, the design-debate
+preset's `debate` would declare `extends: <thread_entry_type>` (name TBD by
+threads Phase 4) with its delta (primarily the `options`/`checks` fields and
+any debate-specific links).
 
 ---
 
@@ -356,17 +407,17 @@ the `log`/`decision` vocabulary. They touch disjoint type sets.
 
 ---
 
-## 9. Open questions for Jared
+## 9. Open questions for Jared (recommended, Jared to decide)
 
-1. **`prefix` inheritance** — Finding 21 draft shows `bound` keeping `BND`. I recommend **NOT inherited** (prefix is identity-affecting; a subtype must declare its own). Agree?
+1. **`prefix`/`label`/`plural` declared by child** — **Recommended: YES** (not inherited; error if missing). Prefix/label/plural are identity-affecting; a subtype must declare its own. `bound` keeps `BND`/`Bound`/`Bounds`.
 
-2. **`coverable`/`coverable_statuses` inheritance** — I recommend **YES** (subtype inherits coverage semantics unless explicitly overridden). A `bound` that didn't inherit `coverable: true` would silently drop out of coverage. Agree?
+2. **`coverable` inherited** — **Recommended: YES**. Subtype inherits coverage semantics unless explicitly overridden. A `bound` that didn't inherit `coverable: true` would silently drop out of coverage.
 
-3. **Coverage grouping setting name** — `coverage.group_inherited` vs `coverage.group_by_parent`. I recommend `group_inherited` (describes what it does). Agree?
+3. **Coverage grouping setting name** — **Recommended: `coverage.group_inherited`**. Describes what it does (groups inherited subtypes under parent). Alternative `group_by_parent` is less precise.
 
-4. **Other `extends:` candidates in `hardware@3`** — Only `bound` identified. `group` is deliberately `coverable: false` and non-satisfiable; `log`/`decision` merge is separate (threads.md). Any others?
+4. **Field override replaces whole definition** — **Recommended: YES**. A child overriding a field replaces the entire field definition (not deep-merged), matching `links` and `preview` semantics. This is simpler and matches the existing `_merge_type_dict` behavior for scalars.
 
-5. **`status` enum inheritance detail** — Child inherits parent's `choices`/`default` but may override. If child overrides `choices`, does it *replace* or *extend*? Recommend **replace** (simpler, matches field/link merge semantics). Agree?
+5. **`hardware@3` adopts `extends:` for `bound` now; presets after threads Phase 4** — **Recommended: YES**. `bound extends requirement` lands in `hardware@3` immediately (no migration, hash-neutral). Design-debate preset's `debate` waits for threads Phase 4 (when `decision` retires into `log`/`thread_entry`), then extends the new thread entry type.
 
 ---
 
@@ -387,11 +438,12 @@ the `log`/`decision` vocabulary. They touch disjoint type sets.
   new projects (`refdes init` writes `group_inherited: true`), keep `false`
   for existing. This is a policy choice, not a technical one.
 
-- **`prefix` not inherited.** If `prefix` were inherited, `bound` would
-  automatically get `REQ` and lose its distinct `BND` prefix — which breaks
-  the visual distinction authors rely on. But it also means every subtype
-  must redeclare `prefix`, `label`, `plural`. That's intentional (explicit
-  identity), but verbose for deep specializations (not allowed here anyway).
+- **`prefix`/`label`/`plural` not inherited.** If `prefix` were inherited,
+  `bound` would automatically get `REQ` and lose its distinct `BND` prefix —
+  which breaks the visual distinction authors rely on. But it also means
+  every subtype must redeclare `prefix`, `label`, `plural`. That's
+  intentional (explicit identity), but verbose for deep specializations (not
+  allowed here anyway).
 
 - **Single-level restriction.** If a project wants `thermal_bound extends
   bound extends requirement`, they cannot. They must write `thermal_bound
@@ -399,10 +451,9 @@ the `log`/`decision` vocabulary. They touch disjoint type sets.
   deliberate simplicity boundary; lifting it adds transitive closure logic
   and diamond-inheritance questions for marginal gain.
 
-- **`include:` not inherited.** A child type must redeclare `include: [...]`
-  if it wants the same field sets. This is verbose but correct: `include:`
-  composes *fields*, `extends:` composes *type semantics*. Mixing them would
-  make `include:` order-dependent on the inheritance chain.
+- **`include:` and `body:` ARE inherited.** This is the point of the finding
+  — removing the duplication. A child may override either, but the default
+  is inheritance, not redeclaration.
 
 ---
 
