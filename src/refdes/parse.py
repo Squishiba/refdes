@@ -67,13 +67,21 @@ _RENAMED_TYPES: dict[str, str] = {
 
 _SafeLoaderClass = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
 
+# Always-pure-Python loader for byte-identical YAML error diagnostics.
+_PurePythonLoaderBase = yaml.SafeLoader
+
 
 class _LineLoader(_SafeLoaderClass):
     """SafeLoader (C when libyaml installed, else pure-Python) that tags each mapping with line."""
 
 
-def _construct_mapping(loader: _LineLoader, node: yaml.MappingNode) -> dict:
-    mapping = _SafeLoaderClass.construct_mapping(loader, node, deep=True)
+class _PurePythonLineLoader(_PurePythonLoaderBase):
+    """Always pure-Python SafeLoader for byte-identical YAML error diagnostics."""
+
+
+def _construct_mapping(loader, node: yaml.MappingNode) -> dict:
+    base = loader.__class__.__bases__[0] if loader.__class__.__bases__ else type(loader)
+    mapping = base.construct_mapping(loader, node, deep=True)
     mapping["__line__"] = node.start_mark.line + 1
     return mapping
 
@@ -81,12 +89,20 @@ def _construct_mapping(loader: _LineLoader, node: yaml.MappingNode) -> dict:
 _LineLoader.add_constructor(
     yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, _construct_mapping
 )
+_PurePythonLineLoader.add_constructor(
+    yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, _construct_mapping
+)
 
 
 def yaml_safe_load(stream_or_text) -> Any:
-    """Load YAML with libyaml when available; same resolver/semantics as SafeLoader."""
-    return yaml.load(stream_or_text, Loader=_SafeLoaderClass)
-
+    """Load YAML with libyaml when available; same resolver/semantics as SafeLoader.
+    On any YAML parse error, retry with the pure-Python loader and raise the
+    pure-Python exception so diagnostics stay byte-identical to the pre-C-loader
+    behaviour (libyaml's exception messages and caret placement differ)."""
+    try:
+        return yaml.load(stream_or_text, Loader=_SafeLoaderClass)
+    except yaml.YAMLError:
+        return yaml.load(stream_or_text, Loader=_PurePythonLoaderBase)
 
 def _strip_lines(obj: Any) -> Any:
     """Remove the __line__ bookkeeping key from nested structures."""
@@ -95,7 +111,6 @@ def _strip_lines(obj: Any) -> Any:
     if isinstance(obj, list):
         return [_strip_lines(v) for v in obj]
     return obj
-
 
 def _relpath(project: Project, path: str) -> str:
     try:
@@ -478,11 +493,12 @@ def _build_item(
             )
 
     return item
-
-
 def _yaml_mapping(text: str) -> dict | None:
     """Parse `text` as YAML, returning it only if it is a mapping (empty -> {})."""
-    parsed = yaml.load(text, Loader=_LineLoader)
+    try:
+        parsed = yaml.load(text, Loader=_LineLoader)
+    except yaml.YAMLError:
+        parsed = yaml.load(text, Loader=_PurePythonLineLoader)
     if parsed is None:
         return {}
     return parsed if isinstance(parsed, dict) else None
@@ -639,7 +655,14 @@ def parse_list_file(project: Project, path: str) -> list[Item]:
     try:
         raw = yaml.load(text, Loader=_LineLoader) or {}
     except yaml.YAMLError as exc:
-        message, err_line = _yaml_error_report(exc, text.split("\n"), offset=0)
+        exc_py = None
+        try:
+            yaml.load(text, Loader=_PurePythonLineLoader) or {}
+        except yaml.YAMLError as exc_py_inner:
+            exc_py = exc_py_inner
+        message, err_line = _yaml_error_report(
+            exc_py if exc_py is not None else exc, text.split("\n"), offset=0
+        )
         project.error(f"invalid YAML: {message}", file=rel, line=err_line)
         return []
 
@@ -658,11 +681,6 @@ def parse_list_file(project: Project, path: str) -> list[Item]:
         project.error("'items:' must be a list", file=rel, line=1)
         return []
 
-    # `- section: <type>` (finding 6): a marker entry, not an item -- asserts
-    # the type for every entry after it until the next section or end of
-    # list. Interleaving two types under one section is structurally
-    # impossible rather than something to lint for after the fact, since an
-    # item that names a conflicting type is simply an error (_apply_section).
     section_type: str | None = None
     section_line: int | None = None
 
@@ -693,8 +711,6 @@ def parse_list_file(project: Project, path: str) -> list[Item]:
         if item:
             out.append(item)
     return out
-
-
 def source_files(project: Project) -> list[str]:
     items_dir = os.path.join(project.root, "items")
     found: list[str] = []
