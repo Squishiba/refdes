@@ -12,9 +12,9 @@ from markdown_it import MarkdownIt
 
 from . import blocked as blocked_mod
 from . import blocks as blocks_mod
-from . import chains as chains_mod
 from . import boards as boards_mod
 from . import calc, dates, imports, seal
+from . import chains as chains_mod
 from . import citations as citations_mod
 from . import ids as ids_mod
 from . import keys as keys_mod

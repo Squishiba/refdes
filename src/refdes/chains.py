@@ -128,6 +128,12 @@ def resolve_current(project: Project, start: Item | str, field: str) -> Any | No
     the nearest entry that declares it. An entry omitting the field does not
     clear it. Two entries at the same nearest distance declaring different
     values is ambiguous: None.
+
+    "Declares it" means the entry's own keys said so. A value handed down by
+    the file's `defaults:` block is present in `item.fields` but named in
+    `item.inherited_fields`, and is not this entry declaring anything: a log
+    file defaulting `status: proposed` would otherwise have every silent
+    entry in it shadow the `accepted` its head actually wrote.
     """
     found = tips(project, start)
     if len(found) != 1:
@@ -147,6 +153,7 @@ def resolve_current(project: Project, start: Item | str, field: str) -> Any | No
             items[node].fields[field]
             for node in frontier
             if field in items[node].fields
+            and field not in items[node].inherited_fields
         ]
         if declared:
             first = declared[0]

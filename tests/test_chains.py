@@ -38,7 +38,7 @@ types:
 def _project(tmp_path, items_yaml):
     write_project_config(tmp_path, CHAIN_SCHEMA)
     items = tmp_path / "items"
-    items.mkdir()
+    items.mkdir(exist_ok=True)
     (items / "log.yaml").write_text(items_yaml, encoding="utf-8")
     project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
     parse.load_items(project)
@@ -206,6 +206,39 @@ def test_a_project_with_no_follows_anywhere_reports_nothing(tmp_path):
     )
     assert project.diagnostics == []
     assert chains.build_graph(project) == ({}, {})
+
+
+def test_a_field_inherited_from_the_file_defaults_does_not_declare_it(tmp_path):
+    """§3's fold is "the most recent entry that *declared* F", and a value a
+    file's `defaults:` block handed down is not the entry declaring it --
+    otherwise a log file defaulting `status: proposed` would have every
+    silent entry in it shadow the `accepted` its head actually set."""
+    project = _project(
+        tmp_path,
+        "defaults: { type: log, status: proposed }\n"
+        "items:\n"
+        "  - id: LOG-001\n    summary: Head.\n    status: accepted\n"
+        "  - id: LOG-002\n    summary: Second.\n    follows: [LOG-001]\n"
+        "  - id: LOG-003\n    summary: Third.\n    follows: [LOG-002]\n",
+    )
+    head, middle, last = (_by_id(project, f"LOG-00{n}") for n in (1, 2, 3))
+    assert "status" in middle.fields and "status" in middle.inherited_fields
+    assert "status" in head.fields and "status" not in head.inherited_fields
+
+    assert chains.resolve_current(project, head, "status") == "accepted"
+    assert chains.resolve_current(project, middle, "status") == "accepted"
+    assert chains.resolve_current(project, last, "status") == "accepted"
+
+    # And with no explicit declaration anywhere, the default alone is not a
+    # value the fold reports: nothing in the chain ever declared it.
+    silent = _project(
+        tmp_path,
+        "defaults: { type: log, status: proposed }\n"
+        "items:\n"
+        "  - id: LOG-001\n    summary: Head.\n"
+        "  - id: LOG-002\n    summary: Second.\n    follows: [LOG-001]\n",
+    )
+    assert chains.resolve_current(silent, _by_id(silent, "LOG-001"), "status") is None
 
 
 def test_an_unresolvable_follows_target_is_not_an_edge(tmp_path):
