@@ -575,6 +575,64 @@ def test_figure_reference_resolves_on_the_per_board_log_page(tmp_path):
     assert '<span class="fig-num"' not in html
 
 
+LOG_TWO_BOARD_FIG_SCHEMA = LOG_FIG_SCHEMA + """boards:
+  power: {label: Power}
+  control: {label: Control}
+"""
+
+
+def test_per_board_log_page_numbers_figures_against_its_own_entries(tmp_path):
+    """Figure numbering on `log-<board>.html` is per page: each board's page
+    must number its own entries' figures from 1, however many other boards'
+    figures the unscoped `log.html` interleaves before them. A closure
+    accidentally built over *every* log entry in the project would number
+    control's first figure "Figure 2" -- after power's older figure -- even
+    though "Figure 1" is what this page actually shows."""
+    write_project_config(tmp_path, LOG_TWO_BOARD_FIG_SCHEMA)
+    power = tmp_path / "items" / "power"
+    power.mkdir(parents=True)
+    (power / "figures").mkdir()
+    (power / "figures" / "alpha.png").write_bytes(FIG_PNG)
+    control = tmp_path / "items" / "control"
+    control.mkdir(parents=True)
+    (control / "figures").mkdir()
+    (control / "figures" / "curve.png").write_bytes(FIG_PNG)
+    (power / "log-001.md").write_text(
+        "---\n"
+        "id: LOG-001\n"
+        "type: log\n"
+        "date: 2026-01-05\n"
+        "summary: Alpha measured on the power board.\n"
+        "---\n\n"
+        '![alpha](figures/alpha.png){id="fig-a" caption="Alpha"}\n',
+        encoding="utf-8",
+    )
+    (control / "log-002.md").write_text(
+        "---\n"
+        "id: LOG-002\n"
+        "type: log\n"
+        "date: 2026-01-06\n"
+        "summary: Control curve measured on the control board.\n"
+        "---\n\n"
+        "See [[fig:fig-b]].\n\n"
+        '![the control curve](figures/curve.png){id="fig-b" caption="Control curve"}\n',
+        encoding="utf-8",
+    )
+    out = _build_and_render(tmp_path)
+
+    # Lock the premise: by date LOG-001 precedes LOG-002, so the unscoped log
+    # numbers fig-a first and fig-b second -- a wrong closure only surfaces as
+    # a wrong number because of this ordering.
+    unscoped = open(os.path.join(out, "log.html"), encoding="utf-8").read()
+    assert "<figcaption>Figure 1 — Alpha</figcaption>" in unscoped
+    assert "<figcaption>Figure 2 — Control curve</figcaption>" in unscoped
+
+    html = open(os.path.join(out, "log-control.html"), encoding="utf-8").read()
+    assert "<figcaption>Figure 1 — Control curve</figcaption>" in html
+    assert '<a class="ref fig-ref" href="#fig-b">Figure 1</a>' in html
+    assert "fig-a" not in html
+
+
 LOG_WORKSPACE_FIG_SCHEMA = LOG_FIG_SCHEMA + """workspaces:
   product-a: {label: Product A}
 """
@@ -607,6 +665,58 @@ def test_figure_reference_resolves_on_the_per_workspace_log_page(tmp_path):
     assert '<a class="ref fig-ref" href="#fig-curve">Figure 1</a>' in html
     assert "fig-ref-pending" not in html
     assert '<span class="fig-num"' not in html
+
+
+LOG_TWO_WORKSPACE_FIG_SCHEMA = LOG_FIG_SCHEMA + """workspaces:
+  product-a: {label: Product A}
+  product-b: {label: Product B}
+"""
+
+
+def test_per_workspace_log_page_numbers_figures_against_its_own_entries(tmp_path):
+    """Same shape on the workspace side: `log-<workspace>.html` numbers its
+    own entries' figures from 1 even though the unscoped `log.html` has
+    numbered those same figures 1 and 2 across both workspaces' entries."""
+    write_project_config(tmp_path, LOG_TWO_WORKSPACE_FIG_SCHEMA)
+    items = tmp_path / "items"
+    items.mkdir()
+    figures = items / "figures"
+    figures.mkdir()
+    (figures / "alpha.png").write_bytes(FIG_PNG)
+    (figures / "curve.png").write_bytes(FIG_PNG)
+    (items / "log-001.md").write_text(
+        "---\n"
+        "id: LOG-001\n"
+        "type: log\n"
+        "date: 2026-01-05\n"
+        "summary: Alpha measured for product A.\n"
+        "workspace: product-a\n"
+        "---\n\n"
+        '![alpha](figures/alpha.png){id="fig-a" caption="Alpha"}\n',
+        encoding="utf-8",
+    )
+    (items / "log-002.md").write_text(
+        "---\n"
+        "id: LOG-002\n"
+        "type: log\n"
+        "date: 2026-01-06\n"
+        "summary: Control curve measured for product B.\n"
+        "workspace: product-b\n"
+        "---\n\n"
+        "See [[fig:fig-b]].\n\n"
+        '![the control curve](figures/curve.png){id="fig-b" caption="Control curve"}\n',
+        encoding="utf-8",
+    )
+    out = _build_and_render(tmp_path)
+
+    unscoped = open(os.path.join(out, "log.html"), encoding="utf-8").read()
+    assert "<figcaption>Figure 1 — Alpha</figcaption>" in unscoped
+    assert "<figcaption>Figure 2 — Control curve</figcaption>" in unscoped
+
+    html = open(os.path.join(out, "log-product-b.html"), encoding="utf-8").read()
+    assert "<figcaption>Figure 1 — Control curve</figcaption>" in html
+    assert '<a class="ref fig-ref" href="#fig-b">Figure 1</a>' in html
+    assert "fig-a" not in html
 
 
 # -------------------------------------------------- explicit reference regression
