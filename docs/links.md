@@ -33,9 +33,12 @@ build error.
 
 When a link target has a surrogate key, the tool rewrites the bare reference
 in the source file to a composite `DISPLAY-ID@key` form on the next **writable**
-load. This runs in `cli._load()` for **every command that loads the project**
-unless `--no-write` is given — i.e. all commands except `init` (which creates a
-new project) and `new` (which only prints a template). For example:
+load. This runs when the project is loaded for `check`, `build`, `revision`,
+`release`, `index`, `ls`, `id`, `fetch`, `audit`, `stub-tests`, and
+`former-ids propose` unless `--no-write` is given. It does **not** run for
+`init`, `new`, `schema`, `standard add-preset`, `standard remove-preset`,
+`revise`, `standard upgrade`, or `keys adopt` (these load the project
+differently). For example:
 
 ```yaml
 # Author writes:

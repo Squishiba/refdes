@@ -169,12 +169,12 @@ A baseline's whole point is to stay legible after the live item is gone —
 Each baseline entry records `hash_format` (currently **3** — see `build.HASH_FORMAT`).
 When the hash definition evolves (format 1: display-id link targets; format 2:
 resolved-key link targets, raw `checks: against:`; format 3: `checks: against:`
-also reduced to keys), `migrate_hash_format` runs on load. It recomputes each
-legacy-format entry's hash under its recorded definition against the live item:
-if it matches, the entry is carried forward to the current format; if not, it
-is reported as `uncomparable` (the item genuinely changed). This keeps a
-baseline diff from falsely flagging every item as "changed" when only the hash
-definition moved. `refdes audit` lists `uncomparable` entries per baseline.
+also reduced to keys), the migration runs on load. Each legacy-format entry's
+hash is recomputed under its recorded definition against the live item: if it
+matches, the entry is carried forward to the current format; if not, it is
+reported as `uncomparable` (the item genuinely changed). This keeps a baseline
+diff from falsely flagging every item as "changed" when only the hash definition
+moved. `refdes audit` lists `uncomparable` entries per baseline.
 
 ### `stamped_by`
 
