@@ -1,0 +1,14 @@
+Task: finish libyaml parsing change.
+
+2026-09-15
+- Step 0: `git merge --ff-only main` succeeded; branch was already current.
+- Cherry-picked every commit on `ao/refdes-61/root` not on main, oldest first: db9be93 -> 15781be, 4ee70a3 -> 0fe520a, 0d38560 -> 1198471.
+- Inspection: `yaml_safe_load()` uses CSafeLoader and retries SafeLoader from a buffered text stream; parse list files retry the pure-Python line loader to preserve diagnostic text. Restored the deleted YAML list section-marker comment verbatim from `git show main:src/refdes/parse.py`.
+- Captured a clean main archive probe: boards, seals, ledger, lockfile, baseline, settings, schema overlay, and standards loaders all raise `yaml.parser.ParserError` for `a: [unterminated`; the adoption-marker check returns `False` because it intentionally catches YAML errors.
+- Added malformed-file guards for every loader, real list-path diagnostic parity tests for all requested malformed forms, and front-matter-only parse equivalence coverage. Corrected the changelog fragment format. Targeted tests: 9 passed.
+- Initial clean-archive output comparison was blocked by main advancing after this branch started: root generated 41 files, with only assets/style.css differing because current main had a newly landed thread-style addition absent from this unrebase branch.
+- Wrote the requested 2,000 two-entry-thread full-build benchmark in .scratch and smoke-tested its workload on this branch: 0.723958 s.
+- Final rebase onto current main succeeded with no conflicts. Rebased clean-archive parity passed: root project 41 files compared, 0 differ; docs-site 35 files compared, 0 differ; both `refdes index` JSON outputs were identical.
+- Back-to-back full benchmark after rebase: main 2.195164 s; branch 0.724106 s.
+- Final verification: `python -m ruff check src/refdes/parse.py tests/test_parse_equivalence.py tests/test_yaml_loaders.py` passed; `python -m pytest -q` passed 911 tests in 54.29 s.
+- Finished.

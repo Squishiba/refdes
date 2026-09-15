@@ -1,60 +1,102 @@
-"""YAML diagnostics must be byte-identical: C loader uses pure-Python fallback on error."""
+"""YAML diagnostics and real loaders retain their pre-libyaml failure behavior."""
 
 from __future__ import annotations
 
-import yaml
+from pathlib import Path
 
-from refdes.parse import _PurePythonLineLoader, _yaml_error_report, yaml_safe_load
+import pytest
+import yaml
+from conftest import write_project_config
+from helpers import COVERAGE_SCHEMA
+
+from refdes import boards, citations, ids, keys, lifecycle, parse, seal, standards
+from refdes.parse import _PurePythonLineLoader, _yaml_error_report
+from refdes.schema import SCHEMA_NAME, load_project
 
 MALFORMED = [
-    ("bad indentation", "items:\n  - id: A\n    text: ok\n\tbad: x\n"),
-    ("unclosed flow list", "items:\n  - id: A\n    text: [ unterminated\n"),
-    ("tab indentation", "items:\n  - id: A\n    text: fine\n\tbad: x\n"),
-    ("unterminated quoted scalar", 'items:\n  - id: A\n    text: "unterminated\n'),
-    ("bad block scalar (>=)", "items:\n  - id: A\n    limit: >= 9 V\n"),
-    ("double mapping key", "items:\n  - id: A\n    text: a: b: c\n"),
+    ("tab indentation", "items:\n  - id: REQ-001\n\ttext: tabbed\n"),
+    ("unclosed flow list", "items:\n  - id: REQ-001\n    text: [ unterminated\n"),
+    (
+        "unterminated double-quoted scalar",
+        'items:\n  - id: REQ-001\n    text: "unterminated\n',
+    ),
+    ("bare > broken", "items:\n  - id: REQ-001\n    text: > broken\n"),
+    ("bare >= 9 V", "items:\n  - id: REQ-001\n    limit: >= 9 V\n"),
+    ("nested mapping", "items:\n  - id: REQ-001\n    text: a: b: c\n"),
+    (
+        "bad dedent",
+        "items:\n  - id: REQ-001\n    text: fine\n   type: requirement\n",
+    ),
 ]
 
-def test_diagnostic_parity_for_malformed_yaml():
-    for label, text in MALFORMED:
-        lines = text.split("\n")
-        # Direct pure-Python load (always pure-python exception)
-        try:
-            yaml.load(text, Loader=_PurePythonLineLoader)
-        except yaml.YAMLError as exc_py:
-            msg_py, line_py = _yaml_error_report(exc_py, lines, offset=0)
-        else:
-            msg_py = line_py = None  # Should never succeed for malformed input
 
-        # Our shared helper (retries pure-Python on C error)
-        try:
-            yaml_safe_load(text)
-        except yaml.YAMLError as exc_refdes:
-            msg_refdes, line_refdes = _yaml_error_report(exc_refdes, lines, offset=0)
-        else:
-            msg_refdes = line_refdes = None
+def _pure_diagnostic(text: str) -> tuple[str, int]:
+    with pytest.raises(yaml.YAMLError) as error:
+        yaml.load(text, Loader=_PurePythonLineLoader)
+    message, line = _yaml_error_report(error.value, text.split("\n"), offset=0)
+    return f"invalid YAML: {message}", line
 
-        assert msg_refdes is not None, f"{label}: refdes helper did not raise"
-        assert msg_py is not None, f"{label}: pure-python loader did not raise"
-        assert msg_refdes == msg_py, (
-            f"{label}: message mismatch\nrefdes: {msg_refdes!r}\npure: {msg_py!r}"
-        )
-        assert line_refdes == line_py, f"{label}: line mismatch {line_refdes} vs {line_py}"
-        # The caret excerpt must be present in the message when the pure-Python loader includes it.
-        # Since our retry reports the pure-Python exception, it should include the same excerpt.
-        assert msg_refdes.startswith(str(msg_py)) or msg_refdes == msg_py
 
-def test_yaml_safe_load_with_file_handle_raises_on_malformed():
-    """Stream handles must not silently return empty on error."""
-    import tempfile
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as fh:
-        fh.write("items:\n  - id: A\n    text: [ unterminated\n")
-        path = fh.name
-    with open(path, "r", encoding="utf-8") as stream:
-        try:
-            from refdes.parse import yaml_safe_load
-            yaml_safe_load(stream)
-        except yaml.YAMLError:
-            pass  # Expected: must raise, not return None
-        else:
-            raise AssertionError("yaml_safe_load(stream) did not raise on malformed YAML")
+@pytest.mark.parametrize(("label", "text"), MALFORMED, ids=lambda case: case[0])
+def test_real_list_loader_matches_pure_python_diagnostic(tmp_path, label, text):
+    """The user-facing diagnostic, including PyYAML's caret excerpt, is exact."""
+    write_project_config(tmp_path, COVERAGE_SCHEMA)
+    items = tmp_path / "items"
+    items.mkdir()
+    (items / "bad.yaml").write_text(text, encoding="utf-8")
+
+    project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
+    parse.load_items(project)
+
+    expected = _pure_diagnostic(text)
+    actual = [(diagnostic.message, diagnostic.line) for diagnostic in project.errors]
+    assert "^" in expected[0], f"{label}: pure-Python diagnostic lost its caret excerpt"
+    assert actual == [expected], f"{label}: real loader diagnostic differs from SafeLoader"
+
+
+def _write_malformed(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("a: [unterminated\n", encoding="utf-8")
+
+
+def test_real_loaders_keep_main_malformed_yaml_behavior(tmp_path):
+    """Clean-main probe: every loader raised YAMLError, except is_adopted=False."""
+    write_project_config(tmp_path, COVERAGE_SCHEMA)
+    project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
+
+    _write_malformed(Path(boards.manifest_path(project)))
+    with pytest.raises(yaml.YAMLError):
+        boards.load_manifest(project)
+
+    _write_malformed(Path(seal.seal_path(project)))
+    with pytest.raises(yaml.YAMLError):
+        seal.load_seals(project)
+
+    _write_malformed(Path(ids.ledger_path(project)))
+    with pytest.raises(yaml.YAMLError):
+        ids.load_ledger(project)
+
+    _write_malformed(Path(citations.lockfile_path(project)))
+    with pytest.raises(yaml.YAMLError):
+        citations.load_lockfile(project)
+
+    _write_malformed(Path(lifecycle.baseline_path(project, "probe")))
+    with pytest.raises(yaml.YAMLError):
+        lifecycle.load_baseline(project, "probe")
+
+    _write_malformed(Path(keys.adoption_marker_path(project)))
+    assert keys.is_adopted(project) is False
+
+    settings = tmp_path / "bad-settings.yaml"
+    _write_malformed(settings)
+    with pytest.raises(yaml.YAMLError):
+        load_project(config_path=str(settings))
+
+    _write_malformed(tmp_path / SCHEMA_NAME)
+    with pytest.raises(yaml.YAMLError):
+        load_project(config_path=str(tmp_path / "refdes-project.yaml"))
+
+    standard = tmp_path / "bad-standard.yaml"
+    _write_malformed(standard)
+    with pytest.raises(yaml.YAMLError):
+        standards._read_yaml(str(standard))

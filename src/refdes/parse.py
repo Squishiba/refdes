@@ -687,6 +687,11 @@ def parse_list_file(project: Project, path: str) -> list[Item]:
         project.error("'items:' must be a list", file=rel, line=1)
         return []
 
+    # `- section: <type>` (finding 6): a marker entry, not an item -- asserts
+    # the type for every entry after it until the next section or end of
+    # list. Interleaving two types under one section is structurally
+    # impossible rather than something to lint for after the fact, since an
+    # item that names a conflicting type is simply an error (_apply_section).
     section_type: str | None = None
     section_line: int | None = None
 

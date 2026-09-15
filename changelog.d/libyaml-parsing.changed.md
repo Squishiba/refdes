@@ -1,1 +1,1 @@
-Faster YAML parsing via PyYAML's C loader (`yaml.CSafeLoader`) with pure-Python fallback; no behaviour change.
+- Improved YAML parsing performance with libyaml while preserving existing parse results and error diagnostics.
