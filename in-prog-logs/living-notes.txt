@@ -34,3 +34,13 @@ Verification for addendum: ruff documentation-path check passed (no Python files
 to lint); full suite passed, 978 tests.
 
 Status: addendum finished; rebased onto main and verified with 978 passing tests.
+
+Review revision: the prior addendum already contained the day-rollover and
+non-locking stale-tip options. Section 2 now additionally contrasts the
+hand-edit-compatible first-writable-load snapshot of a new follows edge with
+the explicit continuation record. It recommends the explicit default for now:
+the automatic form would turn VS Code save refresh, CI misconfiguration,
+corrected typos, and old-branch checkout into history writers. Section 9 adds
+the corresponding Jared decision question.
+
+Status: review revision finished; rebased onto main and verified with 978 passing tests.

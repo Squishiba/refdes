@@ -125,14 +125,18 @@ ordinary work-in-progress edits build failures.
 | **Seal on write-enabled build (today)** | Existing code; a first build records every new append-only item. | Rendering/validation has an invisible authoring consequence. A note can become immutable because someone opened a preview. `index` avoids seal writes, but its regular save refresh demonstrates why that is fragile. |
 | **Record on Git commit via pre-commit hook** | A commit is a recognizable checkpoint and Git already preserves review history. | A hook must be installed and kept current; a clone without it records nothing. A hook that writes snapshots after files are staged must either restage unexpectedly or require a second commit. CI normally must verify, not invent history. It also excludes non-Git projects, contradicting the baseline design's VCS independence (`docs/lifecycle.md:262-277`). |
 | **Record when followed** | The current tip stays editable; making a successor is a meaningful "what did I know then?" moment. It gives the next work session its prior list. | Forks create two recorded parents; a terminal note may never be followed; id-less entries need their surrogate key; standalone logs have no successor. |
+| **Record predecessor on first writable load that sees a new `follows:` edge** | Hand-authored YAML/Markdown needs no second command: once a valid successor names a predecessor, write one idempotent `followed` event keyed by predecessor/successor. The successor may still be half typed, but the snapshot is of the untouched predecessor. | This makes generic load an author-history writer. VS Code runs writable `index` after every save (`editors/vscode/extension.js:91-126,510-526`), so a partial save can record a later-corrected `follows:` typo. CI must consistently use `--no-write`; checking out an old branch can replay an edge absent from that checkout's history store. Idempotence prevents duplicate events, not a misleading one for a typo or branch replay. |
 | **Seal at day rollover** | A daily cutoff is easy to explain and may fit a diary-like log. | An unfinished note is stamped merely because midnight passed — the exact friction Jared identified. A build that compares entry date with "today" gives the same commit different seal outcomes on different days, breaking reproducible builds and bisects. It also needs a timezone rule and mistakes deliberately backdated entries for stale notes. |
 | **N-day stale-tip prompt (no seal)** | Preserves the self-checking value of "is this still in progress?" without blocking edits or creating history. | Current source has no reliable "last touched" time: a log `date:` may be backdated, and filesystem mtimes change across clone/export. A wall-clock site build would still produce different HTML on different days unless it uses an explicit as-of date. |
 | **Explicit finalize/status field** | Clear intent; works for single notes and standalone logs. | Adds a state authors must remember and encourages premature stamps; "final" is usually false for design work. |
 | **Never record; detect only** | Maximum fluidity and no new store. | Cannot show the original content Jared wants, and a later edit is indistinguishable from an ordinary revision. |
 
-**Recommendation — record when followed, with explicit escape hatches.** This
-matches Jared's current lean **for now**: it records a meaningful transition
-without making elapsed time an authoring action.
+**Recommendation — record when followed through an explicit continuation
+operation, with explicit escape hatches.** This matches Jared's current lean
+**for now**: it records a meaningful transition without making elapsed time or
+a generic load an authoring action. It does cost a hand author one deliberate
+step; that is preferable to silently recording a false edge during routine
+inspection.
 
 1. A new explicit continuation operation (CLI or future editor) first resolves
    the intended current tip, writes the new entry, and writes a `followed`
@@ -145,22 +149,46 @@ without making elapsed time an authoring action.
    records each parent as appropriate but never selects one branch's task state
    by accident. An id-less entry is addressed by its already-required key, not
    its absent display ID.
-4. Existing direct text editing remains valid. If an author creates a
-   `follows:` edge by hand, a non-writing command reports it as an unrecorded
-   continuation; only the explicit continuation writer makes the record. That
-   deliberately changes the current writable-load `freeze_follows()` behavior
-   (`src/refdes/cli.py:120-132`).
+4. Existing direct text editing remains valid. A hand-authored `follows:` edge
+   remains a valid topology change, but an explicit `refdes thread continue`
+   (or `refdes history record <predecessor> --followed-by <successor>`) is what
+   records it. Until then, a non-writing command reports an unrecorded
+   continuation. This deliberately changes the current writable-load
+   `freeze_follows()` behavior (`src/refdes/cli.py:120-132`).
+
+**Hand-edited follow alternative.** The automatic alternative records the
+predecessor the first time any writable load observes a newly valid
+`follows:` edge. Its author contract is attractive: write the YAML/Markdown
+edge normally, then run an ordinary writable command; no separate history
+command is needed. `--no-write` prevents the record, so CI must use that flag
+and authors who want the snapshot must eventually run a writable command.
+
+The alternative is safe against a half-written **successor** only in the
+narrow sense that it snapshots the predecessor. It is not semantically
+neutral: a typo corrected on the next save leaves a real-but-misleading
+historical event; an old branch checkout can add an event the branch did not
+previously contain; and the VS Code save refresh turns routine inspection into
+a write. Naming the event `observed_follow` instead of `followed` would make
+that provenance honest, but does not remove the surprising side effect or
+history noise.
+
+**Recommendation: do not make this the default.** Keep the explicit
+continuation/record operation until real authoring use proves its extra step is
+less costly than these false or replayed events. The automatic form remains a
+plausible opt-in project setting, but it must be implemented as idempotent
+per predecessor/successor edge, run only after the edge resolves, honor
+`--no-write`, and make its CI/checkout behavior explicit in diagnostics.
 
 **Optional companion — stale-tip prompt, not a seal.** Defer this until the
-recording model exists, then expose it in `refdes thread`/`refdes work` and,
-where useful, the site as `still in progress?` after `N` days. It needs an
-explicit `last_touched_at` written only by an explicit continuation/touch
-operation — never a filesystem mtime or the author-editable `date:` field.
-The query takes `--as-of YYYY-MM-DD` (CI/static rendering must supply it); an
-interactive CLI may default that flag from the local clock and print the date
-used. A static site generated without `--as-of` omits the prompt rather than
-quietly making its bytes depend on the wall clock. This companion creates no
-snapshot, lock, or build failure.
+recording model exists, then expose it in `refdes thread`/`refdes work`, VS
+Code/editor hover, and, where useful, the site as `still in progress?` after
+`N` days. It needs an explicit `last_touched_at` written only by an explicit
+continuation/touch operation — never a filesystem mtime or the author-editable
+`date:` field. The query takes `--as-of YYYY-MM-DD` (CI/static rendering must
+supply it); an interactive CLI may default that flag from the local clock and
+print the date used. A static site generated without `--as-of` omits the prompt
+rather than quietly making its bytes depend on the wall clock. This companion
+creates no snapshot, lock, or build failure.
 
 VS Code currently runs `refdes index --compact` on each save after a 250 ms
 debounce (`editors/vscode/extension.js:91-126,510-526`). Therefore neither
@@ -493,3 +521,16 @@ out of support.
 
    **Recommendation: B.** It surfaces existing derived evidence without
    claiming that every warning or diagnostic is an author-owned task.
+
+8. **Should hand-authored `follows:` record history automatically?**
+   - A. Require `refdes thread continue` / explicit history recording after
+     editing the edge by hand.
+   - B. On the first writable load that observes a valid new edge, snapshot its
+     predecessor once per predecessor/successor pair.
+   - C. Offer B as an opt-in project policy while keeping A as the default.
+
+   **Recommendation: A now; consider C after real use.** A makes the author
+   declare the record moment and keeps VS Code save refresh, CI, typo
+   correction, and old-branch checkout from silently writing historical
+   events. B removes a real hand-editing step but needs its event noise and
+   environment-sensitive writes to be acceptable first.
