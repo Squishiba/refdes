@@ -521,9 +521,11 @@ boundary. Coverage grouping (bounds under requirements vs. their own
 section) becomes a project setting, defaulting to current (separate)
 behavior.
 
-**Status: outstanding.** No `extends`/inheritance concept exists in
-`schema.py`; `standards.resolve_schema()`'s layered merge is base → presets
-→ project overlay only, with no type→type axis.
+**Status: design draft.** Spec at [`docs/design/extends.md`](extends.md) —
+states the substitution rule (universal Liskov, no opt-in marker), coverage-
+grouping default (`coverage.group_inherited: false`), single-level
+enforcement, and hardware@3 adoption plan. Awaiting Jared's decisions on
+open questions (extends.md §9) before implementation.
 
 **Local model: not suitable to design, suitable to implement once specced.**
 What was hard here was the judgement — whether universal (Liskov)
