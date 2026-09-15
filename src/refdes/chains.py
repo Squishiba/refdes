@@ -296,7 +296,8 @@ def resolve_current(
     edges instead of rebuilding them for every entry. When `graph` is a
     `ChainGraph`, results are memoized per (connected component, field),
     including the fork/no-tip cases. The component's tips are computed once
-    and cached, so every entry in a component pays the walk only once.
+    over the ENTIRE component (all nodes with no successors), so every entry
+    in the component gets the same result.
     """
     if isinstance(graph, ChainGraph):
         cg = graph
@@ -322,41 +323,59 @@ def resolve_current(
             found, cached = cg.cache_get(comp_id, field)
             if found:
                 return cached
+    else:
+        comp_id = None
 
-    # A fork can be behind `start`: start at every reachable head, then ask
-    # for all tips in the connected thread rather than treating one branch as
-    # a settled subthread. A merge later reconverges these walks on one tip.
-    roots: set[str] = set()
-    stack = [start_handle]
-    seen = {start_handle}
-    while stack:
-        node = stack.pop()
-        preceding = predecessors.get(node, [])
-        if not preceding:
-            roots.add(node)
-        for predecessor in preceding:
-            prev = handles.get(id(predecessor))
-            if prev is not None and prev not in seen:
-                seen.add(prev)
-                stack.append(prev)
-    found_by_handle = {
-        handles[id(tip)]
-        for root in roots
-        for tip in _tips_from(root, successors, handles, items)
-    }
-
-    # Cache the tips for this component if we have a ChainGraph
-    tips_frozen = frozenset(found_by_handle)
+    # For ChainGraph, get or compute the component's tips (all nodes with no successors in the component)
     if isinstance(graph, ChainGraph) and comp_id is not None:
-        cg.tips_set(comp_id, tips_frozen)
+        # Check if we already cached tips for this component
+        cached_tips = cg.tips_get(comp_id)
+        if cached_tips is not None:
+            tips_frozen = cached_tips
+        else:
+            # Compute ALL tips in the component: nodes in this component with no successors
+            tips_frozen = _compute_component_tips(comp_id, cg, handles, items, successors, predecessors)
+            cg.tips_set(comp_id, tips_frozen)
+    else:
+        # Without ChainGraph, compute component tips from scratch each time
+        # (still per-component semantics, just not memoized)
+        # First find all nodes in the component by walking from start
+        component_nodes: set[str] = set()
+        stack = [start_handle]
+        seen = {start_handle}
+        while stack:
+            node = stack.pop()
+            component_nodes.add(node)
+            # Walk backwards
+            for predecessor in predecessors.get(node, []):
+                prev = handles.get(id(predecessor))
+                if prev is not None and prev not in seen:
+                    seen.add(prev)
+                    stack.append(prev)
+            # Walk forwards
+            for successor in successors.get(node, []):
+                succ_handle = handles.get(id(successor))
+                if succ_handle is not None and succ_handle not in seen:
+                    seen.add(succ_handle)
+                    stack.append(succ_handle)
 
-    if len(found_by_handle) != 1:
+        # Find all tips in this component (nodes with no internal successors)
+        tips_frozen = frozenset(
+            node
+            for node in component_nodes
+            if not any(
+                handles.get(id(succ)) in component_nodes
+                for succ in successors.get(node, [])
+            )
+        )
+
+    if len(tips_frozen) != 1:
         # Fork or no tip - cache None result
         if isinstance(graph, ChainGraph) and comp_id is not None:
             cg.cache_set(comp_id, field, None)
         return None
 
-    tip_handle = next(iter(found_by_handle))
+    tip_handle = next(iter(tips_frozen))
 
     # Perform the fold
     frontier = [tip_handle]
@@ -388,6 +407,38 @@ def resolve_current(
     if isinstance(graph, ChainGraph) and comp_id is not None:
         cg.cache_set(comp_id, field, result)
     return None
+
+
+def _compute_component_tips(
+    comp_id: int,
+    cg: ChainGraph,
+    handles: dict[int, str],
+    items: dict[str, Item],
+    successors: dict[str, list[Item]],
+    predecessors: dict[str, list[Item]],
+) -> frozenset[str]:
+    """Compute ALL tips in a connected component.
+
+    A tip is a node in the component that has no successors (within the component).
+    """
+    # Get all nodes in this component
+    component_nodes = {node for node, cid in cg._component_of.items() if cid == comp_id}
+
+    # Find all nodes in the component that have no successors within the component
+    tips: set[str] = set()
+    for node in component_nodes:
+        node_successors = successors.get(node, [])
+        # Check if any successor is in the same component
+        has_internal_successor = False
+        for succ in node_successors:
+            succ_handle = handles.get(id(succ))
+            if succ_handle is not None and succ_handle in component_nodes:
+                has_internal_successor = True
+                break
+        if not has_internal_successor:
+            tips.add(node)
+
+    return frozenset(tips)
 
 
 def _find_cycle(project: Project, predecessors: dict[str, list[Item]]) -> list[str] | None:

@@ -393,3 +393,100 @@ def test_resolve_current_walks_component_once_per_field(tmp_path):
     assert chains.resolve_current(fork_project, fork_b, "status", graph=fork_cg) is None
     assert len(fork_cg._component_tips) == 1
     assert len(fork_cg._resolve_cache) == 1
+
+
+def test_resolve_current_component_tips_whole_component(tmp_path):
+    """Component-wide tips: a fork anywhere in the component makes it unsettled.
+
+    Structure:
+      H1 (LOG-001, status=accepted) -> A (LOG-002)
+      H2 (LOG-003, status=proposed) -> B (LOG-004)
+      M (LOG-005, merge) follows [A, B], status=accepted
+      C (LOG-006, fork from H2) follows [H2]
+
+    Component has tips {M, C} = 2 tips -> fork -> None for ALL entries.
+    """
+    project = _project(
+        tmp_path,
+        "defaults: { type: log }\n"
+        "items:\n"
+        "  - id: LOG-001\n    summary: Head 1\n    status: accepted\n"
+        "  - id: LOG-002\n    summary: A\n    follows: [LOG-001]\n"
+        "  - id: LOG-003\n    summary: Head 2\n    status: proposed\n"
+        "  - id: LOG-004\n    summary: B\n    follows: [LOG-003]\n"
+        "  - id: LOG-005\n    summary: Merge\n    follows: [LOG-002, LOG-004]\n    status: accepted\n"
+        "  - id: LOG-006\n    summary: Fork from H2\n    follows: [LOG-003]\n",
+    )
+
+    cg = chains.build_graph(project)
+    log1 = _by_id(project, "LOG-001")  # H1
+    log2 = _by_id(project, "LOG-002")  # A
+    log3 = _by_id(project, "LOG-003")  # H2
+    log4 = _by_id(project, "LOG-004")  # B
+    log5 = _by_id(project, "LOG-005")  # M (merge)
+    log6 = _by_id(project, "LOG-006")  # C (fork from H2)
+
+    # With ChainGraph: query A first then C (both should be None)
+    assert chains.resolve_current(project, log2, "status", graph=cg) is None
+    assert chains.resolve_current(project, log6, "status", graph=cg) is None
+    assert len(cg._resolve_cache) == 1  # one cache entry for (component, status)
+    assert len(cg._component_tips) == 1
+    tips = cg._component_tips[0]
+    assert len(tips) == 2  # M and C are the two tips
+
+    # With ChainGraph: query C first then A (order shouldn't matter)
+    cg2 = chains.build_graph(project)
+    assert chains.resolve_current(project, log6, "status", graph=cg2) is None
+    assert chains.resolve_current(project, log2, "status", graph=cg2) is None
+
+    # Without graph (uncached): both should also be None
+    assert chains.resolve_current(project, log2, "status") is None
+    assert chains.resolve_current(project, log6, "status") is None
+    assert chains.resolve_current(project, log1, "status") is None
+    assert chains.resolve_current(project, log3, "status") is None
+    assert chains.resolve_current(project, log4, "status") is None
+    assert chains.resolve_current(project, log5, "status") is None
+
+
+def test_resolve_current_merged_component_settled(tmp_path):
+    """A component with only merges (no forks) resolves to the settled value.
+
+    Structure:
+      H1 (LOG-001, status=accepted) -> A (LOG-002)
+      H2 (LOG-003, no status) -> B (LOG-004)
+      M (LOG-005, merge) follows [A, B], status=accepted
+
+    Component has single tip {M} -> fold from M finds status=accepted.
+    All entries in component should resolve to 'accepted'.
+    """
+    project = _project(
+        tmp_path,
+        "defaults: { type: log }\n"
+        "items:\n"
+        "  - id: LOG-001\n    summary: Head 1\n    status: accepted\n"
+        "  - id: LOG-002\n    summary: A\n    follows: [LOG-001]\n"
+        "  - id: LOG-003\n    summary: Head 2\n"
+        "  - id: LOG-004\n    summary: B\n    follows: [LOG-003]\n"
+        "  - id: LOG-005\n    summary: Merge\n    follows: [LOG-002, LOG-004]\n    status: accepted\n",
+    )
+
+    cg = chains.build_graph(project)
+    log1 = _by_id(project, "LOG-001")  # H1
+    log2 = _by_id(project, "LOG-002")  # A
+    log3 = _by_id(project, "LOG-003")  # H2
+    log4 = _by_id(project, "LOG-004")  # B
+    log5 = _by_id(project, "LOG-005")  # M (merge)
+
+    # All entries in component should resolve to 'accepted'
+    assert chains.resolve_current(project, log1, "status", graph=cg) == "accepted"
+    assert chains.resolve_current(project, log2, "status", graph=cg) == "accepted"
+    assert chains.resolve_current(project, log3, "status", graph=cg) == "accepted"
+    assert chains.resolve_current(project, log4, "status", graph=cg) == "accepted"
+    assert chains.resolve_current(project, log5, "status", graph=cg) == "accepted"
+
+    # Without graph (uncached): all should also be 'accepted'
+    assert chains.resolve_current(project, log1, "status") == "accepted"
+    assert chains.resolve_current(project, log2, "status") == "accepted"
+    assert chains.resolve_current(project, log3, "status") == "accepted"
+    assert chains.resolve_current(project, log4, "status") == "accepted"
+    assert chains.resolve_current(project, log5, "status") == "accepted"
