@@ -257,9 +257,16 @@ def _flat_value(value) -> str:
     return str(value)
 
 
-def thread_view(item: Item, project: Project) -> dict | None:
+def thread_view(
+    item: Item, project: Project, *, graph: tuple | None = None
+) -> dict | None:
     """The Thread section for an item's own page, or None when it isn't part
     of a thread (threads.md §8's "Rendering" row).
+
+    `graph` is the build's one `chains.build_graph(project)`; `render_site`
+    hands it to every page through the `thread_view` template global. Building
+    it per page would make a whole-site render quadratic in the item count for
+    no benefit, since the graph does not change while the site is written.
 
     Two parts: the "currently concludes" panel -- the thread's folded value
     of each verdict field and verdict link some entry declares, each
@@ -274,24 +281,17 @@ def thread_view(item: Item, project: Project) -> dict | None:
     None for an item with no `follows:` edge in either direction, which is
     what keeps every non-thread page byte-identical to before this existed.
     """
-    graph = chains_mod.build_graph(project)
+    if graph is None:
+        graph = chains_mod.build_graph(project)
     if not chains_mod.is_threaded(project, item, graph=graph):
         return None
 
     entries_in_order = chains_mod.thread_entries(project, item, graph=graph)
-    # Forked exactly when the fold has no single tip to fold from -- the same
-    # question `_fold` asks (every head of the thread, all tips downstream of
-    # them), so the panel can never disagree with coverage.
-    predecessors = graph[0]
-    preceded = {id(entry) for preds in predecessors.values() for entry in preds}
-    tips_by_id = {
-        id(tip)
-        for entry in entries_in_order
-        if id(entry) not in preceded
-        for tip in chains_mod.tips(project, entry, graph=graph)
-    }
-    forked = len(tips_by_id) != 1
-    found_tips = [entry for entry in entries_in_order if id(entry) in tips_by_id]
+    # Forked exactly when the fold has no single tip to fold from: the panel
+    # asks `thread_tips`, the same question `_fold` asks, so a page can never
+    # conclude something its own fold would refuse to.
+    found_tips = chains_mod.thread_tips(project, item, graph=graph)
+    forked = len(found_tips) != 1
     rows: list[dict] = []
     if not forked:
         for field in THREAD_VERDICT_FIELDS:
@@ -771,7 +771,12 @@ def render_site(project: Project, draft: bool = False) -> str:
     env.globals["coverage_of"] = project.coverage.get
     env.globals["blocked_chains_for"] = blocked_mod.by_item(project).get
     env.globals["trace_view"] = lambda item: _trace_view(item, project)
-    env.globals["thread_view"] = lambda item: thread_view(item, project)
+    # One `follows:` graph for the whole build, handed to every item page:
+    # `thread_view` runs on each one, and rebuilding the graph per page made a
+    # site render quadratic in the item count even for projects with no
+    # threads at all.
+    thread_graph = chains_mod.build_graph(project)
+    env.globals["thread_view"] = lambda item: thread_view(item, project, graph=thread_graph)
     env.globals["part_anchor"] = _part_anchor
     citations_by_url = citations_mod.by_url(project)
     parts_by_number = citations_mod.by_part_number(project)

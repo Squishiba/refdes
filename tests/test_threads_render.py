@@ -249,6 +249,96 @@ def test_resolve_current_with_source_attributes_the_source_entry(tmp_path):
     assert source is project.item_by_id("LOG-001")
 
 
+def test_rendering_hands_every_page_one_follows_graph(tmp_path, monkeypatch):
+    """`thread_view` runs on every item page, so the graph behind it is built
+    once per build and handed down. Building it per page made a site render
+    quadratic in the item count — for every project, including the ones with
+    no `follows:` anywhere."""
+    project, _out = _render(
+        tmp_path,
+        "defaults: { type: log }\n"
+        "items:\n"
+        "  - id: LOG-001\n    date: 2026-04-01\n    summary: Head.\n"
+        "  - id: LOG-002\n    date: 2026-04-02\n    summary: B.\n    follows: [LOG-001]\n"
+        "  - id: LOG-003\n    date: 2026-04-03\n    summary: C.\n    follows: [LOG-002]\n"
+        "  - id: LOG-004\n    date: 2026-04-04\n    summary: D.\n    follows: [LOG-003]\n"
+        "  - id: LOG-005\n    date: 2026-04-05\n    summary: E.\n    follows: [LOG-004]\n"
+        "  - id: LOG-006\n    date: 2026-04-06\n    summary: F.\n    follows: [LOG-005]\n",
+    )
+    calls = []
+    real = chains.build_graph
+    monkeypatch.setattr(
+        chains, "build_graph", lambda *a, **kw: (calls.append(1), real(*a, **kw))[1]
+    )
+    render.render_site(project, draft=False)
+    # One graph for the build (this project has no pages, so nothing else
+    # asks for one) — not one per item page.
+    assert len(calls) == 1
+
+    # And `thread_view` given a graph never reaches for one of its own.
+    graph = real(project)
+    monkeypatch.setattr(
+        chains,
+        "build_graph",
+        lambda *a, **kw: pytest.fail("thread_view rebuilt the follows graph"),
+    )
+    for item in project.items.values():
+        render.thread_view(item, project, graph=graph)
+
+
+def test_tied_declarations_of_the_same_value_still_fold(tmp_path):
+    """Two entries at the same nearest distance declaring the SAME value is
+    not ambiguous -- only different values are. A silent merge entry whose
+    two parents both say `accepted` folds to `accepted`, attributed to a
+    deterministic one of them (earliest by date, then file, then line)."""
+    project, _out = _render(
+        tmp_path,
+        "defaults: { type: log }\n"
+        "items:\n"
+        "  - id: LOG-001\n    date: 2026-04-01\n    summary: Head.\n"
+        "  - id: LOG-002\n    date: 2026-04-02\n    summary: A.\n"
+        "    status: accepted\n    follows: [LOG-001]\n"
+        "  - id: LOG-003\n    date: 2026-04-03\n    summary: B.\n"
+        "    status: accepted\n    follows: [LOG-001]\n"
+        "  - id: LOG-004\n    date: 2026-04-04\n    summary: Merged, silent.\n"
+        "    follows: [LOG-002, LOG-003]\n",
+    )
+    merge = project.item_by_id("LOG-004")
+    assert chains.resolve_current(project, merge, "status") == "accepted"
+    value, source = chains.resolve_current_with_source(project, merge, "status")
+    assert value == "accepted"
+    assert source is project.item_by_id("LOG-002")  # earliest of the tied pair
+
+
+def test_a_fork_elsewhere_in_the_thread_is_forked_for_every_entry(tmp_path):
+    """One fork definition (threads.md §3): the fold and the panel both ask
+    the whole connected component, so an entry whose own forward reach looks
+    settled is still forked when a sibling branch of the same thread isn't.
+
+    H1 -> A -> M <- B <- H2, and C follows H2: from A the forward reach is
+    the single tip M, but the component has two tips (M and C), so nothing
+    in it -- A or C included -- concludes anything, and both pages say so.
+    """
+    project, out = _render(
+        tmp_path,
+        "defaults: { type: log }\n"
+        "items:\n"
+        "  - id: LOG-001\n    date: 2026-04-01\n    summary: H1.\n"
+        "  - id: LOG-002\n    date: 2026-04-02\n    summary: A.\n    follows: [LOG-001]\n"
+        "  - id: LOG-003\n    date: 2026-04-03\n    summary: H2.\n"
+        "  - id: LOG-004\n    date: 2026-04-04\n    summary: B.\n    follows: [LOG-003]\n"
+        "  - id: LOG-005\n    date: 2026-04-05\n    summary: Merged.\n    status: accepted\n"
+        "    follows: [LOG-002, LOG-004]\n"
+        "  - id: LOG-006\n    date: 2026-04-06\n    summary: C.\n    follows: [LOG-003]\n",
+    )
+    for start in ("LOG-002", "LOG-006"):
+        assert chains.resolve_current(project, project.item_by_id(start), "status") is None
+        assert chains.resolve_current_with_source(project, project.item_by_id(start), "status") == (None, None)
+        body = panel(_page(out, start.lower()))
+        assert "forked" in body, start
+        assert "accepted" not in body, start
+
+
 def test_resolve_current_link_with_source_returns_targets_and_source(tmp_path):
     project, _out = _render(tmp_path, LINEAR)
     targets, source = chains.resolve_current_link_with_source(
