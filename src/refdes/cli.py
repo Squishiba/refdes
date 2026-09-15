@@ -395,6 +395,15 @@ def cmd_index(args) -> int:
     prints the export instead of a report.
     """
     project, _stale = _load(args, require_ids=False)
+    # A file that fails to parse is reported like everywhere else, but `index`
+    # is the one command whose exit code is deliberately left alone: the VS
+    # Code extension (editors/vscode/extension.js, refreshIndex) throws away
+    # the whole index whenever this command exits non-zero, so a half-typed
+    # YAML file mid-edit would blank the editor on every keystroke. Report on
+    # stderr, keep the JSON on stdout, keep exiting 0.
+    load_errors = project.errors
+    for d in load_errors:
+        print(str(d), file=sys.stderr)
     build_mod.build(project, seal_write=False, reseal=False)
     json.dump(
         render_mod.items_json(project),
@@ -430,6 +439,11 @@ def cmd_ls(args) -> int:
     place; the search has to actually reach it for that to matter.
     """
     project, _stale = _load(args, require_ids=False)
+    # Items in a file that failed to parse are not in the listing and never
+    # can be -- say so, and don't let the listing pass for a complete answer.
+    load_errors = project.errors
+    for d in load_errors:
+        print(str(d), file=sys.stderr)
     build_mod.build(project, seal_write=False, reseal=False)
 
     query = " ".join(args.query).strip().lower()
@@ -454,7 +468,7 @@ def cmd_ls(args) -> int:
 
     if not rows:
         print("no items match")
-        return 0
+        return 1 if load_errors else 0
 
     id_w = max(len(i.id) for i in rows)
     type_w = max(len(i.type) for i in rows)
@@ -462,14 +476,27 @@ def cmd_ls(args) -> int:
     for item in rows:
         board_col = f"{item.board:<{board_w}}  " if board_w else ""
         print(f"{item.id:<{id_w}}  {item.type:<{type_w}}  {board_col}{item.title}")
-    return 0
+    return 1 if load_errors else 0
 
 
 def cmd_id(args) -> int:
     if args.no_write:
         args.dry_run = True  # --no-write: report the allocation, write nothing
     project, _stale = _load(args, require_ids=False)
+    # Nothing pending is only the honest answer when every file loaded: an
+    # item in a file that failed to parse is not in project.pending either,
+    # so "no items are missing an id" would be a claim about files this run
+    # never saw. Report the load errors and fail instead of reassuring.
+    load_errors = project.errors
+    for d in load_errors:
+        print(str(d), file=sys.stderr)
     if not project.pending:
+        if load_errors:
+            print(
+                f"ids could not be checked in {len(load_errors)} file(s) that "
+                "failed to load"
+            )
+            return 1
         print("no items are missing an id")
         return 0
 
@@ -548,6 +575,12 @@ def _print_baseline_diff(diff) -> None:
 def cmd_audit(args) -> int:
     """Suppression is allowed; invisible suppression is not."""
     project, _stale = _load(args, require_ids=False)
+    # An audit of a project whose files didn't all load is an incomplete
+    # audit, and silence about that is exactly what an audit exists to
+    # prevent. The report still comes out for what did load; the run fails.
+    load_errors = project.errors
+    for d in load_errors:
+        print(str(d), file=sys.stderr)
     build_mod.build(project)
     historical_key_infos = keys_mod.audit_historical_baselines(project)
 
@@ -723,7 +756,7 @@ def cmd_audit(args) -> int:
 
     print(f"\n{len(project.items)} items audited "
           f"({len(project.local_items)} local)")
-    return 0
+    return 1 if load_errors else 0
 
 
 def cmd_init(args) -> int:
@@ -1037,6 +1070,12 @@ def cmd_former_ids_propose(args) -> int:
             "former-ids propose --confirm", "former_ids: into the item files"
         )
     project, _stale = _load(args, require_ids=False)
+    # A file that never parsed was never searched for candidates either, so
+    # both of this command's quiet answers -- "no candidates" and a --confirm
+    # run that finds errors -- have to say so rather than pass for clean.
+    load_errors = project.errors
+    for d in load_errors:
+        print(str(d), file=sys.stderr)
     build_mod.build(project, seal_write=False, reseal=False)
     try:
         candidates = former_ids_mod.propose(
@@ -1047,6 +1086,13 @@ def cmd_former_ids_propose(args) -> int:
         return 1
 
     if not candidates:
+        if load_errors:
+            print(
+                "no candidate former-id mappings found -- "
+                f"{len(load_errors)} load error(s); files that failed to "
+                "load were not searched"
+            )
+            return 1
         print("no candidate former-id mappings found")
         return 0
 

@@ -192,6 +192,12 @@ rendering hundreds of HTML files each time would make that unusable. Diagnostics
 come back as structured JSON under `diagnostics`, so nothing has to parse console
 output.
 
+An items file that fails to parse is printed to stderr — but `index` still emits
+the JSON for everything that did load, and still **exits 0**. It is the one
+command whose exit code is deliberately left alone: the VS Code extension
+discards the whole index on a non-zero exit, so a half-typed YAML file mid-edit
+would blank the editor on every save.
+
 ---
 
 ## `refdes ls`
@@ -217,6 +223,10 @@ refdes ls --file items/common/power.yaml
 refdes ls "current limit"
 refdes ls --tag "current limit"
 ```
+
+An items file that fails to parse is printed to stderr and `ls` exits 1 — the
+listing of what did load is unchanged, it simply no longer passes for a
+complete answer.
 
 The board column is omitted entirely when the project has no `boards:`
 registry, matching every other place board is conditionally shown.
@@ -264,6 +274,10 @@ allocated 1 id(s)
 Exits non-zero and prints the reason if a bare-numeric hint collides with an
 id already used or burned — nothing is written for that item, but every
 other pending item in the same run still allocates normally.
+
+An item in a file that failed to parse is not pending either, so when there
+are load errors `id` prints them and exits 1 instead of reporting "no items
+are missing an id" about files it never read.
 
 Updates `.refdes/ids.yaml`. See [IDs](ids.md).
 
@@ -317,6 +331,10 @@ chains](links.md#blocked-by-and-the-cascade-report), imported projects,
 ```bash
 refdes audit
 ```
+
+An items file that fails to parse is printed to stderr and `audit` exits 1 — an
+audit that quietly omits a whole file is exactly the invisible suppression this
+command exists to catch. The report itself is unchanged.
 
 ```
 Schema fields not tracked as 'invalidate':
@@ -703,6 +721,10 @@ inference only ever drafts a suggestion here — the `former_ids:` entry
 match recomputed on the fly. An id passed to `--confirm` that isn't among
 the currently proposed candidates is refused, not guessed at — re-run
 `propose` without `--confirm` first if the project has changed since.
+
+An items file that fails to parse is printed to stderr, and on the path where
+nothing matched it says so and exits 1: those files were never searched, so
+"no candidate former-id mappings found" would be a claim about them too.
 
 ---
 
