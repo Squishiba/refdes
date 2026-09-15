@@ -91,6 +91,8 @@ citation is remote and belongs to `CMP-PWR-001`, not this decision
 (`items/components/power.yaml:12-18`), so it cannot satisfy the proposed
 same-item source rule.
 
+**Migration note:** this example intentionally retains its current `type: decision`; after the in-progress phase 4a decision-to-log merge lands, `DEC-PWR-001` is `type: log` with the fields shown here otherwise unchanged.
+
 **Before (current):**
 
 ````markdown
@@ -173,12 +175,17 @@ must first validate header names and each row's column count, then construct the
 row map itself. Do not use `csv.DictReader` alone: duplicate headers overwrite
 one another in a dict before the reader can diagnose them.
 
-The selected text is parsed by `decimal.Decimal`, with a finite-value check, and
-stored as canonical decimal text (no exponent normalization requirement beyond
-`str(Decimal(value))`). The parser accepts an optional leading sign, decimal
-point, and scientific exponent because `Decimal` does; it rejects locale formats,
-units, and non-finite values. This intentionally keeps units on the refdes calc
-line rather than making CSV unit parsing a second language.
+The selected text is stripped only of ASCII space (`U+0020`) and horizontal tab
+(`U+0009`) at its ends, then must match
+`^[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?$` with `re.ASCII` **before**
+`decimal.Decimal` parses it. That explicit grammar admits only ASCII decimal
+forms; it rejects locale notation, units, underscores, non-ASCII digits, and
+non-ASCII whitespace. The parsed `Decimal` must be finite, and conversion to
+the float-backed calc magnitude must also be finite: overflow is an extraction
+error, not an infinite `Value`. The resulting finite value is stored as
+canonical decimal text (no exponent normalization requirement beyond
+`str(Decimal(value))`). This intentionally keeps units on the refdes calc line
+rather than making CSV unit parsing a second language.
 
 ### Exact behavior, including silent-wrong-value hazards
 
@@ -194,18 +201,22 @@ existing lock record unchanged when any requested key for it fails.
 | Two or more rows have the requested key, even if their values are equal | Error listing every matching line | “First wins” changes the selected value when rows are reordered; “last wins” does the same. |
 | Requested key has no exact match | Error, with no fuzzy suggestion used for extraction | A near-match must never become a number. The diagnostic may list close keys as prose only. |
 | `key` cell is blank, including an empty quoted cell | Error for that row; it cannot match a nonempty source key | Prevents a malformed row being treated as an implicit default. |
-| Selected `value` is empty or only Unicode/ASCII whitespace | Error | `0`, `0.0`, and `0e0` remain valid; absence is not zero. |
-| Selected `value` is not a finite `Decimal` (`abc`, `NaN`, `Infinity`) | Error | A failed conversion cannot become a default or a floating non-number. |
+| Selected `value` is empty after ASCII space/tab trimming | Error | `0`, `0.0`, and `0e0` remain valid; absence is not zero. |
+| Selected `value` is not in the explicit ASCII grammar (`abc`, `NaN`, `Infinity`) | Error | A failed conversion cannot become a default or a floating non-number. |
 | Selected cell is `3.3 V`, `100 mW`, `10%`, `$1.20`, or any other unit/suffix-bearing text | Error | Units must be declared at the calc use site; accepting a suffix would conceal a unit disagreement. |
 | `1,000` or `1 000` is quoted in one `value` cell | Error | Thousands grouping is locale-specific and must not become either `1` or `1000` by guesswork. |
 | `1,000` is unquoted | Row-width error | Standard CSV sees two fields; accepting it would shift columns. |
 | `1,23` intended as a locale decimal is quoted | Error | Decimal comma is never silently reinterpreted as `1.23`. |
+| `1_000` | Error | `Decimal` accepts underscores, but an underscore is digit grouping and must not silently alter the source contract. |
+| Arabic-Indic `١٢٣`, fullwidth `１２`, or any other non-ASCII digit | Error | `Decimal` accepts Unicode digits; the reader accepts ASCII numeric notation only. |
+| A non-breaking space (`U+00A0`) or any other non-ASCII whitespace, including before `1` | Error | Only ASCII space/tab are trimmed; Unicode whitespace must not be silently erased. |
+| `1e999999` or another value that overflows when converted to calc's float-backed magnitude | Error | A finite `Decimal` is not sufficient if evaluation would receive infinity. |
 | Leading UTF-8 BOM on the file | Accepted; it is removed from the first header only | Common export form, handled deterministically. |
 | Malformed quoting, dangling quote, invalid UTF-8, or CSV parser error | Error with parser message and physical line when available | A permissive recovery can select a different row. |
 | Valid RFC-style quoting, including commas/newlines inside an unused context column | Accepted by the standard CSV parser | The same parsed row is used for header width and selection; quoted text does not alter `key`/`value`. |
 | Leading/trailing whitespace in a `key` | Preserved; exact matching means it does not match an unspaced source key | Trimming keys makes two visually similar keys collide. |
-| Leading/trailing whitespace in a numeric `value` | Stripped before `Decimal` parsing | This is presentation outside the numeric token, not a distinct value. The raw text and canonical decimal must both be available in the error/debug record. |
-| `+1.0`, `-1.0`, `.5`, `1e-3` | Accepted if `Decimal` accepts it and it is finite | These are unambiguous ASCII numeric forms. |
+| Leading/trailing ASCII space/tab in a numeric `value` | Stripped before the ASCII-grammar check | This is presentation outside the numeric token, not a distinct value. The raw text and canonical decimal must both be available in the error/debug record. |
+| `+1.0`, `-1.0`, `.5`, `1.`, `1e-3` | Accepted if the parsed and calc-converted values are finite | These are the explicit grammar's unambiguous ASCII numeric forms. |
 
 The reader must enumerate and extract **every declared source key for a file in
 one parse**, not repeatedly search the file per calc line. This produces one
@@ -523,7 +534,10 @@ export CSV/netlist first.
 
 Add the resolved `(canonical citation path, source key, locked numeric text)` for
 every `source()` call to the owning local item's content-hash payload. Bump
-`HASH_FORMAT` and retain the existing historical hash readers/migration posture.
+`HASH_FORMAT` to the next **coordinated** format number and retain the existing
+historical hash readers/migration posture. `HASH_FORMAT` is currently 3
+(`c148896`); phase 4a also changes hash behavior for the type rename, so this
+work must use whatever next number has landed rather than assuming 4.
 The cited **file hash alone** must not be the item input: an unrelated edit to a
 large budget spreadsheet should not invalidate a decision whose selected key did
 not change, while a selected value changing under the same file must invalidate
@@ -610,8 +624,8 @@ source-derived `Value` passed as an ordinary argument.
   input during evaluation.
 - [ ] Preserve current local citation hash-drift verification unless Jared
   decides otherwise in Open Question 1.
-- [ ] Add selected locked source values to the owning content hash; bump and
-  migrate hash format deliberately.
+- [ ] Add selected locked source values to the owning content hash; coordinate
+  the next `HASH_FORMAT` number with phase 4a and migrate it deliberately.
 - [ ] Render source provenance beside calc rows.
 - [ ] Keep source files strictly read-only; do not add navigation, formula
   calculation, reader plugins, xlsx, EDA readers, EDA checks, or write-back.
@@ -641,8 +655,9 @@ not reader internals.
    `value`/`key` headers cannot silently select a column.
 4. `test_csv_source_missing_key_blank_value_and_non_numeric_value_error` — each
    fails loudly; `0` remains valid.
-5. `test_csv_source_rejects_unit_suffix_grouping_and_locale_decimal` — `100 mW`,
-   quoted `1,000`, unquoted `1,000`, and quoted `1,23` all fail.
+5. `test_csv_source_rejects_unit_suffix_grouping_locale_unicode_and_overflow` —
+   `100 mW`, quoted/unquoted `1,000`, quoted `1,23`, `1_000`, Arabic-Indic and
+   fullwidth digits, NBSP, and `1e999999` all fail before a wrong calc value.
 6. `test_csv_source_handles_utf8_bom_and_standard_quoted_context` — BOM only at
    start works; valid quoted fields do not shift selection.
 7. `test_csv_source_rejects_malformed_quote_and_ragged_row` — no best-effort
