@@ -510,6 +510,58 @@ def _yaml_mapping(text: str) -> dict | None:
     return parsed if isinstance(parsed, dict) else None
 
 
+def md_front_matter_blocks(lines: list[str]) -> tuple[list[tuple[int, int, dict]], list[tuple[str, int]]]:
+    """Split Markdown lines into front-matter blocks: (open_i, close_i, parsed).
+
+    The single splitter shared by parse_markdown_file (which builds items
+    from the blocks) and revise's write guard (which counts them), so the two
+    can never disagree about where an item's front matter is. A fence only
+    opens a new item when the line right after it looks like a YAML key and a
+    closing fence follows; otherwise it stays a literal horizontal rule in
+    the previous item's body. Returns (blocks, errors) with errors as
+    (message, line) pairs for the caller to report; an empty blocks list
+    means no usable front matter at all (the conditions that abort parsing).
+    """
+    blocks: list[tuple[int, int, dict]] = []
+    errors: list[tuple[str, int]] = []
+    fence_idx = [i for i, line in enumerate(lines) if FENCE_RE.match(line)]
+    if len(fence_idx) < 2 or fence_idx[0] != 0:
+        return [], [("no YAML front-matter (file must start with '---')", 1)]
+
+    close0 = fence_idx[1]
+    head_text = "\n".join(lines[1:close0])
+    try:
+        parsed0 = _yaml_mapping(head_text)
+    except yaml.YAMLError as exc:
+        message, err_line = _yaml_error_report(exc, lines, offset=1)
+        return [], [(f"invalid YAML front-matter: {message}", err_line)]
+    if parsed0 is None:
+        return [], [("front-matter must be a mapping", 1)]
+    blocks.append((0, close0, parsed0))
+
+    # Every remaining fence is independently a candidate to open the next item,
+    # paired with whichever fence comes right after it -- including a fence that
+    # is already serving as the previous item's close, which is what lets one
+    # `---` between two back-to-back items do double duty as both.
+    for k in range(1, len(fence_idx) - 1):
+        open_i = fence_idx[k]
+        close_i = fence_idx[k + 1]
+        next_line = lines[open_i + 1] if open_i + 1 < len(lines) else ""
+        if not KEY_LINE_RE.match(next_line):
+            continue
+        try:
+            parsed = _yaml_mapping("\n".join(lines[open_i + 1 : close_i]))
+        except yaml.YAMLError as exc:
+            message, err_line = _yaml_error_report(exc, lines, offset=open_i + 1)
+            errors.append((f"invalid YAML front-matter: {message}", err_line))
+            continue
+        if parsed is None:
+            errors.append(("front-matter must be a mapping", open_i + 2))
+            continue
+        blocks.append((open_i, close_i, parsed))
+    return blocks, errors
+
+
 def parse_markdown_file(project: Project, path: str) -> list[Item]:
     """Read one or more `---`-fenced item documents from a single .md file.
 
@@ -535,55 +587,11 @@ def parse_markdown_file(project: Project, path: str) -> list[Item]:
         text = fh.read()
     lines = text.split("\n")
 
-    fence_idx = [i for i, line in enumerate(lines) if FENCE_RE.match(line)]
-    if len(fence_idx) < 2 or fence_idx[0] != 0:
-        project.error("no YAML front-matter (file must start with '---')", file=rel, line=1)
+    blocks, errors = md_front_matter_blocks(lines)
+    for message, err_line in errors:
+        project.error(message, file=rel, line=err_line)
+    if not blocks:
         return []
-
-    close0 = fence_idx[1]
-    head_text = "\n".join(lines[1:close0])
-    try:
-        parsed0 = _yaml_mapping(head_text)
-    except yaml.YAMLError as exc:
-        message, err_line = _yaml_error_report(exc, lines, offset=1)
-        project.error(f"invalid YAML front-matter: {message}", file=rel, line=err_line)
-        return []
-    if parsed0 is None:
-        project.error("front-matter must be a mapping", file=rel, line=1)
-        return []
-
-    blocks: list[tuple[int, int, dict]] = [(0, close0, parsed0)]
-
-    # Every remaining fence is independently a candidate to open the next item,
-    # paired with whichever fence comes right after it -- including a fence that is
-    # already serving as the previous item's close, which is what lets one `---`
-    # between two back-to-back items do double duty as both. A fence with nothing
-    # later to close it (the last one in the file) is never reachable as an opener
-    # here, which is exactly "a closing fence exists later".
-    for k in range(1, len(fence_idx) - 1):
-        open_i = fence_idx[k]
-        close_i = fence_idx[k + 1]
-        next_line = lines[open_i + 1] if open_i + 1 < len(lines) else ""
-        if not KEY_LINE_RE.match(next_line):
-            continue
-        # Past this point the block opens with a `key:` line, so it was meant
-        # as an item -- a malformed one must be reported, never skipped. A
-        # silent `continue` here dropped the whole item from the project with
-        # a clean, zero-error build, and folded its body text into the
-        # previous item's, which is the same class of harm as the later
-        # `defaults:` block below (and strictly quieter: that one at least
-        # produced a warning). The very first block already reports both of
-        # these; every later one now reports them identically.
-        try:
-            parsed = _yaml_mapping("\n".join(lines[open_i + 1 : close_i]))
-        except yaml.YAMLError as exc:
-            message, err_line = _yaml_error_report(exc, lines, offset=open_i + 1)
-            project.error(f"invalid YAML front-matter: {message}", file=rel, line=err_line)
-            continue
-        if parsed is None:
-            project.error("front-matter must be a mapping", file=rel, line=open_i + 2)
-            continue
-        blocks.append((open_i, close_i, parsed))
 
     defaults: dict[str, Any] = {}
     defaults_line: int | None = None

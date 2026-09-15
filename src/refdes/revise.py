@@ -30,7 +30,6 @@ from __future__ import annotations
 import os
 import re
 from dataclasses import dataclass, field
-from itertools import pairwise
 from typing import Any, Callable
 
 import yaml
@@ -521,20 +520,18 @@ def _parse_item_count(rel: str, text: str) -> int | None:
     try:
         if rel.endswith(".md"):
             lines = text.split("\n")
-            fences = [i for i, line in enumerate(lines) if parse.FENCE_RE.match(line)]
-            if len(fences) < 2 or fences[0] != 0:
+            # Same splitter parse_markdown_file uses, so body prose behind a
+            # `---` thematic break is never mistaken for front matter and
+            # multi-item files judge the way they load.
+            blocks, errors = parse.md_front_matter_blocks(lines)
+            if errors or not blocks:
                 return None
-            count = 0
-            for open_i, close_i in pairwise(fences):
-                data = parse.yaml_safe_load("\n".join(lines[open_i + 1 : close_i]))
-                if data is None:
-                    continue
-                if not isinstance(data, dict):
-                    return None
-                keys = set(data)
-                if keys and keys not in ({"defaults"}, {"section"}):
-                    count += 1
-            return count
+            return sum(
+                1
+                for _, _, parsed in blocks
+                if {k for k in parsed if k != "__line__"}
+                not in ({"defaults"}, {"section"})
+            )
         data = parse.yaml_safe_load(text)
         if not isinstance(data, dict) or "items" not in data:
             return None

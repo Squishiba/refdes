@@ -26,7 +26,7 @@ from conftest import write_project_config
 
 from refdes import build as build_mod
 from refdes import cli as cli_mod
-from refdes import ids, keys, parse
+from refdes import ids, keys, parse, revise
 from refdes.schema import load_project
 
 FLOW_SCHEMA = (
@@ -163,3 +163,52 @@ def test_guard_lets_good_writes_through(tmp_path):
     text = path.read_text(encoding="utf-8")
     assert "key: " in text
     assert not project.errors
+
+
+# ------------------------------------------- guard judges what the loader sees
+
+MULTI_ITEM_MD = (
+    "---\n"
+    "id: REQ-001\ntype: requirement\ntitle: One\n---\n"
+    "Body one.\n"
+    "---\n"
+    "id: REQ-002\ntype: requirement\ntitle: Two\n---\n"
+    "Body two.\n"
+)
+
+THEMATIC_BREAK_MD = (
+    "---\n"
+    "id: REQ-001\ntype: requirement\ntitle: One\n---\n"
+    "Body before the rule.\n\n---\n\nBody after the rule.\n"
+)
+
+
+def _guard_rolls_back_broken_rewrite(tmp_path, before: str, expected_count: int):
+    """The guard must judge these files by the same splitting the loader
+    uses: a corrupting rewrite of a multi-item Markdown file, or of a single
+    item whose body contains a `---` thematic break, is rolled back exactly
+    and reported. (Both were silently skipped while the guard counted fences
+    over every `---` in the file: body prose parsed as YAML gave "cannot
+    judge", and None means the guard stays out of the way.)"""
+    path = tmp_path / "items" / "r.md"
+    write_project_config(tmp_path, FLOW_SCHEMA)
+    path.parent.mkdir(exist_ok=True)
+    path.write_text(before, encoding="utf-8", newline="\n")
+    assert revise._parse_item_count("items/r.md", before) == expected_count
+
+    after = before.replace("id: REQ-001", "id: [unclosed", 1)
+    project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
+    rewrite = revise.FileRewrite(
+        path=str(path), rel="items/r.md", before=before, after=after
+    )
+    revise.write_rewrites_verified(project, [rewrite])
+    assert path.read_text(encoding="utf-8", newline="\n") == before
+    assert any("rolled back" in str(d) for d in project.diagnostics)
+
+
+def test_write_guard_judges_multi_item_markdown(tmp_path):
+    _guard_rolls_back_broken_rewrite(tmp_path, MULTI_ITEM_MD, expected_count=2)
+
+
+def test_write_guard_judges_markdown_body_with_thematic_break(tmp_path):
+    _guard_rolls_back_broken_rewrite(tmp_path, THEMATIC_BREAK_MD, expected_count=1)
