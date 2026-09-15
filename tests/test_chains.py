@@ -490,3 +490,20 @@ def test_resolve_current_merged_component_settled(tmp_path):
     assert chains.resolve_current(project, log3, "status") == "accepted"
     assert chains.resolve_current(project, log4, "status") == "accepted"
     assert chains.resolve_current(project, log5, "status") == "accepted"
+
+
+def test_handles_not_called_per_resolve_current_when_chain_graph_given(tmp_path):
+    """When a ChainGraph is passed, _handles(project) is not rebuilt per call."""
+    project = _project(tmp_path, LINEAR)
+    cg = chains.build_graph(project)
+    original_handles = chains._handles
+    call_count = [0]
+    def counting_handles(project):
+        call_count[0] += 1
+        return original_handles(project)
+    import unittest.mock
+    with unittest.mock.patch.object(chains, "_handles", counting_handles):
+        for entry in project.local_items:
+            chains.resolve_current(project, entry, "status", graph=cg)
+            chains.is_threaded(project, entry, graph=cg)
+    assert call_count[0] == 0, f"_handles was called {call_count[0]} times when ChainGraph passed"

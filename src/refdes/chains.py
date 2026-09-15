@@ -42,15 +42,15 @@ def _handles(project: Project) -> dict[int, str]:
     return {id(item): handle for handle, item in project.items.items()}
 
 
-def _start_handle(project: Project, start: Item | str) -> str | None:
+def _start_handle(project: Project, start: Item | str, handles: dict[int, str] | None = None) -> str | None:
     """Accept an Item, a `project.items` key/handle, or a display id."""
+    h = handles if handles is not None else _handles(project)
     if isinstance(start, Item):
-        return _handles(project).get(id(start))
+        return h.get(id(start))
     if start in project.items:
         return start
     item = project.item_by_id(start)
-    return _handles(project).get(id(item)) if item is not None else None
-
+    return h.get(id(item)) if item is not None else None
 
 class ChainGraph:
     """The follows graph with per-build memoization for `resolve_current`.
@@ -62,6 +62,7 @@ class ChainGraph:
     """
 
     __slots__ = (
+        "_component_nodes",
         "_component_of",
         "_component_tips",
         "_handles",
@@ -88,6 +89,8 @@ class ChainGraph:
         self._resolve_cache: dict[tuple[int, str], Any] = {}
         # component_id -> frozenset of tip handles (computed once per component)
         self._component_tips: dict[int, frozenset[str]] = {}
+        # component_id -> list of node handles (computed once per component)
+        self._component_nodes: dict[int, list[str]] = {}
 
     def __iter__(self):
         """Unpack as (predecessors, successors) for backward compatibility."""
@@ -109,6 +112,7 @@ class ChainGraph:
         if self._component_of is not None:
             return
         comp: dict[str, int] = {}
+        comp_nodes: dict[int, list[str]] = {}
         comp_id = 0
         # All nodes that appear anywhere in the graph
         all_nodes = set(self.predecessors) | set(self.successors)
@@ -116,22 +120,28 @@ class ChainGraph:
             if node in comp:
                 continue
             # BFS/DFS to mark the whole component
+            nodes_in_component: list[str] = []
             stack = [node]
             comp[node] = comp_id
+            nodes_in_component.append(node)
             while stack:
                 cur = stack.pop()
                 for pred in self.predecessors.get(cur, []):
                     ph = self._handles.get(id(pred))
                     if ph is not None and ph not in comp:
                         comp[ph] = comp_id
+                        nodes_in_component.append(ph)
                         stack.append(ph)
                 for succ in self.successors.get(cur, []):
                     sh = self._handles.get(id(succ))
                     if sh is not None and sh not in comp:
                         comp[sh] = comp_id
+                        nodes_in_component.append(sh)
                         stack.append(sh)
+            comp_nodes[comp_id] = nodes_in_component
             comp_id += 1
         self._component_of = comp
+        self._component_nodes = comp_nodes
 
     def component_id(self, handle: str) -> int | None:
         """Return the component id for `handle`, or None if not in graph."""
@@ -207,13 +217,13 @@ def is_threaded(
     *,
     graph: ChainGraph | tuple[dict[str, list[Item]], dict[str, list[Item]]] | None = None,
 ) -> bool:
-    """Whether `item` participates in at least one resolved follows edge."""
     if graph is None:
         graph = build_graph(project)
     # Accept both ChainGraph and the legacy tuple
     predecessors = graph.predecessors if isinstance(graph, ChainGraph) else graph[0]
     successors = graph.successors if isinstance(graph, ChainGraph) else graph[1]
-    handle = _start_handle(project, item)
+    handles = graph._handles if isinstance(graph, ChainGraph) else None
+    handle = _start_handle(project, item, handles=handles)
     return handle is not None and (handle in predecessors or handle in successors)
 
 
@@ -256,7 +266,8 @@ def tips(
     reuses a precomputed `(predecessors, successors)` pair for callers that
     need many walks during one build.
     """
-    handle = _start_handle(project, start)
+    handles_tips = graph._handles if isinstance(graph, ChainGraph) else None
+    handle = _start_handle(project, start, handles=handles_tips)
     if handle is None:
         return []
     if isinstance(graph, ChainGraph):
@@ -267,7 +278,9 @@ def tips(
         succs = build_graph(project).successors
     if successors is not None:
         succs = successors
-    return _tips_from(handle, succs, _handles(project), project.items)
+    handles_tips_use = graph._handles if isinstance(graph, ChainGraph) else _handles(project)
+    items_tips_use = (graph._items if isinstance(graph, ChainGraph) else project.items)
+    return _tips_from(handle, succs, handles_tips_use, items_tips_use)
 
 
 def resolve_current(
@@ -312,7 +325,7 @@ def resolve_current(
         handles = _handles(project)
         items = project.items
 
-    start_handle = _start_handle(project, start)
+    start_handle = _start_handle(project, start, handles=handles)
     if start_handle is None:
         return None
 
@@ -421,8 +434,8 @@ def _compute_component_tips(
 
     A tip is a node in the component that has no successors (within the component).
     """
-    # Get all nodes in this component
-    component_nodes = {node for node, cid in cg._component_of.items() if cid == comp_id}
+    # Get component node list from cached per-component nodes
+    component_nodes = set(cg._component_nodes.get(comp_id, []))
 
     # Find all nodes in the component that have no successors within the component
     tips: set[str] = set()
