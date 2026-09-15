@@ -98,11 +98,19 @@ them (the 2026-09-01 re-posting; issue #6's attachment carries the same 1–11).
 
 ### 1 — No published or CI-built copy of the reference docs site exists anywhere
 
-**Status: done.** Shipped in `089fdbe`: `.github/workflows/docs.yml` builds
-`docs-site/` and deploys it to GitHub Pages on every push to `main`
-(`actions/configure-pages` + `actions/deploy-pages`). `1f1ec03` later added
-the `docs-site/gen_examples.py --check` staleness gate to the same workflow's
-build job (finding 20).
+**Status: shipped, not yet deploying.** Shipped in `089fdbe`:
+`.github/workflows/docs.yml` builds `docs-site/` and deploys it to GitHub
+Pages on every push to `main` (`actions/configure-pages` +
+`actions/deploy-pages`). `1f1ec03` later added the
+`docs-site/gen_examples.py --check` staleness gate to the same workflow's
+build job (finding 20). It is not yet deploying, though: every run of the
+workflow since it was added (56 runs, first 2026-08-22) fails at
+`actions/configure-pages` with "Get Pages site failed ... verify that the
+repository has Pages enabled and configured to build using GitHub Actions"
+(HttpError Not Found) — the repository has Pages disabled (`has_pages:
+false`). The build steps pass (pip install, `gen_examples.py --check`,
+`refdes build` in `docs-site/`). The fix is a repository setting, not code:
+Settings → Pages → Build and deployment → Source: GitHub Actions.
 
 ### 2 — `section:` markers validate fine in `refdes check` but fail every schema in the editor
 
@@ -807,11 +815,13 @@ becomes derived, which is backwards, and round-trips the moment an engineer
 edits it) and changes the failure class from "the document is wrong" to
 "refdes corrupted my schematic."
 
-**Status: outstanding — and parked behind finding 25's Part 2.** No `xlsx`/`csv`/
+**Status: outstanding — design drafted, awaiting review.** No `xlsx`/`csv`/
 `openpyxl` reference exists anywhere in the package, and the lockfile records
-hashes only, never extracted values. The finding states the dependency itself: a
-citation has to be able to name a repo-local file before a calc value can be
-drawn from one.
+hashes only, never extracted values. The blocker that parked this finding —
+finding 25's Part 2, a citation being able to name a repo-local file — has
+landed on `main` (`2001801`, `4496053`, 2026-09-15), so the finding is no
+longer parked; only review of the draft design stands between it and
+implementation.
 **Design:** `docs/design/calc-sources.md` is the draft implementation specification, awaiting Jared's review.
 
 **Local model (not decided — my read): not suitable.** The mechanical parts
