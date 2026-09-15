@@ -166,15 +166,17 @@ A baseline's whole point is to stay legible after the live item is gone —
 
 ### Hash format versioning
 
-Each baseline entry records `hash_format` (currently **3** — see `build.HASH_FORMAT`).
-When the hash definition evolves (format 1: display-id link targets; format 2:
-resolved-key link targets, raw `checks: against:`; format 3: `checks: against:`
-also reduced to keys), the migration runs on load. Each legacy-format entry's
-hash is recomputed under its recorded definition against the live item: if it
-matches, the entry is carried forward to the current format; if not, it is
-reported as `uncomparable` (the item genuinely changed). This keeps a baseline
-diff from falsely flagging every item as "changed" when only the hash definition
-moved. `refdes audit` lists `uncomparable` entries per baseline.
+Each baseline entry records `hash_format` (currently **3**). When the hash
+definition evolves (format 1: display-id link targets; format 2: resolved-key
+link targets, raw `checks: against:`; format 3: `checks: against:` also reduced
+to keys), a baseline that is read for a diff or a stamp migrates itself: each
+legacy-format entry's hash is recomputed under its recorded definition against
+the live item. If it matches, the entry is carried forward to the current
+format; if not, the item genuinely changed, and the entry stays at the format it
+was stamped at. This keeps a baseline diff from falsely flagging every item as
+"changed" when only the hash definition moved. `refdes keys adopt` names the
+entries it cannot carry (`uncomparable baseline entry <name>: <id>`); everywhere
+else an entry that stayed behind simply compares as changed.
 
 ### `stamped_by`
 
@@ -221,7 +223,8 @@ Since last revision (rev-c, 2026-08-10T09:12:00Z):
   changed   3   DEC-PWR-002, CMP-PWR-001, REQ-PWR-003
   added     1   TST-PWR-004
   removed   0
-  relabelled 1   REQ-PWR-009 -> REQ-PWR-012   (k7f3m2q9x4a)
+  relabelled 1
+    REQ-PWR-009 -> REQ-PWR-012   (k7f3m2q9x4a)
   (38 unchanged)
 
 Since last release (rev-b, 2026-07-02T16:40:00Z):
@@ -229,7 +232,9 @@ Since last release (rev-b, 2026-07-02T16:40:00Z):
   added     4   TST-PWR-003, TST-PWR-004, DEC-PWR-003, CMP-PWR-005
   removed   1
     REQ-OLD-002 (requirement) "Legacy input protection" — no longer in the project
-  relabelled 2   REQ-PWR-009 -> REQ-PWR-012, BND-THM-001 -> BND-THM-004   (k7f3m2q9x4a, m9n2b5v8c1x)
+  relabelled 2
+    REQ-PWR-009 -> REQ-PWR-012   (k7f3m2q9x4a)
+    BND-THM-001 -> BND-THM-004   (m9n2b5v8c1w)
   (31 unchanged)
 ```
 

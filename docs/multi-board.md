@@ -133,14 +133,16 @@ Run `refdes build --accept-board-move` to accept it; `refdes audit` lists every
 accepted and outstanding move. Unlike a sealed log entry, a board move is never a
 build error — moving a file is an ordinary thing to do on purpose.
 
-**After `refdes keys adopt`, the manifest is fully key-keyed.** `keys adopt`
-converts the manifest: live, identifiable memberships are re-keyed by surrogate
-key; entries for items that no longer exist (deleted, or renamed without
-`former_ids:`) are dropped from the manifest and reported as `stale`. Legacy
-display-id-keyed entries that resolve to a live item but have a conflicting
-duplicate (both a current id and a `former_ids:` entry point to the same item)
-are left in place and reported as `unidentified`. Read-only `refdes check`
-never changes the manifest; **any writable build** prunes stale entries
+**After `refdes keys adopt`, the manifest is keyed by surrogate key.**
+`keys adopt` converts it: live, identifiable memberships are re-keyed by
+surrogate key; entries for items that no longer exist (deleted, or renamed
+without `former_ids:`) are dropped from the manifest and reported as `stale`. A
+legacy display-id entry that cannot be moved safely stays keyed by display id
+and is reported as `unidentified` — either the item has no key to move to, or
+two records (a current id and a `former_ids:` entry, say) name the same item
+with different memberships. Read-only `refdes check` never changes the
+manifest; **any build that records** — a plain `refdes build`, not `check`, not
+`build --dry-run`, and not a `--no-write` run — prunes stale entries
 automatically, adopted or not.
 
 ### Conforming to a shared contract

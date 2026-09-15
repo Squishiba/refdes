@@ -136,14 +136,14 @@ an id being retyped, which is what surrogate keys provide.
 
 A **surrogate key** is an opaque, immutable 11-character identifier (e.g. `k7f3m2q9x4a`) that the tool mints once per item and never changes. It is written into the item's source file as `key: k7f3m2q9x4a` and stays there forever — unlike the display `id:`, which can be renamed.
 
-Surrogate keys solve the identity problem completely:
+Surrogate keys close that gap:
 
-- **Structured links and `checks: against:`** resolve by key, not display id. When a target is renamed, the link still points at the same item because the key hasn't changed. The tool rewrites bare references to `DISPLAY-ID@key` composites and refreshes the display half automatically on the next writable load.
-- **Baselines and seals** are keyed by surrogate key after adoption. A renamed item is recognised as the same item across baselines (reported as `relabelled`, not `removed` + `added`).
+- **Structured links and `checks: against:`** resolve by key once the reference carries one: in a `DISPLAY-ID@key` composite the key half decides the target, and only the label is refreshed. When a target is renamed, the link still points at the same item because the key hasn't changed. The tool rewrites bare references to `DISPLAY-ID@key` composites and refreshes the display half automatically on the next writable load; a reference that is still bare resolves by display id.
+- **Baselines and seals** are keyed by surrogate key after adoption (before it, by display id, with a baseline entry carrying its own key inside). A renamed item is recognised as the same item across baselines either way — reported as `relabelled`, not `removed` + `added`.
 - **Board/workspace membership** follows the key, so moving and renaming an item in the same change still warns correctly.
 - **Duplicate and corruption detection** — the tool validates key format (Crockford base32 with a Damm check character) and uniqueness on every build.
 
-Keys are minted automatically as a side effect of loading the project (every command that parses items), gated by `--no-write`. A project that has never run `refdes keys adopt` uses the **legacy** scheme: baselines, seals, and the membership manifest are keyed by display id, with the surrogate key carried inside each entry. Running `refdes keys adopt` converts the project to the **adopted** scheme: those files are re-keyed by surrogate key, the adoption marker `.refdes/keys-adopted.yaml` is written, and future stamps/seals/manifests use key-keyed storage.
+Keys are minted automatically as a side effect of loading the project — every command that loads and builds it, plus the own-transaction passes of `refdes revise`, `refdes standard upgrade`, and `refdes keys adopt` — gated by `--no-write`. A project that has never run `refdes keys adopt` uses the **legacy** scheme: baselines, seals, and the membership manifest are keyed by display id (a baseline entry additionally carries its surrogate key inside). Running `refdes keys adopt` converts the project to the **adopted** scheme: those files are re-keyed by surrogate key, the adoption marker `.refdes/keys-adopted.yaml` is written, and future stamps/seals/manifests use key-keyed storage.
 
 You don't need to run `keys adopt` to benefit from keys — minting, link expansion, and the corruption lint work immediately. Adoption is a one-time explicit step that rebases history (baselines, seals, membership) so the immutable identity is the primary key everywhere. See [`refdes keys adopt`](cli-reference.md#refdes-keys-adopt) and [`refdes audit`](cli-reference.md#refdes-audit) for the commands.
 

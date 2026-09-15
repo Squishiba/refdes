@@ -36,9 +36,11 @@ in the source file to a composite `DISPLAY-ID@key` form on the next **writable**
 load. This runs when the project is loaded for `check`, `build`, `revision`,
 `release`, `index`, `ls`, `id`, `fetch`, `audit`, `stub-tests`, and
 `former-ids propose` unless `--no-write` is given. It does **not** run for
-`init`, `new`, `schema`, `standard add-preset`, `standard remove-preset`,
-`revise`, `standard upgrade`, or `keys adopt` (these load the project
-differently). For example:
+`init`, `new`, `schema`, `standard add-preset`, or `standard remove-preset`,
+which don't load the item files that way. `revise`, `standard upgrade`, and
+`keys adopt` run the same minting and expansion inside their own transaction —
+under `--dry-run` they report what they would expand first instead of writing it.
+For example:
 
 ```yaml
 # Author writes:
@@ -49,8 +51,9 @@ satisfies: [REQ-PWR-002@k7f3m2q9x4a]
 ```
 
 **Authors always write bare IDs** — the composite form is written and
-maintained by the tool. The key half (after `@`) is the immutable identity;
-resolution and content hashing use only the key. The display half (before `@`)
+maintained by the tool. The key half (after `@`) is the immutable identity: a
+composite resolves by the key, and content hashing uses it, never the label. The
+display half (before `@`)
 is readable context that the tool refreshes automatically when the target item
 is renamed: on the next writable load, a stale `OLD-ID@key` becomes
 `NEW-ID@key`.

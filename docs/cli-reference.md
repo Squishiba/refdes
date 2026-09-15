@@ -341,14 +341,17 @@ Since last revision (rev-c, 2026-08-10T09:12:00Z):
   changed   3   DEC-PWR-002, CMP-PWR-001, REQ-PWR-003
   added     1   TST-PWR-004
   removed   0
-  relabelled 1   REQ-PWR-009 -> REQ-PWR-012   (k7f3m2q9x4a)
+  relabelled 1
+    REQ-PWR-009 -> REQ-PWR-012   (k7f3m2q9x4a)
   (12 unchanged)
 
 Since last release (rev-b, 2026-07-02T16:40:00Z):
   changed   9   CMP-PWR-001, DEC-PWR-001, DEC-PWR-002, REQ-PWR-002, ...
   added     4   TST-PWR-003, TST-PWR-004, DEC-PWR-003, CMP-PWR-005
   removed   0
-  relabelled 2   REQ-PWR-009 -> REQ-PWR-012, BND-THM-001 -> BND-THM-004   (k7f3m2q9x4a, m9n2b5v8c1x)
+  relabelled 2
+    REQ-PWR-009 -> REQ-PWR-012   (k7f3m2q9x4a)
+    BND-THM-001 -> BND-THM-004   (m9n2b5v8c1w)
   (7 unchanged)
 
 Board moves since the manifest was last written:
@@ -387,7 +390,8 @@ shows `(no revision/release stamped yet)`.
 This happens when an item is renamed (its `id:` changed) after a baseline was
 stamped: the key is the immutable identity, so the baseline diff recognises it
 as the same item and reports it as `relabelled` rather than `removed` + `added`.
-The surrogate key is shown in parentheses.
+Each one is listed on its own line under the count, with the surrogate key in
+parentheses.
 
 The "Citations" section only
 appears for a project that declares a `citations`-typed field somewhere and
@@ -709,8 +713,8 @@ one-time, transactional operation that:
 
 - Mints a surrogate key for every item that doesn't have one yet (written as
   `key: <11-char>` in the source file)
-- Expands all structured link targets and `checks: against:` references to the
-  composite `DISPLAY-ID@key` form
+- Expands structured link targets and `checks: against:` references that
+  resolve to a keyed item to the composite `DISPLAY-ID@key` form
 - Freezes bare `follows:` references at their thread tips
 - Rebases every baseline (`.refdes/baselines/*.yaml`) and seal file
   (`.refdes/log-seal*.yaml`) to key-keyed storage, carrying forward entries
@@ -763,17 +767,20 @@ the stamp, so their old-format hash no longer matches the current content)
 are listed individually:
 
 ```
-uncomparable baseline entry rev-a: REQ-OLD-002
-uncomparable seal entry .refdes/log-seal.yaml: LOG-A-005
+  uncomparable baseline entry rev-a: REQ-OLD-002
+  uncomparable seal entry .refdes/log-seal.yaml: LOG-A-005
 ```
 
-`unidentified` membership entries (legacy display-id entries that can't be
-matched to a live item by key or former_ids) and `stale` entries (for deleted
-items) are reported similarly.
+Membership entries get their own lines: an entry that cannot be matched to a
+live item's key is left keyed by display id and printed as
+`unidentified membership entry boards: REQ-PWR-004`, and entries for items that
+no longer exist are dropped with a summary line —
+`dropped 2 stale membership entries: boards: REQ-OLD-001, workspaces: REQ-OLD-004`
+(`would drop ...` under `--dry-run`).
 
 The operation is **transactional and idempotent**: if any write fails, all
 changes are rolled back; running it again on an already-adopted project prints
-"nothing to do -- project already adopted" and exits 0. The project must
+`nothing to do -- project already adopted` and exits 0. The project must
 validate cleanly (no build errors) before adoption runs — `keys adopt` refuses
 on a broken project.
 
