@@ -22,6 +22,11 @@ is a living note, and starting the next entry is the moment the prior state
 becomes worth remembering. It must not happen during `build`, `index`, or a VS
 Code save refresh.
 
+An optional, non-locking stale-tip prompt can ask whether a tip is still in
+progress after a configured interval. It is useful self-checking, not evidence
+or a history trigger: its clock must be explicit to keep static output
+reproducible (§2).
+
 Use one general, versioned `.refdes/history/` store for these snapshots and
 for rich baseline snapshots. Store normalized semantic item content (own
 fields, raw structured links, body, identity, and source location), not an
@@ -120,10 +125,14 @@ ordinary work-in-progress edits build failures.
 | **Seal on write-enabled build (today)** | Existing code; a first build records every new append-only item. | Rendering/validation has an invisible authoring consequence. A note can become immutable because someone opened a preview. `index` avoids seal writes, but its regular save refresh demonstrates why that is fragile. |
 | **Record on Git commit via pre-commit hook** | A commit is a recognizable checkpoint and Git already preserves review history. | A hook must be installed and kept current; a clone without it records nothing. A hook that writes snapshots after files are staged must either restage unexpectedly or require a second commit. CI normally must verify, not invent history. It also excludes non-Git projects, contradicting the baseline design's VCS independence (`docs/lifecycle.md:262-277`). |
 | **Record when followed** | The current tip stays editable; making a successor is a meaningful "what did I know then?" moment. It gives the next work session its prior list. | Forks create two recorded parents; a terminal note may never be followed; id-less entries need their surrogate key; standalone logs have no successor. |
+| **Seal at day rollover** | A daily cutoff is easy to explain and may fit a diary-like log. | An unfinished note is stamped merely because midnight passed — the exact friction Jared identified. A build that compares entry date with "today" gives the same commit different seal outcomes on different days, breaking reproducible builds and bisects. It also needs a timezone rule and mistakes deliberately backdated entries for stale notes. |
+| **N-day stale-tip prompt (no seal)** | Preserves the self-checking value of "is this still in progress?" without blocking edits or creating history. | Current source has no reliable "last touched" time: a log `date:` may be backdated, and filesystem mtimes change across clone/export. A wall-clock site build would still produce different HTML on different days unless it uses an explicit as-of date. |
 | **Explicit finalize/status field** | Clear intent; works for single notes and standalone logs. | Adds a state authors must remember and encourages premature stamps; "final" is usually false for design work. |
 | **Never record; detect only** | Maximum fluidity and no new store. | Cannot show the original content Jared wants, and a later edit is indistinguishable from an ordinary revision. |
 
-**Recommendation — record when followed, with explicit escape hatches.**
+**Recommendation — record when followed, with explicit escape hatches.** This
+matches Jared's current lean **for now**: it records a meaningful transition
+without making elapsed time an authoring action.
 
 1. A new explicit continuation operation (CLI or future editor) first resolves
    the intended current tip, writes the new entry, and writes a `followed`
@@ -141,6 +150,17 @@ ordinary work-in-progress edits build failures.
    continuation; only the explicit continuation writer makes the record. That
    deliberately changes the current writable-load `freeze_follows()` behavior
    (`src/refdes/cli.py:120-132`).
+
+**Optional companion — stale-tip prompt, not a seal.** Defer this until the
+recording model exists, then expose it in `refdes thread`/`refdes work` and,
+where useful, the site as `still in progress?` after `N` days. It needs an
+explicit `last_touched_at` written only by an explicit continuation/touch
+operation — never a filesystem mtime or the author-editable `date:` field.
+The query takes `--as-of YYYY-MM-DD` (CI/static rendering must supply it); an
+interactive CLI may default that flag from the local clock and print the date
+used. A static site generated without `--as-of` omits the prompt rather than
+quietly making its bytes depend on the wall clock. This companion creates no
+snapshot, lock, or build failure.
 
 VS Code currently runs `refdes index --compact` on each save after a 250 ms
 debounce (`editors/vscode/extension.js:91-126,510-526`). Therefore neither

@@ -23,3 +23,14 @@ passed twice: 978 tests before commit and 978 after rebasing onto main. No
 changelog fragment was added because the task explicitly requested no changelog.
 
 Status: finished.
+
+Addendum: section 2 now evaluates seal-at-day-rollover against unfinished notes,
+wall-clock-dependent builds/bisects, timezones, and backdated entries. It retains
+seal-when-followed as Jared's current lean. It also adds a non-locking N-day
+stale-tip prompt, constrained to explicit touch timestamps and an explicit
+`--as-of` date for reproducible static output.
+
+Verification for addendum: ruff documentation-path check passed (no Python files
+to lint); full suite passed, 978 tests.
+
+Status: addendum finished; rebased onto main and verified with 978 passing tests.
