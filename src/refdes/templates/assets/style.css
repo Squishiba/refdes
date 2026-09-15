@@ -350,6 +350,18 @@ table.coverage td { font-size: 13px; }
 .tl-amends { color: var(--warn); }
 .tl-body { margin-top: 8px; font-size: 14px; }
 
+/* ------------------------------------------------------- thread (threads.md §8) */
+
+.thread-concludes { border: 1px solid var(--line); border-radius: 6px; background: var(--panel); padding: 10px 14px; margin: 12px 0; }
+.thread-concludes h3 { margin: 0 0 8px; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+.thread-concludes dl { margin: 0; display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; }
+.thread-concludes dt { color: var(--muted); font-size: 12.5px; text-transform: uppercase; letter-spacing: .04em; }
+.thread-concludes dd { margin: 0; font-size: 14px; }
+.thread-source { color: var(--muted); font-size: 12.5px; margin-left: 8px; }
+.thread-forked { margin: 0; font-size: 14px; color: var(--warn); }
+.thread-timeline { margin-top: 12px; }
+.tl-current > .tl-meta::after { content: "this entry"; font-size: 11px; padding: 1px 7px; border-radius: 4px; background: var(--accent); color: var(--bg); }
+
 .option { border: 1px solid var(--line); border-left-width: 3px; border-radius: 6px; padding: 10px 14px; margin: 10px 0; background: var(--panel); }
 .option-chosen   { border-left-color: var(--good); }
 .option-rejected { border-left-color: var(--bad); }

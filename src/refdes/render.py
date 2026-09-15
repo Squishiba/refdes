@@ -11,6 +11,7 @@ from jinja2 import Environment, FileSystemLoader
 
 from . import blocked as blocked_mod
 from . import build as build_mod
+from . import chains as chains_mod
 from . import citations as citations_mod
 from . import dates
 from . import ids as ids_mod
@@ -231,6 +232,114 @@ def _trace_view(item: Item, project: Project) -> dict:
         "outgoing": outgoing,
         "incoming": incoming,
         "self_inverse": {name: sorted(set(ids)) for name, ids in self_inverse.items()},
+    }
+
+
+# What the thread panel shows (docs/design/threads.md §8, decided 2026-09-14):
+# the verdict fields a thread can conclude -- never the narrative ones
+# (`date`, `author`, `summary`, body), which stay in the timeline.
+THREAD_VERDICT_FIELDS = ("status", "rationale", "options", "checks")
+THREAD_VERDICT_LINKS = ("satisfies", "selects", "constrained_by")
+
+
+def _entry_ref(item: Item) -> dict:
+    """How a thread view names one entry: display id, or key when it has
+    none (threads.md §2's permanently id-less continuation)."""
+    return {"label": item.id or item.key or item.slug, "href": f"{item.slug}.html"}
+
+
+def _flat_value(value) -> str:
+    """A one-line rendering of a folded field value for the panel's <dd>."""
+    if isinstance(value, dict):
+        return ", ".join(f"{key}: {_flat_value(val)}" for key, val in value.items())
+    if isinstance(value, (list, tuple)):
+        return "; ".join(_flat_value(val) for val in value)
+    return str(value)
+
+
+def thread_view(item: Item, project: Project) -> dict | None:
+    """The Thread section for an item's own page, or None when it isn't part
+    of a thread (threads.md §8's "Rendering" row).
+
+    Two parts: the "currently concludes" panel -- the thread's folded value
+    of each verdict field and verdict link some entry declares, each
+    attributed to the entry it came from -- and a compact timeline of every
+    entry in the thread, reusing `log.html`'s timeline markup with this
+    page's own entry marked.
+
+    A forked thread (threads.md §6) shows no folded values at all: an
+    unmerged fork is not yet a single conclusion. The panel says so plainly
+    and names the open tips instead.
+
+    None for an item with no `follows:` edge in either direction, which is
+    what keeps every non-thread page byte-identical to before this existed.
+    """
+    graph = chains_mod.build_graph(project)
+    if not chains_mod.is_threaded(project, item, graph=graph):
+        return None
+
+    entries_in_order = chains_mod.thread_entries(project, item, graph=graph)
+    # Forked exactly when the fold has no single tip to fold from -- the same
+    # question `_fold` asks (every head of the thread, all tips downstream of
+    # them), so the panel can never disagree with coverage.
+    predecessors = graph[0]
+    preceded = {id(entry) for preds in predecessors.values() for entry in preds}
+    tips_by_id = {
+        id(tip)
+        for entry in entries_in_order
+        if id(entry) not in preceded
+        for tip in chains_mod.tips(project, entry, graph=graph)
+    }
+    forked = len(tips_by_id) != 1
+    found_tips = [entry for entry in entries_in_order if id(entry) in tips_by_id]
+    rows: list[dict] = []
+    if not forked:
+        for field in THREAD_VERDICT_FIELDS:
+            value, source = chains_mod.resolve_current_with_source(
+                project, item, field, graph=graph
+            )
+            if source is None:
+                continue
+            rows.append(
+                {
+                    "name": field,
+                    "value": _flat_value(value),
+                    "source": _entry_ref(source),
+                }
+            )
+        for link in THREAD_VERDICT_LINKS:
+            targets, source = chains_mod.resolve_current_link_with_source(
+                project, item, link, graph=graph
+            )
+            if source is None:
+                continue
+            rows.append(
+                {
+                    "name": link,
+                    "value": ", ".join(_entry_ref(target)["label"] for target in targets),
+                    "source": _entry_ref(source),
+                }
+            )
+
+    entries = []
+    for entry in entries_in_order:
+        ref = _entry_ref(entry)
+        summary = entry.fields.get("summary") or (
+            "" if entry.id else f"entry {entry.key}"
+        )
+        entries.append(
+            {
+                **ref,
+                "date": entry.fields.get("date", ""),
+                "summary": summary,
+                "current": entry is item,
+            }
+        )
+    return {
+        "forked": forked,
+        "tips": [_entry_ref(tip) for tip in found_tips],
+        "rows": rows,
+        "entries": entries,
     }
 
 
@@ -662,6 +771,7 @@ def render_site(project: Project, draft: bool = False) -> str:
     env.globals["coverage_of"] = project.coverage.get
     env.globals["blocked_chains_for"] = blocked_mod.by_item(project).get
     env.globals["trace_view"] = lambda item: _trace_view(item, project)
+    env.globals["thread_view"] = lambda item: thread_view(item, project)
     env.globals["part_anchor"] = _part_anchor
     citations_by_url = citations_mod.by_url(project)
     parts_by_number = citations_mod.by_part_number(project)

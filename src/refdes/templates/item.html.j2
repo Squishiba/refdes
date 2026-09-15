@@ -33,6 +33,53 @@
 </section>
 {% endif %}
 
+{% set thread = thread_view(item) %}
+{% if thread %}
+{# docs/design/threads.md §8: a thread's entries each carry the whole thread's
+   view of itself -- what it currently concludes (the fold, attributed to the
+   entry each value came from) and the chain as a timeline. A forked thread
+   concludes nothing (§3), so its panel says so and names the open tips. #}
+<section class="thread">
+  <h2>Thread</h2>
+  <div class="thread-concludes">
+    <h3>Currently concludes</h3>
+    {% if thread.forked %}
+    <p class="thread-forked">
+      This thread has forked, so nothing it concludes is settled yet.
+      Open tips:
+      {% for tip in thread.tips %}
+      <a class="ref" href="{{ tip.href }}" data-ref="{{ tip.label }}">{{ tip.label }}</a>{% if not loop.last %}, {% endif %}
+      {% endfor %}
+      .
+    </p>
+    {% elif thread.rows %}
+    <dl>
+      {% for row in thread.rows %}
+      <dt>{{ row.name }}</dt>
+      <dd>{{ row.value }}
+        <span class="thread-source">from
+          <a class="ref" href="{{ row.source.href }}" data-ref="{{ row.source.label }}">{{ row.source.label }}</a></span>
+      </dd>
+      {% endfor %}
+    </dl>
+    {% else %}
+    <p class="muted">Nothing concluded yet.</p>
+    {% endif %}
+  </div>
+  <ol class="timeline thread-timeline">
+    {% for entry in thread.entries %}
+    <li class="tl-entry{% if entry.current %} tl-current{% endif %}">
+      <div class="tl-meta">
+        <span class="tl-date">{{ entry.date }}</span>
+        <a class="ref tl-id" href="{{ entry.href }}" data-ref="{{ entry.label }}">{{ entry.label }}</a>
+      </div>
+      <div class="tl-summary">{{ entry.summary }}</div>
+    </li>
+    {% endfor %}
+  </ol>
+</section>
+{% endif %}
+
 {# Fields whose content is shown by a section further down the page, not by a
    row in the fields table: the [[ID#field]] anchor belongs on that section, so
    the reference lands on the content rather than on an empty placeholder. #}

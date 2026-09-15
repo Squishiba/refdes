@@ -21,8 +21,9 @@ not O(N²).
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Callable
 
+from . import dates
 from .model import Item, Project
 
 FOLLOWS = "follows"
@@ -283,130 +284,257 @@ def tips(
     return _tips_from(handle, succs, handles_tips_use, items_tips_use)
 
 
-def resolve_current(
+def _graph_view(graph, project: Project):
+    """`(predecessors, successors, handles, items, cg)` for either graph shape.
+
+    A `ChainGraph` carries the handle map and item map built once for the
+    build, so a fold over it never pays for `_handles(project)` again; the
+    legacy `(predecessors, successors)` tuple still works and rebuilds them
+    per call, which is what it always cost.
+    """
+    if isinstance(graph, ChainGraph):
+        return graph.predecessors, graph.successors, graph._handles, graph._items, graph
+    if graph is None:
+        built = build_graph(project)
+        return built.predecessors, built.successors, built._handles, built._items, built
+    predecessors, successors = graph
+    return predecessors, successors, _handles(project), project.items, None
+
+
+def _component(
+    handle: str,
+    predecessors: dict[str, list[Item]],
+    successors: dict[str, list[Item]],
+    handles: dict[int, str],
+) -> set[str]:
+    """Every node reachable from `handle` in *either* direction along
+    `follows:` — the connected component, which is what a thread is (§8)."""
+    seen = {handle}
+    stack = [handle]
+    while stack:
+        node = stack.pop()
+        for neighbour in predecessors.get(node, []) + successors.get(node, []):
+            nxt = handles.get(id(neighbour))
+            if nxt is None or nxt in seen:
+                continue
+            seen.add(nxt)
+            stack.append(nxt)
+    return seen
+
+
+def _component_tips(
+    handle: str,
+    predecessors: dict[str, list[Item]],
+    successors: dict[str, list[Item]],
+    handles: dict[int, str],
+    items: dict[str, Item],
+    cg: ChainGraph | None,
+) -> frozenset[str]:
+    """The handles in `handle`'s component with nothing following them.
+
+    This is the one definition of "has this thread forked?" (§3, §6): one tip
+    means the thread is settled and folds, more than one means it is not, and
+    the answer is the same whichever entry of the thread it is asked from — a
+    fork on a sibling branch is a fork for the whole thread, not only for the
+    entry that can see it forward. A component that is entirely a cycle has no
+    tip and comes back empty.
+
+    On a `ChainGraph` this is `_compute_component_tips`, computed once per
+    component and memoized there; the tuple form recomputes it.
+    """
+    if cg is not None:
+        comp_id = cg.component_id(handle)
+        if comp_id is None:
+            return frozenset({handle})
+        cached = cg.tips_get(comp_id)
+        if cached is not None:
+            return cached
+        tips = _compute_component_tips(
+            comp_id, cg, handles, items, successors, predecessors
+        )
+        cg.tips_set(comp_id, tips)
+        return tips
+    nodes = _component(handle, predecessors, successors, handles)
+    return frozenset(node for node in nodes if not successors.get(node))
+
+
+def thread_tips(
     project: Project,
     start: Item | str,
-    field: str,
     *,
     graph: ChainGraph | tuple[dict[str, list[Item]], dict[str, list[Item]]] | None = None,
-) -> Any | None:
-    """The chain's current value of `field`, per threads.md §3.
+) -> list[Item]:
+    """Every tip of the whole connected thread containing `start`, oldest
+    first — the public form of `_component_tips`.
 
-    Walk forward to the reachable tips; more than one tip (an unmerged fork,
-    §6) is undefined — never "settled" — so this returns None. From the
-    single tip, walk backward over *all* predecessors (a merge entry has
-    several) breadth-first by distance from the tip, and return `field` from
-    the nearest entry that declares it. An entry omitting the field does not
-    clear it. Two entries at the same nearest distance declaring different
-    values is ambiguous: None.
+    `tips()` is the narrower question (what runs forward from one entry) and
+    stays that way for callers like the build's fork report; this is what the
+    fold and §8's panel ask, so a page can never conclude something its own
+    fold would refuse to.
+    """
+    predecessors, successors, handles, items, cg = _graph_view(graph, project)
+    handle = _start_handle(project, start, handles=handles)
+    if handle is None:
+        return []
+    return sorted(
+        (
+            items[node]
+            for node in _component_tips(
+                handle, predecessors, successors, handles, items, cg
+            )
+        ),
+        key=lambda item: _order_key(project, item),
+    )
 
-    "Declares it" means the entry's own keys said so. A value handed down by
-    the file's `defaults:` block is present in `item.fields` but named in
+
+def thread_entries(
+    project: Project,
+    start: Item | str,
+    *,
+    graph: ChainGraph | tuple[dict[str, list[Item]], dict[str, list[Item]]] | None = None,
+) -> list[Item]:
+    """Every entry in `start`'s connected thread, oldest first.
+
+    Walks *both* directions along `follows:` (§8's chain view: a thread is the
+    connected component, not the forward reach), so an entry mid-chain sees
+    the whole of it. Order is (date, source file, source line) — the same
+    chronological posture `log.html` takes, with file and line as the
+    deterministic tiebreak for entries sharing a date. A lone item with no
+    `follows:` in either direction is a thread of one, and returns itself.
+    """
+    predecessors, successors, handles, items, cg = _graph_view(graph, project)
+    handle = _start_handle(project, start, handles=handles)
+    if handle is None:
+        return []
+    if cg is not None:
+        comp_id = cg.component_id(handle)
+        nodes = (
+            set(cg._component_nodes.get(comp_id, []))
+            if comp_id is not None
+            else {handle}
+        )
+    else:
+        nodes = _component(handle, predecessors, successors, handles)
+    return sorted(
+        (items[node] for node in nodes), key=lambda item: _order_key(project, item)
+    )
+
+
+def _order_key(project: Project, item: Item) -> tuple:
+    """Chronological thread order: `date:`, then source file, then source line."""
+    return (_date_ordinal(project, item), item.source_file, item.source_line)
+
+
+def _date_ordinal(project: Project, item: Item) -> int:
+    """Sort key: chronological by `date:`, entries with no parseable date
+    last (mirrors `render._date_sort_key`'s posture)."""
+    value = item.fields.get("date")
+    if value is None or str(value) == "":
+        return 2**31 - 1
+    try:
+        return dates.parse_date(value, project.date_format).toordinal()
+    except (TypeError, ValueError):
+        return 2**31 - 1
+
+
+def _declares(item: Item, name: str) -> bool:
+    """True when this entry's *own* keys named `name` (a field or a link).
+
+    A value handed down by the file's `defaults:` block is present in
+    `item.fields` (and for a link, in `item.links`) but named in
     `item.inherited_fields`, and is not this entry declaring anything: a log
     file defaulting `status: proposed` would otherwise have every silent
     entry in it shadow the `accepted` its head actually wrote.
-    ``graph`` lets repeated resolution in one build reuse the parsed follows
-    edges instead of rebuilding them for every entry. When `graph` is a
-    `ChainGraph`, results are memoized per (connected component, field),
-    including the fork/no-tip cases. The component's tips are computed once
-    over the ENTIRE component (all nodes with no successors), so every entry
-    in the component gets the same result.
     """
-    if isinstance(graph, ChainGraph):
-        cg = graph
-        predecessors, successors = cg.predecessors, cg.successors
-        handles = cg._handles
-        items = cg._items
-    else:
-        if graph is None:
-            predecessors, successors = build_graph(project)
-        else:
-            predecessors, successors = graph
-        handles = _handles(project)
-        items = project.items
+    return name in item.fields and name not in item.inherited_fields
 
+
+def _fold(
+    project: Project,
+    start: Item | str,
+    declared_of: Callable[[Item], Any],
+    *,
+    cache_key: str,
+    graph: ChainGraph | tuple[dict[str, list[Item]], dict[str, list[Item]]] | None = None,
+) -> tuple[Any, Item | None]:
+    """The one fold behind `resolve_current` and its with-source variants.
+
+    Ask the whole connected thread for its tips (`_component_tips`); more than
+    one (an unmerged fork anywhere in it, §6) is undefined — never "settled" —
+    so this returns (None, None). From the single tip, walk backward over
+    *all* predecessors (a merge entry has several) breadth-first by distance
+    from the tip, and return the value `declared_of` gives for the nearest
+    entries that declare it, paired with the one they came from. An entry that
+    does not declare it does not clear the value.
+
+    Ambiguity is about *values*, not entries: several entries at the same
+    nearest distance agreeing on one value fold to that value — a silent merge
+    entry whose two parents both say `accepted` still concludes `accepted` —
+    and are attributed to the earliest of them by `_order_key` (date, then
+    source file, then source line), so the page does not move between builds.
+    Same nearest distance, different values: (None, None).
+
+    `declared_of` returns None for "this entry does not declare it", so a
+    caller folding a field whose declared value could be falsy still folds.
+    `cache_key` names what is being folded (`field:status`, `link:satisfies`)
+    for the graph's per-(component, key) memo: every entry of a thread shares
+    one component, so a thread costs one fold per key, not one per entry.
+    """
+    predecessors, successors, handles, items, cg = _graph_view(graph, project)
     start_handle = _start_handle(project, start, handles=handles)
     if start_handle is None:
-        return None
+        return None, None
 
-    # If we have a ChainGraph, check cache FIRST using component from start_handle
-    if isinstance(graph, ChainGraph):
-        comp_id = cg.component_id(start_handle)
-        if comp_id is not None:
-            found, cached = cg.cache_get(comp_id, field)
-            if found:
-                return cached
-    else:
-        comp_id = None
+    comp_id = cg.component_id(start_handle) if cg is not None else None
+    if cg is not None and comp_id is not None:
+        found, cached = cg.cache_get(comp_id, cache_key)
+        if found:
+            return cached
 
-    # For ChainGraph, get or compute the component's tips (all nodes with no successors in the component)
-    if isinstance(graph, ChainGraph) and comp_id is not None:
-        # Check if we already cached tips for this component
-        cached_tips = cg.tips_get(comp_id)
-        if cached_tips is not None:
-            tips_frozen = cached_tips
-        else:
-            # Compute ALL tips in the component: nodes in this component with no successors
-            tips_frozen = _compute_component_tips(comp_id, cg, handles, items, successors, predecessors)
-            cg.tips_set(comp_id, tips_frozen)
-    else:
-        # Without ChainGraph, compute component tips from scratch each time
-        # (still per-component semantics, just not memoized)
-        # First find all nodes in the component by walking from start
-        component_nodes: set[str] = set()
-        stack = [start_handle]
-        seen = {start_handle}
-        while stack:
-            node = stack.pop()
-            component_nodes.add(node)
-            # Walk backwards
-            for predecessor in predecessors.get(node, []):
-                prev = handles.get(id(predecessor))
-                if prev is not None and prev not in seen:
-                    seen.add(prev)
-                    stack.append(prev)
-            # Walk forwards
-            for successor in successors.get(node, []):
-                succ_handle = handles.get(id(successor))
-                if succ_handle is not None and succ_handle not in seen:
-                    seen.add(succ_handle)
-                    stack.append(succ_handle)
-
-        # Find all tips in this component (nodes with no internal successors)
-        tips_frozen = frozenset(
-            node
-            for node in component_nodes
-            if not any(
-                handles.get(id(succ)) in component_nodes
-                for succ in successors.get(node, [])
-            )
-        )
-
+    tips_frozen = _component_tips(
+        start_handle, predecessors, successors, handles, items, cg
+    )
     if len(tips_frozen) != 1:
-        # Fork or no tip - cache None result
-        if isinstance(graph, ChainGraph) and comp_id is not None:
-            cg.cache_set(comp_id, field, None)
-        return None
+        result: tuple[Any, Item | None] = (None, None)
+    else:
+        result = _fold_from_tip(
+            project,
+            next(iter(tips_frozen)),
+            declared_of,
+            predecessors,
+            handles,
+            items,
+        )
+    if cg is not None and comp_id is not None:
+        cg.cache_set(comp_id, cache_key, result)
+    return result
 
-    tip_handle = next(iter(tips_frozen))
 
-    # Perform the fold
+def _fold_from_tip(
+    project: Project,
+    tip_handle: str,
+    declared_of: Callable[[Item], Any],
+    predecessors: dict[str, list[Item]],
+    handles: dict[int, str],
+    items: dict[str, Item],
+) -> tuple[Any, Item | None]:
+    """`_fold`'s backward walk, from the thread's one tip."""
     frontier = [tip_handle]
     visited = {tip_handle}
     while frontier:
-        declared = [
-            items[node].fields[field]
-            for node in frontier
-            if field in items[node].fields
-            and field not in items[node].inherited_fields
+        hits = [
+            (items[node], declared_of(items[node])) for node in frontier
         ]
-        if declared:
-            first = declared[0]
-            result = first if all(value == first for value in declared) else None
-            # Cache the result if we have a ChainGraph
-            if isinstance(graph, ChainGraph) and comp_id is not None:
-                cg.cache_set(comp_id, field, result)
-            return result
+        hits = [(item, value) for item, value in hits if value is not None]
+        if hits:
+            value = hits[0][1]
+            if any(other != value for _item, other in hits[1:]):
+                return None, None
+            source = min(
+                (item for item, _value in hits),
+                key=lambda item: _order_key(project, item),
+            )
+            return value, source
         nxt: list[str] = []
         for node in frontier:
             for predecessor in predecessors.get(node, []):
@@ -416,10 +544,100 @@ def resolve_current(
                 visited.add(ph)
                 nxt.append(ph)
         frontier = nxt
-    result = None
-    if isinstance(graph, ChainGraph) and comp_id is not None:
-        cg.cache_set(comp_id, field, result)
-    return None
+    return None, None
+
+
+def resolve_current(
+    project: Project,
+    start: Item | str,
+    field: str,
+    *,
+    graph: ChainGraph | tuple[dict[str, list[Item]], dict[str, list[Item]]] | None = None,
+) -> Any | None:
+    """The chain's current value of `field`, per threads.md §3.
+
+    The whole connected thread is asked for its tips; more than one tip (an
+    unmerged fork, §6) is undefined — never "settled" — so this returns None.
+    From the single tip, walk backward over *all* predecessors (a merge entry
+    has several) breadth-first by distance from the tip, and return `field`
+    from the nearest entry that declares it. An entry omitting the field does
+    not clear it. Two entries at the same nearest distance declaring different
+    values is ambiguous: None; declaring the *same* value is agreement, and
+    folds to it.
+
+    "Declares it" means the entry's own keys said so — see `_declares`.
+    ``graph`` lets repeated resolution in one build reuse the parsed follows
+    edges instead of rebuilding them for every entry. When `graph` is a
+    `ChainGraph`, results are memoized per (connected component, field),
+    including the fork/no-tip cases: a thread of N entries costs one fold per
+    field, not N.
+    """
+    value, _source = resolve_current_with_source(project, start, field, graph=graph)
+    return value
+
+
+def resolve_current_with_source(
+    project: Project,
+    start: Item | str,
+    field: str,
+    *,
+    graph: ChainGraph | tuple[dict[str, list[Item]], dict[str, list[Item]]] | None = None,
+) -> tuple[Any, Item | None]:
+    """`resolve_current`'s fold, plus the entry the value came from.
+
+    The rendering side (§8's "currently concludes" panel) has to say *which*
+    entry concluded it, which the value-only fold throws away. Several entries
+    tying at the nearest distance with the same value are attributed to the
+    earliest of them by `_order_key`. (None, None) for the same reasons
+    `resolve_current` returns None: forked, ambiguous, or nothing in the
+    thread ever declared it.
+    """
+    return _fold(
+        project,
+        start,
+        lambda item: item.fields[field] if _declares(item, field) else None,
+        cache_key=f"field:{field}",
+        graph=graph,
+    )
+
+
+def resolve_current_link_with_source(
+    project: Project,
+    start: Item | str,
+    link: str,
+    *,
+    graph: ChainGraph | tuple[dict[str, list[Item]], dict[str, list[Item]]] | None = None,
+) -> tuple[list[Item], Item | None]:
+    """The same fold over a *link* name: (resolved targets, declaring entry).
+
+    The nearest entry walking back from the thread's one tip whose own `links`
+    declare `link` — not inherited from `defaults:` — supplies the targets,
+    resolved through `build.resolve_link_target` so a composite or bare-key
+    spelling resolves the way every other structured link does. A target that
+    does not resolve is dropped: `resolve_links` has already reported it. Same
+    fork and equal-distance rules as `resolve_current`.
+    """
+    from . import build as build_mod
+
+    by_key = build_mod._key_index(project)
+
+    def declared_of(item: Item) -> Any:
+        if link not in item.links or link in item.inherited_fields:
+            return None
+        targets = [
+            target
+            for target in (
+                build_mod.resolve_link_target(by_key, project, raw)
+                for raw in item.links.get(link) or []
+            )
+            if target is not None
+        ]
+        return targets or None
+
+    targets, source = _fold(
+        project, start, declared_of, cache_key=f"link:{link}", graph=graph
+    )
+    return (targets or []), source
 
 
 def _compute_component_tips(
