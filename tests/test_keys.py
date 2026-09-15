@@ -727,6 +727,62 @@ def test_a_key_keyed_seal_detects_a_deleted_key_without_a_baseline(tmp_path, cap
     assert "log-seal.yaml" in captured.err
 
 
+def test_a_manifest_only_deleted_key_survives_a_write_enabled_build(tmp_path, capsys):
+    """The membership manifest is often the only record of a key (a project
+    with boards and no baselines). A write-enabled build must not prune or
+    rewrite that entry, or the next load loses the evidence and mints."""
+    old_key = keys_mod.mint()
+    write_project_config(
+        tmp_path,
+        "site: { title: T, out: _site }\n"
+        "boards:\n  board-a: { label: Board A, token: A }\n"
+        "types:\n"
+        "  requirement:\n"
+        "    prefix: REQ\n"
+        "    fields: { text: { type: text, required: true } }\n",
+    )
+    items = tmp_path / "items" / "board-a"
+    items.mkdir(parents=True)
+    path = items / "r.yaml"
+    path.write_text(
+        "defaults: { type: requirement, prefix: REQ }\n"
+        f"items:\n  - id: REQ-001\n    key: {old_key}\n    text: Powered.\n",
+        encoding="utf-8",
+    )
+    config = str(tmp_path / "refdes-project.yaml")
+    marker = tmp_path / ".refdes"
+    marker.mkdir()
+    (marker / "keys-adopted.yaml").write_text("adopted: true\n", encoding="utf-8")
+    assert cli_mod.main(["-c", config, "build"]) == 0
+    capsys.readouterr()
+    manifest = marker / "boards.yaml"
+    assert old_key in manifest.read_text(encoding="utf-8")
+
+    path.write_text(
+        path.read_text(encoding="utf-8").replace(f"    key: {old_key}\n", ""),
+        encoding="utf-8",
+    )
+    assert cli_mod.main(["-c", config, "build"]) == 1
+    first = capsys.readouterr()
+    assert "key deleted" in first.err
+    assert old_key in manifest.read_text(encoding="utf-8")
+
+    # The next writable load must still see the evidence and still refuse.
+    assert cli_mod.main(["-c", config, "check"]) == 1
+    second = capsys.readouterr()
+    assert "key deleted" in second.err
+    assert "key:" not in path.read_text(encoding="utf-8")
+
+    path.write_text(
+        path.read_text(encoding="utf-8").replace(
+            "id: REQ-001\n", f"id: REQ-001\n    key: {old_key}\n"
+        ),
+        encoding="utf-8",
+    )
+    assert cli_mod.main(["-c", config, "check"]) == 0
+    capsys.readouterr()
+
+
 def test_the_remedy_points_a_markdown_item_at_its_front_matter(tmp_path, capsys):
     old_key = keys_mod.mint()
     root = _keys_project(tmp_path, "items: []\n")

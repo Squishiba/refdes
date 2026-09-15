@@ -929,6 +929,14 @@ key be minted. `refdes keys adopt` refuses outright for the same item rather
 than minting over it. An item with no key and no record anywhere is still
 minted silently, exactly as before.
 
+The record itself must also survive the build that reports the loss. The
+membership manifest is pruned and rewritten on every write-enabled build, and
+for a project with no baselines it is the *only* record of a non-log item's
+key: pruning the key-keyed entry and re-recording the item under its display
+id left the next load with no evidence and it minted a fresh key — the silent
+re-mint, one build late. A key-keyed entry that records a deleted-key item is
+therefore never pruned and never rewritten (§7 storage).
+
 The seal verifier stays out of the way: a keyless item whose key-keyed seal
 entry still names the old key is no longer reported as "key changed since it
 was sealed" — that was the same event twice, and wrong about which one it

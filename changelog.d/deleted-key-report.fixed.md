@@ -7,7 +7,9 @@
   is a different item — after which a fresh key is minted for it. Nothing is
   written into the item in the meantime, so the evidence survives.
   `refdes keys adopt` refuses the same item rather than minting over it.
-  The seal verifier no longer adds its own `key changed since it was sealed`
+  The record holding the old key survives the build that reports the loss: a
+  key-keyed membership entry for the item is never pruned or rewritten, and the
+  seal verifier no longer adds its own `key changed since it was sealed`
   for the same item — the deleted-key report owns it — and the sealed entry is
   still never re-sealed over. Items with no key and no record anywhere are
   still minted silently.

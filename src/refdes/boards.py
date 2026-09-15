@@ -280,8 +280,24 @@ def _membership_is_live(
     return key in live_keys if key is not None else display_id in live_ids
 
 
-def _prune_stale(project: Project, memberships: Memberships, kind: str) -> bool:
+def _deleted_key_evidence(project: Project) -> dict[str, str]:
+    """display id -> recorded key, for items whose key was deleted by hand.
+
+    A key-keyed membership entry for such an item is the *only* record of the
+    key in a project with no baselines, so the writers below must not prune or
+    rewrite it (§6, decision 2026-09-15).
+    """
+    return {r.item.id: r.key for r in keys_mod.deleted_key_records(project)}
+
+
+def _prune_stale(
+    project: Project,
+    memberships: Memberships,
+    kind: str,
+    evidence: dict[str, str] | None = None,
+) -> bool:
     """Drop memberships whose immutable or legacy identity is no longer local."""
+    evidence = evidence or {}
     live_ids = {item.id for item in project.local_items}
     live_ids |= set(project.former_ids)
     live_keys = {item.key for item in project.local_items if item.key}
@@ -291,6 +307,8 @@ def _prune_stale(project: Project, memberships: Memberships, kind: str) -> bool:
         if not _membership_is_live(
             record_id, value, kind, live_ids, live_keys
         )
+        and evidence.get(_membership_parts(record_id, value, kind)[1])
+        != record_id
     ]
     for record_id in stale:
         del memberships[record_id]
@@ -397,6 +415,7 @@ def _verify_membership(
     write: bool,
     accept_move: bool,
     adopted: bool,
+    evidence: dict[str, str],
 ) -> bool:
     """One kind's worth of drift checking (`"board"` or `"workspace"`).
 
@@ -422,6 +441,10 @@ def _verify_membership(
             continue
 
         record_id, _stored, recorded = found
+        if evidence.get(item.id) == record_id:
+            # This entry records the key the item just lost: rewriting it in
+            # the item's (keyless) shape would delete the last record of it.
+            continue
         if recorded == value:
             if write:
                 changed = _store_membership(
@@ -467,23 +490,31 @@ def verify(project: Project, write: bool = False, accept_move: bool = False) -> 
 
     manifest = load_manifest(project)
     adopted = keys_mod.is_adopted(project) if write else False
+    evidence = _deleted_key_evidence(project) if write else {}
     changed = False
     if write:
-        changed = _prune_stale(project, manifest["boards"], "board") or changed
+        changed = _prune_stale(
+            project, manifest["boards"], "board", evidence
+        ) or changed
         changed = (
-            _prune_stale(project, manifest["workspaces"], "workspace") or changed
+            _prune_stale(
+                project, manifest["workspaces"], "workspace", evidence
+            )
+            or changed
         )
 
     if project.boards:
         changed = _verify_membership(
             project, manifest["boards"], project.board_moves,
             lambda item: item.board, "board", write, accept_move, adopted,
+            evidence,
         ) or changed
 
     if project.workspaces:
         changed = _verify_membership(
             project, manifest["workspaces"], project.workspace_moves,
-            lambda item: item.workspace, "workspace", write, accept_move, adopted,
+            lambda item: item.workspace, "workspace", write, accept_move,
+            adopted, evidence,
         ) or changed
 
     if write and changed:

@@ -74,4 +74,32 @@ Review round (refdes-2) on f6accf6:
   test_writable_check_reports_a_deleted_key_without_reminting and a new
   test_the_remedy_points_a_markdown_item_at_its_front_matter.
 - Docs §6 and the changelog fragment note the seal verifier standing down.
+Second review round (refdes-2) on e3e266c - silent re-mint after one build:
+- Reproduced the shape: with the membership manifest as the only record of a
+  key (every non-log item in a project with no baselines), the write-enabled
+  boards.verify() pruned the key-keyed entry as "stale" and re-recorded the
+  item as a legacy `REQ-001: board-a`, so the next load found no evidence and
+  minted. Fixed in boards.py: verify() now computes _deleted_key_evidence()
+  (display id -> recorded key, from keys.deleted_key_records) once per write
+  and passes it down; _prune_stale() keeps such an entry and
+  _verify_membership() skips the rewrite that would have replaced it.
+- Checked the other writers, as asked:
+  * seal files: safe. The fresh-seal branch needs _find_seal() to miss, and it
+    finds the key-keyed entry by recorded display id; the orphan drop only
+    fires when the display id is gone from the project. The existing test
+    asserts a byte-identical seal file after a write-enabled build.
+  * baseline stamping: safe by the error floor - cli._run_stamp() returns on
+    project.errors before stamp(), and the deleted-key ERROR is set. A stamp
+    would otherwise have become the new latest baseline with no key for the
+    item, which is what deleted_key_records() reads.
+  * keys adopt: refuses before any write (first review round).
+  * revise._carry_forward_seals: keeps the keyed record id (it only re-ids a
+    legacy scalar entry), and revise() gates on _blocking_errors anyway.
+  * imports.py: read-only load path, writes no records.
+- New test test_a_manifest_only_deleted_key_survives_a_write_enabled_build
+  (tests/test_keys.py) runs the real order: adopted board project, build, delete
+  the key, write-enabled build (error, manifest entry intact), a second
+  writable load (still "key deleted", still no key in the file), restore (clean).
+  Sabotage-tested: emptying _deleted_key_evidence() reproduces the legacy
+  rewrite and fails the test; restored.
 Status: finished.
