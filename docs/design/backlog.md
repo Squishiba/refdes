@@ -788,6 +788,7 @@ edits it) and changes the failure class from "the document is wrong" to
 hashes only, never extracted values. The finding states the dependency itself: a
 citation has to be able to name a repo-local file before a calc value can be
 drawn from one.
+**Design:** `docs/design/calc-sources.md` is the draft implementation specification, awaiting Jared's review.
 
 **Local model (not decided — my read): not suitable.** The mechanical parts
 (a CSV reader, a lockfile field) are easy, but the correctness claim is "the

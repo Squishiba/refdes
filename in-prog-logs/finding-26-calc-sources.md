@@ -1,0 +1,8 @@
+# Finding 26 — calc sources
+
+2026-09-15 — Started design-only pass after fast-forwarding this branch to `main`. Verified the finding and its dependency in `docs/design/backlog.md`; inspected current calc evaluation, citation locking/fetching, content hashing, CLI behavior, and the existing `DEC-PWR-001` datasheet-derived efficiency example. Next: run the schema/CLI and openpyxl probes, then write the scoped design specification and backlog pointer.
+
+
+2026-09-15 — Wrote `docs/design/calc-sources.md` as a Draft awaiting Jared’s review and added the requested backlog pointer. The document recommends same-item citation-backed `source(path, key)` calc syntax; fixed `key,value` CSV semantics; fetch-only extraction with atomic lock updates; source values in the owning content hash; CSV-only V1; internal readers only; and schematic drift checks rather than schematic calc authority. Probed `openpyxl 3.1.5`: a workbook written with an unevaluated formula returns `None` under `data_only=True`; the draft requires that to error. The existing local-citation verifier rehashes files during build/check, which conflicts narrowly with the wording “builds read the lockfile only”; documented this and recommended preserving the recently-landed verifier, pending Jared’s decision.
+
+2026-09-15 — Completed. Ruff accepted the changed documentation paths (no Python files to lint). The full suite passed twice: 970 passed; the final run took 61.53 seconds after `git rebase main`, which reported the branch up to date. The design-document-only commit carries no changelog fragment.
