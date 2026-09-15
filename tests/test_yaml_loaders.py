@@ -43,3 +43,18 @@ def test_diagnostic_parity_for_malformed_yaml():
         # The caret excerpt must be present in the message when the pure-Python loader includes it.
         # Since our retry reports the pure-Python exception, it should include the same excerpt.
         assert msg_refdes.startswith(str(msg_py)) or msg_refdes == msg_py
+
+def test_yaml_safe_load_with_file_handle_raises_on_malformed():
+    """Stream handles must not silently return empty on error."""
+    import tempfile
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as fh:
+        fh.write("items:\n  - id: A\n    text: [ unterminated\n")
+        path = fh.name
+    with open(path, "r", encoding="utf-8") as stream:
+        try:
+            from refdes.parse import yaml_safe_load
+            yaml_safe_load(stream)
+        except yaml.YAMLError:
+            pass  # Expected: must raise, not return None
+        else:
+            raise AssertionError("yaml_safe_load(stream) did not raise on malformed YAML")

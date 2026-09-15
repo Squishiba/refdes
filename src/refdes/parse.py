@@ -98,12 +98,18 @@ def yaml_safe_load(stream_or_text) -> Any:
     """Load YAML with libyaml when available; same resolver/semantics as SafeLoader.
     On any YAML parse error, retry with the pure-Python loader and raise the
     pure-Python exception so diagnostics stay byte-identical to the pre-C-loader
-    behaviour (libyaml's exception messages and caret placement differ)."""
+    behaviour (libyaml's exception messages and caret placement differ).
+    Stream handles are read to text first so the retry can use the same content."""
+    if hasattr(stream_or_text, "read"):
+        text = stream_or_text.read()
+        if isinstance(text, bytes):
+            text = text.decode("utf-8")
+    else:
+        text = stream_or_text
     try:
-        return yaml.load(stream_or_text, Loader=_SafeLoaderClass)
+        return yaml.load(text, Loader=_SafeLoaderClass)
     except yaml.YAMLError:
-        return yaml.load(stream_or_text, Loader=_PurePythonLoaderBase)
-
+        return yaml.load(text, Loader=_PurePythonLoaderBase)
 def _strip_lines(obj: Any) -> Any:
     """Remove the __line__ bookkeeping key from nested structures."""
     if isinstance(obj, dict):
