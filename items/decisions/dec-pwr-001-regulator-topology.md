@@ -28,9 +28,9 @@ options:
       that REQ-PWR-002 does not actually have once the second-stage LC is fitted.
 checks:
   - value: eff
-    against: BND-THM-002
+    against: BND-THM-002@9sga3wyj9mm
   - value: P_dens
-    against: BND-THM-001
+    against: BND-THM-001@cw45e0ks00n
 ---
 
 The 3V3 rail draws up to 1.2 A from a 9–36 V input, in a sealed enclosure with no
