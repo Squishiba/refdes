@@ -929,6 +929,12 @@ key be minted. `refdes keys adopt` refuses outright for the same item rather
 than minting over it. An item with no key and no record anywhere is still
 minted silently, exactly as before.
 
+The seal verifier stays out of the way: a keyless item whose key-keyed seal
+entry still names the old key is no longer reported as "key changed since it
+was sealed" — that was the same event twice, and wrong about which one it
+was. The deleted-key report owns the item, and the sealed entry is still
+never re-sealed over.
+
 Two properties worth calling out. First, it is **provable** — no similarity
 scoring, no confidence, no confirmation prompt, unlike `former-ids propose`
 today. Second, it is **cheap**: the baseline is already loaded for the diff.

@@ -409,3 +409,57 @@ def test_renamed_keyed_seal_does_not_claim_a_new_item_reusing_its_old_id(tmp_pat
     assert stored["LOG-001"] == reused.item_by_id("LOG-001").content_hash
     assert reused.item_by_id("LOG-005").content_hash == original_hash
     assert seal.resealed_ids(reused) == []
+
+
+def test_deleting_a_sealed_items_key_reports_only_the_deleted_key(tmp_path):
+    """A keyless item whose key-keyed seal entry still names the old key is a
+    deleted key, not a changed one: the seal verifier stays out of the way of
+    the §6 deleted-key report and never re-seals over the evidence."""
+    sealed_key = keys_mod.mint()
+    write_project_config(
+        tmp_path,
+        "site: { title: T, out: _site }\n"
+        "types:\n"
+        "  log:\n"
+        "    prefix: LOG\n"
+        "    append_only: true\n"
+        "    fields: { summary: { type: text, required: true } }\n",
+    )
+    items = tmp_path / "items"
+    items.mkdir()
+    item_path = items / "log.yaml"
+    item_path.write_text(
+        "defaults: { type: log }\n"
+        f"items:\n  - id: LOG-001\n    key: {sealed_key}\n    summary: First.\n",
+        encoding="utf-8",
+    )
+    project = _load_and_build(tmp_path, seal_write=False, reseal=False)
+    seal.save_seals(
+        project,
+        {
+            sealed_key: {
+                "id": "LOG-001",
+                "hash": project.item_by_id("LOG-001").content_hash,
+                "hash_format": build_mod.HASH_FORMAT,
+            }
+        },
+    )
+    seal_path = tmp_path / ".refdes" / "log-seal.yaml"
+    before = seal_path.read_text(encoding="utf-8")
+    item_path.write_text(
+        item_path.read_text(encoding="utf-8").replace(
+            f"    key: {sealed_key}\n", ""
+        ),
+        encoding="utf-8",
+    )
+
+    deleted = _load_and_build(tmp_path, seal_write=True, reseal=False)
+
+    mentions = [d.message for d in deleted.errors if "key deleted" in d.message]
+    assert len(mentions) == 1
+    assert sealed_key in mentions[0]
+    assert not [d.message for d in deleted.errors if "key changed" in d.message], [
+        d.message for d in deleted.errors
+    ]
+    assert seal_path.read_text(encoding="utf-8") == before
+    assert set(seal.load_seals(deleted)) == {sealed_key}

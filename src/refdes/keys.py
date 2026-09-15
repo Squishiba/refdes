@@ -486,11 +486,16 @@ def deleted_key_message(record: DeletedKey) -> str:
             f" The records disagree about the old key -- {disagreement} -- so "
             "check which one is right before restoring."
         )
+    where = (
+        "in its front matter"
+        if item.source_file.endswith((".md", ".markdown"))
+        else "alongside its id:"
+    )
     message += (
-        f" Restore it by adding this line back to {item.source_file} at line "
-        f"{item.source_line}: `key: {record.key}`. Or, if this really is a "
-        "new, different item, give it a new display id so it is not mistaken "
-        "for the old one -- a fresh key will then be minted for it."
+        f" Add the field `key: {record.key}` back to the item that starts at "
+        f"{item.source_file}:{item.source_line} ({where}). Or, if this really "
+        "is a new, different item, give it a new display id so it is not "
+        "mistaken for the old one -- a fresh key will then be minted for it."
     )
     return message
 

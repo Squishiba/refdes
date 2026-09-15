@@ -619,6 +619,10 @@ def test_writable_check_reports_a_deleted_key_without_reminting(tmp_path, capsys
     assert "baseline 'rev-a'" in captured.err
     assert f"key: {old_key}" in captured.err
     assert "new display id" in captured.err
+    # The remedy names the item's start, not a line to insert at: an item is a
+    # YAML list entry, so "add this line at N" would break the file.
+    assert "items/r.yaml:3" in captured.err
+    assert "alongside its id:" in captured.err
     assert "WARNING" in captured.out
 
 
@@ -721,6 +725,28 @@ def test_a_key_keyed_seal_detects_a_deleted_key_without_a_baseline(tmp_path, cap
     assert "key deleted" in captured.err
     assert old_key in captured.err
     assert "log-seal.yaml" in captured.err
+
+
+def test_the_remedy_points_a_markdown_item_at_its_front_matter(tmp_path, capsys):
+    old_key = keys_mod.mint()
+    root = _keys_project(tmp_path, "items: []\n")
+    (root / "items" / "r.md").write_text(
+        f"---\nid: REQ-001\nkey: {old_key}\ntype: requirement\n---\nSame item.\n",
+        encoding="utf-8",
+    )
+    _stamp_keyed_baseline(root, "rev-a")
+    path = root / "items" / "r.md"
+    path.write_text(
+        path.read_text(encoding="utf-8").replace(f"key: {old_key}\n", ""),
+        encoding="utf-8",
+    )
+
+    cli_mod.main(["-c", str(root / "refdes-project.yaml"), "--no-write", "check"])
+    captured = capsys.readouterr()
+
+    assert "key deleted" in captured.err
+    assert "items/r.md:2" in captured.err
+    assert "in its front matter" in captured.err
 
 
 def test_disagreeing_records_are_both_named(tmp_path, capsys):

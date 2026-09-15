@@ -280,6 +280,11 @@ def verify(project: Project, write: bool = False, reseal: str | None = None) -> 
             recorded_key = _seal_key_mismatch(record_id, value, item)
             if recorded_key is not None:
                 project.seal_violations.append(item.id)
+                if not item.key:
+                    # The key was deleted, not changed: the deleted-key report
+                    # (§6, 2026-09-15) owns this item and says so with the
+                    # remedies. Never re-seal over it either.
+                    continue
                 project.error(
                     f"{item.id} is append-only and its key changed since it was "
                     f"sealed: was {recorded_key!r}, now {item.key!r}. A key never "

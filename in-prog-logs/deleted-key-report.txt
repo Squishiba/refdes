@@ -54,4 +54,24 @@ re-minting them.
 - Added changelog.d/deleted-key-report.fixed.md.
 - Full suite: 889 passed. Ruff clean on keys.py, adopt.py, test_keys.py
   (test_keys_adopt.py has one pre-existing F541 on a line I did not touch).
+Review round (refdes-2) on f6accf6:
+- Confirmed by hand on an adopted project with key-keyed seals: the file was
+  not re-minted and the warning + "key deleted" error named the seal file.
+- Fix 1: seal.py verify() no longer reports "key changed since it was sealed"
+  for an item that has no key at all - that was the same event reported twice
+  and wrong about which it was. The branch still records the seal violation
+  and still `continue`s, so the sealed entry is never re-sealed over. New test
+  test_deleting_a_sealed_items_key_reports_only_the_deleted_key (tests/
+  test_seal.py) asserts exactly one "key deleted" error, no "key changed"
+  line, and a byte-identical seal file after a write-enabled build.
+  Sabotage-tested: re-enabling the old branch makes that test fail with the
+  duplicate "key changed" line; restored.
+- Fix 2: the remedy said "add this line back to items/x.yaml at line 27",
+  but line 27 is the "- id: ..." list entry, so following it literally breaks
+  the YAML. It now reads "Add the field `key: <old>` back to the item that
+  starts at items/x.yaml:27 (alongside its id:)", and "(in its front matter)"
+  for a .md/.markdown item. Pinned by assertions in
+  test_writable_check_reports_a_deleted_key_without_reminting and a new
+  test_the_remedy_points_a_markdown_item_at_its_front_matter.
+- Docs §6 and the changelog fragment note the seal verifier standing down.
 Status: finished.
