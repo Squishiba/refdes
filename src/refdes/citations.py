@@ -362,8 +362,9 @@ def save_lockfile(project: Project, records: dict[str, dict]) -> None:
     os.makedirs(os.path.dirname(path), exist_ok=True)
     header = (
         "# Refdes citation lockfile. Computed provenance for each cited path --\n"
-        "# sha256, fetch timestamp, vendored flag, resolved sections -- keyed by\n"
-        "# the citation's path (URL or project-relative file). Written only by\n"
+        "# sha256, fetch timestamp, vendored flag, resolved sections and the\n"
+        "# sha256 those sections were read out of -- keyed by the citation's\n"
+        "# path (URL or project-relative file). Written only by\n"
         "# `refdes fetch`.\n"
         "# Never hand-edit the sha256.\n"
     )
@@ -560,6 +561,23 @@ def _apply_section(project, item, spec, record, status, severity) -> None:
         return
     sections = (record or {}).get("sections") or {}
     page = sections.get(spec.section)
+    # A page is a fact about specific bytes. `refdes fetch` records which bytes
+    # it read them out of; if that is not the sha256 now in the record, the page
+    # belongs to a document this one is not, and rendering it would be the
+    # silent-wrong-link failure this whole feature is here to avoid. Better a
+    # citation with no page and a loud warning than a confident wrong page.
+    pinned = str((record or {}).get("sha256") or "")
+    resolved_against = str((record or {}).get("sections_sha256") or "")
+    if page is not None and resolved_against != pinned:
+        status.detail = (
+            f"section {spec.section!r} of {spec.path} was resolved against "
+            f"different bytes than the ones now pinned; run 'refdes fetch "
+            f"--update --path {spec.path}' to re-resolve it"
+        )
+        severity(
+            status.detail, file=item.source_file, line=item.source_line, item_id=item.id
+        )
+        return
     if page is None:
         status.detail = (
             f"section {spec.section!r} of {spec.path} has no resolved page in "
@@ -730,18 +748,29 @@ class FetchResult:
 
 
 def _section_bytes(project, kind, canon, record):
-    """The pinned bytes to resolve a section against, for a path that was not
+    """The *pinned* bytes to resolve a section against, for a path that was not
     fetched this run (already pinned, no --update). (data, "") on success,
-    (None, message) when they are not on disk -- which for a remote citation
-    means it is not vendored, so nothing local can be opened.
+    (None, message) when they are not available.
+
+    "pinned" is the whole point: a page number only means something next to the
+    bytes it was read out of, so the bytes handed back are checked against the
+    record's sha256 before anyone is allowed to resolve against them. Reading
+    the current file without that check is how a section silently resolves to
+    the page a heading moved to.
     """
+    sha = str((record or {}).get("sha256") or "")
     if kind == "local":
         target = os.path.join(project.root, canon)
         if not os.path.isfile(target):
             return None, f"local file {canon!r} is not on disk"
         with open(target, "rb") as fh:
-            return fh.read(), ""
-    sha = str((record or {}).get("sha256") or "")
+            data = fh.read()
+        if hashlib.sha256(data).hexdigest() != sha:
+            return None, (
+                "the file on disk changed since it was pinned; run 'refdes "
+                f"fetch --update --path {canon}' to re-pin and resolve"
+            )
+        return data, ""
     blob = vendor_path(project, sha, canon)
     if not os.path.isfile(blob):
         return None, (
@@ -750,7 +779,15 @@ def _section_bytes(project, kind, canon, record):
             f"{canon}' with the network available"
         )
     with open(blob, "rb") as fh:
-        return fh.read(), ""
+        data = fh.read()
+    # The blob's name is its sha256, so a mismatch is a corrupted cache rather
+    # than a moved file -- and resolving against it would be resolving against
+    # bytes nothing pinned.
+    if hashlib.sha256(data).hexdigest() != sha:
+        return None, (
+            f"the vendored blob for {canon} does not match its pinned sha256"
+        )
+    return data, ""
 
 
 def _section_failure(canon: str, err: SectionError, sections: dict[str, list[str]]) -> str:
@@ -799,15 +836,27 @@ def fetch_all(
             raise CitationError(f"no citation in this project cites {path!r}")
 
     wants_vendor: dict[str, bool] = defaultdict(bool)
-    # {path: {section as written: [citing item ids]}} -- what each path's
-    # outline has to be asked for, and whom to tell when the answer fails.
-    wants_sections: dict[str, dict[str, list[str]]] = defaultdict(
-        lambda: defaultdict(list)
-    )
     for item, spec in entries:
         wants_vendor[spec.path] = wants_vendor[spec.path] or spec.vendor
-        if spec.section:
-            wants_sections[spec.path][spec.section].append(item.id)
+
+    # {canonical path: {section as written: [citing item ids]}} -- what each
+    # path's outline has to be asked for, and whom to tell when the answer
+    # fails. Collected from EVERY item in the project, not from this run's
+    # scope: a page number is a fact about the bytes being pinned, so re-
+    # pinning a path under `--item A` has to re-resolve B's section too, or B
+    # is left citing a page of the file it used to be. Scoping a fetch narrows
+    # which paths are re-pinned; it cannot narrow what a re-pin means.
+    all_sections: dict[str, dict[str, list[str]]] = defaultdict(
+        lambda: defaultdict(list)
+    )
+    for item, spec in collect(project):
+        if not spec.section:
+            continue
+        try:
+            _kind, canon = classify(project.root, spec.path)
+        except CitationError:
+            continue  # a refused path is validation's to report, not ours
+        all_sections[canon][spec.section].append(item.id)
 
     records = load_lockfile(project)
     results: list[FetchResult] = []
@@ -824,7 +873,7 @@ def fetch_all(
         want_vendor = wants_vendor[target]
         sections = {
             section: sorted(set(ids))
-            for section, ids in sorted(wants_sections.get(target, {}).items())
+            for section, ids in sorted(all_sections.get(canon, {}).items())
         }
         if kind == "local" and want_vendor:
             raise CitationError(
@@ -841,29 +890,51 @@ def fetch_all(
             )
             # A `section:` added to an already-pinned citation still has to be
             # resolved, or `refdes fetch` reports success while having done
-            # nothing about it. The bytes are on disk -- the file itself for a
-            # local path, the vendor blob for a vendored remote -- so this
-            # needs no network; when they are not, the reason is the error.
+            # nothing about it. But a recorded page is only as good as the bytes
+            # it was read out of, and only as live as the citation that asked
+            # for it: a section nobody cites any more goes, and a map that
+            # cannot show which bytes it came from goes, because a page with no
+            # provenance is the confident wrong link this feature exists to
+            # prevent. What is still cited and still vouched for is kept, and
+            # only the gaps are resolved.
             already = existing.get("sections") or {}
-            unresolved = {s: ids for s, ids in sections.items() if s not in already}
-            if unresolved:
+            pinned = str(existing.get("sha256") or "")
+            verified = (
+                bool(pinned) and str(existing.get("sections_sha256") or "") == pinned
+            )
+            kept = (
+                {s: p for s, p in already.items() if s in sections} if verified else {}
+            )
+            todo = {s: ids for s, ids in sections.items() if s not in kept}
+            resolved: dict[str, int] = {}
+            if todo:
+                # The bytes are on disk -- the file itself for a local path, the
+                # vendor blob for a vendored remote -- so this needs no network;
+                # when they are not, the reason is the error.
                 data, why = _section_bytes(project, kind, canon, existing)
                 if data is None:
                     err = SectionError("", why, KIND_NO_LOCAL_BYTES)
-                    result.section_errors.append(_section_failure(canon, err, unresolved))
+                    result.section_errors.append(_section_failure(canon, err, todo))
                 else:
-                    resolved, failures = resolve_sections(data, unresolved, existing)
-                    merged = dict(already)
-                    merged.update(resolved)
+                    resolved, failures = resolve_sections(data, todo, existing)
                     for failure in failures:
-                        for dropped in ([failure.section] if failure.section else list(unresolved)):
-                            merged.pop(dropped, None)
-                    existing["sections"] = merged
-                    changed = True
-                    result.sections = resolved
+                        for dropped in (
+                            [failure.section] if failure.section else list(todo)
+                        ):
+                            kept.pop(dropped, None)
                     result.section_errors = [
-                        _section_failure(canon, f, unresolved) for f in failures
+                        _section_failure(canon, f, todo) for f in failures
                     ]
+            result.sections = resolved
+            merged = {**kept, **resolved}
+            if merged != already or ("sections_sha256" in existing) != bool(merged):
+                changed = True
+            if merged:
+                existing["sections"] = merged
+                existing["sections_sha256"] = pinned
+            else:
+                existing.pop("sections", None)
+                existing.pop("sections_sha256", None)
             results.append(result)
             continue
 
@@ -896,17 +967,17 @@ def fetch_all(
         failures: list[SectionError] = []
         if sections:
             resolved, failures = resolve_sections(data, sections, previous)
-        # Sections resolved in an earlier run survive (another item may cite
-        # them and be out of this run's scope); a section that failed to
-        # resolve this time is dropped rather than left pointing at a page the
-        # new bytes may not have.
-        merged = dict((previous or {}).get("sections") or {})
-        merged.update(resolved)
-        for failure in failures:
-            for dropped in ([failure.section] if failure.section else list(sections)):
-                merged.pop(dropped, None)
-        if merged:
-            record["sections"] = merged
+        # Nothing from the old record is carried across a sha change. Every
+        # cited section -- from every item, in or out of this run's scope --
+        # was just re-resolved against these bytes, so what is recorded is
+        # exactly that and nothing more: a section that failed is dropped
+        # rather than left pointing at a page the new bytes may not have, and a
+        # section nobody cites any more goes with the bytes it was found in.
+        if resolved:
+            record["sections"] = resolved
+            # The pages are only meaningful next to the bytes they came from.
+            # `build` checks this against `sha256` before trusting one.
+            record["sections_sha256"] = digest
         records[canon] = record
         changed = True
         results.append(

@@ -265,10 +265,26 @@ nonzero — naming the path, the section, and every item that cites it — when:
 | The PDF extra isn't installed | `section: needs the optional PDF extra: pip install refdes[pdf]` |
 | pypdf can't parse the file | the file and pypdf's own message, never a traceback |
 | `--update`, and the title is gone from the new revision | `the section you cited no longer exists in the new revision (was page N)` |
+| the local file moved since it was pinned, and `--update` was not given | `the file on disk changed since it was pinned; run 'refdes fetch --update --path …'` |
 
 A failed lookup does not undo the pin — the fetch succeeded, the lookup didn't.
 A section that fails to resolve is dropped from the lockfile rather than left
 pointing at a page the new bytes may not have.
+
+**A page belongs to the bytes it was read out of.** The lockfile records the
+sha256 the pages were resolved against (`sections_sha256`) next to the pages
+themselves, and `build` uses a page only while that still matches the sha256 now
+pinned. If it does not — a hand-edited lockfile, a record from before a re-pin —
+the build warns and links the document with no page, because a page number from
+another revision is a wrong link, not a near miss. The same rule is why a
+re-pin re-resolves **every** section any item cites for that path, including
+sections belonging to items outside the run's `--item`/`--path` scope: scoping a
+fetch narrows which paths are re-pinned, it cannot narrow what re-pinning them
+means. Carrying an old page across a sha change is the one thing that would let
+`refdes fetch --update --item CMP-PWR-001` silently leave some other item's
+citation pointing into the wrong page of the file it just replaced. A section
+that stopped being cited stops being recorded — it is a derived value, not a
+ledger entry.
 
 `page:` and `section:` on one citation are not an error, but they have to agree:
 if both are present and the resolved page differs, `build` warns naming both and

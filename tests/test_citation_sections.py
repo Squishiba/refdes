@@ -188,6 +188,179 @@ items:
     assert not results[0].error and not results[0].section_errors
 
 
+# ------------------------------------------- scope: a re-pin re-resolves all
+
+
+TWO_CITERS = """\
+defaults:
+  type: component
+items:
+  - id: CMP-001
+    title: Regulator
+    datasheets:
+      - path: docs/manual.pdf
+        section: Thermal
+  - id: CMP-002
+    title: Placement
+    datasheets:
+      - path: docs/manual.pdf
+        section: Intro
+"""
+
+V1 = [("Intro", 0, None), ("Thermal", 2, None)]
+# The new revision moves both headings -- which is the entire point: a page
+# resolved against v1 is simply wrong about v2.
+V2 = [("Cover", 0, None), ("Intro", 1, None), ("Thermal", 4, None)]
+
+
+def test_scoped_update_reresolves_other_items_sections(tmp_path):
+    """`--update --item CMP-001` re-pins the file, and a re-pin changes what
+    every page number in the record means. CMP-002's section is out of this
+    run's scope but in the same document, so it is re-resolved too -- carrying
+    its v1 page over would leave the build linking into the wrong page of the
+    bytes it just pinned, with nothing said about it."""
+    root = _project(tmp_path, item_text=TWO_CITERS, outline=V1)
+    _fetch(root)
+    assert _lockfile(root)["docs/manual.pdf"]["sections"] == {"Intro": 1, "Thermal": 3}
+
+    make_pdf(root / "docs" / "manual.pdf", pages=5, outline=V2)
+    results = citations_mod.fetch_all(
+        _load_only(root), item_id="CMP-001", update=True, fetcher=lambda u: b""
+    )
+    assert not results[0].error and not results[0].section_errors
+    record = _lockfile(root)["docs/manual.pdf"]
+    assert record["sections"] == {"Intro": 2, "Thermal": 5}
+    assert record["sections_sha256"] == record["sha256"]
+
+    # and the build agrees, for the item that was never in scope
+    project = _build(root)
+    assert project.item_by_id("CMP-002").citations[0].section_page == "2"
+    assert not project.warnings and not project.errors
+    out = render.render_site(project)
+    html = (Path(out) / "cmp-002.html").read_text(encoding="utf-8")
+    assert "#page=2" in html
+
+
+def test_scoped_update_reports_a_gone_section_whose_citer_is_out_of_scope(tmp_path):
+    """Same scope argument on the failure side: the section that vanished is
+    CMP-002's, and CMP-002 is the citer that has to be told, even though only
+    CMP-001 was asked for."""
+    root = _project(tmp_path, item_text=TWO_CITERS, outline=V1)
+    _fetch(root)
+
+    # the new revision keeps Thermal (CMP-001, the item in scope) and drops
+    # Intro -- which is CMP-002's, and CMP-002 is not
+    make_pdf(
+        root / "docs" / "manual.pdf",
+        pages=5,
+        outline=[("Cover", 0, None), ("Thermal", 4, None)],
+    )
+    results = citations_mod.fetch_all(
+        _load_only(root), item_id="CMP-001", update=True, fetcher=lambda u: b""
+    )
+    assert not results[0].error
+    assert len(results[0].section_errors) == 1
+    message = results[0].section_errors[0]
+    assert "CMP-002" in message
+    assert "Intro" in message
+    assert "the section you cited no longer exists in the new revision (was page 1)" in message
+    record = _lockfile(root)["docs/manual.pdf"]
+    assert record["sections"] == {"Thermal": 5}
+    assert record["sections_sha256"] == record["sha256"]
+
+
+def test_fetch_drops_a_section_nobody_cites_anymore(tmp_path):
+    """A section that stopped being cited stops being recorded -- it is a
+    derived value, not a ledger entry."""
+    root = _project(tmp_path, item_text=TWO_CITERS, outline=V1)
+    _fetch(root)
+    assert _lockfile(root)["docs/manual.pdf"]["sections"] == {"Intro": 1, "Thermal": 3}
+
+    (root / "items" / "cmp.yaml").write_text(
+        TWO_CITERS.replace("        section: Intro\n", ""), encoding="utf-8"
+    )
+    _fetch(root)
+    assert _lockfile(root)["docs/manual.pdf"]["sections"] == {"Thermal": 3}
+
+
+# ---------------------------------------- already pinned: bytes must be pinned
+
+
+def test_already_pinned_changed_local_file_does_not_resolve_section(tmp_path):
+    """The skip path resolves a newly cited section from the file on disk --
+    but only if that file is still the pinned one. Resolving against a working
+    copy that has already moved records a page for bytes nothing pinned, and
+    the build has no way to know."""
+    root = _project(
+        tmp_path,
+        item_text="""\
+defaults:
+  type: component
+items:
+  - id: CMP-001
+    title: Regulator
+    datasheets:
+      - path: docs/manual.pdf
+""",
+        outline=V1,
+    )
+    _fetch(root)
+    pinned = _lockfile(root)["docs/manual.pdf"]["sha256"]
+
+    # the file moves, and a section: appears -- without --update
+    make_pdf(root / "docs" / "manual.pdf", pages=5, outline=V2)
+    (root / "items" / "cmp.yaml").write_text(
+        "defaults:\n  type: component\n"
+        "items:\n  - id: CMP-001\n    title: Regulator\n"
+        "    datasheets:\n      - path: docs/manual.pdf\n"
+        "        section: Thermal\n",
+        encoding="utf-8",
+    )
+    results = _fetch(root)
+    assert results[0].skipped is True
+    assert len(results[0].section_errors) == 1
+    message = results[0].section_errors[0]
+    assert "changed since it was pinned" in message
+    assert "refdes fetch --update --path docs/manual.pdf" in message
+    assert "CMP-001" in message
+    record = _lockfile(root)["docs/manual.pdf"]
+    assert "sections" not in record and "sections_sha256" not in record
+    # nothing was re-pinned behind --update: the pin still names the old bytes
+    assert record["sha256"] == pinned
+
+
+def test_already_pinned_unchanged_local_file_still_resolves(tmp_path):
+    """The check above is about changed bytes, not a blanket refusal: an
+    unchanged file is the pinned bytes, and resolving from it is correct."""
+    root = _project(
+        tmp_path,
+        item_text="""\
+defaults:
+  type: component
+items:
+  - id: CMP-001
+    title: Regulator
+    datasheets:
+      - path: docs/manual.pdf
+""",
+        outline=V1,
+    )
+    _fetch(root)
+    (root / "items" / "cmp.yaml").write_text(
+        "defaults:\n  type: component\n"
+        "items:\n  - id: CMP-001\n    title: Regulator\n"
+        "    datasheets:\n      - path: docs/manual.pdf\n"
+        "        section: Thermal\n",
+        encoding="utf-8",
+    )
+    results = _fetch(root)
+    assert not results[0].section_errors
+    assert results[0].sections == {"Thermal": 3}
+    record = _lockfile(root)["docs/manual.pdf"]
+    assert record["sections"] == {"Thermal": 3}
+    assert record["sections_sha256"] == record["sha256"]
+
+
 # ---------------------------------------------------------------- failures a-f
 
 
@@ -392,6 +565,8 @@ def _pin_with_sections(root, sections, extra_item=""):
     }
     if sections is not None:
         record["sections"] = sections
+        # Pages are only meaningful next to the bytes they were read out of.
+        record["sections_sha256"] = record["sha256"]
     path = root / ".refdes" / "citations.yaml"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
@@ -422,6 +597,35 @@ def test_build_renders_the_resolved_page_in_the_href_and_the_page_cell(tmp_path)
     sha = hashlib.sha256((root / "docs" / "manual.pdf").read_bytes()).hexdigest()
     assert f'href="assets/citations/{sha}.pdf#page=1"' in html
     assert "<td class=\"mono\">1</td>" in html
+
+
+def test_build_ignores_section_page_resolved_against_other_bytes(tmp_path):
+    """Defence in depth: the pages in `sections` were read out of the bytes
+    `sections_sha256` names. If that is not the sha256 now pinned, the page
+    belongs to a document this one is not -- so no page is rendered, and the
+    build says why, instead of linking confidently into the wrong revision."""
+    root = _project(tmp_path)
+    _pin_with_sections(root, {"Thermal Design": 1, "Deep Thing": 4})
+    path = root / ".refdes" / "citations.yaml"
+    doc = yaml.safe_load(path.read_text(encoding="utf-8"))
+    doc["citations"]["docs/manual.pdf"]["sections_sha256"] = "0" * 64
+    path.write_text(yaml.safe_dump(doc), encoding="utf-8")
+
+    project = _build(root)
+    assert project.item_by_id("CMP-001").citations[0].section_page == ""
+    assert project.item_by_id("CMP-002").citations[0].section_page == ""
+    assert len(project.warnings) == 2
+    assert all("resolved against" in d.message and "different bytes" in d.message for d in project.warnings)
+    assert all(d.item_id in ("CMP-001", "CMP-002") for d in project.warnings)
+
+    out = render.render_site(project)
+    html = (Path(out) / "cmp-001.html").read_text(encoding="utf-8")
+    sha = hashlib.sha256((root / "docs" / "manual.pdf").read_bytes()).hexdigest()
+    assert f'href="assets/citations/{sha}.pdf"' in html
+    assert "#page=" not in html
+
+    strict = _build(root, require_citations=True)
+    assert any("resolved against" in d.message for d in strict.errors)
 
 
 def test_unresolved_section_warns_and_never_renders_bare(tmp_path):

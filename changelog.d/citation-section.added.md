@@ -21,5 +21,12 @@
   `refdes[pdf]` (`pip install refdes[pdf]`); nothing else in refdes reads a
   PDF, and a project with no `section:` never imports it. A `section:` with no
   resolved page in the lockfile warns at build, and is an error under
-  `--require-citations`. See [citing a section by
-  name](markdown.md#citing-a-section-by-name).
+  `--require-citations`. A page belongs to the bytes it was read out of: the
+  lockfile records the sha256 the pages were resolved against, `build` checks it
+  before using one, and a page resolved against different bytes warns and renders
+  no page instead of linking into the wrong revision. So re-pinning a path
+  re-resolves every section any item cites for it — including items outside the
+  run's `--item`/`--path` scope — and drops any section that stopped being
+  cited; and a local file that changed since it was pinned is not resolved
+  against at all without `--update`, which is what the failure tells you to run.
+  See [citing a section by name](markdown.md#citing-a-section-by-name).

@@ -237,7 +237,7 @@ per-item `board` for a [`boards:`](multi-board.md) registry, top-level
 | `boards` / `items[].board` | Only present when the project declares a `boards:` registry |
 | `types[].fields[].type` | The field's declared type (`text`, `citations`, ...) — how a consumer finds "which field is my citations field" without being told out of band |
 | `items[].citations` | Resolved provenance, keyed by field name — local items only; empty `{}` for items with no `citations:`-typed field |
-| `citations[].section_page` | The page a `section:` resolved to, recorded by `refdes fetch` and read straight out of the lockfile — builds never open a PDF. Empty when the citation cites no section, or the section was never resolved (which `build` warns about); an authored `page:` still wins wherever both exist |
+| `citations[].section_page` | The page a `section:` resolved to, recorded by `refdes fetch` and read straight out of the lockfile — builds never open a PDF. Empty when the citation cites no section, or the section was never resolved, or it was resolved against bytes other than the ones now pinned (either of which `build` warns about); an authored `page:` still wins wherever both exist |
 
 `items[].fields` is authored intent only — for a `citations:`-typed field, each
 entry is just what was written in the item (`path`, `rev`, `page`, `section`,

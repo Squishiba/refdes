@@ -602,6 +602,17 @@ wins where both are given, warning on disagreement. `section:` is refused at
 build time on a hash-only remote citation, since those bytes are not guaranteed
 local.
 
+The invariant that took the most thought: **a page is a fact about specific
+bytes.** The record therefore stores `sections_sha256` beside `sections`,
+`_apply_section()` refuses to use a page whose sha256 is not the sha256 now
+pinned (warning instead), `_section_bytes()` will not resolve a local path whose
+file has moved since it was pinned, and a re-pin re-resolves every section any
+item in the project cites for that path — not the run's scope — because
+`fetch --update --item A` replacing the bytes makes every recorded page of that
+file stale, whether or not item B was asked about. Sections nobody cites are
+dropped rather than accumulated. Without all four, the feature's failure mode is
+the one this codebase cannot have: a confidently wrong link and no word said.
+
 Part 1 shipped in `a077cb2`:
 `item.html.j2` now appends `#page={{ c.spec.page }}` to *both* citation hrefs —
 the upstream link and the published `local copy` link — guarded on `page` being

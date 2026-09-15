@@ -322,8 +322,14 @@ fetched  https://www.ti.com/lit/ds/symlink/tps62913.pdf  sha256=a1b2c3d4e5f6... 
 Already-pinned paths are skipped (reported as `skipped`) unless `--update` is
 given, so a routine re-run does not re-download anything — but a `section:`
 added since the last run is still resolved then, from the bytes already on
-disk. Updates `.refdes/citations.yaml`, and `.refdes/vendor/` for any citation
-that opted into vendoring.
+disk, and only if those bytes are still the pinned ones: a local file that has
+moved since it was pinned is not resolved against, and says to run `--update`
+instead. Resolution covers every section any item in the project cites for the
+path being pinned, not just the ones inside `--item`/`--path` scope — a page
+number is a fact about the bytes being pinned, so re-pinning a file under one
+item cannot leave another item's section pointing at the bytes it replaced.
+Updates `.refdes/citations.yaml`, and `.refdes/vendor/` for any citation that
+opted into vendoring.
 
 A `section:` that cannot be resolved is reported as its own `FAILED` line and
 makes the exit code nonzero, even though the pin itself succeeded — see
