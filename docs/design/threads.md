@@ -96,8 +96,9 @@ Narrative fields (`date`, `author`, `summary`, body) stay in the timeline.
 A forked thread shows no folded values at all: the panel says it has forked
 and names the open tips. `chains.py` gains the additive helpers this needs —
 `resolve_current_with_source`, `resolve_current_link_with_source`,
-`thread_entries` — with the same fork and equal-distance-conflict rules as
-`resolve_current`. An item with no `follows:` edge in either direction renders
+`thread_entries`, `thread_tips` — all built on the same component memo as
+`resolve_current`, so a thread costs one fold per key however many of its
+pages are rendered. An item with no `follows:` edge in either direction renders
 byte-identically to before. `hardware@3` still does not declare `follows:`
 (Phase 4, which documents threads fully). See `tests/test_threads_render.py`.
 

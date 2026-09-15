@@ -476,9 +476,11 @@ def _fold(
 
     `declared_of` returns None for "this entry does not declare it", so a
     caller folding a field whose declared value could be falsy still folds.
-    `cache_key` names what is being folded (`field:status`, `link:satisfies`)
-    for the graph's per-(component, key) memo: every entry of a thread shares
-    one component, so a thread costs one fold per key, not one per entry.
+    `cache_key` names what is being folded — the field name, or `link:name`
+    for a link — for the graph's per-(component, key) memo: every entry of a
+    thread shares one component, so a thread costs one fold per key, not one
+    per entry. The memo holds the `(value, source)` pair, so the value-only
+    and with-source folds of one key share it.
     """
     predecessors, successors, handles, items, cg = _graph_view(graph, project)
     start_handle = _start_handle(project, start, handles=handles)
@@ -596,7 +598,10 @@ def resolve_current_with_source(
         project,
         start,
         lambda item: item.fields[field] if _declares(item, field) else None,
-        cache_key=f"field:{field}",
+        # Fields keep the bare name as their memo key — the key `resolve_current`
+        # has always used — and links namespace themselves so a link can never
+        # be handed a field's folded value.
+        cache_key=field,
         graph=graph,
     )
 
@@ -607,6 +612,7 @@ def resolve_current_link_with_source(
     link: str,
     *,
     graph: ChainGraph | tuple[dict[str, list[Item]], dict[str, list[Item]]] | None = None,
+    by_key: dict[str, Item] | None = None,
 ) -> tuple[list[Item], Item | None]:
     """The same fold over a *link* name: (resolved targets, declaring entry).
 
@@ -616,10 +622,14 @@ def resolve_current_link_with_source(
     spelling resolves the way every other structured link does. A target that
     does not resolve is dropped: `resolve_links` has already reported it. Same
     fork and equal-distance rules as `resolve_current`.
+
+    `by_key` is `build._key_index(project)` when the caller has already built
+    it — a page folding several link names shares one index.
     """
     from . import build as build_mod
 
-    by_key = build_mod._key_index(project)
+    if by_key is None:
+        by_key = build_mod._key_index(project)
 
     def declared_of(item: Item) -> Any:
         if link not in item.links or link in item.inherited_fields:

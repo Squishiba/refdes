@@ -258,7 +258,10 @@ def _flat_value(value) -> str:
 
 
 def thread_view(
-    item: Item, project: Project, *, graph: tuple | None = None
+    item: Item,
+    project: Project,
+    *,
+    graph: chains_mod.ChainGraph | tuple | None = None,
 ) -> dict | None:
     """The Thread section for an item's own page, or None when it isn't part
     of a thread (threads.md §8's "Rendering" row).
@@ -307,9 +310,11 @@ def thread_view(
                     "source": _entry_ref(source),
                 }
             )
+        # One key index for the page's link folds, not one per link name.
+        by_key = build_mod._key_index(project)
         for link in THREAD_VERDICT_LINKS:
             targets, source = chains_mod.resolve_current_link_with_source(
-                project, item, link, graph=graph
+                project, item, link, graph=graph, by_key=by_key
             )
             if source is None:
                 continue

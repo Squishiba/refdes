@@ -339,6 +339,36 @@ def test_a_fork_elsewhere_in_the_thread_is_forked_for_every_entry(tmp_path):
         assert "accepted" not in body, start
 
 
+def test_the_panel_folds_a_thread_once_per_key(tmp_path):
+    """The panel asks for five verdict fields and three verdict links on
+    every entry page of a thread. A `ChainGraph` memoizes per (component, key),
+    so a thread costs one fold per key — not one per entry per key — and the
+    with-source fold shares the memo its value-only sibling uses."""
+    project, _out = _render(
+        tmp_path,
+        "defaults: { type: log }\n"
+        "items:\n"
+        "  - id: LOG-001\n    date: 2026-04-01\n    summary: Head.\n"
+        "    status: accepted\n    satisfies: [REQ-001]\n"
+        "  - id: LOG-002\n    date: 2026-04-02\n    summary: B.\n    follows: [LOG-001]\n"
+        "  - id: LOG-003\n    date: 2026-04-03\n    summary: C.\n    follows: [LOG-002]\n",
+    )
+    graph = chains.build_graph(project)
+    by_key = build_mod._key_index(project)
+    entries = [project.item_by_id(f"LOG-00{n}") for n in (1, 2, 3)]
+    for entry in entries:
+        chains.resolve_current_with_source(project, entry, "status", graph=graph)
+        chains.resolve_current(project, entry, "status", graph=graph)
+    assert list(graph._resolve_cache) == [(graph.component_id(graph._handles[id(entries[0])]), "status")]
+
+    chains.resolve_current_link_with_source(
+        project, entries[0], "satisfies", graph=graph, by_key=by_key
+    )
+    comp = graph.component_id(graph._handles[id(entries[0])])
+    assert sorted(key for _c, key in graph._resolve_cache) == ["link:satisfies", "status"]
+    assert graph._resolve_cache[(comp, "link:satisfies")][1] is entries[0]
+
+
 def test_resolve_current_link_with_source_returns_targets_and_source(tmp_path):
     project, _out = _render(tmp_path, LINEAR)
     targets, source = chains.resolve_current_link_with_source(
