@@ -265,36 +265,116 @@ _PREFIX_LINE_RE = re.compile(r"^(\s*(?:-\s+)?)prefix:(\s*)(\S+)(\s*)$")
 _ID_LINE_RE = re.compile(r"^(\s*(?:-\s+)?)id:(\s*)(\S+)(\s*)$")
 
 
-def _rewrite_type_and_prefix_lines(lines: list[str], mapping: Mapping) -> list[str]:
+def _rename_plain_value(value: str, lookup: Callable[[str], str | None]) -> str | None:
+    """`lookup` applied to a plain scalar, seeing through the optional
+    quoting YAML would have stripped: `type: 'decision'` names the same type
+    as `type: decision`. Returns the new value, or None for "untouched"."""
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
+        inner = lookup(value[1:-1])
+        return f"{value[0]}{inner}{value[0]}" if inner is not None else None
+    return lookup(value)
+
+
+def _flow_rename_field_value(
+    line: str, key: str, lookup: Callable[[str], str | None]
+) -> tuple[str, str | None]:
+    """Rename the value of `key` inside a single-line flow mapping, reusing
+    links.py's brace/quote-depth value scanner (`_flow_value_end`) and the
+    same mapping shapes it accepts: `- {...}` items, `defaults: {...}`, and
+    bare `{...}` Markdown front matter. Returns (new_line, error_message);
+    a flow mapping that spells `key` twice is REFUSED -- YAML's last-wins
+    rule makes any rewrite of it a guess about which entry was meant."""
+    brace = line.find("{")
+    if brace < 0:
+        return line, None
+    prefix = line[:brace]
+    if not re.fullmatch(r"\s*(?:-\s*|defaults:\s*)?", prefix):
+        return line, None
+    field_re = re.compile(rf"(^|[\[{{,])(\s*){re.escape(key)}\s*:")
+    matches = list(field_re.finditer(line, brace))
+    if len(matches) > 1:
+        return line, (
+            f"flow mapping contains '{key}:' more than once -- refusing to "
+            "guess which one the rename targets"
+        )
+    if not matches:
+        return line, None
+    value_start = matches[0].end()
+    value_end = links_mod._flow_value_end(line, value_start)
+    raw = line[value_start:value_end]
+    stripped = raw.strip()
+    new_value = _rename_plain_value(stripped, lookup)
+    if new_value is None:
+        return line, None
+    lead = raw[: len(raw) - len(raw.lstrip())]
+    return line[:value_start] + lead + new_value + line[value_end:], None
+
+
+def _rewrite_type_and_prefix_lines(
+    lines: list[str], mapping: Mapping
+) -> tuple[list[str], list[tuple[int, str]]]:
     """File-wide pass: `type:`/`section:` values and `prefix:` values,
     wherever they appear in the file (see _TYPE_OR_SECTION_LINE_RE). `id:`
     values are handled separately (_ID_LINE_RE) since only the prefix
-    portion moves, the numeric suffix is preserved verbatim, not reformatted."""
+    portion moves, the numeric suffix is preserved verbatim, not reformatted.
+
+    Block-style lines are matched by the line regexes; any other line holding
+    a single-line flow mapping gets the same four keys renamed inside the
+    braces via _flow_rename_field_value. Returns (lines, errors) where errors
+    are (1-indexed line, message) pairs for spellings that cannot be renamed
+    safely -- a multi-line flow mapping is invisible to both passes and is
+    caught later by the post-rewrite stale-name guard."""
     out = list(lines)
+    errors: list[tuple[int, str]] = []
+
+    def _flow(i: int, line: str, key: str, lookup) -> str:
+        new_line, err = _flow_rename_field_value(line, key, lookup)
+        if err is not None:
+            errors.append((i + 1, err))
+        return new_line
+
+    def _lookup_type(old: str) -> str | None:
+        return mapping.types.get(old)
+
+    def _lookup_prefix(old: str) -> str | None:
+        return _rename_prefix(old, mapping.prefixes)
+
+    def _lookup_id(old: str) -> str | None:
+        split = ids_mod.split_id(old)
+        if split is None:
+            return None
+        new_prefix = _rename_prefix(split[0], mapping.prefixes)
+        return new_prefix + old[len(split[0]) :] if new_prefix is not None else None
+
     for i, line in enumerate(out):
         m = _TYPE_OR_SECTION_LINE_RE.match(line)
-        if m and m.group(4) in mapping.types:
-            indent, key, sp1, _old, sp2 = m.groups()
-            out[i] = f"{indent}{key}:{sp1}{mapping.types[m.group(4)]}{sp2}"
-            continue
+        if m:
+            new_value = _rename_plain_value(m.group(4), _lookup_type)
+            if new_value is not None:
+                indent, key, sp1, _old, sp2 = m.groups()
+                out[i] = f"{indent}{key}:{sp1}{new_value}{sp2}"
+                continue
         m = _PREFIX_LINE_RE.match(line)
         if m:
-            new_prefix = _rename_prefix(m.group(3), mapping.prefixes)
+            new_prefix = _rename_plain_value(m.group(3), _lookup_prefix)
             if new_prefix is not None:
                 indent, sp1, _old, sp2 = m.groups()
                 out[i] = f"{indent}prefix:{sp1}{new_prefix}{sp2}"
                 continue
         m = _ID_LINE_RE.match(line)
         if m:
-            split = ids_mod.split_id(m.group(3))
-            if split is not None:
-                old_prefix = split[0]
-                new_prefix = _rename_prefix(old_prefix, mapping.prefixes)
-                if new_prefix is not None:
-                    indent, sp1, old_id, sp2 = m.groups()
-                    new_id = new_prefix + old_id[len(old_prefix) :]
-                    out[i] = f"{indent}id:{sp1}{new_id}{sp2}"
-    return out
+            new_id = _rename_plain_value(m.group(3), _lookup_id)
+            if new_id is not None:
+                indent, sp1, _old, sp2 = m.groups()
+                out[i] = f"{indent}id:{sp1}{new_id}{sp2}"
+                continue
+        if "{" in line:
+            line = _flow(i, line, "type", _lookup_type)
+            line = _flow(i, line, "section", _lookup_type)
+            line = _flow(i, line, "prefix", _lookup_prefix)
+            line = _flow(i, line, "id", _lookup_id)
+            out[i] = line
+    return out, errors
 
 
 def _item_spans(rel: str, lines: list[str], items: list[Item]) -> list[tuple[Item, int, int]]:
@@ -579,6 +659,72 @@ def write_rewrites_verified(project, rewrites: list[FileRewrite]) -> None:
         )
 
 
+def _stale_mapped_names(rel: str, text: str, mapping: Mapping) -> list[str]:
+    """file:line messages for every item, defaults or section marker in `text`
+    that still carries a name `mapping` was meant to move -- an old type, an
+    old section type, an old prefix, or an id still wearing an old prefix.
+
+    Decided from PARSED data (the same loaders the project uses), never from
+    regex matches, so "the mapping does not apply" can only be claimed when
+    nothing the parser can see disagrees. Anything this cannot parse returns
+    [] -- parse errors are reported by the normal verification path, which
+    runs on the same text."""
+    if not mapping.types and not mapping.prefixes:
+        return []
+    stale: list[str] = []
+
+    def _check(line: int, mapping_data: dict) -> None:
+        value = mapping_data.get("type")
+        if isinstance(value, str) and value in mapping.types:
+            stale.append(
+                f"{rel}:{line} - type '{value}' is still spelled the old way: "
+                "this value is written in a form revise cannot edit"
+            )
+        value = mapping_data.get("section")
+        if isinstance(value, str) and value in mapping.types:
+            stale.append(
+                f"{rel}:{line} - section type '{value}' is still spelled the "
+                "old way: this value is written in a form revise cannot edit"
+            )
+        value = mapping_data.get("prefix")
+        if isinstance(value, str) and _rename_prefix(value, mapping.prefixes):
+            stale.append(
+                f"{rel}:{line} - prefix '{value}' is still spelled the old "
+                "way: this value is written in a form revise cannot edit"
+            )
+        value = mapping_data.get("id")
+        if isinstance(value, str):
+            split = ids_mod.split_id(value)
+            if split is not None and _rename_prefix(split[0], mapping.prefixes):
+                stale.append(
+                    f"{rel}:{line} - id '{value}' still carries the old "
+                    "prefix: this value is written in a form revise cannot edit"
+                )
+
+    try:
+        if rel.endswith(".md"):
+            blocks, errors = parse.md_front_matter_blocks(text.replace("\r\n", "\n").split("\n"))
+            if errors:
+                return []
+            for open_i, _close, parsed in blocks:
+                _check(open_i + 2, parsed)
+            return stale
+        data = parse.yaml_safe_load(text)
+        if not isinstance(data, dict):
+            return []
+        defaults = data.get("defaults")
+        if isinstance(defaults, dict):
+            _check(defaults.get("__line__", 1), defaults)
+        entries = data.get("items")
+        if isinstance(entries, list):
+            for entry in entries:
+                if isinstance(entry, dict):
+                    _check(entry.get("__line__", 1), entry)
+    except (yaml.YAMLError, TypeError, ValueError, AttributeError):
+        return []
+    return stale
+
+
 def _rewrite_file(project: Project, path: str, rel: str, mapping: Mapping) -> tuple[FileRewrite, list[str]]:
     with open(path, "r", encoding="utf-8", newline="") as fh:
         text = fh.read()
@@ -587,8 +733,10 @@ def _rewrite_file(project: Project, path: str, rel: str, mapping: Mapping) -> tu
 
     items = [i for i in project.local_items if i.source_file == rel]
 
-    lines = _rewrite_type_and_prefix_lines(lines, mapping)
-    lines, errors = _rewrite_fields_and_links(lines, rel, items, mapping, project)
+    lines, tp_errors = _rewrite_type_and_prefix_lines(lines, mapping)
+    errors = [f"{rel}:{n} - {message}" for n, message in tp_errors]
+    lines, link_errors = _rewrite_fields_and_links(lines, rel, items, mapping, project)
+    errors = errors + link_errors
 
     after = newline.join(lines)
     if lines and text.endswith(("\n", "\r\n")):
@@ -1017,6 +1165,7 @@ def apply(
     old_hashes = {item.id: item.content_hash for item in project_before.local_items}
 
     rewrites: list[FileRewrite] = []
+    all_rewrites: list[FileRewrite] = []
     all_errors: list[str] = []
     # Only files that actually parsed into at least one item -- a file that
     # parsed into nothing (or only markers) has no `type:`/field/link/prefix
@@ -1027,10 +1176,24 @@ def apply(
         path = os.path.join(project_before.root, *rel.split("/"))
         rw, errors = _rewrite_file(project_before, path, rel, mapping)
         all_errors += errors
+        all_rewrites.append(rw)
         if rw.after != rw.before:
             rewrites.append(rw)
 
+    # The no-silent-success rule, decided from parsed data: after the rewrite
+    # pass (in memory -- identical for --dry-run), every item, defaults and
+    # section marker must have moved off any name the mapping carries. A
+    # spelling the rewrite could not reach (multi-line flow mapping, comment
+    # trick, anything) surfaces here as a refusal instead of a clean exit or
+    # a "nothing to do -- mapping does not apply" that hides it. Checked on
+    # the after-text, so a file whose rename DID land never trips it.
+    for rw in all_rewrites:
+        all_errors += _stale_mapped_names(rw.rel, rw.after, mapping)
+
     if all_errors:
+        # A refusal leaves the tree exactly as it was found -- including the
+        # load-time key-mint writes this transaction ran on the way in.
+        restore_rewrites(ensure_rewrites)
         return RevisionResult(ok=False, errors=all_errors)
 
     if not rewrites and not prefix_rename and mutate_config is None:
@@ -1085,6 +1248,28 @@ def apply(
             ok=False,
             errors=["rewritten project has parse errors -- rolled back:"]
             + [str(d) for d in light_blocking],
+        )
+
+    # Post-rewrite guard on the actual on-disk text (the pre-write check
+    # above ran on the in-memory after-text; this one confirms the bytes that
+    # were really written, so a write that mangled something cannot slip
+    # through as a success). Any item still wearing a name the mapping was
+    # meant to move rolls the whole revision back.
+    stale_after: list[str] = []
+    for rw in rewrites:
+        with open(rw.path, "r", encoding="utf-8", newline="") as fh:
+            stale_after += _stale_mapped_names(rw.rel, fh.read(), mapping)
+    if stale_after:
+        _rollback()
+        return RevisionResult(
+            ok=False,
+            errors=[
+                (
+                    "rewritten files still carry names this mapping was meant to "
+                    "move -- written in a form revise cannot edit -- rolled back:"
+                )
+            ]
+            + stale_after,
         )
 
     # Correlate old<->new items by (source_file, source_line): a pure

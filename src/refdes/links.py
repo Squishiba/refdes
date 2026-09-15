@@ -149,10 +149,10 @@ def _rewrite_flow_mapping_field(
     if brace < 0:
         return line, set()
     prefix = line[:brace]
-    if not (
-        re.fullmatch(r"\s*-\s*", prefix)
-        or re.fullmatch(r"\s*defaults:\s*", prefix)
-    ):
+    # An item flow mapping (`- {...}`), a flow `defaults:` block, or -- the
+    # Markdown spelling -- a bare `{...}` front-matter line with nothing
+    # before the brace at all.
+    if not re.fullmatch(r"\s*(?:-\s*|defaults:\s*)?", prefix):
         return line, set()
 
     field_re = re.compile(rf"(^|[{{,])(\s*){re.escape(key)}\s*:")

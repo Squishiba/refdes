@@ -296,3 +296,95 @@ def test_revise_rewrites_section_inside_flow_marker_end_to_end(tmp_path):
     text = (tmp_path / "items" / "i.yaml").read_text(encoding="utf-8")
     assert "section: constraint" in text
     assert "bound" not in text
+
+
+# ------------------------------------------- refusals: forms revise cannot edit
+
+MULTILINE_FLOW = (
+    "defaults:\n  type: bound\n  prefix: BND\n"
+    "items:\n"
+    "  - {id: BND-001,\n"
+    "    type: bound,\n"
+    "    text: Hello}\n"
+)
+
+
+def test_multiline_flow_mapping_type_rename_refuses_not_silent(tmp_path):
+    """A flow mapping split across lines is invisible to every single-line
+    pass -- but the parsed item still carries the old type. The post-rewrite
+    guard must refuse with a file:line naming the unreachable spelling, never
+    exit 0 (and never "nothing to do"), leaving the file untouched."""
+    path = _project(tmp_path, "i.yaml", MULTILINE_FLOW)
+    result = revise.apply(
+        str(tmp_path), revise.Mapping(types={"bound": "constraint"})
+    )
+    assert not result.ok
+    assert any("cannot edit" in e for e in result.errors), result.errors
+    assert any("items/i.yaml" in e for e in result.errors), result.errors
+    assert path.read_text(encoding="utf-8") == MULTILINE_FLOW
+
+
+def test_duplicate_key_in_flow_mapping_refuses(tmp_path):
+    """`{prefix: BND, prefix: BND}` -- YAML last-wins makes any rewrite a
+    guess about which entry was meant; refuse naming the line."""
+    before = (
+        "defaults:\n  type: bound\n"
+        "items:\n  - {id: BND-001, prefix: BND, prefix: BND, text: Hello}\n"
+    )
+    path = _project(tmp_path, "i.yaml", before)
+    result = revise.apply(
+        str(tmp_path), revise.Mapping(prefixes={"BND": "LIM"})
+    )
+    assert not result.ok
+    assert any("more than once" in e for e in result.errors), result.errors
+    assert any("items/i.yaml" in e for e in result.errors), result.errors
+    assert path.read_text(encoding="utf-8") == before
+
+
+def test_quoted_flow_type_value_renamed(tmp_path):
+    """`type: 'bound'` names the same type as `type: bound` -- it renames
+    too, and the author's quoting style is kept."""
+    path = _project(
+        tmp_path, "i.yaml",
+        "defaults:\n  prefix: BND\n"
+        "items:\n"
+        "  - {id: BND-001, type: 'bound', text: One}\n"
+        '  - {id: BND-002, type: "bound", text: Two}\n'
+        "  - id: BND-003\n    type: 'bound'\n    text: Three\n",
+    )
+    result = revise.apply(
+        str(tmp_path), revise.Mapping(types={"bound": "constraint"}),
+        mutate_config=_bump_schema,
+    )
+    assert result.ok, result.errors
+    text = path.read_text(encoding="utf-8")
+    assert "type: 'constraint'" in text
+    assert 'type: "constraint"' in text
+    assert "bound" not in text
+
+
+def test_nothing_to_do_only_when_parsed_project_has_no_mapped_names(tmp_path):
+    """'Nothing to do' is a claim about the parsed project, not about what
+    the regexes happened to match: a project whose parsed items DO use a
+    mapped name -- in a spelling the rewrite cannot reach -- must refuse, not
+    report nothing-to-do."""
+    # genuinely unmapped: clean nothing-to-do, file untouched
+    path = _project(
+        tmp_path, "i.yaml",
+        "defaults:\n  type: bound\n  prefix: BND\n"
+        "items:\n  - id: BND-001\n    text: Hello\n",
+    )
+    before = path.read_text(encoding="utf-8")
+    result = revise.apply(
+        str(tmp_path), revise.Mapping(types={"other": "third"})
+    )
+    assert result.ok, result.errors
+    assert path.read_text(encoding="utf-8") == before
+
+    # mapped name present but unreachable: refusal, not nothing-to-do
+    _project(tmp_path, "j.yaml", MULTILINE_FLOW.replace("BND-001", "BND-002"))
+    result = revise.apply(
+        str(tmp_path), revise.Mapping(types={"bound": "constraint"})
+    )
+    assert not result.ok
+    assert any("cannot edit" in e for e in result.errors), result.errors
