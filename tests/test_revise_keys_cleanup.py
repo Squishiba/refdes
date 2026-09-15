@@ -153,6 +153,61 @@ def test_dry_run_simulates_the_pipeline_and_writes_nothing(keyed_project, capsys
     assert _tree_texts(keyed_project) == before
 
 
+def test_dry_run_changed_files_match_the_real_run_including_refresh(tmp_path):
+    """The third-file case: an inbound composite reference that ensure never
+    touches (it is already composite) but the post-rename display-half
+    refresh does. The dry run must list it -- same file list, dry vs real."""
+    import shutil
+
+    from refdes import keys as keys_mod
+
+    root = tmp_path / "proj"
+    root.mkdir()
+    write_project_config(root, KEYS_SCHEMA)
+    items = root / "items"
+    items.mkdir()
+    (items / "con.yaml").write_text(
+        "defaults:\n  type: constraint\n  prefix: CON\n"
+        "items:\n"
+        "  - id: CON-001\n    text: Board power density\n    limit: \"<= 0.15 W/in^2\"\n",
+        encoding="utf-8",
+    )
+    (items / "dec.md").write_text(
+        "---\nid: DEC-001\ntype: decision\ntitle: Regulator topology\n"
+        "constrained_by: [CON-001]\n---\n\n"
+        "```calc\nP_dens : W/in^2 = 0.1 W/in^2\n```\n",
+        encoding="utf-8",
+    )
+    project = load_project(config_path=str(root / "refdes-project.yaml"))
+    parse.load_items(project)
+    keys_mod.mint_missing(project, write=True)
+    project = load_project(config_path=str(root / "refdes-project.yaml"))
+    parse.load_items(project)
+    key = project.item_by_id("CON-001").key
+    # A third file whose reference is already composite: key ensure leaves it
+    # alone, only the post-rename refresh moves its display half.
+    (items / "addr.yaml").write_text(
+        "defaults:\n  type: decision\n  prefix: ADR\n"
+        "items:\n"
+        f"  - id: ADR-001\n    title: Chassis grounding\n    constrained_by: [CON-001@{key}]\n",
+        encoding="utf-8",
+    )
+    real = tmp_path / "real"
+    shutil.copytree(root, real, ignore=shutil.ignore_patterns("_site"))
+
+    mapping = revise.Mapping(prefixes={"CON": "BND"})
+    dry = revise.apply(str(root), mapping, dry_run=True)
+    assert dry.ok, dry.errors
+    done = revise.apply(str(real), mapping)
+    assert done.ok, done.errors
+
+    assert "items/addr.yaml" in dry.changed_files, dry.changed_files
+    assert dry.changed_files == done.changed_files
+    assert any(
+        e.startswith("items/addr.yaml") and "constrained_by" in e for e in dry.expansions
+    ), dry.expansions
+
+
 # ------------------------------------------------------------- the bare-ref guard
 
 

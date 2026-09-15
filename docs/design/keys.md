@@ -35,7 +35,8 @@ ledger, or remaps baseline/seal record ids — a prefix rename runs the
 writable-load key pipeline (mint, link/check expansion, follows freeze)
 inside its own transaction first and refuses with file:line if a structured
 reference to an affected id is still bare afterwards (dry runs simulate the
-whole pipeline on a throwaway copy and report what it would expand);
+whole run, display-half refresh included, on a throwaway copy, and report
+the same file list the real run writes);
 `former_ids.propose` returns exact key-proven candidates for a baseline
 that carries keys, keeping similarity scoring for legacy keyless baselines
 only. Two deliberate deviations from §4's original list: `_rename_prefix`

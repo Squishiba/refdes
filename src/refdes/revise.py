@@ -32,8 +32,6 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
-import yaml
-
 from . import build as build_mod
 from . import ids as ids_mod
 from . import keys as keys_mod
@@ -580,11 +578,15 @@ def _snapshot_item_texts(project: Project) -> dict[str, str]:
     return out
 
 
-def _simulate_key_ensure(config_path: str, snapshot: dict[str, str]) -> tuple[Project, list[str]]:
-    """Dry-run twin of _run_key_ensure(): copy the tree to a throwaway
-    directory, run the real pipeline there, and report (loaded project, per-
-    line changes). The real tree is never touched; the report is what the
-    real run would expand."""
+def _simulate_key_ensure(
+    config_path: str, snapshot: dict[str, str], mapping: Mapping
+) -> tuple[list[str], list[str]]:
+    """Dry-run twin of the whole real run: copy the tree to a throwaway
+    directory and perform the entire sequence there -- key ensure, the
+    rename's own file rewrites, and the post-rename display-half refresh --
+    then report (blockers, per-line changes). The real tree is never
+    touched; the report is what the real run would write, file-for-file,
+    including the refresh files that only exist because of the rename."""
     import shutil
     import tempfile
 
@@ -596,6 +598,19 @@ def _simulate_key_ensure(config_path: str, snapshot: dict[str, str]) -> tuple[Pr
         copy_config = os.path.join(copy, "refdes-project.yaml")
         _run_key_ensure(copy_config)
         simulated = _load_light(copy_config)
+        blockers = _bare_reference_blockers(simulated, mapping)
+        if not blockers:
+            # The rename itself, on the copy: same per-file rewrite the real
+            # run performs, then the same post-rename display-half refresh.
+            for rel in sorted({item.source_file for item in simulated.local_items}):
+                path = os.path.join(copy, *rel.split("/"))
+                rw, errors = _rewrite_file(simulated, path, rel, mapping)
+                if errors:
+                    return errors, []
+                if rw.after != rw.before:
+                    with open(path, "w", encoding="utf-8", newline="") as fh:
+                        fh.write(rw.after)
+            _refresh_display_halves(copy_config)
         report: list[str] = []
         for rel, text in sorted(snapshot.items()):
             path = os.path.join(copy, *rel.split("/"))
@@ -604,7 +619,7 @@ def _simulate_key_ensure(config_path: str, snapshot: dict[str, str]) -> tuple[Pr
             with open(path, "r", encoding="utf-8", newline="") as fh:
                 after = fh.read()
             report.extend(_line_diff_report(rel, text, after))
-        return simulated, report
+        return blockers, report
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
@@ -802,8 +817,7 @@ def apply(
     if prefix_rename:
         snapshot = _snapshot_item_texts(project_before)
         if dry_run:
-            simulated, expansions = _simulate_key_ensure(config_path, snapshot)
-            blockers = _bare_reference_blockers(simulated, mapping)
+            blockers, expansions = _simulate_key_ensure(config_path, snapshot, mapping)
             if blockers:
                 return RevisionResult(ok=False, errors=blockers, expansions=expansions)
         else:
