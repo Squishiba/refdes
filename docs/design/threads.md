@@ -84,6 +84,23 @@ fork `info` per open fork and one `follows` cycle `error` per cycle.
 available only to projects that declare the ordinary link themselves. See
 `tests/test_chains.py`.
 
+**Phase 3b implemented** (rendering): §8's "Rendering" row. The page of any
+item that is part of a thread gains a **Thread** section: a "currently
+concludes" panel sourced from the chain fold, and a compact timeline of every
+entry in the thread reusing `log.html`'s timeline markup, with the page's own
+entry marked. The panel shows verdict fields only (decided 2026-09-14): the
+thread's folded value of each of `status`, `rationale`, `options`, `checks`
+some entry declares, plus the folded `satisfies`, `selects` and
+`constrained_by` links — each attributed to the entry the value came from.
+Narrative fields (`date`, `author`, `summary`, body) stay in the timeline.
+A forked thread shows no folded values at all: the panel says it has forked
+and names the open tips. `chains.py` gains the additive helpers this needs —
+`resolve_current_with_source`, `resolve_current_link_with_source`,
+`thread_entries` — with the same fork and equal-distance-conflict rules as
+`resolve_current`. An item with no `follows:` edge in either direction renders
+byte-identically to before. `hardware@3` still does not declare `follows:`
+(Phase 4, which documents threads fully). See `tests/test_threads_render.py`.
+
 ---
 
 ## What changed, and why the previous draft is wrong

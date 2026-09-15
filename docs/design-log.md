@@ -174,6 +174,13 @@ Three reasons, in increasing order of importance:
 amendment markers, and the requirements each entry addresses. Every entry also gets
 its own page with full traceability.
 
+Entries that continue one another — a chain of entries linked by `follows:` —
+additionally show a **Thread** section on their page: what the thread currently
+concludes, with each value attributed to the entry that concluded it, and the
+whole thread as a timeline. A thread that has forked shows no conclusion at all,
+only the open tips. Threads are covered in full in
+[threads](design/threads.md).
+
 ## Coverage
 
 An entry that `addresses` a requirement moves it from **open** to **addressed** —
