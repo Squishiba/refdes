@@ -1,0 +1,25 @@
+Task: living-notes design document
+
+Plan:
+1. Inspect current thread folding, sealing, build side effects, lifecycle baselines, editor/index behavior, and phase 4a migration.
+2. Draft a decision-oriented design that distinguishes existing behavior from options, with file:line evidence.
+3. Add the requested backlog pointer, lint, run the full suite, rebase main, and commit.
+
+Status: research in progress.
+
+Research complete. Verified the current build pipeline, writable-load side effects,
+seal and baseline storage, thread folding/forks, VS Code save indexing, and the
+unmerged phase 4a standard/migration diff. Drafted docs/design/living-notes.md
+and added the requested backlog pointer. The draft recommends explicit
+follow-triggered snapshots plus explicit manual/baseline records, not build-time
+locking; a shared content-addressed history store; and complete folded tasks at
+the sole thread tip with fork-specific lists.
+
+Status: documentation drafted; verification pending.
+
+Verification complete: `python -m ruff check docs/design/living-notes.md
+docs/design/backlog.md` passed (no Python files to lint), and the full suite
+passed twice: 978 tests before commit and 978 after rebasing onto main. No
+changelog fragment was added because the task explicitly requested no changelog.
+
+Status: finished.

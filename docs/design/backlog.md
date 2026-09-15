@@ -1153,3 +1153,8 @@ item file and baseline in one transaction, refresh and cleanup alter rename
 semantics, and the two disclosed gaps are already-known correctness holes.
 None of this was discussed against the suitability rule in conversation,
 and I'd rather leave it unmarked than guess at a rule this consequential.
+
+### Living notes, history and task lists -- design draft
+
+See [living-notes.md](living-notes.md) for the draft exploring dynamic notes,
+recorded history, and a task list that follows a thread tip.
