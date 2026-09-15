@@ -90,10 +90,11 @@ add/override, and scalar overrides (`prefix`, `label`, `plural`, `preview`,
 | `label` | **no** (error if missing) | Child must declare |
 | `plural` | **no** (error if missing) | Child must declare |
 
-Rationale: `prefix`/`label`/`plural` are **type-identity** properties — they
-affect hashing, rendering, sealing, and authoring conventions. Inheriting
-them would make a subtype silently adopt the parent's identity semantics,
-which is the opposite of what a deliberate specialization should do.
+Rationale: `prefix`/`label`/`plural` are **identity/presentation** properties —
+they affect rendering, sealing, and authoring conventions (the hash payload
+uses `item.type`, not prefix/label/plural). Inheriting them would make a
+subtype silently adopt the parent's identity semantics, which is the opposite
+of what a deliberate specialization should do.
 
 `include:` and `body:` **are inherited** — the finding explicitly names
 `include: [provenance, stewardship]` and `body: { on_change: invalidate,
@@ -402,7 +403,7 @@ any debate-specific links).
 |---|---|
 | **1. Engine** | `standards.py` `_resolve_extends` pass; `ItemType.extends` field; `subtype_map` in `Project`; `is_subtype` helper |
 | **2. Consumers** | `build.py` link validation + coverage; `blocks.py` index filter; `schema_json.py` completion; `render.py` coverage grouping setting |
-| **3. Standard** | `hardware@v3/base.yaml` convert `bound` to `extends: requirement`; `migration.yaml`; update design-debate preset to `extends: decision` |
+| **3. Standard** | `hardware@v3/base.yaml` converts `bound` to `extends: requirement` with no migration, verified by identical resolved schemas; preset adoption deferred until after threads Phase 4 |
 | **4. Tests** | Positive: subtype satisfies parent link targets, coverage honors parent's `satisfying_statuses`, index groups by parent when setting on. Negative: multi-level `extends:` errors, project overlay extending an extended type errors. |
 
 ---
