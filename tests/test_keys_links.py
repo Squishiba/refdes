@@ -645,6 +645,108 @@ def test_diff_against_a_legacy_baseline_reports_unedited_items_as_unchanged(tmp_
     assert diff.unchanged_count == 1
 
 
+def _edited_after_stamp_baseline(root):
+    """Write a format-1 baseline `rev-a` over a _keyed_links_project whose
+    REQ-001 is then edited on disk while REQ-002 stays put -- one genuinely
+    uncomparable entry and one safely carried entry in the same baseline."""
+    project = _built_links_project(root)
+    stale = _legacy_baseline_entry(project, "REQ-001")
+    carried = _legacy_baseline_entry(project, "REQ-002")
+    path = root / "items" / "r.yaml"
+    path.write_text(
+        path.read_text(encoding="utf-8").replace(
+            "text: Original.", "text: Edited after the stamp."
+        ),
+        encoding="utf-8",
+    )
+    _write_legacy_baseline(root, "rev-a", {"REQ-001": stale, "REQ-002": carried})
+
+
+def test_audit_reports_uncomparable_not_changed(tmp_path, capsys):
+    """An older-format entry whose stored hash no longer matches under the
+    OLD definition is "can't tell", not "changed" -- audit names it under
+    `uncomparable` and keeps it out of `changed` (docs/change-tracking.md)."""
+    root = _keyed_links_project(
+        tmp_path,
+        "defaults: { type: requirement }\n"
+        "items:\n  - id: REQ-001\n    text: Original.\n"
+        "  - id: REQ-002\n    text: Stable.\n",
+    )
+    _edited_after_stamp_baseline(root)
+
+    status = cli_mod.main(["-c", str(root / "refdes-project.yaml"), "audit"])
+    out = capsys.readouterr().out
+    assert status == 0
+    assert "uncomparable 1   REQ-001" in out
+    assert "can't be checked against the current definition" in out
+    assert "  changed   0\n" in out  # REQ-001 is not claimed as changed
+
+
+def test_audit_output_unchanged_without_uncomparable_entries(tmp_path, capsys):
+    """A clean migration prints no uncomparable line: the first audit run
+    (which migrates the baseline) and the second (nothing left to migrate)
+    must produce byte-identical output."""
+    root = _keyed_links_project(
+        tmp_path,
+        "defaults: { type: requirement }\nitems:\n  - id: REQ-001\n    text: Unedited.\n",
+    )
+    project = _built_links_project(root)
+    _write_legacy_baseline(root, "rev-a", {"REQ-001": _legacy_baseline_entry(project, "REQ-001")})
+
+    assert cli_mod.main(["-c", str(root / "refdes-project.yaml"), "audit"]) == 0
+    first = capsys.readouterr().out
+    assert "uncomparable" not in first
+
+    assert cli_mod.main(["-c", str(root / "refdes-project.yaml"), "audit"]) == 0
+    assert capsys.readouterr().out == first
+
+
+def test_diff_against_carried_entry_is_not_uncomparable(tmp_path):
+    """A safely carried entry keeps comparing normally: unchanged while the
+    item stands still, plain `changed` (not uncomparable) once it moves."""
+    root = _keyed_links_project(
+        tmp_path,
+        "defaults: { type: requirement }\nitems:\n  - id: REQ-001\n    text: Unedited.\n",
+    )
+    project = _built_links_project(root)
+    _write_legacy_baseline(root, "rev-a", {"REQ-001": _legacy_baseline_entry(project, "REQ-001")})
+
+    diff = lifecycle.diff_against(project, lifecycle.load_baseline(project, "rev-a"))
+    assert diff.uncomparable == []
+    assert diff.changed == []
+    assert diff.unchanged_count == 1
+
+    path = root / "items" / "r.yaml"
+    path.write_text(
+        path.read_text(encoding="utf-8").replace("text: Unedited.", "text: Moved."),
+        encoding="utf-8",
+    )
+    project2 = _built_links_project(root)
+    diff2 = lifecycle.diff_against(project2, lifecycle.load_baseline(project2, "rev-a"))
+    assert diff2.changed == ["REQ-001"]
+    assert diff2.uncomparable == []
+
+
+def test_revision_reports_uncomparable_entries(tmp_path, capsys):
+    """Re-stamping a name whose baseline carries an uncomparable entry is
+    still a conflict -- nothing is silently dropped or silently re-stamped --
+    but the output names the entries that simply can't be checked instead of
+    letting the conflict alone claim "different content" for all of it."""
+    root = _keyed_links_project(
+        tmp_path,
+        "defaults: { type: requirement }\n"
+        "items:\n  - id: REQ-001\n    text: Original.\n"
+        "  - id: REQ-002\n    text: Stable.\n",
+    )
+    _edited_after_stamp_baseline(root)
+
+    status = cli_mod.main(["-c", str(root / "refdes-project.yaml"), "revision", "rev-a"])
+    err = capsys.readouterr().err
+    assert status == 1
+    assert "uncomparable 1   REQ-001" in err
+    assert "already stamped" in err  # the conflict itself is still reported
+
+
 def test_stamp_same_name_after_hash_format_change_is_unchanged_not_conflict(tmp_path):
     """The false "conflict" this migration exists to prevent: re-stamping an
     unedited project under a name a hash_format-1 baseline already used must

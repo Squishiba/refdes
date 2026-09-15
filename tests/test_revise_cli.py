@@ -420,9 +420,10 @@ def test_stale_arithmetic_not_flagged_without_a_status_field(stale_project):
 
 def test_stale_arithmetic_silent_against_a_baseline_that_predates_the_signal(stale_project):
     """A baseline stamped before this feature existed has no `verdict`/
-    `calc_hash` to compare against -- silence, not a guess, and not an
-    'uncomparable' report either (unlike the hash-format migration, there's
-    nothing to migrate: the field is just absent until the next stamp)."""
+    `calc_hash` to compare against -- silence, not a guess. This entry is
+    also format 2 with a stored hash that doesn't check out under that old
+    definition, so it lands under `uncomparable` (can't tell), never
+    `changed`."""
     (stale_project / ".refdes" / "baselines").mkdir(parents=True)
     (stale_project / ".refdes" / "baselines" / "old.yaml").write_text(
         "kind: revision\n"
@@ -438,7 +439,8 @@ def test_stale_arithmetic_silent_against_a_baseline_that_predates_the_signal(sta
     project = _lc_build(stale_project)  # DEC-001 is still `proposed` here
     baseline = lifecycle.load_baseline(project, "old")
     diff = lifecycle.diff_against(project, baseline)
-    assert "DEC-001" in diff.changed  # hash mismatch against the bogus stored hash
+    assert diff.changed == []  # the bogus stored hash proves nothing, either way
+    assert diff.uncomparable == ["DEC-001"]
     assert diff.stale_arithmetic == []
 
 

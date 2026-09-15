@@ -135,8 +135,11 @@ revision 'rev-c' stamped: 41 items.
 
 Re-running the same name with identical content is a no-op (exit 0, file
 untouched); with different content it's an error (nothing written) — a
-name is a permanent label once stamped. See
-[lifecycle](lifecycle.md#edge-cases).
+name is a permanent label once stamped. If the existing baseline carries
+older-format entries whose stored hashes can't be checked against the current
+definition, the conflict output names them on an `uncomparable N` line first —
+part of the mismatch may be the hash definition having moved, not content.
+See [lifecycle](lifecycle.md#edge-cases).
 
 ---
 
@@ -410,6 +413,16 @@ stamped: the key is the immutable identity, so the baseline diff recognises it
 as the same item and reports it as `relabelled` rather than `removed` + `added`.
 Each one is listed on its own line under the count, with the surrogate key in
 parentheses.
+
+**`uncomparable`** — baseline entries in an older hash format whose stored hash
+no longer checks out under that format's own definition (see
+[hash format versioning](lifecycle.md#hash-format-versioning)). refdes cannot
+tell whether the content moved or only the hash definition did, so these are
+listed on their own `uncomparable N` line instead of under `changed`, and are
+not counted as unchanged either. The line only appears when the count is
+nonzero. What to do: review the item's content, then stamp a new baseline once
+it has been reviewed. `refdes revision`/`refdes release` name the same entries
+when re-stamping an existing name conflicts.
 
 The "Citations" section only
 appears for a project that declares a `citations`-typed field somewhere and

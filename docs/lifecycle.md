@@ -176,7 +176,11 @@ format; if not, the item genuinely changed, and the entry stays at the format it
 was stamped at. This keeps a baseline diff from falsely flagging every item as
 "changed" when only the hash definition moved. `refdes keys adopt` names the
 entries it cannot carry (`uncomparable baseline entry <name>: <id>`); everywhere
-else an entry that stayed behind simply compares as changed.
+else an entry that stayed behind is reported as `uncomparable`, never as
+`changed` — `refdes audit` prints an `uncomparable N` line in the baseline diff,
+and `refdes revision`/`refdes release` name them when a re-stamp conflicts —
+because "changed" claims the content moved, and that is exactly the claim these
+entries make impossible. They are not counted as unchanged either.
 
 ### `stamped_by`
 

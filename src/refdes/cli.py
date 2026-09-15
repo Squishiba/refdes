@@ -346,6 +346,21 @@ def _run_stamp(args, kind: str) -> int:
         return 1
 
     if outcome.status == "conflict":
+        if outcome.uncomparable:
+            # Part of why the stored content can't match may be entries whose
+            # hash simply can't be checked any more, not a content move --
+            # say so instead of letting "different content" overclaim.
+            print(
+                f"\nuncomparable {len(outcome.uncomparable)}"
+                f"   {', '.join(outcome.uncomparable)}",
+                file=sys.stderr,
+            )
+            print(
+                "  older-format baseline entries whose stored hash can't be checked against the\n"
+                "  current definition -- not proof of changed content; review them, then stamp a\n"
+                "  new baseline once the content has been reviewed.",
+                file=sys.stderr,
+            )
         print(f"\nerror: {outcome.conflict_detail}", file=sys.stderr)
         return 1
 
@@ -561,6 +576,13 @@ def _print_baseline_diff(diff) -> None:
     print(f"  changed   {len(diff.changed)}" + (f"   {changed}" if changed else ""))
     for item_id in diff.stale_arithmetic:
         print(f"    {item_id} -- stale arithmetic: status changed, calc block did not")
+    if diff.uncomparable:
+        uncomparable = ", ".join(diff.uncomparable)
+        print(f"  uncomparable {len(diff.uncomparable)}   {uncomparable}")
+        print(
+            "    older-format entries whose stored hash can't be checked against the current"
+            " definition --\n    not counted as changed; review the content, then stamp a new baseline"
+        )
     added = ", ".join(diff.added)
     print(f"  added     {len(diff.added)}" + (f"   {added}" if added else ""))
     print(f"  removed   {len(diff.removed)}")

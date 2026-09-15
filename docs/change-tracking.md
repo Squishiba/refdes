@@ -127,8 +127,14 @@ This conditional carry-forward means a partially-migrated baseline stays
 precisely describable: some entries at format 3, some still at format 1. Those
 left-behind entries are what `refdes keys adopt` reports as `uncomparable
 baseline entry <name>: <id>` (and `uncomparable seal entry <file>: <id>`), so
-the gap is named before anything is rebased; other commands compare the stored
-hash as recorded, so such an entry shows up as ordinary `changed`.
+the gap is named before anything is rebased. Everywhere else they are reported
+as **uncomparable**, never as `changed`: `refdes audit` prints an
+`uncomparable N` line with the ids in its baseline diff, and `refdes
+revision`/`refdes release` name them when re-stamping an existing name
+conflicts. `changed` claims the content moved, and for these entries refdes
+cannot make that claim — it can only say it can't tell; they are not counted
+as unchanged either. What to do: review the item's content, then stamp a new
+baseline once it has been reviewed.
 
 ## Auditing
 

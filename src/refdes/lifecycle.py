@@ -629,6 +629,14 @@ class StampOutcome:
     stamped_by: str = ""
     gate_results: list[GateRuleResult] = field(default_factory=list)
     conflict_detail: str = ""
+    # Older-format entries the existing baseline carries that the hash-format
+    # migration could not verify (migrate_hash_format's `uncomparable`). The
+    # stamp path never silently drops or silently re-stamps them: they keep
+    # the stored content unequal to the fresh items_map, so the outcome is
+    # "conflict" -- but "conflict" alone overclaims "different content"
+    # when part of the mismatch may only be the hash definition having
+    # moved, so the CLI names them alongside it.
+    uncomparable: list[str] = field(default_factory=list)
 
 
 def stamp(project: Project, kind: str, name: str, write: bool = True) -> StampOutcome:
@@ -661,8 +669,9 @@ def stamp(project: Project, kind: str, name: str, write: bool = True) -> StampOu
     items_map = _items_map(project)
 
     existing = load_baseline(project, name)
+    uncomparable: list[str] = []
     if existing is not None:
-        migrate_hash_format(project, existing, write=write)
+        uncomparable = sorted(migrate_hash_format(project, existing, write=write).uncomparable)
         if existing.kind == kind and _same_baseline_items(existing.items, items_map):
             # Byte-identical re-run: skip entirely, file untouched -- not even
             # stamped_at rewritten, mirroring `refdes fetch` skipping an
@@ -671,7 +680,7 @@ def stamp(project: Project, kind: str, name: str, write: bool = True) -> StampOu
             return StampOutcome(
                 kind=kind, name=name, status="unchanged", path=baseline_path(project, name),
                 item_count=len(items_map), stamped_at=existing.stamped_at,
-                stamped_by=existing.stamped_by,
+                stamped_by=existing.stamped_by, uncomparable=uncomparable,
             )
         raise_detail = (
             f"{name!r} is already stamped as a {existing.kind} "
@@ -680,7 +689,10 @@ def stamp(project: Project, kind: str, name: str, write: bool = True) -> StampOu
             f"{os.path.relpath(baseline_path(project, name), project.root)} "
             f"first if that was intentional, or choose a new name."
         )
-        return StampOutcome(kind=kind, name=name, status="conflict", conflict_detail=raise_detail)
+        return StampOutcome(
+            kind=kind, name=name, status="conflict", conflict_detail=raise_detail,
+            uncomparable=uncomparable,
+        )
 
     gate_results = evaluate_gate(project, kind)
     if any(r.enabled and r.offenders for r in gate_results):
@@ -735,6 +747,13 @@ class DiffResult:
     # this field (no `verdict`/`calc_hash` recorded to compare against) --
     # a false negative, never a false positive; see _stale_arithmetic below.
     stale_arithmetic: list[str]
+    # Baseline entries the hash-format migration could not verify at all
+    # (docs/change-tracking.md): older-format entries whose recorded hash no
+    # longer matches the item under the *old* hash definition, so refdes
+    # cannot tell whether the content moved or only the definition did. They
+    # appear here instead of in `changed` -- "changed" claims more than
+    # "can't tell" -- and are deliberately not counted as unchanged either.
+    uncomparable: list[str] = field(default_factory=list)
 
 
 def _stale_arithmetic(
@@ -799,8 +818,14 @@ def diff_against(project: Project, baseline: Baseline, write: bool = True) -> Di
     defaults True for callers that load a project writably by construction,
     and `cli` threads `not args.no_write` from both `audit` and
     `former-ids propose`.
+
+    Entries the migration reports as `uncomparable` -- content change or
+    definition move, indistinguishable -- are reported on their own
+    (`DiffResult.uncomparable`), never folded into `changed`, and never
+    counted as unchanged.
     """
-    migrate_hash_format(project, baseline, write=write)
+    migration = migrate_hash_format(project, baseline, write=write)
+    uncomparable = set(migration.uncomparable)
     current = _items_map(project)
     indexes = _baseline_indexes(baseline.items)
     changed, added = [], []
@@ -821,6 +846,8 @@ def diff_against(project: Project, baseline: Baseline, write: bool = True) -> Di
         old_entries[current_id] = old
         if key and old_id != current_id:
             relabelled.append((old_id, current_id, str(key)))
+        if current_id in uncomparable:
+            continue  # neither "changed" nor "unchanged" -- reported as uncomparable
         if old.get("hash") != entry["hash"]:
             changed.append(current_id)
         elif old_id == current_id:
@@ -846,4 +873,5 @@ def diff_against(project: Project, baseline: Baseline, write: bool = True) -> Di
         relabelled=sorted(relabelled),
         unchanged_count=unchanged,
         stale_arithmetic=_stale_arithmetic(project, changed, old_entries),
+        uncomparable=sorted(uncomparable),
     )
