@@ -134,13 +134,14 @@ accepted and outstanding move. Unlike a sealed log entry, a board move is never 
 build error — moving a file is an ordinary thing to do on purpose.
 
 **After `refdes keys adopt`, the manifest is fully key-keyed.** `keys adopt`
-converts the manifest (via `boards.plan_surrogate_storage`): live, identifiable
-memberships are re-keyed by surrogate key; entries for items that no longer
-exist (deleted, or renamed without `former_ids:`) are dropped from the manifest
-and reported as `stale`. Legacy display-id-keyed entries that can't be matched
-to a live item by key or `former_ids:` are left in place and reported as
-`unidentified`. Read-only `refdes check` never changes the manifest; writable
-builds prune stale entries automatically once the project is adopted.
+converts the manifest: live, identifiable memberships are re-keyed by surrogate
+key; entries for items that no longer exist (deleted, or renamed without
+`former_ids:`) are dropped from the manifest and reported as `stale`. Legacy
+display-id-keyed entries that resolve to a live item but have a conflicting
+duplicate (both a current id and a `former_ids:` entry point to the same item)
+are left in place and reported as `unidentified`. Read-only `refdes check`
+never changes the manifest; **any writable build** prunes stale entries
+automatically, adopted or not.
 
 ### Conforming to a shared contract
 

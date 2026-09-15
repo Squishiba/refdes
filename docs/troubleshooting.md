@@ -89,14 +89,12 @@ either value; surrogate keys keep it from blocking the build.
 
 ## Surrogate keys
 
-**`key 'k7f3m2q9x4a' is malformed: expected exactly 11 characters`** /
-**`key 'k7f3m2q9x4a' is malformed: contains a character outside the key alphabet`** /
-**`key 'k7f3m2q9x4a' is malformed: check character mismatch (Expected check character 'b'.)`**
+**`key 'k7f3m2q9x4c' is malformed: expected exactly 11 characters`** /
+**`key 'k7f3m2q9x4c' is malformed: contains a character outside the key alphabet`** /
+**`key 'k7f3m2q9x4c' is malformed: check character mismatch (Expected check character 'a'.)`**
 The key line in the source file has been corrupted (edited by hand, merge conflict,
 or encoding issue). Keys are written by `refdes` and never edited by hand.
-**Remedy:** restore the line from git (`git checkout -- <file>`), or delete the
-`key:` line entirely and run a writable command (e.g. `refdes check`) to have it
-re-minted.
+**Remedy:** restore the line from git (`git checkout -- <file>`).
 
 **`key 'k7f3m2q9x4a' on REQ-PWR-004 (items/requirements/power.yaml:12) is already used by REQ-PWR-007 (items/requirements/power.yaml:19)`**
 Two items share the same surrogate key — a line was duplicated (copy-paste,
@@ -123,6 +121,11 @@ is informational — the item was likely deleted. `refdes audit` reports this so
 you can verify it was intentional.
 **Remedy:** if the item was deleted on purpose, nothing to do. If it was
 renamed, ensure its `former_ids:` records the old display id.
+
+**`refines points at key k7f3m2q9x4a (labelled REQ-PWR-002), which no item declares. The label may be stale; the key is what resolves. Either the target was deleted, or this reference predates it.`** /
+**`check against key k7f3m2q9x4a, which no item declares. Either the target was deleted, or this reference predates it.`**
+A structured link or `checks: against:` entry references a surrogate key that no live item has. The display label (if present) may be stale; the key is the immutable identity used for resolution. This happens when a target item was deleted, or the reference was written before the target existed.
+**Remedy:** if the target was deleted, remove the link or `checks:` entry. If the target should exist, ensure it has a `key:` line (run a writable command to mint missing keys) and that the key matches.
 
 ## Links
 

@@ -33,7 +33,9 @@ build error.
 
 When a link target has a surrogate key, the tool rewrites the bare reference
 in the source file to a composite `DISPLAY-ID@key` form on the next **writable**
-command (any command that loads the project without `--no-write`). For example:
+load. This runs in `cli._load()` for **every command that loads the project**
+unless `--no-write` is given — i.e. all commands except `init` (which creates a
+new project) and `new` (which only prints a template). For example:
 
 ```yaml
 # Author writes:
@@ -50,13 +52,10 @@ is readable context that the tool refreshes automatically when the target item
 is renamed: on the next writable load, a stale `OLD-ID@key` becomes
 `NEW-ID@key`.
 
-This expansion and refresh happens on every command that writes — `build`,
-`check`, `id`, `revision`, `release`, `audit`, `fetch`, `stub-tests`,
-`revise`, `standard upgrade`, `standard add-preset`, `standard remove-preset`,
-`keys adopt`, and `former-ids propose --confirm`. It is **suppressed by
-`--no-write`** (the global flag, placed before the subcommand), which makes
-the load read-only: bare references stay bare, stale display halves are not
-refreshed, and no source files are modified.
+This expansion and refresh is **suppressed by `--no-write`** (the global flag,
+placed before the subcommand), which makes the load read-only: bare references
+stay bare, stale display halves are not refreshed, and no source files are
+modified.
 
 `follows:` is the one exception while it is still bare: it means "continue
 this thread", so the first writable load freezes it to the thread's current

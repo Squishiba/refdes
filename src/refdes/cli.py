@@ -1096,10 +1096,10 @@ def main(argv: list[str] | None = None) -> int:
         "board/workspace membership manifest, baseline stamping, "
         "and the ID ledger (.refdes/ids.yaml); explicit write commands "
         "either report what would change (id, revise, stub-tests, "
-        "revision, release) or refuse (fetch, init, standard upgrade, "
-        "standard add-preset/remove-preset, former-ids propose --confirm, "
-        "keys adopt). 'refdes build --no-write' still writes the site -- "
-        "that is the command's own output, not a side effect",
+        "revision, release, keys adopt) or refuse (fetch, init, "
+        "standard upgrade, standard add-preset/remove-preset, "
+        "former-ids propose --confirm). 'refdes build --no-write' still "
+        "writes the site -- that is the command's own output, not a side effect",
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
