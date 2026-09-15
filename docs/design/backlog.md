@@ -712,13 +712,25 @@ says so itself: a file has to be citable before a calc value can be drawn from
 it — so 26 is parked for the same reason, not because it was judged wrong.
 (Not in the finding — recorded from conversation, not from the document.)
 
-**Status: Part 1 done, Part 2 deferred.** Part 1 shipped in `f8e7ee0`:
+**Status: both parts done.** Part 1 shipped in `f8e7ee0`:
 hardware@3's `field_sets:` has a third entry `citations: {citations: {type:
 citations, on_change: invalidate}}`, and both `component` and `decision` now
 `include: [provenance, stewardship, citations]`, with the `migration.yaml`
 rename above and this repo's own `items/components/power.yaml` moved over.
-Part 2 is unbuilt: `CitationSpec` still has `url`, no `path`, and the lockfile
-is still keyed by url.
+Part 2 shipped next: `CitationSpec.path` dispatches on scheme (`citations.classify`
+— `http`/`https` remote, everything else a project-root-relative local file, with
+drive letters, backslashes, absolute paths, `..` and symlink escapes all refused);
+local files are pinned by `refdes fetch` reading from disk, re-hashed at every
+build, published as content-addressed copies at `assets/citations/<sha256><ext>`,
+and a changed-but-unre-pinned file is one warning naming every citer (error under
+`--require-citations`). `vendor:` on a local path is a hard error at both validate
+and fetch. The lockfile keeps its shape, keyed by the `path:` value — the two
+namespaces are disjoint because remote keys always carry `http(s)://`, so no
+lockfile migration was needed. The `revise.py` blind spot closed as a new global
+`Mapping.citation_keys` category, applied inside every `citations`-typed field's
+entries, with `citation_keys: {url: path}` in hardware v3's `migration.yaml` — and
+a stale `url:` in any project now fails validation with a message naming the
+rename and pointing at `refdes standard upgrade`.
 
 **Local model: Part 1 suitable (and shipped), Part 2 (not decided — my read)
 not suitable.** Part 1 is a field-set declaration plus a rename entry, with a

@@ -165,7 +165,7 @@
 <section class="citations"{% if citation_fields | length == 1 %} id="field-{{ citation_fields[0] }}"{% endif %}>
   <h2>Citations</h2>
   <table class="grid">
-    <thead><tr><th></th><th>URL</th><th>Rev</th><th>Page</th><th>Part #</th><th>Vendor</th><th>Detail</th></tr></thead>
+    <thead><tr><th></th><th>Path</th><th>Rev</th><th>Page</th><th>Part #</th><th>Vendor</th><th>Detail</th></tr></thead>
     <tbody>
     {% for c in item.citations %}
       <tr{% if c.spec.id %} id="cite-{{ c.spec.id }}"{% endif %}>
@@ -176,8 +176,14 @@
           {% endif %}
         </td>
         <td>
-          <a href="{{ c.spec.url }}{% if c.spec.page %}#page={{ c.spec.page }}{% endif %}" target="_blank" rel="noopener">{{ c.spec.url }}</a>
-          {% if c.local_path %}<br><a href="assets/{{ c.local_path }}{% if c.spec.page %}#page={{ c.spec.page }}{% endif %}">local copy</a>{% endif %}
+          {% if c.remote %}
+          <a href="{{ c.spec.path }}{% if c.spec.page %}#page={{ c.spec.page }}{% endif %}" target="_blank" rel="noopener">{{ c.spec.path }}</a>
+          {% elif c.local_path %}
+          <a href="assets/{{ c.local_path }}{% if c.spec.page %}#page={{ c.spec.page }}{% endif %}">{{ c.spec.path }}</a>
+          {% else %}
+          <code>{{ c.spec.path }}</code>
+          {% endif %}
+          {% if c.remote and c.local_path %}<br><a href="assets/{{ c.local_path }}{% if c.spec.page %}#page={{ c.spec.page }}{% endif %}">local copy</a>{% endif %}
         </td>
         <td class="mono">{{ c.spec.rev or '—' }}</td>
         <td class="mono">{{ c.spec.page or '—' }}</td>

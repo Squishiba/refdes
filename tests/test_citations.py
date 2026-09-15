@@ -43,7 +43,7 @@ items:
   - id: CMP-001
     title: Buck converter
     datasheets:
-      - url: https://example.com/ds.pdf
+      - path: https://example.com/ds.pdf
         rev: C
         page: "14"
         part_number: TPS62913
@@ -103,7 +103,7 @@ def test_citations_field_must_be_a_list(tmp_path):
     assert any("must be a list of citation entries" in d.message for d in project.errors)
 
 
-def test_citation_entry_without_url_is_an_error(tmp_path):
+def test_citation_entry_without_path_is_an_error(tmp_path):
     write_project_config(tmp_path, CITATION_SCHEMA)
     items = tmp_path / "items"
     items.mkdir()
@@ -113,7 +113,44 @@ def test_citation_entry_without_url_is_an_error(tmp_path):
         encoding="utf-8",
     )
     project = _cite_build(tmp_path)
-    assert any("each citation needs a 'url'" in d.message for d in project.errors)
+    assert any("each citation needs a 'path'" in d.message for d in project.errors)
+
+
+def test_stale_url_key_gets_the_rename_error(tmp_path):
+    """Finding 25 Part 2, decision D1: `url:` is a hard break, but never an
+    anonymous unknown-key failure -- the diagnostic names the rename and the
+    automatic way to apply it, for every project regardless of standard pin."""
+    write_project_config(tmp_path, CITATION_SCHEMA)
+    items = tmp_path / "items"
+    items.mkdir()
+    (items / "cmp.yaml").write_text(
+        "defaults: {type: component}\n"
+        "items:\n  - id: CMP-001\n    title: t\n    datasheets:\n"
+        "      - url: https://example.com/ds.pdf\n",
+        encoding="utf-8",
+    )
+    project = _cite_build(tmp_path)
+    assert any(
+        "url: was renamed to path:" in d.message and "standard upgrade" in d.message
+        for d in project.errors
+    )
+
+
+def test_vendor_on_local_path_is_an_error(tmp_path):
+    write_project_config(tmp_path, CITATION_SCHEMA)
+    items = tmp_path / "items"
+    items.mkdir()
+    (items / "cmp.yaml").write_text(
+        "defaults: {type: component}\n"
+        "items:\n  - id: CMP-001\n    title: t\n    datasheets:\n"
+        "      - path: docs/local.pdf\n        vendor: true\n",
+        encoding="utf-8",
+    )
+    project = _cite_build(tmp_path)
+    assert any(
+        "vendor: on local path" in d.message and "already local" in d.message
+        for d in project.errors
+    )
 
 
 # ---------------------------------------------------------------------- verify
@@ -139,7 +176,7 @@ def test_hash_only_citation_is_ok_with_no_local_file_needed(citation_project):
     (citation_project / "items" / "cmp.yaml").write_text(
         "defaults: {type: component}\n"
         "items:\n  - id: CMP-001\n    title: t\n"
-        "    datasheets:\n      - url: https://example.com/ds.pdf\n        vendor: false\n",
+        "    datasheets:\n      - path: https://example.com/ds.pdf\n        vendor: false\n",
         encoding="utf-8",
     )
     _write_citation_lockfile(
@@ -253,7 +290,7 @@ def test_items_json_citations_unpinned(citation_project):
     assert "has no fetched record" in status["detail"]
     # authored intent stays in `fields`, untouched by resolution
     assert _citation_entry(payload)["fields"]["datasheets"][0] == {
-        "url": "https://example.com/ds.pdf",
+        "path": "https://example.com/ds.pdf",
         "rev": "C",
         "page": "14",
         "part_number": "TPS62913",
@@ -265,7 +302,7 @@ def test_items_json_citations_hash_only_pinned_not_vendored(citation_project):
     (citation_project / "items" / "cmp.yaml").write_text(
         "defaults: {type: component}\n"
         "items:\n  - id: CMP-001\n    title: t\n"
-        "    datasheets:\n      - url: https://example.com/ds.pdf\n        vendor: false\n",
+        "    datasheets:\n      - path: https://example.com/ds.pdf\n        vendor: false\n",
         encoding="utf-8",
     )
     _write_citation_lockfile(
@@ -351,12 +388,12 @@ items:
   - id: CMP-001
     title: A
     datasheets:
-      - url: https://example.com/ds.pdf
+      - path: https://example.com/ds.pdf
         vendor: true
   - id: CMP-002
     title: B
     datasheets:
-      - url: https://example.com/ds.pdf
+      - path: https://example.com/ds.pdf
         vendor: false
 """
 
@@ -392,11 +429,11 @@ def test_fetch_all_pins_every_cited_url(citation_project):
     parse.load_items(project)
     results = citations_mod.fetch_all(project, fetcher=_fake_fetcher())
     assert len(results) == 1
-    assert results[0].url == "https://example.com/ds.pdf"
+    assert results[0].path == "https://example.com/ds.pdf"
     assert results[0].vendored is True  # the one citer declares vendor: true
     lockfile = citations_mod.load_lockfile(project)
     assert "https://example.com/ds.pdf" in lockfile
-    blob = citations_mod.vendor_path(project, results[0].sha256, results[0].url)
+    blob = citations_mod.vendor_path(project, results[0].sha256, results[0].path)
     assert os.path.isfile(blob)
 
 
@@ -406,10 +443,10 @@ defaults:
 items:
   - id: CMP-001
     title: A
-    datasheets: [{url: "https://example.com/a.pdf"}]
+    datasheets: [{path: "https://example.com/a.pdf"}]
   - id: CMP-002
     title: B
-    datasheets: [{url: "https://example.com/b.pdf"}]
+    datasheets: [{path: "https://example.com/b.pdf"}]
 """
 
 
@@ -426,16 +463,16 @@ def test_fetch_scoped_to_item(two_url_project):
     project = load_project(config_path=str(two_url_project / "refdes-project.yaml"))
     parse.load_items(project)
     results = citations_mod.fetch_all(project, item_id="CMP-001", fetcher=_fake_fetcher())
-    assert [r.url for r in results] == ["https://example.com/a.pdf"]
+    assert [r.path for r in results] == ["https://example.com/a.pdf"]
 
 
 def test_fetch_scoped_to_url(two_url_project):
     project = load_project(config_path=str(two_url_project / "refdes-project.yaml"))
     parse.load_items(project)
     results = citations_mod.fetch_all(
-        project, url="https://example.com/b.pdf", fetcher=_fake_fetcher()
+        project, path="https://example.com/b.pdf", fetcher=_fake_fetcher()
     )
-    assert [r.url for r in results] == ["https://example.com/b.pdf"]
+    assert [r.path for r in results] == ["https://example.com/b.pdf"]
 
 
 def test_fetch_unknown_item_raises(citation_project):
@@ -450,7 +487,7 @@ def test_fetch_url_not_cited_raises(citation_project):
     parse.load_items(project)
     with pytest.raises(citations_mod.CitationError, match="cites"):
         citations_mod.fetch_all(
-            project, url="https://example.com/nope.pdf", fetcher=_fake_fetcher()
+            project, path="https://example.com/nope.pdf", fetcher=_fake_fetcher()
         )
 
 
@@ -494,7 +531,7 @@ def test_refresh_detects_drift(citation_project):
     parse.load_items(project)
     drift = citations_mod.refresh(project, fetcher=_fake_fetcher(b"new bytes"))
     assert len(drift) == 1
-    assert drift[0].url == "https://example.com/ds.pdf"
+    assert drift[0].path == "https://example.com/ds.pdf"
     assert drift[0].pinned_sha256 == sha_old
     assert drift[0].citers == ["CMP-001"]
 
@@ -714,7 +751,7 @@ def test_citation_without_page_keeps_bare_href(citation_project):
     (citation_project / "items" / "cmp.yaml").write_text(
         "defaults: {type: component}\n"
         "items:\n  - id: CMP-001\n    title: t\n"
-        "    datasheets:\n      - url: https://example.com/ds.pdf\n",
+        "    datasheets:\n      - path: https://example.com/ds.pdf\n",
         encoding="utf-8",
     )
     project = _cite_build(citation_project)
@@ -734,7 +771,7 @@ def test_citation_page_value_is_html_escaped(citation_project):
     (citation_project / "items" / "cmp.yaml").write_text(
         "defaults: {type: component}\n"
         "items:\n  - id: CMP-001\n    title: t\n"
-        "    datasheets:\n      - url: https://example.com/ds.pdf\n"
+        "    datasheets:\n      - path: https://example.com/ds.pdf\n"
         "        page: '14\" onmouseover=\"alert(1)'\n",
         encoding="utf-8",
     )
@@ -786,14 +823,14 @@ def board_citation_project(tmp_path):
     a.mkdir(parents=True)
     (a / "c.yaml").write_text(
         "defaults: {type: component}\n"
-        'items:\n  - id: CMP-A-001\n    title: A\n    datasheets: [{url: "https://example.com/a.pdf"}]\n',
+        'items:\n  - id: CMP-A-001\n    title: A\n    datasheets: [{path: "https://example.com/a.pdf"}]\n',
         encoding="utf-8",
     )
     b = tmp_path / "items" / "board-b"
     b.mkdir(parents=True)
     (b / "c.yaml").write_text(
         "defaults: {type: component}\n"
-        'items:\n  - id: CMP-B-001\n    title: B\n    datasheets: [{url: "https://example.com/b.pdf"}]\n',
+        'items:\n  - id: CMP-B-001\n    title: B\n    datasheets: [{path: "https://example.com/b.pdf"}]\n',
         encoding="utf-8",
     )
     return tmp_path
@@ -809,3 +846,220 @@ def test_per_board_references_are_scoped(board_citation_project):
 
     ref_global = open(os.path.join(out, "references.html"), encoding="utf-8").read()
     assert "example.com/a.pdf" in ref_global and "example.com/b.pdf" in ref_global
+
+
+# ------------------------------------------------------- local path citations
+
+LOCAL_ITEM = """\
+defaults:
+  type: component
+items:
+  - id: CMP-001
+    title: Schematic
+    datasheets:
+      - path: docs/sch.pdf
+        rev: "2"
+"""
+
+LOCAL_ITEM_TWO_CITERS = """\
+defaults:
+  type: component
+items:
+  - id: CMP-001
+    title: Schematic
+    datasheets:
+      - path: docs/sch.pdf
+  - id: CMP-002
+    title: Schematic too
+    datasheets:
+      - path: docs/sch.pdf
+"""
+
+
+def _local_project(tmp_path, item_text=LOCAL_ITEM, doc_data=b"%PDF local"):
+    write_project_config(tmp_path, CITATION_SCHEMA)
+    (tmp_path / "items").mkdir()
+    (tmp_path / "items" / "cmp.yaml").write_text(item_text, encoding="utf-8")
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "sch.pdf").write_bytes(doc_data)
+    return tmp_path
+
+
+def _load_only(root):
+    project = load_project(config_path=str(root / "refdes-project.yaml"))
+    parse.load_items(project)
+    return project
+
+
+def test_classify_dispatches_on_scheme(tmp_path):
+    root = str(tmp_path)
+    assert citations_mod.classify(root, "https://example.com/ds.pdf") == (
+        "remote",
+        "https://example.com/ds.pdf",
+    )
+    assert citations_mod.classify(root, "HTTP://example.com/ds.pdf")[0] == "remote"
+    assert citations_mod.classify(root, "docs/sch.pdf") == ("local", "docs/sch.pdf")
+    assert citations_mod.classify(root, "./docs//sub/../sch.pdf") == (
+        "local",
+        "docs/sch.pdf",
+    )
+
+    for bad in (
+        "file:/tmp/x.pdf",
+        "ftp://example.com/x",
+        "C:\\x\\a.pdf",
+        "c:/x/a.pdf",
+        "docs\\sch.pdf",
+        "/abs/sch.pdf",
+        "\\\\host\\share\\x",
+        "../outside.pdf",
+        "docs/../../outside.pdf",
+        "..",
+        ".",
+        "",
+        "   ",
+    ):
+        with pytest.raises(citations_mod.CitationError):
+            citations_mod.classify(root, bad)
+
+
+def test_classify_refuses_symlink_escape(tmp_path):
+    outside = tmp_path / "outside.pdf"
+    outside.write_bytes(b"x")
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    link = proj / "sneaky.pdf"
+    try:
+        link.symlink_to(outside)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks unavailable on this filesystem")
+    with pytest.raises(citations_mod.CitationError):
+        citations_mod.classify(str(proj), "sneaky.pdf")
+
+
+def test_fetch_local_pins_without_network(tmp_path):
+    _local_project(tmp_path)
+    project = _load_only(tmp_path)
+
+    def no_network(url):
+        raise AssertionError("a local citation must not touch the network")
+
+    results = citations_mod.fetch_all(project, fetcher=no_network)
+    assert len(results) == 1 and not results[0].error
+    sha = hashlib.sha256(b"%PDF local").hexdigest()
+    assert results[0].path == "docs/sch.pdf" and results[0].sha256 == sha
+
+    project2 = _cite_build(tmp_path)
+    status = project2.item_by_id("CMP-001").citations[0]
+    assert status.state == "ok" and status.remote is False
+    assert status.local_path == f"citations/{sha}.pdf"
+    assert not project2.warnings and not project2.errors
+
+
+def test_local_pinned_copy_is_published_even_with_publish_datasheets_off(tmp_path):
+    """The publish_datasheets gate exists for copyrighted third-party PDFs.
+    A file the project itself wrote has no such problem -- its pinned copy is
+    published unconditionally, because it is the only URL the site can carry."""
+    _local_project(tmp_path)
+    project = _load_only(tmp_path)
+    citations_mod.fetch_all(project, fetcher=lambda u: b"unused")
+    project = _cite_build(tmp_path)
+    out = render.render_site(project)
+    sha = hashlib.sha256(b"%PDF local").hexdigest()
+    published = os.path.join(out, "assets", "citations", f"{sha}.pdf")
+    assert os.path.isfile(published)
+    with open(published, "rb") as fh:
+        assert fh.read() == b"%PDF local"
+
+
+def test_local_file_changed_since_pin_warns_and_names_citers(tmp_path):
+    _local_project(tmp_path, item_text=LOCAL_ITEM_TWO_CITERS)
+    project = _load_only(tmp_path)
+    citations_mod.fetch_all(project, fetcher=lambda u: b"unused")
+    (tmp_path / "docs" / "sch.pdf").write_bytes(b"%PDF edited")
+
+    project = _cite_build(tmp_path)
+    states = [c.state for c in project.item_by_id("CMP-001").citations]
+    assert states == ["hash_mismatch"]
+    notes = [d.message for d in project.warnings if "changed since it was pinned" in d.message]
+    assert len(notes) == 1  # one diagnostic per file, not per citer
+    assert "CMP-001" in notes[0] and "CMP-002" in notes[0]
+    assert "refdes fetch --update" in notes[0]
+    assert not project.errors
+
+
+def test_local_file_changed_since_pin_errors_under_require(tmp_path):
+    _local_project(tmp_path)
+    project = _load_only(tmp_path)
+    citations_mod.fetch_all(project, fetcher=lambda u: b"unused")
+    (tmp_path / "docs" / "sch.pdf").write_bytes(b"%PDF edited")
+    project = _cite_build(tmp_path, require_citations=True)
+    assert any("changed since it was pinned" in d.message for d in project.errors)
+
+
+def test_local_file_missing_is_error(tmp_path):
+    _local_project(tmp_path)
+    (tmp_path / "docs" / "sch.pdf").unlink()
+    project = _cite_build(tmp_path)
+    status = project.item_by_id("CMP-001").citations[0]
+    assert status.state == "missing"
+    assert any("does not exist" in d.message for d in project.errors)
+
+
+def test_local_unpinned_is_info_then_error_under_require(tmp_path):
+    _local_project(tmp_path)
+    project = _cite_build(tmp_path)
+    status = project.item_by_id("CMP-001").citations[0]
+    assert status.state == "unpinned"
+    assert any("has no fetched record" in d.message for d in project.infos)
+    assert not project.errors
+    project = _cite_build(tmp_path, require_citations=True)
+    assert any("has no fetched record" in d.message for d in project.errors)
+
+
+def test_fetch_all_refuses_vendor_on_local(tmp_path):
+    _local_project(
+        tmp_path,
+        item_text=LOCAL_ITEM.replace('rev: "2"', "rev: \"2\"\n        vendor: true"),
+    )
+    project = _load_only(tmp_path)
+    with pytest.raises(citations_mod.CitationError, match="already local"):
+        citations_mod.fetch_all(project, fetcher=lambda u: b"unused")
+
+
+def test_refresh_skips_local_paths(tmp_path):
+    _local_project(tmp_path)
+    project = _load_only(tmp_path)
+    citations_mod.fetch_all(project, fetcher=lambda u: b"unused")
+
+    def no_network(url):
+        raise AssertionError("local citations are already compared every build")
+
+    assert citations_mod.refresh(project, fetcher=no_network) == []
+
+
+def test_local_citation_renders_link_to_pinned_copy(tmp_path):
+    _local_project(tmp_path)
+    project = _load_only(tmp_path)
+    citations_mod.fetch_all(project, fetcher=lambda u: b"unused")
+    project = _cite_build(tmp_path)
+    out = render.render_site(project)
+    sha = hashlib.sha256(b"%PDF local").hexdigest()
+    with open(os.path.join(out, "cmp-001.html"), encoding="utf-8") as fh:
+        item_html = fh.read()
+    with open(os.path.join(out, "references.html"), encoding="utf-8") as fh:
+        ref_html = fh.read()
+    assert f"assets/citations/{sha}.pdf" in item_html
+    assert f"assets/citations/{sha}.pdf" in ref_html
+    assert "docs/sch.pdf" in item_html and "docs/sch.pdf" in ref_html
+
+
+def test_case_mismatch_between_path_and_disk_warns(tmp_path):
+    _local_project(tmp_path)  # docs/sch.pdf on disk
+    (tmp_path / "items" / "cmp.yaml").write_text(
+        LOCAL_ITEM.replace("docs/sch.pdf", "docs/SCH.pdf"), encoding="utf-8"
+    )
+    if not os.path.exists(tmp_path / "docs" / "SCH.pdf"):
+        pytest.skip("case-sensitive filesystem: the path is simply missing there")
+    project = _cite_build(tmp_path)
+    assert any("differs in case" in d.message for d in project.warnings)

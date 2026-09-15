@@ -58,7 +58,7 @@ title: Cited a datasheet for a part never made into a component.
 workspace: alpha
 board: main
 datasheets:
-  - url: "https://example.com/opamp.pdf"
+  - path: "https://example.com/opamp.pdf"
     part_number: LM358
 ---
 """,

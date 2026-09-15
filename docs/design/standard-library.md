@@ -1353,24 +1353,24 @@ the dedicated report below is for the question that block can't answer.
 
 `citations.py` already has the exact mechanism to mirror: `collect()` walks
 every local item's every `citations:`-typed field regardless of which type
-declares it, and `by_url(project, board=None)` regroups the result by URL,
+declares it, and `by_path(project, board=None)` regroups the result by path,
 optionally scoped to one board — this is precisely what `references.html`
 and `references-{board}.html` render, and precisely what `refdes audit`'s
 existing "Citations:" section prints. Parts indexing adds a sibling,
 `by_part_number(project, board=None)`, doing the identical regroup keyed on
-`spec.part_number` instead of `spec.url` (entries with no part number are
+`spec.part_number` instead of `spec.path` (entries with no part number are
 skipped — most citations won't have one filled in), plus a second, equally
 small walk over `component.part_number` and any other field named
 `part_number` on any local item. Both feed one merged, sorted-by-exact-string
 structure — one entry per part number, carrying whichever components declare
 it directly and whichever citations name it in their nested `part_number`.
-No new traversal logic: this reuses `collect()`'s walk and `by_url()`'s
+No new traversal logic: this reuses `collect()`'s walk and `by_path()`'s
 grouping shape wholesale.
 
 Rendered exactly like citations: **`parts.html`**, global, plus
 **`parts-{board}.html`** per board, both from one template, following the
 same "global page has no board filter, board page filters both sources to
-`item.board == board`" rule `by_url` already uses. `"parts"` and
+`item.board == board`" rule `by_path` already uses. `"parts"` and
 `"parts-{board}"` join the existing `reserved` name set in `render_site`
 (`render.py:480-492`) alongside `"references"` and `"references-{board}"`,
 so a narrative page can't collide with the generated report — the same

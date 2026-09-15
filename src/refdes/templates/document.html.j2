@@ -122,7 +122,7 @@
             {% else %}<span class="pill pill-warn">{{ c.state.replace('_', ' ') }}</span>
             {% endif %}
           </td>
-          <td>{{ c.spec.url }}</td>
+          <td>{{ c.spec.path }}</td>
           <td class="mono">{{ c.spec.rev or '—' }}</td>
           <td class="mono">{{ c.spec.page or '—' }}</td>
           <td class="mono">{{ c.spec.part_number or '—' }}</td>

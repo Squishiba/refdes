@@ -305,7 +305,7 @@ uses the `links` form (`required_when: {links: alternate}`) — see
 
 **`enum`, `limit`, and `citations` are enforced today.** `enum` is checked
 against `choices`; `limit` is parsed as a quantity; `citations` is checked to
-be a list of entries that each have at least a `url`. The rest are
+be a list of entries that each have at least a `path`. The rest are
 declarative — they document intent and are where future validation will hook
 in.
 
@@ -320,7 +320,7 @@ Four field *names* have behaviour attached regardless of declared type:
 
 `citations` is different: it is keyed off the declared **type**, not a fixed
 field name, so a project can call the field `references`, `sources`,
-anything — the hardware standard calls it `citations`. Any field declared `type: citations` gets a `url` (required), plus
+anything — the hardware standard calls it `citations`. Any field declared `type: citations` gets a `path` (required — `http`/`https` for a remote document, a project-root-relative file path for a local one), plus
 `rev`, `page`, `part_number`, `vendor`, and an optional `id` per entry, its
 own table on the item page, and an entry in `references.html` — see [citing a
 datasheet](markdown.md#citing-a-datasheet), [CLI

@@ -485,7 +485,7 @@ def _citations_json(item: Item) -> dict:
     """Resolved provenance for `item.citations`, grouped by field and ordered by index.
 
     Deliberately kept separate from `fields` -- `fields[fname][i]` is authored
-    intent (url, rev, vendor:), this is what it resolved to (sha256, vendored,
+    intent (path, rev, vendor:), this is what it resolved to (sha256, vendored,
     pinned). Every entry always carries the same keys, `state` included, so
     "unpinned" and "pinned but not vendored" are each a distinct, explicit
     `state` value rather than something a consumer infers from an absent key.
@@ -494,7 +494,7 @@ def _citations_json(item: Item) -> dict:
     for status in sorted(item.citations, key=lambda s: (s.spec.field, s.spec.index)):
         out.setdefault(status.spec.field, []).append(
             {
-                "url": status.spec.url,
+                "path": status.spec.path,
                 "state": status.state,
                 "pinned": status.state != "unpinned",
                 "vendored": status.vendored,
@@ -787,7 +787,7 @@ def render_site(project: Project, draft: bool = False) -> str:
     thread_graph = chains_mod.build_graph(project)
     env.globals["thread_view"] = lambda item: thread_view(item, project, graph=thread_graph)
     env.globals["part_anchor"] = _part_anchor
-    citations_by_url = citations_mod.by_url(project)
+    citations_by_path = citations_mod.by_path(project)
     parts_by_number = citations_mod.by_part_number(project)
     env.globals["parts_usage"] = parts_by_number.get
 
@@ -914,7 +914,7 @@ def render_site(project: Project, draft: bool = False) -> str:
     _write_html(
         out_dir, written, "references.html", references_tpl,
         project=project,
-        grouped=citations_by_url,
+        grouped=citations_by_path,
         previews_json=previews_json,
     )
 
@@ -1012,7 +1012,7 @@ def render_site(project: Project, draft: bool = False) -> str:
                 out_dir, written, f"references-{board_key}.html", references_tpl,
                 project=project,
                 board=board_spec,
-                grouped=citations_mod.by_url(project, board=board_key),
+                grouped=citations_mod.by_path(project, board=board_key),
                 previews_json=previews_json,
             )
 
@@ -1083,7 +1083,7 @@ def render_site(project: Project, draft: bool = False) -> str:
                 out_dir, written, f"references-{workspace_key}.html", references_tpl,
                 project=project,
                 workspace=workspace_spec,
-                grouped=citations_mod.by_url(project, workspace=workspace_key),
+                grouped=citations_mod.by_path(project, workspace=workspace_key),
                 previews_json=previews_json,
             )
 

@@ -9,7 +9,14 @@ whether it was vendored -- is a different kind of fact: it changes when someone
 runs `refdes fetch`, not when someone edits an item. Mixing it into the item
 would mean re-fetching a datasheet could retroactively mark a sealed log entry,
 or any other suspect-link consumer of an item's content hash, as edited. So it
-lives instead in a committed lockfile, `.refdes/citations.yaml`, keyed by url.
+lives instead in a committed lockfile, `.refdes/citations.yaml`, keyed by path.
+
+A citation's `path:` is one field dispatched on scheme (finding 25 Part 2):
+`http`/`https` means remote -- fetched, hashed, optionally vendored, exactly as
+ever -- and anything else means a file inside the project, relative to the
+project root, hashed from its local bytes at build time. Absolute paths, drive
+letters, backslashes, and anything that escapes the project root are refused,
+never guessed; `vendor:` on a local path is a hard error.
 
 The bytes themselves are a third kind of fact, and the biggest: `vendor: true`
 opts a citation into keeping a local copy, content-addressed at
@@ -18,15 +25,16 @@ datasheets are generally copyrighted, so vendoring is opt-in and defaults off.
 Hash-only "pinned but not vendored" is a first-class, complete mode on its own.
 
 `refdes fetch` is the only thing in this module that touches the network, and
-only when actually invoked. Everything else here -- `verify`, `by_url` -- reads
-only the lockfile and the local vendor cache, so `build` and `check` stay
-hermetic.
+only when actually invoked. Everything else here -- `verify`, `by_path` --
+reads only the lockfile, the local vendor cache, and (for local citations)
+files inside the project, so `build` and `check` stay hermetic.
 """
 
 from __future__ import annotations
 
 import hashlib
 import os
+import posixpath
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -56,9 +64,95 @@ def vendor_dir(project: Project) -> str:
     return os.path.join(project.root, VENDOR_DIR)
 
 
-def vendor_path(project: Project, sha256: str, url: str) -> str:
-    ext = os.path.splitext(urlparse(url).path)[1]
+def vendor_path(project: Project, sha256: str, path: str) -> str:
+    ext = os.path.splitext(urlparse(path).path)[1]
     return os.path.join(vendor_dir(project), f"{sha256}{ext}")
+
+
+# ---------------------------------------------------------------- classification
+
+REMOTE_SCHEMES = ("http", "https")
+
+
+def classify(project_root: str, value: str) -> tuple[str, str]:
+    """Dispatch one citation `path:` value: ("remote", value) for http(s) URLs,
+    ("local", canonical project-root-relative path) for everything else.
+
+    Refuses rather than guesses (finding 25 Part 2): a scheme that is not
+    http/https -- including the single-letter scheme a Windows drive letter
+    parses as (`C:\\sch.pdf` is `scheme='c'` to urlparse) and `file:` -- is an
+    error, as are absolute paths, UNC prefixes, backslashes (a Windows-path
+    tell and non-portable anyway), and anything whose normalized form escapes
+    the project root via `..` or whose resolved target does (symlinks). The
+    canonical local form is slash-separated and normpath'd, so the lockfile key
+    and the hash target never depend on how the author spelled it.
+    """
+    value = (value or "").strip()
+    if not value:
+        raise CitationError("citation path is empty")
+    scheme = urlparse(value).scheme
+    if scheme.lower() in REMOTE_SCHEMES:
+        return "remote", value
+    if scheme:
+        hint = (
+            " this looks like a Windows drive letter, not a scheme"
+            if len(scheme) == 1
+            else ""
+        )
+        raise CitationError(
+            f"citation path {value!r} has scheme {scheme!r}; only http/https "
+            f"URLs are remote, and a local path must be project-relative "
+            f"without a scheme{hint}"
+        )
+    if "\\" in value:
+        raise CitationError(
+            f"citation path {value!r} contains a backslash; local paths must "
+            f"be project-relative and slash-separated"
+        )
+    if value.startswith("/"):
+        raise CitationError(
+            f"citation path {value!r} is absolute; local paths must be "
+            f"relative to the project root"
+        )
+    canon = posixpath.normpath(value)
+    if canon == "." or canon == ".." or canon.startswith("../"):
+        raise CitationError(
+            f"citation path {value!r} escapes the project root"
+        )
+    resolved = os.path.realpath(os.path.join(project_root, canon))
+    root_real = os.path.realpath(project_root)
+    if resolved != root_real and not resolved.startswith(root_real + os.sep):
+        raise CitationError(
+            f"citation path {value!r} resolves outside the project root "
+            f"(via a symlink?)"
+        )
+    return "local", canon
+
+
+def case_mismatch(project_root: str, rel: str) -> str | None:
+    """The on-disk name for `rel` if it exists but only case-insensitively --
+    a path that builds on this machine and vanishes in a Linux CI checkout.
+    None when the spelling matches disk exactly or the file is absent (its
+    absence is reported as a missing file, not a case note)."""
+    target = os.path.join(project_root, rel)
+    if not os.path.isfile(target):
+        return None
+    parent = project_root
+    mismatched = False
+    for part in rel.split("/"):
+        try:
+            names = os.listdir(parent)
+        except OSError:
+            return None
+        if part in names:
+            parent = os.path.join(parent, part)
+            continue
+        folded = [n for n in names if n.lower() == part.lower()]
+        if not folded:
+            return None
+        mismatched = True
+        parent = os.path.join(parent, folded[0])
+    return parent if mismatched else None
 
 
 # --------------------------------------------------------------------- lockfile
@@ -77,9 +171,10 @@ def save_lockfile(project: Project, records: dict[str, dict]) -> None:
     path = lockfile_path(project)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     header = (
-        "# Refdes citation lockfile. Computed provenance for each cited URL --\n"
-        "# sha256, fetch timestamp, vendored flag -- keyed by URL. Written only by\n"
-        "# `refdes fetch`. Never hand-edit the sha256.\n"
+        "# Refdes citation lockfile. Computed provenance for each cited path --\n"
+        "# sha256, fetch timestamp, vendored flag -- keyed by the citation's path:\n"
+        "# value (URL or project-relative file). Written only by `refdes fetch`.\n"
+        "# Never hand-edit the sha256.\n"
     )
     with open(path, "w", encoding="utf-8") as fh:
         fh.write(header)
@@ -105,7 +200,7 @@ def collect(project: Project) -> list[tuple[Item, CitationSpec]]:
             if not isinstance(entries, list):
                 continue  # malformed -- reported by validate_items
             for index, entry in enumerate(entries):
-                if not isinstance(entry, dict) or not entry.get("url"):
+                if not isinstance(entry, dict) or not entry.get("path"):
                     continue  # malformed -- reported by validate_items
                 out.append(
                     (
@@ -113,7 +208,7 @@ def collect(project: Project) -> list[tuple[Item, CitationSpec]]:
                         CitationSpec(
                             field=fname,
                             index=index,
-                            url=str(entry["url"]),
+                            path=str(entry["path"]),
                             rev=str(entry.get("rev") or ""),
                             page=str(entry.get("page") or ""),
                             part_number=str(entry.get("part_number") or ""),
@@ -125,10 +220,10 @@ def collect(project: Project) -> list[tuple[Item, CitationSpec]]:
     return out
 
 
-def by_url(
+def by_path(
     project: Project, board: str | None = None, workspace: str | None = None
 ) -> dict[str, list[CitationStatus]]:
-    """`item.citations`, regrouped by url -- for `audit` and `references.html`.
+    """`item.citations`, regrouped by path -- for `audit` and `references.html`.
 
     `board`/`workspace`, when given, scope this to that board's or workspace's
     own items, the same way `render._document_sections` and friends scope the
@@ -144,7 +239,7 @@ def by_url(
         if workspace is not None and item.workspace != workspace:
             continue
         for status in item.citations:
-            grouped[status.spec.url].append(status)
+            grouped[status.spec.path].append(status)
     return dict(sorted(grouped.items()))
 
 
@@ -157,7 +252,7 @@ def by_part_number(
     `part_number` (recognized by name, the same way `limit`/`options`/
     `checks` already are -- on any item type, not only `component`), and a
     citation's own nested `part_number` (`item.citations`, populated by
-    `verify()`). `board`/`workspace` scope the same way `by_url` does.
+    `verify()`). `board`/`workspace` scope the same way `by_path` does.
     """
     grouped: dict[str, PartUsage] = {}
 
@@ -195,8 +290,8 @@ def _sha256_file(path: str) -> str:
 def verify(project: Project, require: bool = False) -> None:
     """Resolve every declared citation against the lockfile and the vendor cache.
 
-    Hermetic -- reads `.refdes/citations.yaml` and `.refdes/vendor/`, touches no
-    network. Severities:
+    Hermetic -- reads `.refdes/citations.yaml`, `.refdes/vendor/`, and cited
+    local files, but touches no network. Severities:
 
       no lockfile entry     -- info (routine until `refdes fetch` runs), or
                                 error with `require` (CI)
@@ -204,6 +299,10 @@ def verify(project: Project, require: bool = False) -> None:
       blob hash mismatch    -- ERROR always, never soft-failed: a corrupted or
                                 tampered local cache is not something to wave
                                 through in CI
+      local file missing    -- ERROR always: a cited file that isn't there is
+                                not a routine state
+      local file changed    -- warning naming every citer (review the change,
+                                then re-pin), or error with `require` (CI)
       inconsistent vendor:  -- warning, always (not promoted by `require`;
       across citers of a       it is a hygiene note about the declaration, not
       shared url                a missing artifact)
@@ -217,30 +316,56 @@ def verify(project: Project, require: bool = False) -> None:
     unpinned_severity = project.error if require else project.info
 
     grouped: dict[str, list[tuple[Item, CitationSpec]]] = defaultdict(list)
+    changed_local: dict[str, list[str]] = defaultdict(list)
     for item, spec in entries:
-        grouped[spec.url].append((item, spec))
+        grouped[spec.path].append((item, spec))
         item.citations.append(
-            _resolve(project, item, spec, records.get(spec.url), severity, unpinned_severity)
+            _resolve(
+                project, item, spec, records.get(spec.path),
+                severity, unpinned_severity, changed_local,
+            )
         )
 
-    for url, citers in grouped.items():
+    for canon, citers in sorted(changed_local.items()):
+        ids = ", ".join(sorted(set(citers)))
+        (project.error if require else project.warn)(
+            f"local citation {canon!r} has changed since it was pinned -- "
+            f"review the change, then run 'refdes fetch --update --path "
+            f"{canon}' (cited by {ids})"
+        )
+
+    for path, citers in grouped.items():
+        if classify(project.root, path)[0] != "remote":
+            continue  # vendor: on a local path is a validation error, not a flag to reconcile
         vendor_flags = {spec.vendor for _item, spec in citers}
         if len(vendor_flags) > 1:
             ids = ", ".join(sorted({item.id for item, _spec in citers}))
             project.warn(
-                f"citation {url!r} is cited with inconsistent vendor: flags "
+                f"citation {path!r} is cited with inconsistent vendor: flags "
                 f"across {ids} -- pick one so the vendoring decision is "
                 f"unambiguous"
             )
 
 
-def _resolve(project, item, spec, record, severity, unpinned_severity) -> CitationStatus:
+def _resolve(project, item, spec, record, severity, unpinned_severity, changed_local) -> CitationStatus:
     status = CitationStatus(spec=spec, item_id=item.id)
+    try:
+        kind, canon = classify(project.root, spec.path)
+    except CitationError as exc:
+        # Malformed path -- validate_items has already reported it with
+        # file:line; resolving further would only duplicate the noise.
+        status.state = "invalid"
+        status.detail = str(exc)
+        return status
+    if kind == "local":
+        return _resolve_local(
+            project, item, spec, canon, record, status, unpinned_severity, changed_local
+        )
     if record is None:
         status.state = "unpinned"
         status.detail = (
-            f"citation to {spec.url} has no fetched record; run "
-            f"'refdes fetch --url {spec.url}' to pin it"
+            f"citation to {spec.path} has no fetched record; run "
+            f"'refdes fetch --path {spec.path}' to pin it"
         )
         unpinned_severity(
             status.detail, file=item.source_file, line=item.source_line, item_id=item.id
@@ -253,11 +378,11 @@ def _resolve(project, item, spec, record, severity, unpinned_severity) -> Citati
     if not status.vendored:
         return status
 
-    blob = vendor_path(project, status.sha256, spec.url)
+    blob = vendor_path(project, status.sha256, spec.path)
     if not os.path.isfile(blob):
         status.state = "cache_missing"
         status.detail = (
-            f"vendored copy of {spec.url} is missing at "
+            f"vendored copy of {spec.path} is missing at "
             f"{os.path.relpath(blob, project.root)}"
         )
         severity(status.detail, file=item.source_file, line=item.source_line, item_id=item.id)
@@ -267,7 +392,7 @@ def _resolve(project, item, spec, record, severity, unpinned_severity) -> Citati
     if actual != status.sha256:
         status.state = "hash_mismatch"
         status.detail = (
-            f"vendored copy of {spec.url} does not match its recorded hash "
+            f"vendored copy of {spec.path} does not match its recorded hash "
             f"(cache is tampered or corrupt)"
         )
         project.error(status.detail, file=item.source_file, line=item.source_line, item_id=item.id)
@@ -282,6 +407,61 @@ def _resolve(project, item, spec, record, severity, unpinned_severity) -> Citati
         ext = os.path.splitext(blob)[1]
         status.local_path = f"datasheets/{status.sha256}{ext}"
         project.datasheet_assets[status.local_path] = blob
+    return status
+
+
+def _resolve_local(project, item, spec, canon, record, status, unpinned_severity, changed_local):
+    """Resolve a repo-local citation (finding 25 Part 2): the file itself is
+    the artifact -- no fetch, no vendor cache, no publish_datasheets gate (the
+    project wrote the file, so publishing a content-addressed copy is safe).
+    A changed-but-unre-pinned file is a warning, not an error: the pin did its
+    job by noticing, and re-pinning is a review decision, not a build failure.
+    """
+    status.remote = False
+    target = os.path.join(project.root, canon)
+    if not os.path.isfile(target):
+        status.state = "missing"
+        status.detail = f"cited local file {canon!r} does not exist"
+        project.error(
+            status.detail, file=item.source_file, line=item.source_line, item_id=item.id
+        )
+        return status
+    on_disk = case_mismatch(project.root, canon)
+    if on_disk:
+        project.warn(
+            f"citation path {spec.path!r} differs in case from the file on disk "
+            f"({os.path.relpath(on_disk, project.root)}); a case-sensitive "
+            f"checkout (e.g. Linux CI) would not find it",
+            file=item.source_file, line=item.source_line, item_id=item.id,
+        )
+    if record is None:
+        status.state = "unpinned"
+        status.detail = (
+            f"citation to {canon} has no fetched record; run "
+            f"'refdes fetch --path {canon}' to pin it"
+        )
+        unpinned_severity(
+            status.detail, file=item.source_file, line=item.source_line, item_id=item.id
+        )
+        return status
+
+    status.sha256 = str(record.get("sha256") or "")
+    status.fetched = str(record.get("fetched") or "")
+    actual = _sha256_file(target)
+    if actual != status.sha256:
+        status.state = "hash_mismatch"
+        status.detail = (
+            f"local file {canon} does not match its pinned hash "
+            f"(changed since it was last fetched)"
+        )
+        changed_local[canon].append(item.id)  # one diagnostic per file, naming every citer
+        return status
+
+    # Always published: the site link for a local citation is the pinned copy,
+    # since the repo path itself is not a URL a published page can point at.
+    ext = os.path.splitext(canon)[1]
+    status.local_path = f"citations/{status.sha256}{ext}"
+    project.datasheet_assets[status.local_path] = target
     return status
 
 
@@ -302,7 +482,7 @@ def _now_iso() -> str:
 
 @dataclass
 class FetchResult:
-    url: str
+    path: str
     sha256: str = ""
     vendored: bool = False
     skipped: bool = False
@@ -312,15 +492,16 @@ class FetchResult:
 def fetch_all(
     project: Project,
     item_id: str | None = None,
-    url: str | None = None,
+    path: str | None = None,
     update: bool = False,
     fetcher=None,
 ) -> list[FetchResult]:
-    """Fetch every url a citation declares (optionally scoped), pin it, vendor it.
+    """Fetch every path a citation declares (optionally scoped), pin it, vendor it.
 
     Only ever called from `refdes fetch` -- the one command allowed to touch the
-    network. Already-pinned urls are skipped unless `update` is set, so a
-    routine re-run does not re-download anything.
+    network, and only for remote citations: a local path is read from disk, so
+    pinning one works with the network down. Already-pinned paths are skipped
+    unless `update` is set, so a routine re-run does not re-download anything.
 
     `fetcher` defaults to the module-level `fetch_bytes`, looked up at call time
     (not bound as a parameter default) so tests can monkeypatch
@@ -335,25 +516,32 @@ def fetch_all(
         entries = [(item, spec) for item, spec in entries if item.id == item_id]
         if not entries:
             raise CitationError(f"item {item_id!r} declares no citations")
-    if url is not None:
-        entries = [(item, spec) for item, spec in entries if spec.url == url]
+    if path is not None:
+        entries = [(item, spec) for item, spec in entries if spec.path == path]
         if not entries:
-            raise CitationError(f"no citation in this project cites {url!r}")
+            raise CitationError(f"no citation in this project cites {path!r}")
 
     wants_vendor: dict[str, bool] = defaultdict(bool)
     for _item, spec in entries:
-        wants_vendor[spec.url] = wants_vendor[spec.url] or spec.vendor
+        wants_vendor[spec.path] = wants_vendor[spec.path] or spec.vendor
 
     records = load_lockfile(project)
     results: list[FetchResult] = []
     changed = False
 
-    for target_url in sorted(wants_vendor):
-        if target_url in records and not update:
-            existing = records[target_url]
+    for target in sorted(wants_vendor):
+        kind, canon = classify(project.root, target)
+        want_vendor = wants_vendor[target]
+        if kind == "local" and want_vendor:
+            raise CitationError(
+                f"vendor: on local citation path {canon!r} is meaningless -- "
+                f"a local file is already local"
+            )
+        if canon in records and not update:
+            existing = records[canon]
             results.append(
                 FetchResult(
-                    url=target_url,
+                    path=canon,
                     sha256=str(existing.get("sha256") or ""),
                     vendored=bool(existing.get("vendored")),
                     skipped=True,
@@ -362,26 +550,29 @@ def fetch_all(
             continue
 
         try:
-            data = fetcher(target_url)
-        except Exception as exc:  # noqa: BLE001 -- surfaced per-url, not fatal
-            results.append(FetchResult(url=target_url, error=str(exc)))
+            if kind == "local":
+                with open(os.path.join(project.root, canon), "rb") as fh:
+                    data = fh.read()
+            else:
+                data = fetcher(canon)
+        except Exception as exc:  # noqa: BLE001 -- surfaced per-path, not fatal
+            results.append(FetchResult(path=canon, error=str(exc)))
             continue
 
         digest = hashlib.sha256(data).hexdigest()
-        want_vendor = wants_vendor[target_url]
         if want_vendor:
             os.makedirs(vendor_dir(project), exist_ok=True)
-            with open(vendor_path(project, digest, target_url), "wb") as fh:
+            with open(vendor_path(project, digest, canon), "wb") as fh:
                 fh.write(data)
 
-        records[target_url] = {
+        records[canon] = {
             "sha256": digest,
             "fetched": _now_iso(),
             "vendored": want_vendor,
             "bytes": len(data),
         }
         changed = True
-        results.append(FetchResult(url=target_url, sha256=digest, vendored=want_vendor))
+        results.append(FetchResult(path=canon, sha256=digest, vendored=want_vendor))
 
     if changed:
         save_lockfile(project, records)
@@ -393,7 +584,7 @@ def fetch_all(
 
 @dataclass
 class DriftEntry:
-    url: str
+    path: str
     pinned_sha256: str
     upstream_sha256: str
     citers: list[str] = field(default_factory=list)
@@ -405,7 +596,9 @@ def refresh(project: Project, fetcher=None) -> list[DriftEntry]:
     Read-only: writes nothing, pins nothing, vendors nothing. Only reachable via
     `refdes check --refresh`, so a plain `build` or `check` never touches the
     network. A url that fails to fetch is reported as a warning, not drift --
-    drift means the bytes changed, not that the network did.
+    drift means the bytes changed, not that the network did. Local paths are
+    skipped: verify() already compares them against the live file on every
+    build, so there is no second upstream to ask.
 
     `fetcher` defaults to the module-level `fetch_bytes` at call time, the same
     way `fetch_all` does -- see its docstring.
@@ -414,27 +607,29 @@ def refresh(project: Project, fetcher=None) -> list[DriftEntry]:
     records = load_lockfile(project)
     citers: dict[str, list[str]] = defaultdict(list)
     for item, spec in collect(project):
-        citers[spec.url].append(item.id)
+        citers[spec.path].append(item.id)
 
     drift: list[DriftEntry] = []
-    for target_url in sorted(citers):
-        record = records.get(target_url)
+    for target in sorted(citers):
+        if classify(project.root, target)[0] != "remote":
+            continue  # local -- verify() re-hashes it against the pin every run
+        record = records.get(target)
         if record is None:
             continue  # unpinned -- already flagged by verify(), nothing to compare
         try:
-            data = fetcher(target_url)
+            data = fetcher(target)
         except Exception as exc:  # noqa: BLE001
-            project.warn(f"could not refresh {target_url}: {exc}")
+            project.warn(f"could not refresh {target}: {exc}")
             continue
         upstream_sha256 = hashlib.sha256(data).hexdigest()
         pinned_sha256 = str(record.get("sha256") or "")
         if upstream_sha256 != pinned_sha256:
             drift.append(
                 DriftEntry(
-                    url=target_url,
+                    path=target,
                     pinned_sha256=pinned_sha256,
                     upstream_sha256=upstream_sha256,
-                    citers=sorted(set(citers[target_url])),
+                    citers=sorted(set(citers[target])),
                 )
             )
     return drift

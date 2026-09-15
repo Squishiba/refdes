@@ -214,10 +214,43 @@ def validate_items(project: Project) -> None:
                     )
                 else:
                     for index, entry in enumerate(value):
-                        if not isinstance(entry, dict) or not entry.get("url"):
+                        if not isinstance(entry, dict):
                             _field_error(
                                 project, item, fname,
-                                f"{fname}[{index}]: each citation needs a 'url'",
+                                f"{fname}[{index}]: each citation needs a 'path'",
+                            )
+                            continue
+                        if "url" in entry:
+                            # Hard break (finding 25 Part 2): never let a stale
+                            # `url:` fail as an anonymous unknown key -- name the
+                            # rename and the way to have it done automatically.
+                            _field_error(
+                                project, item, fname,
+                                f"{fname}[{index}]: citation field url: was "
+                                f"renamed to path: -- rename it (refdes "
+                                f"standard upgrade does this for hardware@2 "
+                                f"-> @3 content)",
+                            )
+                            continue
+                        if not entry.get("path"):
+                            _field_error(
+                                project, item, fname,
+                                f"{fname}[{index}]: each citation needs a 'path'",
+                            )
+                            continue
+                        try:
+                            kind, _canon = citations_mod.classify(
+                                project.root, str(entry["path"])
+                            )
+                        except citations_mod.CitationError as exc:
+                            _field_error(project, item, fname, f"{fname}[{index}]: {exc}")
+                            continue
+                        if kind == "local" and entry.get("vendor"):
+                            _field_error(
+                                project, item, fname,
+                                f"{fname}[{index}]: vendor: on local path "
+                                f"{str(entry['path'])!r} is meaningless -- a "
+                                f"local file is already local",
                             )
                             continue
                         cite_id = entry.get("id")

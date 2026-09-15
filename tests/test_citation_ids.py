@@ -48,12 +48,12 @@ def _project(tmp_path, cmp_citations, dec_body="Plain body."):
 
 
 ONE_CITATION_WITH_ID = (
-    "  - url: https://example.com/ds.pdf\n"
+    "  - path: https://example.com/ds.pdf\n"
     "    rev: C\n"
     "    id: ds-main\n"
 )
 
-ONE_CITATION_NO_ID = "  - url: https://example.com/ds.pdf\n    rev: C\n"
+ONE_CITATION_NO_ID = "  - path: https://example.com/ds.pdf\n    rev: C\n"
 
 
 def test_cite_ref_renders_an_anchored_link_to_the_owning_item_page(tmp_path):
@@ -124,9 +124,9 @@ def test_duplicate_citation_id_across_two_items_is_an_error_naming_both(tmp_path
         "defaults:\n  type: component\n"
         "items:\n"
         "  - id: CMP-001\n    title: A\n"
-        "    datasheets:\n      - url: https://example.com/a.pdf\n        id: shared\n"
+        "    datasheets:\n      - path: https://example.com/a.pdf\n        id: shared\n"
         "  - id: CMP-002\n    title: B\n"
-        "    datasheets:\n      - url: https://example.com/b.pdf\n        id: shared\n",
+        "    datasheets:\n      - path: https://example.com/b.pdf\n        id: shared\n",
         encoding="utf-8",
     )
     project = _build_at(tmp_path)
@@ -143,7 +143,7 @@ def test_invalid_citation_id_format_is_an_error(tmp_path):
         "defaults:\n  type: component\n"
         "items:\n"
         "  - id: CMP-001\n    title: A\n"
-        "    datasheets:\n      - url: https://example.com/a.pdf\n        id: \"not a valid id!\"\n",
+        "    datasheets:\n      - path: https://example.com/a.pdf\n        id: \"not a valid id!\"\n",
         encoding="utf-8",
     )
     project = _build_at(tmp_path)

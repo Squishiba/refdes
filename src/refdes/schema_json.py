@@ -71,14 +71,14 @@ _FIELD_TYPE_MAP: dict[str, dict[str, Any]] = {
         "items": {
             "type": "object",
             "properties": {
-                "url": {"type": "string"},
+                "path": {"type": "string"},
                 "rev": {"type": "string"},
                 "page": {"type": "string"},
                 "part_number": {"type": "string"},
                 "vendor": {"type": "boolean"},
                 "id": {"type": "string"},
             },
-            "required": ["url"],
+            "required": ["path"],
             "additionalProperties": False,
         },
     },

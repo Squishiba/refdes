@@ -270,23 +270,24 @@ Updates `.refdes/ids.yaml`. See [IDs](ids.md).
 
 ## `refdes fetch`
 
-The **only** command that touches the network. Fetches every url a
-`citations:` field declares, records its sha256 and fetch time in the
-`.refdes/citations.yaml` lockfile, and vendors the bytes into
-`.refdes/vendor/` for any citation that declares `vendor: true`. `build` and
-`check` never do this themselves — see [citing a
-datasheet](markdown.md#citing-a-datasheet).
+The **only** command that touches the network — and only for remote
+(`http`/`https`) citations. Fetches every path a `citations:` field declares,
+records its sha256 and fetch time in the `.refdes/citations.yaml` lockfile,
+and vendors the bytes into `.refdes/vendor/` for any remote citation that
+declares `vendor: true`. A local path is read from disk instead, so pinning
+one works with the network down. `build` and `check` never do this themselves
+— see [citing a datasheet](markdown.md#citing-a-datasheet).
 
 | Option | Effect |
 |---|---|
 | `--item ID` | Fetch only this item's citations |
-| `--url URL` | Fetch only this url |
+| `--path PATH` | Fetch only this cited path (url or project-relative file) |
 | `--update` | Re-fetch even if already pinned |
 
 ```bash
 refdes fetch
 refdes fetch --item CMP-PWR-001
-refdes fetch --url https://www.ti.com/lit/ds/symlink/tps62913.pdf --update
+refdes fetch --path https://www.ti.com/lit/ds/symlink/tps62913.pdf --update
 ```
 
 ```
@@ -294,7 +295,7 @@ fetched  https://www.ti.com/lit/ds/symlink/tps62913.pdf  sha256=a1b2c3d4e5f6... 
 1 citation(s) processed, 0 failed
 ```
 
-Already-pinned urls are skipped (reported as `skipped`) unless `--update` is
+Already-pinned paths are skipped (reported as `skipped`) unless `--update` is
 given, so a routine re-run does not re-download anything. Updates
 `.refdes/citations.yaml`, and `.refdes/vendor/` for any citation that opted
 into vendoring.
@@ -731,7 +732,7 @@ python -m http.server -d _site 8000
 | `.refdes/citations.yaml` | **yes** | Citation lockfile (sha256, fetch time, vendored flag); written only by `refdes fetch` |
 | `.refdes/baselines/<name>.yaml` | **yes** | One file per `refdes revision`/`refdes release` stamp. Not rewritten by any ordinary command; `refdes revise` and `refdes standard upgrade` do edit it, to carry an item's content hash across a rename |
 | `.refdes/schema.json` | **no, gitignored** | The project's merged JSON Schema, for editor completion; rewritten by every command that loads the project |
-| `.refdes/vendor/` | **no, gitignored** | Vendored datasheet bytes, content-addressed by sha256; written only by `refdes fetch --url ... ` for a citation with `vendor: true` |
+| `.refdes/vendor/` | **no, gitignored** | Vendored datasheet bytes, content-addressed by sha256; written only by `refdes fetch --path ...` for a remote citation with `vendor: true` |
 | `_site/` | no | Generated output |
 
 Source files are also rewritten by `refdes id`, which inserts allocated IDs in

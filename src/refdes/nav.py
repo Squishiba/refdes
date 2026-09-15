@@ -85,7 +85,7 @@ def scope_reports(
     names = ["summary", "coverage"]
     if any(i.type == "log" for i in scoped):
         names.append("log")
-    if citations_mod.by_url(project, board=board, workspace=workspace):
+    if citations_mod.by_path(project, board=board, workspace=workspace):
         names.append("references")
     if citations_mod.by_part_number(project, board=board, workspace=workspace):
         names.append("parts")

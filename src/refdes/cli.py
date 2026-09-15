@@ -248,7 +248,7 @@ def cmd_check(args) -> int:
     if drift:
         print(f"\n{len(drift)} citation(s) drifted from their pinned hash:")
         for d in drift:
-            print(f"  {d.url}")
+            print(f"  {d.path}")
             print(f"    pinned    {d.pinned_sha256}")
             print(f"    upstream  {d.upstream_sha256}")
             print(f"    cited by  {', '.join(d.citers)}")
@@ -496,7 +496,7 @@ def cmd_fetch(args) -> int:
     project, _stale = _load(args, require_ids=False)
     try:
         results = citations_mod.fetch_all(
-            project, item_id=args.item, url=args.url, update=args.update
+            project, item_id=args.item, path=args.path, update=args.update
         )
     except citations_mod.CitationError as exc:
         print(f"error: {exc}", file=sys.stderr)
@@ -506,11 +506,11 @@ def cmd_fetch(args) -> int:
     for r in results:
         if r.error:
             failed += 1
-            print(f"FAILED  {r.url}  {r.error}", file=sys.stderr)
+            print(f"FAILED  {r.path}  {r.error}", file=sys.stderr)
             continue
         verb = "skipped" if r.skipped else "fetched"
         vendored = "vendored" if r.vendored else "hash-only"
-        print(f"{verb:8} {r.url}  sha256={r.sha256[:12]}...  {vendored}")
+        print(f"{verb:8} {r.path}  sha256={r.sha256[:12]}...  {vendored}")
     print(f"{len(results)} citation(s) processed, {failed} failed")
     return 1 if failed else 0
 
@@ -667,14 +667,14 @@ def cmd_audit(args) -> int:
             pin = f" pinned to {spec.version}" if spec.version else " unpinned"
             print(f"  {spec.name:<14} {count} items{pin}  <- {spec.items_path}")
 
-    grouped = citations_mod.by_url(project)
+    grouped = citations_mod.by_path(project)
     if grouped:
         print("\nCitations:")
-        for url, statuses in grouped.items():
+        for path, statuses in grouped.items():
             state = statuses[0].state
             vendored = "vendored" if any(s.vendored for s in statuses) else "hash-only"
             citers = ", ".join(sorted({s.item_id for s in statuses}))
-            print(f"  {url}")
+            print(f"  {path}")
             print(f"    {state:<14} {vendored:<10} cited by {citers}")
 
     grouped_parts = citations_mod.by_part_number(project)
@@ -1220,13 +1220,15 @@ def main(argv: list[str] | None = None) -> int:
         "fetch",
         help="fetch and pin (optionally vendor) datasheet citations",
         description="The only command that touches the network. Fetches every "
-        "url a `citations:` field declares, records its sha256 and fetch time in "
-        "the `.refdes/citations.yaml` lockfile, and vendors the bytes into "
-        "`.refdes/vendor/` for any citation that declares `vendor: true`. "
-        "Already-pinned urls are skipped unless --update is given.",
+        "remote path a `citations:` field declares (local ones are read from "
+        "disk), records each sha256 and fetch time in the "
+        "`.refdes/citations.yaml` lockfile, and vendors the bytes into "
+        "`.refdes/vendor/` for any remote citation that declares "
+        "`vendor: true`. Already-pinned paths are skipped unless --update is "
+        "given.",
     )
     p_fetch.add_argument("--item", help="fetch only this item's citations")
-    p_fetch.add_argument("--url", help="fetch only this url")
+    p_fetch.add_argument("--path", help="fetch only this citation path")
     p_fetch.add_argument(
         "--update", action="store_true", help="re-fetch even if already pinned"
     )

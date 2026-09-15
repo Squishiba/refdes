@@ -105,7 +105,7 @@ items:
   - id: CMP-001
     title: Buck converter
     datasheets:
-      - url: https://example.com/ds.pdf
+      - path: https://example.com/ds.pdf
         rev: C
 """
 

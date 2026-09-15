@@ -1081,3 +1081,106 @@ def test_revise_leaves_keyed_seal_untouched_on_display_rename(tmp_path):
     parse.load_items(project2)
     build_mod.build(project2, seal_write=False, reseal=False)
     assert project2.seal_violations == []
+
+
+# ------------------------------------------------- citation key renames (finding 25)
+
+CITATION_REVISE_SCHEMA = """\
+site: { title: T, out: _site }
+id: { width: 3, ledger: .refdes/ids.yaml }
+types:
+  component:
+    prefix: CMP
+    label: Component
+    fields:
+      title:      { type: text, required: true }
+      datasheets: { type: citations }
+"""
+
+
+def test_revise_renames_citation_entry_keys_from_mapping(tmp_path):
+    write_project_config(tmp_path, CITATION_REVISE_SCHEMA)
+    (tmp_path / "items").mkdir()
+    path = tmp_path / "items" / "c.yaml"
+    path.write_text(
+        "defaults: { type: component }\n"
+        "items:\n  - id: CMP-001\n    title: Buck\n    datasheets:\n"
+        "      - url: https://example.com/ds.pdf\n        rev: C\n"
+        "      - url: https://example.com/app.pdf\n",
+        encoding="utf-8",
+    )
+    result = revise.apply(str(tmp_path), revise.Mapping(citation_keys={"url": "path"}))
+    assert result.ok, result.errors
+    text = path.read_text(encoding="utf-8")
+    assert "url:" not in text
+    assert "path: https://example.com/ds.pdf" in text
+    assert "path: https://example.com/app.pdf" in text
+    assert "rev: C" in text  # sibling keys inside the entry are untouched
+
+
+def test_revise_renames_citation_keys_at_the_field_key_indentation(tmp_path):
+    """Legal YAML writes the block sequence at its key's own indentation --
+    and the region rule (include `- ...` at that indent, stop at a real
+    sibling key) only runs if something follows the entries."""
+    write_project_config(tmp_path, CITATION_REVISE_SCHEMA)
+    (tmp_path / "items").mkdir()
+    path = tmp_path / "items" / "c.yaml"
+    path.write_text(
+        "defaults: { type: component }\n"
+        "items:\n  - id: CMP-001\n    title: Buck\n    datasheets:\n"
+        "    - url: https://example.com/ds.pdf\n"
+        "    part_number: TPS62913\n",
+        encoding="utf-8",
+    )
+    result = revise.apply(str(tmp_path), revise.Mapping(citation_keys={"url": "path"}))
+    assert result.ok, result.errors
+    text = path.read_text(encoding="utf-8")
+    assert "path: https://example.com/ds.pdf" in text
+    assert "part_number: TPS62913" in text  # the sibling key ended the region, untouched
+
+
+def test_revise_refuses_flow_style_citation_entries(tmp_path):
+    """A stale key the parsed data says is set but the line pass cannot find
+    is an error, not a silent miss -- the blind spot is closed loudly."""
+    write_project_config(tmp_path, CITATION_REVISE_SCHEMA)
+    (tmp_path / "items").mkdir()
+    path = tmp_path / "items" / "c.yaml"
+    path.write_text(
+        "defaults: { type: component }\n"
+        "items:\n  - id: CMP-001\n    title: Buck\n"
+        "    datasheets: [{url: https://example.com/ds.pdf}]\n",
+        encoding="utf-8",
+    )
+    result = revise.apply(str(tmp_path), revise.Mapping(citation_keys={"url": "path"}))
+    assert not result.ok
+    assert any("flow style" in e for e in result.errors)
+    assert "url:" in path.read_text(encoding="utf-8")  # rolled back / never written
+
+
+def test_standard_upgrade_renames_citation_url_keys_end_to_end(tmp_path):
+    """hardware@2 -> @3: `datasheets: -> citations:` (a field rename) and
+    `url: -> path:` (a citation-entry key rename) in one apply -- and the
+    pre-existing D1 errors on those very entries must not block the upgrade
+    that exists to fix them."""
+    write_project_config(
+        tmp_path,
+        "site: { title: T, out: _site }\n"
+        "standard: { base: hardware, version: 2, presets: [] }\n"
+        "id: { width: 3, ledger: .refdes/ids.yaml }\n",
+    )
+    (tmp_path / "items").mkdir()
+    path = tmp_path / "items" / "c.yaml"
+    path.write_text(
+        "items:\n  - id: CMP-001\n    type: component\n    title: Buck\n"
+        "    part_number: TPS62913\n    status: selected\n    datasheets:\n"
+        "      - url: https://example.com/ds.pdf\n        rev: C\n",
+        encoding="utf-8",
+    )
+    steps = revise.apply_standard_upgrade(str(tmp_path), 3)
+    assert [(s.from_version, s.to_version) for s in steps] == [(2, 3)]
+    assert steps[0].result.ok, steps[0].result.errors
+    text = path.read_text(encoding="utf-8")
+    assert "url:" not in text
+    assert "citations:" in text  # the field rename
+    assert "path: https://example.com/ds.pdf" in text  # the entry key rename
+    assert "rev: C" in text

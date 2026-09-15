@@ -26,6 +26,12 @@
 # it -- see revise.check_body_merge_conflicts(), run alongside the ordinary
 # ambiguity check every apply() already performs.
 #
+# citation_keys: below renames url: -> path: *inside* every citation entry
+# (finding 25 Part 2): one field for "where the document is", dispatched on
+# scheme. fields: cannot express this -- it renames item-level keys only and
+# never sees inside a citations-typed field's entries -- so revise.py gained
+# that category for exactly this blind spot.
+#
 # See docs/design/standard-library.md §3 for the versioning design this
 # implements.
 
@@ -38,3 +44,6 @@ fields:
     method: body
   component:
     datasheets: citations
+
+citation_keys:
+  url: path

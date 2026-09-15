@@ -114,7 +114,7 @@ def _snapshot_project(tmp_path):
         "defaults: { type: component, board: board-a }\n"
         "items:\n"
         "  - id: CMP-001\n    title: TPS62913.\n"
-        "    datasheets:\n      - url: https://example.com/datasheet.pdf\n",
+        "    datasheets:\n      - path: https://example.com/datasheet.pdf\n",
         encoding="utf-8",
     )
     refdes_dir = tmp_path / ".refdes"

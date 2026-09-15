@@ -19,7 +19,7 @@ item type.
 
    ```yaml
    citations:
-     - url: https://www.ti.com/lit/ds/symlink/lm358.pdf
+     - path: https://www.ti.com/lit/ds/symlink/lm358.pdf
        part_number: LM358
    ```
 

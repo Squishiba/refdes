@@ -256,7 +256,7 @@ class CitationSpec:
     """One entry of a `citations:`-typed field -- declared intent only.
 
     Computed provenance (hash, fetch time, vendored flag) is never stored here or
-    on the item; it lives in the `.refdes/citations.yaml` lockfile, keyed by url,
+    on the item; it lives in the `.refdes/citations.yaml` lockfile, keyed by path,
     so that re-fetching a datasheet can never retroactively mark a sealed log
     entry -- or any other suspect-link consumer of an item's content hash -- as
     edited.
@@ -264,7 +264,11 @@ class CitationSpec:
 
     field: str
     index: int
-    url: str
+    # Where the document is: an http(s) URL (fetched, hashed, optionally
+    # vendored) or a project-root-relative path (never fetched, hashed from
+    # the local bytes at build time). One field, dispatched on scheme --
+    # "where the document is" is one idea (finding 25 Part 2).
+    path: str
     rev: str = ""
     page: str = ""
     part_number: str = ""
@@ -282,15 +286,22 @@ class CitationStatus:
 
     spec: CitationSpec
     item_id: str
-    state: str = "ok"  # "ok" | "unpinned" | "cache_missing" | "hash_mismatch"
+    # "missing" is local-only: the cited repo file does not exist on disk.
+    state: str = "ok"  # "ok" | "unpinned" | "cache_missing" | "hash_mismatch" | "missing"
     detail: str = ""
     sha256: str = ""
     fetched: str = ""
     vendored: bool = False
+    # False for a repo-local citation (finding 25 Part 2); the templates use
+    # this to decide whether the primary link goes upstream or to the
+    # published copy under assets/ -- a repo path is not a site URL.
+    remote: bool = True
     # Path to the published copy, relative to `assets/` (e.g.
-    # "datasheets/<sha256>.pdf") -- set only when the citation is vendored AND
-    # Project.publish_datasheets is on; empty otherwise, which is also how the
-    # rendered citation link knows to point upstream instead of to a local copy.
+    # "datasheets/<sha256>.pdf") -- set when the citation is vendored AND
+    # Project.publish_datasheets is on, and always for a local citation
+    # (content-addressed under "citations/"); empty otherwise, which is also
+    # how the rendered citation link knows to point upstream instead of to a
+    # local copy.
     local_path: str = ""
 
 

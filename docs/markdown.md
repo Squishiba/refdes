@@ -186,14 +186,14 @@ types:
       citations: { type: citations, on_change: invalidate }
 ```
 
-An item declares intent only — a url, and optionally a rev, page,
+An item declares intent only — a path, and optionally a rev, page,
 part_number, id, and whether the bytes should be vendored:
 
 ```yaml
 - id: CMP-PWR-001
   title: TPS62913 synchronous buck converter
   citations:
-    - url: https://www.ti.com/lit/ds/symlink/tps62913.pdf
+    - path: https://www.ti.com/lit/ds/symlink/tps62913.pdf
       rev: E
       page: "14"
       part_number: TPS62913
@@ -201,11 +201,34 @@ part_number, id, and whether the bytes should be vendored:
       id: tps62913-ds
 ```
 
+`path:` is one field dispatched on scheme. `http:`/`https:` means remote —
+fetched, hashed, optionally vendored, exactly as before. Anything else means
+**a file inside the project**, relative to the project root (the directory
+holding `refdes-project.yaml`), slash-separated:
+
+```yaml
+- id: BND-MECH-001
+  title: Board outline
+  citations:
+    - path: docs/mech/board-outline.pdf
+      rev: "2"
+```
+
+The file itself is the artifact: `refdes fetch` reads it from disk (no
+network), every build re-hashes it against the pin, and the pinned bytes are
+published with the site as `assets/citations/<sha256><ext>` so the rendered
+link survives a Linux CI checkout — absolute paths, drive letters,
+backslashes, `..` escapes, symlinks pointing out of the project, and
+`vendor:` on a local path are all refused, never guessed. A local file that
+changed since it was pinned is a warning naming every citer (review, then
+`refdes fetch --update --path <path>`), an error with `--require-citations`;
+a cited file that doesn't exist is an error, always.
+
 `id` is optional, exactly like a figure's `id=` — give a citation one and
 `[[cite:tps62913-ds]]` anywhere in prose (or `[[cite:tps62913-ds|the
 datasheet]]` for custom text) links straight to **that citation's row** on
 `CMP-PWR-001`'s own page, the item that declared it — never to
-`references.html`, which groups by url across every citer instead of naming
+`references.html`, which groups by path across every citer instead of naming
 one entry. It must be unique across the whole project — one flat namespace,
 the same posture figure ids and item ids already have — since it can be
 referenced from any item or page, not just the one that declared it. A
@@ -221,7 +244,7 @@ written by hand:
 ```bash
 refdes fetch                     # every citation in the project
 refdes fetch --item CMP-PWR-001  # just this item's
-refdes fetch --url https://...   # just this url
+refdes fetch --path docs/sch.pdf   # just this one cited path
 refdes fetch --update            # re-fetch even if already pinned
 ```
 
@@ -230,21 +253,23 @@ refdes fetch --update            # re-fetch even if already pinned
 local vendor cache, so they stay completely offline.
 
 **Pinning vs. vendoring.** Every fetched citation is pinned: its sha256 and
-fetch time are recorded in `.refdes/citations.yaml`, keyed by url, and
+fetch time are recorded in `.refdes/citations.yaml`, keyed by path, and
 committed. `vendor: true` additionally keeps a local copy of the bytes,
 content-addressed at `.refdes/vendor/<sha256><ext>` — gitignored, not git
 LFS, not committed. `vendor:` defaults to `false` on purpose: manufacturer
 datasheets are generally copyrighted, so "pinned but not vendored" (hash-only)
-is a complete mode on its own, not a fallback. Citing the same url with
+is a complete mode on its own, not a fallback. Citing the same remote path with
 inconsistent `vendor:` flags across items is a warning.
 
 **Verification**, checked at every `build` and `check`, offline:
 
 | Situation | Severity |
 |---|---|
-| No lockfile entry for a cited url | info (error with `--require-citations`) — routine until `refdes fetch` runs, so it's hidden unless `-v`/`--verbose` |
+| No lockfile entry for a cited path | info (error with `--require-citations`) — routine until `refdes fetch` runs, so it's hidden unless `-v`/`--verbose` |
 | `vendor: true`, but the local blob is missing | warning (error with `--require-citations`) |
 | The local blob's hash no longer matches its recorded sha256 | **error, always** |
+| A cited local file doesn't exist | **error, always** |
+| A cited local file changed since it was pinned | warning naming every citer (error with `--require-citations`) |
 
 The hash-mismatch case is never soft-failed — a corrupted or tampered local
 cache is not something `--require-citations` or its absence should decide.
@@ -255,7 +280,7 @@ drift.
 
 An item's citations get their own table on its page instead of showing up in
 the generic field table, and every citation in the project is listed once,
-grouped by url, on `references.html` (and `references-<board>.html` per
+grouped by path, on `references.html` (and `references-<board>.html` per
 [board](multi-board.md)). See [CLI reference](cli-reference.md#refdes-fetch)
 and [output formats](output.md).
 

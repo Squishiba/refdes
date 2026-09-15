@@ -13,7 +13,7 @@ items:
     part_number: TPS62913
     status: selected
     citations:
-      - url: https://www.ti.com/lit/ds/symlink/tps62913.pdf
+      - path: https://www.ti.com/lit/ds/symlink/tps62913.pdf
         rev: E
         page: "14"
         part_number: TPS62913

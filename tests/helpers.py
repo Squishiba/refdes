@@ -278,7 +278,7 @@ LIFECYCLE_COMPONENT = (
     "defaults: { type: component }\n"
     "items:\n"
     "  - id: CMP-001\n    title: Cites an unfetched datasheet.\n"
-    "    datasheets:\n      - url: https://example.com/datasheet.pdf\n"
+    "    datasheets:\n      - path: https://example.com/datasheet.pdf\n"
 )
 
 

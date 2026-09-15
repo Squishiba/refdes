@@ -10,7 +10,7 @@
 | `summary.html` | The whole project at a glance: margins, every computed value, gaps |
 | `coverage.html` | The full [coverage](coverage.md) table, least-covered first |
 | `log.html` | The [design log](design-log.md) timeline, oldest first |
-| `references.html` | Every [citation](markdown.md#citing-a-datasheet) in the project, grouped by url |
+| `references.html` | Every [citation](markdown.md#citing-a-datasheet) in the project, grouped by path |
 | `parts.html` | Every [part number](parts.md), exact-string indexed, with where-used backlinks |
 | `document.html` | Every item in one page, in reading order — the printable record |
 | `<id>.html` | One page per item, lowercased ID (`req-pwr-002.html`) |
@@ -190,7 +190,7 @@ per-item `board` for a [`boards:`](multi-board.md) registry, top-level
       "fields": { "status": "accepted", "options": [ ... ] },
       "citations": {
         "citations": [
-          { "url": "https://www.ti.com/lit/ds/symlink/tps62913.pdf",
+          { "path": "https://www.ti.com/lit/ds/symlink/tps62913.pdf",
             "state": "ok", "pinned": true, "vendored": false,
             "sha256": "9f2c...", "fetched": "2026-03-01T12:00:00Z",
             "local_path": "", "detail": "" }
@@ -239,14 +239,14 @@ per-item `board` for a [`boards:`](multi-board.md) registry, top-level
 | `items[].citations` | Resolved provenance, keyed by field name — local items only; empty `{}` for items with no `citations:`-typed field |
 
 `items[].fields` is authored intent only — for a `citations:`-typed field, each
-entry is just what was written in the item (`url`, `rev`, `page`, `part_number`,
+entry is just what was written in the item (`path`, `rev`, `page`, `part_number`,
 `vendor:`, `id`). What it *resolved to* is a separate, parallel structure,
 `items[].citations`, keyed by field name and ordered to match `fields[fname]`:
 
 ```json
 "citations": {
   "citations": [
-    { "url": "...", "state": "ok", "pinned": true, "vendored": false,
+    { "path": "...", "state": "ok", "pinned": true, "vendored": false,
       "sha256": "9f2c...", "fetched": "2026-03-01T12:00:00Z",
       "local_path": "", "detail": "" }
   ]
@@ -267,9 +267,10 @@ key:
 | `state` | Meaning |
 |---|---|
 | `"ok"` | Resolved — hash on file, and vendored locally if `vendor: true` was declared |
-| `"unpinned"` | No lockfile entry yet — `refdes fetch` has not run for this url |
+| `"unpinned"` | No lockfile entry yet — `refdes fetch` has not run for this path |
 | `"cache_missing"` | Pinned and vendored, but the local blob is gone |
-| `"hash_mismatch"` | Vendored blob's hash no longer matches the pinned sha256 (always an error) |
+| `"hash_mismatch"` | Vendored blob's hash no longer matches the pinned sha256 (always an error), or a cited local file changed since it was pinned (warning, error with `--require-citations`) |
+| `"missing"` | A cited local file does not exist (always an error) |
 
 `pinned` is `state != "unpinned"` — the one field to check "is this dependency
 tree fully pinned for a release" without enumerating `state` values yourself.

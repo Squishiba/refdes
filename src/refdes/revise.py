@@ -63,9 +63,17 @@ class Mapping:
     # project-wide namespace, unlike fields.
     links: dict[str, str] = field(default_factory=dict)
     prefixes: dict[str, str] = field(default_factory=dict)
+    # old citation-entry key -> new citation-entry key (finding 25 Part 2).
+    # Global, not per-type: every `citations`-typed field holds the same entry
+    # shape everywhere, so `url: -> path:` applies inside any such field on
+    # any type -- the blind spot this closes is that `fields:` only sees
+    # item-level keys, never keys nested inside a structured field's entries.
+    citation_keys: dict[str, str] = field(default_factory=dict)
 
     def is_empty(self) -> bool:
-        return not (self.types or self.fields or self.links or self.prefixes)
+        return not (
+            self.types or self.fields or self.links or self.prefixes or self.citation_keys
+        )
 
     def merge(self, other: "Mapping") -> "Mapping":
         """Combine two *independent* deltas into one Mapping object for
@@ -81,11 +89,15 @@ class Mapping:
         one Mapping), never for combining two different steps.
         """
         merged = Mapping(
-            types=dict(self.types), links=dict(self.links), prefixes=dict(self.prefixes)
+            types=dict(self.types),
+            links=dict(self.links),
+            prefixes=dict(self.prefixes),
+            citation_keys=dict(self.citation_keys),
         )
         merged.types.update(other.types)
         merged.links.update(other.links)
         merged.prefixes.update(other.prefixes)
+        merged.citation_keys.update(other.citation_keys)
         merged.fields = {t: dict(f) for t, f in self.fields.items()}
         for tname, frenames in other.fields.items():
             merged.fields.setdefault(tname, {}).update(frenames)
@@ -105,6 +117,8 @@ def mapping_from_dict(raw: dict[str, Any], source: str) -> Mapping:
       refines: narrows
     prefixes:
       CON: BND
+    citation_keys:
+      url: path        # renamed inside every citations-typed field's entries
 
     Standalone from load_mapping() below so standards.py can read its own
     migration.yaml files as plain dicts (via yaml_safe_load, no import of
@@ -120,7 +134,13 @@ def mapping_from_dict(raw: dict[str, Any], source: str) -> Mapping:
         fields[str(tname)] = {str(k): str(v) for k, v in (frenames or {}).items()}
     links = {str(k): str(v) for k, v in (raw.get("links") or {}).items()}
     prefixes = {str(k): str(v) for k, v in (raw.get("prefixes") or {}).items()}
-    return Mapping(types=types, fields=fields, links=links, prefixes=prefixes)
+    citation_keys = {
+        str(k): str(v) for k, v in (raw.get("citation_keys") or {}).items()
+    }
+    return Mapping(
+        types=types, fields=fields, links=links, prefixes=prefixes,
+        citation_keys=citation_keys,
+    )
 
 
 def load_mapping(path: str) -> Mapping:
@@ -160,6 +180,7 @@ def check_ambiguous(project: Project, mapping: Mapping) -> list[str]:
     errors += _collisions(mapping.types, "type")
     errors += _collisions(mapping.links, "link")
     errors += _collisions(mapping.prefixes, "prefix")
+    errors += _collisions(mapping.citation_keys, "citation key")
     for tname, frenames in mapping.fields.items():
         errors += _collisions(frenames, f"{tname}.field")
 
@@ -363,7 +384,95 @@ def _rewrite_fields_and_links(
             err = _rewrite_one_key(out, start, end, rel, item, "link", old_key, new_key)
             if err:
                 errors.append(err)
+        errors += _rewrite_citation_keys(out, start, end, rel, item, mapping, project)
     return out, errors
+
+
+def _rewrite_citation_keys(
+    out: list[str], start: int, end: int, rel: str, item: Item, mapping: Mapping, project: Project
+) -> list[str]:
+    """Rename keys *inside* citation entries -- the blind spot finding 25
+    names: `Mapping.fields` only sees item-level keys, so `url: -> path:` in
+    a `citations`-typed field's entries was invisible to the field pass, and
+    a `standard upgrade` would report success while leaving every entry on
+    the old key. Scoped to the line region under each of the item's own
+    citations-typed field keys, so a coincidental `url:` line elsewhere in
+    the item is never touched. A stale key the parsed data says is set but
+    the text pass cannot find (flow-style entries, `defaults:`) is an error,
+    not a silent miss.
+    """
+    if not mapping.citation_keys:
+        return []
+    spec = project.types.get(item.type)
+    if spec is None:
+        return []
+    errors: list[str] = []
+    type_renames = mapping.fields.get(item.type) or {}
+    for fname, fspec in spec.fields.items():
+        if fspec.type != "citations":
+            continue
+        entries = item.fields.get(fname)
+        if not isinstance(entries, list):
+            continue
+        stale = {
+            old: new
+            for old, new in mapping.citation_keys.items()
+            if any(isinstance(e, dict) and old in e for e in entries)
+        }
+        if not stale:
+            continue
+        # The field pass may have already renamed this field's own key line
+        # (hardware@2 -> @3 renames `datasheets:` to `citations:` in the same
+        # apply), so scan for either spelling of the key.
+        names = {fname, type_renames.get(fname, fname)}
+        rewrote = False
+        for i in range(start, min(end, len(out))):
+            for name in names:
+                m = _field_or_link_line_re(name).match(out[i])
+                if m:
+                    indent = len(m.group(1))
+                    rewrote |= _rewrite_citation_region(
+                        out, i + 1, min(end, len(out)), indent, stale
+                    )
+        if not rewrote:
+            olds = ", ".join(sorted(repr(o) for o in stale))
+            errors.append(
+                f"{rel}:{item.source_line} [{item.id or '?'}] -- expected to rename "
+                f"citation key(s) {olds} inside {item.type}.{fname} entries but "
+                f"couldn't find those keys written under {fname}: (entries written "
+                f"in flow style are not rewritten -- convert them to block style "
+                f"first)"
+            )
+    return errors
+
+
+_SEQ_ENTRY_RE = re.compile(r"^\s*-(\s|$)")
+
+
+def _rewrite_citation_region(
+    out: list[str], start: int, limit: int, key_indent: int, stale: dict[str, str]
+) -> bool:
+    """Rewrite stale entry keys in the block region following a citations
+    field key, in place; returns whether anything changed. The region ends
+    at the first dedent to the field key's own indentation that isn't a
+    sequence entry, so `- url:` at the key's own indentation (legal YAML for
+    a block sequence) is included."""
+    rewrote = False
+    for i in range(start, limit):
+        line = out[i]
+        if not line.strip():
+            continue
+        indent = len(line) - len(line.lstrip())
+        if indent < key_indent or (indent == key_indent and not _SEQ_ENTRY_RE.match(line)):
+            return rewrote
+        for old, new in stale.items():
+            m = _field_or_link_line_re(old).match(line)
+            if m:
+                indent_text, rest = m.groups()
+                out[i] = f"{indent_text}{new}:{rest}"
+                rewrote = True
+                break
+    return rewrote
 
 
 def _newline_style(text: str) -> str:
@@ -775,6 +884,20 @@ def apply(
     config_path = os.path.join(project_root, "refdes-project.yaml")
     project_before = _load_and_validate(config_path)
     blocking = _blocking_errors(project_before)
+    if mapping.citation_keys:
+        # Errors this very mapping is about to fix must not block it: a
+        # hardware@2 project's `url:` citation entries are a validation error
+        # by design (finding 25 Part 2), and `standard upgrade` -- which runs
+        # through here with `citation_keys: {url: path}` -- is the documented
+        # way out. Any *other* pre-existing error still blocks, as ever.
+        blocking = [
+            d
+            for d in blocking
+            if not any(
+                f"citation field {old}: was renamed to {new}:" in d.message
+                for old, new in mapping.citation_keys.items()
+            )
+        ]
     if blocking:
         return RevisionResult(
             ok=False,

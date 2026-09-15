@@ -259,7 +259,7 @@ exists:
 
 - New content is byte-identical (same items, same kind) → no-op, exit 0,
   file untouched — not even `stamped_at` rewritten. Mirrors `refdes fetch`
-  skipping an already-pinned url.
+  skipping an already-pinned path.
 - New content differs → error, nothing written. `rev-b` is a durable
   label; it only means "the version sent to the fab" if it keeps meaning
   the same thing later.

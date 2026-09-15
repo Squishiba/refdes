@@ -4,18 +4,18 @@
 
 <h1>References{% if board %} — {{ board.label }}{% elif workspace %} — {{ workspace.label }}{% endif %}</h1>
 <p class="muted">
-  Every datasheet citation{% if board %} on {{ board.label }}{% elif workspace %} on {{ workspace.label }}{% endif %}, grouped by
-  URL. Provenance -- hash, fetch time, vendored flag -- comes from
+  Every citation{% if board %} on {{ board.label }}{% elif workspace %} on {{ workspace.label }}{% endif %}, grouped by
+  path. Provenance -- hash, fetch time, vendored flag -- comes from
   <code>.refdes/citations.yaml</code>, written only by <code>refdes fetch</code>.
 </p>
 
 {% if grouped %}
 <table class="grid">
   <thead>
-    <tr><th></th><th>URL</th><th>Cited by</th><th>Vendor</th><th>Fetched</th><th>SHA-256</th></tr>
+    <tr><th></th><th>Path</th><th>Cited by</th><th>Vendor</th><th>Fetched</th><th>SHA-256</th></tr>
   </thead>
   <tbody>
-  {% for url, statuses in grouped.items() %}
+  {% for path, statuses in grouped.items() %}
     {% set s0 = statuses[0] %}
     <tr>
       <td>
@@ -25,8 +25,14 @@
         {% endif %}
       </td>
       <td>
-        <a href="{{ url }}" target="_blank" rel="noopener">{{ url }}</a>
-        {% if s0.local_path %}<br><a href="assets/{{ s0.local_path }}">local copy</a>{% endif %}
+        {% if s0.remote %}
+        <a href="{{ path }}" target="_blank" rel="noopener">{{ path }}</a>
+        {% elif s0.local_path %}
+        <a href="assets/{{ s0.local_path }}">{{ path }}</a>
+        {% else %}
+        <code>{{ path }}</code>
+        {% endif %}
+        {% if s0.remote and s0.local_path %}<br><a href="assets/{{ s0.local_path }}">local copy</a>{% endif %}
       </td>
       <td>
         {% for s in statuses %}
