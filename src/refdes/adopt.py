@@ -53,7 +53,6 @@ class AdoptionResult:
     ok: bool
     minted: int = 0
     expanded: int = 0
-    frozen_follows: int = 0
     checks_expanded: int = 0
     baselines: list[BaselineAdoption] = field(default_factory=list)
     seals: list[SealAdoption] = field(default_factory=list)
@@ -62,6 +61,7 @@ class AdoptionResult:
     errors: list[str] = field(default_factory=list)
     dry_run: bool = False
     already_adopted: bool = False
+    frozen_follows: int = 0
 
 
 def _baseline_data(baseline: lifecycle.Baseline, items: dict[str, dict]) -> dict:
@@ -129,7 +129,15 @@ def _chain_rewrites(
 
 
 def _compose_item_rewrites(project, assignments) -> tuple[list[revise.FileRewrite], object]:
-    """Compose link, check, follows, and key edits into one transaction."""
+    """Compose source-preserving item edits before key insertion.
+
+    Each stage reads the preceding stage's output through ``source_texts``:
+    all use source lines from the original parse, while a preceding rewrite
+    may have changed the exact text the next stage must preserve. The fixed
+    order is links -> checks -> follows -> keys. Links/checks/follows touch
+    disjoint fields, but follows must run after assignments give every target
+    an in-memory key and before key insertion shifts source lines.
+    """
     for item, new_key in assignments:
         item.key = new_key
 

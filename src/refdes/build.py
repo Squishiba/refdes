@@ -366,7 +366,15 @@ def resolve_link_target(by_key: dict[str, Item], project: Project, target: str) 
 
 
 def _unknown_key_message(pointer: str, target_id: str) -> str:
-    """Layer-3 diagnostic for a composite or bare key that does not resolve."""
+    """Layer-3 diagnostic for a composite or bare key with no live target.
+
+    Shared, not duplicated, between structured links (`resolve_links`) and
+    `checks: against:` (`run_checks`): both point at a target the same way,
+    and `pointer` supplies only the verb phrase (for example, "refines
+    points at" or "check against"). The remaining text deliberately never
+    falls back to a display ID; for a composite its label may be stale, and
+    for a bare key the key itself is the immutable identity.
+    """
     label, separator, key = target_id.partition("@")
     if not separator:
         return (

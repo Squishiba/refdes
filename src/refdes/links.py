@@ -21,7 +21,11 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from . import chains as chains_mod, dates, keys as keys_mod, parse as parse_mod, seal as seal_mod
+from . import chains as chains_mod
+from . import dates
+from . import keys as keys_mod
+from . import parse as parse_mod
+from . import seal as seal_mod
 from .model import Item, Project
 
 if TYPE_CHECKING:

@@ -5,4 +5,6 @@ Added bare-key target resolution, excluded bare follows targets from ordinary ex
 
 `refdes keys adopt` composes the freeze plan into its transaction and reports frozen follows separately. Added regression coverage for tip selection, id-less tips, malformed/unknown key diagnostics, forks, D3 ordering, self-exclusion, rename-safe refresh, no-write/idempotence, sealed entries, ordinary links, duplicate merge targets, and adoption. Focused tests pass (48). The Python environment does not provide ruff, so its scoped style check could not run. Docs and changelog updated.
 
-Rebased on main after Phase 2b landed. Reused `chains.build_graph(frozen_only=True)` and `chains.tips()` for the freeze pass; removed the temporary private walk. Added the minimal prospective-successor API needed to sequence same-load freezes. Focused follows/adoption tests pass (26) and chain tests pass (17). Pending final full-suite run.
+Rebased on main after Phase 2b landed. Reused `chains.build_graph(frozen_only=True)` and `chains.tips()` for the freeze pass; removed the temporary private walk. Added the minimal prospective-successor API needed to sequence same-load freezes. Focused follows/adoption tests pass (26) and chain tests pass (17). Full suite passed (872).
+
+Review follow-up: restoring shortened rationale docstrings, splitting links imports to project style, and restoring the pre-existing AdoptionResult field order. This will be a new commit on top of 8ac048b.
