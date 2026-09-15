@@ -25,6 +25,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 
 from . import ids as ids_mod
+from . import keys as keys_mod
 from . import lifecycle
 from .model import Project, SchemaError
 
@@ -46,6 +47,11 @@ class Candidate:
     new_id: str
     new_title: str
     confidence: float
+    # True when the pairing comes from surrogate-key identity, not from a
+    # similarity score: a keyed baseline records each item's immutable key,
+    # so an old display id matching a new one through the same key is exact
+    # provenance, not inference (docs/design/keys.md §4).
+    exact: bool = False
 
 
 def _resolve_baseline(project: Project, baseline_name: str | None):
@@ -63,11 +69,27 @@ def _resolve_baseline(project: Project, baseline_name: str | None):
     return baseline
 
 
+def _baseline_carries_keys(baseline) -> bool:
+    """Whether any baseline record carries surrogate-key identity (either
+    §5 shape: key-keyed, or a legacy record with a `key:` field)."""
+    return any(
+        keys_mod.baseline_identity(record_id, entry) is not None
+        for record_id, entry in baseline.items.items()
+    )
+
+
 def propose(
     project: Project, baseline_name: str | None = None, write: bool = True
 ) -> list[Candidate]:
     """Best-match candidates, one per still-unresolved removed id, greedily
     assigned by descending confidence so no added item is proposed twice.
+
+    A baseline that carries surrogate keys needs no inference for a display
+    rename: `diff.relabelled` already pairs old id, new id, and the key that
+    proves they are the same item, so those candidates come back exact
+    (confidence 1.0, `exact=True`) and similarity scoring never runs on
+    them. Similarity scoring remains the path for legacy keyless baselines
+    -- the pre-keys world this command was written for.
 
     `write` threads through to `lifecycle.diff_against`'s hash-format
     migration -- `--no-write` must not rewrite a baseline file just to
@@ -75,6 +97,28 @@ def propose(
     """
     baseline = _resolve_baseline(project, baseline_name)
     diff = lifecycle.diff_against(project, baseline, write=write)
+
+    if _baseline_carries_keys(baseline):
+        out: list[Candidate] = []
+        for old_id, new_id, _key in diff.relabelled:
+            if old_id in project.former_ids:  # already resolved
+                continue
+            new_item = project.item_by_id(new_id)
+            if new_item is None or new_item.former_ids:
+                continue
+            entry = baseline.items.get(_key) or {}
+            out.append(
+                Candidate(
+                    old_id=old_id,
+                    old_type=str(entry.get("type", new_item.type)),
+                    old_title=str(entry.get("title", "")),
+                    new_id=new_id,
+                    new_title=new_item.title,
+                    confidence=1.0,
+                    exact=True,
+                )
+            )
+        return out
 
     removed = [
         (old_id, old_type, old_title)

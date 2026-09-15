@@ -36,7 +36,9 @@ import yaml
 
 from . import build as build_mod
 from . import ids as ids_mod
+from . import keys as keys_mod
 from . import lifecycle, parse
+from . import links as links_mod
 from . import seal as seal_mod
 from . import standards as standards_mod
 from .model import CHECK_VIOLATION, Item, Project, SchemaError
@@ -190,17 +192,6 @@ def check_ambiguous(project: Project, mapping: Mapping) -> list[str]:
                     f"field rename {tname}.{old!r} -> {new!r}: {tname}.{new!r} already exists"
                 )
 
-    ledger = ids_mod.load_ledger(project)
-    burned = ledger.get("burned") or {}
-    for old, new in mapping.prefixes.items():
-        if old == new:
-            continue
-        if new in burned and new not in mapping.prefixes:
-            errors.append(
-                f"prefix rename {old!r} -> {new!r}: {new!r} already has allocated ids "
-                f"in the ledger"
-            )
-
     return errors
 
 
@@ -317,108 +308,6 @@ def _field_or_link_line_re(key: str) -> re.Pattern:
 _ID_TOKEN_RE = re.compile(r"\b[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)*-\d+\b")
 
 
-def _rewrite_id_tokens(value: str, prefixes: dict[str, str]) -> str:
-    """Replace every id-shaped token in `value` whose prefix renames under
-    `prefixes` (exact or compound, see `_rename_prefix`); every other
-    character -- punctuation, other tokens -- passes through untouched."""
-
-    def repl(m: re.Match) -> str:
-        token = m.group(0)
-        split = ids_mod.split_id(token)
-        if split is None:
-            return token
-        new_prefix = _rename_prefix(split[0], prefixes)
-        return token if new_prefix is None else new_prefix + token[len(split[0]) :]
-
-    return _ID_TOKEN_RE.sub(repl, value)
-
-
-def _rewrite_reference_ids(
-    lines: list[str], rel: str, items: list[Item], mapping: Mapping
-) -> list[str]:
-    """Per-item pass: id-valued *references to other items* -- a link's own
-    target list (`constrained_by: [CON-THM-001]`) and a `checks:` entry's
-    `against:` -- rewritten when the referenced id's prefix renames under
-    `mapping.prefixes`.
-
-    An item's *own* id/prefix is `_rewrite_type_and_prefix_lines`'s job, not
-    this one; this only ever follows a reference the item already declares
-    (a verb in its own resolved `item.links`, or `against:` on an item that
-    has `checks:` set), so a prefix rename can never leave a dangling
-    reference behind elsewhere in the project. Scoped to lines matching one
-    of those keys within the item's own span -- prose mentioning the same id
-    elsewhere (a rationale, a log entry's body) is never touched, matching
-    `_rewrite_fields_and_links`'s own scoping.
-
-    Both YAML spellings of the value are handled: same-line (`key: [A, B]`
-    or `key: A`) and block-style, where the key line is bare and the targets
-    follow as `- A` entries under it. Block style is the idiomatic spelling
-    for a list of any length, and skipping it did not merely leave those
-    references alone -- the rewritten project then had a dangling link
-    target, so the whole operation refused and rolled back, with a
-    diagnostic ("constrained_by points at 'CON-THM-001', which does not
-    exist") that named the symptom and nothing about the real cause. Only
-    flow-style values had ever been run through this engine.
-
-    Runs before `_rewrite_fields_and_links` in `_rewrite_file` so it can
-    still find a link by its *current* key name, before any `mapping.links`
-    verb rename has touched that same line's key.
-    """
-    if not mapping.prefixes:
-        return lines
-    out = list(lines)
-    for item, start, end in _item_spans(rel, lines, items):
-        keys = set(item.links)
-        if "checks" in item.fields:
-            keys.add("against")
-        if not keys:
-            continue
-        limit = min(end, len(out))
-        for i in range(start, limit):
-            for key in keys:
-                m = _field_or_link_line_re(key).match(out[i])
-                if not m:
-                    continue
-                indent, rest = m.groups()
-                if rest.strip():
-                    new_rest = _rewrite_id_tokens(rest, mapping.prefixes)
-                    if new_rest != rest:
-                        out[i] = f"{indent}{key}:{new_rest}"
-                else:
-                    _rewrite_block_sequence(out, i + 1, limit, len(indent), mapping.prefixes)
-                break
-    return out
-
-
-_SEQ_ENTRY_RE = re.compile(r"^(\s*)-(\s+)(\S.*?)(\s*)$")
-
-
-def _rewrite_block_sequence(
-    out: list[str], start: int, limit: int, key_indent: int, prefixes: dict[str, str]
-) -> None:
-    """Rewrite id tokens in the `- VALUE` entries of a block-style sequence
-    beginning at `start`, in place.
-
-    The sequence ends at the first line that isn't an entry indented deeper
-    than the key itself -- YAML also permits an entry at the key's own
-    indentation, which is accepted too, since the alternative is silently
-    skipping half of a legally-written list. A blank line inside the
-    sequence is passed over; anything else ends it, so a following sibling
-    key is never walked into.
-    """
-    for i in range(start, limit):
-        line = out[i]
-        if not line.strip():
-            continue
-        m = _SEQ_ENTRY_RE.match(line)
-        if m is None or len(m.group(1)) < key_indent:
-            return
-        indent, sep, value, trail = m.groups()
-        new_value = _rewrite_id_tokens(value, prefixes)
-        if new_value != value:
-            out[i] = f"{indent}-{sep}{new_value}{trail}"
-
-
 def _rewrite_one_key(
     out: list[str], start: int, end: int, rel: str, item: Item, kind: str, old_key: str, new_key: str
 ) -> str | None:
@@ -520,44 +409,12 @@ def _rewrite_file(project: Project, path: str, rel: str, mapping: Mapping) -> tu
     items = [i for i in project.local_items if i.source_file == rel]
 
     lines = _rewrite_type_and_prefix_lines(lines, mapping)
-    lines = _rewrite_reference_ids(lines, rel, items, mapping)
     lines, errors = _rewrite_fields_and_links(lines, rel, items, mapping, project)
 
     after = newline.join(lines)
     if lines and text.endswith(("\n", "\r\n")):
         after += newline
     return FileRewrite(path=path, rel=rel, before=text, after=after), errors
-
-
-# ----------------------------------------------------------------- id ledger
-
-
-def _relabel_ledger(project: Project, prefixes: dict[str, str]) -> dict | None:
-    """Relabel `.refdes/ids.yaml` burned/allocated entries by prefix -- never
-    renumbered, since the numeric suffix is untouched everywhere else too.
-    Returns the original ledger dict (for the caller to restore verbatim if
-    the operation is refused after this point), or None if there was no
-    ledger file to touch."""
-    if not any(old != new for old, new in prefixes.items()):
-        return None
-    path = ids_mod.ledger_path(project)
-    if not os.path.isfile(path):
-        return None
-    ledger = ids_mod.load_ledger(project)
-    original = {"burned": dict(ledger.get("burned") or {}), "allocated": list(ledger.get("allocated") or [])}
-
-    burned = dict(ledger.get("burned") or {})
-    new_burned: dict[str, int] = {}
-    for prefix, number in burned.items():
-        relabeled = _rename_prefix(prefix, prefixes) or prefix
-        new_burned[relabeled] = max(int(new_burned.get(relabeled, 0)), int(number))
-    allocated = [
-        _relabel_id(str(i), prefixes) for i in (ledger.get("allocated") or [])
-    ]
-    ledger["burned"] = new_burned
-    ledger["allocated"] = allocated
-    ids_mod.save_ledger(project, ledger)
-    return original
 
 
 def _rename_prefix(prefix: str, prefixes: dict[str, str]) -> str | None:
@@ -579,21 +436,6 @@ def _rename_prefix(prefix: str, prefixes: dict[str, str]) -> str | None:
         if prefix.startswith(old + "-"):
             return new + prefix[len(old) :]
     return None
-
-
-def _relabel_id(item_id: str, prefixes: dict[str, str]) -> str:
-    split = ids_mod.split_id(item_id)
-    if split is None:
-        return item_id
-    old_prefix = split[0]
-    new_prefix = _rename_prefix(old_prefix, prefixes)
-    if new_prefix is None:
-        return item_id
-    return new_prefix + item_id[len(old_prefix) :]
-
-
-def _restore_ledger(project: Project, original: dict) -> None:
-    ids_mod.save_ledger(project, {"burned": original["burned"], "allocated": original["allocated"]})
 
 
 def _capture_seal_files(project: Project) -> dict[str, str]:
@@ -634,6 +476,10 @@ class RevisionResult:
     # "file:line  OLD-ID" for every prose mention of a renamed id left behind
     # -- see _stale_prose_references().
     stale_references: list[str] = field(default_factory=list)
+    # Dry-run only: "file:line  old -> new" for every line the real run would
+    # rewrite while minting keys and expanding references to composite form
+    # before the rename itself (docs/design/keys.md §4).
+    expansions: list[str] = field(default_factory=list)
     # True when this step changed refdes-project.yaml itself -- today, a standard
     # upgrade bumping `standard.version:`. Distinguishes "no item file needed
     # rewriting, and the pin moved" from "this mapping does not apply here",
@@ -665,6 +511,203 @@ def _blocking_errors(project: Project) -> list:
     compares the same way and would catch it.
     """
     return [d for d in project.errors if d.code != CHECK_VIOLATION]
+
+
+def _load_light(config_path: str) -> Project:
+    project = load_project(config_path=config_path)
+    parse.load_items(project, require_ids=False)
+    return project
+
+
+def _run_key_ensure(config_path: str) -> list[FileRewrite]:
+    """Run the writable-load key maintenance pipeline (docs/design/keys.md
+    §2-§3: mint, link expansion, `checks: against:` expansion, follows
+    freeze) for real, and return the net text changes as FileRewrites so the
+    caller can roll them back if the operation that needed them is refused.
+
+    This is the same sequence `cli._load()` runs on every writable command;
+    `revise` used to be the one path that bypassed it (it calls apply()
+    directly, never through the CLI loader), which is why a prefix rename
+    here had to carry its own reference-rewriting machinery. With the
+    pipeline run first, every expandable structured reference is already a
+    `DISPLAY@key` composite whose key half no rename touches, and the only
+    references left bare are the ones expansion cannot reach -- which the
+    rename must refuse over, not silently rewrite around.
+    """
+    rels = sorted(
+        {
+            i.source_file
+            for i in _load_light(config_path).local_items + _load_light(config_path).pending
+        }
+    )
+    before: dict[str, str] = {}
+    for rel in rels:
+        path = os.path.join(os.path.dirname(config_path), *rel.split("/"))
+        with open(path, "r", encoding="utf-8", newline="") as fh:
+            before[rel] = fh.read()
+
+    project = _load_light(config_path)
+    if keys_mod.mint_missing(project, write=True):
+        project = _load_light(config_path)
+    if links_mod.expand_missing(project, write=True):
+        project = _load_light(config_path)
+    if links_mod.expand_missing_checks(project, write=True):
+        project = _load_light(config_path)
+    links_mod.freeze_follows(project, write=True)
+
+    rewrites: list[FileRewrite] = []
+    for rel, text in before.items():
+        path = os.path.join(os.path.dirname(config_path), *rel.split("/"))
+        with open(path, "r", encoding="utf-8", newline="") as fh:
+            now = fh.read()
+        if now != text:
+            rewrites.append(FileRewrite(path=path, rel=rel, before=text, after=now))
+    return rewrites
+
+
+def _snapshot_item_texts(project: Project) -> dict[str, str]:
+    """rel -> exact on-disk text, for every file holding an item (local or
+    pending) -- the baseline the ensure/refresh rollback diffs against."""
+    out: dict[str, str] = {}
+    for item in project.local_items + project.pending:
+        rel = item.source_file
+        if rel in out:
+            continue
+        path = os.path.join(project.root, *rel.split("/"))
+        if os.path.isfile(path):
+            with open(path, "r", encoding="utf-8", newline="") as fh:
+                out[rel] = fh.read()
+    return out
+
+
+def _simulate_key_ensure(config_path: str, snapshot: dict[str, str]) -> tuple[Project, list[str]]:
+    """Dry-run twin of _run_key_ensure(): copy the tree to a throwaway
+    directory, run the real pipeline there, and report (loaded project, per-
+    line changes). The real tree is never touched; the report is what the
+    real run would expand."""
+    import shutil
+    import tempfile
+
+    root = os.path.dirname(config_path)
+    tmp = tempfile.mkdtemp(prefix="refdes-revise-")
+    try:
+        copy = os.path.join(tmp, "proj")
+        shutil.copytree(root, copy, ignore=shutil.ignore_patterns("_site", ".git"))
+        copy_config = os.path.join(copy, "refdes-project.yaml")
+        _run_key_ensure(copy_config)
+        simulated = _load_light(copy_config)
+        report: list[str] = []
+        for rel, text in sorted(snapshot.items()):
+            path = os.path.join(copy, *rel.split("/"))
+            if not os.path.isfile(path):
+                continue
+            with open(path, "r", encoding="utf-8", newline="") as fh:
+                after = fh.read()
+            report.extend(_line_diff_report(rel, text, after))
+        return simulated, report
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def _line_diff_report(rel: str, before: str, after: str) -> list[str]:
+    if before == after:
+        return []
+    b, a = before.splitlines(), after.splitlines()
+    if len(b) == len(a):
+        return [
+            f"{rel}:{i + 1}  {x.strip()} -> {y.strip()}"
+            for i, (x, y) in enumerate(zip(b, a))
+            if x != y
+        ]
+    import difflib
+
+    out: list[str] = []
+    matcher = difflib.SequenceMatcher(None, b, a, autojunk=False)
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        if tag == "equal":
+            continue
+        if tag == "replace":
+            for k in range(max(i2 - i1, j2 - j1)):
+                x = b[i1 + k].strip() if i1 + k < i2 else ""
+                y = a[j1 + k].strip() if j1 + k < j2 else ""
+                out.append(f"{rel}:{j1 + k + 1}  {x} -> {y}")
+        elif tag == "insert":
+            out += [f"{rel}:{j1 + k + 1}  (added) {a[j1 + k].strip()}" for k in range(j2 - j1)]
+        else:
+            out += [f"{rel}:{i1 + k + 1}  (removed) {b[i1 + k].strip()}" for k in range(i2 - i1)]
+    return out
+
+
+def _refresh_display_halves(config_path: str) -> None:
+    """After a rename, refresh stale composite display halves (the §3 pass a
+    writable load runs). Key-resolved hashes are untouched by this -- only
+    the display text moves -- so it is safe between the file rewrite and the
+    hash carry-forward."""
+    project = _load_light(config_path)
+    if links_mod.expand_missing(project, write=True):
+        project = _load_light(config_path)
+    links_mod.expand_missing_checks(project, write=True)
+
+
+def _affected_ids(project: Project, mapping: Mapping) -> dict[str, str]:
+    """old id -> new id for every local item whose display id this prefix
+    rename would move (exact or compound prefix, see _rename_prefix)."""
+    affected: dict[str, str] = {}
+    for item in project.local_items:
+        split = ids_mod.split_id(item.id or "")
+        if split is None:
+            continue
+        new_prefix = _rename_prefix(split[0], mapping.prefixes)
+        if new_prefix is not None:
+            affected[item.id] = new_prefix + item.id[len(split[0]) :]
+    return affected
+
+
+def _bare_reference_blockers(project: Project, mapping: Mapping) -> list[str]:
+    """Every structured reference that still spells, bare, an id this prefix
+    rename would move -- as file:line refusals. Bare references are what
+    key expansion could not reach (a `checks:` inherited from defaults: is
+    the known case, docs/design/keys.md's disclosed gap); rewriting them is
+    exactly what this engine no longer does, so a rename that would leave
+    one behind refuses instead."""
+    affected = _affected_ids(project, mapping)
+    if not affected:
+        return []
+
+    blockers: list[str] = []
+
+    def check(item: Item, pointer: str, target: str, inherited: bool) -> None:
+        if "@" in target:
+            return
+        target_item = project.item_by_id(target)
+        if target_item is None or target_item.id not in affected:
+            return
+        note = (
+            " (inherited from defaults:, which key expansion does not reach -- "
+            "docs/design/keys.md's disclosed gap)" if inherited else ""
+        )
+        blockers.append(
+            f"{item.source_file}:{item.source_line} [{item.id or '?'}] {pointer}: "
+            f"{target!r} is still a bare reference to an id this rename moves "
+            f"({target} -> {affected[target]}); key expansion could not reach it"
+            f"{note}, and revise does not rewrite bare references -- fix it by hand"
+        )
+
+    for item in project.local_items:
+        for verb, targets in item.links.items():
+            for target in targets:
+                check(item, verb, str(target), verb in item.inherited_fields)
+        entries = item.fields.get("checks")
+        if isinstance(entries, list):
+            for entry in entries:
+                if isinstance(entry, dict) and "against" in entry:
+                    check(
+                        item,
+                        "check against",
+                        str(entry["against"]),
+                        "checks" in item.inherited_fields,
+                    )
+    return blockers
 
 
 def _load_and_validate(config_path: str) -> Project:
@@ -742,6 +785,35 @@ def apply(
     if ambiguous:
         return RevisionResult(ok=False, errors=ambiguous)
 
+    # A prefix rename moves display ids that structured references may still
+    # spell bare. This engine no longer rewrites bare references (docs/design/
+    # keys.md §4): it runs the same writable-load key maintenance every other
+    # command performs -- mint, link/check expansion, follows freeze -- inside
+    # its own transaction first, and refuses with file:line if a structured
+    # reference to an affected id is *still* bare afterwards. A dry run
+    # simulates that whole pipeline on a throwaway copy of the tree, so the
+    # report says what the real run would expand instead of pretending the
+    # rename is smaller than it is.
+    prefix_rename = bool(_affected_ids(project_before, mapping))
+    ensure_rewrites: list[FileRewrite] = []
+    refresh_rewrites: list[FileRewrite] = []
+    expansions: list[str] = []
+    snapshot: dict[str, str] = {}
+    if prefix_rename:
+        snapshot = _snapshot_item_texts(project_before)
+        if dry_run:
+            simulated, expansions = _simulate_key_ensure(config_path, snapshot)
+            blockers = _bare_reference_blockers(simulated, mapping)
+            if blockers:
+                return RevisionResult(ok=False, errors=blockers, expansions=expansions)
+        else:
+            ensure_rewrites = _run_key_ensure(config_path)
+            project_before = _load_and_validate(config_path)
+            blockers = _bare_reference_blockers(project_before, mapping)
+            if blockers:
+                restore_rewrites(ensure_rewrites)
+                return RevisionResult(ok=False, errors=blockers)
+
     old_hashes = {item.id: item.content_hash for item in project_before.local_items}
 
     rewrites: list[FileRewrite] = []
@@ -761,23 +833,26 @@ def apply(
     if all_errors:
         return RevisionResult(ok=False, errors=all_errors)
 
-    if not rewrites and not any(old != new for old, new in mapping.prefixes.items()) and mutate_config is None:
+    if not rewrites and not prefix_rename and mutate_config is None:
         return RevisionResult(ok=True, dry_run=dry_run)  # nothing to do
 
     if dry_run:
-        return RevisionResult(ok=True, dry_run=True, changed_files=[r.rel for r in rewrites])
+        changed = {r.rel for r in rewrites}
+        changed |= {rel for entry in expansions for rel in [entry.split(":", 1)[0]] if ":" in entry}
+        return RevisionResult(
+            ok=True, dry_run=True, changed_files=sorted(changed), expansions=expansions
+        )
 
     write_rewrites(rewrites)
 
-    original_ledger = _relabel_ledger(project_before, mapping.prefixes)
     original_seals = _capture_seal_files(project_before)
     with open(config_path, "r", encoding="utf-8") as fh:
         config_before = fh.read()
 
     def _rollback() -> None:
+        restore_rewrites(refresh_rewrites)
         restore_rewrites(rewrites)
-        if original_ledger is not None:
-            _restore_ledger(project_before, original_ledger)
+        restore_rewrites(ensure_rewrites)
         _restore_seal_files(original_seals)
         with open(config_path, "w", encoding="utf-8", newline="") as fh:
             fh.write(config_before)
@@ -829,7 +904,26 @@ def apply(
             id_changes[before_item.id] = after_item.id
         new_hashes[before_item.id] = after_item.content_hash
 
-    seals_updated = _carry_forward_seals(project_before, old_hashes, new_hashes, id_changes)
+    # Composite display halves naming a renamed item are now stale text.
+    # Refresh them with the same §3 pass a writable load runs -- it rewrites
+    # only the display half of `DISPLAY@key` references, and hashes are
+    # key-resolved, so this cannot disturb the carry-forward below. Writes go
+    # through the snapshot so a later refusal puts every byte back.
+    _refresh_display_halves(config_path)
+    for rel, before in snapshot.items():
+        path = os.path.join(project_before.root, *rel.split("/"))
+        if not os.path.isfile(path):
+            continue
+        with open(path, "r", encoding="utf-8", newline="") as fh:
+            now = fh.read()
+        if now != before and rel not in {r.rel for r in rewrites} | {
+            r.rel for r in ensure_rewrites
+        }:
+            refresh_rewrites.append(
+                FileRewrite(path=path, rel=rel, before=before, after=now)
+            )
+
+    seals_updated = _carry_forward_seals(project_before, old_hashes, new_hashes)
 
     try:
         project_after = _load_and_validate(config_path)
@@ -847,12 +941,15 @@ def apply(
         )
 
     baselines_updated, baselines_skipped = _carry_forward_baselines(
-        project_before, old_hashes, new_hashes, id_changes, standard_transition
+        project_before, old_hashes, new_hashes, standard_transition
     )
 
+    changed_files = sorted(
+        {r.rel for r in ensure_rewrites} | {r.rel for r in rewrites} | {r.rel for r in refresh_rewrites}
+    )
     return RevisionResult(
         ok=True,
-        changed_files=[r.rel for r in rewrites],
+        changed_files=changed_files,
         id_changes=id_changes,
         baselines_updated=baselines_updated,
         baselines_skipped_no_standard=baselines_skipped,
@@ -879,7 +976,7 @@ def _stale_prose_references(
     id half of an explicit `[[CON-THM-001]]` or `[[CON-THM-001#field]]` --
     `_ID_TOKEN_RE` matches the id either way, brackets and fragment along for
     the ride). Only structured references move (see
-    `_rewrite_reference_ids`): an id written into a rationale, a log entry's
+    structured references move by key expansion, never by text rewrite): an id written into a rationale, a log entry's
     body, or a narrative page is deliberately left alone, because rewriting
     prose means editing a sentence -- including, for a sealed append-only
     entry, one that is not supposed to change. But leaving it alone silently
@@ -949,7 +1046,6 @@ def _carry_forward_baselines(
     project: Project,
     old_hashes: dict[str, str],
     new_hashes: dict[str, str],
-    id_changes: dict[str, str],
     standard_transition: tuple[dict, dict] | None = None,
 ) -> tuple[list[str], list[str]]:
     """Swap each affected item's old hash (and, for a prefix rename, its old
@@ -1010,16 +1106,13 @@ def _carry_forward_baselines(
                 continue
             new_entry = dict(entry)
             new_entry["hash"] = new_hashes.get(old_id, entry["hash"])
-            if "id" in entry:
-                # Key-keyed baselines preserve the display id at stamp time:
-                # that historical label is what makes `relabelled` observable.
-                new_record_id = record_id
-            else:
-                new_record_id = id_changes.get(old_id, old_id)
-            if new_record_id != record_id:
-                del new_items[record_id]
-            new_items[new_record_id] = new_entry
-            if new_record_id != record_id or new_entry != entry:
+            # The record key never moves: a keyed entry's key is immutable
+            # identity and its stored display id is the historical label that
+            # makes `relabelled` observable; a legacy display-id-keyed entry
+            # keeps its stamp-time label for the same reason (docs/design/
+            # keys.md §4 -- the id-remapping half of this function is gone).
+            new_items[record_id] = new_entry
+            if new_entry != entry:
                 changed = True
 
         advance = from_standard is not None and baseline.standard == from_standard
@@ -1052,13 +1145,13 @@ def _carry_forward_seals(
     project: Project,
     old_hashes: dict[str, str],
     new_hashes: dict[str, str],
-    id_changes: dict[str, str],
 ) -> list[str]:
     """Carry matching hashes forward in every legacy or key-keyed seal file.
 
-    A display rename moves a legacy seal's outer key. A §5 seal is already
-    keyed by immutable identity, so its recorded display label remains the
-    historical label and an id-only rename does not touch the file.
+    Only the hash moves: a §5 seal is keyed by immutable identity and keeps
+    its stamp-time display label, and a legacy display-id-keyed entry keeps
+    its stamp-time key for the same reason (docs/design/keys.md §4 -- the
+    id-remapping half of this function is gone).
     """
     updated: list[str] = []
     live_keys = {item.key for item in project.local_items if item.key}
@@ -1078,16 +1171,10 @@ def _carry_forward_seals(
             record_id, value, recorded, _hash_format = found
             if recorded != old_hash:
                 continue
-            if isinstance(value, dict) and value.get("id"):
-                new_record_id = record_id
-            else:
-                new_record_id = id_changes.get(old_id, old_id)
             new_hash = new_hashes.get(old_id, recorded)
             new_value = seal_mod._with_seal_hash(value, new_hash, hash_format=build_mod.HASH_FORMAT)
-            if new_record_id != record_id:
-                del new_seals[record_id]
-            new_seals[new_record_id] = new_value
-            if new_record_id != record_id or new_value != value:
+            new_seals[record_id] = new_value
+            if new_value != value:
                 changed = True
         if changed:
             seal_mod.save_seals(project, new_seals, board)

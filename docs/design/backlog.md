@@ -1093,17 +1093,24 @@ implementation-status header for the module list. Adoption is explicit and
 transactional; the self-describing `.refdes/keys-adopted.yaml` marker records
 it, and new stamps/seals then use key-keyed storage.
 
-**Status: partially implemented.** One decided cleanup remains, deferred by
-Jared on 2026-09-14:
+**Status: implemented** (the §4 cleanup landed after this section was
+written; see keys.md's implementation-status header for the shape):
 
-- **The subtractive cleanup in `revise.py`/`former_ids.py` (§4)** — roughly
-  166 lines of `revise.py`'s prefix-rename machinery (`_rewrite_reference_ids`,
-  `_rewrite_block_sequence`, `_rewrite_id_tokens`, `_rename_prefix`,
-  `_relabel_id`, `_relabel_ledger`, `_restore_ledger`) delete outright once
-  keys make a prefix rename non-transactional; `former_ids.propose`'s
-  similarity-scoring/confidence/`--confirm` machinery shrinks to just the
-  external-citation case, since the internal "which new item replaced this
-  old id" question becomes a lookup instead of a guess.
+- ~~**The subtractive cleanup in `revise.py`/`former_ids.py` (§4)**~~ —
+  `revise.py`'s prefix-rename reference machinery (`_rewrite_reference_ids`,
+  `_rewrite_block_sequence`, `_rewrite_id_tokens`, `_relabel_id`,
+  `_relabel_ledger`, `_restore_ledger`) is gone, along with the ledger's
+  burned-prefix collision check and the baseline/seal record-id remapping;
+  `_rename_prefix` survives as the private id/prefix-line helper, and
+  `Mapping.prefixes` stays (prefix renames still move display ids). A prefix
+  rename now runs the writable-load key pipeline (mint, link/check
+  expansion, follows freeze) inside its own transaction and refuses with
+  file:line if a structured reference to an affected id is still bare
+  afterwards; dry runs simulate the pipeline on a throwaway copy and report
+  what the real run would expand. `former_ids.propose` answers the internal
+  "which new item replaced this old id" question by key lookup (exact,
+  confidence 1.0) for baselines that carry keys; similarity scoring remains
+  only for legacy keyless baselines.
 
 **Both disclosed gaps are closed:**
 

@@ -237,11 +237,14 @@ def test_standard_upgrade_v1_to_v2_applies_the_whole_collapsed_delta(tmp_path):
     assert "title:" not in con_text
 
     dec_text = (items / "dec.md").read_text(encoding="utf-8")
-    assert "constrained_by: [BND-THM-001]" in dec_text
-    assert "against: BND-THM-001" in dec_text
+    # References move by composite display half (keys.md §4): apply() first
+    # expands them to `DISPLAY@key`, the rename refreshes the display half.
+    assert "constrained_by: [BND-THM-001@" in dec_text
+    assert "against: BND-THM-001@" in dec_text
 
     # Nothing renames an equivalence; the restriction only starts being checked.
-    assert "equivalent: [CMP-002]" in (items / "cmp.yaml").read_text(encoding="utf-8")
+    # (The key half the writable-load pipeline adds is not a rename.)
+    assert "equivalent: [CMP-002@" in (items / "cmp.yaml").read_text(encoding="utf-8")
 
     project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
     assert project.standard_version == 2

@@ -731,8 +731,12 @@ def test_revise_rewrites_a_link_value_and_a_checks_against_value(compound_prefix
     result = revise.apply(str(compound_prefix_project), mapping)
     assert result.ok, result.errors
     text = (compound_prefix_project / "items" / "dec.md").read_text(encoding="utf-8")
-    assert "constrained_by: [BND-THM-001]" in text
-    assert "against: BND-THM-001" in text
+    # The references move by their composite display half, not by text
+    # rewrite: apply() first expands them to `DISPLAY@key` (the writable-load
+    # pipeline, docs/design/keys.md §4), and the rename then refreshes only
+    # the display half of each composite.
+    assert "constrained_by: [BND-THM-001@" in text
+    assert "against: BND-THM-001@" in text
 
     project = load_project(config_path=str(compound_prefix_project / "refdes-project.yaml"))
     parse.load_items(project)
@@ -825,9 +829,9 @@ def test_revise_rewrites_a_block_style_link_target_list(block_style_project):
     assert result.id_changes == {"CON-THM-001": "BND-THM-001"}
 
     dec = (block_style_project / "items" / "dec.md").read_text(encoding="utf-8")
-    assert "constrained_by:\n  - BND-THM-001\n" in dec
+    assert "constrained_by:\n  - BND-THM-001@" in dec
     log = (block_style_project / "items" / "log.yaml").read_text(encoding="utf-8")
-    assert "addresses:\n      - BND-THM-001\n" in log
+    assert "addresses:\n      - BND-THM-001@" in log
 
     project = load_project(config_path=str(block_style_project / "refdes-project.yaml"))
     parse.load_items(project)
@@ -849,8 +853,8 @@ def test_block_sequence_rewrite_stops_before_the_next_item(block_style_project):
     result = revise.apply(str(block_style_project), mapping)
     assert result.ok, result.errors
     log = (block_style_project / "items" / "log.yaml").read_text(encoding="utf-8")
-    assert "      - BND-THM-001\n" in log
-    assert "  - id: LOG-002\n" in log
+    assert "      - BND-THM-001@" in log
+    assert "    id: LOG-002\n" in log  # the next item was never walked into
 
 
 def test_revise_reports_prose_left_pointing_at_a_renamed_id(compound_prefix_project):
@@ -981,7 +985,13 @@ def test_revise_reports_a_stale_field_fragment_after_a_field_rename(tmp_path):
     ), result.stale_references
 
 
-def test_revise_relabels_a_compound_prefix_in_the_id_ledger(compound_prefix_project):
+def test_revise_leaves_the_id_ledger_untouched(compound_prefix_project):
+    """The ledger records allocation history, not current vocabulary: a
+    prefix rename no longer relabels its burned/allocated entries
+    (docs/design/keys.md §4). What a burned prefix once allocated is a fact
+    about the past, and rewriting that fact to the new spelling destroyed
+    the audit trail for no lookup benefit -- ids.allocate() consults the
+    live prefix of the item it is numbering, not history."""
     (compound_prefix_project / ".refdes").mkdir()
     (compound_prefix_project / ".refdes" / "ids.yaml").write_text(
         "burned:\n  CON-THM: 1\nallocated: []\n", encoding="utf-8"
@@ -990,8 +1000,7 @@ def test_revise_relabels_a_compound_prefix_in_the_id_ledger(compound_prefix_proj
     result = revise.apply(str(compound_prefix_project), mapping)
     assert result.ok, result.errors
     ledger_text = (compound_prefix_project / ".refdes" / "ids.yaml").read_text(encoding="utf-8")
-    assert "BND-THM: 1" in ledger_text
-    assert "CON-THM" not in ledger_text
+    assert ledger_text == "burned:\n  CON-THM: 1\nallocated: []\n"
 
 
 def test_revise_preserves_keyed_baseline_identity_across_prefix_rename(tmp_path):

@@ -795,6 +795,13 @@ def _print_revision_result(result, dry_run: bool) -> int:
         print("refused:" if not dry_run else "would refuse:", file=sys.stderr)
         for e in result.errors:
             print(f"  {e}", file=sys.stderr)
+        if dry_run and result.expansions:
+            print(
+                "references the real run would expand first (not enough to clear the refusal):",
+                file=sys.stderr,
+            )
+            for entry in result.expansions:
+                print(f"  {entry}", file=sys.stderr)
         return 1
 
     verb = "would change" if dry_run else "changed"
@@ -813,6 +820,13 @@ def _print_revision_result(result, dry_run: bool) -> int:
     print(f"{verb} {len(result.changed_files)} file(s):")
     for rel in result.changed_files:
         print(f"  {rel}")
+    if dry_run and result.expansions:
+        print(
+            f"\n{len(result.expansions)} line(s) the real run would first mint/expand "
+            "to composite form (keys + references), before the rename itself:"
+        )
+        for entry in result.expansions:
+            print(f"  {entry}")
     if result.id_changes:
         print("id changes:")
         for old_id, new_id in sorted(result.id_changes.items()):
@@ -1026,7 +1040,8 @@ def cmd_former_ids_propose(args) -> int:
     for c in candidates:
         print(
             f"  {c.old_id} ({c.old_type} {c.old_title!r}) -> {c.new_id} "
-            f"({c.new_title!r})  confidence {c.confidence:.0%}"
+            f"({c.new_title!r})  "
+            + ("exact match (surrogate key)" if c.exact else f"confidence {c.confidence:.0%}")
         )
 
     if not args.confirm:

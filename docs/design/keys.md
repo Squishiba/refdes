@@ -29,8 +29,19 @@ the spec" below). Adoption records `.refdes/keys-adopted.yaml`; subsequent
 stamps, new seals, and membership-manifest writes use the surrogate-keyed
 shape. This repository is itself adopted — commit `0a37b1b` ("keys: adopt
 surrogate keys on the root project"); see §7, "This repository's own
-project". The subtractive `revise.py`/`former_ids.py` cleanup (§4) remains
-design only, deferred by Jared 2026-09-14.
+project". §4, the subtractive `revise.py`/`former_ids.py` cleanup, is now
+implemented: `revise` no longer rewrites bare references, relabels the id
+ledger, or remaps baseline/seal record ids — a prefix rename runs the
+writable-load key pipeline (mint, link/check expansion, follows freeze)
+inside its own transaction first and refuses with file:line if a structured
+reference to an affected id is still bare afterwards (dry runs simulate the
+whole pipeline on a throwaway copy and report what it would expand);
+`former_ids.propose` returns exact key-proven candidates for a baseline
+that carries keys, keeping similarity scoring for legacy keyless baselines
+only. Two deliberate deviations from §4's original list: `_rename_prefix`
+survives as the private id/prefix-line helper (it was never reference
+machinery), and `Mapping.prefixes` stays — only its ledger-burned collision
+check is gone.
 
 **What §3/§5 turned out to need beyond the spec, implementing it:**
 
