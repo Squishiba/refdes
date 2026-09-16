@@ -323,6 +323,60 @@ def inline_figure_project(tmp_path):
     return tmp_path
 
 
+FIGURE_TYPO_ITEM = """\
+---
+id: DEC-A-001
+type: decision
+title: A figure with a mistyped attribute name.
+status: accepted
+---
+
+![the curve](figures/present.png){widht=60% caption="Efficiency curve"}
+
+![fine](figures/present.png){width=45% caption="No typo here" id="fig-fine"}
+"""
+
+
+@pytest.fixture
+def figure_typo_project(tmp_path):
+    write_project_config(tmp_path, COVERAGE_SCHEMA)
+    items = tmp_path / "items"
+    items.mkdir()
+    (items / "dec-a.md").write_text(FIGURE_TYPO_ITEM, encoding="utf-8")
+    figures = items / "figures"
+    figures.mkdir()
+    (figures / "present.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+    return tmp_path
+
+
+def test_unknown_attribute_on_a_figure_warns(figure_typo_project):
+    """`widht=60%` must say so, not do nothing in silence -- the same class of
+    typo the inline case already warns about."""
+    project, html = _inline_rendered(figure_typo_project)
+
+    warns = [d for d in project.warnings if "widht" in d.message]
+    assert len(warns) == 1
+    assert "is not an image attribute and is ignored" in warns[0].message
+    assert warns[0].file == "items/dec-a.md"
+    assert warns[0].item_id == "DEC-A-001"
+    # The figure still renders, with everything it does understand.
+    assert '<figure class="md-figure">' in html
+    assert "<figcaption>Efficiency curve</figcaption>" in html
+    assert not project.errors
+
+
+def test_valid_figure_attributes_produce_no_warning(figure_typo_project):
+    """`width`, `caption` and `id` are known names: none of them may draw the
+    unknown-attribute warning, or every correct figure in a project starts
+    shouting."""
+    project, html = _inline_rendered(figure_typo_project)
+
+    named = [d.message for d in project.warnings if "is not an image attribute" in d.message]
+    assert not [m for m in named if any(f"'{name}'" in m for name in ("width", "caption", "id"))]
+    assert named == ["'widht' is not an image attribute and is ignored"]
+    assert '<figure class="md-figure" id="fig-fine" style="width: 45%">' in html
+
+
 def _inline_rendered(project_root):
     project = load_project(config_path=str(project_root / "refdes-project.yaml"))
     parse.load_items(project)

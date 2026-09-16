@@ -73,6 +73,9 @@ FIGURE_RE = re.compile(
 # them (`the set {a, b}`) are prose, not a suffix, and pass through untouched.
 INLINE_FIGURE_RE = re.compile(r'(<img\b[^>]*?>)\s*\{([^{}]*)\}', re.IGNORECASE)
 FIGURE_ATTR_RE = re.compile(r'([A-Za-z_][\w-]*)\s*=\s*(?:"([^"]*)"|(\S+))')
+# The attribute names an image suffix understands, in either position. Anything
+# else is a typo waiting to be reported, not a thing to ignore quietly.
+IMAGE_ATTR_NAMES = ("width", "caption", "id")
 IMG_ALT_RE = re.compile(r'\balt="([^"]*)"', re.IGNORECASE)
 # A resolved figure's number, filled in once the whole rendered document is
 # known (docs/design/index-blocks.md §9) -- emitted by _apply_figure_attrs,
@@ -1603,6 +1606,28 @@ def _image_suffix_attrs(attrs_text: str) -> dict[str, str]:
     }
 
 
+def _warn_unknown_image_attrs(
+    project: Project,
+    attrs: dict[str, str],
+    where_file: str,
+    where_line: int | None = None,
+    where_id: str | None = None,
+) -> None:
+    """One warning per attribute name refdes does not know.
+
+    A typo like `widht=50%` otherwise does nothing at all, in silence, which is
+    the failure mode this project treats most seriously. Shared by both image
+    paths so a figure and an inline image report it in the same words. Never a
+    build failure: an unrecognised name is no reason to stop rendering.
+    """
+    for name in attrs:
+        if name not in IMAGE_ATTR_NAMES:
+            project.warn(
+                f"{name!r} is not an image attribute and is ignored",
+                file=where_file, line=where_line, item_id=where_id,
+            )
+
+
 def _apply_inline_image_attrs(
     html: str,
     project: Project,
@@ -1628,19 +1653,13 @@ def _apply_inline_image_attrs(
             # suffix: leave the text exactly as the author wrote it.
             return match.group(0)
         attrs = _image_suffix_attrs(attrs_text)
-        for name in attrs:
-            if name == "width":
-                continue
-            if name in ("caption", "id"):
+        _warn_unknown_image_attrs(project, attrs, where_file, where_line, where_id)
+        for name in ("caption", "id"):
+            if name in attrs:
                 want = "captioned figure" if name == "caption" else "numbered, referenceable figure"
                 project.warn(
                     f"{name}= is ignored on an inline image; put the image in a "
                     f"paragraph of its own to get a {want}",
-                    file=where_file, line=where_line, item_id=where_id,
-                )
-            else:
-                project.warn(
-                    f"{name!r} is not an image attribute and is ignored",
                     file=where_file, line=where_line, item_id=where_id,
                 )
         width = attrs.get("width")
@@ -1666,13 +1685,16 @@ def _apply_figure_attrs(
     register an explicit `id=` in the project-wide figure registry
     (docs/design/index-blocks.md §9).
 
-A paragraph containing nothing but one image immediately followed by a `{...}`
-suffix becomes a real `<figure>`. An image with a suffix anywhere else -- inline
-with text, in a list item, in a table cell -- is handled by
-`_apply_inline_image_attrs`, which this function runs over the result.
-Matched the same way `_process_images` and `_linkify` scan rendered HTML with a
-regex rather than a markdown-it plugin.
-With no suffix the image passes through completely untouched. `alt` always
+
+    A paragraph containing nothing but one image immediately followed by a
+    `{...}` suffix becomes a real `<figure>`. An image with a suffix anywhere
+    else -- inline with text, in a list item, in a table cell -- is handled by
+    `_apply_inline_image_attrs`, which this function runs over the result.
+    Either way an attribute name outside `IMAGE_ATTR_NAMES` warns: a typo like
+    `widht=50%` must not silently do nothing.
+    Matched the same way `_process_images` and `_linkify` scan rendered HTML
+    with a regex rather than a markdown-it plugin.
+    With no suffix the image passes through completely untouched. `alt` always
     stays on the `<img>`; `caption` falls back to it when not given. `id=` is
     optional exactly like `width=`/`caption=` already are -- a figure with no
     id renders exactly as it does today, numbered nowhere, referenced by
@@ -1686,6 +1708,7 @@ With no suffix the image passes through completely untouched. `alt` always
         # Parsed once unescaped, then re-escaped whatever ends up in the caption
         # before it goes back into the page as HTML text.
         attrs = _image_suffix_attrs(attrs_text)
+        _warn_unknown_image_attrs(project, attrs, where_file, where_line, where_id)
         alt_match = IMG_ALT_RE.search(img_tag)
         alt = alt_match.group(1) if alt_match else ""  # already HTML-escaped text
         caption = _esc(attrs["caption"]) if "caption" in attrs else alt

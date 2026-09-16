@@ -57,6 +57,20 @@ fix.
 - `tar` is not on this shell's allowlist, so the archive export unpacks with
   python's `tarfile` (`.scratch/export_ref.py`); the archive itself is a plain
   `git archive --format=tar main`.
-- Unknown attributes on a *paragraph-only* figure are still ignored silently,
-  exactly as before — warning there too would be consistent, but it is outside
-  this chunk's "byte-identical for working cases" mandate. Worth a follow-up.
+- Unknown attributes on a *paragraph-only* figure were still ignored silently,
+  exactly as before. Approved by the orchestrator and landed in chunk 2 A:
+  `_warn_unknown_image_attrs` (build.py:1606) is now called from both paths,
+  so `{widht=60%}` on a figure reports
+  `'widht' is not an image attribute and is ignored` with file:line and item
+  id, and the figure still renders everything it understands
+  (`test_unknown_attribute_on_a_figure_warns`,
+  `test_valid_figure_attributes_produce_no_warning`).
+
+# Chunk 2 A — unknown attribute on a paragraph-only figure
+
+`IMAGE_ATTR_NAMES` (build.py:69) is the one list of names an image suffix
+understands; `_warn_unknown_image_attrs` warns for anything else and is called
+from `_apply_figure_attrs.swap` and `_apply_inline_image_attrs.swap`, so the
+message shape cannot drift between the two positions. Building this repo emits
+no new warnings, so nothing in the project's own markup was relying on the
+silence. Changelog: changelog.d/figure-attr-typo.fixed.md.
