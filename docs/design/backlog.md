@@ -1609,6 +1609,276 @@ rather than a list of pairs.
 
 ---
 
+## In-use feedback, finding 35
+
+### 35 — A shared figure gets retyped into every calc block, and diverges silently when it changes
+
+**Source: Jared, using refdes at work, 2026-09-16, not from an issue.** One
+number — `V_in = 12 V +/- 5%` — belongs to the power stage and is used by
+everything downstream of it. Today it is retyped into each item that needs it,
+and when the input rail changes, the copies do not. He wants to name another
+item's calc value explicitly, and liked the consequence: such a reference is a
+*real dependency*, visible to the build, not a convenience alias. The typed
+copies are not hypothetical — `items/decisions/dec-pwr-001-regulator-topology.md:43`
+is the `V_in = 12 V ± 5%` line, and it is the same figure the finding is about.
+
+**What exists today, verified.** Within one item, names already flow: `run_calcs`
+threads a single `env` through every block of an item (build.py:887-921, with
+`item._env` retained for `checks:` at build.py:921), and docs/math.md:30-31 says
+both halves of the rule in prose — visible across blocks, **not** shared between
+items. Re-declaring a name inside one item is an error: `evaluate_block` keeps an
+`origins` map threaded by the same caller (build.py:890-893) and raises
+"`'V_in' is assigned twice in this item` … `A name can only be assigned once per
+item (blocks share one item-wide scope)`" (calc.py:914-927). Nothing crosses the
+item boundary: `run_calcs` and `compute_hashes` both iterate `project.local_items`
+(build.py:888, 1237), and an expression can only read names present in `env`
+(calc.py:424-426). So the boundary this finding wants to open is exactly the one
+math.md documents, and the one rule that must survive it is the duplicate-name
+rule.
+
+**What must not be reinvented.** Project equations — finding 27, shipped in
+`c96d96b` — are `calc.Equation`/`set_equations`/`validate_equations`
+(calc.py:208-293): a project-wide namespace of *formulas*. Finding 26's
+`source("file.csv", "key")` (docs/design/calc-sources.md) is a lockfile-pinned
+*input*. `{{name}}` (build.py:53, substituted in `render_bodies` at
+build.py:1741-1760) is item-local *prose* interpolation of a formatted result.
+And the stale-arithmetic signal (docs/design/stale-arithmetic-signal.md,
+`build.calc_hash_for` at build.py:1092-1115, `lifecycle._stale_arithmetic` at
+lifecycle.py:760) exists precisely to notice "the status changed but the
+arithmetic did not" — and its own docstring says out loud that it cannot see an
+upstream value moving: "A result changing because an upstream value moved, with
+this item's own block untouched, is a different question this function doesn't
+answer" (build.py:1107-1109). That sentence is this finding's gap, stated by the
+feature that declines to close it.
+
+**1. Syntax.** Three candidates. (a) A dotted reference inside the block —
+`V_in = DEC-PWR-001.V_in`. (b) An import line above the block —
+`use DEC-PWR-001.V_in as V_in` — with the block then reading `V_in`. (c)
+`{{DEC-PWR-001.V_in}}` in the expression, reusing the prose interpolation.
+
+(c) is out on ordering alone: `{{name}}` substitution happens in
+`render_bodies` (build.py:1741), which `build()` calls at 1891, *after*
+`run_calcs` at 1881 — the interpolation runs on text, after arithmetic, and
+cannot feed it. It is also a formatted string, not a `Value`
+(`item.calc_values` is `name -> formatted result`, model.py:412), so it carries
+no unit and no tolerance. Keeping `{{…}}` meaning "prose, this item only" is
+worth more than one fewer syntax.
+
+(b) is workable but buys a second scoping rule for no benefit: an import line is
+block-level syntax in a language whose only scope is the item, it has to decide
+what happens when the alias collides with a local name (which is today's
+duplicate error, so the answer is "error" either way), and it separates the
+reference from the line that uses it. (a) reads as what it is and needs no new
+statement form.
+
+**Recommendation: (a), `V_in = DEC-PWR-001.V_in`, stored expanded as a
+composite.** The syntax space is free — verified, not assumed: today
+`DEC-PWR-001.V_in` fails as `unknown name 'DEC'` (the lexer reads `-` as
+subtraction and evaluation hits `DEC` first) and `DEC_PWR_001.V_in` fails as
+`Attribute is not allowed in an expression` (calc.py:471, and the module
+docstring's "no attribute access", calc.py:3-5). So nothing silently evaluates,
+but the diagnostic is a lie about the author's intent — which is an argument for
+making it real syntax with a real message, not for leaving it.
+
+Rename survival is the whole reason to care. This project stores structured
+references as `DISPLAY-ID@key` composites resolved on the key half only
+(docs/design/keys.md §3, `build.resolve_link_target` at build.py:395-422), so a
+reference is written by the author bare and frozen to
+`V_in = DEC-PWR-001@k7f3m2q9x4a.V_in`, refreshed on rename by the same rule.
+It is **not** a `links:` reference, though, and must not pretend to be: the
+precedent for a structured reference that lives outside `links:` is `checks:
+against:`, which got its own `plan_check_expansion`/`expand_missing_checks`
+(links.py:701, 802) sharing `_planned_target` (links.py:308) with the link path
+so the §3 refresh rule cannot drift between them. A calc reference needs the
+third instance of that same shape — one more `plan_*`/`expand_*` pair over calc
+block lines, sharing `_planned_target` and the Layer 1/3 diagnostics. That is
+also where `--no-write` comes from: every one of these write-backs is called as
+`write=not args.no_write` (cli.py:95-125), and a bare reference under
+`--no-write` still resolves, on the display id, exactly as keys.md §2's rule
+requires.
+
+**2. What is referenceable.** Option (a), any named value in the target's
+blocks, is one keystroke of friction per reference and makes every local name in
+every item public API — `A_board`, `eff_2`, the throwaway `tmp` in a scratch
+block all become things a rename can break, which is the opposite of what
+`origins` is for (calc.py:914-927 tells you to *rename* a colliding local; it
+cannot tell you that the rename broke three other items). Option (b), an
+explicit `exports:` list on the target, costs one line per publishing item and
+buys the only rule that makes renames reportable: renaming an exported name is a
+breaking change the tool can name, renaming a local is free.
+
+**Recommendation: (b)** — `exports: [V_in]` on the target, validated the way
+`equations:` is validated (each name must be one the item's calc blocks actually
+assign; an `exports:` entry naming nothing is an error, not a no-op).
+Referencing an unexported name is an error that names the fix, in the same voice
+as the duplicate-name error. The friction is the point: publishing is the moment
+the author says "this number is a contract."
+
+Imported projects: the data is exported (`render.items_json` emits per-item
+calcs, render.py:588-597) but not absorbed — `imports._absorb`
+(imports.py:61-122) reconstructs fields, links, identity and the upstream
+content hash, and no calcs, and `run_calcs` never iterates external items.
+**v1 refuses it**, with a message saying so. It is the right refusal rather than
+a limitation: a cross-project calc reference is only honest against the pinned
+artifact version (imports.py:46-54 already makes a version mismatch an error),
+and getting there means deciding whether a downstream project's arithmetic is
+reproducible from its own lockfile-and-pins — a question this finding should not
+settle by accident.
+
+**3. Evaluation order and cycles.** Calcs are per-item today; a cross-item
+reference makes it a graph over items. Order falls out of the reference edges:
+resolve edges first, evaluate in dependency order (DFS post-order, memoised —
+an item's `env` is computed once and cached, since `env` is already the whole
+state), which is a strictly smaller change than it sounds because pass structure
+stays: `run_calcs` still owns one item's blocks, and gains a scheduler around
+it. A cycle is an error naming the cycle, following both existing precedents —
+`blocked_by cycle: a -> b -> a` (blocked.py:99, which reports and `return`s,
+stopping the pass rather than half-annotating) and `equation cycle: a -> b -> a`
+(calc.py:264, with `_equation_stack` as the runtime backstop, calc.py:270-288).
+Reuse the `->` shape so the three cycle diagnostics read alike.
+
+A reference to an item whose own calc failed must **not** restate that failure.
+One root error at the item that broke, plus a downstream line per dependent
+worded as "cannot resolve `DEC-PWR-001.V_in`: its item's calc failed" — the
+same one-root-many-notes discipline `blocked.py` uses when several claimers
+trace to one unsettled root (build.py:846-880). Otherwise a single bad line in a
+shared item produces N identical errors and the author starts counting errors
+instead of reading them.
+
+**4. Staleness — the correctness core.** Three options. (a) Recompute silently:
+the value is always current, and "stale" becomes meaningless — worse, a seal or
+baseline recorded earlier describes arithmetic whose inputs no longer exist, and
+nothing says so. (b) Put the resolved upstream value into the referring item's
+content hash. (c) Leave the value current but mark dependents suspect.
+
+**Recommendation: (b), with (c) as the presentation layer of (b), and (a) alone
+rejected.** The argument is comparison, not assertion: finding 26 already decided
+this for the source-backed case, and decided it the same way — a value that is an
+arithmetic input is content, so the resolved `(path, key, locked text)` goes into
+the content hash and "seals/baselines/suspect-link consumers notice a reviewed
+source-value change as content" (docs/design/calc-sources.md §8). A referenced
+calc value is the same kind of thing one level up. (c) alone is not available
+anyway: suspect links do not exist — docs/lifecycle.md:261-264 describes them as
+the thing a future mechanism would supply — and a correctness guarantee cannot be
+built on machinery that has not been built.
+
+What the author sees, and this is the payoff: DEC-A's `V_in` moves, DEC-B's calc
+block is untouched, and DEC-B shows up in the baseline diff as `changed` with
+nothing in its own text to point at. That is precisely the shape
+stale-arithmetic was invented to catch and explicitly cannot (build.py:1107-1109),
+so the diff line has to say what moved: `changed DEC-B — referenced
+DEC-PWR-001.V_in: 12 V ± 5% -> 11.4 V ± 5%`. The item template already renders a
+`stale` pill for a dependency that moved out from under an item
+(item.html.j2:214, the blocked-chain case), so the affordance exists.
+
+The honest costs, stated rather than buried. It is a hash-definition change:
+`HASH_FORMAT` is 3 (build.py:1044), and this bumps it — but so does finding 26,
+and the two must coordinate on one number and one historical payload builder,
+exactly as formats 2 and 3 were carried forward conditionally (keys.md §5).
+It puts a value that lives in another file inside this item's identity, so a
+rename of the upstream *display id* must not churn — hash the resolved key and
+the resolved value, never the composite text, the same rule as
+`_link_hash_token` (build.py:1118-1140). And it means an author can see their own
+item marked changed for something they did not do, which is the correct report
+and the one most likely to be complained about; the diff line naming the upstream
+value is what makes it readable instead of mysterious.
+
+**5. Units and tolerance.** Confirmed, and this is the strongest argument for the
+feature over copy-paste. A `Value` is `(nom, lo, hi)` over pint quantities
+carrying its unit (calc.py:33-51), and `_binary` propagates the interval by
+corners (calc.py:74-96), so a reference to `12 V ± 5%` arrives with its width
+intact. A retyped `12 V` loses the ±5% silently and reports a suspiciously tight
+answer — the copies are not merely a maintenance problem, they are a correctness
+problem the moment someone drops the tolerance while retyping. A dimensionality
+mismatch at the reference site is an ordinary calc error at the line that has the
+wrong dimensions: the unit assertion `P : W = DEC-X.V_in * I` fails in the
+existing `convert_value` conversion (calc.py:831-843), and a bare mismatch inside
+a larger expression fails in `_binary`'s pint operation. No new diagnostic class
+is needed; the line reported is the line the author has to fix.
+
+**6. Composition with findings 26 and 27.** The rule that keeps three mechanisms
+from becoming three systems: **they differ in where the number comes from, not in
+what it becomes.** All three bind a name in one `env` to one `Value`, and all
+three contribute their resolved scalar to the content hash. Consequences, each
+falling out rather than needing its own code: a referenced value may itself be
+source-backed — the referring item sees a `Value` and performs no I/O, so
+calc-sources.md's hermeticity rule (never parse a spreadsheet during check or
+build) survives one hop and, since the upstream value is in the upstream item's
+hash and the upstream hash is in the artifact, two hops. An equation takes a
+referenced value as an argument for free, because arguments are evaluated
+`_eval_node(a, env)` over the same env (calc.py:284) — `thermal_rise(
+ref("DEC-X", "P_diss"), 40)` needs no change to `_call_equation`. And the
+duplicate-name rule is untouched: a reference binds a name *exactly as an
+assignment does*, so `origins` fires if an item both references `V_in` and
+assigns it — one name, one meaning per item, which is the rule the finding was
+told must survive and does.
+
+**7. Failure modes.** Target id does not exist → error at the reference line,
+"no item `DEC-PWR-001`", the same shape as `check against X, which does not
+exist` (build.py:988). Target exists but has no such variable → error naming the
+name and the target's exported names. Target's *exported* variable renamed → the
+reference names nothing and errors; and here the honest disclosure: **keys do not
+save this half.** A surrogate key protects the item half of the reference across
+a rename; a calc variable has no surrogate, and `resolve_link_target`
+deliberately has no `former_ids:` fallback (build.py:408-411). `exports:` does not
+fix that either — it makes the breakage *reportable at the reference site* rather
+than silent, which is the most any of this can promise. Target deleted → the
+unknown-key diagnostic (`build._unknown_key_message`), display half not consulted
+as a fallback (keys.md §3 case 3). Reference into an item on another board, or an
+unboarded shared item → allowed and useful; boards never scope links (finding 33
+verified zero board references in links.py), and finding 33's shared component is
+exactly the item two boards want to read one number from. The gap to disclose:
+a calc reference is not a `links:` edge, so it is invisible to
+`lint_cross_workspace_references` (workspaces.py:92-124, which iterates
+`item.links` exclusively), to backlinks, and to coverage. Making it a link edge
+would drag it into coverage semantics, and finding 33's `_board_gate` lesson
+(build.py:611-623) is that a display feature turned into a coverage edge is how a
+display feature becomes a coverage hole — so v1 discloses the blind spot instead.
+A log entry referencing a sealed entry's value → the sealed value cannot move, so
+the reference is stable; if the seal is violated, both the violation and the
+dependent's changed hash report, and the diff line naming the upstream value is
+what keeps that from looking like two unrelated problems. `--no-write` → the
+expansion write-back is skipped and the bare reference still resolves on the
+display id; nothing under `items/` or `.refdes/` changes, same as the existing
+no-write contract on the other expansions (cli.py:95-125). `refdes check` → an
+unresolved reference is an error, and check writes nothing.
+
+**v1 scope.** Include: the dotted reference form with a real diagnostic
+replacing `unknown name 'DEC'`; composite expansion, refresh and Layer 1/3
+diagnostics through a `plan_*`/`expand_*` pair sharing `_planned_target`;
+`exports:` on the target with validation that every exported name is assigned;
+dependency-ordered evaluation with one cached `env` per item; cycle errors in the
+`a -> b -> a` shape; one root error plus downstream notes; the resolved
+`(key, name, value text)` in the content hash under a coordinated
+`HASH_FORMAT` bump with a historical builder; the diff line naming the upstream
+value and its old value; unit and tolerance flow-through with no new diagnostic
+class. Refuse: references into imported items (with a message saying why);
+references to unexported names; `exports: "*"` or wildcard publishing;
+`{{ID.name}}` prose interpolation of another item's value — the author writes
+`V_in = DEC-PWR-001.V_in` and then `{{V_in}}`, which keeps prose and arithmetic
+pointing at one name; calc references as `links:` edges, into backlinks,
+coverage, or the workspace lint; referencing anything but a single named value
+(no block import, no "import everything"); and any change to `source()` or to
+equations beyond what one shared `env` gives for free.
+
+**Status: outstanding — awaiting decision.** The decisions requested: (a)/(b)/(c)
+on syntax (§1), published-exports versus any-name (§2), and value-in-the-content-
+hash versus mark-suspect-only (§4) — the last of which needs coordinating with
+finding 26's own hash bump before either claims a format number.
+
+**Local model (not decided — my read): not suitable.** The parser change and the
+scheduler are small, but the correctness claim is "every item whose arithmetic
+depended on a value that moved is reported, and no item that did not is" — a
+claim about a graph, about hash carry-forward across a format bump, and about the
+interaction of three value-into-`env` mechanisms. The failure mode is the
+characteristic one twice over: a reference that silently resolves to the wrong
+item half (a composite refreshed wrongly), or a hash change that churns on a
+rename it was supposed to be immune to. Both pass a build with no failing test
+anywhere, and both are in machinery — keys, hashing, seals — that this project
+has consistently kept off a small model's plate.
+
+---
+
 ## Surrogate keys — remaining layers
 
 `docs/design/keys.md` §1 (key format), §2 (minting), §3 (composite
