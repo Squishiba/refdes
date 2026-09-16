@@ -1367,6 +1367,234 @@ conflation in all five filter sites at once.
 
 ---
 
+## In-use feedback, finding 34
+
+### 34 — The generated site has one look, and almost nothing about that look is a token
+
+**Source: Jared, while using refdes at work, not from an issue.** "I would
+like the editor to have flavor and not be some basic gruel engineers are so
+very familiar with." The ask is about the *editor*, but the editor does not
+exist yet (`cli.py:1182-1520` registers build/check/revision/release/index/ls/
+id/fetch/audit/init/new/schema/standard/keys/revise/stub-tests/former-ids —
+there is no `serve`), and the look it would inherit does. This finding is
+therefore about theming the site first, with the editor as the second
+consumer (§5). Written for someone who does not write CSS: where a term is
+load-bearing, it is explained in the sentence that uses it.
+
+**What exists today, verified against the files.** `src/refdes/templates/
+assets/style.css` is 441 lines and defines eleven custom properties on `:root`
+(`style.css:1-13`) — `--bg`, `--fg`, `--muted`, `--line`, `--panel`,
+`--accent`, `--good`, `--bad`, `--warn`, `--claim`, and `--mono` (which is a
+font *stack*, not a colour). A `prefers-color-scheme: dark` block
+(`style.css:15-28`) redefines the ten colour tokens, and `var()` is used 138
+times across the rest of the file, so colours themselves are in decent shape:
+only two colour literals survive outside `:root` — `color: #fff` on
+`.type-badge` (`style.css:192`) and the `rgba(0,0,0,.18)` shadow on
+`#preview-card` (`style.css:397`) — and the fourteen `color-mix()` uses derive
+their tints *from* the tokens, so they follow a theme automatically. The
+stylesheet is linked once, `base.html.j2:6`, and copied to `_site/assets/` by
+`render.py:880-882` (empty-project path) and `render.py:1112-1114`.
+
+**The gap, and it is most of the work: everything that is not a colour.**
+Counted in the same file: 66 `font-size` declarations, 65 of them literal px
+from 11px to 30px; 20 `font-weight` declarations (400/500/600/650); 24
+`border-radius` declarations (3px, 4px, 5px, 6px, 7px, 8px, 999px, 50%); 36
+`padding` declarations and 82 `margin` mentions, with no shared rhythm —
+`10px 14px`, `14px 16px`, `4px 16px 14px`, `6px 10px 6px 0` are each written
+out where they recur; 14 `letter-spacing` and 14 `gap` declarations; 325 `px`
+literals in total. Type is the worst of it: the body face is not a token at
+all — it is inline in the `font: 15px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif`
+shorthand at `style.css:36`, with a second hardcoded `system-ui, sans-serif`
+at `style.css:183` — so there is no token anywhere that changes what the site
+*is* typographically, only what it is coloured. The surfaces that carry the
+most personality (`.pill` and `.type-badge`, the `.panel`/`.notice`/`.option`
+boxes, `.timeline` and the thread styles at `style.css:337-372`, the table
+rules on `.grid`/`.fields`/`.calc`) are all built from those literals. A theme
+cannot reach any of them today. That is the refactor this finding is actually
+about, and it should be said plainly rather than discovered halfway through.
+
+**1. Scope — three sizes, and why the middle one.**
+
+- **(a) Colours only**, by swapping the existing ten. Cheapest by an order of
+  magnitude — the token layer already exists, so a theme is a file of ten
+  `--name: value` pairs and the implementation is "load it, emit it after
+  `:root`". But it is not what was asked for. Ten colours on a layout whose
+  type, spacing and radii are fixed gives a *different-coloured* site, not a
+  site with flavour; the gruel is the 11px uppercase letter-spaced label and
+  the 8px radius, not the blue.
+- **(b) Colours + typography + density**, which requires refactoring
+  `style.css` into a real token layer first: add `--sans`, `--serif`,
+  `--text-xs..--text-3xl` (or a base size plus a ratio), `--weight-*`,
+  `--space-1..--space-6`, `--radius-*`, and replace the literals with `var()`
+  throughout. Cost, honestly: it touches all 441 lines, it is the kind of
+  change that can silently alter line-height and table density on pages no
+  test asserts about, and it has to be reviewed visually, which is the
+  slowest kind of review here. It is also a one-time cost paid once for every
+  theme after it.
+- **(c) Whole-look themes that also change layout** (sidebar vs top nav,
+  cards vs flat lists, two-column documents). Rejected: refdes would then own
+  N divergent stylesheets *and* the templates that satisfy all of them, which
+  is how static generators grow a second product surface nobody can maintain.
+  Layout is also where a theme stops being a short file and becomes a fork.
+
+**Recommendation: (b)**, with (a) as the first milestone inside it — land the
+token layer and one built-in theme that is visually identical to today, so the
+refactor is provably a no-op, then add themes on top.
+
+**2. Who can define one.**
+
+- **Built-in named themes**, selected in project settings as `site: theme:
+  <name>`. `site:` is parsed today by plain `.get()` calls at
+  `schema.py:713-719` (`title`, `out`, `version`, `pages`, `nav`, `assets`)
+  with **no validation of unknown subkeys** — unlike top-level settings, which
+  hard-error on an unknown key with a difflib "Did you mean" hint
+  (`schema.py:116-121`). So `site: theme: slate` must be added as an explicit
+  check: an unknown theme name is a build error naming the available themes,
+  never a silent fall back to the default. That asymmetry is the whole
+  difference between a typo doing nothing and a typo doing the wrong thing.
+- **Token overrides in project settings** — `site: tokens: {--accent: #..., --sans: ...}`.
+  Zero new files for the author, and it composes with a named theme (theme
+  first, overrides second). Trade-off: YAML is not CSS, so a value with a
+  comma in it (a font stack) needs quoting rules people will trip over.
+- **A project-local CSS file** loaded after the theme, e.g. `site: css:
+  theme.css`, copied into `_site/assets/` and linked after `assets/style.css`.
+  Note the existing guard it must not collide with: `_copy_project_assets`
+  refuses any project asset whose top-level name is a template-owned file
+  (`render.py:677-686`, `reserved = set(os.listdir(ASSET_DIR))`), so a project
+  file named `style.css` is already a hard build error — a theme file needs its
+  own name and its own `<link>`, not a second copy of the reserved one.
+- **Rejected: a remote URL.** The site is plain static files that must work
+  offline, on a plane, on a factory floor network, and must not change under
+  an author between two builds of the same commit. A URL also makes a sealed
+  baseline's rendering depend on someone else's server.
+
+What each means for someone who does not write CSS: **a theme is a short file
+of `--name: value` lines and nothing else** — no selectors, no braces, no
+nesting, nothing to get structurally wrong. `--accent: #b3541e` is the entire
+syntax. That is the property worth protecting, and it is what §3 turns on.
+
+**3. Sharing.** Three routes, in increasing order of reach: **bundled with
+refdes** (built-ins, the only kind that ships with an upgrade and gets the
+contrast checking below); **a file committed in the project** (`theme.css`
+beside the items, which is how it travels with the repo to a colleague, and
+how it is reviewable in a diff); and **a gallery page on the docs site** —
+`docs-site/refdes-project.yaml` is itself a pages-only refdes project
+rendering `../docs` with the same stylesheet, so a gallery is a page there,
+showing each built-in theme with the exact `site:` snippet and token file to
+copy. Say it explicitly in the docs, because it is the reason sharing is safe
+at all: **a token-only theme cannot break page structure** — it can only make
+a colour, a face, a size, or a padding different, and the worst outcome is
+ugly or hard to read. A project CSS file *can* break structure, hide a
+section, or delete the nav, and should be documented as "past this line you
+are on your own": supported for your own project, not a sharing format, and
+not something a built-in theme will ever depend on.
+
+**4. Invariants every theme must keep.**
+
+- **Dark mode still works.** Decide now, because it changes the file format:
+  either a theme supplies *both* palettes (two token blocks, and the dark
+  block stops being refdes's property), or refdes keeps the
+  `prefers-color-scheme` mechanism (`style.css:15-28`) and a theme declares
+  light tokens plus dark tokens under two documented headings. My
+  recommendation is the latter — keep the media query and the `color-scheme`
+  declaration refdes's, keep the theme as two flat lists of pairs — because
+  the alternative lets a theme ship that is unreadable at 2am, which is the
+  common case for the log page on a phone. The newer `light-dark()` function
+  (Baseline, all three engines, May 2024) is tempting for collapsing the two
+  blocks into one line per token, but it is a second mechanism to explain to
+  theme authors; not worth it in v1.
+- **The print stylesheet still works.** `@media print` at `style.css:322`
+  hides the nav and footer, un-flexes the layout, and sets `a { color:
+  inherit }`. Any token a print rule depends on (`--bg`, `--fg`, `--line`,
+  `--accent` for `.part-title`'s underline) must stay defined; a theme that
+  redefines `--line` as transparent prints a document with no rules, which no
+  build error would catch.
+- **Contrast stays legible.** WCAG AA is 4.5:1 for normal text and 3:1 for
+  large text (W3C, Understanding SC 1.4.3). refdes *could* check ratios at
+  build: the tokens are hex literals in a file it already parses, and the
+  ratio is ~15 lines of relative-luminance arithmetic with no new dependency.
+  Cost: it can only check token-against-token (`--fg` on `--bg`, `--muted` on
+  `--panel`, `--good`/`--bad`/`--warn` on both surfaces), not real rendered
+  contrast through `color-mix()` tints — so it catches the gross cases, which
+  is most of them. Recommendation: **check the built-ins at build (hard
+  error) and project themes as a warning**, because refusing to build a
+  project because its author likes a pale accent is the kind of friction that
+  makes people delete the feature; and a warning naming the failing pair and
+  the ratio is actionable.
+- **The status colours keep their meaning.** `--good`, `--bad`, `--warn`,
+  `--claim` are not decorative hues; they are read as pass/fail/at-risk/claimed
+  on coverage strips, pills, stage bars and margin bars (`style.css:248-262`,
+  `style.css:419-441`). A theme must not reassign them to arbitrary hues — a
+  `--bad` that is not visibly alarming (pale beige, or a hue a colour-blind
+  reader cannot separate from `--good`) is a **correctness problem, not a
+taste one**, because the whole point of the strip is a verdict readable at a
+  glance. Enforce it the way the other invariants are: a documented rule, plus
+  a build-time check that `--bad` and `--good` are distinguishable from each
+  other and alarming enough by whatever mechanical test is chosen (a minimum
+  saturation/luminance band, or a required separate non-colour cue).
+
+**5. The editor must not grow its own look.** `docs/design/browser-editor.md`
+recommends shape B, a separate `/edit/` app served by `refdes serve`, and
+already names the mitigation at `browser-editor.md:162` — "reuse design
+tokens/CSS where sensible". Theming makes that concrete and cheap: the editor
+links the **same `assets/style.css`** and the same theme file, so a project's
+theme applies to both surfaces for free. If the editor needs editor-specific
+rules, they belong in a second stylesheet that *imports the token layer only*
+(`tokens.css`, the file §1(b) proposes) and never redefines it — one source of
+truth per token, in whichever file the other imports. The failure to avoid is
+an editor with its own hardcoded palette, which is the "basic gruel" the ask
+is about, doubled and permanently out of sync.
+
+**6. What could silently go wrong, and how refdes notices.**
+
+- **A theme makes a diagnostic invisible** — `--bad` close to `--bg`, or a
+  `.ref-missing` marker the same colour as the prose. Caught by the contrast
+  check above, applied to the semantic pairs specifically.
+- **A token typo falls back to browser defaults.** CSS does not warn: a
+  declaration using an undefined or mistyped custom property becomes "invalid
+  at computed-value time", which the browser treats as unset — the inherited
+  or initial value, *not* the earlier cascade value, and a `var(--x,
+  fallback)` only helps when `--x` is entirely unset. So `--accent: #f00`
+  silently leaves the real `--accent` at its default and the site renders
+  half-themed. Refdes notices by validating the theme's key set against the
+  built-in token list at build: **unknown token name = error with a "did you
+  mean" hint**, the same treatment `schema.py:116-121` already gives unknown
+  settings.
+- **A missing token in a hand-written theme** — same mechanism, opposite
+  direction, and the reason a project theme should be *merged over* the
+  default rather than replacing it, so an omitted token is the default value
+  rather than unset. Validate the merged set is complete before rendering.
+- **A theme file that is not copied into the output** — the site renders with
+  the default theme and the author sees the right thing locally because their
+  browser cached it. The build already tracks every file it wrote in
+  `.refdes-manifest.json` (`render.py:641-735`) and prunes to it, so the check
+  is one line: a declared `site: css:`/theme path must appear in `written`, or
+  it is an error.
+- **An upgrade adds a token an old theme does not define** — the new surface
+  renders unstyled in every existing project. Mitigation: new tokens are added
+  with a default in `style.css` (never only in a theme), so an old theme is
+  incomplete-but-correct; and the completeness validation above runs against
+  the *current* token list, so it reports "this theme predates `--space-7`, it
+  now falls back to the default" as a warning rather than a mystery.
+
+**Recommendation and v1 scope.** Do the token-layer refactor first, ship it as
+a visually identical no-op, then ship theming on top of it. v1 should include:
+the token layer (`--sans`, `--serif`, `--text-*`, `--weight-*`, `--space-*`,
+`--radius-*` replacing the literals counted above); `site: theme: <name>`
+with three or four built-ins, one of which is today's look; `site: tokens:`
+overrides merged over the named theme; token-name and completeness validation
+with "did you mean" hints; contrast checking (error for built-ins, warning for
+project themes); the docs-site gallery; and the same stylesheet linked by the
+future editor. v1 should refuse: layout-changing themes; remote theme URLs;
+any project CSS file that a built-in theme depends on; reassignment of
+`--good`/`--bad`/`--warn`/`--claim` outside their semantic bands; and a theme
+format with selectors, nesting, or anything else that makes a theme a program
+rather than a list of pairs.
+
+**Status: outstanding — awaiting decision.**
+
+---
+
 ## Surrogate keys — remaining layers
 
 `docs/design/keys.md` §1 (key format), §2 (minting), §3 (composite
