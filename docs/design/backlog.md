@@ -1127,6 +1127,246 @@ above): nothing here depends on taste or an unsettled tradeoff.
 
 ---
 
+## Field report, finding 33
+
+Recorded from Jared's use of refdes at work — no GitHub attachment, no code
+review. The source note says so, as it does for 29–32.
+
+### 33 — A component used by several boards belongs to none, so it is missing from every board's pages
+
+**Source: field report, not issue #7.** A part used by two boards — the same
+rail-to-rail LDO on Board A and Board B, one datasheet, one selection, one
+`part_number` — has no home folder. It is not Board A's and it is not Board
+B's, so it goes in `items/shared/`, and `shared` is not in the `boards:`
+registry. That is deliberate on refdes' part: an unregistered segment gets no
+board and "that is not an error, since shared items legitimately belong to
+none" (docs/multi-board.md:46-49). What is not deliberate is the consequence.
+Every board-scoped surface filters on the item's own resolved board, so the
+shared component is absent from `parts-board-a.html` **and** from
+`parts-board-b.html` — the two pages that exist to answer "what is on this
+board" — while both boards' items `selects:` it. The part number is in the
+project-wide parts page and on the component's own page, and nowhere a
+board-scoped reader looks. Nothing fails, because the defect is an absence.
+
+**What exists today, verified.** Resolution is one-way and single-valued:
+`boards.resolve()` (boards.py:73-113) takes the item's own `board:` hint —
+which `parse.py:423-424` sets after merging the file's `defaults:` under it,
+so item beats file before this module is ever consulted — hard-errors it if it
+names nothing in the registry, and otherwise falls back to `_derive()`
+(boards.py:68-70), a single path segment looked up in a single `path_segment →
+board key` index (boards.py:38-41, `_board_segment` 60-66). The result lands
+in `Item.board`, one `str` (model.py:430). There is no set, no list, no
+second chance. The surfaces that then read it, all with the same
+`item.board != board → skip` shape:
+
+- `render._in_scope` (render.py:57-64), the one filter shared by
+  `_document_sections` (render.py:81) → `document-<board>.html`,
+  `_coverage_rows` (render.py:112) → `coverage-<board>.html`, `_log_entries`
+  (render.py:157) → `log-<board>.html`, and `summary_payload`
+  (render.py:351-367) → `summary-<board>.html`;
+- `citations.by_path` (citations.py:416-436, filter at 430) →
+  `references-<board>.html`, and `citations.by_part_number`
+  (citations.py:439-470, filter at 456) → `parts-<board>.html`;
+- `nav.scope_reports` (nav.py:55-92, filter at 77-81), which decides not what
+  a page shows but **whether the page is written at all** — a board whose only
+  parts live in `shared/` gets no `parts-<board>.html` whatsoever, and no nav
+  link to one;
+- the `{{index}}` block's `board:` parameter (blocks.py:132-167);
+- `cli._visible` (cli.py:150-174) and the item count beside it (cli.py:195),
+  i.e. `refdes check --board board-a`, and `refdes ls --board` (cli.py:471);
+- `seal.append_only_items` (seal.py:187-197), which is why an unboarded log
+  entry's seal lives in `.refdes/log-seal.yaml` while its board neighbours
+  live in `log-seal-<board>.yaml` (seal.py:42-47);
+- `build._board_gate` (build.py:611-623), where an unboarded satisfier
+  "counts for *no* board" — stated as a feature there, and it is one, for
+  obligations.
+
+Correctness is not the problem. Links are project-wide and boards never scope
+them — `links.py` contains no reference to boards at all (grep count: zero) —
+so a decision on Board A already `selects:` the shared component, the
+component's page shows both boards' incoming links, and `refdes check` without
+`--board` checks the whole thing correctly. `PartUsage.boards`
+(model.py:336-340) even reports which boards a part number is used by, derived
+from the boards of the items that name it — and for a part named only by
+shared components that set is empty, so the project-wide parts page renders
+"—" in its Boards column (parts.html.j2:36-38) for exactly the parts this
+finding is about. Visibility is the problem, and one surface has already
+admitted that: `_contract_rows` (render.py:128-145) is the single board-scoped
+render site that says out loud it is "NOT scoped by `_in_scope`", because
+finding 24's whole point was listing an item that lives elsewhere.
+
+**The question that decides most of the design: counted, or only displayed?**
+These are different claims and they should not be settled together.
+*Displayed* means the item appears among a board's items on that board's
+pages — in its parts list, its document, its index block. *Counted* means the
+item changes a board's numbers: its coverage stage, its totals, its release
+gate. My answer, and the recommendation below is built on it: a shared
+component should be **displayed and listed** on each board that uses it, and
+should **not** be counted as that board's coverage obligation. A BOM is a
+listing, not a score — `parts-<board>.html` is the page someone takes to
+procurement, and a part both boards buy belongs on it — whereas coverage is
+already handled by a mechanism designed for "one item, many boards":
+`conforms_to:` (finding 24) declares the obligation on the board and
+`compute_board_coverage` (build.py:701-760) scores each (item, board) pair
+against that board's own satisfiers. Folding shared items into coverage
+without that declaration would double-count one engineering fact across N
+boards' totals, and would do it silently. The two claims pull in different
+directions and the honest answer is that refdes has been treating them as one
+question, because one `item.board` answers both.
+
+**Option (a) — board-declared inclusion, mirroring finding 24.** The author
+writes, on the board:
+
+```yaml
+boards:
+  board-a:
+    includes: [GRP-PWR-COMMON]
+```
+
+naming a `group` whose `contains` members are shown and listed on that board,
+resolved by the same walk `compute_board_coverage` already does
+(build.py:732-741, `group.backlinks["contains"]`). It should **not** reuse
+`conforms_to:`. That key means "this board owes this, scored per board,
+warned on until satisfied" — an obligation, with `validate_conforms_to`
+(build.py:581-608) hard-erroing a target that is not an existing group and
+`compute_board_coverage` emitting a
+warning per (member, board) pair short of `satisfied`. Attaching shared
+components to that key would make every shared part an obligation each board
+is warned about until it is "satisfied", which is nonsense for a part number.
+A separate `includes:` key, validated by the same shape check as
+`_conforms_to` (schema.py:431-452, which exists because a bare string iterated
+one letter per error) and the same exists-must-be-a-group check, keeps the
+mechanism and drops the semantics.
+
+What the board pages then show: the group's members appear in
+`parts-<board>.html`, `document-<board>.html`, and any `{{index board:}}`
+table, because the filter changes from `item.board == board` to `item.board ==
+board or item.key in included_keys(board)` — one predicate, in `_in_scope`
+(render.py:57-64) and its three non-render twins (`citations.by_path`:430,
+`citations.by_part_number`:456, `nav.scope_reports`:77-81) — plus the
+`{{index}}` block's own copy at blocks.py:167 — which is the whole
+implementation surface for display. What the manifest records: nothing new, if
+inclusion stays display-only — `.refdes/boards.yaml` records the item's own
+resolved board (boards.py:247-270, one scalar or one `{id, board}` entry per
+item), and an item in `shared/` keeps recording no board, which is true. That
+is the strength of this option: the drift machinery, the `--accept-board-move`
+warning (boards.py:409-484), the per-board seals (seal.py:42-47, 187-197), the
+token lint (boards.py:115-133), and `items.json`'s single `board` field
+(render.py:574) all stay exactly as they are, because none of them is asked to
+hold a set. What could silently go wrong: an author adds the component to the
+group and forgets `includes:` on the new board, and the part is missing from
+that board's pages again — the same absence, now one indirection further away.
+That is the failure mode worth designing against, and the answer is the same
+one finding 24 chose: make the *declaration* loud (an `includes:` target that
+is not a group is a build error) and, if it is wanted, warn when a board's items
+link to an unboarded item that no `includes:` on that board covers — a lint on
+the gap, not a membership change.
+
+**Option (b) — multi-board membership on the item (`boards: [a, b]`).** What
+the author writes is one line, where and when they know the answer, which is
+the most direct thing any option offers. What breaks is everything downstream
+of `Item.board: str` (model.py:430). The manifest shape: `.refdes/boards.yaml`
+is one value per item (boards.py:247-270), and a move is detected by string
+inequality (boards.py:409-484) — a list needs a set-difference, and "board-a →
+board-b" and "[a] → [a, b]" are different events that the current warning text
+cannot distinguish, so `--accept-board-move` needs a new meaning. Per-board
+seals: `append_only_items(project, board)` (seal.py:187-197) partitions items
+across seal files, and a multi-board log entry would have to be sealed in N
+files or in a `""` file that `--reseal board-a` then cannot reach — either way
+one entry's immutability is now governed by N accept flags. `--board` scoping:
+`check --board` (cli.py:150-174) and `ls --board` (cli.py:471) become
+overlapping filters, so `refdes ls --board a` plus `--board b` no longer
+sums to the project. The token lint (boards.py:115-133) has no single token to
+check a prefix against, and would either warn spuriously or go quiet. Coverage
+grouping: `_board_gate` (build.py:611-623) is the guard that an unboarded
+satisfier discharges nobody, and a multi-board satisfier now discharges every
+board it lists — including one it was added to for BOM reasons, which is
+exactly the silent-and-optimistic failure that guard was written to prevent.
+And `items.json` exports `board` as one string (render.py:574), so imported
+artifacts and every downstream consumer change shape. What could silently go
+wrong is the coverage half specifically: adding a board to a shared component's
+list to make it show up on a page would also let that component satisfy or
+address that board's requirements, with no warning anywhere. This option is
+the one that makes display and counting inseparable in the worst possible
+direction.
+
+**Option (c) — derive membership from links.** An item with no board of its
+own is shown on every board whose items link to it. No new syntax, no new
+manifest entry, no author to remember anything, and it is precisely the fact
+the finding is about — the boards that use it are the boards that link to it.
+`PartUsage.boards` (model.py:336-340) already does this for parts, derived
+from the naming items' boards, and the shared case is the one it renders as
+"—". But two things make it a bad *rule* even though it is a good *report*.
+First, "shown on" then has to mean "counted in" or not, and there is no
+principled answer: if a shared component appears on Board A's parts page
+because Board A links to it, does it appear on Board A's coverage page,
+in Board A's summary totals, in the release gate? Whatever is chosen, the
+answer arrives from a link the author typed for a different reason. Second,
+the incidental-link risk is real and one-directional: one `references:` to a
+shared note from a Board A decision, written three months ago and now
+half-true, puts that note on Board A's pages forever, and — worse — the
+inverse, a board that legitimately uses a part but names it in prose rather
+than in a link, still doesn't get it. `workspaces.lint_cross_workspace_references`
+(workspaces.py:92-127) is the precedent for keeping derived edges out of
+scoping decisions: it iterates `item.links` exclusively and its docstring says
+so in as many words (workspaces.py:102-106), because a derived relationship is
+not a declared dependency. Use it as a diagnostic — "this unboarded item is
+linked from board-a and board-b; consider `includes:` on both" — never as the
+mechanism.
+
+**Option (d) — leave it, and link out.** Shared items stay project-wide; a
+board page that wants them links to `parts.html#part-...` by hand, the way
+`item.html.j2:110` already links "also used elsewhere". The honest cost: the
+author has to know the gap exists in order to work around it, and the
+workaround is a hand-maintained link in prose that no build check will notice
+when it rots, on every board, for every shared item — the exact class of
+thing refdes normally makes a mechanism for. It also leaves `nav.scope_reports`
+(nav.py:88-90) free to write no `parts-<board>.html` at all for a board whose
+only parts are shared, so the page the link-out lives on may not exist. What
+it buys is zero new semantics and zero risk of a shared part being counted
+where it shouldn't be — which is a real argument under this project's
+"refuse rather than guess" posture, and the reason this is a decision rather
+than an obvious fix.
+
+**Recommendation: (a), display-only, with (c) demoted to a diagnostic.** A
+board names the shared groups it includes; membership follows; the predicate
+lives in the five filter sites named above; nothing about the manifest, the
+seals, the drift warning, the token lint, or `items.json` changes, because
+none of them is asked to hold more than one board. Coverage stays exactly
+where finding 24 put it — declared on the board, scored per (item, board) —
+and `includes:` carries no obligation and emits no coverage warning. The
+question I am least sure about, and would want settled before implementation:
+whether `includes:` targets only `group` items or also individual ids. Groups
+keep it symmetrical with `conforms_to:` and give one place to maintain a
+platform BOM; ids are what a two-board project with three shared parts
+actually wants to write, and forcing a `GRP-` item to hold three components is
+ceremony. My lean: groups only, because the asymmetry between two
+board-declared list keys would be a worse tax than the ceremony, and a
+three-part group is cheap. Second uncertainty: whether `summary_payload`'s
+orphan and margin tables should include included-but-not-owned items — they
+are computed from the same `local` list (render.py:363-367), so whatever
+`_in_scope` decides flows there automatically, and "displayed but not counted"
+may not be separable without a second predicate. That is the design question
+this finding should be answered on.
+
+**Status: outstanding — awaiting decision.** Nothing here is implemented; every
+filter site above is as cited, and `includes:` appears nowhere in the package.
+The decision requested is (a)/(b)/(c)/(d) plus the two sub-questions above.
+
+**Local model (not decided — my read): not suitable.** The code change is
+small and the display half is loud, but the correctness claim is "this item is
+now visible on exactly the boards that use it and counted on none of them",
+which is a claim about absences in five filter sites and every page and report
+built from them — and the failure mode of getting it wrong is the project's
+characteristic one: a board's parts page or summary quietly reporting a BOM
+that is not the board's. The
+`_board_gate` interaction in particular (build.py:611-623) turns a display
+feature into a coverage hole if the two predicates are conflated, and no test
+that a delegating prompt would think to write is likely to catch that
+conflation in all five filter sites at once.
+
+---
+
 ## Surrogate keys — remaining layers
 
 `docs/design/keys.md` §1 (key format), §2 (minting), §3 (composite
