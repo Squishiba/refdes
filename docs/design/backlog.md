@@ -318,9 +318,20 @@ source file and board, `editors/vscode/extension.js`); finding 9 as
 finding 10 as `next_ids` in the index payload (`payload["next_ids"]`,
 `src/refdes/render.py`); and finding 13 in `1cf3e88`.
 
-**Status: design draft, not decided.** [`browser-editor.md`](browser-editor.md)
-compares the browser/editor shapes and recommends a local `refdes serve` with
-a separate `/edit/` shell over the same plain files. No implementation exists.
+**Status: architecture decided (2026-09-16); remaining work is v1 scope, not
+shape.** [`browser-editor.md`](browser-editor.md) settled on option B — a local
+`refdes serve` whose rendered site is the preview, with a separate `/edit/`
+application over the same plain files, so `_site/` stays static and the
+“Edit this item” affordance exists only while the server runs. Its **Decisions**
+section records the calls that followed from that, and **What v1 must deliver**
+is the checklist to build against. Two items there are what make this more than
+a form, and both are the author's own stated pain points: **filtering** as a
+first-class surface (type, board, workspace, tag, source file, coverage stage,
+check state, blocked state, link relationships, and free text — combinable,
+counted, and held in the URL), and **identity handled for the author** (no
+hand-typed IDs anywhere: `next_ids` offered at creation, allocation
+authoritative under the save lock, link composites written from a picked key).
+No implementation exists.
 
 **Local model: not suitable.** This one survives the revised rule unchanged:
 it is design-judgment-heavy UI work with no mechanical acceptance test —
