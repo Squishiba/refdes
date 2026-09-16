@@ -821,7 +821,10 @@ hashes only, never extracted values. The blocker that parked this finding —
 finding 25's Part 2, a citation being able to name a repo-local file — has
 landed on `main` (`2001801`, `4496053`, 2026-09-15), so the finding is no
 longer parked; only review of the draft design stands between it and
-implementation.
+implementation. The draft also answers a question someone will ask again:
+item-based aggregation (summing a field over a set of items) was considered
+and rejected, for the completeness reason recorded in
+`docs/design/calc-sources.md` §2.
 **Design:** `docs/design/calc-sources.md` is the draft implementation specification, awaiting Jared's review.
 
 **Local model (not decided — my read): not suitable.** The mechanical parts

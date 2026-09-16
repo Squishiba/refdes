@@ -157,7 +157,108 @@ same-row `value` cell is extracted.
 
 ---
 
-## 2. CSV reader contract
+## 2. Why refdes does not sum over items
+
+A log entry that wants a total — the quiescent and load currents of a design,
+say — has no way to get one from items. `{{index}}` filters by `by`, `type`,
+`board`, and `tag` and renders one ID-and-title row per item, with no totals
+and no value columns (`src/refdes/blocks.py:417-419`; only those two cells are
+emitted, `src/refdes/blocks.py:197-203`). Calc functions consume the `Value`s
+of one expression: `FUNCTIONS` is `sqrt`, `abs`, `min`, `max`, `exp`, `ln`,
+`log10`, and `MULTI_ARG` admits only `min`/`max` (`src/refdes/calc.py:130-173`)
+— no function takes a set of items. Calc variables are per item, never shared
+between items (`docs/math.md:30-31`). The obvious-looking answer — teach refdes
+to sum a field across a set of items — is the one to reject, and this section
+records why.
+
+### The completeness argument
+
+A total is only correct if the set it sums is complete, and refdes cannot
+verify completeness of its own item set. “Every component item on board A”
+totals the parts that happen to have been marked up in `items/`; the number
+looks authoritative and is silently wrong the moment a part exists in the
+schematic but not in `items/`. Refdes has no schematic, netlist, or BOM to
+compare against, so it would be asserting something it cannot check — this
+project's characteristic failure: a confident answer with nothing verifying it.
+A committed budget CSV or an EDA BOM export, by contrast, is maintained by
+someone whose job it is that the set is complete, and refdes hash-pins it. An
+omitted part moves the number, and the number's change is a reviewed diff; an
+omitted item sums to nothing and nothing notices.
+
+### The division of labour
+
+- **Items** hold the components that carry an argument — a decision behind
+  them, a datasheet cited, a bound they must meet.
+- **A source file** holds the exhaustive tally — a power-budget CSV, an
+  exported BOM — maintained by whoever owns the board.
+- **Refdes** carries the claim: its value, its provenance, and whether it still
+  holds.
+
+Refdes is not a component database. That boundary is what keeps it from
+becoming one.
+
+### Worked example: a rail budget in a log entry
+
+The design's quiescent and load currents live on component items, each with its
+own argument, so neither `{{index}}` nor calc can total them. The log entry
+that records the rail budget instead pulls the two totals from the committed
+power budget and leaves the arithmetic where a `checks:` entry can verify it:
+
+````markdown
+---
+id: LOG-PWR-001
+type: log
+date: 2026-09-16
+summary: Board A 3.3 V rail budget drawn from the committed power budget.
+# … existing fields …
+citations:
+  - path: analysis/power-budget.csv
+    id: power-budget
+checks:
+  - value: P_3v3
+    against: BND-PWR-001
+---
+
+```calc
+I_load : mA = source("analysis/power-budget.csv", "board_a_total_load")
+I_q    : mA = source("analysis/power-budget.csv", "board_a_total_quiescent")
+P_3v3  : W  = 3.3 V * (I_load + I_q)
+```
+````
+
+As in section 1's example, this uses the post-phase-4a `log` shape; until the
+decision-to-log merge lands, the identical entry is `type: decision`. Each
+current is one extracted scalar, exactly as this design specifies; the sum is
+refdes-side arithmetic, and the check verifies the total against the rail bound
+instead of asserting it as prose. When the budget changes, `refdes fetch
+--update` prints the extracted-value diff —
+`analysis/power-budget.csv: board_a_total_load: 1.85 -> 2.3` — and the check
+re-runs against `BND-PWR-001` on the next build: the author sees the changed
+input and its consequence as one reviewed change, the same drift visibility as
+section 5's command matrix.
+
+### Decision record
+
+**Decision (Jared, 2026-09-16): item-based aggregation — summing a field over
+a set of items — was considered and rejected.** The completeness argument above
+is the reason: refdes cannot verify that any set of items it summed was
+complete, so the total would be a claim it cannot check. **Escape hatch:** if
+aggregation is ever wanted, the honest version requires an explicit
+completeness declaration — “this group is the complete set of X” — and a
+maintained source file already provides that declaration for free. The bar for
+revisiting this decision is a case where no such file can exist.
+
+### Alternatives considered
+
+| Alternative | Decision | Why |
+|---|---|---|
+| Give `{{index}}` a totals row | Reject | Sums whichever items happen to exist — the completeness failure — and turns a listing block into a computation. |
+| A calc builtin that sums a field over items | Reject | Same completeness failure, plus cross-item state where calc deliberately has none (`docs/math.md:30-31`; every function consumes one expression's values, `src/refdes/calc.py:130-173`). |
+| Completeness-declared groups, then sum over members | Escape hatch | Requires “this group is the complete set of X” — which a maintained source file already is, for free. Revisit only when no such file can exist. |
+
+---
+
+## 3. CSV reader contract
 
 ### Recommendation
 
@@ -236,7 +337,7 @@ currently used, and avoids needless I/O.
 
 ---
 
-## 3. XLSX reader: optional follow-on
+## 4. XLSX reader: optional follow-on
 
 ### Recommendation
 
@@ -299,7 +400,7 @@ value; fetch must error rather than evaluate the formula or coerce `None`.
 
 ---
 
-## 4. Lockfile, commands, and drift lifecycle
+## 5. Lockfile, commands, and drift lifecycle
 
 ### Recommendation
 
@@ -381,7 +482,7 @@ recorded is precisely the hidden state this design avoids.
 
 ---
 
-## 5. Units and the 1000x trap
+## 6. Units and the 1000x trap
 
 ### Recommendation
 
@@ -430,7 +531,7 @@ remain the actual safety mechanisms.
 
 ---
 
-## 6. Reader extension seam
+## 7. Reader extension seam
 
 ### Recommendation
 
@@ -491,7 +592,7 @@ boundary.
 
 ---
 
-## 7. Schematic and netlist sources: drift checks, not V1 calculators
+## 8. Schematic and netlist sources: drift checks, not V1 calculators
 
 ### Recommendation
 
@@ -534,7 +635,7 @@ export CSV/netlist first.
 
 ---
 
-## 8. Hashes, seals, baselines, imports, and equations
+## 9. Hashes, seals, baselines, imports, and equations
 
 ### Recommendation: source values enter the item content hash
 
@@ -616,7 +717,7 @@ source-derived `Value` passed as an ordinary argument.
 
 ---
 
-## 9. Implementer checklist and required tests
+## 10. Implementer checklist and required tests
 
 ### V1 scope
 
@@ -707,7 +808,7 @@ not reader internals.
 
 ---
 
-## 10. Open questions for Jared
+## 11. Open questions for Jared
 
 1. **Does “builds read the lockfile only” supersede Finding 25 Part 2's current
    local-file hash verification?**
@@ -759,7 +860,7 @@ not reader internals.
      explicitly (`Sheet1!case_rise`); an unqualified name that exists only as a
      sheet-scoped name in exactly one sheet may still resolve, while an
      unqualified name matching sheet-scoped names in two or more sheets is an
-     ambiguity error, never a pick. Sections 3 and 9 carry the corresponding
+     ambiguity error, never a pick. Sections 4 and 10 carry the corresponding
      rules and named tests. **Escape hatch:** if implementation shows this is
      much larger than it looks, it may be deferred out of the first XLSX
      release; the reason must be written down here before that deferral
