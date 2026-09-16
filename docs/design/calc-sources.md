@@ -241,18 +241,21 @@ currently used, and avoids needless I/O.
 ### Recommendation
 
 Implement XLSX only after CSV is proven in a real project, as an optional
-`xlsx` extra that depends on `openpyxl`. It uses a workbook **defined name**, not
-a sheet/cell address:
+`xlsx` extra that depends on `openpyxl`. It uses a defined name, workbook- or
+sheet-scoped, never a sheet/cell address:
 
 ```calc
 thermal_rise : delta_degC = source("analysis/thermal-model.xlsx", "case_rise")
 ```
 
-The source key resolves a workbook-scoped defined name. It must resolve to one
-cell containing a finite numeric cached value. The reader loads with
-`data_only=True`; it does not calculate formulas. It returns a decimal derived
-from the returned Python numeric value and rejects text, boolean, date/time,
-error, blank, formula-without-cache, multi-cell ranges, and external references.
+The source key resolves a workbook-scoped or sheet-scoped defined name; it must
+resolve to one cell containing a finite numeric cached value. A sheet-scoped
+name is qualified in the key as `Sheet1!case_rise` (a defined-name key, not a
+cell address); the rules for unqualified keys are in the table below. The reader
+loads with `data_only=True`; it does not calculate formulas. It returns a
+decimal derived from the returned Python numeric value and rejects text,
+boolean, date/time, error, blank, formula-without-cache, multi-cell ranges, and
+external references.
 
 `openpyxl` is not currently a project dependency; `pyproject.toml:34-42` lists
 only four runtime dependencies and no `xlsx` extra. This feature therefore does
@@ -273,8 +276,10 @@ value; fetch must error rather than evaluate the formula or coerce `None`.
 | Case | Proposed result |
 |---|---|
 | Exactly one workbook-scoped name with one internal, single-cell destination | Read the one cached cell under `data_only=True`. |
-| Workbook-scoped name missing | Extraction error. |
-| Sheet-scoped name | Extraction error in V1 XLSX. The calc key lacks a sheet qualifier, and allowing same spelling on multiple sheets would be ambiguous. |
+| Qualified sheet-scoped name, e.g. `Sheet1!case_rise`, with one internal, single-cell destination | Read the one cached cell under `data_only=True`. The part before `!` must name an actual sheet; the part after is matched with the same defined-name rules as an unqualified key. A qualified key never falls back. |
+| Unqualified key with no workbook-scoped match, sheet-scoped in exactly one sheet | Read the one cached cell under `data_only=True`. |
+| Unqualified key with no workbook-scoped match, sheet-scoped in two or more sheets | Ambiguity error naming every sheet that defines the name; never a pick. |
+| No defined name matches the key after the rules above | Extraction error. |
 | Two defined names differing only by case | Use `openpyxl`'s exact name identity; source keys remain case-sensitive. Any ambiguity reported by the library is an error. |
 | Multi-cell range, union of cells/ranges, 3-D range, table/structured reference, or external workbook reference | Extraction error. This feature extracts one scalar, not an aggregate or query. |
 | Literal numeric cell | Accepted if finite. |
@@ -633,8 +638,8 @@ source-derived `Value` passed as an ordinary argument.
 
 ### Later
 
-- [ ] Optional `xlsx` extra using workbook-scoped, one-cell defined names and
-  cached values only.
+- [ ] Optional `xlsx` extra using workbook- and sheet-scoped, one-cell defined
+  names and cached values only.
 - [ ] Separate `source_checks:` drift-check contract and first LTspice/CSV
   BOM/netlist reader where a real project provides fixtures.
 - [ ] External reader entry points only after two in-tree readers stabilize the
@@ -686,11 +691,18 @@ not reader internals.
 16. `test_source_no_write_never_creates_or_updates_lockfile` — extending the
     existing no-write snapshot fixture.
 17. `test_xlsx_defined_name_requires_one_workbook_scoped_cell` — when XLSX ships:
-    reject sheet-scoped, missing, external, and multi-cell names.
-18. `test_xlsx_formula_without_cached_value_errors` — fixture with formula XML
+    exactly one workbook-scoped, single-cell defined name resolves; missing names
+    and external/multi-cell destinations error.
+18. `test_xlsx_sheet_scoped_name_resolves_with_qualified_key` — `Sheet1!case_rise`
+    reads the one cached cell; an unqualified key that is sheet-scoped in exactly
+    one sheet also resolves.
+19. `test_xlsx_unqualified_sheet_scoped_name_ambiguous_between_sheets_errors` —
+    an unqualified key matching sheet-scoped names in two or more sheets is an
+    ambiguity error naming every matching sheet; it never picks one.
+20. `test_xlsx_formula_without_cached_value_errors` — fixture with formula XML
     `<f>…</f><v/>`; `data_only=True` `None` is never treated as zero.
-19. `test_xlsx_error_string_and_boolean_cells_error` — no coercion.
-20. `test_source_reader_cannot_write_source_file` — snapshot bytes before/after
+21. `test_xlsx_error_string_and_boolean_cells_error` — no coercion.
+22. `test_source_reader_cannot_write_source_file` — snapshot bytes before/after
     `fetch --update` for CSV and later XLSX/EDA fixtures.
 
 ---
@@ -738,10 +750,20 @@ not reader internals.
 
 6. **When XLSX lands, should sheet-scoped defined names be allowed through a
    qualified key such as `Sheet1!case_rise`?**
-   - **A. No in first XLSX release (recommended).** Workbook-scoped names are
-     unambiguous and make key syntax portable.
-   - B. Add qualification. It handles some workbooks but introduces spelling and
-     renaming rules; demand a real fixture first.
+   - **A. No in first XLSX release.** Workbook-scoped names are unambiguous and
+     make key syntax portable.
+   - **B. Add qualification.** It handles some workbooks but introduces spelling
+     and renaming rules; demand a real fixture first.
+   - **Decision (Jared, 2026-09-16): B — sheet-scoped defined names are
+     supported in the first XLSX release.** The key must name the sheet
+     explicitly (`Sheet1!case_rise`); an unqualified name that exists only as a
+     sheet-scoped name in exactly one sheet may still resolve, while an
+     unqualified name matching sheet-scoped names in two or more sheets is an
+     ambiguity error, never a pick. Sections 3 and 9 carry the corresponding
+     rules and named tests. **Escape hatch:** if implementation shows this is
+     much larger than it looks, it may be deferred out of the first XLSX
+     release; the reason must be written down here before that deferral
+     happens.
 
 7. **When a source value changes by exactly 1000x, should fetch warn?**
    - **A. Yes, advisory only (recommended).** It makes the canonical mW/W trap
