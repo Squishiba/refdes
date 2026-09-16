@@ -1,0 +1,55 @@
+Entry summary typography (chunk 2 B)
+
+Problem: an entry's summary rendered at 15px over a 14px body — 1px apart, same
+weight — so an entry opened as a wall of near-identical text instead of
+summary → meta → body. The task: make the summary read as the heading of its
+entry, ~17-18px semibold with tighter leading, body unchanged at 14px.
+
+Change: one rule, src/refdes/templates/assets/style.css:354.
+
+  before  .tl-summary { margin-top: 4px; font-size: 15px; }
+  after   .tl-summary { margin-top: 4px; font-size: 17.5px; font-weight: 600;
+                        line-height: 1.3; }
+
+Why these numbers:
+- 17.5px sits between the 14px body and the 18px `h2` the timeline lives under
+  (style.css:45), so the summary out-ranks its own body without competing with
+  the page's real section heading. h1 is 26px, h3 is 14px uppercase muted.
+- 600 is this stylesheet's established semibold — `.tl-date`, `.option-name`,
+  `.draft-banner` already use it (`.card-num` at 650 is the only heavier one).
+- line-height 1.3 against the base 15px/1.6 (style.css:36) keeps a two-line
+  summary reading as one heading rather than a paragraph.
+- No font-size tokens exist in :root (only colours and --mono), so px matches
+  the file's own convention; no colour is set, so the summary keeps inheriting
+  --fg, which is the token the dark block flips.
+
+Checked, not assumed:
+- Dark mode: the `prefers-color-scheme: dark` block restates :root colours only
+  and never mentions .tl-summary — nothing to undo, nothing to mirror.
+- Print: the `@media print` block hides nav chrome and unwides main; it sets no
+  font-size for the timeline, so the hierarchy prints as it screens.
+- Narrow width: the width rules are max-width 720 (trace columns) and min-width
+  720/860/980 (table layout, sidenav, toc); none touch .tl-*. 17.5px is the h2
+  size, which already ships at every width.
+- All three timelines share the class — templates/log.html.j2:24 and the thread
+  timeline in templates/item.html.j2:76 — so one rule covers the log page, an
+  item's own page and a thread panel.
+
+Tests (tests/test_render_assets.py, "entry summary typography"): the suite had
+no CSS-level test before this — it only asserted style.css was copied. These
+parse the shipped stylesheet instead of eyeballing it:
+- test_entry_summary_outranks_the_body_text_it_heads — summary font-size > body
+  font-size, summary font-weight > body font-weight (body declares none, so 400),
+  body still exactly 14px, summary leading < 1.5.
+- test_no_media_rule_or_colour_overrides_the_entry_summary — .tl-summary is
+  declared once, appears in no @media block (print, dark, or width), and sets no
+  colour.
+- test_the_summary_class_reaches_the_log_page_and_the_thread_timeline — the
+  rendered log page and an item page's thread timeline both wrap the summary in
+  .tl-summary, so the rule lands everywhere the claim says it does.
+
+Verification: 1047 tests pass. Building this repo and docs-site/ from a clean
+export of main (783782b) and from this branch and hashing every output file
+gives 78 files compared, 2 differ — assets/style.css in each site, which is the
+change, and no HTML.
+Changelog: changelog.d/entry-summary-typography.changed.md

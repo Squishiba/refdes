@@ -8,6 +8,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 
 import pytest
 from conftest import write_project_config
@@ -925,6 +926,113 @@ def test_explicit_item_reference_does_not_nest_duplicate_links(blocks_project):
     html = project.item_by_id("REQ-001").body_html
     assert html.count("<a") == 1
     assert '<a class="ref" href="con-001.html" data-ref="CON-001">CON-001</a>' in html
+
+
+# ------------------------------------------------------- entry summary typography
+
+
+def _theme_css() -> str:
+    path = os.path.join(REPO, "src", "refdes", "templates", "assets", "style.css")
+    with open(path, encoding="utf-8") as fh:
+        return fh.read()
+
+
+def _css_rule(css: str, selector: str) -> dict[str, str]:
+    """A top-level rule's declarations as {property: value}."""
+    match = re.search(rf"^{re.escape(selector)}\s*\{{([^}}]*)\}}", css, re.MULTILINE)
+    assert match, f"{selector} is not in the theme stylesheet"
+    decls = {}
+    for decl in match.group(1).split(";"):
+        if ":" in decl:
+            name, _, value = decl.partition(":")
+            decls[name.strip()] = value.strip()
+    return decls
+
+
+def _media_blocks(css: str) -> list[tuple[str, str]]:
+    """(condition, body) for every @media block, braces balanced."""
+    blocks = []
+    for match in re.finditer(r"@media([^{]*)\{", css):
+        depth, i = 1, match.end()
+        while depth:
+            if css[i] == "{":
+                depth += 1
+            elif css[i] == "}":
+                depth -= 1
+            i += 1
+        blocks.append((match.group(1).strip(), css[match.end():i - 1]))
+    return blocks
+
+
+def _px(value: str) -> float:
+    return float(value.strip().removesuffix("px"))
+
+
+def test_entry_summary_outranks_the_body_text_it_heads():
+    """A 15px summary over a 14px body read as one more line of prose, not as
+    the heading of the entry. It has to carry a larger size and a heavier weight
+    than the body under it — and the body stays exactly where it was."""
+    css = _theme_css()
+    summary, body = _css_rule(css, ".tl-summary"), _css_rule(css, ".tl-body")
+
+    assert _px(summary["font-size"]) > _px(body["font-size"])
+    assert float(summary.get("font-weight", 400)) > float(body.get("font-weight", 400))
+    assert _px(body["font-size"]) == 14.0
+    # Tighter leading than running text: a heading is read, not waded through.
+    assert float(summary["line-height"]) < 1.5
+
+
+def test_no_media_rule_or_colour_overrides_the_entry_summary():
+    """The hierarchy has to hold on paper, on a phone and in the dark palette.
+    It does by being declared once, outside every @media block, and setting no
+    colour of its own — so it inherits --fg, which is the token that flips."""
+    css = _theme_css()
+
+    assert len(re.findall(r"^\.tl-summary\s*\{", css, re.MULTILINE)) == 1
+    overridden = [cond for cond, body in _media_blocks(css) if "tl-summary" in body]
+    assert overridden == []
+    assert "color" not in _css_rule(css, ".tl-summary")
+
+
+SUMMARY_TYPO_SCHEMA = """\
+site: {title: "Summary typography", out: _site}
+id: {width: 3, ledger: .refdes/ids.yaml}
+link_types:
+  follows: { inverse: followed_by, label: Follows }
+types:
+  log:
+    prefix: LOG
+    fields:
+      date: { type: date, required: true }
+      summary: { type: text, required: true }
+    links:
+      follows: [log]
+"""
+
+
+def test_the_summary_class_reaches_the_log_page_and_the_thread_timeline(tmp_path):
+    """Typography is worth nothing on a page that does not use the class. The
+    log page and an item page's thread timeline each wrap the summary in
+    `.tl-summary`, so the one rule styles the heading everywhere it appears."""
+    write_project_config(tmp_path, SUMMARY_TYPO_SCHEMA)
+    items = tmp_path / "items"
+    items.mkdir()
+    (items / "log.yaml").write_text(
+        "defaults: { type: log }\n"
+        "items:\n"
+        "  - id: LOG-001\n    date: 2026-01-05\n    summary: First entry.\n"
+        "  - id: LOG-002\n    date: 2026-01-06\n    summary: Second entry.\n    follows: [LOG-001]\n",
+        encoding="utf-8",
+    )
+
+    out = _build_and_render(tmp_path)
+    with open(os.path.join(out, "log.html"), encoding="utf-8") as fh:
+        log_html = fh.read()
+    with open(os.path.join(out, "log-002.html"), encoding="utf-8") as fh:
+        item_html = fh.read()
+
+    assert '<div class="tl-summary">First entry.</div>' in log_html
+    assert '<div class="tl-summary">Second entry.</div>' in item_html
 
 
 # ---------------------------------------------------------- preview-data payload safety
