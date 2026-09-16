@@ -3,5 +3,8 @@
   // point at the executable inside it rather than relying on PATH.
   "refdes.command": ".venv\\Scripts\\refdes.exe",
   "refdes.checkOnSave": true,
-  "refdes.showCalcResults": true
+  "refdes.showCalcResults": true,
+  // Design docs are hand-formatted; a formatter that realigns Markdown tables
+  // turns a one-line edit into a whole-table diff and buries the real change.
+  "[markdown]": { "editor.formatOnSave": false }
 }
