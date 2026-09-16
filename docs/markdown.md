@@ -125,6 +125,16 @@ text, falling back to the `alt` text when omitted. `alt` always stays on the
 image renders exactly as it always has: a bare `<img>`, no `<figure>`
 wrapper.
 
+A `<figure>` needs a paragraph of its own. Where the same suffix lands on an
+image that is **not** alone in its paragraph — inline with a sentence, in a
+list item, in a table cell — there is nothing to wrap, so the suffix is never
+left on the page as literal text: `width` is applied to the `<img>` itself,
+and `caption`/`id`, which only mean something on a `<figure>`, are dropped
+with a warning naming file:line and item id and telling you to put the image
+in a paragraph of its own. An unknown attribute name warns the same way.
+Braces that aren't an attribute suffix at all — `the set {a, b}` — are
+ordinary prose and are never touched.
+
 `id` is optional, exactly like `width`/`caption`. Give a figure one and two
 things follow automatically:
 

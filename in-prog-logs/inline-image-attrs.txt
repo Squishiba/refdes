@@ -1,0 +1,62 @@
+# Inline image attribute suffixes (chunk 1)
+
+## Task
+
+`{width=...}` on an image was silently dropped as literal text whenever the
+image was not alone in its paragraph — `See this: ![alt](x.png){width=50%}`,
+`- ![alt](x.png){width=50%}`. `FIGURE_RE` only matched a whole paragraph that
+was nothing but one `<img>` plus the suffix, so `_apply_figure_attrs` never
+saw the other positions and the braces reached the page as text.
+
+## What was done
+
+- `src/refdes/build.py`
+  - `INLINE_FIGURE_RE` (build.py:74): `<img ...>` followed by `{...}` anywhere.
+  - `_image_suffix_attrs` (build.py:1593): the suffix parse the figure path
+    already did, factored out so both paths parse identically.
+  - `_apply_inline_image_attrs` (build.py:1606): runs after `FIGURE_RE.sub`
+    inside `_apply_figure_attrs` (build.py:1720-1721). Applies `width=` as an
+    inline `style` on the `<img>`; warns and drops `caption=`/`id=` (no
+    `<figure>` inline to caption or number) and any unknown attribute name.
+    Never leaves the braces in the output.
+  - Braces with no `=` in them (`the set {a, b}`) are prose, not a suffix, and
+    pass through completely untouched.
+- `docs/markdown.md` "Width and captions": documents the inline behaviour.
+- `changelog.d/inline-image-attrs.fixed.md`.
+
+## Rendering paths checked (item 4)
+
+`_apply_figure_attrs` is called from exactly two places, and every rendered
+body in the site comes from one of them:
+
+- `render_bodies` — build.py:1855, item bodies (`item.body_html`).
+- `render_pages` — build.py:1886, narrative page bodies (`page.body_html`).
+
+Everything downstream consumes those two fields, so log entries
+(`templates/log.html.j2:41-42`, fed by `render.py:910`, `:1006`, `:1077`),
+item pages (`item.html.j2:125-126`, `render.py:941`), document pages
+(`document.html.j2:77-78`, `render.py:953`), per-board and per-workspace
+documents (`render.py:983`, `:1055`) and narrative pages (`page.html.j2:19`,
+`render.py:863`) all get the fix for free. The thread panel
+(`render.py:260-348`, `item.html.j2:36-70`) renders verdict fields and entry
+references only — no `body_html` at all — so there is no image path there to
+fix.
+
+## Verification
+
+- New tests in `tests/test_render_assets.py` (all confirmed failing on main
+  first, except the two regression guards which pass before and after by
+  design).
+- Full suite: 1042 passed.
+- Site diff, `git archive main` export in `.scratch/main-export` vs this
+  branch, both projects: 78 files compared, 1 differ — `markdown.html`, which
+  is the docs paragraph this change adds. Nothing else in either site changed.
+
+## Notes
+
+- `tar` is not on this shell's allowlist, so the archive export unpacks with
+  python's `tarfile` (`.scratch/export_ref.py`); the archive itself is a plain
+  `git archive --format=tar main`.
+- Unknown attributes on a *paragraph-only* figure are still ignored silently,
+  exactly as before — warning there too would be consistent, but it is outside
+  this chunk's "byte-identical for working cases" mandate. Worth a follow-up.

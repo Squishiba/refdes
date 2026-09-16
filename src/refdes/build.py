@@ -65,6 +65,13 @@ _URL_SCHEME_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9+.\-]*:|^//")
 FIGURE_RE = re.compile(
     r'<p>\s*(<img\b[^>]*?>)\s*\{([^{}]*)\}\s*</p>', re.IGNORECASE
 )
+# The same suffix on an image that is *not* alone in its paragraph -- inline
+# with text, in a list item, in a table cell. There is no `<figure>` here to
+# carry a width, caption, or number, so `width=` goes on the `<img>` itself and
+# the rest of the suffix is dropped with a warning: what must never happen is
+# the author's markup reaching the page as literal text. Braces with no `=` in
+# them (`the set {a, b}`) are prose, not a suffix, and pass through untouched.
+INLINE_FIGURE_RE = re.compile(r'(<img\b[^>]*?>)\s*\{([^{}]*)\}', re.IGNORECASE)
 FIGURE_ATTR_RE = re.compile(r'([A-Za-z_][\w-]*)\s*=\s*(?:"([^"]*)"|(\S+))')
 IMG_ALT_RE = re.compile(r'\balt="([^"]*)"', re.IGNORECASE)
 # A resolved figure's number, filled in once the whole rendered document is
@@ -1583,6 +1590,71 @@ def _process_images(
     return IMG_SRC_RE.sub(swap, html)
 
 
+def _image_suffix_attrs(attrs_text: str) -> dict[str, str]:
+    """Parse the inside of an image's `{...}` attribute suffix.
+
+    markdown-it escapes '"' in plain text the same as '&', '<', '>', so the
+    quoted-value delimiters in `attrs_text` are themselves `&quot;` by the time
+    a regex ever sees them; unescape first to parse the attributes.
+    """
+    return {
+        m.group(1).lower(): m.group(2) if m.group(2) is not None else m.group(3)
+        for m in FIGURE_ATTR_RE.finditer(html_entities.unescape(attrs_text))
+    }
+
+
+def _apply_inline_image_attrs(
+    html: str,
+    project: Project,
+    where_file: str,
+    where_line: int | None = None,
+    where_id: str | None = None,
+) -> str:
+    """Honour what a `{...}` suffix can mean on an image that is not alone in
+    its paragraph, and never leave the suffix on the page as text.
+
+    Runs after `FIGURE_RE`'s pass, so anything still carrying a suffix here is
+    an inline image: `width=` becomes an inline `style` on the `<img>`, and
+    `caption=`/`id=` -- which only mean something on a `<figure>`, and there is
+    no `<figure>` inline -- are dropped with a warning naming file:line and
+    item id, and saying how to get them instead. An unknown attribute name gets
+    the same treatment: a warning, not silence, not a build failure.
+    """
+
+    def swap(match: re.Match) -> str:
+        img_tag, attrs_text = match.group(1), match.group(2)
+        if "=" not in attrs_text:
+            # `{a, b}` after an image is a set in prose, not an attribute
+            # suffix: leave the text exactly as the author wrote it.
+            return match.group(0)
+        attrs = _image_suffix_attrs(attrs_text)
+        for name in attrs:
+            if name == "width":
+                continue
+            if name in ("caption", "id"):
+                want = "captioned figure" if name == "caption" else "numbered, referenceable figure"
+                project.warn(
+                    f"{name}= is ignored on an inline image; put the image in a "
+                    f"paragraph of its own to get a {want}",
+                    file=where_file, line=where_line, item_id=where_id,
+                )
+            else:
+                project.warn(
+                    f"{name!r} is not an image attribute and is ignored",
+                    file=where_file, line=where_line, item_id=where_id,
+                )
+        width = attrs.get("width")
+        if not width:
+            return img_tag
+        style = f' style="width: {_esc(width)}"'
+        # markdown-it always closes an `<img>` with ` />`; keep that spacing.
+        if img_tag.endswith("/>"):
+            return f"{img_tag[:-2].rstrip()}{style} />"
+        return f"{img_tag[:-1].rstrip()}{style}>"
+
+    return INLINE_FIGURE_RE.sub(swap, html)
+
+
 def _apply_figure_attrs(
     html: str,
     project: Project,
@@ -1594,10 +1666,13 @@ def _apply_figure_attrs(
     register an explicit `id=` in the project-wide figure registry
     (docs/design/index-blocks.md §9).
 
-    Only a paragraph containing nothing but one image immediately followed by a
-    `{...}` suffix is touched -- matched the same way `_process_images` and
-    `_linkify` scan rendered HTML with a regex rather than a markdown-it plugin.
-    With no suffix the image passes through completely untouched. `alt` always
+A paragraph containing nothing but one image immediately followed by a `{...}`
+suffix becomes a real `<figure>`. An image with a suffix anywhere else -- inline
+with text, in a list item, in a table cell -- is handled by
+`_apply_inline_image_attrs`, which this function runs over the result.
+Matched the same way `_process_images` and `_linkify` scan rendered HTML with a
+regex rather than a markdown-it plugin.
+With no suffix the image passes through completely untouched. `alt` always
     stays on the `<img>`; `caption` falls back to it when not given. `id=` is
     optional exactly like `width=`/`caption=` already are -- a figure with no
     id renders exactly as it does today, numbered nowhere, referenced by
@@ -1608,15 +1683,9 @@ def _apply_figure_attrs(
 
     def swap(match: re.Match) -> str:
         img_tag, attrs_text = match.group(1), match.group(2)
-        # markdown-it escapes '"' in plain text the same as '&', '<', '>', so the
-        # quoted-value delimiters in `attrs_text` are themselves `&quot;` by the
-        # time this regex ever sees them. Unescape first to parse the attributes,
-        # then re-escape whatever ends up in the caption before it goes back into
-        # the page as HTML text.
-        attrs = {
-            m.group(1).lower(): m.group(2) if m.group(2) is not None else m.group(3)
-            for m in FIGURE_ATTR_RE.finditer(html_entities.unescape(attrs_text))
-        }
+        # Parsed once unescaped, then re-escaped whatever ends up in the caption
+        # before it goes back into the page as HTML text.
+        attrs = _image_suffix_attrs(attrs_text)
         alt_match = IMG_ALT_RE.search(img_tag)
         alt = alt_match.group(1) if alt_match else ""  # already HTML-escaped text
         caption = _esc(attrs["caption"]) if "caption" in attrs else alt
@@ -1648,7 +1717,8 @@ def _apply_figure_attrs(
         figcaption = f"<figcaption>{num_marker}{caption}</figcaption>" if (caption or num_marker) else ""
         return f'<figure class="md-figure"{id_attr}{style}>{img_tag}{figcaption}</figure>'
 
-    return FIGURE_RE.sub(swap, html)
+    html = FIGURE_RE.sub(swap, html)
+    return _apply_inline_image_attrs(html, project, where_file, where_line, where_id)
 
 
 def assign_figure_numbers(bodies: list[str]) -> dict[str, int]:

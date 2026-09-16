@@ -281,6 +281,143 @@ def test_image_with_no_suffix_is_never_wrapped_in_a_figure(figure_project):
     assert html.count("<figure") == 2
 
 
+# ------------------------------------------------- inline image attribute suffixes
+
+INLINE_FIGURE_ITEM = """\
+---
+id: DEC-A-001
+type: decision
+title: Images with attributes in every position.
+status: accepted
+---
+
+See this: ![inline](figures/present.png){width=50%} in a sentence.
+
+- ![in list](figures/present.png){width=30%}
+
+| a | b |
+| --- | --- |
+| ![in cell](figures/present.png){width=25%} | x |
+
+![captioned inline](figures/present.png){width=40% caption="Not a caption"} trailing text.
+
+![unknown attrs](figures/present.png){flood=3 align=left} trailing text.
+
+Also ![with id](figures/present.png){id="fig-nope"} inline.
+
+![plain](figures/present.png) {a, b} is prose braces, and 50% of it is not markup.
+
+![the curve](figures/present.png){width=60% caption="Figure 3 — the curve"}
+"""
+
+
+@pytest.fixture
+def inline_figure_project(tmp_path):
+    write_project_config(tmp_path, COVERAGE_SCHEMA)
+    items = tmp_path / "items"
+    items.mkdir()
+    (items / "dec-a.md").write_text(INLINE_FIGURE_ITEM, encoding="utf-8")
+    figures = items / "figures"
+    figures.mkdir()
+    (figures / "present.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+    return tmp_path
+
+
+def _inline_rendered(project_root):
+    project = load_project(config_path=str(project_root / "refdes-project.yaml"))
+    parse.load_items(project)
+    build_mod.build(project)
+    return project, project.item_by_id("DEC-A-001").body_html
+
+
+def test_inline_image_with_text_honours_width_and_leaves_no_literal_braces(inline_figure_project):
+    """`![alt](x.png){width=50%}` inline with text keeps the image, gets the
+    width on the `<img>`, and never shows the suffix as text."""
+    project, html = _inline_rendered(inline_figure_project)
+    digest = _asset_hash(b"\x89PNG\r\n\x1a\n")
+
+    assert f'<img src="assets/items/figures/present.{digest}.png" alt="inline" style="width: 50%" />' in html
+    assert "{width=50%}" not in html
+    assert not project.errors
+
+
+def test_image_in_a_list_item_honours_width_and_leaves_no_literal_braces(inline_figure_project):
+    project, html = _inline_rendered(inline_figure_project)
+
+    assert 'alt="in list" style="width: 30%" />' in html
+    assert "{width=30%}" not in html
+    assert not project.errors
+
+
+def test_image_in_a_table_cell_honours_width_and_leaves_no_literal_braces(inline_figure_project):
+    project, html = _inline_rendered(inline_figure_project)
+
+    assert 'alt="in cell" style="width: 25%" />' in html
+    assert "{width=25%}" not in html
+    assert not project.errors
+
+
+def test_caption_on_an_inline_image_warns_and_is_dropped(inline_figure_project):
+    """There is no `<figure>` to caption inline, so `caption=` is dropped with a
+    warning naming where it was -- not rendered as literal text, and not
+    silently."""
+    project, html = _inline_rendered(inline_figure_project)
+
+    assert 'alt="captioned inline" style="width: 40%" />' in html
+    assert "Not a caption" not in html
+    assert "caption=" not in html
+    warns = [d for d in project.warnings if "caption=" in d.message]
+    assert len(warns) == 1
+    assert "inline image" in warns[0].message
+    assert "paragraph of its own" in warns[0].message
+    assert warns[0].item_id == "DEC-A-001"
+    assert warns[0].file == "items/dec-a.md"
+
+
+def test_id_on_an_inline_image_warns_and_is_dropped(inline_figure_project):
+    """An inline image has no figure to number, so `id=` warns too -- and is not
+    registered, so `[[fig:...]]` still reports it as unknown."""
+    project, html = _inline_rendered(inline_figure_project)
+
+    assert "fig-nope" not in html
+    assert "fig-nope" not in project.figures
+    warns = [d for d in project.warnings if "id=" in d.message]
+    assert len(warns) == 1
+    assert "inline image" in warns[0].message
+
+
+def test_unknown_attribute_on_an_inline_image_warns(inline_figure_project):
+    project, html = _inline_rendered(inline_figure_project)
+
+    assert "flood" not in html and "align" not in html
+    warns = [d.message for d in project.warnings if "flood" in d.message or "align" in d.message]
+    assert len(warns) == 2
+    assert not project.errors
+
+
+def test_paragraph_only_figure_output_is_byte_identical(inline_figure_project):
+    """The one position that already worked must not change shape at all."""
+    _, html = _inline_rendered(inline_figure_project)
+    digest = _asset_hash(b"\x89PNG\r\n\x1a\n")
+
+    assert (
+        f'<figure class="md-figure" style="width: 60%">'
+        f'<img src="assets/items/figures/present.{digest}.png" alt="the curve" />'
+        f"<figcaption>Figure 3 — the curve</figcaption></figure>"
+    ) in html
+    assert html.count("<figure") == 1
+
+
+def test_prose_braces_are_left_completely_alone(inline_figure_project):
+    """`{a, b}` is a set, not an attribute suffix: no warning, no rewrite."""
+    project, html = _inline_rendered(inline_figure_project)
+    digest = _asset_hash(b"\x89PNG\r\n\x1a\n")
+
+    assert f'<img src="assets/items/figures/present.{digest}.png" alt="plain" />' in html
+    assert "{a, b}" in html
+    assert not [d for d in project.warnings if "a, b" in d.message]
+
+
 # ------------------------------------------------------------- pages + images
 
 def test_pages_get_the_same_image_resolution_and_copy(tmp_path):
