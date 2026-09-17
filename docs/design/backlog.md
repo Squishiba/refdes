@@ -1940,6 +1940,176 @@ semantics, and the two disclosed gaps are already-known correctness holes.
 None of this was discussed against the suitability rule in conversation,
 and I'd rather leave it unmarked than guess at a rule this consequential.
 
+---
+
+## An idea from Jared, finding 36
+
+### 36 — Resolve `<img>` references by filename against a declared search path, not by relative path
+
+**Source: Jared, a direct request — not from an issue, not from code review,
+not from using the tool at work.** Today's pain: `<img src>` resolves
+relative to the *source file's own directory* (`build.py:1557,1572-1574`), so
+moving a document to a different folder breaks every image it embeds, and a
+photo shared by items in several folders needs a `../../` path written out by
+hand at every use site. His framing: make this work the way `#include
+<foo.h>` does in C++ — write the filename, let the tool find it.
+
+**1. The analogy is worth taking literally, not loosely — and it argues
+against the obvious implementation.** `#include <foo.h>` does **not** search
+the whole project tree; it searches a small, explicitly declared list of
+include directories (`-I` paths, or a toolchain default list) and nothing
+else. An implementation that instead walked every directory under the
+project root looking for a file named `diagram.png` would not be the C++
+analogy — it would be the thing C++ deliberately avoids, and for the same
+reason this project avoids it everywhere else: an unbounded search over
+mutable ambient state (the whole tree, as it happens to be arranged today) is
+exactly the "permanent meaning derived from mutable ambient context" pattern
+already corrected twice here (board-from-path, and the group/file-link
+question finding 14 rejected for the same reason). The closer analogy, and
+the recommendation, is a **declared list of asset search directories in
+project settings** — the same shape `site.assets:` already is
+(`schema.py:719`, `model.py:660`: `asset_dirs: list[str]`, currently used
+only to bulk-copy whole directories into `_site/assets/`, `build.py:1933-1942`).
+Whether search reuses `site.assets:` itself as the list, or a new
+sibling key, is an open question (see §2); either way, the list is short,
+explicit, and lives in the file an author already edits to add a photo
+directory — never a directory the tool discovers on its own.
+
+**2. Open question: one list or two.** `site.assets:` today means "copy this
+whole directory into the output, verbatim, for hand-typed hrefs to point at"
+(`build.py`'s `collect_static_assets`, identity-mapped, never hashed,
+deliberately — `docs/design/index-blocks.md` §10 explains why an
+author-typed `href` cannot be silently rewritten). Reusing it as the search
+list too is the smaller surface (one key, one mental model: "directories this
+project keeps its assets in"), but conflates two different guarantees — bulk
+copy is unconditional and untyped, name-search resolution needs to be
+unambiguous project-wide (§3). A separate key (`site: asset_search: [...]`,
+naming only) avoids that conflation at the cost of a second list to keep in
+sync when a directory serves both purposes, which in practice is most of
+them. Recommendation: reuse `site.assets:` — most projects that want this
+feature already declare the directories it would search, and a second list
+that usually mirrors the first is the kind of duplication this project
+otherwise refuses to introduce (see finding 21's argument against
+`requirement`/`bound` field duplication for the general version of this
+concern). Worth deciding explicitly rather than assuming, since it changes
+what a `site.assets:` entry *means*, not just what consumes it.
+
+**3. Ambiguity is a hard error, always — this is the load-bearing rule.**
+If two files anywhere on the search path share a leaf name — `diagram.png` in
+both `figures/power/` and `figures/thermal/` — resolution must refuse with an
+error naming **every** candidate and its full path, never a silent
+first-match. This project's characteristic bug is code that reports success
+while doing the wrong thing, and "quietly resolved to a different
+`diagram.png` than the one meant" is precisely that shape: the build
+succeeds, the site renders, and the wrong photo sits under a caption that
+describes the right one, discoverable only by a human noticing later. There
+is no safe implicit tie-breaker here (first-declared directory, most-recently
+modified, alphabetical) — every one of them is a rule nobody reading the
+document can see, which is the same objection keys.md raises against a
+display-id fallback when a key fails to resolve (keys.md §3, case 3: "the
+display half is deliberately not used as a fallback ... falling back would
+resurrect exactly the ambiguity keys exist to remove"). The fix a human takes
+in response is also mechanical and worth stating in the error itself:
+disambiguate by writing a longer relative path instead of a bare filename, or
+rename one of the files.
+
+**4. Recommend resolve-and-freeze, for the same reason it was chosen twice
+already.** This project has already made this exact call twice: a bare
+numeric `id:` is expanded by `refdes id` and frozen at the number resolved
+(`docs/design/keys.md` §2 recap; `ids.py`), and a link target is expanded to
+the `DISPLAY-ID@key` composite and frozen, never re-resolved from the display
+half at build time (keys.md §3). The argument transfers unchanged: resolve
+the bare filename against the search path **once**, on a writable command,
+and rewrite the source file's `<img src="diagram.png">` to the concrete
+relative path that was found (`<img src="figures/power/diagram.png">`) —
+the same write-back mechanism `_process_images` already has the hook for,
+since it already rewrites every `<img src>` it processes into
+`assets/<hashed path>` in the rendered HTML (`build.py:1591`); this adds an
+earlier, source-file-mutating pass in front of it, gated by `--no-write`
+exactly as key minting and link expansion already are (keys.md §2). Without
+freezing, the tool would instead need to re-run the same search, from
+scratch, on every future build — meaning that adding a second, later file
+also named `diagram.png` to the search path silently changes which file an
+*existing, unmodified* document points to, with no diff anywhere to show it.
+That is the board-from-path mistake in a new location: permanent meaning
+(which photo this document shows) derived from ambient state (whatever
+happens to be on disk this time) instead of being pinned the moment it was
+established.
+
+**One place the analogy runs out, and it should be disclosed rather than
+implied away: freezing does not give the asset an identity the way a
+surrogate key gives an item one.** An item's key survives a rename or a file
+move because the tool controls both ends of that reference and rewrites it
+(keys.md §3's refresh rule). An image file has no key — it is bytes on disk
+identified only by its path — so once `<img src="figures/power/diagram.png">`
+is written, moving `diagram.png` breaks it exactly as a hand-written relative
+path breaks today, with no different failure mode and no automatic repair.
+What resolve-and-freeze actually buys is authoring convenience (write a short
+name once, and the tool finds and pins the correct long path for you) and
+robustness to *moving the document* (the frozen path no longer depends on
+where the referencing file lives), not robustness to moving the *asset*. That
+distinction is worth stating plainly in whatever documents this, since "smart
+asset resolution" sounds like it should survive both and it only survives
+one.
+
+**5. Trigger — what counts as "the short form," and what does not change.**
+Recommend a fallback chain, not a syntax switch: a `src` that resolves
+relative to the source file's own directory keeps resolving exactly as it
+does today — zero behavior change for every existing document, and the
+common case (an image sitting beside the markdown that embeds it) never
+touches the search path at all. Only a `src` that **fails** to resolve
+relative to the source file, **and has no path separator in it** (a bare
+leaf filename, `diagram.png`, not `figures/diagram.png`), falls through to a
+search-path lookup. A multi-segment relative path that fails to resolve
+stays a plain "does not exist" error, not a search candidate — searching by
+leaf name for a path that was clearly meant to be a specific location would
+blur exactly the boundary §1 draws between a declared list and a tree walk,
+and would make an author's typo in a subdirectory name silently resolve to
+an unrelated file elsewhere on the search path instead of erroring. If it
+still fails after the search-path lookup (not found, or found and ambiguous
+per §3), it is the same build error `_process_images` already raises for a
+missing image (`build.py:1575-1580`), extended to name which directories
+were searched.
+
+**6. Boundary — this is about `<img>`, not "assets" generally.** The finding
+is scoped to photos and embedded images, and that scope should hold:
+`site.assets:` already solves a different problem for everything else it
+covers — a whole directory copied verbatim for an author-typed `href` the
+tool never resolves or rewrites (a PDF, a datasheet not managed as a
+citation) — and nothing about that needs filename search, because the author
+already writes the exact path by hand into a link they control end to end.
+Citations have their own resolution mechanism entirely (a URL or a
+project-relative `path:`, pinned by content hash, vendored under
+`.refdes/vendor/<sha256><ext>` — `citations.py`), chosen specifically because
+provenance and hash-pinning matter more than authoring convenience for a
+cited document; filename search would be the wrong model there even if it
+were extended, since two datasheets legitimately sharing a filename across
+vendors is normal, not an error. `[[fig:id]]` figure references are already
+name-based, but the name is a **declared figure id**, not a filename — a
+different addressing scheme solving a different problem (cross-referencing a
+numbered figure in prose), and out of scope here. So the boundary is: this
+applies to `<img src>` only, and only to the local-file case that today
+resolves relative to the source file — a URL `src` is untouched
+(`_URL_SCHEME_RE`, `build.py:1570`).
+
+**Status: outstanding — awaiting decision.** Nothing here is implemented; the
+open questions are §2 (one search list or two) and, less critically, the
+exact key name and error wording for §3.
+
+**Local model: not suitable.** Ambiguity resolution and the freeze semantics
+are exactly the shape of judgment call this project keeps off a smaller
+model: getting either subtly wrong — a tie-breaker that silently picks a
+file instead of erroring, or a freeze that re-resolves instead of pinning —
+produces a build that succeeds while pointing at the wrong photo, which is
+this project's characteristic failure and, per finding 33's framing of the
+same rule, exactly the "no test that a delegating prompt would think to
+write is likely to catch" case. This is also design-unsettled work under the
+suitability rule's second clause (§2 above is a real open question, not yet
+decided), which keeps it off regardless of how loud the eventual acceptance
+test could be made.
+
+---
+
 ### Living notes, history and task lists -- design draft
 
 See [living-notes.md](living-notes.md) for the draft exploring dynamic notes,
