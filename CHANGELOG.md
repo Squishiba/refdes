@@ -132,9 +132,13 @@ and this project uses [Semantic Versioning](https://semver.org/).
   mechanism, not a `links:` reference, and is not covered by expansion --
   `against:` stays a bare id and is not yet rename-safe.
 
-  Still design-only: the corruption lint, `refdes keys adopt`, the
-  display-half refresh-on-rename mechanism, and anything in `revise.py` or
-  `former_ids.py`.
+  Still design-only at the time of this entry: the corruption lint, `refdes
+  keys adopt`, the display-half refresh-on-rename mechanism, and anything in
+  `revise.py` or `former_ids.py`. All four have since shipped — see the
+  `changelog.d/` fragments (`key-corruption-lint.added.md`,
+  `keys-adopt.added.md`, `key-label-refresh.added.md`,
+  `revise-keys-cleanup.changed.md`) and `docs/design/keys.md`'s own
+  implementation-status paragraph, which is the accurate, current record.
 - **Surrogate keys, layer 1: format and minting** (`docs/design/keys.md`).
   Every local item now gets an opaque, immutable 11-character `key:` --
   10 random Crockford-base32 data characters plus a Damm check character,
@@ -151,8 +155,9 @@ and this project uses [Semantic Versioning](https://semver.org/).
   check character is Damm, not the originally-recommended Luhn mod 32 --
   see the doc's amended §1 for the measured numbers behind that call. This
   is the format-and-minting slice only; link resolution, hashing, the
-  corruption lint, and `refdes keys adopt` are later layers and remain
-  design-only.
+  corruption lint, and `refdes keys adopt` were later layers, design-only at
+  the time of this entry and since shipped (see the layer-2 entry above and
+  `docs/design/keys.md`'s implementation-status paragraph).
 - `refdes audit` reports `allocated` ledger entries with no live item and no
   `former_ids:` explaining them (issue #6, finding 10 part 2's narrower,
   informational half). Not a fix for hand-typed id reuse after deletion --
