@@ -15,6 +15,7 @@ from typing import Any
 import yaml
 
 from . import calc, dates, standards
+from .configcheck import EQUATION_KEYS, BlockChecker, validate_overlay, validate_settings
 from .model import (
     BASELINE_IDENTITIES,
     DIAGNOSTIC_LEVELS,
@@ -261,6 +262,7 @@ def _load_equations(raw: dict[str, Any]) -> dict[str, calc.Equation]:
     cycles) are `calc.validate_equations`'s, and run again inside
     `calc.set_equations` so nothing can install a registry that skipped them.
     """
+    check = BlockChecker(PROJECT_SETTINGS_NAME)
     block = raw.get("equations") or {}
     if not isinstance(block, dict):
         raise SchemaError(
@@ -274,12 +276,7 @@ def _load_equations(raw: dict[str, Any]) -> dict[str, calc.Equation]:
             raise SchemaError(
                 f"equations.{name} must be a mapping with 'params' and 'expr'"
             )
-        for key in spec:
-            if key not in ("params", "expr", "note"):
-                raise SchemaError(
-                    f"equations.{name}.{key} is not valid -- only 'params', "
-                    "'expr', and 'note' are recognized"
-                )
+        check.keys(spec, EQUATION_KEYS, f"equations.{name}", "an equations: entry")
 
         params = spec.get("params") or []
         if not isinstance(params, list):
@@ -428,30 +425,6 @@ def _validate_link_targets(types: dict[str, ItemType]) -> None:
                     )
 
 
-def _conforms_to(bname: str, value: Any) -> list[str]:
-    """A board's `conforms_to:` as a list of group ids.
-
-    A bare string here would otherwise be iterated character by character, so
-    `conforms_to: GRP-001` produced one "does not exist" error per letter -- a
-    screenful of them to explain a missing pair of brackets. Rejected at load,
-    the way every other malformed `boards:` entry is.
-    """
-    if value is None:
-        return []
-    if not isinstance(value, list):
-        raise SchemaError(
-            f"boards.{bname} conforms_to must be a list of group ids, got "
-            f"{value!r} -- write conforms_to: [GRP-001]"
-        )
-    for target in value:
-        if not isinstance(target, str):
-            raise SchemaError(
-                f"boards.{bname} conforms_to must be a list of group ids, got "
-                f"the non-string entry {target!r}"
-            )
-    return list(value)
-
-
 def load_project(config_path: str | None = None, start: str = ".") -> Project:
     path = config_path or find_config(start)
     if os.path.basename(os.path.abspath(path)) == LEGACY_CONFIG_NAME:
@@ -473,6 +446,12 @@ def load_project(config_path: str | None = None, start: str = ".") -> Project:
     # before checking would let it pass as a schema key instead of naming it.
     settings = _validate_settings(raw)
     overlay = _load_schema_overlay(root)
+    # Every nested block of both files is validated here, before anything reads
+    # it: an unknown key is a configuration error naming its block path, and a
+    # wrong type is one naming what it expected. Nothing below this line takes a
+    # config value on trust -- see configcheck.py.
+    blocks = validate_settings(raw, PROJECT_SETTINGS_NAME)
+    validate_overlay(overlay, SCHEMA_NAME)
     # The two are disjoint by validation, so one dict is all
     # standards.resolve_schema needs: `standard:` from the settings, the
     # project's own types:/link_types:/field_sets: from the overlay.
@@ -480,16 +459,10 @@ def load_project(config_path: str | None = None, start: str = ".") -> Project:
 
     equations = _load_equations(raw)
 
-    site = raw.get("site") or {}
-    id_cfg = raw.get("id") or {}
-    history = raw.get("history") or {}
-    units = raw.get("units") or {}
-
-    default_on_change = history.get("default", "invalidate")
-    if default_on_change not in ON_CHANGE_MODES:
-        raise SchemaError(
-            f"history.default must be one of {list(ON_CHANGE_MODES)}, got {default_on_change!r}"
-        )
+    site = blocks["site"]
+    id_cfg = blocks["id"]
+    units = blocks["units"]
+    default_on_change = blocks["history"]["default"]
 
     # standard: {base, version, presets} resolves fresh, here, on every load --
     # never a scaffold copy. See standards.py and docs/design/standard-library.md
@@ -628,29 +601,24 @@ def load_project(config_path: str | None = None, start: str = ".") -> Project:
     _validate_required_when(types)
     _validate_link_targets(types)
 
-    import_specs: list[ImportSpec] = []
-    for entry in raw.get("imports") or []:
-        entry = entry or {}
-        if not entry.get("name") or not entry.get("items"):
-            raise SchemaError("each imports: entry needs 'name' and 'items'")
-        import_specs.append(
-            ImportSpec(
-                name=str(entry["name"]),
-                items_path=str(entry["items"]),
-                version=str(entry["version"]) if entry.get("version") else None,
-            )
+    import_specs = [
+        ImportSpec(
+            name=entry["name"],
+            items_path=entry["items"],
+            version=entry["version"],
         )
+        for entry in blocks["imports"]
+    ]
 
     boards: dict[str, BoardSpec] = {}
     path_owner: dict[str, str] = {}
-    for bname, bspec in (raw.get("boards") or {}).items():
-        bspec = bspec or {}
+    for bname, bspec in blocks["boards"].items():
         spec = BoardSpec(
             name=bname,
-            label=bspec.get("label", bname),
-            token=str(bspec.get("token") or ""),
-            path=str(bspec.get("path") or ""),
-            conforms_to=_conforms_to(bname, bspec.get("conforms_to")),
+            label=bspec["label"],
+            token=bspec["token"],
+            path=bspec["path"],
+            conforms_to=bspec["conforms_to"],
         )
         segment = spec.path_segment
         if segment in path_owner:
@@ -666,13 +634,12 @@ def load_project(config_path: str | None = None, start: str = ".") -> Project:
     # segment never collides with a board's own.
     workspaces: dict[str, WorkspaceSpec] = {}
     workspace_path_owner: dict[str, str] = {}
-    for wname, wspec in (raw.get("workspaces") or {}).items():
-        wspec = wspec or {}
+    for wname, wspec in blocks["workspaces"].items():
         spec = WorkspaceSpec(
             name=wname,
-            label=wspec.get("label", wname),
-            shared=bool(wspec.get("shared", False)),
-            path=str(wspec.get("path") or ""),
+            label=wspec["label"],
+            shared=wspec["shared"],
+            path=wspec["path"],
         )
         segment = spec.path_segment
         if segment in workspace_path_owner:
@@ -711,21 +678,21 @@ def load_project(config_path: str | None = None, start: str = ".") -> Project:
             )
 
     project = Project(
-        title=site.get("title", "Design Reference"),
-        out_dir=site.get("out", "_site"),
-        version=str(site.get("version") or ""),
-        pages_dir=str(site.get("pages") or "pages"),
-        nav_order=[str(s) for s in (site.get("nav") or [])],
-        asset_dirs=[str(s) for s in (site.get("assets") or [])],
+        title=site["title"],
+        out_dir=site["out"],
+        version=site["version"],
+        pages_dir=site["pages"],
+        nav_order=site["nav"],
+        asset_dirs=site["assets"],
         imports=import_specs,
         types=types,
         link_types=link_types,
         inverse_of=inverse_of,
         default_on_change=default_on_change,
-        id_width=int(id_cfg.get("width", 3)),
-        id_ledger=id_cfg.get("ledger", ".refdes/ids.yaml"),
-        preferred_units=list(units.get("preferred") or []),
-        unit_aliases=dict(units.get("aliases") or {}),
+        id_width=id_cfg["width"],
+        id_ledger=id_cfg["ledger"],
+        preferred_units=units["preferred"],
+        unit_aliases=units["aliases"],
         equations=equations,
         root=root,
         boards=boards,

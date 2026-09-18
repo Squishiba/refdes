@@ -32,6 +32,8 @@ today.
 
 from __future__ import annotations
 
+import os
+
 import pytest
 
 from refdes import cli as cli_mod
@@ -516,3 +518,29 @@ def test_legitimate_shapes_still_load(tmp_path):
     assert "note" in project.types
     assert "removed" not in project.types
     assert project.boards["board-a"].label == "board-a"
+
+
+REPO = os.path.join(os.path.dirname(__file__), "..")
+
+
+def test_this_repository_and_its_docs_site_still_load():
+    """The two real projects in this repo, loaded verbatim: a config that was
+    right yesterday has to load today, or the validation has eaten a legal
+    shape. This is the acceptance test for the whole file."""
+    project = load_project(config_path=os.path.join(REPO, "refdes-project.yaml"))
+    assert project.title.startswith("Example Board")
+    assert project.standard_base == "hardware"
+    assert project.standard_version == 3
+    assert project.id_width == 3
+    assert "W" in project.preferred_units
+    assert project.boards["board-b"].token == "B"
+    assert "log" in project.types and "requirement" in project.types
+    assert project.types["log"].fields["board"].type == "text"
+
+    docs = load_project(
+        config_path=os.path.join(REPO, "docs-site", "refdes-project.yaml")
+    )
+    assert docs.title == "Refdes"
+    assert docs.out_dir == "../_docs"
+    assert docs.nav_order[:2] == ["index", "getting-started"]
+    assert list(docs.types) == ["note"]

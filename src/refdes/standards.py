@@ -287,7 +287,9 @@ def _merge_field_sets(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str
     return result
 
 
-def _expand_include(type_raw: dict[str, Any], field_sets: dict[str, Any]) -> dict[str, Any]:
+def _expand_include(
+    type_raw: dict[str, Any], field_sets: dict[str, Any], path: str = "types"
+) -> dict[str, Any]:
     """Resolve `include:` into `fields:`, and drop `include:` from the result.
 
     Field sets are merged in list order (a later include wins over an earlier
@@ -296,6 +298,14 @@ def _expand_include(type_raw: dict[str, Any], field_sets: dict[str, Any]) -> dic
     """
     type_raw = dict(type_raw or {})
     includes = type_raw.pop("include", None) or []
+    if isinstance(includes, str):
+        # A bare `include: common` used to iterate per character and report an
+        # unknown field_set 'c'. configcheck rejects it for a project's own
+        # types; this is the same message for the bundle path.
+        raise SchemaError(
+            f"{path}.include must be a list of field_set names, got "
+            f"{includes!r} -- write include: [{includes}]"
+        )
     own_fields = type_raw.get("fields") or {}
 
     merged_fields: dict[str, Any] = {}
@@ -303,7 +313,9 @@ def _expand_include(type_raw: dict[str, Any], field_sets: dict[str, Any]) -> dic
         if set_name not in field_sets:
             close = difflib.get_close_matches(str(set_name), sorted(field_sets), n=1, cutoff=0.5)
             hint = f" Did you mean {close[0]!r}?" if close else ""
-            raise SchemaError(f"include: names unknown field_set {set_name!r}.{hint}")
+            raise SchemaError(
+                f"{path}.include names unknown field_set {set_name!r}.{hint}"
+            )
         merged_fields.update(field_sets[set_name] or {})
     merged_fields.update(own_fields)
 
@@ -331,7 +343,7 @@ def _merge_types(
 ) -> dict[str, Any]:
     result: dict[str, Any] = {}
     for tname, traw in base_types.items():
-        result[tname] = _expand_include(traw, field_sets)
+        result[tname] = _expand_include(traw, field_sets, f"types.{tname}")
 
     for tname, traw in project_types_raw.items():
         if traw is None:
@@ -341,7 +353,7 @@ def _merge_types(
             # that already runs over the final merged schema in schema.py.
             result.pop(tname, None)
             continue
-        expanded_overlay = _expand_include(traw, field_sets)
+        expanded_overlay = _expand_include(traw, field_sets, f"types.{tname}")
         if tname in result:
             result[tname] = _merge_type_dict(result[tname], expanded_overlay)
         else:

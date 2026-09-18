@@ -879,7 +879,7 @@ def test_an_equation_body_that_does_not_parse_is_caught_at_load(tmp_path):
 
 
 def test_an_unknown_equation_definition_key_is_an_error(tmp_path):
-    with pytest.raises(SchemaError, match="only 'params'"):
+    with pytest.raises(SchemaError, match="equations.ok.unit is not valid"):
         _equation_config(
             tmp_path,
             "equations:\n  ok: { params: [x], expr: 'x', unit: A }\n",
