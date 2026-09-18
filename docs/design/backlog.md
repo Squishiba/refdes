@@ -2237,15 +2237,15 @@ raises about the §3 refresh rule having one implementation.
 path at all must be visible somewhere, or the view lies by omission.** An
 item with no board and no group — precisely finding 33's `items/shared/`
 component, and every item in a project that has never used `part_of` at all
-— must land in a visible synthetic bucket, `(unfiled)`, rendered last with a
-count. This is not optional polish: a tree view that quietly omits items is
+— must land in a visible synthetic bucket, `Project-wide`, rendered last
+with a count. This is not optional polish: a tree view that quietly omits items is
 the project's characteristic failure — a build that succeeds while hiding
 something — and unlike finding 33's board pages, where the omission was one
 surface among several that still showed the item, a tree advertised as *the
 whole project* is read as exhaustive, so silence inside it reads as
 nonexistence. The invariant is mechanically testable: the count of expanded
 nodes equals `len(project.local_items)`, every time, on every fixture.
-Naming matters too: `(unfiled)`, not `(orphaned)` or `(unassigned)` —
+Naming matters too: `Project-wide`, not `(orphaned)` or `(unassigned)` —
 multi-board.md:46-49 is explicit that shared items legitimately belong to
 no board, so the bucket is an observation, not an accusation.
 
@@ -2282,17 +2282,18 @@ operation." The machinery already decides what a scope's page set is: add a
 `"tree"` entry to `REPORT_LABELS` (nav.py:46-53) and `scope_reports`
 (nav.py:55-92) and `render.render_site` writes it and the nav links it, with
 the single-source-of-truth property that section's docstring exists to
-protect — no dangle, no orphan. Whether scoped `tree-<board>.html` variants
-exist then falls out of `scope_reports`' existing "no items, no page" rule
-rather than needing its own decision.
+protect — no dangle, no orphan. Scoped `tree-<board>.html` and its workspace
+equivalent are in the v1 set — decided 2026-09-18, see Status — and whether
+a given project actually gets one falls out of `scope_reports`' existing
+"no items, no page" rule rather than needing its own decision.
 
 **4. Scope and size.** v1 generates `tree.html` project-wide, and board- or
 workspace-scoped `{{tree board=...}}` blocks in hand-written pages cover the
 narrower views; `tree-<board>.html` as a generated report is easy to add
-later precisely because `scope_reports` is the one gate, and should be
-decided later rather than now — a board's `document-<board>.html` already
-lists its items in reading order, so the scoped tree's marginal value is
-smaller than the project-wide one's. On a large project the page must open
+precisely because `scope_reports` is the one gate, and was decided on
+2026-09-18 to join the scoped report set now rather than later — a board's
+`document-<board>.html` already lists its items in reading order, so the
+scoped tree's marginal value is smaller than the project-wide one's. On a large project the page must open
 small: the spine expanded to `depth` (default 2 — workspaces/boards and
 their group level, items collapsed to counts like "Board A > GRP-PCIE (9)"),
 every collapsed node a `<details>` exactly like the sidebar's (base.html.j2:30),
@@ -2322,7 +2323,7 @@ and at project scale the thing you cannot do with either existing surface is
 see the shape you did not know to ask about: how much is filed, how much is
 not, where the groups are, which board is a graveyard. That is orientation,
 it is genuinely navigation, and it is what v1 serves. The report reading —
-`(unfiled)` as a standing finding-33 visibility surface, group sizes as a
+`Project-wide` as a standing finding-33 visibility surface, group sizes as a
 smell test — is a consequence of the navigation view being total, not a
 second feature, and should be documented as such rather than sold as an
 audit tool.
@@ -2351,29 +2352,35 @@ visible, which is a navigation win and a finding-33 input, not a resolution.
 `board`/`workspace`/`via`/`depth`, validated by the existing
 `_validate_params`/`extract_blocks` path so bad parameters are `refdes
 check` errors with file:line; `tree.html` generated unconditionally via
-`REPORT_LABELS`/`scope_reports`; the containment spine (workspace → board →
-group → item) with expand-once-reference-elsewhere built on the visited-set
-rule from `walk_cascade`, including whatever small visited-set-as-parameter
-seam the forest walk needs; the mandatory `(unfiled)` bucket with the
-totality test (expanded count == `len(project.local_items)`); `<details>`
+`REPORT_LABELS`/`scope_reports`, plus scoped `tree-<board>.html` and
+`tree-<workspace>.html` pages through the same gate; the containment spine
+(workspace → board → group → item) with expand-once-reference-elsewhere
+built on the visited-set rule from `walk_cascade`, including whatever small
+visited-set-as-parameter seam the forest walk needs; the mandatory
+`Project-wide` bucket with the totality test (expanded count ==
+`len(project.local_items)`); `<details>`
 collapse with `depth` default 2, no JavaScript; cycle termination by the
 same node-bounded rule, with a fixture that has a `part_of` cycle and a
 multi-group item. Refuse: folder-shaped nesting (multi-board.md:31);
 relation-rooted trees that compete with `{{cascade}}` (use `via=` for the
 one level of it this block offers); any JS-dependent behaviour; tree
-*editing* — this is the read side, the editor owns writes; scoped
-`tree-<board>.html` pages (easy later, undecided now); and any change to
-what `board:`, `part_of`, or the coverage stages *mean* — the tree renders
-the model, it does not amend it, and in particular `(unfiled)` is a render
-bucket, not a new item state anywhere in the data.
+*editing* — this is the read side, the editor owns writes; and any change
+to what `board:`, `part_of`, or the coverage stages *mean* — the tree
+renders the model, it does not amend it, and in particular `Project-wide`
+is a render bucket, not a new item state anywhere in the data.
 
-**Status: outstanding — awaiting decision.** The decisions requested: the
-containment-spine answer to §1 (versus a pure relation tree); expand-once
-versus duplicate for multi-parent items (§2 — the one with a real cost to
-cascade's precedent, since it generalises the visited set across a forest);
-whether `tree-<board>.html` joins the scoped report set now or later (§4);
-and the exact wording of the `(unfiled)` bucket, since it is the first
-place a user of a finding-33 project will look.
+**Status: three questions decided 2026-09-18; the §1 containment-spine
+question remains open.** Multi-parent items expand once — an item renders in
+full under one deterministic primary parent and as a reference link under
+every other, {{cascade}}'s rule generalised (§2); duplicating was rejected,
+because in a total view a subtree repeated under N parents makes a reader
+unable to tell a second copy from a coincidence of naming.
+`tree-<board>.html` and the workspace equivalent join the scoped report set
+now, not later (§4). And the catch-all bucket for items with no board and no
+group is `Project-wide`, not `(unfiled)`: that name says what those items
+are — shared, project-level items, which docs/multi-board.md:46-49 says
+legitimately belong to no board — rather than what they lack, and it
+matches how refdes already names its project-wide pages.
 
 **Local model (not decided — my read): suitable, IF the task specifies the
 totality tests.** The rendering is composition of things that exist —
@@ -2385,7 +2392,7 @@ is precisely a silent-wrongness that a build passes and a casual reader
 never notices. The task must name the tests: expanded count equals item
 count on every fixture; a two-group item appears expanded once and as a
 reference once; a `part_of` cycle terminates; an item with no board and no
-group lands in `(unfiled)`; and the JS-disabled contract holds (no
+group lands in `Project-wide`; and the JS-disabled contract holds (no
 `<script>` in the tree's markup). Without those named, the verdict reverts,
 for the same reason finding 14's does.
 
