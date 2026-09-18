@@ -2110,6 +2110,287 @@ test could be made.
 
 ---
 
+## An idea from Jared, finding 37
+
+### 37 — A tree view of the whole project, as part of the built site
+
+**Source: Jared, using refdes at work, 2026-09-16, not from an issue.** He
+asked whether a "tree view for everything" had ever been discussed — it has
+not, in this backlog or in the design docs — and said it should be part of
+basic site operation, not an editor-only feature. The motivation is
+navigating a project you cannot hold in your head, and he named its own
+half: it is the read side of the filtering problem the browser editor takes
+as a v1 requirement (docs/design/browser-editor.md, "Filtering": *finding
+the thing is most of what authoring a traceable project costs*). A filter
+answers "which items match X"; a tree answers "where am I". Neither is the
+other.
+
+**What exists today, verified.** Three things are tree-shaped or
+list-shaped, and none of them is this.
+
+The **sidebar** is a real recursive tree — `NavNode` (nav.py:20-43) holds
+links or groups of the same type to arbitrary depth, and `build_nav`
+(nav.py:137-197) builds workspace groups nesting board groups nesting pages
+— but it is a tree of **pages**, never of items. Its leaves are hand-written
+pages and the generated reports; the items themselves appear only inside
+pages. It collapses with `<details>`, pre-opened when the current page lives
+inside a group (base.html.j2:30, `node.contains(current_page)`), which is
+the collapse mechanism this finding should reuse rather than reinvent.
+
+**`{{cascade}}`** (blocks.py:362-412) is a tree of items, and the closest
+thing to this finding — but it is a tree along **one relation from one
+root**: `from` and `direction` are required, `via` names the link types to
+follow (default: every `trace`-enabled verb, blocks.py:384-393), `depth`
+bounds the walk at 3 by default. Its cycle handling is the part worth
+reading before designing anything new (blocks.py:250-336): the walk keeps a
+`visited` set seeded with the root (blocks.py:277), and following an edge to
+an already-visited item renders it **once more as a terminal leaf** annotated
+`(already shown above)` (blocks.py:324-327, 346) instead of recursing — one
+rule that handles a true cycle and an ordinary diamond identically, because
+bounding on *node* answers both. The same primitive, with `on_cycle="error"`
+instead (`CascadeCycleError`, blocks.py:234-248), is what `blocked.py`
+reuses to make a `blocked_by` cycle a hard build error (blocked.py:68-99) —
+so the seam already has two callers with two different cycle policies and a
+documented reason for each.
+
+**`{{index}}`** (blocks.py:132-198) is tables, not a tree: items of one type
+filtered by `board=`/`tag=`, grouped under `<h4>` headings by one field's
+value. One level, no nesting, no parent-child anything. And the **item
+dashboard** is a flat table of every item — the exact wall this finding is
+about: at project scale it is a list nobody scrolls.
+
+**The relations a tree could nest by**, and what each already means:
+`part_of:`/`contains` with the `group` type (finding 14, shipped — members
+point at the group, `contains` is the computed backlink, groups are
+deliberately not coverable and not satisfaction targets); the coverage
+chain `requirement → satisfied_by → verified_by`, which is not a stored
+edge but a computed stage ladder (`compute_coverage`, build.py:769-780,
+addressed/claimed/satisfied/verified; the five-stage order including `open`
+at render.py:115); `blocked_by` (blocked.py — a graph asserted acyclic,
+resolved transitively to roots); boards and workspaces, which are a
+**registry**, not item relations at all — an item resolves to at most one
+`str` board (finding 33's verified single-valued resolution) and workspaces
+own items, not boards, in the registry (nav.py:150-155); and the folder
+layout under `items/`, which multi-board.md:31 says outright is "just
+organisation until you register them" — a tree view that nested by folders
+would be deriving meaning from ambient file placement, the mistake this
+project has corrected repeatedly.
+
+**1. What does it nest by?** Three answers. (a) One fixed relation. (b) A
+chosen one, like `{{cascade}}`'s `via=`. (c) A composite containment view:
+workspaces → boards → groups → items.
+
+(a) is not enough to be *the* view of everything: any single relation
+omits every item that does not participate in it, and an omitting view
+cannot be the site's basic orientation surface — see §2's no-omission rule.
+(b) is already built and shipped: that is `{{cascade}}`, and re-listing its
+design here would be re-deciding it. The honest division of labour is that
+**relation-shaped trees are cascade's job and this finding should not
+compete with it**. What cascade structurally cannot do is be total: a rooted
+walk shows what is reachable from one item, and says nothing about the rest
+of the project.
+
+So the recommendation is **(c) for the site-level view**: nest by the
+containment spine — workspace (registry), then board (registry), then
+`part_of` groups, then items — because it is the only nesting where **every
+item has a place without the author having declared anything**: every item
+has at most one board and zero-or-more groups, and the leftovers get an
+explicit bucket (§2). And it is the question an author actually has when
+they open "the tree view for everything": not "what traces from REQ-X" —
+they know that question and already have `{{cascade}}` for it — but "what
+is in this project, grouped how, and what is floating." That is a
+containment question, and containment is what `part_of`/`contains` and the
+registries already mean.
+
+**2. It is a graph, not a tree — and the rendering rule must be stated, not
+waved at.** An item can be `part_of` several groups; groups can contain
+groups; `part_of` is an ordinary link type and can cycle. Three candidate
+rules for an item with two parents: duplicate the subtree under each, show
+it once with references elsewhere, or refuse to render. Refusing is out — a
+view that errors because the data is legal is the tool scolding the project
+for a shape the schema permits. Duplicating is what `{{cascade}}` does not
+choose, and for a *total* view it is worse than in a rooted one: with N
+parents the item's whole subtree appears N times, and a reader scanning for
+"is this item in the project once" cannot tell whether the second copy is
+the same item or a coincidence of naming.
+
+**Recommendation: expand once, reference everywhere else — which is
+cascade's answer generalised, not a second invention.** Each item renders
+expanded under exactly one parent, chosen by a deterministic rule (first
+board/group in a fixed order: registry order, then group id), and under
+every other parent it renders as a leaf with a link, annotated with the
+verb and the primary location — the same shape as `(already shown above)`
+(blocks.py:346), reading e.g. `part_of GRP-PCIE-SPEC — see Board A >
+GRP-PCIE`. Cycles need no new machinery: the visited-set-on-node rule
+(blocks.py:324) terminates any walk whatever the graph does, and the
+`visited` set is shared across the whole forest, not per-root, so an item
+reachable from two roots still expands once. One implementation seam to
+disclose honestly: `walk_cascade` creates its own `visited = {root_id}`
+(blocks.py:277) and is single-root, so a forest walk either grows a
+parameter to pass an external visited set in, or wraps it with a
+multi-seeded entry point. That is a small change to a shipped primitive with
+two existing callers and their tests; it should be made deliberately, not
+by copy-pasting a second walker, which is exactly the drift risk keys.md §3
+raises about the §3 refresh rule having one implementation.
+
+**The no-omission rule, stated as an invariant: an item reachable by no
+path at all must be visible somewhere, or the view lies by omission.** An
+item with no board and no group — precisely finding 33's `items/shared/`
+component, and every item in a project that has never used `part_of` at all
+— must land in a visible synthetic bucket, `(unfiled)`, rendered last with a
+count. This is not optional polish: a tree view that quietly omits items is
+the project's characteristic failure — a build that succeeds while hiding
+something — and unlike finding 33's board pages, where the omission was one
+surface among several that still showed the item, a tree advertised as *the
+whole project* is read as exhaustive, so silence inside it reads as
+nonexistence. The invariant is mechanically testable: the count of expanded
+nodes equals `len(project.local_items)`, every time, on every fixture.
+Naming matters too: `(unfiled)`, not `(orphaned)` or `(unassigned)` —
+multi-board.md:46-49 is explicit that shared items legitimately belong to
+no board, so the bucket is an observation, not an accusation.
+
+**3. Page, block, or both?** Both, and the existing machinery makes that
+cheap rather than ambitious. The **block** is `{{tree}}`, a third member of
+the family, registered as a `BlockSpec` in the same dict as its two siblings
+(blocks.py:416-425) and inheriting every convention the family already
+enforces: closed parameter set, no expressions, no nesting, narrative pages
+only. Parameters, in the house style:
+
+| Parameter | Required | Meaning |
+|---|---|---|
+| `board` | no | Scope to one board's subtree (validated against `project.boards`, `_suggest` on a typo — the `{{index}}` `board=` precedent, blocks.py:154) |
+| `workspace` | no | Same, for the workspace registry |
+| `via` | no | Nest one level deeper by a named relation *under* the containment spine (e.g. `via="satisfies"` expands each requirement's satisfiers inside its board/group branch); validated against `project.link_types` like cascade's `via=` (blocks.py:384-390) |
+| `depth` | no, default `2` | How deep the containment spine expands before collapsing to counts |
+
+Required parameters: none — `{{tree}}` alone is the whole-project view, and
+that is the point: unlike `{{cascade}}`, which must be told its root, this
+block has no root to ask for. A bad parameter reports through the machinery
+that already exists and needs no new design: `_validate_params`
+(blocks.py:117-128) raises `_BlockError` for an unknown or missing parameter
+naming the accepted set, `extract_blocks` turns that into a `project.error`
+with the page's file and the directive's line number plus a visible
+`⚠` marker in the rendered page (blocks.py:462-467), and `refdes check`
+reports it because `cmd_check` runs the full `build()` (cli.py:245), which
+runs `render_pages` (build.py:1985) where block extraction lives. An unknown
+parameter to `{{tree}}` is a check failure with a file:line, same as for the
+other two.
+
+The **page** is `tree.html`, generated unconditionally as part of the basic
+site — this is the half Jared asked for specifically: "part of basic site
+operation." The machinery already decides what a scope's page set is: add a
+`"tree"` entry to `REPORT_LABELS` (nav.py:46-53) and `scope_reports`
+(nav.py:55-92) and `render.render_site` writes it and the nav links it, with
+the single-source-of-truth property that section's docstring exists to
+protect — no dangle, no orphan. Whether scoped `tree-<board>.html` variants
+exist then falls out of `scope_reports`' existing "no items, no page" rule
+rather than needing its own decision.
+
+**4. Scope and size.** v1 generates `tree.html` project-wide, and board- or
+workspace-scoped `{{tree board=...}}` blocks in hand-written pages cover the
+narrower views; `tree-<board>.html` as a generated report is easy to add
+later precisely because `scope_reports` is the one gate, and should be
+decided later rather than now — a board's `document-<board>.html` already
+lists its items in reading order, so the scoped tree's marginal value is
+smaller than the project-wide one's. On a large project the page must open
+small: the spine expanded to `depth` (default 2 — workspaces/boards and
+their group level, items collapsed to counts like "Board A > GRP-PCIE (9)"),
+every collapsed node a `<details>` exactly like the sidebar's (base.html.j2:30),
+which is CSS-only and keeps the promise output.md makes twice — "with
+JavaScript disabled every reference is still a working link" (output.md:21-22)
+and the narrow-viewport toggle where "no JavaScript is involved, and it
+works with JavaScript disabled" (output.md:131-134). `<details>` is
+therefore not a preference but a constraint this feature inherits: any
+collapse mechanism that needs JS to expand is a non-starter, which rules out
+the interactive tree widgets a JS app would reach for and is also, per the
+editor's own deferred list, the difference between a built static page and
+the editor surface. Print: expanded nodes print as an ordinary nested list,
+the same argument index-blocks.md §6 makes for cascade's `<ul>` over a table.
+
+**5. What it is for, honestly.** Two candidate answers, and the finding
+should not pretend to be both. As a **report** — "what is unaddressed, what
+hangs off this requirement" — it is redundant: `coverage.html` already
+answers unaddressed by stage ladder, and `{{cascade}}` already answers
+"what hangs off this" better than a global tree could, because rooted and
+verb-filtered. As **navigation** — the question is why the sidebar plus
+filtering is not enough. It is a fair challenge: the sidebar is a tree, and
+the browser editor's filter list (v1, browser-editor.md) will facet by
+type, board, coverage stage, and link relationships. The answer is that the
+sidebar is a tree of *pages* and never shows an item, and a filter list is
+by construction not a map — filtering answers a question you arrived with,
+and at project scale the thing you cannot do with either existing surface is
+see the shape you did not know to ask about: how much is filed, how much is
+not, where the groups are, which board is a graveyard. That is orientation,
+it is genuinely navigation, and it is what v1 serves. The report reading —
+`(unfiled)` as a standing finding-33 visibility surface, group sizes as a
+smell test — is a consequence of the navigation view being total, not a
+second feature, and should be documented as such rather than sold as an
+audit tool.
+
+**6. Interaction with the browser editor and finding 33.** With the editor:
+same data, different surface, and the editor's own constraint binds here too
+— the tree must be built from the **built** project through the
+side-effect-free path, never a file scan, because "a list that disagreed
+with the report page about which requirements are open would be worse than
+no list" (browser-editor.md, Filtering). The editor's filtered list and the
+tree are then two views of one built payload; when the editor ships, its
+list should be able to render *inside* tree scope (filter within Board A),
+and the tree's anchors (`#grp-pcie`, item ids as they are today) are what
+make a tree node and a filter result the same addressable thing. Nothing in
+v1 depends on the editor existing; nothing in the editor's design is
+invalidated by the tree. With **finding 33**: this is the feature's quiet
+payoff and should be said plainly — a tree with a mandatory no-omission
+bucket is exactly where an item that belongs to no board becomes
+conspicuous, on every build, to everyone, instead of being absent-in-silence
+from board pages. It does not *fix* finding 33 (the shared component still
+needs `includes:`-style display inclusion to appear on the boards that use
+it), and it must not be documented as if it did: the bucket makes the gap
+visible, which is a navigation win and a finding-33 input, not a resolution.
+
+**v1 scope.** Include: `{{tree}}` as a third `BlockSpec` with
+`board`/`workspace`/`via`/`depth`, validated by the existing
+`_validate_params`/`extract_blocks` path so bad parameters are `refdes
+check` errors with file:line; `tree.html` generated unconditionally via
+`REPORT_LABELS`/`scope_reports`; the containment spine (workspace → board →
+group → item) with expand-once-reference-elsewhere built on the visited-set
+rule from `walk_cascade`, including whatever small visited-set-as-parameter
+seam the forest walk needs; the mandatory `(unfiled)` bucket with the
+totality test (expanded count == `len(project.local_items)`); `<details>`
+collapse with `depth` default 2, no JavaScript; cycle termination by the
+same node-bounded rule, with a fixture that has a `part_of` cycle and a
+multi-group item. Refuse: folder-shaped nesting (multi-board.md:31);
+relation-rooted trees that compete with `{{cascade}}` (use `via=` for the
+one level of it this block offers); any JS-dependent behaviour; tree
+*editing* — this is the read side, the editor owns writes; scoped
+`tree-<board>.html` pages (easy later, undecided now); and any change to
+what `board:`, `part_of`, or the coverage stages *mean* — the tree renders
+the model, it does not amend it, and in particular `(unfiled)` is a render
+bucket, not a new item state anywhere in the data.
+
+**Status: outstanding — awaiting decision.** The decisions requested: the
+containment-spine answer to §1 (versus a pure relation tree); expand-once
+versus duplicate for multi-parent items (§2 — the one with a real cost to
+cascade's precedent, since it generalises the visited set across a forest);
+whether `tree-<board>.html` joins the scoped report set now or later (§4);
+and the exact wording of the `(unfiled)` bucket, since it is the first
+place a user of a finding-33 project will look.
+
+**Local model (not decided — my read): suitable, IF the task specifies the
+totality tests.** The rendering is composition of things that exist —
+`NavNode`'s recursive template macro, `walk_cascade`'s visited rule,
+`BlockSpec` validation, `<details>` — and every parameter error is loud by
+inheritance. But the finding's one hard promise is "never silently drop an
+item," and a walker with a shared visited set dropping a multi-parent item
+is precisely a silent-wrongness that a build passes and a casual reader
+never notices. The task must name the tests: expanded count equals item
+count on every fixture; a two-group item appears expanded once and as a
+reference once; a `part_of` cycle terminates; an item with no board and no
+group lands in `(unfiled)`; and the JS-disabled contract holds (no
+`<script>` in the tree's markup). Without those named, the verdict reverts,
+for the same reason finding 14's does.
+
+---
+
 ### Living notes, history and task lists -- design draft
 
 See [living-notes.md](living-notes.md) for the draft exploring dynamic notes,
