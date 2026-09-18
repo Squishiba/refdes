@@ -140,8 +140,12 @@ or straight into anything that renders Mermaid.
 | `records` | `recorded_by` | log entry → decision |
 | `supersedes` | `superseded_by` | decision → older decision |
 | `blocked_by` | `blocks` | decision → anything holding it up — see [below](#blocked-by-and-the-cascade-report) |
+| `part_of` | `contains` | an item belonging to a group — requirement, bound, decision, test, or component → group |
 | `equivalent` | `equivalent` (self-inverse) | component → drop-in second source — see [below](#part-equivalence-equivalent-and-alternate) |
 | `alternate` | `alternate` (self-inverse) | component → functionally close, check before substituting — see [below](#part-equivalence-equivalent-and-alternate) |
+
+> **Only from `hardware@3` onward.** `part_of`, and the `group` type it points
+> at, are new in `hardware@3` — v1 and v2 declare neither.
 
 Add your own by declaring them in `link_types` and listing them under a type's
 `links:`.
