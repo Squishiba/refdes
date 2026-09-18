@@ -791,9 +791,22 @@ def format_bounds(value: Value, digits: int = 4) -> str:
 
 CALC_BLOCK_RE = re.compile(r"^```calc[^\n]*\n(.*?)^```\s*$", re.DOTALL | re.MULTILINE)
 ASSIGN_RE = re.compile(r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+?)\s*$")
-# Optional unit assertion: `P_diss : W = V_out * I_load`
+# Retired spelling of the unit assertion: `P_diss : W = V_out * I_load`.
+# Still evaluated, unchanged, until the rewrite tool lands (chunk 3 retires it).
 ANNOTATED_RE = re.compile(
     r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*:\s*([^=]+?)\s*=\s*(.+?)\s*$"
+)
+# The unit a result is presented in, after the expression: `P = V * I | mW`.
+# The last `|` on the line is the separator, so a stray `|` inside the
+# expression (bitwise-or is not in the language, so it can only be a typo)
+# still leaves the trailing unit where the author wrote it. Comments are
+# stripped before this runs, and the language has no string literals, so a
+# `|` anywhere on a live line is this separator or a parse error.
+PIPE_UNIT_RE = re.compile(r"^(?P<lhs>.+?)\s*\|\s*(?P<unit>[^|]+?)\s*$")
+# `P | mW = V * I` -- the unit in the one place it does not go. Caught to name
+# the fix rather than the generic "expected an assignment".
+LEADING_PIPE_RE = re.compile(
+    r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*\|\s*[^|=]+?\s*=\s*(.+?)\s*$"
 )
 
 
@@ -806,6 +819,9 @@ class CalcOutcome:
     error: str | None
     annotation: str = ""
     warning: str | None = None
+    # Which spelling declared the unit: "|" for `name = expr | unit`, ":" for
+    # the retired `name : unit = expr`. Renderers show the author's own marker.
+    unit_style: str = ":"
     # Absolute 1-indexed source line, or None when the caller didn't supply
     # evaluate_block a start_line to compute one from.
     line: int | None = None
@@ -879,6 +895,27 @@ def evaluate_block(
             comment = comment.strip()
             line = line.rstrip()
 
+        leading = LEADING_PIPE_RE.match(line)
+        if leading:
+            outcomes.append(
+                CalcOutcome(leading.group(1), leading.group(2), comment, None,
+                            f"the unit goes after the expression: "
+                            f"{leading.group(1)} = {leading.group(2)} | unit — "
+                            "`name | unit = expression` is not the syntax",
+                            line=line_number)
+            )
+            continue
+
+        # Split a trailing `| unit` off the line before the assignment
+        # grammars see it, so both spellings -- and the both-at-once error --
+        # fall out of the same matching below.
+        full_line = line
+        unit_after = ""
+        pipe_match = PIPE_UNIT_RE.match(line)
+        if pipe_match:
+            unit_after = pipe_match.group("unit")
+            line = pipe_match.group("lhs").rstrip()
+
         annotation = ""
         match = ANNOTATED_RE.match(line)
         if match:
@@ -904,12 +941,42 @@ def evaluate_block(
             match = ASSIGN_RE.match(line)
             if not match:
                 outcomes.append(
-                    CalcOutcome("", line.strip(), comment, None,
+                    CalcOutcome("", full_line.strip(), comment, None,
                                 "expected an assignment of the form 'name = expression'",
                                 line=line_number)
                 )
                 continue
             name, expression = match.group(1), match.group(2)
+
+        if annotation and unit_after:
+            outcomes.append(
+                CalcOutcome(
+                    name, expression, comment, None,
+                    f"{name} declares a unit twice -- ': {annotation}' before "
+                    f"the = and '| {unit_after}' after the expression; keep one",
+                    annotation, line=line_number,
+                )
+            )
+            continue
+
+        unit_style = ":"
+        if unit_after:
+            # The finding-9 guard, mirrored for the new spelling: a tolerance
+            # parked after the unit gets a message naming the fix.
+            tol_parts = TOLERANCE_SPLIT.split(unit_after, maxsplit=1)
+            if len(tol_parts) == 2:
+                outcomes.append(
+                    CalcOutcome(
+                        name, expression, comment, None,
+                        "a tolerance belongs on the right-hand side — "
+                        f"{name} = {expression} ± {tol_parts[1].strip()} "
+                        f"| {tol_parts[0].strip()}",
+                        annotation=unit_after, unit_style="|", line=line_number,
+                    )
+                )
+                continue
+            annotation = unit_after
+            unit_style = "|"
 
         if name in origins:
             first_line = origins[name]
@@ -922,7 +989,7 @@ def evaluate_block(
                     f"{first_where}, again at {here_where}. A name can only be "
                     f"assigned once per item (blocks share one item-wide scope); "
                     f"rename one of them, e.g. {name!r} -> {name + '_2'!r}.",
-                    annotation, line=line_number,
+                    annotation, unit_style=unit_style, line=line_number,
                 )
             )
             continue
@@ -935,13 +1002,13 @@ def evaluate_block(
         except CalcError as exc:
             outcomes.append(
                 CalcOutcome(name, expression, comment, None, str(exc), annotation,
-                            warning, line=line_number)
+                            warning, unit_style=unit_style, line=line_number)
             )
             continue
         except Exception as exc:  # pint and math surface a variety of types
             outcomes.append(
                 CalcOutcome(name, expression, comment, None, str(exc), annotation,
-                            warning, line=line_number)
+                            warning, unit_style=unit_style, line=line_number)
             )
             continue
 
@@ -949,7 +1016,7 @@ def evaluate_block(
         origins[name] = line_number
         outcomes.append(
             CalcOutcome(name, expression, comment, value, None, annotation,
-                        warning, line=line_number)
+                        warning, unit_style=unit_style, line=line_number)
         )
     return outcomes
 

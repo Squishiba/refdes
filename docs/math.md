@@ -9,22 +9,22 @@ input is safe to build.
 
 ````markdown
 ```calc
-V_out            = 3.3 V
-I_load           = 1.2 A
-eff              = 0.93
-P_diss  : W      = V_out * I_load * (1/eff - 1)
-A_board          = 1.4 inch * 0.9 inch
-P_dens  : W/in^2 = P_diss / A_board
+V_out   = 3.3 V
+I_load  = 1.2 A
+eff     = 0.93
+P_diss  = V_out * I_load * (1/eff - 1) | W
+A_board = 1.4 inch * 0.9 inch
+P_dens  = P_diss / A_board | W/in^2
 ```
 ````
 
 Renders as a table of expression and evaluated result:
 
 ```
-V_out             = 3.3 V                        → 3.3 V
-P_diss  : W       = V_out * I_load * (1/eff - 1) → 0.2981 W
-A_board           = 1.4 inch * 0.9 inch          → 1.26 in²
-P_dens  : W/in^2  = P_diss / A_board             → 0.2366 W/in²
+V_out   = 3.3 V                                  → 3.3 V
+P_diss  = V_out * I_load * (1/eff - 1) | W       → 0.2981 W
+A_board = 1.4 inch * 0.9 inch                    → 1.26 in²
+P_dens  = P_diss / A_board | W/in^2              → 0.2366 W/in²
 ```
 
 Variables are visible to later lines in the same item, across multiple blocks.
@@ -37,6 +37,16 @@ The converter loses {{P_diss}} over {{A_board}} of board.
 ```
 
 → "The converter loses 0.2981 W over 1.26 in² of board."
+
+A reference can ask for a different presentation unit, the same `| unit` form
+as a calc line:
+
+```markdown
+The converter loses {{P_diss | mW}}.
+```
+
+→ "The converter loses 298.1 mW." — a unit of the wrong dimension is a build
+error at the reference, never a silent fallback to the calc's own unit.
 
 A `{{name}}` that does not match a calc value in the same item is a warning and is
 left as written.
@@ -105,19 +115,30 @@ per hour.
 
 ## Unit assertions
 
-`name : unit = expression` declares what the result must be:
+`name = expression | unit` declares what the result must be and what unit to
+present it in:
 
 ```calc
-P : W = V_out / I_load
+P = V_out / I_load | W
 ```
 
 ```
 ERROR calc P: declared as W but the expression evaluates to V/A
 ```
 
-Assertions also **pin the display unit**, which is why `P_dens : W/in^2` reports
-`0.2366 W/in²` rather than `236.6 mW/in²` — matching the bound it is checked
-against. Use them wherever getting the dimension wrong would be expensive.
+Whitespace around `|` is optional, and the unit accepts everything a quantity
+accepts — compounds like `W/in^2`, house units, aliases. A tolerance goes on
+the expression, before the unit: `V = 12 V ± 5% | mV`.
+
+Assertions also **pin the display unit**, which is why `P_dens = ... | W/in^2`
+reports `0.2366 W/in²` rather than `236.6 mW/in²` — matching the bound it is
+checked against. Use them wherever getting the dimension wrong would be
+expensive.
+
+> **Note:** the older spelling, `name : unit = expression`, still works and
+> behaves identically. It is being retired: a rewrite tool will convert
+> projects to the `| unit` form, after which the old spelling becomes an
+> error. New documents should use `| unit`.
 
 ## Tolerances
 
@@ -185,7 +206,7 @@ equations:
 ```
 
 ```calc
-CLIM_out1 : A = current_limit(2500, 0.8 V, 3.3 kohm) ± 15%
+CLIM_out1 = current_limit(2500, 0.8 V, 3.3 kohm) ± 15% | A
 ```
 
 `note:` is provenance — a datasheet page, an application note — and nothing at
@@ -237,7 +258,7 @@ produces a number.
 ## Known limitations
 
 - **Torque reads as energy.** `N·m` and `J` are dimensionally identical, so a
-  torque displays as joules. Pin it with `tq : N*m = ...`. Every units library has
+  torque displays as joules. Pin it with `tq = ... | N*m`. Every units library has
   this; none solve it without a separate notion of quantity kind.
 - **No solving for unknowns.** Forward evaluation only. Symbolic solve is planned.
 - **No cross-item references.** A calc block cannot read another item's values.

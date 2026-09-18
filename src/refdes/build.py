@@ -49,8 +49,12 @@ EXPLICIT_REF_RE = re.compile(
 )
 # Bare reference: REQ-PWR-002 appearing in prose.
 BARE_REF_RE = re.compile(r"(?<![\w\-/])([A-Z][A-Z0-9]*(?:-[A-Z0-9]+)*-\d{1,6})(?![\w\-])")
-# Inline calc value: {{P_diss}}
-INLINE_VALUE_RE = re.compile(r"\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}")
+# Inline calc value: {{P_diss}}, optionally presented in another unit:
+# {{P_diss | mW}}. The unit group accepts everything a `| unit` annotation
+# accepts; a wrong dimension is an error at the reference site.
+INLINE_VALUE_RE = re.compile(
+    r"\{\{\s*([A-Za-z_][A-Za-z0-9_]*)(?:\s*\|\s*([^{}|]+?))?\s*\}\}"
+)
 # Regions of rendered HTML where references must not be linkified.
 PROTECTED_RE = re.compile(r"<pre\b[\s\S]*?</pre>|<code\b[\s\S]*?</code>", re.IGNORECASE)
 # `<img src="...">` as markdown-it emits it -- html is off, so this only ever comes
@@ -909,6 +913,7 @@ def run_calcs(project: Project) -> None:
                     expression=outcome.expression,
                     comment=outcome.comment,
                     annotation=outcome.annotation,
+                    unit_style=outcome.unit_style,
                     line=outcome.line,
                 )
                 diag_line = outcome.line if outcome.line is not None else item.source_line
@@ -1333,7 +1338,10 @@ def _calc_table_html(lines: list[CalcLine]) -> str:
     for line in lines:
         name_cell = _esc(line.name)
         if line.annotation:
-            name_cell += f'<span class="calc-annotation">: {_esc(line.annotation)}</span>'
+            marker = "|" if line.unit_style == "|" else ":"
+            name_cell += (
+                f'<span class="calc-annotation">{marker} {_esc(line.annotation)}</span>'
+            )
         if line.error:
             rows.append(
                 f'<tr class="calc-row calc-error">'
@@ -1831,6 +1839,41 @@ def resolve_figures(html: str, project: Project, numbers: dict[str, int]) -> str
     return FIG_REF_PENDING_RE.sub(ref, html)
 
 
+def _inline_value_replacer(project: Project, item: Item):
+    """The `re.sub` callable that swaps `{{name}}` -- and `{{name | unit}}`
+    -- for evaluated calc results in one item's body. A module-level factory
+    rather than a closure over the render_bodies loop variable."""
+
+    def replace_inline(match: re.Match) -> str:
+        name, unit = match.group(1), (match.group(2) or "").strip()
+        if name not in item.calc_values:
+            project.warn(
+                f"{{{{{name}}}}} does not name a calc value in this item",
+                file=item.source_file, line=item.source_line, item_id=item.id,
+            )
+            return match.group(0)
+        if not unit:
+            return f"`{item.calc_values[name]}`"
+        # `{{P | mW}}`: convert the value itself, never the formatted
+        # string -- and never silently fall back to the calc's own unit
+        # when the dimension is wrong. The Value lives in the item's
+        # calc environment, the same one `checks:` already reads.
+        value = getattr(item, "_env", {}).get(name)
+        if value is None:
+            return f"`{item.calc_values[name]}`"
+        try:
+            converted = calc.convert_value(value, unit)
+        except calc.CalcError as exc:
+            project.error(
+                f"{{{{{name} | {unit}}}}} — {exc}",
+                file=item.source_file, line=item.source_line, item_id=item.id,
+            )
+            return match.group(0)
+        return f"`{calc.format_value(converted, project.sigfigs)}`"
+
+    return replace_inline
+
+
 def render_bodies(project: Project) -> None:
     # gfm-like adds tables and strikethrough, which a hardware document needs for
     # pin maps and BOM excerpts. linkify stays off: bare IDs are our own concern,
@@ -1839,17 +1882,7 @@ def render_bodies(project: Project) -> None:
 
     for item in project.local_items:
         # Substitute inline calc values before markdown sees the text.
-        def replace_inline(match: re.Match) -> str:
-            name = match.group(1)
-            if name in item.calc_values:
-                return f"`{item.calc_values[name]}`"
-            project.warn(
-                f"{{{{{name}}}}} does not name a calc value in this item",
-                file=item.source_file, line=item.source_line, item_id=item.id,
-            )
-            return match.group(0)
-
-        source = INLINE_VALUE_RE.sub(replace_inline, item.body)
+        source = INLINE_VALUE_RE.sub(_inline_value_replacer(project, item), item.body)
 
         # Swap calc blocks for placeholders, render, then inject the evaluated
         # tables. The placeholder has to be plain text -- an HTML comment would be

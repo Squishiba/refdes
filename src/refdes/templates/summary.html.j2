@@ -107,7 +107,7 @@
     {% for item, line in calc_rows %}
       <tr class="{{ 'row-bad' if line.error }}">
         <td><a class="ref" href="{{ item.slug }}.html" data-ref="{{ item.id }}">{{ item.id }}</a></td>
-        <td class="mono">{{ line.name }}{% if line.annotation %}<span class="calc-annotation">: {{ line.annotation }}</span>{% endif %}</td>
+        <td class="mono">{{ line.name }}{% if line.annotation %}<span class="calc-annotation">{{ '| ' if line.unit_style == '|' else ': ' }}{{ line.annotation }}</span>{% endif %}</td>
         <td class="mono small">{{ line.expression }}</td>
         {% if line.error %}
         <td class="mono bad" colspan="2">⚠ {{ line.error }}</td>

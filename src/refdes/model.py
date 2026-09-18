@@ -358,6 +358,9 @@ class CalcLine:
     comment: str = ""
     error: str | None = None
     annotation: str = ""    # declared unit, e.g. "W" in `P_diss : W = ...`
+    # Which spelling declared it: "|" for `P_diss = ... | W`, ":" for the
+    # retired `P_diss : W = ...`. Renderers echo the author's own marker.
+    unit_style: str = ":"
     # Absolute 1-indexed source line this assignment was written on, or None
     # when the owning item's body has no known position (see Item.body_line).
     # What lets an editor match a calc result to *its* line rather than the
