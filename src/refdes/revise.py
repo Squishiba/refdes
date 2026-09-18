@@ -1432,6 +1432,8 @@ def _carry_forward_baselines(
     old_hashes: dict[str, str],
     new_hashes: dict[str, str],
     standard_transition: tuple[dict, dict] | None = None,
+    old_calc_hashes: dict[str, str | None] | None = None,
+    new_calc_hashes: dict[str, str | None] | None = None,
 ) -> tuple[list[str], list[str]]:
     """Swap each affected item's old hash (and, for a prefix rename, its old
     id key) for the new one in every stamped baseline.
@@ -1491,6 +1493,18 @@ def _carry_forward_baselines(
                 continue
             new_entry = dict(entry)
             new_entry["hash"] = new_hashes.get(old_id, entry["hash"])
+            # calc-rewrite (docs/math.md): the narrower stale-arithmetic
+            # probe moves with the content hash when the caller proves the
+            # calc block's meaning is unchanged -- an entry whose recorded
+            # calc_hash matches the pre-rewrite hash gets the post-rewrite
+            # one, so a spelling-only rewrite never reads as "the arithmetic
+            # changed". Absent for a vocabulary rename (no calc hashes given).
+            if old_calc_hashes is not None:
+                old_calc = old_calc_hashes.get(old_id)
+                if old_calc is not None and entry.get("calc_hash") == old_calc:
+                    new_calc = (new_calc_hashes or {}).get(old_id)
+                    if new_calc is not None:
+                        new_entry["calc_hash"] = new_calc
             # The record key never moves: a keyed entry's key is immutable
             # identity and its stored display id is the historical label that
             # makes `relabelled` observable; a legacy display-id-keyed entry
@@ -1506,6 +1520,11 @@ def _carry_forward_baselines(
             _rewrite_baseline_file(project, baseline, new_items, new_standard)
             updated.append(baseline.name)
     return updated, skipped
+
+
+# Public alias: calc_rewrite.py reuses this engine (hash matching, entry
+# swap, file rewrite) rather than duplicating it.
+carry_forward_baselines = _carry_forward_baselines
 
 
 def _rewrite_baseline_file(

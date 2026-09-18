@@ -136,9 +136,12 @@ checked against. Use them wherever getting the dimension wrong would be
 expensive.
 
 > **Note:** the older spelling, `name : unit = expression`, still works and
-> behaves identically. It is being retired: a rewrite tool will convert
-> projects to the `| unit` form, after which the old spelling becomes an
-> error. New documents should use `| unit`.
+> behaves identically. It is being retired: `refdes calc-rewrite` converts
+> a project to the `| unit` form in one transactional pass (it verifies
+> every calc still evaluates to the same value and unit, carries baselines
+> forward, and never touches sealed append-only entries — see its
+> `--help`), after which the old spelling becomes an error. New documents
+> should use `| unit`.
 
 ## Tolerances
 

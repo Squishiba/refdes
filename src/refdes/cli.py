@@ -9,6 +9,7 @@ import sys
 
 from . import adopt as adopt_mod
 from . import build as build_mod
+from . import calc_rewrite as calc_rewrite_mod
 from . import citations as citations_mod
 from . import former_ids as former_ids_mod
 from . import ids as ids_mod
@@ -947,6 +948,43 @@ def cmd_revise(args) -> int:
     return _print_revision_result(result, dry_run=args.dry_run)
 
 
+def cmd_calc_rewrite(args) -> int:
+    if args.no_write:
+        args.dry_run = True  # --no-write: report the plan, write nothing
+    project_root = _standard_project_root(args)
+    result = calc_rewrite_mod.apply(project_root, dry_run=args.dry_run)
+    if not result.ok:
+        print("would refuse:" if args.dry_run else "refused:", file=sys.stderr)
+        for error in result.errors:
+            print(f"  {error}", file=sys.stderr)
+        return 1
+    if result.line_changes:
+        verb = "would rewrite" if args.dry_run else "rewrote"
+        print(
+            f"{verb} {len(result.line_changes)} calc line(s) in "
+            f"{len(result.changed_files)} file(s):"
+        )
+        for change in result.line_changes:
+            print(f"  {change}")
+    else:
+        print("nothing to rewrite -- no old-spelling calc lines found")
+    if result.sealed_entries:
+        print(
+            f"\n{len(result.sealed_entries)} old-spelling calc line(s) in sealed "
+            "append-only entries left as written -- seals are historical records "
+            "and are never rewritten; these stay on the old spelling (which still "
+            "evaluates) until history-backed resealing lands or they are "
+            "deliberately resealed:"
+        )
+        for entry in result.sealed_entries:
+            print(f"  {entry}")
+    if result.baselines_updated:
+        print(f"baselines carried forward: {', '.join(result.baselines_updated)}")
+    if result.seals_updated:
+        print(f"seals carried forward: {', '.join(result.seals_updated)}")
+    return 0
+
+
 def cmd_standard_upgrade(args) -> int:
     if args.no_write:
         return _refuse_no_write(
@@ -1487,6 +1525,26 @@ def main(argv: list[str] | None = None) -> int:
         "--dry-run", action="store_true", help="show what would change without writing"
     )
     p_revise.set_defaults(func=cmd_revise)
+
+    p_calc_rewrite = sub.add_parser(
+        "calc-rewrite",
+        help="rewrite retired 'name : unit = expression' calc lines to the "
+        "pipe form 'name = expression | unit'",
+        description="Rewrite every old-spelling unit assertion inside ```calc "
+        "fences in item bodies to the pipe form, in place, preserving "
+        "indentation and comments. Prose and {{name}} references are never "
+        "touched. Transactional like 'refdes revise': the rewritten project is "
+        "reloaded, fully validated, and every calc's evaluated result and unit "
+        "are compared against before -- any change in what a calc computes "
+        "rolls every file back. Content hashes and calc hashes are carried "
+        "forward across stamped baselines, since a spelling-only rewrite is "
+        "not a content change. Sealed append-only entries are never rewritten; "
+        "they are listed and left on the old spelling, which still evaluates.",
+    )
+    p_calc_rewrite.add_argument(
+        "--dry-run", action="store_true", help="show what would change without writing"
+    )
+    p_calc_rewrite.set_defaults(func=cmd_calc_rewrite)
 
     p_stub_tests = sub.add_parser(
         "stub-tests",
