@@ -1734,6 +1734,21 @@ Referencing an unexported name is an error that names the fix, in the same voice
 as the duplicate-name error. The friction is the point: publishing is the moment
 the author says "this number is a contract."
 
+**Decided otherwise (2026-09-19): any named value in the target item is
+referenceable, and there is no `exports:`/`publishes:` list.** Jared's reasoning
+is that naming the item in the reference *is* the explicit step this paragraph
+wanted — `V_in = DEC-PWR-001.V_in` says out loud, at the site that needs it, that
+someone else's number is being relied on — and an `exports:` list adds a second
+vocabulary (names a block assigns, names the item publishes) that its author has
+to keep in sync for a guarantee the reference already carries. The cost is
+stated rather than buried, as this paragraph asked for it to be: the target's
+author cannot see who depends on a variable, so renaming one breaks dependents.
+Accepted, because it breaks **loudly** — every dependent fails at its own
+reference line with the file:line, the item id and the reference — which is the
+same bar `origins` and the duplicate-name error are held to. Everywhere else in
+this finding, "exported names" reads as "the names that item's calc blocks
+assign".
+
 Imported projects: the data is exported (`render.items_json` emits per-item
 calcs, render.py:588-597) but not absorbed — `imports._absorb`
 (imports.py:61-122) reconstructs fields, links, identity and the upstream
@@ -1881,10 +1896,25 @@ coverage, or the workspace lint; referencing anything but a single named value
 (no block import, no "import everything"); and any change to `source()` or to
 equations beyond what one shared `env` gives for free.
 
-**Status: outstanding — awaiting decision.** The decisions requested: (a)/(b)/(c)
-on syntax (§1), published-exports versus any-name (§2), and value-in-the-content-
-hash versus mark-suspect-only (§4) — the last of which needs coordinating with
-finding 26's own hash bump before either claims a format number.
+**Status: decided (2026-09-19).** Syntax is (a), `V_in = DEC-PWR-001.V_in`,
+stored as a `DISPLAY-ID@key` composite like every other structured reference
+(§1) — written bare, frozen on the key half, refreshed on rename by the same
+rule. Any named value in the target is referenceable; there is no `exports:`
+list (§2, decided against that section's own recommendation, with the
+invisible-dependents cost accepted because a rename breaks loudly at every
+referring site). A reference to a missing item, a missing name, or a renamed
+name is a **loud error at the referring site** — file:line, the item id, the
+reference — never a silent default and never a stale value. The resolved
+upstream value **enters the referring item's content hash** (§4's recommendation,
+consistent with finding 26), so an upstream change shows the dependent as
+`changed` in baselines with the diff line naming which reference moved and what
+it moved from and to; the `HASH_FORMAT` number stays coordinated with finding
+26's bump, one number and one historical builder, exactly as §4 says. Rejected:
+(b) `use … as …` import lines and (c) `{{ID.name}}` in expressions (§1), for the
+ordering and second-scope reasons given there; published-exports (§2); and
+recompute-silently or mark-suspect-only (§4), the latter because suspect links
+do not exist yet and a correctness guarantee cannot be built on machinery that
+has not been built.
 
 **Local model (not decided — my read): not suitable.** The parser change and the
 scheduler are small, but the correctness claim is "every item whose arithmetic
