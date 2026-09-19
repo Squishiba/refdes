@@ -39,7 +39,7 @@ cited source file.
 Use a calc builtin with two **string-literal** arguments:
 
 ```calc
-name : unit = source("repo-relative/cited-file.ext", "reader-defined-named-key")
+name = source("repo-relative/cited-file.ext", "reader-defined-named-key") | unit
 ```
 
 - `path` must exactly name a **repo-local `path:` citation declared on the same
@@ -107,8 +107,8 @@ V_in             = 12 V ± 5%
 V_out            = 3.3 V
 I_load           = 1.2 A
 eff              = 0.93                 # TPS62913 datasheet, half load
-P_out   : W      = V_out * I_load
-P_diss  : W      = P_out * (1/eff - 1)
+P_out            = V_out * I_load | W
+P_diss           = P_out * (1/eff - 1) | W
 ```
 ````
 
@@ -128,9 +128,9 @@ citations:
 V_in             = 12 V ± 5%
 V_out            = 3.3 V
 I_load           = 1.2 A
-eff : 1          = source("analysis/power-budget.csv", "tps62913_half_load_eff")
-P_out   : W      = V_out * I_load
-P_diss  : W      = P_out * (1/eff - 1)
+eff              = source("analysis/power-budget.csv", "tps62913_half_load_eff") | 1
+P_out            = V_out * I_load | W
+P_diss           = P_out * (1/eff - 1) | W
 ```
 ````
 
@@ -220,9 +220,9 @@ checks:
 ---
 
 ```calc
-I_load : mA = source("analysis/power-budget.csv", "board_a_total_load")
-I_q    : mA = source("analysis/power-budget.csv", "board_a_total_quiescent")
-P_3v3  : W  = 3.3 V * (I_load + I_q)
+I_load = source("analysis/power-budget.csv", "board_a_total_load") | mA
+I_q    = source("analysis/power-budget.csv", "board_a_total_quiescent") | mA
+P_3v3  = 3.3 V * (I_load + I_q) | W
 ```
 ````
 
@@ -346,7 +346,7 @@ Implement XLSX only after CSV is proven in a real project, as an optional
 sheet-scoped, never a sheet/cell address:
 
 ```calc
-thermal_rise : delta_degC = source("analysis/thermal-model.xlsx", "case_rise")
+thermal_rise = source("analysis/thermal-model.xlsx", "case_rise") | delta_degC
 ```
 
 The source key resolves a workbook-scoped or sheet-scoped defined name; it must
@@ -494,7 +494,7 @@ unit.
 The visible authoring pattern is therefore:
 
 ```calc
-load_power : W = source("analysis/power-budget.csv", "rail_3v3_power")
+load_power = source("analysis/power-budget.csv", "rail_3v3_power") | W
 ```
 
 If the CSV contains `1850` because the spreadsheet is in mW, the calc table

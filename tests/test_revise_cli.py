@@ -43,10 +43,10 @@ def stale_project(tmp_path):
         "items:\n"
         "  - id: DEC-001\n"
         "    status: proposed\n"
-        '    body: "```calc\\nP : W = 3.3 V * 1.2 A\\n```"\n'
+        '    body: "```calc\\nP = 3.3 V * 1.2 A | W\\n```"\n'
         "  - id: DEC-002\n"
         "    status: proposed\n"
-        '    body: "```calc\\nP : W = 3.3 V * 1.2 A\\n```"\n'
+        '    body: "```calc\\nP = 3.3 V * 1.2 A | W\\n```"\n'
         "  - id: DEC-003\n"
         "    status: proposed\n"
         "    body: No calc block here, just prose.\n",
@@ -57,7 +57,7 @@ def stale_project(tmp_path):
         "items:\n"
         "  - id: NOTE-001\n"
         "    tag: v1\n"
-        '    body: "```calc\\nx : W = 1 V * 1 A\\n```"\n',
+        '    body: "```calc\\nx = 1 V * 1 A | W\\n```"\n',
         encoding="utf-8",
     )
     return tmp_path
@@ -325,10 +325,10 @@ def test_stale_arithmetic_flags_status_moved_with_calc_unchanged(stale_project):
         "items:\n"
         "  - id: DEC-001\n"
         "    status: accepted\n"  # moved, calc untouched
-        '    body: "```calc\\nP : W = 3.3 V * 1.2 A\\n```"\n'
+        '    body: "```calc\\nP = 3.3 V * 1.2 A | W\\n```"\n'
         "  - id: DEC-002\n"
         "    status: proposed\n"
-        '    body: "```calc\\nP : W = 3.3 V * 1.2 A\\n```"\n'
+        '    body: "```calc\\nP = 3.3 V * 1.2 A | W\\n```"\n'
         "  - id: DEC-003\n"
         "    status: proposed\n"
         "    body: No calc block here, just prose.\n",
@@ -353,10 +353,10 @@ def test_stale_arithmetic_not_flagged_when_calc_moves_too(stale_project):
         "items:\n"
         "  - id: DEC-001\n"
         "    status: proposed\n"
-        '    body: "```calc\\nP : W = 3.3 V * 1.2 A\\n```"\n'
+        '    body: "```calc\\nP = 3.3 V * 1.2 A | W\\n```"\n'
         "  - id: DEC-002\n"
         "    status: accepted\n"  # moved, and so did the calc block
-        '    body: "```calc\\nP : W = 5 V * 1 A\\n```"\n'
+        '    body: "```calc\\nP = 5 V * 1 A | W\\n```"\n'
         "  - id: DEC-003\n"
         "    status: proposed\n"
         "    body: No calc block here, just prose.\n",
@@ -380,10 +380,10 @@ def test_stale_arithmetic_not_flagged_without_a_calc_block(stale_project):
         "items:\n"
         "  - id: DEC-001\n"
         "    status: proposed\n"
-        '    body: "```calc\\nP : W = 3.3 V * 1.2 A\\n```"\n'
+        '    body: "```calc\\nP = 3.3 V * 1.2 A | W\\n```"\n'
         "  - id: DEC-002\n"
         "    status: proposed\n"
-        '    body: "```calc\\nP : W = 3.3 V * 1.2 A\\n```"\n'
+        '    body: "```calc\\nP = 3.3 V * 1.2 A | W\\n```"\n'
         "  - id: DEC-003\n"
         "    status: accepted\n"  # moved, no calc block to be stale
         "    body: No calc block here, just prose.\n",
@@ -408,7 +408,7 @@ def test_stale_arithmetic_not_flagged_without_a_status_field(stale_project):
         "items:\n"
         "  - id: NOTE-001\n"
         "    tag: v2\n"  # changed; calc block itself untouched
-        '    body: "```calc\\nx : W = 1 V * 1 A\\n```"\n',
+        '    body: "```calc\\nx = 1 V * 1 A | W\\n```"\n',
         encoding="utf-8",
     )
     project2 = _lc_build(stale_project)
@@ -464,10 +464,10 @@ def test_audit_prints_the_stale_arithmetic_annotation(stale_project, capsys):
         "items:\n"
         "  - id: DEC-001\n"
         "    status: accepted\n"
-        '    body: "```calc\\nP : W = 3.3 V * 1.2 A\\n```"\n'
+        '    body: "```calc\\nP = 3.3 V * 1.2 A | W\\n```"\n'
         "  - id: DEC-002\n"
         "    status: proposed\n"
-        '    body: "```calc\\nP : W = 3.3 V * 1.2 A\\n```"\n'
+        '    body: "```calc\\nP = 3.3 V * 1.2 A | W\\n```"\n'
         "  - id: DEC-003\n"
         "    status: proposed\n"
         "    body: No calc block here, just prose.\n",

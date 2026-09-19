@@ -181,7 +181,7 @@ The denominator's interval spans zero. Narrow the tolerance or restructure.
 Split it across two lines.
 
 **Units display oddly (`2 J` for a torque).**
-`N·m` and `J` are dimensionally identical. Pin it: `tq : N*m = ...`.
+`N·m` and `J` are dimensionally identical. Pin it: `tq = ... | N*m`.
 
 ## Checks
 

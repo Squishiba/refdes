@@ -6,5 +6,5 @@
   spellings on one line is an error naming both. Prose references gain the
   same form: `{{P_diss | mW}}` presents that value converted to `mW`, and a
   unit of the wrong dimension is a build error at the reference rather than a
-  silent fallback. The old `: unit` spelling still works unchanged for now;
-  a rewrite command will convert projects before it is retired.
+  silent fallback. The old `: unit` spelling is retired — see
+  `calc-colon-units-retired.breaking` and `refdes calc-rewrite`.

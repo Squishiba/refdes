@@ -1,8 +1,9 @@
-"""Chunk 1 of the Calcpad-style unit syntax: `name = expression | unit`.
+"""The Calcpad-style unit syntax: `name = expression | unit`.
 
-The unit a result is presented in goes after the expression; the old
-`name : unit = expression` spelling keeps working unchanged until the
-rewrite tool lands. Prose references gain the same form: `{{P_diss | mW}}`.
+The unit a result is presented in goes after the expression. The old
+`name : unit = expression` spelling is retired: it is a build error naming
+the exact fix, and `refdes calc-rewrite` migrates a whole project. Prose
+references use the same form: `{{P_diss | mW}}`.
 """
 
 from __future__ import annotations
@@ -72,9 +73,8 @@ def test_pipe_unit_accepts_the_same_units_as_the_old_annotation():
     # Brackets are the escape hatch inside *expressions*; the old unit
     # annotation never accepted them, so neither does the new spelling --
     # what matters is that the accepted set is identical.
-    for src in ("t : [h] = 1800 s", "t = 1800 s | [h]"):
-        outcome = calc.evaluate_block(src, {})[0]
-        assert outcome.error == "unknown unit '[h]' in declaration"
+    outcome = calc.evaluate_block("t = 1800 s | [h]", {})[0]
+    assert outcome.error == "unknown unit '[h]' in declaration"
     env = {}
     calc.evaluate_block("t = 1800 s | h", env)
     assert calc.format_value(env["t"]) == "0.5 h"
@@ -127,13 +127,17 @@ def test_unit_before_the_equals_is_rejected_with_the_fix():
 # ------------------------------------------------ the old spelling (guard)
 
 
-def test_old_spelling_still_works_unchanged():
+def test_old_spelling_is_a_retired_error_naming_the_exact_fix():
     env = {}
     outcomes = calc.evaluate_block("P_mW : mW = 3.3 V * 1.2 A\nt : ms = 2.5 s", env)
-    assert [o.error for o in outcomes] == [None, None]
+    assert all(o.error is not None and o.retired for o in outcomes)
+    assert "write `P_mW = 3.3 V * 1.2 A | mW`" in outcomes[0].error
+    assert "write `t = 2.5 s | ms`" in outcomes[1].error
+    assert all("refdes calc-rewrite" in o.error for o in outcomes)
+    # The line still evaluates: a sealed entry (warning only) must render
+    # its numbers, and calc-rewrite's value guard needs the before picture.
     assert calc.format_value(env["P_mW"]) == "3960 mW"
     assert calc.format_value(env["t"]) == "2500 ms"
-    assert all(o.unit_style == ":" for o in outcomes)
 
 
 def test_old_spelling_assertion_error_is_unchanged():
@@ -165,12 +169,12 @@ def test_comment_only_line_with_a_pipe_is_still_a_comment():
 def test_rendered_table_shows_the_authors_own_marker(tmp_path):
     project = _build(
         tmp_path,
-        "```calc\nV = 3.3 V\nI = 1.2 A\nP = V * I | mW\nQ : W = V * I\n```\n",
+        "```calc\nV = 3.3 V\nI = 1.2 A\nP = V * I | mW\nQ = V * I | W\n```\n",
     )
     assert not project.errors
     html = project.item_by_id("DEC-001").body_html
     assert '<span class="calc-annotation">| mW</span>' in html
-    assert '<span class="calc-annotation">: W</span>' in html
+    assert '<span class="calc-annotation">| W</span>' in html
 
 
 def test_items_json_export_carries_new_spelling_lines(tmp_path):
@@ -264,12 +268,11 @@ TEMPERATURE_SCHEMA = (
 
 @pytest.mark.parametrize(
     "expression",
-    ["T_j = 313.15 K | degC", "T_j : degC = 40 degC"],
+    ["T_j = 313.15 K | degC", "T_j = 40 degC | degC"],
 )
-def test_checks_resolve_names_from_either_spelling(tmp_path, expression):
-    """`checks: value:` refers to calc names, so the new spelling must be
-    just as checkable as the old one -- and the conversion it performs is
-    what the check sees."""
+def test_checks_resolve_names_from_the_pipe_spelling(tmp_path, expression):
+    """`checks: value:` refers to calc names, and the conversion the pipe
+    spelling performs is what the check sees."""
     write_project_config(tmp_path, TEMPERATURE_SCHEMA)
     items = tmp_path / "items"
     items.mkdir()

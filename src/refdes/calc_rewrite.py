@@ -36,7 +36,7 @@ from dataclasses import dataclass, field
 from . import build as build_mod
 from . import calc
 from . import seal as seal_mod
-from .model import Item, Project
+from .model import RETIRED_UNIT_SPELLING, Item, Project
 from .revise import (
     FileRewrite,
     _blocking_errors,
@@ -59,43 +59,10 @@ FENCE_OPEN_RE = re.compile(r"^\s*```calc[^\n]*$")
 FENCE_CLOSE_RE = re.compile(r"^\s*```\s*$")
 
 
-def rewrite_line(line: str) -> str | None:
-    """The pipe-form spelling of one old-spelling calc line, or None when the
-    line is not an old-spelling assignment. Indentation and any trailing
-    comment (and the whitespace before it) are preserved exactly.
-
-    Alignment: an author who padded the name before the colon, or padded
-    before the equals sign, was aligning the block's `=` in a column -- and
-    a calc block is prose-adjacent text a person reads. So on a padded line
-    the `=` stays in exactly the column it was in (the name is padded to
-    reach it, the text after the `=` keeps its own spacing), and the
-    `| unit` simply follows the expression. An unpadded line stays compact:
-    `name = expression | unit`."""
-    code, hash_sign, comment = line.partition("#")
-    stripped = code.strip()
-    if not stripped or "|" in stripped:
-        # A `|` on the code part means the line already uses the pipe form
-        # (or spells both, which is a build error the run never reaches).
-        return None
-    match = calc.ANNOTATED_RE.match(stripped)
-    if not match:
-        return None
-    name, unit, expression = match.groups()
-    indent = line[: len(line) - len(line.lstrip())]
-    gap = code[len(code.rstrip()):] if hash_sign else ""
-    eq_idx = code.find("=")
-    pad_before_eq = len(code[:eq_idx]) - len(code[:eq_idx].rstrip())
-    pad_before_colon = code.find(":") - (len(indent) + len(name))
-    if pad_before_eq >= 2 or pad_before_colon >= 2:
-        # Aligned line: keep the `=` in its column, keep everything from the
-        # `=` on (spacing included) exactly as written, append the unit.
-        tail = code[eq_idx + 1:].rstrip()
-        new = f"{(indent + name).ljust(eq_idx)}={tail} | {unit}"
-    else:
-        new = f"{indent}{name} = {expression} | {unit}"
-    if hash_sign:
-        new += f"{gap}{hash_sign}{comment}"
-    return new
+# The spelling transformation lives in calc.rewrite_line -- one place, shared
+# with the build error that quotes the suggested fix. Re-exported here so the
+# rewrite engine (and tests that swap it) address it through this module.
+rewrite_line = calc.rewrite_line
 
 
 @dataclass
@@ -190,6 +157,11 @@ def _snapshot_diff(before: dict, after: dict) -> list[str]:
     for pos, calcs in sorted(before.items()):
         after_calcs = after.get(pos, {})
         for name, (result, unit) in sorted(calcs.items()):
+            if result is None:
+                # The line did not compute before the rewrite (a retired
+                # spelling with a second defect, say). There is no value to
+                # preserve; the post-rewrite validation guards that line.
+                continue
             new_result, new_unit = after_calcs.get(name, (None, None))
             if (new_result, new_unit) == (result, unit):
                 continue
@@ -206,7 +178,12 @@ def apply(project_root: str, dry_run: bool = False) -> CalcRewriteResult:
     the pipe form. See the module docstring for the full safety model."""
     config_path = os.path.join(project_root, "refdes-project.yaml")
     project_before = _load_and_validate(config_path)
-    blocking = _blocking_errors(project_before)
+    # Retired-spelling errors are the point of this command, not a reason to
+    # refuse it: a project that needs the rewrite by definition fails the
+    # build once the old spelling is an error. Every other error still
+    # refuses, and the post-rewrite validation stays fully strict.
+    blocking = [d for d in _blocking_errors(project_before)
+                if d.code != RETIRED_UNIT_SPELLING]
     if blocking:
         return CalcRewriteResult(
             ok=False,

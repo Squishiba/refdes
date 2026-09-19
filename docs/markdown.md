@@ -43,7 +43,7 @@ Wide tables scroll inside their own box rather than pushing the page sideways.
 
 ````markdown
 ```calc
-P : W = 3.3 V * 1.2 A
+P = 3.3 V * 1.2 A | W
 ```
 ````
 

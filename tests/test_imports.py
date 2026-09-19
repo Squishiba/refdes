@@ -99,7 +99,7 @@ checks:
 ```calc
 I_total   = 4.8 A
 n_pins    = 2
-I_pin : A = I_total / n_pins
+I_pin = I_total / n_pins | A
 ```
 """
 

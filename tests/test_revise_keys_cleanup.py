@@ -65,7 +65,7 @@ def keyed_project(tmp_path):
         "  - value: P_dens\n"
         "    against: CON-001\n"
         "---\n\n"
-        "```calc\nP_dens : W/in^2 = 0.1 W/in^2\n```\n",
+        "```calc\nP_dens = 0.1 W/in^2 | W/in^2\n```\n",
         encoding="utf-8",
     )
     return tmp_path
@@ -175,7 +175,7 @@ def test_dry_run_changed_files_match_the_real_run_including_refresh(tmp_path):
     (items / "dec.md").write_text(
         "---\nid: DEC-001\ntype: decision\ntitle: Regulator topology\n"
         "constrained_by: [CON-001]\n---\n\n"
-        "```calc\nP_dens : W/in^2 = 0.1 W/in^2\n```\n",
+        "```calc\nP_dens = 0.1 W/in^2 | W/in^2\n```\n",
         encoding="utf-8",
     )
     project = load_project(config_path=str(root / "refdes-project.yaml"))
@@ -276,9 +276,9 @@ def test_prefix_rename_succeeds_over_a_defaults_inherited_check(tmp_path):
         "    - value: P_dens\n      against: CON-001\n"
         "---\n\n"
         "---\nid: DEC-001\ntitle: Regulator topology\n---\n\n"
-        "```calc\nP_dens : W/in^2 = 0.1 W/in^2\n```\n\n"
+        "```calc\nP_dens = 0.1 W/in^2 | W/in^2\n```\n\n"
         "---\nid: DEC-002\ntitle: Copper weight\n---\n\n"
-        "```calc\nP_dens : W/in^2 = 0.12 W/in^2\n```\n",
+        "```calc\nP_dens = 0.12 W/in^2 | W/in^2\n```\n",
         encoding="utf-8",
     )
 

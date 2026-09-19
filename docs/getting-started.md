@@ -169,9 +169,9 @@ BND-THM-001 sets what we may dissipate getting there.
 V_out            = 3.3 V
 I_load           = 1.2 A
 eff              = 0.93
-P_diss  : W      = V_out * I_load * (1/eff - 1)
+P_diss           = V_out * I_load * (1/eff - 1) | W
 A_board          = 1.4 inch * 0.9 inch
-P_dens  : W/in^2 = P_diss / A_board
+P_dens           = P_diss / A_board | W/in^2
 ```
 
 The converter loses {{P_diss}} over {{A_board}} of board, so the power stage runs
@@ -182,8 +182,8 @@ Three things are happening:
 
 - The `calc` block evaluates with **real units**. `V * A` yields watts; `V + A`
   would be a build error.
-- `P_diss : W` is a **unit assertion** — if the algebra drifted dimensionally, the
-  build fails at that line.
+- `P_diss ... | W` is a **unit assertion** — if the algebra drifted dimensionally,
+  the build fails at that line.
 - `checks:` compares `P_dens` against `BND-THM-001`'s limit.
 
 ## 5. Build

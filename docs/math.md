@@ -135,13 +135,12 @@ reports `0.2366 W/in²` rather than `236.6 mW/in²` — matching the bound it is
 checked against. Use them wherever getting the dimension wrong would be
 expensive.
 
-> **Note:** the older spelling, `name : unit = expression`, still works and
-> behaves identically. It is being retired: `refdes calc-rewrite` converts
-> a project to the `| unit` form in one transactional pass (it verifies
-> every calc still evaluates to the same value and unit, carries baselines
-> forward, and never touches sealed append-only entries — see its
-> `--help`), after which the old spelling becomes an error. New documents
-> should use `| unit`.
+> **Note:** the older spelling, `name : unit = expression`, is retired —
+> the build reports an error naming the exact fix on every line that still
+> uses it. `refdes calc-rewrite` converts a project to the `| unit` form in
+> one transactional pass (it verifies every calc still evaluates to the
+> same value and unit, carries baselines and seals forward, and leaves
+> sealed append-only entries untouched — see its `--help`).
 
 ## Tolerances
 

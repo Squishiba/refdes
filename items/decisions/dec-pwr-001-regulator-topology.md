@@ -44,10 +44,10 @@ V_in             = 12 V ± 5%            # nominal supply, 5% tolerance
 V_out            = 3.3 V
 I_load           = 1.2 A
 eff              = 0.93                 # TPS62913 datasheet, half load
-P_out   : W      = V_out * I_load
-P_diss  : W      = P_out * (1/eff - 1)  # converter loss at full load
+P_out            = V_out * I_load | W
+P_diss           = P_out * (1/eff - 1) | W  # converter loss at full load
 A_board          = 1.4 inch * 0.9 inch  # area allocated to the power stage
-P_dens  : W/in^2 = P_diss / A_board
+P_dens           = P_diss / A_board | W/in^2
 ```
 
 The converter loses {{P_diss}} at full load, spread over {{A_board}} of board, so

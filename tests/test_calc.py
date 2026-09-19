@@ -123,13 +123,13 @@ def test_derived_results_still_collapse_to_named_units():
 
 def test_unit_assertion_passes_and_pins_the_display_unit():
     env = {}
-    outcomes = calc.evaluate_block("P : W = 3.3 V * 1.2 A", env)
+    outcomes = calc.evaluate_block("P = 3.3 V * 1.2 A | W", env)
     assert outcomes[0].error is None
     assert calc.format_value(env["P"]) == "3.96 W"  # not 3.96 kW or 3960 mW
 
 
 def test_unit_assertion_catches_dimensional_drift():
-    outcomes = calc.evaluate_block("P : W = 3.3 V / 1.2 A", {})
+    outcomes = calc.evaluate_block("P = 3.3 V / 1.2 A | W", {})
     assert outcomes[0].error is not None
     assert "declared as W" in outcomes[0].error
 
@@ -143,7 +143,9 @@ def test_misplaced_tolerance_names_the_fix_not_the_parse_failure():
     assert outcomes[0].error is not None
     assert "unknown unit" not in outcomes[0].error
     assert (
-        "a tolerance belongs on the right-hand side — P : W = V * I ± 10%"
+        "a tolerance belongs on the right-hand side, and the ': unit =' "
+        "spelling was retired — write `P = V * I ± 10% | W`; run "
+        "'refdes calc-rewrite' to fix a whole project"
         == outcomes[0].error
     )
 
@@ -151,7 +153,12 @@ def test_misplaced_tolerance_names_the_fix_not_the_parse_failure():
 def test_misplaced_tolerance_plus_minus_spelling_is_also_caught():
     outcomes = calc.evaluate_block("P : W +/- 10% = V * I", {})
     assert outcomes[0].error is not None
-    assert "a tolerance belongs on the right-hand side — P : W = V * I ± 10%" == outcomes[0].error
+    assert (
+        "a tolerance belongs on the right-hand side, and the ': unit =' "
+        "spelling was retired — write `P = V * I ± 10% | W`; run "
+        "'refdes calc-rewrite' to fix a whole project"
+        == outcomes[0].error
+    )
 
 
 def test_misplaced_tolerance_error_reaches_the_build_diagnostic(tmp_path):
@@ -171,7 +178,13 @@ def test_misplaced_tolerance_error_reaches_the_build_diagnostic(tmp_path):
     parse.load_items(project)
     build_mod.build(project)
     message = next(d.message for d in project.errors if "P" in d.message)
-    assert "calc 'P': a tolerance belongs on the right-hand side — P : W = V * I ± 10%" == message
+    assert (
+        "calc 'P': a tolerance belongs on the right-hand side, and the "
+        "': unit =' spelling was retired — write `P = V * I ± 10% | W`; run "
+        "'refdes calc-rewrite' to fix a whole project"
+        == message
+    )
+    assert next(d for d in project.errors if "P" in d.message).code == "retired_unit_spelling"
 
 
 # ------------------------------------------------------- duplicate assignment
@@ -365,7 +378,7 @@ def test_mil_is_a_length_not_pints_angular_mil():
     becomes a dimensionless 62 and propagates as a wrong answer.
     """
     env = {}
-    calc.evaluate_block("t : mm = 62 mil", env)
+    calc.evaluate_block("t = 62 mil | mm", env)
     assert calc.format_value(env["t"]) == "1.575 mm"
 
     outcomes = calc.evaluate_block("bad = 62 mil + 3 V", {})
@@ -608,7 +621,7 @@ def _temperature_project(tmp_path, limit, value="40 degC"):
         "  - value: T_j\n"
         "    against: BND-001\n"
         "---\n\n"
-        f"```calc\nT_j : degC = {value}\n```\n",
+        f"```calc\nT_j = {value} | degC\n```\n",
         encoding="utf-8",
     )
     project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
@@ -835,7 +848,7 @@ def test_an_equation_call_in_a_calc_block_reaches_the_build(tmp_path):
     items.mkdir()
     (items / "dec.md").write_text(
         "---\nid: DEC-001\ntype: decision\n---\n\n"
-        "```calc\nCLIM_out1 : A = current_limit(2500, 0.8 V, 3.3 kohm)\n```\n",
+        "```calc\nCLIM_out1 = current_limit(2500, 0.8 V, 3.3 kohm) | A\n```\n",
         encoding="utf-8",
     )
     project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))

@@ -231,7 +231,7 @@ def _check_severity_project(tmp_path, *, item_type, item_id, prefix, checks_extr
         "    against: CON-IO-004\n"
         f"{checks_extra}"
         "---\n\n"
-        "```calc\nCLIM : A = 0.697 A\n```\n",
+        "```calc\nCLIM = 0.697 A | A\n```\n",
         encoding="utf-8",
     )
     return _build_at(tmp_path)

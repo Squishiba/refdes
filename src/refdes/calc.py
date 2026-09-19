@@ -792,7 +792,8 @@ def format_bounds(value: Value, digits: int = 4) -> str:
 CALC_BLOCK_RE = re.compile(r"^```calc[^\n]*\n(.*?)^```\s*$", re.DOTALL | re.MULTILINE)
 ASSIGN_RE = re.compile(r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+?)\s*$")
 # Retired spelling of the unit assertion: `P_diss : W = V_out * I_load`.
-# Still evaluated, unchanged, until the rewrite tool lands (chunk 3 retires it).
+# Matched only to produce the error that names the fix -- it is no longer
+# evaluated. `refdes calc-rewrite` migrates a whole project at once.
 ANNOTATED_RE = re.compile(
     r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*:\s*([^=]+?)\s*=\s*(.+?)\s*$"
 )
@@ -810,6 +811,58 @@ LEADING_PIPE_RE = re.compile(
 )
 
 
+def rewrite_line(line: str) -> str | None:
+    """The pipe-form spelling of one old-spelling calc line, or None when the
+    line is not an old-spelling assignment. Indentation and any trailing
+    comment (and the whitespace before it) are preserved exactly.
+
+    Alignment: an author who padded the name before the colon, or padded
+    before the equals sign, was aligning the block's `=` in a column -- and
+    a calc block is prose-adjacent text a person reads. So on a padded line
+    the `=` stays in exactly the column it was in (the name is padded to
+    reach it, the text after the `=` keeps its own spacing), and the
+    `| unit` simply follows the expression. An unpadded line stays compact:
+    `name = expression | unit`.
+
+    This is the one spelling transformation: the build error for a retired
+    line quotes its suggestion from here, and `refdes calc-rewrite` applies
+    it."""
+    code, hash_sign, comment = line.partition("#")
+    stripped = code.strip()
+    if not stripped or "|" in stripped:
+        # A `|` on the code part means the line already uses the pipe form
+        # (or spells both, which is a build error the run never reaches).
+        return None
+    match = ANNOTATED_RE.match(stripped)
+    if not match:
+        return None
+    name, unit, expression = match.groups()
+    indent = line[: len(line) - len(line.lstrip())]
+    tol_parts = TOLERANCE_SPLIT.split(unit, maxsplit=1)
+    if len(tol_parts) == 2:
+        # `P : W ± 10% = expr` -- the tolerance moves to the right-hand side
+        # in the same step (it was never a legal part of the unit).
+        new = f"{name} = {expression} ± {tol_parts[1].strip()} | {tol_parts[0].strip()}"
+        new = indent + new.lstrip()
+        if hash_sign:
+            new += f"{code[len(code.rstrip()):]}{hash_sign}{comment}"
+        return new
+    gap = code[len(code.rstrip()):] if hash_sign else ""
+    eq_idx = code.find("=")
+    pad_before_eq = len(code[:eq_idx]) - len(code[:eq_idx].rstrip())
+    pad_before_colon = code.find(":") - (len(indent) + len(name))
+    if pad_before_eq >= 2 or pad_before_colon >= 2:
+        # Aligned line: keep the `=` in its column, keep everything from the
+        # `=` on (spacing included) exactly as written, append the unit.
+        tail = code[eq_idx + 1:].rstrip()
+        new = f"{(indent + name).ljust(eq_idx)}={tail} | {unit}"
+    else:
+        new = f"{indent}{name} = {expression} | {unit}"
+    if hash_sign:
+        new += f"{gap}{hash_sign}{comment}"
+    return new
+
+
 @dataclass
 class CalcOutcome:
     name: str
@@ -825,6 +878,10 @@ class CalcOutcome:
     # Absolute 1-indexed source line, or None when the caller didn't supply
     # evaluate_block a start_line to compute one from.
     line: int | None = None
+    # The error is about the retired `name : unit = expr` spelling itself, so
+    # a sealed append-only entry -- which cannot be edited without resealing
+    # -- downgrades to a warning instead of failing the build.
+    retired: bool = False
 
 
 def assigned_names(source: str) -> set[str]:
@@ -931,9 +988,11 @@ def evaluate_block(
                 outcomes.append(
                     CalcOutcome(
                         name, expression, comment, None,
-                        "a tolerance belongs on the right-hand side — "
-                        f"{name} : {unit_part} = {expression} ± {tol_part}",
-                        annotation, line=line_number,
+                        "a tolerance belongs on the right-hand side, and the "
+                        "': unit =' spelling was retired — "
+                        f"write `{name} = {expression} ± {tol_part} | {unit_part}`; "
+                        "run 'refdes calc-rewrite' to fix a whole project",
+                        annotation, retired=True, line=line_number,
                     )
                 )
                 continue
@@ -956,6 +1015,40 @@ def evaluate_block(
                     f"the = and '| {unit_after}' after the expression; keep one",
                     annotation, line=line_number,
                 )
+            )
+            continue
+
+        if annotation:
+            # Only the retired colon spelling can still carry an annotation
+            # here: the pipe form sets its own below. The line still
+            # evaluates -- a sealed append-only entry downgrades to a
+            # warning and must still render its numbers, and calc-rewrite's
+            # value guard compares before against after -- but the outcome
+            # carries an error, so any unsealed use fails the build. The
+            # suggestion comes from rewrite_line, the same function
+            # `refdes calc-rewrite` applies, so the transformation lives once.
+            suggested = rewrite_line(line)
+            fix = f" -- write `{suggested.strip()}`" if suggested else ""
+            retired_msg = (
+                f"the 'name : unit = expression' spelling was retired{fix}; "
+                "run 'refdes calc-rewrite' to fix a whole project"
+            )
+            warning = check_ambiguity(expression, names)
+            try:
+                value = evaluate_assignment(expression, env)
+                value = convert_value(value, annotation)
+            except Exception as exc:  # noqa: BLE001 -- pint and math surface a variety of types
+                outcomes.append(
+                    CalcOutcome(name, expression, comment, None,
+                                f"{retired_msg} (and: {exc})", annotation,
+                                warning, retired=True, line=line_number)
+                )
+                continue
+            env[name] = value
+            origins[name] = line_number
+            outcomes.append(
+                CalcOutcome(name, expression, comment, value, retired_msg,
+                            annotation, warning, retired=True, line=line_number)
             )
             continue
 

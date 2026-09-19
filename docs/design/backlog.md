@@ -1791,7 +1791,7 @@ intact. A retyped `12 V` loses the ±5% silently and reports a suspiciously tigh
 answer — the copies are not merely a maintenance problem, they are a correctness
 problem the moment someone drops the tolerance while retyping. A dimensionality
 mismatch at the reference site is an ordinary calc error at the line that has the
-wrong dimensions: the unit assertion `P : W = DEC-X.V_in * I` fails in the
+wrong dimensions: the unit assertion `P = DEC-X.V_in * I | W` fails in the
 existing `convert_value` conversion (calc.py:831-843), and a bare mismatch inside
 a larger expression fails in `_binary`'s pint operation. No new diagnostic class
 is needed; the line reported is the line the author has to fix.

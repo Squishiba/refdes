@@ -33,9 +33,9 @@ extension could not run the CLI; check the setting above.
 a `calc` block, updating on save:
 
 ```calc
-V_out            = 3.3 V                          → 3.3 V
-P_diss  : W      = V_out * I_load * (1/eff - 1)   → 0.2981 W
-P_dens  : W/in^2 = P_diss / A_board               → 0.2366 W/in²
+V_out            = 3.3 V                                     → 3.3 V
+P_diss           = V_out * I_load * (1/eff - 1) | W           → 0.2981 W
+P_dens           = P_diss / A_board | W/in^2                  → 0.2366 W/in²
 ```
 
 Values with tolerance show their bounds; a failed line shows the error inline.

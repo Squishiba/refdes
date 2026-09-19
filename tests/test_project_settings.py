@@ -360,7 +360,7 @@ def test_sigfigs_flows_through_check_messages(tmp_path):
         "  - value: x\n"
         "    against: CON-001\n"
         "---\n\n"
-        "```calc\nx : A = 0.6061 A\n```\n",
+        "```calc\nx = 0.6061 A | A\n```\n",
         encoding="utf-8",
     )
     project = load_project(start=str(tmp_path))

@@ -12,7 +12,7 @@ from conftest import write_project_config
 
 from refdes import build as build_mod
 from refdes import calc, calc_rewrite, cli, lifecycle, parse
-from refdes.model import CHECK_VIOLATION
+from refdes.model import CHECK_VIOLATION, RETIRED_UNIT_SPELLING
 from refdes.schema import load_project
 
 SCHEMA = (
@@ -94,6 +94,24 @@ def _load(root):
     return project
 
 
+def test_the_refdes_repo_itself_has_no_retired_spellings():
+    """The repo's own items were migrated with `refdes calc-rewrite` — the
+    dogfood step of the retirement. The build still fails by design (DEC-PWR-001
+    teaches a check violation), but no retired-unit-spelling diagnostic
+    survives anywhere in the tree."""
+    import os
+
+    from helpers import REPO
+
+    project = load_project(config_path=os.path.join(REPO, "refdes-project.yaml"))
+    parse.load_items(project)
+    build_mod.build(project, seal_write=False, reseal=False, accept_board_move=False)
+    assert not [
+        d for d in project.errors + project.warnings
+        if d.code == RETIRED_UNIT_SPELLING
+    ]
+
+
 def test_rewrite_markdown_item(calc_project):
     result = calc_rewrite.apply(str(calc_project))
     assert result.ok, result.errors
@@ -139,8 +157,9 @@ def test_dry_run_writes_nothing(calc_project):
 
 def test_sealed_entry_refused_and_reported_while_others_rewrite(calc_project):
     (calc_project / "items" / "log.yaml").write_text(LOG_ITEM, encoding="utf-8")
-    project = _load(calc_project)  # default build seals append-only entries
-    assert not [d for d in project.errors]
+    project = _load(calc_project)
+    # Not sealed yet, so the old spelling inside the entry is a real error.
+    assert [d for d in project.errors if d.code == "retired_unit_spelling"]
     build_mod.build(project, seal_write=True, reseal=False, accept_board_move=False)
 
     result = calc_rewrite.apply(str(calc_project))
@@ -154,9 +173,11 @@ def test_sealed_entry_refused_and_reported_while_others_rewrite(calc_project):
     dec_text = (calc_project / "items" / "dec.md").read_text(encoding="utf-8")
     assert "P = V * I | W" in dec_text  # everything else rewritten
 
-    # And the untouched sealed entry still builds clean on the old spelling.
+    # And the untouched sealed entry builds: its retired spelling is a
+    # warning, not an error -- it cannot be fixed without resealing.
     project2 = _load(calc_project)
     assert not [d for d in project2.errors if d.code != CHECK_VIOLATION]
+    assert [d for d in project2.warnings if "retired" in d.message]
 
 
 def test_value_changing_rewrite_refused_and_rolled_back(calc_project, monkeypatch):

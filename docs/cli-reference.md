@@ -663,6 +663,36 @@ rename from turning a clean build into a failing one.
 
 ---
 
+## `refdes calc-rewrite`
+
+Rewrite every retired `name : unit = expression` calc line to the pipe
+form `name = expression | unit`, in place:
+
+```bash
+refdes calc-rewrite --dry-run   # show every line that would change
+refdes calc-rewrite             # rewrite them
+```
+
+Only lines inside ```calc fences in item bodies are touched — prose and
+`{{name}}` references are never rewritten. Indentation, trailing comments
+and the equals-column alignment are preserved, and a tolerance that sat in
+the old annotation moves to the expression: `P : W ± 10% = V * I` becomes
+`P = V * I ± 10% | W`.
+
+The operation is transactional like `refdes revise`: the rewritten project
+is reloaded and fully validated, and every calc's evaluated result and unit
+are compared against the before picture — any calc that would compute
+differently rolls every file back. Content hashes and calc hashes are
+carried forward across stamped baselines **and** seal files, because a
+spelling-only rewrite is not a content change.
+
+Sealed append-only entries are never rewritten: their lines are listed on
+stdout and left exactly as written. That is why the retired spelling still
+*evaluates* — a sealed entry renders its numbers — even though anywhere
+else in a project it is a build error naming the exact fix.
+
+---
+
 ## `refdes stub-tests`
 
 Generate a starter test item for every coverable item that has no

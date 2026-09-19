@@ -167,7 +167,7 @@ def violating_project(tmp_path):
         "  - value: P_dens\n"
         "    against: CON-THM-001\n"
         "---\n\n"
-        "```calc\nP_dens : W/in^2 = 0.2366 W/in^2\n```\n",
+        "```calc\nP_dens = 0.2366 W/in^2 | W/in^2\n```\n",
         encoding="utf-8",
     )
     return tmp_path
@@ -246,7 +246,7 @@ def test_standard_upgrade_runs_on_a_project_with_a_failing_check(tmp_path):
     (tmp_path / "items" / "d.md").write_text(
         "---\nid: DEC-001\ntype: decision\ntitle: Regulator\nstatus: accepted\n"
         "constrained_by: [CON-001]\nchecks:\n  - value: P_dens\n    against: CON-001\n---\n\n"
-        "```calc\nP_dens : W/in^2 = 0.2366 W/in^2\n```\n",
+        "```calc\nP_dens = 0.2366 W/in^2 | W/in^2\n```\n",
         encoding="utf-8",
     )
     steps = revise.apply_standard_upgrade(str(tmp_path), 2)
@@ -673,7 +673,7 @@ def compound_prefix_project(tmp_path):
         "    against: CON-THM-001\n"
         "---\n\n"
         "The thermal budget in CON-THM-001 drives this choice.\n\n"
-        "```calc\nP_dens : W/in^2 = 0.1 W/in^2\n```\n",
+        "```calc\nP_dens = 0.1 W/in^2 | W/in^2\n```\n",
         encoding="utf-8",
     )
     return tmp_path

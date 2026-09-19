@@ -105,9 +105,9 @@ cannot execute code and every result is deterministic.
 V_out            = 3.3 V
 I_load           = 1.2 A
 eff              = 0.93
-P_diss  : W      = V_out * I_load * (1/eff - 1)
+P_diss           = V_out * I_load * (1/eff - 1) | W
 A_board          = 1.4 inch * 0.9 inch
-P_dens  : W/in^2 = P_diss / A_board
+P_dens           = P_diss / A_board | W/in^2
 ```
 ````
 
@@ -144,14 +144,14 @@ compound cannot be anything but a unit.
 
 ### Unit assertions
 
-`name : unit = expression` declares what the result should be, and fails the build
-if the algebra drifts:
+`name = expression | unit` declares what the result should be, and fails the
+build if the algebra drifts:
 
 ```
-P : W = V_out / I_load     ->  error: declared as W but the expression evaluates to V/A
+P = V_out / I_load | W   ->  error: declared as W but the expression evaluates to V/A
 ```
 
-It also pins the display unit, which is why `P_dens : W/in^2` reports
+It also pins the display unit, which is why `P_dens = ... | W/in^2` reports
 `0.2366 W/in²` rather than `236.6 mW/in²` — matching the bound it is checked
 against. Annotations are optional; use them where getting the dimension wrong would
 be expensive.
@@ -378,7 +378,7 @@ downstream should read that, not the HTML.
 ## Known limitations
 
 - **Torque reads as energy.** `N·m` and `J` are dimensionally identical, so a
-  torque collapses to joules on display. Pin it with an assertion (`tq : N*m = …`)
+  torque collapses to joules on display. Pin it with an assertion (`tq = … | N*m`)
   if it matters. Every units library has this problem; none solve it without a
   separate notion of quantity kind.
 - **Interval widths are conservative.** A variable appearing more than once in an

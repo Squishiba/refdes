@@ -35,6 +35,11 @@ DIAGNOSTIC_LEVELS = (ERROR, WARNING, INFO)
 # message looks for this. Today that is one caller: `refdes revise` and
 # `refdes standard upgrade`, which must not be blocked by it.
 CHECK_VIOLATION = "check_violation"
+# A calc line using the retired `name : unit = expression` spelling. Errors
+# with this code are what `refdes calc-rewrite` exists to fix, so the
+# rewrite's pre-flight validation tolerates them -- no other error may hide
+# behind that exemption.
+RETIRED_UNIT_SPELLING = "retired_unit_spelling"
 
 
 # refdes-project.yaml: project-level presentation/behaviour settings, distinct

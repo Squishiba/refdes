@@ -81,7 +81,7 @@ options:
 Prose goes here, and may reference REQ-PWR-002 inline.
 
 ```calc
-P : W = 3.3 V * 1.2 A
+P = 3.3 V * 1.2 A | W
 ```
 ````
 

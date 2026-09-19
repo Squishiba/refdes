@@ -26,6 +26,7 @@ from .model import (
     ERROR,
     INFO,
     INVALIDATE,
+    RETIRED_UNIT_SPELLING,
     WARNING,
     CalcLine,
     CheckResult,
@@ -905,6 +906,7 @@ def run_calcs(project: Project) -> None:
         # exactly like `env` -- what lets evaluate_block catch a name reused in
         # a later block, not just within one block.
         origins: dict[str, int | None] = {}
+        item_sealed: bool | None = None  # lazy: only retired lines ask the seal files
         for block, offset in calc.extract_blocks_with_lines(item.body):
             start_line = item.body_line + offset if item.body_line is not None else None
             for outcome in calc.evaluate_block(block, env, start_line=start_line, origins=origins):
@@ -923,12 +925,34 @@ def run_calcs(project: Project) -> None:
                         file=item.source_file, line=diag_line, item_id=item.id,
                     )
                 if outcome.error:
-                    line.error = outcome.error
-                    project.error(
-                        f"calc {outcome.name or outcome.expression!r}: {outcome.error}",
-                        file=item.source_file, line=diag_line, item_id=item.id,
-                    )
-                else:
+                    if outcome.retired:
+                        if item_sealed is None:
+                            item_sealed = seal.is_sealed(project, item)
+                        if item_sealed:
+                            # A sealed append-only entry cannot be edited
+                            # without resealing, and resealing is what Jared
+                            # wants to avoid: the retired spelling inside one
+                            # warns with the same text instead of failing the
+                            # build, and stays working (evaluated above) until
+                            # history-backed resealing lands.
+                            project.warn(
+                                f"calc {outcome.name}: {outcome.error}",
+                                file=item.source_file, line=diag_line, item_id=item.id,
+                            )
+                        else:
+                            line.error = outcome.error
+                            project.error(
+                                f"calc {outcome.name or outcome.expression!r}: {outcome.error}",
+                                file=item.source_file, line=diag_line, item_id=item.id,
+                                code=RETIRED_UNIT_SPELLING,
+                            )
+                    else:
+                        line.error = outcome.error
+                        project.error(
+                            f"calc {outcome.name or outcome.expression!r}: {outcome.error}",
+                            file=item.source_file, line=diag_line, item_id=item.id,
+                        )
+                if outcome.value is not None:
                     line.result = calc.format_value(outcome.value, project.sigfigs)
                     line.bounds = calc.format_bounds(outcome.value, project.sigfigs)
                     item.calc_values[outcome.name] = line.result

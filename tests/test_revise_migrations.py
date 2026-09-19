@@ -219,7 +219,7 @@ def test_standard_upgrade_v1_to_v2_applies_the_whole_collapsed_delta(tmp_path):
         "  - value: P_dens\n"
         "    against: CON-THM-001\n"
         "---\n\n"
-        "```calc\nP_dens : W/in^2 = 0.1 W/in^2\n```\n",
+        "```calc\nP_dens = 0.1 W/in^2 | W/in^2\n```\n",
         encoding="utf-8",
     )
 
@@ -523,7 +523,7 @@ def test_v3_component_checks_needs_no_engine_change(tmp_path):
         "  - id: CMP-001\n    title: Digital output driver.\n"
         "    body: |\n"
         "      ```calc\n"
-        "      I_drive : A = 1.5 A\n"
+        "      I_drive = 1.5 A | A\n"
         "      ```\n"
         "    checks:\n"
         "      - value: I_drive\n        against: BND-001\n",
