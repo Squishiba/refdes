@@ -486,7 +486,7 @@ def load_project(config_path: str | None = None, start: str = ".") -> Project:
     # base -> presets -> this project's own overlay, with `include:` resolved
     # into `fields:` -- everything below reads them exactly as it always read
     # raw.get("link_types")/raw.get("types") directly.
-    resolved_link_types, resolved_types = standards.resolve_schema(
+    resolved_field_sets, resolved_link_types, resolved_types = standards.resolve_namespaces(
         raw, settings["require_rejection_rationale"]
     )
 
@@ -707,6 +707,7 @@ def load_project(config_path: str | None = None, start: str = ".") -> Project:
         types=types,
         link_types=link_types,
         inverse_of=inverse_of,
+        field_sets=resolved_field_sets,
         default_on_change=default_on_change,
         id_width=id_cfg["width"],
         id_ledger=id_cfg["ledger"],

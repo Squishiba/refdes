@@ -35,10 +35,16 @@ _NAMESPACE_LABEL = {
 }
 
 
-def resolve_schema(
+def resolve_namespaces(
     raw: dict[str, Any], require_rejection_rationale: bool
-) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Return (link_types, types) as plain dicts, fully merged and `include:`-free.
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    """Return (field_sets, link_types, types) as plain dicts, fully merged.
+
+    The three namespaces of `refdes-schema.yaml`, resolved base -> presets ->
+    project overlay. Types come back `include:`-free; the field sets are the
+    one namespace the resolved types no longer show any trace of, so anything
+    that reports on the vocabulary (vocabulary.py) needs them separately --
+    `include:` is expanded into `fields:` and popped.
 
     `standard:` absent, `None`, or the string "none" is the explicit escape
     hatch (docs/design/standard-library.md §3): today's fully self-declared
@@ -66,6 +72,15 @@ def resolve_schema(
     link_types = _merge_named_mapping(base_link_types, raw.get("link_types") or {})
     types = _merge_types(base_types, raw.get("types") or {}, field_sets)
 
+    return field_sets, link_types, types
+
+
+def resolve_schema(
+    raw: dict[str, Any], require_rejection_rationale: bool
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """The two-value form of `resolve_namespaces`, for callers that have no
+    use for the field-set namespace."""
+    _field_sets, link_types, types = resolve_namespaces(raw, require_rejection_rationale)
     return link_types, types
 
 

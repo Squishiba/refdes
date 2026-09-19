@@ -1,0 +1,19 @@
+{% extends "base.html.j2" %}
+{% block title %}Vocabulary — {{ project.title }}{% endblock %}
+{% block content %}
+
+<h1>Vocabulary</h1>
+<p class="muted">
+  Every term this project's schema resolves to, in one place: item types,
+  link verbs, field sets, and the keys the engine owns. Each entry gives
+  its definition, its scope, where it points and what points at it, and
+  its fields. It is generated from the resolved schema — base standard,
+  presets, and this project's own overlay, in that order — so a term that
+  exists here exists in the engine, and a preset the build does not enable
+  is not here. A term with no definition says so: project terms are not
+  required to define themselves.
+</p>
+
+{{ vocabulary_html | safe }}
+
+{% endblock %}

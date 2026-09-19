@@ -18,6 +18,7 @@ from . import dates
 from . import ids as ids_mod
 from . import nav as nav_mod
 from . import tree as tree_mod
+from . import vocabulary as vocabulary_mod
 from .model import Item, Project
 
 TEMPLATE_DIR = os.path.join(os.path.dirname(__file__), "templates")
@@ -857,7 +858,10 @@ def render_site(project: Project, draft: bool = False) -> str:
     # board and each workspace adds its own scoped set of the same six
     # reports -- schema.py's load-time check already guarantees a board key
     # and a workspace key never collide, so these two updates never fight.
-    report_names = ("coverage", "log", "document", "summary", "references", "parts", "tree")
+    report_names = (
+        "coverage", "log", "document", "summary", "references", "parts", "tree",
+        "vocabulary",
+    )
     reserved = {*report_names, dashboard_name[: -len(".html")]}
     for board_key in project.boards:
         reserved.update(f"{name}-{board_key}" for name in report_names)
@@ -989,6 +993,16 @@ def render_site(project: Project, draft: bool = False) -> str:
         out_dir, written, "tree.html", tree_tpl,
         project=project,
         tree_html=tree_mod.render_tree_html(project),
+        previews_json=previews_json,
+    )
+
+    # Project-wide like the tree: the schema does not narrow to a board, so
+    # there is exactly one vocabulary page and `scope_reports` says so.
+    vocabulary_tpl = env.get_template("vocabulary.html.j2")
+    _write_html(
+        out_dir, written, "vocabulary.html", vocabulary_tpl,
+        project=project,
+        vocabulary_html=vocabulary_mod.render_html(project),
         previews_json=previews_json,
     )
 

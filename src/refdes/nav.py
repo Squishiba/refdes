@@ -51,6 +51,7 @@ REPORT_LABELS = {
     "parts": "Parts",
     "document": "Full record",
     "tree": "Tree",
+    "vocabulary": "Vocabulary",
 }
 
 
@@ -101,6 +102,10 @@ def scope_reports(
     # parts are shared ones still gets one, and a scope with nothing gets
     # none -- `scoped` is already empty above in that case.
     names.append("tree")
+    # The vocabulary page is the project's whole schema, which does not
+    # narrow to a board: one page per project, whatever the scope's item set.
+    if board is None and workspace is None:
+        names.append("vocabulary")
     return sorted(names, key=list(REPORT_LABELS).index)
 
 

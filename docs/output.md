@@ -13,6 +13,8 @@
 | `references.html` | Every [citation](markdown.md#citing-a-datasheet) in the project, grouped by path |
 | `parts.html` | Every [part number](parts.md), exact-string indexed, with where-used backlinks |
 | `document.html` | Every item in one page, in reading order — the printable record |
+| `tree.html` | Every item in one view, filed by workspace, board, `part_of` group — see [the project tree](#the-project-tree) |
+| `vocabulary.html` | Every term the project's schema resolves to, with definitions — see [the vocabulary page](#the-vocabulary-page) |
 | `<id>.html` | One page per item, lowercased ID (`req-pwr-002.html`) |
 | `items.json` | The machine-readable export |
 | `assets/` | The stylesheet and script, plus every local image, `site.assets:` directory, and vendored citation your project references — see [images and other local files](markdown.md#images-and-other-local-files) |
@@ -154,6 +156,36 @@ It answers "what is in this project, grouped how, and what is floating"
 
 The same forest is also a block: `{{tree}}` in a page, optionally
 `board=`, `workspace=` or `depth=`. See [blocks](blocks.md).
+
+## The vocabulary page
+
+`vocabulary.html` is the project's vocabulary in one place: every **item
+type**, **link verb**, **field set**, and **engine-reserved key** the
+resolved schema knows about, each with its definition, its scope, where it
+points and what points at it, and its fields.
+
+- **It is generated from the resolved schema, not from any one file.**
+  Base standard, then presets, then the project's own overlay — so the page
+  says what the build actually means. A preset that is not enabled is not on
+  the page; a type the project adds of its own is, with the project's own
+  `doc:` for it.
+- **A term with no definition says so.** `doc:` is optional on project
+  terms, so an undefined one renders as "No definition" rather than being
+  dropped: the page is complete over the schema, and completeness is the
+  point. Engine-reserved keys (`id`, `type`, `key`, `body`, `history`, …)
+  are not author-declared at all, so their definitions live in
+  `refdes/vocabulary.py` — one place, cited by the page.
+- **Direction is computed, not restated.** "Pointed at by" for a type comes
+  from every declaration that may target it, including a verb declared under
+  its **inverse** name (`decision: {links: {recorded_by: [log]}}` is
+  `log --records--> decision`), and a verb with an empty target list says it
+  points at any type rather than showing nothing.
+- **It is static and printable.** Plain headings, definition lists, and
+  tables: no script of its own, no handler attributes, every anchor a plain
+  `id` — the page works offline, with JavaScript disabled, and on paper.
+
+Like the tree, the vocabulary page is project-wide only: a schema does not
+narrow to a board, so there is one page and no `vocabulary-<board>.html`.
 
 ## Site navigation
 

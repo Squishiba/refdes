@@ -1,5 +1,15 @@
 #!/usr/bin/env python3
-"""Generate the per-type filled-in examples in docs/schema-reference.md.
+"""Generate the derived reference content in the docs site.
+
+Two pages, one generator each, both marker-injected and both staleness-gated:
+
+- the per-type filled-in examples in `docs/schema-reference.md` (finding 20);
+- `docs/vocabulary.md`, the bundled standard's own vocabulary page (finding
+  38) -- the same `refdes.vocabulary` a built site renders as its
+  `vocabulary.html`, rendered as markdown so the docs site gives it its own
+  chrome and anchors. The docs site is pages-only and pins no `standard:` of
+  its own, so it gets the vocabulary page as generated markdown rather than
+  as a built report.
 
 The reference docs described schema *abstractly* and never showed a filled-in,
 valid instance of any type -- exactly the artifact `refdes new <type>` already
@@ -38,15 +48,24 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "src"))
 
 from refdes import scaffold as scaffold_mod  # noqa: E402
+from refdes import vocabulary as vocabulary_mod  # noqa: E402
 from refdes.schema import load_project  # noqa: E402
 
 PROJECT_CONFIG = os.path.join(ROOT, "refdes-project.yaml")
 TARGET_DOC = os.path.join(ROOT, "docs", "schema-reference.md")
+VOCAB_DOC = os.path.join(ROOT, "docs", "vocabulary.md")
 
 BEGIN = "<!-- BEGIN GENERATED per-type-examples -->"
 END = "<!-- END GENERATED per-type-examples -->"
 _BLOCK_RE = re.compile(
     re.escape(BEGIN) + r"\n(.*?)" + re.escape(END),
+    re.DOTALL,
+)
+
+VOCAB_BEGIN = "<!-- BEGIN GENERATED vocabulary -->"
+VOCAB_END = "<!-- END GENERATED vocabulary -->"
+_VOCAB_BLOCK_RE = re.compile(
+    re.escape(VOCAB_BEGIN) + r"\n(.*?)" + re.escape(VOCAB_END),
     re.DOTALL,
 )
 
@@ -118,20 +137,57 @@ def render_block() -> str:
     return "\n".join(lines)
 
 
+def render_vocabulary_block() -> str:
+    """The bundled standard's vocabulary as markdown, version-labelled.
+
+    Same resolved schema as the examples: the repo's pin, replayed against a
+    scratch project with no overlay, so the page describes the standard and
+    not this repo's `log` tweak.
+    """
+    project, standard = pinned_project()
+    label = f"{standard['base']}@{standard['version']}"
+    header = (
+        f"Every term below is what the resolved **{label}** schema in this "
+        f"repo's `refdes-project.yaml` means today, written here by "
+        f"`python docs-site/gen_examples.py`. A built site renders the same "
+        f"structure as its own `vocabulary.html`, from its own resolved "
+        f"schema -- base standard, presets, and the project's overlay. Do "
+        f"not hand-edit this block: `tests/test_vocabulary_page.py` fails if "
+        f"it differs from what the generator produces today.\n"
+    )
+    return header + "\n" + vocabulary_mod.render_markdown(project)
+
+
+def _extract(page_text: str, pattern: re.Pattern) -> str:
+    match = pattern.search(page_text)
+    return match.group(1) if match else ""
+
+
+def _inject(page_text: str, block: str, pattern: re.Pattern, begin: str, end: str, name: str) -> str:
+    if not pattern.search(page_text):
+        raise SystemExit(
+            f"markers not found in the target page -- add the BEGIN/END "
+            f"'{name}' marker lines first:\n  {begin}\n  {end}"
+        )
+    return pattern.sub(lambda m: begin + "\n" + block + end, page_text, count=1)
+
+
 def extract_block(page_text: str) -> str:
     """The current generated content between the markers, or '' if absent."""
-    match = _BLOCK_RE.search(page_text)
-    return match.group(1) if match else ""
+    return _extract(page_text, _BLOCK_RE)
+
+
+def extract_vocabulary_block(page_text: str) -> str:
+    return _extract(page_text, _VOCAB_BLOCK_RE)
 
 
 def inject(page_text: str, block: str) -> str:
     """`page_text` with the marker region replaced by `block`."""
-    if not _BLOCK_RE.search(page_text):
-        raise SystemExit(
-            f"markers not found in the target page -- add the BEGIN/END "
-            f"'per-type-examples' marker lines first:\n  {BEGIN}\n  {END}"
-        )
-    return _BLOCK_RE.sub(lambda m: BEGIN + "\n" + block + END, page_text, count=1)
+    return _inject(page_text, block, _BLOCK_RE, BEGIN, END, "per-type-examples")
+
+
+def inject_vocabulary(page_text: str, block: str) -> str:
+    return _inject(page_text, block, _VOCAB_BLOCK_RE, VOCAB_BEGIN, VOCAB_END, "vocabulary")
 
 
 def is_current(page_text: str) -> bool:
@@ -147,25 +203,30 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    with open(TARGET_DOC, "r", encoding="utf-8") as fh:
-        page = fh.read()
-
-    if args.check:
-        if is_current(page):
-            print(f"{os.path.relpath(TARGET_DOC, ROOT)} is up to date.")
-            return 0
-        print(
-            f"{os.path.relpath(TARGET_DOC, ROOT)} carries a stale generated "
-            "example block -- run `python docs-site/gen_examples.py`.",
-            file=sys.stderr,
-        )
-        return 1
-
-    updated = inject(page, render_block())
-    with open(TARGET_DOC, "w", encoding="utf-8") as fh:
-        fh.write(updated)
-    print(f"updated {os.path.relpath(TARGET_DOC, ROOT)}")
-    return 0
+    stale = False
+    for page in (
+        (TARGET_DOC, extract_block, inject, render_block),
+        (VOCAB_DOC, extract_vocabulary_block, inject_vocabulary, render_vocabulary_block),
+    ):
+        path, extract, inject_page, render = page
+        with open(path, "r", encoding="utf-8") as fh:
+            text = fh.read()
+        block = render()
+        if args.check:
+            if extract(text) == block:
+                print(f"{os.path.relpath(path, ROOT)} is up to date.")
+                continue
+            print(
+                f"{os.path.relpath(path, ROOT)} carries a stale generated "
+                "block -- run `python docs-site/gen_examples.py`.",
+                file=sys.stderr,
+            )
+            stale = True
+            continue
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(inject_page(text, block))
+        print(f"updated {os.path.relpath(path, ROOT)}")
+    return 1 if stale else 0
 
 
 if __name__ == "__main__":
