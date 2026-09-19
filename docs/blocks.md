@@ -104,9 +104,34 @@ hoc rendering of one blocker chain — that's a convenience overlap, not a
 substitute for the dedicated report, which computes staleness and feeds
 coverage in a way the block does not.
 
+## `{{tree}}`
+
+```markdown
+{{tree}}
+{{tree board="power"}}
+{{tree workspace="rev-b" depth="1"}}
+```
+
+The containment forest — the same view as `tree.html`, in the page:
+every item in scope filed by workspace, board, `part_of` group, item,
+collapsible with plain `<details>`, zero JavaScript. Parameters:
+
+- `board=` / `workspace=` narrow the forest to one scope, exactly like
+  the scoped report pages. A board's tree includes the members of its
+  `includes:` groups, marked shared. At most one of the two.
+- `depth=` sets how many levels start open (default 2).
+
+`{{tree}}` deliberately has **no `via=`.** In `{{cascade}}` it names the
+relation the walk follows, and the walk's shape is whatever that relation
+makes it. The tree has no such choice: its whole point is the one fixed
+nesting every item already has. A `via=` would not generalize the tree,
+it would replace it with a cascade wearing a hat — so `via=` is reported
+as the unknown parameter it is, and nesting by some other relation stays
+`{{cascade}}`'s job.
+
 ## Failure modes
 
-Both blocks validate strictly and name the specific fix, the same bar every
+The blocks validate strictly and name the specific fix, the same bar every
 other refdes diagnostic holds to:
 
 ```
@@ -136,7 +161,7 @@ directive isn't silently swallowed while you're reading the diagnostic.
 ## The non-goal
 
 Refdes's generated blocks take **parameters, never expressions.** `index`,
-`cascade`, and whatever joins them are a small, closed family — each
+`cascade`, `tree`, and whatever joins them are a small, closed family — each
 accepts a small, closed set of named parameters, each with one fixed
 meaning, validated against the resolved schema at build time. There is no
 comparison operator, no `and`/`or`, no wildcard, and no nesting one block

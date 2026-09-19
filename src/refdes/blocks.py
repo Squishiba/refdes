@@ -39,6 +39,7 @@ from typing import Callable
 
 from . import boards as boards_mod
 from . import chains as chains_mod
+from . import tree as tree_mod
 from .model import Item, Project
 
 # A line that is nothing but one `{{...}}` directive -- its own markdown
@@ -424,6 +425,49 @@ def _render_cascade(project: Project, params: dict[str, str]) -> str:
     return f'<ul class="cascade"><li>{root_text}{_render_node_list(nodes, project)}</li></ul>'
 
 
+# ---------------------------------------------------------------- {{tree}}
+
+
+def _render_tree(project: Project, params: dict[str, str]) -> str:
+    """The whole containment forest, optionally narrowed to one board or one
+    workspace.
+
+    `via` is deliberately absent. In `{{cascade}}` it names the relation the
+    walk follows, and the walk's shape is whatever that relation makes it.
+    The tree has no such choice: its whole purpose is the one fixed nesting
+    every item already has -- workspace, board, `part_of` group, item -- and
+    a `via` would replace the tree with a cascade wearing a hat. Nesting by
+    some other relation belongs to `{{cascade}}`; asking the tree for it is
+    reported as the unknown parameter it is.
+    """
+    board = params.get("board")
+    workspace = params.get("workspace")
+    if board is not None and board not in project.boards:
+        raise _BlockError(f"unknown board {board!r}.{_suggest(board, project.boards)}")
+    if workspace is not None and workspace not in project.workspaces:
+        raise _BlockError(
+            f"unknown workspace {workspace!r}."
+            f"{_suggest(workspace, project.workspaces)}"
+        )
+
+    depth_raw = params.get("depth", str(tree_mod.DEFAULT_DEPTH))
+    try:
+        open_depth = int(depth_raw)
+    except (TypeError, ValueError):
+        open_depth = 0
+    if open_depth <= 0:
+        raise _BlockError("depth must be a positive integer.")
+
+    markup = tree_mod.render_tree_html(
+        project, board=board, workspace=workspace, open_depth=open_depth
+    )
+    if markup == '<ul class="tree"></ul>':
+        scope = board or workspace
+        who = f"{scope}" if scope else "the project"
+        return f'<p class="tree-empty">No items in {who}.</p>'
+    return markup
+
+
 # --------------------------------------------------------------- dispatch
 
 _REGISTRY: dict[str, BlockSpec] = {
@@ -435,6 +479,12 @@ _REGISTRY: dict[str, BlockSpec] = {
         required=("from", "direction"),
         optional=("depth", "via"),
         render=_render_cascade,
+    ),
+    "tree": BlockSpec(
+        name="tree",
+        required=(),
+        optional=("board", "workspace", "depth"),
+        render=_render_tree,
     ),
 }
 

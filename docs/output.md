@@ -139,8 +139,19 @@ It answers "what is in this project, grouped how, and what is floating"
   every reference is still a working link with scripting off, and the
   print stylesheet expands the whole tree so nothing hides on paper.
 
-Scoped `tree-<board>.html` pages are a planned follow-up; today the tree
-is project-wide only.
+- **The same forest, scoped.** `tree-<board>.html` and
+  `tree-<workspace>.html` show one board's or one workspace's items under
+  exactly the rules above, and appear in the sidebar of that scope beside
+  Summary and Coverage. A board's tree holds the items it displays —
+  owned plus the members of its `includes:` groups — so nothing on the
+  page is missing from it; those shared members hang under a node for the
+  group that shares them, marked **shared, via GRP-…**, and stay counted
+  by their own board everywhere numbers are produced. A scope with nothing
+  in it gets no page. The invariant becomes per-scope: expanded nodes
+  equal the items that scope displays.
+
+The same forest is also a block: `{{tree}}` in a page, optionally
+`board=`, `workspace=` or `depth=`. See [blocks](blocks.md).
 
 ## Site navigation
 

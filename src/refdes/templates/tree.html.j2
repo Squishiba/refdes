@@ -1,8 +1,9 @@
 {% extends "base.html.j2" %}
-{% block title %}Tree — {{ project.title }}{% endblock %}
+{% set scope = board or workspace %}
+{% block title %}{{ 'Tree' if scope else 'Project tree' }} — {{ scope.label if scope else project.title }}{% endblock %}
 {% block content %}
 
-<h1>Project tree</h1>
+<h1>{{ 'Tree' if scope else 'Project tree' }}{% if scope %} — {{ scope.label }}{% endif %}</h1>
 <p class="muted">
   Every item in the project, filed by the containment spine: workspace,
   board, <code>part_of</code> group, item. An item is expanded once, under
@@ -13,9 +14,17 @@
   itself expands once, under its own board or under
   <strong>Project-wide</strong>. Items with no board keep the same rule
   (first group by id, else Project-wide, rendered last). Nothing here is
-  hidden: the counts are the whole project, and no item is ever absent
+  hidden: the counts are the whole scope, and no item is ever absent
   from its own board.
 </p>
+{% if board %}
+<p class="muted">
+  This page shows every item <strong>{{ board.label }}</strong> displays:
+  the items it owns, plus the members of the groups named in its
+  <code>includes:</code>, which are marked <em>shared</em> and stay counted
+  by their own board.
+</p>
+{% endif %}
 
 {{ tree_html | safe }}
 

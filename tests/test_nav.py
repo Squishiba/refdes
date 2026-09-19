@@ -128,9 +128,14 @@ def test_nav_tree_groups_pages_and_reports_under_their_board(board_project):
     assert set(groups) == {"Board A", "Board B"}
 
     a_children = [c.label for c in groups["Board A"].children]
-    assert a_children == ["Power overview", "Summary", "Coverage", "Full record"]
-    # A board with no page of its own still gets a group -- just its reports.
-    assert [c.label for c in groups["Board B"].children] == ["Summary", "Coverage", "Full record"]
+    assert a_children == [
+        "Power overview", "Summary", "Coverage", "Full record", "Tree"
+    ]
+    # A board with no page of its own still gets a group -- just its reports,
+    # tree included: it is the forest of exactly the items the scope shows.
+    assert [c.label for c in groups["Board B"].children] == [
+        "Summary", "Coverage", "Full record", "Tree"
+    ]
 
     # The board-tagged page is not duplicated at the top level.
     root_labels = [n.label for n in tree if n.href]

@@ -39,6 +39,7 @@ from __future__ import annotations
 import html
 from dataclasses import dataclass, field
 
+from . import boards as boards_mod
 from .model import Item, Project
 
 DEFAULT_DEPTH = 2  # spine levels expanded before collapsing to counts
@@ -69,6 +70,9 @@ class TreeNode:
     # A group-view placeholder: the group item named here is expanded
     # elsewhere; this node only holds this board's members of that group.
     view_of: Item | None = None
+    # The placeholder stands for an `includes:` group on a scoped board
+    # page (finding 33): labelled shared, like the parts rows already are.
+    shared: bool = False
     children: list[TreeNode] = field(default_factory=list)
     references: list[Item] = field(default_factory=list)
     # A cycle revisit: this item was already expanded elsewhere in the
@@ -104,9 +108,26 @@ def _group_parents(project: Project, item: Item, local_keys: set[str]) -> list[I
     return parents
 
 
-def build_forest(project: Project) -> TreeForest:
-    """The whole-project containment forest (see the module docstring)."""
-    items = sorted(project.local_items, key=_ref)
+def build_forest(
+    project: Project, board: str | None = None, workspace: str | None = None
+) -> TreeForest:
+    """The containment forest for one scope (see the module docstring).
+
+    `board`/`workspace` scope the forest exactly like the other reports:
+    a board's forest holds the items it displays -- owned plus the members
+    of its `includes:` groups, which hang under a shared group node -- and
+    has that single board as its only root. Both None is the whole project.
+    """
+    included = boards_mod.included_map(project, board) if board is not None else {}
+    items = sorted(
+        [
+            i
+            for i in project.local_items
+            if boards_mod.displays(i, board, included)
+            and (workspace is None or i.workspace == workspace)
+        ],
+        key=_ref,
+    )
     local_keys = {_ref(i) for i in items}
     parents = {_ref(item): _group_parents(project, item, local_keys) for item in items}
 
@@ -117,11 +138,24 @@ def build_forest(project: Project) -> TreeForest:
     by_board: dict[str, list[Item]] = {}
     by_board_view: dict[tuple[str, str], list[Item]] = {}
     groups_by_token: dict[str, Item] = {}
+    shared_views: set[tuple[str, str]] = set()
     bucket: list[Item] = []
     for item in items:
         group_list = parents[_ref(item)]
-        if item.board:
-            same_board = [g for g in group_list if g.board == item.board]
+        shared_group = None
+        if board is not None and item.board != board and item.id in included:
+            shared_group = project.item_by_id(included[item.id])
+        if shared_group is not None:
+            # A member shared onto this board by `includes:`: it hangs under
+            # a shared node for the including group, wherever it is owned.
+            key = (board, _ref(shared_group))
+            by_board_view.setdefault(key, []).append(item)
+            groups_by_token.setdefault(_ref(shared_group), shared_group)
+            shared_views.add(key)
+        elif board is not None or item.board:
+            same_board = [
+                g for g in group_list if board is not None or g.board == item.board
+            ]
             if same_board:
                 primary = same_board[0]
                 by_group.setdefault(_ref(primary), []).append(item)
@@ -146,7 +180,16 @@ def build_forest(project: Project) -> TreeForest:
         else:
             bucket.append(item)
 
-    roots = _scope_roots(project, by_board, by_board_view, groups_by_token)
+    if board is not None:
+        roots = [
+            _board_node(
+                project, board, by_board, by_board_view, groups_by_token, shared_views
+            )
+        ]
+    else:
+        roots = _scope_roots(
+            project, by_board, by_board_view, groups_by_token, shared_views
+        )
     bucket_node = None
     if bucket:
         bucket_node = TreeNode(
@@ -178,11 +221,8 @@ def build_forest(project: Project) -> TreeForest:
             _attach_groups(extra, by_group, ref_groups, (token,))
         # A boarded cycle member belongs to its board's branch, not to a new
         # root: nothing may be absent from its own board.
-        parent = (
-            _find_board_node(forest.roots, _board_label(project, head.board))
-            if head.board
-            else None
-        )
+        anchor = board or head.board
+        parent = _find_board_node(forest.roots, _board_label(project, anchor)) if anchor else None
         if parent is not None:
             parent.children.append(extra)
             _visit_all(forest, [extra], (parent.label,))
@@ -216,6 +256,7 @@ def _scope_roots(
     by_board: dict[str, list[Item]],
     by_board_view: dict[tuple[str, str], list[Item]],
     groups_by_token: dict[str, Item],
+    shared_views: set[tuple[str, str]],
 ) -> list[TreeNode]:
     """Workspace nodes (registry order) nesting their boards, then the
     remaining boards -- the same derivation `nav.build_nav` uses."""
@@ -235,7 +276,9 @@ def _scope_roots(
                 kind="workspace",
                 label=ws_spec.label,
                 children=[
-                _board_node(project, b, by_board, by_board_view, groups_by_token)
+                _board_node(
+                    project, b, by_board, by_board_view, groups_by_token, shared_views
+                )
                 for b in ws_boards
             ],
             )
@@ -245,7 +288,10 @@ def _scope_roots(
         if board_key in nested:
             continue
         nodes.append(
-            _board_node(project, board_key, by_board, by_board_view, groups_by_token)
+            _board_node(
+                project, board_key, by_board, by_board_view, groups_by_token,
+                shared_views,
+            )
         )
     return nodes
 
@@ -256,6 +302,7 @@ def _board_node(
     by_board: dict[str, list[Item]],
     by_board_view: dict[tuple[str, str], list[Item]],
     groups_by_token: dict[str, Item],
+    shared_views: set[tuple[str, str]],
 ) -> TreeNode:
     spec = project.boards.get(board_key)
     children = [
@@ -274,6 +321,7 @@ def _board_node(
                 kind="group-view",
                 label=_display(group_item),
                 view_of=group_item,
+                shared=(board_key, gtok) in shared_views,
                 children=[
                     TreeNode(kind="item", label=_display(m), item=m)
                     for m in members
@@ -332,35 +380,48 @@ def _visit_all(
         _visit_all(forest, node.children, node_path)
 
 
-def render_tree_html(project: Project) -> str:
-    """The `<ul class="tree">` markup for tree.html: `<details>` collapse,
-    open above DEFAULT_DEPTH, zero JavaScript."""
-    forest = build_forest(project)
-    return _render_list(forest, forest.roots, 1)
+def render_tree_html(
+    project: Project,
+    board: str | None = None,
+    workspace: str | None = None,
+    open_depth: int = DEFAULT_DEPTH,
+) -> str:
+    """The `<ul class="tree">` markup for a tree page or the `{{tree}}`
+    block: `<details>` collapse, open above `open_depth`, zero JavaScript."""
+    forest = build_forest(project, board=board, workspace=workspace)
+    return _render_list(forest, forest.roots, 1, open_depth)
 
 
-def _render_list(forest: TreeForest, nodes: list[TreeNode], depth: int) -> str:
+def _render_list(
+    forest: TreeForest, nodes: list[TreeNode], depth: int, open_depth: int
+) -> str:
     if not nodes and depth > 1:
         return ""
     return (
         ('<ul class="tree">' if depth == 1 else "<ul>")
-        + "".join(_render_node(forest, node, depth) for node in nodes)
+        + "".join(_render_node(forest, node, depth, open_depth) for node in nodes)
         + "</ul>"
     )
 
 
-def _render_node(forest: TreeForest, node: TreeNode, depth: int) -> str:
+def _render_node(
+    forest: TreeForest, node: TreeNode, depth: int, open_depth: int
+) -> str:
     if node.duplicate:
         return _render_reference(forest, node.item)
     if node.view_of is not None:
-        where = forest.locations.get(_ref(node.view_of), "")
+        if node.shared:
+            hint = f"shared, via {_esc(node.label)}"
+        else:
+            where = forest.locations.get(_ref(node.view_of), "")
+            hint = f"group expanded under {_esc(where)}"
         label = (
             f'<a class="ref" href="{_esc(node.view_of.slug)}.html" '
             f'data-ref="{_esc(node.view_of.id)}">{_esc(node.label)}</a> '
-            f'<span class="tree-seen">(group expanded under {_esc(where)})</span>'
+            f'<span class="tree-seen">({_esc(hint)})</span>'
         )
-        inner = _render_list(forest, node.children, depth + 1)
-        open_attr = " open" if depth < DEFAULT_DEPTH else ""
+        inner = _render_list(forest, node.children, depth + 1, open_depth)
+        open_attr = " open" if depth < open_depth else ""
         return (
             f"<li><details{open_attr}><summary>{label} "
             f'<span class="count">{_item_count(node)}</span></summary>'
@@ -374,12 +435,12 @@ def _render_node(forest: TreeForest, node: TreeNode, depth: int) -> str:
         )
     else:
         label = _esc(node.label)
-    inner = _render_list(forest, node.children, depth + 1) + "".join(
+    inner = _render_list(forest, node.children, depth + 1, open_depth) + "".join(
         _render_reference(forest, item) for item in node.references
     )
     if not inner:
         return f"<li>{label}</li>"
-    open_attr = " open" if depth < DEFAULT_DEPTH else ""
+    open_attr = " open" if depth < open_depth else ""
     return (
         f"<li><details{open_attr}><summary>{label} "
         f'<span class="count">{_item_count(node)}</span></summary>{inner}</details></li>'

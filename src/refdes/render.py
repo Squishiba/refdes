@@ -1078,6 +1078,15 @@ def render_site(project: Project, draft: bool = False) -> str:
             **summary_payload(project, board=board_key),
         )
 
+        if "tree" in board_reports:
+            _write_html(
+                out_dir, written, f"tree-{board_key}.html", tree_tpl,
+                project=project,
+                board=board_spec,
+                tree_html=tree_mod.render_tree_html(project, board=board_key),
+                previews_json=previews_json,
+            )
+
     # Same reports, one set per registered workspace, scoped to that
     # workspace's own items -- mirrors the per-board loop above exactly,
     # `nav.scope_reports` gate included.
@@ -1152,6 +1161,15 @@ def render_site(project: Project, draft: bool = False) -> str:
             previews_json=previews_json,
             **summary_payload(project, workspace=workspace_key),
         )
+
+        if "tree" in ws_reports:
+            _write_html(
+                out_dir, written, f"tree-{workspace_key}.html", tree_tpl,
+                project=project,
+                workspace=workspace_spec,
+                tree_html=tree_mod.render_tree_html(project, workspace=workspace_key),
+                previews_json=previews_json,
+            )
 
     with open(os.path.join(out_dir, "items.json"), "w", encoding="utf-8") as fh:
         json.dump(items_json(project), fh, indent=2, ensure_ascii=False, default=str)
