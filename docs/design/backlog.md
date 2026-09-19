@@ -2048,7 +2048,11 @@ what a `site.assets:` entry *means*, not just what consumes it.
 If two files anywhere on the search path share a leaf name — `diagram.png` in
 both `figures/power/` and `figures/thermal/` — resolution must refuse with an
 error naming **every** candidate and its full path, never a silent
-first-match. This project's characteristic bug is code that reports success
+first-match. Decided 2026-09-19, and the trigger is pinned: the refusal happens
+**at the reference site**, when an `<img>` names the ambiguous leaf — two
+same-named files that no image points at are not an error, so nothing walks the
+search path hunting duplicate leaf names. The collision is a property of the
+reference, not of the directory. This project's characteristic bug is code that reports success
 while doing the wrong thing, and "quietly resolved to a different
 `diagram.png` than the one meant" is precisely that shape: the build
 succeeds, the site renders, and the wrong photo sits under a caption that
@@ -2142,9 +2146,17 @@ applies to `<img src>` only, and only to the local-file case that today
 resolves relative to the source file — a URL `src` is untouched
 (`_URL_SCHEME_RE`, `build.py:1570`).
 
-**Status: outstanding — awaiting decision.** Nothing here is implemented; the
-open questions are §2 (one search list or two) and, less critically, the
-exact key name and error wording for §3.
+**Status: decided (2026-09-19).** The search list **reuses `site.assets:`** —
+no separate `asset_search:` key (§2's recommendation, taken: one list, one
+mental model, and a second list that usually mirrors the first is the
+duplication this project refuses). A bare filename that exists in two or more of
+those directories is an **error at the reference site** when an image names it,
+naming every match and its full path, never a first-match pick; two same-named
+files nobody references are not an error (§3 as corrected above). Rejected: a
+second `asset_search:` key, for the mirroring-lists cost above, and any implicit
+tie-breaker — first-declared directory, newest mtime, alphabetical — because
+each is a rule no reader of the document can see. The exact error wording and
+the fallback-chain trigger in §5 stand as written; nothing here is implemented.
 
 **Local model: not suitable.** Ambiguity resolution and the freeze semantics
 are exactly the shape of judgment call this project keeps off a smaller
