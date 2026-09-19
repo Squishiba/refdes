@@ -246,6 +246,62 @@ def test_comment_text_survives_byte_for_byte(calc_project):
     assert "P = V * I | W  #  two spaces | and a pipe " in after
 
 
+ALIGNED_MD = """---
+type: decision
+id: DEC-003
+title: Aligned block
+---
+
+```calc
+V_out   = 3.3 V
+I_load  = 1.2 A
+eff     = 0.9
+P_out   : W      = V_out * I_load
+P_diss  : W      = P_out * (1/eff - 1)  # converter loss at full load
+P_dens  : W/in^2 = P_diss / 4 cm^2
+```
+"""
+
+
+def _equals_columns(text):
+    cols = []
+    in_block = False
+    for line in text.splitlines():
+        if line.strip().startswith("```calc"):
+            in_block = True
+            continue
+        if in_block and line.strip() == "```":
+            in_block = False
+            continue
+        if in_block and "=" in line:
+            cols.append(line.index("="))
+    return cols
+
+
+def test_rewrite_preserves_equals_column(tmp_path):
+    write_project_config(tmp_path, SCHEMA)
+    items = tmp_path / "items"
+    items.mkdir()
+    path = items / "aligned.md"
+    path.write_text(ALIGNED_MD, encoding="utf-8")
+    before = _equals_columns(ALIGNED_MD)
+    assert before == [8, 8, 8, 17, 17, 17]
+
+    result = calc_rewrite.apply(str(tmp_path))
+    assert result.ok, result.errors
+    after_text = path.read_text(encoding="utf-8")
+    # Every = in the block sits in exactly the column it was in.
+    assert _equals_columns(after_text) == before
+    assert f"{'P_out':<17}= V_out * I_load | W" in after_text
+    assert "P_diss  " in after_text  # name column untouched too
+    assert "# converter loss at full load" in after_text
+    # Plain aligned lines are not rewritten at all.
+    assert "V_out   = 3.3 V" in after_text
+    # And the rewrite is still idempotent on aligned lines.
+    second = calc_rewrite.apply(str(tmp_path))
+    assert second.ok and second.changed_files == []
+
+
 def test_cli_calc_rewrite_no_write_behaves_as_dry_run(calc_project, monkeypatch, capsys):
     monkeypatch.chdir(calc_project)
     before = (calc_project / "items" / "dec.md").read_bytes()

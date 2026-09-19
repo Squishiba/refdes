@@ -62,8 +62,15 @@ FENCE_CLOSE_RE = re.compile(r"^\s*```\s*$")
 def rewrite_line(line: str) -> str | None:
     """The pipe-form spelling of one old-spelling calc line, or None when the
     line is not an old-spelling assignment. Indentation and any trailing
-    comment (and the whitespace before it) are preserved exactly; the code
-    part becomes `name = expression | unit`."""
+    comment (and the whitespace before it) are preserved exactly.
+
+    Alignment: an author who padded the name before the colon, or padded
+    before the equals sign, was aligning the block's `=` in a column -- and
+    a calc block is prose-adjacent text a person reads. So on a padded line
+    the `=` stays in exactly the column it was in (the name is padded to
+    reach it, the text after the `=` keeps its own spacing), and the
+    `| unit` simply follows the expression. An unpadded line stays compact:
+    `name = expression | unit`."""
     code, hash_sign, comment = line.partition("#")
     stripped = code.strip()
     if not stripped or "|" in stripped:
@@ -76,7 +83,16 @@ def rewrite_line(line: str) -> str | None:
     name, unit, expression = match.groups()
     indent = line[: len(line) - len(line.lstrip())]
     gap = code[len(code.rstrip()):] if hash_sign else ""
-    new = f"{indent}{name} = {expression} | {unit}"
+    eq_idx = code.find("=")
+    pad_before_eq = len(code[:eq_idx]) - len(code[:eq_idx].rstrip())
+    pad_before_colon = code.find(":") - (len(indent) + len(name))
+    if pad_before_eq >= 2 or pad_before_colon >= 2:
+        # Aligned line: keep the `=` in its column, keep everything from the
+        # `=` on (spacing included) exactly as written, append the unit.
+        tail = code[eq_idx + 1:].rstrip()
+        new = f"{(indent + name).ljust(eq_idx)}={tail} | {unit}"
+    else:
+        new = f"{indent}{name} = {expression} | {unit}"
     if hash_sign:
         new += f"{gap}{hash_sign}{comment}"
     return new
