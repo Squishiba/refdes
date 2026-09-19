@@ -12,19 +12,26 @@ rule (blocks.py) generalised from a single rooted walk to a forest: one
 shared `visited` set across the whole render, a re-visited node rendered as
 a terminal leaf annotated with where it was expanded, never recursed.
 
-**The primary-parent rule, stated:** an item's primary parent is its
-lexicographically smallest `part_of` group (by display id, surrogate key as
-fallback) when it has at least one; otherwise its resolved board; otherwise
+**The primary-home rule, stated:** an item that has a board is expanded
+under ITS OWN BOARD. If it is also in a group that shares that board, it
+expands under the group's node inside the board branch; if its groups all
+live elsewhere, a group node for its lexicographically smallest group (by
+display id, surrogate key as fallback) appears inside the board branch
+holding that board's members -- the group item itself is still expanded
+once, elsewhere. Every other group lists the item as a reference leaf.
+An item with no board keeps the old rule: smallest `part_of` group, else
 the synthetic `Project-wide` bucket. Id-based and registry-order-based, so
-it is stable across builds. A `part_of` cycle makes its members unreachable
+it is stable across builds. A group node may therefore appear in more than
+one board branch, each showing only that board's members. A `part_of` cycle makes its members unreachable
 from any root; the smallest-id member is promoted to a root of the forest
 and the visited-set rule terminates the rest, exactly as cascade's rule
 terminates a cycle inside one tree.
 
-**The invariant, tested mechanically:** every local item is expanded
-exactly once -- `expanded_count == len(project.local_items)` -- and
-`Project-wide` (rendered last, with a count) catches everything with no
-board and no group. Nothing is ever silently dropped.
+**The invariants, tested mechanically:** every local item is expanded
+exactly once -- `expanded_count == len(project.local_items)` -- every item
+that has a board appears under that board's branch, expanded or as a
+reference leaf, and `Project-wide` (rendered last, with a count) catches
+everything with no board and no group. Nothing is ever silently dropped.
 """
 
 from __future__ import annotations
@@ -56,9 +63,12 @@ class TreeNode:
     """One expanded node of the forest: a workspace, a board, an item
     (group or not), or the Project-wide bucket."""
 
-    kind: str  # workspace | board | item | project-wide
+    kind: str  # workspace | board | item | project-wide | group-view
     label: str
     item: Item | None = None
+    # A group-view placeholder: the group item named here is expanded
+    # elsewhere; this node only holds this board's members of that group.
+    view_of: Item | None = None
     children: list[TreeNode] = field(default_factory=list)
     references: list[Item] = field(default_factory=list)
     # A cycle revisit: this item was already expanded elsewhere in the
@@ -100,24 +110,43 @@ def build_forest(project: Project) -> TreeForest:
     local_keys = {_ref(i) for i in items}
     parents = {_ref(item): _group_parents(project, item, local_keys) for item in items}
 
-    # Primary parent per item: smallest part_of group, else board, else bucket.
+    # Primary home per item: its own board (inside a same-board group node
+    # where one fits), else smallest part_of group, else the bucket.
     by_group: dict[str, list[Item]] = {}  # group token -> children to expand
     ref_groups: dict[str, list[Item]] = {}  # group token -> reference leaves
     by_board: dict[str, list[Item]] = {}
+    by_board_view: dict[tuple[str, str], list[Item]] = {}
+    groups_by_token: dict[str, Item] = {}
     bucket: list[Item] = []
     for item in items:
         group_list = parents[_ref(item)]
-        if group_list:
+        if item.board:
+            same_board = [g for g in group_list if g.board == item.board]
+            if same_board:
+                primary = same_board[0]
+                by_group.setdefault(_ref(primary), []).append(item)
+                for other in group_list:
+                    if other is not primary:
+                        ref_groups.setdefault(_ref(other), []).append(item)
+            elif group_list:
+                primary = group_list[0]
+                by_board_view.setdefault(
+                    (item.board, _ref(primary)), []
+                ).append(item)
+                groups_by_token[_ref(primary)] = primary
+                for other in group_list:
+                    ref_groups.setdefault(_ref(other), []).append(item)
+            else:
+                by_board.setdefault(item.board, []).append(item)
+        elif group_list:
             primary = group_list[0]
             by_group.setdefault(_ref(primary), []).append(item)
             for other in group_list[1:]:
                 ref_groups.setdefault(_ref(other), []).append(item)
-        elif item.board:
-            by_board.setdefault(item.board, []).append(item)
         else:
             bucket.append(item)
 
-    roots = _scope_roots(project, by_board)
+    roots = _scope_roots(project, by_board, by_board_view, groups_by_token)
     bucket_node = None
     if bucket:
         bucket_node = TreeNode(
@@ -147,6 +176,17 @@ def build_forest(project: Project) -> TreeForest:
             ]
             extra.references = list(ref_groups.get(token, ()))
             _attach_groups(extra, by_group, ref_groups, (token,))
+        # A boarded cycle member belongs to its board's branch, not to a new
+        # root: nothing may be absent from its own board.
+        parent = (
+            _find_board_node(forest.roots, _board_label(project, head.board))
+            if head.board
+            else None
+        )
+        if parent is not None:
+            parent.children.append(extra)
+            _visit_all(forest, [extra], (parent.label,))
+            continue
         # `Project-wide` stays last, whatever gets promoted.
         if bucket_node is not None:
             forest.roots.insert(forest.roots.index(bucket_node), extra)
@@ -156,8 +196,26 @@ def build_forest(project: Project) -> TreeForest:
     return forest
 
 
+def _board_label(project: Project, board_key: str) -> str:
+    spec = project.boards.get(board_key)
+    return spec.label if spec else board_key
+
+
+def _find_board_node(node_list: list[TreeNode], label: str) -> TreeNode | None:
+    for node in node_list:
+        if node.kind == "board" and node.label == label:
+            return node
+        found = _find_board_node(node.children, label)
+        if found is not None:
+            return found
+    return None
+
+
 def _scope_roots(
-    project: Project, by_board: dict[str, list[Item]]
+    project: Project,
+    by_board: dict[str, list[Item]],
+    by_board_view: dict[tuple[str, str], list[Item]],
+    groups_by_token: dict[str, Item],
 ) -> list[TreeNode]:
     """Workspace nodes (registry order) nesting their boards, then the
     remaining boards -- the same derivation `nav.build_nav` uses."""
@@ -176,28 +234,56 @@ def _scope_roots(
             TreeNode(
                 kind="workspace",
                 label=ws_spec.label,
-                children=[_board_node(project, b, by_board) for b in ws_boards],
+                children=[
+                _board_node(project, b, by_board, by_board_view, groups_by_token)
+                for b in ws_boards
+            ],
             )
         )
         nested.update(ws_boards)
     for board_key in project.boards:
         if board_key in nested:
             continue
-        nodes.append(_board_node(project, board_key, by_board))
+        nodes.append(
+            _board_node(project, board_key, by_board, by_board_view, groups_by_token)
+        )
     return nodes
 
 
 def _board_node(
-    project: Project, board_key: str, by_board: dict[str, list[Item]]
+    project: Project,
+    board_key: str,
+    by_board: dict[str, list[Item]],
+    by_board_view: dict[tuple[str, str], list[Item]],
+    groups_by_token: dict[str, Item],
 ) -> TreeNode:
     spec = project.boards.get(board_key)
+    children = [
+        TreeNode(kind="item", label=_display(i), item=i)
+        for i in by_board.get(board_key, ())
+    ]
+    views = sorted(
+        (gtok, members)
+        for (bk, gtok), members in by_board_view.items()
+        if bk == board_key
+    )
+    for gtok, members in views:
+        group_item = groups_by_token[gtok]
+        children.append(
+            TreeNode(
+                kind="group-view",
+                label=_display(group_item),
+                view_of=group_item,
+                children=[
+                    TreeNode(kind="item", label=_display(m), item=m)
+                    for m in members
+                ],
+            )
+        )
     return TreeNode(
         kind="board",
         label=spec.label if spec else board_key,
-        children=[
-            TreeNode(kind="item", label=_display(i), item=i)
-            for i in by_board.get(board_key, ())
-        ],
+        children=children,
     )
 
 
@@ -266,6 +352,20 @@ def _render_list(forest: TreeForest, nodes: list[TreeNode], depth: int) -> str:
 def _render_node(forest: TreeForest, node: TreeNode, depth: int) -> str:
     if node.duplicate:
         return _render_reference(forest, node.item)
+    if node.view_of is not None:
+        where = forest.locations.get(_ref(node.view_of), "")
+        label = (
+            f'<a class="ref" href="{_esc(node.view_of.slug)}.html" '
+            f'data-ref="{_esc(node.view_of.id)}">{_esc(node.label)}</a> '
+            f'<span class="tree-seen">(group expanded under {_esc(where)})</span>'
+        )
+        inner = _render_list(forest, node.children, depth + 1)
+        open_attr = " open" if depth < DEFAULT_DEPTH else ""
+        return (
+            f"<li><details{open_attr}><summary>{label} "
+            f'<span class="count">{_item_count(node)}</span></summary>'
+            f"{inner}</details></li>"
+        )
     if node.item is not None:
         label = (
             f'<a class="ref" href="{_esc(node.item.slug)}.html" '

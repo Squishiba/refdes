@@ -5,11 +5,16 @@
 <h1>Project tree</h1>
 <p class="muted">
   Every item in the project, filed by the containment spine: workspace,
-  board, <code>part_of</code> group, item. An item with several groups is
-  expanded once, under its first group by id, and listed as a reference
-  under the others. Items with no board and no group sit in
-  <strong>Project-wide</strong>, rendered last. Nothing here is hidden:
-  the counts are the whole project.
+  board, <code>part_of</code> group, item. An item is expanded once, under
+  <strong>its own board</strong> — inside a node for its first group by id
+  when a group fits, or directly when it has none — and listed as a
+  reference under every other group. A group node may appear in more than
+  one board branch, each showing only that board's members; the group
+  itself expands once, under its own board or under
+  <strong>Project-wide</strong>. Items with no board keep the same rule
+  (first group by id, else Project-wide, rendered last). Nothing here is
+  hidden: the counts are the whole project, and no item is ever absent
+  from its own board.
 </p>
 
 {{ tree_html | safe }}

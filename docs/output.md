@@ -115,17 +115,25 @@ It answers "what is in this project, grouped how, and what is floating"
 — orientation, not a report; coverage and trace questions stay with
 `coverage.html` and `{{cascade}}`.
 
-- **Every item appears exactly once, expanded.** An item with several
-  `part_of` groups is expanded under one deterministic primary parent —
-  its first group by id, else its board, else `Project-wide` — and shows
-  up under every other parent as a reference leaf linking back to where
-  it is expanded, the same rule `{{cascade}}` uses for revisited nodes.
-  The choice is id-based, so it is the same on every build.
+- **Every item appears exactly once, expanded, and never missing from
+  its own board.** The primary home of an item that has a board is that
+  board: directly under it when the item has no group, or inside a group
+  node when one of its groups shares the board. When all of a boarded
+  item's groups live elsewhere, a node for its first group by id appears
+  inside the board branch holding that board's members, and the group
+  itself expands once, under its own board or under `Project-wide`. A
+  group node may therefore appear in several board branches, each showing
+  only that board's members. Board-less items keep the old rule: first
+  group by id, else `Project-wide`. Every other group lists the item as a
+  reference leaf linking back to where it is expanded — the rule
+  `{{cascade}}` uses for revisited nodes. The choice is id-based, so it
+  is the same on every build.
 - **Nothing is silently dropped.** Items with no board and no group —
   shared components, projects that have never used `part_of` — land in a
-  visible **Project-wide** bucket, rendered last with a count. The
-  expanded-node count equals the project's item count, mechanically, on
-  every build.
+  visible **Project-wide** bucket, rendered last with a count. Two counts
+  hold mechanically on every build: expanded nodes equal the project's
+  item count, and every boarded item appears in its board's branch,
+  expanded or as a reference.
 - **Collapse is plain `<details>`,** opened to depth two (workspaces and
   boards open, groups collapsed to counts). No JavaScript is involved;
   every reference is still a working link with scripting off, and the

@@ -129,6 +129,188 @@ def _page(root, name="tree.html"):
         return fh.read()
 
 
+# Boarded items always appear under their own board (finding 37 fix round).
+BOARD_GROUP_ITEMS = {
+    # Group with no board: it expands under Project-wide.
+    "shared/grp-pwr.md": """\
+---
+id: GRP-PWR-001
+type: group
+title: Project-wide power group.
+---
+""",
+    # Boarded item whose only group is project-wide: must expand under its
+    # OWN board, inside a GRP-PWR-001 node, and be a reference leaf under the
+    # expanded project-wide group.
+    "board-a/req-a1.md": """\
+---
+id: REQ-A-001
+type: requirement
+text: Board A item in a project-wide group.
+part_of: [GRP-PWR-001]
+---
+""",
+    # Plain board item, no group: direct child of Board A.
+    "board-a/req-a2.md": """\
+---
+id: REQ-A-002
+type: requirement
+text: Board A item with no group.
+---
+""",
+}
+
+TWO_BOARD_ITEMS = {
+    "shared/grp-two.md": """\
+---
+id: GRP-T-001
+type: group
+title: Group with members on two boards.
+---
+""",
+    "board-a/req-ta.md": """\
+---
+id: REQ-TA-001
+type: requirement
+text: Member on board A.
+part_of: [GRP-T-001]
+---
+""",
+    "board-b/req-tb.md": """\
+---
+id: REQ-TB-001
+type: requirement
+text: Member on board B.
+part_of: [GRP-T-001]
+---
+""",
+}
+
+
+def _subtree_tokens(node):
+    """(expanded tokens, reference tokens) in the subtree rooted at node."""
+    exp, refs = set(), set()
+    stack = [node]
+    while stack:
+        n = stack.pop()
+        if n.item is not None and not n.duplicate:
+            exp.add(tree_mod._ref(n.item))
+        elif n.duplicate:
+            refs.add(tree_mod._ref(n.item))
+        refs.update(tree_mod._ref(r) for r in n.references)
+        stack.extend(n.children)
+    return exp, refs
+
+
+def _board_node(forest, label):
+    matches = [n for n in forest.roots if n.kind == "board" and n.label == label]
+    assert matches, f"no board root {label}"
+    return matches[0]
+
+
+def test_boarded_item_in_project_wide_group_expands_under_its_board(tmp_path):
+    """The reported repro: REQ-A-001 (board A, part_of project-wide GRP-PWR)
+    must appear under Board A -- expanded, inside a GRP-PWR node -- and as a
+    reference leaf under the expanded project-wide group."""
+    _write(tmp_path, items=BOARD_GROUP_ITEMS)
+    project = _render(tmp_path)
+    forest = tree_mod.build_forest(project)
+
+    board_a = _board_node(forest, "Board A")
+    exp_a, _refs_a = _subtree_tokens(board_a)
+    assert "REQ-A-001" in exp_a  # expanded, not merely referenced
+    assert "REQ-A-002" in exp_a
+
+    # Expanded inside a group node for GRP-PWR-001 inside the board branch.
+    views = [
+        c for c in board_a.children
+        if c.view_of is not None and c.view_of.id == "GRP-PWR-001"
+    ]
+    assert len(views) == 1
+    assert [c.item.id for c in views[0].children] == ["REQ-A-001"]
+
+    # The project-wide group's expanded node lists it as a reference leaf.
+    bucket = next(n for n in forest.roots if n.kind == "project-wide")
+    grp = [c for c in bucket.children if c.item is not None and c.item.id == "GRP-PWR-001"]
+    assert len(grp) == 1
+    assert [r.id for r in grp[0].references] == ["REQ-A-001"]
+
+    # Invariant: every item expanded exactly once.
+    assert forest.expanded_count == len(project.local_items)
+
+    # Page level: linked twice, once expanded once as reference.
+    html = _page(tmp_path)
+    assert html.count('data-ref="REQ-A-001"') == 2
+    assert "expanded under" in html
+
+
+def test_item_in_group_on_same_board_expands_under_the_group_node(tmp_path):
+    """Board A item whose primary group is also on Board A: expanded under
+    the group's own node inside the board branch -- no placeholder, no
+    reference leaf for that pairing."""
+    _write(tmp_path)
+    project = _render(tmp_path)
+    forest = tree_mod.build_forest(project)
+    board_a = _board_node(forest, "Board A")
+    grp_a = [
+        c for c in board_a.children
+        if c.item is not None and c.item.id == "GRP-A-001"
+    ]
+    assert len(grp_a) == 1
+    assert "CMP-M-001" in {c.item.id for c in grp_a[0].children if c.item}
+    # no group-view placeholder for GRP-A-001 anywhere in the board branch
+    assert not [c for c in board_a.children if c.view_of is not None
+                and c.view_of.id == "GRP-A-001"]
+
+
+def test_group_with_members_on_two_boards_shows_a_node_under_each(tmp_path):
+    """A project-wide group with members on both boards: each board branch
+    gets a group node holding ONLY that board's members."""
+    _write(tmp_path, items=TWO_BOARD_ITEMS)
+    project = _render(tmp_path)
+    forest = tree_mod.build_forest(project)
+
+    for label, member in (("Board A", "REQ-TA-001"), ("Board B", "REQ-TB-001")):
+        board = _board_node(forest, label)
+        views = [c for c in board.children
+                 if c.view_of is not None and c.view_of.id == "GRP-T-001"]
+        assert len(views) == 1, label
+        assert [c.item.id for c in views[0].children] == [member]
+        exp, _ = _subtree_tokens(board)
+        other = "REQ-TB-001" if label == "Board A" else "REQ-TA-001"
+        assert other not in exp  # only this board's members
+
+    assert forest.expanded_count == len(project.local_items)
+
+
+def test_every_boarded_item_appears_under_its_own_board_branch(tmp_path):
+    """The new invariant: nothing may be absent from its own board -- every
+    item with a board appears in that board's branch, expanded or as a
+    reference leaf."""
+    for items in (TREE_ITEMS, BOARD_GROUP_ITEMS, TWO_BOARD_ITEMS):
+        _write(tmp_path, items=items)
+        project = _render(tmp_path)
+        forest = tree_mod.build_forest(project)
+        boards = {n.label: n for n in forest.roots if n.kind == "board"}
+        for item in project.local_items:
+            if not item.board:
+                continue
+            from refdes import boards as _  # noqa: F401  (board key -> label)
+            spec = project.boards.get(item.board)
+            node = boards[spec.label if spec else item.board]
+            exp, refs = _subtree_tokens(node)
+            assert tree_mod._ref(item) in exp | refs, (
+                f"{item.id} missing from its own board branch")
+
+
+def test_primary_placement_stable_across_two_builds_with_group_views(tmp_path):
+    _write(tmp_path, items=TWO_BOARD_ITEMS)
+    _render(tmp_path)
+    first = _page(tmp_path)
+    _render(tmp_path)
+    assert _page(tmp_path) == first
+
+
 # ------------------------------------------------------------------ invariant
 
 
