@@ -5,7 +5,7 @@
 
 <h1>{{ 'Tree' if scope else 'Project tree' }}{% if scope %} — {{ scope.label }}{% endif %}</h1>
 <p class="muted">
-  Every item in the project, filed by the containment spine: workspace,
+  {% if scope %}Every item {{ scope.label }} displays{% else %}Every item in the project{% endif %}, filed by the containment spine: workspace,
   board, <code>part_of</code> group, item. An item is expanded once, under
   <strong>its own board</strong> — inside a node for its first group by id
   when a group fits, or directly when it has none — and listed as a
@@ -22,7 +22,8 @@
   This page shows every item <strong>{{ board.label }}</strong> displays:
   the items it owns, plus the members of the groups named in its
   <code>includes:</code>, which are marked <em>shared</em> and stay counted
-  by their own board.
+  by their own board. The board's own count tallies only what it owns;
+  shared members are counted apart.
 </p>
 {% endif %}
 

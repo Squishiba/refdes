@@ -61,6 +61,14 @@ text: Owned by board A, member of the shared group.
 part_of: [GRP-T-001]
 ---
 """,
+    "board-a/req-ta2.md": """\
+---
+id: REQ-TA-002
+type: requirement
+text: Also owned by board A, also in the shared group.
+part_of: [GRP-T-001]
+---
+""",
     "board-b/req-b1.md": """\
 ---
 id: REQ-B-001
@@ -163,6 +171,31 @@ def test_tree_board_pages_exist_and_are_scoped(tmp_path):
     assert "REQ-B-001" in b
     assert "REQ-TA-001" in b  # included through includes
     assert "shared" in b  # the finding 33 label
+
+
+def test_board_node_count_tallies_owned_only(tmp_path):
+    _write(tmp_path)
+    _render(tmp_path)
+    b = _site_file(tmp_path, "tree-board-b.html")
+    assert "1 own, 2 shared" in b  # REQ-B-001 owns; two GRP-T-001 members shared
+    assert '<span class="count">3</span>' not in b
+    # A board with nothing shared keeps the plain count.
+    a = _site_file(tmp_path, "tree-board-a.html")
+    assert '<span class="count">2</span>' in a
+    assert " own, " not in a
+    # The project-wide tree keeps its counts as they are.
+    whole = _site_file(tmp_path, "tree.html")
+    assert " own, " not in whole
+
+
+def test_scoped_intro_opens_with_the_scope(tmp_path):
+    _write(tmp_path)
+    _render(tmp_path)
+    b = _site_file(tmp_path, "tree-board-b.html")
+    assert "Every item Board B displays" in b
+    assert "Every item in the project" not in b
+    whole = _site_file(tmp_path, "tree.html")
+    assert "Every item in the project" in whole
 
 
 def test_board_with_nothing_in_scope_gets_no_tree_page(tmp_path):

@@ -8,3 +8,7 @@
   it displays, including `includes:` members under a node marked
   "shared, via GRP-..."; a scope with nothing in it gets no page. The
   once-expanded invariant now holds per scope.
+- On a scoped tree page the board node's count tallies only what the
+  board owns, shared members counted apart ("1 own, 2 shared") -- a
+  board's numbers count only what it owns (finding 33). Group nodes and
+  the project-wide tree keep their counts as they are.

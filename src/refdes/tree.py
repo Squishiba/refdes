@@ -87,6 +87,10 @@ class TreeForest:
     expanded: list[Item] = field(default_factory=list)
     # item identity token -> breadcrumb of the node it was expanded under
     locations: dict[str, str] = field(default_factory=dict)
+    # The board this forest is scoped to, if any: a board node's count then
+    # tallies only what the board owns, with shared members counted apart
+    # (finding 33: a board's numbers count only what it owns).
+    board: str | None = None
 
     @property
     def expanded_count(self) -> int:
@@ -203,7 +207,7 @@ def build_forest(
     for node in roots:
         _attach_groups(node, by_group, ref_groups, ())
 
-    forest = TreeForest(roots=roots)
+    forest = TreeForest(roots=roots, board=board)
     _visit_all(forest, roots, ())
     # Cycle members unreachable from any root: promote the smallest remaining
     # to a root and keep going until every item has been expanded once.
@@ -441,10 +445,32 @@ def _render_node(
     if not inner:
         return f"<li>{label}</li>"
     open_attr = " open" if depth < open_depth else ""
+    if node.kind == "board" and forest.board is not None:
+        own, shared = _own_shared(node)
+        text = f"{own} own, {shared} shared" if shared else str(own)
+    else:
+        text = str(_item_count(node))
     return (
         f"<li><details{open_attr}><summary>{label} "
-        f'<span class="count">{_item_count(node)}</span></summary>{inner}</details></li>'
+        f'<span class="count">{text}</span></summary>{inner}</details></li>'
     )
+
+
+def _own_shared(node: TreeNode) -> tuple[int, int]:
+    """Own and shared item counts inside a scoped board node's branch:
+    everything under a shared `includes:` node is shared, everything else
+    the board owns. Group nodes keep their plain counts."""
+    own = shared = 0
+    stack = [(c, c.shared) for c in node.children]
+    while stack:
+        n, is_shared = stack.pop()
+        if n.item is not None:
+            if is_shared:
+                shared += 1
+            else:
+                own += 1
+        stack.extend((c, is_shared) for c in n.children)
+    return own, shared
 
 
 def _render_reference(forest: TreeForest, item: Item) -> str:

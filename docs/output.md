@@ -146,9 +146,11 @@ It answers "what is in this project, grouped how, and what is floating"
   owned plus the members of its `includes:` groups — so nothing on the
   page is missing from it; those shared members hang under a node for the
   group that shares them, marked **shared, via GRP-…**, and stay counted
-  by their own board everywhere numbers are produced. A scope with nothing
-  in it gets no page. The invariant becomes per-scope: expanded nodes
-  equal the items that scope displays.
+  by their own board everywhere numbers are produced — on this page too:
+  the board node counts what it owns, shared members counted apart
+  ("1 own, 2 shared"). Group nodes keep their plain counts. A scope with
+  nothing in it gets no page. The invariant becomes per-scope: expanded
+  nodes equal the items that scope displays.
 
 The same forest is also a block: `{{tree}}` in a page, optionally
 `board=`, `workspace=` or `depth=`. See [blocks](blocks.md).
