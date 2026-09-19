@@ -1361,11 +1361,31 @@ orphan and margin tables should include included-but-not-owned items — they
 are computed from the same `local` list (render.py:363-367), so whatever
 `_in_scope` decides flows there automatically, and "displayed but not counted"
 may not be separable without a second predicate. That is the design question
-this finding should be answered on.
+this finding should be answered on. — Decided 2026-09-19: they are separable,
+and the second predicate is the accepted cost of the decision, not a reason to
+revisit it.
 
-**Status: outstanding — awaiting decision.** Nothing here is implemented; every
-filter site above is as cited, and `includes:` appears nowhere in the package.
-The decision requested is (a)/(b)/(c)/(d) plus the two sub-questions above.
+**Status: decided (2026-09-19).** Option (a), display-only, with (c) demoted to
+a diagnostic — and the tally half settled harder than the recommendation left
+it: a board's summary numbers count **only** the items the board owns. The item
+counts, the orphan and margin tables on `summary-<board>.html`, and anything
+else `summary_payload` tallies read the ownership predicate; items that reach
+the board through `includes:` are displayed and listed there, labelled as shared
+("shared, via GRP-X"), and never tallied. Jared: "Should only tally what it
+owns, not what is shared." That is why one predicate cannot serve both jobs and
+`_in_scope` (render.py:57-64) grows a sibling rather than a widened test.
+Rejected: (b) multi-board membership on the item, for the `_board_gate`
+conflation catalogued above — a board added for BOM reasons would also take on
+that component's obligations; (c) link-derived membership as the mechanism, for
+the incidental-link one — a three-month-old `references:` would confer
+membership; (d) leave it and link out, because the workaround is a
+hand-maintained link that rots with no build check, on a page `nav.scope_reports`
+might not even write. `includes:` names **groups only**, not individual item
+ids — the finding's own lean, taken as the default because Jared did not
+object, and marked revisitable: if the ceremony of a `GRP-` item holding three
+components turns out to cost more than the asymmetry with `conforms_to:`, that
+is the knob to turn. Nothing here is implemented yet; `includes:` still appears
+nowhere in the package.
 
 **Local model (not decided — my read): not suitable.** The code change is
 small and the display half is loud, but the correctness claim is "this item is
