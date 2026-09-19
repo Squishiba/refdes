@@ -94,47 +94,48 @@
 
 field_sets:
   provenance:
-    source: { type: text, on_change: log }
-    note:   { type: text, on_change: log }
-    tags:   { type: list, on_change: ignore }
+    source: { type: text, on_change: log, doc: "Where the item's content came from — a spec section, a datasheet, a conversation. Kept out of the content hash, so correcting it never marks downstream items suspect." }
+    note: { type: text, on_change: log, doc: "A free-text remark about the item's provenance, kept beside the item instead of inside its body. Kept out of the content hash." }
+    tags: { type: list, on_change: ignore, doc: "Free-form labels for grouping and finding items; free-text search matches tags as well as titles. Kept out of the content hash." }
   stewardship:
-    owner:         { type: person, on_change: log }
-    last_reviewed: { type: date,   on_change: ignore }
+    owner: { type: person, on_change: log, doc: "The person responsible for this item — who a question about it goes to. Kept out of the content hash, so ownership changes never invalidate downstream work." }
+    last_reviewed: { type: date, on_change: ignore, doc: "The date this item was last reviewed. Bookkeeping only: kept out of the content hash." }
   citations:
-    citations: { type: citations, on_change: invalidate }
+    citations: { type: citations, on_change: invalidate, doc: "External documents this item relies on. Each entry needs a path — an http(s) URL or a project-root-relative file — and may carry rev, page, section, part_number, vendor and an id for [[cite:]] references." }
 
 link_types:
   # trace: false on amends/records/supersedes/addresses -- none of these is
   # "this item's correctness is justified by that one," which is what a
   # {{cascade}} block's default walk is for (docs/design/index-blocks.md §6).
   # Every other verb traces by default.
-  refines:        { inverse: refined_by,    label: "Refines" }
-  derives_from:   { inverse: derived_by,    label: "Derives from" }
-  governed_by:    { inverse: governs,       label: "Governed by" }
-  satisfies:      { inverse: satisfied_by,  label: "Satisfies" }
-  constrained_by: { inverse: constrains,    label: "Constrained by" }
-  verifies:       { inverse: verified_by,   label: "Verifies" }
-  addresses:      { inverse: addressed_by,  label: "Addresses",   trace: false }
-  records:        { inverse: recorded_by,   label: "Records",     trace: false }
-  amends:         { inverse: amended_by,    label: "Amends",      trace: false }
-  supersedes:     { inverse: superseded_by, label: "Supersedes",  trace: false }
-  selects:        { inverse: selected_by,   label: "Selects" }
-  blocked_by:     { inverse: blocks,        label: "Blocked by" }
-  part_of:        { inverse: contains,      label: "Part of" }
-  equivalent:     { inverse: equivalent,    label: "Equivalent" }   # self-inverse
-  alternate:      { inverse: alternate,     label: "Alternate" }    # self-inverse
+  refines:        { inverse: refined_by,    label: "Refines", doc: "A narrower, more detailed version of the same kind of statement: a requirement refining a requirement, or a bound refining a bound. Same category of thing, different altitude." }
+  derives_from:   { inverse: derived_by,    label: "Derives from", doc: "A bound whose value follows from a requirement or another bound — where the number came from, not a restatement of it." }
+  governed_by:    { inverse: governs,       label: "Governed by", doc: "This requirement must comply with a general rule stated elsewhere — another requirement or a bound — without being a narrower version of it. Traceability only; it never feeds coverage." }
+  satisfies:      { inverse: satisfied_by,  label: "Satisfies", doc: "A decision or component claims to meet a requirement or bound. This is the link that closes coverage once the claiming item reaches a satisfying status." }
+  constrained_by: { inverse: constrains,    label: "Constrained by", doc: "A decision or component that must respect a bound. Traceability only — it does not close coverage on the bound; satisfies does." }
+  verifies:       { inverse: verified_by,   label: "Verifies", doc: "A test proves a requirement or bound. Counts toward coverage when the test's status is one of the type's verifying_statuses." }
+  addresses:      { inverse: addressed_by,  label: "Addresses",   trace: false, doc: "A log entry records work done on a requirement or bound. Counts as addressed coverage — someone has worked on it and written it up — without claiming it is met." }
+  records:        { inverse: recorded_by,   label: "Records",     trace: false, doc: "A log entry records a decision — the design-log side of the decision's own recorded_by end of the same edge." }
+  amends:         { inverse: amended_by,    label: "Amends",      trace: false, doc: "A log entry corrects an earlier log entry. Log entries are never edited in place; the correction is a new entry pointing back at this one." }
+  supersedes:     { inverse: superseded_by, label: "Supersedes",  trace: false, doc: "This decision replaces an older one. The older decision keeps its history; its status moves to superseded." }
+  selects:        { inverse: selected_by,   label: "Selects", doc: "A decision picks a component — the choice-of-part record that makes the component the project's answer, not just a candidate." }
+  blocked_by:     { inverse: blocks,        label: "Blocked by", doc: "Something is holding this decision up. Name only the immediate blocker; reports resolve the chain to its root. May point at an item of any type; a cycle is a build error." }
+  part_of:        { inverse: contains,      label: "Part of", doc: "This item belongs to a group. Membership is always declared by the member, never by the group; contains is the computed backlink." }
+  equivalent:     { inverse: equivalent,    label: "Equivalent", doc: "This component is a drop-in second source for that one — interchangeable as claimed, no review needed. Self-inverse, and restricted to component-to-component." }
+  alternate:      { inverse: alternate,     label: "Alternate", doc: "This component is functionally close to that one but not a drop-in: check before substituting. Self-inverse, component-to-component, and the rationale explaining what differs is required." }
 
 types:
   requirement:
+    doc: "Something the design must achieve, stated as one prose body. Counts toward coverage while active; a draft or retired requirement is left out of coverage entirely."
     prefix: REQ
     label: Requirement
     preview: [status, title]
     coverable: true
     coverable_statuses: [active]
     fields:
-      title:     { type: text, on_change: invalidate }
-      status:    { type: enum, choices: [draft, active, retired], default: draft, on_change: invalidate }
-      rationale: { type: text, on_change: invalidate }
+      title:     { type: text, on_change: invalidate, doc: "An optional short label for tables and previews. The requirement's content is the body, not this." }
+      status:    { type: enum, choices: [draft, active, retired], default: draft, on_change: invalidate, doc: "Lifecycle of the requirement. Only active requirements count toward coverage; draft and retired ones are excluded." }
+      rationale: { type: text, on_change: invalidate, doc: "Why this requirement exists — the reasoning behind the statement, kept separate from the statement itself." }
     include: [provenance, stewardship]
     links:
       refines:     [requirement]
@@ -143,16 +144,17 @@ types:
     body: { on_change: invalidate, required: true }
 
   bound:
+    doc: "A numeric limit the design must respect — a voltage, a current, a tolerance. Its limit field makes it checkable by other items' checks. Counts toward coverage while active."
     prefix: BND
     label: Bound
     preview: [status, title, limit]
     coverable: true
     coverable_statuses: [active]
     fields:
-      title:     { type: text, on_change: invalidate }
-      limit:     { type: limit, required: true, on_change: invalidate }
-      status:    { type: enum, choices: [draft, active, retired], default: draft, on_change: invalidate }
-      rationale: { type: text, on_change: invalidate }
+      title:     { type: text, on_change: invalidate, doc: "An optional short label for tables and previews. The bound's content is the body, not this." }
+      limit:     { type: limit, required: true, on_change: invalidate, doc: "The numeric limit itself, parsed as a quantity with a comparison — '>= 9 V', '<= 600 mA'. Required, and it is what makes this bound checkable by other items' checks." }
+      status:    { type: enum, choices: [draft, active, retired], default: draft, on_change: invalidate, doc: "Lifecycle of the bound. Only active bounds count toward coverage; draft and retired ones are excluded." }
+      rationale: { type: text, on_change: invalidate, doc: "Why this limit is what it is — the reasoning behind the number." }
     include: [provenance, stewardship]
     links:
       refines:      [bound]
@@ -161,19 +163,20 @@ types:
     body: { on_change: invalidate, required: true }
 
   decision:
+    doc: "A design choice that was made — what was picked, why, and what it satisfies. A settled (accepted) decision closes coverage on what it satisfies; a failing check on a decision is an error."
     prefix: DEC
     label: Decision
     preview: [status, title, date]
     satisfying_statuses: [accepted]
     check_severity: error
     fields:
-      title:     { type: text, required: true, on_change: invalidate }
+      title:     { type: text, required: true, on_change: invalidate, doc: "What was decided, in one line. Required — every decision needs a label." }
       status:    { type: enum, choices: [proposed, in_progress, accepted, on_hold, rejected, superseded],
-                   default: proposed, on_change: invalidate }
-      rationale: { type: text, on_change: invalidate, required_when: {status: rejected} }
-      date:      { type: date, on_change: log }
-      options:   { type: options, on_change: invalidate }
-      checks:    { type: checks, on_change: invalidate }
+                   default: proposed, on_change: invalidate, doc: "Where the decision stands. Only an accepted decision counts as settled and closes coverage on what it satisfies." }
+      rationale: { type: text, on_change: invalidate, required_when: {status: rejected}, doc: "Why this decision, and why not the alternatives. Required when the decision is rejected — the reason a rejection happened is the point of recording it." }
+      date:      { type: date, on_change: log, doc: "When the decision was made. Kept out of the content hash, so fixing a date never marks downstream items suspect." }
+      options:   { type: options, on_change: invalidate, doc: "The alternatives considered, as name / verdict / because entries. Rendered as the options-considered panel on the decision's page." }
+      checks:    { type: checks, on_change: invalidate, doc: "Numeric checks: each entry compares a value from this item's calc block against a bound's limit. A failed check here is reported as an error." }
     include: [provenance, stewardship, citations]
     links:
       satisfies:      [requirement, bound]
@@ -186,13 +189,14 @@ types:
     body: { on_change: invalidate }
 
   test:
+    doc: "A verification item that proves a requirement or bound. Its verifies links count toward coverage when the test's status is passing."
     prefix: TST
     label: Test
     preview: [status, title]
     verifying_statuses: [passing]
     fields:
-      title:  { type: text, required: true, on_change: invalidate }
-      status: { type: enum, choices: [planned, passing, failing, blocked], default: planned, on_change: invalidate }
+      title:  { type: text, required: true, on_change: invalidate, doc: "What the test proves, in one line. Required." }
+      status: { type: enum, choices: [planned, passing, failing, blocked], default: planned, on_change: invalidate, doc: "Result of the test. Only a passing test counts as having verified what it points at." }
     include: [provenance, stewardship]
     links:
       verifies: [requirement, bound]
@@ -200,17 +204,18 @@ types:
     body: { on_change: invalidate }
 
   component:
+    doc: "A part the design uses. A selected component closes coverage on what it satisfies, and it can carry its own checks against bounds. Equivalence and alternateness between components are claims made here, not facts from a parts database."
     prefix: CMP
     label: Component
     preview: [status, title, part_number]
     satisfying_statuses: [selected]
     fields:
-      title:       { type: text, required: true, on_change: invalidate }
-      part_number: { type: text, on_change: invalidate }
-      refdes:      { type: list, on_change: log }
-      status:      { type: enum, choices: [candidate, selected, obsolete], default: candidate, on_change: invalidate }
-      rationale:   { type: text, on_change: invalidate, required_when: {links: alternate} }
-      checks:      { type: checks, on_change: invalidate }
+      title:       { type: text, required: true, on_change: invalidate, doc: "What the component is, in one line. Required." }
+      part_number: { type: text, on_change: invalidate, doc: "The manufacturer part number. Indexed into the parts page, alongside part numbers cited inside citations entries." }
+      refdes:      { type: list, on_change: log, doc: "Reference designators on the board — U14, R7 — where this part is placed. Kept out of the content hash." }
+      status:      { type: enum, choices: [candidate, selected, obsolete], default: candidate, on_change: invalidate, doc: "Where the part stands in this design. Only a selected component counts as settled and closes coverage on what it satisfies." }
+      rationale:   { type: text, on_change: invalidate, required_when: {links: alternate}, doc: "Why this part, or — when an alternate link is present — what makes that alternate not a drop-in. Required whenever an alternate link exists." }
+      checks:      { type: checks, on_change: invalidate, doc: "Numeric checks: each entry compares a value from this item's calc block against a bound's limit, so a component can demonstrate compliance with a bound directly." }
     include: [provenance, stewardship, citations]
     links:
       satisfies:      [requirement, bound]
@@ -227,25 +232,27 @@ types:
   # point here with `part_of`, and `contains` is only ever the computed
   # inverse backlink (docs/design/backlog.md finding 14).
   group:
+    doc: "A named collection of items — 'the PCIe interface spec' — that names the collection without letting it stand in for its members. Members point here with part_of; a group never lists its members, never appears in coverage, and nothing may satisfy one."
     prefix: GRP
     label: Group
     preview: [title]
     coverable: false
     fields:
-      title: { type: text, required: true, on_change: log }
+      title: { type: text, required: true, on_change: log, doc: "The name of the collection. Required — an unnamed group names nothing. Kept out of the content hash, so renaming a group never marks its members suspect." }
     include: [provenance, stewardship]
     body: { on_change: log }
 
   log:
+    doc: "A dated entry in the design log — work done, questions raised, corrections. Entries are append-only: once built they are sealed, and corrections are new entries with amends, not edits." 
     prefix: LOG
     label: Log entry
     plural: Log entries
     append_only: true
     preview: [date, author, summary]
     fields:
-      date:    { type: date, required: true, on_change: invalidate }
-      summary: { type: text, required: true, on_change: invalidate }
-      author:  { type: person, on_change: invalidate }
+      date:    { type: date, required: true, on_change: invalidate, doc: "When this entry was written. Required — an undated log entry cannot be ordered in time." }
+      summary: { type: text, required: true, on_change: invalidate, doc: "One-line account of what happened, shown in log listings above the body." }
+      author:  { type: person, on_change: invalidate, doc: "Who wrote the entry." }
     include: [provenance]
     links:
       addresses: [requirement, bound]

@@ -6,58 +6,62 @@
 # preset rather than joining the base standard.
 
 link_types:
-  raises:      { inverse: raised_by, label: "Raises" }
-  bears_on:    { inverse: borne_on,  label: "Bears on" }
-  met_by:      { inverse: meets,     label: "Met by" }
-  resolved_by: { inverse: resolves, label: "Resolved by" }
+  raises:      { inverse: raised_by, label: "Raises", doc: "A position puts a claim on the table — someone is asserting this, and it is open to rebuttal." }
+  bears_on:    { inverse: borne_on,  label: "Bears on", doc: "A claim is relevant to an option, a requirement or a bound — it argues for or against it without by itself settling anything." }
+  met_by:      { inverse: meets,     label: "Met by", doc: "An option claims to meet a requirement or bound. It records how a candidate measures up; it is not coverage — only a decision's or component's satisfies closes coverage." }
+  resolved_by: { inverse: resolves, label: "Resolved by", doc: "A debate was settled by a decision. The debate keeps the argument; the decision keeps the outcome." }
 
 types:
   debate:
+    doc: "An open question the design is arguing about — the argument that produces a decision, recorded alongside it. Closed by linking the decision that resolved it."
     prefix: DB
     label: Debate
     preview: [status, title]
     fields:
-      title:   { type: text, required: true, on_change: invalidate }
-      status:  { type: enum, choices: [open, resolved], default: open, on_change: invalidate }
-      chat_id: { type: text, on_change: log }
+      title:   { type: text, required: true, on_change: invalidate, doc: "The question under debate, in one line. Required." }
+      status:  { type: enum, choices: [open, resolved], default: open, on_change: invalidate, doc: "Whether the debate is still live. Set it to resolved when a resolved_by decision lands." }
+      chat_id: { type: text, on_change: log, doc: "An identifier for where the debate happened — a chat thread or meeting reference, kept for provenance. Kept out of the content hash." }
     include: [provenance, stewardship]
     links:
       resolved_by: [decision]
     body: { on_change: invalidate }
 
   option:
+    doc: "A candidate approach under debate, compared against requirements and bounds. A failed check on an option is reported as information — a finding about the candidate, not a defect in the design."
     prefix: OPT
     label: Option
     preview: [status, title]
     check_severity: info      # a failed criterion is a finding, not a defect
     fields:
-      title:  { type: text, required: true, on_change: invalidate }
-      status: { type: enum, choices: [candidate, eliminated], default: candidate, on_change: invalidate }
-      checks: { type: checks, on_change: invalidate }
+      title:  { type: text, required: true, on_change: invalidate, doc: "The candidate approach, in one line. Required." }
+      status: { type: enum, choices: [candidate, eliminated], default: candidate, on_change: invalidate, doc: "Whether this option is still in the running or was ruled out." }
+      checks: { type: checks, on_change: invalidate, doc: "Numeric checks: each entry compares a value from this item's calc block against a bound's limit, to score the candidate against the numbers. A failure is reported as information, not an error." }
     include: [provenance]
     links:
       met_by: [requirement, bound]
     body: { on_change: invalidate }
 
   claim:
+    doc: "An assertion made in a debate — a fact or judgement that bears on an option, a requirement or a bound, and that others may accept or rebut."
     prefix: CLM
     label: Claim
     preview: [status, text]
     fields:
-      text:   { type: text, required: true, on_change: invalidate }
-      status: { type: enum, choices: [open, accepted, rebutted], default: open, on_change: invalidate }
+      text:   { type: text, required: true, on_change: invalidate, doc: "The assertion itself, in one line. Required — a claim that says nothing cannot be accepted or rebutted." }
+      status: { type: enum, choices: [open, accepted, rebutted], default: open, on_change: invalidate, doc: "How the claim has fared so far: still open, accepted, or rebutted." }
     include: [provenance]
     links:
       bears_on: [option, requirement, bound]
     body: { on_change: invalidate }
 
   position:
+    doc: "One participant's stance in a debate, raising the claims they stand behind. Positions are what make the argument attributable — who said it, not just what was said."
     prefix: POS
     label: Position
     preview: [participant, stance]
     fields:
-      participant: { type: person, required: true, on_change: invalidate }
-      stance:      { type: text, on_change: invalidate }
+      participant: { type: person, required: true, on_change: invalidate, doc: "Who holds this position. Required — a position nobody took is not a position." }
+      stance:      { type: text, on_change: invalidate, doc: "A one-line statement of the side being taken; the claims behind it are the raises links." }
     include: [provenance]
     links:
       raises: [claim]

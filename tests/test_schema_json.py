@@ -72,8 +72,11 @@ def test_build_schema_link_carries_target_description():
     doc = schema_json_mod.build_schema(project)
     satisfies = doc["$defs"]["decision__bare"]["properties"]["satisfies"]
     assert satisfies["type"] == "array"
-    # decision.satisfies widened to [requirement, bound] (issue #7 finding 22)
-    assert satisfies["description"] == "target: requirement, bound"
+    # decision.satisfies widened to [requirement, bound] (issue #7 finding 22).
+    # The bundled standard defines `doc:` for satisfies (finding 38), so the
+    # description is the definition followed by the target hint.
+    assert satisfies["description"].endswith("(target: requirement, bound)")
+    assert satisfies["description"].startswith("A decision or component claims")
 
 
 def test_build_schema_section_marker_validates_in_a_list_file(tmp_path):
