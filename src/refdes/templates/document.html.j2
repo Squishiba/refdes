@@ -43,6 +43,8 @@
       {% set state = check_state(item) %}
       {% if state != 'none' %}<span class="pill pill-{{ state }}">{{ state }}</span>{% endif %}
       {% if item.external %}<span class="pill pill-external">imported from {{ item.origin }}</span>{% endif %}
+      {% set via = shared_via.get(item.id) %}
+      {% if via %}<span class="pill pill-none">shared, via {{ via }}</span>{% endif %}
     </h3>
 
     {% set cov = coverage_of(item.id) %}

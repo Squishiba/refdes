@@ -44,6 +44,7 @@ from urllib.parse import urlparse
 
 import yaml
 
+from . import boards as boards_mod
 from .model import CitationSpec, CitationStatus, Item, PartUsage, Project
 from .parse import yaml_safe_load
 
@@ -424,10 +425,14 @@ def by_path(
 
     Only meaningful after `verify()` has run (via `build()`), which is what
     populates `item.citations` in the first place.
+
+    A board also lists the citations of the items its `includes:` groups bring
+    onto its pages (finding 33) -- displayed, not owned.
     """
+    included = boards_mod.included_map(project, board)
     grouped: dict[str, list[CitationStatus]] = defaultdict(list)
     for item in project.local_items:
-        if board is not None and item.board != board:
+        if board is not None and not boards_mod.displays(item, board, included):
             continue
         if workspace is not None and item.workspace != workspace:
             continue
@@ -445,15 +450,17 @@ def by_part_number(
     `part_number` (recognized by name, the same way `limit`/`options`/
     `checks` already are -- on any item type, not only `component`), and a
     citation's own nested `part_number` (`item.citations`, populated by
-    `verify()`). `board`/`workspace` scope the same way `by_path` does.
+    `verify()`). `board`/`workspace` scope the same way `by_path` does, `includes:` included:
+    a shared component a board includes is listed on its parts page.
     """
+    included = boards_mod.included_map(project, board)
     grouped: dict[str, PartUsage] = {}
 
     def usage(part_number: str) -> PartUsage:
         return grouped.setdefault(part_number, PartUsage(part_number=part_number))
 
     for item in project.local_items:
-        if board is not None and item.board != board:
+        if board is not None and not boards_mod.displays(item, board, included):
             continue
         if workspace is not None and item.workspace != workspace:
             continue

@@ -10,6 +10,7 @@ import shutil
 from jinja2 import Environment, FileSystemLoader
 
 from . import blocked as blocked_mod
+from . import boards as boards_mod
 from . import build as build_mod
 from . import chains as chains_mod
 from . import citations as citations_mod
@@ -87,12 +88,20 @@ def _document_sections(
     workspace's own local items -- imported items carry neither, so a scoped
     document has no "Imported references" section.
     """
+    # `includes:` members join the display (finding 33) -- `_in_scope` alone
+    # stays the ownership filter everywhere a number is produced.
+    included = boards_mod.included_map(project, board)
     sections: list[tuple[str, list[Item]]] = []
     for type_name, spec in project.types.items():
         items = [
             i
             for i in project.items.values()
-            if i.type == type_name and not i.external and _in_scope(i, board, workspace)
+            if i.type == type_name
+            and not i.external
+            and (
+                _in_scope(i, board, workspace)
+                or (board is not None and i.id in included)
+            )
         ]
         if type_name == "log":
             items.sort(key=lambda i: _date_sort_key(project, i))
@@ -157,11 +166,16 @@ def _unmet_boards(project: Project) -> dict[str, list[str]]:
 def _log_entries(
     project: Project, board: str | None = None, workspace: str | None = None
 ) -> list[Item]:
+    included = boards_mod.included_map(project, board)
     return sorted(
         (
             i
             for i in project.local_items
-            if i.type == "log" and _in_scope(i, board, workspace)
+            if i.type == "log"
+            and (
+                _in_scope(i, board, workspace)
+                or (board is not None and i.id in included)
+            )
         ),
         key=lambda i: _date_sort_key(project, i),
     )
@@ -906,6 +920,7 @@ def render_site(project: Project, draft: bool = False) -> str:
     _write_html(
         out_dir, written, "log.html", log_tpl,
         project=project,
+        shared_via={},
         entries=log_entries,
         figured=_figured(project, [entry.body_html for entry in log_entries]),
         previews_json=previews_json,
@@ -915,6 +930,7 @@ def render_site(project: Project, draft: bool = False) -> str:
     _write_html(
         out_dir, written, "references.html", references_tpl,
         project=project,
+        shared_via={},
         grouped=citations_by_path,
         previews_json=previews_json,
     )
@@ -923,6 +939,7 @@ def render_site(project: Project, draft: bool = False) -> str:
     _write_html(
         out_dir, written, "parts.html", parts_tpl,
         project=project,
+        shared_via={},
         parts=parts_by_number,
         previews_json=previews_json,
     )
@@ -947,6 +964,7 @@ def render_site(project: Project, draft: bool = False) -> str:
     _write_html(
         out_dir, written, "document.html", document_tpl,
         project=project,
+        shared_via={},
         sections=doc_sections,
         anchored=lambda html: _anchorize(html, known_slugs),
         figured=_figured(
@@ -969,6 +987,9 @@ def render_site(project: Project, draft: bool = False) -> str:
         board_reports = nav_mod.scope_reports(project, board=board_key)
         if not board_reports:
             continue
+        # `{item id: group id}` for the items this board displays via
+        # `includes:` but does not own -- the templates label them with it.
+        board_shared = boards_mod.included_map(project, board_key)
         board_sections = _document_sections(project, board=board_key)
         board_known_slugs = {
             item.slug for _label, items in board_sections for item in items
@@ -977,6 +998,7 @@ def render_site(project: Project, draft: bool = False) -> str:
             out_dir, written, f"document-{board_key}.html", document_tpl,
             project=project,
             board=board_spec,
+            shared_via=board_shared,
             sections=board_sections,
             anchored=lambda html, slugs=board_known_slugs: _anchorize(html, slugs),
             figured=_figured(
@@ -1001,6 +1023,7 @@ def render_site(project: Project, draft: bool = False) -> str:
                 out_dir, written, f"log-{board_key}.html", log_tpl,
                 project=project,
                 board=board_spec,
+                shared_via=board_shared,
                 entries=board_log_entries,
                 figured=_figured(
                     project, [entry.body_html for entry in board_log_entries]
@@ -1013,6 +1036,7 @@ def render_site(project: Project, draft: bool = False) -> str:
                 out_dir, written, f"references-{board_key}.html", references_tpl,
                 project=project,
                 board=board_spec,
+                shared_via=board_shared,
                 grouped=citations_mod.by_path(project, board=board_key),
                 previews_json=previews_json,
             )
@@ -1022,6 +1046,7 @@ def render_site(project: Project, draft: bool = False) -> str:
                 out_dir, written, f"parts-{board_key}.html", parts_tpl,
                 project=project,
                 board=board_spec,
+                shared_via=board_shared,
                 parts=citations_mod.by_part_number(project, board=board_key),
                 previews_json=previews_json,
             )
@@ -1049,6 +1074,7 @@ def render_site(project: Project, draft: bool = False) -> str:
             out_dir, written, f"document-{workspace_key}.html", document_tpl,
             project=project,
             workspace=workspace_spec,
+            shared_via={},
             sections=ws_sections,
             anchored=lambda html, slugs=ws_known_slugs: _anchorize(html, slugs),
             figured=_figured(
@@ -1072,6 +1098,7 @@ def render_site(project: Project, draft: bool = False) -> str:
                 out_dir, written, f"log-{workspace_key}.html", log_tpl,
                 project=project,
                 workspace=workspace_spec,
+                shared_via={},
                 entries=ws_log_entries,
                 figured=_figured(
                     project, [entry.body_html for entry in ws_log_entries]
@@ -1084,6 +1111,7 @@ def render_site(project: Project, draft: bool = False) -> str:
                 out_dir, written, f"references-{workspace_key}.html", references_tpl,
                 project=project,
                 workspace=workspace_spec,
+                shared_via={},
                 grouped=citations_mod.by_path(project, workspace=workspace_key),
                 previews_json=previews_json,
             )
@@ -1093,6 +1121,7 @@ def render_site(project: Project, draft: bool = False) -> str:
                 out_dir, written, f"parts-{workspace_key}.html", parts_tpl,
                 project=project,
                 workspace=workspace_spec,
+                shared_via={},
                 parts=citations_mod.by_part_number(project, workspace=workspace_key),
                 previews_json=previews_json,
             )

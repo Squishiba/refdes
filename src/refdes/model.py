@@ -160,6 +160,12 @@ class BoardSpec:
     # that does not resolve to a group item is a hard error, never a silently
     # empty obligation set.
     conforms_to: list[str] = field(default_factory=list)
+    # Group item ids whose `contains` members this board DISPLAYS on its scoped
+    # pages without owning them (docs/design/backlog.md finding 33): a shared
+    # component both boards buy appears on each board's parts/document pages,
+    # labelled shared. Display only -- counts, coverage, seals, the manifest and
+    # the release gate never consult this; ownership stays `item.board`.
+    includes: list[str] = field(default_factory=list)
 
     @property
     def path_segment(self) -> str:

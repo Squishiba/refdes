@@ -112,6 +112,60 @@ def resolve(project: Project) -> None:
                 )
 
 
+def included_map(project: Project, board: str | None) -> dict[str, str]:
+    """The display half of finding 33: `{member id: group id}` for the members
+    of the groups named in `board`'s `includes:`.
+
+    These items appear on the board's scoped pages -- labelled "shared, via
+    GRP-..." -- but are counted by nothing: summary tallies, coverage, the
+    release gate, the seals, the drift manifest and `items.json` all keep
+    reading `item.board` alone. This map is the ONLY place inclusion is
+    resolved; display sites consult it instead of writing their own checks.
+
+    Membership is the group's `contains` backlinks -- the same walk
+    `compute_board_coverage` does for `conforms_to:` -- so the group never
+    lists its members. Empty for `board is None`, an unknown board, or a
+    board with no `includes:`, which is what keeps every project that never
+    used the key byte-identical.
+    """
+    if board is None or not project.boards:
+        return {}
+    spec = project.boards.get(board)
+    if spec is None or not spec.includes:
+        return {}
+    out: dict[str, str] = {}
+    for group_id in spec.includes:
+        group = project.item_by_id(group_id)
+        if group is None:
+            continue  # validate_includes() already errored on this
+        for ref in group.backlinks.get("contains", []):
+            member = project.item_by_ref(ref)
+            if member is not None:
+                out.setdefault(member.id, group_id)
+    return out
+
+
+def displays(item: Item, board: str | None, included: Mapping[str, str]) -> bool:
+    """The one display predicate: does `item` appear on `board`'s pages?
+
+    Owned (`item.board == board`) or included (a member of one of the board's
+    `includes:` groups). Never use this where a number is produced -- tallies,
+    coverage and gates keep using `item.board` alone.
+    """
+    if board is None:
+        return True
+    return item.board == board or item.id in included
+
+
+def shared_via(
+    item: Item, board: str | None, included: Mapping[str, str]
+) -> str:
+    """The group id an item is shared onto `board` by, or "" when it is owned."""
+    if board is None or item.board == board:
+        return ""
+    return included.get(item.id, "")
+
+
 def lint_tokens(project: Project) -> None:
     """Warn when an item's id prefix does not contain its board's declared token.
 

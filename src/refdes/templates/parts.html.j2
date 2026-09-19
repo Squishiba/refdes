@@ -22,14 +22,14 @@
       <td>
         {% if usage.components %}
           {% for c in usage.components %}
-          <a class="ref" href="{{ c.slug }}.html" data-ref="{{ c.id }}">{{ c.id }}</a>{% if not loop.last %}, {% endif %}
+          <a class="ref" href="{{ c.slug }}.html" data-ref="{{ c.id }}">{{ c.id }}</a>{% set via = shared_via.get(c.id) %}{% if via %} <span class="muted small">(shared, via {{ via }})</span>{% endif %}{% if not loop.last %}, {% endif %}
           {% endfor %}
         {% else %}<span class="muted">—</span>{% endif %}
       </td>
       <td>
         {% if usage.citers %}
           {% for c, status in usage.citers %}
-          <a class="ref" href="{{ c.slug }}.html" data-ref="{{ c.id }}">{{ c.id }}</a>{% if not loop.last %}, {% endif %}
+          <a class="ref" href="{{ c.slug }}.html" data-ref="{{ c.id }}">{{ c.id }}</a>{% set via = shared_via.get(c.id) %}{% if via %} <span class="muted small">(shared, via {{ via }})</span>{% endif %}{% if not loop.last %}, {% endif %}
           {% endfor %}
         {% else %}<span class="muted">—</span>{% endif %}
       </td>

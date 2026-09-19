@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from . import boards as boards_mod
 from . import citations as citations_mod
 from .model import Project
 
@@ -74,9 +75,13 @@ def scope_reports(
     """
     if not project.items:
         return []
+    # A board's page set counts members of its `includes:` groups too
+    # (finding 33): a board whose only parts are shared ones still gets a
+    # parts page -- they are displayed here, and only the tallies exclude them.
+    included = boards_mod.included_map(project, board)
     scoped = [
         i for i in project.local_items
-        if (board is None or i.board == board)
+        if (board is None or boards_mod.displays(i, board, included))
         and (workspace is None or i.workspace == workspace)
     ]
     if (board is not None or workspace is not None) and not scoped:

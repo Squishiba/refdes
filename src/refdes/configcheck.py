@@ -48,7 +48,7 @@ ID_KEYS = frozenset({"width", "ledger"})
 HISTORY_KEYS = frozenset({"default"})
 UNITS_KEYS = frozenset({"preferred", "aliases"})
 STANDARD_KEYS = frozenset({"base", "version", "presets"})
-BOARD_KEYS = frozenset({"label", "token", "path", "conforms_to"})
+BOARD_KEYS = frozenset({"label", "token", "path", "conforms_to", "includes"})
 WORKSPACE_KEYS = frozenset({"label", "shared", "path"})
 IMPORT_KEYS = frozenset({"name", "items", "version"})
 TYPE_KEYS = frozenset(
@@ -250,6 +250,7 @@ class BlockChecker:
                 "token": self.string(spec.get("token"), f"{path}.token"),
                 "path": self.string(spec.get("path"), f"{path}.path"),
                 "conforms_to": self._conforms_to(spec.get("conforms_to"), name),
+                "includes": self._includes(spec.get("includes"), name),
             }
         return boards
 
@@ -267,6 +268,20 @@ class BlockChecker:
             raise self.error(
                 f"{path} must be a list of group ids, got {_got(value)} -- "
                 "write conforms_to: [GRP-001]"
+            )
+        return self.string_list(value, path, "a list of group ids")
+
+    def _includes(self, value: Any, bname: str) -> list[str]:
+        """A board's `includes:` as a list of group ids -- validated exactly like
+        `conforms_to:` (finding 33): a bare string is a configuration error, not
+        a per-character list of one-letter groups."""
+        path = f"boards.{bname} includes"
+        if value is None:
+            return []
+        if not isinstance(value, list):
+            raise self.error(
+                f"{path} must be a list of group ids, got {_got(value)} -- "
+                "write includes: [GRP-001]"
             )
         return self.string_list(value, path, "a list of group ids")
 

@@ -36,7 +36,7 @@
       </td>
       <td>
         {% for s in statuses %}
-        <a class="ref" href="{{ s.item_id | lower }}.html" data-ref="{{ s.item_id }}">{{ s.item_id }}</a>{% if not loop.last %}, {% endif %}
+        <a class="ref" href="{{ s.item_id | lower }}.html" data-ref="{{ s.item_id }}">{{ s.item_id }}</a>{% set via = shared_via.get(s.item_id) %}{% if via %} <span class="muted small">(shared, via {{ via }})</span>{% endif %}{% if not loop.last %}, {% endif %}
         {% endfor %}
       </td>
       <td>{{ 'vendored' if s0.vendored else 'hash-only' }}</td>

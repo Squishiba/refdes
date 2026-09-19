@@ -205,6 +205,44 @@ the warning — but [no report pages](#a-board-with-no-items-yet), and that
 warning therefore leaves out the `— see coverage-<board>.html` pointer it would
 otherwise print.
 
+### Including a shared group
+
+A part used by two boards — the same LDO on Board A and Board B, one
+datasheet, one `part_number` — belongs to neither, so it lives in
+`items/shared/`, and `shared` is not a board. Without a declaration it is
+then absent from *both* boards' pages: the two pages that answer "what is on
+this board" (docs/design/backlog.md finding 33). Declare the shared groups a
+board shows:
+
+```yaml
+boards:
+  board-a:
+    label: "Board A"
+    includes: [GRP-COMMON]   # group items whose members this board displays
+```
+
+Like `conforms_to:`, the targets are [`group` items](standard-library.md)
+members point at with `part_of:`, and `includes:` is a **list of strings**:
+a bare `includes: GRP-COMMON` is a configuration error, and an `includes:`
+naming something that is not an existing group is a **build error** — the
+same posture, the same messages, one fewer silent absence.
+
+What inclusion does: the group's members are **displayed and listed** on
+that board's scoped pages — `document-<board>.html`, `parts-<board>.html`,
+`references-<board>.html`, `log-<board>.html` where relevant, and
+`{{index board:}}` tables — each labelled **shared, via GRP-...** so a
+reader can tell an included item from an owned one. A board whose only
+parts are included ones now gets a `parts-<board>.html` (and the nav link to
+it) instead of no page at all.
+
+What inclusion never does: **count**. A board's summary numbers and tables,
+its coverage page rows, and the release gate cover only items the board
+*owns* — `item.board` alone decides those. Obligations stay with
+`conforms_to:` above; `includes:` carries none and warns about nothing. The
+membership manifest, the per-board seals, the board-move warning and
+`items.json` are untouched either: an included item keeps its own (possibly
+empty) board, because a shared part is still nobody's.
+
 ### When this stops working
 
 - **A board ships to a different customer** — you cannot hand over the site without

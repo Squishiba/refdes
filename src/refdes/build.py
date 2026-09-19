@@ -623,6 +623,36 @@ def validate_conforms_to(project: Project) -> None:
                 )
 
 
+def validate_includes(project: Project) -> None:
+    """Every `includes:` target must name an existing group item.
+
+    Mirrors `validate_conforms_to` exactly (finding 33): a typo here would
+    silently leave a shared part off the board's pages -- the same absence
+    this feature exists to fix -- so it is a hard error, not a quietly empty
+    display set. Runs after resolve_links(), like its counterpart, though
+    `includes:` itself only needs `item_by_id` to check the targets.
+    """
+    if not project.boards:
+        return
+    group_types = _group_type_names(project)
+    for bname, spec in sorted(project.boards.items()):
+        for target in spec.includes:
+            item = project.item_by_id(target)
+            if item is None:
+                project.error(
+                    f"boards.{bname} includes {target!r}, which does not "
+                    f"exist -- a group item must be declared before a board "
+                    f"can include it",
+                    file="refdes-project.yaml",
+                )
+            elif item.type not in group_types:
+                project.error(
+                    f"boards.{bname} includes {target!r}, which is a "
+                    f"{item.type}, not a group -- includes names group items",
+                    file="refdes-project.yaml",
+                )
+
+
 def _board_gate(project: Project, board: str | None):
     """Filter for the satisfiers/verifiers that count toward `board`.
 
@@ -2091,6 +2121,7 @@ def build(
     chain_graph = chains_mod.build_graph(project)
     chains_mod.resolve(project, graph=chain_graph)
     validate_conforms_to(project)
+    validate_includes(project)
     workspaces_mod.lint_cross_workspace_references(project)
     blocked_mod.resolve(project)
     run_calcs(project)

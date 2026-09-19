@@ -20,6 +20,8 @@
       <a class="ref tl-id" href="{{ entry.slug }}.html" data-ref="{{ entry.id }}">{{ entry.id }}</a>
       {% if entry.fields.get('author') %}<span class="muted">{{ entry.fields['author'] }}</span>{% endif %}
       {% if entry.fields.get('board') %}<span class="tl-board">{{ entry.fields['board'] }}</span>{% endif %}
+      {% set via = shared_via.get(entry.id) %}
+      {% if via %}<span class="muted">shared, via {{ via }}</span>{% endif %}
     </div>
     <div class="tl-summary">{{ entry.fields.get('summary', '') }}</div>
     {% if entry.links.get('amends') %}

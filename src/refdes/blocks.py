@@ -37,6 +37,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Callable
 
+from . import boards as boards_mod
 from . import chains as chains_mod
 from .model import Item, Project
 
@@ -160,11 +161,14 @@ def _render_index(project: Project, params: dict[str, str]) -> str:
     if tag is not None and tag not in known_tags:
         raise _BlockError(f"unknown tag {tag!r}.{_suggest(tag, known_tags)}")
 
+    # A board's index also lists the members of its `includes:` groups
+    # (finding 33), labelled shared; the row builder below adds the label.
+    included = boards_mod.included_map(project, board)
     items = [
         item
         for item in project.local_items
         if item.type == type_name
-        and (board is None or item.board == board)
+        and (board is None or boards_mod.displays(item, board, included))
         and (tag is None or tag in _item_tags(item))
     ]
 
@@ -195,13 +199,22 @@ def _render_index(project: Project, params: dict[str, str]) -> str:
     for key in ordered_keys:
         parts.append(f"<h4>{_esc(key)}</h4>")
         rows = "".join(
-            f"<tr><td>{_esc(i.id)}</td><td>{_esc(i.title)}</td></tr>" for i in groups[key]
+            f"<tr><td>{_esc(i.id)}</td><td>{_esc(i.title)}"
+            f"{_shared_note(i, board, included)}</td></tr>"
+            for i in groups[key]
         )
         parts.append(
             '<table class="index-table"><thead><tr><th>ID</th><th>Title</th></tr>'
             f"</thead><tbody>{rows}</tbody></table>"
         )
     return "".join(parts)
+
+
+def _shared_note(item: Item, board: str | None, included: dict[str, str]) -> str:
+    """The `shared, via GRP-...` marker on an index row an `includes:` group
+    brought onto this board's page (finding 33); empty for owned items."""
+    via = boards_mod.shared_via(item, board, included)
+    return f' <span class="muted small">shared, via {_esc(via)}</span>' if via else ""
 
 
 def _order_group_keys(groups: dict[str, list], fspec) -> list[str]:
