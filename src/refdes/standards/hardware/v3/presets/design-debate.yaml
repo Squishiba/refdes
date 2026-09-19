@@ -13,7 +13,7 @@ link_types:
 
 types:
   debate:
-    doc: "An open question the design is arguing about — the argument that produces a decision, recorded alongside it. Closed by linking the decision that resolved it."
+    doc: "An open question the design is arguing about — the argument that produces a decision, recorded alongside it. You close it by setting its status; the resolved_by link records which decision settled it."
     prefix: DB
     label: Debate
     preview: [status, title]

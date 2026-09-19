@@ -116,9 +116,9 @@ link_types:
   verifies:       { inverse: verified_by,   label: "Verifies", doc: "A test proves a requirement or bound. Counts toward coverage when the test's status is one of the type's verifying_statuses." }
   addresses:      { inverse: addressed_by,  label: "Addresses",   trace: false, doc: "A log entry records work done on a requirement or bound. Counts as addressed coverage — someone has worked on it and written it up — without claiming it is met." }
   records:        { inverse: recorded_by,   label: "Records",     trace: false, doc: "A log entry records a decision — the design-log side of the decision's own recorded_by end of the same edge." }
-  amends:         { inverse: amended_by,    label: "Amends",      trace: false, doc: "A log entry corrects an earlier log entry. Log entries are never edited in place; the correction is a new entry pointing back at this one." }
-  supersedes:     { inverse: superseded_by, label: "Supersedes",  trace: false, doc: "This decision replaces an older one. The older decision keeps its history; its status moves to superseded." }
-  selects:        { inverse: selected_by,   label: "Selects", doc: "A decision picks a component — the choice-of-part record that makes the component the project's answer, not just a candidate." }
+  amends:         { inverse: amended_by,    label: "Amends",      trace: false, doc: "A log entry corrects an earlier log entry. Entries are append-only, so a correction is written as a new entry pointing back at this one rather than as an edit." }
+  supersedes:     { inverse: superseded_by, label: "Supersedes",  trace: false, doc: "This decision replaces an older one. The older decision keeps its history; moving its status to superseded is your edit, not something the link does by itself." }
+  selects:        { inverse: selected_by,   label: "Selects", doc: "A decision picks a component. The component's own status marks it selected; this link records which decision made the pick." }
   blocked_by:     { inverse: blocks,        label: "Blocked by", doc: "Something is holding this decision up. Name only the immediate blocker; reports resolve the chain to its root. May point at an item of any type; a cycle is a build error." }
   part_of:        { inverse: contains,      label: "Part of", doc: "This item belongs to a group. Membership is always declared by the member, never by the group; contains is the computed backlink." }
   equivalent:     { inverse: equivalent,    label: "Equivalent", doc: "This component is a drop-in second source for that one — interchangeable as claimed, no review needed. Self-inverse, and restricted to component-to-component." }
@@ -243,7 +243,7 @@ types:
     body: { on_change: log }
 
   log:
-    doc: "A dated entry in the design log — work done, questions raised, corrections. Entries are append-only: once built they are sealed, and corrections are new entries with amends, not edits." 
+    doc: "A dated entry in the design log — work done, questions raised, corrections. Entries are append-only: each is sealed on the first build where it has no errors, and after that editing it is a build error — corrections are new entries with amends."
     prefix: LOG
     label: Log entry
     plural: Log entries
