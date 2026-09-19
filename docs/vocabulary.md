@@ -32,6 +32,10 @@ vocabulary is in [output](output.md#the-vocabulary-page).
 <!-- BEGIN GENERATED vocabulary -->
 Every term below is what the resolved **hardware@3** schema in this repo's `refdes-project.yaml` means today, written here by `python docs-site/gen_examples.py`. A built site renders the same structure as its own `vocabulary.html`, from its own resolved schema -- base standard, presets, and the project's overlay. Do not hand-edit this block: `tests/test_vocabulary_page.py` fails if it differs from what the generator produces today.
 
+![Type and link graph](vocabulary-graph.svg)
+
+*Generated from the resolved schema by `refdes/vocabulary.py` and `refdes/diagram.py`; the same drawing every built site's vocabulary page carries inline.*
+
 ## Item types
 
 ### `bound`

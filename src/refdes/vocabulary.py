@@ -26,6 +26,7 @@ from dataclasses import dataclass, field
 from html import escape
 from typing import TYPE_CHECKING
 
+from . import diagram
 from .parse import OVERRIDABLE, RESERVED
 
 if TYPE_CHECKING:
@@ -318,10 +319,16 @@ def _assign_anchors(vocab: Vocabulary) -> None:
 # ------------------------------------------------------------------ rendering
 
 
+# The filename the docs site's generated page points at for the diagram:
+# it cannot inline SVG (its markdown renders with html disabled), so the
+# same bytes gen_examples writes there are what `render_markdown` names.
+DIAGRAM_ASSET = "vocabulary-graph.svg"
+
+
 def render_html(project: Project) -> str:
     """The page's body markup, for `vocabulary.html.j2` to embed."""
     vocab = entries(project)
-    out: list[str] = [_index_html(vocab)]
+    out: list[str] = [_graph_html(project), _index_html(vocab)]
     for kind, title in GROUPS:
         group = vocab.entries.get(kind, [])
         if not group:
@@ -330,6 +337,13 @@ def render_html(project: Project) -> str:
         out.extend(_term_html(e) for e in group)
         out.append("</section>")
     return "\n".join(out)
+
+
+def _graph_html(project: Project) -> str:
+    """The diagram, above the index: the shape of the vocabulary first, then
+    its terms one at a time. Inline SVG from `diagram.py` -- no script, no
+    embed, so it renders with JavaScript off and on paper."""
+    return f'<div class="vocab-graph">{diagram.render_svg(project)}</div>'
 
 
 def _index_html(vocab: Vocabulary) -> str:
@@ -434,7 +448,16 @@ def render_markdown(project: Project) -> str:
     """The same vocabulary as a docs page: markdown, so the docs site's own
     renderer gives it the site's chrome and anchors."""
     vocab = entries(project)
-    out: list[str] = []
+    out: list[str] = [
+        f"![Type and link graph]({DIAGRAM_ASSET})",
+        "",
+        (
+            "*Generated from the resolved schema by `refdes/vocabulary.py` and "
+            "`refdes/diagram.py`; the same drawing every built site's vocabulary "
+            "page carries inline.*"
+        ),
+        "",
+    ]
     for kind, title in GROUPS:
         group = vocab.entries.get(kind, [])
         if not group:

@@ -12,6 +12,14 @@ site:
   out: ../_docs
   pages: ../docs
 
+  # Generated images. `gen_examples.py` writes the vocabulary diagram here;
+  # a markdown image naming a bare filename resolves against this list.
+  # (Not named `assets`: a `site.assets:` directory is copied to
+  # `_site/assets/<its own path>`, so a directory called `assets` lands at
+  # `assets/assets/`.)
+  assets:
+    - images
+
   # Reading order. Anything not listed falls in after these, alphabetically.
   nav:
     - index

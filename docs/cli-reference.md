@@ -506,19 +506,22 @@ refdes schema --json | jq '."$defs".decision__bare.properties'
 
 ## `refdes schema --graph`
 
-Print Mermaid flowchart source describing the project's actual type/link
-graph to stdout — the same resolved schema `--json` emits, walked with a
-different renderer. Generated, not hand-drawn, so a preset or project
-overlay changing a verb can't leave it silently stale. See [links and
-traceability](links.md#starter-link-types) for a worked example, generated
-against the bundled standard.
+Print the project's actual type/link graph as an SVG document to stdout —
+the same resolved schema `--json` emits, walked with a different renderer.
+Generated, not hand-drawn, so a preset or project overlay changing a verb
+can't leave it silently stale. It is byte-for-byte the drawing every built
+site puts at the top of its [vocabulary page](vocabulary.md).
 
 ```bash
-refdes schema --graph > graph.mmd
+refdes schema --graph > graph.svg
 ```
 
-GitHub renders a ` ```mermaid ` fence natively in any Markdown file (README,
-issue, wiki); paste the output into one, or into any other Mermaid renderer.
+Plain SVG with no script in it: open the file in a browser, embed it in a
+page, commit it beside a README. Its colours are the site's CSS custom
+properties with literal fallbacks, so it follows a theme when it is inside
+one and still renders standalone. (This output used to be Mermaid source,
+which needed a renderer of someone else's choosing — and went stale in the
+docs page that embedded it anyway.)
 
 ---
 

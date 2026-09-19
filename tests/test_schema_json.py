@@ -222,9 +222,10 @@ def test_cli_schema_json_prints_valid_schema(tmp_path, capsys):
 
 
 def test_build_graph_emits_one_edge_per_declared_link(tmp_path):
-    """Finding 11: the graph is a walk over the same resolved project.types
-    build_schema() uses, with a different renderer -- one Mermaid edge per
-    (type, link, target) triple, in the direction actually declared."""
+    """Finding 11, redrawn in 38b: the graph is a walk over the same resolved
+    project.types build_schema() uses, with a different renderer -- one edge
+    per (type, link, target) triple, in the direction actually declared, as
+    SVG rather than Mermaid."""
     write_project_config(
         tmp_path,
         "site: { title: T, out: _site }\n"
@@ -239,8 +240,8 @@ def test_build_graph_emits_one_edge_per_declared_link(tmp_path):
         )
     project = load_project(start=str(tmp_path))
     graph = schema_json_mod.build_graph(project)
-    assert "graph LR" in graph
-    assert "decision -- satisfies --> requirement" in graph
+    assert graph.startswith("<svg")
+    assert 'data-source="decision" data-verb="satisfies" data-target="requirement"' in graph
     # The inverse is computed, not separately declared -- must not appear as
     # its own edge (that would double the graph for every link verb).
     assert "satisfied_by" not in graph
@@ -253,17 +254,19 @@ def test_build_graph_unrestricted_target_draws_to_a_single_any_node():
     general one."""
     project = _build_at_repo_schema()
     graph = schema_json_mod.build_graph(project)
-    assert "decision -- blocked_by --> any" in graph
+    assert 'data-verb="blocked_by" data-target="any"' in graph
+    assert graph.count('data-verb="blocked_by"') == 1
 
 
-def test_cli_schema_graph_prints_mermaid_source(tmp_path, capsys):
+def test_cli_schema_graph_prints_an_svg_document(tmp_path, capsys):
     scaffold_mod.init(str(tmp_path))
     status = cli_mod.main(["-c", str(tmp_path / "refdes-project.yaml"), "schema", "--graph"])
     assert status == 0
     out = capsys.readouterr().out
-    assert out.startswith("%%")
-    assert "graph LR" in out
-    assert "requirement -- refines --> requirement" in out
+    assert out.startswith("<svg")
+    assert out.rstrip().endswith("</svg>")
+    # A self-declared verb is a real edge, drawn as a loop, not dropped.
+    assert 'data-source="requirement" data-verb="refines" data-target="requirement"' in out
 
 
 def test_check_refreshes_schema_json_and_warns_when_stale(tmp_path, capsys):

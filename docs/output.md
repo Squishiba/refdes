@@ -180,6 +180,15 @@ points and what points at it, and its fields.
   its **inverse** name (`decision: {links: {recorded_by: [log]}}` is
   `log --records--> decision`), and a verb with an empty target list says it
   points at any type rather than showing nothing.
+- **It opens with the graph.** Item types as nodes and every declared link
+  verb as a labelled arrow to each type it may target — `group` included,
+  `part_of` included, and a verb with no declared target list drawn as one
+  arrow to a single *any type* node. The layout is layered and computed from
+  the schema, so the same schema draws the same bytes every time; each node
+  is an anchor into its entry below, and the colours are the site's own CSS
+  variables, so the picture follows dark mode and prints. It is inline SVG
+  with no script in it, and `refdes schema --graph` writes the identical
+  file.
 - **It is static and printable.** Plain headings, definition lists, and
   tables: no script of its own, no handler attributes, every anchor a plain
   `id` — the page works offline, with JavaScript disabled, and on paper.

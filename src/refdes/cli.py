@@ -1433,10 +1433,12 @@ def main(argv: list[str] | None = None) -> int:
         "pinned version, plus selected presets, plus the project overlay -- "
         "as JSON Schema (--json, the default; the same schema is written to "
         ".refdes/schema.json by every command that loads the project, this is "
-        "the explicit standalone form) or as Mermaid flowchart source "
-        "describing the type/link graph (--graph): generated from the "
-        "resolved schema so it can't go stale the way a hand-drawn diagram "
-        "would the moment a preset or overlay changes a verb.",
+        "the explicit standalone form) or as the type/link graph drawn as an "
+        "SVG document (--graph): generated from the resolved schema so it "
+        "can't go stale the way a hand-drawn diagram would the moment a "
+        "preset or overlay changes a verb, and drawn here rather than handed "
+        "to Mermaid or graphviz so the picture needs no renderer beyond a "
+        "browser.",
     )
     p_schema.add_argument(
         "--json", action="store_true", help="JSON Schema output (the default)"
@@ -1444,7 +1446,7 @@ def main(argv: list[str] | None = None) -> int:
     p_schema.add_argument(
         "--graph",
         action="store_true",
-        help="Mermaid flowchart source describing the actual type/link graph, to stdout",
+        help="draw the actual type/link graph as an SVG document, to stdout",
     )
     p_schema.set_defaults(func=cmd_schema)
 
