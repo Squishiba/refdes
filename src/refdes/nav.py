@@ -50,6 +50,7 @@ REPORT_LABELS = {
     "references": "References",
     "parts": "Parts",
     "document": "Full record",
+    "tree": "Tree",
 }
 
 
@@ -95,6 +96,10 @@ def scope_reports(
     if citations_mod.by_part_number(project, board=board, workspace=workspace):
         names.append("parts")
     names.append("document")
+    # The tree page is project-wide for now; scoped tree pages are finding
+    # 37 chunk 2, so only the whole-project scope gets the nav entry today.
+    if board is None and workspace is None:
+        names.append("tree")
     return sorted(names, key=list(REPORT_LABELS).index)
 
 

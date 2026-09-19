@@ -107,6 +107,33 @@ across pages.
 It is also the intended input for real PDF generation later — the anchor rewriting
 and linear ordering are the parts that would otherwise break.
 
+## The project tree
+
+`tree.html` is the whole project in one view: every item, filed by the
+containment spine — workspace, then board, then `part_of` group, then item.
+It answers "what is in this project, grouped how, and what is floating"
+— orientation, not a report; coverage and trace questions stay with
+`coverage.html` and `{{cascade}}`.
+
+- **Every item appears exactly once, expanded.** An item with several
+  `part_of` groups is expanded under one deterministic primary parent —
+  its first group by id, else its board, else `Project-wide` — and shows
+  up under every other parent as a reference leaf linking back to where
+  it is expanded, the same rule `{{cascade}}` uses for revisited nodes.
+  The choice is id-based, so it is the same on every build.
+- **Nothing is silently dropped.** Items with no board and no group —
+  shared components, projects that have never used `part_of` — land in a
+  visible **Project-wide** bucket, rendered last with a count. The
+  expanded-node count equals the project's item count, mechanically, on
+  every build.
+- **Collapse is plain `<details>`,** opened to depth two (workspaces and
+  boards open, groups collapsed to counts). No JavaScript is involved;
+  every reference is still a working link with scripting off, and the
+  print stylesheet expands the whole tree so nothing hides on paper.
+
+Scoped `tree-<board>.html` pages are a planned follow-up; today the tree
+is project-wide only.
+
 ## Site navigation
 
 Every page carries the same **sidebar**, generated from the project's own

@@ -46,7 +46,7 @@ def test_nav_tree_is_flat_with_no_boards_registered(unboarded_project):
     project = _build_at(unboarded_project)
     tree = nav_mod.build_nav(project, dashboard_href="items.html")
     assert [n.label for n in tree] == [
-        "Overview", "Summary", "Items", "Coverage", "Full record", "JSON",
+        "Overview", "Summary", "Items", "Coverage", "Full record", "Tree", "JSON",
     ]
     assert all(n.href and not n.children for n in tree)
 

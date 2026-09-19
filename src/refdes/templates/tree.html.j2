@@ -1,0 +1,17 @@
+{% extends "base.html.j2" %}
+{% block title %}Tree — {{ project.title }}{% endblock %}
+{% block content %}
+
+<h1>Project tree</h1>
+<p class="muted">
+  Every item in the project, filed by the containment spine: workspace,
+  board, <code>part_of</code> group, item. An item with several groups is
+  expanded once, under its first group by id, and listed as a reference
+  under the others. Items with no board and no group sit in
+  <strong>Project-wide</strong>, rendered last. Nothing here is hidden:
+  the counts are the whole project.
+</p>
+
+{{ tree_html | safe }}
+
+{% endblock %}

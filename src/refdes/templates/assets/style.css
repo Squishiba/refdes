@@ -228,6 +228,16 @@ ul.tight li { margin: 3px 0; }
 .cascade-branch > ul { margin-left: 0; padding-left: 0; border-left: none; }
 .cascade-seen { color: var(--muted); font-size: 12.5px; }
 
+/* ------------------------------------------------- project tree (finding 37) */
+
+.tree { list-style: none; margin: 10px 0; padding-left: 0; font-size: 14px; }
+.tree ul { list-style: none; margin: 4px 0 4px 18px; padding-left: 14px;
+  border-left: 1px solid var(--line); }
+.tree li { margin: 3px 0; }
+.tree summary { cursor: pointer; }
+.tree .count { color: var(--muted); font-size: 12.5px; }
+.tree-ref .tree-seen { color: var(--muted); font-size: 12.5px; }
+
 .block-error {
   border: 1px solid var(--bad); border-radius: 6px;
   background: color-mix(in srgb, var(--bad) 8%, transparent);
@@ -328,6 +338,10 @@ table.coverage td { font-size: 13px; }
   .content { display: block; } /* undo the flex row from the >=860px rule */
   .doc-item { break-inside: avoid; border-left: none; padding-left: 0; }
   .toc details { display: block; }
+  /* The tree prints fully expanded: a collapsed <details> on paper would
+     hide whole branches of the one page whose promise is totality. */
+  .tree details { display: block; }
+  .tree summary { cursor: default; }
   a { color: inherit; text-decoration: none; }
   main { max-width: none; }
 }
