@@ -2533,23 +2533,57 @@ finding is not "write a diagram generator"; it is "put every vocabulary
 description under the gate finding 20 already built, and stop checking in
 diagrams that the gate does not cover".
 
+**Decided (2026-09-19), and one consequence pinned here:** the generated SVG
+**replaces** the Mermaid output of `refdes schema --graph` (`cli.py:829-830`;
+the flag's own help, `cli.py:1438-1440`, says "Mermaid flowchart source") rather
+than becoming a second diagram generator sitting next to it. Jared does not want
+Mermaid in this project, so there is one diagram mechanism — the SVG emitter of
+§6 — and the checked-in Mermaid block at `docs/links.md:97-123` is deleted with
+it, not regenerated.
+(One half of the staleness claim above has since been fixed: `part_of`/`contains`
+is now a row of the hand-written verb table, `docs/links.md:143`, landed in
+`e43bbdb`. The embedded diagram is still stale — `grep -n part_of docs/links.md`
+matches the table row and the `hardware@3` note under it, never the diagram —
+which is the point this section makes.)
+
 **3. Where the definitions live.** Three options, and the interesting part is
-that the cheapest-looking one is blocked by a promise. (a) A `doc:` prose key
-on each declaration in the YAML. This is the nicest end state — definition and
-declaration in one place, impossible to forget to update separately — and it
-is technically free for a project's own overlay, because an unrecognised key
-inside a type, field or link mapping is inert: `schema.py:525-620` reads those
-specs with plain `.get()` and never validates the key set, unlike project
-settings, which hard-error on an unknown key at `schema.py:121` with a
-did-you-mean. But for the bundled standard it is not free at all: `base.yaml`
-is frozen by design — "Byte-identical forever once released: a project
-pinning `standard: {base: hardware, version: 3}` gets exactly this file,
-unchanged by any future refdes upgrade" (`base.yaml:3-5`), with
-`tests/test_standards.py:95` guarding the same promise in the other direction.
-Adding `doc:` lines to `hardware@3` would break that for a docs-only gain; the
-honest version of (a) for the bundled standard is `hardware@4`. (b) A separate
-prose file keyed by term, checked against the resolved schema by the lint in
-§4. (c) For the three code-defined families, the declaration *is* a docstring:
+that the cheapest-looking one turned out not to be blocked at all — by either of
+the things this section first said blocked it. (a) A `doc:` prose key on each
+declaration in the YAML. This is the nicest end state — definition and
+declaration in one place, impossible to forget to update separately — and it is
+not free in either direction, though not for the reasons stated here when the
+finding was written. It is **no longer true** that an unrecognised key inside a
+type, field or link mapping is inert: that stopped when nested-config validation
+landed on main in `a1899e5` (`src/refdes/configcheck.py`). One `BlockChecker`
+now holds a closed key set per block — `TYPE_KEYS`, `FIELD_KEYS`, `BODY_KEYS`,
+`LINK_TYPE_KEYS` at `configcheck.py:54-76` — and `BlockChecker.keys`
+(`configcheck.py:98-116`) raises a `SchemaError` naming the unknown key, its
+block path and a `difflib` did-you-mean, for `types.<name>`
+(`configcheck.py:372`), `types.<name>.fields.<name>` (`:320`), `types.<name>.body`
+(`:383`), `link_types.<name>` (`:357`) and the fields of a `field_sets:` entry
+(the same `field_spec`, reached from `:338`); `schema.load_project` runs
+`validate_settings` and `validate_overlay` before anything reads a block
+(`schema.py:453-454`). So `doc:` is not a key the loader tolerates, it is a key
+that has to be **added to those recognised sets** — types, fields, link types
+and field sets — before anyone can write it anywhere, project overlay included.
+That is a small diff, but it is a config-validation diff and not a docs diff,
+and it is the thing to review. The bundled standard is not blocked either:
+**`hardware@3` is not released.** Every `hardware@3` change sits under the
+Unreleased section (`CHANGELOG.md:8`) — "**The bundled standard moves to
+`hardware@3`.** Five changes, arriving together because none was ever published
+on its own" (`CHANGELOG.md:27-28`) — the newest released section is
+`[0.5.0] - 2026-08-21` (`CHANGELOG.md:291`), which is where `hardware@2` shipped
+(`CHANGELOG.md:507`), and the freeze promise is written "Byte-identical forever
+**once released**" (`base.yaml:3-5`); `tests/test_standards.py:95-96` guards
+that promise for v1 against the addition of v2, which is a released-version
+claim, not a claim about a version that has not shipped. `hardware@3` is still
+moving under in-flight work — the `log`/`decision` merge lands in it, not in a
+new `hardware@4` (`docs/design/extends.md:368-370`, and the phase ordering in
+`docs/design/living-notes-plan.md:36`) — so `doc:` keys can go into
+`standards/hardware/v3/base.yaml` directly, before its first release, and the
+version bump this finding thought (a) had to pay for is not needed. (b) A
+separate prose file keyed by term, checked against the resolved schema by the
+lint in §4. (c) For the three code-defined families, the declaration *is* a docstring:
 `RESERVED`, `BlockSpec`, `IMAGE_ATTR_NAMES` and the calc regexes are Python
 objects, so a generator that reads them cannot drift, and the work is writing
 the prose next to them rather than inventing a place to put it. Recommendation
@@ -2559,7 +2593,13 @@ half-measure and I want to name the cost: (b) reintroduces the two-places
 problem this finding is complaining about, and what makes it safe is not the
 file layout but the lint. If the two-places compromise is unacceptable, the
 alternative is a version bump, which is a bigger decision than a docs page and
-should be made as one.
+should be made as one. **Decided otherwise (2026-09-19): (a), everywhere** —
+every definition is a `doc:` key next to the declaration it defines, and there
+is no separate vocabulary file. Jared: "They shouldn't be separated." The
+half-measure is rejected precisely because of the cost named here: (b) is the
+two-places problem this finding exists to close, papered over with a lint.
+And the version bump the alternative required is not on the table — `hardware@3`
+is unreleased (above), so the bundled `base.yaml` takes `doc:` keys in place.
 
 **4. The lint — both directions, and it is the load-bearing part.** A term in
 the resolved schema with no definition, and a definition naming no term, are
@@ -2569,12 +2609,15 @@ naming because they are the ones that will actually happen. A definition whose
 term exists only in a preset the build didn't enable is not an error but must
 not be rendered: generate from the resolved schema, never from the bundle, or
 the page advertises `debate` to projects that never asked for `design-debate`.
-A `doc:` key spelled `docs:` is the quiet one — the loader ignores unknown
-keys in a spec (§3), so a typo silently deletes a definition, which means the
-lint has to check the *spelling of the annotation itself* against the
-vocabulary file, not just the term it annotates. And a term renamed in one
-place and not the other is caught by both directions firing at once. All of
-this runs inside the existing `--check` flag, in the CI step that already
+A `doc:` key spelled `docs:` is no longer the quiet one: since `a1899e5` an
+unknown key in a type, field, body, link-type or field-set spec is a hard
+`SchemaError` with a did-you-mean (§3), so the typo fails the build at load
+instead of silently deleting a definition, and the lint does **not** have to
+police the spelling of the annotation itself. That job moved to `configcheck`,
+which is where it belongs — it is a config error, not a documentation gap. What
+the lint keeps is the two directions above and the preset case. And a term
+renamed in one place and not the other is caught by both directions firing at
+once. All of this runs inside the existing `--check` flag, in the CI step that already
 exists at `docs.yml:40`, plus a sibling of `tests/test_docs_examples.py` so it
 fires in `pytest` too and not only on the docs job.
 
@@ -2643,8 +2686,12 @@ which the `--check` gate requires and a force-directed solver with a random
 seed does not give for free. The emitter goes behind one function taking
 nodes and edges and returning SVG, so swapping in a real engine is a
 replacement and not a rewrite if a project's own overlay grows the graph past
-the point where a fixed layout works. Three rendering constraints, all of them
-promises the site already makes: inline `<svg>` rather than `<img src>`,
+the point where a fixed layout works. **Decided (2026-09-19): hand-rolled, as
+recommended** — no graph library, on the licence and native-binary analysis
+above. Taken as the default rather than a closed door: it is revisitable exactly
+where this paragraph put the hinge, when an overlay outgrows a fixed layer
+assignment, and the one-function emitter boundary is what makes that swap cheap.
+Three rendering constraints, all of them promises the site already makes: inline `<svg>` rather than `<img src>`,
 because inline is what lets fills use the theme's CSS custom properties and
 therefore follow dark mode (README.md:344-346, `docs/output.md:20-21`);
 nothing in the path fetches or executes, since the published site promises no
@@ -2674,6 +2721,16 @@ library case? Writing the generator as `vocabulary(project) -> (markdown, svg)`
 makes the per-project page a template and a nav line later; writing it against
 the docs-site project directly makes it a rewrite.
 
+**Decided (2026-09-19): both surfaces, from one generator.** The bundled
+standard's reference on the docs site *and* every project's own vocabulary —
+local overlay types included — on that project's own built site. That makes
+`vocabulary(project) -> (markdown, svg)` a requirement rather than a nicety: the
+docs-site page is one call site with the repo's pinned scratch project, not a
+separate code path. It also means the two questions this section says the
+docs-site page can dodge are v1 work, not deferred work: how an override renders
+(merged truth, with origin labels where §5's provenance can be recovered), and
+what a forty-type project gets when the fixed layout stops holding.
+
 **8. Failure modes, and which ones generation actually fixes.** A term renamed
 with a stale definition, or a definition for a term that no longer exists: the
 two lint directions, both build failures. An example that stopped parsing: the
@@ -2698,11 +2755,23 @@ behind one function; the nav entry; and a fix to `docs/links.md` by pointing it
 at the generated page instead of carrying a checked-in Mermaid block that
 nothing regenerates.
 
-**Status: outstanding — awaiting decision.** Two questions are genuinely open:
-§3, separate prose file now versus `doc:` keys in a future `hardware@4`; and
-§6, hand-rolled layout versus the MIT `graph-layout` package. Everything else
-follows from those two, and neither is urgent in the sense that the first
-version of the page is useful either way.
+**Status: decided (2026-09-19).** Definitions live next to each declaration as
+a `doc:` key in the YAML, never in a separate file — Jared: "They shouldn't be
+separated." Rejected: the separate prose file (§3's (b)) and the
+`doc:`-keys-in-a-future-`hardware@4` variant, both because either one keeps the
+two-places problem this finding exists to close; the bump is unnecessary anyway,
+since `hardware@3` is unreleased and `v3/base.yaml` takes `doc:` keys in place
+(§3). Because unknown keys in those specs have been hard errors since `a1899e5`,
+`doc:` must be added to the recognised key sets for types, fields, link types
+and field sets in `configcheck.py` before it can be written anywhere. Layout is
+hand-rolled, no graph library (§6, the recommendation taken; default, revisitable
+when an overlay outgrows a fixed layer assignment). Scope is both surfaces from
+one generator — the bundled standard's reference on the docs site and each
+project's own vocabulary, local overlay types included, on that project's own
+site (§7). And the generated SVG replaces the `refdes schema --graph` Mermaid
+output rather than adding a second generator: no Mermaid (§2). What is left is
+implementation detail — the lint's wording, the layer assignment for the bundled
+graph — not design.
 
 **Local model: partly suitable, and the split is worth naming.** The generator,
 the lint and the SVG emitter are the shape this project delegates: every
