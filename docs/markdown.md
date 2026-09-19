@@ -110,6 +110,54 @@ so a broken one stops the build:
 ERROR items/decisions/dec-001.md:2 [DEC-001] — image src 'figures/nope.png' does not exist
 ```
 
+### A bare filename, found on the search path
+
+A `src` written as a **bare filename** — no `/` in it — that does not resolve
+beside its own source file is looked up in the directories your
+`site.assets:` list already declares:
+
+```yaml
+site:
+  assets: [figures, photos/shared]
+```
+
+```markdown
+![Thermal curve](curve.png)     # found at figures/curve.png
+```
+
+The rule is `#include <foo.h>` in C++: only the declared directories are
+searched, never the project tree as it happens to be arranged. Three things
+follow from that, and all three are deliberate:
+
+- **A path that resolves relative to your source file always wins.** The
+  search runs only after that lookup fails, so every image that works today
+  keeps working identically — even if the same filename also sits on the
+  search path.
+- **Only a bare filename is searched.** `figures/curve.png` was written as a
+  specific location; if it does not exist you get the plain does-not-exist
+  error above, never a leaf-name match on some unrelated file elsewhere.
+- **Two matches is a build error, not a tie-break.** A name found in more
+  than one declared directory refuses, naming every candidate:
+
+  ```
+  ERROR items/decisions/dec-001.md:4 [DEC-001] — image src 'curve.png' is ambiguous: it exists in more than one site.assets directory (figures/curve.png, photos/shared/curve.png). Write the path relative to items/decisions/dec-001.md instead of the bare filename, or rename one of them
+  ```
+
+  There is no first-declared, newest-file, or alphabetical winner, because
+  every such rule is invisible to whoever reads the document. Two same-named
+  files that no image actually references are not an error — the refusal
+  happens at the reference, not at the collision.
+
+A searched image is copied into `_site/assets/` and rewritten like any other
+(see above — including the `site.assets:` rule that a file inside a declared
+asset directory is copied verbatim rather than content-hashed), and it takes
+`{width=... caption="..."}` attributes exactly as a relative-path image does.
+What the search does *not* buy you: an asset identity. The lookup happens on
+every build, so adding a second file with the same name under a declared
+directory turns an existing, unmodified document's image into the ambiguity
+error above — which is the point of erroring rather than picking. If you want
+the reference pinned so it can never drift, write the relative path.
+
 ### Width and captions
 
 A Quarto-style attribute suffix directly after the image, on the same line,

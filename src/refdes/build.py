@@ -1577,6 +1577,61 @@ def _hashed_leaf(rel: str, digest: str) -> str:
     return f"{directory}/{hashed_leaf}" if directory else hashed_leaf
 
 
+def _search_image_src(
+    project: Project,
+    src: str,
+    where_file: str,
+    where_line: int | None,
+    where_id: str | None,
+) -> str | None:
+    """Resolve a bare `<img src>` filename against the `site.assets:` directories.
+
+    The fallback half of docs/design/backlog.md finding 36: `#include <foo.h>`
+    semantics, where the declared list is `site.assets:` itself (the same
+    directories `collect_static_assets` bulk-copies). Only a src that has
+    already failed to resolve relative to the source file AND contains no path
+    separator reaches here -- a multi-segment path was written as a specific
+    location, and searching its leaf name would silently land an author's
+    typo on an unrelated file somewhere else. Never a first-match pick: two
+    files with the same leaf name on the search path is a build error naming
+    every candidate, because "quietly resolved to a different `diagram.png`
+    than the one meant" is this project's characteristic failure. Returns the
+    resolved absolute path, or None after reporting the error.
+    """
+    matches: list[str] = []
+    for rel_dir in project.asset_dirs:
+        full_dir = os.path.join(project.root, rel_dir)
+        if not os.path.isdir(full_dir):
+            continue
+        for dirpath, _dirnames, filenames in os.walk(full_dir):
+            if src in filenames:
+                rel = os.path.relpath(os.path.join(dirpath, src), project.root)
+                rel = rel.replace("\\", "/")
+                if rel not in matches:
+                    matches.append(rel)
+    if len(matches) == 1:
+        return os.path.normpath(os.path.join(project.root, matches[0]))
+    if len(matches) > 1:
+        project.error(
+            f"image src {src!r} is ambiguous: it exists in more than one "
+            f"site.assets directory ({', '.join(sorted(matches))}). Write the "
+            f"path relative to {where_file} instead of the bare filename, or "
+            f"rename one of them",
+            file=where_file, line=where_line, item_id=where_id,
+        )
+        return None
+    searched = (
+        "the site.assets directories: " + ", ".join(project.asset_dirs)
+        if project.asset_dirs
+        else "no site.assets directories are declared to search"
+    )
+    project.error(
+        f"image src {src!r} does not exist (searched {searched})",
+        file=where_file, line=where_line, item_id=where_id,
+    )
+    return None
+
+
 def _process_images(
     html: str,
     project: Project,
@@ -1588,7 +1643,12 @@ def _process_images(
 
     A local src is resolved relative to the source file's own directory -- the
     same base a browser would use to open the rendered page next to its markdown
-    source. One that resolves is registered in `project.assets` (source path ->
+    source, and the rule that always wins: a src that resolves there is used
+    whatever else shares its filename, so no document that works today changes
+    behaviour. Only one that fails there *and* is a bare filename (no path
+    separator) falls through to the `site.assets:` search
+    (`_search_image_src`, docs/design/backlog.md finding 36). One that resolves
+    is registered in `project.assets` (source path ->
     a content-hashed destination path, computed once per source and reused for
     every further reference to the same file) and rewritten to
     `assets/<hashed path>`, which is where `render_site` copies it. One that does
@@ -1605,11 +1665,16 @@ def _process_images(
             os.path.join(project.root, os.path.dirname(where_file), src)
         )
         if not os.path.isfile(full_path):
-            project.error(
-                f"image src {src!r} does not exist",
-                file=where_file, line=where_line, item_id=where_id,
-            )
-            return match.group(0)
+            if "/" in src or "\\" in src:
+                project.error(
+                    f"image src {src!r} does not exist",
+                    file=where_file, line=where_line, item_id=where_id,
+                )
+                return match.group(0)
+            found = _search_image_src(project, src, where_file, where_line, where_id)
+            if found is None:
+                return match.group(0)
+            full_path = found
         rel = os.path.relpath(full_path, project.root).replace("\\", "/")
         dest = project.assets.get(rel)
         if dest is None:
