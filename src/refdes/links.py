@@ -855,3 +855,198 @@ def _report_missing_checks(project: Project, count: int) -> None:
         "the next writable command will expand them. Run without --no-write, "
         "or see docs/design/keys.md."
     )
+
+
+# ------------------------------------- cross-item calc references (finding 35)
+
+
+def _calc_ref_rewrites(
+    lines: list[str], start: int, end: int, replacements: dict[str, str]
+) -> set[str]:
+    """Rewrite bare calc-reference targets inside one item's line span, and
+    refresh stale composite display halves, in place. Operates only on the
+    target half of a `name = TARGET.NAME` line (pipe unit stripped first), so
+    ordinary expressions and comments are never touched. Returns the *old
+    target strings* actually rewritten -- what the caller attributes back to
+    the item so in-memory state follows only real file changes."""
+    from . import calc as calc_mod
+
+    applied: set[str] = set()
+    for i in range(start, end):
+        raw = lines[i]
+        code, hash_sign, comment = raw.partition("#")
+        line = code.rstrip()
+        if not line.strip():
+            continue
+        pipe = calc_mod.PIPE_UNIT_RE.match(line)
+        if pipe:
+            line = pipe.group("lhs").rstrip()
+        match = calc_mod.ASSIGN_RE.match(line)
+        if not match:
+            continue
+        rhs = match.group(2).strip()
+        ref = calc_mod.CROSS_REF_RE.match(rhs)
+        if not ref:
+            continue
+        target = ref.group("target")
+        new_target = replacements.get(target)
+        if new_target is None:
+            continue
+        # Replace only the reference's target half in the code part of the
+        # line, so the author's spacing, the pipe unit, and any trailing
+        # comment survive exactly (the line count never changes either -- the
+        # same invariant every other expansion here preserves).
+        new_rhs = rhs.replace(target, new_target, 1)
+        new_code = code.replace(rhs, new_rhs, 1)
+        new_raw = f"{new_code}{hash_sign}{comment}"
+        if new_raw != raw:
+            lines[i] = new_raw
+            applied.add(target)
+    return applied
+
+
+def plan_calc_ref_expansion(
+    project: Project,
+    source_texts: dict[str, str] | None = None,
+) -> LinkExpansionPlan:
+    """Cross-item calc-reference counterpart of plan_expansion(). A calc
+    reference (`V_in = DEC-PWR-001.V_in`) is not a `links:` reference, but it
+    names an item the same way a structured link target does, so it gets the
+    same treatment -- the third instance of this shape after links and
+    `checks: against:` -- reusing `_planned_target` for the §3 refresh rule so
+    it cannot drift between the three (docs/design/keys.md).
+
+    Only the target half of the reference is rewritten; the name half is the
+    target's calc variable and belongs to the target's own rename story."""
+    from .revise import FileRewrite
+
+    candidates: list[tuple[Item, str, str, str]] = []
+    replacements_by_item: dict[int, dict[str, str]] = defaultdict(dict)
+    by_key = {item.key: item for item in project.items.values() if item.key}
+    expansion_count = 0
+
+    from .build import _calc_reference_targets
+
+    for item in project.local_items:
+        for target in _calc_reference_targets(item):
+            new_target = _planned_target(
+                project, by_key, "calc reference", item, target
+            )
+            if new_target is None:
+                continue
+            if "@" not in target:
+                expansion_count += 1
+            candidates.append((item, "calc_ref", target, new_target))
+            replacements_by_item[id(item)][target] = new_target
+
+    plan = LinkExpansionPlan(expansion_count=expansion_count)
+    if not candidates:
+        return plan
+
+    files_touched = sorted({item.source_file for item, *_ in candidates})
+    applied_by_item: dict[int, set[str]] = defaultdict(set)
+    for rel in files_touched:
+        path = os.path.join(project.root, rel)
+        if source_texts is not None and rel in source_texts:
+            text = source_texts[rel]
+        else:
+            with open(path, "r", encoding="utf-8", newline="") as fh:
+                text = fh.read()
+        newline = "\r\n" if "\r\n" in text else "\n"
+        lines = text.splitlines()
+
+        # Spans are item-to-item, not `_item_spans`: that helper bounds a
+        # markdown item at its first fence (link fields live in front matter),
+        # and calc lines are inside the fence. Bleeding is impossible here --
+        # `_calc_ref_rewrites` only touches lines matching the strict
+        # `name = TARGET.NAME` assignment grammar.
+        file_items = sorted(
+            (i for i in project.local_items if i.source_file == rel),
+            key=lambda i: i.source_line,
+        )
+        for idx, item in enumerate(file_items):
+            start = item.source_line - 1
+            end = (
+                file_items[idx + 1].source_line - 1
+                if idx + 1 < len(file_items)
+                else len(lines)
+            )
+            repl = replacements_by_item.get(id(item))
+            if repl:
+                applied_by_item[id(item)] |= _calc_ref_rewrites(
+                    lines, start, end, repl
+                )
+
+        after = newline.join(lines) + newline
+        if after != text:
+            plan.files.append(FileRewrite(path=path, rel=rel, before=text, after=after))
+
+    plan.rewrites = [
+        (item, name, old, new)
+        for item, name, old, new in candidates
+        if old in applied_by_item.get(id(item), ())
+    ]
+    written_expansions = sum(
+        1 for _item, _name, old, _new in plan.rewrites if "@" not in old
+    )
+    plan.remaining = expansion_count - written_expansions
+    return plan
+
+
+def expand_missing_calc_refs(
+    project: Project, write: bool = True
+) -> list[tuple[Item, str, str, str]]:
+    """Expand bare cross-item calc-reference targets and refresh stale
+    composite display halves -- the calc-reference counterpart of
+    expand_missing() and expand_missing_checks(), run on the same writable
+    load path and gated by `--no-write` the same way (cli._load()). Under
+    `--no-write` a bare reference still resolves, on the display id, exactly
+    as keys.md §2's rule requires; only the write-back is skipped.
+
+    Returns ``(item, "calc_ref", old_reference, new_reference)`` for every
+    reference actually rewritten, and updates the parsed body text in memory
+    so the build that expanded sees the same text the file now holds.
+
+    Must run after keys.mint_missing() for the same reason the other two
+    must: a bare target needs a durable key before there is anything to
+    expand into. Safe to run before or after the other two expansions -- the
+    three touch disjoint fields and source lines.
+    """
+    plan = plan_calc_ref_expansion(project)
+    if not plan.rewrites:
+        return []
+    if not write:
+        if plan.expansion_count:
+            _report_missing_calc_refs(project, plan.expansion_count)
+        return []
+
+    from .revise import write_rewrites_verified
+
+    write_rewrites_verified(project, plan.files)
+    replacements_by_item: dict[int, dict[str, str]] = defaultdict(dict)
+    for item, _name, old, new in plan.rewrites:
+        replacements_by_item[id(item)][old] = new
+    for item in project.local_items:
+        replacements = replacements_by_item.get(id(item))
+        if not replacements:
+            continue
+        # Same rewrite over the parsed body, so the build that expanded sees
+        # the text the file now holds (line counts are preserved, so every
+        # other item's positions stay valid).
+        body_lines = item.body.splitlines()
+        _calc_ref_rewrites(body_lines, 0, len(body_lines), replacements)
+        item.body = "\n".join(body_lines) + ("\n" if item.body.endswith("\n") else "")
+
+    if plan.remaining:
+        _report_missing_calc_refs(project, plan.remaining)
+    return plan.rewrites
+
+
+def _report_missing_calc_refs(project: Project, count: int) -> None:
+    """Calc-reference counterpart of _report_missing() -- see its docstring."""
+    noun = "reference has" if count == 1 else "references have"
+    project.info(
+        f"{count} calc {noun} not been expanded to the composite form yet; "
+        "the next writable command will expand them. Run without --no-write, "
+        "or see docs/design/keys.md."
+    )

@@ -603,14 +603,20 @@ def items_json(project: Project) -> dict:
             "external": item.external,
             "origin": item.origin,
             "source": {"file": item.source_file, "line": item.source_line},
+            # `reference` appears only on cross-item reference lines, so
+            # every pre-existing export stays byte-identical.
             "calcs": [
                 {
                     "name": c.name,
-                    "expression": c.expression,
+                    # display_expression == expression for every ordinary
+                    # line; on a reference line it hides the key half so
+                    # the export reads like the rendered table.
+                    "expression": c.display_expression,
                     "result": c.result,
                     "bounds": c.bounds,
                     "error": c.error,
                     "line": c.line,
+                    **({"reference": c.reference} if c.reference else {}),
                 }
                 for c in item.calcs
             ],

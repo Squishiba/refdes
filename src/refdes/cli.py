@@ -118,6 +118,13 @@ def _load(args, require_ids: bool = True) -> tuple[Project, bool]:
     # targets available for this companion expansion.
     links_mod.expand_missing_checks(project, write=not args.no_write)
 
+    # Same treatment for cross-item calc references (`V_in = DEC-PWR-001.V_in`,
+    # finding 35): a bare target freezes to the composite and stale display
+    # halves refresh through the same _planned_target rule. Under --no-write
+    # the bare reference still resolves on the display id; only the write-back
+    # is skipped.
+    links_mod.expand_missing_calc_refs(project, write=not args.no_write)
+
     # A bare follows reference means "continue this thread", not "pin this
     # named entry". Resolve it once to the current frozen-edge tip after keys
     # exist, then reparse so build sees the durable composite-or-bare-key

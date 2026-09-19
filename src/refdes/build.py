@@ -929,65 +929,221 @@ def compute_coverage(project: Project, chain_graph=None) -> None:
 # ----------------------------------------------------------------------------- calc
 
 
-def run_calcs(project: Project) -> None:
-    for item in project.local_items:
-        env: dict[str, calc.Value] = {}
-        # name -> line first assigned, threaded across every block of this item
-        # exactly like `env` -- what lets evaluate_block catch a name reused in
-        # a later block, not just within one block.
-        origins: dict[str, int | None] = {}
-        item_sealed: bool | None = None  # lazy: only retired lines ask the seal files
-        for block, offset in calc.extract_blocks_with_lines(item.body):
-            start_line = item.body_line + offset if item.body_line is not None else None
-            for outcome in calc.evaluate_block(block, env, start_line=start_line, origins=origins):
-                line = CalcLine(
-                    name=outcome.name,
-                    expression=outcome.expression,
-                    comment=outcome.comment,
-                    annotation=outcome.annotation,
-                    unit_style=outcome.unit_style,
-                    line=outcome.line,
+def _calc_reference_targets(item) -> list[str]:
+    """The target strings of every cross-item reference in this item's calc
+    blocks, in source order, deduped -- the dependency edges the scheduler
+    walks. Parsed with the same regexes `evaluate_block` uses (pipe unit
+    stripped first), so a line is a dependency edge here exactly when it is a
+    reference line there."""
+    targets: list[str] = []
+    for block in calc.extract_blocks(item.body):
+        for raw_line in block.splitlines():
+            line = raw_line.partition("#")[0].rstrip()
+            if not line.strip():
+                continue
+            pipe = calc.PIPE_UNIT_RE.match(line)
+            if pipe:
+                line = pipe.group("lhs").rstrip()
+            match = calc.ASSIGN_RE.match(line)
+            if not match:
+                continue
+            ref = calc.CROSS_REF_RE.match(match.group(2).strip())
+            if ref and ref.group("target") not in targets:
+                targets.append(ref.group("target"))
+    return targets
+
+
+def _calc_ref_display(target_str: str, target) -> str:
+    """How a reference target is named in a diagnostic: the live item's current
+    display id (never the raw composite text, per docs/design/keys.md §3),
+    falling back to the authored text when nothing resolves."""
+    if target is not None:
+        return target.id or target.key
+    return target_str.partition("@")[0] or target_str
+
+
+def _make_calc_resolver(project: Project, by_key: dict[str, Item]):
+    """The resolver a cross-item reference line calls, bound to the referring
+    item's evaluation. Resolution is by key half only (`resolve_link_target`,
+    docs/design/keys.md §3) -- the display half is refreshed by
+    links.expand_missing_calc_refs and is never consulted here. Every failure
+    raises CalcError with the message the referring line reports: file, line,
+    and item id come from the caller's diagnostic, exactly like any other
+    calc error. There is no silent default and no stale value on any path."""
+
+    def resolve(reference: str) -> calc.Value:
+        target_str, _, name = reference.rpartition(".")
+        target = resolve_link_target(by_key, project, target_str)
+        if target is None:
+            if "@" in target_str or _is_bare_key_token(target_str):
+                raise calc.CalcError(
+                    _unknown_key_message(f"calc reference {reference!r}", target_str)
                 )
-                diag_line = outcome.line if outcome.line is not None else item.source_line
-                if outcome.warning:
-                    project.warn(
-                        f"calc {outcome.name}: {outcome.warning}",
-                        file=item.source_file, line=diag_line, item_id=item.id,
-                    )
-                if outcome.error:
-                    if outcome.retired:
-                        if item_sealed is None:
-                            item_sealed = seal.is_sealed(project, item)
-                        if item_sealed:
-                            # A sealed append-only entry cannot be edited
-                            # without resealing, and resealing is what Jared
-                            # wants to avoid: the retired spelling inside one
-                            # warns with the same text instead of failing the
-                            # build, and stays working (evaluated above) until
-                            # history-backed resealing lands.
-                            project.warn(
-                                f"calc {outcome.name}: {outcome.error}",
-                                file=item.source_file, line=diag_line, item_id=item.id,
-                            )
-                        else:
-                            line.error = outcome.error
-                            project.error(
-                                f"calc {outcome.name or outcome.expression!r}: {outcome.error}",
-                                file=item.source_file, line=diag_line, item_id=item.id,
-                                code=RETIRED_UNIT_SPELLING,
-                            )
+            raise calc.CalcError(
+                f"no item {target_str!r} -- cross-item reference {reference!r} "
+                "names an item that does not exist"
+            )
+        display = _calc_ref_display(target_str, target)
+        if target.external:
+            raise calc.CalcError(
+                f"cross-item reference {reference!r} points at {display}, an "
+                "imported item; references into imported items are not supported"
+            )
+        if getattr(target, "_calc_failed", False):
+            # One root error was already reported at the item that broke; a
+            # dependent restates it in one line rather than a second confusing
+            # "unknown name" cascade (the blocked.py one-root-many-notes shape).
+            raise calc.CalcError(
+                f"cannot resolve {reference!r}: {display}'s own calc failed"
+            )
+        value = getattr(target, "_env", {}).get(name)
+        if value is None:
+            defined = sorted(getattr(target, "_env", {}))
+            listing = (
+                "it defines: " + ", ".join(defined) if defined
+                else "it defines no calc values"
+            )
+            raise calc.CalcError(
+                f"cross-item reference {reference!r}: {display} does not "
+                f"define {name!r} ({listing})"
+            )
+        return value
+
+    return resolve
+
+
+def _run_item_calcs(project: Project, item, by_key: dict[str, Item]) -> None:
+    """Evaluate one item's calc blocks -- the per-item half of run_calcs,
+    extracted so the scheduler can call it in dependency order. `item._env`
+    is populated here and cached; the scheduler guarantees every item this
+    one references has already been evaluated (or failed) before it runs."""
+    env: dict[str, calc.Value] = {calc.RESOLVER_KEY: _make_calc_resolver(project, by_key)}
+    # name -> line first assigned, threaded across every block of this item
+    # exactly like `env` -- what lets evaluate_block catch a name reused in
+    # a later block, not just within one block. The duplicate-name rule is
+    # untouched by cross-item references: a reference binds a name exactly as
+    # an assignment does, so `origins` fires if an item both references a
+    # name and assigns it.
+    origins: dict[str, int | None] = {}
+    item_sealed: bool | None = None  # lazy: only retired lines ask the seal files
+    failed = False
+    for block, offset in calc.extract_blocks_with_lines(item.body):
+        start_line = item.body_line + offset if item.body_line is not None else None
+        for outcome in calc.evaluate_block(block, env, start_line=start_line, origins=origins):
+            line = CalcLine(
+                name=outcome.name,
+                expression=outcome.expression,
+                comment=outcome.comment,
+                annotation=outcome.annotation,
+                unit_style=outcome.unit_style,
+                line=outcome.line,
+                reference=outcome.reference,
+            )
+            diag_line = outcome.line if outcome.line is not None else item.source_line
+            if outcome.warning:
+                project.warn(
+                    f"calc {outcome.name}: {outcome.warning}",
+                    file=item.source_file, line=diag_line, item_id=item.id,
+                )
+            if outcome.error:
+                if outcome.retired:
+                    if item_sealed is None:
+                        item_sealed = seal.is_sealed(project, item)
+                    if item_sealed:
+                        # A sealed append-only entry cannot be edited
+                        # without resealing, and resealing is what Jared
+                        # wants to avoid: the retired spelling inside one
+                        # warns with the same text instead of failing the
+                        # build, and stays working (evaluated above) until
+                        # history-backed resealing lands.
+                        project.warn(
+                            f"calc {outcome.name}: {outcome.error}",
+                            file=item.source_file, line=diag_line, item_id=item.id,
+                        )
                     else:
                         line.error = outcome.error
+                        failed = True
                         project.error(
                             f"calc {outcome.name or outcome.expression!r}: {outcome.error}",
                             file=item.source_file, line=diag_line, item_id=item.id,
+                            code=RETIRED_UNIT_SPELLING,
                         )
-                if outcome.value is not None:
-                    line.result = calc.format_value(outcome.value, project.sigfigs)
-                    line.bounds = calc.format_bounds(outcome.value, project.sigfigs)
-                    item.calc_values[outcome.name] = line.result
-                item.calcs.append(line)
-        item._env = env  # retained for check evaluation
+                else:
+                    line.error = outcome.error
+                    failed = True
+                    project.error(
+                        f"calc {outcome.name or outcome.expression!r}: {outcome.error}",
+                        file=item.source_file, line=diag_line, item_id=item.id,
+                    )
+            if outcome.value is not None:
+                line.result = calc.format_value(outcome.value, project.sigfigs)
+                line.bounds = calc.format_bounds(outcome.value, project.sigfigs)
+                item.calc_values[outcome.name] = line.result
+            item.calcs.append(line)
+    del env[calc.RESOLVER_KEY]
+    item._env = env  # retained for check evaluation and cross-item references
+    item._calc_failed = failed
+
+
+def run_calcs(project: Project) -> None:
+    """Evaluate every local item's calc blocks in dependency order.
+
+    A cross-item reference (`V_in = DEC-PWR-001.V_in`, finding 35) makes the
+    per-item passes of the past a graph over items: the reference edges are
+    walked first and each item is evaluated only after everything it reads
+    from, so a target's `env` is ready when the resolver asks for it. Each
+    item's env is computed exactly once and cached on the item (`_env`),
+    which is the whole state, so the scheduler is a memoised DFS post-order
+    and `run_checks` keeps finding `_env` where it always did.
+
+    A cycle is an error naming the full path (`a -> b -> a`), following the
+    `blocked_by cycle:` (blocked.py) and `equation cycle:` (calc.py) shapes.
+    Every item in a cycle is marked failed and never evaluated; a dependent
+    outside the cycle gets one note naming the upstream failure rather than
+    N restatements of it."""
+    by_key = _key_index(project)
+    # Identity -> "visiting" (on the current DFS path) or "done" (env ready
+    # or failed). Items are unhashable-by-value here, so id() is the key.
+    state: dict[int, str] = {}
+    reported_cycles: set[tuple[int, ...]] = set()
+
+    def visit(item, path: list) -> None:
+        mark = state.get(id(item))
+        if mark == "done":
+            return
+        if mark == "visiting":
+            cycle = [*path[path.index(item):], item]
+            key = tuple(id(i) for i in cycle)
+            if key not in reported_cycles:
+                reported_cycles.add(key)
+                closer = path[-1]  # the item whose reference closes the loop
+                names = " -> ".join(i.id or i.key for i in cycle)
+                project.error(
+                    f"calc reference cycle: {names}",
+                    file=closer.source_file, line=closer.source_line,
+                    item_id=closer.id or closer.key,
+                )
+            for node in cycle:
+                node._calc_failed = True
+                node._env = {}
+            return
+        state[id(item)] = "visiting"
+        for target_str in _calc_reference_targets(item):
+            target = resolve_link_target(by_key, project, target_str)
+            if target is None or target.external:
+                # Reported at the reference line when the item itself runs;
+                # not a schedulable edge.
+                continue
+            visit(target, [*path, item])
+        state[id(item)] = "done"
+        if getattr(item, "_calc_failed", False):
+            # A cycle member: never evaluated, so its own references stay
+            # unreported and its dependents get the one-line upstream note.
+            return
+        _run_item_calcs(project, item, by_key)
+
+    for item in project.local_items:
+        visit(item, [])
 
 
 _CHECK_EMITTERS = {ERROR: Project.error, WARNING: Project.warn, INFO: Project.info}
@@ -1396,11 +1552,14 @@ def _calc_table_html(lines: list[CalcLine]) -> str:
             name_cell += (
                 f'<span class="calc-annotation">{marker} {_esc(line.annotation)}</span>'
             )
+        # A cross-item reference renders as the dependency it is -- the
+        # target's display id and the name, key half hidden (keys.md §3).
+        expr_cell = _esc(line.display_expression)
         if line.error:
             rows.append(
                 f'<tr class="calc-row calc-error">'
                 f'<td class="calc-name">{name_cell}</td>'
-                f'<td class="calc-expr">{_esc(line.expression)}</td>'
+                f'<td class="calc-expr">{expr_cell}</td>'
                 f'<td class="calc-result" colspan="2">⚠ {_esc(line.error)}</td></tr>'
             )
             continue
@@ -1414,7 +1573,7 @@ def _calc_table_html(lines: list[CalcLine]) -> str:
         rows.append(
             f'<tr class="calc-row">'
             f'<td class="calc-name">{name_cell}</td>'
-            f'<td class="calc-expr">{_esc(line.expression)}</td>'
+            f'<td class="calc-expr">{expr_cell}</td>'
             f'<td class="calc-result">{_esc(line.result)} {bounds}</td>'
             f"{comment}</tr>"
         )

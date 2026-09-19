@@ -385,6 +385,22 @@ class CalcLine:
     # What lets an editor match a calc result to *its* line rather than the
     # first line that happens to share its name.
     line: int | None = None
+    # Set when the right-hand side is a cross-item reference
+    # (`V_in = DEC-PWR-001.V_in`): the reference text as authored. Renderers
+    # show it in place of the raw expression so the table reads as the
+    # dependency it is; "" for an ordinary expression.
+    reference: str = ""
+
+    @property
+    def display_expression(self) -> str:
+        """The expression as a reader should see it: for a cross-item
+        reference, the target's display half and the name, with the tool-
+        maintained key half hidden (docs/design/keys.md §3 -- rendering never
+        shows raw composite text). Ordinary expressions are unchanged."""
+        if not self.reference:
+            return self.expression
+        target, _, name = self.reference.rpartition(".")
+        return f"{target.partition('@')[0] or target}.{name}"
 
 
 @dataclass

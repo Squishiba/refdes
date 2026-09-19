@@ -28,7 +28,55 @@ P_dens  = P_diss / A_board | W/in^2              → 0.2366 W/in²
 ```
 
 Variables are visible to later lines in the same item, across multiple blocks.
-They are **not** shared between items.
+They are **not** shared between items — unless you name the item, below.
+
+## Referencing another item's values
+
+One number that belongs to the power stage and is used by everything downstream
+of it should be written once. Retyping it into every item that needs it means
+the copies diverge silently when the original changes. A dotted reference names
+another item's calc value directly:
+
+```calc
+V_in = DEC-PWR-001.V_in
+P_in = V_in * I_in | W
+```
+
+This is a real dependency, not a convenience alias. The build evaluates items
+in dependency order — an item's calc runs only after every item it reads from —
+and the reference is stored expanded as a `DISPLAY-ID@key` composite like every
+other structured reference, so renaming `DEC-PWR-001` refreshes the label and
+keeps resolving. The next writable command freezes the bare spelling to its
+composite; under `--no-write` the bare reference still resolves on the display
+id, and nothing is written.
+
+Any named value in the target's calc blocks is referenceable — there is no
+exports list. The pipe unit works on a reference like on any line:
+`V_in = DEC-PWR-001.V_in | mV` re-expresses the target's value in millivolts.
+Units and tolerances flow through untouched: a reference to `12 V ± 5%` arrives
+with its ±5% intact, which is exactly what a retyped `12 V` loses.
+
+A reference binds a name exactly as an assignment does, so the one-name-per-item
+rule is unchanged: an item that both assigns `V_in` and references it gets the
+ordinary "assigned twice" error.
+
+Every failure is a loud error at the referring line — never a silent default or
+a stale value:
+
+```
+ERROR calc V: no item 'DEC-NOPE' -- cross-item reference 'DEC-NOPE.V_in' names an item that does not exist
+ERROR calc X: cross-item reference 'DEC-001.Iout': DEC-001 does not define 'Iout' (it defines: I_out, V_in)
+ERROR calc V: cannot resolve 'DEC-001.V_in': DEC-001's own calc failed
+ERROR calc reference cycle: DEC-001 -> DEC-002 -> DEC-001
+```
+
+A reference to an item whose own calc failed reports *that*, in one line — the
+root error is stated once, at the item that broke. A cycle is an error naming
+the full path, the way `blocked_by` and equation cycles already are.
+
+References into imported items are refused with a message saying so: a
+cross-project calc reference is only honest against the pinned artifact
+version, and that is a later decision.
 
 ## Referencing results in prose
 
@@ -263,4 +311,3 @@ produces a number.
   torque displays as joules. Pin it with `tq = ... | N*m`. Every units library has
   this; none solve it without a separate notion of quantity kind.
 - **No solving for unknowns.** Forward evaluation only. Symbolic solve is planned.
-- **No cross-item references.** A calc block cannot read another item's values.

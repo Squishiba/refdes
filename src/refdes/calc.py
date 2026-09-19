@@ -804,6 +804,18 @@ ANNOTATED_RE = re.compile(
 # stripped before this runs, and the language has no string literals, so a
 # `|` anywhere on a live line is this separator or a parse error.
 PIPE_UNIT_RE = re.compile(r"^(?P<lhs>.+?)\s*\|\s*(?P<unit>[^|]+?)\s*$")
+# A cross-item calc reference (finding 35 chunk 1): the whole right-hand side
+# is one dotted reference into another item -- `V_in = DEC-PWR-001.V_in`, or
+# with the composite key half `V_in = DEC-PWR-001@k7f3m2q9x4a.V_in`, or with
+# the pipe unit `V_in = DEC-PWR-001.V_in | V`. The target half is exactly what
+# `resolve_link_target` accepts (a bare display id, a bare key, or a
+# `DISPLAY-ID@key` composite); the name half is any name the target's calc
+# blocks assign. A dotted RHS is *only* a reference: nothing else in the
+# language has attribute access, so there is no other parse it could shadow.
+CROSS_REF_RE = re.compile(
+    r"^(?P<target>[A-Za-z0-9][A-Za-z0-9_-]*(?:@[A-Za-z0-9_-]+)?)"
+    r"\.(?P<name>[A-Za-z_][A-Za-z0-9_]*)$"
+)
 # `P | mW = V * I` -- the unit in the one place it does not go. Caught to name
 # the fix rather than the generic "expected an assignment".
 LEADING_PIPE_RE = re.compile(
@@ -882,6 +894,21 @@ class CalcOutcome:
     # a sealed append-only entry -- which cannot be edited without resealing
     # -- downgrades to a warning instead of failing the build.
     retired: bool = False
+    # Set on a cross-item reference line (`V_in = DEC-PWR-001.V_in`): the
+    # reference text exactly as authored. The value itself is resolved by the
+    # caller -- evaluation order across items is a build-level concern, so
+    # `evaluate_block` hands the reference to the resolver installed in the
+    # environment under `RESOLVER_KEY` (a callable taking the reference text
+    # and returning a `Value`, or raising with the message to report).
+    reference: str = ""
+
+
+# Key under which the caller installs a cross-item reference resolver in the
+# environment `evaluate_block` threads through a project's calc blocks. It
+# starts with `__` so it can never collide with an authored calc name (names
+# are `[A-Za-z_][A-Za-z0-9_]*` and the lexer never produces `__`-prefixed
+# lookups).
+RESOLVER_KEY = "__refdes_calc_resolver__"
 
 
 def assigned_names(source: str) -> set[str]:
@@ -1084,6 +1111,62 @@ def evaluate_block(
                     f"rename one of them, e.g. {name!r} -> {name + '_2'!r}.",
                     annotation, unit_style=unit_style, line=line_number,
                 )
+            )
+            continue
+
+        ref_match = CROSS_REF_RE.match(expression.strip())
+        if ref_match:
+            reference = expression.strip()
+            if name in origins:
+                first_line = origins[name]
+                first_where = f"line {first_line}" if first_line is not None else "earlier in this item"
+                here_where = f"line {line_number}" if line_number is not None else "here"
+                outcomes.append(
+                    CalcOutcome(
+                        name, expression, comment, None,
+                        f"{name!r} is assigned twice in this item -- first at "
+                        f"{first_where}, again at {here_where}. A name can only be "
+                        f"assigned once per item (blocks share one item-wide scope); "
+                        f"rename one of them, e.g. {name!r} -> {name + '_2'!r}.",
+                        annotation, unit_style=unit_style, line=line_number,
+                        reference=reference,
+                    )
+                )
+                continue
+            resolver = env.get(RESOLVER_KEY)
+            if resolver is None:
+                outcomes.append(
+                    CalcOutcome(name, expression, comment, None,
+                                f"cross-item calc reference {reference!r} is not "
+                                "supported in this evaluation context",
+                                annotation, unit_style=unit_style,
+                                line=line_number, reference=reference)
+                )
+                continue
+            try:
+                value = resolver(reference)
+                if annotation:
+                    value = convert_value(value, annotation)
+            except CalcError as exc:
+                outcomes.append(
+                    CalcOutcome(name, expression, comment, None, str(exc),
+                                annotation, unit_style=unit_style,
+                                line=line_number, reference=reference)
+                )
+                continue
+            except Exception as exc:  # noqa: BLE001 -- resolver may surface pint errors too
+                outcomes.append(
+                    CalcOutcome(name, expression, comment, None, str(exc),
+                                annotation, unit_style=unit_style,
+                                line=line_number, reference=reference)
+                )
+                continue
+            env[name] = value
+            origins[name] = line_number
+            outcomes.append(
+                CalcOutcome(name, expression, comment, value, None, annotation,
+                            None, unit_style=unit_style, line=line_number,
+                            reference=reference)
             )
             continue
 
