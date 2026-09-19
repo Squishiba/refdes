@@ -463,3 +463,98 @@ def test_deleting_a_sealed_items_key_reports_only_the_deleted_key(tmp_path):
     ]
     assert seal_path.read_text(encoding="utf-8") == before
     assert set(seal.load_seals(deleted)) == {sealed_key}
+
+
+# ------------------------------------- a new entry with errors never seals (3b)
+
+
+SEAL_ERROR_SCHEMA = (
+    "site: { title: T, out: _site }\n"
+    "types:\n"
+    "  decision:\n"
+    "    prefix: DEC\n"
+    "    fields:\n"
+    "      title: { type: text, required: true }\n"
+    "    body: {}\n"
+    "  log:\n"
+    "    prefix: LOG\n"
+    "    append_only: true\n"
+    "    fields:\n"
+    "      summary: { type: text, required: true }\n"
+    "    body: {}\n"
+)
+
+LOG_OK = (
+    "defaults:\n  type: log\n  prefix: LOG\n"
+    "items:\n"
+    "  - id: LOG-001\n    summary: First entry.\n    body: |\n"
+    "      Worked on the layout.\n\n"
+    "      ```calc\n      P = 12 V * 0.5 A | W\n      ```\n"
+)
+
+LOG_BROKEN = LOG_OK.replace("P = 12 V * 0.5 A | W", "P : W = 12 V * 0.5 A")
+
+
+def _seal_error_project(tmp_path, log_text):
+    write_project_config(tmp_path, SEAL_ERROR_SCHEMA)
+    items = tmp_path / "items"
+    items.mkdir()
+    (items / "log.yaml").write_text(log_text, encoding="utf-8")
+    return tmp_path
+
+
+def test_a_new_entry_with_an_error_is_not_sealed(tmp_path):
+    """The trap: sealing an entry that this very build flagged with an ERROR
+    turns the next fix into "modified since it was sealed" -- the author is
+    punished for following the error's own instruction. A new entry with an
+    error attributed to it stays unsealed."""
+    root = _seal_error_project(tmp_path, LOG_BROKEN)
+    project = _load_and_build(root, seal_write=True, reseal=False)
+    assert [d for d in project.errors if d.item_id == "LOG-001"]
+    assert any(
+        "LOG-001 was not sealed because it has errors" in d.message
+        for d in project.warnings
+    ), [d.message for d in project.warnings]
+    assert not seal.load_seals(project)
+
+
+def test_an_unsealed_entry_with_errors_seals_on_the_first_clean_build(tmp_path):
+    root = _seal_error_project(tmp_path, LOG_BROKEN)
+    broken = _load_and_build(root, seal_write=True, reseal=False)
+    assert not seal.load_seals(broken)
+    (root / "items" / "log.yaml").write_text(LOG_OK, encoding="utf-8")
+    fixed = _load_and_build(root, seal_write=True, reseal=False)
+    assert not fixed.errors
+    assert "LOG-001" in seal.load_seals(fixed)
+
+
+def test_an_error_on_another_item_does_not_stop_this_entry_sealing(tmp_path):
+    """Per-entry, not per-build: one broken file elsewhere must not freeze
+    every healthy log entry out of sealing."""
+    root = _seal_error_project(tmp_path, LOG_OK)
+    (root / "items" / "dec.md").write_text(
+        "---\nid: DEC-001\ntype: decision\ntitle: Broken\n---\n\n"
+        "```calc\nP = 3.3 V / 1.2 A | W\n```\n",
+        encoding="utf-8",
+    )
+    project = _load_and_build(root, seal_write=True, reseal=False)
+    assert [d for d in project.errors if d.item_id == "DEC-001"]
+    assert "LOG-001" in seal.load_seals(project)
+    assert not [d for d in project.warnings if "not sealed" in d.message]
+
+
+def test_the_repro_rewrite_then_rebuild_needs_no_reseal(tmp_path):
+    """The chunk 3 trap end to end: a new entry on the retired spelling
+    errors and is NOT sealed; calc-rewrite fixes it (it refuses sealed
+    entries); the rebuild is clean and seals -- no reseal, no punishment."""
+    from refdes import calc_rewrite
+
+    root = _seal_error_project(tmp_path, LOG_BROKEN)
+    broken = _load_and_build(root, seal_write=True, reseal=False)
+    assert [d for d in broken.errors if d.code == "retired_unit_spelling"]
+    result = calc_rewrite.apply(str(root))
+    assert result.ok, result.errors
+    assert not result.sealed_entries
+    fixed = _load_and_build(root, seal_write=True, reseal=False)
+    assert not fixed.errors
+    assert "LOG-001" in seal.load_seals(fixed)

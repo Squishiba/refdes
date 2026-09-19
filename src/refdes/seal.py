@@ -222,6 +222,11 @@ def _boards_in_play(project: Project) -> list[str]:
 def verify(project: Project, write: bool = False, reseal: str | None = None) -> None:
     """Check sealed entries per board, and seal any new ones when requested.
 
+    A new entry with an ERROR diagnostic attributed to it in this build is
+    not sealed -- it is reported once and seals on the first later build
+    where it is error-free, so fixing what the build complained about never
+    collides with a seal made over the broken text.
+
     ``reseal`` is ``None``/falsy (verify only), ``RESEAL_ALL`` (accept edits
     on every board), or one registered board key (accept edits only for that
     board). A changed surrogate key is corruption, not an ordinary edit, and
@@ -243,6 +248,13 @@ def verify(project: Project, write: bool = False, reseal: str | None = None) -> 
     base = load_seals(project, board="")
     base_changed = False
     live_keys = {item.key for item in project.local_items if item.key}
+    # An entry this very build flagged with an ERROR is never sealed: the
+    # author is told to fix it, and sealing it now would turn that fix into
+    # "modified since it was sealed" -- following the error's own instruction
+    # would punish them. Per-entry, not per-build: an error elsewhere does
+    # not freeze healthy entries out of sealing. Only attributed errors
+    # count; project-level diagnostics belong to no entry.
+    errored_items = {d.item_id for d in project.errors if d.item_id}
 
     for board in _boards_in_play(project):
         entries = append_only_items(project, board=board)
@@ -266,7 +278,14 @@ def verify(project: Project, write: bool = False, reseal: str | None = None) -> 
             found = _find_seal(seals, item, live_keys)
             if found is None:
                 if write:
-                    if keys_mod.is_adopted(project) and item.key:
+                    if item.id in errored_items:
+                        project.warn(
+                            f"{item.id} was not sealed because it has errors; "
+                            "it will be sealed on the first clean build",
+                            file=item.source_file, line=item.source_line,
+                            item_id=item.id,
+                        )
+                    elif keys_mod.is_adopted(project) and item.key:
                         seals[item.key] = {
                             "id": item.id,
                             "hash": item.content_hash,

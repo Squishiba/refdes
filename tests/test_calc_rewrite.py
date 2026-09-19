@@ -12,6 +12,7 @@ from conftest import write_project_config
 
 from refdes import build as build_mod
 from refdes import calc, calc_rewrite, cli, lifecycle, parse
+from refdes import seal as seal_mod
 from refdes.model import CHECK_VIOLATION, RETIRED_UNIT_SPELLING
 from refdes.schema import load_project
 
@@ -158,9 +159,14 @@ def test_dry_run_writes_nothing(calc_project):
 def test_sealed_entry_refused_and_reported_while_others_rewrite(calc_project):
     (calc_project / "items" / "log.yaml").write_text(LOG_ITEM, encoding="utf-8")
     project = _load(calc_project)
-    # Not sealed yet, so the old spelling inside the entry is a real error.
+    # Not sealed yet, so the old spelling inside the entry is a real error --
+    # and an entry with errors is never sealed. The sealed-with-old-spelling
+    # case is therefore purely historical: sealed before the retirement. That
+    # history is simulated here by writing the seal record directly, with the
+    # entry's current content hash.
     assert [d for d in project.errors if d.code == "retired_unit_spelling"]
-    build_mod.build(project, seal_write=True, reseal=False, accept_board_move=False)
+    log = project.item_by_id("LOG-001")
+    seal_mod.save_seals(project, {log.id: log.content_hash})
 
     result = calc_rewrite.apply(str(calc_project))
     assert result.ok, result.errors
