@@ -192,6 +192,7 @@ link_types:
 | `inverse` | `<name>_by` | Name of the computed back-link |
 | `label` | the link name | Heading shown on item pages |
 | `trace` | `true` | Whether this link type participates in a `{{cascade}}` block's default walk (see [generated blocks](blocks.md)) |
+| `doc` | not set | The verb's own definition — see [`doc`](#doc) |
 
 Either end resolves to the same edge, so a type may declare `verifies` even though
 `verified_by` is the name in `link_types`. See [links](links.md).
@@ -243,6 +244,7 @@ types:
 | `coverable` | not set — falls back to name-based detection, see below | Whether items of this type get a `Coverage` object at all |
 | `coverable_statuses` | not set — excludes `status: retired` if a `status` field exists, nothing otherwise | `status` values that keep an item in coverage; unlisted statuses (e.g. `draft`) are excluded entirely, not just "open" |
 | `verifying_statuses` | not set — every `verifies:` link counts | `status` values on a verifier (a type declaring a `verifies`-family link) that actually count as having verified, as opposed to merely linked; mirrors `satisfying_statuses` |
+| `doc` | not set | The type's own definition — see [`doc`](#doc) |
 
 `satisfying_statuses` requires the type to declare a `status` field — the project
 fails to load if it doesn't.
@@ -271,6 +273,49 @@ preserves, is removed in refdes 1.0. See
 | `choices` | Allowed values, for `type: enum` |
 | `default` | Applied when the item omits the field |
 | `on_change` | `invalidate`, `log`, or `ignore` |
+| `doc` | The field's own definition — see [`doc`](#doc) |
+
+### `doc`
+
+```yaml
+# refdes-schema.yaml
+types:
+  thermal_budget:
+    prefix: THB
+    doc: A statement of the heat a board is allowed to produce, and where.
+    fields:
+      watts: { type: quantity, required: true, doc: Total dissipation this budget allows. }
+field_sets:
+  stewardship:
+    owner: { type: person, doc: The person a question about this item goes to. }
+link_types:
+  governed_by: { inverse: governs, doc: The bound or requirement this item must respect. }
+```
+
+One prose definition, written next to the declaration it defines. It is accepted
+on a type, a field, a field-set entry (a field spec like any other, so the
+definition is written once and rides along into every type that `include:`s the
+set), and a link type — in the bundled standard and in a project's
+`refdes-schema.yaml` alike.
+
+The value must be a non-empty string; `doc: 42`, `doc: [a, b]` and a bare
+`doc:` are configuration errors naming the block path, the same way any other
+wrong-typed config value is. A misspelling (`docs:`) is the unknown-key error
+the rest of the config already raises, did-you-mean included.
+
+Nothing is rendered and nothing changes for a project that declares none: a
+term without `doc:` exports exactly what it exported before the key existed.
+Where a definition *is* declared it reaches the editor through the two exports
+that already exist — `.refdes/schema.json` carries it as the JSON Schema
+`description` (so vscode-yaml shows it on hover and in completions, and the
+refdes extension shows it on field-name completion in `.md` front matter), and
+`items.json`'s `types` payload carries it as `doc` on the type and on each
+field. A link type's definition joins the `target: …` line already in its
+editor description.
+
+The generated vocabulary reference and diagram that will read these definitions
+is [design finding 38](design/backlog.md); this is chunk 1 of it — the key, not
+the dictionary.
 
 ### `required_when`
 

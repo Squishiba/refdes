@@ -554,18 +554,22 @@ def items_json(project: Project) -> dict:
         }
         for item_id, cov in sorted(project.coverage.items())
     }
+    # `doc` appears only where a definition was actually declared (finding 38),
+    # so a project that writes no `doc:` keys gets byte-identical output.
     payload["types"] = {
         name: {
             "label": spec.label,
             "plural": spec.plural,
             "prefix": spec.prefix,
             "append_only": spec.append_only,
+            **({"doc": spec.doc} if spec.doc else {}),
             "fields": {
                 f.name: {
                     "type": f.type,
                     "on_change": f.on_change,
                     "required": f.required,
                     "choices": f.choices,
+                    **({"doc": f.doc} if f.doc else {}),
                 }
                 for f in spec.fields.values()
             },

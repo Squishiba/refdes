@@ -425,6 +425,21 @@ def _validate_link_targets(types: dict[str, ItemType]) -> None:
                     )
 
 
+def _doc_text(value: Any, path: str) -> str:
+    """A resolved `doc:` definition (finding 38), checked for the one shape it
+    may take.
+
+    `configcheck` already refuses a bad one in a project's own overlay; this is
+    the same rule for the bundled standard and its presets, which flow through
+    here without going through that validator.
+    """
+    if value is None:
+        return ""
+    if not isinstance(value, str) or not value.strip():
+        raise SchemaError(f"{path} must be a non-empty string, got {value!r}")
+    return value
+
+
 def load_project(config_path: str | None = None, start: str = ".") -> Project:
     path = config_path or find_config(start)
     if os.path.basename(os.path.abspath(path)) == LEGACY_CONFIG_NAME:
@@ -485,6 +500,7 @@ def load_project(config_path: str | None = None, start: str = ".") -> Project:
             inverse=inverse,
             label=spec.get("label", name),
             trace=bool(spec.get("trace", True)),
+            doc=_doc_text(spec.get("doc"), f"link_types.{name}.doc"),
         )
         inverse_of[name] = inverse
 
@@ -529,6 +545,7 @@ def load_project(config_path: str | None = None, start: str = ".") -> Project:
                 choices=fspec.get("choices"),
                 default=fspec.get("default"),
                 required_when=required_when,
+                doc=_doc_text(fspec.get("doc"), f"types.{tname}.fields.{fname}.doc"),
             )
 
         links: dict[str, list[str]] = {}
@@ -590,6 +607,7 @@ def load_project(config_path: str | None = None, start: str = ".") -> Project:
             coverable=coverable,
             coverable_statuses=coverable_statuses,
             verifying_statuses=verifying_statuses,
+            doc=_doc_text(tspec.get("doc"), f"types.{tname}.doc"),
         )
 
     if not types:

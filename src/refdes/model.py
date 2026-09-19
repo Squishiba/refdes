@@ -124,6 +124,10 @@ class FieldSpec:
     # `required` -- see docs/design/standard-library.md §2 "Conditional
     # requiredness". None means unconditional (ordinary `required:` behavior only).
     required_when: dict[str, Any] | None = None
+    # The field's own definition, written next to its declaration (finding 38).
+    # "" means undeclared, never rendered: a project that writes no `doc:` keys
+    # exports exactly what it exported before this key existed.
+    doc: str = ""
 
 
 @dataclass
@@ -139,6 +143,8 @@ class LinkType:
     # addresses in the bundled standard, none of which is "this item's
     # correctness is justified by that one").
     trace: bool = True
+    # The verb's own definition (finding 38); "" when undeclared.
+    doc: str = ""
 
 
 @dataclass
@@ -243,6 +249,8 @@ class ItemType:
     # satisfying_statuses. None means every link counts, same as before this
     # existed.
     verifying_statuses: list[str] | None = None
+    # The type's own definition (finding 38); "" when undeclared.
+    doc: str = ""
 
 
 @dataclass

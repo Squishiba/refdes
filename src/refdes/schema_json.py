@@ -115,23 +115,38 @@ def field_json_schema(fspec: FieldSpec) -> dict[str, Any]:
         frag = dict(_FIELD_TYPE_MAP.get(fspec.type, {"type": "string"}))
     if fspec.default is not None:
         frag["default"] = fspec.default
+    # A `doc:` definition, shown by the editor on hover and in completion docs
+    # (finding 38). Absent, not empty, when the field has none: a project that
+    # writes no `doc:` keys gets byte-identical output.
+    if fspec.doc:
+        frag["description"] = fspec.doc
     return frag
 
 
-def link_json_schema(targets: list[str]) -> dict[str, Any]:
+def link_json_schema(targets: list[str], doc: str = "") -> dict[str, Any]:
     """The JSON-Schema fragment for one declared link. The allowed-target
     restriction can't be enforced here -- confirming a listed ID actually
     resolves to an item of an allowed type means reading other files, which
     is `refdes check`'s job -- so it's stated in `description` for a human
-    to read on hover, not something the validator itself checks."""
+    to read on hover, not something the validator itself checks.
+
+    A verb's own `doc:` definition goes in the same `description`, ahead of the
+    target line, which is what was already there (finding 38).
+    """
+    target = f"target: {', '.join(targets) if targets else 'any'}"
     return {
         "type": "array",
         "items": {"type": "string"},
-        "description": f"target: {', '.join(targets) if targets else 'any'}",
+        "description": f"{doc} ({target})" if doc else target,
     }
 
 
-def _type_branch(type_name: str, spec: ItemType, include_body: bool) -> dict[str, Any]:
+def _type_branch(
+    type_name: str,
+    spec: ItemType,
+    include_body: bool,
+    link_docs: dict[str, str] | None = None,
+) -> dict[str, Any]:
     properties: dict[str, Any] = {
         # Deliberately unconstrained and never required: an item mid-authoring,
         # before `refdes id` has allocated one, is the tool's own normal
@@ -145,7 +160,7 @@ def _type_branch(type_name: str, spec: ItemType, include_body: bool) -> dict[str
         if fspec.required:
             required.append(fname)
     for lname, targets in spec.links.items():
-        properties[lname] = link_json_schema(targets)
+        properties[lname] = link_json_schema(targets, (link_docs or {}).get(lname, ""))
     properties["history"] = {"$ref": "#/$defs/history"}
     # prefix/board/workspace are legal properties only when this type doesn't
     # already declare a same-named field -- mirrors OVERRIDABLE (parse.py)
@@ -158,7 +173,7 @@ def _type_branch(type_name: str, spec: ItemType, include_body: bool) -> dict[str
         # string) -- never legal in .md front matter, where the body is the
         # text after the closing fence, not a YAML key at all.
         properties["body"] = {"type": "string"}
-    return {
+    branch: dict[str, Any] = {
         "type": "object",
         "properties": properties,
         "required": required,
@@ -173,6 +188,9 @@ def _type_branch(type_name: str, spec: ItemType, include_body: bool) -> dict[str
         # its own regardless of this setting.
         "additionalProperties": True,
     }
+    if spec.doc:
+        branch["description"] = spec.doc
+    return branch
 
 
 def build_schema(project: Project) -> dict[str, Any]:
@@ -185,13 +203,14 @@ def build_schema(project: Project) -> dict[str, Any]:
     level since a list file has an `items:` key and a bare item doesn't.
     """
     defs: dict[str, Any] = {"history": HISTORY_DEF}
+    link_docs = {name: lt.doc for name, lt in project.link_types.items() if lt.doc}
     bare_refs: list[dict[str, str]] = []
     entry_refs: list[dict[str, str]] = []
     for type_name, spec in sorted(project.types.items()):
         bare_key = f"{type_name}__bare"
         entry_key = f"{type_name}__entry"
-        defs[bare_key] = _type_branch(type_name, spec, include_body=False)
-        defs[entry_key] = _type_branch(type_name, spec, include_body=True)
+        defs[bare_key] = _type_branch(type_name, spec, include_body=False, link_docs=link_docs)
+        defs[entry_key] = _type_branch(type_name, spec, include_body=True, link_docs=link_docs)
         bare_refs.append({"$ref": f"#/$defs/{bare_key}"})
         entry_refs.append({"$ref": f"#/$defs/{entry_key}"})
 

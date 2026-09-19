@@ -268,8 +268,11 @@ const completionProvider = {
         const linkKeys = Object.keys(spec.links || {});
         const items = fieldKeys
           .map((k) => {
+            const fspec = spec.fields[k] || {};
             const c = new vscode.CompletionItem(k, vscode.CompletionItemKind.Field);
-            c.detail = (spec.fields[k] || {}).type;
+            c.detail = fspec.type;
+            // A `doc:` definition from the schema (finding 38), when declared.
+            if (fspec.doc) c.documentation = fspec.doc;
             c.insertText = `${k}: `;
             return c;
           })

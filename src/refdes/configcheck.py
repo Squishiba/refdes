@@ -67,13 +67,14 @@ TYPE_KEYS = frozenset(
         "check_severity",
         "coverable",
         "coverable_statuses",
+        "doc",
     }
 )
 FIELD_KEYS = frozenset(
-    {"type", "on_change", "required", "required_when", "choices", "default"}
+    {"type", "on_change", "required", "required_when", "choices", "default", "doc"}
 )
 BODY_KEYS = frozenset({"on_change", "required"})
-LINK_TYPE_KEYS = frozenset({"inverse", "label", "trace"})
+LINK_TYPE_KEYS = frozenset({"inverse", "label", "trace", "doc"})
 EQUATION_KEYS = frozenset({"params", "expr", "note"})
 
 
@@ -170,6 +171,19 @@ class BlockChecker:
             return default
         if isinstance(value, bool) or not isinstance(value, int):
             raise self.wrong(path, "a whole number", value)
+        return value
+
+    def definition(self, value: Any, path: str) -> str:
+        """A `doc:` definition (finding 38): prose, or nothing at all.
+
+        Empty is refused rather than rendered -- `doc:` with no text behind it
+        is the shape the completeness lint of chunk 2 has to catch, and a
+        mapping or a list is a definition that will render as `{'en': 'x'}`.
+        """
+        if value is None:
+            return ""
+        if not isinstance(value, str) or not value.strip():
+            raise self.wrong(path, "a non-empty string", value)
         return value
 
     def mode(self, value: Any, path: str, default: str) -> str:
@@ -342,6 +356,8 @@ class BlockChecker:
             self.string_list(block.get("choices"), f"{path}.choices", "a list of choices")
         if "required" in block:
             self.boolean(block.get("required"), f"{path}.required")
+        if "doc" in block:
+            self.definition(block.get("doc"), f"{path}.doc")
         return block
 
     def field_map(self, value: Any, path: str) -> dict:
@@ -373,6 +389,7 @@ class BlockChecker:
             self.string(spec.get("inverse"), f"{path}.inverse")
             self.string(spec.get("label"), f"{path}.label")
             self.boolean(spec.get("trace"), f"{path}.trace", True)
+            self.definition(spec.get("doc"), f"{path}.doc")
 
     def types(self, raw: dict) -> None:
         block = self.mapping(raw.get("types"), "types", "a mapping of type name to its settings")
@@ -388,6 +405,7 @@ class BlockChecker:
         self.string(spec.get("prefix"), f"{path}.prefix")
         self.string(spec.get("label"), f"{path}.label")
         self.string(spec.get("plural"), f"{path}.plural")
+        self.definition(spec.get("doc"), f"{path}.doc")
         if "include" in spec:
             self.string_list(spec.get("include"), f"{path}.include", "a list of field_set names")
         self.field_map(spec.get("fields") or {}, f"{path}.fields")
