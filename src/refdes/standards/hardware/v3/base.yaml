@@ -107,7 +107,7 @@
 # separate body content of its own) and refuses, rolling back, if the result
 # would not validate.
 
-field_sets:
+sets:
   provenance:
     source: { type: text, on_change: log, doc: "Where the item's content came from — a spec section, a datasheet, a conversation. Kept out of the content hash, so correcting it never marks downstream items suspect." }
     note: { type: text, on_change: log, doc: "A free-text remark about the item's provenance, kept beside the item instead of inside its body. Kept out of the content hash." }

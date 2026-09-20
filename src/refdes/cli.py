@@ -1409,7 +1409,7 @@ def main(argv: list[str] | None = None) -> int:
         "init",
         help="write a minimal refdes-project.yaml that points at the standard",
         description="Write a minimal refdes-project.yaml in the current directory -- "
-        "site:/standard:/id: only, no types:/link_types:/field_sets: -- plus "
+        "site:/standard:/id: only, no types:/link_types:/sets: -- plus "
         ".vscode/settings.json wiring up schema completion for items/**/*.yaml. "
         "standard: points at the standard library rather than copying it; "
         "<latest> is resolved to a concrete pinned integer, never written as "

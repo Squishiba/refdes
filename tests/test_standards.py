@@ -454,11 +454,11 @@ def test_verifying_statuses_filters_which_links_count_as_verified(tmp_path):
     assert project.coverage["REQ-001"].stage == "verified"
 
 
-def test_field_sets_include_expands_with_own_fields_winning(tmp_path):
+def test_sets_include_expands_with_own_fields_winning(tmp_path):
     write_project_config(
         tmp_path,
         "site: { title: T, out: _site }\n"
-        "field_sets:\n"
+        "sets:\n"
         "  provenance:\n"
         "    source: { type: text, on_change: log }\n"
         "    tags:   { type: list, on_change: ignore }\n"
@@ -476,7 +476,7 @@ def test_field_sets_include_expands_with_own_fields_winning(tmp_path):
     assert req.fields["source"].on_change == "invalidate"  # own field beats the include
 
 
-def test_include_unknown_field_set_errors_at_load(tmp_path):
+def test_include_unknown_set_errors_at_load(tmp_path):
     write_project_config(
         tmp_path,
         "site: { title: T, out: _site }\n"
@@ -487,7 +487,7 @@ def test_include_unknown_field_set_errors_at_load(tmp_path):
         "    fields:\n"
         "      text: { type: text, required: true }\n",
     )
-    with pytest.raises(SchemaError, match="unknown field_set 'nope'"):
+    with pytest.raises(SchemaError, match="unknown set 'nope'"):
         load_project(config_path=str(tmp_path / "refdes-project.yaml"))
 
 

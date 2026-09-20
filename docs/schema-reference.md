@@ -2,7 +2,7 @@
 
 Every key in `refdes-project.yaml` — the project marker, and the home of
 every project setting. The three schema keys (`types:`, `link_types:`,
-`field_sets:`) are the one exception: they are the project's own schema
+`sets:`) are the one exception: they are the project's own schema
 overlay, and they live in the optional `refdes-schema.yaml`, which most
 projects never have — a project taking its whole vocabulary from a bundled
 standard needs only the settings file. A project is any folder containing
@@ -24,7 +24,7 @@ boards:      { ... }   # opt-in board registry
 workspaces:  { ... }   # opt-in workspace registry, one level above boards
 
 # refdes-schema.yaml — optional, only when the project declares its own schema
-field_sets:  { ... }   # reusable field groups, include:d by a type
+sets:  { ... }   # reusable field groups, include:d by a type
 link_types:  { ... }   # relationships and their inverses
 types:       { ... }   # item types
 ```
@@ -137,11 +137,11 @@ standard:
 ```
 
 Points at the bundled standard dictionary instead of hand-declaring
-`link_types:`/`types:`/`field_sets:` from scratch. Resolved fresh, from the
+`link_types:`/`types:`/`sets:` from scratch. Resolved fresh, from the
 installed `refdes` package, on every load — `refdes-project.yaml` never
 contains a copy of what the standard declares, only the pointer to it. Absent
 entirely, or the string `standard: none`, means no standard: every type,
-link, and field set comes only from the project's own `refdes-schema.yaml`,
+link, and set comes only from the project's own `refdes-schema.yaml`,
 exactly like every project before this existed.
 
 | Key | Required | Purpose |
@@ -150,7 +150,7 @@ exactly like every project before this existed.
 | `version` | yes | A pinned integer, e.g. `1` — never the string `"latest"` |
 | `presets` | no, defaults to `[]` | Optional bundled extensions layered on top, e.g. `[design-debate]` |
 
-The project's own `link_types:`/`types:`/`field_sets:` — written in
+The project's own `link_types:`/`types:`/`sets:` — written in
 `refdes-schema.yaml` — are merged on top of the
 resolved standard, not replacing it — see [the standard
 library](standard-library.md#overriding-and-extending) for the merge rules
@@ -158,11 +158,11 @@ library](standard-library.md#overriding-and-extending) for the merge rules
 
 ---
 
-## `field_sets`
+## `sets`
 
 ```yaml
 # refdes-schema.yaml
-field_sets:
+sets:
   provenance:
     source: { type: text, on_change: log }
     tags:   { type: list, on_change: ignore }
@@ -236,7 +236,7 @@ types:
 | `append_only` | `false` | Seal items of this type after first build |
 | `preview` | `[]` | Fields shown in hover previews and index columns |
 | `fields` | `{}` | Legal fields |
-| `include` | not set | Names of `field_sets:` entries merged into `fields:` before this type's own fields are applied |
+| `include` | not set | Names of `sets:` entries merged into `fields:` before this type's own fields are applied |
 | `links` | `{}` | Legal links, mapped to allowed target types |
 | `body` | `on_change`: project default; `required`: `false` | `on_change` mode for the markdown body, and whether it must be non-empty (`required: true` — the bundled standard sets this on `requirement`/`bound`, hardware@3). Enforced as a **warning**, not a build-blocking error the way `required: true` is on an ordinary field — a stub can still exist while it's being drafted. |
 | `satisfying_statuses` | not set — every `satisfies:` link counts | `status` values that count as settled; see [coverage](coverage.md#which-statuses-count-as-satisfying) |
@@ -285,7 +285,7 @@ types:
     doc: A statement of the heat a board is allowed to produce, and where.
     fields:
       watts: { type: quantity, required: true, doc: Total dissipation this budget allows. }
-field_sets:
+sets:
   stewardship:
     owner: { type: person, doc: The person a question about this item goes to. }
 link_types:

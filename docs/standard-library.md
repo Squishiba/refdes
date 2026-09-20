@@ -16,7 +16,7 @@ standard:
 
 That's the entire `standard:` block a project needs, and it sits in
 `refdes-project.yaml` alongside the project's other settings. No `types:`,
-`link_types:`, or `field_sets:` key has to appear anywhere — most projects
+`link_types:`, or `sets:` key has to appear anywhere — most projects
 have no `refdes-schema.yaml` at all — and their absence is the point:
 `standard:` records a *pointer* to the standard, not a copy of it. See
 [schema reference](schema-reference.md#standard) for the key-by-key syntax.
@@ -42,8 +42,8 @@ it — `refines`, `derives_from`, `governed_by`, `satisfies`, `constrained_by`,
 `component`. See
 [links](links.md) for how declaring one end gives you the other for free.
 
-Every type also carries `owner`/`last_reviewed` (the `stewardship` field set)
-and `source`/`note`/`tags` (`provenance`) — see [field_sets and
+Every type also carries `owner`/`last_reviewed` (the `stewardship` set)
+and `source`/`note`/`tags` (`provenance`) — see [sets and
 `include:`](#field-sets-and-include) for how those are assembled without
 retyping five fields on every type, and [authoring: `source`, `note`,
 `rationale`, `body`](authoring.md#source-note-rationale-body) for what
@@ -52,7 +52,7 @@ retyping five fields on every type, and [authoring: `source`, `note`,
 ## Opting out
 
 `standard: none`, or omitting `standard:` entirely, is the explicit escape
-hatch: nothing is pre-seeded, and `types:`/`link_types:`/`field_sets:` are
+hatch: nothing is pre-seeded, and `types:`/`link_types:`/`sets:` are
 fully authored by the project in `refdes-schema.yaml`, exactly like every
 `refdes` project before this feature existed — one file for the schema
 instead of one file holding everything. A project that never adopted the
@@ -62,7 +62,7 @@ relocates it: schema keys into `refdes-schema.yaml`, settings into
 
 ## Overriding and extending
 
-The project's own `types:`/`link_types:`/`field_sets:` blocks — written in
+The project's own `types:`/`link_types:`/`sets:` blocks — written in
 `refdes-schema.yaml`, the optional file that holds the project's schema
 overlay and nothing else — are **merged** on top of the resolved standard,
 not replaced by it. A `types.<name>:` block
@@ -97,14 +97,14 @@ types:
   component: null   # errors here if any type still declares a link to it
 ```
 
-## `field_sets` and `include:`
+## `sets` and `include:`
 
 Reusable groups of field definitions, declared once and pulled into a type
 with `include:`. The standard is built this way internally:
 
 ```yaml
 # refdes-schema.yaml
-field_sets:
+sets:
   provenance:
     source: { type: text, on_change: log }
     tags:   { type: list, on_change: ignore }
@@ -119,7 +119,7 @@ types:
 Included fields are merged in list order (a later `include:` wins over an
 earlier one on a name collision), then the type's own `fields:` are applied on
 top — a type's own declaration always wins over anything it includes. A
-project declares its own `field_sets:` in `refdes-schema.yaml` for fields
+project declares its own `sets:` in `refdes-schema.yaml` for fields
 repeated across its own custom types; they merge with the standard's, by
 name, under the same rules as everything else here.
 
@@ -193,7 +193,7 @@ The same wording appears for a link name a since-removed preset provided
 ## `refdes init`
 
 Writes a minimal `refdes-project.yaml` in the current directory — `site:`,
-`standard:`, `id:` only, no `types:`/`link_types:`/`field_sets:` and no
+`standard:`, `id:` only, no `types:`/`link_types:`/`sets:` and no
 `refdes-schema.yaml` either: a project with nothing of its own to add to the
 standard doesn't get one — plus `.vscode/settings.json` wiring up schema
 completion for `items/**/*.yaml` (see [editor

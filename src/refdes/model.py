@@ -641,11 +641,11 @@ class Project:
     # (the live registry load_project installs); this is the loaded definition, for
     # anything that reports on the project's vocabulary.
     equations: dict[str, Equation] = field(default_factory=dict)
-    # The `field_sets:` namespace as resolved base -> presets -> project.
+    # The `sets:` namespace as resolved base -> presets -> project.
     # `include:` is expanded into each type's `fields:` and popped, so this is
     # the only place the namespace survives resolution -- vocabulary.py reports
     # on it. Plain dicts, in refdes-schema.yaml's own shape.
-    field_sets: dict[str, dict] = field(default_factory=dict)
+    sets: dict[str, dict] = field(default_factory=dict)
     # Keyed by surrogate key (docs/design/threads.md §2) -- or, for an item
     # that has neither a key nor a display id yet (a keyless import, a
     # keyless local item under `--no-write`, or a permanently id-less chain
@@ -746,7 +746,7 @@ class Project:
     # signal that actually means something is an item with no tags: *of its
     # own*, which plenty of projects will reasonably not want the noise
     # from. Default false: tags: is optional by design
-    # (field_sets.provenance, no required:), so this can't be an
+    # (sets.provenance, no required:), so this can't be an
     # unconditional check.
     lint_own_tags: bool = False
     release_gate: dict[str, dict[str, bool]] = field(default_factory=_default_release_gate)

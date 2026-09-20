@@ -1,7 +1,7 @@
 """The project's vocabulary, as one generated reference page (finding 38).
 
 One entry per term the *resolved* schema knows about -- item types, link
-verbs, field sets, engine-reserved keys -- each with its definition (the
+verbs, sets, engine-reserved keys -- each with its definition (the
 `doc:` key from chunks 1-2), its scope, where it points and what points at
 it, its fields, and a worked example of how it is written: the bundled
 standard's terms carry hand-written ones in `EXAMPLES` (values from
@@ -41,7 +41,7 @@ if TYPE_CHECKING:
 GROUPS: tuple[tuple[str, str], ...] = (
     ("types", "Item types"),
     ("links", "Link verbs"),
-    ("field_sets", "Field sets"),
+    ("sets", "Sets"),
     ("keys", "Engine-reserved keys"),
 )
 
@@ -138,9 +138,9 @@ class TermEntry:
     declared_on: list[str] = field(default_factory=list)
     # Item types only: (verb, source types) for every verb that may point here.
     pointed_at_by: list[tuple[str, list[str]]] = field(default_factory=list)
-    # Item types and field sets.
+    # Item types and sets.
     fields: list[FieldEntry] = field(default_factory=list)
-    # Field sets only: the types that pull the set in with `include:`.
+    # Sets only: the types that pull the set in with `include:`.
     included_by: list[str] = field(default_factory=list)
     # Item types only.
     prefix: str = ""
@@ -211,13 +211,13 @@ def entries(project: Project) -> Vocabulary:
             )
         )
 
-    field_sets: list[TermEntry] = []
-    for name in sorted(project.field_sets):
-        raw = project.field_sets[name] or {}
-        field_sets.append(
+    sets: list[TermEntry] = []
+    for name in sorted(project.sets):
+        raw = project.sets[name] or {}
+        sets.append(
             TermEntry(
                 name=name,
-                kind="field_sets",
+                kind="sets",
                 fields=[
                     _field_entry(fname, spec if isinstance(spec, dict) else {})
                     for fname, spec in raw.items()
@@ -237,7 +237,7 @@ def entries(project: Project) -> Vocabulary:
     ]
 
     vocab = Vocabulary(
-        entries={"types": types, "links": links, "field_sets": field_sets, "keys": keys}
+        entries={"types": types, "links": links, "sets": sets, "keys": keys}
     )
     _assign_anchors(vocab)
     for entry in vocab.terms():
@@ -296,7 +296,7 @@ def _verb_facts(project: Project) -> dict:
 
 
 def _includers(project: Project, name: str, raw: dict) -> set[str]:
-    """Types that pull this field set in.
+    """Types that pull this set in.
 
     `include:` is expanded and popped during resolution, so membership is
     re-derived the way finding 38 §5 suggests: a type whose fields are a
@@ -748,7 +748,7 @@ def _facts(e: TermEntry) -> list[tuple[str, str]]:
             facts.append(("Inverse", f"<code>{escape(e.inverse)}</code>"))
         if e.declared_on:
             facts.append(("Declared on", _join(e.declared_on, code=True)))
-    elif e.kind == "field_sets" and e.included_by:
+    elif e.kind == "sets" and e.included_by:
         facts.append(("Included by", _join(e.included_by, code=True)))
     elif e.kind == "keys":
         scope = {
@@ -848,7 +848,7 @@ def _md_facts(e: TermEntry) -> list[str]:
             lines.append(f"- **Inverse:** `{e.inverse}`")
         if e.declared_on:
             lines.append("- **Declared on:** " + ", ".join(f"`{d}`" for d in e.declared_on))
-    elif e.kind == "field_sets" and e.included_by:
+    elif e.kind == "sets" and e.included_by:
         lines.append("- **Included by:** " + ", ".join(f"`{d}`" for d in e.included_by))
     elif e.kind == "keys":
         scope = {

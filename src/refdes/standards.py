@@ -2,7 +2,7 @@
 
 Live reference resolution (docs/design/standard-library.md §3): a project's
 Neither config file ever contains a copy of the standard's types/link_types/
-field_sets -- `refdes-project.yaml` holds only a pointer to them
+sets -- `refdes-project.yaml` holds only a pointer to them
 (`standard: {base, version, presets}`). This module resolves that pointer fresh
 against the bundled package data on every `load_project()` call and returns
 plain dicts in exactly the shape `refdes-schema.yaml`'s own
@@ -29,7 +29,7 @@ _STANDARDS_ROOT = os.path.join(os.path.dirname(__file__), "standards")
 _KNOWN_BASES = ("hardware",)
 
 _NAMESPACE_LABEL = {
-    "field_sets": "field_set",
+    "sets": "set",
     "link_types": "link_type",
     "types": "type",
 }
@@ -38,28 +38,28 @@ _NAMESPACE_LABEL = {
 def resolve_namespaces(
     raw: dict[str, Any], require_rejection_rationale: bool
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
-    """Return (field_sets, link_types, types) as plain dicts, fully merged.
+    """Return (sets, link_types, types) as plain dicts, fully merged.
 
     The three namespaces of `refdes-schema.yaml`, resolved base -> presets ->
-    project overlay. Types come back `include:`-free; the field sets are the
+    project overlay. Types come back `include:`-free; the sets are the
     one namespace the resolved types no longer show any trace of, so anything
     that reports on the vocabulary (vocabulary.py) needs them separately --
     `include:` is expanded into `fields:` and popped.
 
     `standard:` absent, `None`, or the string "none" is the explicit escape
     hatch (docs/design/standard-library.md §3): today's fully self-declared
-    behavior, field_sets/include still available for the project's own types.
+    behavior, sets/include still available for the project's own types.
     """
     standard_cfg = raw.get("standard", "none")
     if standard_cfg is None:
         standard_cfg = "none"
 
     if standard_cfg == "none":
-        base_field_sets: dict[str, Any] = {}
+        base_sets: dict[str, Any] = {}
         base_link_types: dict[str, Any] = {}
         base_types: dict[str, Any] = {}
     elif isinstance(standard_cfg, dict):
-        base_field_sets, base_link_types, base_types = _load_standard(
+        base_sets, base_link_types, base_types = _load_standard(
             standard_cfg, require_rejection_rationale
         )
     else:
@@ -68,11 +68,11 @@ def resolve_namespaces(
             f"'version', and optional 'presets', got {standard_cfg!r}"
         )
 
-    field_sets = _merge_field_sets(base_field_sets, raw.get("field_sets") or {})
+    sets = _merge_sets(base_sets, raw.get("sets") or {})
     link_types = _merge_named_mapping(base_link_types, raw.get("link_types") or {})
-    types = _merge_types(base_types, raw.get("types") or {}, field_sets)
+    types = _merge_types(base_types, raw.get("types") or {}, sets)
 
-    return field_sets, link_types, types
+    return sets, link_types, types
 
 
 def resolve_schema(
@@ -80,7 +80,7 @@ def resolve_schema(
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """The two-value form of `resolve_namespaces`, for callers that have no
     use for the field-set namespace."""
-    _field_sets, link_types, types = resolve_namespaces(raw, require_rejection_rationale)
+    _sets, link_types, types = resolve_namespaces(raw, require_rejection_rationale)
     return link_types, types
 
 
@@ -119,14 +119,19 @@ def _load_standard(
 
     base_doc = _read_yaml(base_path)
 
-    field_sets: dict[str, Any] = dict(base_doc.get("field_sets") or {})
+    # Released bundles (hardware v1, v2) predate the field_sets -> sets rename
+    # and are frozen byte-identical once released (base.yaml's own header), so
+    # the loader reads either key from a bundle file. Project overlays and
+    # presets -- never frozen -- speak only `sets:`; a `field_sets:` in an
+    # overlay is the rename error in schema._load_schema_overlay.
+    sets: dict[str, Any] = dict(base_doc.get("sets") or base_doc.get("field_sets") or {})
     link_types: dict[str, Any] = dict(base_doc.get("link_types") or {})
     types: dict[str, Any] = dict(base_doc.get("types") or {})
 
     # name -> where it came from, for collision diagnostics naming both sides.
     origin: dict[tuple[str, str], str] = {}
-    for name in field_sets:
-        origin[("field_sets", name)] = f"the {base_name} standard"
+    for name in sets:
+        origin[("sets", name)] = f"the {base_name} standard"
     for name in link_types:
         origin[("link_types", name)] = f"the {base_name} standard"
     for name in types:
@@ -162,7 +167,7 @@ def _load_standard(
             )
         preset_doc = _read_yaml(preset_path)
         for ns_name, accumulator in (
-            ("field_sets", field_sets),
+            ("sets", sets),
             ("link_types", link_types),
             ("types", types),
         ):
@@ -179,7 +184,7 @@ def _load_standard(
                 accumulator[name] = spec
                 origin[key] = f"preset {preset_name!r}"
 
-    return field_sets, link_types, types
+    return sets, link_types, types
 
 
 def _read_yaml(path: str) -> dict[str, Any]:
@@ -290,8 +295,8 @@ def _merge_named_mapping(base: dict[str, Any], overlay: dict[str, Any]) -> dict[
     return result
 
 
-def _merge_field_sets(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
-    """Each field_set is itself a {field_name: fieldspec} map, merged by key --
+def _merge_sets(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
+    """Each set is itself a {field_name: fieldspec} map, merged by key --
     the same rule a type's own `fields:` uses against its inherited fields."""
     result = dict(base)
     for name, spec in overlay.items():
@@ -303,11 +308,11 @@ def _merge_field_sets(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str
 
 
 def _expand_include(
-    type_raw: dict[str, Any], field_sets: dict[str, Any], path: str = "types"
+    type_raw: dict[str, Any], sets: dict[str, Any], path: str = "types"
 ) -> dict[str, Any]:
     """Resolve `include:` into `fields:`, and drop `include:` from the result.
 
-    Field sets are merged in list order (a later include wins over an earlier
+    Sets are merged in list order (a later include wins over an earlier
     one on a name collision), then the type's own `fields:` are overlaid on top
     -- a type's own declaration always wins over anything it includes.
     """
@@ -315,23 +320,23 @@ def _expand_include(
     includes = type_raw.pop("include", None) or []
     if isinstance(includes, str):
         # A bare `include: common` used to iterate per character and report an
-        # unknown field_set 'c'. configcheck rejects it for a project's own
+        # unknown set 'c'. configcheck rejects it for a project's own
         # types; this is the same message for the bundle path.
         raise SchemaError(
-            f"{path}.include must be a list of field_set names, got "
+            f"{path}.include must be a list of set names, got "
             f"{includes!r} -- write include: [{includes}]"
         )
     own_fields = type_raw.get("fields") or {}
 
     merged_fields: dict[str, Any] = {}
     for set_name in includes:
-        if set_name not in field_sets:
-            close = difflib.get_close_matches(str(set_name), sorted(field_sets), n=1, cutoff=0.5)
+        if set_name not in sets:
+            close = difflib.get_close_matches(str(set_name), sorted(sets), n=1, cutoff=0.5)
             hint = f" Did you mean {close[0]!r}?" if close else ""
             raise SchemaError(
-                f"{path}.include names unknown field_set {set_name!r}.{hint}"
+                f"{path}.include names unknown set {set_name!r}.{hint}"
             )
-        merged_fields.update(field_sets[set_name] or {})
+        merged_fields.update(sets[set_name] or {})
     merged_fields.update(own_fields)
 
     type_raw["fields"] = merged_fields
@@ -354,11 +359,11 @@ def _merge_type_dict(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str,
 
 
 def _merge_types(
-    base_types: dict[str, Any], project_types_raw: dict[str, Any], field_sets: dict[str, Any]
+    base_types: dict[str, Any], project_types_raw: dict[str, Any], sets: dict[str, Any]
 ) -> dict[str, Any]:
     result: dict[str, Any] = {}
     for tname, traw in base_types.items():
-        result[tname] = _expand_include(traw, field_sets, f"types.{tname}")
+        result[tname] = _expand_include(traw, sets, f"types.{tname}")
 
     for tname, traw in project_types_raw.items():
         if traw is None:
@@ -368,7 +373,7 @@ def _merge_types(
             # that already runs over the final merged schema in schema.py.
             result.pop(tname, None)
             continue
-        expanded_overlay = _expand_include(traw, field_sets, f"types.{tname}")
+        expanded_overlay = _expand_include(traw, sets, f"types.{tname}")
         if tname in result:
             result[tname] = _merge_type_dict(result[tname], expanded_overlay)
         else:

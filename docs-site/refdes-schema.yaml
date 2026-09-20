@@ -1,4 +1,4 @@
-# The documentation project's own schema overlay: types, link_types, field_sets
+# The documentation project's own schema overlay: types, link_types, sets
 # only. Optional — a project that takes its whole vocabulary from the bundled
 # standard has no file here at all.
 

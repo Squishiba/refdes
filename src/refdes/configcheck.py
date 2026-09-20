@@ -342,10 +342,10 @@ class BlockChecker:
 
     def field_spec(self, spec: Any, path: str) -> dict | None:
         """One field definition, as it appears under a type's `fields:` or a
-        field set's own mapping. None is a deletion of an inherited field."""
+        set's own mapping. None is a deletion of an inherited field."""
         if spec is None:
             return None
-        block = self.mapping(spec, path, "a mapping of field settings")
+        block = self.mapping(spec, path, "a mapping of settings")
         self.keys(block, FIELD_KEYS, path, "a field spec")
         declared = block.get("type", "text")
         if declared not in FIELD_TYPES:
@@ -366,12 +366,12 @@ class BlockChecker:
             self.field_spec(fspec, f"{path}.{fname}")
         return fields
 
-    def field_sets(self, raw: dict) -> None:
+    def sets(self, raw: dict) -> None:
         block = self.mapping(
-            raw.get("field_sets"), "field_sets", "a mapping of field set name to its fields"
+            raw.get("sets"), "sets", "a mapping of set name to its fields"
         )
         for name, entry in block.items():  # the set names themselves are the project's own
-            path = f"field_sets.{name}"
+            path = f"sets.{name}"
             if entry is None:
                 continue
             self.field_map(entry, path)
@@ -407,7 +407,7 @@ class BlockChecker:
         self.string(spec.get("plural"), f"{path}.plural")
         self.definition(spec.get("doc"), f"{path}.doc")
         if "include" in spec:
-            self.string_list(spec.get("include"), f"{path}.include", "a list of field_set names")
+            self.string_list(spec.get("include"), f"{path}.include", "a list of set names")
         self.field_map(spec.get("fields") or {}, f"{path}.fields")
         links = self.mapping(spec.get("links"), f"{path}.links", "a mapping of link name to allowed target types")
         for lname, targets in links.items():
@@ -447,13 +447,13 @@ def validate_settings(raw: dict[str, Any], source: str) -> dict[str, Any]:
 
 
 def validate_overlay(raw: dict[str, Any], source: str) -> None:
-    """Validate the project's own `types:`/`link_types:`/`field_sets:`.
+    """Validate the project's own `types:`/`link_types:`/`sets:`.
 
     Structure only: the merged result still goes through `load_project`'s
     parsing loop, which owns the cross-checks (an unknown link name, a
     `required_when:` pointing at a field that is not there).
     """
     check = BlockChecker(source)
-    check.field_sets(raw)
+    check.sets(raw)
     check.link_types(raw)
     check.types(raw)

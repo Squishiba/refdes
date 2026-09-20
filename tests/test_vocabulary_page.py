@@ -39,7 +39,7 @@ link_types:
   satisfies:   { inverse: satisfied_by,  label: Satisfies, doc: "A decision meets a requirement." }
   documents:   { inverse: documented_by, label: Documents }
   tracks:      { inverse: tracked_by,    label: Tracks }
-field_sets:
+sets:
   provenance:
     tags: { type: list, on_change: ignore, doc: "Free-form labels." }
 types:
@@ -100,12 +100,12 @@ def _term_block(html, anchor):
 
 
 def test_every_resolved_term_has_an_entry(vocab_project):
-    """Types, verbs, field sets and the engine-reserved keys: nothing the
+    """Types, verbs, sets and the engine-reserved keys: nothing the
     resolved schema knows about is missing, and nothing extra appears."""
     vocab = vocabulary.entries(vocab_project)
     assert set(_group(vocab, "types")) == set(vocab_project.types)
     assert set(_group(vocab, "links")) == set(vocab_project.link_types)
-    assert set(_group(vocab, "field_sets")) == set(vocab_project.field_sets)
+    assert set(_group(vocab, "sets")) == set(vocab_project.sets)
     assert set(_group(vocab, "keys")) == set(vocabulary.RESERVED_KEYS)
 
 
@@ -193,8 +193,8 @@ def test_pointed_at_by_resolves_a_verb_declared_by_its_inverse_name(vocab_projec
     assert verbs["documents"].declared_on == ["note"]
 
 
-def test_field_set_entry_lists_its_fields_and_includers(vocab_project):
-    sets = _group(vocabulary.entries(vocab_project), "field_sets")
+def test_set_entry_lists_its_fields_and_includers(vocab_project):
+    sets = _group(vocabulary.entries(vocab_project), "sets")
     assert [f.name for f in sets["provenance"].fields] == ["tags"]
     assert sets["provenance"].included_by == ["decision"]
 

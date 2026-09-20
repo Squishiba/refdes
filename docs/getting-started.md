@@ -48,7 +48,7 @@ here defines a `requirement` or a `link_types:` block — that all comes from
 the pinned standard, resolved live from the installed `refdes` package. If
 you define types of your own, they go in an optional `refdes-schema.yaml`
 beside this file — that one holds only `types:`, `link_types:`, and
-`field_sets:`. See [the standard library](standard-library.md) for what it
+`sets:`. See [the standard library](standard-library.md) for what it
 covers, and `refdes init --standard none` if you'd rather author every type
 by hand, as every project did before this existed. `init` also writes
 `.vscode/settings.json`, wiring up field/link completion for

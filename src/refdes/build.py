@@ -336,7 +336,7 @@ def lint_own_tags(project: Project) -> None:
     """Finding 11, sequenced after finding 9 (`refdes ls --tag`): warn on an
     item with no `tags:` of its own -- opt-in, following `boards.lint_tokens()`'s
     own precedent for an advisory lint, since `tags:` is optional by design
-    (`field_sets.provenance`, no `required:`) and plenty of projects will
+    (`sets.provenance`, no `required:`) and plenty of projects will
     reasonably not want the noise.
 
     A bare presence check (warn when `tags:` is unset) would fire on

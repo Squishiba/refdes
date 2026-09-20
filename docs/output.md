@@ -160,7 +160,7 @@ The same forest is also a block: `{{tree}}` in a page, optionally
 ## The vocabulary page
 
 `vocabulary.html` is the project's vocabulary in one place: every **item
-type**, **link verb**, **field set**, and **engine-reserved key** the
+type**, **link verb**, **set**, and **engine-reserved key** the
 resolved schema knows about, each with its definition, its scope, where it
 points and what points at it, and its fields.
 

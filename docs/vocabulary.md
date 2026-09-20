@@ -1,7 +1,7 @@
 # Vocabulary
 
 Every term a refdes schema resolves to, defined in one place: **item types**,
-**link verbs**, **field sets**, and the **engine-reserved keys** — the ones
+**link verbs**, **sets**, and the **engine-reserved keys** — the ones
 an item carries whether the project declared them or not.
 
 The page below is generated from the standard this repo pins, and a built
@@ -529,7 +529,7 @@ A test proves a requirement or bound. Counts toward coverage when the test's sta
   verified_by: [TST-PWR-001]
 ```
 
-## Field sets
+## Sets
 
 ### `citations`
 

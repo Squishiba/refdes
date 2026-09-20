@@ -35,12 +35,12 @@ from helpers import (
 #
 # A project's config is two files now: `refdes-project.yaml`, the marker holding
 # every project setting, and the optional `refdes-schema.yaml` holding only the
-# project's own `types:`/`link_types:`/`field_sets:`. `refdes.yaml` is retired.
+# project's own `types:`/`link_types:`/`sets:`. `refdes.yaml` is retired.
 #
 # Test fixtures still carry their config as one combined module constant, and
 # `write_project_config` is what turns that constant into the two real files.
 
-SCHEMA_KEYS = ("types", "link_types", "field_sets")
+SCHEMA_KEYS = ("types", "link_types", "sets")
 PROJECT_FILE = "refdes-project.yaml"
 SCHEMA_FILE = "refdes-schema.yaml"
 
@@ -81,7 +81,7 @@ def write_project_config(root, combined_yaml: str):
 
     `combined_yaml` is the single combined text a fixture already holds as a
     module constant; it is split by top-level key -- `types:`, `link_types:` and
-    `field_sets:` go to `refdes-schema.yaml`, everything else to
+    `sets:` go to `refdes-schema.yaml`, everything else to
     `refdes-project.yaml` -- with comments intact. `refdes-schema.yaml` is only
     written when the config actually declares a schema of its own, matching the
     common real-world case of a project with no overlay file.

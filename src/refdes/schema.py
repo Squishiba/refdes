@@ -2,7 +2,7 @@
 
 `refdes-project.yaml` is the project marker and holds every project setting;
 `refdes-schema.yaml` is the optional overlay holding only the project's own
-`types:`/`link_types:`/`field_sets:`. `refdes.yaml` is retired -- a project
+`types:`/`link_types:`/`sets:`. `refdes.yaml` is retired -- a project
 carrying one gets an error naming both replacements, never a silent ignore.
 """
 
@@ -39,7 +39,7 @@ from .parse import yaml_safe_load
 # is what makes a directory a refdes project.
 PROJECT_SETTINGS_NAME = "refdes-project.yaml"
 
-# The project's own schema overlay -- `types:`, `link_types:`, `field_sets:`
+# The project's own schema overlay -- `types:`, `link_types:`, `sets:`
 # only. Optional: most projects take their whole vocabulary from the bundled
 # standard and never need one.
 SCHEMA_NAME = "refdes-schema.yaml"
@@ -52,7 +52,7 @@ LEGACY_CONFIG_NAME = "refdes.yaml"
 CONFIG_NAME = PROJECT_SETTINGS_NAME
 
 # The three namespaces the overlay file owns.
-SCHEMA_KEYS = frozenset({"types", "link_types", "field_sets"})
+SCHEMA_KEYS = frozenset({"types", "link_types", "sets"})
 
 # The setting keys that moved here from the retired refdes.yaml.
 _PROJECT_SETTING_KEYS = {
@@ -85,7 +85,7 @@ LEGACY_CONFIG_ERROR = (
     f"history:, standard:, equations:, imports:, and the process settings like "
     f"sigfigs: and release_gate:) into {PROJECT_SETTINGS_NAME}, which is now the "
     f"project marker, and move any schema overlay (types:, link_types:, "
-    f"field_sets:) into {SCHEMA_NAME}, which is optional -- omit it entirely if "
+    f"sets:) into {SCHEMA_NAME}, which is optional -- omit it entirely if "
     f"the project declares no types of its own. Then delete {LEGACY_CONFIG_NAME}: "
     f"nothing is read from it any more, so a key left behind there is a setting "
     f"that silently stops applying."
@@ -112,7 +112,7 @@ def _validate_settings(raw: dict[str, Any]) -> dict[str, Any]:
             raise _settings_error(
                 f"{key} does not belong here -- the project's own schema overlay "
                 f"lives in {SCHEMA_NAME}, which holds types:, link_types: and "
-                f"field_sets: and nothing else"
+                f"sets: and nothing else"
             )
         if key not in _KNOWN_SETTINGS:
             import difflib
@@ -253,10 +253,17 @@ def _load_schema_overlay(root: str) -> dict[str, Any]:
     for key in raw:
         if key in SCHEMA_KEYS:
             continue
+        if key == "field_sets":
+            raise SchemaError(
+                f"{SCHEMA_NAME}: field_sets: was renamed to sets: -- the key "
+                "changed when sets widened beyond fields (docs/design/"
+                "composition.md); rename it in place, the entries themselves "
+                "are unchanged"
+            )
         what = "a project setting" if key in _KNOWN_SETTINGS else "not a schema key"
         raise SchemaError(
             f"{SCHEMA_NAME}: {key!r} is {what} -- this file holds only types:, "
-            f"link_types: and field_sets:; every setting lives in "
+            f"link_types: and sets:; every setting lives in "
             f"{PROJECT_SETTINGS_NAME}"
         )
     return raw
@@ -354,7 +361,7 @@ def find_config(start: str = ".") -> str:
         f"no {PROJECT_SETTINGS_NAME} found in {os.path.abspath(start)} or any parent "
         f"directory -- that file is the project marker, and holds every project "
         f"setting; {SCHEMA_NAME} is the optional overlay holding only types:, "
-        f"link_types: and field_sets:"
+        f"link_types: and sets:"
     )
 
 
@@ -481,7 +488,7 @@ def load_project(config_path: str | None = None, start: str = ".") -> Project:
     validate_overlay(overlay, SCHEMA_NAME)
     # The two are disjoint by validation, so one dict is all
     # standards.resolve_schema needs: `standard:` from the settings, the
-    # project's own types:/link_types:/field_sets: from the overlay.
+    # project's own types:/link_types:/sets: from the overlay.
     raw = {**raw, **overlay}
 
     equations = _load_equations(raw)
@@ -498,7 +505,7 @@ def load_project(config_path: str | None = None, start: str = ".") -> Project:
     # base -> presets -> this project's own overlay, with `include:` resolved
     # into `fields:` -- everything below reads them exactly as it always read
     # raw.get("link_types")/raw.get("types") directly.
-    resolved_field_sets, resolved_link_types, resolved_types = standards.resolve_namespaces(
+    resolved_sets, resolved_link_types, resolved_types = standards.resolve_namespaces(
         raw, settings["require_rejection_rationale"]
     )
 
@@ -719,7 +726,7 @@ def load_project(config_path: str | None = None, start: str = ".") -> Project:
         types=types,
         link_types=link_types,
         inverse_of=inverse_of,
-        field_sets=resolved_field_sets,
+        sets=resolved_sets,
         default_on_change=default_on_change,
         id_width=id_cfg["width"],
         id_ledger=id_cfg["ledger"],

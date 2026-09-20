@@ -73,7 +73,7 @@ def init(
 ) -> str:
     """Write a minimal `refdes-project.yaml` that points at the standard rather than
     copying it (docs/design/standard-library.md §3) -- no `types:`,
-    `link_types:`, or `field_sets:` key anywhere in the file; that absence
+    `link_types:`, or `sets:` key anywhere in the file; that absence
     is the point. `standard=None` writes `standard: none`, the explicit
     escape hatch. `<version>` is never written as the literal string
     "latest": resolved here, once, to the concrete integer the installed
@@ -212,7 +212,7 @@ def _read_standard_cfg(raw: dict[str, Any]) -> dict[str, Any]:
 def add_preset(project_root: str, preset_name: str) -> None:
     """Validate `preset_name` exists at the project's pinned version, then
     append it to `standard.presets:`. On the next load its types, links,
-    and field sets simply join the merged schema -- no migration step, no
+    and sets simply join the merged schema -- no migration step, no
     re-running init (docs/design/standard-library.md §8)."""
     config_path = os.path.join(project_root, "refdes-project.yaml")
     with open(config_path, encoding="utf-8") as fh:
@@ -242,7 +242,7 @@ def add_preset(project_root: str, preset_name: str) -> None:
 
 def remove_preset(project_root: str, preset_name: str) -> list:
     """Remove `preset_name` from `standard.presets:`, reporting what that
-    breaks BEFORE writing the change: every type, link, and field set the
+    breaks BEFORE writing the change: every type, link, and set the
     preset provided disappears from the merged schema on the next load, so
     an item still using one of them needs to be seen now, not discovered on
     the next unrelated build (docs/design/standard-library.md §8).

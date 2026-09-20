@@ -91,12 +91,12 @@ def test_doc_accepted_on_a_link_type(tmp_path):
     assert project.link_types["satisfies"].doc == DOC
 
 
-def test_doc_accepted_on_a_field_set_entry(tmp_path):
-    """A field set's entries are field specs, so `doc:` rides along into every
+def test_doc_accepted_on_a_set_entry(tmp_path):
+    """A set's entries are field specs, so `doc:` rides along into every
     type that `include:`s the set -- the definition is written once."""
     project = _load(
         tmp_path,
-        "field_sets:\n"
+        "sets:\n"
         "  common:\n"
         f"    title: {{type: text, doc: {DOC}}}\n"
         "types:\n"
@@ -164,15 +164,15 @@ def test_a_bad_doc_on_a_link_type_names_the_link_type(tmp_path):
     assert "link_types.satisfies.doc" in str(exc.value)
 
 
-def test_a_bad_doc_on_a_field_set_entry_names_the_set(tmp_path):
+def test_a_bad_doc_on_a_set_entry_names_the_set(tmp_path):
     with pytest.raises(SchemaError) as exc:
         _load(
             tmp_path,
-            "field_sets:\n  common:\n    title: {type: text, doc: 42}\n"
+            "sets:\n  common:\n    title: {type: text, doc: 42}\n"
             "types:\n  note:\n    prefix: NTE\n    include: [common]\n"
             "    fields: {body: {type: text}}\n",
         )
-    assert "field_sets.common.title.doc" in str(exc.value)
+    assert "sets.common.title.doc" in str(exc.value)
 
 
 # ------------------------------------------------------------- the exports

@@ -12,7 +12,7 @@ and nothing in this file reads a project's overlay.
 
 Why the check reads the bundle two ways:
 - the raw YAML files catch every declaration where it is written, including
-  `field_sets:` entries, which the resolved schema pops after expanding
+  `sets:` entries, which the resolved schema pops after expanding
   `include:` into `fields:`;
 - the resolved-schema pass catches anything a merge could introduce -- a field
   that reaches a type by `include:` without a definition, a preset layered on
@@ -68,13 +68,13 @@ def _missing_definitions(label: str, doc: dict) -> list[str]:
         if spec is None:
             continue
         needs(f"link_types.{name}", spec)
-    for set_name, entry in (doc.get("field_sets") or {}).items():
+    for set_name, entry in (doc.get("sets") or {}).items():
         if entry is None:
             continue
         for fname, fspec in entry.items():
             if fspec is None:
                 continue
-            needs(f"field_sets.{set_name}.{fname}", fspec)
+            needs(f"sets.{set_name}.{fname}", fspec)
     return missing
 
 

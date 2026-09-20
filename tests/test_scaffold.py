@@ -53,7 +53,8 @@ def test_init_writes_the_exact_documented_file(tmp_path):
     text = open(path, encoding="utf-8").read()
     assert "types:" not in text
     assert "link_types:" not in text
-    assert "field_sets:" not in text
+    # line-anchored: `presets:` contains the substring `sets:`
+    assert "\nsets:" not in text
     assert "standard:" in text
     assert "base: hardware" in text
     # The concrete integer, never the word "latest" -- and read from the

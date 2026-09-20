@@ -16,7 +16,7 @@ refuses rather than reading quietly. Move every project setting — `site:`,
 `id:`, `boards:`, `workspaces:`, `units:`, `history:`, `standard:`,
 `equations:`, `imports:`, and the process settings like `sigfigs:` and
 `release_gate:` — into `refdes-project.yaml`, and move any
-`types:`/`link_types:`/`field_sets:` into the optional `refdes-schema.yaml`
+`types:`/`link_types:`/`sets:` into the optional `refdes-schema.yaml`
 (omit that file entirely if your whole vocabulary comes from the standard).
 Then delete `refdes.yaml` — nothing is read from it any more, so a key left
 behind is a setting that silently stops applying.

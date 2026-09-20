@@ -312,7 +312,7 @@ item actually asserts, so a change there does. Choosing between `note:` and
 this item as needing another look, it's `rationale:` (or `body:`, if it's
 content rather than a *reason*); if not, it's `note:`.
 
-`source` and `note` come from `field_sets.provenance` (see [`field_sets` and
+`source` and `note` come from `sets.provenance` (see [`sets` and
 `include:`](standard-library.md#field-sets-and-include)); `rationale` is
 declared per type, and required on some (`decision.rationale`, when `status:
 rejected`); `body` is a reserved key, not a field at all — see [bodies in

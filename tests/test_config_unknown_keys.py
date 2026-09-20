@@ -443,32 +443,41 @@ def test_link_types_block_must_be_a_mapping(tmp_path):
     _wrong_type(tmp_path, "link_types")
 
 
-# -------------------------------------------------------------- field_sets:
+# -------------------------------------------------------------- sets:
 
 
-def test_field_set_field_unknown_key_is_an_error(tmp_path):
-    """A field_set's entries go through the same field-spec parsing as a
+def test_set_field_unknown_key_is_an_error(tmp_path):
+    """A set's entries go through the same field-spec parsing as a
     type's own `fields:`, so they get the same validation."""
     _write(
         tmp_path,
-        schema="field_sets:\n  common:\n    title: {typ: text, requird: true}\n"
+        schema="sets:\n  common:\n    title: {typ: text, requird: true}\n"
         "types:\n  note:\n    prefix: NTE\n    include: [common]\n"
         "    fields:\n      body: {type: text}\n",
     )
-    _unknown(tmp_path, "field_sets.common.title.requird", "requird", hint="required")
+    _unknown(tmp_path, "sets.common.title.requird", "requird", hint="required")
 
 
-def test_field_set_must_be_a_mapping(tmp_path):
+def test_set_must_be_a_mapping(tmp_path):
     _write(
         tmp_path,
-        schema="field_sets:\n  common: whatever\n" + MIN_SCHEMA,
+        schema="sets:\n  common: whatever\n" + MIN_SCHEMA,
     )
-    _wrong_type(tmp_path, "field_sets.common")
+    _wrong_type(tmp_path, "sets.common")
 
 
-def test_field_sets_block_must_be_a_mapping(tmp_path):
-    _write(tmp_path, schema="field_sets: common\n" + MIN_SCHEMA)
-    _wrong_type(tmp_path, "field_sets")
+def test_sets_block_must_be_a_mapping(tmp_path):
+    _write(tmp_path, schema="sets: common\n" + MIN_SCHEMA)
+    _wrong_type(tmp_path, "sets")
+
+
+def test_field_sets_in_the_overlay_is_the_rename_error(tmp_path):
+    """`field_sets:` was renamed to `sets:` when sets widened beyond fields
+    (docs/design/composition.md open question 1). A project overlay still
+    writing the old key gets the rename named, not a bare unknown-key."""
+    _write(tmp_path, schema="field_sets:\n  common: {title: {type: text}}\n" + MIN_SCHEMA)
+    message = _error(tmp_path)
+    assert "field_sets: was renamed to sets:" in message, message
 
 
 # ---------------------------------------------------------------- CLI shape
@@ -504,13 +513,13 @@ def test_model_blocks_are_still_validated(tmp_path):
 
 def test_legitimate_shapes_still_load(tmp_path):
     """The validation must not eat the shapes that are legal today: `null`
-    deletes an inherited type/link type/field set, a board or workspace entry
+    deletes an inherited type/link type/set, a board or workspace entry
     may be empty, and a project with no overlay file is the common case."""
     _write(
         tmp_path,
         "boards:\n  board-a: {}\n",
         schema="link_types:\n  satisfies: {inverse: satisfied_by}\n"
-        "field_sets:\n  common: {title: {type: text}}\n"
+        "sets:\n  common: {title: {type: text}}\n"
         "types:\n  note:\n    prefix: NTE\n    fields: {title: {type: text}}\n"
         "  removed: null\n",
     )
