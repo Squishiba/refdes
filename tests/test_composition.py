@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import pytest
 from conftest import write_project_config
+from helpers import _build_at
 
 from refdes.schema import SchemaError, load_project
 
@@ -278,6 +279,56 @@ def test_set_name_colliding_with_type_name_is_an_error(tmp_path):
         )
     assert "sets.note collides with types.note" in str(exc.value)
     assert "a name may be a type or a set, not both" in str(exc.value)
+
+
+# ------------------------------------------- sets confer no substitutability
+
+
+def test_including_a_set_confers_no_substitutability(tmp_path):
+    """Two types sharing a set are no more interchangeable than two types
+    that happen to have the same fields: a link target list naming one still
+    rejects the other (docs/design/composition.md §6.3)."""
+    write_project_config(
+        tmp_path,
+        "site: { title: T, out: _site }\n"
+        "link_types:\n"
+        "  refines: { inverse: refined_by }\n"
+        "sets:\n"
+        "  common:\n"
+        "    fields:\n"
+        "      title: { type: text, required: true }\n"
+        "types:\n"
+        "  note:\n"
+        "    prefix: NTE\n"
+        "    include: [common]\n"
+        "    links:\n"
+        "      refines: [note]\n"
+        "  other:\n"
+        "    prefix: OTH\n"
+        "    include: [common]\n",
+    )
+    items = tmp_path / "items"
+    items.mkdir()
+    (items / "r.yaml").write_text(
+        "defaults: { type: note, prefix: NTE }\n"
+        "items:\n"
+        "  - id: NTE-001\n"
+        "    title: A note\n"
+        "    refines: [OTH-001]\n",
+        encoding="utf-8",
+    )
+    (items / "o.yaml").write_text(
+        "defaults: { type: other, prefix: OTH }\n"
+        "items:\n"
+        "  - id: OTH-001\n"
+        "    title: An other\n",
+        encoding="utf-8",
+    )
+    project = _build_at(tmp_path)
+    assert any(
+        "may point at" in d.message and "OTH-001" in d.message
+        for d in project.errors
+    ), [d.message for d in project.errors]
 
 
 # ------------------------------------------------------- the shadow warning
