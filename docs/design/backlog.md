@@ -2797,4 +2797,4 @@ picture had stopped matching the thing it pictures.
 ### Living notes, history and task lists -- design draft
 
 See [living-notes.md](living-notes.md) for the draft exploring dynamic notes,
-recorded history, and a task list that follows a thread tip.
+captured history, and a task list that follows a thread tip.

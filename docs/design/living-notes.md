@@ -1,6 +1,6 @@
 Status: Decided -- ready to plan implementation
 
-# Living notes, recorded history, and task lists
+# Living notes, captured history, and task lists
 
 ## Decisions (2026-09-16)
 
@@ -8,12 +8,12 @@ Jared answered all eight open questions. They are decisions, not options under
 continued review; §9 records each answer with the reasoning and the alternatives
 considered and rejected.
 
-1. **Record moment.** A `follows:` edge appearing in a successor is the record
+1. **Capture moment.** A `follows:` edge appearing in a successor is the capture
    event for its predecessor, whether the edge was hand-authored or written by a
-   continuation command. Manual `refdes history record <item>` covers terminal
-   and unthreaded notes, and `revision`/`release` record baseline events for
+   continuation command. Manual `refdes history capture <item>` covers terminal
+   and unthreaded notes, and `revision`/`release` capture baseline events for
    their own purpose. Git hooks are never correctness machinery.
-2. **A recorded edit is visible, never fatal.** It is a marker on the item and a
+2. **A captured edit is visible, never fatal.** It is a marker on the item and a
    diagnostic, never a build failure. A project may opt into a release-gate rule
    for it; the note type never blocks on its own.
 3. **Snapshot fidelity.** A canonical semantic item payload plus body. Git stays
@@ -27,7 +27,7 @@ considered and rejected.
    rewrite friction.
 7. **Worklist breadth.** Every derived row in §5's table, under five binding
    rules (§5). One of them is an optional, off-by-default release-gate rule.
-8. **Hand-authored `follows:` records history automatically.** This reverses the
+8. **Hand-authored `follows:` captures history automatically.** This reverses the
    draft's recommendation: writing the edge *is* the explicit act. §2 states the
    five cases this commits the design to handling and says plainly which of them
    cannot be handled well.
@@ -43,16 +43,16 @@ and exports coverage, calculated values, checks, links, and diagnostics
 (`src/refdes/cli.py:405-433`, `src/refdes/render.py:511-643`).
 
 Do not make an entry permanently uneditable. Replace the current build-time
-seal with a **recorded snapshot**: an entry stays editable, but, after a record
+seal with a **captured snapshot**: an entry stays editable, but, after a capture
 moment, refdes compares its live semantic content with the stored snapshot and
-shows **edited after recorded** with the recorded content available to inspect.
-The record moment is **a `follows:` edge naming that entry as its predecessor**,
+shows **edited after captured** with the captured content available to inspect.
+The capture moment is **a `follows:` edge naming that entry as its predecessor**,
 captured by the first writable load that resolves the edge — the same load that
 already rewrites the edge's own spelling (`src/refdes/links.py:592-693`, called
 from `_load()` at `src/refdes/cli.py:125`). Writing the edge is the authoring
 act; there is no second command to remember. A terminal or unthreaded note is
-recorded by `refdes history record <item>`, and `revision`/`release` record
-baseline events. Rendering never records: no snapshot is created by
+captured by `refdes history capture <item>`, and `revision`/`release` capture
+baseline events. Rendering never captures: no snapshot is created by
 `render_site()`, a `--dry-run`, or any `--no-write` run.
 
 A non-locking stale-tip prompt — "is this tip still in progress?" after a
@@ -135,7 +135,7 @@ computed by `check`, `index`, or `ls`.
 | Write associated with a normal build | Where it happens now | Available without a site build? | Decision |
 | --- | --- | --- | --- |
 | `_site/` HTML, `items.json`, copied assets, and the output manifest | `cmd_build()` calls `render_site()`; the renderer writes/prunes its manifest (`src/refdes/cli.py:288-290`, `src/refdes/render.py:641-655,723-738,1109`). | This is build's declared output, not incidental state. `--no-write` intentionally still writes it (`docs/design/keys.md:374-382`). | Keep it as output; never use it as an event that changes source/history state. |
-| New append-only seals; reseals; board-split seal migration | `build()` calls `seal.verify(... write=seal_write)` (`src/refdes/build.py:1859-1861`); new entries are written only when `write` is true (`src/refdes/seal.py:222-342`). | **No:** `check`/`index` verify only. | Replace "build seals new entry" with explicit recorded-snapshot events. Preserve current files during migration (§8). |
+| New append-only seals; reseals; board-split seal migration | `build()` calls `seal.verify(... write=seal_write)` (`src/refdes/build.py:1859-1861`); new entries are written only when `write` is true (`src/refdes/seal.py:222-342`). | **No:** `check`/`index` verify only. | Replace "build seals new entry" with explicit captured-snapshot events. Preserve current files during migration (§8). |
 | Board/workspace membership manifest, including accepted moves and stale-entry pruning | `build()` calls `boards.verify()` (`src/refdes/build.py:1860-1862`); it writes only when changed and write-enabled (`src/refdes/boards.py:486-521`). | **No:** checks discover drift, but do not record it. | Keep a deliberate acceptance action; it already has one (`build --accept-board-move`). Do not make it dependent on HTML rendering. |
 | Schema cache, key minting, composite-link/check expansion, and `follows` freezing | These occur in `_load()` for **any writable loading command**, before build (`src/refdes/cli.py:69-136`). | **Yes, but with writes**: `check`, `index`, `ls`, and others load this way; `--no-write` gates it. | This is the strongest counterexample to "only build writes," and the reason §2 puts history capture here rather than inventing a new write path. |
 | Citation lockfile/vendor cache | Not a build side effect: `citations.verify()` is hermetic (`src/refdes/citations.py:483-547`); only `refdes fetch` writes pins/vendor bytes (`src/refdes/citations.py:360-372,806-1001`). | **Yes**, via explicit fetch. | Leave it separate. Citation pinning is a different intentional record. |
@@ -150,7 +150,7 @@ about load: **no render, `--dry-run`, or `--no-write` pass may create an
 author-history event.** A writable load that resolves a new `follows:` edge may,
 and does (§2).
 
-## 2. When does an entry become recorded history?
+## 2. When does an entry become captured history?
 
 Today an append-only type is sealed the first write-enabled build sees it.
 A later hash mismatch is an error unless `--reseal` accepts the changed hash
@@ -159,49 +159,49 @@ A later hash mismatch is an error unless `--reseal` accepts the changed hash
 That detects edits rather than physically preventing them, but it makes
 ordinary work-in-progress edits build failures.
 
-Decided: **the record moment is a `follows:` edge, captured by the first
-writable load that resolves it**, plus `refdes history record` for notes a
+Decided: **the capture moment is a `follows:` edge, captured by the first
+writable load that resolves it**, plus `refdes history capture` for notes a
 thread will never supply a successor for, plus the baseline events `revision`
 and `release` already write. The table below is the option set that was weighed;
 the verdict on each is now part of the row.
 
 | Option | Benefit | Failure mode / cost |
 | --- | --- | --- |
-| **Seal on write-enabled build (today)** -- *rejected; replaced by recorded snapshots* | Existing code; a first build records every new append-only item. | Rendering/validation has an invisible authoring consequence. A note can become immutable because someone opened a preview. `index` avoids seal writes, but its regular save refresh demonstrates why that is fragile. |
-| **Record on Git commit via pre-commit hook** -- *rejected* | A commit is a recognizable checkpoint and Git already preserves review history. | A hook must be installed and kept current; a clone without it records nothing. A hook that writes snapshots after files are staged must either restage unexpectedly or require a second commit. CI normally must verify, not invent history. It also excludes non-Git projects, contradicting the baseline design's VCS independence (`docs/lifecycle.md:266-277`). |
-| **Record when followed** -- *chosen, as the authoring act; no separate command* | The current tip stays editable; making a successor is a meaningful "what did I know then?" moment. It gives the next work session its prior list. | Forks create two recorded parents; a terminal note may never be followed; id-less entries need their surrogate key; standalone logs have no successor. |
-| **Record predecessor on first writable load that sees a new `follows:` edge** -- *chosen, as the capture mechanism for the row above* | Hand-authored YAML/Markdown needs no second command: once a valid successor names a predecessor, write one idempotent `followed` event keyed by predecessor/successor. The successor may still be half typed, but the snapshot is of the untouched predecessor. | This makes generic load an author-history writer. VS Code runs writable `index` after every save (`editors/vscode/extension.js:91-126,510-526`), so a partial save can record a later-corrected `follows:` typo. CI must consistently use `--no-write`; checking out an old branch can replay an edge absent from that checkout's history store. Idempotence prevents duplicate events, not a misleading one for a typo or branch replay. |
+| **Seal on write-enabled build (today)** -- *rejected; replaced by captured snapshots* | Existing code; a first build records every new append-only item. | Rendering/validation has an invisible authoring consequence. A note can become immutable because someone opened a preview. `index` avoids seal writes, but its regular save refresh demonstrates why that is fragile. |
+| **Capture on Git commit via pre-commit hook** -- *rejected* | A commit is a recognizable checkpoint and Git already preserves review history. | A hook must be installed and kept current; a clone without it captures nothing. A hook that writes snapshots after files are staged must either restage unexpectedly or require a second commit. CI normally must verify, not invent history. It also excludes non-Git projects, contradicting the baseline design's VCS independence (`docs/lifecycle.md:266-277`). |
+| **Capture when followed** -- *chosen, as the authoring act; no separate command* | The current tip stays editable; making a successor is a meaningful "what did I know then?" moment. It gives the next work session its prior list. | Forks create two captured parents; a terminal note may never be followed; id-less entries need their surrogate key; standalone logs have no successor. |
+| **Capture predecessor on first writable load that sees a new `follows:` edge** -- *chosen, as the capture mechanism for the row above* | Hand-authored YAML/Markdown needs no second command: once a valid successor names a predecessor, write one idempotent `followed` event keyed by predecessor/successor. The successor may still be half typed, but the snapshot is of the untouched predecessor. | This makes generic load an author-history writer. VS Code runs writable `index` after every save (`editors/vscode/extension.js:91-126,510-526`), so a partial save can capture a later-corrected `follows:` typo. CI must consistently use `--no-write`; checking out an old branch can replay an edge absent from that checkout's history store. Idempotence prevents duplicate events, not a misleading one for a typo or branch replay. |
 | **Seal at day rollover** -- *rejected* | A daily cutoff is easy to explain and may fit a diary-like log. | An unfinished note is stamped merely because midnight passed — the exact friction Jared identified. A build that compares entry date with "today" gives the same commit different seal outcomes on different days, breaking reproducible builds and bisects. It also needs a timezone rule and mistakes deliberately backdated entries for stale notes. |
 | **N-day stale-tip prompt (no seal)** -- *deferred; not part of this model* | Preserves the self-checking value of "is this still in progress?" without blocking edits or creating history. | Current source has no reliable "last touched" time: a log `date:` may be backdated, and filesystem mtimes change across clone/export. A wall-clock site build would still produce different HTML on different days unless it uses an explicit as-of date. |
 | **Explicit finalize/status field** -- *rejected* | Clear intent; works for single notes and standalone logs. | Adds a state authors must remember and encourages premature stamps; "final" is usually false for design work. |
-| **Never record; detect only** -- *rejected* | Maximum fluidity and no new store. | Cannot show the original content Jared wants, and a later edit is indistinguishable from an ordinary revision. |
+| **Never capture; detect only** -- *rejected* | Maximum fluidity and no new store. | Cannot show the original content Jared wants, and a later edit is indistinguishable from an ordinary revision. |
 
-**Decided — the `follows:` edge is the record moment, and a writable load
+**Decided — the `follows:` edge is the capture moment, and a writable load
 captures it.** Writing `follows: LOG-A-011` into a new entry is itself the
 explicit act of saying "what that entry said is now history." There is no second
-command to remember, and no unrecorded-continuation state a hand author has to
+command to remember, and no uncaptured-continuation state a hand author has to
 be nagged about.
 
 1. A continuation operation (a future CLI command or editor action) resolves the
    intended current tip, writes the new entry, and writes the `followed` history
    event containing the predecessor's snapshot. It must be one transaction:
    neither the successor nor the event survives a partial write.
-2. A hand-authored `follows:` edge records the same event. Capture happens in
+2. A hand-authored `follows:` edge captures the same event. Capture happens in
    the writable-load path that already rewrites a bare edge's spelling —
    `links.plan_follows_freeze()`/`freeze_follows()` (`src/refdes/links.py:592-693`,
    called from `_load()` at `src/refdes/cli.py:125` with `write=not args.no_write`)
    — so the edge and its event come from one write pass and no new command or
-   hook is introduced. `freeze_follows()` keeps what it does today; recording is
+   hook is introduced. `freeze_follows()` keeps what it does today; capture is
    added alongside it, not substituted for it.
-3. A manual `refdes history record <item>` records an unthreaded or terminal
-   note without falsely calling it final. A revision/release records baseline
+3. A manual `refdes history capture <item>` captures an unthreaded or terminal
+   note without falsely calling it final. A revision/release captures baseline
    history for its own purpose (§4). These remain explicit author moments.
-4. A fork records the predecessor snapshot once for each branch event. A merge
-   records each parent as appropriate but never selects one branch's task state
+4. A fork captures the predecessor snapshot once for each branch event. A merge
+   captures each parent as appropriate but never selects one branch's task state
    by accident. An id-less entry is addressed by its already-required key, not
    its absent display ID.
-5. The record is announced, never silent. A writable command prints a line
-   naming it (`recorded LOG-A-011: LOG-A-012 now follows it`) and the editor
+5. The capture is announced, never silent. A writable command prints a line
+   naming it (`captured LOG-A-011: LOG-A-012 now follows it`) and the editor
    surfaces the same fact on the predecessor (§6). An author who runs no
    writable command sees nothing written — which is the point of the next rule.
 
@@ -213,10 +213,10 @@ because they are.
 
 | Case | Rule |
 | --- | --- |
-| **A typo corrected on the next save.** The first save's edge resolves to the wrong predecessor and records an event for it. | Events are keyed to the (predecessor, successor) pair. When a later writable load resolves that successor's edge to a *different* predecessor, refdes writes a compensating `followed-corrected` event naming both and treats the original as superseded — it never deletes or rewrites the first event. The snapshot was still an accurate picture of the predecessor; only the relationship was wrong, and the correction is auditable. |
-| **VS Code's save refresh runs a writable `index`.** `refdes index --compact` runs 250 ms after every save (`editors/vscode/extension.js:91-126,510-526`), so a mid-thought save can be the load that captures. | Accepted deliberately: the save is the author moment, and the announced record line plus the editor marker make the write visible instead of hidden. This is the explicit price of decision 8, paid against the draft's objection. A project that would rather not pay it configures the extension to pass `--no-write` and records explicitly. |
-| **CI must never record.** | `--no-write` gates capture exactly as it gates every other incidental write in `_load()` (`src/refdes/cli.py:69-136`), and an explicit `refdes history record` under `--no-write` refuses through `_refuse_no_write()` (`src/refdes/cli.py:137-149`) rather than pretending to have recorded. CI is inert by construction, not by convention. |
-| **Checking out an old branch replays an edge that branch never recorded.** | Events are content-addressed per (predecessor key, successor key) pair, so a replay regenerates the same object and the same event id and is a no-op. Where that branch's history store genuinely lacks the event, the replay is the repair rather than the corruption: the edge exists there, so the event belongs there. |
+| **A typo corrected on the next save.** The first save's edge resolves to the wrong predecessor and captures an event for it. | Events are keyed to the (predecessor, successor) pair. When a later writable load resolves that successor's edge to a *different* predecessor, refdes writes a compensating `followed-corrected` event naming both and treats the original as superseded — it never deletes or rewrites the first event. The snapshot was still an accurate picture of the predecessor; only the relationship was wrong, and the correction is auditable. |
+| **VS Code's save refresh runs a writable `index`.** `refdes index --compact` runs 250 ms after every save (`editors/vscode/extension.js:91-126,510-526`), so a mid-thought save can be the load that captures. | Accepted deliberately: the save is the author moment, and the announced capture line plus the editor marker make the write visible instead of hidden. This is the explicit price of decision 8, paid against the draft's objection. A project that would rather not pay it configures the extension to pass `--no-write` and captures explicitly. |
+| **CI must never capture.** | `--no-write` gates capture exactly as it gates every other incidental write in `_load()` (`src/refdes/cli.py:69-136`), and an explicit `refdes history capture` under `--no-write` refuses through `_refuse_no_write()` (`src/refdes/cli.py:137-149`) rather than pretending to have captured. CI is inert by construction, not by convention. |
+| **Checking out an old branch replays an edge that branch never captured.** | Events are content-addressed per (predecessor key, successor key) pair, so a replay regenerates the same object and the same event id and is a no-op. Where that branch's history store genuinely lacks the event, the replay is the repair rather than the corruption: the edge exists there, so the event belongs there. |
 | **Idempotence.** | One event per (predecessor key, successor key) pair, enforced by the event's content address, so repeated writable loads — the common case, since every save runs one — cannot accumulate duplicates. |
 
 **Stated plainly, because two of these are not fully fixable.** A typo leaves a
@@ -237,7 +237,7 @@ resolves, `--no-write` inertness, explicit CI and checkout behavior — is carri
 by the chosen design above.
 
 **Deferred companion — stale-tip prompt, not a seal.** Defer this until the
-recording model exists, then expose it in `refdes thread`/`refdes work`, VS
+capture model exists, then expose it in `refdes thread`/`refdes work`, VS
 Code/editor hover, and, where useful, the site as `still in progress?` after
 `N` days. It needs an explicit `last_touched_at` written only by an explicit
 continuation/touch operation — never a filesystem mtime or the author-editable
@@ -251,10 +251,10 @@ VS Code runs `refdes index --compact` on each save after a 250 ms debounce
 (`editors/vscode/extension.js:91-126,510-526`). Under this decision that is the
 intended capture path rather than an obstacle to route around, so the hard
 constraint narrows to one that must be enforced in code: **rendering, `--dry-run`,
-and `--no-write` never record, and no snapshot or seal write may happen inside
+and `--no-write` never capture, and no snapshot or seal write may happen inside
 `render_site()`.**
 
-## 3. Editing after it was recorded
+## 3. Editing after it was captured
 
 ### Options
 
@@ -263,12 +263,12 @@ and `--no-write` never record, and no snapshot or seal write may happen inside
 | **Prevent/require amendment (today)** -- *rejected* | The build error is loud and corrections are explicit, but the existing item cannot remain a living note. `amends:` preserves a correction relationship but cannot show source content once `--reseal` overwrites the hash. |
 | **Allow and detect/show** -- *chosen* | Better matches notes. Requires durable snapshot content, a visible marker, and an intentional redaction story. |
 
-**Decided — allow and detect/show.** A recorded item may be edited. `check`,
+**Decided — allow and detect/show.** A captured item may be edited. `check`,
 `index`, the proposed `thread` CLI query, and the site all expose:
 
 ```text
-recorded 2026-09-15T14:08Z when LOG-POWER-014 followed it
-edited after recorded: current semantic content differs
+captured 2026-09-15T14:08Z when LOG-POWER-014 followed it
+edited after captured: current semantic content differs
 original: view / diff / restore-as-new-entry
 ```
 
@@ -315,7 +315,7 @@ A raw span would preserve comments and whitespace but must also capture
 surrounding defaults, sections, and the split Markdown front matter/body
 representation. It makes equivalent source shapes look changed. A canonical
 payload is enough to render the former item and diff meaningful fields;
-source-path/line still points to where it was recorded. The cost is that it is
+source-path/line still points to where it was captured. The cost is that it is
 not a byte-for-byte archival copy. Git remains the tool for whitespace and
 comment archaeology.
 
@@ -345,8 +345,8 @@ proves semantic equivalence. A new `HASH_FORMAT` must never rewrite an object or
 make an item look edited. `--no-write` prohibits history writes just as it
 prohibits source-tree incidental writes (the global flag is declared at
 `src/refdes/cli.py:1167-1178` and gates `_load()` at `src/refdes/cli.py:69-136`):
-an explicit record/continue command refuses through `_refuse_no_write()`
-(`src/refdes/cli.py:137-149`) rather than pretending it recorded something.
+an explicit capture/continue command refuses through `_refuse_no_write()`
+(`src/refdes/cli.py:137-149`) rather than pretending it captured something.
 
 ## 4. Baseline snapshots: "what did this item say at rev-B?"
 
@@ -363,7 +363,7 @@ rev-B?" from a baseline.
 | **Use the same history object store with baseline events** -- *chosen* | One canonical former-item representation; events distinguish `followed`, `manual`, `revision`, and `release`. |
 
 **Decided — same store, separate event kind.** A successful
-`revision rev-B` records one `baseline: revision/rev-B` event per local item,
+`revision rev-B` captures one `baseline: revision/rev-B` event per local item,
 referencing the same semantic object format. The existing
 `.refdes/baselines/rev-B.yaml` remains the compact gate/diff artifact; history
 adds a view layer rather than changing its contract. The item page can then
@@ -430,7 +430,7 @@ generation is insufficient.
 **Decided — an ordinary log head, and nothing else.** The first task creation
 writes a deliberately named ordinary `log` head (for example, "Power work
 list"), optionally scoped to a board. It is a note, not a verdict, and later
-work follows it. A project-wide work list is the same shape without a board.
+work follows it. A project-wide task list is the same shape without a board.
 A separate per-board notes file was considered and rejected: it would be a third
 worklist format with no thread fold, no source identity, and no answer to "what
 starts a task list?" The formality of "your scratch list is a note like every
@@ -515,7 +515,7 @@ Proposed CLI, explicitly a sketch rather than current behavior:
 $ refdes thread LOG-POWER-002
 Thread: LOG-POWER-001 → LOG-POWER-002  (one tip)
 Tip: LOG-POWER-002  2026-09-15  Buck thermal follow-up
-Recorded: LOG-POWER-001 at 2026-09-15T14:08:00Z (followed)
+Captured: LOG-POWER-001 at 2026-09-15T14:08:00Z (followed)
 
 Tasks at tip:
   [ ] T-thermal-model  Model worst-case copper temperature.  (open since LOG-POWER-001, 2026-08-30)
@@ -534,7 +534,7 @@ prints the verdict line and the open tasks together rather than the verdict
 alone. For a fork the header lists both tips and prints one `Tasks at <tip>`
 block per branch; it never reports a single current status or list.
 
-VS Code shows the same tip, tasks, record marker, and fork state in the hover
+VS Code shows the same tip, tasks, capture marker, and fork state in the hover
 for a thread entry. Today its hover is a compact item preview built from
 `index` (`editors/vscode/extension.js:180-207`, registered at
 `editors/vscode/extension.js:507`), and the current index payload has no thread
@@ -566,7 +566,7 @@ unmerged fork is undefined (`src/refdes/chains.py:452-551`).
 | --- | --- |
 | Retire `decision`, merge its fields/links into `log`, and migrate `title` to `summary` | **Keep.** One entry type is still the correct home for a narrative note and a verdict. |
 | `follows:` chain, fold, forks/merges, id-less continuations | **Keep.** It is exactly the topology needed to locate the editable tip and carry the task list. |
-| `append_only: true` meaning build seals every new log | **Change.** It would reintroduce the behavior this document rejects. `append_only` keeps its meaning for authoring (an entry is not rewritten in place; corrections are new entries) and loses the build-time hash lock. Log entries are recordable without being build-locked. |
+| `append_only: true` meaning build seals every new log | **Change.** It would reintroduce the behavior this document rejects. `append_only` keeps its meaning for authoring (an entry is not rewritten in place; corrections are new entries) and loses the build-time hash lock. Log entries are capturable without being build-locked. |
 | `_load()` freezes hand-authored bare `follows:` on any writable command | **Keep, and extend.** The same writable-load path that freezes the edge (`src/refdes/links.py:592-693` via `src/refdes/cli.py:125`) is where the predecessor snapshot is captured (§2). Rendering and `--no-write` stay out. |
 | Phase 4b static thread panel | **Keep, but make it a client.** It should display task/history data from the shared projection, not own its computation or trigger writes. |
 | `amends:` | **Keep as an annotation.** It identifies a specific correction; it is not a replacement for a history snapshot or chain position. |
@@ -576,7 +576,7 @@ type merge is compatible; the current seal timing is not. Landing first would
 make a later reversal more expensive: migrated decisions and fresh logs would
 already be sealed under the policy being rejected. The low-risk work is to
 retain the branch for its merge/migration evidence while changing the
-recording contract before integration.
+capture contract before integration.
 
 ## 8. Migration and compatibility
 
@@ -586,9 +586,9 @@ recording contract before integration.
 | A legacy sealed item whose live content still matches | A migration command may capture its *current* semantic snapshot as a clearly dated `migrated-current` event. It must not label that as the original seal-time text. |
 | A resealed legacy item | Keep the existing audit drift evidence (`seal.resealed_ids()` is read-only, `src/refdes/seal.py:411-438`); no old content can be recovered unless Git has it. |
 | Existing baselines | Leave their compact schema and hash-format handling intact. New baselines gain history events; old baseline item pages say rich content is unavailable. |
-| Existing standalone logs | They remain valid ordinary entries. An explicit history-record command supports them; no retroactive `follows:` inference. |
+| Existing standalone logs | They remain valid ordinary entries. An explicit history-capture command supports them; no retroactive `follows:` inference. |
 | Projects with no Git or an exported tree | Fully supported by `.refdes/history/`; no Git fallback or silent absence. |
-| `--no-write` / CI | Validate and report mismatches, but create no events, objects, redactions, or migration files — including the automatic capture of §2, which sits behind the same `write=not args.no_write` gate as `freeze_follows()` (`src/refdes/cli.py:125`). A record/continue request fails loudly under `--no-write` via `_refuse_no_write()` (`src/refdes/cli.py:137-149`). |
+| `--no-write` / CI | Validate and report mismatches, but create no events, objects, redactions, or migration files — including the automatic capture of §2, which sits behind the same `write=not args.no_write` gate as `freeze_follows()` (`src/refdes/cli.py:125`). A capture/continue request fails loudly under `--no-write` via `_refuse_no_write()` (`src/refdes/cli.py:137-149`). |
 
 The new store must key records by surrogate key where available, as seals and
 baselines now do after adoption. Display ID remains stored for readability but
@@ -603,21 +603,21 @@ These were the open questions put to Jared; all eight are now answered
 answer, and marks what was considered and rejected. Answer 8 reverses the
 draft's recommendation.
 
-1. **What is the minimum explicit record moment?**
+1. **What is the minimum explicit capture moment?**
    - A. Only "continue thread."
-   - B. Continue plus manual `history record` and baseline/release events.
+   - B. Continue plus manual `history capture` and baseline/release events.
    - C. Git commits through a required hook.
 
    **Decided: B.** The natural next-entry moment is preserved without
    abandoning terminal and non-thread notes. Git hooks were rejected outright:
    they are optional integrations at most, never correctness machinery. See §2.
 
-2. **Should a recorded edit merely be visible, or ever block a release?**
+2. **Should a captured edit merely be visible, or ever block a release?**
    - A. Always visible, never blocking.
    - B. A project release-gate rule may block it.
    - C. Restore today's build error.
 
-   **Decided: B, with the non-blocking half stated first.** A recorded edit is
+   **Decided: B, with the non-blocking half stated first.** A captured edit is
    always visible and never a build failure; the project *may* add a
    release-gate rule for it. Restoring today's build error was rejected. See §3
    and the gate mechanism in §5.
@@ -670,8 +670,8 @@ draft's recommendation.
    off-by-default release-gate rule. Making every diagnostic an author-owned
    task (C) was rejected.
 
-8. **Should hand-authored `follows:` record history automatically?**
-   - A. Require `refdes thread continue` / explicit history recording after
+8. **Should hand-authored `follows:` capture history automatically?**
+   - A. Require `refdes thread continue` / explicit history capture after
      editing the edge by hand.
    - B. On the first writable load that observes a valid new edge, snapshot its
      predecessor once per predecessor/successor pair.

@@ -32,7 +32,7 @@ two commands an author needs to use it directly (H4). Only then touch sealing
 (H5) — because until H1–H4 exist, removing the build-time lock leaves nothing
 behind, which is exactly the "docs and behaviour diverge" failure the analysis
 rejected as option d2. Everything after H5 is the task-list and query-surface
-half, which the recording model does not depend on and which therefore must not
+half, which the capture model does not depend on and which therefore must not
 delay 4a: `tasks:` (H6), the two read commands and the index projection (H7),
 the optional gate rules (H8), and the optional baseline/site layer (H9).
 
@@ -62,7 +62,7 @@ item.
 `objects/*.yaml` carries `history_format: 1`, the item's key, display id, type,
 own declared fields, raw link spellings (not resolved ids — `model.py:378-396`
 keeps raw and resolved deliberately separate and writes/hashing need raw),
-body, and the source file/line it was recorded from. It excludes rendered HTML,
+body, and the source file/line it was captured from. It excludes rendered HTML,
 diagnostics, backlinks, coverage — everything rebuildable.
 
 **One stated deviation from the doc's sketch.** The doc writes
@@ -106,9 +106,9 @@ phase, so every existing test — including the whole-tree byte-identical
 
 ## Phase H2 — capture at the `follows:` edge, announced
 
-**Adds.** The record moment. When a writable load freezes a `follows:` edge, it
-records a `followed` event holding the **predecessor's** snapshot, and prints
-the visible line: `recorded LOG-A-011: LOG-A-012 now follows it`.
+**Adds.** The capture moment. When a writable load freezes a `follows:` edge, it
+captures a `followed` event holding the **predecessor's** snapshot, and prints
+the visible line: `captured LOG-A-011: LOG-A-012 now follows it`.
 
 **Files.** `src/refdes/cli.py:125` — the `freeze_follows(project,
 write=not args.no_write)` call inside `_load()` (`cli.py:69-136`) — plus
@@ -129,10 +129,10 @@ file under the project, so `.refdes/history/` is covered the moment it exists).
 2. *VS Code's writable save refresh* (`editors/vscode/extension.js` runs
    `index --compact` on save). Accepted deliberately — the save is the author
    moment. The announcement is the price, paid visibly. Machine output stays
-   clean: `index --compact` prints JSON only and never the record line
+   clean: `index --compact` prints JSON only and never the capture line
    (open question Q4).
 3. *CI.* Capture sits behind the same `write=not args.no_write` gate as every
-   other incidental write in `_load()`. An explicit record under `--no-write`
+   other incidental write in `_load()`. An explicit capture under `--no-write`
    refuses through `_refuse_no_write()` (`cli.py:137`), it does not pretend.
 4. *Old-branch checkout replaying an edge.* Derived event ids (H1) make the
    replay write the identical bytes; where the branch's store lacked the event,
@@ -162,33 +162,33 @@ the guard passes and the *event* write is what fails).
   all, and a byte-identical site.
 
 **Deliberately does not do.** No `refdes history` command, no redaction, no
-edited-after-recorded marker, no seal change, no baseline events, nothing in
+edited-after-captured marker, no seal change, no baseline events, nothing in
 `render_site()` (`render.py:756`) — the hard rule that no render creates an
 event is enforced here by the absence of any history call under `render.py`.
 
-## Phase H3 — "edited after recorded", a diagnostic and never a failure
+## Phase H3 — "edited after captured", a diagnostic and never a failure
 
 **Adds.** Comparison of live semantic content against the newest snapshot for
 an item, surfaced as a diagnostic and an index field.
 
-**Files.** `src/refdes/history.py` gains `edited_after_recorded(project)`
-returning `(item, event, recorded_digest)`; `src/refdes/build.py` gains one
+**Files.** `src/refdes/history.py` gains `edited_after_captured(project)`
+returning `(item, event, captured_digest)`; `src/refdes/build.py` gains one
 call after `compute_hashes` (`build.py:1219`) and before the seal step
 (`build.py:1977`), reporting through `project.warn` — never `project.error`.
-`src/refdes/render.py:511` (`items_json`) gains a per-item `recorded` /
-`edited_after_recorded` pair so VS Code and the future editor read it from the
+`src/refdes/render.py:511` (`items_json`) gains a per-item `captured` /
+`edited_after_captured` pair so VS Code and the future editor read it from the
 index rather than recomputing it. Tests: `tests/test_history_edit.py`.
 
 **Verified against.**
-- Sabotage: record an entry, edit its body, `refdes check` → warning naming
-  the entry, the recording event, and the successor; **exit code unchanged**;
+- Sabotage: capture an entry, edit its body, `refdes check` → warning naming
+  the entry, the capture event, and the successor; **exit code unchanged**;
   `refdes build` → site still written, "0 errors".
 - The same edit with `--reseal`-style history absent (no event) → no warning.
 - A field with `on_change: log` edited → warning fires (the digest covers it),
   while the baseline diff and `content_hash` do not move — the two-digest split
   asserted from the other side.
-- `items_json` snapshot: the new keys appear for recorded items and are absent
-  for unrecorded ones, so an unrecorded project's payload is byte-identical to
+- `items_json` snapshot: the new keys appear for captured items and are absent
+  for uncaptured ones, so an uncaptured project's payload is byte-identical to
   before (the same "absent key, not null" convention `items_json` already uses
   for `boards`).
 - `render_site()` writes no history file — asserted by a tree hash around a
@@ -198,18 +198,18 @@ index rather than recomputing it. Tests: `tests/test_history_edit.py`.
 (H9), no restore-as-new-entry command, no diff UI, no VS Code hover change.
 The marker is in the data and the diagnostics; surfaces come later.
 
-## Phase H4 — `refdes history record`, `redact`, and `migrate-seals`
+## Phase H4 — `refdes history capture`, `redact`, and `migrate-seals`
 
 **Adds.** The author-facing commands for everything the thread cannot supply:
 terminal and unthreaded notes, and redaction.
 
 **Files.** `src/refdes/cli.py` — a `history` subparser alongside the others at
-`cli.py:1180-1520`, with `record`, `redact`, and `migrate-seals`
+`cli.py:1180-1520`, with `capture`, `redact`, and `migrate-seals`
 sub-subcommands following the `keys`/`standard`/`former-ids` group pattern
-(`cli.py:1454`, `:1415`, `:1518`). `src/refdes/history.py` gains `record()` and
+(`cli.py:1454`, `:1415`, `:1518`). `src/refdes/history.py` gains `capture()` and
 `redact()`. Docs: `docs/cli-reference.md`. Tests: `tests/test_history_cli.py`.
 
-- `refdes history record <item>` — a `manual` event. Says "recorded", never
+- `refdes history capture <item>` — a `manual` event. Says "captured", never
   "final". Refuses under `--no-write` through `_refuse_no_write()`
   (`cli.py:137`), the pattern already tested for `fetch` and `standard upgrade`
   (`tests/test_no_write.py:221`, `:258`).
@@ -223,9 +223,9 @@ sub-subcommands following the `keys`/`standard`/`former-ids` group pattern
   not delete legacy seal support until a migration has run").
 
 **Verified against.**
-- `record` writes one object + one `manual` event, announces, and is idempotent
+- `capture` writes one object + one `manual` event, announces, and is idempotent
   on a second run.
-- `record --no-write` refuses with a nonzero exit and writes nothing
+- `capture --no-write` refuses with a nonzero exit and writes nothing
   (tree-hash test).
 - `redact` without the acknowledgement refuses; with it, the object and its
   events are gone, the `redacted` event exists, and the warning text — asserted
@@ -242,7 +242,7 @@ no project policy about who may redact (decided against), no Git integration.
 
 **This is the phase threads 4a waits for.**
 
-**Adds.** For a type whose standard declares history-backed recording, the
+**Adds.** For a type whose standard declares history-backed capture, the
 first writable build no longer writes a hash lock, an edit is no longer a build
 error, and `links.py:623-634` no longer refuses to freeze a bare `follows:` on
 an entry that a legacy seal file mentions. Existing seal files keep being read
@@ -282,18 +282,18 @@ on edit or on deletion, and `audit` still reports them.
 
 **`--reseal` and `audit`.** For build-sealed types, unchanged. For
 history-backed types there is nothing to reseal: the flag is accepted, says so,
-and records nothing (Q2). `audit`'s "Append-only entries edited after sealing"
+and captures nothing (Q2). `audit`'s "Append-only entries edited after sealing"
 section (`cli.py:644`, fed by `seal.resealed_ids()` at `seal.py:411`) keeps
 printing for build-sealed types and gains a sibling section for
-edited-after-recorded items, which is the honest replacement in the report.
+edited-after-captured items, which is the honest replacement in the report.
 
 **Verified against.**
 - **The decisive one, taken from the analysis §3 transcript:** a history-backed
   project, entry sealed by a legacy seal file, bare `follows:` added to it,
-  `refdes index` → the edge **freezes**, the chain forms, the record line
+  `refdes index` → the edge **freezes**, the chain forms, the capture line
   prints, and `check` reports zero errors. Before H5 this transcript ends with
   a refusal and an edge that stays bare forever.
-- Edit a history-backed entry after recording → `check` and `build` both exit
+- Edit a history-backed entry after capture → `check` and `build` both exit
   **0** with the H3 warning. Before H5 this is a build error.
 - `--reseal` on a history-backed entry → no hash overwrite, no silent loss of
   the prior hash. Assert the legacy seal file's bytes are unchanged.
@@ -387,7 +387,7 @@ question `blocked._is_settled()` `blocked.py:23` already asks, pointed at the
 thread); and the gate rule of H8, which is not in this phase's output at all.
 
 **Verified against.**
-- `refdes thread <ref>` on a one-tip thread: header, tip, recorded line, tasks
+- `refdes thread <ref>` on a one-tip thread: header, tip, capture line, tasks
   with age, derived block.
 - Forked thread: both tips listed, one `Tasks at <tip>` block per branch, and
   no line anywhere asserting a single current status.
@@ -408,8 +408,8 @@ site panel, no stale-tip prompt (deferred, and it needs an explicit
 ## Phase H8 — two optional release-gate rules, both off
 
 **Adds.** `open_tasks` (a release blocks while any thread tip carries an open
-author task) and `recorded_edits` (a release blocks while any item is edited
-after recorded). Both off by default, both enabled through the existing
+author task) and `captured_edits` (a release blocks while any item is edited
+after captured). Both off by default, both enabled through the existing
 `release_gate:` overlay.
 
 **Files.** `src/refdes/model.py:52` `RELEASE_GATE_DEFAULTS` gains two entries
@@ -421,7 +421,7 @@ of `{release: false, revision: false}`, which makes them members of
 `docs/lifecycle.md`'s printed defaults block. Tests: `tests/test_lifecycle.py`.
 
 **Verified against.**
-- Default-off: an existing project with open tasks and an edited-after-recorded
+- Default-off: an existing project with open tasks and an edited-after-captured
   item stamps a release exactly as it does today — the strongest
   nothing-changed test in the phase.
 - Enabled via overlay: each rule blocks with an offender list naming the item,
@@ -437,8 +437,8 @@ project-policy engine, no default-on anywhere.
 ## Phase H9 — baseline snapshot events and the site history disclosure (optional)
 
 **Adds.** `revision`/`release` write `baseline` events into the same store, and
-the item page gains a history disclosure showing recorded content, the
-edited-after-recorded marker, and a baseline selector.
+the item page gains a history disclosure showing captured content, the
+edited-after-captured marker, and a baseline selector.
 
 **Files.** `src/refdes/lifecycle.py` — `stamp()` (`:642`) writes events beside
 the compact baseline it already writes; `diff_against()` (`:804`) unchanged in
@@ -532,7 +532,7 @@ Mitigation: H1's tests assert a no-op load writes nothing; watch the count on
 this repo after H5's migrate.
 
 **R3 — capture noise.** VS Code runs a writable `index` after every save, so
-the record line could become wallpaper. Mitigation: it prints only when an event
+the capture line could become wallpaper. Mitigation: it prints only when an event
 was actually written, and never in `--compact` output (Q4).
 
 **R4 — the interim lock.** Between H5 landing and 4a landing, `main`'s v3 `log`
@@ -550,7 +550,7 @@ inside the content hash** (`docs/design/backlog.md` finding 35 §4, with a
 coordinated `HASH_FORMAT` bump shared with finding 26). If that lands, an item
 whose *upstream* value moved would be reported as changed by `content_hash`
 consumers. If the history digest ever absorbed those values, the same item
-would read "edited after recorded" with nobody having edited it — which
+would read "edited after captured" with nobody having edited it — which
 contradicts decision 2's promise that the marker is about the author's own
 content. Mitigation, taken as the conservative default: `history_format: 1`
 digests the item's **own** declared payload only, and the divergence from
@@ -578,7 +578,16 @@ task already under way. It may rename terms this plan introduces — `record`,
 decisions themselves: a rename touches the names on disk and in output, not what
 was decided about them.
 
-**Q1 — what expresses "this type records instead of locking"?**
+**Applied 2026-09-20 (owner-approved, `docs/design/vocabulary-review.md` §3):**
+P1 renamed `record`/`recorded` to `capture`/`captured` throughout these design
+docs — the moment, the marker, the `refdes history capture` command, the
+`captured_edits` gate rule, and the planned identifiers (`edited_after_captured`,
+the `captured`/`edited_after_captured` index pair). `history`, `snapshot` and
+`tasks:` keep their names (P3 keeps `snapshot`; P6 keeps `tasks:`). The shipped
+`records:` link verb and its `recorded_by` inverse are untouched — that is the
+collision P1 removed.
+
+**Q1 — what expresses "this type captures instead of locking"?**
 (a) a type-level `sealing: history` in the standard, defaulting to `build`;
 (b) a project/standard-level `sealing: build | none` switch (the analysis's
 b2); (c) an implicit `standard_version >= 3` test in `seal.verify`.
@@ -592,12 +601,12 @@ standard, defaulting to `build`.
 
 **Q2 — what does `--reseal` do on a history-backed type?**
 (a) accepted, prints "sealing no longer applies to this type; nothing was
-rewritten", records nothing; (b) records a `reseal` event capturing current
-content; (c) errors. **Assumed: (a).** (b) invents a second recording moment the
+rewritten", captures nothing; (b) captures a `reseal` event capturing current
+content; (c) errors. **Assumed: (a).** (b) invents a second capture moment the
 decisions do not include, and (c) breaks a flag people have in muscle memory.
 
 **Decided (Jared, 2026-09-19): (a)** — accepted, prints "sealing no longer
-applies to this type; nothing was rewritten", records nothing.
+applies to this type; nothing was rewritten", captures nothing.
 
 **Q3 — do the six existing seals get `migrated-current` snapshots?**
 `living-notes.md` §8 permits capturing their *current* content as a clearly
@@ -610,10 +619,10 @@ mistaken for seal-time text, which is the specific lie §8 forbids.
 `migrated-current` available behind an explicit flag on `history
 migrate-seals`.
 
-**Q4 — when does the record line print?**
+**Q4 — when does the capture line print?**
 **Assumed: only when an event was actually written**, never on an idempotent
 no-op, and never in `index --compact` (machine output stays parse-clean). A
-project that wants silence passes `--no-write` and records explicitly.
+project that wants silence passes `--no-write` and captures explicitly.
 
 **Decided (Jared, 2026-09-19): as assumed** — the line prints only when an event
 was actually written, never on an idempotent no-op, and never in `index
@@ -644,7 +653,7 @@ than today. Landing it inside 4a makes the biggest untested combination
 
 **Q8 — do the two H8 gate rules ship together?**
 **Assumed: yes, both off by default.** They are the same two-line mechanism, and
-`recorded_edits` without `open_tasks` (or vice versa) leaves a decided policy
+`captured_edits` without `open_tasks` (or vice versa) leaves a decided policy
 with no enforcement path.
 
 **Decided (Jared, 2026-09-19): yes** — the two H8 gate rules ship together, both
