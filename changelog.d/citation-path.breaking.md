@@ -10,7 +10,7 @@
   warning naming every item that cites it (an error under
   `--require-citations`); a cited local file that doesn't exist is an error.
   Absolute paths, drive letters, backslashes, `..` escapes, symlinks out of
-  the project, and `vendor:` on a local path are refused, never guessed.
+  the project, and `keep_copy:` on a local path are refused, never guessed.
   `refdes fetch --url` is now `refdes fetch --path`. A stale `url:` fails
   validation with a message naming the rename; `refdes standard upgrade
   --to 3` rewrites hardware@2 content automatically, and the lockfile needs

@@ -366,7 +366,7 @@ Four field *names* have behaviour attached regardless of declared type:
 `citations` is different: it is keyed off the declared **type**, not a fixed
 field name, so a project can call the field `references`, `sources`,
 anything — the hardware standard calls it `citations`. Any field declared `type: citations` gets a `path` (required — `http`/`https` for a remote document, a project-root-relative file path for a local one), plus
-`rev`, `page`, `section`, `part_number`, `vendor`, and an optional `id` per entry, its
+`rev`, `page`, `section`, `part_number`, `keep_copy`, and an optional `id` per entry, its
 own table on the item page, and an entry in `references.html` — see [citing a
 datasheet](markdown.md#citing-a-datasheet), [CLI
 reference](cli-reference.md#refdes-fetch), and [output

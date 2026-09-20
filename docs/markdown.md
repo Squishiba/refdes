@@ -231,7 +231,7 @@ site:
 
 For a **datasheet** specifically, don't hand-link it at all — see [citing a
 datasheet](#citing-a-datasheet) below, which gets you a hash-pinned reference
-with optional vendoring instead of a link that can silently rot.
+with an optional local copy instead of a link that can silently rot.
 
 ## Citing a datasheet
 
@@ -245,7 +245,7 @@ types:
 ```
 
 An item declares intent only — a path, and optionally a rev, page,
-part_number, id, and whether the bytes should be vendored:
+part_number, id, and kept locally:
 
 ```yaml
 - id: CMP-PWR-001
@@ -255,12 +255,12 @@ part_number, id, and whether the bytes should be vendored:
       rev: E
       page: "14"
       part_number: TPS62913
-      vendor: false
+      keep_copy: false
       id: tps62913-ds
 ```
 
 `path:` is one field dispatched on scheme. `http:`/`https:` means remote —
-fetched, hashed, optionally vendored, exactly as before. Anything else means
+fetched, hashed, optionally kept, exactly as before. Anything else means
 **a file inside the project**, relative to the project root (the directory
 holding `refdes-project.yaml`), slash-separated:
 
@@ -277,7 +277,7 @@ network), every build re-hashes it against the pin, and the pinned bytes are
 published with the site as `assets/citations/<sha256><ext>` so the rendered
 link survives a Linux CI checkout — absolute paths, drive letters,
 backslashes, `..` escapes, symlinks pointing out of the project, and
-`vendor:` on a local path are all refused, never guessed. A local file that
+`keep_copy:` on a local path are all refused, never guessed. A local file that
 changed since it was pinned is a warning naming every citer (review, then
 `refdes fetch --update --path <path>`), an error with `--require-citations`;
 a cited file that doesn't exist is an error, always.
@@ -294,7 +294,7 @@ the title of a heading in the document:
   citations:
     - path: https://www.ti.com/lit/ds/symlink/tps62913.pdf
       section: Application and Implementation
-      vendor: true
+      keep_copy: true
       id: tps62913-ds
 ```
 
@@ -309,7 +309,7 @@ Titles are matched exactly and case-sensitively, after whitespace is collapsed
 (a heading the outline stored across two lines is one title). Nothing is fuzzy:
 a title that isn't in the outline is an error, not a guess. Resolution needs the
 bytes, so `section:` is allowed on a local `path:` citation and on a remote one
-with `vendor: true`; on a hash-only remote citation it is refused at build time,
+with `keep_copy: true`; on a hash-only remote citation it is refused at build time,
 because those bytes are not guaranteed to be there next time.
 
 Resolving is never silent. `refdes fetch` prints a `FAILED` line and exits
@@ -363,7 +363,7 @@ addressed by `[[cite:...]]` anyway; an unresolved `[[cite:...]]` is a warning
 and renders in red, same as any other unresolved reference.
 
 That is all authoring requires. Everything else — the sha256, when it was
-fetched, whether it was vendored — is computed by `refdes fetch`, never
+fetched, whether it was kept — is computed by `refdes fetch`, never
 written by hand:
 
 ```bash
@@ -375,23 +375,23 @@ refdes fetch --update            # re-fetch even if already pinned
 
 `refdes fetch` is the **only** command that touches the network. `build` and
 `check` read only the committed lockfile (`.refdes/citations.yaml`) and the
-local vendor cache, so they stay completely offline.
+local copies, so they stay completely offline.
 
-**Pinning vs. vendoring.** Every fetched citation is pinned: its sha256 and
+**Pinning vs. keeping a copy.** Every fetched citation is pinned: its sha256 and
 fetch time are recorded in `.refdes/citations.yaml`, keyed by path, and
-committed. `vendor: true` additionally keeps a local copy of the bytes,
-content-addressed at `.refdes/vendor/<sha256><ext>` — gitignored, not git
-LFS, not committed. `vendor:` defaults to `false` on purpose: manufacturer
-datasheets are generally copyrighted, so "pinned but not vendored" (hash-only)
+committed. `keep_copy: true` additionally keeps a local copy of the bytes,
+content-addressed at `.refdes/copies/<sha256><ext>` — gitignored, not git
+LFS, not committed. `keep_copy:` defaults to `false` on purpose: manufacturer
+datasheets are generally copyrighted, so "pinned but not kept" (hash-only)
 is a complete mode on its own, not a fallback. Citing the same remote path with
-inconsistent `vendor:` flags across items is a warning.
+inconsistent `keep_copy:` flags across items is a warning.
 
 **Verification**, checked at every `build` and `check`, offline:
 
 | Situation | Severity |
 |---|---|
 | No lockfile entry for a cited path | info (error with `--require-citations`) — routine until `refdes fetch` runs, so it's hidden unless `-v`/`--verbose` |
-| `vendor: true`, but the local blob is missing | warning (error with `--require-citations`) |
+| `keep_copy: true`, but the local blob is missing | warning (error with `--require-citations`) |
 | The local blob's hash no longer matches its recorded sha256 | **error, always** |
 | A cited local file doesn't exist | **error, always** |
 | A cited local file changed since it was pinned | warning naming every citer (error with `--require-citations`) |

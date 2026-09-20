@@ -16,7 +16,7 @@
   lookup still leaves the pin recorded, and drops the unresolved section from
   the lockfile rather than leaving it pointing at a page the new bytes may not
   have. `section:` needs the bytes, so it is allowed on a local `path:` and on
-  a remote citation with `vendor: true`, and refused at build time on a
+  a remote citation with `keep_copy: true`, and refused at build time on a
   hash-only remote citation. Resolution needs the new optional extra
   `refdes[pdf]` (`pip install refdes[pdf]`); nothing else in refdes reads a
   PDF, and a project with no `section:` never imports it. A `section:` with no

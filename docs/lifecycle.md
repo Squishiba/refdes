@@ -21,7 +21,7 @@ stamp under the same label is the point, not an afterthought.
 Two layers.
 
 **The floor, always on, not configurable.** Any build error (a seal
-violation, a tampered vendored citation, a broken link, anything `refdes
+violation, a tampered kept citation copy, a broken link, anything `refdes
 check` already fails on) blocks both commands outright — nothing is
 written. This is the same posture `check` already has; `revision`/`release`
 add nothing new here.
@@ -32,7 +32,7 @@ add nothing new here.
 release_gate:
   draft_items:                 { release: true,  revision: false }
   unpinned_citations:          { release: true,  revision: false }
-  missing_vendored_copies:     { release: true,  revision: false }
+  missing_kept_copies:     { release: true,  revision: false }
   uncovered_requirements:      { release: true,  revision: false }
   unverified_requirements:     { release: false, revision: false }
   info_check_failures:         { release: false, revision: false }
@@ -48,7 +48,7 @@ against the eight names.
 |---|---|
 | `draft_items` | any local item's own status field currently reads `draft` |
 | `unpinned_citations` | a `citations:` entry has never been fetched |
-| `missing_vendored_copies` | a `vendor: true` citation's local blob is missing |
+| `missing_kept_copies` | a `keep_copy: true` citation's local blob is missing |
 | `uncovered_requirements` | a non-draft coverable item's coverage stage is `open` |
 | `unverified_requirements` | a non-draft coverable item isn't yet `verified` |
 | `info_check_failures` | a failing check on a `check_severity: info` type |
@@ -86,7 +86,7 @@ release 'rev-b' blocked -- not stamped:
   FAIL     draft_items            REQ-PWR-004, REQ-PWR-005
   FAIL     uncovered_requirements BND-THM-002
   pass     unpinned_citations
-  pass     missing_vendored_copies
+  pass     missing_kept_copies
   skipped  unverified_requirements
   skipped  info_check_failures
   pass     unaccepted_board_moves
@@ -138,7 +138,7 @@ refdes_version: "0.3.0"
 gate:
   draft_items: pass
   unpinned_citations: pass
-  missing_vendored_copies: pass
+  missing_kept_copies: pass
   uncovered_requirements: pass
   unverified_requirements: skipped
   info_check_failures: skipped

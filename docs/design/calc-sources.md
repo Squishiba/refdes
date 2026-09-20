@@ -429,7 +429,7 @@ value; fetch must error rather than evaluate the formula or coerce `None`.
 Extend each existing citation record with a `values:` map only when that cited
 local file is used by `source()`. Keep the existing top-level `citations:` map
 and canonical-path keys unchanged. Existing citation records contain `sha256`,
-`fetched`, `vendored`, and `bytes` as written by `citations.fetch_all()`
+`fetched`, `kept_copy`, and `bytes` as written by `citations.fetch_all()`
 (`src/refdes/citations.py:496-589`); their current provenance fields are
 intentionally outside the item (`CitationSpec`, `src/refdes/model.py:254-263`).
 
@@ -440,7 +440,7 @@ citations:
   analysis/power-budget.csv:
     sha256: 15cc0b…
     fetched: "2026-09-15T04:18:00Z"
-    vendored: false
+    kept_copy: false
     bytes: 214
     values:
       tps62913_half_load_eff:

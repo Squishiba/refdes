@@ -48,10 +48,10 @@ config key:
 
 - **Seal violations** — `seal.verify()` (`src/refdes/seal.py:87`) already
   calls `project.error(...)` for an edited sealed entry. Already blocks.
-- **Vendored-copy hash mismatch** — `citations.verify()`
+- **Kept-copy hash mismatch** — `citations.verify()`
   (`src/refdes/citations.py:227-233`) already calls `project.error(...)`
   unconditionally for a tampered/corrupt cache. Already blocks. (This is
-  distinct from a *missing* vendored copy — see below.)
+  distinct from a *missing* kept copy — see below.)
 
 Both are already non-negotiable today; a baseline stamped over either would
 record a hash nobody should trust. No reason to make either configurable.
@@ -70,7 +70,7 @@ checkpoint.
 |---|---|---|---|---|
 | `draft_items` | any local item whose configured status field currently reads its configured draft value | `item.fields.get(status_field)` | **true** | false |
 | `unpinned_citations` | a `citations:` entry with no lockfile record (`state == "unpinned"`) | `citations.verify` / `item.citations` | **true** | false |
-| `missing_vendored_copies` | `vendor: true` citation whose blob is absent (`state == "cache_missing"`) | `citations.verify` / `item.citations` | **true** | false |
+| `missing_kept_copies` | `keep_copy: true` citation whose blob is absent (`state == "cache_missing"`) | `citations.verify` / `item.citations` | **true** | false |
 | `uncovered_requirements` | a non-draft, non-retired coverable item at coverage stage `open` | `project.coverage` | **true** | false |
 | `unverified_requirements` | a non-draft, non-retired coverable item at any stage below `verified` | `project.coverage` | false | false |
 | `info_check_failures` | a failing `checks:` entry on a type whose `check_severity` is `info` (e.g. an `option` candidate) | `item.checks` | false | false |
@@ -79,7 +79,7 @@ checkpoint.
 Reasoning for the defaults, briefly:
 
 - **`draft_items` / `uncovered_requirements` / `unpinned_citations` /
-  `missing_vendored_copies` / `unaccepted_board_moves` default on for
+  `missing_kept_copies` / `unaccepted_board_moves` default on for
   `release`.** These are exactly the "did you actually finish" questions a
   release is supposed to force. A release with an unresolved board move or
   an unfetched datasheet citation is shipping an unresolved question, not a
@@ -126,7 +126,7 @@ This document does not name that file; it only adds one top-level key to it,
 release_gate:
   draft_items:              { release: true,  revision: false }
   unpinned_citations:       { release: true,  revision: false }
-  missing_vendored_copies:  { release: true,  revision: false }
+  missing_kept_copies:  { release: true,  revision: false }
   uncovered_requirements:   { release: true,  revision: false }
   unverified_requirements:  { release: false, revision: false }
   info_check_failures:      { release: false, revision: false }
@@ -208,7 +208,7 @@ to exactly that stamp, and keeps the "delete to undo" story in §6 a plain
 comment gives for `ids.yaml` and `citations.yaml`: these record which names
 have been burned, and two branches stamping `rev-b` independently without
 seeing each other's file is exactly the kind of silent collision that
-comment already warns about. Only `.refdes/vendor/` (the actual copyrighted
+comment already warns about. Only `.refdes/copies/` (the actual copyrighted
 bytes) is gitignored; every other `.refdes/*.yaml` manifest is committed.
 `.refdes/baselines/` follows that rule.
 
@@ -230,7 +230,7 @@ refdes_version: "0.3.0"
 gate:
   draft_items: pass
   unpinned_citations: pass
-  missing_vendored_copies: pass
+  missing_kept_copies: pass
   uncovered_requirements: pass
   unverified_requirements: skipped   # not enabled in release_gate: at the time
   info_check_failures: skipped

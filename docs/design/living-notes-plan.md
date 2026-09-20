@@ -389,7 +389,7 @@ derived rows come from what already exists: coverage
 (`blocked.resolve` `blocked.py:68`, `blocked.by_item` `:135` — currently absent
 from the index), citations (`citations.verify` `citations.py:483`,
 `_rule_unpinned_citations` `lifecycle.py:508`,
-`_rule_missing_vendored_copies` `:519`), proposed/on-hold verdicts via
+`_rule_missing_kept_copies` `:519`), proposed/on-hold verdicts via
 `chains.resolve_current(..., "status")` (`chains.py:552`), and forks
 (`chains.resolve` `chains.py:726`, `thread_tips` `:361`). Tests:
 `tests/test_thread_cli.py`, `tests/test_work.py`.

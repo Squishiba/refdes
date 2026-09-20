@@ -431,6 +431,19 @@ word throughout: "declared intent in items, computed provenance in a
 lockfile", with `lockfile_path`, `load_lockfile`, `save_lockfile` and
 `vendor:` as the vocabulary of the module.
 
+**Landed (2026-09-20).** The owner approved this rename and chose the
+explicit two-word spelling: the field is `keep_copy:`. The lockfile key is
+`kept_copy:` — past tense, because it records a resolved fact beside
+`fetched`, not the author's intent flag, which stays `keep_copy:`. The
+directory is `.refdes/copies/` (the plural noun for the bytes, no verb
+needed) and the release-gate rule is `missing_kept_copies`. The old
+spelling never passes silently: `vendor:` in an entry is a hard validation
+error naming `keep_copy:`, a stranded `.refdes/vendor/` directory or
+`vendored:` lockfile record produces a loud diagnostic, and `vendor:` →
+`keep_copy` rides the v2→v3 migration's `citation_keys` — it shipped under
+hardware@2, so released projects need the rewrite. What "vendor" remains
+in the codebase is manufacturer-sense only.
+
 **S1.2 — `alternate` means "not interchangeable" in a vocabulary where
 `equivalent` already means "interchangeable".** `v3/base.yaml:124-125`:
 

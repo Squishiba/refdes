@@ -930,8 +930,8 @@ browser cache, or worse a CDN in front of a hosted `_site/`, is built to get
 wrong: nothing about the URL changed, so nothing tells the cache to refetch.
 
 **Worth fixing, and the tool already has the pattern for it.**
-`.refdes/vendor/<sha256><ext>` (`docs/markdown.md:174`) already
-content-addresses vendored citation bytes for exactly this reason — this is
+`.refdes/copies/<sha256><ext>` (`docs/markdown.md:174`) already
+content-addresses kept citation bytes for exactly this reason — this is
 extending an idea already proven in the codebase to a second asset class,
 not introducing a new one. And the mechanism needed to make a filename
 change *safe* — pruning whatever the previous build wrote under the old

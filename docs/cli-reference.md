@@ -162,7 +162,7 @@ release 'rev-b' blocked -- not stamped:
   FAIL     draft_items            REQ-PWR-004, REQ-PWR-005
   FAIL     uncovered_requirements BND-THM-002
   pass     unpinned_citations
-  pass     missing_vendored_copies
+  pass     missing_kept_copies
   skipped  unverified_requirements
   skipped  info_check_failures
   pass     unaccepted_board_moves
@@ -291,8 +291,8 @@ Updates `.refdes/ids.yaml`. See [IDs](ids.md).
 The **only** command that touches the network — and only for remote
 (`http`/`https`) citations. Fetches every path a `citations:` field declares,
 records its sha256 and fetch time in the `.refdes/citations.yaml` lockfile,
-and vendors the bytes into `.refdes/vendor/` for any remote citation that
-declares `vendor: true`. A local path is read from disk instead, so pinning
+and keeps the bytes in `.refdes/copies/` for any remote citation that
+declares `keep_copy: true`. A local path is read from disk instead, so pinning
 one works with the network down. `build` and `check` never do this themselves
 — see [citing a datasheet](markdown.md#citing-a-datasheet).
 
@@ -328,8 +328,8 @@ instead. Resolution covers every section any item in the project cites for the
 path being pinned, not just the ones inside `--item`/`--path` scope — a page
 number is a fact about the bytes being pinned, so re-pinning a file under one
 item cannot leave another item's section pointing at the bytes it replaced.
-Updates `.refdes/citations.yaml`, and `.refdes/vendor/` for any citation that
-opted into vendoring.
+Updates `.refdes/citations.yaml`, and `.refdes/copies/` for any citation that
+opted into keeping a local copy.
 
 A `section:` that cannot be resolved is reported as its own `FAILED` line and
 makes the exit code nonzero, even though the pin itself succeeded — see
@@ -912,13 +912,13 @@ python -m http.server -d _site 8000
 | `.refdes/log-seal.yaml` | **yes** | Append-only seals for log entries with no board (the only file used at all when the project has no `boards:` registry) |
 | `.refdes/log-seal-<board>.yaml` | **yes** | Append-only seals for one registered board's own log entries |
 | `.refdes/boards.yaml` | **yes** | Board and workspace drift manifest; the `workspaces:` section only appears for a project that has declared `workspaces:` |
-| `.refdes/citations.yaml` | **yes** | Citation lockfile (sha256, fetch time, vendored flag); written only by `refdes fetch` |
+| `.refdes/citations.yaml` | **yes** | Citation lockfile (sha256, fetch time, kept-copy flag); written only by `refdes fetch` |
 | `.refdes/baselines/<name>.yaml` | **yes** | One file per `refdes revision`/`refdes release` stamp. Not rewritten by any ordinary command; `refdes revise` and `refdes standard upgrade` do edit it, to carry an item's content hash across a rename |
 | `.refdes/schema.json` | **no, gitignored** | The project's merged JSON Schema, for editor completion; rewritten by every command that loads the project |
-| `.refdes/vendor/` | **no, gitignored** | Vendored datasheet bytes, content-addressed by sha256; written only by `refdes fetch --path ...` for a remote citation with `vendor: true` |
+| `.refdes/copies/` | **no, gitignored** | Kept local copies of datasheet bytes, content-addressed by sha256; written only by `refdes fetch --path ...` for a remote citation with `keep_copy: true` |
 | `_site/` | no | Generated output |
 
 Source files are also rewritten by `refdes id`, which inserts allocated IDs in
-place. `.refdes/citations.yaml` and `.refdes/vendor/` are the only things
+place. `.refdes/citations.yaml` and `.refdes/copies/` are the only things
 `refdes fetch` writes — `build` and `check` (without `--refresh`) never touch
 either.

@@ -1721,7 +1721,7 @@ sealed content) — `schema.json` carries no history at all. It's a pure
 function of the current merged config; deleting it loses nothing, and by
 definition it should always exactly match what the current config would
 produce. That puts it in the same category as `_site/` and
-`.refdes/vendor/`: a derived artifact, not a record. It's gitignored, with a
+`.refdes/copies/`: a derived artifact, not a record. It's gitignored, with a
 comment in the same voice the existing gitignore comment already uses:
 
 ```

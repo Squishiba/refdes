@@ -17,7 +17,7 @@
 | `vocabulary.html` | Every term the project's schema resolves to, with definitions — see [the vocabulary page](#the-vocabulary-page) |
 | `<id>.html` | One page per item, lowercased ID (`req-pwr-002.html`) |
 | `items.json` | The machine-readable export |
-| `assets/` | The stylesheet and script, plus every local image, `site.assets:` directory, and vendored citation your project references — see [images and other local files](markdown.md#images-and-other-local-files) |
+| `assets/` | The stylesheet and script, plus every local image, `site.assets:` directory, and kept citation copy your project references — see [images and other local files](markdown.md#images-and-other-local-files) |
 
 Static files. No server, no build step for the reader, no network calls. Hover
 previews are inlined at build time; with JavaScript disabled every reference is
@@ -234,7 +234,7 @@ The print stylesheet hides all of this.
 - Rendered body, with calc blocks as evaluated tables and IDs autolinked
 - Options-considered panel for decisions, chosen and rejected
 - Checks table with pass/fail and the worst-case detail
-- Citations table for any `citations`-typed field — pinned/vendored state, rev, page, part number. The page is the authored `page:`, or the page a `section:` resolved to at fetch time
+- Citations table for any `citations`-typed field — pinned/kept state, rev, page, part number. The page is the authored `page:`, or the page a `section:` resolved to at fetch time
 - Traceability: outgoing and incoming links
 - Provenance: source `file:line`, and the content hash
 
@@ -280,7 +280,7 @@ per-item `board` for a [`boards:`](multi-board.md) registry, top-level
       "citations": {
         "citations": [
           { "path": "https://www.ti.com/lit/ds/symlink/tps62913.pdf",
-            "state": "ok", "pinned": true, "vendored": false,
+            "state": "ok", "pinned": true, "kept_copy": false,
             "sha256": "9f2c...", "fetched": "2026-03-01T12:00:00Z",
             "local_path": "", "section_page": "14", "detail": "" }
         ]
@@ -330,14 +330,14 @@ per-item `board` for a [`boards:`](multi-board.md) registry, top-level
 
 `items[].fields` is authored intent only — for a `citations:`-typed field, each
 entry is just what was written in the item (`path`, `rev`, `page`, `section`,
-`part_number`, `vendor:`, `id`). What it *resolved to* is a separate, parallel
+`part_number`, `keep_copy:`, `id`). What it *resolved to* is a separate, parallel
 structure,
 `items[].citations`, keyed by field name and ordered to match `fields[fname]`:
 
 ```json
 "citations": {
   "citations": [
-    { "path": "...", "state": "ok", "pinned": true, "vendored": false,
+    { "path": "...", "state": "ok", "pinned": true, "kept_copy": false,
       "sha256": "9f2c...", "fetched": "2026-03-01T12:00:00Z",
       "local_path": "", "section_page": "14", "detail": "" }
   ]
@@ -352,23 +352,23 @@ the model level, and [citing a datasheet](markdown.md#citing-a-datasheet) for
 the authoring side.
 
 Every entry always has the same keys, so "not yet pinned" and "pinned but not
-vendored" are each an explicit `state`, not something inferred from an absent
+kept" are each an explicit `state`, not something inferred from an absent
 key:
 
 | `state` | Meaning |
 |---|---|
-| `"ok"` | Resolved — hash on file, and vendored locally if `vendor: true` was declared |
+| `"ok"` | Resolved — hash on file, and kept locally if `keep_copy: true` was declared |
 | `"unpinned"` | No lockfile entry yet — `refdes fetch` has not run for this path |
-| `"cache_missing"` | Pinned and vendored, but the local blob is gone |
-| `"hash_mismatch"` | Vendored blob's hash no longer matches the pinned sha256 (always an error), or a cited local file changed since it was pinned (warning, error with `--require-citations`) |
+| `"cache_missing"` | Pinned and kept, but the local blob is gone |
+| `"hash_mismatch"` | Kept blob's hash no longer matches the pinned sha256 (always an error), or a cited local file changed since it was pinned (warning, error with `--require-citations`) |
 | `"missing"` | A cited local file does not exist (always an error) |
 | `"invalid"` | The `path:` itself is refused (escapes the project, drive letter, backslash, …) — validation already reported it with `file:line`; the citation is skipped, not resolved |
 
 `pinned` is `state != "unpinned"` — the one field to check "is this dependency
 tree fully pinned for a release" without enumerating `state` values yourself.
-`vendored` and `sha256` distinguish hash-only pins (`vendored: false`, `sha256`
-set) from vendored ones (`vendored: true`) — vendoring is opt-in per citation,
-so a fully-pinned project can still be `vendored: false` throughout.
+`kept_copy` and `sha256` distinguish hash-only pins (`kept_copy: false`, `sha256`
+set) from kept ones (`kept_copy: true`) — keeping a copy is opt-in per citation,
+so a fully-pinned project can still be `kept_copy: false` throughout.
 
 ### What it is good for
 
