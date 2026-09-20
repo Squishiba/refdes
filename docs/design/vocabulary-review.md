@@ -1,9 +1,41 @@
 # Vocabulary review — duplication and clarity
 
-**Status: findings, no code changed.** Read-only pass over the words refdes
-asks an author to learn. Nothing here renames anything; §4 proposes fixes and
-names the migration cost of each. The goal this review is scored against is
-the owner's, in his words: the vocabulary should be **intuitive**.
+**Status: findings and proposals, no code changed.** Read-only pass over the
+words refdes asks an author to learn. Nothing here renames anything; §3 proposes
+fixes and costs each one. The goal this review is scored against is the owner's,
+in his words: the vocabulary should be **intuitive**.
+
+## Summary
+
+The vocabulary is mostly healthy: the link verbs are defined at their point of
+use, the active-voice convention is genuinely good design, and the words that
+are unfamiliar — `fold`, `tip`, `stamp`, `bound` — do not import competing
+meanings. §4 records what was checked and kept, on purpose.
+
+The damage is concentrated in three places.
+
+1. **Words that mean something else to a hardware engineer.** `vendor:` in a
+   citation entry means "keep a local copy of the bytes", and it sits in the
+   same mapping as `part_number` (§2.1 S1.1). `alternate` means *not*
+   interchangeable, beside `equivalent` which means interchangeable — the same
+   near-synonym structure that already cost this project one rename (§S1.2).
+2. **One word, several mechanisms.** `log` is a type and a change mode whose
+   difference the engine does not implement (S1.4); `history` names four things
+   (S1.5); `revision`/`revise`/`rev:` are four things including two adjacent
+   commands (S1.3); `frozen`, `locked`, `sealed` and `pinned` are four
+   mechanisms with four near-synonyms (S1.7, D1).
+3. **The unshipped living-notes vocabulary is about to add five more words to
+   the cluster it is simultaneously redefining** — `record`, `recorded`,
+   `history`, `snapshot`, `tasks` (`living-notes-plan.md:576` reserves exactly
+   this) — and `record` collides head-on with the shipped `records:` verb, a
+   collision the plan itself already noticed at `:588`.
+
+The good news is cost. Everything in the third group is unshipped and free to
+change today, and most of the second group is inside `hardware@3`, which is
+unreleased: a rename there touches one YAML file and this repo, not a migration.
+§3.1 is free, §3.2 is cheap now and expensive after v3 ships, §3.3 is moderate,
+§3.4 costs only documentation. §3.6 lists what this review recommends leaving
+alone, and why.
 
 Every term below was read in the file that defines it, and every quote is
 copied from that line. Where a term exists in more than one standard version,
@@ -739,7 +771,331 @@ Short, on purpose. `fold`, `tip`, `stamp`, `pin`, `redact`, `cascade`,
 `bound`, `calc`, `[[cite:]]`, `board`, `workspace`, `coverable` and the
 active-voice link convention are all either defined at first use, or ordinary
 engineering English, or both. Several are unfamiliar; none imports a competing
-meaning; none is duplicated by a sibling word. §4.2 records them as checked.
+meaning; none is duplicated by a sibling word. §4 records them as checked.
+
+## 3. Proposals
+
+Each proposal is one line of old to new, what has to change, and what breaks.
+They are grouped by cost, not by severity, because the cheapest fixes are the
+ones worth doing first.
+
+### 3.0 Cost tiers
+
+- **T0 — free.** The word exists only in `docs/design/living-notes.md`,
+  `living-notes-plan.md` or `threads.md`. No item file, no output, no code.
+  `living-notes-plan.md:576` says so explicitly: a rename "touches the names on
+disk and in output, not what was decided about them", and the eight ratified
+  decisions stay intact.
+- **T1 — cheap now, expensive later.** The word is in `hardware@3`, which is
+  unreleased (`AGENTS.md` "Current state, briefly"). A rename touches
+  `v3/base.yaml`, this repo's own items, tests and docs. The moment v3 ships,
+  the same rename needs `refdes standard upgrade` and a migration for other
+  people's projects. `hardware@1` and `hardware@2` are frozen either way —
+  `constraint` stays `constraint` in v1 forever, which is correct.
+- **T2 — moderate.** The word is in engine code and in output users read, so a
+  rename touches function names, output fields and docs, but not the item-file
+  format.
+- **T3 — documentation only.** The word is fine or the fix is a table; no
+  rename.
+
+### 3.1 T0 — free today: the living-notes words
+
+**P1 — `record` / `recorded` → `capture` / `captured`.** The event, the marker
+and the command: "captured 2026-09-15T14:08Z when LOG-POWER-014 followed it",
+"edited after captured", `refdes history capture <item>`.
+*Why*: kills the head-on collision with the shipped `records:` verb
+(`v3/base.yaml:118`) that `living-notes-plan.md:588` already names as a
+confusion, and keeps every ratified decision about what the mechanism does.
+*Alternatives considered*: `settle`/`settled` — already the coverage prose for a
+satisfying decision (`v3:166` "A settled (accepted) decision"), so it moves the
+collision instead of removing it; `freeze` — taken by key-freezing
+(`adopt.py:64`), and P4 is renaming that anyway; `fix`/`fixed` — reads as
+*repaired*; `seal` — reusing the word H5 is retiring is precisely the
+meaning-flip S2.3 warns about.
+*Cost*: T0. Two design docs and the names H1 through H9 will use. Nothing on
+disk, because nothing is written yet.
+
+**P2 — move the config key, not the store: project `history:` → `on_change:`.**
+The key's own comment already says what it is — `docs/schema-reference.md:18`
+`history:     { ... }   # default on_change mode` — and the item-level override
+(`vocabulary.py:81`) is the same thing at item scope. Renaming both to
+`on_change:` leaves `history` to mean exactly one thing: the store and its
+command family, `refdes history capture` / `redact` / `migrate-seals`.
+*Cost*: T1, small. `refdes-project.yaml` in this repo, the config parse and
+default in `model.py`, `parse.py`'s reserved-key handling for the item-level
+override, `schema-reference.md`, `change-tracking.md`, and tests. No item body
+changes. Doing it before H1 means no project ever has to migrate.
+
+**P3 — keep `snapshot`, and say what distinguishes it from `baseline`.**
+`snapshot` is uncollided and names the stored object, which `capture` (the
+event) does not. The pair that needs a sentence, not a rename, is
+snapshot/baseline: a snapshot is one item's payload at a moment, a baseline is
+the whole project's content hash at a stamped moment (`lifecycle.py`).
+*Cost*: T3, one line in the H-plan glossary.
+
+**P4 — `frozen` (key-freezing) → `anchored` / `anchor`.** Today `adopt.py:64`
+reports `frozen_follows`, `:214` says "could not freeze N local follows
+reference(s)", `build.py:421` discusses "unfrozen links", and `links.md` tells
+authors a bare `follows:` "freezes" to its tip. None of it has anything to do
+with immutability: it means the link stopped floating on a display id and now
+names a key. *Anchor* says exactly that, is uncollided, and reads correctly in
+the sentence the docs already have: "the first writable load anchors it to the
+thread's current tip".
+*Cost*: T2. Function names `plan_follows_freeze` / `freeze_follows`, the
+`frozen_follows` output field, `links.md`, `cli-reference.md`, tests. The
+composite `DISPLAY-ID@key` form itself does not change, so no item file and no
+baseline format changes. Worth doing before the threads work ships, because
+that work will add more uses of the word to the immutability cluster.
+
+**P5 — a naming rule for H1 through H9, at zero cost.** `sealed` may only ever
+refer to the pre-H5 mechanism and the `legacy-seal` markers; the new state is
+`captured` and `edited after captured`. The decided behaviour of Q2 stays
+exactly as ratified (`living-notes-plan.md:598-600`), including the `--reseal`
+message; this constrains the *word*, not the mechanism. Without the rule, an
+older build's error message and a newer build's marker will both say `sealed`
+and mean opposite things (S2.3).
+
+**P6 — keep `tasks:`, and make the noun always `task`.** `tasks:` on the merged
+`log` type, `open_tasks` as the gate rule (`living-notes-plan.md:410-411`), and
+`refdes work` as the query are three consistent derivations of one noun, not a
+duplication. The one thing to avoid is letting `work`, `work item`, `to-do` and
+`task` all appear for the same object; pick `task` for the data and `work` only
+for the command that lists them.
+
+### 3.2 T1 — cheap while `hardware@3` is unreleased
+
+**P7 — citation sub-key `vendor:` → `keep:`.** "keep a copy of the bytes" is
+what the boolean does (`docs/markdown.md:380-383`), and `keep` does not already
+mean the manufacturer to the person writing a BOM. *Alternatives considered*:
+`local:` — collides with "local citation", which is what the docs already call a
+path-on-disk citation (`markdown.md:280`); `cache:` — implies disposable, and
+these bytes are provenance; `copy:` — acceptable, vaguer. Also update
+`refdes fetch` help ("optionally vendor") and the `fetch` description's
+"vendors the bytes into `.refdes/vendor/`". The `.refdes/vendor/` directory name
+can stay — it is not author-facing prose — or move with it; either is fine.
+*Cost*: T1. `v3/base.yaml:104`, `citations.py` key parsing, `markdown.md`
+examples, this repo's items that set `vendor: true`, tests. Any future project
+gets `refdes revise` coverage for free, since that command already renames
+fields from a mapping file.
+
+**P8 — `equivalent` → `drop_in`, keep `alternate`.** The pair is the problem
+(S1.2), and the fix is to put the unambiguous industry phrase on the safe side:
+`drop_in` means interchangeable, full stop, and `alternate` keeps its weaker
+meaning of "functionally close, check before substituting" (`v3:124-125`).
+Self-inverse stays. The `required_when: {links: alternate}` rule on
+`component.rationale` (`:217`) is unaffected.
+*Cost*: T1. One link verb in `v3/base.yaml`, the parts-page rendering, `docs/links.md`,
+tests. No shipped project. If v3 ships first, this becomes a standard upgrade
+with a mapping, and every `equivalent:` line in someone's items needs rewriting.
+
+**P9 — `on_change: log` → `on_change: timeline`.** The mode's whole meaning is
+"this change belongs in the field-level timeline we have not built yet"
+(`change-tracking.md:10-23`), and `timeline` names that without borrowing the
+name of an item type. It also makes the current no-op honest: a reader can see
+that `timeline` is the unimplemented one, rather than reading `log` and
+assuming the `log` type is involved.
+*Cost*: T1. Six field annotations in `v3/base.yaml` (`:97`, `:98`, `:101`,
+`:177`, `:215`, `:241`), the mode constant in `model.py`, the tables in
+`schema-reference.md:275` and `change-tracking.md:10-14`, tests. *Alternative*:
+collapse `log` and `ignore` into one mode until the timeline exists — honest,
+but it throws away authoring intent already recorded in six fields, and the
+rename is smaller.
+
+**P10 — preset type `claim` → `assertion`.** Removes the `claimed` stage /
+`claim` type collision (S1.8) at its cheapest point: the debate preset is
+opt-in, bundled with an unreleased standard, and nothing outside this repo can
+be using it. `raises`, `bears_on`, `met_by`, `resolved_by` stay; the coverage
+stage `claimed` stays, because stage names appear in computed output and gate
+language.
+*Cost*: T1. `presets/design-debate.yaml`, its tests, `docs/links.md` and
+whatever preset prose exists.
+
+**P11 — a question, not a rename: should `superseded` and `selected` exist as
+statuses at all?** Both are facts the `supersedes` and `selects` links already
+assert, and both verb definitions have to disclaim any effect (S1.9) precisely
+because the state is stored twice and can disagree. The vocabulary-level fix is
+to have one representation: compute "superseded" from `supersedes` and
+"selected" from `selected_by`, and drop both from the enums. That is a design
+change, not a word change, and it interacts with coverage — `selected` is
+component's `satisfying_statuses` value (`v3:211`) — so it needs Jared's call.
+The fallback if he says no: keep both, and add a build warning when a link and
+a status disagree, so the vocabulary stops being the only thing telling the
+author they mean the same thing.
+
+### 3.3 T2 — engine and CLI words
+
+**P12 — `refdes revise` → `refdes rename`, keeping `revise` as an alias.**
+`revise` and `revision` are two letters apart and do unrelated things (S1.3),
+and the command's own description is a rename: "Apply an explicit old->new
+vocabulary mapping (type names, field names scoped per type, link verb names, id
+prefixes) to every item file in one operation" (`cli.py:1514-1527`).
+*Cost*: T2. Parser name, `cmd_revise`, `docs/cli-reference.md`, shell
+completions, muscle memory — hence the alias, kept until the next minor.
+
+**P13 — `refdes index` → `refdes items`, keeping `index` as an alias.** Four
+referents for `index` (D5), and this is the one users type. The command prints
+items; call it that. *Cost*: T2, same shape as P12, plus any editor tooling
+built on it — `docs/cli-reference.md:193` says that is precisely who it is for,
+so the alias matters more here than for P12.
+
+**P14 — leave `audit`, `init`, `new`, `check`, `build`, `fetch`, `stub-tests`,
+`keys adopt`, `calc-rewrite`, `former-ids`, `standard`, `schema`, `ls`, `id`,
+`release`, `revision` alone.** Renaming CLI verbs is the most expensive
+category of vocabulary change and buys the least. The two that are genuinely
+vague — `audit` (S2.4) and `index` (S2.5) — get fixed by their help text and
+first doc line, not by a new name. `release` and `revision` are load-bearing in
+user habits and their definitions are already precise (`docs/lifecycle.md:5-11`).
+
+### 3.4 T3 — the fixes renaming cannot make
+
+Most of §2.2 is not misnaming; it is the absence of a page that says which word
+to reach for. Five tables and one mechanism:
+
+**P15 — a "which grouping?" table** for `board`, `workspace`, `group`,
+`section`, `tag` and `{{tree}}` (D3), in `docs/concepts.md`, one row each: what
+it is for, whether it is data or path, and whether it appears in coverage.
+
+**P16 — a "which compliance verb?" table** for `refines`, `derives_from`,
+`governed_by`, `constrained_by`, `satisfies` and preset `met_by` (S1.10) in
+`docs/links.md`, with the two columns that actually decide it: does it feed
+coverage, and does it change the thing or just point at it. `constrained_by`
+is worth keeping despite the fossil — a new author never met `constraint`, so
+the word only confuses people who read v1 — but the doc string should say
+"must respect a bound" and nothing that sounds like `governed_by`.
+
+**P17 — a "what does this word mean when a thing is finished with?" table** for
+`retired`, `superseded`, `obsolete`, `eliminated`, `rebutted` and `on_hold`
+(D4). Do not unify them: each is right for its type, and a single `retired`
+across six types would lose the difference between a part that was never chosen
+and a decision that was reversed. Document them as a set instead, and note that
+`on_hold` and `blocked_by` are two ways to say stuck.
+
+**P18 — one sentence for component versus part** (S2.2): the type is
+`component`, the world calls it a part, and the parts page is the components
+page. Put it in `docs/concepts.md` where `component` first appears.
+
+**P19 — restate the `_by` rule so it has no exception.** `docs/coverage.md:64-91`
+makes a good rule and then flags `verified_by` as breaking it. The rule authors
+can actually use is: *the suffix never tells you whether a link feeds coverage;
+the type's `satisfying_statuses` and `verifying_statuses` do.* That is true for
+every verb including `verified_by`, and it removes the one exception from a rule
+whose whole value is being automatic.
+
+**P20 — put disambiguation in the standard, not in prose.** `vocabulary.py`
+already renders every type, field and verb onto a generated vocabulary page
+(`vocabulary.py:12-14`: `vocabulary.html` and `docs/vocabulary.md`), from the
+same `doc:` strings quoted throughout §1. Add one optional sibling key — say
+`not_to_be_confused_with:` — rendered as a fact line by `_facts()`
+(`vocabulary.py:387`) and `_term_html()` (`:365`), and use it for exactly the
+pairs in this review: `alternate`/`drop_in`, `records:`/`capture`,
+`log`-the-type/`timeline`, `claimed`/`assertion`, `bound`/`limit`.
+*Cost*: small engine change, no format change for projects that do not use it.
+The value is structural: a rename proposed later has one place to look for what
+the word was for, and the page stops being a list of definitions that happen to
+sit next to each other.
+
+**P21 — a three-question rule for any new word entering a standard.** (1) Does
+this word already mean something else in refdes? grep the standards, `parse.py`,
+`vocabulary.py`, `cli.py`. (2) Does it mean something else to a hardware
+engineer, in a BOM, or in a datasheet? (3) If two words name adjacent ideas, is
+the difference visible in the names, or only in the doc strings? The
+`constraint`/`requirement` rename, the `records:` confusion at
+`living-notes-plan.md:588`, and S1.1 through S1.5 in this review are all
+failures of question one or two, caught after the fact each time.
+
+### 3.5 Order of work
+
+1. P1, P5, P6 — free, and they must happen before H1 writes any of these names
+   to disk.
+2. P2 — free-ish now, a migration later; it also unblocks P1's `refdes history`
+   naming.
+3. P7, P8, P9, P10 — do them in the same pass as any other v3 change, before
+   v3 ships. After that they are standard upgrades.
+4. P4, P12, P13 — engine and CLI, with aliases; schedule whenever, but P4 gets
+   more expensive the more threads work lands.
+5. P15 through P20 — documentation, useful immediately, no dependencies.
+6. P11 — needs a decision from Jared before anyone writes code.
+
+### 3.6 Explicitly not proposed
+
+- **Renaming `bound`.** It was a deliberate, documented rename with a working
+  reason (`v2/base.yaml:21-24`), and upper/lower bound is ordinary engineering
+  English. The `limit`/`constrained_by` drift around it is fixed by P16, not by
+  another rename.
+- **Unifying the six dead-words** (D4). See P17.
+- **Renaming `fold`, `tip`, `thread`, `cascade`, `{{tree}}`, `stamp`, `pin`,
+  `redact`, `refines`, `derives_from`, `part_of`, `amends`, `addresses`,
+  `board`, `workspace`, `coverable`, `calc`, `[[cite:]]`.** Unfamiliar, not
+  wrong; each is defined where it is used; none imports a competing meaning.
+- **Renaming `seal` to something new.** H5 already retires the mechanism; the
+  word stays only as the name of the legacy files, which is what P5 pins down.
+- **Renaming `constrained_by`.** See P16 — the fossil costs a doc line, a rename
+costs every item file that uses the verb.
+
+## 4. Checked and fine
+
+Terms that were read, examined against the two questions in §2, and found
+sound. This list is the other half of the review: it is what tells the next
+person that the absence of a finding here was a decision and not an oversight.
+
+### 4.1 Terms checked and kept
+
+**Link verbs.** `satisfies`, `verifies`, `addresses`, `refines`,
+`derives_from`, `part_of`, `amends` — each names one action, the doc string
+says who may author it and what it does to coverage, and none has a sibling
+word for the same job. `governed_by` is the weakest of them only because it
+shares a page with three near-neighbours, which is P16's problem rather than
+its own.
+
+**The active-voice convention** (`docs/coverage.md:64-91`) — a semantic
+property readable from the shape of the word, which is rare and worth keeping.
+P19 removes its one exception from the prose.
+
+**Coverage machinery.** `coverable`, `coverable_statuses`,
+`satisfying_statuses`, `verifying_statuses`, `check_severity` — four switches
+that say exactly what they include, and `check_severity`'s comment
+(`model.py:230-235`) explains why `option` is INFO and `decision` is ERROR.
+The five stage names are good; `claimed` is the only one with a naming problem,
+and that is its collision with the preset type (S1.8, P10), not the word.
+
+**Nouns a hardware engineer already owns, used correctly.** `refdes` as
+reference designator (`v3:215` "U14, R7"), `part_number`, `calc`,
+`[[cite:]]`, `board`, `limit`, `pin` (a hash-pinned reference — the right word,
+and `docs/markdown.md:380-383` draws the pin/vendor line cleanly even though
+`vendor` itself is P7's problem).
+
+**Words that are unfamiliar and better than the obvious alternative.** `fold`
+for combining a thread's per-field values by walking back from the tip —
+precise, and `threads.md:388-393` defends it as correct. `tip` for the live end
+of a thread. `stamp` for writing a baseline. `redact` for the destructive,
+acknowledged removal in `living-notes.md:329`, which is exactly the word for it.
+`{{tree}}` and `{{cascade}}` — two words for two different walks, and
+`docs/blocks.md:124-130` explains in the vocabulary itself why the tree has no
+`via=`: "it would replace it with a cascade wearing a hat". That is the tone
+the rest of this vocabulary should aim for.
+
+**Already renamed, correctly.** `constraint` → `bound` in v2, with the reason
+recorded in the standard's own header (`v2/base.yaml:21-24`), and v1 left
+frozen at `constraint` forever. That is the model for every rename proposed
+above: change the name where it is cheap, keep the old name where it is honest,
+and write down why both times.
+
+### 4.2 What this review did not cover
+
+- **Config vocabulary from the other design docs.** `extends.md` and
+  `calc-sources.md` are coining words for layering and value sources
+  (`extends`, overlay, source) and their decisions were ratified on 2026-09-19
+  as this review was running. They deserve the same two questions, and they are
+  still unshipped, so the answer is cheap to get.
+- **Error and diagnostic message wording.** The vocabulary of what the tool
+  says when it fails is a large surface and none of it was examined here.
+- **Rendered site strings** — template headings, page titles, the parts page.
+  Only `docs/` and `src/refdes/` definitions were read.
+- **`hardware@1` and `hardware@2` names as candidates for change.** They were
+  read for the inventory and compared against v3; they are frozen and nothing
+  here proposes touching them.
+- **`docs/design/backlog.md`.** It is a large term-coining document in its own
+  right and was read only where §1 cited it.
 
 The one structural thing worth saying about the healthy part of the vocabulary
 is `docs/coverage.md:64-91`: the rule that coverage claims are authored in
