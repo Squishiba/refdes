@@ -8,7 +8,7 @@ build time.
 
 1. **[Getting started](getting-started.md)** — build a working project from an empty
    folder in about ten minutes.
-2. **[Concepts](concepts.md)** — the object model, and the three notions of "done"
+2. **[Concepts](concepts.md)** — the object model, and the five coverage stages
    the whole tool is organised around.
 
 ## Guides

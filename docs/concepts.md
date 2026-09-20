@@ -44,16 +44,19 @@ When a value has a tolerance, a check uses the bound that is hardest to satisfy 
 the upper bound for `<=`, the lower bound for `>=`. A nominal that passes while a
 tolerance corner fails is reported as a failure, because that is what it is.
 
-## The three notions of "done"
+## The five coverage stages
 
-The most important idea in the tool. These are separate questions and collapsing
-them is how open work goes missing:
+The most important idea in the tool. Three of these — `addressed`, `satisfied`
+and `verified` — are separate senses of "done", and collapsing them is how open
+work goes missing. `claimed` is a satisfied claim that has not settled; `open`
+is the absence of all of them:
 
 | Stage | Means | Comes from |
 |---|---|---|
 | `open` | Nothing references it | — |
 | `addressed` | Somebody has worked on it | a **log** entry `addresses` it |
-| `satisfied` | A decision claims to meet it | a **decision** `satisfies` it |
+| `claimed` | A decision or component says it meets it, but that claim hasn't settled | a **decision**/**component** `satisfies` it, with a `status` not (yet) in the type's `satisfying_statuses:` |
+| `satisfied` | A settled decision or component claims to meet it | a **decision**/**component** `satisfies` it, with a `status` in `satisfying_statuses:` |
 | `verified` | A test proves it | a **test** `verifies` it |
 
 A requirement can be satisfied on paper and completely unverified. Another can be
