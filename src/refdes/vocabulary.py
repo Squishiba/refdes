@@ -214,15 +214,19 @@ def entries(project: Project) -> Vocabulary:
     sets: list[TermEntry] = []
     for name in sorted(project.sets):
         raw = project.sets[name] or {}
+        # A set is a type-spec fragment: its fields live under `fields:`
+        # (docs/design/composition.md §1); links and body ride along with it
+        # but the page lists fields, as before.
+        raw_fields = raw.get("fields") or {}
         sets.append(
             TermEntry(
                 name=name,
                 kind="sets",
                 fields=[
                     _field_entry(fname, spec if isinstance(spec, dict) else {})
-                    for fname, spec in raw.items()
+                    for fname, spec in raw_fields.items()
                 ],
-                included_by=sorted(_includers(project, name, raw)),
+                included_by=sorted(_includers(project, name, raw_fields)),
             )
         )
 
@@ -511,8 +515,8 @@ EXAMPLES: dict[tuple[str, str], str] = {
         "  rationale: Higher ESR at the output cap; verify ripple before swapping.\n"
         "  # rationale is required whenever an alternate link is present"
     ),
-    # -------------------------------------------------------------- field sets
-    ("field_sets", "provenance"): (
+    # -------------------------------------------------------------- sets
+    ("sets", "provenance"): (
         "# A type pulls the set in, and its items then carry its fields:\n"
         "types:\n"
         "  requirement:\n"
@@ -522,7 +526,7 @@ EXAMPLES: dict[tuple[str, str], str] = {
         "  source: Customer spec rev D, §3.1\n"
         "  tags: [power]"
     ),
-    ("field_sets", "stewardship"): (
+    ("sets", "stewardship"): (
         "types:\n"
         "  requirement:\n"
         "    include: [stewardship]\n"
@@ -530,7 +534,7 @@ EXAMPLES: dict[tuple[str, str], str] = {
         "  owner: J. Bin\n"
         "  last_reviewed: 2026-03-02"
     ),
-    ("field_sets", "citations"): (
+    ("sets", "citations"): (
         "types:\n"
         "  component:\n"
         "    include: [citations]\n"
@@ -642,7 +646,7 @@ def _fallback_example(e: TermEntry) -> str:
             elif e.inverse == e.name:
                 lines.append("# Self-inverse: the target gains the same edge.")
         return "\n".join(lines)
-    if e.kind == "field_sets":
+    if e.kind == "sets":
         owner = e.included_by[0] if e.included_by else "<type>"
         return "\n".join(["types:", f"  {owner}:", f"    include: [{e.name}]"])
     return f"{e.name}: ..."

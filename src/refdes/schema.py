@@ -505,8 +505,8 @@ def load_project(config_path: str | None = None, start: str = ".") -> Project:
     # base -> presets -> this project's own overlay, with `include:` resolved
     # into `fields:` -- everything below reads them exactly as it always read
     # raw.get("link_types")/raw.get("types") directly.
-    resolved_sets, resolved_link_types, resolved_types = standards.resolve_namespaces(
-        raw, settings["require_rejection_rationale"]
+    resolved_sets, resolved_link_types, resolved_types, schema_warnings = (
+        standards.resolve_namespaces(raw, settings["require_rejection_rationale"])
     )
 
     link_types: dict[str, LinkType] = {}
@@ -754,4 +754,10 @@ def load_project(config_path: str | None = None, start: str = ".") -> Project:
     # is what fixes how its expressions read, and build.py applies unit aliases
     # the same way -- a project with no `equations:` resets it to empty.
     calc.set_equations(equations)
+    # An include that contributes nothing that survives the merge is a smell,
+    # not a mistake -- deliberate shadowing is legitimate (docs/design/
+    # composition.md §6.3). Loud enough to see in build output, not loud
+    # enough to stop the build.
+    for message in schema_warnings:
+        project.warn(message)
     return project

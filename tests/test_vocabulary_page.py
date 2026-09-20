@@ -41,7 +41,8 @@ link_types:
   tracks:      { inverse: tracked_by,    label: Tracks }
 sets:
   provenance:
-    tags: { type: list, on_change: ignore, doc: "Free-form labels." }
+    fields:
+      tags: { type: list, on_change: ignore, doc: "Free-form labels." }
 types:
   requirement:
     prefix: REQ

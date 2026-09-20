@@ -71,10 +71,10 @@ def _missing_definitions(label: str, doc: dict) -> list[str]:
     for set_name, entry in (doc.get("sets") or {}).items():
         if entry is None:
             continue
-        for fname, fspec in entry.items():
+        for fname, fspec in (entry.get("fields") or {}).items():
             if fspec is None:
                 continue
-            needs(f"sets.{set_name}.{fname}", fspec)
+            needs(f"sets.{set_name}.fields.{fname}", fspec)
     return missing
 
 

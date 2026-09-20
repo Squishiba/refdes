@@ -98,7 +98,8 @@ def test_doc_accepted_on_a_set_entry(tmp_path):
         tmp_path,
         "sets:\n"
         "  common:\n"
-        f"    title: {{type: text, doc: {DOC}}}\n"
+        "    fields:\n"
+        f"      title: {{type: text, doc: {DOC}}}\n"
         "types:\n"
         "  note:\n"
         "    prefix: NTE\n"
@@ -168,11 +169,11 @@ def test_a_bad_doc_on_a_set_entry_names_the_set(tmp_path):
     with pytest.raises(SchemaError) as exc:
         _load(
             tmp_path,
-            "sets:\n  common:\n    title: {type: text, doc: 42}\n"
+            "sets:\n  common:\n    fields:\n      title: {type: text, doc: 42}\n"
             "types:\n  note:\n    prefix: NTE\n    include: [common]\n"
             "    fields: {body: {type: text}}\n",
         )
-    assert "sets.common.title.doc" in str(exc.value)
+    assert "sets.common.fields.title.doc" in str(exc.value)
 
 
 # ------------------------------------------------------------- the exports

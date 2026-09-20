@@ -109,14 +109,17 @@
 
 sets:
   provenance:
-    source: { type: text, on_change: log, doc: "Where the item's content came from — a spec section, a datasheet, a conversation. Kept out of the content hash, so correcting it never marks downstream items suspect." }
-    note: { type: text, on_change: log, doc: "A free-text remark about the item's provenance, kept beside the item instead of inside its body. Kept out of the content hash." }
-    tags: { type: list, on_change: ignore, doc: "Free-form labels for grouping and finding items; free-text search matches tags as well as titles. Kept out of the content hash." }
+    fields:
+      source: { type: text, on_change: log, doc: "Where the item's content came from — a spec section, a datasheet, a conversation. Kept out of the content hash, so correcting it never marks downstream items suspect." }
+      note: { type: text, on_change: log, doc: "A free-text remark about the item's provenance, kept beside the item instead of inside its body. Kept out of the content hash." }
+      tags: { type: list, on_change: ignore, doc: "Free-form labels for grouping and finding items; free-text search matches tags as well as titles. Kept out of the content hash." }
   stewardship:
-    owner: { type: person, on_change: log, doc: "The person responsible for this item — who a question about it goes to. Kept out of the content hash, so ownership changes never invalidate downstream work." }
-    last_reviewed: { type: date, on_change: ignore, doc: "The date this item was last reviewed. Bookkeeping only: kept out of the content hash." }
+    fields:
+      owner: { type: person, on_change: log, doc: "The person responsible for this item — who a question about it goes to. Kept out of the content hash, so ownership changes never invalidate downstream work." }
+      last_reviewed: { type: date, on_change: ignore, doc: "The date this item was last reviewed. Bookkeeping only: kept out of the content hash." }
   citations:
-    citations: { type: citations, on_change: invalidate, doc: "External documents this item relies on. Each entry needs a path — an http(s) URL or a project-root-relative file — and may carry rev, page, section, part_number, keep_copy and an id for [[cite:]] references." }
+    fields:
+      citations: { type: citations, on_change: invalidate, doc: "External documents this item relies on. Each entry needs a path — an http(s) URL or a project-root-relative file — and may carry rev, page, section, part_number, keep_copy and an id for [[cite:]] references." }
 
 link_types:
   # trace: false on amends/records/supersedes/addresses -- none of these is

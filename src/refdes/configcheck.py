@@ -74,6 +74,10 @@ FIELD_KEYS = frozenset(
     {"type", "on_change", "required", "required_when", "choices", "default", "doc"}
 )
 BODY_KEYS = frozenset({"on_change", "required"})
+
+# A set is a fragment of the type's own spec and carries exactly these
+# (docs/design/composition.md §1.7); every other key is a loud error.
+_SET_ENTRY_KEYS = frozenset({"fields", "links", "body"})
 LINK_TYPE_KEYS = frozenset({"inverse", "label", "trace", "doc"})
 EQUATION_KEYS = frozenset({"params", "expr", "note"})
 
@@ -368,13 +372,40 @@ class BlockChecker:
 
     def sets(self, raw: dict) -> None:
         block = self.mapping(
-            raw.get("sets"), "sets", "a mapping of set name to its fields"
+            raw.get("sets"), "sets", "a mapping of set name to its contents"
         )
         for name, entry in block.items():  # the set names themselves are the project's own
             path = f"sets.{name}"
             if entry is None:
                 continue
-            self.field_map(entry, path)
+            spec = self.mapping(
+                entry, path, "a mapping of set contents: fields, links and body"
+            )
+            # A set is a type-spec fragment carrying exactly three keys
+            # (docs/design/composition.md §1). Anything else -- include,
+            # coverable, prefix, or a bare field name from the pre-rename
+            # direct form -- is named, not passed through.
+            for key in spec:
+                if key not in _SET_ENTRY_KEYS:
+                    raise self.error(
+                        f"{path} may not declare {key!r}: a set carries fields, "
+                        "links and body only"
+                    )
+            if "fields" in spec:
+                self.field_map(spec["fields"] or {}, f"{path}.fields")
+            if "links" in spec:
+                links = self.mapping(
+                    spec["links"], f"{path}.links", "a mapping of link name to allowed target types"
+                )
+                for lname, targets in links.items():
+                    self.string_list(
+                        targets, f"{path}.links.{lname}", "a list of target type names"
+                    )
+            if "body" in spec:
+                body = self.mapping(spec["body"], f"{path}.body", "a mapping of body settings")
+                self.keys(body, BODY_KEYS, f"{path}.body", "a body: block")
+                if "on_change" in body:
+                    self.mode(body.get("on_change"), f"{path}.body.on_change", "invalidate")
 
     def link_types(self, raw: dict) -> None:
         block = self.mapping(

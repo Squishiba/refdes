@@ -37,8 +37,8 @@ _NAMESPACE_LABEL = {
 
 def resolve_namespaces(
     raw: dict[str, Any], require_rejection_rationale: bool
-) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
-    """Return (sets, link_types, types) as plain dicts, fully merged.
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], list[str]]:
+    """Return (sets, link_types, types, warnings) as plain dicts, fully merged.
 
     The three namespaces of `refdes-schema.yaml`, resolved base -> presets ->
     project overlay. Types come back `include:`-free; the sets are the
@@ -70,17 +70,30 @@ def resolve_namespaces(
 
     sets = _merge_sets(base_sets, raw.get("sets") or {})
     link_types = _merge_named_mapping(base_link_types, raw.get("link_types") or {})
-    types = _merge_types(base_types, raw.get("types") or {}, sets)
+    warnings: list[str] = []
+    types = _merge_types(base_types, raw.get("types") or {}, sets, warnings)
 
-    return sets, link_types, types
+    # A name may be a type or a set, not both: `include: [x]` and `extends: [x]`
+    # would then disagree about what x is, and the resolved schema could not
+    # say which namespace a reference meant (docs/design/composition.md §6.1).
+    for name in sorted(sets):
+        if name in types:
+            raise SchemaError(
+                f"sets.{name} collides with types.{name}; a name may be a type "
+                "or a set, not both"
+            )
+
+    return sets, link_types, types, warnings
 
 
 def resolve_schema(
     raw: dict[str, Any], require_rejection_rationale: bool
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """The two-value form of `resolve_namespaces`, for callers that have no
-    use for the field-set namespace."""
-    _sets, link_types, types = resolve_namespaces(raw, require_rejection_rationale)
+    use for the set namespace."""
+    _sets, link_types, types, _warnings = resolve_namespaces(
+        raw, require_rejection_rationale
+    )
     return link_types, types
 
 
@@ -124,7 +137,10 @@ def _load_standard(
     # the loader reads either key from a bundle file. Project overlays and
     # presets -- never frozen -- speak only `sets:`; a `field_sets:` in an
     # overlay is the rename error in schema._load_schema_overlay.
-    sets: dict[str, Any] = dict(base_doc.get("sets") or base_doc.get("field_sets") or {})
+    sets: dict[str, Any] = {
+        name: _normalize_set_entry(spec)
+        for name, spec in (base_doc.get("sets") or base_doc.get("field_sets") or {}).items()
+    }
     link_types: dict[str, Any] = dict(base_doc.get("link_types") or {})
     types: dict[str, Any] = dict(base_doc.get("types") or {})
 
@@ -181,7 +197,9 @@ def _load_standard(
                         "with the base standard or with each other -- this is a "
                         "bug in the preset bundle, or drop one of the two presets."
                     )
-                accumulator[name] = spec
+                accumulator[name] = (
+                    _normalize_set_entry(spec) if ns_name == "sets" else spec
+                )
                 origin[key] = f"preset {preset_name!r}"
 
     return sets, link_types, types
@@ -295,26 +313,72 @@ def _merge_named_mapping(base: dict[str, Any], overlay: dict[str, Any]) -> dict[
     return result
 
 
+_SET_SPEC_KEYS = frozenset({"fields", "links", "body"})
+
+
+def _normalize_set_entry(spec: Any) -> Any:
+    """Wrap a released bundle's bare {field_name: fieldspec} set in `fields:`.
+
+    hardware v1/v2 declare sets as direct field maps and are frozen
+    byte-identical once released (base.yaml's own header), so the loader
+    normalizes them into the one shape the engine speaks: a type-spec
+    fragment carrying only `fields:`, `links:` and `body:`
+    (docs/design/composition.md §1.7). An entry that already carries only
+    set-spec keys passes through; no released set has a field named
+    `fields`, `links` or `body`, so the test is unambiguous in practice.
+    """
+    if spec is None or not isinstance(spec, dict):
+        return spec
+    if spec and not set(spec) <= _SET_SPEC_KEYS:
+        return {"fields": spec}
+    return spec
+
+
 def _merge_sets(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
-    """Each set is itself a {field_name: fieldspec} map, merged by key --
-    the same rule a type's own `fields:` uses against its inherited fields."""
+    """Merge set specs by set name; within a set, `fields:` and `links:`
+    merge by key (an overlay may add a field to `provenance` without
+    redeclaring it) and `body:` replaces wholesale -- the same rules
+    `_merge_type_dict` uses for a type. Entries arrive normalized
+    (`_normalize_set_entry`), so every entry has the wrapped shape."""
     result = dict(base)
     for name, spec in overlay.items():
         if spec is None:
             result.pop(name, None)
             continue
-        result[name] = _merge_named_mapping(result.get(name) or {}, spec or {})
+        existing = result.get(name) or {}
+        merged = dict(existing)
+        merged.update(spec)
+        merged["fields"] = _merge_named_mapping(
+            existing.get("fields") or {}, spec.get("fields") or {}
+        )
+        merged["links"] = _merge_named_mapping(
+            existing.get("links") or {}, spec.get("links") or {}
+        )
+        result[name] = merged
     return result
 
 
 def _expand_include(
-    type_raw: dict[str, Any], sets: dict[str, Any], path: str = "types"
+    type_raw: dict[str, Any],
+    sets: dict[str, Any],
+    path: str = "types",
+    warnings: list[str] | None = None,
 ) -> dict[str, Any]:
-    """Resolve `include:` into `fields:`, and drop `include:` from the result.
+    """Resolve `include:` into `fields:`, `links:` and `body:`, and drop
+    `include:` from the result (docs/design/composition.md §2).
 
-    Sets are merged in list order (a later include wins over an earlier
-    one on a name collision), then the type's own `fields:` are overlaid on top
-    -- a type's own declaration always wins over anything it includes.
+    A set is a fragment of the type's own spec. Sets merge in include-list
+    order, later wins on a name collision; then the type's own declarations
+    merge last and beat anything they include. Every merge is by-name with
+    whole-spec replacement -- no field spec, link target list or body block
+    is deep-merged across a set boundary.
+
+    Two *sets* fighting is loud: the same verb or body declared with
+    different specs by two includes is an error, because neither set's
+    author wrote the conflict at the point of use and the later one would
+    silently replace the earlier. Identical declarations are benign. The
+    type outvoting a set it names on its own line is documented behavior,
+    not an error.
     """
     type_raw = dict(type_raw or {})
     includes = type_raw.pop("include", None) or []
@@ -327,8 +391,15 @@ def _expand_include(
             f"{includes!r} -- write include: [{includes}]"
         )
     own_fields = type_raw.get("fields") or {}
+    own_links = type_raw.get("links") or {}
 
     merged_fields: dict[str, Any] = {}
+    merged_links: dict[str, Any] = {}
+    merged_body: Any = None
+    link_from: dict[str, str] = {}
+    body_from: str | None = None
+    contributions: list[tuple[str, dict, dict, Any]] = []
+
     for set_name in includes:
         if set_name not in sets:
             close = difflib.get_close_matches(str(set_name), sorted(sets), n=1, cutoff=0.5)
@@ -336,10 +407,55 @@ def _expand_include(
             raise SchemaError(
                 f"{path}.include names unknown set {set_name!r}.{hint}"
             )
-        merged_fields.update(sets[set_name] or {})
-    merged_fields.update(own_fields)
+        entry = sets[set_name] or {}
+        set_fields = entry.get("fields") or {}
+        set_links = entry.get("links") or {}
+        set_body = entry.get("body")
 
+        for verb, targets in set_links.items():
+            if verb in merged_links and merged_links[verb] != targets:
+                raise SchemaError(
+                    f"{path}.include: sets {link_from[verb]!r} and {set_name!r} both "
+                    f"declare link {verb!r} with different targets "
+                    f"({merged_links[verb]} vs {targets}); the later would silently "
+                    f"replace the earlier -- declare {verb!r} once, on the type"
+                )
+            if verb not in merged_links:
+                merged_links[verb] = targets
+                link_from[verb] = set_name
+        if set_body is not None:
+            if merged_body is not None and merged_body != set_body:
+                raise SchemaError(
+                    f"{path}.include: sets {body_from!r} and {set_name!r} both declare "
+                    f"body with different specs; the later would silently replace the "
+                    f"earlier -- declare body on the type instead"
+                )
+            merged_body = set_body
+            body_from = set_name
+        merged_fields.update(set_fields)
+        contributions.append((set_name, set_fields, set_links, set_body))
+
+    merged_fields.update(own_fields)
+    if merged_links:
+        merged_links.update(own_links)
+        type_raw["links"] = merged_links
+    if merged_body is not None and type_raw.get("body") is None:
+        type_raw["body"] = merged_body
     type_raw["fields"] = merged_fields
+
+    if warnings is not None:
+        final_body = type_raw.get("body")
+        for set_name, cf, cl, cb in contributions:
+            survives = (
+                any(merged_fields.get(f) == spec for f, spec in cf.items())
+                or any(type_raw.get("links", {}).get(v) == t for v, t in cl.items())
+                or (cb is not None and final_body == cb)
+            )
+            if not survives:
+                warnings.append(
+                    f"{path}.include: set {set_name!r} contributes nothing that "
+                    "survives the merge"
+                )
     return type_raw
 
 
@@ -359,11 +475,14 @@ def _merge_type_dict(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str,
 
 
 def _merge_types(
-    base_types: dict[str, Any], project_types_raw: dict[str, Any], sets: dict[str, Any]
+    base_types: dict[str, Any],
+    project_types_raw: dict[str, Any],
+    sets: dict[str, Any],
+    warnings: list[str] | None = None,
 ) -> dict[str, Any]:
     result: dict[str, Any] = {}
     for tname, traw in base_types.items():
-        result[tname] = _expand_include(traw, sets, f"types.{tname}")
+        result[tname] = _expand_include(traw, sets, f"types.{tname}", warnings)
 
     for tname, traw in project_types_raw.items():
         if traw is None:
@@ -373,7 +492,7 @@ def _merge_types(
             # that already runs over the final merged schema in schema.py.
             result.pop(tname, None)
             continue
-        expanded_overlay = _expand_include(traw, sets, f"types.{tname}")
+        expanded_overlay = _expand_include(traw, sets, f"types.{tname}", warnings)
         if tname in result:
             result[tname] = _merge_type_dict(result[tname], expanded_overlay)
         else:
