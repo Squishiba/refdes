@@ -501,9 +501,9 @@ def _citations_json(item: Item) -> dict:
     """Resolved provenance for `item.citations`, grouped by field and ordered by index.
 
     Deliberately kept separate from `fields` -- `fields[fname][i]` is authored
-    intent (path, rev, vendor:), this is what it resolved to (sha256, vendored,
+    intent (path, rev, keep_copy:), this is what it resolved to (sha256, kept_copy,
     pinned). Every entry always carries the same keys, `state` included, so
-    "unpinned" and "pinned but not vendored" are each a distinct, explicit
+    "unpinned" and "pinned but not kept" are each a distinct, explicit
     `state` value rather than something a consumer infers from an absent key.
     """
     out: dict[str, list[dict]] = {}
@@ -513,7 +513,7 @@ def _citations_json(item: Item) -> dict:
                 "path": status.spec.path,
                 "state": status.state,
                 "pinned": status.state != "unpinned",
-                "vendored": status.vendored,
+                "kept_copy": status.kept_copy,
                 "sha256": status.sha256,
                 "fetched": status.fetched,
                 "local_path": status.local_path,
@@ -724,7 +724,7 @@ def _copy_datasheet_assets(project: Project, out_dir: str, written: set[str]) ->
     """Copy `project.datasheet_assets` into `_site/assets/`, flattened.
 
     Populated only when `publish_datasheets` is on (citations.py) -- source and
-    destination differ (`.refdes/vendor/<sha256><ext>` -> flattened
+    destination differ (`.refdes/copies/<sha256><ext>` -> flattened
     `assets/datasheets/<sha256><ext>`), so this can't reuse
     `_copy_project_assets`'s mirroring copy.
     """

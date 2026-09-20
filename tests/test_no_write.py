@@ -124,7 +124,7 @@ def _snapshot_project(tmp_path):
         "  https://example.com/datasheet.pdf:\n"
         "    sha256: deadbeef\n"
         "    fetched: '2026-01-01T00:00:00Z'\n"
-        "    vendored: false\n",
+        "    kept_copy: false\n",
         encoding="utf-8",
     )
     # A schema.json older than both config files: every _load() command

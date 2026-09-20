@@ -77,7 +77,7 @@ _FIELD_TYPE_MAP: dict[str, dict[str, Any]] = {
                 "page": {"type": "string"},
                 "section": {"type": "string", "minLength": 1},
                 "part_number": {"type": "string"},
-                "vendor": {"type": "boolean"},
+                "keep_copy": {"type": "boolean"},
                 "id": {"type": "string"},
             },
             "required": ["path"],

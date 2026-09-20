@@ -1,32 +1,39 @@
 """Datasheet citations: declared intent in items, computed provenance in a lockfile.
 
 An item's `citations:`-typed field says what it means to cite -- a url, maybe a
-rev, page, or part number, and whether the bytes should be vendored. That is all
-ordinary invalidate-mode data, hashed like any other field.
+rev, page, or part number, and whether the bytes should be kept locally. That
+is all ordinary invalidate-mode data, hashed like any other field.
 
 What a citation actually *resolved to* -- its sha256, when it was fetched,
-whether it was vendored -- is a different kind of fact: it changes when someone
+whether it was kept -- is a different kind of fact: it changes when someone
 runs `refdes fetch`, not when someone edits an item. Mixing it into the item
 would mean re-fetching a datasheet could retroactively mark a sealed log entry,
 or any other suspect-link consumer of an item's content hash, as edited. So it
 lives instead in a committed lockfile, `.refdes/citations.yaml`, keyed by path.
 
 A citation's `path:` is one field dispatched on scheme (finding 25 Part 2):
-`http`/`https` means remote -- fetched, hashed, optionally vendored, exactly as
+`http`/`https` means remote -- fetched, hashed, optionally kept, exactly as
 ever -- and anything else means a file inside the project, relative to the
 project root, hashed from its local bytes at build time. Absolute paths, drive
 letters, backslashes, and anything that escapes the project root are refused,
-never guessed; `vendor:` on a local path is a hard error.
+never guessed; `keep_copy:` on a local path is a hard error.
 
-The bytes themselves are a third kind of fact, and the biggest: `vendor: true`
+The bytes themselves are a third kind of fact, and the biggest: `keep_copy: true`
 opts a citation into keeping a local copy, content-addressed at
-`.refdes/vendor/<sha256><ext>`. That directory is gitignored -- manufacturer
-datasheets are generally copyrighted, so vendoring is opt-in and defaults off.
-Hash-only "pinned but not vendored" is a first-class, complete mode on its own.
+`.refdes/copies/<sha256><ext>`. That directory is gitignored -- manufacturer
+datasheets are generally copyrighted, so keeping copies is opt-in and defaults
+off. Hash-only "pinned but not kept" is a first-class, complete mode on its
+own.
+
+The field used to be called `vendor:` -- retired because a hardware engineer
+reads `vendor` next to `part_number` as the company that makes the part (see
+docs/design/vocabulary-review.md S1). Writing `vendor:` is a loud validation
+error naming `keep_copy:`; a pre-rename `.refdes/vendor/` directory or `vendored:`
+lockfile key is reported, never silently ignored (see `legacy_notices`).
 
 `refdes fetch` is the only thing in this module that touches the network, and
 only when actually invoked. Everything else here -- `verify`, `by_path` --
-reads only the lockfile, the local vendor cache, and (for local citations)
+reads only the lockfile, the local copies dir, and (for local citations)
 files inside the project, so `build` and `check` stay hermetic.
 """
 
@@ -49,7 +56,12 @@ from .model import CitationSpec, CitationStatus, Item, PartUsage, Project
 from .parse import yaml_safe_load
 
 LOCKFILE = ".refdes/citations.yaml"
-VENDOR_DIR = ".refdes/vendor"
+COPIES_DIR = ".refdes/copies"
+# Pre-rename spellings (the `vendor:` era, shipped through v0.5.0). Nothing
+# reads them; `legacy_notices` exists so a project that still has them is told
+# out loud instead of silently losing its local copies.
+LEGACY_VENDOR_DIR = ".refdes/vendor"
+LEGACY_LOCKFILE_KEY = "vendored"
 
 
 class CitationError(Exception):
@@ -63,13 +75,47 @@ def lockfile_path(project: Project) -> str:
     return os.path.join(project.root, LOCKFILE)
 
 
-def vendor_dir(project: Project) -> str:
-    return os.path.join(project.root, VENDOR_DIR)
+def copies_dir(project: Project) -> str:
+    return os.path.join(project.root, COPIES_DIR)
 
 
-def vendor_path(project: Project, sha256: str, path: str) -> str:
+def kept_copy_path(project: Project, sha256: str, path: str) -> str:
     ext = os.path.splitext(urlparse(path).path)[1]
-    return os.path.join(vendor_dir(project), f"{sha256}{ext}")
+    return os.path.join(copies_dir(project), f"{sha256}{ext}")
+
+
+def legacy_notices(project: Project, records: dict[str, dict]) -> list[tuple[str, str]]:
+    """(severity, message) for pre-rename `vendor:`-era artifacts on disk.
+
+    Two shapes strand data silently without this: a `.refdes/vendor/`
+    directory nothing reads any more, and lockfile records still keyed
+    `vendored:` -- which the renamed reader would see as "no keep_copy flag",
+    report every vendored citation as hash-only, and call it a day. That is
+    the success-while-doing-nothing shape this project's history says to
+    refuse, so the lockfile half is an error, not a shrug."""
+    out: list[tuple[str, str]] = []
+    if os.path.isdir(os.path.join(project.root, LEGACY_VENDOR_DIR)):
+        out.append((
+            "warning",
+            f"found a {LEGACY_VENDOR_DIR}/ directory: the local-copy directory "
+            f"was renamed to {COPIES_DIR}/ -- move the blobs across (or re-run "
+            f"'refdes fetch'); nothing reads {LEGACY_VENDOR_DIR}/ any more",
+        ))
+    stale = sorted(
+        path
+        for path, record in records.items()
+        if isinstance(record, dict) and LEGACY_LOCKFILE_KEY in record
+    )
+    if stale:
+        out.append((
+            "error",
+            f"the citation lockfile still uses the pre-rename key "
+            f"'{LEGACY_LOCKFILE_KEY}:' for: {', '.join(stale)} -- the citation "
+            f"field vendor: was renamed to keep_copy: and its lockfile key to "
+            f"kept_copy:; rename the key in {LOCKFILE} or re-pin with 'refdes "
+            f"fetch --update'",
+        ))
+    return out
 
 
 # ---------------------------------------------------------------- classification
@@ -363,7 +409,7 @@ def save_lockfile(project: Project, records: dict[str, dict]) -> None:
     os.makedirs(os.path.dirname(path), exist_ok=True)
     header = (
         "# Refdes citation lockfile. Computed provenance for each cited path --\n"
-        "# sha256, fetch timestamp, vendored flag, resolved sections and the\n"
+        "# sha256, fetch timestamp, kept-copy flag, resolved sections and the\n"
         "# sha256 those sections were read out of -- keyed by the citation's\n"
         "# path (URL or project-relative file). Written only by\n"
         "# `refdes fetch`.\n"
@@ -406,7 +452,7 @@ def collect(project: Project) -> list[tuple[Item, CitationSpec]]:
                             page=str(entry.get("page") or ""),
                             section=str(entry.get("section") or ""),
                             part_number=str(entry.get("part_number") or ""),
-                            vendor=bool(entry.get("vendor", False)),
+                            keep_copy=bool(entry.get("keep_copy", False)),
                             id=str(entry.get("id") or ""),
                         ),
                     )
@@ -488,14 +534,17 @@ def _sha256_file(path: str) -> str:
 
 
 def verify(project: Project, require: bool = False) -> None:
-    """Resolve every declared citation against the lockfile and the vendor cache.
+    """Resolve every declared citation against the lockfile and the local copies.
 
-    Hermetic -- reads `.refdes/citations.yaml`, `.refdes/vendor/`, and cited
+    Hermetic -- reads `.refdes/citations.yaml`, `.refdes/copies/`, and cited
     local files, but touches no network. Severities:
 
+      pre-rename artifacts  -- warning for a leftover `.refdes/vendor/`
+                                directory; error for lockfile records still
+                                keyed `vendored:` (see `legacy_notices`)
       no lockfile entry     -- info (routine until `refdes fetch` runs), or
                                 error with `require` (CI)
-      vendored but no blob  -- warning, or error with `require` (CI)
+      keep_copy: true, no blob   -- warning, or error with `require` (CI)
       blob hash mismatch    -- ERROR always, never soft-failed: a corrupted or
                                 tampered local cache is not something to wave
                                 through in CI
@@ -503,15 +552,17 @@ def verify(project: Project, require: bool = False) -> None:
                                 not a routine state
       local file changed    -- warning naming every citer (review the change,
                                 then re-pin), or error with `require` (CI)
-      inconsistent vendor:  -- warning, always (not promoted by `require`;
+      inconsistent keep_copy:    -- warning, always (not promoted by `require`;
       across citers of a       it is a hygiene note about the declaration, not
       shared url                a missing artifact)
     """
+    records = load_lockfile(project)
+    for severity, message in legacy_notices(project, records):
+        (project.error if severity == "error" else project.warn)(message)
+
     entries = collect(project)
     if not entries:
         return
-
-    records = load_lockfile(project)
     severity = project.error if require else project.warn
     unpinned_severity = project.error if require else project.info
 
@@ -541,13 +592,13 @@ def verify(project: Project, require: bool = False) -> None:
         except CitationError:
             continue  # refused path -- _resolve already flagged it; nothing to reconcile
         if kind != "remote":
-            continue  # vendor: on a local path is a validation error, not a flag to reconcile
-        vendor_flags = {spec.vendor for _item, spec in citers}
-        if len(vendor_flags) > 1:
+            continue  # keep_copy: on a local path is a validation error, not a flag to reconcile
+        keep_copy_flags = {spec.keep_copy for _item, spec in citers}
+        if len(keep_copy_flags) > 1:
             ids = ", ".join(sorted({item.id for item, _spec in citers}))
             project.warn(
-                f"citation {path!r} is cited with inconsistent vendor: flags "
-                f"across {ids} -- pick one so the vendoring decision is "
+                f"citation {path!r} is cited with inconsistent keep_copy: flags "
+                f"across {ids} -- pick one so the keep-a-copy decision is "
                 f"unambiguous"
             )
 
@@ -631,15 +682,15 @@ def _resolve(project, item, spec, record, severity, unpinned_severity, changed_l
 
     status.sha256 = str(record.get("sha256") or "")
     status.fetched = str(record.get("fetched") or "")
-    status.vendored = bool(record.get("vendored", False))
-    if not status.vendored:
+    status.kept_copy = bool(record.get("kept_copy", False))
+    if not status.kept_copy:
         return status
 
-    blob = vendor_path(project, status.sha256, spec.path)
+    blob = kept_copy_path(project, status.sha256, spec.path)
     if not os.path.isfile(blob):
         status.state = "cache_missing"
         status.detail = (
-            f"vendored copy of {spec.path} is missing at "
+            f"local copy of {spec.path} is missing at "
             f"{os.path.relpath(blob, project.root)}"
         )
         severity(status.detail, file=item.source_file, line=item.source_line, item_id=item.id)
@@ -649,15 +700,15 @@ def _resolve(project, item, spec, record, severity, unpinned_severity, changed_l
     if actual != status.sha256:
         status.state = "hash_mismatch"
         status.detail = (
-            f"vendored copy of {spec.path} does not match its recorded hash "
-            f"(cache is tampered or corrupt)"
+            f"local copy of {spec.path} does not match its recorded hash "
+            f"(the copy is tampered or corrupt)"
         )
         project.error(status.detail, file=item.source_file, line=item.source_line, item_id=item.id)
         return status
 
     if project.publish_datasheets:
         # Flattened (assets/datasheets/<sha256><ext>), not mirrored under
-        # `.refdes/vendor/` -- a dot-prefixed directory is skipped by several
+        # `.refdes/copies/` -- a dot-prefixed directory is skipped by several
         # static hosts, GitHub Pages via Jekyll included. Tracked separately
         # from `project.assets`, whose copy step mirrors source path to dest
         # path; here they differ, so render_site copies this dict instead.
@@ -669,7 +720,7 @@ def _resolve(project, item, spec, record, severity, unpinned_severity, changed_l
 
 def _resolve_local(project, item, spec, canon, record, status, unpinned_severity, changed_local):
     """Resolve a repo-local citation (finding 25 Part 2): the file itself is
-    the artifact -- no fetch, no vendor cache, no publish_datasheets gate (the
+    the artifact -- no fetch, no copies dir, no publish_datasheets gate (the
     project wrote the file, so publishing a content-addressed copy is safe).
     A changed-but-unre-pinned file is a warning, not an error: the pin did its
     job by noticing, and re-pinning is a review decision, not a build failure.
@@ -741,7 +792,7 @@ def _now_iso() -> str:
 class FetchResult:
     path: str
     sha256: str = ""
-    vendored: bool = False
+    kept_copy: bool = False
     skipped: bool = False
     error: str = ""
     # One line per `section:` that could not be resolved against the bytes that
@@ -778,10 +829,10 @@ def _section_bytes(project, kind, canon, record):
                 f"fetch --update --path {canon}' to re-pin and resolve"
             )
         return data, ""
-    blob = vendor_path(project, sha, canon)
+    blob = kept_copy_path(project, sha, canon)
     if not os.path.isfile(blob):
         return None, (
-            "the vendored bytes are not in .refdes/vendor/, so the outline "
+            "the kept bytes are not in .refdes/copies/, so the outline "
             "cannot be read offline -- run 'refdes fetch --update --path "
             f"{canon}' with the network available"
         )
@@ -792,7 +843,7 @@ def _section_bytes(project, kind, canon, record):
     # bytes nothing pinned.
     if hashlib.sha256(data).hexdigest() != sha:
         return None, (
-            f"the vendored blob for {canon} does not match its pinned sha256"
+            f"the local copy for {canon} does not match its pinned sha256"
         )
     return data, ""
 
@@ -817,7 +868,7 @@ def fetch_all(
     update: bool = False,
     fetcher=None,
 ) -> list[FetchResult]:
-    """Fetch every path a citation declares (optionally scoped), pin it, vendor it.
+    """Fetch every path a citation declares (optionally scoped), pin it, and keep a local copy where asked.
 
     Only ever called from `refdes fetch` -- the one command allowed to touch the
     network, and only for remote citations: a local path is read from disk, so
@@ -842,9 +893,9 @@ def fetch_all(
         if not entries:
             raise CitationError(f"no citation in this project cites {path!r}")
 
-    wants_vendor: dict[str, bool] = defaultdict(bool)
+    wants_keep_copy: dict[str, bool] = defaultdict(bool)
     for item, spec in entries:
-        wants_vendor[spec.path] = wants_vendor[spec.path] or spec.vendor
+        wants_keep_copy[spec.path] = wants_keep_copy[spec.path] or spec.keep_copy
 
     # {canonical path: {section as written: [citing item ids]}} -- what each
     # path's outline has to be asked for, and whom to tell when the answer
@@ -869,7 +920,7 @@ def fetch_all(
     results: list[FetchResult] = []
     changed = False
 
-    for target in sorted(wants_vendor):
+    for target in sorted(wants_keep_copy):
         try:
             kind, canon = classify(project.root, target)
         except CitationError as exc:
@@ -877,14 +928,14 @@ def fetch_all(
             # fetch's: report it and keep pinning the rest.
             results.append(FetchResult(path=target, error=str(exc)))
             continue
-        want_vendor = wants_vendor[target]
+        want_keep_copy = wants_keep_copy[target]
         sections = {
             section: sorted(set(ids))
             for section, ids in sorted(all_sections.get(canon, {}).items())
         }
-        if kind == "local" and want_vendor:
+        if kind == "local" and want_keep_copy:
             raise CitationError(
-                f"vendor: on local citation path {canon!r} is meaningless -- "
+                f"keep_copy: on local citation path {canon!r} is meaningless -- "
                 f"a local file is already local"
             )
         if canon in records and not update:
@@ -892,7 +943,7 @@ def fetch_all(
             result = FetchResult(
                 path=canon,
                 sha256=str(existing.get("sha256") or ""),
-                vendored=bool(existing.get("vendored")),
+                kept_copy=bool(existing.get("kept_copy")),
                 skipped=True,
             )
             # A `section:` added to an already-pinned citation still has to be
@@ -916,7 +967,7 @@ def fetch_all(
             resolved: dict[str, int] = {}
             if todo:
                 # The bytes are on disk -- the file itself for a local path, the
-                # vendor blob for a vendored remote -- so this needs no network;
+                # kept copy for a remote -- so this needs no network;
                 # when they are not, the reason is the error.
                 data, why = _section_bytes(project, kind, canon, existing)
                 if data is None:
@@ -956,9 +1007,9 @@ def fetch_all(
             continue
 
         digest = hashlib.sha256(data).hexdigest()
-        if want_vendor:
-            os.makedirs(vendor_dir(project), exist_ok=True)
-            with open(vendor_path(project, digest, canon), "wb") as fh:
+        if want_keep_copy:
+            os.makedirs(copies_dir(project), exist_ok=True)
+            with open(kept_copy_path(project, digest, canon), "wb") as fh:
                 fh.write(data)
 
         # `previous` is what turns "no title matches" into "the section you
@@ -967,7 +1018,7 @@ def fetch_all(
         record: dict = {
             "sha256": digest,
             "fetched": _now_iso(),
-            "vendored": want_vendor,
+            "kept_copy": want_keep_copy,
             "bytes": len(data),
         }
         resolved: dict[str, int] = {}
@@ -991,7 +1042,7 @@ def fetch_all(
             FetchResult(
                 path=canon,
                 sha256=digest,
-                vendored=want_vendor,
+                kept_copy=want_keep_copy,
                 sections=resolved,
                 section_errors=[_section_failure(canon, f, sections) for f in failures],
             )
@@ -1016,7 +1067,7 @@ class DriftEntry:
 def refresh(project: Project, fetcher=None) -> list[DriftEntry]:
     """Re-fetch every pinned citation to a scratch buffer and compare hashes.
 
-    Read-only: writes nothing, pins nothing, vendors nothing. Only reachable via
+    Read-only: writes nothing, pins nothing, copies nothing. Only reachable via
     `refdes check --refresh`, so a plain `build` or `check` never touches the
     network. A url that fails to fetch is reported as a warning, not drift --
     drift means the bytes changed, not that the network did. Local paths are

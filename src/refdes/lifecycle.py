@@ -516,7 +516,7 @@ def _rule_unpinned_citations(project: Project) -> list[str]:
     )
 
 
-def _rule_missing_vendored_copies(project: Project) -> list[str]:
+def _rule_missing_kept_copies(project: Project) -> list[str]:
     return sorted(
         {
             item.id
@@ -575,7 +575,7 @@ def _rule_unaccepted_workspace_moves(project: Project) -> list[str]:
 _RULES: dict[str, Callable[[Project], list[str]]] = {
     "draft_items": _rule_draft_items,
     "unpinned_citations": _rule_unpinned_citations,
-    "missing_vendored_copies": _rule_missing_vendored_copies,
+    "missing_kept_copies": _rule_missing_kept_copies,
     "uncovered_requirements": _rule_uncovered_requirements,
     "unverified_requirements": _rule_unverified_requirements,
     "info_check_failures": _rule_info_check_failures,

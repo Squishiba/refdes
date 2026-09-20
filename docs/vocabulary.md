@@ -71,7 +71,7 @@ A part the design uses. A selected component closes coverage on what it satisfie
 | `tags` | Free-form labels for grouping and finding items; free-text search matches tags as well as titles. Kept out of the content hash. | list | no |
 | `owner` | The person responsible for this item — who a question about it goes to. Kept out of the content hash, so ownership changes never invalidate downstream work. | person | no |
 | `last_reviewed` | The date this item was last reviewed. Bookkeeping only: kept out of the content hash. | date | no |
-| `citations` | External documents this item relies on. Each entry needs a path — an http(s) URL or a project-root-relative file — and may carry rev, page, section, part_number, vendor and an id for [[cite:]] references. | citations | no |
+| `citations` | External documents this item relies on. Each entry needs a path — an http(s) URL or a project-root-relative file — and may carry rev, page, section, part_number, keep_copy and an id for [[cite:]] references. | citations | no |
 | `title` | What the component is, in one line. Required. | text | yes |
 | `part_number` | The manufacturer part number. Indexed into the parts page, alongside part numbers cited inside citations entries. | text | no |
 | `refdes` | Reference designators on the board — U14, R7 — where this part is placed. Kept out of the content hash. | list | no |
@@ -93,7 +93,7 @@ A design choice that was made — what was picked, why, and what it satisfies. A
 | `tags` | Free-form labels for grouping and finding items; free-text search matches tags as well as titles. Kept out of the content hash. | list | no |
 | `owner` | The person responsible for this item — who a question about it goes to. Kept out of the content hash, so ownership changes never invalidate downstream work. | person | no |
 | `last_reviewed` | The date this item was last reviewed. Bookkeeping only: kept out of the content hash. | date | no |
-| `citations` | External documents this item relies on. Each entry needs a path — an http(s) URL or a project-root-relative file — and may carry rev, page, section, part_number, vendor and an id for [[cite:]] references. | citations | no |
+| `citations` | External documents this item relies on. Each entry needs a path — an http(s) URL or a project-root-relative file — and may carry rev, page, section, part_number, keep_copy and an id for [[cite:]] references. | citations | no |
 | `title` | What was decided, in one line. Required — every decision needs a label. | text | yes |
 | `status` | Where the decision stands. Only an accepted decision counts as settled and closes coverage on what it satisfies. | enum | no |
 | `rationale` | Why this decision, and why not the alternatives. Required when the decision is rejected — the reason a rejection happened is the point of recording it. | text | no |
@@ -299,7 +299,7 @@ _No definition._
 
 | Field | Definition | Type | Required |
 |---|---|---|---|
-| `citations` | External documents this item relies on. Each entry needs a path — an http(s) URL or a project-root-relative file — and may carry rev, page, section, part_number, vendor and an id for [[cite:]] references. | citations | no |
+| `citations` | External documents this item relies on. Each entry needs a path — an http(s) URL or a project-root-relative file — and may carry rev, page, section, part_number, keep_copy and an id for [[cite:]] references. | citations | no |
 
 ### `provenance`
 

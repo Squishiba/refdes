@@ -82,7 +82,7 @@ def test_project_settings_absent_file_matches_pre_config_defaults(tmp_path):
     assert project.release_gate == {
         "draft_items":                {"release": True,  "revision": False},
         "unpinned_citations":         {"release": True,  "revision": False},
-        "missing_vendored_copies":    {"release": True,  "revision": False},
+        "missing_kept_copies":    {"release": True,  "revision": False},
         "uncovered_requirements":     {"release": True,  "revision": False},
         "unverified_requirements":    {"release": False, "revision": False},
         "info_check_failures":        {"release": False, "revision": False},
@@ -275,6 +275,18 @@ def test_project_settings_release_gate_rejects_unknown_rule_with_a_suggestion(tm
         "release_gate:\n  draft_item: { release: true }\n",  # typo: missing 's'
     )
     with pytest.raises(SchemaError, match=r"draft_item.*Did you mean 'draft_items'"):
+        load_project(config_path=str(config))
+
+
+def test_project_settings_release_gate_names_the_rule_rename(tmp_path):
+    """S1 renamed the `missing_vendored_copies` rule to
+    `missing_kept_copies`; a project still carrying the old key gets the
+    rename spelled out, not a fuzzy suggestion that may not fire."""
+    config = _write_minimal_project(
+        tmp_path,
+        "release_gate:\n  missing_vendored_copies: { release: true }\n",
+    )
+    with pytest.raises(SchemaError, match=r"missing_vendored_copies was renamed to 'missing_kept_copies'"):
         load_project(config_path=str(config))
 
 

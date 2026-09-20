@@ -101,7 +101,7 @@ field_sets:
     owner: { type: person, on_change: log, doc: "The person responsible for this item — who a question about it goes to. Kept out of the content hash, so ownership changes never invalidate downstream work." }
     last_reviewed: { type: date, on_change: ignore, doc: "The date this item was last reviewed. Bookkeeping only: kept out of the content hash." }
   citations:
-    citations: { type: citations, on_change: invalidate, doc: "External documents this item relies on. Each entry needs a path — an http(s) URL or a project-root-relative file — and may carry rev, page, section, part_number, vendor and an id for [[cite:]] references." }
+    citations: { type: citations, on_change: invalidate, doc: "External documents this item relies on. Each entry needs a path — an http(s) URL or a project-root-relative file — and may carry rev, page, section, part_number, keep_copy and an id for [[cite:]] references." }
 
 link_types:
   # trace: false on amends/records/supersedes/addresses -- none of these is

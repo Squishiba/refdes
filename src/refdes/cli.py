@@ -538,12 +538,19 @@ def cmd_id(args) -> int:
 
 
 def cmd_fetch(args) -> int:
-    """The only command that touches the network. Pins and optionally vendors."""
+    """The only command that touches the network. Pins and optionally keeps local copies."""
     if args.no_write:
         return _refuse_no_write(
-            "fetch", "the .refdes/citations.yaml lockfile and .refdes/vendor/"
+            "fetch", "the .refdes/citations.yaml lockfile and .refdes/copies/"
         )
     project, _stale = _load(args, require_ids=False)
+    # Pre-rename `vendor:`-era artifacts are not read by anything any more --
+    # say so here too, not just at build/check time, so `refdes fetch` cannot
+    # look clean while the project's old copies and lockfile keys sit stranded.
+    for _severity, message in citations_mod.legacy_notices(
+        project, citations_mod.load_lockfile(project)
+    ):
+        print(f"warning: {message}", file=sys.stderr)
     # A file that fails to parse is a load error, not a fetch failure -- but
     # it is still a failure: every citation in that file was never loaded,
     # so fetching cannot have processed it. Report the load errors (the same
@@ -567,8 +574,8 @@ def cmd_fetch(args) -> int:
             print(f"FAILED  {r.path}  {r.error}", file=sys.stderr)
             continue
         verb = "skipped" if r.skipped else "fetched"
-        vendored = "vendored" if r.vendored else "hash-only"
-        print(f"{verb:8} {r.path}  sha256={r.sha256[:12]}...  {vendored}")
+        kept = "kept" if r.kept_copy else "hash-only"
+        print(f"{verb:8} {r.path}  sha256={r.sha256[:12]}...  {kept}")
         for section, page in sorted(r.sections.items()):
             print(f"         section {section!r} -> page {page}")
         # The pin succeeded but the outline lookup did not: report it as its own
@@ -757,10 +764,10 @@ def cmd_audit(args) -> int:
         print("\nCitations:")
         for path, statuses in grouped.items():
             state = statuses[0].state
-            vendored = "vendored" if any(s.vendored for s in statuses) else "hash-only"
+            kept = "kept" if any(s.kept_copy for s in statuses) else "hash-only"
             citers = ", ".join(sorted({s.item_id for s in statuses}))
             print(f"  {path}")
-            print(f"    {state:<14} {vendored:<10} cited by {citers}")
+            print(f"    {state:<14} {kept:<10} cited by {citers}")
 
     grouped_parts = citations_mod.by_part_number(project)
     if grouped_parts:
@@ -1357,13 +1364,13 @@ def main(argv: list[str] | None = None) -> int:
 
     p_fetch = sub.add_parser(
         "fetch",
-        help="fetch and pin (optionally vendor) datasheet citations",
+        help="fetch and pin (optionally keep copies of) datasheet citations",
         description="The only command that touches the network. Fetches every "
         "remote path a `citations:` field declares (local ones are read from "
         "disk), records each sha256 and fetch time in the "
-        "`.refdes/citations.yaml` lockfile, and vendors the bytes into "
-        "`.refdes/vendor/` for any remote citation that declares "
-        "`vendor: true`. Already-pinned paths are skipped unless --update is "
+        "`.refdes/citations.yaml` lockfile, and keeps the bytes in "
+        "`.refdes/copies/` for any remote citation that declares "
+        "`keep_copy: true`. Already-pinned paths are skipped unless --update is "
         "given.",
     )
     p_fetch.add_argument("--item", help="fetch only this item's citations")

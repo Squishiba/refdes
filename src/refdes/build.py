@@ -247,6 +247,21 @@ def validate_items(project: Project) -> None:
                                 f"-> @3 content)",
                             )
                             continue
+                        if "vendor" in entry:
+                            # Same hard break for the S1 rename (vocabulary-
+                            # review.md): `vendor:` meant "keep a local copy",
+                            # which a hardware engineer reads as the company.
+                            # Silently ignoring it would drop the keep_copy flag and
+                            # report the citation as hash-only -- success while
+                            # doing nothing.
+                            _field_error(
+                                project, item, fname,
+                                f"{fname}[{index}]: citation field vendor: was "
+                                f"renamed to keep_copy: -- rename it (refdes "
+                                f"standard upgrade does this for hardware@2 "
+                                f"-> @3 content)",
+                            )
+                            continue
                         if not entry.get("path"):
                             _field_error(
                                 project, item, fname,
@@ -260,10 +275,10 @@ def validate_items(project: Project) -> None:
                         except citations_mod.CitationError as exc:
                             _field_error(project, item, fname, f"{fname}[{index}]: {exc}")
                             continue
-                        if kind == "local" and entry.get("vendor"):
+                        if kind == "local" and entry.get("keep_copy"):
                             _field_error(
                                 project, item, fname,
-                                f"{fname}[{index}]: vendor: on local path "
+                                f"{fname}[{index}]: keep_copy: on local path "
                                 f"{str(entry['path'])!r} is meaningless -- a "
                                 f"local file is already local",
                             )
@@ -277,7 +292,7 @@ def validate_items(project: Project) -> None:
                                     f"non-empty string naming an outline entry",
                                 )
                                 continue
-                            if kind == "remote" and not entry.get("vendor"):
+                            if kind == "remote" and not entry.get("keep_copy"):
                                 # Resolving a title needs the bytes, and for a
                                 # hash-only remote citation they are not
                                 # guaranteed to be local -- resolution would
@@ -287,8 +302,8 @@ def validate_items(project: Project) -> None:
                                     project, item, fname,
                                     f"{fname}[{index}]: section: on remote "
                                     f"path {str(entry['path'])!r} needs "
-                                    f"vendor: true -- the bytes have to be "
-                                    f"local for its outline to be read; vendor "
+                                    f"keep_copy: true -- the bytes have to be "
+                                    f"local for its outline to be read; keep a copy of "
                                     f"this citation or cite a local path",
                                 )
                                 continue

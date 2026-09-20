@@ -165,7 +165,7 @@
 <section class="citations"{% if citation_fields | length == 1 %} id="field-{{ citation_fields[0] }}"{% endif %}>
   <h2>Citations</h2>
   <table class="grid">
-    <thead><tr><th></th><th>Path</th><th>Rev</th><th>Page</th><th>Part #</th><th>Vendor</th><th>Detail</th></tr></thead>
+    <thead><tr><th></th><th>Path</th><th>Rev</th><th>Page</th><th>Part #</th><th>Copy</th><th>Detail</th></tr></thead>
     <tbody>
     {% for c in item.citations %}
       {# Effective page for the link: an explicit `page:` wins, otherwise the
@@ -191,7 +191,7 @@
         <td class="mono">{{ c.spec.rev or '—' }}</td>
         <td class="mono">{{ cpage or '—' }}</td>
         <td class="mono">{{ c.spec.part_number or '—' }}</td>
-        <td>{{ 'yes' if c.spec.vendor else 'no' }}</td>
+        <td>{{ 'yes' if c.spec.keep_copy else 'no' }}</td>
         <td class="small">{{ c.detail }}</td>
       </tr>
     {% endfor %}

@@ -5,14 +5,14 @@
 <h1>References{% if board %} — {{ board.label }}{% elif workspace %} — {{ workspace.label }}{% endif %}</h1>
 <p class="muted">
   Every citation{% if board %} on {{ board.label }}{% elif workspace %} on {{ workspace.label }}{% endif %}, grouped by
-  path. Provenance -- hash, fetch time, vendored flag -- comes from
+  path. Provenance -- hash, fetch time, kept-copy flag -- comes from
   <code>.refdes/citations.yaml</code>, written only by <code>refdes fetch</code>.
 </p>
 
 {% if grouped %}
 <table class="grid">
   <thead>
-    <tr><th></th><th>Path</th><th>Cited by</th><th>Vendor</th><th>Fetched</th><th>SHA-256</th></tr>
+    <tr><th></th><th>Path</th><th>Cited by</th><th>Copy</th><th>Fetched</th><th>SHA-256</th></tr>
   </thead>
   <tbody>
   {% for path, statuses in grouped.items() %}
@@ -39,7 +39,7 @@
         <a class="ref" href="{{ s.item_id | lower }}.html" data-ref="{{ s.item_id }}">{{ s.item_id }}</a>{% set via = shared_via.get(s.item_id) %}{% if via %} <span class="muted small">(shared, via {{ via }})</span>{% endif %}{% if not loop.last %}, {% endif %}
         {% endfor %}
       </td>
-      <td>{{ 'vendored' if s0.vendored else 'hash-only' }}</td>
+      <td>{{ 'copied' if s0.kept_copy else 'hash-only' }}</td>
       <td class="mono small">{{ s0.fetched or '—' }}</td>
       <td class="mono small">{{ (s0.sha256[:12] ~ '…') if s0.sha256 else '—' }}</td>
     </tr>

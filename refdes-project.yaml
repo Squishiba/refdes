@@ -93,7 +93,7 @@ baseline_identity: os_user
 # (the standard's required_when mechanism -- see docs/standard-library.md).
 require_rejection_rationale: true
 
-# Whether a `vendor: true` citation's locally-cached PDF is copied into
+# Whether a `keep_copy: true` citation's locally-cached PDF is copied into
 # _site/ (as assets/datasheets/<sha256>.pdf) so the built site can serve it
 # directly. Off by default: manufacturer datasheets are generally
 # copyrighted, and publishing a site that includes them is a redistribution
@@ -109,7 +109,7 @@ publish_datasheets: false
 release_gate:
   draft_items:                 { release: true,  revision: false }
   unpinned_citations:          { release: true,  revision: false }
-  missing_vendored_copies:     { release: true,  revision: false }
+  missing_kept_copies:         { release: true,  revision: false }
   uncovered_requirements:      { release: true,  revision: false }
   unverified_requirements:     { release: false, revision: false }
   info_check_failures:         { release: false, revision: false }

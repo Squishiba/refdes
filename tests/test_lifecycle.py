@@ -58,7 +58,7 @@ def test_unpinned_citations_rule(lifecycle_project):
     assert results["unpinned_citations"].offenders == ["CMP-001"]
 
 
-def test_missing_vendored_copies_rule(lifecycle_project, tmp_path):
+def test_missing_kept_copies_rule(lifecycle_project, tmp_path):
     root = lifecycle_project
     (root / ".refdes").mkdir(exist_ok=True)
     (root / ".refdes" / "citations.yaml").write_text(
@@ -66,12 +66,12 @@ def test_missing_vendored_copies_rule(lifecycle_project, tmp_path):
         "  https://example.com/datasheet.pdf:\n"
         "    sha256: deadbeef\n"
         "    fetched: '2026-01-01T00:00:00Z'\n"
-        "    vendored: true\n",
+        "    kept_copy: true\n",
         encoding="utf-8",
     )
     project = _lc_build(root)
     results = {r.name: r for r in lifecycle.evaluate_gate(project, "release")}
-    assert results["missing_vendored_copies"].offenders == ["CMP-001"]
+    assert results["missing_kept_copies"].offenders == ["CMP-001"]
     # not simultaneously flagged as unpinned -- it IS pinned, just missing the blob
     assert results["unpinned_citations"].offenders == []
 

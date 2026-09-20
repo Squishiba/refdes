@@ -17,6 +17,18 @@ from refdes import build as build_mod
 from refdes import parse, revise, standards
 from refdes.schema import load_project
 
+
+def test_hardware_v3_migration_renames_vendor_to_keep_copy():
+    """S1 (vocabulary-review.md): `vendor:` shipped under hardware@2
+    (v0.3.0-v0.5.0), so `refdes standard upgrade --to 3` must rewrite it
+    inside citation entries -- the same citation_keys category that carries
+    url: -> path.
+    """
+    raw = standards.load_migration_raw("hardware", 3)
+    assert raw is not None
+    assert raw["citation_keys"].get("vendor") == "keep_copy"
+
+
 # ------------------------------------- hardware@2: the whole v1 -> v2 delta
 
 def test_an_item_still_typed_constraint_at_v2_names_the_rename(tmp_path):

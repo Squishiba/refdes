@@ -57,7 +57,7 @@ BASELINE_IDENTITIES = ("os_user", "git_identity")
 RELEASE_GATE_DEFAULTS: dict[str, dict[str, bool]] = {
     "draft_items":                {"release": True,  "revision": False},
     "unpinned_citations":         {"release": True,  "revision": False},
-    "missing_vendored_copies":    {"release": True,  "revision": False},
+    "missing_kept_copies":         {"release": True,  "revision": False},
     "uncovered_requirements":     {"release": True,  "revision": False},
     "unverified_requirements":    {"release": False, "revision": False},
     "info_check_failures":        {"release": False, "revision": False},
@@ -274,7 +274,7 @@ class CheckResult:
 class CitationSpec:
     """One entry of a `citations:`-typed field -- declared intent only.
 
-    Computed provenance (hash, fetch time, vendored flag) is never stored here or
+    Computed provenance (hash, fetch time, kept-copy flag) is never stored here or
     on the item; it lives in the `.refdes/citations.yaml` lockfile, keyed by path,
     so that re-fetching a datasheet can never retroactively mark a sealed log
     entry -- or any other suspect-link consumer of an item's content hash -- as
@@ -284,7 +284,7 @@ class CitationSpec:
     field: str
     index: int
     # Where the document is: an http(s) URL (fetched, hashed, optionally
-    # vendored) or a project-root-relative path (never fetched, hashed from
+    # kept) or a project-root-relative path (never fetched, hashed from
     # the local bytes at build time). One field, dispatched on scheme --
     # "where the document is" is one idea (finding 25 Part 2).
     path: str
@@ -297,7 +297,11 @@ class CitationSpec:
     # still declared intent only.
     section: str = ""
     part_number: str = ""
-    vendor: bool = False
+    # Keep a local copy of the fetched bytes under `.refdes/copies/`. Named
+    # `keep_copy:`, not `vendor:` -- a hardware engineer reads `vendor` in the same
+    # mapping as `part_number:` as the company that makes the part (see
+    # docs/design/vocabulary-review.md S1).
+    keep_copy: bool = False
     # Optional, project-wide-unique (finding 19 Part B) -- what `[[cite:<id>]]`
     # in prose resolves to. "" when the entry declares none, which is most of
     # them: giving a citation an id is only worth doing when something needs to
@@ -316,13 +320,13 @@ class CitationStatus:
     detail: str = ""
     sha256: str = ""
     fetched: str = ""
-    vendored: bool = False
+    kept_copy: bool = False
     # False for a repo-local citation (finding 25 Part 2); the templates use
     # this to decide whether the primary link goes upstream or to the
     # published copy under assets/ -- a repo path is not a site URL.
     remote: bool = True
     # Path to the published copy, relative to `assets/` (e.g.
-    # "datasheets/<sha256>.pdf") -- set when the citation is vendored AND
+    # "datasheets/<sha256>.pdf") -- set when the citation is kept AND
     # Project.publish_datasheets is on, and always for a local citation
     # (content-addressed under "citations/"); empty otherwise, which is also
     # how the rendered citation link knows to point upstream instead of to a
@@ -715,9 +719,9 @@ class Project:
     # always belongs to exactly one item and is never deferred to render time:
     # every citation is known from parsed data alone, before any body renders.
     citation_ids: dict[str, tuple[str, str, int | None]] = field(default_factory=dict)
-    # Vendored datasheet copies to publish into the site: {dest path relative to
+    # Local datasheet copies to publish into the site: {dest path relative to
     # assets/ (flattened, e.g. "datasheets/<sha256>.pdf") -> absolute source
-    # path in the vendor cache}. Populated by citations.verify() only when
+    # path in the local copies dir}. Populated by citations.verify() only when
     # publish_datasheets is on; copied by render.render_site(). Unlike `assets`
     # above, source and destination paths differ (flattened, not mirrored), so
     # this can't reuse that set.
@@ -730,7 +734,7 @@ class Project:
     item_layout: str = "flat"  # "flat" | "workspace" -- see model.ITEM_LAYOUTS
     baseline_identity: str = "os_user"  # "os_user" | "git_identity"
     require_rejection_rationale: bool = True  # decision.rationale required_when toggle
-    # Whether verify() copies vendored citation PDFs into _site/. Default false:
+    # Whether verify() copies local citation PDFs into _site/. Default false:
     # manufacturer datasheets are generally copyrighted, and publishing them is
     # a redistribution question a project must opt into, not one this tool
     # should decide by default -- a deliberate change from pre-config behaviour,

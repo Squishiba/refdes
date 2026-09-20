@@ -182,6 +182,18 @@ def _validate_settings(raw: dict[str, Any]) -> dict[str, Any]:
         if rule_name not in RELEASE_GATE_DEFAULTS:
             import difflib
 
+            # The vendor: -> keep_copy: rename (vocabulary-review.md S1) renamed
+            # this rule too; name the rename instead of leaning on a fuzzy
+            # did-you-mean that may not fire across the word swap.
+            _renamed = {"missing_vendored_copies": "missing_kept_copies"}
+            if str(rule_name) in _renamed:
+                raise _settings_error(
+                    f"release_gate.{rule_name} was renamed to "
+                    f"{_renamed[str(rule_name)]!r} when the citation field "
+                    f"vendor: became keep_copy: -- rename it in "
+                    f"{PROJECT_SETTINGS_NAME}"
+                )
+
             close = difflib.get_close_matches(
                 str(rule_name), sorted(RELEASE_GATE_DEFAULTS), n=1, cutoff=0.5
             )

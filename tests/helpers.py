@@ -296,7 +296,7 @@ def _pin_lifecycle_citation(root) -> None:
         "  https://example.com/datasheet.pdf:\n"
         "    sha256: deadbeef\n"
         "    fetched: '2026-01-01T00:00:00Z'\n"
-        "    vendored: false\n",
+        "    kept_copy: false\n",
         encoding="utf-8",
     )
 

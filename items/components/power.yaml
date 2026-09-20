@@ -17,4 +17,4 @@ items:
         rev: E
         page: "14"
         part_number: TPS62913
-        vendor: false
+        keep_copy: false

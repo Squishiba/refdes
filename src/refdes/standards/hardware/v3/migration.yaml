@@ -32,6 +32,12 @@
 # never sees inside a citations-typed field's entries -- so revise.py gained
 # that category for exactly this blind spot.
 #
+# vendor: -> keep_copy: rides the same category (vocabulary-review.md S1):
+# `vendor:` meant "keep a local copy of the fetched bytes", which a hardware
+# engineer reads next to `part_number:` as the company that makes the part.
+# It shipped under hardware@2 (v0.3.0-v0.5.0), so released projects can
+# carry it; the owner approved the rename on 2026-09-20, choosing keep_copy:
+#
 # See docs/design/standard-library.md §3 for the versioning design this
 # implements.
 
@@ -47,3 +53,4 @@ fields:
 
 citation_keys:
   url: path
+  vendor: keep_copy

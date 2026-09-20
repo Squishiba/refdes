@@ -506,7 +506,7 @@ items:
 # ----------------------------------------------------------------- validation
 
 
-def test_section_on_a_remote_citation_without_vendor_is_an_error(tmp_path):
+def test_section_on_a_remote_citation_without_keep_copy_is_an_error(tmp_path):
     """The bytes of a hash-only remote citation are not guaranteed local, so
     resolution would depend on the network -- refuse it, and say what to do."""
     root = _project(
@@ -525,7 +525,7 @@ items:
     project = _build(root)
     matches = [d for d in project.errors if "section:" in d.message]
     assert len(matches) == 1
-    assert "needs vendor: true" in matches[0].message
+    assert "needs keep_copy: true" in matches[0].message
     assert "cite a local path" in matches[0].message
     assert matches[0].item_id == "CMP-001"
     assert matches[0].file and matches[0].line
@@ -560,7 +560,7 @@ def _pin_with_sections(root, sections, extra_item=""):
     record = {
         "sha256": hashlib.sha256(data).hexdigest(),
         "fetched": "2026-01-01T00:00:00Z",
-        "vendored": False,
+        "kept_copy": False,
         "bytes": len(data),
     }
     if sections is not None:

@@ -47,7 +47,7 @@ items:
         rev: C
         page: "14"
         part_number: TPS62913
-        vendor: true
+        keep_copy: true
 """
 
 
@@ -73,8 +73,8 @@ def _write_citation_lockfile(root, records):
     path.write_text(yaml.safe_dump({"citations": records}), encoding="utf-8")
 
 
-def _write_vendor_blob(root, sha256, ext, data):
-    path = root / ".refdes" / "vendor" / f"{sha256}{ext}"
+def _write_kept_copy_blob(root, sha256, ext, data):
+    path = root / ".refdes" / "copies" / f"{sha256}{ext}"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(data)
     return path
@@ -136,21 +136,93 @@ def test_stale_url_key_gets_the_rename_error(tmp_path):
     )
 
 
-def test_vendor_on_local_path_is_an_error(tmp_path):
+def test_keep_copy_on_local_path_is_an_error(tmp_path):
     write_project_config(tmp_path, CITATION_SCHEMA)
     items = tmp_path / "items"
     items.mkdir()
     (items / "cmp.yaml").write_text(
         "defaults: {type: component}\n"
         "items:\n  - id: CMP-001\n    title: t\n    datasheets:\n"
-        "      - path: docs/local.pdf\n        vendor: true\n",
+        "      - path: docs/local.pdf\n        keep_copy: true\n",
         encoding="utf-8",
     )
     project = _cite_build(tmp_path)
     assert any(
-        "vendor: on local path" in d.message and "already local" in d.message
+        "keep_copy: on local path" in d.message and "already local" in d.message
         for d in project.errors
     )
+
+
+def test_old_vendor_field_is_a_loud_error_naming_keep_copy(tmp_path):
+    """S1 rename (vocabulary-review.md): `vendor:` meant "keep a local copy"
+    and a hardware engineer reads it as the company that makes the part. It
+    shipped under hardware@2, so released projects carry it -- but silently
+    ignoring the old spelling would drop the copy flag and report a
+    would-be-vendored citation as hash-only: success while doing nothing.
+    Hard error naming the new spelling, exactly like `url:` above."""
+    write_project_config(tmp_path, CITATION_SCHEMA)
+    items = tmp_path / "items"
+    items.mkdir()
+    (items / "cmp.yaml").write_text(
+        "defaults: {type: component}\n"
+        "items:\n  - id: CMP-001\n    title: t\n    datasheets:\n"
+        "      - path: https://example.com/ds.pdf\n        vendor: true\n",
+        encoding="utf-8",
+    )
+    project = _cite_build(tmp_path)
+    assert any(
+        "vendor: was renamed to keep_copy:" in d.message
+        and "standard upgrade" in d.message
+        for d in project.errors
+    )
+
+
+def test_legacy_vendor_directory_warns_and_names_copies(citation_project):
+    """A pre-rename `.refdes/vendor/` directory is stranded, not read: the
+    build must say so loudly instead of quietly finding no blobs under
+    `.refdes/copies/` and reporting every copied citation as cache-missing."""
+    (citation_project / ".refdes" / "vendor").mkdir(parents=True, exist_ok=True)
+    project = _cite_build(citation_project)
+    assert any(
+        ".refdes/vendor/" in d.message and ".refdes/copies/" in d.message
+        for d in project.warnings
+    )
+
+
+def test_legacy_vendored_lockfile_key_is_an_error(citation_project):
+    """Same reasoning for the lockfile: a `vendored: true` record must not
+    read as "no copy flag" -- that would silently downgrade a copied
+    citation to hash-only."""
+    _write_citation_lockfile(
+        citation_project,
+        {
+            "https://example.com/ds.pdf": {
+                "sha256": "abc123",
+                "fetched": "2026-01-01T00:00:00Z",
+                "vendored": True,
+            }
+        },
+    )
+    project = _cite_build(citation_project)
+    assert any(
+        "vendored" in d.message
+        and "kept_copy" in d.message
+        and "keep_copy" in d.message
+        for d in project.errors
+    )
+
+
+def test_keep_copy_true_fetch_lands_a_local_copy(citation_project):
+    """The positive half of the rename: `keep_copy: true` gets the bytes
+    under `.refdes/copies/`, content-addressed by sha."""
+    project = load_project(config_path=str(citation_project / "refdes-project.yaml"))
+    parse.load_items(project)
+    results = citations_mod.fetch_all(project, fetcher=_fake_fetcher())
+    assert results[0].kept_copy is True
+    blob = os.path.join(
+        str(citation_project), ".refdes", "copies", results[0].sha256 + ".pdf"
+    )
+    assert os.path.isfile(blob)
 
 
 # ---------------------------------------------------------------------- verify
@@ -176,12 +248,12 @@ def test_hash_only_citation_is_ok_with_no_local_file_needed(citation_project):
     (citation_project / "items" / "cmp.yaml").write_text(
         "defaults: {type: component}\n"
         "items:\n  - id: CMP-001\n    title: t\n"
-        "    datasheets:\n      - path: https://example.com/ds.pdf\n        vendor: false\n",
+        "    datasheets:\n      - path: https://example.com/ds.pdf\n        keep_copy: false\n",
         encoding="utf-8",
     )
     _write_citation_lockfile(
         citation_project,
-        {"https://example.com/ds.pdf": {"sha256": "abc123", "fetched": "2026-01-01T00:00:00Z", "vendored": False}},
+        {"https://example.com/ds.pdf": {"sha256": "abc123", "fetched": "2026-01-01T00:00:00Z", "kept_copy": False}},
     )
     project = _cite_build(citation_project)
     status = project.item_by_id("CMP-001").citations[0]
@@ -197,16 +269,16 @@ def _enable_publish_datasheets(root):
         fh.write("publish_datasheets: true\n")
 
 
-def test_vendored_citation_ok_when_blob_matches(citation_project):
-    """publish_datasheets defaults off, so a vendored citation resolves 'ok' but
+def test_kept_copy_citation_ok_when_blob_matches(citation_project):
+    """publish_datasheets defaults off, so a kept-copy citation resolves 'ok' but
     is not exposed as a local copy -- the rendered link stays upstream-only."""
     data = b"%PDF-1.4 real bytes"
     sha = hashlib.sha256(data).hexdigest()
     _write_citation_lockfile(
         citation_project,
-        {"https://example.com/ds.pdf": {"sha256": sha, "fetched": "2026-01-01T00:00:00Z", "vendored": True}},
+        {"https://example.com/ds.pdf": {"sha256": sha, "fetched": "2026-01-01T00:00:00Z", "kept_copy": True}},
     )
-    _write_vendor_blob(citation_project, sha, ".pdf", data)
+    _write_kept_copy_blob(citation_project, sha, ".pdf", data)
     project = _cite_build(citation_project)
     status = project.item_by_id("CMP-001").citations[0]
     assert status.state == "ok"
@@ -214,28 +286,28 @@ def test_vendored_citation_ok_when_blob_matches(citation_project):
     assert not project.errors
 
 
-def test_vendored_citation_published_when_publish_datasheets_is_on(citation_project):
+def test_kept_copy_citation_published_when_publish_datasheets_is_on(citation_project):
     data = b"%PDF-1.4 real bytes"
     sha = hashlib.sha256(data).hexdigest()
     _write_citation_lockfile(
         citation_project,
-        {"https://example.com/ds.pdf": {"sha256": sha, "fetched": "2026-01-01T00:00:00Z", "vendored": True}},
+        {"https://example.com/ds.pdf": {"sha256": sha, "fetched": "2026-01-01T00:00:00Z", "kept_copy": True}},
     )
-    _write_vendor_blob(citation_project, sha, ".pdf", data)
+    _write_kept_copy_blob(citation_project, sha, ".pdf", data)
     _enable_publish_datasheets(citation_project)
     project = _cite_build(citation_project)
     status = project.item_by_id("CMP-001").citations[0]
     assert status.state == "ok"
-    assert status.local_path == f"datasheets/{sha}.pdf"  # flattened, not .refdes/vendor/...
+    assert status.local_path == f"datasheets/{sha}.pdf"  # flattened, not .refdes/copies/...
     assert not project.errors
 
 
 def test_cache_missing_and_hash_mismatch_are_unaffected_by_publish_datasheets(citation_project):
     """Local-cache integrity checks are unconditional -- publishing is a separate
-    concern from whether the vendored copy is trustworthy."""
+    concern from whether the kept copy is trustworthy."""
     _write_citation_lockfile(
         citation_project,
-        {"https://example.com/ds.pdf": {"sha256": "deadbeef", "fetched": "2026-01-01T00:00:00Z", "vendored": True}},
+        {"https://example.com/ds.pdf": {"sha256": "deadbeef", "fetched": "2026-01-01T00:00:00Z", "kept_copy": True}},
     )
     _enable_publish_datasheets(citation_project)
     project = _cite_build(citation_project)
@@ -244,10 +316,10 @@ def test_cache_missing_and_hash_mismatch_are_unaffected_by_publish_datasheets(ci
     assert status.local_path == ""
 
 
-def test_vendored_citation_cache_missing_when_blob_absent(citation_project):
+def test_kept_copy_citation_cache_missing_when_blob_absent(citation_project):
     _write_citation_lockfile(
         citation_project,
-        {"https://example.com/ds.pdf": {"sha256": "deadbeef", "fetched": "2026-01-01T00:00:00Z", "vendored": True}},
+        {"https://example.com/ds.pdf": {"sha256": "deadbeef", "fetched": "2026-01-01T00:00:00Z", "kept_copy": True}},
     )
     project = _cite_build(citation_project)
     status = project.item_by_id("CMP-001").citations[0]
@@ -255,15 +327,15 @@ def test_vendored_citation_cache_missing_when_blob_absent(citation_project):
     assert any("is missing at" in d.message for d in project.warnings)
 
 
-def test_vendored_citation_hash_mismatch_is_always_an_error(citation_project):
+def test_kept_copy_citation_hash_mismatch_is_always_an_error(citation_project):
     """Never soft-failed: a corrupted local cache is an error even without --require-citations."""
     data = b"%PDF-1.4 real bytes"
     sha = hashlib.sha256(data).hexdigest()
     _write_citation_lockfile(
         citation_project,
-        {"https://example.com/ds.pdf": {"sha256": sha, "fetched": "2026-01-01T00:00:00Z", "vendored": True}},
+        {"https://example.com/ds.pdf": {"sha256": sha, "fetched": "2026-01-01T00:00:00Z", "kept_copy": True}},
     )
-    _write_vendor_blob(citation_project, sha, ".pdf", b"tampered bytes")
+    _write_kept_copy_blob(citation_project, sha, ".pdf", b"tampered bytes")
     project = _cite_build(citation_project)
     status = project.item_by_id("CMP-001").citations[0]
     assert status.state == "hash_mismatch"
@@ -283,7 +355,7 @@ def test_items_json_citations_unpinned(citation_project):
     status = _citation_entry(payload)["citations"]["datasheets"][0]
     assert status["state"] == "unpinned"
     assert status["pinned"] is False
-    assert status["vendored"] is False
+    assert status["kept_copy"] is False
     assert status["sha256"] == ""
     assert status["fetched"] == ""
     assert status["local_path"] == ""
@@ -294,46 +366,46 @@ def test_items_json_citations_unpinned(citation_project):
         "rev": "C",
         "page": "14",
         "part_number": "TPS62913",
-        "vendor": True,
+        "keep_copy": True,
     }
 
 
-def test_items_json_citations_hash_only_pinned_not_vendored(citation_project):
+def test_items_json_citations_hash_only_pinned_not_kept(citation_project):
     (citation_project / "items" / "cmp.yaml").write_text(
         "defaults: {type: component}\n"
         "items:\n  - id: CMP-001\n    title: t\n"
-        "    datasheets:\n      - path: https://example.com/ds.pdf\n        vendor: false\n",
+        "    datasheets:\n      - path: https://example.com/ds.pdf\n        keep_copy: false\n",
         encoding="utf-8",
     )
     _write_citation_lockfile(
         citation_project,
-        {"https://example.com/ds.pdf": {"sha256": "abc123", "fetched": "2026-01-01T00:00:00Z", "vendored": False}},
+        {"https://example.com/ds.pdf": {"sha256": "abc123", "fetched": "2026-01-01T00:00:00Z", "kept_copy": False}},
     )
     project = _cite_build(citation_project)
     payload = render.items_json(project)
     status = _citation_entry(payload)["citations"]["datasheets"][0]
     assert status["state"] == "ok"
     assert status["pinned"] is True
-    assert status["vendored"] is False
+    assert status["kept_copy"] is False
     assert status["sha256"] == "abc123"
     assert status["fetched"] == "2026-01-01T00:00:00Z"
     assert status["local_path"] == ""
 
 
-def test_items_json_citations_vendored(citation_project):
+def test_items_json_citations_kept_copy(citation_project):
     data = b"%PDF-1.4 real bytes"
     sha = hashlib.sha256(data).hexdigest()
     _write_citation_lockfile(
         citation_project,
-        {"https://example.com/ds.pdf": {"sha256": sha, "fetched": "2026-01-01T00:00:00Z", "vendored": True}},
+        {"https://example.com/ds.pdf": {"sha256": sha, "fetched": "2026-01-01T00:00:00Z", "kept_copy": True}},
     )
-    _write_vendor_blob(citation_project, sha, ".pdf", data)
+    _write_kept_copy_blob(citation_project, sha, ".pdf", data)
     project = _cite_build(citation_project)
     payload = render.items_json(project)
     status = _citation_entry(payload)["citations"]["datasheets"][0]
     assert status["state"] == "ok"
     assert status["pinned"] is True
-    assert status["vendored"] is True
+    assert status["kept_copy"] is True
     assert status["sha256"] == sha
     assert status["local_path"] == ""  # publish_datasheets defaults off
 
@@ -341,14 +413,14 @@ def test_items_json_citations_vendored(citation_project):
 def test_items_json_citations_cache_missing(citation_project):
     _write_citation_lockfile(
         citation_project,
-        {"https://example.com/ds.pdf": {"sha256": "deadbeef", "fetched": "2026-01-01T00:00:00Z", "vendored": True}},
+        {"https://example.com/ds.pdf": {"sha256": "deadbeef", "fetched": "2026-01-01T00:00:00Z", "kept_copy": True}},
     )
     project = _cite_build(citation_project)
     payload = render.items_json(project)
     status = _citation_entry(payload)["citations"]["datasheets"][0]
     assert status["state"] == "cache_missing"
     assert status["pinned"] is True
-    assert status["vendored"] is True
+    assert status["kept_copy"] is True
     assert status["sha256"] == "deadbeef"
     assert status["local_path"] == ""
 
@@ -381,7 +453,7 @@ def test_items_json_types_expose_citations_field_type(citation_project):
     assert payload["types"]["component"]["fields"]["datasheets"]["type"] == "citations"
 
 
-INCONSISTENT_VENDOR_ITEMS = """\
+INCONSISTENT_KEEP_COPY_ITEMS = """\
 defaults:
   type: component
 items:
@@ -389,22 +461,22 @@ items:
     title: A
     datasheets:
       - path: https://example.com/ds.pdf
-        vendor: true
+        keep_copy: true
   - id: CMP-002
     title: B
     datasheets:
       - path: https://example.com/ds.pdf
-        vendor: false
+        keep_copy: false
 """
 
 
-def test_inconsistent_vendor_flags_across_citers_warns(tmp_path):
+def test_inconsistent_keep_copy_flags_across_citers_warns(tmp_path):
     write_project_config(tmp_path, CITATION_SCHEMA)
     items = tmp_path / "items"
     items.mkdir()
-    (items / "cmp.yaml").write_text(INCONSISTENT_VENDOR_ITEMS, encoding="utf-8")
+    (items / "cmp.yaml").write_text(INCONSISTENT_KEEP_COPY_ITEMS, encoding="utf-8")
     project = _cite_build(tmp_path)
-    assert any("inconsistent vendor:" in d.message for d in project.warnings)
+    assert any("inconsistent keep_copy:" in d.message for d in project.warnings)
 
 
 def test_content_hash_unaffected_by_lockfile_changes(citation_project):
@@ -414,7 +486,7 @@ def test_content_hash_unaffected_by_lockfile_changes(citation_project):
 
     _write_citation_lockfile(
         citation_project,
-        {"https://example.com/ds.pdf": {"sha256": "abc", "fetched": "2026-01-01T00:00:00Z", "vendored": False}},
+        {"https://example.com/ds.pdf": {"sha256": "abc", "fetched": "2026-01-01T00:00:00Z", "kept_copy": False}},
     )
     project2 = _cite_build(citation_project)
     hash2 = project2.item_by_id("CMP-001").content_hash
@@ -430,10 +502,10 @@ def test_fetch_all_pins_every_cited_url(citation_project):
     results = citations_mod.fetch_all(project, fetcher=_fake_fetcher())
     assert len(results) == 1
     assert results[0].path == "https://example.com/ds.pdf"
-    assert results[0].vendored is True  # the one citer declares vendor: true
+    assert results[0].kept_copy is True  # the one citer declares keep_copy: true
     lockfile = citations_mod.load_lockfile(project)
     assert "https://example.com/ds.pdf" in lockfile
-    blob = citations_mod.vendor_path(project, results[0].sha256, results[0].path)
+    blob = citations_mod.kept_copy_path(project, results[0].sha256, results[0].path)
     assert os.path.isfile(blob)
 
 
@@ -525,7 +597,7 @@ def test_refresh_detects_drift(citation_project):
     sha_old = hashlib.sha256(b"old bytes").hexdigest()
     _write_citation_lockfile(
         citation_project,
-        {"https://example.com/ds.pdf": {"sha256": sha_old, "fetched": "2026-01-01T00:00:00Z", "vendored": False}},
+        {"https://example.com/ds.pdf": {"sha256": sha_old, "fetched": "2026-01-01T00:00:00Z", "kept_copy": False}},
     )
     project = load_project(config_path=str(citation_project / "refdes-project.yaml"))
     parse.load_items(project)
@@ -541,7 +613,7 @@ def test_refresh_no_drift_when_hash_matches(citation_project):
     sha = hashlib.sha256(data).hexdigest()
     _write_citation_lockfile(
         citation_project,
-        {"https://example.com/ds.pdf": {"sha256": sha, "fetched": "2026-01-01T00:00:00Z", "vendored": False}},
+        {"https://example.com/ds.pdf": {"sha256": sha, "fetched": "2026-01-01T00:00:00Z", "kept_copy": False}},
     )
     project = load_project(config_path=str(citation_project / "refdes-project.yaml"))
     parse.load_items(project)
@@ -558,7 +630,7 @@ def test_refresh_writes_nothing(citation_project):
     sha_old = hashlib.sha256(b"old bytes").hexdigest()
     _write_citation_lockfile(
         citation_project,
-        {"https://example.com/ds.pdf": {"sha256": sha_old, "fetched": "2026-01-01T00:00:00Z", "vendored": False}},
+        {"https://example.com/ds.pdf": {"sha256": sha_old, "fetched": "2026-01-01T00:00:00Z", "kept_copy": False}},
     )
     project = load_project(config_path=str(citation_project / "refdes-project.yaml"))
     parse.load_items(project)
@@ -569,7 +641,7 @@ def test_refresh_writes_nothing(citation_project):
 def test_refresh_warns_on_fetch_failure_not_drift(citation_project):
     _write_citation_lockfile(
         citation_project,
-        {"https://example.com/ds.pdf": {"sha256": "abc", "fetched": "2026-01-01T00:00:00Z", "vendored": False}},
+        {"https://example.com/ds.pdf": {"sha256": "abc", "fetched": "2026-01-01T00:00:00Z", "kept_copy": False}},
     )
 
     def bad_fetcher(url):
@@ -634,7 +706,7 @@ def test_cli_check_refresh_detects_drift(citation_project, monkeypatch, capsys):
     sha_old = hashlib.sha256(b"old").hexdigest()
     _write_citation_lockfile(
         citation_project,
-        {"https://example.com/ds.pdf": {"sha256": sha_old, "fetched": "2026-01-01T00:00:00Z", "vendored": False}},
+        {"https://example.com/ds.pdf": {"sha256": sha_old, "fetched": "2026-01-01T00:00:00Z", "kept_copy": False}},
     )
     monkeypatch.setattr(citations_mod, "fetch_bytes", lambda url, timeout=30.0: b"new bytes")
     code = cli_mod.main(["-c", str(citation_project / "refdes-project.yaml"), "check", "--refresh"])
@@ -716,16 +788,16 @@ def test_reserved_name_guard_covers_references(citation_project):
     assert any("generated report" in d.message for d in project.errors)
 
 
-def test_vendored_citation_pdf_is_not_published_by_default(citation_project):
+def test_kept_copy_citation_pdf_is_not_published_by_default(citation_project):
     """publish_datasheets defaults off: nothing is copied into _site/, and the
     rendered citation links upstream only -- no 'local copy' link."""
-    data = b"%PDF-1.4 vendored bytes"
+    data = b"%PDF-1.4 kept bytes"
     sha = hashlib.sha256(data).hexdigest()
     _write_citation_lockfile(
         citation_project,
-        {"https://example.com/ds.pdf": {"sha256": sha, "fetched": "2026-01-01T00:00:00Z", "vendored": True}},
+        {"https://example.com/ds.pdf": {"sha256": sha, "fetched": "2026-01-01T00:00:00Z", "kept_copy": True}},
     )
-    _write_vendor_blob(citation_project, sha, ".pdf", data)
+    _write_kept_copy_blob(citation_project, sha, ".pdf", data)
     project = _cite_build(citation_project)
     out = render.render_site(project)
     assert not os.path.isdir(os.path.join(out, "assets", "datasheets"))
@@ -735,14 +807,14 @@ def test_vendored_citation_pdf_is_not_published_by_default(citation_project):
     assert "local copy" not in html
 
 
-def test_vendored_citation_pdf_is_copied_into_the_site_when_published(citation_project):
-    data = b"%PDF-1.4 vendored bytes"
+def test_kept_copy_citation_pdf_is_copied_into_the_site_when_published(citation_project):
+    data = b"%PDF-1.4 kept bytes"
     sha = hashlib.sha256(data).hexdigest()
     _write_citation_lockfile(
         citation_project,
-        {"https://example.com/ds.pdf": {"sha256": sha, "fetched": "2026-01-01T00:00:00Z", "vendored": True}},
+        {"https://example.com/ds.pdf": {"sha256": sha, "fetched": "2026-01-01T00:00:00Z", "kept_copy": True}},
     )
-    _write_vendor_blob(citation_project, sha, ".pdf", data)
+    _write_kept_copy_blob(citation_project, sha, ".pdf", data)
     _enable_publish_datasheets(citation_project)
     project = _cite_build(citation_project)
     out = render.render_site(project)
@@ -760,13 +832,13 @@ def test_citation_page_deep_links_upstream_and_local_copy_hrefs(citation_project
     stays the bare URL. Asserted on the href attribute itself, not a loose
     substring: the page number is already printed in a table cell, so a naive
     `"page=14" in html` check would pass even if the href were untouched."""
-    data = b"%PDF-1.4 vendored bytes"
+    data = b"%PDF-1.4 kept bytes"
     sha = hashlib.sha256(data).hexdigest()
     _write_citation_lockfile(
         citation_project,
-        {"https://example.com/ds.pdf": {"sha256": sha, "fetched": "2026-01-01T00:00:00Z", "vendored": True}},
+        {"https://example.com/ds.pdf": {"sha256": sha, "fetched": "2026-01-01T00:00:00Z", "kept_copy": True}},
     )
-    _write_vendor_blob(citation_project, sha, ".pdf", data)
+    _write_kept_copy_blob(citation_project, sha, ".pdf", data)
     _enable_publish_datasheets(citation_project)
     project = _cite_build(citation_project)
     out = render.render_site(project)
@@ -1047,10 +1119,10 @@ def test_local_unpinned_is_info_then_error_under_require(tmp_path):
     assert any("has no fetched record" in d.message for d in project.errors)
 
 
-def test_fetch_all_refuses_vendor_on_local(tmp_path):
+def test_fetch_all_refuses_keep_copy_on_local(tmp_path):
     _local_project(
         tmp_path,
-        item_text=LOCAL_ITEM.replace('rev: "2"', "rev: \"2\"\n        vendor: true"),
+        item_text=LOCAL_ITEM.replace('rev: "2"', "rev: \"2\"\n        keep_copy: true"),
     )
     project = _load_only(tmp_path)
     with pytest.raises(citations_mod.CitationError, match="already local"):
