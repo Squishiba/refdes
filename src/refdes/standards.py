@@ -399,6 +399,11 @@ def _expand_include(
     link_from: dict[str, str] = {}
     body_from: str | None = None
     contributions: list[tuple[str, dict, dict, Any]] = []
+    # field name -> the spec the sets left it with, for the doc-only patch
+    # rule (§3), and which set a patch patched -- so a patched set still
+    # counts as having contributed.
+    set_provided: dict[str, Any] = {}
+    patched_from: dict[str, str] = {}
 
     for set_name in includes:
         if set_name not in sets:
@@ -433,9 +438,40 @@ def _expand_include(
             merged_body = set_body
             body_from = set_name
         merged_fields.update(set_fields)
+        for fname, fspec in set_fields.items():
+            set_provided[fname] = fspec
         contributions.append((set_name, set_fields, set_links, set_body))
 
-    merged_fields.update(own_fields)
+    def _last_provider(fname: str) -> str:
+        for sn, sf, _sl, _sb in reversed(contributions):
+            if fname in sf:
+                return sn
+        return ""
+
+    # The type's own fields merge last. Overriding an included field is
+    # either a doc-only patch -- a spec whose only key is `doc:`, which
+    # inherits type/required/choices/default/on_change from the set and
+    # keeps every type's wording as written (§3) -- or a full redeclaration
+    # that must carry `type:`. A spec with some semantic keys but no `type:`
+    # is neither, and saying so beats defaulting it to text.
+    for fname, fspec in own_fields.items():
+        if fname in set_provided and isinstance(fspec, dict) and set(fspec) == {"doc"}:
+            patched = dict(set_provided[fname] or {})
+            patched["doc"] = fspec["doc"]
+            merged_fields[fname] = patched
+            patched_from[fname] = _last_provider(fname)
+        elif (
+            fname in set_provided
+            and isinstance(fspec, dict)
+            and "type" not in fspec
+        ):
+            raise SchemaError(
+                f"{path}.fields.{fname} overrides an included field but is "
+                "neither a full definition (missing 'type') nor a doc-only "
+                f"patch; keys given: {', '.join(sorted(fspec))}"
+            )
+        else:
+            merged_fields[fname] = fspec
     if merged_links:
         merged_links.update(own_links)
         type_raw["links"] = merged_links
@@ -447,7 +483,10 @@ def _expand_include(
         final_body = type_raw.get("body")
         for set_name, cf, cl, cb in contributions:
             survives = (
-                any(merged_fields.get(f) == spec for f, spec in cf.items())
+                any(
+                    merged_fields.get(f) == spec or patched_from.get(f) == set_name
+                    for f, spec in cf.items()
+                )
                 or any(type_raw.get("links", {}).get(v) == t for v, t in cl.items())
                 or (cb is not None and final_body == cb)
             )

@@ -163,6 +163,77 @@ def test_two_sets_different_body_is_an_error(tmp_path):
     assert "declare body on the type instead" in message
 
 
+# --------------------------------------------------- doc-only field patches
+
+
+def test_doc_only_field_patch_inherits_the_rest(tmp_path):
+    """A spec whose only key is `doc:` patches the included definition's doc
+    and inherits everything else (docs/design/composition.md §3)."""
+    project = _load(
+        tmp_path,
+        "sets:\n"
+        "  common:\n"
+        "    fields:\n"
+        "      title: { type: text, required: true, on_change: log, default: t }\n"
+        "types:\n"
+        "  note:\n"
+        "    prefix: NTE\n"
+        "    include: [common]\n"
+        "    fields:\n"
+        '      title: { doc: "Type-specific wording." }\n',
+    )
+    title = project.types["note"].fields["title"]
+    assert title.doc == "Type-specific wording."
+    assert title.type == "text"
+    assert title.required is True
+    assert title.on_change == "log"
+    assert title.default == "t"
+
+
+def test_field_patch_with_semantic_key_is_an_error(tmp_path):
+    """Some semantic keys but no `type:` is neither a patch nor a full
+    definition -- it must be named, not defaulted to text."""
+    with pytest.raises(SchemaError) as exc:
+        _load(
+            tmp_path,
+            "sets:\n"
+            "  common:\n"
+            "    fields:\n"
+            "      title: { type: text, required: true }\n"
+            "types:\n"
+            "  note:\n"
+            "    prefix: NTE\n"
+            "    include: [common]\n"
+            "    fields:\n"
+            "      title: { required: false }\n",
+        )
+    message = str(exc.value)
+    assert "overrides an included field but is neither a full definition" in message
+    assert "nor a doc-only patch" in message
+    assert "keys given: required" in message
+
+
+def test_doc_only_patch_does_not_make_the_set_shadowed(tmp_path):
+    """A set whose only field is doc-patched still contributed -- the patch
+    inherits its type and policy -- so the total-shadow warning stays quiet."""
+    project = _load(
+        tmp_path,
+        "sets:\n"
+        "  common:\n"
+        "    fields:\n"
+        "      title: { type: text }\n"
+        "types:\n"
+        "  note:\n"
+        "    prefix: NTE\n"
+        "    include: [common]\n"
+        "    fields:\n"
+        '      title: { doc: "Type-specific wording." }\n',
+    )
+    assert not any(
+        "contributes nothing" in d.message for d in project.warnings
+    )
+
+
 # ------------------------------------------------- a set is not a type
 
 
