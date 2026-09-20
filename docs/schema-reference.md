@@ -346,7 +346,7 @@ The standard's own `decision.rationale` uses this
 (`required_when: {status: rejected}`), toggled by
 `require_rejection_rationale:` in `refdes-project.yaml`. `component.rationale`
 uses the `links` form (`required_when: {links: alternate}`) — see
-[`alternate`'s required rationale](links.md#part-equivalence-equivalent-and-alternate).
+[`alternate`'s required rationale](links.md#part-equivalence-drop_in-and-alternate).
 
 **`enum`, `limit`, and `citations` are enforced today.** `enum` is checked
 against `choices`; `limit` is parsed as a quantity; `citations` is checked to
@@ -522,7 +522,7 @@ status: candidate  # choices: candidate, selected, obsolete
 # checks:  # checks
 # satisfies: []  # target: requirement, bound
 # constrained_by: []  # target: bound
-# equivalent: []  # target: component
+# drop_in: []  # target: component
 # alternate: []  # target: component
 # part_of: []  # target: group
 ---

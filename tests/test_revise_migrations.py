@@ -165,7 +165,7 @@ def test_the_parts_fixture_matches_the_bundled_standard():
     )
     shipped = types["component"]["links"]
     fixture = yaml.safe_load(PARTS_SCHEMA)["types"]["component"]["links"]
-    for verb in ("equivalent", "alternate"):
+    for verb in ("drop_in", "alternate"):
         assert fixture[verb] == shipped[verb], (
             f"parts fixture declares {verb}: {fixture[verb]}, "
             f"but the bundled standard ships {shipped[verb]}"
@@ -345,6 +345,85 @@ def test_standard_upgrade_v2_to_v3_renames_text_and_method_to_body(tmp_path):
     assert not project.errors, [str(d) for d in project.errors]
     assert project.item_by_id("REQ-001").body == "The unit shall operate from 9 V to 36 V."
     assert project.item_by_id("REQ-001").title == "The unit shall operate from 9 V to 36 V."
+
+
+def test_standard_upgrade_v2_to_v3_renames_equivalent_to_drop_in(tmp_path):
+    """P8: v3 spells the drop-in verb `drop_in`, so the v2 -> v3 step has to
+    rewrite every `equivalent:` line, not leave it behind.
+
+    Sabotage note: with v3's `links:` entry removed from migration.yaml this
+    step does not quietly pass -- it *refuses*, rolling back, because parse.py
+    reports the leftover `equivalent:` as the rename error (see
+    test_v3_rejects_the_old_equivalent_spelling_by_name) and revise validates
+    the rewritten tree before committing it. So the two halves cover each
+    other: miss the migration and the author is stuck on v2 with an error that
+    names the fix, rather than on v3 with a project full of edges that stopped
+    being edges. Both halves are load-bearing; this is the test for the first
+    one."""
+    write_project_config(
+        tmp_path,
+        "site: { title: T, out: _site }\n"
+        "standard: { base: hardware, version: 2, presets: [] }\n",
+    )
+    items = tmp_path / "items"
+    items.mkdir()
+    (items / "cmp.yaml").write_text(
+        "defaults: { type: component, prefix: CMP }\n"
+        "items:\n"
+        "  - id: CMP-001\n    title: First source.\n    equivalent: [CMP-002]\n"
+        "  - id: CMP-002\n    title: Second source.\n",
+        encoding="utf-8",
+    )
+
+    steps = revise.apply_standard_upgrade(str(tmp_path), 3)
+    assert len(steps) == 1
+    assert steps[0].result.ok, steps[0].result.errors
+
+    cmp_text = (items / "cmp.yaml").read_text(encoding="utf-8")
+    assert "drop_in: [CMP-002" in cmp_text, cmp_text
+    assert "equivalent:" not in cmp_text, cmp_text
+
+    project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
+    assert project.standard_version == 3
+    parse.load_items(project)
+    build_mod.build(project, seal_write=False, reseal=False, accept_board_move=False)
+    # No errors *and* no warnings: a leftover old-spelling verb would surface
+    # here as parse.py's rename error, or -- if that guard were missing too --
+    # as an unknown-field warning naming no replacement. Either way the edge
+    # stopped being an edge.
+    assert not project.errors, [str(d) for d in project.errors]
+    assert not project.warnings, [str(d) for d in project.warnings]
+    assert project.item_by_id("CMP-001").links["drop_in"]
+
+
+def test_v3_rejects_the_old_equivalent_spelling_by_name(tmp_path):
+    """A project pinned at v3 that still writes `equivalent:` must be told the
+    verb is now `drop_in`, as an error, not the generic unknown-field warning
+    with no suggestion -- `equivalent` and `drop_in` share nothing difflib can
+    match on, so without the explicit rename entry the author gets a warning
+    that names no replacement and loses the edge."""
+    write_project_config(
+        tmp_path,
+        "site: { title: T, out: _site }\n"
+        "standard: { base: hardware, version: 3, presets: [] }\n",
+    )
+    (tmp_path / "items").mkdir()
+    (tmp_path / "items" / "cmp.yaml").write_text(
+        "defaults: { type: component, prefix: CMP }\n"
+        "items:\n"
+        "  - id: CMP-001\n    title: First source.\n    equivalent: [CMP-002]\n"
+        "  - id: CMP-002\n    title: Second source.\n",
+        encoding="utf-8",
+    )
+    project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
+    parse.load_items(project)
+    errors = [d.message for d in project.errors]
+    assert any(
+        "'component.equivalent' is now 'component.drop_in'" in m for m in errors
+    ), errors
+    # The edge is carried through the failing build rather than dropped, so
+    # nothing else in the report cascades off its absence.
+    assert project.item_by_id("CMP-001").links["drop_in"] == ["CMP-002"]
 
 
 def test_upgrade_refuses_when_an_item_already_has_its_own_body(tmp_path):

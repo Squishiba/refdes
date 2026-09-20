@@ -85,12 +85,27 @@
 #    test/component — spec content — not on `log`, whose entries are records
 #    of activity rather than things a spec group collects.
 #
+# 5. `equivalent` is renamed `drop_in`. `equivalent` is the industry word for
+#    a drop-in second source, but sitting next to `alternate` it reads as the
+#    weaker of the two — "sort of equivalent" — which is exactly backwards from
+#    what the verbs mean, and the difference is safety-adjacent: the verb that
+#    means "no review needed" has to be the one nobody can misread. `drop_in`
+#    is the unambiguous phrase, so it goes on that verb; `alternate` keeps its
+#    name and its weaker meaning. Nothing else about the pair changes: both
+#    stay self-inverse, declared on `component`, restricted to `component`
+#    targets, and `required_when: {links: alternate}` on `component.rationale`
+#    is untouched. `refdes standard upgrade --to 3` rewrites every `equivalent:`
+#    line to `drop_in:` (see migration.yaml); a project pinned at v3 that still
+#    writes the old spelling gets a build error naming the new verb.
+#
 # v1 and v2 are untouched and still resolve exactly as they always have; a
-# project pinned there sees no difference from any of this. `refdes standard
-# upgrade --to 3` renames `text:`/`method:` to `body:` in every item file
-# that still writes them (refusing, rather than silently merging, an item
-# that already has separate body content of its own) and refuses, rolling
-# back, if the result would not validate.
+# project pinned there sees no difference from any of this — including the
+# `equivalent` verb, which v1 and v2 still spell `equivalent`. `refdes
+# standard upgrade --to 3` renames `text:`/`method:` to `body:` and the
+# `equivalent` link verb to `drop_in:` in every item file that still writes
+# them (refusing, rather than silently merging, an item that already has
+# separate body content of its own) and refuses, rolling back, if the result
+# would not validate.
 
 field_sets:
   provenance:
@@ -117,11 +132,11 @@ link_types:
   addresses:      { inverse: addressed_by,  label: "Addresses",   trace: false, doc: "A log entry records work done on a requirement or bound. Counts as addressed coverage — someone has worked on it and written it up — without claiming it is met." }
   records:        { inverse: recorded_by,   label: "Records",     trace: false, doc: "A log entry records a decision — the design-log side of the decision's own recorded_by end of the same edge." }
   amends:         { inverse: amended_by,    label: "Amends",      trace: false, doc: "A log entry corrects an earlier log entry. Entries are append-only, so a correction is written as a new entry pointing back at this one rather than as an edit." }
-  supersedes:     { inverse: superseded_by, label: "Supersedes",  trace: false, doc: "This decision replaces an older one. The older decision keeps its history; moving its status to superseded is your edit, not something the link does by itself." }
-  selects:        { inverse: selected_by,   label: "Selects", doc: "A decision picks a component. The component's own status marks it selected; this link records which decision made the pick." }
+  supersedes:     { inverse: superseded_by, label: "Supersedes",  trace: false, doc: "This decision replaces an older one. The older decision keeps its history; moving its status to superseded is your edit, not something the link does by itself. Because the two are separate claims, a build warns when this link says superseded and the target's status says something else." }
+  selects:        { inverse: selected_by,   label: "Selects", doc: "A decision picks a component. The component's own status marks it selected; this link records which decision made the pick. A build warns when either half is missing and the other is not." }
   blocked_by:     { inverse: blocks,        label: "Blocked by", doc: "Something is holding this decision up. Name only the immediate blocker; reports resolve the chain to its root. May point at an item of any type; a cycle is a build error." }
   part_of:        { inverse: contains,      label: "Part of", doc: "This item belongs to a group. Membership is always declared by the member, never by the group; contains is the computed backlink." }
-  equivalent:     { inverse: equivalent,    label: "Equivalent", doc: "This component is a drop-in second source for that one — interchangeable as claimed, no review needed. Self-inverse, and restricted to component-to-component." }
+  drop_in:        { inverse: drop_in,       label: "Drop-in", doc: "This component is a drop-in second source for that one — interchangeable as claimed, no review needed. Self-inverse, and restricted to component-to-component. For a part that is close but needs checking before it goes in a design, use alternate." }
   alternate:      { inverse: alternate,     label: "Alternate", doc: "This component is functionally close to that one but not a drop-in: check before substituting. Self-inverse, component-to-component, and the rationale explaining what differs is required." }
 
 types:
@@ -204,7 +219,7 @@ types:
     body: { on_change: invalidate }
 
   component:
-    doc: "A part the design uses. A selected component closes coverage on what it satisfies, and it can carry its own checks against bounds. Equivalence and alternateness between components are claims made here, not facts from a parts database."
+    doc: "A part the design uses. A selected component closes coverage on what it satisfies, and it can carry its own checks against bounds. Drop-in and alternate claims between components are made here, not facts from a parts database."
     prefix: CMP
     label: Component
     preview: [status, title, part_number]
@@ -220,7 +235,7 @@ types:
     links:
       satisfies:      [requirement, bound]
       constrained_by: [bound]
-      equivalent:     [component]
+      drop_in:        [component]
       alternate:      [component]
       part_of:        [group]
     body: { on_change: invalidate }

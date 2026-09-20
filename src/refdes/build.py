@@ -20,6 +20,7 @@ from . import ids as ids_mod
 from . import keys as keys_mod
 from . import nav as nav_mod
 from . import pages as pages_mod
+from . import status_links as status_links_mod
 from . import workspaces as workspaces_mod
 from .model import (
     CHECK_VIOLATION,
@@ -2298,6 +2299,7 @@ def build(
     validate_includes(project)
     workspaces_mod.lint_cross_workspace_references(project)
     blocked_mod.resolve(project)
+    status_links_mod.warn_conflicts(project)
     run_calcs(project)
     run_checks(project)
     compute_hashes(project)

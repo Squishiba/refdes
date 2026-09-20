@@ -38,8 +38,21 @@
 # It shipped under hardware@2 (v0.3.0-v0.5.0), so released projects can
 # carry it; the owner approved the rename on 2026-09-20, choosing keep_copy:
 #
+# links: below renames the `equivalent` link verb to `drop_in` (the
+# vocabulary review's P8): v2 ships `equivalent` meaning "drop-in second
+# source", v3 spells that verb `drop_in` and leaves `equivalent` meaning
+# nothing at all. This one is not optional in a way the additive v3 changes
+# are: without it the step bumps the pin, re-validates, and passes -- an
+# unknown link verb on an item is a warning, not an error, so every
+# `equivalent:` line in the project silently stops being an edge while the
+# project happily reports itself upgraded to v3. Verified by running the
+# step against a v2 project that declares one.
+#
 # See docs/design/standard-library.md §3 for the versioning design this
 # implements.
+
+links:
+  equivalent: drop_in
 
 fields:
   requirement:   # keyed by the OLD type name

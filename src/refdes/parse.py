@@ -52,6 +52,20 @@ _RENAMED_FIELDS: dict[tuple[str, str], str] = {
     ("test", "method"): "body",
 }
 
+# Link verbs renamed by a standard-library version bump, (type, old verb) ->
+# new verb (hardware v3's `equivalent` -> `drop_in`, vocabulary review P8).
+# Without this the old spelling lands in the catch-all below and reports a
+# bare "unknown field 'equivalent' on component" *warning* that names nothing:
+# difflib cannot suggest `drop_in` from `equivalent` -- the two share no
+# substring worth a match -- and a missed link is a dropped traceability edge,
+# which is exactly the case this file already insists must fail the build.
+# Only consulted when the type actually declares the new verb, so a hand-rolled
+# schema that has never heard of either name is never told to rename into a
+# verb it does not have.
+_RENAMED_LINKS: dict[tuple[str, str], str] = {
+    ("component", "equivalent"): "drop_in",
+}
+
 # Types renamed by a standard-library version bump, old name -> new name
 # (hardware v1's `constraint` -> v2's `bound`). The same reasoning as
 # _RENAMED_FIELDS one level up: without this, moving the pin forward by hand
@@ -450,6 +464,17 @@ def _build_item(
                     item.body = str(value)
             else:
                 item.fields[new_key] = _strip_lines(value)
+        elif (spec.name, key) in _RENAMED_LINKS and _RENAMED_LINKS[(spec.name, key)] in spec.links:
+            new_key = _RENAMED_LINKS[(spec.name, key)]
+            project.error(
+                f"the link verb '{spec.name}.{key}' is now '{spec.name}.{new_key}' -- "
+                f"rename this key in the source file. Its targets are used as "
+                f"{new_key!r} in this build so the edge is not silently dropped "
+                f"while the rest of the project reports against the new name.",
+                file=rel, line=line, item_id=item.id or "?",
+            )
+            targets = value if isinstance(value, list) else [value]
+            item.links[new_key] = [str(t) for t in targets if t]
         else:
             # A typo'd link name (`sattisfies:` for `satisfies:`) doesn't just lose a
             # field -- it drops a traceability edge, so it must fail the build rather

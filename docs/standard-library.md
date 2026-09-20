@@ -35,10 +35,11 @@ the standard link vocabulary:
 | `component` | `CMP` | `candidate` → `selected` / `obsolete` | A specific part realizing a decision |
 | `log` | `LOG` | — (append-only) | The dated, unedited record of how the design got here |
 
-And thirteen link verbs, each declared on the type that would naturally author
-it — `refines`, `derives_from`, `satisfies`, `constrained_by`, `verifies`,
-`addresses`, `records`, `amends`, `supersedes`, `selects`, `blocked_by`, plus
-the self-inverse `equivalent`/`alternate` pair on `component`. See
+And fifteen link verbs, each declared on the type that would naturally author
+it — `refines`, `derives_from`, `governed_by`, `satisfies`, `constrained_by`,
+`verifies`, `addresses`, `records`, `amends`, `supersedes`, `selects`,
+`blocked_by`, `part_of`, plus the self-inverse `drop_in`/`alternate` pair on
+`component`. See
 [links](links.md) for how declaring one end gives you the other for free.
 
 Every type also carries `owner`/`last_reviewed` (the `stewardship` field set)
@@ -384,8 +385,8 @@ the type is now `bound`, which is worth saying because `constraint` and
 `bound` share almost no letters, so a did-you-mean suggestion offers
 nothing.
 
-**`hardware@3`** — three changes, arriving together for the same reason `@2`'s
-three did: none was ever published on its own.
+**`hardware@3`** — the changes below, arriving together for the same reason
+`@2`'s three did: none was ever published on its own.
 
 1. **A new link verb, `governed_by`** (inverse `governs`), authored on
    `requirement`, targeting `[requirement, bound]`. Fills a gap `refines` and
@@ -439,10 +440,24 @@ three did: none was ever published on its own.
    provenance note invalidate downstream links; the log's `summary` because
    it's required, and `log` isn't part of this change.
 
-`hardware@1` and `@2` resolve exactly as they always have.
+4. **`equivalent` is renamed `drop_in`.** Paired with `alternate`, the word
+   `equivalent` reads as the weaker of the two — "sort of equivalent" — which
+   is backwards from what the verbs mean: `equivalent` was the drop-in second
+   source needing no review, `alternate` the one that must be checked. The
+   difference is safety-adjacent, so the unambiguous industry phrase goes on
+   the verb that means no review needed. Nothing else about the pair changes:
+   both stay self-inverse, declared on `component`, restricted to `component`
+   targets, and `alternate`'s required `rationale` is untouched. A project
+   pinned at `hardware@3` that still writes `equivalent:` gets a build error
+   naming `drop_in` — an unknown link verb is otherwise only a warning, and a
+   dropped traceability edge is exactly the thing that must not pass quietly.
 
-`refdes standard upgrade --to 3` renames `text:`/`method:` to `body:` in
-every item file that still writes them. Parts 1 and 2 need no migration —
+`hardware@1` and `@2` resolve exactly as they always have — including the
+verb, which those two still spell `equivalent`.
+
+`refdes standard upgrade --to 3` renames `text:`/`method:` to `body:` and the
+`equivalent` link verb to `drop_in:` in every item file that still writes
+them. Changes 1 and 2 need no migration —
 a widened target list or a new field/link accepts everything a narrower one
 already did, so there's nothing existing to rename. The upgrade refuses
 (rolling back) rather than silently overwriting or orphaning content on any
@@ -471,7 +486,7 @@ The standard's own types simply use them:
 
 - [`blocked_by:` and the cascade report](links.md#blocked-by-and-the-cascade-report)
 - [Parts indexing and the parts page](parts.md)
-- [Part equivalence: `equivalent` and `alternate`](links.md#part-equivalence-equivalent-and-alternate)
+- [Part equivalence: `drop_in` and `alternate`](links.md#part-equivalence-drop_in-and-alternate)
 
 ## Not yet built
 

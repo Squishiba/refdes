@@ -74,7 +74,7 @@ same microcontroller is a coincidence of the bill of materials, not a
 claimed dependency between them — exactly the coincidence this page exists
 to surface. The [cross-workspace lint](workspaces.md) walks only
 `item.links`, so sharing a `part_number` across workspaces never trips it;
-only an [`equivalent`/`alternate`](links.md#part-equivalence-equivalent-and-alternate)
+only a [`drop_in`/`alternate`](links.md#part-equivalence-drop_in-and-alternate)
 link — a real authored claim — would.
 
 ## Part equivalence
@@ -82,5 +82,5 @@ link — a real authored claim — would.
 Recording that a manufacturer says two parts are equivalent is parts data
 and doesn't belong here. Recording that *you've decided* two parts are
 interchangeable for *this design* is a reviewable claim, which is exactly
-refdes's domain — see [links: `equivalent` and
-`alternate`](links.md#part-equivalence-equivalent-and-alternate).
+refdes's domain — see [links: `drop_in` and
+`alternate`](links.md#part-equivalence-drop_in-and-alternate).

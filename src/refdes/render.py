@@ -209,12 +209,12 @@ def _trace_view(item: Item, project: Project) -> dict:
     Traceability section: `outgoing` (this item's own declarations, minus
     self-inverse verbs), `incoming` (computed backlinks, same exclusion),
     and `self_inverse` -- every link type where `LinkType.inverse ==
-    LinkType.name` (`equivalent`/`alternate` today, any future one
+    LinkType.name` (`drop_in`/`alternate` today, any future one
     automatically), merged from both `links` and `backlinks` into one
     de-duplicated list per verb.
 
     docs/design/standard-library.md §11: for a self-inverse verb,
-    `links["equivalent"]` and `backlinks["equivalent"]` are the identical
+    `links["drop_in"]` and `backlinks["drop_in"]` are the identical
     fact, not two different ones the way "Satisfies"/"Satisfied by" are --
     rendering them as separate Outgoing/Incoming entries would show a reader
     the same claim twice, differing only in which of the two items happened

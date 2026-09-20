@@ -255,10 +255,10 @@ def test_nav_parts_link_absent_with_no_part_numbers(tmp_path):
     assert "parts.html" not in hrefs
 
 
-def test_equivalent_rationale_is_optional(parts_project):
+def test_drop_in_rationale_is_optional(parts_project):
     (parts_project / "items" / "alpha" / "main" / "cmp-005.md").write_text(
         "---\nid: CMP-005\ntype: component\ntitle: Drop-in second source.\n"
-        "workspace: alpha\nboard: main\nequivalent: [CMP-001]\n---\n",
+        "workspace: alpha\nboard: main\ndrop_in: [CMP-001]\n---\n",
         encoding="utf-8",
     )
     project = _parts_build(parts_project)
@@ -326,13 +326,13 @@ def test_self_inverse_redundant_double_declaration_still_renders_once(parts_proj
     (parts_project / "items" / "alpha" / "main" / "cmp-001.md").write_text(
         "---\nid: CMP-001\ntype: component\ntitle: Main MCU.\n"
         "part_number: STM32G474\nworkspace: alpha\nboard: main\n"
-        "equivalent: [CMP-002]\n---\n",
+        "drop_in: [CMP-002]\n---\n",
         encoding="utf-8",
     )
     (parts_project / "items" / "beta" / "main" / "cmp-002.md").write_text(
         "---\nid: CMP-002\ntype: component\ntitle: Also uses the same MCU.\n"
         "part_number: STM32G474\nworkspace: beta\nboard: main\n"
-        "equivalent: [CMP-001]\n---\n",
+        "drop_in: [CMP-001]\n---\n",
         encoding="utf-8",
     )
     project = _parts_build(parts_project)
@@ -342,19 +342,19 @@ def test_self_inverse_redundant_double_declaration_still_renders_once(parts_proj
     assert block.count('data-ref="CMP-002"') == 1
 
 
-def test_equivalent_and_alternate_are_ordinary_authored_links_for_the_lint(parts_project):
-    """Unlike shared part_number usage, equivalent/alternate ARE declared
+def test_drop_in_and_alternate_are_ordinary_authored_links_for_the_lint(parts_project):
+    """Unlike shared part_number usage, drop_in/alternate ARE declared
     item.links -- a genuine authored claim -- so the cross-workspace lint
     correctly still fires on those, distinguishing an authored dependency
     from a derived coincidence of the BOM."""
     (parts_project / "items" / "alpha" / "main" / "cmp-001.md").write_text(
         "---\nid: CMP-001\ntype: component\ntitle: Main MCU.\n"
         "part_number: STM32G474\nworkspace: alpha\nboard: main\n"
-        "equivalent: [CMP-002]\n---\n",
+        "drop_in: [CMP-002]\n---\n",
         encoding="utf-8",
     )
     project = _parts_build(parts_project)
     assert any(
-        "equivalent points at CMP-002" in d.message and "workspace 'beta'" in d.message
+        "drop_in points at CMP-002" in d.message and "workspace 'beta'" in d.message
         for d in project.warnings
     )

@@ -440,7 +440,7 @@ workspaces:
 boards:
   main: {label: Main}
 link_types:
-  equivalent: { inverse: equivalent, label: "Equivalent" }
+  drop_in:    { inverse: drop_in,    label: "Drop-in" }
   alternate:  { inverse: alternate,  label: "Alternate" }
 types:
   component:
@@ -451,7 +451,7 @@ types:
       rationale:   { type: text, on_change: invalidate, required_when: {links: alternate} }
       datasheets:  { type: citations, on_change: invalidate }
     links:
-      equivalent: [component]
+      drop_in:    [component]
       alternate:  [component]
     body: { on_change: invalidate }
 """

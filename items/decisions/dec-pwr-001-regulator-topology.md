@@ -10,6 +10,10 @@ tags: [power, thermal]
 board: board-a   # folder predates the boards: registry; see refdes.yaml
 satisfies: [REQ-PWR-002@rgsmdxz3w5m, REQ-PWR-003@na934tg83df]
 constrained_by: [BND-THM-001@cw45e0ks00n]
+# The chosen option below is the synchronous buck, and CMP-PWR-001 is that
+# converter. `selects:` is the other half of its `status: selected`: the status
+# marks the part, this link records which decision made the pick.
+selects: [CMP-PWR-001@pktmysgxn8x]
 options:
   - name: LDO (TPS7A4700)
     verdict: rejected

@@ -59,10 +59,10 @@ A numeric limit the design must respect — a voltage, a current, a tolerance. I
 
 ### `component`
 
-A part the design uses. A selected component closes coverage on what it satisfies, and it can carry its own checks against bounds. Equivalence and alternateness between components are claims made here, not facts from a parts database.
+A part the design uses. A selected component closes coverage on what it satisfies, and it can carry its own checks against bounds. Drop-in and alternate claims between components are made here, not facts from a parts database.
 
 - **Id prefix:** `CMP`
-- **Pointed at by:** `alternate` from `component`; `equivalent` from `component`; `selects` from `decision`
+- **Pointed at by:** `alternate` from `component`; `drop_in` from `component`; `selects` from `decision`
 
 | Field | Definition | Type | Required |
 |---|---|---|---|
@@ -217,12 +217,12 @@ A bound whose value follows from a requirement or another bound — where the nu
 - **Inverse:** `derived_by`
 - **Declared on:** `bound`
 
-### `equivalent`
+### `drop_in`
 
-This component is a drop-in second source for that one — interchangeable as claimed, no review needed. Self-inverse, and restricted to component-to-component.
+This component is a drop-in second source for that one — interchangeable as claimed, no review needed. Self-inverse, and restricted to component-to-component. For a part that is close but needs checking before it goes in a design, use alternate.
 
 - **Points at:** `component`
-- **Inverse:** `equivalent`
+- **Inverse:** `drop_in`
 - **Declared on:** `component`
 
 ### `governed_by`
@@ -267,7 +267,7 @@ A decision or component claims to meet a requirement or bound. This is the link 
 
 ### `selects`
 
-A decision picks a component. The component's own status marks it selected; this link records which decision made the pick.
+A decision picks a component. The component's own status marks it selected; this link records which decision made the pick. A build warns when either half is missing and the other is not.
 
 - **Points at:** `component`
 - **Inverse:** `selected_by`
@@ -275,7 +275,7 @@ A decision picks a component. The component's own status marks it selected; this
 
 ### `supersedes`
 
-This decision replaces an older one. The older decision keeps its history; moving its status to superseded is your edit, not something the link does by itself.
+This decision replaces an older one. The older decision keeps its history; moving its status to superseded is your edit, not something the link does by itself. Because the two are separate claims, a build warns when this link says superseded and the target's status says something else.
 
 - **Points at:** `decision`
 - **Inverse:** `superseded_by`

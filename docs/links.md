@@ -118,8 +118,8 @@ stdout.
 | `supersedes` | `superseded_by` | decision → older decision |
 | `blocked_by` | `blocks` | decision → anything holding it up — see [below](#blocked-by-and-the-cascade-report) |
 | `part_of` | `contains` | an item belonging to a group — requirement, bound, decision, test, or component → group |
-| `equivalent` | `equivalent` (self-inverse) | component → drop-in second source — see [below](#part-equivalence-equivalent-and-alternate) |
-| `alternate` | `alternate` (self-inverse) | component → functionally close, check before substituting — see [below](#part-equivalence-equivalent-and-alternate) |
+| `drop_in` | `drop_in` (self-inverse) | component → drop-in second source, no review needed — see [below](#part-equivalence-drop_in-and-alternate) |
+| `alternate` | `alternate` (self-inverse) | component → functionally close, check before substituting — see [below](#part-equivalence-drop_in-and-alternate) |
 
 > **Only from `hardware@3` onward.** `part_of`, and the `group` type it points
 > at, are new in `hardware@3` — v1 and v2 declare neither.
@@ -165,7 +165,7 @@ Three verbs, three different questions, easy to reach for the wrong one:
   for the same one. Neither feeds [coverage](coverage.md#which-links-feed-coverage)
   — see there for why, and which links do.
 
-## Part equivalence: `equivalent` and `alternate`
+## Part equivalence: `drop_in` and `alternate`
 
 **This isn't a parts database.** A manufacturer's own equivalence data —
 "these two op-amps are pin-compatible per the datasheet" — belongs in
@@ -179,14 +179,16 @@ Two verbs, both `component` → `component`, because they mean different things:
 
 ```yaml
 - id: CMP-014
-  equivalent: [CMP-019]      # drop-in, no review needed
+  drop_in: [CMP-019]         # drop-in, no review needed
 - id: CMP-021
   alternate: [CMP-014]       # functionally close -- check before substituting
   rationale: Higher ESR at the output cap; verify ripple before swapping.
 ```
 
-**`equivalent`** — a drop-in second source. The claim ("these are
-interchangeable") is complete on its own, so `rationale` is optional.
+**`drop_in`** — a drop-in second source. The claim ("these are
+interchangeable") is complete on its own, so `rationale` is optional. This is
+the verb that means *no review needed*; if substituting the part is a decision
+somebody has to check first, it is `alternate`, not this.
 
 **`alternate`** — functionally close but not a drop-in. `rationale` is
 **required** (`required_when: {links: alternate}`) because the entire
@@ -200,7 +202,14 @@ from — promoting it to a real `component` is what makes an equivalence claim
 possible, and is itself a reason to give it an item.
 
 Both are restricted to `component` targets, and that restriction is
-checked — `equivalent: [REQ-PWR-001]` on a component is a build error.
+checked — `drop_in: [REQ-PWR-001]` on a component is a build error.
+
+> **The verb was `equivalent` before `hardware@3`.** `refdes standard
+> upgrade --to 3` rewrites every `equivalent:` line to `drop_in:`; a project
+> pinned at v3 that still writes the old spelling gets a build error naming
+> `drop_in`, because an unknown link verb would otherwise be a warning you can
+> ignore while the edge quietly disappears. v1 and v2 keep spelling it
+> `equivalent`, since a pinned version never changes under you.
 
 > **Only from `hardware@2` onward.** v1 wrote both target lists as `[]`,
 > which the loader reads as *unrestricted* (the same way
@@ -213,19 +222,61 @@ checked — `equivalent: [REQ-PWR-001]` on a component is a build error.
 ### Equivalence is symmetric — the self-inverse link
 
 Every other link in this vocabulary is directional: satisfying isn't the
-same claim as being satisfied, so each gets its own inverse name. Equivalence
-has no natural passive form — if CMP-014 is `equivalent` to CMP-019, CMP-019
-is, identically, `equivalent` to CMP-014, not "equivalented by" it.
-`equivalent`/`alternate` declare themselves as their own inverse
-(`{ inverse: equivalent, ... }`), which the loader already handles with no
+same claim as being satisfied, so each gets its own inverse name. Being a
+drop-in has no natural passive form — if CMP-014 is `drop_in` for CMP-019,
+CMP-019 is, identically, `drop_in` for CMP-014, so there is no second word to
+invent. `drop_in`/`alternate` declare themselves as their own inverse
+(`{ inverse: drop_in, ... }`), which the loader already handles with no
 special-casing.
 
 Because of this, an item page merges its own declarations with the computed
 backlink into one list before rendering, rather than showing the identical
 fact twice under "Outgoing" and "Incoming." A component declaring
-`equivalent: [CMP-019]`, and CMP-019 separately declaring `equivalent:
+`drop_in: [CMP-019]`, and CMP-019 separately declaring `drop_in:
 [CMP-014]` back, is harmless — the merge de-duplicates to one visible entry
 either way, so there's nothing to validate and nothing worth warning about.
+
+## When a link and a status disagree
+
+Two facts in this vocabulary are stored twice — once as a link, once as a
+status on the item the link points at:
+
+| The link | The status it asserts | On the link's target |
+|---|---|---|
+| `supersedes: [DEC-002]` | `status: superseded` | DEC-002 |
+| `selects: [CMP-001]` | `status: selected` | CMP-001 |
+
+Neither half does anything to the other, and that is deliberate: the verbs'
+own definitions say so (`supersedes:` — "moving its status to superseded is
+your edit, not something the link does by itself"). But two representations of
+one fact can disagree, and until now nothing noticed. A build now **warns** in
+either direction:
+
+```yaml
+# DEC-003 supersedes DEC-002, and DEC-002 is still `status: accepted`:
+#   WARNING  [DEC-003] supersedes DEC-002, but that item's status is
+#   'accepted', not 'superseded' -- the link does not move a status on its
+#   own. Set DEC-002's status to 'superseded', or remove the supersedes link
+#   if it is not true.
+
+# CMP-001 is `status: selected` and no decision anywhere selects it:
+#   WARNING  [CMP-001] status is 'selected' but nothing selects it -- no item
+#   declares selects: pointing at this one. Author selects: on the item that
+#   makes it so, or move this item off 'selected'.
+```
+
+A warning, never an error, and never a rewrite: the build cannot know which
+half was the mistake. Deriving the status from the link instead — dropping
+`superseded` and `selected` from the enums and computing them — is the other
+way to fix the duplication, and it is not what shipped: `selected` is
+component's `satisfying_statuses` value, so coverage reads the status, and an
+authored lifecycle field should not silently mean whatever the graph happens to
+say. The warning leaves the author to decide which half was wrong.
+
+Nothing is reported when the vocabulary does not carry both halves: a type with
+no `status` field, or one whose `choices` never offer the paired value, can
+never be in disagreement about it. And a project that never declares
+`supersedes`/`selects` at all hears nothing, whatever its statuses say.
 
 ## `blocked_by:` and the cascade report
 
