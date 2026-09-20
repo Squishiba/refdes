@@ -24,7 +24,7 @@ boards:      { ... }   # opt-in board registry
 workspaces:  { ... }   # opt-in workspace registry, one level above boards
 
 # refdes-schema.yaml — optional, only when the project declares its own schema
-sets:  { ... }   # reusable field groups, include:d by a type
+sets:  { ... }   # reusable type-spec fragments (fields, links, body), include:d by a type
 link_types:  { ... }   # relationships and their inverses
 types:       { ... }   # item types
 ```
@@ -164,17 +164,34 @@ library](standard-library.md#overriding-and-extending) for the merge rules
 # refdes-schema.yaml
 sets:
   provenance:
-    source: { type: text, on_change: log }
-    tags:   { type: list, on_change: ignore }
+    fields:
+      source: { type: text, on_change: log }
+      tags:   { type: list, on_change: ignore }
+  tracked:
+    links:
+      part_of: [group]
+    body: { required: true }
 ```
 
-Named, reusable groups of field definitions, `include:`d by one or more types
-instead of being retyped on each. The standard is authored this way internally
-(`provenance`, `stewardship`); a project declares its own in
-`refdes-schema.yaml` for fields
-repeated across its own custom types. See [the standard
-library](standard-library.md#field-sets-and-include) for `include:`'s merge
-order against a type's own fields.
+Named, reusable fragments of a type's own spec, `include:`d by one or more
+types instead of being retyped on each. A set carries exactly three keys —
+`fields:`, `links:` and `body:` — and nothing else: `include:`, `coverable:`,
+`prefix:` and the rest are a type's declarations, not a set's. Including a
+set merges in list order (a later set wins on a name collision), and the
+type's own declaration merges last and wins over everything it includes.
+Two included sets declaring the same link verb or `body:` with different
+specs is a load error naming both sets. An include whose every contribution
+is shadowed warns in the build output.
+
+A type may override an included field with a spec whose **only** key is
+`doc:` — a patch that keeps the set's `type`, `required`, `choices`,
+`default` and `on_change` while replacing just the definition. Any other
+override must be a full field spec carrying `type:`. The standard is
+authored this way internally (`provenance`, `stewardship`, `citations`);
+a project declares its own in `refdes-schema.yaml` for structure repeated
+across its own custom types. See [the standard
+library](standard-library.md#sets-and-include) and
+[docs/design/composition.md](design/composition.md) for the full merge rule.
 
 ---
 
@@ -287,7 +304,8 @@ types:
       watts: { type: quantity, required: true, doc: Total dissipation this budget allows. }
 sets:
   stewardship:
-    owner: { type: person, doc: The person a question about this item goes to. }
+    fields:
+      owner: { type: person, doc: The person a question about this item goes to. }
 link_types:
   governed_by: { inverse: governs, doc: The bound or requirement this item must respect. }
 ```

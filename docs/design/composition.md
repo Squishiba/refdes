@@ -1,4 +1,9 @@
-Status: draft proposal — not decided.
+Status: decided — owner (Jared) approved all five open questions as
+recommended, 2026-09-20. Engine implementation landed on ao/refdes-106/root
+(rename, links/body widening, conflict errors, shadow warning, doc-only
+patches); the base.yaml factoring refactor is deliberately deferred to the
+`extends:` pass per question 3, and the two `extends:`-dependent tests are
+deferred with it.
 
 # Composition — widening `include:` beyond fields
 
@@ -26,8 +31,12 @@ attempt to factor every duplicated field declaration in
 the resolved schema held byte-identical as the oracle. The spec answers what
 that attempt measured, not what a reader might imagine was duplicated.
 
-**Implementation status:** not started — design spec, per the backlog's rule
-that engine changes get a spec first.
+**Implementation status:** engine landed (rename `6f2ea68`, widening
+`5d05498`, doc-only patches `08b79e4`). The base.yaml refactor and the
+`test_hardware3_base_resolves_unchanged` oracle ride the `extends:` pass
+(open question 3, decided); `test_extends_naming_a_set_is_an_error` and
+`test_extends_and_include_together_own_declaration_wins` are deferred with
+the extends engine itself.
 
 ---
 
@@ -407,7 +416,7 @@ Structural:
 
 ---
 
-## 7. Open questions for Jared (recommended, Jared to decide)
+## 7. Open questions for Jared (all decided as recommended, 2026-09-20)
 
 1. **Rename `field_sets:` to `sets:`?** — **Recommended: YES, now.** The
    moment sets carry links and body, the name `field_sets` is a lie in

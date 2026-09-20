@@ -44,7 +44,7 @@ it — `refines`, `derives_from`, `governed_by`, `satisfies`, `constrained_by`,
 
 Every type also carries `owner`/`last_reviewed` (the `stewardship` set)
 and `source`/`note`/`tags` (`provenance`) — see [sets and
-`include:`](#field-sets-and-include) for how those are assembled without
+`include:`](#sets-and-include) for how those are assembled without
 retyping five fields on every type, and [authoring: `source`, `note`,
 `rationale`, `body`](authoring.md#source-note-rationale-body) for what
 `source`/`note` are actually for, as distinct from `rationale`/`body`.
@@ -99,15 +99,17 @@ types:
 
 ## `sets` and `include:`
 
-Reusable groups of field definitions, declared once and pulled into a type
-with `include:`. The standard is built this way internally:
+Reusable fragments of a type's own spec — `fields:`, `links:` and `body:`,
+and nothing else — declared once and pulled into a type with `include:`.
+The standard is built this way internally:
 
 ```yaml
 # refdes-schema.yaml
 sets:
   provenance:
-    source: { type: text, on_change: log }
-    tags:   { type: list, on_change: ignore }
+    fields:
+      source: { type: text, on_change: log }
+      tags:   { type: list, on_change: ignore }
 
 types:
   requirement:
@@ -116,12 +118,29 @@ types:
       text: { type: text, required: true }
 ```
 
-Included fields are merged in list order (a later `include:` wins over an
-earlier one on a name collision), then the type's own `fields:` are applied on
-top — a type's own declaration always wins over anything it includes. A
-project declares its own `sets:` in `refdes-schema.yaml` for fields
+Included contents are merged in list order (a later `include:` wins over an
+earlier one on a name collision), then the type's own declarations are
+applied on top — a type's own declaration always wins over anything it
+includes. Every merge is by name with whole-spec replacement: no field spec,
+link target list or body block is deep-merged across a set boundary. Two
+included sets declaring the same link verb or `body:` with different specs
+is a load error naming both sets — neither author wrote that conflict at
+the point of use — and an include whose every contribution is shadowed
+warns in the build output.
+
+A type may override an included field with a spec whose only key is `doc:`:
+the patch keeps the set's `type`, `required`, `choices`, `default` and
+`on_change` and replaces just the definition, so shared structure factors
+out while each type keeps its own wording. Any other override must be a
+full field spec carrying `type:`
+([docs/design/composition.md](design/composition.md)).
+
+A project declares its own `sets:` in `refdes-schema.yaml` for structure
 repeated across its own custom types; they merge with the standard's, by
-name, under the same rules as everything else here.
+name, under the same rules as everything else here. A preset may define a
+set the base's types `include:` — one hop of overlay power over the base's
+own composition is deliberate; sets are not types, and sharing a set
+confers no substitutability between the types that include it.
 
 ## Presets
 
