@@ -175,11 +175,14 @@ amendment markers, and the requirements each entry addresses. Every entry also g
 its own page with full traceability.
 
 Entries that continue one another — a chain of entries linked by `follows:` —
-additionally show a **Thread** section on their page: what the thread currently
-concludes, with each value attributed to the entry that concluded it, and the
-whole thread as a timeline. A thread that has forked shows no conclusion at all,
-only the open tips. Threads are covered in full in
-[threads](design/threads.md).
+will additionally show a **Thread** section on their page: what the thread
+currently concludes, with each value attributed to the entry that concluded it,
+and the whole thread as a timeline. A thread that has forked would show no
+conclusion at all, only the open tips.
+
+This is not available today: no bundled standard declares `follows:`, so
+writing it in an item is an unknown-link error. The thread behaviour ships
+with the threads work, covered in full in [threads](design/threads.md).
 
 ## Coverage
 

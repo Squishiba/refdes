@@ -63,10 +63,13 @@ placed before the subcommand), which makes the load read-only: bare references
 stay bare, stale display halves are not refreshed, and no source files are
 modified.
 
-`follows:` is the one exception while it is still bare: it means "continue
-this thread", so the first writable load freezes it to the thread's current
-tip (becoming `DISPLAY-ID@key` or a bare key for an id-less tip). Once frozen,
-it follows the same rename-refresh rule as any other composite.
+`follows:` will be the one exception while it is still bare: it means
+"continue this thread", so the first writable load freezes it to the thread's
+current tip (becoming `DISPLAY-ID@key` or a bare key for an id-less tip). Once
+frozen, it follows the same rename-refresh rule as any other composite.
+**It is not yet available to authors:** no bundled standard declares the verb,
+so writing `follows:` today is an unknown-link error. The chain behaviour
+ships with the threads work — see [threads](design/threads.md).
 
 ## Back-links are computed
 

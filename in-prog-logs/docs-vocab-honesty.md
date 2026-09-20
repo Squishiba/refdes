@@ -25,4 +25,27 @@ Tests: 1256 passed.
 
 ## Chunk 2 — follows: documented but not declared
 
-(to be filled in below)
+Confirmed the premise: grep for `follows`/`followed` across
+src/refdes/standards/ hits only a v2 comment and the derives_from label
+prose — no link_types declaration in v1, v2 or v3. The engine is landed
+(chains.py walk, links.py plan_follows_freeze/freeze_follows called from
+cli.py:133, keys adopt implemented as cmd_keys_adopt), but an undeclared
+verb errors at parse/schema (schema.py:555, blocks.py:403).
+
+Changed (user-facing docs only):
+- docs/links.md — `follows:` paragraph rewritten: what it will do kept,
+  plus a plain statement it is not available and is an unknown-link error
+  today; ships with the threads work.
+- docs/design-log.md — Thread section rewritten the same way.
+- docs/cli-reference.md — keys adopt bullet "Freezes bare follows:
+  references" now caveats that no bundled standard declares it yet.
+- changelog.d/follows-docs-honesty.fixed.md — new fragment.
+
+Checked and left alone: docs/design/threads.md (the design doc itself says
+hardware@3 does not declare follows:), docs/design/living-notes.md,
+living-notes-plan.md, keys.md, backlog.md (design history/plans),
+docs/vocabulary.md (no follows entry), README.md, refdes-schema.yaml, and
+every other docs/*.md hit for "follows" — all ordinary English prose, not
+the link verb. docs-site/ has no follows: mentions.
+
+Tests after chunk 2: 1256 passed.
