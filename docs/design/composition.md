@@ -36,7 +36,9 @@ that engine changes get a spec first.
 Today `include:` carries fields only: `_expand_include`
 (`standards.py:305`) merges `field_sets:` entries into `fields:` and pops
 itself. §12.3 of `extends.md` measured what is byte-identical across types
-but structurally unreachable:
+but structurally unreachable (the line numbers below are re-cited against
+the current `base.yaml`; §12 itself was measured before the P8/P11 commits
+landed):
 
 | Block | Groups / lines | Verdict |
 |---|---|---|
@@ -53,10 +55,10 @@ Each verdict argued separately.
 ### 1.1 `links:` — carried
 
 The largest single cluster of duplication in `base.yaml` is a link:
-`part_of: [group]` appears verbatim on five types (:143, :162, :188, :203,
-:225 — nine lines, four redundant copies), and `satisfies: [requirement,
+`part_of: [group]` appears verbatim on five types (:158, :177, :203, :218,
+:240 — nine lines, four redundant copies), and `satisfies: [requirement,
 bound]` plus `constrained_by: [bound]` repeat on `decision` and `component`
-(:182–183, :221–222). A link entry is a `verb: [targets]` pair; sharing one
+(:197–198, :236–237). A link entry is a `verb: [targets]` pair; sharing one
 is sharing a structural fact — "spec-content types belong to groups",
 "decisions and components claim requirements and bounds". These are exactly
 the facts that drift when a target list widens on one type and not its
@@ -67,16 +69,16 @@ shaped exactly as the type's own.
 ### 1.2 `body:` — carried
 
 Six of seven types' `body:` lines fall into two byte-identical groups:
-`{ on_change: invalidate, required: true }` on requirement/bound (:144,
-:163) and `{ on_change: invalidate }` on decision/test/component/log (:189,
-:204, :226, :261). `body:` is two semantic keys — `on_change`, `required` —
+`{ on_change: invalidate, required: true }` on requirement/bound (:159,
+:178) and `{ on_change: invalidate }` on decision/test/component/log (:204,
+:219, :241, :276). `body:` is two semantic keys — `on_change`, `required` —
 not identity; there is nothing type-specific about "the body invalidates
 downstream when edited". Carried.
 
 ### 1.3 `preview:` — left out
 
-One group, two lines (`preview: [status, title]` on requirement :132 and
-test :195). Two reasons it stays out. First, a preview is a list of field
+One group, two lines (`preview: [status, title]` on requirement :147 and
+test :210). Two reasons it stays out. First, a preview is a list of field
 names the set does not own: a set carrying `preview: [status, title]`
 silently asserts that every includer has `status` and `title` fields, and
 that coupling is invisible — remove `title` from one includer and the set's
@@ -89,7 +91,7 @@ out, and said to be left out.
 ### 1.4 `coverable:` / `coverable_statuses:` — left out
 
 One group, four lines — and it is precisely the requirement/bound pair
-(:133–134, :151–152), the same pair `extends:` already collapses: `bound
+(:148–149, :166–167), the same pair `extends:` already collapses: `bound
 extends requirement` inherits `coverable` and `coverable_statuses` per
 `extends.md` §2.2, decided 2026-09-19. After `extends:` lands, the measured
 duplication here is zero. Worse, sharing coverability through a set would
