@@ -184,14 +184,16 @@ Stage names — `docs/coverage.md:6-14` ("## The five stages"):
 | `satisfied` | "A settled decision or component claims to meet it" |
 | `verified` | "A test proves it" |
 
-`docs/concepts.md:47-57` documents the same subject as "## The three notions
-of 'done'" and lists **four** stages — `open`, `addressed`, `satisfied`,
-`verified` — with no `claimed` row:
-
-> "| `satisfied` | A decision claims to meet it | a **decision** `satisfies` it |"
-
-The header count ("three"), the row count (four), and `coverage.md`'s five
-disagree with each other in the two places a new author meets coverage.
+`docs/concepts.md` documented the same subject as "## The three notions of
+'done'" with **four** rows and no `claimed` — a header count of three, a row
+count of four, and `coverage.md`'s five, disagreeing in the two places a new
+author meets coverage. This was fixed on `main` while this review was in
+flight, by `6a65cee` "docs(coverage): title the section by its five stages,
+matching the code"; `docs/concepts.md:47` is now "## The five coverage stages"
+with all five rows at `:56-60`. It is recorded here because it is the pattern
+the rest of §2 is about — a count in a heading and a count in the code drifting
+apart — and because it is the proof that the project fixes this class of thing
+when it is named.
 
 Type-level switches that produce the stages:
 
@@ -297,13 +299,13 @@ change.
 | `history` | `living-notes.md:63` (store) | "Use one general, versioned `.refdes/history/` store for these snapshots and for rich baseline snapshots." |
 | `snapshot` | `living-notes.md:46` | "Replace the current build-time seal with a **recorded snapshot**: an entry stays editable, but, after a record moment, refdes compares its live semantic content with the stored snapshot" |
 | `redact` | `living-notes.md:329` | "`refdes history redact <object-or-item>` requires an explicit acknowledgement, removes matching current history objects/events, and writes an auditable redaction event without repeating the secret." |
-| `seal` (kept, meaning changed) | `living-notes-plan.md:243-247` | "the first writable build no longer writes a hash lock, an edit is no longer a build error ... Existing seal files keep being read and become **legacy-seal markers**: 'recorded hash only; original content was not captured.'" |
-| `lock` | `living-notes-plan.md:243` | "no longer writes a hash lock" — and `living-notes.md:94`, Jared's own word: "I've also been questioning the idea of 'locking' documents in the first place." |
+| `seal` (kept, meaning changed) | `living-notes-plan.md:246-249` | "the first writable build no longer writes a hash lock, an edit is no longer a build error ... Existing seal files keep being read and become **legacy-seal markers**: 'recorded hash only; original content was not captured.'" |
+| `lock` | `living-notes-plan.md:246` | "no longer writes a hash lock" — and `living-notes.md:94`, Jared's own word: "I've also been questioning the idea of 'locking' documents in the first place." |
 | `task` / `tasks:` | `living-notes.md:378` | "Add an optional `tasks:` field to the merged `log` type, with stable task IDs and complete state" with `state: open # open \| done \| dropped` |
 | `thread` | `threads.md:7-12` | "A **thread** is not a container and not an item: it is the connected chain of entries reachable by walking `follows:` backward and its computed inverse, `followed_by:`, forward." |
 | `tip` | `threads.md:11-12`, `:448` | "answered by walking forward from any entry in the chain to its tip(s) and folding per field"; "all reachable heads contribute their tips, and a non-reconciled fork is" |
 | `follows` / `followed_by` | `threads.md:6-8` | "An entry declares its predecessor with a link, `follows:`, written by the tool, not typed by the author." |
-| `release` (gate sense) | `living-notes-plan.md:407` | "Adds. `open_tasks` (a release blocks while any thread tip carries an open author task) and `recorded_edits` (a release blocks while any item is edited after recorded). Both off by default, both enabled through the existing `release_gate:` overlay." |
+| `release` (gate sense) | `living-notes-plan.md:410-411` | "Adds. `open_tasks` (a release blocks while any thread tip carries an open author task) and `recorded_edits` (a release blocks while any item is edited after recorded). Both off by default, both enabled through the existing `release_gate:` overlay." |
 | `gate` | `docs/lifecycle.md:19` "## The readiness gate"; `model.py:52-63` `RELEASE_GATE_DEFAULTS` | eight named rules, each `{release: bool, revision: bool}` |
 | `work` / worklist | `living-notes.md:441` | "A proposed `refdes work` query combines hand-written tip tasks with derived rows, but preserves their origins and never writes them into `tasks:`." |
 | `continuation` | `living-notes.md:74` | "a task edit is a **new continuation entry** containing a complete replacement list, not an edit of its predecessor" |
@@ -317,8 +319,13 @@ standard** — `v3/base.yaml` has no `follows` verb, and
 `tests/test_chains.py:25` declares it by hand
 (`follows: { inverse: followed_by, label: Follows }`). So today an author
 using threads must add the verb to their own overlay; the words exist in the
-engine and in `docs/design/threads.md`, and `docs/design-log.md:177` and
-`docs/links.md:66` already describe them to users as if they were standard.
+engine and in `docs/design/threads.md`. `docs/links.md`, `docs/design-log.md`
+and the `keys adopt` bullet in `docs/cli-reference.md` used to present
+`follows:` to authors as available; `8491dd1` "docs(links): stop presenting
+follows: as available in the bundled standards" corrected all three while this
+review was in flight, and `docs/links.md` now says "**It is not yet available
+to authors:** no bundled standard declares the verb, so writing `follows:`
+today is an unknown-link error."
 
 ### 1.8 Coverage of the inventory
 
@@ -329,3 +336,414 @@ body block names plus `calc` and `[[cite:]]`, the 5 coverage stages and the 4
 type-level coverage switches, the 24 CLI subcommands, the 3 diagnostic levels,
 the 10 status enumerations, and the 16 living-notes/threads words named in the
 brief. All were opened and read; the quotes above are copied, not recalled.
+
+## 2. Analysis
+
+### How this is graded
+
+Two questions get asked of every term, and they are not the same question.
+
+**Is it duplicated?** Either one word carrying two meanings the author must
+keep apart, or one meaning wearing several names, so that the author cannot
+tell whether two words are the same thing or different things.
+
+**Is it misleading?** Whether a hardware engineer arriving with the vocabulary
+of their own trade will import a meaning refdes does not intend. This is the
+serious category, and the project has been bitten by it exactly once already
+and paid for it with a rename:
+
+> "`requirement` and `constraint` read as near-synonyms in plain English — a
+> constraint colloquially *is* a requirement — which is what produced the
+> authoring mix-up this came from." — `v2/base.yaml:21-24`
+
+**Unfamiliar is not the same as wrong.** `fold`, `tip`, `stamp`, `pin`,
+`redact`, `bound` and `cascade` are words a reader has not met before in this
+position. Each is defined the first time it is used, none of them imports a
+competing meaning, and none of them is a problem. Renaming unfamiliar-but-
+correct words is churn that costs more than it buys, and this review does not
+propose it. Findings are graded:
+
+- **S1 — actively misleading.** A reader will get it wrong without noticing.
+- **S2 — genuinely confusing.** Recoverable from the docs, but the word alone
+  does not carry the distinction.
+- **S3 — merely unfamiliar.** Fine as is; listed in §4.2 so the decision to
+  keep it is on the record.
+
+### 2.1 S1 — actively misleading
+
+**S1.1 — `vendor:` in a citation entry means "keep a local copy", not
+"the company that makes it".** This is the worst one in the vocabulary for a
+hardware engineer, because the word already has a fixed meaning in their trade
+and refdes uses it for something else in the same breath as the word that
+*does* mean what they think.
+
+`v3/base.yaml:104` — one field, two adjacent sub-keys, opposite senses:
+
+> "Each entry needs a path — an http(s) URL or a project-root-relative file —
+> and may carry rev, page, section, part_number, **vendor** and an id for
+> `[[cite:]]` references."
+
+`docs/markdown.md:297` shows a real entry, and `:380-383` explains the sense:
+
+> "**Pinning vs. vendoring.** Every fetched citation is pinned: its sha256 and
+> ... `vendor: true` additionally keeps a local copy of the bytes, content-
+> addressed at `.refdes/vendor/<sha256><ext>`"
+
+So `part_number: TPS62913` and `vendor: true` sit in the same mapping, and the
+second one is a boolean about file copying. An engineer reads that pair as
+"the vendor of this part number is true". Worse, the thing `vendor:` is
+naming — a local copy of a datasheet — is exactly what a hardware engineer
+would call a *vendor copy* in the manufacturer sense too. Both readings are
+available and one of them is wrong. `src/refdes/citations.py:1` commits the
+word throughout: "declared intent in items, computed provenance in a
+lockfile", with `lockfile_path`, `load_lockfile`, `save_lockfile` and
+`vendor:` as the vocabulary of the module.
+
+**S1.2 — `alternate` means "not interchangeable" in a vocabulary where
+`equivalent` already means "interchangeable".** `v3/base.yaml:124-125`:
+
+> `equivalent`: "This component is a drop-in second source for that one —
+> interchangeable as claimed, no review needed."
+>
+> `alternate`: "This component is functionally close to that one but **not a
+> drop-in**: check before substituting."
+
+Two near-synonyms in English carrying a load-bearing, safety-adjacent
+distinction, both self-inverse, both component-to-component, differing only in
+whether a review is needed. This is structurally identical to the
+`requirement`/`constraint` pair that the project already renamed once. And the
+industry usage runs against refdes: in BOM practice an "alternate part" is
+generally an approved substitute — i.e. closer to what refdes calls
+`equivalent` — so the default connotation a reader imports points at the
+opposite meaning. The distinction is worth keeping; the word pair is not
+obvious enough to carry it, and the consequence of getting it backwards is a
+part swapped on a board without review.
+
+**S1.3 — `revision`, `revise`, `rev:` and "Since last revision" are four
+different things, two of them adjacent CLI commands.**
+
+- `refdes revision <name>` — `cli.py:1306`: "stamp an internal checkpoint
+  baseline".
+- `refdes revise` — `cli.py:1514`: "rewrite project-local vocabulary
+  (types/fields/links/prefixes)".
+- `rev:` — a citation entry's datasheet revision, `docs/markdown.md:255`
+  (`rev: E`), `:272` (`rev: "2"`).
+- "Since last revision" — a section heading in `refdes audit` output
+  (`docs/cli-reference.md:341` onward), meaning since the last stamped
+  baseline of any kind, including a release.
+
+Two commands whose names differ by two letters do unrelated jobs — one records
+a point in time, the other rewrites the schema — and `rev` is simultaneously
+the identity of a datasheet edition. A datasheet revision is not a project
+revision and neither is a baseline name, and all three are called rev/revision
+in the same tool.
+
+**S1.4 — `log` is an item type, a change-tracking mode, and a prose name for
+the notebook, and one of those three distinctions does not exist.**
+
+- `log` the type — `v3/base.yaml:245`.
+- `log` the `on_change` mode — `docs/change-tracking.md:10-14`, the middle row
+  of a three-row table whose first column is the same word as an item type.
+- "design log" the prose name — `v3/base.yaml:246` "A dated entry in the
+  design log".
+
+And the mode itself is not what its name promises. `docs/change-tracking.md:16-23`:
+
+> "**The last two columns are implemented; the first is not.** ... until it
+> exists, `log` and `ignore` are indistinguishable in every *other* observable
+> way"
+
+and `docs/schema-reference.md:87-89` is blunter:
+
+> "Only `invalidate` has any effect today ... `log` is reserved for a future
+> per-field history layer and currently behaves exactly like `ignore` —
+> choosing between them is not yet a meaningful decision."
+
+The bundled standard nonetheless distributes the two names across its fields as
+if the choice mattered — `on_change: log` on `source` (`:97`), `note` (`:98`),
+`owner` (`:101`), `date` (`:177`), `refdes` (`:215`), `title` on group (`:241`)
+versus `on_change: ignore` on `tags` (`:99`) and `last_reviewed` (`:102`). An
+author reading the schema reasonably concludes the engine treats them
+differently. It does not. A word that names a distinction the tool does not
+implement is a vocabulary item that teaches the wrong model, and `log` is the
+same word as the type an author writes `type: log` five lines above it.
+
+**S1.5 — `history` names four things.**
+
+1. The project config key for the default change mode — `docs/schema-reference.md:18`
+   `history:     { ... }   # default on_change mode`, documented at `:78`.
+2. The item-level override of that mode — `vocabulary.py:81` "This item's
+   change-policy override, in place of the project's `history: default`", and
+   `docs/schema-reference.md:652` "## Item-level `history`".
+3. The planned snapshot store — `docs/design/living-notes.md:63` "Use one
+   general, versioned `.refdes/history/` store for these snapshots".
+4. The parked git-reader layer — `docs/change-tracking.md:20-22` "a
+   continuous, field-level history the parked git-reader layer would provide".
+
+(1) and (2) are at least the same concept at two scopes. (3) is a completely
+different object — a store of immutable events — that will be reached through a
+new command family, `refdes history record` / `refdes history redact` /
+`history migrate-seals` (`living-notes.md:13`, `:329`, `living-notes-plan.md:602-606`).
+So `history:` in front matter and `refdes history` on the command line will
+mean unrelated things in the same project, and the word already meant the
+parked layer in the docs. This is the term with the most meanings in the whole
+vocabulary.
+
+**S1.6 — `records:` (shipped verb) and `record` / `recorded` (planned core
+noun) collide in the same file, and the plan already noticed.**
+
+The shipped verb, `v3/base.yaml:118`: "A log entry records a decision — the
+design-log side of the decision's own `recorded_by` end of the same edge."
+
+The planned noun, `living-notes.md:49-50` and `:270`: the record moment is "a
+`follows:` edge naming that entry as its predecessor", rendered as "recorded
+2026-09-15T14:08Z when LOG-POWER-014 followed it".
+
+A log entry that carries `records: [DEC-POWER-002]` and is also "edited after
+recorded" uses the same word twice for two unrelated facts, in the same item,
+on adjacent lines. `living-notes-plan.md:588` names the hazard in passing while
+rejecting an unrelated option:
+
+> "(c) is the smallest diff but hides a policy in a version comparison, which
+> is how the `records:` confusion happened."
+
+That sentence is evidence the collision is already live, not hypothetical. It
+is also the cheapest kind of finding this review can make: `record`, `recorded`
+and `snapshot` are unshipped, and `living-notes-plan.md:576` explicitly
+reserves the right to rename them — "It may rename terms this plan introduces —
+`record`, `recorded`, `history`, `snapshot`, `tasks` — without reopening the
+eight decisions themselves".
+
+**S1.7 — `frozen` already means "link resolved to a surrogate key", while
+living-notes uses lock/seal language for immutability.** `src/refdes/adopt.py:64`
+`frozen_follows: int = 0`, `:214` "could not freeze N local follows
+reference(s)", `src/refdes/build.py:421` "preserving the authoring path for
+unfrozen links". Nothing to do with sealing; freezing here means a link target
+has been pinned to a key instead of a display id. Meanwhile `living-notes-plan.md:246`
+describes sealing's removal as "the first writable build no longer writes a
+hash lock". So the codebase has freeze, lock, seal and pin as four near-
+synonyms for four different mechanisms, one of which (`frozen`) is already
+committed in output fields (`frozen_follows`) that users see.
+
+**S1.8 — `claimed` (coverage stage) vs `claim` (preset item type) vs "claims
+to meet" (the prose of `satisfies` and `met_by`).**
+
+- `claimed` is a coverage stage — `docs/coverage.md:6-14`: "A decision or
+  component says it meets it, but that claim hasn't settled".
+- `claim` is an item type in the debate preset — `presets/design-debate.yaml:44`:
+  "An assertion made in a debate".
+- `satisfies` is defined as a claim — `v3/base.yaml:114`: "A decision or
+  component **claims to meet** a requirement or bound." And `met_by`, preset
+  `:11`: "An option **claims to meet** a requirement or bound. It records how a
+  candidate measures up; it is not coverage."
+
+So "claim" is a thing you file, a stage a requirement is in, and the standard
+English verb for the coverage relation. Two of the three are unrelated to each
+other and share a root with no help from the naming: an author who files a
+`claim` about a requirement whose coverage stage is `claimed` has said two
+unrelated things in words that look like they agree. (`docs/concepts.md` used to
+compound this by omitting the `claimed` stage entirely while heading the section
+"The three notions of 'done'"; `6a65cee` fixed that on `main` during this
+review — see §1.5.)
+
+**S1.9 — `supersedes`/`superseded` and `selects`/`selected`: the link and the
+status both claim to do it, and neither does.** `v3/base.yaml:120`:
+
+> "This decision replaces an older one. The older decision keeps its history;
+> moving its status to superseded is your edit, not something the link does by
+> itself."
+
+and `:121`:
+
+> "A decision picks a component. The component's own status marks it selected;
+> this link records which decision made the pick."
+
+The vocabulary offers a verb that reads like it changes the world and then
+disclaims having done so, in the verb's own definition. `superseded` and
+`selected` are statuses the author must set separately, so the two
+representations can disagree, and the tool's own wording invites the author to
+believe they cannot. Whatever the engine should do, the words should not
+promise and then retract.
+
+**S1.10 — `constrained_by` points at a type that no longer has that name, and
+sits beside `governed_by` which points at the same targets.** `constraint`
+as a type exists only in `hardware@1:55`; in v3 the word appears nowhere in
+`v3/base.yaml` (grep: zero hits), yet the verb is still `constrained_by` —
+`v3/base.yaml:115`: "A decision or component that must respect a bound."
+So the vocabulary retains the fossil of the renamed type inside a verb while
+the type itself is called `bound`, and the verb's doc has to use a third word
+("respect") to explain it. Beside it, `governed_by` (`:113`): "This requirement
+must comply with a general rule stated elsewhere — another requirement or a
+bound — without being a narrower version of it. Traceability only." Both verbs
+are traceability-only, both target requirement/bound, and the difference —
+"must respect a bound" vs "must comply with a general rule ... elsewhere" — is
+not visible in the names. `refines` (`:111`) is the third option for
+requirement-to-requirement, and `derives_from` (`:112`) the fourth for
+bound-to-requirement. Four verbs, one English idea ("this has to do with that
+rule"), distinguished by altitude, origin, and generality that the names do not
+carry.
+
+**S1.11 — `block` is five things.** `blocked_by` the verb (`:122`) and its
+inverse `blocks`; `blocked` as a `test` status (`:199`); "blocks the build" for
+ERROR severity (`model.py:26`); "a release blocks while any thread tip carries
+an open author task" (`living-notes-plan.md:410`); "the note type never blocks
+on its own" (`living-notes.md:18`). Plus `blocked_chains` as a computed object
+(`src/refdes/blocked.py:1-8`, "`blocked_by:` cycle detection, transitive root
+resolution, and the stale-blocker diagnostic"). A test whose status is
+`blocked` is not blocked_by anything; the two words are 6 characters apart and
+unrelated.
+
+### 2.2 Duplication clusters — one idea, several names
+
+Ranked by how much reader work the cluster costs. Fixes are in §3.
+
+**D1 — "this is fixed now": seal, sealed, reseal, hash lock, legacy-seal,
+migrated-current, snapshot, record, recorded, baseline, stamp, revision, pin,
+lockfile, frozen.** Fifteen words for "a durable record of what something was".
+The mechanisms genuinely differ — `seal.py:1-6` seals append-only log entries
+by content hash, `lifecycle.py` stamps baselines, `citations.py` pins fetched
+bytes in a lockfile, `adopt.py` freezes link targets, and living-notes plans to
+replace sealing with a snapshot store — but the words do not encode the
+differences, and living-notes is about to add `record`, `recorded`,
+`legacy-seal`, `migrated-current` and `history` on top of `seal`, which it is
+simultaneously redefining from "editing this is a build error" to "a marker,
+never fatal" (`living-notes.md:16-18`). A meaning-flip on a shipped word, in
+the same release that adds five new words to the same cluster, is the highest
+cost item in this review.
+
+**D2 — "a run of connected things": thread, chain, cascade, follows,
+followed_by, tip, head, fork, merge, continuation, walk.** `chains.py:1` calls
+it a "`follows:` chain walk"; `docs/design/threads.md:7-12` calls the same
+object a **thread** and explains it is "not a container and not an item";
+`blocked.py` produces `blocked_chains`; `{{cascade}}` is a third, unrelated
+"chain" that renders a walk (`docs/blocks.md:64`); and `threads.md:448` uses
+**heads** and **tips** in one sentence — "all reachable heads contribute their
+tips" — for what §1.4 of that document calls tips. `docs/blocks.md:124-130` is
+the model for how to do this the other way: it explains, in the vocabulary
+itself, why `{{tree}}` has no `via=` — "it would replace it with a cascade
+wearing a hat".
+
+**D3 — "a way to group items": board, workspace, group, section, tag, and
+`{{tree}}`.** Six mechanisms, five words, no single page that says which to
+reach for. `board` is "the first path segment under `items/` unless the item
+says otherwise" (`vocabulary.py:89`), `workspace` is registered (`:93`),
+`group` is an item type (`v3:234`), `section` is both a YAML list-file heading
+and a block parameter (`vocabulary.py:101`), `tag` is free-form (`v3:99`), and
+`{{tree}}` nests by path. `group` in particular is easy to reach for when the
+right answer is a tag, since its own definition is "A named collection of
+items".
+
+**D4 — "no longer in play": retired, superseded, obsolete, eliminated,
+rebutted, on_hold.** Six different words for the same authoring act across six
+types — `retired` (requirement `:137`, bound `:156`), `superseded` (decision
+`:174`), `obsolete` (component `:216`), `eliminated` (option, preset `:37`),
+`rebutted` (claim, preset `:51`), and `on_hold` (decision `:174`) which
+overlaps `blocked_by` (`:122`) as the way to say "stuck". Each word is right
+for its type in isolation; together they mean an author cannot ask "what is
+dead?" in one word, and cannot learn one type's lifecycle and transfer it.
+
+**D5 — "index": the command, the block, items.json, and index.html.**
+`refdes index` (`cli.py:1333`, "print items.json to stdout without rendering
+the site"), `{{index}}` (`blocks.py:474`), "the index" meaning items.json
+(`docs/cli-reference.md:193`), and the site's `index.html`. Four referents,
+one word, and two of them are things a user types.
+
+**D6 — "check": the command, the field, the severity, the gate rule, and the
+citation verifier.** `refdes check` (`cli.py:1269`), `checks:` on decision
+(`v3:179`) and component (`:218`), `check_severity` (`:171`, preset `:34`),
+`info_check_failures` (`model.py:63`), and `citations.verify()`
+(`src/refdes/citations.py:490`). "check" as a noun means a numeric assertion
+inside an item; as a verb it means running the validator; `check_severity`
+means the diagnostic level of the first, and `info_check_failures` means the
+gate rule about it.
+
+**D7 — "verify": the verb, the status list, the backlink, the stage, the gate
+rule, and the citation verifier.** `verifies` (`v3:116`), `verifying_statuses`
+(`:196`), `verified_by` (the backlink, and the one that breaks the `_by`
+convention — `docs/coverage.md:91` "`verified_by` — despite the `_by` suffix —
+*is* the coverage-feeding form"), `verified` (coverage stage),
+`unverified_requirements` (`model.py:62`), `citations.verify()`. Six surfaces,
+one root word, and one of them is a documented exception to the naming rule
+the root word is supposed to express.
+
+**D8 — "identity": id, key, former_ids, surrogate key, display id, adopt.**
+`id` is "Stable in people's sentences, not in the engine" (`vocabulary.py:58`)
+and `key` is "The item's surrogate key: opaque, immutable, and the identity the
+engine actually uses" (`:67`) — two identities per item, named `id` and `key`,
+with `key` being the word that reads as the obvious one. `refdes keys adopt`
+(`cli.py:1502`) then uses **adopt** for "transactionally adopt key-keyed
+baselines and seals", where adopt means "migrate to", and `former_ids`
+(`:72`) is a third identity notion again.
+
+**D9 — "make a starter item": `refdes new` and `refdes stub-tests`.**
+`new <type>` (`cli.py:1417`) "print a starter item for one type to stdout";
+`stub-tests` (`:1558`) "generate starter test items for coverable items with no
+verifying test". Two commands, two words for the same output, and only one of
+them writes.
+
+### 2.3 S2 — unclear connotation, recoverable but not from the word alone
+
+**S2.1 — one concept, three words across three surfaces: `bound` / `limit` /
+`constrained_by`.** The type is `bound` (`v3:146`), its payload field is
+`limit:` (`:155`, "The numeric limit itself ... it is what makes this bound
+checkable"), and the relation to it is `constrained_by` (`:115`). `bound` is
+the right call — it was a deliberate rename with a documented reason, and
+"upper/lower bound" is ordinary engineering English — but the vocabulary then
+uses two other words for the same thing depending on which surface you are on.
+
+**S2.2 — the type is `component`, everything about it is a part.** `part_number`
+(`:214`, "Indexed into the parts page"), `refdes` (`:215`, "Reference
+designators on the board — U14, R7 — where this **part** is placed"), status
+(`:216`, "Where the **part** stands in this design"), and the project-wide
+parts page (`docs/design/standard-library.md:1272` "## 10. Indexing part
+numbers, and the parts page"). Not misleading — nobody is confused about what a
+component is — but the tool has a parts page for its components, and an author
+must learn that searching for "part" and searching for "component" are the same
+activity with different words.
+
+**S2.3 — `seal` is being redefined while keeping its name and its flag.**
+`seal.py:3-5` "Entries are sealed the first time they are built; after that,
+changing one is a build error"; `living-notes-plan.md:246-249` "the first
+writable build no longer writes a hash lock, an edit is no longer a build
+error ... Existing seal files keep being read and become **legacy-seal
+markers**". And `--reseal` survives as a flag that does nothing for those
+types, with a message explaining why (`living-notes-plan.md:561-563` and the
+Q2 decision at `:598-600`: "accepted, prints 'sealing no longer applies to this
+type; nothing was rewritten'"). Keeping the word across that reversal means `sealed` in an
+error message from an older build and `sealed` in a marker from a newer one
+mean different things, and the flag in users' muscle memory is the one that
+means "make the bad thing go away".
+
+**S2.4 — `audit` promises more than it reports.** `cli.py:1376` "list
+suppressed fields, resealed entries, board/workspace moves," — five unrelated
+sections including "Baselines" and "Since last revision" (`docs/cli-reference.md:341`
+ onward). "Audit" is a fine word for a compliance pass, so readers expect a
+verdict; what they get is a drift report. Compare `check`, which does give a
+verdict.
+
+**S2.5 — `refdes index` does not say what it is for.** Its help text is a
+subtraction: "print items.json to stdout without rendering the site". The name
+says index, the doc says "not build", and the actual purpose is stated only in
+prose: "This exists for editor tooling and scripts that need the index on every
+save" (`docs/cli-reference.md:193`).
+
+**S2.6 — `init` and `new` are near-synonyms doing different things.** `init`
+(`cli.py:1390`) "write a minimal refdes-project.yaml that points at the
+standard"; `new <type>` (`:1417`) "print a starter item". One bootstraps a
+project, the other prints an item to stdout. Neither name says which.
+
+### 2.4 What is not a finding
+
+Short, on purpose. `fold`, `tip`, `stamp`, `pin`, `redact`, `cascade`,
+`{{tree}}`, `refines`, `derives_from`, `part_of`, `amends`, `addresses`,
+`bound`, `calc`, `[[cite:]]`, `board`, `workspace`, `coverable` and the
+active-voice link convention are all either defined at first use, or ordinary
+engineering English, or both. Several are unfamiliar; none imports a competing
+meaning; none is duplicated by a sibling word. §4.2 records them as checked.
+
+The one structural thing worth saying about the healthy part of the vocabulary
+is `docs/coverage.md:64-91`: the rule that coverage claims are authored in
+active voice and everything else is `*_by` is a genuinely good piece of
+vocabulary design — it makes a semantic property readable from the word — and
+it has exactly one exception, `verified_by`, which the doc itself flags as an
+exception (`:91`). A rule with one exception is a rule authors will not learn.
