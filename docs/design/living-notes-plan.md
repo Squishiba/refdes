@@ -242,6 +242,17 @@ no project policy about who may redact (decided against), no Git integration.
 
 **This is the phase threads 4a waits for.**
 
+**Naming rule (vocabulary review P5, approved by the owner 2026-09-20).**
+`sealed` may only ever mean the pre-H5 mechanism — the build-time hash lock and
+the `legacy-seal` markers that replace it — and never the new marker. The new
+state is `captured`, and its diagnostic is `edited after captured`. This is not
+cosmetic: flipping the meaning of the shipped word `sealed` between an older
+build's error message and a newer build's marker is the highest-cost outcome the
+vocabulary review found, and an implementer who writes `sealed` into a new
+string here reintroduces it. The decided behaviour of Q2 stays exactly as
+ratified, including the `--reseal` message; this rule constrains the word, not
+the mechanism.
+
 **Adds.** For a type whose standard declares history-backed capture, the
 first writable build no longer writes a hash lock, an edit is no longer a build
 error, and `links.py:623-634` no longer refuses to freeze a bare `follows:` on
@@ -313,6 +324,12 @@ baselines (`lifecycle._items_map`, `lifecycle.py:265`) or their hash-format
 handling. Legacy seal files are still read; nothing is deleted from disk.
 
 ## Phase H6 — `tasks:` on the merged log type, and its fold
+
+**Naming rule (vocabulary review P6, approved by the owner 2026-09-20).**
+`tasks:` stays the key and the noun is always `task` — in prose, in output, and
+in identifiers (`open_tasks`, task rows, task ids). `work` is reserved for the
+`refdes work` command and the listing it produces; never `work item`, `to-do`,
+or `work` as the name of the object itself.
 
 **Adds.** The `tasks:` field and the fold that resolves "the list at this
 tip", under the four fold rules of `living-notes.md` §5.
@@ -582,10 +599,14 @@ was decided about them.
 P1 renamed `record`/`recorded` to `capture`/`captured` throughout these design
 docs — the moment, the marker, the `refdes history capture` command, the
 `captured_edits` gate rule, and the planned identifiers (`edited_after_captured`,
-the `captured`/`edited_after_captured` index pair). `history`, `snapshot` and
-`tasks:` keep their names (P3 keeps `snapshot`; P6 keeps `tasks:`). The shipped
-`records:` link verb and its `recorded_by` inverse are untouched — that is the
-collision P1 removed.
+the `captured`/`edited_after_captured` index pair). P5 and P6 added the naming
+rules stated in H5 and H6 below. `history`, `snapshot` and `tasks:` keep their
+names (P3 keeps `snapshot`; P6 keeps `tasks:`). The shipped `records:` link verb
+and its `recorded_by` inverse are untouched — that is the collision P1 removed.
+P2 (project `history:` → `on_change:`) is approved but **not applied**: the key
+is implemented (`schema.py:480`, with the item-level override in `parse.py` and
+`model.py`), so the docs keep describing what the code does until a migration
+is scheduled.
 
 **Q1 — what expresses "this type captures instead of locking"?**
 (a) a type-level `sealing: history` in the standard, defaulting to `build`;

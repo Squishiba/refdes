@@ -779,6 +779,15 @@ Each proposal is one line of old to new, what has to change, and what breaks.
 They are grouped by cost, not by severity, because the cheapest fixes are the
 ones worth doing first.
 
+**Status (2026-09-20).** The owner approved P1, P2, P5 and P6. P1, P5 and P6
+are applied: `record`/`recorded` are `capture`/`captured` throughout
+`living-notes.md` and `living-notes-plan.md` (the shipped `records:` verb and
+`recorded_by` untouched), and the plan now carries the P5 `sealed` rule in H5
+and the P6 `task`/`work` rule in H6. P2 is **held, not applied**: the project
+`history:` key is implemented (`schema.py:480`, item-level override in
+`parse.py`/`model.py`), so the rename now needs the migration this tiering was
+measured to avoid; the docs keep describing what the code does.
+
 ### 3.0 Cost tiers
 
 - **T0 — free.** The word exists only in `docs/design/living-notes.md`,
