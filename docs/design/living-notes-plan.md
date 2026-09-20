@@ -1,5 +1,8 @@
 Status: Proposed — implementation plan for living notes; the decisions it
-implements are in `docs/design/living-notes.md` and are not reopened here.
+implements are in `docs/design/living-notes.md` and are not reopened here. All
+eight open questions (§Open questions for Jared) were ratified by Jared on
+2026-09-19 as the conservative defaults this plan already assumed, so **H1 is
+unblocked**.
 
 # Living notes: implementation plan
 
@@ -551,8 +554,9 @@ would read "edited after recorded" with nobody having edited it — which
 contradicts decision 2's promise that the marker is about the author's own
 content. Mitigation, taken as the conservative default: `history_format: 1`
 digests the item's **own** declared payload only, and the divergence from
-`content_hash` is documented as intentional. This is Q5 — it is the one place
-where two decided designs want opposite things and Jared should confirm.
+`content_hash` is documented as intentional. This is Q5 — it was the one place
+where two decided designs want opposite things; Jared ratified the conservative
+default on 2026-09-19.
 
 **R7 — `--reseal` is a documented user habit** that H5 makes meaningless for
 history-backed types. Silently no-oping it is the worst outcome; the message
@@ -560,8 +564,19 @@ must say why (Q2).
 
 ## Open questions for Jared
 
-Each has the conservative option this plan assumes, so nothing below blocks a
-worker.
+**All eight are decided.** Jared ratified every one of them on 2026-09-19, in
+each case as the conservative option this plan had already assumed; the assumed
+text above each decision stands as the decision itself. Nothing below blocks a
+worker, and H1 can start.
+
+**The owner's caveat, in his terms.** The defaults are accepted, but the
+vocabulary has to be reviewed before these terms settle: he wants to know
+whether any words are duplicated in meaning or unclear in their connotations,
+because the goal is that the vocabulary be intuitive. That review is a separate
+task already under way. It may rename terms this plan introduces — `record`,
+`recorded`, `history`, `snapshot`, `tasks` — without reopening the eight
+decisions themselves: a rename touches the names on disk and in output, not what
+was decided about them.
 
 **Q1 — what expresses "this type records instead of locking"?**
 (a) a type-level `sealing: history` in the standard, defaulting to `build`;
@@ -572,11 +587,17 @@ project knob that living notes will delete again, and the default keeps every
 existing project byte-identical. (c) is the smallest diff but hides a policy in
 a version comparison, which is how the `records:` confusion happened.
 
+**Decided (Jared, 2026-09-19): (a)** — a type-level `sealing: history` in the
+standard, defaulting to `build`.
+
 **Q2 — what does `--reseal` do on a history-backed type?**
 (a) accepted, prints "sealing no longer applies to this type; nothing was
 rewritten", records nothing; (b) records a `reseal` event capturing current
 content; (c) errors. **Assumed: (a).** (b) invents a second recording moment the
 decisions do not include, and (c) breaks a flag people have in muscle memory.
+
+**Decided (Jared, 2026-09-19): (a)** — accepted, prints "sealing no longer
+applies to this type; nothing was rewritten", records nothing.
 
 **Q3 — do the six existing seals get `migrated-current` snapshots?**
 `living-notes.md` §8 permits capturing their *current* content as a clearly
@@ -585,18 +606,33 @@ only**, with `migrated-current` available behind an explicit flag on
 `history migrate-seals`. Capturing current text is one flag away from being
 mistaken for seal-time text, which is the specific lie §8 forbids.
 
+**Decided (Jared, 2026-09-19): no** — bare `legacy-seal` markers only, with
+`migrated-current` available behind an explicit flag on `history
+migrate-seals`.
+
 **Q4 — when does the record line print?**
 **Assumed: only when an event was actually written**, never on an idempotent
 no-op, and never in `index --compact` (machine output stays parse-clean). A
 project that wants silence passes `--no-write` and records explicitly.
 
+**Decided (Jared, 2026-09-19): as assumed** — the line prints only when an event
+was actually written, never on an idempotent no-op, and never in `index
+--compact`.
+
 **Q5 — does the history digest include resolved upstream calc values?**
 See R6. **Assumed: no** — own declared payload only, diverging from
 `content_hash` deliberately if finding 35 lands.
 
+**Decided (Jared, 2026-09-19): no** — the history digest covers the item's own
+declared payload only, and diverges from `content_hash` deliberately if finding
+35 lands.
+
 **Q6 — is `tasks:` allowed on types other than the merged `log`?**
 **Assumed: no** — `log` only in hardware@3, `state: [open, done, dropped]`,
 `on_change: log`. A second type gets a decision of its own.
+
+**Decided (Jared, 2026-09-19): no** — `tasks:` is on the merged `log` type only
+in hardware@3, with `state: [open, done, dropped]` and `on_change: log`.
 
 **Q7 — does H5 land on `main` before 4a, or inside it?**
 **Assumed: before.** It is independently verifiable against v1/v2 (unchanged)
@@ -604,10 +640,15 @@ and against this repo's own six seals, and it makes the interim strictly safer
 than today. Landing it inside 4a makes the biggest untested combination
 (merge + migration + sealing reversal) one review.
 
+**Decided (Jared, 2026-09-19): before** — H5 lands on `main` ahead of 4a.
+
 **Q8 — do the two H8 gate rules ship together?**
 **Assumed: yes, both off by default.** They are the same two-line mechanism, and
 `recorded_edits` without `open_tasks` (or vice versa) leaves a decided policy
 with no enforcement path.
+
+**Decided (Jared, 2026-09-19): yes** — the two H8 gate rules ship together, both
+off by default.
 
 ## What this plan does not decide
 

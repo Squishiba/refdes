@@ -1,0 +1,33 @@
+Record owner decisions of 2026-09-19 into three design docs
+===========================================================
+
+Docs-only task. No code, no tests, no YAML under src/refdes/standards.
+Three chunks, one commit each. No push, no PR.
+
+Chunk 1 - docs/design/living-notes-plan.md  (this commit)
+---------------------------------------------------------
+
+- Status line now says all eight open questions were ratified by Jared on
+  2026-09-19 and that H1 is unblocked.
+- "Open questions for Jared" section: header text records that all eight are
+  decided, each as the conservative option the plan had already assumed. Each
+  of Q1-Q8 keeps its "Assumed:" text and gains a "Decided (Jared, 2026-09-19)"
+  line restating that same default as the decision. No default was changed.
+- The owner's caveat is recorded in his terms: the defaults are accepted, but
+  the vocabulary has to be reviewed before these terms settle, because he wants
+  to know whether any words are duplicated in meaning or unclear in their
+  connotations and the goal is that the vocabulary be intuitive. The review is
+  noted as a separate task already under way that may rename record, recorded,
+  history, snapshot and tasks without reopening the eight decisions.
+- R6's stale "Jared should confirm" for Q5 is now "Jared ratified the
+  conservative default on 2026-09-19".
+
+Tests: python -m pytest -q -> 1256 passed (baseline run before any edit; docs
+changes touch no code).
+
+No changelog fragment: a design-doc decision record is not user-facing.
+
+Chunk 2 - docs/design/calc-sources.md section 11  (pending)
+-----------------------------------------------------------
+
+Chunk 3 - docs/design/extends.md + backlog finding 21  (pending)
