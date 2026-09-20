@@ -515,6 +515,22 @@ def test_colours_come_from_the_site_tokens(diagram_project):
     assert "var(--accent" in svg
 
 
+def test_both_drawings_use_the_shared_monospace_font_stack(diagram_project):
+    """The width math assumes monospace, so the stack must end in the
+    generic and must be identical in both drawings; and it must name real
+    fonts, not just ui-monospace which resolves to nothing on Windows."""
+    term = diagram.render_term_svg(diagram_project, "decision")
+    spine = diagram.render_spine_svg(diagram_project)
+    assert spine, "fixture should have coverage verbs"
+    for svg in (term, spine):
+        assert f'font-family="{diagram.FONT_STACK}"' in svg
+    assert diagram.FONT_STACK.startswith("var(--mono, ")
+    assert diagram.FONT_STACK.rstrip(")").endswith("monospace")
+    assert "'Cascadia Code'" in diagram.FONT_STACK
+    assert "Consolas" in diagram.FONT_STACK
+    assert "ui-monospace" not in diagram.FONT_STACK
+
+
 def test_the_svg_is_a_whole_document_fragment(diagram_project):
     svg = diagram.render_term_svg(diagram_project, "note")
     assert svg.startswith("<svg")

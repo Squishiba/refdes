@@ -99,6 +99,22 @@ MARGIN = 16
 # "any type" for an unrestricted verb; the diagram says the same words.
 ANY_LABEL = "any type"
 
+# The font stack, one constant for both drawings. Inside a built page
+# --mono wins and the site's own monospace theme applies; standalone --
+# `refdes schema --graph`, or the SVG opened on its own -- the fallbacks
+# do the work, and they have to be real fonts: `ui-monospace` resolves to
+# nothing on Windows and the generic `monospace` there is Courier New,
+# which is why the old stack looked dated. Every family here is a true
+# monospace with a glyph advance at or under 0.602 em, which is what the
+# CHAR_W / LABEL_CHAR_W width math assumes; the order hits Windows
+# (Cascadia Code ships with it, JetBrains Mono is the common install),
+# macOS (SF Mono, Menlo) and Linux (DejaVu Sans Mono) before the generic
+# last resort.
+FONT_STACK = (
+    "var(--mono, 'Cascadia Code', 'JetBrains Mono', 'SF Mono', Menlo, "
+    "Consolas, 'DejaVu Sans Mono', monospace)"
+)
+
 
 @dataclass(frozen=True, order=True)
 class Edge:
@@ -400,7 +416,7 @@ def render_spine_svg(project: Project) -> str:
             f'<svg xmlns="http://www.w3.org/2000/svg" '
             f'viewBox="0 0 {_n(width)} {_n(height)}" '
             f'width="100%" height="{_n(height)}" role="img" '
-            f'font-family="var(--mono, ui-monospace, monospace)" '
+            f'font-family="{FONT_STACK}" '
             f'font-size="{FONT_SIZE}">'
         ),
         "<title>coverage spine</title>",
@@ -498,7 +514,7 @@ def render_term_svg(project: Project, type_name: str) -> str:
             f'<svg xmlns="http://www.w3.org/2000/svg" '
             f'viewBox="0 0 {_n(width)} {_n(height)}" '
             f'width="100%" height="{_n(height)}" role="img" '
-            f'font-family="var(--mono, ui-monospace, monospace)" '
+            f'font-family="{FONT_STACK}" '
             f'font-size="{FONT_SIZE}">'
         ),
         f"<title>{escape(_display(type_name))} connections</title>",
