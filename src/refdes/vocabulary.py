@@ -3,7 +3,10 @@
 One entry per term the *resolved* schema knows about -- item types, link
 verbs, field sets, engine-reserved keys -- each with its definition (the
 `doc:` key from chunks 1-2), its scope, where it points and what points at
-it, and its fields. Nothing here is hand-maintained: the page is derived
+it, its fields, and a worked example of how it is written: the bundled
+standard's terms carry hand-written ones in `EXAMPLES` (values from
+`base.yaml` and the repo's own `items/` tree), and any other term gets a
+minimal one generated from its own resolved facts. Nothing here is hand-maintained: the page is derived
 from the same resolved namespaces the engine runs on, so a term that exists
 in the schema appears on the page, and a preset the build did not enable
 does not.
@@ -143,6 +146,10 @@ class TermEntry:
     prefix: str = ""
     # Engine-reserved keys only: "reserved" or "overridable".
     key_kind: str = ""
+    # Every entry: a worked example of how the term is actually written --
+    # YAML as it would appear in an items file (or, for a field set, in a
+    # schema file), comments included.
+    example: str = ""
 
     @property
     def defined(self) -> bool:
@@ -233,6 +240,8 @@ def entries(project: Project) -> Vocabulary:
         entries={"types": types, "links": links, "field_sets": field_sets, "keys": keys}
     )
     _assign_anchors(vocab)
+    for entry in vocab.terms():
+        entry.example = EXAMPLES.get((entry.kind, entry.name), "") or _fallback_example(entry)
     return vocab
 
 
@@ -316,6 +325,329 @@ def _assign_anchors(vocab: Vocabulary) -> None:
         entry.anchor = anchor
 
 
+# ------------------------------------------------------------------ examples
+
+# Worked examples for the bundled standard's terms, keyed by (group, name).
+# Every field name, type name, id, and value here is taken from
+# `standards/hardware/v3/base.yaml` and this repo's own `items/` tree --
+# nothing invented. A term the table does not cover -- a project overlay
+# type, a preset's verb -- gets `_fallback_example`, generated from the
+# entry's own resolved facts, so every entry on the page carries an
+# example whatever schema produced it. The hand-written examples describe
+# hardware@3 as shipped: a project whose overlay redefines a standard term
+# still gets the standard's example, which is illustrative for that
+# project, not authoritative.
+EXAMPLES: dict[tuple[str, str], str] = {
+    # ------------------------------------------------------------- item types
+    ("types", "requirement"): (
+        "# items/requirements/power.yaml -- shared fields go in defaults:,\n"
+        "# and the statement itself is the body.\n"
+        "defaults:\n"
+        "  type: requirement\n"
+        "  prefix: REQ-PWR\n"
+        "  status: active\n"
+        "items:\n"
+        "  - id: REQ-PWR-001\n"
+        "    body: The unit shall operate from an input supply of 9 V to 36 V.\n"
+        "    source: Customer spec rev D, §3.1"
+    ),
+    ("types", "bound"): (
+        "defaults:\n"
+        "  type: bound\n"
+        "  prefix: BND-THM\n"
+        "  status: active\n"
+        "items:\n"
+        "  - id: BND-THM-001\n"
+        "    body: Board power density\n"
+        "    limit: \"<= 0.15 W/in^2\"  # required -- what makes it checkable\n"
+        "    rationale: Natural convection only; the enclosure is sealed."
+    ),
+    ("types", "decision"): (
+        "# A decision as a Markdown item: front matter, then the prose body.\n"
+        "---\n"
+        "id: DEC-PWR-001\n"
+        "type: decision\n"
+        "title: 3V3 rail regulator topology\n"
+        "status: accepted  # an accepted decision closes coverage on what it satisfies\n"
+        "date: 2026-03-14\n"
+        "satisfies: [REQ-PWR-002, REQ-PWR-003]\n"
+        "constrained_by: [BND-THM-001]\n"
+        "selects: [CMP-PWR-001]\n"
+        "---\n"
+        "\n"
+        "The 3V3 rail draws up to 1.2 A from a 9–36 V input, in a sealed enclosure."
+    ),
+    ("types", "test"): (
+        "defaults:\n"
+        "  type: test\n"
+        "  prefix: TST-PWR\n"
+        "items:\n"
+        "  - id: TST-PWR-001\n"
+        "    title: Input range sweep\n"
+        "    status: passing  # only a passing test counts toward coverage\n"
+        "    body: Sweep the bench supply 9 V to 36 V in 1 V steps at full load.\n"
+        "    verifies: [REQ-PWR-001]"
+    ),
+    ("types", "component"): (
+        "defaults:\n"
+        "  type: component\n"
+        "  prefix: CMP-PWR\n"
+        "items:\n"
+        "  - id: CMP-PWR-001\n"
+        "    title: TPS62913 synchronous buck converter\n"
+        "    part_number: TPS62913\n"
+        "    status: selected"
+    ),
+    ("types", "group"): (
+        "defaults:\n"
+        "  type: group\n"
+        "  prefix: GRP-IO\n"
+        "items:\n"
+        "  - id: GRP-IO-001\n"
+        "    title: The digital IO interface spec\n"
+        "# A group never lists members: each member declares part_of: [GRP-IO-001]."
+    ),
+    ("types", "log"): (
+        "defaults:\n"
+        "  type: log\n"
+        "  prefix: LOG-A\n"
+        "items:\n"
+        "  - id: LOG-A-001\n"
+        "    date: 2026-02-18\n"
+        "    summary: Took delivery of the customer spec rev D.\n"
+        "    addresses: [REQ-PWR-001, REQ-PWR-002]"
+    ),
+    # ------------------------------------------------------------- link verbs
+    ("links", "refines"): (
+        "# REQ-PWR-003 is a narrower statement of the same kind as REQ-PWR-002.\n"
+        "- id: REQ-PWR-003\n"
+        "  body: Converter efficiency shall exceed 90 % at half load.\n"
+        "  refines: [REQ-PWR-002]\n"
+        "# REQ-PWR-002 shows refined_by: [REQ-PWR-003] without saying so itself."
+    ),
+    ("links", "derives_from"): (
+        "- id: BND-THM-002\n"
+        "  body: Minimum converter efficiency\n"
+        "  limit: \">= 0.90\"\n"
+        "  derives_from: [BND-THM-001]  # the number follows from the density bound"
+    ),
+    ("links", "governed_by"): (
+        "- id: REQ-DIO-003\n"
+        "  body: The main IO board shall provide isolated discrete inputs.\n"
+        "  governed_by: [REQ-DIO-001]  # must comply with its 26 V TVS rule\n"
+        "# Not a narrower version of REQ-DIO-001 -- a different fact that has\n"
+        "# to obey it. governs, the backlink, is computed."
+    ),
+    ("links", "satisfies"): (
+        "# Declared from the decision (or component):\n"
+        "- id: DEC-PWR-001\n"
+        "  satisfies: [REQ-PWR-002, REQ-PWR-003]\n"
+        "# The requirements gain satisfied_by: [DEC-PWR-001]; once the decision\n"
+        "# is accepted, that closes their coverage."
+    ),
+    ("links", "constrained_by"): (
+        "- id: DEC-PWR-001\n"
+        "  constrained_by: [BND-THM-001]\n"
+        "# Traceability only -- it does not close coverage on the bound; satisfies does."
+    ),
+    ("links", "verifies"): (
+        "# Declared from the test:\n"
+        "- id: TST-PWR-001\n"
+        "  verifies: [REQ-PWR-001]\n"
+        "# Or from the requirement, under the inverse name -- same edge either way:\n"
+        "- id: REQ-PWR-001\n"
+        "  verified_by: [TST-PWR-001]"
+    ),
+    ("links", "addresses"): (
+        "- id: LOG-A-001\n"
+        "  addresses: [REQ-PWR-001, REQ-PWR-002]\n"
+        "# Addressed coverage: worked on and written up, without claiming it is met."
+    ),
+    ("links", "records"): (
+        "# From the log entry:\n"
+        "- id: LOG-A-004\n"
+        "  records: [DEC-PWR-001]\n"
+        "# Or from the decision, which declares the verb under its inverse name:\n"
+        "- id: DEC-PWR-001\n"
+        "  recorded_by: [LOG-A-004]"
+    ),
+    ("links", "amends"): (
+        "- id: LOG-A-006\n"
+        "  amends: [LOG-A-003]  # a correction is a new entry pointing back,\n"
+        "                       # never an edit to the sealed original"
+    ),
+    ("links", "supersedes"): (
+        "- id: DEC-PWR-002\n"
+        "  supersedes: [DEC-PWR-001]\n"
+        "# The link does not move DEC-PWR-001's status -- set status: superseded\n"
+        "# there yourself, or the build warns that the two halves disagree."
+    ),
+    ("links", "selects"): (
+        "- id: DEC-PWR-001\n"
+        "  selects: [CMP-PWR-001]\n"
+        "# The part's own status: selected is the other half of the same claim;\n"
+        "# the build warns when one exists and the other does not."
+    ),
+    ("links", "blocked_by"): (
+        "- id: DEC-IO-005\n"
+        "  blocked_by: [DEC-IO-001]\n"
+        "# May point at an item of any type; name only the immediate blocker --\n"
+        "# reports resolve the chain to its root, and a cycle is a build error."
+    ),
+    ("links", "part_of"): (
+        "# Membership is always declared by the member, never by the group:\n"
+        "- id: REQ-DIO-003\n"
+        "  part_of: [GRP-IO-001]\n"
+        "# GRP-IO-001 shows contains: [REQ-DIO-003] as the computed backlink."
+    ),
+    ("links", "drop_in"): (
+        "- id: CMP-PWR-001\n"
+        "  drop_in: [CMP-PWR-002]  # self-inverse: CMP-PWR-002 gains the same edge,\n"
+        "                          # and no rationale is required"
+    ),
+    ("links", "alternate"): (
+        "- id: CMP-PWR-002\n"
+        "  alternate: [CMP-PWR-001]\n"
+        "  rationale: Higher ESR at the output cap; verify ripple before swapping.\n"
+        "  # rationale is required whenever an alternate link is present"
+    ),
+    # -------------------------------------------------------------- field sets
+    ("field_sets", "provenance"): (
+        "# A type pulls the set in, and its items then carry its fields:\n"
+        "types:\n"
+        "  requirement:\n"
+        "    include: [provenance]\n"
+        "# An item of that type:\n"
+        "- id: REQ-PWR-001\n"
+        "  source: Customer spec rev D, §3.1\n"
+        "  tags: [power]"
+    ),
+    ("field_sets", "stewardship"): (
+        "types:\n"
+        "  requirement:\n"
+        "    include: [stewardship]\n"
+        "- id: REQ-PWR-001\n"
+        "  owner: J. Bin\n"
+        "  last_reviewed: 2026-03-02"
+    ),
+    ("field_sets", "citations"): (
+        "types:\n"
+        "  component:\n"
+        "    include: [citations]\n"
+        "- id: CMP-PWR-001\n"
+        "  citations:\n"
+        "    - path: https://www.ti.com/lit/ds/symlink/tps62913.pdf\n"
+        "      rev: E\n"
+        "      page: \"14\"\n"
+        "      keep_copy: false"
+    ),
+    # ---------------------------------------------------- engine-reserved keys
+    ("keys", "id"): (
+        "- id: REQ-PWR-001  # minted from the type prefix and the id width;\n"
+        "                   # leave it out and `refdes id` writes one back"
+    ),
+    ("keys", "type"): (
+        "# Usually stated once per file, under defaults:\n"
+        "defaults:\n"
+        "  type: requirement\n"
+        "# An item may also state its own, or a Markdown item carries it in\n"
+        "# the front matter:\n"
+        "---\n"
+        "id: DEC-PWR-001\n"
+        "type: decision\n"
+        "---"
+    ),
+    ("keys", "key"): (
+        "- key: 1zn5skrv6k3  # written back by the tool on the first writable\n"
+        "  id: REQ-PWR-001   # load; never hand-edit it, and links resolve through it"
+    ),
+    ("keys", "former_ids"): (
+        "- id: BND-THM-001\n"
+        "  former_ids: [CON-THM-001]  # written when an id is re-minted, so old\n"
+        "                             # CON-THM-001 citations keep resolving"
+    ),
+    ("keys", "body"): (
+        "- id: REQ-PWR-001\n"
+        "  body: The unit shall operate from an input supply of 9 V to 36 V.\n"
+        "# In a Markdown item, body is the prose below the front matter instead."
+    ),
+    ("keys", "history"): (
+        "- id: REQ-PWR-004\n"
+        "  history:\n"
+        "    fields:\n"
+        "      owner: ignore\n"
+        "    reason: Owner rotates weekly during bring-up; not a meaningful change."
+    ),
+    ("keys", "prefix"): (
+        "defaults:\n"
+        "  type: requirement\n"
+        "  prefix: REQ-PWR  # items in this file mint ids like REQ-PWR-001;\n"
+        "                   # a type declaring a field of this name takes it over"
+    ),
+    ("keys", "board"): (
+        "# The first path segment under items/ is the board; state it only\n"
+        "# when the folder is not a registered board:\n"
+        "defaults:\n"
+        "  board: board-a  # folder predates the boards: registry"
+    ),
+    ("keys", "workspace"): (
+        "# Only when the project registers workspaces: in its settings file:\n"
+        "items:\n"
+        "  - id: IFC-CAN-001\n"
+        "    workspace: platform  # lives in a folder that predates the registry"
+    ),
+    ("keys", "defaults"): (
+        "defaults:\n"
+        "  type: requirement\n"
+        "  status: active\n"
+        "items:\n"
+        "  - id: REQ-PWR-001  # inherits type and status, then its own keys apply\n"
+        "    body: The unit shall operate from an input supply of 9 V to 36 V."
+    ),
+    ("keys", "section"): (
+        "items:\n"
+        "  - section: requirement  # every item after it is a requirement,\n"
+        "  - id: REQ-IO-AI-001     # until the next section marker\n"
+        "    body: The AI accelerator rail shall regulate to 0.85 V ±3%."
+    ),
+}
+
+
+def _fallback_example(e: TermEntry) -> str:
+    """A generic example for a term the hand-written table does not cover.
+
+    Built only from the entry's own resolved facts -- its prefix, required
+    fields, declaring types, targets -- so an overlay type or preset verb
+    gets an example that is true of this project's schema even though no
+    human wrote it. Values are placeholders (`...`), never invented content.
+    """
+    if e.kind == "types":
+        lines = [
+            "defaults:",
+            f"  type: {e.name}",
+            "items:",
+            f"  - id: {e.prefix or 'X'}-001",
+        ]
+        lines.extend(f"    {f.name}: ..." for f in e.fields if f.required)
+        return "\n".join(lines)
+    if e.kind == "links":
+        source = e.declared_on[0] if e.declared_on else "<declaring type>"
+        lines = [f"# On a {source} item:"]
+        if e.targets_unrestricted or not e.targets:
+            lines.append(f"{e.name}: [<any item id>]  # may point at any type")
+        else:
+            lines.append(f"{e.name}: [{e.targets[0]}-001]")
+            if e.inverse and e.inverse != e.name:
+                lines.append(f"# The target shows {e.inverse}: [...] without saying so itself.")
+            elif e.inverse == e.name:
+                lines.append("# Self-inverse: the target gains the same edge.")
+        return "\n".join(lines)
+    if e.kind == "field_sets":
+        owner = e.included_by[0] if e.included_by else "<type>"
+        return "\n".join(["types:", f"  {owner}:", f"    include: [{e.name}]"])
+    return f"{e.name}: ..."
+
+
 # ------------------------------------------------------------------ rendering
 
 
@@ -381,6 +713,11 @@ def _term_html(e: TermEntry, project: Project) -> str:
         parts.append("</dl>")
     if e.fields:
         parts.append(_fields_table(e))
+    if e.example:
+        parts.append(
+            '<div class="vocab-example"><h4>Example</h4>'
+            f"<pre><code>{escape(e.example.rstrip())}</code></pre></div>"
+        )
     parts.append("</div>")
     return "".join(parts)
 
@@ -470,6 +807,12 @@ def render_markdown(project: Project) -> str:
                     out.append(
                         f"| `{f.name}` | {doc} | {f.type} | {'yes' if f.required else 'no'} |"
                     )
+                out.append("")
+            if e.example:
+                out.append("**Example:**\n")
+                out.append("```yaml")
+                out.append(e.example.rstrip())
+                out.append("```")
                 out.append("")
     return "\n".join(out).rstrip() + "\n"
 

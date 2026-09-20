@@ -199,6 +199,46 @@ def test_field_set_entry_lists_its_fields_and_includers(vocab_project):
     assert sets["provenance"].included_by == ["decision"]
 
 
+# ---------------------------------------------------------------- examples
+
+
+def test_every_term_has_a_worked_example(vocab_project):
+    """No entry renders example-less: overlay terms fall back to a generated
+    one built from their own resolved facts."""
+    for e in vocabulary.entries(vocab_project).terms():
+        assert e.example.strip(), f"{e.kind} term {e.name!r} has no example"
+
+
+def test_examples_render_in_both_renderers(vocab_project):
+    html = vocabulary.render_html(vocab_project)
+    md = vocabulary.render_markdown(vocab_project)
+    assert 'class="vocab-example"' in html
+    assert "<pre><code>" in html
+    assert "**Example:**" in md
+    assert "```yaml" in md
+
+
+def test_bundled_standard_terms_have_hand_written_examples():
+    """Every hardware@3 term the pinned schema resolves is covered by the
+    hand-written EXAMPLES table -- a standard term silently falling back to
+    the generic generator (a preset verb, a renamed term) is a gap to close."""
+    project = load_project(config_path=os.path.join(REPO, "refdes-project.yaml"))
+    for e in vocabulary.entries(project).terms():
+        assert (e.kind, e.name) in vocabulary.EXAMPLES, (
+            f"{e.kind} term {e.name!r} has no hand-written example"
+        )
+        assert e.example == vocabulary.EXAMPLES[(e.kind, e.name)]
+
+
+def test_example_markup_is_escaped(vocab_project):
+    """Examples are markup on the page like any other content: a `<` in one
+    (a bound's `<= 0.15 W/in^2`) must not become markup."""
+    project = load_project(config_path=os.path.join(REPO, "refdes-project.yaml"))
+    html = vocabulary.render_html(project)
+    assert "<= 0.15" not in html
+    assert "&lt;= 0.15" in html
+
+
 # ------------------------------------------------------------------- the page
 
 
