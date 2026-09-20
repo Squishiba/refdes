@@ -319,31 +319,26 @@ def _assign_anchors(vocab: Vocabulary) -> None:
 # ------------------------------------------------------------------ rendering
 
 
-# The filename the docs site's generated page points at for the diagram:
-# it cannot inline SVG (its markdown renders with html disabled), so the
-# same bytes gen_examples writes there are what `render_markdown` names.
-DIAGRAM_ASSET = "vocabulary-graph.svg"
-
-
 def render_html(project: Project) -> str:
     """The page's body markup, for `vocabulary.html.j2` to embed."""
     vocab = entries(project)
-    out: list[str] = [_graph_html(project), _index_html(vocab)]
+    out: list[str] = []
+    # The coverage spine above the index: it is the one picture of the
+    # whole schema worth drawing, and a reader deciding where to start
+    # wants it before the A-to-Z. A schema with no coverage verbs gets no
+    # frame around nothing.
+    spine = diagram.render_spine_svg(project)
+    if spine:
+        out.append(f'<div class="vocab-spine">{spine}</div>')
+    out.append(_index_html(vocab))
     for kind, title in GROUPS:
         group = vocab.entries.get(kind, [])
         if not group:
             continue
         out.append(f'<section class="vocab-group" id="group-{kind}"><h2>{escape(title)}</h2>')
-        out.extend(_term_html(e) for e in group)
+        out.extend(_term_html(e, project) for e in group)
         out.append("</section>")
     return "\n".join(out)
-
-
-def _graph_html(project: Project) -> str:
-    """The diagram, above the index: the shape of the vocabulary first, then
-    its terms one at a time. Inline SVG from `diagram.py` -- no script, no
-    embed, so it renders with JavaScript off and on paper."""
-    return f'<div class="vocab-graph">{diagram.render_svg(project)}</div>'
 
 
 def _index_html(vocab: Vocabulary) -> str:
@@ -362,12 +357,18 @@ def _index_html(vocab: Vocabulary) -> str:
     return "".join(parts)
 
 
-def _term_html(e: TermEntry) -> str:
+def _term_html(e: TermEntry, project: Project) -> str:
     parts = [f'<div class="vocab-term" id="{escape(e.anchor)}">']
     heading = f"<code>{escape(e.name)}</code>"
     if e.label and e.label != e.name:
         heading += f' <span class="vocab-label">{escape(e.label)}</span>'
     parts.append(f"<h3>{heading}</h3>")
+    if e.kind == "types":
+        # The term's own connections, drawn beside the term: one small
+        # diagram per type, not one whole-schema hairball.
+        parts.append(
+            f'<div class="vocab-term-diagram">{diagram.render_term_svg(project, e.name)}</div>'
+        )
     parts.append(
         f'<p class="vocab-doc">{escape(e.doc)}</p>'
         if e.defined
@@ -448,16 +449,7 @@ def render_markdown(project: Project) -> str:
     """The same vocabulary as a docs page: markdown, so the docs site's own
     renderer gives it the site's chrome and anchors."""
     vocab = entries(project)
-    out: list[str] = [
-        f"![Type and link graph]({DIAGRAM_ASSET})",
-        "",
-        (
-            "*Generated from the resolved schema by `refdes/vocabulary.py` and "
-            "`refdes/diagram.py`; the same drawing every built site's vocabulary "
-            "page carries inline.*"
-        ),
-        "",
-    ]
+    out: list[str] = []
     for kind, title in GROUPS:
         group = vocab.entries.get(kind, [])
         if not group:

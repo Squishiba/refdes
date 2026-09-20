@@ -257,23 +257,29 @@ def build_schema(project: Project) -> dict[str, Any]:
 
 
 def build_graph(project: Project) -> str:
-    """The project's actual merged type/link graph as an SVG document -- the
-    same walk build_schema() does over `project.types`, with a different
-    renderer (finding 11, redrawn in finding 38 chunk 3b).
+    """The project's per-type connection diagrams, one SVG document per
+    type in sorted order -- the same walk build_schema() does over
+    `project.types`, with a different renderer (finding 11; the one
+    whole-graph drawing of finding 38 chunk 3b was rejected as unreadable
+    and replaced by these).
 
     It used to print Mermaid source. That made the picture someone else's
     problem: the reader needed a Mermaid renderer, and the docs page that
-    embedded it went stale anyway. This emits the drawing itself, from the
-    resolved schema, so it reflects a project's own overlay and presets and
-    cannot drift the way a hand-drawn diagram (or table) does -- the same
-    failure `docs/links.md`'s link-verb table had.
+    embedded it went stale anyway. This emits the drawings themselves, from
+    the resolved schema, so they reflect a project's own overlay and
+    presets and cannot drift the way a hand-drawn diagram (or table) does.
 
-    The layout, the node set and the empty-target convention (one edge to a
-    synthetic `any` node, not one per known type) all live in `diagram.py`,
-    which is also what every built site's vocabulary page embeds: one
-    generator, so the CLI's file and the page can never disagree.
+    The rows, the fixed three-column layout and the empty-target convention
+    (one box labelled *any type*, not one per known type) all live in
+    `diagram.py`, which is also what every built site's vocabulary page
+    embeds beside each term: one generator, so the CLI's output and the
+    page can never disagree.
     """
-    return diagram.render_svg(project)
+    spine = diagram.render_spine_svg(project)
+    terms = "".join(
+        diagram.render_term_svg(project, name) for name in sorted(project.types)
+    )
+    return spine + terms
 
 
 def newest_config_file(project: Project) -> str | None:

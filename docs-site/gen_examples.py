@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """Generate the derived reference content in the docs site.
 
-Three artifacts, all staleness-gated -- two marker-injected pages and one
-generated file:
+Two artifacts, both staleness-gated marker-injected pages:
 
 - the per-type filled-in examples in `docs/schema-reference.md` (finding 20);
 - `docs/vocabulary.md`, the bundled standard's own vocabulary page (finding
@@ -48,7 +47,6 @@ import yaml
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "src"))
 
-from refdes import diagram as diagram_mod  # noqa: E402
 from refdes import scaffold as scaffold_mod  # noqa: E402
 from refdes import vocabulary as vocabulary_mod  # noqa: E402
 from refdes.schema import load_project  # noqa: E402
@@ -56,11 +54,6 @@ from refdes.schema import load_project  # noqa: E402
 PROJECT_CONFIG = os.path.join(ROOT, "refdes-project.yaml")
 TARGET_DOC = os.path.join(ROOT, "docs", "schema-reference.md")
 VOCAB_DOC = os.path.join(ROOT, "docs", "vocabulary.md")
-# The vocabulary page's diagram. The docs site renders markdown with html
-# disabled, so it cannot carry inline SVG the way a built site's
-# `vocabulary.html` does -- the same bytes go to a file in a `site.assets:`
-# directory, which the page references by bare filename.
-DIAGRAM_OUT = os.path.join(ROOT, "docs-site", "images", "vocabulary-graph.svg")
 
 BEGIN = "<!-- BEGIN GENERATED per-type-examples -->"
 END = "<!-- END GENERATED per-type-examples -->"
@@ -165,18 +158,6 @@ def render_vocabulary_block() -> str:
     return header + "\n" + vocabulary_mod.render_markdown(project)
 
 
-def render_diagram_svg() -> str:
-    """The bundled standard's type/link graph as an SVG document.
-
-    `refdes.diagram`, the module every built site's vocabulary page embeds,
-    and the same `pinned_project()` the examples use -- so the picture in
-    the docs is the picture a project gets, modulo its own overlay, and
-    `refdes schema --graph` writes the identical bytes.
-    """
-    project, _standard = pinned_project()
-    return diagram_mod.render_svg(project)
-
-
 def _extract(page_text: str, pattern: re.Pattern) -> str:
     match = pattern.search(page_text)
     return match.group(1) if match else ""
@@ -245,29 +226,6 @@ def main(argv: list[str] | None = None) -> int:
         with open(path, "w", encoding="utf-8") as fh:
             fh.write(inject_page(text, block))
         print(f"updated {os.path.relpath(path, ROOT)}")
-
-    # The diagram is a whole generated file rather than a marker region: a
-    # picture has nowhere to put a comment.
-    svg = render_diagram_svg()
-    current = ""
-    if os.path.isfile(DIAGRAM_OUT):
-        with open(DIAGRAM_OUT, "r", encoding="utf-8") as fh:
-            current = fh.read()
-    rel = os.path.relpath(DIAGRAM_OUT, ROOT)
-    if args.check:
-        if current == svg:
-            print(f"{rel} is up to date.")
-        else:
-            print(
-                f"{rel} is stale -- run `python docs-site/gen_examples.py`.",
-                file=sys.stderr,
-            )
-            stale = True
-    else:
-        os.makedirs(os.path.dirname(DIAGRAM_OUT), exist_ok=True)
-        with open(DIAGRAM_OUT, "w", encoding="utf-8", newline="\n") as fh:
-            fh.write(svg)
-        print(f"updated {rel}")
     return 1 if stale else 0
 
 

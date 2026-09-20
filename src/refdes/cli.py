@@ -11,6 +11,7 @@ from . import adopt as adopt_mod
 from . import build as build_mod
 from . import calc_rewrite as calc_rewrite_mod
 from . import citations as citations_mod
+from . import diagram as diagram_mod
 from . import former_ids as former_ids_mod
 from . import ids as ids_mod
 from . import imports as imports_mod
@@ -841,10 +842,20 @@ def cmd_new(args) -> int:
 def cmd_schema(args) -> int:
     project = load_project(config_path=args.config)
     if args.graph:
-        sys.stdout.write(schema_json_mod.build_graph(project))
-    else:
-        json.dump(schema_json_mod.build_schema(project), sys.stdout, indent=2)
-        sys.stdout.write("\n")
+        if args.type is not None:
+            if args.type not in project.types:
+                known = ", ".join(sorted(project.types))
+                print(
+                    f"unknown type {args.type!r}; this project's types are: {known}",
+                    file=sys.stderr,
+                )
+                return 1
+            sys.stdout.write(diagram_mod.render_term_svg(project, args.type))
+        else:
+            sys.stdout.write(schema_json_mod.build_graph(project))
+        return 0
+    json.dump(schema_json_mod.build_schema(project), sys.stdout, indent=2)
+    sys.stdout.write("\n")
     return 0
 
 
@@ -1440,12 +1451,16 @@ def main(argv: list[str] | None = None) -> int:
         "pinned version, plus selected presets, plus the project overlay -- "
         "as JSON Schema (--json, the default; the same schema is written to "
         ".refdes/schema.json by every command that loads the project, this is "
-        "the explicit standalone form) or as the type/link graph drawn as an "
-        "SVG document (--graph): generated from the resolved schema so it "
-        "can't go stale the way a hand-drawn diagram would the moment a "
-        "preset or overlay changes a verb, and drawn here rather than handed "
-        "to Mermaid or graphviz so the picture needs no renderer beyond a "
-        "browser.",
+        "the explicit standalone form) or as one connection diagram per "
+        "type, each a standalone SVG document (--graph): generated from the "
+        "resolved schema so it can't go stale the way a hand-drawn diagram "
+        "would the moment a preset or overlay changes a verb, and drawn "
+        "here rather than handed to Mermaid or graphviz so the picture "
+        "needs no renderer beyond a browser. Each drawing shows one type "
+        "and its own connections: types that may point at it on the left, "
+        "types it points at on the right, verbs labelled on the arrows. "
+        "With TYPE, draw only that type's diagram; without it, every "
+        "type's in turn.",
     )
     p_schema.add_argument(
         "--json", action="store_true", help="JSON Schema output (the default)"
@@ -1453,7 +1468,13 @@ def main(argv: list[str] | None = None) -> int:
     p_schema.add_argument(
         "--graph",
         action="store_true",
-        help="draw the actual type/link graph as an SVG document, to stdout",
+        help="draw each type's connection diagram as an SVG document, to stdout",
+    )
+    p_schema.add_argument(
+        "type",
+        nargs="?",
+        default=None,
+        help="with --graph: draw only this type's diagram",
     )
     p_schema.set_defaults(func=cmd_schema)
 
