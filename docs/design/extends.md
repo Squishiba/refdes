@@ -1,4 +1,7 @@
-Status: draft proposal — not decided.
+Status: decided (Jared, 2026-09-19) — all five §9 questions answered as
+recommended, with one overturn of this document's own recommendation: coverage
+grouping is the default for every project, new and existing (§4.1, §10). Not yet
+implemented.
 
 # `extends:` — single-level type inheritance
 
@@ -9,8 +12,11 @@ be declared as a specialization of `requirement` rather than a near-duplicate
 type. Substitution is **universal (Liskov)**: anywhere a link target list names
 `requirement`, a `bound` (or any future subtype) satisfies it — no opt-in
 marker. Coverage grouping (whether bounds render under requirements or as their
-own section) is a project setting defaulting to current behaviour (separate
-sections). Single inheritance, one level only.
+own section) is a project setting, and Jared's decision on 2026-09-19 is that
+**grouping is the default, period**: `coverage.group_inherited: true` for every
+project, new and existing. This document's original default — `false`, current
+behaviour (separate sections) — is recorded in §4.1 and §10 as the rejected
+option. Single inheritance, one level only.
 
 The decision is taken. This document specs it; it does not relitigate it.
 
@@ -258,14 +264,23 @@ display; it does not change which items are listed.
 
 ```yaml
 coverage:
-  group_inherited: false   # default = current behaviour (separate sections)
+  group_inherited: true    # default (decided 2026-09-19); false = separate sections
 ```
 
 When `true`, `coverage.html` and per-board `coverage-<board>.html` render
 subtypes under their parent type's section (e.g., `bound` items appear under
-"Requirements" with a "(bound)" badge). The default `false` preserves today's
-output exactly — adopting `extends:` changes no existing project's coverage
-rendering.
+"Requirements" with a "(bound)" badge).
+
+**The default is `true` for every project, new and existing** (Jared,
+2026-09-19). The consequence, stated honestly: **an existing project that
+rebuilds gets one grouped coverage section where it used to get separate ones**,
+and **a project that wants the old output sets `coverage.group_inherited:
+false`**. This is a change of output for existing projects, accepted by the
+owner rather than avoided.
+
+The rejected option, kept visible: this document originally defaulted the setting
+to `false` so that adopting `extends:` would change no existing project's
+coverage rendering. Jared overturned it — grouping is the default, period.
 
 **This setting controls presentation only.** It does not affect which items
 participate in coverage computation (that is governed by the ALLOW consumers
@@ -408,17 +423,32 @@ any debate-specific links).
 
 ---
 
-## 9. Open questions for Jared (recommended, Jared to decide)
+## 9. Open questions for Jared (all decided, Jared, 2026-09-19)
+
+Every question below was answered YES / as recommended on 2026-09-19. Question 3
+carries one overturn of this document's own recommendation: the *name* is as
+recommended, but the *default* is `true` for every project, not `false` — see
+§4.1 and §10.
 
 1. **`prefix`/`label`/`plural` declared by child** — **Recommended: YES** (not inherited; error if missing). Prefix/label/plural are identity-affecting; a subtype must declare its own. `bound` keeps `BND`/`Bound`/`Bounds`.
 
+   **Decided (Jared, 2026-09-19): YES** — `prefix`, `label` and `plural` are declared by the child; not inherited; error if missing.
+
 2. **`coverable` inherited** — **Recommended: YES**. Subtype inherits coverage semantics unless explicitly overridden. A `bound` that didn't inherit `coverable: true` would silently drop out of coverage.
+
+   **Decided (Jared, 2026-09-19): YES** — `coverable` is inherited.
 
 3. **Coverage grouping setting name** — **Recommended: `coverage.group_inherited`**. Describes what it does (groups inherited subtypes under parent). Alternative `group_by_parent` is less precise.
 
+   **Decided (Jared, 2026-09-19): the setting is named `coverage.group_inherited`** — the name is as recommended. **The default is not.** Coverage grouping is the default, period: `coverage.group_inherited: true` for every project, new and existing. An existing project that rebuilds gets one grouped coverage section where it used to get separate ones; a project that wants the old output sets `group_inherited: false`. See §4.1 and §10.
+
 4. **Field override replaces whole definition** — **Recommended: YES**. A child overriding a field replaces the entire field definition (not deep-merged), matching `links` and `preview` semantics. This is simpler and matches the existing `_merge_type_dict` behavior for scalars.
 
+   **Decided (Jared, 2026-09-19): YES** — a field override replaces the whole field definition.
+
 5. **`hardware@3` adopts `extends:` for `bound` now; presets after threads Phase 4** — **Recommended: YES**. `bound extends requirement` lands in `hardware@3` immediately (no migration, hash-neutral). Design-debate preset's `debate` waits for threads Phase 4 (when `decision` retires into `log`/`thread_entry`), then extends the new thread entry type.
+
+   **Decided (Jared, 2026-09-19): YES** — `hardware@3` adopts `bound extends requirement` now; preset adoption waits for threads Phase 4.
 
 ---
 
@@ -433,11 +463,17 @@ any debate-specific links).
   recommend against it: one decision at type declaration is cleaner than a
   decision at every target list.
 
-- **Coverage grouping default.** Defaulting to `false` (separate) preserves
-  current output but means the primary benefit of `extends:` (unified
-  requirement/bound view) is opt-in. An alternative: default to `true` for
-  new projects (`refdes init` writes `group_inherited: true`), keep `false`
-  for existing. This is a policy choice, not a technical one.
+- **Coverage grouping default — OVERTURNED (Jared, 2026-09-19).** This document
+  recommended defaulting to `false` (separate), which preserves current output
+  but means the primary benefit of `extends:` (unified requirement/bound view)
+  is opt-in, and offered a middle path: `true` for new projects, `false` for
+  existing. **Neither stands. The owner's decision: coverage grouping is the
+  default, period** — `coverage.group_inherited: true` for every project, new
+  and existing. The consequence is recorded where the setting is specified
+  (§4.1): an existing project that rebuilds gets one grouped coverage section
+  where it used to get separate ones, and a project that wants the old output
+  sets `group_inherited: false`. This remains a policy choice, not a technical
+  one; the owner made it.
 
 - **`prefix`/`label`/`plural` not inherited.** If `prefix` were inherited,
   `bound` would automatically get `REQ` and lose its distinct `BND` prefix —
@@ -460,7 +496,9 @@ any debate-specific links).
 
 ## 11. Backlog update
 
-Finding 21 in `docs/design/backlog.md` should update its **Status** line from:
+Finding 21 in `docs/design/backlog.md` had its **Status** line updated from the
+original "outstanding" text to the text below, on 2026-09-19 when the §9
+questions were decided:
 
 ```
 **Status: outstanding.** No `extends`/inheritance concept exists in
@@ -471,9 +509,17 @@ Finding 21 in `docs/design/backlog.md` should update its **Status** line from:
 to:
 
 ```
-**Status: design draft.** Spec at `docs/design/extends.md` — states the
-substitution rule (universal Liskov, no opt-in marker), coverage-grouping
-default (`coverage.group_inherited: false`), single-level enforcement, and
-hardware@3 adoption plan. Awaiting Jared's decisions on open questions (§9)
-before implementation.
+**Status: decided (Jared, 2026-09-19), not yet implemented.** Spec at
+`docs/design/extends.md`. All five §9 open questions are answered as
+recommended, with one overturn of the spec's own recommendation: coverage
+grouping is the default for every project, new and existing
+(`coverage.group_inherited: true`), so an existing project that rebuilds gets
+one grouped coverage section where it used to get separate ones; a project that
+wants the old output sets `coverage.group_inherited: false`.
 ```
+
+The full text now in `backlog.md` also keeps the spec's other contents — the
+substitution rule, ALLOW vs LISTING consumer classification, single-level
+enforcement, `include:`/`body:` inheritance, child-declared
+`prefix`/`label`/`plural`, whole-definition field override, and hardware@3
+adoption for `bound` now with preset adoption after threads Phase 4.

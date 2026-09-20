@@ -55,5 +55,30 @@ Chunk 2 - docs/design/calc-sources.md section 11  (this commit)
 Tests: python -m pytest -q -> 1256 passed.
 No changelog fragment: still design-record only, nothing user-facing.
 
-Chunk 3 - docs/design/extends.md + backlog finding 21  (pending)
+Chunk 3 - docs/design/extends.md + backlog finding 21  (this commit)
 ---------------------------------------------------------------
+
+- extends.md status line: draft proposal -> decided (Jared, 2026-09-19), with
+  the one overturn named, still not implemented.
+- Section 9: all five questions answered YES / as recommended - child-declared
+  prefix/label/plural with an error if missing; coverable inherited; the setting
+  named coverage.group_inherited; a field override replaces the whole field
+  definition; hardware@3 adopts bound extends requirement now.
+- The overturn, recorded in the recap, section 4.1, section 9 question 3, and
+  the section 10 bullet: coverage grouping is the default, period, so
+  coverage.group_inherited is true for every project, new and existing. The
+  sample config now shows true. The consequence is stated where the setting is
+  specified: an existing project that rebuilds gets one grouped coverage
+  section where it used to get separate ones, and a project that wants the old
+  output sets group_inherited: false. The doc's original false default stays
+  visible as the rejected option in all four places.
+- Section 11's proposed backlog Status text updated to match.
+- backlog.md finding 21: Status now says the section 9 questions are decided
+  (2026-09-19) and names the grouping default change; the finding body's
+  "defaulting to current (separate) behavior" clause is marked superseded and
+  points at the Status.
+
+Tests: python -m pytest -q -> 1256 passed.
+No changelog fragment: design decisions only, and no code changed, so no
+behavior changed for a user today. The grouping default is not implemented.
+

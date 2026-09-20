@@ -538,21 +538,28 @@ reversing its own earlier draft's opt-in-marker proposal once finding 22
 established that `satisfies` excluding bounds was a defect, not a deliberate
 boundary. The four `[requirement, bound]` link target lists collapse to
 `[requirement]`. Coverage grouping (bounds under requirements vs. their own
-section) becomes a project setting, defaulting to current (separate)
-behavior. `extends:` resolves on the fully merged schema (after base →
+section) becomes a project setting, defaulting to current (separate) behavior —
+superseded by Jared's 2026-09-19 decision, which makes grouping the default for
+every project; see the Status below. `extends:` resolves on the fully merged schema (after base →
 presets → project overlay), so project overlays adding fields to `requirement`
 are inherited by `bound`. Adopting `extends:` for `bound` in `hardware@3`
 churns no hashes (`item.type` stays `"bound"`); no migration.yaml entry is
 needed. Preset adoption (design-debate's `debate`) waits for threads Phase 4.
 
-**Status: design draft.** Spec at [`docs/design/extends.md`](extends.md) —
-states the substitution rule (universal Liskov, no opt-in marker), ALLOW vs
-LISTING consumer classification (§3.2), coverage-grouping default
-(`coverage.group_inherited: false`), single-level enforcement, `include:` and
-`body:` inherited, `prefix`/`label`/`plural` declared by child, field
-override replaces whole definition, hardware@3 adoption for `bound` now
-(hash-neutral, no migration), preset adoption after threads Phase 4. Awaiting
-Jared's decisions on open questions (extends.md §9) before implementation.
+**Status: decided (Jared, 2026-09-19), not yet implemented.** Spec at
+[`docs/design/extends.md`](extends.md) — states the substitution rule (universal
+Liskov, no opt-in marker), ALLOW vs LISTING consumer classification (§3.2),
+single-level enforcement, `include:` and `body:` inherited, `prefix`/`label`/
+`plural` declared by child, field override replaces whole definition,
+hardware@3 adoption for `bound` now (hash-neutral, no migration), preset
+adoption after threads Phase 4. **All five open questions in extends.md §9 are
+decided (2026-09-19), each as recommended — with one overturn of the spec's own
+recommendation: coverage grouping is the default, period.** The default is
+`coverage.group_inherited: true` for every project, new and existing, so an
+existing project that rebuilds gets one grouped coverage section where it used
+to get separate ones; a project that wants the old output sets
+`coverage.group_inherited: false`. The spec's original `false` default is kept
+there as the rejected option.
 
 **Local model: not suitable to design, suitable to implement once specced.**
 What was hard here was the judgement — whether universal (Liskov)
