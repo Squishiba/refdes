@@ -27,7 +27,33 @@ changes touch no code).
 
 No changelog fragment: a design-doc decision record is not user-facing.
 
-Chunk 2 - docs/design/calc-sources.md section 11  (pending)
------------------------------------------------------------
+Chunk 2 - docs/design/calc-sources.md section 11  (this commit)
+---------------------------------------------------------------
+
+- Status line: Draft -> Reviewed, decisions recorded 2026-09-19, question 2
+  still open.
+- Section 11: decision lines added under Q1 (A), Q3 (A), Q4 (A), Q7 (A), Q8 (A).
+- Q2 recorded as STILL OPEN with both halves of his reasoning: a worksheet can
+  be an external form of calculation block so editing it is a natural
+  progression, but a file changing when you do not expect it to is also bad.
+  No option picked, not marked decided.
+- Q5: not option A as written. Source-level tolerance is allowed and optional -
+  his words, optional or a switch the user can change. When a source carries a
+  tolerance and the assignment's right-hand side also carries one, refdes
+  errors; neither silently wins and the author deletes one. His leaning toward
+  the assignment winning is recorded as context, not as the rule. Section 1's
+  "source() itself has no tolerance syntax" bullet keeps its text and is marked
+  superseded in part by this decision.
+- Q6: left exactly as it was; a note records that Jared confirmed on 2026-09-19
+  that it is answered.
+- New subsection at the end of section 1, next to the syntax it serves:
+  "Requirement: a picker for importing values from an outside file", recorded as
+  a requirement on the editor work, not a decided implementation.
+- docs/design/browser-editor.md: new "Source-value picker" subsection before
+  "Link picker", cross-referencing calc-sources.md section 1.
+
+Tests: python -m pytest -q -> 1256 passed.
+No changelog fragment: still design-record only, nothing user-facing.
 
 Chunk 3 - docs/design/extends.md + backlog finding 21  (pending)
+---------------------------------------------------------------

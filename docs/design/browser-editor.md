@@ -419,6 +419,17 @@ not upload: upload introduces destination choice, overwrite handling, binary
 conflicts, extension/MIME policy, and git status changes unrelated to the item
 transaction.
 
+### Source-value picker
+
+`docs/design/calc-sources.md` §1 records a requirement from the project owner
+(2026-09-19): importing data from an outside file should have some form of
+picker in this editor, provided that is not terribly difficult to implement. His
+reason, in his terms: he is not fond of adding more places where a user has to
+manually type the things they want out of a file, and intuition and ease of use
+are key. It is a requirement on the editor work, not a decided implementation —
+this document has not settled what the picker lists, how a named key is chosen
+from it, or where the resulting `source("path", "key")` text is emitted.
+
 ### Link picker
 
 For each link verb, the API supplies its allowed target types from

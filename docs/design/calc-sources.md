@@ -1,4 +1,5 @@
-Status: Draft -- awaiting Jared's review
+Status: Reviewed -- Jared's decisions recorded 2026-09-19; question 2 in
+section 11 is still open.
 
 # Calc values from repo-local source files
 
@@ -55,6 +56,11 @@ name = source("repo-relative/cited-file.ext", "reader-defined-named-key") | unit
 - The source value is a scalar numeric input. It can participate in normal
   arithmetic and existing tolerances, but `source()` itself has no tolerance
   syntax or magic unit conversion.
+  **Superseded in part by the section 11 question 5 decision (Jared,
+  2026-09-19):** source-level tolerance is allowed and optional, and an
+  assignment carrying both a source tolerance and a right-hand-side tolerance is
+  an error. The no-tolerance-syntax shape above is what the recommendation
+  proposed and is kept here as the rejected option.
 
 A string-argument builtin is new syntax, not current calc behavior.
 `calc._eval_node()` currently rejects string constants and only dispatches
@@ -154,6 +160,22 @@ same-row `value` cell is extracted.
 | `source("citation-id", "key")` | Reject for V1 | Citation ids are optional and globally unique, while a source needs the actual path visible beside its named key. The path also makes the lockfile lookup direct. |
 | Cell addresses (`Sheet1!B14`, CSV row 14) | Reject | Inserting a row can return a different valid numeric value with the same file hash. Named keys make that edit an extraction failure or a reviewable diff. |
 | A YAML-only `source:` assignment separate from calc | Reject | Splits an ordinary named calc value into a second declaration language and loses the existing expression/unit/error presentation. |
+
+### Requirement: a picker for importing values from an outside file
+
+Raised by Jared on 2026-09-19.
+
+Importing data from an outside file should have some form of **picker** in the
+browser editor, provided that is not terribly difficult to implement.
+
+His reason, in his terms: he is not fond of adding more places where a user has
+to manually type the things they want out of a file, and intuition and ease of
+use are key.
+
+This is a **requirement on the editor work**, not a decided implementation. What
+the picker lists, how a named key is chosen from it, and where the resulting
+`source("path", "key")` text is emitted are the editor design's to settle.
+Cross-referenced from `docs/design/browser-editor.md`.
 
 ---
 
@@ -810,6 +832,10 @@ not reader internals.
 
 ## 11. Open questions for Jared
 
+Jared answered these on 2026-09-19. Each answer is recorded under its question;
+question 2 is the one he left open, with his reasoning recorded as the state of
+the question.
+
 1. **Does “builds read the lockfile only” supersede Finding 25 Part 2's current
    local-file hash verification?**
    - **A. Preserve current verification (recommended).** The new source resolver
@@ -819,6 +845,8 @@ not reader internals.
    - B. Make all local citations lockfile-only during build/check; move hash
      drift detection to an explicit check/fetch command. This is more hermetic
      but weakens current automatic detection and changes finding 25.
+   - **Decision (Jared, 2026-09-19): A.** Finding 25's current local-file hash
+     verification is preserved.
 
 2. **Should a changed source file make ordinary build/check fail, rather than
    retain citation warning semantics until `fetch --update`?**
@@ -828,6 +856,11 @@ not reader internals.
    - B. New hard error for files that supply `source()` values. Stronger guard,
      but creates a source-specific citation severity and blocks builds before
      review can inspect the intended diff.
+   - **STILL OPEN (Jared, 2026-09-19).** No option is picked and this is not
+     decided. His reasoning, both halves: he can see a worksheet being used as
+     an external form of calculation block, so editing it would be a natural
+     progression of its use in refdes; but a file changing when you do not
+     expect it to is also bad. He is deliberating.
 
 3. **Is same-item citation ownership the desired provenance boundary?**
    - **A. Yes (recommended).** It matches item-local calcs and makes the decision
@@ -835,12 +868,16 @@ not reader internals.
    - B. Permit a project-global citation or `[[cite:id]]` owner. Less repeated
      metadata, but source authority becomes non-local and requires new lookup
      semantics.
+   - **Decision (Jared, 2026-09-19): A.** Same-item citation ownership is the
+     provenance boundary.
 
 4. **Is fixed CSV `key,value` sufficient for the first real project?**
    - **A. Yes (recommended).** It is deliberately boring and makes every silent
      selection hazard testable.
    - B. Add per-citation column mapping now. More flexible, but it adds schema,
      lock, and wrong-column failure modes before any concrete need.
+   - **Decision (Jared, 2026-09-19): A.** Fixed CSV `key,value` is sufficient
+     for the first real project.
 
 5. **Should `source()` accept an optional source-level tolerance?**
    - **A. No (recommended).** Put `±` on the assignment's right-hand result with
@@ -848,6 +885,13 @@ not reader internals.
      tolerance grammar.
    - B. Store source tolerance metadata. It risks treating spreadsheet
      presentation as a second unit/tolerance authority.
+   - **Decision (Jared, 2026-09-19): source-level tolerance is allowed, and it
+     is optional** — his words: optional, or a switch the user can change. Not
+     option A as written. When a source carries a tolerance
+     **and** the assignment's right-hand side also carries one, refdes
+     **errors**: neither silently wins, and the author deletes one.
+   - His leaning, recorded as context and not as the rule: he leans toward the
+     assignment being the winner, but understands why that is undesirable.
 
 6. **When XLSX lands, should sheet-scoped defined names be allowed through a
    qualified key such as `Sheet1!case_rise`?**
@@ -871,6 +915,8 @@ not reader internals.
      conspicuous without guessing units or rejecting legitimate changes.
    - B. No special warning. Simpler, but leaves a well-known human-scale error
      less visible than it needs to be.
+   - **Decision (Jared, 2026-09-19): A.** Advisory warning only on a 1000x
+     change.
 
 8. **Should source provenance appear in exported `items.json` in V1?**
    - **A. Rendered calc-row badge only (recommended).** The lock/hash contract is
@@ -878,3 +924,12 @@ not reader internals.
      consumer API without a user.
    - B. Export path/key/locked value. Useful for tooling, but needs a versioned
      schema and decision about whether every citation or only source uses appear.
+   - **Decision (Jared, 2026-09-19): A.** Rendered calc-row badge only in V1.
+
+Question 6 was decided on 2026-09-16 (option B, sheet-scoped defined names) and
+Jared confirmed on 2026-09-19 that it is answered; its decision block above
+stands unchanged.
+
+The requirement Jared raised on 2026-09-19 for a **picker** in the browser
+editor when importing values from an outside file is recorded in section 1, next
+to the syntax it serves.
