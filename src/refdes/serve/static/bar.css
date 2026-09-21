@@ -1,0 +1,11 @@
+/* Injected into preview pages by `refdes serve` only -- never part of _site/. */
+.refdes-serve-bar {
+  position: fixed; right: 12px; bottom: 12px; z-index: 2147483647;
+  display: flex; gap: 12px; align-items: center;
+  padding: 6px 12px; border-radius: 6px;
+  background: #1f2933; color: #f5f7fa; font: 13px/1.4 system-ui, sans-serif;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, .3);
+}
+.refdes-serve-bar a { color: #9fd3ff; text-decoration: none; }
+.refdes-serve-bar a:hover { text-decoration: underline; }
+@media print { .refdes-serve-bar { display: none; } }

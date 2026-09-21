@@ -212,6 +212,28 @@ def cmd_build(args) -> int:
     return 0
 
 
+def cmd_serve(args) -> int:
+    """`refdes serve`: the loopback-only browser editor and rendered preview
+    (docs/design/browser-editor.md). One project, one process."""
+    from .serve.server import EditorApp
+
+    app = EditorApp(args.config, read_only=args.no_write)
+    print(f"refdes serve: {app.launch_url}", flush=True)
+    print("Listening on 127.0.0.1 only. The token in that URL is this launch's key;")
+    print("keep it out of screenshots and shared terminals. Ctrl+C to stop.", flush=True)
+    if not args.no_open:
+        import webbrowser
+
+        webbrowser.open(app.launch_url)
+    try:
+        app.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        app.stop()
+    return 0
+
+
 def _print_gate_table(results: list, stream) -> None:
     """The whole table on one stream, chosen by the caller.
 
@@ -1172,6 +1194,23 @@ def main(argv: list[str] | None = None) -> int:
         "writes the site -- that is the command's own output, not a side effect",
     )
     sub = parser.add_subparsers(dest="command", required=True)
+
+    p_serve = sub.add_parser(
+        "serve",
+        help="serve the rendered site and a browser editor on 127.0.0.1",
+        description="Load this one project and serve two surfaces on an "
+        "ephemeral 127.0.0.1 port: the rendered site as a preview (rebuilt "
+        "into an OS temp directory, never _site/) at /preview/, and the "
+        "editor at /edit/. The launch URL carries a random per-launch token "
+        "that gates every read and write. Loading is side-effect-free: no "
+        "key minted, no link expanded, nothing sealed, and no file under "
+        "items/ or .refdes/ touched. Edits made outside the browser are "
+        "picked up by polling.",
+    )
+    p_serve.add_argument(
+        "--no-open", action="store_true", help="print the launch URL but do not open a browser"
+    )
+    p_serve.set_defaults(func=cmd_serve)
 
     p_build = sub.add_parser("build", help="render the HTML site and items.json")
     p_build.add_argument("-o", "--out", help="output directory (overrides site.out)")

@@ -417,3 +417,55 @@ def test_load_tree_refuses_an_overlay_combined_with_writes(tmp_path):
     root, config = _snapshot_project(tmp_path)
     with pytest.raises(ValueError):
         loader.load_tree(config, write=True, overlay={str(root / "items" / "r.yaml"): ""})
+
+
+def test_the_editor_get_and_preview_paths_leave_the_tree_byte_identical(tmp_path, capsys):
+    """`refdes serve`'s own reads -- the launch redirect, the rendered preview,
+    the editor shell and assets, every API GET, and a rebuild after an outside
+    edit -- must not mint a key, expand a link, seal an entry, or write
+    schema.json. The fixture has all of those pending (keyless REQ-002, a bare
+    link on DEC-002, an unsealed log, a stale schema.json)."""
+    import http.client
+
+    from refdes.serve import security
+    from refdes.serve.server import EditorApp
+
+    root, config = _snapshot_project(tmp_path)
+    capsys.readouterr()
+    before = _snapshot(root)
+
+    app = EditorApp(config, poll_interval=60)
+    app.start()
+    try:
+        assert not any(_changed(before, root).values()), "the launch load wrote"
+
+        def get(path, **headers):
+            conn = http.client.HTTPConnection("127.0.0.1", app.port, timeout=10)
+            headers.setdefault("Host", f"127.0.0.1:{app.port}")
+            conn.request("GET", path, headers=headers)
+            resp = conn.getresponse()
+            resp.read()
+            conn.close()
+            return resp.status
+
+        cookie = {"Cookie": f"{security.cookie_name(app.port)}={app.token}"}
+        api = {"X-Refdes-Token": app.token}
+        assert get(f"/?token={app.token}") == 302
+        for path in ("/preview/", "/preview/summary.html", "/preview/coverage.html", "/edit/",
+                     "/edit/static/app.js"):
+            assert get(path, **cookie) == 200, path
+        for key in app.state.snapshot.project.items:
+            slug = app.state.snapshot.project.items[key].slug
+            assert get(f"/preview/{slug}.html", **cookie) == 200
+        assert get("/api/revision", **api) == 200
+
+        # an outside edit, then the poll-triggered rebuild and re-render
+        with open(root / "items" / "r.yaml", "a", encoding="utf-8") as fh:
+            fh.write("  - id: REQ-003\n    text: Added from outside.\n")
+        edited = _snapshot(root)
+        assert app.state.refresh() is True
+        assert get("/preview/", **cookie) == 200
+        assert _snapshot(root) == edited, "the rebuild wrote into the project"
+    finally:
+        app.stop()
+    assert _snapshot(root) == edited

@@ -1,7 +1,7 @@
 # CLI reference
 
 ```
-refdes [-c CONFIG] {build,check,revision,release,index,ls,id,fetch,audit,init,new,schema,standard,revise,stub-tests,former-ids} [options]
+refdes [-c CONFIG] {build,check,revision,release,index,serve,ls,id,fetch,audit,init,new,schema,standard,revise,stub-tests,former-ids} [options]
 ```
 
 | Global option | Effect |
@@ -879,6 +879,45 @@ changes are rolled back; running it again on an already-adopted project prints
 `nothing to do -- project already adopted` and exits 0. The project must
 validate cleanly (no build errors) before adoption runs — `keys adopt` refuses
 on a broken project.
+
+---
+
+## `refdes serve`
+
+Serve the project on your own machine: the ordinary rendered site as a preview,
+and a browser editor. Loads exactly one project and prints a launch URL.
+
+| Option | Effect |
+|---|---|
+| `--no-open` | Print the launch URL but do not open a browser |
+
+```bash
+refdes serve
+refdes serve --no-open
+```
+
+- **Loopback only.** It binds `127.0.0.1` on an ephemeral port — there is no
+  `--host` and no remote mode. A request whose `Host` is anything but
+  `127.0.0.1:<port>` or `localhost:<port>` is refused.
+- **A launch token gates everything.** The printed URL carries a random,
+  per-launch token. Opening it sets a `SameSite=Strict` session cookie and
+  redirects to the token-free `/preview/`; every `/api/` call — reads too —
+  must send the token in an `X-Refdes-Token` header, and every write must also
+  come from the server's own `Origin`. Keep the URL out of screenshots and
+  shared terminals.
+- **The preview never touches `_site/`.** It is rendered into a directory under
+  your OS temp directory, removed on Ctrl+C and pruned on a later launch if a
+  crash left it behind. An "Editor" / "Edit this item" toolbar is added to the
+  *HTTP response* only; a `_site/` you publish never contains it.
+- **Loading writes nothing.** No key is minted, no link expanded, nothing
+  sealed, no `.refdes/schema.json` written — the same guarantee as
+  `--no-write`, pinned by `tests/test_no_write.py`. Files you edit outside the
+  browser are picked up by polling (content hashes, so a touch changes
+  nothing) and the preview is rebuilt.
+
+The editor is served from `/edit/` as plain JavaScript and CSS packaged with
+refdes; no Node or build step is involved, and none of it is ever part of the
+generated site.
 
 ---
 

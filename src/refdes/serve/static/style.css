@@ -1,0 +1,11 @@
+:root { --fg: #1f2933; --muted: #616e7c; --line: #d3d9df; --bg: #fff; --accent: #0b6bcb; --warn: #b45309; --bad: #b42318; --ok: #1a7f37; }
+* { box-sizing: border-box; }
+body { margin: 0; font: 14px/1.5 system-ui, sans-serif; color: var(--fg); background: var(--bg); }
+a { color: var(--accent); }
+.muted { color: var(--muted); }
+.topbar { display: flex; gap: 20px; align-items: center; padding: 8px 16px; border-bottom: 1px solid var(--line); background: #f5f7fa; }
+.topbar nav { display: flex; gap: 14px; flex: 1; }
+.badge { padding: 2px 8px; border: 1px solid var(--line); border-radius: 10px; font-size: 12px; background: #fff; }
+.banner { padding: 8px 16px; background: #fff7e6; border-bottom: 1px solid #f0c36d; }
+.banner.bad { background: #fdecea; border-color: #f0a8a0; }
+main { padding: 16px; max-width: 1200px; margin: 0 auto; }
