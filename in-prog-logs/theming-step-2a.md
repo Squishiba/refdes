@@ -99,4 +99,14 @@ that name is a build error instead of a clobber.
 - scratch: `.scratch/snap.py` (hash capture), `.scratch/theme_cli_probe.py`,
   `.scratch/theme-probe/`
 
-Not pushed, not merged — left for Jared to review and land.
+## Post-merge re-verification
+
+`origin/main` moved to `3e65b60` (editor source patcher: `src/refdes/patcher.py`
++ `tests/test_patcher.py`) mid-task. Merged it in — clean, no overlapping files
+with theming — and re-ran everything on the merged tree:
+
+- `python -m pytest -q` → **1747 passed** (1632 theming-era + the 115 new
+  patcher tests).
+- `ruff check <touched files> --select E9,F` → clean.
+
+Not pushed, not merged back — left for Jared to review and land.
