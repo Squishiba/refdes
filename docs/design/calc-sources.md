@@ -1,5 +1,6 @@
 Status: Reviewed -- Jared's decisions recorded 2026-09-19; question 2 in
-section 11 is still open.
+section 11 decided 2026-09-21 (warn loudly; `fetch --update` is the acceptance
+gate). All section 11 questions are now answered.
 
 # Calc values from repo-local source files
 
@@ -832,9 +833,8 @@ not reader internals.
 
 ## 11. Open questions for Jared
 
-Jared answered these on 2026-09-19. Each answer is recorded under its question;
-question 2 is the one he left open, with his reasoning recorded as the state of
-the question.
+Jared answered these on 2026-09-19; question 2, left open then, was decided on
+2026-09-21. Each answer is recorded under its question.
 
 1. **Does “builds read the lockfile only” supersede Finding 25 Part 2's current
    local-file hash verification?**
@@ -856,11 +856,17 @@ the question.
    - B. New hard error for files that supply `source()` values. Stronger guard,
      but creates a source-specific citation severity and blocks builds before
      review can inspect the intended diff.
-   - **STILL OPEN (Jared, 2026-09-19).** No option is picked and this is not
-     decided. His reasoning, both halves: he can see a worksheet being used as
-     an external form of calculation block, so editing it would be a natural
-     progression of its use in refdes; but a file changing when you do not
-     expect it to is also bad. He is deliberating.
+   - **Decision (Jared, 2026-09-21): A, with a loud warning.** A changed source
+     file **warns loudly; it does not error.** The build keeps using the
+     reviewed, lock-pinned value until the user explicitly accepts the change
+     with the existing `refdes fetch --update` -- that command *is* the
+     acceptance gate, so drift never silently changes a value. `--require-citations`
+     promotes the warning to an error for CI. The warning must be prominent in
+     build/check output (naming the file, the key, the old locked value versus
+     the value the file now holds, and the exact accept command) and visible on
+     the rendered item. His earlier reasoning stands as context: a worksheet is a
+     natural external form of calculation block, but a file changing unexpectedly
+     is bad -- the pin plus a loud, actionable warning covers both.
 
 3. **Is same-item citation ownership the desired provenance boundary?**
    - **A. Yes (recommended).** It matches item-local calcs and makes the decision
