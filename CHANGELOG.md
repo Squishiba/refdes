@@ -96,9 +96,10 @@ and this project uses [Semantic Versioning](https://semver.org/).
   `refines`/`derives_from` targets); `coverable`, `coverable_statuses`,
   `body`, provenance/stewardship and `part_of` come from `requirement`. The
   resolved schema is pinned by an oracle test against the pre-conversion dump
-  -- identical field for field and hash-, seal- and baseline-neutral, with one
-  deliberate addition: a `bound` may now declare `governed_by` (it inherits
-  `requirement`'s). No migration. The design-debate preset does not adopt
+  -- identical field for field and hash-, seal- and baseline-neutral. `bound`
+  un-declares the `governed_by` link it would inherit with `governed_by: null`,
+  a new `extends:` mechanism: `verb: null` in a child's `links:` removes an
+  inherited link (not `[]`, which means unrestricted). No migration. The design-debate preset does not adopt
   `extends:` until after threads Phase 4.
 
 - **`extends:` consumers and `coverage.group_inherited`** (`docs/design/extends.md`

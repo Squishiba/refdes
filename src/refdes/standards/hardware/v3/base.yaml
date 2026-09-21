@@ -181,6 +181,7 @@ types:
     links:
       refines:      [bound]
       derives_from: [requirement, bound]
+      governed_by:  null   # un-declared: a bound is not governed_by-capable (keeps the resolved bound as it was)
 
   decision:
     doc: "A design choice that was made — what was picked, why, and what it satisfies. A settled (accepted) decision closes coverage on what it satisfies; a failing check on a decision is an error."

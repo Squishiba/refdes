@@ -46,7 +46,7 @@ Every term below is what the resolved **hardware@3** schema in this repo's `refd
 A numeric limit the design must respect — a voltage, a current, a tolerance. Its limit field makes it checkable by other items' checks. Counts toward coverage while active.
 
 - **Id prefix:** `BND`
-- **Pointed at by:** `addresses` from `log`; `constrained_by` from `component`, `decision`; `derives_from` from `bound`; `governed_by` from `bound`, `requirement`; `refines` from `bound`; `satisfies` from `component`, `decision`; `verifies` from `test`
+- **Pointed at by:** `addresses` from `log`; `constrained_by` from `component`, `decision`; `derives_from` from `bound`; `governed_by` from `requirement`; `refines` from `bound`; `satisfies` from `component`, `decision`; `verifies` from `test`
 
 | Field | Definition | Type | Required |
 |---|---|---|---|
@@ -211,7 +211,7 @@ items:
 Something the design must achieve, stated as one prose body. Counts toward coverage while active; a draft or retired requirement is left out of coverage entirely.
 
 - **Id prefix:** `REQ`
-- **Pointed at by:** `addresses` from `log`; `derives_from` from `bound`; `governed_by` from `bound`, `requirement`; `refines` from `requirement`; `satisfies` from `component`, `decision`; `verifies` from `test`
+- **Pointed at by:** `addresses` from `log`; `derives_from` from `bound`; `governed_by` from `requirement`; `refines` from `requirement`; `satisfies` from `component`, `decision`; `verifies` from `test`
 
 | Field | Definition | Type | Required |
 |---|---|---|---|
@@ -392,7 +392,7 @@ This requirement must comply with a general rule stated elsewhere — another re
 
 - **Points at:** `bound`, `requirement`
 - **Inverse:** `governs`
-- **Declared on:** `bound`, `requirement`
+- **Declared on:** `requirement`
 
 **Example:**
 

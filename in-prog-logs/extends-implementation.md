@@ -41,7 +41,13 @@ Task: implement extends.md in full, phased per its section 8; report to refdes-2
 - hardware@3 base.yaml: `bound` now `extends: requirement`, `plural: Bounds` added (required by the
   child-declares-identity rule; resolves to the same value the label default gave). title/status/rationale
   restated because their `doc:` wording is the bound's own (whole-definition override).
-- Oracle: resolved dump (types + link_types, declared order) vs fixtures snapshotted before the change,
+- SPEC AMENDMENT (approved by Jared via refdes-2, 2026-09-20): `links: { verb: null }` on a child
+  un-declares an inherited link (null-removes convention, like types.<name>: null). Errors if the parent
+  never declared the verb. Used on bound for governed_by, so the oracle is now literally identical
+  (supersedes the "one asserted delta" text below). Documented in extends.md 2.2 and 12. Known gap:
+  a null link written in a project overlay onto a base type's links is consumed by the base/overlay merge
+  before extends resolves (only nulls carried in the type's own declaration reach it).
+- (Superseded) Oracle: resolved dump (types + link_types, declared order) vs fixtures snapshotted before the change,
   with and without design-debate. Only diff: bound gains `governed_by: [requirement, bound]` (inherited;
   cannot be shed under Liskov) and link dict order. Asserted explicitly in the test, not waved through.
   FLAG FOR JARED: spec 5.2's "IDENTICAL" is not literally achievable; alternative would be an invented

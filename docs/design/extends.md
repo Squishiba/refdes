@@ -85,7 +85,7 @@ add/override, and scalar overrides (`prefix`, `label`, `plural`, `preview`,
 |---|---|---|
 | `fields` | **yes** (merged, child overrides by key) | Deep merge like `include:` field sets; includes fields contributed by parent's `include:` |
 | `include` | **yes** (child may override) | The finding names `include: [provenance, stewardship]` as duplication to remove |
-| `links` | **yes** (merged, child overrides by key) | Target lists replaced, not unioned |
+| `links` | **yes** (merged, child overrides by key) | Target lists replaced, not unioned. `verb: null` in the child's `links:` **un-declares** an inherited verb (amendment, Jared 2026-09-20): distinct from omitting the key (inherits) and from `[]` (declared, unrestricted). Nulling a verb the parent never declared is an error. |
 | `preview` | **yes** (replaced wholesale if child declares it) | |
 | `body` | **yes** (child may override) | The finding names `body:` as duplication to remove; `on_change`/`required` inherited unless overridden |
 | `coverable` | **yes** (child may override) | |
@@ -534,14 +534,16 @@ adoption for `bound` now with preset adoption after threads Phase 4.
 
 Where the build settles something the spec left open or contradicted itself.
 
-- **`bound` gains `governed_by`.** §5.2 asks for an identical resolved
-  schema, but `requirement` carries `governed_by: [requirement, bound]` and a
-  child cannot leave a parent link behind (§3.1). After the conversion the
-  resolved `bound` is identical to before in every field, scalar and
-  `doc:`, and differs in exactly one link: it may now declare `governed_by`.
-  The oracle (`test_hardware3_base_resolves_unchanged`) asserts that single
-  delta explicitly; nothing else may move. Link order in the dict also
-  differs (inherited links first), which nothing reads.
+- **`governed_by` is suppressed on `bound`.** `requirement` carries
+  `governed_by: [requirement, bound]`, and plain inheritance would hand it to
+  `bound`, breaking §5.2's identical-schema bar. Jared's amendment
+  (2026-09-20): a child may write `links: { governed_by: null }` to un-declare
+  an inherited link (§2.2), the same null-removes convention as
+  `types.<name>: null`. `bound` does so, and the oracle
+  (`test_hardware3_base_resolves_unchanged`) holds the resolved schema literally
+  identical. The cost is that `bound` is not fully substitutable for
+  `requirement` on outgoing links -- a deliberate, visible exception.
+  Link-verb order in the dict differs (inherited first); nothing reads it.
 - **`doc:` is not inherited** (not in the §2.2 table): it is the type's own
   definition, and a subtype repeating its parent's would misdescribe it.
 - **Field/link order.** Inherited-only entries keep the parent's order, then

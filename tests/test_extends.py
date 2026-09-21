@@ -117,6 +117,31 @@ def test_link_override_replaces_the_target_list(tmp_path):
     assert project.types["req"].links["refines"] == ["req"]
 
 
+def test_null_link_suppresses_an_inherited_link(tmp_path):
+    """`links: { verb: null }` removes the inherited verb -- distinct from
+    omitting it (inherited) and from `[]` (declared, unrestricted)."""
+    both = PARENT.replace(
+        "      refines: [req]\n", "      refines: [req]\n      governed_by: [req]\n"
+    ).replace(
+        "  refines: { inverse: refined_by }\n",
+        "  refines: { inverse: refined_by }\n  governed_by: { inverse: governs }\n",
+    )
+    inherited = _load(tmp_path, both + CHILD).types["bnd"].links
+    assert inherited["governed_by"] == ["req"]
+    unrestricted = _load(tmp_path, both + CHILD + "    links:\n      governed_by: []\n")
+    assert unrestricted.types["bnd"].links["governed_by"] == []
+    suppressed = _load(tmp_path, both + CHILD + "    links:\n      governed_by: null\n")
+    assert "governed_by" not in suppressed.types["bnd"].links
+    assert suppressed.types["bnd"].links["refines"] == ["req"]
+    assert "governed_by" in suppressed.types["req"].links
+
+
+def test_null_link_the_parent_never_declared_is_an_error(tmp_path):
+    message = _err(tmp_path, PARENT + CHILD + "    links:\n      derives_from: null\n")
+    assert "types.bnd.links.derives_from is null" in message
+    assert "'req' declares no link 'derives_from'" in message
+
+
 def test_own_body_and_scalars_replace_the_parents(tmp_path):
     project = _load(
         tmp_path,
@@ -550,32 +575,21 @@ def _normalized(dump: str) -> dict:
 )
 def test_hardware3_base_resolves_unchanged(fixture, presets):
     """The acceptance test of extends.md §5.2: converting `bound` to
-    `extends: requirement` leaves the resolved schema as it was, so nothing that
-    hashes, seals or baselines an item can tell. The fixtures are the
-    pre-conversion dumps (types and link_types, every field, link and scalar, in
-    declared order).
-
-    Exactly one thing differs, asserted rather than waved through: `bound` now
-    also carries `requirement`'s `governed_by: [requirement, bound]`, because
-    inheritance cannot leave a parent link behind (a bound stands in for a
-    requirement everywhere, §3.1). It only permits a link an author may now
-    write; no existing item, hash or coverage result moves. Its position in the
-    link dict differs too -- inherited links first, the child's own after."""
+    `extends: requirement` leaves the resolved schema literally identical, so
+    nothing that hashes, seals or baselines an item can tell. The fixtures are
+    the pre-conversion dumps (types and link_types, every field, link and
+    scalar). `bound` suppresses the one inherited link it never had
+    (`governed_by: null`, §2.2). Field order is compared too; link-verb order
+    is not (inherited verbs come first), and nothing reads it."""
     expected = _normalized((FIXTURES / fixture).read_text(encoding="utf-8"))
     actual = _normalized(resolved_dump(presets))
-
-    bound_links = actual["types"]["bound"]["links"]
-    assert bound_links.pop("governed_by") == ["requirement", "bound"]
-    bound_links_sorted = dict(sorted(bound_links.items()))
-    actual["types"]["bound"]["links"] = bound_links_sorted
-    expected["types"]["bound"]["links"] = dict(
-        sorted(expected["types"]["bound"]["links"].items())
-    )
 
     assert list(actual["types"]) == list(expected["types"])
     for name, spec in expected["types"].items():
         assert actual["types"][name] == spec, f"types.{name} drifted"
+        assert list(actual["types"][name]["fields"]) == list(spec["fields"])
     assert actual["link_types"] == expected["link_types"]
+    assert "governed_by" not in actual["types"]["bound"]["links"]
 
 
 def test_hardware3_bound_extends_requirement(tmp_path):

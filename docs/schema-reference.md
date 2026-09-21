@@ -504,7 +504,6 @@ type: bound
 limit:  # required -- limit
 status: draft  # choices: draft, active, retired
 # rationale:  # text
-# governed_by: []  # target: requirement, bound
 # part_of: []  # target: group
 # refines: []  # target: bound
 # derives_from: []  # target: requirement, bound

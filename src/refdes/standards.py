@@ -631,6 +631,16 @@ def _apply_parent(
             "append_only: a subtype cannot lift the append-only guarantee it "
             "would be substituted under"
         )
+    # `links: { verb: null }` on the child un-declares an inherited link (the
+    # `types.<name>: null` convention, one level down). `[]` cannot mean that:
+    # an empty target list is "unrestricted". Suppressing a verb the parent
+    # never declared is a mistake worth naming, not a silent no-op.
+    for verb, targets in (child.get("links") or {}).items():
+        if targets is None and verb not in (parent.get("links") or {}):
+            raise SchemaError(
+                f"types.{tname}.links.{verb} is null (un-declare an inherited "
+                f"link), but {parent_name!r} declares no link {verb!r}"
+            )
     child_fields = child.get("fields") or {}
     for fname, pspec in (parent.get("fields") or {}).items():
         cspec = child_fields.get(fname)
