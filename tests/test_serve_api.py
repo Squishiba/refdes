@@ -209,17 +209,17 @@ def test_bad_filter_values_are_400_not_empty(served, query):
         (
             "type=nonsense",
             "type: no such type 'nonsense' in this project; "
-            "known types: bound, decision, log, requirement, test",
+            "known types: bound, decision, log, note, requirement, test",
         ),
         (
             "board=nonesuch",
             "board: no such board 'nonesuch' in this project; "
-            "known boards: board-a, board-b",
+            "known boards: board-a, board-b, board-x",
         ),
         (
             "workspace=nowhere",
             "workspace: no such workspace 'nowhere' in this project; "
-            "known workspaces: platform, product-a",
+            "known workspaces: platform, product-a, work-x",
         ),
         (
             "file=items/nope.yaml",
@@ -235,6 +235,23 @@ def test_bad_facet_values_are_400_with_a_message(served, query, message):
     status, payload = client.api_get(f"/api/items?{query}")
     assert status == 400
     assert payload["error"] == message
+
+
+def test_valid_but_empty_type_board_workspace_are_200_empty_lists(served):
+    """A declared-but-currently-empty value is legitimate, not a typo: a
+    bookmarked `?type=note` (or a board/workspace in the registry with no
+    items yet) is a 200 with an empty list and a count of 0."""
+    _app, client = served
+    for facet, value in (
+        ("type", "note"),
+        ("board", "board-x"),
+        ("workspace", "work-x"),
+    ):
+        status, payload = client.api_get(f"/api/items?{facet}={value}")
+        assert status == 200
+        assert payload["total"] == 0
+        assert payload["items"] == []
+        assert payload["facets"][facet].get(value, 0) == 0
 
 
 def test_valid_facet_filters_keep_their_own_facet_counts(served):

@@ -264,23 +264,40 @@ _FACETS = {
     "blocked": _f_blocked,
 }
 
-# The simple facets validated against the built project's own values, in
-# `parse_filters` -- a typo is a 400, never a silently-empty list. `tag` is
-# deliberately absent: tags are a free-form `tags:` list field, matched as a
-# case-insensitive substring, so there is no closed set to validate against.
+# The simple facets validated in `parse_filters` -- a typo is a 400, never a
+# silently-empty list. `tag` is deliberately absent: tags are a free-form
+# `tags:` list field, matched as a case-insensitive substring, so there is no
+# closed set to validate against.
 _KNOWN_FACETS = ("type", "board", "workspace", "file")
 
 
 def _known_values(project: Project, name: str) -> set[str]:
-    """The values of one facet the *built* project actually has -- what a
-    sidebar checkbox can offer, and the only values that facet's filter may
-    take. Computed from the items, never from a schema scan: a declared type
-    with no items cannot appear in the list, exactly as it cannot in the
-    sidebar."""
-    extract = _FACETS[name]
-    known: set[str] = set()
+    """The values one facet filter may take: what the project *declares* plus
+    what its items actually carry. A declared-but-currently-empty value is
+    legitimate (a bookmark like `?type=note` must keep working the day the
+    last note is deleted -- an empty list, count 0), so `type` accepts every
+    type in `project.types`, `board`/`workspace` every registry entry; item
+    values are the fallback for projects with no registry, and `file` is
+    strictly item-derived (the source files the built project has)."""
+    if name == "type":
+        known = set(project.types)
+    elif name == "board":
+        known = set(project.boards)
+    elif name == "workspace":
+        known = set(project.workspaces)
+    else:  # file
+        known = set()
     for item in project.items.values():
-        known.update(extract(project, item))
+        if name == "type":
+            known.add(item.type)
+        elif name == "board":
+            if item.board:
+                known.add(item.board)
+        elif name == "workspace":
+            if item.workspace:
+                known.add(item.workspace)
+        elif item.source_file:
+            known.add(_norm_file(item.source_file))
     return known
 
 

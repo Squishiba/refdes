@@ -133,11 +133,14 @@ id:
 workspaces:
   platform: { label: "Platform", shared: true }
   product-a: { label: "Product A" }
+  work-x: { label: "Work X" }  # declared, no items: a legitimate-but-empty filter
 boards:
   board-a:
     label: "Board A"
   board-b:
     label: "Board B"
+  board-x:
+    label: "Board X"  # declared, no items: a legitimate-but-empty filter
 link_types:
   satisfies: { inverse: satisfied_by, label: Satisfies }
   verifies: { inverse: verified_by, label: Verifies }
@@ -170,6 +173,10 @@ types:
       title: { type: text, required: true }
     links:
       verifies: [requirement]
+  note:
+    prefix: NOTE
+    fields:
+      title: { type: text, required: true }
   log:
     prefix: LOG
     append_only: true

@@ -83,6 +83,40 @@ Tests added (sabotage style, in test_history_commands.py):
 
 Commit: (see git log)
 
+## Review follow-up (refdes-2, accepted on c5019b3)
+
+Reviewer point: validating type/board/workspace ONLY against values carried by
+items makes a legitimate-but-currently-empty declaration a 400 (e.g.
+?type=note breaks the day the last note is deleted; a board in the boards:
+registry with no items yet). A typo should 400; a legitimate-but-empty value
+should be a 200 with an empty list and count 0.
+
+Change (new commit, not an amend):
+- _known_values() now accepts, for the filter, the union of DECLARED values
+  and item-carried values:
+  - type: every key of project.types (schema) plus item.type values
+  - board: every key of project.boards (registry) plus item.board values
+  - workspace: every key of project.workspaces (registry) plus
+    item.workspace values
+  - file: unchanged, strictly item-derived (a source file some item lives in)
+- Message style unchanged; known lists now include the empty declarations.
+- Filter fixture (tests/serve_support.py FILTER_SCHEMA) gained declared-but-
+  empty note type / board-x / work-x to exercise the path in the shared
+  fixture (only test_serve_api.py uses it, verified by grep).
+- tests/test_serve_api.py:
+  - updated the three known-lists in test_bad_facet_values_are_400_with_a_message
+  - new test_valid_but_empty_type_board_workspace_are_200_empty_lists:
+    type=note, board=board-x, workspace=work-x -> 200, total 0, items [],
+    facet count 0 for the value.
+  - the earlier added tests are unchanged in intent.
+
+Verification after the change:
+- tests/test_serve_api.py: 58 passed
+- full suite: 1885 passed (227.73s)
+- ruff check <5 touched files> --select E9,F: clean
+
+Commit: (see git log)
+
 Notes/risks:
 - The known-value sets are computed per query (a couple of hundred items max
   per the design's scale); matches the existing per-query facet_counts cost.
