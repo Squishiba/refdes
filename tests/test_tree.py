@@ -109,6 +109,112 @@ title: Shared part with no board and no group.
 }
 
 
+# --------------------------------------- subtypes of group (`extends: group`)
+#
+# A type that `extends: group` is a group for the tree's purposes: the tree's
+# group decisions must read through `is_subtype`, not a literal type-name test
+# (docs/design/extends.md §3.2, §12), so a subtype's members collect under its
+# node exactly as under a plain group.
+
+SUBTYPE_GROUP_SCHEMA = """\
+site: {title: "Tree test", out: _site}
+id: {width: 3, ledger: .refdes/ids.yaml}
+boards:
+  board-a: {label: "Board A"}
+link_types:
+  part_of: { inverse: contains, label: "Part of" }
+types:
+  component:
+    prefix: CMP
+    fields:
+      title: { type: text, required: true }
+    links:
+      part_of: [group]
+  group:
+    prefix: GRP
+    coverable: false
+    fields:
+      title: { type: text, required: true }
+    links:
+      part_of: [group]
+  # The minimal `extends:` delta: identity, everything else inherited.
+  subgroup:
+    extends: group
+    prefix: SGR
+    label: Subgroup
+    plural: Subgroups
+  # A second member type whose id-prefix sorts after SGR, so in the cycle
+  # test the subgroup members are unreachable-and-promoted before this member
+  # -- the order under which the promoted node must keep its own children.
+  widget:
+    prefix: WDG
+    fields:
+      title: { type: text, required: true }
+    links:
+      part_of: [group]
+"""
+
+SUBTYPE_GROUP_ITEMS = {
+    "board-a/grp.md": """\
+---
+id: GRP-001
+type: group
+title: A plain group on board A.
+---
+""",
+    "board-a/sgr.md": """\
+---
+id: SGR-001
+type: subgroup
+title: The subgroup, a specialization of group.
+---
+""",
+    "board-a/cmp-plain.md": """\
+---
+id: CMP-001
+type: component
+title: Member of the plain group.
+part_of: [GRP-001]
+---
+""",
+    "board-a/cmp-sub.md": """\
+---
+id: CMP-002
+type: component
+title: Member of the subgroup.
+part_of: [SGR-001]
+---
+""",
+}
+
+SUBTYPE_CYCLE_ITEMS = {
+    "board-a/sgr-cy1.md": """\
+---
+id: SGR-CY-001
+type: subgroup
+title: Subgroup cycle member one.
+part_of: [SGR-CY-002]
+---
+""",
+    "board-a/sgr-cy2.md": """\
+---
+id: SGR-CY-002
+type: subgroup
+title: Subgroup cycle member two.
+part_of: [SGR-CY-001]
+---
+""",
+    "board-a/wdg-cy.md": """\
+---
+id: WDG-CY-001
+type: widget
+title: Member of a subgroup only a cycle can reach.
+part_of: [SGR-CY-001]
+---
+""",
+}
+
+
 def _write(root, config=TREE_SCHEMA, items=TREE_ITEMS):
     write_project_config(root, config)
     for relpath, text in items.items():
@@ -339,6 +445,59 @@ def test_part_of_cycle_terminates_and_keeps_every_item(tmp_path):
     forest = tree_mod.build_forest(project)
     ids = {i.id for i in forest.expanded}
     assert {"GRP-CY-001", "GRP-CY-002"} <= ids
+
+
+def test_type_that_extends_group_is_treated_as_a_group_in_the_tree(tmp_path):
+    """`subgroup` `extends: group`: a same-board member expands under the
+    subgroup's own node exactly as it does under the plain group alongside --
+    which is the old behaviour, unchanged. Any literal `type == "group"`
+    test here would drop the subgroup's member onto the board directly."""
+    _write(tmp_path, config=SUBTYPE_GROUP_SCHEMA, items=SUBTYPE_GROUP_ITEMS)
+    project = _render(tmp_path)
+    forest = tree_mod.build_forest(project)
+    board_a = _board_node(forest, "Board A")
+
+    grp = [
+        c for c in board_a.children if c.item is not None and c.item.id == "GRP-001"
+    ]
+    assert len(grp) == 1  # plain group still nests its member
+    assert [c.item.id for c in grp[0].children if c.item] == ["CMP-001"]
+
+    sgr = [
+        c for c in board_a.children if c.item is not None and c.item.id == "SGR-001"
+    ]
+    assert len(sgr) == 1  # the subtype nests its member the same way
+    assert [c.item.id for c in sgr[0].children if c.item] == ["CMP-002"]
+    # neither is demoted to a group-view placeholder
+    assert not [c for c in board_a.children if c.view_of is not None]
+
+    assert forest.expanded_count == len(project.local_items) == 4
+
+    html = _page(tmp_path)
+    under_sgr = html.split('data-ref="SGR-001"', 1)[1].split("</details>", 1)[0]
+    assert 'data-ref="CMP-002"' in under_sgr
+    assert 'data-ref="CMP-001"' not in under_sgr
+
+
+def test_subtype_of_group_in_a_cycle_is_promoted_as_a_group_root(tmp_path):
+    """Finding 37's cycle rule promotes the smallest unreachable member of a
+    `part_of` cycle to a forest root. A subgroup in such a cycle is a group:
+    the promoted node keeps its `by_group` children. With a literal
+    `type == "group"` test it would be promoted bare and its member would be
+    promoted as its own root instead."""
+    _write(tmp_path, config=SUBTYPE_GROUP_SCHEMA, items=SUBTYPE_CYCLE_ITEMS)
+    project = _render(tmp_path)
+    forest = tree_mod.build_forest(project)
+    assert forest.expanded_count == len(project.local_items) == 3
+    # SGR-CY-001 (smallest id) is the promoted root, anchored under its own
+    # board; the other cycle member and the widget member both nest under it
+    # (locations double as the breadcrumb in the rendered page). With a literal
+    # `type == "group"` test all three would sit directly under Board A.
+    assert forest.locations == {
+        "SGR-CY-001": "Board A",
+        "SGR-CY-002": "Board A > SGR-CY-001",
+        "WDG-CY-001": "Board A > SGR-CY-001",
+    }
 
 
 # ------------------------------------------------- expand once, reference else

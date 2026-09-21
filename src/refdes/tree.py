@@ -104,7 +104,7 @@ def _group_parents(project: Project, item: Item, local_keys: set[str]) -> list[I
         target = project.item_by_ref(ref)
         if (
             target is not None
-            and target.type == "group"
+            and project.is_subtype(target.type, "group")
             and (target.id or target.key) in local_keys
         ):
             parents.append(target)
@@ -205,7 +205,7 @@ def build_forest(
         )
         roots.append(bucket_node)
     for node in roots:
-        _attach_groups(node, by_group, ref_groups, ())
+        _attach_groups(node, project, by_group, ref_groups, ())
 
     forest = TreeForest(roots=roots, board=board)
     _visit_all(forest, roots, ())
@@ -215,14 +215,14 @@ def build_forest(
         remaining = [i for i in items if _ref(i) not in forest.locations]
         head = remaining[0]
         extra = TreeNode(kind="item", label=_display(head), item=head)
-        if head.type == "group":
+        if project.is_subtype(head.type, "group"):
             token = _ref(head)
             extra.children = [
                 TreeNode(kind="item", label=_display(c), item=c)
                 for c in by_group.get(token, ())
             ]
             extra.references = list(ref_groups.get(token, ()))
-            _attach_groups(extra, by_group, ref_groups, (token,))
+            _attach_groups(extra, project, by_group, ref_groups, (token,))
         # A boarded cycle member belongs to its board's branch, not to a new
         # root: nothing may be absent from its own board.
         anchor = board or head.board
@@ -341,6 +341,7 @@ def _board_node(
 
 def _attach_groups(
     node: TreeNode,
+    project: Project,
     by_group: dict[str, list[Item]],
     ref_groups: dict[str, list[Item]],
     path: tuple[str, ...],
@@ -350,7 +351,7 @@ def _attach_groups(
     already on it is a cycle member, left as a leaf here and marked a
     duplicate by `_visit_all` rather than recursed into forever."""
     for child in node.children:
-        if child.item is None or child.item.type != "group":
+        if child.item is None or not project.is_subtype(child.item.type, "group"):
             continue
         token = _ref(child.item)
         if token in path:
@@ -360,7 +361,7 @@ def _attach_groups(
             for c in by_group.get(token, ())
         ]
         child.references = list(ref_groups.get(token, ()))
-        _attach_groups(child, by_group, ref_groups, path + (token,))
+        _attach_groups(child, project, by_group, ref_groups, path + (token,))
 
 
 def _visit_all(

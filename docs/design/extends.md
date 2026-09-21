@@ -571,5 +571,8 @@ Where the build settles something the spec left open or contradicted itself.
   `backlog.md` finding 21: resolve `extends:` in two passes so overlay nulls are
   interpreted after inheritance. A null in the type's own declaration (what
   `bound` uses) works.
-- **Untouched:** `tree.py`'s literal `type == "group"` checks, which do not
-  yet see a subtype of `group`.
+- **Tree page honours subtypes.** `tree.py`'s group decisions were the
+  literal `type == "group"` checks; they now read `project.is_subtype(...)`,
+  so a type that `extends: group` behaves as a group everywhere the tree
+  decides groupness: `part_of` parents, board-branch nesting, and cycle
+  promotion. No behaviour change for projects without a subtype of `group`.
