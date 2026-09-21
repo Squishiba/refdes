@@ -882,6 +882,86 @@ on a broken project.
 
 ---
 
+## `refdes history capture` / `redact` / `migrate-seals`
+
+Direct author-facing access to the captured-history store
+(`.refdes/history/`): a manual capture for notes a `follows:` edge will
+never supply a successor for, redaction, and the documented legacy-seal
+migration. Every subcommand **refuses under `--no-write`** (exit 2)
+rather than pretending it wrote something.
+
+### `refdes history capture <item>`
+
+Capture ITEM's (display id or surrogate key) current semantic snapshot
+as a manual `captured` event, and announce it:
+
+```bash
+refdes history capture LOG-A-011
+# captured LOG-A-011: manual capture
+```
+
+Says "captured", never "final": the item stays editable, and a later
+edit is the same `edited after captured` warning any other capture gives
+— a diagnostic, never a failure. Idempotent: one capture event per item;
+the second run prints `... is already captured; nothing was written`,
+creates no files, and announces nothing. Unlike the automatic `follows:`
+capture (deliberately clockless so an old-branch replay is
+byte-identical), an explicit capture carries `occurred_at` — it is the
+author moment §2 names as allowed to stamp a clock, and it cannot replay
+without running this exact command.
+
+### `refdes history redact <item-or-object> --confirm`
+
+Remove matching history objects and events from `.refdes/history/` and
+write one auditable `redaction` event naming what was removed — by
+digest and event id only, **without repeating any of its content**.
+TARGET is an item (display id or surrogate key: every capture event of
+it, plus the snapshots no surviving event still references) or a full
+64-hex object digest.
+
+```bash
+refdes history redact LOG-A-011 --confirm
+# redacted 1 object(s) and 1 event(s)
+# wrote redaction event 6f2a... naming what was removed (by digest and event id only -- its content is not repeated anywhere in this output)
+# Redaction reaches this history store only. It cannot remove data already committed to Git, present in clones, or published in built sites: rewrite Git history and republish (and revoke anything secret) the way you would for any leaked file.
+```
+
+Without `--confirm` the command refuses (exit 2) and writes nothing. The
+warning above is printed by every successful redaction too: this command
+cannot un-publish a leak, only clear the working store. Redaction events
+themselves are never redaction targets — removing the audit trail of a
+prior redaction would make the second leak indistinguishable from no
+leak. An object shared by two identical items is deleted only when the
+last event referencing it goes. The removal is transactional: any failure
+restores every file it had deleted.
+
+### `refdes history migrate-seals [--capture-current]`
+
+Read the legacy append-only seal files (`.refdes/log-seal*.yaml`) and
+write one `legacy-seal` marker event per seal record: **recorded hash
+only; original content was not captured.** The seal files themselves are
+read, never modified, and stay on disk until a later phase retires them
+(the migration must have run before legacy seal support ever goes away).
+Idempotent via the derived event ids.
+
+```bash
+refdes history migrate-seals
+# legacy-seal marker for LOG-A-001 (.refdes/log-seal-board-a.yaml)
+#   recorded hash only; original content was not captured; the seal file is left untouched
+# 1 legacy-seal marker(s) written, 0 already present
+```
+
+A marker carries no snapshot object — its reason names the seal file and
+the recorded hash, and nothing about it may imply the original text is
+recoverable. `--capture-current` additionally captures the *current*
+snapshot of each sealed item whose live content still matches its
+recorded hash, as a clearly dated `migrated-current` event — never
+labelled seal-time text, which is the specific misrepresentation the
+design forbids. An item whose live content has drifted reports `differs`
+and is not captured.
+
+---
+
 ## `refdes serve`
 
 Serve the project on your own machine: the ordinary rendered site as a preview,
@@ -963,6 +1043,7 @@ python -m http.server -d _site 8000
 | `.refdes/baselines/<name>.yaml` | **yes** | One file per `refdes revision`/`refdes release` stamp. Not rewritten by any ordinary command; `refdes revise` and `refdes standard upgrade` do edit it, to carry an item's content hash across a rename |
 | `.refdes/schema.json` | **no, gitignored** | The project's merged JSON Schema, for editor completion; rewritten by every command that loads the project |
 | `.refdes/copies/` | **no, gitignored** | Kept local copies of datasheet bytes, content-addressed by sha256; written only by `refdes fetch --path ...` for a remote citation with `keep_copy: true` |
+| `.refdes/history/` | **yes** | Captured-history store: content-addressed snapshot objects and derived-id events; written by the `follows:` capture and by `refdes history capture`/`redact`/`migrate-seals` |
 | `_site/` | no | Generated output |
 
 Source files are also rewritten by `refdes id`, which inserts allocated IDs in

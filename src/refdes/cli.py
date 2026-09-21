@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 
 from . import adopt as adopt_mod
@@ -13,6 +14,7 @@ from . import calc_rewrite as calc_rewrite_mod
 from . import citations as citations_mod
 from . import diagram as diagram_mod
 from . import former_ids as former_ids_mod
+from . import history as history_mod
 from . import ids as ids_mod
 from . import keys as keys_mod
 from . import lifecycle as lifecycle_mod
@@ -1171,6 +1173,152 @@ def cmd_former_ids_propose(args) -> int:
     return 1 if project.errors else 0
 
 
+_REDACT_WARNING = (
+    "Redaction reaches this history store only. It cannot remove data "
+    "already committed to Git, present in clones, or published in built "
+    "sites: rewrite Git history and republish (and revoke anything secret) "
+    "the way you would for any leaked file."
+)
+
+
+def cmd_history_capture(args) -> int:
+    """One manual `captured` event for an item a thread will never supply a
+    successor for (living-notes §2 decision 3). Says "captured", never
+    "final"."""
+    if args.no_write:
+        return _refuse_no_write("history capture", "the .refdes/history/ store")
+    project, _stale = _load(args)
+    item = project.item_by_ref(args.item)
+    if item is None:
+        print(
+            f"error: no item {args.item!r} in this project "
+            "(looked up by display id, then surrogate key)",
+            file=sys.stderr,
+        )
+        return 2
+    try:
+        result = history_mod.capture(str(project.root), item)
+    except history_mod.HistoryError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    if result.created_event:
+        print(result.announcement)
+    else:
+        print(f"{item.id or item.key} is already captured; nothing was written")
+    return 0
+
+
+def cmd_history_redact(args) -> int:
+    """Remove history objects/events and write an auditable redaction event
+    that names what was removed without repeating its content (§3)."""
+    if args.no_write:
+        return _refuse_no_write("history redact", "the .refdes/history/ store")
+    if not args.confirm:
+        print(
+            "history redact permanently removes captured snapshots and events "
+            "from .refdes/history/ and cannot be undone. Re-run with --confirm "
+            "to acknowledge that.",
+            file=sys.stderr,
+        )
+        print(_REDACT_WARNING, file=sys.stderr)
+        return 2
+    project, _stale = _load(args)
+    target = args.target
+    try:
+        if re.fullmatch(r"[0-9a-f]{64}", target):
+            result = history_mod.redact(str(project.root), object_digest=target)
+        else:
+            item = project.item_by_ref(target)
+            if item is None:
+                print(
+                    f"error: no item or history object {target!r} in this "
+                    "project (an item is addressed by display id or surrogate "
+                    "key; an object by its full 64-hex digest)",
+                    file=sys.stderr,
+                )
+                return 2
+            if not item.key:
+                print(
+                    f"error: {item.id or target} has no surrogate key; run "
+                    "`refdes id` first",
+                    file=sys.stderr,
+                )
+                return 2
+            result = history_mod.redact(str(project.root), item_key=item.key)
+    except history_mod.HistoryError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    if result.event_path is None:
+        print(f"no history objects or events matched {target}; nothing was redacted")
+        return 0
+    print(
+        f"redacted {len(result.removed_objects)} object(s) and "
+        f"{len(result.removed_events)} event(s)"
+    )
+    print(
+        "wrote redaction event "
+        f"{os.path.basename(result.event_path)[: -len('.yaml')]} "
+        "naming what was removed (by digest and event id only -- its content "
+        "is not repeated anywhere in this output)"
+    )
+    print(_REDACT_WARNING)
+    return 0
+
+
+def cmd_history_migrate_seals(args) -> int:
+    """Legacy seal files -> `legacy-seal` markers, one documented
+    transaction (§8); the seal files themselves are left on disk."""
+    if args.no_write:
+        return _refuse_no_write(
+            "history migrate-seals", "the .refdes/history/ store"
+        )
+    project, _stale = _load(args)
+    if args.capture_current:
+        build_mod.compute_hashes(project)
+    try:
+        markers = history_mod.migrate_seals(
+            project, capture_current=args.capture_current
+        )
+    except history_mod.HistoryError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    if not markers:
+        print("no legacy seal files found; nothing to migrate")
+        return 0
+    created = 0
+    for m in markers:
+        who = m.display_id or m.record_id
+        if m.marker_created:
+            created += 1
+            print(f"legacy-seal marker for {who} ({m.seal_file})")
+            print(
+                "  recorded hash only; original content was not captured; "
+                "the seal file is left untouched"
+            )
+        else:
+            print(f"{who}: already migrated ({m.seal_file})")
+        if m.current == "captured":
+            print(
+                f"  captured current content of {who} as a migrated-current "
+                "event -- clearly dated, not seal-time text"
+            )
+        elif m.current == "differs":
+            print(
+                f"  {who}: live content differs from the recorded hash; no "
+                "migrated-current snapshot was taken"
+            )
+        elif m.current == "unresolved":
+            print(
+                f"  {who}: no live item for this seal record; no "
+                "migrated-current snapshot was taken"
+            )
+    print(
+        f"{created} legacy-seal marker(s) written, "
+        f"{len(markers) - created} already present"
+    )
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     _fix_console()
 
@@ -1190,7 +1338,8 @@ def main(argv: list[str] | None = None) -> int:
         "either report what would change (id, revise, stub-tests, "
         "revision, release, keys adopt) or refuse (fetch, init, "
         "standard upgrade, standard add-preset/remove-preset, "
-        "former-ids propose --confirm). 'refdes build --no-write' still "
+        "former-ids propose --confirm, history capture/redact/"
+        "migrate-seals). 'refdes build --no-write' still "
         "writes the site -- that is the command's own output, not a side effect",
     )
     sub = parser.add_subparsers(dest="command", required=True)
@@ -1606,6 +1755,78 @@ def main(argv: list[str] | None = None) -> int:
         help="write former_ids: for these candidates (by old id), and only these",
     )
     p_former_ids_propose.set_defaults(func=cmd_former_ids_propose)
+
+    p_history = sub.add_parser(
+        "history",
+        help="capture, redact, and migrate the captured-history store",
+        description="Direct author-facing access to .refdes/history/: capture "
+        "one item's snapshot by hand (for terminal and unthreaded notes a "
+        "`follows:` edge will never supply), redact objects and events out of "
+        "the store with an auditable trail, and migrate legacy append-only "
+        "seal files into legacy-seal history markers. Every subcommand "
+        "refuses under --no-write rather than pretending it wrote something.",
+    )
+    history_sub = p_history.add_subparsers(dest="history_command", required=True)
+
+    p_history_capture = history_sub.add_parser(
+        "capture",
+        help="capture an item's current snapshot as a `captured` event",
+        description="Capture ITEM's current semantic snapshot into "
+        ".refdes/history/ as a manual `captured` event, and announce it. "
+        "Says 'captured', never 'final': the item stays editable, and a "
+        "later edit is the same 'edited after captured' diagnostic any other "
+        "capture gives. Idempotent -- one capture event per item; a second "
+        "run writes nothing new and announces nothing.",
+    )
+    p_history_capture.add_argument(
+        "item", help="display id or surrogate key of the item to capture"
+    )
+    p_history_capture.set_defaults(func=cmd_history_capture)
+
+    p_history_redact = history_sub.add_parser(
+        "redact",
+        help="remove history objects and events, with an auditable redaction event",
+        description="Remove matching history objects and events from "
+        ".refdes/history/ and write one redaction event naming what was "
+        "removed -- by digest and event id only, without repeating any of its "
+        "content. TARGET is an item (display id or surrogate key: every "
+        "capture event of it, plus the snapshots no other event still "
+        "references) or a full 64-hex object digest. Requires --confirm. "
+        "This cannot remove data already committed to Git, present in "
+        "clones, or published in built sites, and says so in its own "
+        "output.",
+    )
+    p_history_redact.add_argument(
+        "target",
+        help="display id, surrogate key, or 64-hex history object digest",
+    )
+    p_history_redact.add_argument(
+        "--confirm",
+        action="store_true",
+        help="acknowledge that redaction is irreversible and cannot reach "
+        "Git, clones, or published copies",
+    )
+    p_history_redact.set_defaults(func=cmd_history_redact)
+
+    p_history_migrate = history_sub.add_parser(
+        "migrate-seals",
+        help="record legacy seal files as legacy-seal history markers",
+        description="Read the legacy append-only seal files "
+        "(.refdes/log-seal*.yaml) and write one `legacy-seal` marker event "
+        "per seal record: recorded hash only; original content was not "
+        "captured. The seal files themselves are read, never modified, and "
+        "stay on disk until a later phase retires them. Idempotent. This is "
+        "the documented migration §8 requires before legacy seal support is "
+        "ever deleted.",
+    )
+    p_history_migrate.add_argument(
+        "--capture-current",
+        action="store_true",
+        help="also capture the current snapshot of each sealed item whose "
+        "live content still matches its recorded hash, as a clearly dated "
+        "`migrated-current` event -- never labelled seal-time text",
+    )
+    p_history_migrate.set_defaults(func=cmd_history_migrate_seals)
 
     args = parser.parse_args(argv)
     try:

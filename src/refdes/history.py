@@ -52,7 +52,10 @@ import json
 import os
 import re
 import uuid
+from datetime import datetime, timezone
 from typing import NamedTuple
+
+from . import seal as seal_mod
 
 import yaml
 
@@ -66,8 +69,11 @@ HISTORY_DIR = os.path.join(".refdes", "history")
 OBJECTS_DIR = os.path.join(HISTORY_DIR, "objects")
 EVENTS_DIR = os.path.join(HISTORY_DIR, "events")
 
-# The kinds §2/§3 name. An event of any other kind is corruption or a writer
-# from a future format, and load refuses rather than guessing.
+# The kinds §2/§3 name, plus the two H4 writers add: `legacy-seal` markers
+# (plan §H4/§H5: "recorded hash only; original content was not captured") and
+# the clearly dated `migrated-current` snapshot Q3 permits behind an explicit
+# flag. An event of any other kind is corruption or a writer from a future
+# format, and load refuses rather than guessing.
 EVENT_KINDS = frozenset(
     {
         "followed",
@@ -76,8 +82,17 @@ EVENT_KINDS = frozenset(
         "revision",
         "release",
         "redaction",
+        "legacy-seal",
+        "migrated-current",
     }
 )
+
+# Kinds that legitimately carry no snapshot object: a legacy-seal marker
+# records that a hash exists, not content (§H5's definition), and a redaction
+# event must not repeat the content it just removed (§3). Their events omit
+# the `object` key entirely rather than pointing at a digest that names
+# nothing -- a fake digest is exactly the lie the format exists to prevent.
+NO_OBJECT_KINDS = frozenset({"legacy-seal", "redaction"})
 
 # Fixed namespace for derived event ids: uuid5(namespace, "kind\0key\0succ")
 # must be identical across processes, machines, and runs, or replay (§2 case
@@ -296,7 +311,7 @@ def append_event(
     """
     if kind not in EVENT_KINDS:
         raise HistoryError(f"unknown history event kind {kind!r}")
-    if not object_digest:
+    if not object_digest and kind not in NO_OBJECT_KINDS:
         raise HistoryError("an event must name the object digest it records")
     eid = event_id(kind, item_key, successor_key)
     path = os.path.join(events_dir(root), f"{eid}.yaml")
@@ -305,8 +320,9 @@ def append_event(
         "id": eid,
         "kind": kind,
         "item_key": item_key,
-        "object": object_digest,
     }
+    if object_digest:
+        payload["object"] = object_digest
     if successor_key:
         payload["successor_key"] = successor_key
     if reason:
@@ -319,7 +335,7 @@ def append_event(
         if not isinstance(existing, dict):
             raise HistoryError(f"{path}: existing event is not a YAML mapping")
         _check_format(existing, path)
-        if existing.get("object") != object_digest:
+        if (existing.get("object") or "") != object_digest:
             raise HistoryError(
                 f"{path}: this edge was already captured against object "
                 f"{existing.get('object')!r}; refusing to re-point it at {object_digest!r}"
@@ -352,11 +368,14 @@ def load_events(root: str) -> list[dict[str, object]]:
         with open(path, "r", encoding="utf-8") as fh:
             data = yaml_safe_load(fh)
         _check_format(data, path)
-        for required in ("id", "kind", "item_key", "object"):
-            if not data.get(required):
-                raise HistoryError(f"{path}: missing required key {required!r}")
-        if data["kind"] not in EVENT_KINDS:
-            raise HistoryError(f"{path}: unknown event kind {data['kind']!r}")
+        if data.get("kind") not in EVENT_KINDS:
+            raise HistoryError(f"{path}: unknown event kind {data.get('kind')!r}")
+        required = ("id", "kind", "item_key")
+        if data["kind"] not in NO_OBJECT_KINDS:
+            required += ("object",)
+        for key in required:
+            if not data.get(key):
+                raise HistoryError(f"{path}: missing required key {key!r}")
         stem = name[: -len(".yaml")]
         if data["id"] != stem:
             raise HistoryError(
@@ -510,9 +529,12 @@ class EditedAfterCaptured(NamedTuple):
     captured_digest: str
 
 
-# Only the follows-family kinds have writers before H4; `captured`,
-# `revision`, and `release` join the comparison when their writers exist.
-_CAPTURE_KINDS = ("followed", "followed-corrected")
+# H4 gave `captured` its writer (`refdes history capture`), so it joins the
+# comparison, exactly as this comment always said it would. `revision`,
+# `release`, and `migrated-current` stay out until their comparison semantics
+# are decided (a migrated-current snapshot deliberately matches current
+# content, so letting it silence the diagnostic is a separate call).
+_CAPTURE_KINDS = ("followed", "followed-corrected", "captured")
 
 
 def _frozen_follows_key(target: object) -> "str | None":
@@ -599,3 +621,276 @@ def edited_after_captured(project) -> list:
         for key, (event, edited) in sorted(capture_index(project).items())
         if edited
     ]
+
+
+# ------------------------------------------------- H4: the author commands
+
+
+def _utc_now() -> str:
+    """The clock an explicit author moment may carry (§2): display metadata
+    only, never ordered, compared, or gated on."""
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def capture(root: str, item: Item, *, occurred_at: object = None) -> FollowCapture:
+    """One manual capture of ``item`` (``refdes history capture``, plan §H4).
+
+    A `captured` event — the plan's "manual" event — saying "captured",
+    never "final": the item stays editable, and a later edit is the same
+    H3 diagnostic as any other capture. Idempotent by the derived id: one
+    capture event per item, and a second run writes nothing and announces
+    nothing (Q4: the line prints only when an event was actually written).
+    Unlike the follows capture, this one carries a clock — H2 deliberately
+    omitted ``occurred_at`` so an edge replay is byte-identical, but an
+    explicit capture is a single author moment that cannot replay without
+    this exact command, and §2 names it as the write that may stamp time.
+    """
+    if not item.key:
+        raise HistoryError(
+            "a capture is addressed by surrogate key, and "
+            f"{item.id or '?'} has none"
+        )
+    digest = semantic_digest(item)
+    eid = event_id("captured", item.key)
+    event_path = os.path.join(events_dir(root), f"{eid}.yaml")
+    if os.path.exists(event_path):
+        return FollowCapture("", event_path, False, None)
+
+    object_file = object_path(root, digest)
+    object_existed = os.path.exists(object_file)
+    save_object(root, item)
+    try:
+        append_event(
+            root,
+            "captured",
+            item.key,
+            digest,
+            reason="manual capture",
+            occurred_at=occurred_at if occurred_at is not None else _utc_now(),
+        )
+    except Exception:
+        if not object_existed and os.path.exists(object_file):
+            os.remove(object_file)
+        raise
+    return FollowCapture(
+        f"captured {item.id or item.key}: manual capture",
+        event_path,
+        True,
+        None if object_existed else object_file,
+    )
+
+
+class RedactionResult(NamedTuple):
+    """What one ``redact`` did: the target it was addressed by, the object
+    digests and event records removed, and the redaction event written
+    (``None`` when nothing matched and nothing was written)."""
+
+    target: str
+    removed_objects: list
+    removed_events: list
+    event_path: "str | None"
+
+
+def redact(
+    root: str, *, item_key: str = None, object_digest: str = None
+) -> RedactionResult:
+    """Remove matching objects and events, then write one auditable
+    ``redaction`` event (§3, plan §H4).
+
+    The event names what was removed — object digests and event ids —
+    without repeating any of its content: a digest is an address, not the
+    secret. Rules the plan leaves open, resolved as stated in
+    ``in-prog-logs/living-notes-phase-h4.md``:
+
+    * Redaction events themselves are never redaction targets. Removing the
+      audit trail of a prior redaction would make the second leak
+      indistinguishable from no leak at all.
+    * An item target removes the events *of* that item (``item_key``), not
+      events that point at it as a successor — those record other items.
+    * An object is deleted only when no surviving event still references it
+      (content addressing lets two identical items share one snapshot).
+    * The event's ``successor_key`` carries a fingerprint of the removal
+      set, so a second, genuinely different redaction of the same target
+      gets its own event id instead of colliding with the first.
+
+    Transactional: every removed file's bytes are held in memory and
+    restored if any step fails, so a half-redacted store is not a state
+    this function can leave behind.
+    """
+    if (item_key is None) == (object_digest is None):
+        raise HistoryError("redact takes exactly one of item_key or object_digest")
+    root = str(root)
+    events = load_events(root)
+    if object_digest is not None:
+        doomed = [
+            e
+            for e in events
+            if e["kind"] != "redaction" and str(e.get("object") or "") == object_digest
+        ]
+        digests = {object_digest}
+    else:
+        doomed = [
+            e
+            for e in events
+            if e["kind"] != "redaction" and str(e["item_key"]) == item_key
+        ]
+        referenced = {str(e["object"]) for e in doomed if e.get("object")}
+        keep = [e for e in events if e not in doomed]
+        digests = {
+            d
+            for d in referenced
+            if not any(str(e.get("object") or "") == d for e in keep)
+        }
+    target = item_key or object_digest
+    object_exists = object_digest is not None and os.path.isfile(
+        object_path(root, object_digest)
+    )
+    if not doomed and not object_exists:
+        return RedactionResult(target, [], [], None)
+
+    removed_files: list[tuple[str, bytes]] = []
+    try:
+        for event in doomed:
+            path = os.path.join(events_dir(root), f"{event['id']}.yaml")
+            with open(path, "rb") as fh:
+                blob = fh.read()
+            os.remove(path)
+            removed_files.append((path, blob))
+        removed_digests = []
+        for digest in sorted(digests):
+            path = object_path(root, digest)
+            if os.path.isfile(path):
+                with open(path, "rb") as fh:
+                    blob = fh.read()
+                os.remove(path)
+                removed_files.append((path, blob))
+                removed_digests.append(digest)
+        fingerprint = hashlib.sha256(
+            "\0".join(
+                sorted(removed_digests + [str(e["id"]) for e in doomed])
+            ).encode("utf-8")
+        ).hexdigest()[:12]
+        reason = (
+            f"redacted {len(removed_digests)} object(s) and "
+            f"{len(doomed)} event(s): "
+            + "objects "
+            + (", ".join(removed_digests) or "-")
+            + "; events "
+            + ", ".join(str(e["id"]) for e in doomed)
+        )
+        event_path = append_event(
+            root,
+            "redaction",
+            str(target),
+            "",
+            successor_key=fingerprint,
+            reason=reason,
+        )
+    except Exception:
+        for path, blob in removed_files:
+            with open(path, "wb") as fh:
+                fh.write(blob)
+        raise
+    return RedactionResult(target, removed_digests, doomed, event_path)
+
+
+class SealMarker(NamedTuple):
+    """One legacy seal record's migration outcome (``refdes history
+    migrate-seals``, plan §H4). ``current`` is the ``--capture-current``
+    verdict: ``""`` (flag not given), ``"captured"``, ``"differs"`` (live
+    content no longer matches the recorded hash — capturing it would dress
+    up drift as migration), or ``"unresolved"`` (no live item)."""
+
+    seal_file: str
+    record_id: str
+    item_key: str
+    display_id: "str | None"
+    marker_path: str
+    marker_created: bool
+    current: str
+    current_path: "str | None"
+
+
+def migrate_seals(project, *, capture_current: bool = False, occurred_at: object = None) -> list:
+    """Read every legacy seal file and write one ``legacy-seal`` marker per
+    record (§8: "do not delete legacy seal support until a migration has
+    run"; the command lands in H4 so the migration is one documented
+    transaction).
+
+    A marker is "recorded hash only; original content was not captured"
+    (§H5's definition): no snapshot object, and the reason names the seal
+    file and the recorded hash so the marker is self-describing. The seal
+    file itself is never touched. Derived ids make the migration
+    idempotent; a record that appears in two files (the transitional
+    base-file/board-file overlap ``seal.py`` documents) yields one marker.
+
+    ``capture_current`` is Q3's explicit flag: for a seal record whose live
+    item's content still matches its recorded hash (compared through
+    ``seal._matches_sealed_hash``, the one shared hash-format migration
+    reader), capture the *current* snapshot as a clearly dated
+    ``migrated-current`` event — never labelled seal-time text, which is
+    the specific lie §8 forbids. Callers must run ``build.compute_hashes``
+    first; an item whose ``content_hash`` was never computed simply
+    reports ``differs``.
+    """
+    root = str(project.root)
+    markers = []
+    for board in sorted({""} | set(project.boards)):
+        path = seal_mod.seal_path(project, board)
+        if not os.path.isfile(path):
+            continue
+        rel = os.path.relpath(path, root).replace("\\", "/")
+        seals = seal_mod.load_seals(project, board)
+        for record_id in sorted(seals):
+            key, display_id, recorded, hash_format = seal_mod._seal_parts(
+                record_id, seals[record_id]
+            )
+            item = project.items.get(key) if key else None
+            if item is None and display_id:
+                item = project.item_by_id(display_id)
+            item_key = str(key or (item.key if item and item.key else display_id or record_id))
+            reason = (
+                f"legacy seal for {display_id or record_id} in {rel}; "
+                f"recorded hash {recorded}"
+                + (f" (hash_format {hash_format})" if hash_format is not None else "")
+                + "; original content was not captured"
+            )
+            marker_path = os.path.join(
+                events_dir(root), f"{event_id('legacy-seal', item_key)}.yaml"
+            )
+            marker_created = not os.path.exists(marker_path)
+            append_event(root, "legacy-seal", item_key, "", reason=reason)
+
+            current, current_path = "", None
+            if capture_current:
+                if item is None:
+                    current = "unresolved"
+                else:
+                    matches, _hash = seal_mod._matches_sealed_hash(
+                        recorded, item, project, hash_format
+                    )
+                    if not matches:
+                        current = "differs"
+                    else:
+                        digest = save_object(root, item)[0]
+                        current_path = append_event(
+                            root,
+                            "migrated-current",
+                            item.key,
+                            digest,
+                            reason=(
+                                "current content captured at seal migration; "
+                                "this is not seal-time text"
+                            ),
+                            occurred_at=(
+                                occurred_at if occurred_at is not None else _utc_now()
+                            ),
+                        )
+                        current = "captured"
+            markers.append(
+                SealMarker(
+                    rel, record_id, item_key, display_id,
+                    marker_path, marker_created, current, current_path,
+                )
+            )
+    return markers
