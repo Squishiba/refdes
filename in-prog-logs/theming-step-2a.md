@@ -109,4 +109,51 @@ with theming — and re-ran everything on the merged tree:
   patcher tests).
 - `ruff check <touched files> --select E9,F` → clean.
 
+## Follow-up: the byte-identity test and CRLF checkouts
+
+Jared landed 2a (`1b9d654`/`5191df6`) and reported
+`test_no_theme_build_is_byte_identical_to_the_pinned_output` failing in his
+checkout: `core.autocrlf=true` there materializes `assets/app.js` with CRLF, the
+build copies static assets byte-for-byte, and the pinned hash was captured from
+an LF working copy.
+
+His prescribed fix — fold `\r\n` → `\n` in each built file before hashing, keep
+the fixture — does not work as stated, and the reason is worth writing down. The
+fixture is not uniformly LF. Generated pages are written in text mode, so on the
+Windows machine that captured them they are CRLF, and their pinned hashes are
+CRLF hashes; only the copied assets were LF. Measured, not assumed:
+
+```
+index.html                 crlf_in_file=True  fixture_matches=raw
+items.json                 crlf_in_file=True  fixture_matches=raw
+.refdes-manifest.json      crlf_in_file=True  fixture_matches=raw
+assets/app.js              crlf_in_file=False fixture_matches=raw
+assets/style.css           crlf_in_file=False fixture_matches=raw
+```
+
+So folding the built tree to LF fixes the assets and breaks the other fifteen
+files — which is exactly what the first attempt did here: 15 files differing,
+test red. Since the fixture must stay as captured, the comparison has to accept
+the *content* rather than one encoding of it.
+
+**Fix**: `_digests(path)` returns the sha256 of a built file's content under
+each line-ending convention — as-is, folded to LF, expanded to CRLF — and a file
+matches when its pinned hash is one of them. Binaries (extension set
+`BINARY_EXTENSIONS`) are compared raw only, so a changed PNG byte cannot pass as
+a line ending. Fixture untouched; the assertion is now two — same file set, then
+no hash mismatches — so a missing or extra output file still fails loudly.
+
+**Proof** (`.scratch/crlf_proof2.py`, output verified):
+
+- baseline: 0 missing, 0 mismatched.
+- `assets/app.js` rewritten with CRLF (the reported condition): raw hash changes,
+  **0 mismatched** — test still passes.
+- generated `index.html` / `items.json` / `.refdes-manifest.json` folded to LF (a
+  POSIX run): raw hashes change, **0 mismatched**.
+- sabotage one non-line-ending byte of `assets/app.js`: **mismatched =
+  ['assets/app.js']** — the check still bites.
+
+`python -m pytest -q` → **1747 passed**; `ruff check tests/test_theme.py --select
+E9,F` → clean.
+
 Not pushed, not merged back — left for Jared to review and land.

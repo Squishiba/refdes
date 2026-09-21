@@ -266,11 +266,46 @@ def _coverage_project(tmp_path, site_extra: str = ""):
     return tmp_path
 
 
+# Extensions whose bytes ARE the content: a newline conversion would be wrong
+# for them, and accepting a converted variant would mask a real change.
+BINARY_EXTENSIONS = {
+    ".bmp", ".bz2", ".eot", ".gif", ".gz", ".ico", ".jpeg", ".jpg", ".mp3",
+    ".mp4", ".ogg", ".otf", ".pdf", ".png", ".svgz", ".tar", ".tif", ".tiff",
+    ".ttf", ".webm", ".webp", ".woff", ".woff2", ".zip", "",
+}
+
+
+def _digests(path):
+    """Every sha256 a built file's content hashes to under a line-ending
+    convention: as-is, folded to LF, and expanded to CRLF.
+
+    Which convention a pinned hash was captured under is a property of the
+    machine, not of the build. Generated pages are written in text mode, so
+    they are CRLF on Windows and LF on POSIX; static assets are copied
+    byte-for-byte, so they carry whatever the checkout produced -- LF under this
+    worktree's `.gitattributes`, CRLF in a `core.autocrlf=true` checkout where
+    it is not in force. The fixture was captured on Windows, so it holds CRLF
+    hashes for the generated files and LF hashes for the assets, and a single
+    normalization would break one side or the other. Accepting the three
+    line-ending variants of the same content is what makes the check measure the
+    build instead of the checkout; any byte that is not a line ending still has
+    to match exactly, and binaries are compared raw only.
+    """
+    with open(path, "rb") as fh:
+        data = fh.read()
+    variants = {hashlib.sha256(data).hexdigest()}
+    if os.path.splitext(path)[1].lower() not in BINARY_EXTENSIONS:
+        variants.add(hashlib.sha256(data.replace(b"\r\n", b"\n")).hexdigest())
+        variants.add(hashlib.sha256(data.replace(b"\n", b"\r\n")).hexdigest())
+    return variants
+
+
 def test_no_theme_build_is_byte_identical_to_the_pinned_output(tmp_path):
     """The regression this whole step has to prove: with no theme configured,
-    nothing about the built site changes -- not one byte, not one manifest
-    entry. The hashes were captured from origin/main before any theming code
-    existed, on this same fixture project."""
+    nothing about the built site changes -- not one file, not one byte beyond
+    line endings, not one manifest entry. The hashes were captured from
+    origin/main before any theming code existed, on this same fixture
+    project."""
     pinned = json.loads(open(FIXTURE_HASHES, encoding="utf-8").read())
     out = _build(_coverage_project(tmp_path))
     built = {}
@@ -278,9 +313,9 @@ def test_no_theme_build_is_byte_identical_to_the_pinned_output(tmp_path):
         for name in names:
             path = os.path.join(dirpath, name)
             rel = os.path.relpath(path, out).replace("\\", "/")
-            with open(path, "rb") as fh:
-                built[rel] = hashlib.sha256(fh.read()).hexdigest()
-    assert built == pinned
+            built[rel] = _digests(path)
+    assert set(built) == set(pinned)
+    assert {rel: pinned[rel] for rel in pinned if pinned[rel] not in built[rel]} == {}
 
 
 def test_an_override_changes_the_emitted_css(tmp_path):
