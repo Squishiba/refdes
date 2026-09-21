@@ -681,3 +681,32 @@ def test_overlay_can_retype_bound_to_extend_nothing_by_removing_it(tmp_path):
     surface as the usual link-target load error, not an extends one."""
     message = _err(tmp_path, HARDWARE3 + "types:\n  bound: null\n")
     assert "bound" in message and "extends" not in message
+
+
+def test_overlay_cannot_suppress_a_link_that_arrives_via_extends(tmp_path):
+    """The overlay merge runs before `extends:` resolves, so this null used to
+    be popped as a no-op and `part_of` then came back from `requirement` -- a
+    silent wrong answer. It is an error until two-pass resolution lands
+    (extends.md §12)."""
+    message = _err(
+        tmp_path, HARDWARE3 + "types:\n  bound:\n    links:\n      part_of: null\n"
+    )
+    assert "types.bound.links.part_of is null" in message
+    assert "not supported yet" in message and "'requirement'" in message
+
+
+def test_overlay_null_on_an_ordinary_type_still_removes_its_own_link(tmp_path):
+    project = _load(
+        tmp_path, HARDWARE3 + "types:\n  requirement:\n    links:\n      part_of: null\n"
+    )
+    assert "part_of" not in project.types["requirement"].links
+    # ...and the child, which inherits from the edited parent, follows it.
+    assert "part_of" not in project.types["bound"].links
+
+
+def test_overlay_renulling_an_already_suppressed_link_stays_suppressed(tmp_path):
+    project = _load(
+        tmp_path, HARDWARE3 + "types:\n  bound:\n    links:\n      governed_by: null\n"
+    )
+    assert "governed_by" not in project.types["bound"].links
+

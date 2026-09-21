@@ -46,7 +46,9 @@ Task: implement extends.md in full, phased per its section 8; report to refdes-2
   never declared the verb. Used on bound for governed_by, so the oracle is now literally identical
   (supersedes the "one asserted delta" text below). Documented in extends.md 2.2 and 12. Known gap:
   a null link written in a project overlay onto a base type's links is consumed by the base/overlay merge
-  before extends resolves (only nulls carried in the type's own declaration reach it).
+  before extends resolves. UPDATE: now a loud SchemaError (standards._check_overlay_link_nulls) instead of a
+  silent no-op, per refdes-2; three regression tests. Real follow-on (backlog.md finding 21): two-pass
+  extends resolution so overlay nulls are interpreted after inheritance.
 - (Superseded) Oracle: resolved dump (types + link_types, declared order) vs fixtures snapshotted before the change,
   with and without design-debate. Only diff: bound gains `governed_by: [requirement, bound]` (inherited;
   cannot be shed under Liskov) and link dict order. Asserted explicitly in the test, not waved through.

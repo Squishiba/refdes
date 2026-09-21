@@ -563,5 +563,13 @@ Where the build settles something the spec left open or contradicted itself.
 - **Single-level error** uses §6.2's wording without the `ERROR file:line —`
   frame (schema errors carry no position). The set-named-as-parent message says
   "set", not "field_set" (composition.md predates the rename).
+- **Known gap, loud not silent.** An overlay's `links: { verb: null }` on a
+  type that extends, for a verb the type does not itself declare, cannot
+  suppress the inherited link: the overlay merge runs before `extends:` resolves
+  and would pop it as a no-op. It is a `SchemaError` naming the verb
+  (`_check_overlay_link_nulls`), never a silent success. Follow-on, tracked in
+  `backlog.md` finding 21: resolve `extends:` in two passes so overlay nulls are
+  interpreted after inheritance. A null in the type's own declaration (what
+  `bound` uses) works.
 - **Untouched:** `tree.py`'s literal `type == "group"` checks, which do not
   yet see a subtype of `group`.

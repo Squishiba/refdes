@@ -99,7 +99,10 @@ and this project uses [Semantic Versioning](https://semver.org/).
   -- identical field for field and hash-, seal- and baseline-neutral. `bound`
   un-declares the `governed_by` link it would inherit with `governed_by: null`,
   a new `extends:` mechanism: `verb: null` in a child's `links:` removes an
-  inherited link (not `[]`, which means unrestricted). No migration. The design-debate preset does not adopt
+  inherited link (not `[]`, which means unrestricted). An overlay writing that
+  null for a link the type only inherits is a load error, not a silent no-op
+  (proper support needs two-pass resolution; tracked in the backlog). No
+  migration. The design-debate preset does not adopt
   `extends:` until after threads Phase 4.
 
 - **`extends:` consumers and `coverage.group_inherited`** (`docs/design/extends.md`
