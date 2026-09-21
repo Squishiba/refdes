@@ -54,3 +54,11 @@ Branch ao/refdes-121/root. Not pushed; orchestrator (refdes-2) lands.
 - Blank-key rows anywhere in a CSV are an extraction error (doc: "error for that
   row"); a spreadsheet export with a trailing `,,` row would therefore fail.
   Left strict per the doc; loosen only if a real file needs it.
+
+## XLSX (section 4): NOT started
+openpyxl is not installed in this environment (`import openpyxl` fails) and is
+not a project dependency (pyproject has no `xlsx` extra). Per the task, stopped
+at CSV. The reader registry (`sources.register`) is the seam; XLSX would add an
+`xlsx = ["openpyxl>=3.1"]` extra + a reader + named tests 17-21.
+
+Final: full suite 1439 passed; merged origin/main; nothing pushed.
