@@ -1640,7 +1640,17 @@ any project CSS file that a built-in theme depends on; reassignment of
 format with selectors, nesting, or anything else that makes a theme a program
 rather than a list of pairs.
 
-**Status: outstanding — awaiting decision.**
+**Status: decided (Jared, 2026-09-21).** The section's own "Recommendation and
+v1 scope" is accepted as written: the token-layer refactor first, shipped as a
+visually identical no-op, then theming on top — built-in named themes
+(`site: theme:`), `site: tokens:` overrides merged over the named theme,
+token-name and completeness validation, and contrast checking (error for
+built-ins, warning for project themes). v1 refuses layout-changing themes,
+remote theme URLs, any project CSS file that a built-in theme depends on,
+reassignment of `--good`/`--bad`/`--warn`/`--claim` outside their semantic
+bands, and a theme format with selectors, nesting, or anything else that
+makes a theme a program rather than a list of pairs. Implementation not
+started.
 
 ---
 
@@ -2462,7 +2472,11 @@ renders the model, it does not amend it, and in particular `Project-wide`
 is a render bucket, not a new item state anywhere in the data.
 
 **Status: three questions decided 2026-09-18; the §1 containment-spine
-question remains open.** Multi-parent items expand once — an item renders in
+question decided 2026-09-21 (recommendation (c)).** The site-level tree
+nests by the containment spine — workspace, then board, then `part_of`
+groups, then items, with the `Project-wide` bucket. The tree page already
+exists (`src/refdes/tree.py`). Multi-parent items expand once — an item
+renders in
 full under one deterministic primary parent and as a reference link under
 every other, {{cascade}}'s rule generalised (§2); duplicating was rejected,
 because in a total view a subtree repeated under N parents makes a reader

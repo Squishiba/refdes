@@ -1,0 +1,28 @@
+Record owner decisions of 2026-09-21 into docs/design/backlog.md
+================================================================
+
+Docs-only task. No code, no tests. Status lines only. No push, no merge.
+Branched from origin/main (ao/refdes-123/root), merged origin/main first
+(Already up to date: HEAD == origin/main == 4d421af).
+
+- Finding 34 (themes): status line was "Status: outstanding -- awaiting
+  decision." Now "Status: decided (Jared, 2026-09-21)." The section's own
+  "Recommendation and v1 scope" is accepted as written: token-layer refactor
+  first as a visually identical no-op, then theming -- built-in named themes
+  (site: theme:), site: tokens: overrides, token-name/completeness validation,
+  contrast checking. v1 refuses layout-changing themes, remote theme URLs,
+  project CSS files a built-in theme depends on, reassignment of
+  --good/--bad/--warn/--claim outside their semantic bands, and a theme format
+  that is a program rather than a list of pairs. Implementation not started
+  (verified: no code commits touch theme/tokens; only docs commit 0adaa18).
+- Finding 37 (tree view): status paragraph said the section-1 containment-spine
+  question "remains open". Now decided 2026-09-21 as recommendation (c): the
+  site-level tree nests by the containment spine -- workspace, then board, then
+  part_of groups, then items, with the Project-wide bucket. Noted that the tree
+  page already exists (src/refdes/tree.py). The resting 2026-09-18 decisions in
+  the same status paragraph were left untouched.
+- Finding 21/extends: nothing to do. Already decided (2026-09-19) and
+  implemented on ao/refdes-113; no status edit made.
+
+Verification: python -m pytest -q (full suite) before reporting.
+No changelog fragment: design decision record only, no user-facing behavior.
