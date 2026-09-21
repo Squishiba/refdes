@@ -1488,6 +1488,51 @@ def _checks_hash_value(by_key: dict[str, Item], project: Project, entries) -> ob
     return reduced
 
 
+def _calc_reference_values(by_key: dict[str, Item], project: Project, item: Item):
+    """Every cross-item calc reference in ``item``'s blocks, in source order,
+    as ``(target text, name, resolved target item or None, resolved Value or
+    None)``. The one place a reference line is resolved against the *evaluated*
+    project, shared by the content hash (`_calc_refs_hash_value`) and the
+    baseline snapshot (`calc_reference_snapshot`) so the two can never disagree
+    about what a reference resolved to. Unresolvable pieces come back ``None``;
+    the build has already reported them at the referring line."""
+    out = []
+    for block in calc.extract_blocks(item.body):
+        for raw_line in block.splitlines():
+            line = raw_line.partition("#")[0].rstrip()
+            pipe = calc.PIPE_UNIT_RE.match(line)
+            if pipe:
+                line = pipe.group("lhs").rstrip()
+            match = calc.ASSIGN_RE.match(line)
+            ref = calc.CROSS_REF_RE.match(match.group(2).strip()) if match else None
+            if not ref:
+                continue
+            target = resolve_link_target(by_key, project, ref.group("target"))
+            value = None
+            if target is not None and not target.external:
+                value = getattr(target, "_env", {}).get(ref.group("name"))
+            out.append((ref.group("target"), ref.group("name"), target, value))
+    return out
+
+
+def calc_reference_snapshot(project: Project, item: Item) -> dict[str, str]:
+    """``{"<target key>.<name>": "<value as displayed>"}`` for every resolved
+    cross-item reference of ``item`` -- what a baseline records so a later diff
+    can say *which* upstream value moved and from what (finding 35 §4). Keyed
+    on the target's key (its display id, when keyless), so an upstream rename
+    does not look like a moved value; the text is the readable result and
+    bounds, e.g. ``12 V (11.4 V … 12.6 V)``. Empty for an item with none."""
+    by_key = _key_index(project)
+    snapshot: dict[str, str] = {}
+    for _target_str, name, target, value in _calc_reference_values(by_key, project, item):
+        if target is None or value is None:
+            continue
+        text = calc.format_value(value, project.sigfigs)
+        bounds = calc.format_bounds(value, project.sigfigs)
+        snapshot[f"{target.key or target.id}.{name}"] = f"{text} ({bounds})" if bounds else text
+    return snapshot
+
+
 def _calc_refs_hash_value(by_key: dict[str, Item], project: Project, item: Item):
     """What an item's cross-item calc references contribute to its content
     hash (HASH_FORMAT 4, finding 35 §4), or ``None`` when it has none.
@@ -1508,30 +1553,18 @@ def _calc_refs_hash_value(by_key: dict[str, Item], project: Project, item: Item)
     reports that as an error at the referring line, this only has to be
     deterministic and distinct from any real value.
     """
-    targets = _calc_reference_targets(item)
-    if not targets:
+    refs = _calc_reference_values(by_key, project, item)
+    if not refs:
         return None
-    tokens = {t: _link_hash_token(by_key, project, t) for t in targets}
-    resolved = []
-    for block in calc.extract_blocks(item.body):
-        for raw_line in block.splitlines():
-            line = raw_line.partition("#")[0].rstrip()
-            pipe = calc.PIPE_UNIT_RE.match(line)
-            if pipe:
-                line = pipe.group("lhs").rstrip()
-            match = calc.ASSIGN_RE.match(line)
-            ref = calc.CROSS_REF_RE.match(match.group(2).strip()) if match else None
-            if not ref:
-                continue
-            target = resolve_link_target(by_key, project, ref.group("target"))
-            value = None
-            if target is not None and not target.external:
-                value = getattr(target, "_env", {}).get(ref.group("name"))
-            resolved.append([
-                tokens[ref.group("target")],
-                ref.group("name"),
-                calc.value_signature(value) if value is not None else None,
-            ])
+    tokens = {t: _link_hash_token(by_key, project, t) for t, *_ in refs}
+    resolved = [
+        [
+            tokens[target_str],
+            name,
+            calc.value_signature(value) if value is not None else None,
+        ]
+        for target_str, name, _target, value in refs
+    ]
     from . import links as links_mod
 
     body_lines = item.body.splitlines()

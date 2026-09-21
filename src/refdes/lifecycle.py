@@ -322,6 +322,9 @@ def _items_map(project: Project) -> dict[str, dict]:
         calc_hash = build_mod.calc_hash_for(item)
         if calc_hash is not None:
             entry["calc_hash"] = calc_hash
+        refs = build_mod.calc_reference_snapshot(project, item)
+        if refs:
+            entry["calc_refs"] = refs
         out[record_id] = entry
     return out
 
@@ -755,6 +758,45 @@ class DiffResult:
     # "can't tell" -- and are deliberately not counted as unchanged either.
     # Ids are the entry's current display id (see diff_against's docstring).
     uncomparable: list[str] = field(default_factory=list)
+    # Finding 35 §4: for a `changed` item whose cross-item calc references
+    # resolved to a different value than at stamp time, one line per moved
+    # reference -- `referenced DEC-PWR-001.V_in: 12 V (...) -> 11.4 V (...)` --
+    # so a dependent marked changed with nothing in its own text to point at
+    # says what moved. Empty for a baseline stamped before this was recorded.
+    moved_refs: dict[str, list[str]] = field(default_factory=dict)
+
+
+def _moved_refs(
+    project: Project, changed: list[str], current: dict[str, dict],
+    old_entries: dict[str, dict],
+) -> dict[str, list[str]]:
+    """The `referenced X.name: old -> new` lines for each changed item whose
+    baseline entry recorded ``calc_refs`` (see build.calc_reference_snapshot).
+    Silent for a baseline without them -- a missing record is not a claim that
+    nothing moved, and inventing an old value would be worse than saying
+    nothing. A reference present now but not at stamp time is the item's own
+    edit, not an upstream move, and is not listed."""
+    by_key = {i.key: i for i in project.local_items if i.key}
+    now_by_id = {}
+    for record_id, entry in current.items():
+        identity = keys_mod.baseline_identity(record_id, entry)
+        now_by_id[identity[1] if identity is not None else record_id] = entry
+    out: dict[str, list[str]] = {}
+    for item_id in changed:
+        old_refs = old_entries.get(item_id, {}).get("calc_refs") or {}
+        new_refs = now_by_id.get(item_id, {}).get("calc_refs") or {}
+        lines = []
+        for ref, new_text in new_refs.items():
+            old_text = old_refs.get(ref)
+            if old_text is None or old_text == new_text:
+                continue
+            target_ref, _, name = ref.rpartition(".")
+            target = by_key.get(target_ref) or project.item_by_id(target_ref)
+            shown = f"{target.id}.{name}" if target is not None and target.id else ref
+            lines.append(f"referenced {shown}: {old_text} -> {new_text}")
+        if lines:
+            out[item_id] = lines
+    return out
 
 
 def _stale_arithmetic(
@@ -881,6 +923,7 @@ def diff_against(project: Project, baseline: Baseline, write: bool = True) -> Di
         relabelled=sorted(relabelled),
         unchanged_count=unchanged,
         stale_arithmetic=_stale_arithmetic(project, changed, old_entries),
+        moved_refs=_moved_refs(project, changed, current, old_entries),
         # Anything the migration named but no current item matched stays in
         # the report under the id it was recorded with -- dropping it would
         # silently bury an entry we already know we can't check.
