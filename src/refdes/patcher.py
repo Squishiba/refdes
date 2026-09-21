@@ -578,7 +578,10 @@ def _plan_insert(f: _File, item: _Item, name: str, value: Any, what: str) -> Pat
     # key lands directly after the item's last line of content and ahead of the
     # blank line that separates items.
     pos = item.base + last_value.end_mark.index
-    while pos > 0 and f.text[pos - 1] in " \n":
+    # "\r" walks back too: stopping between the CR and the LF of a CRLF file
+    # would splice the new line into a broken pair, leaving the old break's
+    # halves either side of the insertion.
+    while pos > 0 and f.text[pos - 1] in " \t\r\n":
         pos -= 1
     if pos <= item.base + node.start_mark.index:
         return Refusal(f"cannot find where item {item.ref} ends", ref=item.ref, field=name)
@@ -594,7 +597,10 @@ def _plan_insert(f: _File, item: _Item, name: str, value: Any, what: str) -> Pat
         )
     block = "\n" in emitted
     addition = f"{f.eol}{indent}{name}:"
-    addition += (" " + emitted) if not block else (" " + emitted.rstrip("\n"))
+    # A block scalar's own closing break is dropped here because the break that
+    # already sits in the file at the insertion point supplies it -- rstrip("\n")
+    # alone would leave that break's CR behind on a CRLF file.
+    addition += (" " + emitted) if not block else (" " + emitted.rstrip("\r\n"))
     return PatchPlan(
         ref=item.ref,
         op="insert",
@@ -1106,6 +1112,7 @@ def _literal_block(value: str, indent: int, eol: str) -> str | None:
 def _verify(f: _File, plan: PatchPlan, op: Any) -> None:
     """Reparse the patched text with the real parser and prove points 4 and 5."""
     _check_replacement_eol(f, plan)
+    _check_break_seams(f, plan)
     patched = f.text[: plan.start] + plan.replacement + f.text[plan.end :]
     try:
         after = _load(patched)
@@ -1182,6 +1189,30 @@ def _body_view(body: str) -> str:
     # A CRLF body read back line-by-line can end on the orphan \r of its last
     # break, which is the same closing break seen from the other side.
     return folded[:-1] if folded.endswith("\r") else folded
+
+
+def _check_break_seams(f: _File, plan: PatchPlan) -> None:
+    """Neither edge of the span may sit inside a line break.
+
+    An insertion is zero-width, so its offset is chosen by walking back to the
+    end of the previous value -- and the end of a value in a CRLF file is the
+    space *between* the CR and the LF if the walk stops one character short.
+    The replacement then opens with its own break and the file's break closes
+    it: `\\r\\r\\n` at one seam and a bare `\\n` at the other. The replacement's
+    own text can be well-formed and still be spliced into a broken pair, so
+    this looks at the two seams rather than at the replacement.
+    """
+    repl = plan.replacement
+    if not repl:
+        return
+    left = f.text[plan.start - 1 : plan.start]
+    right = f.text[plan.end : plan.end + 1]
+    if left == "\r" and repl[:1] != "\n":
+        raise _LocateError("the planned edit inserts between the CR and the LF of a line break")
+    if repl[-1:] == "\r" and right != "\n":
+        raise _LocateError("the planned replacement ends inside a line break")
+    if f.eol == "\r\n" and right == "\n" and repl[-1:] != "\r":
+        raise _LocateError("the planned replacement leaves a bare LF line break in a CRLF file")
 
 
 def _check_replacement_eol(f: _File, plan: PatchPlan) -> None:

@@ -286,6 +286,130 @@ def test_crlf_yaml_body_edit_applies():
     assert apply_patch(new, revert_plan(got)) == text
 
 
+# ------------------------------------------------------- inserting a new field
+#
+# An insertion is a zero-width span, so its offset is the one place the patcher
+# can land *inside* a line break: walking back to the end of the previous value
+# stopped between the CR and the LF of a CRLF file, and the added line then
+# opened with its own break -- `\r\r\n` in the middle and an orphan `\n` at the
+# end of the run. These fixtures pin that an insertion lands on a line boundary.
+
+INSERT_YAML = "items:\n  - id: REQ-001\n    title: T\n    priority: high\n\n  - id: REQ-002\n    title: U\n"
+INSERT_MD = "---\nid: DEC-001\n---\n\nprose\n\n---\nid: DEC-002\n---\n\nmore\n"
+
+
+def _line_break_variants(text):
+    """The same file as LF, as CRLF, and each without the final break."""
+    crlf = text.replace("\n", "\r\n")
+    return {
+        "lf": text,
+        "crlf": crlf,
+        "lf-no-final-newline": text.rstrip("\n"),
+        "crlf-no-final-newline": crlf.rstrip("\r\n"),
+    }
+
+
+def assert_breaks_are_whole(text, eol):
+    """No lone CR anywhere, no CR-run, and no bare LF in a CRLF file."""
+    lone_cr = [i for i, ch in enumerate(text) if ch == "\r" and text[i + 1 : i + 2] != "\n"]
+    assert lone_cr == [], f"lone CR at {lone_cr[:3]}: {text[max(0, lone_cr[0] - 30):lone_cr[0] + 10]!r}"
+    assert "\r\r" not in text
+    if eol == "\r\n":
+        lone_lf = [i for i, ch in enumerate(text) if ch == "\n" and text[i - 1 : i] != "\r"]
+        assert lone_lf == [], f"bare LF at {lone_lf[:3]}"
+
+
+def inserted(text, ref, op, eol, expected_value):
+    """Plan an insertion, apply it, and hold the result to all four guarantees."""
+    got = plan(text, ref, op)
+    new = apply_patch(text, got)
+    if got.op == "insert":
+        assert got.start == got.end, "an insertion is zero-width"
+    # 2. everything outside the insertion point is the same bytes
+    assert new[: got.start] == text[: got.start]
+    assert new[len(new) - len(text) + got.end :] == text[got.end :]
+    # 1. the break structure survives
+    assert_breaks_are_whole(new, eol)
+    # 3. revert is byte-identical
+    assert apply_patch(new, revert_plan(got)) == text
+    # 4. the real parser sees exactly the intended value, and nothing else moved
+    after = patcher._load(new)
+    assert len(after.items) == len(patcher._load(text).items)
+    item = next(it for it in after.items if it.ref == ref)
+    if isinstance(op, SetField):
+        assert item.fields[op.name].value == str(expected_value)
+    elif item.shape == "md-front-matter":
+        entry = next(e for e in after.projection if e[0].get("id") == ref or e[0].get("key") == ref)
+        assert entry[1].rstrip("\r\n") == expected_value.rstrip("\n")
+    else:
+        assert item.fields["body"].value.rstrip("\n") == expected_value.rstrip("\n")
+    return new, got
+
+
+def test_insert_yaml_body_all_line_ending_variants():
+    for eol, text in _line_break_variants(INSERT_YAML).items():
+        inserted(text, "REQ-002", SetBody("Replacement body.\nSecond line."), eol, "Replacement body.\nSecond line.")
+
+
+def test_insert_yaml_field_all_line_ending_variants():
+    for eol, text in _line_break_variants(INSERT_YAML).items():
+        inserted(text, "REQ-001", SetField("owner", "Jared"), eol, "Jared")
+
+
+def test_insert_md_front_matter_field_all_line_ending_variants():
+    for eol, text in _line_break_variants(INSERT_MD).items():
+        inserted(text, "DEC-001", SetField("owner", "Jared"), eol, "Jared")
+
+
+def test_insert_md_body_all_line_ending_variants():
+    # DEC-002's body exists but the edit is the same shape for a file whose
+    # last item ends without a final break.
+    for eol, text in _line_break_variants(INSERT_MD).items():
+        new, got = inserted(text, "DEC-002", SetBody("New prose.\n"), eol, "New prose.")
+        assert "New prose." in new
+        assert got.shape == "md-body"
+
+
+def test_insert_crlf_yaml_body_is_crlf_throughout():
+    text = INSERT_YAML.replace("\n", "\r\n")
+    new, got = inserted(text, "REQ-002", SetBody("Replacement body.\nSecond line."), "\r\n", "Replacement body.\nSecond line.")
+    assert "\n" not in new.replace("\r\n", "")
+    assert "body: |-" in new
+    assert yaml.safe_load(new)["items"][1]["body"] == "Replacement body.\nSecond line."
+
+
+def test_insert_keeps_a_missing_final_newline_missing():
+    text = INSERT_YAML.replace("\n", "\r\n").rstrip("\r\n")
+    new, _ = inserted(text, "REQ-002", SetBody("Body.\n"), "\r\n", "Body.")
+    assert not new.endswith("\r\n") and not new.endswith("\n")
+    lf = INSERT_YAML.rstrip("\n")
+    new, _ = inserted(lf, "REQ-002", SetBody("Body.\n"), "\n", "Body.")
+    assert not new.endswith("\n")
+
+
+def test_insert_leaves_other_items_untouched():
+    text = INSERT_YAML.replace("\n", "\r\n")
+    new, _ = inserted(text, "REQ-001", SetField("owner", "Jared"), "\r\n", "Jared")
+    before = yaml.safe_load(text)["items"]
+    after = yaml.safe_load(new)["items"]
+    assert before[1] == after[1]
+    assert after[0]["owner"] == "Jared"
+    assert {k: v for k, v in after[0].items() if k != "owner"} == before[0]
+
+
+def test_an_insertion_offset_inside_a_break_is_refused():
+    """Sabotage the other way: a plan whose zero-width offset lands between the
+    CR and the LF must be refused, not spliced into a broken pair."""
+    from dataclasses import replace as dreplace
+
+    text = INSERT_YAML.replace("\n", "\r\n")
+    got = plan(text, "REQ-002", SetBody("Replacement body.\nSecond line."))
+    f = patcher._load(text)
+    split = dreplace(got, start=got.start + 1, end=got.start + 1)
+    with pytest.raises(patcher._LocateError):
+        patcher._verify(f, split, SetBody("Replacement body.\nSecond line."))
+
+
 def test_flow_style_item_scalar_replacement():
     text = "items: [{id: REQ-001, title: T, priority: high}]\n"
     new, _ = edited(text, "REQ-001", SetField("priority", "low"))
@@ -679,6 +803,26 @@ def test_crlf_copies_of_the_repo_edit_their_bodies_without_refusal(rel, text):
         assert new[: got.start] == text[: got.start], rel
         assert new[len(new) - len(text) + got.end :] == text[got.end :], rel
         assert apply_patch(new, revert_plan(got)) == text, f"{rel} {item.ref} body"
+
+
+@pytest.mark.parametrize("rel,text", _crlf_item_files())
+def test_crlf_copies_of_the_repo_take_a_new_field_without_broken_breaks(rel, text):
+    """Every real item must accept a field it does not have yet, on a CRLF
+    checkout, with no split line break and a byte-identical revert."""
+    f = _load(text)
+    if f is None:
+        pytest.skip(f"{rel} is not a patchable items file")
+    for item in f.items:
+        name = "patcher_probe"
+        if name in item.fields:
+            continue
+        got = plan_patch(text, item.ref, SetField(name, "probe value"))
+        assert isinstance(got, PatchPlan), f"{rel} {item.ref}: {got.reason}"
+        new = apply_patch(text, got)
+        assert new[: got.start] == text[: got.start], rel
+        assert new[len(new) - len(text) + got.end :] == text[got.end :], rel
+        assert_breaks_are_whole(new, "\r\n")
+        assert apply_patch(new, revert_plan(got)) == text, f"{rel} {item.ref}.{name}"
 
 
 def test_the_repo_has_nothing_the_patcher_refuses():
