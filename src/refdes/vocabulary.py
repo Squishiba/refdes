@@ -226,7 +226,7 @@ def entries(project: Project) -> Vocabulary:
                     _field_entry(fname, spec if isinstance(spec, dict) else {})
                     for fname, spec in raw_fields.items()
                 ],
-                included_by=sorted(_includers(project, name, raw_fields)),
+                included_by=sorted(_includers(project, name, raw)),
             )
         )
 
@@ -303,19 +303,62 @@ def _includers(project: Project, name: str, raw: dict) -> set[str]:
     """Types that pull this set in.
 
     `include:` is expanded and popped during resolution, so membership is
-    re-derived the way finding 38 §5 suggests: a type whose fields are a
-    superset of the set's fields includes it. Exact for the ordinary case --
-    a type that re-declares one of the set's fields with a different
-    definition still shows as an includer, which is the honest answer.
+    re-derived the way finding 38 §5 suggests -- widened to links and body
+    alongside the widening of sets themselves (docs/design/composition.md
+    §5): a type matches when it still carries the set's whole contribution,
+    every field under the same *semantic* spec (`doc:` may differ, which is
+    exactly what a doc-only patch produces), every link verb with identical
+    targets, and the same body. Matching field names alone would report
+    every type with a `title` as an includer of `named_title`, required or
+    not. The inference still cannot tell an include from an identical
+    inherited or hand-written declaration, and a type that fully shadows a
+    set's field with a different definition drops out: the page reports who
+    carries the contribution, which is the honest approximation of who
+    included it.
     """
-    names = set(raw)
-    if not names:
+    fields = raw.get("fields") or {}
+    links = raw.get("links") or {}
+    body = raw.get("body")
+    if not (fields or links or body):
         return set()
-    return {
-        type_name
-        for type_name, spec in project.types.items()
-        if names <= set(spec.fields)
-    }
+    includers = set()
+    for type_name, spec in project.types.items():
+        if not all(
+            _carries_field_spec(spec.fields.get(fname), fspec)
+            for fname, fspec in fields.items()
+        ):
+            continue
+        type_links = spec.links or {}
+        if not all(
+            verb in type_links
+            and list(type_links[verb] or []) == list(targets or [])
+            for verb, targets in links.items()
+        ):
+            continue
+        if body is not None and (
+            spec.body_on_change != (body or {}).get("on_change", "invalidate")
+            or bool(spec.body_required) != bool((body or {}).get("required", False))
+        ):
+            continue
+        includers.add(type_name)
+    return includers
+
+
+def _carries_field_spec(resolved, declared) -> bool:
+    """Whether a resolved FieldSpec still carries a set's field definition:
+    every key that affects validation, hashing or invalidation agrees; only
+    `doc:` may differ."""
+    if resolved is None:
+        return False
+    declared = declared or {}
+    return (
+        resolved.type == declared.get("type", "text")
+        and resolved.on_change == declared.get("on_change", "invalidate")
+        and bool(resolved.required) == bool(declared.get("required", False))
+        and resolved.required_when == declared.get("required_when")
+        and resolved.choices == declared.get("choices")
+        and resolved.default == declared.get("default")
+    )
 
 
 def _assign_anchors(vocab: Vocabulary) -> None:
@@ -544,6 +587,48 @@ EXAMPLES: dict[tuple[str, str], str] = {
         "      rev: E\n"
         "      page: \"14\"\n"
         "      keep_copy: false"
+    ),
+    # -------------------------------------------------------------- sets
+    ("sets", "statement_title"): (
+        "types:\n"
+        "  requirement:\n"
+        "    include: [statement_title]\n"
+        "    fields:\n"
+        "      # a doc-only patch keeps the type's own wording for the field\n"
+        "      title: { doc: \"An optional short label for tables and previews.\" }\n"
+        "- id: REQ-PWR-001\n"
+        "  title: 12 V rail tolerance\n"
+        "  body: The 12 V rail must stay within 5% under load."
+    ),
+    ("sets", "named_title"): (
+        "types:\n"
+        "  decision:\n"
+        "    include: [named_title]\n"
+        "- id: DEC-PWR-001\n"
+        "  title: Regulator choice\n"
+        "  # title is required on decision, test and component"
+    ),
+    ("sets", "grouped"): (
+        "types:\n"
+        "  requirement:\n"
+        "    include: [grouped]\n"
+        "- id: REQ-IO-001\n"
+        "  part_of: [GRP-IO-001]\n"
+        "  # membership is declared by the member, never by the group"
+    ),
+    ("sets", "claims"): (
+        "types:\n"
+        "  decision:\n"
+        "    include: [claims]\n"
+        "- id: DEC-PWR-001\n"
+        "  satisfies: [REQ-PWR-001]\n"
+        "  constrained_by: [BND-PWR-001]"
+    ),
+    ("sets", "invalidate_body"): (
+        "types:\n"
+        "  decision:\n"
+        "    include: [invalidate_body]\n"
+        "# editing such a body marks downstream items suspect"
     ),
     # ---------------------------------------------------- engine-reserved keys
     ("keys", "id"): (

@@ -14,7 +14,12 @@ engine and sit at the end of this file.
 
 from __future__ import annotations
 
+import json
+import os
+from collections import defaultdict
+
 import pytest
+import yaml
 from conftest import write_project_config
 from helpers import _build_at
 
@@ -461,3 +466,93 @@ def test_extends_and_include_together_own_declaration_wins(tmp_path, monkeypatch
     assert project.types["k"].links["refines"] == ["p"]
     # The parent's own resolved spec is untouched by its child.
     assert project.types["p"].fields["b"].doc == "from the parent"
+
+
+# ------------------------------------------- the base.yaml factoring pass
+# (composition.md Q3: the deferred sets-factoring of hardware@3's base.yaml,
+# accepted with the resolved-schema oracle as its acceptance gate.)
+
+BASE_YAML = os.path.join(
+    os.path.dirname(__file__), "..",
+    "src", "refdes", "standards", "hardware", "v3", "base.yaml",
+)
+
+
+def _own_declarations(base: dict):
+    """(kind, name, canonical spec, type) for every declaration a type makes
+    itself -- fields, link verbs, body. Includes are NOT expanded: the point
+    is what the file duplicates, not what the merge resolves to."""
+    out = []
+    for tname, spec in (base.get("types") or {}).items():
+        for fname, fspec in (spec.get("fields") or {}).items():
+            out.append(("field", fname, json.dumps(fspec, sort_keys=True), tname))
+        for verb, targets in (spec.get("links") or {}).items():
+            out.append(("link", verb, json.dumps(targets, sort_keys=True), tname))
+        if spec.get("body") is not None:
+            out.append(("body", "body", json.dumps(spec["body"], sort_keys=True), tname))
+    return out
+
+
+def _base_yaml() -> dict:
+    with open(BASE_YAML, encoding="utf-8") as fh:
+        return yaml.safe_load(fh)
+
+
+def test_base_yaml_declares_nothing_identically_twice():
+    """No field spec, link verb or body block is declared byte-identically
+    on two or more types of hardware@3's base.yaml.
+
+    Before the factoring pass the file carried eight redundant declarations:
+    `part_of: [group]` on four types, `satisfies: [requirement, bound]` and
+    `constrained_by: [bound]` on two each, and `body: { on_change:
+    invalidate }` on four. Each now lives in a set exactly once (or, for
+    `bound`, arrives through `extends:`). Doc-only patches are not
+    duplicates -- the shared structure sits in the set once and the patch
+    carries only the type's own sentence."""
+    groups = defaultdict(list)
+    for kind, name, canon, tname in _own_declarations(_base_yaml()):
+        groups[(kind, name, canon)].append(tname)
+    dupes = {key: types for key, types in groups.items() if len(types) > 1}
+    assert not dupes, "byte-identical duplicated declarations: " + "; ".join(
+        f"{kind} {name!r} on {types}" for (kind, name, _), types in dupes.items()
+    )
+
+
+def test_base_yaml_doc_only_diffs_are_the_approved_survivors():
+    """Full field redeclarations that differ only in `doc:` are exactly the
+    three pairs the spec leaves in place, no more: the requirement/bound
+    `status` and `rationale` pair -- a set's fields land before the type's
+    own, so routing them through one would strand `bound`'s `limit` after
+    `rationale` instead of between `title` and `status`, and doc-only
+    patches do not apply across `extends:` -- and the `checks` pair
+    (composition Q2: flattening decision's `check_severity` sentence loses
+    information, so both stay fully declared). Doc-only PATCHES are not
+    counted: their shared structure lives in the set once."""
+    by_name: dict[str, dict[str, dict]] = defaultdict(dict)
+    for tname, spec in (_base_yaml().get("types") or {}).items():
+        for fname, fspec in (spec.get("fields") or {}).items():
+            if fspec is None or set(fspec) == {"doc"}:
+                continue  # a doc-only patch, not a redeclaration
+            by_name[fname][tname] = fspec
+    pairs = []
+    for fname, per_type in by_name.items():
+        semantic = defaultdict(list)
+        for tname, fspec in per_type.items():
+            key = json.dumps(
+                {k: v for k, v in fspec.items() if k != "doc"},
+                sort_keys=True,
+            )
+            semantic[key].append(tname)
+        for holders in semantic.values():
+            if len(holders) > 1:
+                docs = {json.dumps(per_type[t].get("doc")) for t in holders}
+                assert len(docs) == len(holders), (
+                    f"fields.{fname} is declared identically (doc included) "
+                    f"on {holders} -- that is duplication, not a survivor"
+                )
+                pairs.append((fname, tuple(sorted(holders))))
+    assert sorted(pairs) == sorted([
+        ("status", ("bound", "requirement")),
+        ("rationale", ("bound", "requirement")),
+        ("checks", ("component", "decision")),
+    ])

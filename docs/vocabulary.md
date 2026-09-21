@@ -555,6 +555,76 @@ types:
       keep_copy: false
 ```
 
+### `claims`
+
+_No definition._
+
+- **Included by:** `component`, `decision`
+
+**Example:**
+
+```yaml
+types:
+  decision:
+    include: [claims]
+- id: DEC-PWR-001
+  satisfies: [REQ-PWR-001]
+  constrained_by: [BND-PWR-001]
+```
+
+### `grouped`
+
+_No definition._
+
+- **Included by:** `bound`, `component`, `decision`, `requirement`, `test`
+
+**Example:**
+
+```yaml
+types:
+  requirement:
+    include: [grouped]
+- id: REQ-IO-001
+  part_of: [GRP-IO-001]
+  # membership is declared by the member, never by the group
+```
+
+### `invalidate_body`
+
+_No definition._
+
+- **Included by:** `component`, `decision`, `log`, `test`
+
+**Example:**
+
+```yaml
+types:
+  decision:
+    include: [invalidate_body]
+# editing such a body marks downstream items suspect
+```
+
+### `named_title`
+
+_No definition._
+
+- **Included by:** `component`, `decision`, `test`
+
+| Field | Definition | Type | Required |
+|---|---|---|---|
+| `title` | What this item is, in one line. Required. | text | yes |
+
+**Example:**
+
+```yaml
+types:
+  decision:
+    include: [named_title]
+- id: DEC-PWR-001
+  title: Regulator choice
+  # title is required on decision, test and component
+```
+
 ### `provenance`
 
 _No definition._
@@ -578,6 +648,30 @@ types:
 - id: REQ-PWR-001
   source: Customer spec rev D, §3.1
   tags: [power]
+```
+
+### `statement_title`
+
+_No definition._
+
+- **Included by:** `bound`, `requirement`
+
+| Field | Definition | Type | Required |
+|---|---|---|---|
+| `title` | An optional short label for tables and previews. The item's content is the body, not this. | text | no |
+
+**Example:**
+
+```yaml
+types:
+  requirement:
+    include: [statement_title]
+    fields:
+      # a doc-only patch keeps the type's own wording for the field
+      title: { doc: "An optional short label for tables and previews." }
+- id: REQ-PWR-001
+  title: 12 V rail tolerance
+  body: The 12 V rail must stay within 5% under load.
 ```
 
 ### `stewardship`

@@ -481,9 +481,9 @@ type: requirement
 # title:  # text
 status: draft  # choices: draft, active, retired
 # rationale:  # text
+# part_of: []  # target: group
 # refines: []  # target: requirement
 # governed_by: []  # target: requirement, bound
-# part_of: []  # target: group
 ---
 
 <!-- required: the content itself goes here. -->
@@ -530,13 +530,13 @@ status: proposed  # choices: proposed, in_progress, accepted, on_hold, rejected,
 # date:  # date
 # options:  # options
 # checks:  # checks
+# part_of: []  # target: group
 # satisfies: []  # target: requirement, bound
 # constrained_by: []  # target: bound
 # supersedes: []  # target: decision
 # selects: []  # target: component
 # blocked_by: []  # target: any
 # recorded_by: []  # target: log
-# part_of: []  # target: group
 ---
 
 <!-- optional body. -->
@@ -555,8 +555,8 @@ type: test
 # last_reviewed:  # date
 title:  # required -- text
 status: planned  # choices: planned, passing, failing, blocked
-# verifies: []  # target: requirement, bound
 # part_of: []  # target: group
+# verifies: []  # target: requirement, bound
 ---
 
 <!-- optional body. -->
@@ -580,11 +580,11 @@ title:  # required -- text
 status: candidate  # choices: candidate, selected, obsolete
 # rationale:  # text; required when it has a link under 'alternate'
 # checks:  # checks
+# part_of: []  # target: group
 # satisfies: []  # target: requirement, bound
 # constrained_by: []  # target: bound
 # drop_in: []  # target: component
 # alternate: []  # target: component
-# part_of: []  # target: group
 ---
 
 <!-- optional body. -->
