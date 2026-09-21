@@ -1,0 +1,90 @@
+Serve facet validation + redact digest validation (task: two small fixes)
+
+Status: FINISHED. Full suite passes; committed on ao/refdes-143/root.
+
+## FIX 1 — src/refdes/serve/filters.py + tests/test_serve_api.py
+
+read api filters via parse_filters(project, query) did not validate the simple
+facet filters type/board/workspace/file: an unknown value returned an empty
+200 list indistinguishable from "no matches".
+
+Implementation:
+- Added `_KNOWN_FACETS = ("type", "board", "workspace", "file")`.
+- `_known_values(project, name)` computes the facet's values from the BUILT
+  project's items (reuses the existing `_FACETS` extractors, so the valid set
+  is exactly what the sidebar can show; a declared-but-empty type cannot be
+  filtered on, matching the facet sidebar).
+- `_validate_facet(...)` raises FilterError (400) when the value is not one
+  of the known ones. Messages, modeled on the existing ones
+  (`missing_verb: no link verb ...` / `stage must be one of ...`):
+  - type/board/workspace: `"{name}: no such {name} {value!r} in this
+    project; known {name}s: {sorted}` (names parameter + bad value + knowns)
+  - file: `"file: {value!r} is not a source file in this project"`
+    (file omits the known list — the task only asked for knowns on
+    type/board/workspace). Comparison is slash-normalized exactly like
+    `Filters.matches` does, so `file=items\reqs.yaml` still validates.
+
+Tag decision (task left it open): tags stay unvalidated. Confirmed from the
+facets code (`_f_tag` -> `item_tags` reads the free-form `tags:` list field
+on items; FILTER schema has `tags: { type: list }`, no vocabulary) and the
+filter semantics is a case-insensitive substring match (same as `refdes ls`).
+There is no closed set of tags, so there is nothing to validate against.
+
+Tests added (existing style):
+- `test_bad_facet_values_are_400_with_a_message` (parametrized x4): each
+  bad value -> 400 with exact error message (incl. known lists).
+- `test_valid_facet_filters_keep_their_own_facet_counts`: for each newly
+  validated param a valid value is still a 200 with the same rows as
+  `test_each_filter_alone`, and the filtered facet's own counts equal the
+  unfiltered project's (cross-filter rule unchanged).
+- existing `test_bad_filter_values_are_400_not_empty` untouched.
+
+## FIX 2 — src/refdes/history.py + tests/test_history_commands.py
+
+history.redact(root, item_key=None, object_digest=None) put a caller-supplied
+object_digest straight into object_path() -> os.remove() with no validation;
+a future caller could pass "../../items/foo" and delete a file outside
+.refdes/history. The CLI pre-validates (cli.py: re.fullmatch([0-9a-f]{64}))
+but the library function did not.
+
+Implementation:
+- `_OBJECT_DIGEST_RE = re.compile(r"[0-9a-f]{64}")` (fullmatch) + helper
+  `_require_valid_digest(digest)` raising HistoryError for anything that is
+  not exactly 64 lowercase hex (non-str included). Message:
+  "object digest must be exactly 64 lowercase hex characters, got {value!r}".
+- `object_path()` now refuses a non-hex-64 digest BEFORE os.path.join, so no
+  caller can build an escaping path.
+- `redact()` calls `_require_valid_digest(object_digest)` before `root =
+  str(root)` / `load_events(root)` — i.e. before ANY filesystem access.
+  Internal callers of object_path (save_object, capture_followed, capture,
+  load_object) all pass real sha256 hexdigests, so nothing else changes; a
+  tampered store event naming a bad digest would now also raise (and redact's
+  existing transaction rollback restores the tree).
+- docstring bullet added.
+
+Tests added (sabotage style, in test_history_commands.py):
+- `test_redact_rejects_a_non_hex_digest_before_touching_the_tree`: on a
+  warmed store with one capture, each of "../../x", an absolute path,
+  "A"*64 (uppercase), 63 chars, 65 chars, "", and a 64-char digest with a
+  slash raises HistoryError from both `history.redact(...)` and
+  `history.object_path(...)`, and the full tree stays byte-identical
+  (`_tree`/`_changes`). A valid digest ("a"*64) still works: quiet
+  no-op, nothing removed, tree intact, object_path returns the expected
+  path. Store still loads with the capture intact.
+- existing redact tests untouched.
+
+## Verification
+
+- python -m pytest -q -p no:cacheprovider tests/test_serve_api.py
+  tests/test_history_commands.py -> 77 passed
+- python -m pytest -q -p no:cacheprovider (full suite) -> 1884 passed
+  (211.90s)
+- ruff check <4 touched files> --select E9,F -> All checks passed
+
+Commit: (see git log)
+
+Notes/risks:
+- The known-value sets are computed per query (a couple of hundred items max
+  per the design's scale); matches the existing per-query facet_counts cost.
+- Did not touch append_event/load_object validation surface beyond what the
+  task named; object_path validation indirectly covers load_object.

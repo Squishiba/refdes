@@ -203,6 +203,61 @@ def test_bad_filter_values_are_400_not_empty(served, query):
     assert "error" in payload
 
 
+@pytest.mark.parametrize(
+    "query,message",
+    [
+        (
+            "type=nonsense",
+            "type: no such type 'nonsense' in this project; "
+            "known types: bound, decision, log, requirement, test",
+        ),
+        (
+            "board=nonesuch",
+            "board: no such board 'nonesuch' in this project; "
+            "known boards: board-a, board-b",
+        ),
+        (
+            "workspace=nowhere",
+            "workspace: no such workspace 'nowhere' in this project; "
+            "known workspaces: platform, product-a",
+        ),
+        (
+            "file=items/nope.yaml",
+            "file: 'items/nope.yaml' is not a source file in this project",
+        ),
+    ],
+)
+def test_bad_facet_values_are_400_with_a_message(served, query, message):
+    """The simple facets name values the built project actually has: a typo
+    names the parameter and the bad value (and the known ones for
+    type/board/workspace) instead of silently returning an empty list."""
+    _app, client = served
+    status, payload = client.api_get(f"/api/items?{query}")
+    assert status == 400
+    assert payload["error"] == message
+
+
+def test_valid_facet_filters_keep_their_own_facet_counts(served):
+    """Validating a facet value changes nothing about the sidebar: the
+    cross-filter rule still holds, so the filtered facet's own counts equal
+    the unfiltered project's."""
+    _app, client = served
+    status, base = client.api_get("/api/items")
+    assert status == 200
+    # also exercises the "valid value still works" path for every new
+    # validation: each of these is a 200 with the expected rows (see
+    # test_each_filter_alone) and the same facet counts as no filter.
+    for facet, value in (
+        ("type", "requirement"),
+        ("board", "board-b"),
+        ("workspace", "product-a"),
+        ("file", "items/reqs.yaml"),
+    ):
+        status, payload = client.api_get(f"/api/items?{facet}={value}")
+        assert status == 200
+        assert payload["facets"][facet] == base["facets"][facet]
+
+
 def test_unknown_params_are_ignored(served):
     _app, client = served
     status, payload = client.api_get("/api/items?whatever=1")

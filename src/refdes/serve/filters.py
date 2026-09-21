@@ -176,7 +176,8 @@ class Filters:
 def parse_filters(project: Project, query: dict[str, list[str]]) -> Filters:
     """Build a `Filters` from a parsed query string. Unknown parameters are
     ignored (forward-compatible); known ones are validated here so a typo is a
-    400 rather than an empty list."""
+    400 rather than an empty list. `type`, `board`, `workspace`, and `file`
+    must name values the built project actually has (see `_validate_facet`)."""
     values: dict[str, str] = {}
     for name in FILTER_PARAMS:
         value = _first(query, name)
@@ -193,6 +194,8 @@ def parse_filters(project: Project, query: dict[str, list[str]]) -> Filters:
             declared = spec is not None and bool(spec.links)
             if not declared and value not in project.link_types:
                 raise FilterError(f"missing_verb: no link verb {value!r} in this project")
+        if name in _KNOWN_FACETS:
+            _validate_facet(project, name, value)
         values[name] = value
     filters = Filters(values=values)
     for name in ("links_to", "linked_from"):
@@ -260,6 +263,41 @@ _FACETS = {
     "check": _f_check,
     "blocked": _f_blocked,
 }
+
+# The simple facets validated against the built project's own values, in
+# `parse_filters` -- a typo is a 400, never a silently-empty list. `tag` is
+# deliberately absent: tags are a free-form `tags:` list field, matched as a
+# case-insensitive substring, so there is no closed set to validate against.
+_KNOWN_FACETS = ("type", "board", "workspace", "file")
+
+
+def _known_values(project: Project, name: str) -> set[str]:
+    """The values of one facet the *built* project actually has -- what a
+    sidebar checkbox can offer, and the only values that facet's filter may
+    take. Computed from the items, never from a schema scan: a declared type
+    with no items cannot appear in the list, exactly as it cannot in the
+    sidebar."""
+    extract = _FACETS[name]
+    known: set[str] = set()
+    for item in project.items.values():
+        known.update(extract(project, item))
+    return known
+
+
+def _validate_facet(project: Project, name: str, value: str) -> None:
+    """A facet filter must name a value the built project actually has, or
+    raise like every other bad filter. `file` compares slash-normalized, as
+    `matches` does."""
+    candidate = _norm_file(value) if name == "file" else value
+    known = _known_values(project, name)
+    if candidate in known:
+        return
+    if name == "file":
+        raise FilterError(f"file: {value!r} is not a source file in this project")
+    raise FilterError(
+        f"{name}: no such {name} {value!r} in this project; "
+        f"known {name}s: {', '.join(sorted(known))}"
+    )
 
 
 def facet_counts(
