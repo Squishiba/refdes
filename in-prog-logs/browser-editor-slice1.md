@@ -42,3 +42,51 @@ Decisions made inside the doc's frame (not new design calls):
 Tests: test_serve_security (37), test_serve_state (10), test_serve_cli (2),
 test_no_write editor GET/preview/rebuild byte-identity. Full suite: 1443 pass.
 Difficulty: my shell heredocs mangled backslash escapes twice; used Edit/Write.
+
+## Chunk 2 — read-side API + editor shell (done)
+Merged origin/main first (twice: living-notes history.py, then hardware@3
+sets refactor; no conflicts with this work).
+
+- `serve/filters.py`: the filtered query over the *built* snapshot. Params:
+  type, board, workspace, tag, file, stage, check, blocked(yes/no),
+  links_to, linked_from, missing_verb, q, limit. Single value per param,
+  AND-combined; matching follows `refdes ls` where it has an equivalent
+  (tag/q substring, file slash-normalized exact). Semantics I fixed where
+  the doc is silent (design calls, logged per instruction):
+  * `stage` only counts coverable items (a non-coverable item has no stage,
+    not "open"); `check` rolls up none/pass/fail/unknown like items.json;
+    `blocked` = has a declared blocked_by edge (any chain depth).
+  * `links_to`/`linked_from` name a target (display id or key) and match
+    resolved links/backlinks under any verb; `missing_verb` = type declares
+    the verb, item has no resolved target for it.
+  * Facet counts are cross-filtered (a facet's counts ignore only its own
+    filter) — the honest number for a sidebar. `facet_totals` reports each
+    facet's matched total.
+  * Bad values (stage=banana, unresolved links_to, limit out of range) are
+    400s, never an empty list. Unknown params ignored (forward-compat).
+- `serve/api.py`: `/api/items` (rows carry `handle` = the project.items dict
+  key, so keyless/provisional items stay addressable) and `/api/item/<ref>`
+  (fields, body, links both directions, coverage, checks, attributed
+  diagnostics, sealed/append_only, preview page name). Ref accepted: dict
+  key, display id, or surrogate key. `is_sealed` reads `.refdes/` seal
+  files only — verified byte-identity.
+- Shell UI (`serve/static/`): index.html is now sidebar|list|detail;
+  new filters.js (URL<->state, facet buttons with counts), list.js, item.js
+  (read-only view + preview iframe); app.js is a hash router
+  (`#/items?filters`, `#/items/<handle>?filters`) that refetches on
+  `refdes:rebuilt`. Plain ES modules, no inline script, no framework; the
+  JS renders API fields only. style.css extended.
+- Tests: tests/test_serve_api.py (52: every filter alone and combined,
+  cross-filtered counts, URL round-trip, 400s, item view incl. handle
+  addressing + diagnostics + seal state, token/Host/Origin/405 gating).
+  serve_support.py gained `make_filter_project` (two boards, two workspaces,
+  five files, verified/satisfied/open, pass+fail checks, a blocked decision,
+  a missing-verb decision). test_no_write's editor GET test now hits every
+  new route (7 filtered lists + every item view by handle and by id) and
+  still asserts the tree byte-identical.
+- Full suite: 1564 passed (after merging main). ruff clean on touched files.
+- Not verified in a real browser (no Node here, same caveat as chunk 1):
+  the JS is served with correct MIME and CSP, and every payload it renders
+  is exercised by the API tests; interaction smoke is deferred to chunk 3's
+  end-to-end pass.
+- No write path, no editing controls, no source patching — chunk 3.

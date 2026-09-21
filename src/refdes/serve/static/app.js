@@ -1,6 +1,69 @@
+// The editor shell: a hash router over #/items[?filters] and
+// #/items/<handle>[?filters]. The filter query is the state — reload and
+// deep links land on the same view. Everything shown is fetched from the
+// API; nothing here computes a project fact.
+
 import { api } from './api.js';
+import { parseFilters, filterQuery, renderSidebar } from './filters.js';
+import { renderList } from './list.js';
+import { renderItem } from './item.js';
 
 const banner = document.getElementById('banner');
+const sidebar = document.getElementById('sidebar');
+const listPane = document.getElementById('list');
+const detailPane = document.getElementById('detail');
+
+function parseRoute() {
+  const hash = location.hash || '#/items';
+  const q = hash.indexOf('?');
+  const path = q === -1 ? hash : hash.slice(0, q);
+  const filters = parseFilters(hash);
+  const m = path.match(/^#\/items(?:\/(.+))?$/);
+  if (!m) return { name: 'items', handle: null, filters };
+  return { name: 'item', handle: m[1] ? decodeURIComponent(m[1]) : null, filters };
+}
+
+let requestSeq = 0;
+
+async function renderRoute() {
+  const route = parseRoute();
+  const seq = ++requestSeq;
+  let payload;
+  try {
+    payload = await api(`/api/items${filterQuery(route.filters)}`);
+  } catch (err) {
+    sidebar.textContent = '';
+    listPane.textContent = '';
+    const p = document.createElement('p');
+    p.className = 'banner bad';
+    p.textContent = err.status === 400
+      ? `Bad filter: ${err.message}`
+      : `Could not load items: ${err.message}`;
+    listPane.appendChild(p);
+    return;
+  }
+  if (seq !== requestSeq) return; // superseded by a newer navigation
+  renderSidebar(sidebar, payload, route.filters, (next) => {
+    location.hash = `#/items${filterQuery(next)}`;
+  });
+  renderList(listPane, payload, route.filters);
+  if (route.handle) {
+    renderItem(detailPane, route.handle);
+  } else if (payload.items.length === 1) {
+    renderItem(detailPane, payload.items[0].handle);
+  } else {
+    detailPane.textContent = '';
+    const p = document.createElement('p');
+    p.className = 'muted';
+    p.textContent = 'Select an item.';
+    detailPane.appendChild(p);
+  }
+}
+
+window.addEventListener('hashchange', renderRoute);
+renderRoute();
+
+const gitBadge = document.getElementById('git-badge');
 const gitBadge = document.getElementById('git-badge');
 let openRevision = null;   // the revision the current view was loaded against
 
@@ -43,6 +106,8 @@ export async function poll() {
     banner.hidden = false;
   }
 }
+
+window.addEventListener('refdes:rebuilt', renderRoute);
 
 poll();
 setInterval(poll, 2000);

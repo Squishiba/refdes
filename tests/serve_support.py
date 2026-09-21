@@ -119,6 +119,156 @@ More body after a literal horizontal rule.
 """
 
 
+# ---------------------------------------------------------------- the filter
+# fixture: a project shaped to exercise every filter facet at once -- two
+# boards, two workspaces, several source files, coverage stages (verified /
+# satisfied / open), a passing and a failing `checks:` entry, a blocked
+# decision, and a decision missing a declared link verb entirely.
+
+FILTER_SCHEMA = """\
+site:
+  title: "Filter test"
+id:
+  width: 3
+workspaces:
+  platform: { label: "Platform", shared: true }
+  product-a: { label: "Product A" }
+boards:
+  board-a:
+    label: "Board A"
+  board-b:
+    label: "Board B"
+link_types:
+  satisfies: { inverse: satisfied_by, label: Satisfies }
+  verifies: { inverse: verified_by, label: Verifies }
+  blocked_by: { inverse: blocks, label: "Blocked by" }
+types:
+  requirement:
+    prefix: REQ
+    coverable: true
+    fields:
+      text: { type: text, required: true }
+      tags: { type: list }
+      status: { type: enum, choices: [draft, approved] }
+  decision:
+    prefix: DEC
+    fields:
+      title: { type: text, required: true }
+      status: { type: enum, choices: [proposed, accepted] }
+      checks: { type: checks }
+    links:
+      satisfies: [requirement]
+      blocked_by: []
+  bound:
+    prefix: BND
+    fields:
+      title: { type: text, required: true }
+      limit: { type: limit, required: true }
+  test:
+    prefix: TST
+    fields:
+      title: { type: text, required: true }
+    links:
+      verifies: [requirement]
+  log:
+    prefix: LOG
+    append_only: true
+    fields:
+      summary: { type: text, required: true }
+"""
+
+FILTER_REQS = """\
+defaults: { type: requirement, board: board-a, workspace: platform }
+items:
+  - id: REQ-001
+    text: The rail shall supply 3.3 V.
+    tags: [power, rail]
+    status: approved
+  - id: REQ-002
+    text: The board shall boot within 2 s.
+    tags: [boot]
+    board: board-b
+    workspace: product-a
+  - id: REQ-003
+    text: Nothing addresses this yet.
+"""
+
+FILTER_DECS = """\
+defaults: { type: decision, board: board-a, workspace: platform }
+items:
+  - id: DEC-001
+    title: Use the buck regulator.
+    status: accepted
+    satisfies: [REQ-001]
+    checks:
+      - { value: I_total, against: BND-001 }
+    body: |
+      ```calc
+      I_total = 5 A
+      ```
+  - id: DEC-002
+    title: Unsettled boot approach.
+    status: proposed
+    satisfies: [REQ-002]
+    checks:
+      - { value: I_boot, against: BND-002 }
+    body: |
+      ```calc
+      I_boot = 3 A
+      ```
+  - id: DEC-003
+    title: Blocked waiting on the regulator choice.
+    status: proposed
+    blocked_by: [DEC-001]
+"""
+
+FILTER_BOUNDS = """\
+defaults: { type: bound, board: board-a, workspace: platform }
+items:
+  - id: BND-001
+    title: Total rail current.
+    limit: "<= 6 A"
+  - id: BND-002
+    title: Boot current.
+    limit: "<= 2 A"
+    board: board-b
+    workspace: product-a
+"""
+
+FILTER_TESTS = """\
+defaults: { type: test, board: board-a, workspace: platform }
+items:
+  - id: TST-001
+    title: Measure the rail.
+    verifies: [REQ-001]
+"""
+
+FILTER_LOG = """\
+defaults: { type: log, board: board-a, workspace: platform }
+items:
+  - id: LOG-001
+    summary: Started the rail work.
+"""
+
+
+def make_filter_project(tmp_path, *, mint_keys: bool = False):
+    """The filter fixture. No key minting by default: the read-only load is
+    what the editor serves, and the handles it carries are what the API
+    must address items by."""
+    write_project_config(tmp_path, FILTER_SCHEMA)
+    items = tmp_path / "items"
+    items.mkdir(exist_ok=True)
+    for name, text in {
+        "reqs.yaml": FILTER_REQS,
+        "decs.yaml": FILTER_DECS,
+        "bounds.yaml": FILTER_BOUNDS,
+        "tests.yaml": FILTER_TESTS,
+        "log.yaml": FILTER_LOG,
+    }.items():
+        (items / name).write_text(text, encoding="utf-8")
+    return str(tmp_path / "refdes-project.yaml")
+
+
 def make_project(tmp_path, *, mint_keys: bool = True):
     """Write the fixture project under tmp_path and return its config path.
     With `mint_keys`, one ordinary writable check mints every key first, so the

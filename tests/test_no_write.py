@@ -459,6 +459,39 @@ def test_the_editor_get_and_preview_paths_leave_the_tree_byte_identical(tmp_path
             assert get(f"/preview/{slug}.html", **cookie) == 200
         assert get("/api/revision", **api) == 200
 
+        # the read-side editor API (Slice 1 chunk 2): filtered lists, every
+        # facet, and an item view per item -- all must stay side-effect-free
+        # (no mint, no expansion, no seal, no schema.json), including the
+        # item view's seal check, which reads .refdes/ seal files.
+        import json as _json
+        from urllib.parse import quote
+
+        def get_body(path, **headers):
+            conn = http.client.HTTPConnection("127.0.0.1", app.port, timeout=10)
+            headers.setdefault("Host", f"127.0.0.1:{app.port}")
+            conn.request("GET", path, headers=headers)
+            resp = conn.getresponse()
+            data = resp.read()
+            conn.close()
+            assert resp.status == 200, path
+            return _json.loads(data)
+
+        list_paths = [
+            "/api/items",
+            "/api/items?type=requirement",
+            "/api/items?board=board-a&stage=open",
+            "/api/items?check=none&blocked=no",
+            "/api/items?q=rail",
+            "/api/items?links_to=REQ-001",
+            "/api/items?linked_from=DEC-001",
+        ]
+        for path in list_paths:
+            assert get(path, **api) == 200, path
+        for row in get_body("/api/items", **api)["items"]:
+            assert get(f"/api/item/{quote(row['handle'], safe='')}", **api) == 200
+        for ref in ("REQ-001", "DEC-001", "LOG-001"):
+            assert get(f"/api/item/{ref}", **api) == 200
+
         # an outside edit, then the poll-triggered rebuild and re-render
         with open(root / "items" / "r.yaml", "a", encoding="utf-8") as fh:
             fh.write("  - id: REQ-003\n    text: Added from outside.\n")
