@@ -52,6 +52,7 @@ import json
 import os
 import re
 import uuid
+from typing import NamedTuple
 
 import yaml
 
@@ -370,3 +371,126 @@ def load_events(root: str) -> list[dict[str, object]]:
         events.append(dict(data))
     events.sort(key=lambda event: str(event["id"]))
     return events
+
+
+# ------------------------------------------------------- the capture call site
+
+
+class FollowCapture(NamedTuple):
+    """What one capture attempt did: the announcement line (``""`` when the
+    edge was already captured, so the caller prints nothing on a no-op), the
+    event's path, and exactly which files this call created — so a caller
+    running a batch of captures can undo its own writes when the surrounding
+    transaction fails (plan §H2: the frozen edge and its event are one unit)."""
+
+    announcement: str
+    event_path: str
+    created_event: bool
+    created_object: "str | None"
+
+
+def _follows_target_key(target: object) -> "str | None":
+    """The key half of a frozen follows target (``ID@key``, or a bare
+    well-formed key for an id-less tip); None for anything unresolved."""
+    text = str(target)
+    if "@" in text:
+        return text.partition("@")[2]
+    return None
+
+
+def capture_followed(
+    root: str,
+    predecessor: Item,
+    successor: Item,
+    *,
+    current_predecessor_keys: "set[str] | None" = None,
+) -> FollowCapture:
+    """Turn one resolved (predecessor, successor) pair into a `followed`
+    event holding the predecessor's snapshot (plan §H2: the one function the
+    capture call site adds to this store).
+
+    The plan's five cases, in one function:
+
+    * **Idempotence** (case five): the derived id means re-capturing the same
+      edge is a filesystem no-op that announces nothing.
+    * **Typo corrected** (case one): when the successor's *current* frozen
+      edges no longer include a predecessor this successor was previously
+      captured against, the new event is `followed-corrected`, naming the
+      superseded key in `reason`. The original event is never deleted or
+      rewritten. A merge — two parents both still on the successor's edge
+      list — is not a correction, so `current_predecessor_keys` must be the
+      successor's full current edge set, not just this pair.
+    * **Old-branch replay** (case four): derived ids plus the content-addressed
+      object make the replay write the identical path with the identical
+      bytes. `occurred_at` is deliberately **not** written here: a wall-clock
+      stamp would give one fact different bytes in two checkouts, and §2
+      makes it display metadata nobody may order or gate on. The explicit
+      `history capture` command (H4) is the author moment that can carry a
+      clock.
+
+    Cases two (VS Code's save refresh) and three (CI) are the caller's:
+    capture rides the freeze's `write` flag, so a writable load captures and
+    `--no-write` never reaches this function.
+    """
+    if not predecessor.key or not successor.key:
+        raise HistoryError(
+            "a follows: capture is addressed by surrogate key, and "
+            f"{predecessor.id or '?'} or {successor.id or '?'} has none"
+        )
+    if current_predecessor_keys is None:
+        current_predecessor_keys = {
+            key
+            for key in map(_follows_target_key, successor.links.get("follows", []))
+            if key
+        }
+    superseded = sorted(
+        {
+            str(event["item_key"])
+            for event in load_events(root)
+            if event.get("successor_key") == successor.key
+            and event.get("kind") in ("followed", "followed-corrected")
+            and str(event["item_key"]) not in current_predecessor_keys
+        }
+    )
+    kind = "followed-corrected" if superseded else "followed"
+    reason = (
+        "supersedes the followed edge from " + ", ".join(superseded)
+        if superseded
+        else ""
+    )
+
+    digest = semantic_digest(predecessor)
+    eid = event_id(kind, predecessor.key, successor.key)
+    event_path = os.path.join(events_dir(root), f"{eid}.yaml")
+    if os.path.exists(event_path):
+        return FollowCapture("", event_path, False, None)
+
+    object_file = object_path(root, digest)
+    object_existed = os.path.exists(object_file)
+    save_object(root, predecessor)
+    try:
+        append_event(
+            root,
+            kind,
+            predecessor.key,
+            digest,
+            successor_key=successor.key,
+            reason=reason,
+        )
+    except Exception:
+        # An object no event points at is a leak the transaction should not
+        # leave behind; content-addressed, so removing it can only undo this
+        # call's own write (it did not exist a moment ago).
+        if not object_existed and os.path.exists(object_file):
+            os.remove(object_file)
+        raise
+
+    announcement = (
+        f"captured {predecessor.id or predecessor.key}: "
+        f"{successor.id or successor.key} now follows it"
+    )
+    if superseded:
+        announcement += f" (corrects {', '.join(superseded)})"
+    return FollowCapture(
+        announcement, event_path, True, None if object_existed else object_file
+    )

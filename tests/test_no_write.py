@@ -36,6 +36,7 @@ boards:
     label: "Board A"
 link_types:
   satisfies: {{ inverse: satisfied_by, label: Satisfies }}
+  follows: {{ inverse: followed_by, label: Follows }}
 types:
   requirement:
     prefix: REQ
@@ -53,6 +54,8 @@ types:
     append_only: true
     fields:
       summary: {{ type: text, required: true }}
+    links:
+      follows: [log]
   component:
     prefix: CMP
     fields:
@@ -107,7 +110,10 @@ def _snapshot_project(tmp_path):
         )
     (items / "log.yaml").write_text(
         "defaults: { type: log, board: board-a }\n"
-        "items:\n  - id: LOG-001\n    summary: Unsealed entry.\n",
+        "items:\n"
+        "  - id: LOG-001\n    summary: Unsealed entry.\n"
+        "  - id: LOG-002\n    summary: Follows LOG-001.\n"
+        "    follows: [LOG-001]\n",
         encoding="utf-8",
     )
     (items / "cmp.yaml").write_text(
@@ -214,6 +220,30 @@ def test_no_write_leaves_whole_project_tree_byte_identical(tmp_path, capsys, arg
     assert not any(changes.values()), (
         f"--no-write {' '.join(argv)} touched the project tree: {changes}"
     )
+
+
+# ------------------------------------------------------------- history (H2)
+
+
+def test_no_write_does_not_capture_follows_history(tmp_path, capsys):
+    """Living notes phase H2: the `follows:` freeze is also a capture, and
+    `--no-write` gates it exactly like the freeze itself -- nothing appears
+    under `.refdes/history/` until a writable load freezes the edge."""
+    root, config = _snapshot_project(tmp_path)
+    capsys.readouterr()
+    before = _snapshot(root)
+
+    assert _run_no_write(config, ["check"]) == 0
+    assert not any(_changed(before, root).values())
+    assert not (root / ".refdes" / "history").exists()
+
+    # The same load without the gate freezes the edge and captures: one
+    # event, announced on stderr, nothing else in the store.
+    assert cli_mod.main(["-c", config, "check"]) == 0
+    err = capsys.readouterr().err
+    assert "captured LOG-001: LOG-002 now follows it" in err
+    events = list((root / ".refdes" / "history" / "events").glob("*.yaml"))
+    assert len(events) == 1
 
 
 # ---------------------------------------------------------------- explicit

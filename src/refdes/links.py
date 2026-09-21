@@ -17,12 +17,14 @@ from __future__ import annotations
 
 import os
 import re
+import sys
 from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from . import chains as chains_mod
 from . import dates
+from . import history as history_mod
 from . import keys as keys_mod
 from . import parse as parse_mod
 from . import seal as seal_mod
@@ -667,24 +669,107 @@ def plan_follows_freeze(
     return _freeze_rewrite_plan(project, candidates, source_texts)
 
 
+def _frozen_target_key(target: str) -> str | None:
+    """The key half of a frozen follows target: `DISPLAY@key`, or a bare
+    well-formed key (an id-less tip); None for anything unresolved."""
+    text = str(target)
+    if "@" in text:
+        return text.partition("@")[2]
+    return text if _is_well_formed_key(text) else None
+
+
+def _capture_followed_edges(
+    project: Project, rewrites: list[tuple[Item, str, str, str]]
+) -> list[str]:
+    """Capture every freshly frozen edge (plan §H2): one `followed` event
+    per (predecessor, successor) pair, holding the predecessor's snapshot.
+
+    Raises after undoing its own partial writes if the store refuses, so the
+    caller can roll the edge rewrites back with it -- the edge and its event
+    are one transaction, never an edge frozen without its event."""
+    by_key = {item.key: item for item in project.items.values() if item.key}
+    created: list[str] = []
+    announcements: list[str] = []
+    try:
+        for successor, _link_name, _old, new in rewrites:
+            pred_key = _frozen_target_key(new)
+            predecessor = by_key.get(pred_key) if pred_key else None
+            if predecessor is None or not successor.key:
+                continue
+            current = {
+                key
+                for key in map(
+                    _frozen_target_key, successor.links.get("follows", [])
+                )
+                if key
+            }
+            capture = history_mod.capture_followed(
+                project.root,
+                predecessor,
+                successor,
+                current_predecessor_keys=current,
+            )
+            if capture.created_object:
+                created.append(capture.created_object)
+            if capture.created_event:
+                created.append(capture.event_path)
+            if capture.announcement:
+                announcements.append(capture.announcement)
+    except (history_mod.HistoryError, OSError):
+        for path in created:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+        raise
+    return announcements
+
+
 def freeze_follows(project: Project, write: bool = True) -> list[tuple[Item, str, str, str]]:
-    """Write one-time follows freezes after key minting and before build."""
+    """Write one-time follows freezes after key minting and before build.
+
+    Phase H2 (docs/design/living-notes-plan.md): a frozen edge is also the
+    capture moment. Alongside the freeze, in the same write pass and behind
+    the same `write` flag, every resolved (predecessor, successor) pair
+    appends a `followed` event holding the predecessor's snapshot to
+    `.refdes/history/` and announces itself on stderr -- visible in a
+    terminal, never in a command's machine output (`index --compact`'s
+    stdout stays pure JSON, Q4). The freeze itself does exactly what it did
+    before; if an event write fails, the edge rewrites are rolled back so no
+    edge is ever frozen without its event."""
     plan = plan_follows_freeze(project)
     if not plan.rewrites or not write:
         return []
 
-    from .revise import write_rewrites_verified
+    from .revise import restore_rewrites, write_rewrites_verified
 
     write_rewrites_verified(project, plan.files)
     replacements_by_item: dict[int, dict[str, str]] = defaultdict(dict)
     for item, _link_name, old, new in plan.rewrites:
         replacements_by_item[id(item)][old] = new
+    original_links: dict[int, list[str]] = {}
     for item in project.local_items:
         replacements = replacements_by_item.get(id(item))
         if not replacements:
             continue
+        original_links[id(item)] = item.links.get("follows", [])
         targets = item.links.get("follows", [])
         item.links["follows"] = list(dict.fromkeys(replacements.get(target, target) for target in targets))
+
+    try:
+        announcements = _capture_followed_edges(project, plan.rewrites)
+    except (history_mod.HistoryError, OSError) as exc:
+        for item in project.local_items:
+            if id(item) in original_links:
+                item.links["follows"] = original_links[id(item)]
+        restore_rewrites(plan.files)
+        project.error(
+            f"the follows: capture failed ({exc}); the frozen edges were "
+            "rolled back to their original text"
+        )
+        return []
+    for line in announcements:
+        print(line, file=sys.stderr)
     return plan.rewrites
 
 
