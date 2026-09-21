@@ -1,0 +1,31 @@
+Task: flaky test_serve_cli.py temp-dir race fix (test-only)
+
+Status: finished
+
+What changed
+- tests/test_serve_cli.py only.
+- _start() gained a keyword-only `tmpdir=None` argument; when given, the child
+  env gets TMP/TEMP/TMPDIR set to that dir (rest of os.environ preserved),
+  so refdes serve's PreviewManager (tempfile.mkdtemp(dir=None)) creates its
+  refdes-preview-* root there instead of the shared system temp dir.
+- test_serve_prints_a_loopback_url_serves_it_and_cleans_up now creates a
+  private dir tmp_path/'tmp', lists THAT dir before/after, asserts exactly one
+  new refdes-preview-* dir, and the manual rmtree cleanup targets it.
+- Dropped the now-unused `import tempfile`.
+- Other callers of _start (the error-exit test) untouched; other serve tests
+  (grep gettempdir/refdes-preview) have no counting race:
+  test_serve_security.py only checks app.preview.root starts with the real
+  temp dir, not a directory listing count.
+
+Verification
+- ruff check tests/test_serve_cli.py --select E9,F: clean.
+- python -m pytest -q tests/test_serve_cli.py x3: 2 passed (10.69s, 10.38s, 1.83s).
+- Two concurrent copies via PowerShell Start-Job: both Completed, both 2 passed
+  (1.72s / 1.67s), overlapping window.
+
+Notes
+- One refdes-preview-* dir sitting in the real system %TEMP% (marker pid 6500,
+  mtime now) is owned by another concurrent session's run of the old test code
+  in this shared checkout (repo is shared between sessions). Left untouched:
+  it is outside this task's workspace and the test no longer lists system temp.
+- Not pushed, not merged (user reviews and lands).
