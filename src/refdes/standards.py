@@ -20,8 +20,6 @@ import difflib
 import os
 from typing import Any
 
-import yaml
-
 from .model import SchemaError
 from .parse import yaml_safe_load
 

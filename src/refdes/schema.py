@@ -12,8 +12,6 @@ import difflib
 import os
 from typing import Any
 
-import yaml
-
 from . import calc, dates, standards
 from .configcheck import EQUATION_KEYS, BlockChecker, validate_overlay, validate_settings
 from .model import (
