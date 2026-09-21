@@ -56,6 +56,7 @@ from typing import NamedTuple
 
 import yaml
 
+from . import keys as keys_mod
 from .model import Item
 from .parse import yaml_safe_load
 
@@ -494,3 +495,107 @@ def capture_followed(
     return FollowCapture(
         announcement, event_path, True, None if object_existed else object_file
     )
+
+
+# --------------------------------------------------- edited after captured (H3)
+
+
+class EditedAfterCaptured(NamedTuple):
+    """One item whose live semantic content no longer matches its capture
+    snapshot (plan §H3: ``(item, event, captured_digest)``). The event is the
+    capture it was compared against, so the report can name it."""
+
+    item: Item
+    event: dict
+    captured_digest: str
+
+
+# Only the follows-family kinds have writers before H4; `captured`,
+# `revision`, and `release` join the comparison when their writers exist.
+_CAPTURE_KINDS = ("followed", "followed-corrected")
+
+
+def _frozen_follows_key(target: object) -> "str | None":
+    """The key half of a follows target: ``ID@key``, or a bare well-formed
+    key (an id-less tip); None for a still-bare display id — an edge whose
+    spelling has not settled, which cannot disprove anything."""
+    text = str(target)
+    if "@" in text:
+        return text.partition("@")[2]
+    if len(text) == keys_mod.KEY_LEN and keys_mod.malformed_key_message(text) is None:
+        return text
+    return None
+
+
+def _superseded(event: dict, by_key: "dict[str, Item]") -> bool:
+    """Whether a capture event's edge was corrected away (§2, case one).
+
+    The event stays in the store forever — corrected, never erased — but a
+    successor that no longer edges to this predecessor means the captured
+    *relationship* was the typo's, not the note's, and warning about edits
+    to it would resurrect a capture the author disowned. A successor that is
+    gone, or whose edges are all still-bare (unsettled), cannot disprove the
+    edge, so the capture stands."""
+    successor_key = str(event.get("successor_key") or "")
+    if not successor_key:
+        return False
+    successor = by_key.get(successor_key)
+    if successor is None:
+        return False
+    resolved = [
+        key
+        for key in map(_frozen_follows_key, successor.links.get("follows", []))
+        if key
+    ]
+    if not resolved:
+        return False
+    return str(event["item_key"]) not in resolved
+
+
+def capture_index(project) -> dict:
+    """item key -> ``(representative capture event, edited_after_captured)``.
+
+    Read-only: the store is opened here and never written — under
+    ``--no-write`` or otherwise. An item with several live captures (a fork
+    or merge gives one event per successor) counts as edited only when its
+    current digest matches *none* of them: a second capture of the current
+    state is the newest snapshot saying "this is what was captured", and
+    ``occurred_at`` may not order events to find "newest" (§2). The
+    representative event is a matching capture, or the lowest-id live one
+    when the item is edited; ids are derived, so the pick is stable.
+    """
+    events = load_events(str(project.root))
+    captures = [e for e in events if e["kind"] in _CAPTURE_KINDS]
+    if not captures:
+        return {}
+    by_key = {item.key: item for item in project.items.values() if item.key}
+    index: dict = {}
+    for key in sorted({str(e["item_key"]) for e in captures}):
+        item = by_key.get(key)
+        if item is None:
+            continue  # the captured item is gone; nothing live to compare
+        live = [
+            e
+            for e in captures
+            if str(e["item_key"]) == key and not _superseded(e, by_key)
+        ]
+        if not live:
+            continue
+        current = semantic_digest(item)
+        matches = [e for e in live if str(e["object"]) == current]
+        event = matches[0] if matches else sorted(live, key=lambda e: str(e["id"]))[0]
+        index[key] = (event, not matches)
+    return index
+
+
+def edited_after_captured(project) -> list:
+    """Every live item whose current semantic digest differs from every
+    capture snapshot of it (plan §H3). A diagnostic source only: it writes
+    nothing, and its callers report through ``project.warn`` — never an
+    error, never a failed build."""
+    by_key = {item.key: item for item in project.items.values() if item.key}
+    return [
+        EditedAfterCaptured(by_key[key], event, str(event["object"]))
+        for key, (event, edited) in sorted(capture_index(project).items())
+        if edited
+    ]

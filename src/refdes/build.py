@@ -13,7 +13,7 @@ from markdown_it import MarkdownIt
 from . import blocked as blocked_mod
 from . import blocks as blocks_mod
 from . import boards as boards_mod
-from . import calc, dates, imports, seal
+from . import calc, dates, history as history_mod, imports, seal
 from . import chains as chains_mod
 from . import citations as citations_mod
 from . import ids as ids_mod
@@ -2495,6 +2495,41 @@ def collect_static_assets(project: Project) -> None:
 # ------------------------------------------------------------------------ entry point
 
 
+def warn_edited_after_captured(project: Project) -> None:
+    """Phase H3: "edited after captured" is a diagnostic and never a failure.
+
+    One warning per captured item whose live semantic content differs from
+    its snapshot, naming the item, the capture event, and the successor that
+    captured it. Reported through ``project.warn`` only -- it can never move
+    the exit code, and it reads `.refdes/history/` without writing it. A
+    store that refuses to be read is reported the same way: the check
+    declines, the build proceeds."""
+    try:
+        findings = history_mod.edited_after_captured(project)
+    except (history_mod.HistoryError, OSError) as exc:
+        project.warn(
+            f"edited-after-captured was not checked: the history store "
+            f"could not be read ({exc})",
+            file="refdes-project.yaml",
+        )
+        return
+    by_key = {item.key: item for item in project.items.values() if item.key}
+    for finding in findings:
+        item = finding.item
+        successor_key = str(finding.event.get("successor_key") or "")
+        successor = by_key.get(successor_key)
+        succ_label = successor.id or successor.key if successor else successor_key
+        captured_when = f"; captured when {succ_label} followed it" if succ_label else ""
+        project.warn(
+            f"{item.id or item.key}: edited after captured -- current semantic "
+            f"content differs from the snapshot in {finding.event['kind']} "
+            f"event {finding.event['id']}{captured_when}",
+            file=item.source_file,
+            line=item.source_line,
+            item_id=item.id,
+        )
+
+
 def build(
     project: Project,
     seal_write: bool = False,
@@ -2526,6 +2561,7 @@ def build(
     run_calcs(project)
     run_checks(project)
     compute_hashes(project)
+    warn_edited_after_captured(project)
     seal.verify(project, write=seal_write, reseal=reseal)
     boards_mod.verify(project, write=seal_write, accept_move=accept_board_move)
     boards_mod.lint_tokens(project)

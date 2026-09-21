@@ -111,7 +111,10 @@ def test_the_announcement_never_pollutes_machine_output(tmp_path, capsys):
     assert cli_mod.main(["-c", cfg, "index", "--compact"]) == 0
     captured = capsys.readouterr()
     json.loads(captured.out)  # parse-clean, as the extension requires
-    assert "captured" not in captured.out
+    # H3 narrowed this: the index payload legitimately carries a
+    # `captured` key per captured item; what must stay off stdout is the
+    # announcement line itself.
+    assert "now follows it" not in captured.out
     assert "captured LOG-001: LOG-002 now follows it" in captured.err
 
 

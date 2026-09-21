@@ -246,6 +246,35 @@ def test_no_write_does_not_capture_follows_history(tmp_path, capsys):
     assert len(events) == 1
 
 
+def test_no_write_reports_edited_after_captured_without_touching_the_tree(
+    tmp_path, capsys
+):
+    """Living notes phase H3: the edited-after-captured diagnostic reads the
+    history store and never writes it -- under `--no-write` it still reports
+    (a warning, exit unchanged), with the whole tree including
+    `.refdes/history/` byte-identical."""
+    root, config = _snapshot_project(tmp_path)
+    capsys.readouterr()
+    # A writable check freezes the LOG-002 -> LOG-001 edge and captures it.
+    assert cli_mod.main(["-c", config, "check"]) == 0
+    capsys.readouterr()
+
+    # The author edits the captured entry after the fact.
+    log = root / "items" / "log.yaml"
+    log.write_text(
+        log.read_text(encoding="utf-8").replace(
+            "summary: Unsealed entry.", "summary: Edited after capture."
+        ),
+        encoding="utf-8",
+    )
+    before = _snapshot(root)
+
+    assert _run_no_write(config, ["check"]) == 0
+    out = capsys.readouterr().out
+    assert "edited after captured" in out
+    assert not any(_changed(before, root).values())
+
+
 # ---------------------------------------------------------------- explicit
 # write commands: each honors --no-write (reports what would change, writes
 # nothing) or refuses with exit 2 -- none may write silently.

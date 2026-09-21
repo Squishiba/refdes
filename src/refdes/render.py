@@ -15,6 +15,7 @@ from . import build as build_mod
 from . import chains as chains_mod
 from . import citations as citations_mod
 from . import dates
+from . import history as history_mod
 from . import ids as ids_mod
 from . import nav as nav_mod
 from . import tree as tree_mod
@@ -617,6 +618,18 @@ def items_json(project: Project) -> dict:
         for name, spec in project.types.items()
     }
 
+    # Phase H3: captured items carry a `captured` / `edited_after_captured`
+    # pair so VS Code and the future editor read the fact from the index
+    # instead of recomputing it. Uncaptured items get neither key -- the
+    # same "absent key, not null" convention as `boards` -- so an
+    # uncaptured project's payload stays byte-identical. A store that
+    # refuses to be read yields no keys: the build's own diagnostic has
+    # already said so, and the index never fails over it.
+    try:
+        captures = history_mod.capture_index(project)
+    except (history_mod.HistoryError, OSError):
+        captures = {}
+
     items_out = []
     for item in sorted(project.items.values(), key=lambda i: i.id):
         entry = {
@@ -632,6 +645,11 @@ def items_json(project: Project) -> dict:
             entry["board"] = item.board
         if project.workspaces:
             entry["workspace"] = item.workspace
+        capture = captures.get(item.key) if item.key else None
+        if capture is not None:
+            event, edited = capture
+            entry["captured"] = str(event["id"])
+            entry["edited_after_captured"] = edited
         entry.update({
             "fields": item.fields,
             "former_ids": item.former_ids,
