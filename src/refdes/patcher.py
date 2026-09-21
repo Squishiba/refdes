@@ -1105,6 +1105,7 @@ def _literal_block(value: str, indent: int, eol: str) -> str | None:
 
 def _verify(f: _File, plan: PatchPlan, op: Any) -> None:
     """Reparse the patched text with the real parser and prove points 4 and 5."""
+    _check_replacement_eol(f, plan)
     patched = f.text[: plan.start] + plan.replacement + f.text[plan.end :]
     try:
         after = _load(patched)
@@ -1129,12 +1130,16 @@ def _verify(f: _File, plan: PatchPlan, op: Any) -> None:
             )
     edited = after_proj[index]
     expected = _expected_projection(before[index], plan, op)
-    if isinstance(edited, tuple) and isinstance(expected, tuple) and isinstance(op, SetBody):
-        # The parser reads a body as the lines between two fences, so the break
-        # that closes the last line is a separator there and content at EOF.
-        # Compare prose on equal terms rather than calling a faithful edit a
-        # mismatch over one newline.
-        same = edited[0] == expected[0] and _body_view(edited[1]) == _body_view(expected[1])
+    if isinstance(op, SetBody):
+        # A body is prose: the file's own line breaks and the break that closes
+        # its last line are how that prose is spelled on disk, not part of what
+        # the author asked for. Compare it on a line-ending-neutral view -- the
+        # replacement itself still carries the file's eol, which
+        # `_check_replacement_eol` proves above.
+        name = plan.field or "body"
+        edited, expected = _fold_body(edited, name), _fold_body(expected, name)
+    if isinstance(edited, tuple) and isinstance(expected, tuple):
+        same = edited[0] == expected[0] and edited[1] == expected[1]
         if not same:
             raise _LocateError(
                 "the edited body did not construct to the intended text: "
@@ -1148,8 +1153,56 @@ def _verify(f: _File, plan: PatchPlan, op: Any) -> None:
         )
 
 
+def _fold_body(entry: Any, name: str) -> Any:
+    """A projection entry with its body text reduced to `_body_view`.
+
+    Only the edited body is folded; every other field of the item is compared
+    exactly, so this cannot hide a change anywhere but the prose.
+    """
+    if isinstance(entry, tuple):
+        fields, body = entry
+        return (fields, _body_view(body))
+    if isinstance(entry, dict) and isinstance(entry.get(name), str):
+        out = dict(entry)
+        out[name] = _body_view(out[name])
+        return out
+    return entry
+
+
 def _body_view(body: str) -> str:
-    return body[:-1] if body.endswith("\n") else body
+    """Prose without the accident of how its line breaks were written.
+
+    CRLF folds to LF because the patcher emits the file's own eol, and the
+    closing break of the last line is dropped because the parser reads it as a
+    separator between blocks while the author wrote it as the end of a line.
+    """
+    folded = body.replace("\r\n", "\n")
+    if folded.endswith("\n"):
+        folded = folded[:-1]
+    # A CRLF body read back line-by-line can end on the orphan \r of its last
+    # break, which is the same closing break seen from the other side.
+    return folded[:-1] if folded.endswith("\r") else folded
+
+
+def _check_replacement_eol(f: _File, plan: PatchPlan) -> None:
+    """The replacement's line breaks must be the file's own.
+
+    `_body_view` makes the semantic comparison line-ending-neutral, so this is
+    where the byte-level half of that bargain is enforced: a plan that splices
+    LF breaks into a CRLF file (or the reverse) is not a faithful edit, even
+    though it would construct to the same value.
+    """
+    repl = plan.replacement
+    if f.eol == "\r\n":
+        for i, ch in enumerate(repl):
+            if ch == "\n" and (i == 0 or repl[i - 1] != "\r"):
+                raise _LocateError(
+                    "the planned replacement writes a bare LF line break into a CRLF file"
+                )
+    elif "\r\n" in repl:
+        raise _LocateError(
+            "the planned replacement writes a CRLF line break into a file that uses LF"
+        )
 
 
 def _projection_index(f: _File, ref: str) -> int:

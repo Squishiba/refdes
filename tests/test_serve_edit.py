@@ -98,8 +98,7 @@ def project_root(tmp_path):
     items = tmp_path / "items"
     items.mkdir()
     # newline="\n": these fixtures are LF files, like a git worktree checkout.
-    # A CRLF markdown body is covered separately, because the patcher's own
-    # fidelity check refuses one today (see test_crlf_markdown_body).
+    # The CRLF case is covered separately (test_a_crlf_markdown_body_applies).
     (items / "reqs.yaml").write_text(REQS, encoding="utf-8", newline="\n")
     (items / "decs.yaml").write_text(DECS, encoding="utf-8", newline="\n")
     (items / "log.yaml").write_text(LOG, encoding="utf-8", newline="\n")
@@ -219,12 +218,10 @@ def test_a_crlf_yaml_file_keeps_its_line_endings(project_root):
     assert "status: draft" in after.decode("utf-8")
 
 
-def test_a_crlf_markdown_body_is_refused_not_garbled(project_root):
-    """The patcher's own fidelity check cannot yet prove a CRLF markdown body
-    edit (it compares the op's LF text against the file's CRLF one), so the
-    save refuses. Refusing is the right outcome for the service -- a write it
-    cannot prove is a write it does not make -- and this pins that the refusal
-    leaves the file byte-identical rather than half-converted."""
+def test_a_crlf_markdown_body_applies_and_stays_crlf(project_root):
+    """Jared's checkout is CRLF, so a markdown body save has to work there: the
+    patcher compares prose on a line-ending-neutral view and writes the file's
+    own break, so the edit applies without reformatting the rest of the file."""
     path = str(project_root / "items" / "notes.md")
     with open(path, "rb") as fh:
         original = fh.read()
@@ -235,9 +232,14 @@ def test_a_crlf_markdown_body_is_refused_not_garbled(project_root):
     result = edit_mod.apply_edit(
         str(project_root), req(("REQ-010", SetBody("New prose.\n"), path))
     )
-    assert isinstance(result, Refused), result.message
+    assert isinstance(result, Applied), result.message
     with open(path, "rb") as fh:
-        assert fh.read() == crlf
+        after = fh.read()
+    assert b"New prose." in after
+    assert b"\r\n" in after
+    assert after.replace(b"\r\n", b"\n") == original.replace(
+        b"---\n\nBody prose before a rule.\n", b"---\nNew prose.\n"
+    )
 
 
 # ------------------------------------------------------------------ conflict

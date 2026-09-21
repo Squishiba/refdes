@@ -10,6 +10,7 @@ bytes it was.
 """
 
 import os
+from pathlib import Path
 
 import pytest
 import yaml
@@ -204,6 +205,85 @@ def test_crlf_body_edit_uses_the_files_line_endings():
     text = text.replace("\n", "\r\n")
     new, _ = edited(text, "DEC-001", SetBody("one\r\ntwo\r\n"))
     assert "\n" not in new.replace("\r\n", "")
+
+
+def test_crlf_markdown_body_edit_applies():
+    """The bug: `_verify` compared the op's LF text against the patched file's
+    CRLF body, so a faithful CRLF markdown body edit was reported as a
+    mismatch. The comparison is line-ending-neutral now; the bytes are not."""
+    text = "---\nid: DEC-001\n---\n\nold prose\n".replace("\n", "\r\n")
+    new, got = edited(text, "DEC-001", SetBody("New prose.\n"))
+    assert got.shape == "md-body"
+    assert new == "---\r\nid: DEC-001\r\n---\r\nNew prose.\r\n"
+    assert "\n" not in new.replace("\r\n", "")
+
+
+def test_crlf_markdown_body_edit_keeps_bytes_outside_the_span():
+    text = (
+        "---\r\nid: DEC-001\r\n---\r\n\r\nold prose\r\n"
+        "---\r\nid: DEC-002\r\n---\r\n\r\nother prose\r\n"
+    )
+    new, got = edited(text, "DEC-001", SetBody("Rewritten.\n"))
+    assert new[: got.start] == text[: got.start]
+    assert new[len(new) - len(text) + got.end :] == text[got.end :]
+    assert "other prose" in new and "id: DEC-002" in new
+
+
+def test_mixed_line_endings_follow_the_files_detected_eol():
+    """A file carrying both breaks is not a new decision: `_load` already calls
+    it a CRLF file, so the body is written with CRLF and every byte outside the
+    replaced span -- LF breaks included -- stays where it was."""
+    text = "---\nid: DEC-001\n---\nline a\r\nline b\n"
+    new, got = edited(text, "DEC-001", SetBody("New prose.\nmore\n"))
+    assert new[: got.start] == text[: got.start]
+    assert new[len(new) - len(text) + got.end :] == text[got.end :]
+    assert new.endswith("New prose.\r\nmore\r\n")
+
+
+def test_lf_markdown_body_edit_is_unchanged_by_the_fix():
+    text = "---\nid: DEC-001\n---\n\nold prose\n"
+    new, got = edited(text, "DEC-001", SetBody("New prose.\n"))
+    assert new == "---\nid: DEC-001\n---\nNew prose.\n"
+    assert "\r" not in new
+    assert apply_patch(new, revert_plan(got)) == text
+
+
+def test_a_tampered_crlf_body_plan_is_still_refused():
+    """Line-ending neutrality must not become edit neutrality: a replacement
+    that says something else, or that writes the wrong break into the file, is
+    still a refusal."""
+    from dataclasses import replace as dreplace
+
+    text = "---\nid: DEC-001\n---\n\nold prose\n".replace("\n", "\r\n")
+    got = plan(text, "DEC-001", SetBody("New prose.\n"))
+    f = patcher._load(text)
+    for bad in (
+        dreplace(got, replacement="Different prose.\r\n"),
+        dreplace(got, replacement=got.replacement + "tacked on\r\n"),
+        dreplace(got, replacement="New prose.\n"),  # LF breaks into a CRLF file
+    ):
+        with pytest.raises(patcher._LocateError):
+            patcher._verify(f, bad, SetBody("New prose.\n"))
+
+
+def test_crlf_markdown_body_round_trips_to_the_original_bytes():
+    text = (
+        "---\r\nid: DEC-001\r\n---\r\n\r\nold prose\r\nsecond line\r\n"
+        "---\r\nid: DEC-002\r\n---\r\n\r\nkeep me\r\n"
+    )
+    forward = plan(text, "DEC-001", SetBody("Something else entirely.\n"))
+    middle = apply_patch(text, forward)
+    assert middle != text
+    back = apply_patch(middle, revert_plan(forward))
+    assert back.encode("utf-8") == text.encode("utf-8")
+
+
+def test_crlf_yaml_body_edit_applies():
+    text = "items:\r\n  - id: REQ-001\r\n    body: old\r\n".replace("\n", "\r\n")
+    new, got = edited(text, "REQ-001", SetBody("first\nsecond\n"))
+    assert "\n" not in new.replace("\r\n", "")
+    assert yaml.safe_load(new)["items"][0]["body"] == "first\nsecond\n"
+    assert apply_patch(new, revert_plan(got)) == text
 
 
 def test_flow_style_item_scalar_replacement():
@@ -556,6 +636,49 @@ def test_patched_real_files_still_parse_with_the_real_parser(rel, text):
     after = _load(new)
     assert after is not None, rel
     assert len(after.items) == len(f.items)
+
+
+def _crlf_item_files():
+    """The repo's items files with every break converted to CRLF, written to a
+    temp copy under .scratch/ so the working tree is never touched."""
+    import shutil
+    import tempfile
+
+    out = []
+    dest = Path(tempfile.mkdtemp(prefix="crlf-items-", dir=_scratch_dir()))
+    try:
+        for rel, text in _item_files():
+            target = dest / rel
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with open(target, "wb") as fh:
+                fh.write(text.replace("\n", "\r\n").encode("utf-8"))
+            with open(target, encoding="utf-8", newline="") as fh:
+                out.append((rel, fh.read()))
+    finally:
+        shutil.rmtree(dest, ignore_errors=True)
+    return out
+
+
+def _scratch_dir():
+    scratch = Path(REPO) / ".scratch"
+    scratch.mkdir(exist_ok=True)
+    return scratch
+
+
+@pytest.mark.parametrize("rel,text", _crlf_item_files())
+def test_crlf_copies_of_the_repo_edit_their_bodies_without_refusal(rel, text):
+    """Jared's checkout is CRLF (core.autocrlf=true), so every real body edit
+    must plan there too -- a CRLF conversion is not a reason to refuse."""
+    f = _load(text)
+    if f is None:
+        pytest.skip(f"{rel} is not a patchable items file")
+    for item in f.items:
+        got = plan_patch(text, item.ref, SetBody("patcher probe body\n"))
+        assert isinstance(got, PatchPlan), f"{rel} {item.ref}: {got.reason}"
+        new = apply_patch(text, got)
+        assert new[: got.start] == text[: got.start], rel
+        assert new[len(new) - len(text) + got.end :] == text[got.end :], rel
+        assert apply_patch(new, revert_plan(got)) == text, f"{rel} {item.ref} body"
 
 
 def test_the_repo_has_nothing_the_patcher_refuses():
