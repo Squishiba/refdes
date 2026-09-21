@@ -78,6 +78,30 @@ References into imported items are refused with a message saying so: a
 cross-project calc reference is only honest against the pinned artifact
 version, and that is a later decision.
 
+### An upstream change marks the dependent changed
+
+The value a reference resolved to is part of the referring item's content
+hash (`hash_format` 4), so when `DEC-PWR-001`'s `V_in` moves, `DEC-B` shows up
+as `changed` in the baseline diff even though nothing in its own text did --
+and `refdes audit` says which reference moved:
+
+```
+  changed   2   DEC-B, DEC-PWR-001
+    DEC-B -- referenced DEC-PWR-001.V_in: 12 V (11.4 V … 12.6 V) -> 11.4 V (10.83 V … 11.97 V)
+```
+
+The hash covers the target's key and the full-precision value with its unit
+and tolerance, not the rounded display: renaming the target's display id, or
+the bare → `DISPLAY-ID@key` expansion of the reference on disk, changes
+nothing; an edit below the displayed precision still counts. Editing some
+*other* value or the prose of the target does not touch the dependent.
+Baselines stamped before this record no reference values, so for those the
+diff still lists the item as changed but names no reference.
+
+Renaming a value *inside* the target has no surrogate to protect it (a calc
+name is not a key): every dependent fails loudly at its own reference line,
+which is the report.
+
 ## Referencing results in prose
 
 ```markdown

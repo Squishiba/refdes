@@ -105,9 +105,10 @@ links work the same way.
 ### Hash format versioning
 
 The content hash definition is versioned (`hash_format`, recorded per baseline
-and seal entry; currently **3**). When the hash definition changes (e.g. link
-targets switching from display-id text to resolved keys, or `checks: against:`
-entries being reduced to keys), a baseline stamped under the old definition
+and seal entry; currently **4**). When the hash definition changes (e.g. link
+targets switching from display-id text to resolved keys, `checks: against:`
+entries being reduced to keys, or a cross-item calc reference's resolved value
+joining the hash), a baseline stamped under the old definition
 would show every item as "changed" purely because the *definition* moved, not
 because content changed.
 
