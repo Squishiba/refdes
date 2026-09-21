@@ -176,7 +176,7 @@ def _matches_sealed_hash(
     """
     from . import build as build_mod
 
-    formats = (hash_format,) if hash_format is not None else (build_mod.HASH_FORMAT, 2, 1)
+    formats = (hash_format,) if hash_format is not None else tuple(range(build_mod.HASH_FORMAT, 0, -1))
     for fmt in formats:
         expected = keys_mod.hash_in_format(item, project, fmt)
         if expected is not None and recorded == expected:

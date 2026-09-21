@@ -264,7 +264,7 @@ def hash_in_format(item: Item, project: Project, hash_format: int) -> str | None
 
     if hash_format == build_mod.HASH_FORMAT:
         return item.content_hash
-    if hash_format in (1, 2):
+    if 1 <= hash_format < build_mod.HASH_FORMAT:
         return build_mod.hash_for_format(item, project, hash_format)
     return None
 

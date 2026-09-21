@@ -52,6 +52,16 @@ class Value:
         return self.nom.dimensionality
 
 
+def value_signature(value: Value) -> str:
+    """A canonical, full-precision text of a Value -- nominal, low and high,
+    each magnitude with its unit -- for content hashing (finding 35). Not the
+    sigfig-formatted result: rounding the display digits must not move a hash,
+    and a change the display would round away must still register."""
+    return "|".join(
+        f"{q.magnitude!r} {q.units}" for q in (value.nom, value.lo, value.hi)
+    )
+
+
 def _corners(*values: Value) -> list:
     out = []
     for v in values:

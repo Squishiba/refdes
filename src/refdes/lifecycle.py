@@ -280,7 +280,7 @@ def _items_map(project: Project) -> dict[str, dict]:
     that same surrogate and ``id`` preserves the human-facing label.
 
     ``hash_format`` records which content-hash definition produced ``hash``
-    (``build.HASH_FORMAT`` -- currently 3, docs/design/keys.md §5) directly
+    (``build.HASH_FORMAT`` -- currently 4, docs/design/keys.md §5 and finding 35) directly
     on every freshly-stamped entry, so a later reader never has to guess.
     Absent means format 1: either the baseline predates keys, or
     ``migrate_hash_format`` left the entry untouched because it could not

@@ -1299,10 +1299,17 @@ def run_checks(project: Project) -> None:
 #   3 (2026-09-14) -- `checks: against:` entries that resolve to a keyed
 #      item are likewise reduced to that key; an unresolved or keyless
 #      target keeps its raw text, same as a link target does.
+#   4 (2026-09-21, finding 35) -- an item with cross-item calc references
+#      (`V_in = DEC-PWR-001.V_in`) hashes each reference's resolved key and
+#      the *value* it resolved to, and hashes its body with the reference's
+#      target reduced to that key (docs/design/backlog.md, finding 35 §4).
+#      An item with no such reference has the exact same payload as
+#      format 3, so no existing item's hash moves. Finding 26's source()
+#      values will join this same format number, not a fifth.
 # Recorded per baseline entry (lifecycle.py) so a partially-migrated baseline
 # stays precisely describable; consulted by the migration in
 # lifecycle.py/seal.py/keys.py, never by an ordinary build.
-HASH_FORMAT = 3
+HASH_FORMAT = 4
 
 
 def _hash_payload(
@@ -1311,6 +1318,7 @@ def _hash_payload(
     project: Project,
     link_values,
     checks_values=None,
+    calc_refs=None,
 ) -> dict[str, object]:
     """Everything compute_hashes() and hash_for_format() have in common: which
     fields/body enter the hash, and under what normalization. The two things
@@ -1319,7 +1327,12 @@ def _hash_payload(
     that link's raw target list) and, from format 3 on, how a `checks:`
     entry's `against:` does (`checks_values`, called once with the raw
     `checks:` list; ``None`` leaves `checks:` hashed verbatim, as every
-    format before 3 did) -- everything else here is shared, so the hash
+    format before 3 did) and, from format 4 on, how an item's cross-item
+    calc references do (`calc_refs`, called once per item, returning
+    ``(body_text, resolved_refs)`` or ``None`` for an item with no such
+    reference -- which then hashes exactly as it did under format 3, so an
+    item that never uses the feature can never churn because of it) --
+    everything else here is shared, so the hash
     definitions can never drift apart from each other by accident.
     """
     payload: dict[str, object] = {"type": item.type}
@@ -1339,7 +1352,15 @@ def _hash_payload(
     # Same precedence as fields: item field override > whole-item mode > schema.
     body_mode = item.on_change_for("body", spec, spec.body_on_change)
     if body_mode == INVALIDATE:
-        normalized = re.sub(r"\s+", " ", item.body).strip()
+        body_text = item.body
+        if calc_refs is not None:
+            hashed = calc_refs(item)
+            if hashed is not None:
+                body_text, resolved = hashed
+                # The resolved upstream values are arithmetic input -- content
+                # of this item, exactly as finding 26 decided for source().
+                payload["calc_refs"] = resolved
+        normalized = re.sub(r"\s+", " ", body_text).strip()
         payload["body"] = normalized
 
     return payload
@@ -1467,6 +1488,57 @@ def _checks_hash_value(by_key: dict[str, Item], project: Project, entries) -> ob
     return reduced
 
 
+def _calc_refs_hash_value(by_key: dict[str, Item], project: Project, item: Item):
+    """What an item's cross-item calc references contribute to its content
+    hash (HASH_FORMAT 4, finding 35 §4), or ``None`` when it has none.
+
+    Returns ``(body_text, resolved)``. ``resolved`` lists, in source order,
+    each reference's ``[target token, name, value signature]``: the target
+    reduced by `_link_hash_token` (its key -- so renaming the upstream
+    *display id* changes nothing) and the value the reference resolved to
+    (`calc.value_signature`, full precision and unit, independent of
+    `sigfigs`) -- so a moved upstream value moves this hash while this
+    item's own text is untouched. ``body_text`` is the body with each
+    reference line's target replaced by the same token, so the on-disk
+    bare -> `DISPLAY@key` expansion, and a later display-half refresh, are
+    invisible to the hash exactly as they are for link targets.
+
+    A reference that does not resolve (missing item, missing name, failed
+    or imported target) contributes a ``None`` value; the build already
+    reports that as an error at the referring line, this only has to be
+    deterministic and distinct from any real value.
+    """
+    targets = _calc_reference_targets(item)
+    if not targets:
+        return None
+    tokens = {t: _link_hash_token(by_key, project, t) for t in targets}
+    resolved = []
+    for block in calc.extract_blocks(item.body):
+        for raw_line in block.splitlines():
+            line = raw_line.partition("#")[0].rstrip()
+            pipe = calc.PIPE_UNIT_RE.match(line)
+            if pipe:
+                line = pipe.group("lhs").rstrip()
+            match = calc.ASSIGN_RE.match(line)
+            ref = calc.CROSS_REF_RE.match(match.group(2).strip()) if match else None
+            if not ref:
+                continue
+            target = resolve_link_target(by_key, project, ref.group("target"))
+            value = None
+            if target is not None and not target.external:
+                value = getattr(target, "_env", {}).get(ref.group("name"))
+            resolved.append([
+                tokens[ref.group("target")],
+                ref.group("name"),
+                calc.value_signature(value) if value is not None else None,
+            ])
+    from . import links as links_mod
+
+    body_lines = item.body.splitlines()
+    links_mod._calc_ref_rewrites(body_lines, 0, len(body_lines), tokens)
+    return "\n".join(body_lines), resolved
+
+
 def compute_hashes(project: Project) -> None:
     """Hash only the fields whose on_change mode is `invalidate`.
 
@@ -1515,7 +1587,9 @@ def hash_payload_builder(project: Project, hash_format: int):
     the same reason -- `against:` composites didn't exist under format 2
     either. Format 3 (§5, 2026-09-14): format 2, plus `checks: against:`
     entries reduced to a resolved key the same way a link target is
-    (_checks_hash_value).
+    (_checks_hash_value). Format 4 (finding 35, 2026-09-21): format 3, plus
+    an item's cross-item calc references hash as resolved key + resolved
+    value (_calc_refs_hash_value); an item with none is identical to format 3.
     """
     if hash_format <= 1:
         return lambda item, spec: _hash_payload(
@@ -1528,12 +1602,17 @@ def hash_payload_builder(project: Project, hash_format: int):
         (lambda entries: _checks_hash_value(by_key, project, entries))
         if hash_format >= 3 else _checks_display_only
     )
+    calc_refs = (
+        (lambda item: _calc_refs_hash_value(by_key, project, item))
+        if hash_format >= 4 else None
+    )
     return lambda item, spec: _hash_payload(
         item, spec, project,
         link_values=lambda targets: sorted(
             _link_hash_token(by_key, project, t) for t in targets
         ),
         checks_values=checks_values,
+        calc_refs=calc_refs,
     )
 
 
