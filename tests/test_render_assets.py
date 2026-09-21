@@ -968,12 +968,37 @@ def _px(value: str) -> float:
     return float(value.strip().removesuffix("px"))
 
 
+def _css_tokens(css: str) -> dict[str, str]:
+    """Every custom-property declaration in the stylesheet, last wins."""
+    tokens = {}
+    for match in re.finditer(r"(--[\w-]+)\s*:\s*([^;{}]+);", css):
+        tokens[match.group(1)] = " ".join(match.group(2).split())
+    return tokens
+
+
+def _resolve_vars(value: str, tokens: dict[str, str]) -> str:
+    """Back-substitute var(--token) references down to literals."""
+    while True:
+        match = re.search(r"var\(\s*(--[\w-]+)\s*\)", value)
+        if not match:
+            return value
+        name = match.group(1)
+        assert name in tokens, f"var({name}) used but never declared"
+        value = value[: match.start()] + tokens[name] + value[match.end():]
+
+
 def test_entry_summary_outranks_the_body_text_it_heads():
     """A 15px summary over a 14px body read as one more line of prose, not as
     the heading of the entry. It has to carry a larger size and a heavier weight
     than the body under it — and the body stays exactly where it was."""
     css = _theme_css()
-    summary, body = _css_rule(css, ".tl-summary"), _css_rule(css, ".tl-body")
+    tokens = _css_tokens(css)
+    summary = {
+        k: _resolve_vars(v, tokens) for k, v in _css_rule(css, ".tl-summary").items()
+    }
+    body = {
+        k: _resolve_vars(v, tokens) for k, v in _css_rule(css, ".tl-body").items()
+    }
 
     assert _px(summary["font-size"]) > _px(body["font-size"])
     assert float(summary.get("font-weight", 400)) > float(body.get("font-weight", 400))
