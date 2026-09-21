@@ -841,7 +841,10 @@ def _plan_markdown_body(f: _File, item: _Item, op: SetBody) -> PatchPlan | Refus
         )
     replacement = new
     if original.endswith("\n") and not replacement.endswith("\n"):
-        replacement += f.eol
+        # Append the LF, not the file's eol: the conversion below owns the CR,
+        # and appending "\r\n" here had its LF converted a second time -- the
+        # body of a CRLF file ended in "\r\r\n".
+        replacement += "\n"
     if f.eol == "\r\n":
         replacement = replacement.replace("\n", "\r\n")
     return PatchPlan(
@@ -1194,19 +1197,38 @@ def _body_view(body: str) -> str:
 def _check_break_seams(f: _File, plan: PatchPlan) -> None:
     """Neither edge of the span may sit inside a line break.
 
-    An insertion is zero-width, so its offset is chosen by walking back to the
-    end of the previous value -- and the end of a value in a CRLF file is the
-    space *between* the CR and the LF if the walk stops one character short.
-    The replacement then opens with its own break and the file's break closes
-    it: `\\r\\r\\n` at one seam and a bare `\\n` at the other. The replacement's
-    own text can be well-formed and still be spliced into a broken pair, so
-    this looks at the two seams rather than at the replacement.
+    Two things are checked: the replacement's own text, and the two seams where
+    it meets the file.
+
+    Inside the replacement, every CR must be followed by an LF and -- in a CRLF
+    file -- every LF must be preceded by a CR. A doubled conversion turns the
+    body's final break into `\\r\\r\\n`, which is a CR orphaned one character
+    from the break it was meant to be; counting the file's bare LFs cannot see
+    it, since the LF is intact and it is the CR next to it that is stray.
+
+    At the seams, an insertion is zero-width, so its offset is chosen by walking
+    back to the end of the previous value -- and the end of a value in a CRLF
+    file is the space *between* the CR and the LF if the walk stops one
+    character short. The replacement's own text can be well-formed and still be
+    spliced into a broken pair, so the edges are checked as well.
     """
     repl = plan.replacement
     if not repl:
         return
     left = f.text[plan.start - 1 : plan.start]
     right = f.text[plan.end : plan.end + 1]
+    # Scan the replacement against its neighbours so a break completed by the
+    # file counts as whole: a CR at the end of the replacement is fine when the
+    # character after the span is the LF it belongs to, and likewise at the
+    # front. A CR-run is caught either way -- the first CR of `\r\r\n` has a CR
+    # after it, not an LF.
+    window = left + repl + right
+    for i in range(1, len(window) - 1):
+        ch = window[i]
+        if ch == "\r" and window[i + 1 : i + 2] != "\n":
+            raise _LocateError("the planned replacement contains a CR that is not part of a line break")
+        if f.eol == "\r\n" and ch == "\n" and window[i - 1 : i] != "\r":
+            raise _LocateError("the planned replacement contains an LF that is not part of a CRLF break")
     if left == "\r" and repl[:1] != "\n":
         raise _LocateError("the planned edit inserts between the CR and the LF of a line break")
     if repl[-1:] == "\r" and right != "\n":

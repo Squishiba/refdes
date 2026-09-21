@@ -410,6 +410,74 @@ def test_an_insertion_offset_inside_a_break_is_refused():
         patcher._verify(f, split, SetBody("Replacement body.\nSecond line."))
 
 
+# ------------------------------------------- the body's final break, converted once
+#
+# A Markdown body that runs to the end of the file keeps the file's final break:
+# the planner appends one to the replacement when the original had one. Appending
+# the file's eol and *then* converting LF to CRLF converted that break twice, so
+# the last thing written was `\r\r\n` -- a stray CR the file did not have before.
+
+MD_EOF = "---\nid: DEC-001\n---\n\nfirst prose\n\n---\nid: DEC-002\n---\n\nlast body\n"
+
+
+def md_body(text, ref, eol, final_break):
+    """SetBody on a Markdown item, checked down to the last break of the file."""
+    got = plan(text, ref, SetBody("Inserted body.\nline two."))
+    assert got.shape == "md-body"
+    new = apply_patch(text, got)
+    # the replacement ends in exactly one break, and it is the file's own
+    if final_break:
+        assert got.replacement.endswith(eol) and not got.replacement.endswith(eol + eol)
+        assert not got.replacement.endswith("\r\r\n")
+    else:
+        assert not got.replacement.endswith(("\n", "\r"))
+    assert "\r\r" not in got.replacement
+    assert new[: got.start] == text[: got.start]
+    assert new[len(new) - len(text) + got.end :] == text[got.end :]
+    assert_breaks_are_whole(new, eol)
+    assert new.endswith("\n") == final_break
+    assert apply_patch(new, revert_plan(got)) == text
+    entry = next(e for e in patcher._load(new).projection if e[0]["id"] == ref)
+    assert patcher._body_view(entry[1]) == "Inserted body.\nline two."
+    return new, got
+
+
+def test_md_body_at_eof_with_final_newline_keeps_one_break():
+    md_body(MD_EOF, "DEC-002", "\n", True)
+    md_body(MD_EOF.replace("\n", "\r\n"), "DEC-002", "\r\n", True)
+
+
+def test_md_body_at_eof_without_final_newline_adds_none():
+    md_body(MD_EOF.rstrip("\n"), "DEC-002", "\n", False)
+    md_body(MD_EOF.replace("\n", "\r\n").rstrip("\r\n"), "DEC-002", "\r\n", False)
+
+
+def test_md_body_mid_file_keeps_the_following_item_intact():
+    for eol, text in (("\n", MD_EOF), ("\r\n", MD_EOF.replace("\n", "\r\n"))):
+        new, got = md_body(text, "DEC-001", eol, True)
+        assert got.end < len(text)
+        refs = [e[0]["id"] for e in patcher._load(new).projection]
+        assert refs == ["DEC-001", "DEC-002"]
+        other = next(e for e in patcher._load(new).projection if e[0]["id"] == "DEC-002")
+        before = next(e for e in patcher._load(text).projection if e[0]["id"] == "DEC-002")
+        assert patcher._body_view(other[1]) == patcher._body_view(before[1])
+
+
+def test_a_replacement_with_a_stray_cr_is_refused():
+    from dataclasses import replace as dreplace
+
+    text = MD_EOF.replace("\n", "\r\n")
+    got = plan(text, "DEC-002", SetBody("Inserted body.\nline two."))
+    f = patcher._load(text)
+    for bad in (
+        got.replacement[:-2] + "\r\r\n",  # the doubled conversion this replaced
+        got.replacement + "\r",  # a CR left dangling at the end
+        got.replacement.replace("\r\n", "\n"),  # LF breaks into a CRLF file
+    ):
+        with pytest.raises(patcher._LocateError):
+            patcher._verify(f, dreplace(got, replacement=bad), SetBody("Inserted body.\nline two."))
+
+
 def test_flow_style_item_scalar_replacement():
     text = "items: [{id: REQ-001, title: T, priority: high}]\n"
     new, _ = edited(text, "REQ-001", SetField("priority", "low"))
@@ -823,6 +891,86 @@ def test_crlf_copies_of_the_repo_take_a_new_field_without_broken_breaks(rel, tex
         assert new[len(new) - len(text) + got.end :] == text[got.end :], rel
         assert_breaks_are_whole(new, "\r\n")
         assert apply_patch(new, revert_plan(got)) == text, f"{rel} {item.ref}.{name}"
+
+
+def _break_variant_files():
+    """Every items file of the repo in four break states: LF, CRLF, and each of
+    those without the file's final break. The working copy's own breaks are
+    normalised first so a CRLF checkout produces the same cases as an LF one."""
+    out = []
+    for rel, text in _item_files():
+        for tag, variant in _line_break_variants(text.replace("\r\n", "\n")).items():
+            out.append((f"{rel}::{tag}", tag, variant))
+    return out
+
+
+def _ends_in_block_scalar(text, item):
+    """True when the item's last field is a block scalar whose text runs to EOF."""
+    if not item.fields:
+        return False
+    last = list(item.fields.values())[-1]
+    if isinstance(last, list):
+        last = last[-1]
+    return getattr(last, "style", None) in ("|", "|-", "|+", ">", ">-", ">+") and last.end_mark.index == len(
+        text.rstrip("\r\n")
+    )
+
+
+def _eol_of(tag):
+    return "\r\n" if tag.startswith("crlf") else "\n"
+
+
+@pytest.mark.parametrize("label,tag,text", _break_variant_files())
+def test_every_repo_item_takes_every_edit_in_every_break_state(label, tag, text):
+    """The whole-file version of the break guarantee.
+
+    A doubled conversion at the end of a Markdown body was invisible to a check
+    that counted bare LFs: the LF of the final break is intact, and it is the
+    CR beside it that is stray. So the assertion is about the whole file after
+    the edit, not about the neighbourhood of the span, and it runs over every
+    edit kind -- body, a key the item does not have, every scalar key it does.
+    """
+    f = _load(text)
+    if f is None:
+        pytest.skip(f"{label} is not a patchable items file")
+    eol = _eol_of(tag)
+    had_final_break = text.endswith("\n")
+    ops = [("body", SetBody("patcher probe body\n"))]
+    ops.append(("patcher_probe", SetField("patcher_probe", "probe value")))
+    for item in f.items:
+        edits = list(ops)
+        for name, node in item.fields.items():
+            if name in patcher.PROTECTED_FIELDS or not isinstance(node, yaml.ScalarNode):
+                continue
+            if name == "patcher_probe":
+                continue
+            edits.append((name, SetField(name, "probe")))
+        trailing_block = _ends_in_block_scalar(text, item)
+        for what, op in edits:
+            got = plan_patch(text, item.ref, op)
+            if not isinstance(got, PatchPlan):
+                # Appending a key after a block scalar that runs to EOF without
+                # a final break gives the block a following line, and clip
+                # chomping then hands the body a trailing newline it did not
+                # have. That changes a different field's value, so the patcher
+                # refuses it -- on LF files too, so it is not a break bug. It is
+                # the fidelity contract holding, and this pass does not re-litigate it.
+                assert trailing_block and what == "patcher_probe" and not had_final_break, (
+                    f"{label} {item.ref}.{what}: {got.reason}"
+                )
+                continue
+            assert isinstance(got, PatchPlan)
+            new = apply_patch(text, got)
+            assert new[: got.start] == text[: got.start], f"{label} {item.ref}.{what} before"
+            assert new[len(new) - len(text) + got.end :] == text[got.end :], (
+                f"{label} {item.ref}.{what} after"
+            )
+            assert_breaks_are_whole(new, eol)
+            if not got.replacement.endswith(("\n", "\r")):
+                # A replacement that ends in a break brings its own; the file's
+                # own final break is only owed when the edit does not supply one.
+                assert new.endswith("\n") == had_final_break, f"{label} {item.ref}.{what} final break"
+            assert apply_patch(new, revert_plan(got)) == text, f"{label} {item.ref}.{what} revert"
 
 
 def test_the_repo_has_nothing_the_patcher_refuses():
