@@ -15,6 +15,8 @@ from __future__ import annotations
 import hashlib
 import os
 
+import pytest
+
 from conftest import write_project_config
 
 from refdes import cli as cli_mod
@@ -297,6 +299,53 @@ def test_redact_by_object_digest(tmp_path, capsys):
     assert [e["kind"] for e in events] == ["redaction"]
     assert events[0]["item_key"] == digest
     assert not (tmp_path / ".refdes" / "history" / "objects" / f"{digest}.yaml").exists()
+
+
+def test_redact_rejects_a_non_hex_digest_before_touching_the_tree(tmp_path, capsys):
+    """Sabotage: `redact(object_digest=...)` feeds a caller-supplied string
+    straight into `object_path` and `os.remove` in src/refdes/history.py. A
+    digest that is not exactly 64 lowercase hex must raise `HistoryError`
+    before the store is even read, so a crafted ``../../x`` can never name a
+    file outside .refdes/history/."""
+    config = _setup(tmp_path)
+    config = _warm(tmp_path, capsys)
+    assert cli_mod.main(["-c", config, "history", "capture", "LOG-001"]) == 0
+    capsys.readouterr()
+    root = str(tmp_path)
+    before = _tree(root)
+
+    bad = [
+        "../../x",
+        str(tmp_path / "items" / "log.yaml"),  # an absolute path
+        "A" * 64,  # uppercase hex
+        "a" * 63,
+        "a" * 65,
+        "",
+        "a" * 32 + "/" + "a" * 31,  # a digest with a slash
+    ]
+    for digest in bad:
+        with pytest.raises(history.HistoryError):
+            history.redact(root, object_digest=digest)
+        assert _changes(before, root) == set(), f"{digest!r} touched the tree"
+
+    # `object_path` refuses too, so no caller can build an escaping path.
+    for digest in bad:
+        with pytest.raises(history.HistoryError):
+            history.object_path(root, digest)
+
+    # A valid digest still works: naming nothing is a quiet, write-free
+    # no-op, and object_path accepts it.
+    valid = "a" * 64
+    result = history.redact(root, object_digest=valid)
+    assert result.event_path is None
+    assert result.removed_objects == [] and result.removed_events == []
+    assert _changes(before, root) == set()
+    assert history.object_path(root, valid) == os.path.join(
+        history.objects_dir(root), f"{valid}.yaml"
+    )
+
+    # The capture survived every attempt.
+    assert len(history.load_events(root)) == 1
 
 
 def test_redact_nothing_matched_is_quiet_and_writes_nothing(tmp_path, capsys):

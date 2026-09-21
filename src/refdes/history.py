@@ -99,6 +99,10 @@ NO_OBJECT_KINDS = frozenset({"legacy-seal", "redaction"})
 # four) produces a second file for the same fact instead of a no-op.
 _EVENT_NAMESPACE = uuid.uuid5(uuid.NAMESPACE_URL, "refdes:history:event")
 
+# The only shape an object digest may take: full 64-lowercase-hex, exactly
+# what `digest_of`/sha256 emits and what object filenames are built from.
+_OBJECT_DIGEST_RE = re.compile(r"[0-9a-f]{64}")
+
 _OBJECT_HEADER = (
     "# Refdes captured-history object: the canonical semantic payload of an\n"
     "# item at capture time (docs/design/living-notes.md §3). The filename is\n"
@@ -193,7 +197,22 @@ def events_dir(root: str) -> str:
     return os.path.join(str(root), EVENTS_DIR)
 
 
+def _require_valid_digest(digest: object) -> str:
+    """Refuse any digest that could not be an object filename's content
+    address: exactly 64 lowercase hex, the shape ``sha256().hexdigest()``
+    emits. An unvalidated digest handed to ``object_path`` (then
+    ``os.remove``) is a path traversal in waiting; this is the one gate every
+    caller passes through."""
+    if not isinstance(digest, str) or _OBJECT_DIGEST_RE.fullmatch(digest) is None:
+        raise HistoryError(
+            f"object digest must be exactly 64 lowercase hex characters, "
+            f"got {digest!r}"
+        )
+    return digest
+
+
 def object_path(root: str, digest: str) -> str:
+    _require_valid_digest(digest)
     return os.path.join(objects_dir(root), f"{digest}.yaml")
 
 
@@ -712,6 +731,10 @@ def redact(
     * The event's ``successor_key`` carries a fingerprint of the removal
       set, so a second, genuinely different redaction of the same target
       gets its own event id instead of colliding with the first.
+    * A caller-supplied ``object_digest`` must be exactly 64 lowercase hex
+      (``_require_valid_digest``) and is refused before the store is even
+      read: an unvalidated digest reaching ``object_path``+``os.remove`` is
+      a path traversal.
 
     Transactional: every removed file's bytes are held in memory and
     restored if any step fails, so a half-redacted store is not a state
@@ -719,6 +742,8 @@ def redact(
     """
     if (item_key is None) == (object_digest is None):
         raise HistoryError("redact takes exactly one of item_key or object_digest")
+    if object_digest is not None:
+        _require_valid_digest(object_digest)  # before any filesystem access
     root = str(root)
     events = load_events(root)
     if object_digest is not None:
