@@ -1,7 +1,8 @@
 Status: decided (Jared, 2026-09-19) — all five §9 questions answered as
 recommended, with one overturn of this document's own recommendation: coverage
-grouping is the default for every project, new and existing (§4.1, §10). Not yet
-implemented.
+grouping is the default for every project, new and existing (§4.1, §10).
+Implemented (phases 1-4, ao/refdes-113); see "Implementation notes" at the end
+for where the build differs from or settles this text.
 
 # `extends:` — single-level type inheritance
 
@@ -20,8 +21,10 @@ option. Single inheritance, one level only.
 
 The decision is taken. This document specs it; it does not relitigate it.
 
-**Implementation status:** not started — this is the design spec that the
-backlog entry (finding 21) requires before implementation begins.
+**Implementation status:** implemented — engine (`standards._resolve_extends`),
+consumers, `coverage.group_inherited`, and `hardware@3`'s `bound extends
+requirement`, with the oracle in `tests/test_extends.py`. Preset adoption is
+still deferred to after threads Phase 4 (§7.2).
 
 ---
 
@@ -523,3 +526,40 @@ substitution rule, ALLOW vs LISTING consumer classification, single-level
 enforcement, `include:`/`body:` inheritance, child-declared
 `prefix`/`label`/`plural`, whole-definition field override, and hardware@3
 adoption for `bound` now with preset adoption after threads Phase 4.
+
+
+---
+
+## 12. Implementation notes
+
+Where the build settles something the spec left open or contradicted itself.
+
+- **`bound` gains `governed_by`.** §5.2 asks for an identical resolved
+  schema, but `requirement` carries `governed_by: [requirement, bound]` and a
+  child cannot leave a parent link behind (§3.1). After the conversion the
+  resolved `bound` is identical to before in every field, scalar and
+  `doc:`, and differs in exactly one link: it may now declare `governed_by`.
+  The oracle (`test_hardware3_base_resolves_unchanged`) asserts that single
+  delta explicitly; nothing else may move. Link order in the dict also
+  differs (inherited links first), which nothing reads.
+- **`doc:` is not inherited** (not in the §2.2 table): it is the type's own
+  definition, and a subtype repeating its parent's would misdescribe it.
+- **Field/link order.** Inherited-only entries keep the parent's order, then
+  the child's own follow in the order the child declares them. Chosen so
+  `bound`'s field order is unchanged by the conversion.
+- **`bound` restates `title`, `status`, `rationale`.** A field override
+  replaces the whole definition (§9 Q4), and those three carry the bound's own
+  `doc:` wording; the shared `coverable`/`coverable_statuses`/`include`/`body`/
+  `part_of` are what actually left the type. The four link target lists of §1
+  were left as they are (they still name `bound`): collapsing them to
+  `[requirement]` would change the resolved schema the oracle guards.
+- **`{{index type=}}`.** §3.2/§4.1 say the index must not include subtypes by
+  default; §8 says it groups by parent when `coverage.group_inherited` is on.
+  Built as §8: the index lists subtypes when the setting is on (the default),
+  each marked `(bound)`, with an explicit `subtypes="true|false"` parameter
+  (§3.2's opt-in) to decide per block. `refdes ls --type` stays exact.
+- **Single-level error** uses §6.2's wording without the `ERROR file:line —`
+  frame (schema errors carry no position). The set-named-as-parent message says
+  "set", not "field_set" (composition.md predates the rename).
+- **Untouched:** `tree.py`'s literal `type == "group"` checks, which do not
+  yet see a subtype of `group`.

@@ -162,23 +162,25 @@ types:
     body: { on_change: invalidate, required: true }
 
   bound:
+    # A requirement with a number (docs/design/extends.md): the requirement's
+    # fields, links, body, coverage flags and provenance/stewardship sets come
+    # through `extends:`; what is written here is the delta. Three fields are
+    # restated only because their `doc:` wording is the bound's own -- an
+    # override replaces the whole definition, so each carries its full spec.
+    extends: requirement
     doc: "A numeric limit the design must respect — a voltage, a current, a tolerance. Its limit field makes it checkable by other items' checks. Counts toward coverage while active."
     prefix: BND
     label: Bound
+    plural: Bounds
     preview: [status, title, limit]
-    coverable: true
-    coverable_statuses: [active]
     fields:
       title:     { type: text, on_change: invalidate, doc: "An optional short label for tables and previews. The bound's content is the body, not this." }
       limit:     { type: limit, required: true, on_change: invalidate, doc: "The numeric limit itself, parsed as a quantity with a comparison — '>= 9 V', '<= 600 mA'. Required, and it is what makes this bound checkable by other items' checks." }
       status:    { type: enum, choices: [draft, active, retired], default: draft, on_change: invalidate, doc: "Lifecycle of the bound. Only active bounds count toward coverage; draft and retired ones are excluded." }
       rationale: { type: text, on_change: invalidate, doc: "Why this limit is what it is — the reasoning behind the number." }
-    include: [provenance, stewardship]
     links:
       refines:      [bound]
       derives_from: [requirement, bound]
-      part_of:      [group]
-    body: { on_change: invalidate, required: true }
 
   decision:
     doc: "A design choice that was made — what was picked, why, and what it satisfies. A settled (accepted) decision closes coverage on what it satisfies; a failing check on a decision is an error."

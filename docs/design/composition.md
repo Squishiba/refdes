@@ -2,8 +2,8 @@ Status: decided — owner (Jared) approved all five open questions as
 recommended, 2026-09-20. Engine implementation landed on ao/refdes-106/root
 (rename, links/body widening, conflict errors, shadow warning, doc-only
 patches); the base.yaml factoring refactor is deliberately deferred to the
-`extends:` pass per question 3, and the two `extends:`-dependent tests are
-deferred with it.
+`extends:` pass per question 3. The two `extends:`-dependent tests landed
+with the extends engine (`tests/test_composition.py`).
 
 # Composition — widening `include:` beyond fields
 
@@ -34,9 +34,10 @@ that attempt measured, not what a reader might imagine was duplicated.
 **Implementation status:** engine landed (rename `6f2ea68`, widening
 `5d05498`, doc-only patches `08b79e4`). The base.yaml refactor and the
 `test_hardware3_base_resolves_unchanged` oracle ride the `extends:` pass
-(open question 3, decided); `test_extends_naming_a_set_is_an_error` and
-`test_extends_and_include_together_own_declaration_wins` are deferred with
-the extends engine itself.
+(open question 3, decided) -- the `extends:` half of that oracle is
+`test_hardware3_base_resolves_unchanged` in `tests/test_extends.py`, the
+sets-factoring half is still to do; `test_extends_naming_a_set_is_an_error`
+and `test_extends_and_include_together_own_declaration_wins` are implemented.
 
 ---
 

@@ -546,7 +546,7 @@ are inherited by `bound`. Adopting `extends:` for `bound` in `hardware@3`
 churns no hashes (`item.type` stays `"bound"`); no migration.yaml entry is
 needed. Preset adoption (design-debate's `debate`) waits for threads Phase 4.
 
-**Status: decided (Jared, 2026-09-19), not yet implemented.** Spec at
+**Status: decided (Jared, 2026-09-19); implemented on ao/refdes-113 (phases 1-4, preset adoption still deferred).** Spec at
 [`docs/design/extends.md`](extends.md) — states the substitution rule (universal
 Liskov, no opt-in marker), ALLOW vs LISTING consumer classification (§3.2),
 single-level enforcement, `include:` and `body:` inherited, `prefix`/`label`/

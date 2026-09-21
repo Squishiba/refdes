@@ -35,3 +35,17 @@ Task: implement extends.md in full, phased per its section 8; report to refdes-2
 - Not touched: tree.py's hardcoded `type == "group"` checks, cli `ls --type` (LISTING, exact by spec),
   nav's `log`, diagram edges (declared targets).
 - Tooling note: bash heredocs with apostrophes break this shell tool; used Write + a python append.
+
+## Phase 3+4 -- standard conversion + oracle (done)
+
+- hardware@3 base.yaml: `bound` now `extends: requirement`, `plural: Bounds` added (required by the
+  child-declares-identity rule; resolves to the same value the label default gave). title/status/rationale
+  restated because their `doc:` wording is the bound's own (whole-definition override).
+- Oracle: resolved dump (types + link_types, declared order) vs fixtures snapshotted before the change,
+  with and without design-debate. Only diff: bound gains `governed_by: [requirement, bound]` (inherited;
+  cannot be shed under Liskov) and link dict order. Asserted explicitly in the test, not waved through.
+  FLAG FOR JARED: spec 5.2's "IDENTICAL" is not literally achievable; alternative would be an invented
+  link-deletion escape hatch on the child.
+- Presets untouched (Q5). The four `[requirement, bound]` target lists left alone (collapsing them would
+  change the resolved schema).
+- The composition.md sets-factoring oracle (same test name) is NOT done -- out of scope here.

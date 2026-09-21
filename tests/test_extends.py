@@ -520,3 +520,150 @@ def test_json_schema_completion_offers_subtypes_where_the_parent_is_named(tmp_pa
     project = _consumer_project(tmp_path)
     branch = build_schema(project)["$defs"]["dec__bare"]
     assert branch["properties"]["satisfies"]["description"] == "target: req, bnd"
+
+
+# =========================================================================
+# Phase 3 + 4: hardware@3 adopts `bound extends requirement`; oracle and the
+# standard-level positive/negative cases.
+# =========================================================================
+
+import json  # noqa: E402
+from pathlib import Path  # noqa: E402
+
+from oracle_dump import resolved_dump  # noqa: E402
+
+FIXTURES = Path(__file__).parent / "fixtures"
+
+HARDWARE3 = "standard: { base: hardware, version: 3 }\n"
+
+
+def _normalized(dump: str) -> dict:
+    return json.loads(dump)
+
+
+@pytest.mark.parametrize(
+    "fixture, presets",
+    [
+        ("hardware3_resolved.json", []),
+        ("hardware3_design_debate_resolved.json", ["design-debate"]),
+    ],
+)
+def test_hardware3_base_resolves_unchanged(fixture, presets):
+    """The acceptance test of extends.md §5.2: converting `bound` to
+    `extends: requirement` leaves the resolved schema as it was, so nothing that
+    hashes, seals or baselines an item can tell. The fixtures are the
+    pre-conversion dumps (types and link_types, every field, link and scalar, in
+    declared order).
+
+    Exactly one thing differs, asserted rather than waved through: `bound` now
+    also carries `requirement`'s `governed_by: [requirement, bound]`, because
+    inheritance cannot leave a parent link behind (a bound stands in for a
+    requirement everywhere, §3.1). It only permits a link an author may now
+    write; no existing item, hash or coverage result moves. Its position in the
+    link dict differs too -- inherited links first, the child's own after."""
+    expected = _normalized((FIXTURES / fixture).read_text(encoding="utf-8"))
+    actual = _normalized(resolved_dump(presets))
+
+    bound_links = actual["types"]["bound"]["links"]
+    assert bound_links.pop("governed_by") == ["requirement", "bound"]
+    bound_links_sorted = dict(sorted(bound_links.items()))
+    actual["types"]["bound"]["links"] = bound_links_sorted
+    expected["types"]["bound"]["links"] = dict(
+        sorted(expected["types"]["bound"]["links"].items())
+    )
+
+    assert list(actual["types"]) == list(expected["types"])
+    for name, spec in expected["types"].items():
+        assert actual["types"][name] == spec, f"types.{name} drifted"
+    assert actual["link_types"] == expected["link_types"]
+
+
+def test_hardware3_bound_extends_requirement(tmp_path):
+    project = _load(tmp_path, HARDWARE3)
+    assert project.types["bound"].extends == "requirement"
+    assert project.subtype_map == {"requirement": {"bound"}}
+    assert project.types["requirement"].extends == ""
+    # Identity is the bound's own, never the requirement's.
+    bound = project.types["bound"]
+    assert (bound.prefix, bound.label, bound.plural) == ("BND", "Bound", "Bounds")
+    assert bound.coverable is True and bound.coverable_statuses == ["active"]
+
+
+def test_hardware3_bound_satisfies_every_list_that_names_requirement(tmp_path):
+    """The standard's own consumers: a decision `satisfies:` and a test
+    `verifies:` a bound, and coverage closes on it -- through `extends:`, with
+    `bound` also still named explicitly in those lists."""
+    write_project_config(tmp_path, "site: { title: T, out: _site }\n" + HARDWARE3)
+    (tmp_path / "items").mkdir()
+    (tmp_path / "items" / "all.yaml").write_text(
+        "items:\n"
+        "  - { id: BND-001, type: bound, status: active, limit: '<= 5 V',\n"
+        "      body: The rail stays under five volts. }\n"
+        "  - { id: DEC-001, type: decision, status: accepted, title: Regulator,\n"
+        "      satisfies: [BND-001] }\n"
+        "  - { id: TST-001, type: test, status: passing, title: Rail check, verifies: [BND-001] }\n",
+        encoding="utf-8",
+    )
+    project = _build_at(tmp_path)
+    assert not project.errors, [d.message for d in project.errors]
+    assert project.coverage["BND-001"].stage == "verified"
+
+
+def test_overlay_may_extend_a_base_type(tmp_path):
+    project = _load(
+        tmp_path,
+        HARDWARE3
+        + "types:\n"
+        "  thermal_bound:\n"
+        "    extends: requirement\n"
+        "    prefix: THB\n"
+        "    label: Thermal bound\n"
+        "    plural: Thermal bounds\n"
+        "    fields:\n"
+        "      limit: { type: limit, required: true }\n",
+    )
+    thb = project.types["thermal_bound"]
+    assert thb.extends == "requirement"
+    assert {"title", "status", "limit", "source", "owner"} <= set(thb.fields)
+    assert project.subtype_map == {"requirement": {"bound", "thermal_bound"}}
+
+
+def test_overlay_extending_an_already_extended_type_is_an_error(tmp_path):
+    """The parent's spec still has `extends:` after the standard's own
+    resolution -- the single-level rule catches an overlay hop the same way."""
+    message = _err(
+        tmp_path,
+        HARDWARE3
+        + "types:\n"
+        "  thermal_bound:\n"
+        "    extends: bound\n"
+        "    prefix: THB\n"
+        "    label: Thermal bound\n"
+        "    plural: Thermal bounds\n",
+    )
+    assert message == (
+        "types.thermal_bound.extends names 'bound', which itself extends "
+        "'requirement'. Single-level inheritance only; thermal_bound must "
+        "extend 'requirement' directly or not use extends:."
+    )
+
+
+def test_overlay_edit_to_requirement_reaches_bound(tmp_path):
+    """extends.md §2.3's key consequence, on the real standard: a field the
+    project adds to `requirement` is inherited by `bound`."""
+    project = _load(
+        tmp_path,
+        HARDWARE3
+        + "types:\n"
+        "  requirement:\n"
+        "    fields:\n"
+        "      verification_plan: { type: text }\n",
+    )
+    assert "verification_plan" in project.types["bound"].fields
+
+
+def test_overlay_can_retype_bound_to_extend_nothing_by_removing_it(tmp_path):
+    """`types.bound: null` still removes the type; dangling references to it
+    surface as the usual link-target load error, not an extends one."""
+    message = _err(tmp_path, HARDWARE3 + "types:\n  bound: null\n")
+    assert "bound" in message and "extends" not in message

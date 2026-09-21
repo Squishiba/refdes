@@ -91,6 +91,16 @@ and this project uses [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **hardware@3: `bound` now `extends: requirement`** (`docs/design/extends.md`
+  phases 3-4). `bound` declares only its delta (`limit`, its own docs, the
+  `refines`/`derives_from` targets); `coverable`, `coverable_statuses`,
+  `body`, provenance/stewardship and `part_of` come from `requirement`. The
+  resolved schema is pinned by an oracle test against the pre-conversion dump
+  -- identical field for field and hash-, seal- and baseline-neutral, with one
+  deliberate addition: a `bound` may now declare `governed_by` (it inherits
+  `requirement`'s). No migration. The design-debate preset does not adopt
+  `extends:` until after threads Phase 4.
+
 - **`extends:` consumers and `coverage.group_inherited`** (`docs/design/extends.md`
   phase 2). A subtype is accepted anywhere a link target list names its
   parent (link validation, `conforms_to:`/`includes:` group tests, the
