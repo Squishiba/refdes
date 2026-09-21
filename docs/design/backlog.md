@@ -2172,7 +2172,22 @@ files nobody references are not an error (§3 as corrected above). Rejected: a
 second `asset_search:` key, for the mirroring-lists cost above, and any implicit
 tie-breaker — first-declared directory, newest mtime, alphabetical — because
 each is a rule no reader of the document can see. The exact error wording and
-the fallback-chain trigger in §5 stand as written; nothing here is implemented.
+the fallback-chain trigger in §5 stand as written.
+
+**Status: done (§1/§3/§5/§6), shipped in `e8b4d34`.** `_search_image_src`
+(`build.py`) resolves a bare `<img src>` — one that failed the relative lookup
+and contains no path separator — against `project.asset_dirs` (recursive
+inside each declared directory), never the project tree; a relative src that
+resolves still wins untouched, a failing multi-segment path stays a plain
+does-not-exist error, and a name found nowhere errors naming the directories
+searched. The ambiguity rule ships as decided: error at the reference site
+naming every candidate's full path, no tie-breaker, silent duplicates.
+§4's resolve-and-freeze write-back did **not** ship: resolution re-runs every
+build, and the ambiguity error closes the drift hole freezing was meant to
+(adding a second same-named file turns an existing document's image into a
+loud error, not a silent re-point); `docs/markdown.md` discloses this and
+that moving an *asset* still breaks a hand-written relative path. Tests in
+`tests/test_image_search.py`.
 
 **Local model: not suitable.** Ambiguity resolution and the freeze semantics
 are exactly the shape of judgment call this project keeps off a smaller
