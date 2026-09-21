@@ -7,11 +7,15 @@ coverage-grouping setting and the hardware@3 oracle below.
 
 from __future__ import annotations
 
+import os
+
 import pytest
 from conftest import write_project_config
+from helpers import _build_at
 
-from refdes import standards
+from refdes import render, standards
 from refdes.schema import SchemaError, load_project
+from refdes.schema_json import build_schema
 
 PARENT = (
     "link_types:\n"
@@ -289,3 +293,230 @@ def test_a_preset_may_not_extend_another_presets_type(tmp_path, monkeypatch):
         _load_with_presets(tmp_path, ["p1", "p2"])
     assert "belongs to preset 'p1'" in str(exc.value)
     assert "presets are independent bundles" in str(exc.value)
+
+
+# =========================================================================
+# Phase 2: consumers -- link validation, coverage, index, completion, and
+# the coverage.group_inherited setting.
+# =========================================================================
+
+CONSUMER_SCHEMA = (
+    "link_types:\n"
+    "  refines: { inverse: refined_by }\n"
+    "  satisfies: { inverse: satisfied_by }\n"
+    "  verifies: { inverse: verified_by }\n"
+    "types:\n"
+    "  req:\n"
+    "    prefix: REQ\n"
+    "    label: Requirement\n"
+    "    plural: Requirements\n"
+    "    coverable: true\n"
+    "    coverable_statuses: [active]\n"
+    "    fields:\n"
+    "      title: { type: text }\n"
+    "      status: { type: enum, choices: [draft, active], default: active }\n"
+    "    links:\n"
+    "      refines: [req]\n"
+    "  bnd:\n"
+    "    extends: req\n"
+    "    prefix: BND\n"
+    "    label: Bound\n"
+    "    plural: Bounds\n"
+    "    links:\n"
+    "      refines: [bnd]\n"
+    "  dec:\n"
+    "    prefix: DEC\n"
+    "    label: Decision\n"
+    "    plural: Decisions\n"
+    "    satisfying_statuses: [accepted]\n"
+    "    fields:\n"
+    "      title: { type: text }\n"
+    "      status: { type: enum, choices: [proposed, accepted], default: proposed }\n"
+    "    links:\n"
+    "      satisfies: [req]\n"
+    "  dec2:\n"
+    "    extends: dec\n"
+    "    prefix: DCB\n"
+    "    label: Decision B\n"
+    "    plural: Decisions B\n"
+    "  tst:\n"
+    "    prefix: TST\n"
+    "    label: Test\n"
+    "    plural: Tests\n"
+    "    fields:\n"
+    "      title: { type: text }\n"
+    "    links:\n"
+    "      verifies: [req]\n"
+)
+
+CONSUMER_ITEMS = (
+    "items:\n"
+    "  - { id: REQ-001, type: req, title: A requirement }\n"
+    "  - { id: BND-001, type: bnd, title: A bound }\n"
+    "  - { id: DEC-001, type: dec, status: accepted, title: Settled, satisfies: [BND-001] }\n"
+    "  - { id: DCB-001, type: dec2, status: proposed, title: Unsettled, satisfies: [REQ-001] }\n"
+    "  - { id: TST-001, type: tst, title: Proves it, verifies: [BND-001] }\n"
+)
+
+
+def _consumer_project(tmp_path, items: str = CONSUMER_ITEMS, settings: str = ""):
+    write_project_config(
+        tmp_path, "site: { title: T, out: _site }\n" + settings + CONSUMER_SCHEMA
+    )
+    (tmp_path / "items").mkdir(exist_ok=True)
+    (tmp_path / "items" / "all.yaml").write_text(items, encoding="utf-8")
+    return _build_at(tmp_path)
+
+
+def test_subtype_satisfies_a_parent_link_target_list(tmp_path):
+    """`dec.satisfies: [req]` accepts a `bnd`, `tst.verifies: [req]` too --
+    no per-link marker, `extends:` is the whole commitment."""
+    project = _consumer_project(tmp_path)
+    assert not project.errors, [d.message for d in project.errors]
+    assert project.item_by_id("DEC-001").resolved_links["satisfies"] == ["BND-001"]
+    assert project.item_by_id("TST-001").resolved_links["verifies"] == ["BND-001"]
+
+
+def test_a_parent_does_not_satisfy_a_list_naming_only_its_subtype(tmp_path):
+    """Substitution runs one way: `bnd.refines: [bnd]` still refuses a plain req."""
+    project = _consumer_project(
+        tmp_path,
+        CONSUMER_ITEMS + "  - { id: BND-002, type: bnd, title: X, refines: [REQ-001] }\n",
+    )
+    assert any(
+        "refines may point at ['bnd'], but REQ-001 is a req" in d.message
+        for d in project.errors
+    ), [d.message for d in project.errors]
+
+
+def test_coverage_of_a_subtype_item_follows_the_parents_rules(tmp_path):
+    """BND-001 is coverable by inheritance (never declared on `bnd`): settled
+    by DEC-001, proved by TST-001 -> verified."""
+    project = _consumer_project(tmp_path)
+    assert project.coverage["BND-001"].stage == "verified"
+    assert project.coverage["BND-001"].satisfied_by == ["DEC-001"]
+
+
+def test_coverage_honors_the_inherited_satisfying_statuses(tmp_path):
+    """DCB-001 is a `dec2` (extends dec), which inherited `satisfying_statuses:
+    [accepted]`: proposed -> the link is only a claim; accepted -> settled."""
+    project = _consumer_project(tmp_path)
+    assert project.coverage["REQ-001"].stage == "claimed"
+    assert project.coverage["REQ-001"].claimed_by == ["DCB-001"]
+
+    settled = CONSUMER_ITEMS.replace("status: proposed", "status: accepted")
+    project = _consumer_project(tmp_path, settled)
+    assert project.coverage["REQ-001"].stage == "satisfied"
+
+
+def test_a_draft_subtype_item_is_left_out_by_the_inherited_statuses(tmp_path):
+    items = CONSUMER_ITEMS + "  - { id: BND-002, type: bnd, status: draft, title: D }\n"
+    project = _consumer_project(tmp_path, items)
+    assert "BND-002" not in project.coverage
+
+
+def _index_html(tmp_path, directive: str, settings: str = ""):
+    _consumer_project(tmp_path, settings=settings)
+    (tmp_path / "pages").mkdir(exist_ok=True)
+    (tmp_path / "pages" / "index.md").write_text(
+        f"# Overview\n\n{directive}\n", encoding="utf-8"
+    )
+    project = _build_at(tmp_path)
+    return next(p for p in project.pages if p.slug == "index").body_html
+
+
+def test_index_lists_subtypes_under_the_parent_when_grouping_is_on(tmp_path):
+    html = _index_html(tmp_path, '{{index by="status" type="req"}}')
+    assert "REQ-001" in html and "BND-001" in html
+    assert "(bnd)" in html  # the badge marks the row that is not a plain req
+
+
+def test_index_stays_concrete_when_grouping_is_off(tmp_path):
+    html = _index_html(
+        tmp_path,
+        '{{index by="status" type="req"}}',
+        settings="coverage: { group_inherited: false }\n",
+    )
+    assert "REQ-001" in html
+    assert "BND-001" not in html
+
+
+def test_index_subtypes_parameter_overrides_the_setting(tmp_path):
+    on = _index_html(
+        tmp_path,
+        '{{index by="status" type="req" subtypes="true"}}',
+        settings="coverage: { group_inherited: false }\n",
+    )
+    assert "BND-001" in on
+    off = _index_html(tmp_path, '{{index by="status" type="req" subtypes="false"}}')
+    assert "BND-001" not in off
+
+
+def test_index_subtypes_parameter_must_be_a_boolean(tmp_path):
+    html = _index_html(tmp_path, '{{index by="status" type="req" subtypes="maybe"}}')
+    assert "subtypes must be true or false" in html
+
+
+def test_index_of_the_subtype_itself_never_lists_the_parent(tmp_path):
+    html = _index_html(tmp_path, '{{index by="status" type="bnd"}}')
+    assert "BND-001" in html and "REQ-001" not in html
+
+
+def _site_page(tmp_path, name: str) -> str:
+    project = _build_at(tmp_path)
+    render.render_site(project)
+    with open(os.path.join(str(tmp_path), "_site", name), encoding="utf-8") as fh:
+        return fh.read()
+
+
+def test_group_inherited_defaults_to_true_for_every_project(tmp_path):
+    assert _consumer_project(tmp_path).group_inherited is True
+    assert _load(tmp_path, PARENT + CHILD).group_inherited is True
+
+
+def test_group_inherited_can_be_turned_off(tmp_path):
+    project = _consumer_project(tmp_path, settings="coverage: { group_inherited: false }\n")
+    assert project.group_inherited is False
+
+
+@pytest.mark.parametrize(
+    "block, message",
+    [
+        ("coverage: { group_inherited: maybe }\n", "coverage.group_inherited must be true or false"),
+        ("coverage: { group: true }\n", "coverage.group is not valid"),
+    ],
+)
+def test_coverage_setting_is_validated(tmp_path, block, message):
+    write_project_config(tmp_path, "site: { title: T, out: _site }\n" + block + PARENT)
+    with pytest.raises(SchemaError) as exc:
+        load_project(config_path=str(tmp_path / "refdes-project.yaml"))
+    assert message in str(exc.value)
+
+
+def test_coverage_page_badges_a_grouped_subtype_row(tmp_path):
+    _consumer_project(tmp_path)
+    html = _site_page(tmp_path, "coverage.html")
+    assert 'A bound <span class="muted small">(bnd)</span>' in html
+    assert "A requirement <span" not in html
+
+
+def test_coverage_page_has_no_badge_when_grouping_is_off(tmp_path):
+    _consumer_project(tmp_path, settings="coverage: { group_inherited: false }\n")
+    assert "(bnd)" not in _site_page(tmp_path, "coverage.html")
+
+
+def test_summary_folds_subtype_counts_into_the_parent_row_only_when_grouped(tmp_path):
+    _consumer_project(tmp_path)
+    grouped = render.summary_payload(_build_at(tmp_path))["type_rows"]
+    by_name = {r["name"]: r for r in grouped}
+    assert "bnd" not in by_name and by_name["req"]["count"] == 2
+
+    _consumer_project(tmp_path, settings="coverage: { group_inherited: false }\n")
+    separate = {r["name"]: r for r in render.summary_payload(_build_at(tmp_path))["type_rows"]}
+    assert separate["req"]["count"] == 1 and separate["bnd"]["count"] == 1
+
+
+def test_json_schema_completion_offers_subtypes_where_the_parent_is_named(tmp_path):
+    project = _consumer_project(tmp_path)
+    branch = build_schema(project)["$defs"]["dec__bare"]
+    assert branch["properties"]["satisfies"]["description"] == "target: req, bnd"

@@ -136,6 +136,7 @@ def _render_index(project: Project, params: dict[str, str]) -> str:
     by_field = params["by"]
     board = params.get("board")
     tag = params.get("tag")
+    with_subtypes = _subtypes_param(project, params)
 
     spec = project.types.get(type_name)
     if spec is None:
@@ -165,10 +166,13 @@ def _render_index(project: Project, params: dict[str, str]) -> str:
     # A board's index also lists the members of its `includes:` groups
     # (finding 33), labelled shared; the row builder below adds the label.
     included = boards_mod.included_map(project, board)
+    listed_types = {type_name}
+    if with_subtypes:
+        listed_types |= project.subtype_map.get(type_name, set())
     items = [
         item
         for item in project.local_items
-        if item.type == type_name
+        if item.type in listed_types
         and (board is None or boards_mod.displays(item, board, included))
         and (tag is None or tag in _item_tags(item))
     ]
@@ -201,6 +205,7 @@ def _render_index(project: Project, params: dict[str, str]) -> str:
         parts.append(f"<h4>{_esc(key)}</h4>")
         rows = "".join(
             f"<tr><td>{_esc(i.id)}</td><td>{_esc(i.title)}"
+            f"{_subtype_note(i, type_name)}"
             f"{_shared_note(i, board, included)}</td></tr>"
             for i in groups[key]
         )
@@ -209,6 +214,28 @@ def _render_index(project: Project, params: dict[str, str]) -> str:
             f"</thead><tbody>{rows}</tbody></table>"
         )
     return "".join(parts)
+
+
+def _subtypes_param(project: Project, params: dict[str, str]) -> bool:
+    """Whether `{{index}}` lists the type's subtypes alongside it
+    (docs/design/extends.md §3.2, §8): the explicit `subtypes="true|false"`
+    parameter, else `coverage.group_inherited` -- the one project-wide switch
+    for "a subtype is shown under its parent"."""
+    value = params.get("subtypes")
+    if value is None:
+        return project.group_inherited
+    if value not in ("true", "false"):
+        raise _BlockError(
+            f"subtypes must be true or false, got {value!r}."
+        )
+    return value == "true"
+
+
+def _subtype_note(item: Item, listed_type: str) -> str:
+    """The `(bound)` marker on an index row listed under its parent's type."""
+    if item.type == listed_type:
+        return ""
+    return f' <span class="muted small">({_esc(item.type)})</span>'
 
 
 def _shared_note(item: Item, board: str | None, included: dict[str, str]) -> str:
@@ -472,7 +499,7 @@ def _render_tree(project: Project, params: dict[str, str]) -> str:
 
 _REGISTRY: dict[str, BlockSpec] = {
     "index": BlockSpec(
-        name="index", required=("by", "type"), optional=("board", "tag"), render=_render_index
+        name="index", required=("by", "type"), optional=("board", "tag", "subtypes"), render=_render_index
     ),
     "cascade": BlockSpec(
         name="cascade",

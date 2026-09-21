@@ -120,20 +120,51 @@ def _document_sections(
     return sections
 
 
+_STAGE_ORDER = {"open": 0, "addressed": 1, "claimed": 2, "satisfied": 3, "verified": 4}
+
+
+def _coverage_group_key(project: Project, item: Item) -> str:
+    """The type a coverage row is grouped under: the parent type when
+    `coverage.group_inherited` is on and the item's type extends one, the
+    item's own type otherwise (docs/design/extends.md §4.2). Presentation
+    only -- which items participate in coverage is decided upstream."""
+    spec = project.types.get(item.type)
+    if project.group_inherited and spec is not None and spec.extends:
+        return spec.extends
+    return item.type
+
+
+def _coverage_subtype(project: Project, item: Item) -> str:
+    """The `(bound)` badge text for a row grouped under its parent, else ""."""
+    key = _coverage_group_key(project, item)
+    return item.type if key != item.type else ""
+
+
+def _coverage_sort_key(project: Project):
+    """Stage first, then id -- and, only when grouping is on and the project
+    actually has subtypes, the group's position in the schema between the two,
+    so a subtype's rows sit with their parent's. A project with no `extends:`
+    keeps the old ordering exactly."""
+    if not (project.group_inherited and project.subtype_map):
+        return lambda row: (_STAGE_ORDER.get(row[1].stage, 9), row[0].id)
+    rank = {name: n for n, name in enumerate(project.types)}
+    return lambda row: (
+        _STAGE_ORDER.get(row[1].stage, 9),
+        rank.get(_coverage_group_key(project, row[0]), len(rank)),
+        row[0].id,
+    )
+
+
 def _coverage_rows(
     project: Project, board: str | None = None, workspace: str | None = None
 ) -> list[tuple[Item, object]]:
-    stage_order = {"open": 0, "addressed": 1, "claimed": 2, "satisfied": 3, "verified": 4}
     rows = []
     for item_id, cov in project.coverage.items():
         item = project.item_by_id(item_id)
         if item is not None and _in_scope(item, board, workspace):
             rows.append((item, cov))
-    rows.sort(key=lambda row: (stage_order.get(row[1].stage, 9), row[0].id))
+    rows.sort(key=_coverage_sort_key(project))
     return rows
-
-
-_STAGE_ORDER = {"open": 0, "addressed": 1, "claimed": 2, "satisfied": 3, "verified": 4}
 
 
 def _contract_rows(project: Project, board: str) -> list[tuple[Item, object]]:
@@ -151,7 +182,7 @@ def _contract_rows(project: Project, board: str) -> list[tuple[Item, object]]:
         item = project.item_by_id(item_id)
         if item is not None:
             rows.append((item, cov))
-    rows.sort(key=lambda row: (_STAGE_ORDER.get(row[1].stage, 9), row[0].id))
+    rows.sort(key=_coverage_sort_key(project))
     return rows
 
 
@@ -430,7 +461,13 @@ def summary_payload(
 
     type_rows = []
     for type_name, spec in project.types.items():
-        items = [i for i in local if i.type == type_name]
+        if project.group_inherited and spec.extends:
+            continue  # counted under its parent's row
+        items = [
+            i
+            for i in local
+            if i.type == type_name or _coverage_group_key(project, i) == type_name
+        ]
         if not items:
             continue
         covered = [project.coverage[i.id] for i in items if i.id in project.coverage]
@@ -806,6 +843,7 @@ def render_site(project: Project, draft: bool = False) -> str:
     env.globals["check_state"] = _check_state
     env.globals["coverage_of"] = project.coverage.get
     env.globals["blocked_chains_for"] = blocked_mod.by_item(project).get
+    env.globals["coverage_subtype"] = lambda item: _coverage_subtype(project, item)
     env.globals["trace_view"] = lambda item: _trace_view(item, project)
     # One `follows:` graph for the whole build, handed to every item page:
     # `thread_view` runs on each one, and rebuilding the graph per page made a

@@ -124,7 +124,11 @@ def field_json_schema(fspec: FieldSpec) -> dict[str, Any]:
     return frag
 
 
-def link_json_schema(targets: list[str], doc: str = "") -> dict[str, Any]:
+def link_json_schema(
+    targets: list[str],
+    doc: str = "",
+    subtype_map: dict[str, set[str]] | None = None,
+) -> dict[str, Any]:
     """The JSON-Schema fragment for one declared link. The allowed-target
     restriction can't be enforced here -- confirming a listed ID actually
     resolves to an item of an allowed type means reading other files, which
@@ -134,7 +138,14 @@ def link_json_schema(targets: list[str], doc: str = "") -> dict[str, Any]:
     A verb's own `doc:` definition goes in the same `description`, ahead of the
     target line, which is what was already there (finding 38).
     """
-    target = f"target: {', '.join(targets) if targets else 'any'}"
+    # A subtype satisfies every list naming its parent (docs/design/extends.md
+    # §3), so completion offers it wherever the parent is named.
+    shown = list(targets)
+    for name in targets:
+        shown.extend(
+            sorted(t for t in (subtype_map or {}).get(name, ()) if t not in shown)
+        )
+    target = f"target: {', '.join(shown) if shown else 'any'}"
     return {
         "type": "array",
         "items": {"type": "string"},
@@ -147,6 +158,7 @@ def _type_branch(
     spec: ItemType,
     include_body: bool,
     link_docs: dict[str, str] | None = None,
+    subtype_map: dict[str, set[str]] | None = None,
 ) -> dict[str, Any]:
     properties: dict[str, Any] = {
         # Deliberately unconstrained and never required: an item mid-authoring,
@@ -161,7 +173,9 @@ def _type_branch(
         if fspec.required:
             required.append(fname)
     for lname, targets in spec.links.items():
-        properties[lname] = link_json_schema(targets, (link_docs or {}).get(lname, ""))
+        properties[lname] = link_json_schema(
+            targets, (link_docs or {}).get(lname, ""), subtype_map
+        )
     properties["history"] = {"$ref": "#/$defs/history"}
     # prefix/board/workspace are legal properties only when this type doesn't
     # already declare a same-named field -- mirrors OVERRIDABLE (parse.py)
@@ -207,11 +221,16 @@ def build_schema(project: Project) -> dict[str, Any]:
     link_docs = {name: lt.doc for name, lt in project.link_types.items() if lt.doc}
     bare_refs: list[dict[str, str]] = []
     entry_refs: list[dict[str, str]] = []
+    subtype_map = project.subtype_map
     for type_name, spec in sorted(project.types.items()):
         bare_key = f"{type_name}__bare"
         entry_key = f"{type_name}__entry"
-        defs[bare_key] = _type_branch(type_name, spec, include_body=False, link_docs=link_docs)
-        defs[entry_key] = _type_branch(type_name, spec, include_body=True, link_docs=link_docs)
+        defs[bare_key] = _type_branch(
+            type_name, spec, include_body=False, link_docs=link_docs, subtype_map=subtype_map
+        )
+        defs[entry_key] = _type_branch(
+            type_name, spec, include_body=True, link_docs=link_docs, subtype_map=subtype_map
+        )
         bare_refs.append({"$ref": f"#/$defs/{bare_key}"})
         entry_refs.append({"$ref": f"#/$defs/{entry_key}"})
 

@@ -56,6 +56,13 @@ picture:
   either, not just "open" — it doesn't appear in coverage or its warnings at
   all. The standard sets this on `requirement`/`bound`.
 
+A type that [`extends:`](schema-reference.md#extends) another inherits both
+flags (and `satisfying_statuses:`/`verifying_statuses:`), so a subtype is
+covered by the parent's rules with nothing redeclared, and satisfies or is
+verified through any link that names the parent. The coverage page, summary
+and `{{index}}` show subtype items under the parent unless
+[`coverage.group_inherited`](schema-reference.md#coverage) is `false`.
+
 Imported items are excluded regardless — an upstream project's coverage gaps
 are that project's problem.
 

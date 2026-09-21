@@ -45,7 +45,7 @@
   {% for item, cov in coverage_rows %}
     <tr class="stage-{{ cov.stage }}">
       <td><a class="ref" href="{{ item.slug }}.html" data-ref="{{ item.id }}">{{ item.id }}</a></td>
-      <td>{{ item.title }}{% if unmet_boards and unmet_boards.get(item.id) %}<div class="muted contract-note">not yet satisfied on boards: {{ unmet_boards[item.id] | join(', ') }}</div>{% endif %}</td>
+      <td>{{ item.title }}{% if coverage_subtype(item) %} <span class="muted small">({{ coverage_subtype(item) }})</span>{% endif %}{% if unmet_boards and unmet_boards.get(item.id) %}<div class="muted contract-note">not yet satisfied on boards: {{ unmet_boards[item.id] | join(', ') }}</div>{% endif %}</td>
       <td><span class="pill pill-stage-{{ cov.stage }}">{{ cov.stage }}</span></td>
       {% for group in [cov.addressed_by, cov.claimed_by, cov.satisfied_by, cov.verified_by] %}
       {% set is_claimed_col = loop.index0 == 1 %}
@@ -87,7 +87,7 @@
   {% for item, cov in contract_rows %}
     <tr class="stage-{{ cov.stage }}">
       <td><a class="ref" href="{{ item.slug }}.html" data-ref="{{ item.id }}">{{ item.id }}</a></td>
-      <td>{{ item.title }}</td>
+      <td>{{ item.title }}{% if coverage_subtype(item) %} <span class="muted small">({{ coverage_subtype(item) }})</span>{% endif %}</td>
       <td><span class="pill pill-stage-{{ cov.stage }}">{{ cov.stage }}</span></td>
       {% for group in [cov.claimed_by, cov.satisfied_by, cov.verified_by] %}
       <td>

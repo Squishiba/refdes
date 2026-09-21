@@ -91,6 +91,22 @@ and this project uses [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **`extends:` consumers and `coverage.group_inherited`** (`docs/design/extends.md`
+  phase 2). A subtype is accepted anywhere a link target list names its
+  parent (link validation, `conforms_to:`/`includes:` group tests, the
+  verifier set, the JSON-schema completion text); a list naming the subtype
+  still refuses the parent. Coverage needs nothing more: a subtype inherits
+  `coverable:`/`satisfying_statuses:` and is scored by the parent's rules. New
+  project setting `coverage.group_inherited`, **default `true` for every
+  project, existing ones included** -- decided 2026-09-19, overturning the
+  spec's own `false` default. With it on, an existing project that rebuilds
+  gets subtype rows badged `(bound)` and sorted with their parent on
+  `coverage.html`, subtype counts folded into the parent's summary row, and
+  `{{index type=<parent>}}` listing subtype items under it; set
+  `coverage.group_inherited: false` for the old output. `{{index}}` also takes
+  `subtypes="true|false"` to override the setting per block. A project with
+  no `extends:` sees no change.
+
 - **`extends:` -- single-level type inheritance, engine** (`docs/design/extends.md`
   phase 1). A type may declare `extends: <type>` and write only its delta:
   `fields:`/`links:` merge by key (an override replaces the whole definition),

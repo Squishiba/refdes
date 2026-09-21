@@ -44,6 +44,7 @@ rendered as one table per group.
 | `by` | yes | The field to group by. Must be a `text`, `enum`, `date`, `person`, `list`, or `quantity` field declared on `type`. |
 | `board` | no | Scope to one board's items only. Must be a declared board. |
 | `tag` | no | Scope to items carrying this tag only. Must be a tag some local item actually carries in its `tags:` field. |
+| `subtypes` | no | `true` also lists items of types that [`extends:`](schema-reference.md#extends) `type`, each marked with its own type name; `false` lists `type` alone. Default: the project's [`coverage.group_inherited`](schema-reference.md#coverage), which is `true` unless turned off. |
 
 Each distinct value of `by` becomes its own `<h4>` heading and a two-column
 table (ID, Title) beneath it, items sorted by ID within a group. A list-valued
@@ -151,7 +152,7 @@ other refdes diagnostic holds to:
 
 ```
 {{index by="status" type="decision" sortt="asc"}} — unknown parameter
-    'sortt'. index accepts: by, type, board, tag.
+    'sortt'. index accepts: by, type, board, tag, subtypes.
 ```
 
 A block that fails validation renders a visible `⚠` marker in its place on

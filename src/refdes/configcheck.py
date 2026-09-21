@@ -46,6 +46,7 @@ FIELD_TYPES = frozenset(_FIELD_TYPE_MAP) | {"enum"}
 SITE_KEYS = frozenset({"title", "out", "version", "pages", "nav", "assets"})
 ID_KEYS = frozenset({"width", "ledger"})
 HISTORY_KEYS = frozenset({"default"})
+COVERAGE_KEYS = frozenset({"group_inherited"})
 UNITS_KEYS = frozenset({"preferred", "aliases"})
 STANDARD_KEYS = frozenset({"base", "version", "presets"})
 BOARD_KEYS = frozenset({"label", "token", "path", "conforms_to", "includes"})
@@ -230,6 +231,14 @@ class BlockChecker:
         block = self.mapping(raw.get("history"), "history", "a mapping of history settings")
         self.keys(block, HISTORY_KEYS, "history", "history:")
         return {"default": self.mode(block.get("default"), "history.default", "invalidate")}
+
+    def coverage(self, raw: dict) -> dict:
+        block = self.mapping(raw.get("coverage"), "coverage", "a mapping of coverage settings")
+        self.keys(block, COVERAGE_KEYS, "coverage", "coverage:")
+        group = block.get("group_inherited", True)
+        if not isinstance(group, bool):
+            raise self.wrong("coverage.group_inherited", "true or false", group)
+        return {"group_inherited": group}
 
     def units(self, raw: dict) -> dict:
         block = self.mapping(raw.get("units"), "units", "a mapping of unit settings")
@@ -473,6 +482,7 @@ def validate_settings(raw: dict[str, Any], source: str) -> dict[str, Any]:
         "site": check.site(raw),
         "id": check.id(raw),
         "history": check.history(raw),
+        "coverage": check.coverage(raw),
         "units": check.units(raw),
         "boards": check.boards(raw),
         "workspaces": check.workspaces(raw),

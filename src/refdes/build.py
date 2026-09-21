@@ -35,6 +35,7 @@ from .model import (
     Item,
     ItemType,
     Project,
+    is_subtype,
 )
 
 # Explicit reference: [[REQ-PWR-002]] or [[REQ-PWR-002|the input range]]. The
@@ -476,8 +477,20 @@ def _unknown_key_message(pointer: str, target_id: str) -> str:
     )
 
 
+def _expand_subtypes(project: Project, names) -> set[str]:
+    """`names` plus every type that extends one of them -- the ALLOW-side
+    reading of a type-name list (docs/design/extends.md §3): a subtype stands
+    wherever its parent is named."""
+    sub = project.subtype_map
+    expanded = set(names)
+    for name in names:
+        expanded.update(sub.get(name, ()))
+    return expanded
+
+
 def resolve_links(project: Project) -> None:
     by_key = _key_index(project)
+    subtypes = project.subtype_map
     for item in project.items.values():
         spec = project.types.get(item.type)
         if spec is None:  # imported item of an undeclared type
@@ -520,7 +533,9 @@ def resolve_links(project: Project) -> None:
                         item_id=item.id,
                     )
                     continue
-                if allowed and target.type not in allowed:
+                if allowed and not any(
+                    is_subtype(target.type, name, subtypes) for name in allowed
+                ):
                     project.error(
                         f"{link_name} may point at {allowed}, but {target_id} is a "
                         f"{target.type}",
@@ -557,7 +572,7 @@ def _verifier_type_names(project: Project) -> set[str]:
                 names.add(tname)
             elif lname == "verified_by":
                 names.update(targets)
-    return names
+    return _expand_subtypes(project, names)
 
 
 def _resolve_coverable(
@@ -568,7 +583,12 @@ def _resolve_coverable(
     hazard writeup in docs/design/standard-library.md §2."""
     if spec.coverable is not None:
         return spec.coverable, False
-    is_fallback_coverable = spec.name in _FALLBACK_COVERABLE_TYPES
+    # A subtype of one of the two conventional names stands in for it
+    # (docs/design/extends.md §3); `spec.extends` is "" for every other type.
+    is_fallback_coverable = (
+        spec.name in _FALLBACK_COVERABLE_TYPES
+        or spec.extends in _FALLBACK_COVERABLE_TYPES
+    )
     if is_fallback_coverable and spec.name not in warned:
         project.warn(
             f"types.{spec.name} does not declare 'coverable:'; falling back to "
@@ -606,7 +626,7 @@ def _group_type_names(project: Project) -> set[str]:
     names: set[str] = set()
     for spec in project.types.values():
         names.update(spec.links.get("part_of", []))
-    return names
+    return _expand_subtypes(project, names)
 
 
 def validate_conforms_to(project: Project) -> None:
@@ -885,7 +905,7 @@ def compute_coverage(project: Project, chain_graph=None) -> None:
         # was always coverable but never got these). Once a type explicitly opts
         # in with `coverable: true`, it gets the same treatment as any other
         # coverable type -- an opt-in improvement, not a compatibility break.
-        warn_eligible = not via_fallback or item.type == "requirement"
+        warn_eligible = not via_fallback or "requirement" in (item.type, spec.extends)
 
         if cov.stage == "open":
             open_items.append(item.id)

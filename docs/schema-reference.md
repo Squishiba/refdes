@@ -16,6 +16,7 @@ find it. Each section below says which file its key belongs in.
 site:        { ... }   # title, output directory, version
 id:          { ... }   # ID width and ledger location
 history:     { ... }   # default on_change mode
+coverage:    { ... }   # coverage presentation (grouping subtypes under their parent)
 date_format:  YYYY-MM-DD  # log-date order; default shown
 units:       { ... }   # preferred display units
 standard:    { ... }   # the bundled standard dictionary, or "none"
@@ -93,6 +94,22 @@ decision.
 This entire surface only matters to a project under version control. Without a
 VCS there is no history layer to feed, and `history:` reduces to nothing more
 than a hash-exclusion list.
+
+---
+
+## `coverage`
+
+```yaml
+coverage:
+  group_inherited: true   # the default
+```
+
+`group_inherited` (default `true`, for every project) controls how a subtype
+of an [`extends:`](#extends) parent is presented: the coverage page badges its
+rows with the subtype's name (`(bound)`) and sorts them with the parent's, the
+summary counts them in the parent's row, and `{{index type=<parent>}}` lists them
+under the parent. `false` keeps each type separate. Presentation only -- it
+never changes which items take part in coverage.
 
 ---
 
@@ -253,6 +270,7 @@ types:
 | `append_only` | `false` | Seal items of this type after first build |
 | `preview` | `[]` | Fields shown in hover previews and index columns |
 | `fields` | `{}` | Legal fields |
+| `extends` | not set | The one type this specializes; the type then writes only its delta. See [`extends`](#extends) |
 | `include` | not set | Names of `sets:` entries merged into `fields:` before this type's own fields are applied |
 | `links` | `{}` | Legal links, mapped to allowed target types |
 | `body` | `on_change`: project default; `required`: `false` | `on_change` mode for the markdown body, and whether it must be non-empty (`required: true` — the bundled standard sets this on `requirement`/`bound`, hardware@3). Enforced as a **warning**, not a build-blocking error the way `required: true` is on an ordinary field — a stub can still exist while it's being drafted. |
@@ -279,6 +297,30 @@ coverable by name) with a one-time warning naming the fix; that fallback, and
 the requirement-only restriction on the per-item coverage warnings it
 preserves, is removed in refdes 1.0. See
 [coverage](coverage.md#what-gets-coverage) for the full behavior.
+
+### `extends`
+
+```yaml
+types:
+  thermal_bound:
+    extends: bound
+    prefix: THB
+    label: Thermal bound
+    plural: Thermal bounds
+```
+
+A type may name one parent and declare only what differs
+(`docs/design/extends.md`). It inherits `fields:`, `links:` (merged by key --
+an override replaces the whole field definition or target list), `body:`,
+`preview:`, `coverable:`, `coverable_statuses:`, `satisfying_statuses:`,
+`verifying_statuses:`, `check_severity:` and `append_only:`. It never inherits
+`prefix:`, `label:`, `plural:` (declaring all three is required) or `doc:`.
+
+A subtype is accepted anywhere a link's target list names its parent -- no
+per-link marker. That holds one way only: a list naming the subtype still
+refuses the parent. Inheritance is one level: extending a type that itself
+extends is a load error, as are extending a set, making a parent-required field
+optional, and turning `append_only` off under an append-only parent.
 
 ### Field options
 
