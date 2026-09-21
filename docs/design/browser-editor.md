@@ -430,6 +430,42 @@ are key. It is a requirement on the editor work, not a decided implementation �
 this document has not settled what the picker lists, how a named key is chosen
 from it, or where the resulting `source("path", "key")` text is emitted.
 
+#### PDF datasheet values
+
+**Raised by Jared on 2026-09-21. Status: NOT DECIDED IMPLEMENTATION / later
+slice** — the CSV/xlsx picker above is unchanged. Recorded in full in
+`docs/design/calc-sources.md` §1.
+
+Jared's proposal: the picker **tries** to extract the number from a pinned PDF
+datasheet, then asks the author to verify it is correct before accepting.
+Agreed shape and safety rules:
+
+- Show the extracted value with its unit **in context** — the highlighted
+  cell/line on the rendered page — not the bare number.
+- When a table row has several candidates (min/typ/max columns), list all of
+  them and let the author choose.
+- Nothing is pre-selected: accepting is a deliberate step, never automatic.
+- On accept, record a `citations:` entry holding the file, the page or
+  `section:`, the quoted text, and the value the author confirmed, so a
+  reviewer can re-verify.
+- The calc-sources lockfile pins the number, so a changed PDF raises the loud
+  drift warning (calc-sources Q2: warns loudly, `fetch --update` accepts).
+- If the page is scanned/image-only, or extraction is ambiguous, fail visibly —
+  “could not read this page” — never guess.
+
+The failure this guards against is a silent plausible-but-wrong number: mA vs A
+(the 1000x trap), or the wrong min/typ/max column.
+
+Costs, stated plainly: this needs a PDF text-and-coordinates library as a new
+dependency (an optional dependency, like openpyxl for xlsx), and rendering
+pages in the browser means vendoring pdf.js (large) or rendering images
+server-side; both fit “no Node build step”, but it would be the heaviest
+dependency the editor has.
+
+Sequencing: build after the CSV/xlsx picker, as its own later slice — the PDF
+reader is one more source type behind the same picker UI and the same
+confirm-before-accept step.
+
 ### Link picker
 
 For each link verb, the API supplies its allowed target types from

@@ -178,6 +178,43 @@ the picker lists, how a named key is chosen from it, and where the resulting
 `source("path", "key")` text is emitted are the editor design's to settle.
 Cross-referenced from `docs/design/browser-editor.md`.
 
+**Note (2026-09-21).** The requirement above already covers CSV/xlsx: a picker
+in the editor lists the keys/values of a pinned source file, the author picks
+one, and the editor writes the `source("path", "key")` text — unchanged.
+
+**New, raised by Jared on 2026-09-21: a picker for values in a PDF datasheet.**
+His proposal: the picker **tries** to extract the number, then asks the author
+to verify it is correct before accepting. **Status: NOT DECIDED
+IMPLEMENTATION / later slice.**
+
+Agreed shape and safety rules:
+
+- Show the extracted value with its unit **in context** — the highlighted
+  cell/line on the rendered page — not the bare number.
+- When a table row has several candidates (min/typ/max columns), list all of
+  them and let the author choose.
+- Nothing is pre-selected: accepting is a deliberate step, never automatic.
+- On accept, record a `citations:` entry holding the file, the page or
+  `section:`, the quoted text, and the value the author confirmed, so a
+  reviewer can re-verify.
+- The calc-sources lockfile pins the number, so a changed PDF raises the loud
+  drift warning (calc-sources Q2: warns loudly, `fetch --update` accepts).
+- If the page is scanned/image-only, or extraction is ambiguous, fail visibly —
+  “could not read this page” — never guess.
+
+The failure this guards against is a silent plausible-but-wrong number: mA vs A
+(the 1000x trap), or the wrong min/typ/max column.
+
+Costs, stated plainly: this needs a PDF text-and-coordinates library as a new
+dependency (an optional dependency, like openpyxl for xlsx), and rendering
+pages in the browser means vendoring pdf.js (large) or rendering images
+server-side; both fit “no Node build step”, but it would be the heaviest
+dependency the editor has.
+
+Sequencing: build after the CSV/xlsx picker, as its own later slice. The PDF
+reader is one more source type behind the same picker UI and the same
+confirm-before-accept step.
+
 ---
 
 ## 2. Why refdes does not sum over items
