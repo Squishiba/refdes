@@ -816,14 +816,14 @@ def _write_theme_css(project: Project, out_dir: str, written: set[str]) -> None:
     means no file at all, and no `<link>` either: an un-themed project's output
     stays byte-for-byte what it was before theming existed.
     """
-    overrides = theme_mod.resolve(project.theme, project.theme_tokens)
-    if not overrides:
+    palettes = theme_mod.resolve(project.theme, project.theme_tokens)
+    if not palettes["light"] and not palettes["dark"]:
         return
     asset_out = os.path.join(out_dir, "assets")
     os.makedirs(asset_out, exist_ok=True)
     target = f"assets/{theme_mod.THEME_CSS_NAME}"
     with open(os.path.join(asset_out, theme_mod.THEME_CSS_NAME), "w", encoding="utf-8") as fh:
-        fh.write(theme_mod.render_theme_css(overrides))
+        fh.write(theme_mod.render_theme_css(palettes))
     written.add(target)
 
 
@@ -887,9 +887,10 @@ def render_site(project: Project, draft: bool = False) -> str:
     # rather than a per-call argument because base.html.j2 is the only consumer
     # and every page inherits it; the empty string is what keeps the `<link>`
     # line from rendering at all in an un-themed build.
+    _theme_palettes = theme_mod.resolve(project.theme, project.theme_tokens)
     env.globals["theme_css"] = (
         f"assets/{theme_mod.THEME_CSS_NAME}"
-        if theme_mod.resolve(project.theme, project.theme_tokens)
+        if _theme_palettes["light"] or _theme_palettes["dark"]
         else ""
     )
     env.globals["draft_build"] = draft

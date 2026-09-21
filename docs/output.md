@@ -25,26 +25,32 @@
 The site's look is a set of design tokens declared on `:root` in
 `assets/style.css`: colours (`--bg`, `--fg`, `--accent`, …), type (`--sans`,
 `--text-base`, `--weight-semibold`), spacing (`--space-4`) and radii
-(`--radius-md`). A theme is a flat list of `--token: value` pairs configured
-under `site:` — there is no theme file format, no selector, no nesting, and no
-remote theme, so a theme cannot change layout, hide a section, or fetch
-anything:
+(`--radius-md`). A theme is two flat lists of `--token: value` pairs — one
+palette for light mode, one for dark — configured under `site:`. There is no
+theme file format, no selector, and no remote theme, so a theme cannot change
+layout, hide a section, or fetch anything:
 
 ```yaml
 site:
-  theme: default
+  theme: paper
   tokens:
-    --accent: "#b3541e"
-    --sans: Georgia, serif
+    --accent: "#b3541e"      # both palettes
+    light:
+      --bg: "#fffdf7"        # light mode only
+    dark:
+      --bg: "#17140f"        # dark mode only
 ```
 
-`refdes build` merges the project's `site.tokens:` over the named theme and
+`site.theme:` selects a built-in — `default`, `high-contrast`, `paper`, or
+`slate`, each documented with its token tables on the [themes](themes.md)
+page — and `refdes build` merges the project's `site.tokens:` over it and
 emits the result as `assets/theme.css`, linked after `assets/style.css` on
-every page. The generated file redefines tokens and nothing else, and it is
-tracked in `.refdes-manifest.json` like any other output, so removing the theme
-removes the file. With no theme configured no file is written and no `<link>`
-is emitted: an un-themed build is byte-for-byte what it was before theming
-existed.
+every page. A bare `--token` pair applies to both palettes; a `light:` or
+`dark:` heading targets one. The generated file redefines tokens and nothing
+else, and it is tracked in `.refdes-manifest.json` like any other output, so
+removing the theme removes the file. With no theme configured no file is
+written and no `<link>` is emitted: an un-themed build is byte-for-byte what
+it was before theming existed.
 
 Validation is strict because CSS is not. An unknown theme name or an unknown
 token name is a build error — with a *Did you mean* hint — since a mistyped
@@ -52,11 +58,27 @@ custom property is otherwise "invalid at computed-value time", which renders as
 *unset* and leaves the site half-themed with no diagnostic anywhere. A token
 value must be one plain CSS value: `;`, `{`, `}`, `<`, `@import`, `url(`, a
 comment opener or an escape is refused, which is what keeps a value from
-turning into a rule. `--good`, `--bad`, `--warn` and `--claim` are verdict
-colours, not decorative ones, and cannot be reassigned yet.
+turning into a rule.
 
-Dark mode stays refdes's: the `prefers-color-scheme` palette in `style.css` is
-not part of the themeable set, and an override applies to both palettes.
+`--good`, `--bad`, `--warn` and `--claim` are verdict colours, not decorative
+ones, so reassigning them runs the contrast checks: every semantic pair
+(foreground, muted, accent and each verdict colour against `--bg` and
+`--panel`) must clear a 4.5:1 WCAG AA minimum, and `--bad` must stay
+distinguishable from `--good` — a 90-degree hue separation or 4.5:1 between
+them, so a colour-blind reader can tell a fail from a pass. A failing pair is a
+**warning** naming the pair, the two values and the measured ratio; the build
+still produces the site, because the threshold is a floor and not a law.
+Values the checker cannot parse — a named colour, `rgb()`, another `var()` —
+are skipped rather than guessed at. The built-in themes are held to the same
+checks with no warning allowed: a built-in palette that fails is a test
+failure.
+
+Dark mode follows the reader's OS preference, and a light-mode override no
+longer bleeds into it: when the two palettes disagree, the generated stylesheet
+re-asserts the effective dark palette inside the dark blocks. A host page that
+wants to pin one mode regardless of the OS sets `data-theme="light"` or
+`data-theme="dark"` on `<html>`; matching attribute blocks are emitted for
+exactly that.
 
 Static files. No server, no build step for the reader, no network calls. Hover
 previews are inlined at build time; with JavaScript disabled every reference is

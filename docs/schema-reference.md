@@ -55,33 +55,44 @@ site:
 | `nav` | *(empty)* | Explicit page order in the sidebar, by slug |
 | `version` | *(empty)* | Written into `items.json`; checked by downstream [imports](multi-board.md) |
 | `assets` | *(empty)* | Directories copied verbatim into `assets/`, no reference needed — see [images and other local files](markdown.md#images-and-other-local-files) |
-| `theme` | `default` | Built-in theme by name. An unknown name is a build error naming the themes that exist, never a silent fallback |
-| `tokens` | *(empty)* | `--token: value` overrides merged over the theme — see [theming](output.md#theming) |
+| `theme` | `default` | Built-in theme by name: `default`, `high-contrast`, `paper`, `slate`. An unknown name is a build error naming the themes that exist, never a silent fallback |
+| `tokens` | *(empty)* | `--token: value` overrides merged over the theme, per palette — see [theming](output.md#theming) |
 
 ### `site.theme` and `site.tokens`
 
 ```yaml
 site:
-  theme: default
+  theme: slate
   tokens:
-    --accent: "#b3541e"
+    --accent: "#b3541e"      # both palettes
     --sans: Georgia, serif
-    --radius-pill: 999px
+    light:
+      --bg: "#fdfcf9"        # light mode only
+    dark:
+      --bg: "#10141a"        # dark mode only
 ```
 
-A theme is a flat list of design-token pairs and nothing else. Every name must
-be a token the built-in stylesheet declares (`--bg`, `--fg`, `--accent`,
-`--text-base`, `--space-4`, `--radius-md`, …); a mistyped name is an error with
-a *Did you mean* hint, because CSS's own answer to an undefined custom property
-is silence and a half-themed site. Values must be plain CSS values: `;`, `{`,
-`}`, `<`, `@import`, `url(`, a comment opener, or an escape is refused, so a
-theme can never become a rule, a stylesheet, or a network fetch.
+A theme is a flat list of design-token pairs per palette and nothing else.
+Every name must be a token the built-in stylesheet declares (`--bg`, `--fg`,
+`--accent`, `--text-base`, `--space-4`, `--radius-md`, …); a mistyped name is
+an error with a *Did you mean* hint, because CSS's own answer to an undefined
+custom property is silence and a half-themed site. Values must be plain CSS
+values: `;`, `{`, `}`, `<`, `@import`, `url(`, a comment opener, or an escape
+is refused, so a theme can never become a rule, a stylesheet, or a network
+fetch.
+
+A bare `--token` pair applies to **both** palettes — that is what it has always
+meant, and it still does. Nesting under the `light:` and `dark:` headings
+targets one palette; a block that uses those headings may contain nothing
+else.
 
 `site.tokens:` is **merged over** the theme, and the theme over the built-in
 default: a token you do not mention keeps its default value rather than going
-unset. `--good`, `--bad`, `--warn` and `--claim` cannot be set at all yet —
-they are verdict colours, and the check that a reassignment keeps that meaning
-is finding 34 step 2b.
+unset. `--good`, `--bad`, `--warn` and `--claim` may be set, but every
+semantic pair in the result is contrast-checked — a pair below 4.5:1, or a
+`--bad` too close to `--good`, is a warning naming the pair and the measured
+ratio. The build proceeds; legibility is the author's call, and the diagnostic
+makes it an informed one.
 
 The overrides are emitted as a generated `assets/theme.css` linked after
 `assets/style.css`; see [theming](output.md#theming).

@@ -752,11 +752,14 @@ class Project:
     # `site.theme:` -- the built-in theme this project selects -- and
     # `site.tokens:`, its own token overrides merged over that theme. Both are
     # validated at load by theme.py; `render_site` turns the merged overrides
-    # into the generated `assets/theme.css`. The default theme with no
+    # into the generated `assets/theme.css`. `theme_tokens` is per palette --
+    # `{"light": {...}, "dark": {...}}`, a flat `site: tokens:` pair landing
+    # in both -- and load also contrast-checks the resolved palettes, warning
+    # (never blocking) on any failing semantic pair. The default theme with no
     # overrides writes no file at all, which is what keeps an un-themed
     # project's output byte-identical to a pre-theming build.
     theme: str = "default"
-    theme_tokens: dict[str, str] = field(default_factory=dict)
+    theme_tokens: dict[str, dict[str, str]] = field(default_factory=dict)
     # Figure id -> (owner label for a collision message, source file, source
     # line or None) -- one flat, project-wide namespace, the same posture
     # item ids already have (docs/design/index-blocks.md §9). Populated by

@@ -12,7 +12,7 @@ import difflib
 import os
 from typing import Any
 
-from . import calc, dates, standards
+from . import calc, dates, standards, theme as theme_mod
 from .configcheck import EQUATION_KEYS, BlockChecker, validate_overlay, validate_settings
 from .model import (
     BASELINE_IDENTITIES,
@@ -763,4 +763,7 @@ def load_project(config_path: str | None = None, start: str = ".") -> Project:
     # enough to stop the build.
     for message in schema_warnings:
         project.warn(message)
+    # Finding 34 step 2b: the resolved theme's semantic pairs are contrast-
+    # checked in both palettes. A warning, never a block -- see theme.py.
+    theme_mod.warn_project_theme(project, project.theme, project.theme_tokens)
     return project

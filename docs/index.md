@@ -38,6 +38,7 @@ build time.
 |---|---|
 | [Schema reference](schema-reference.md) | Every key in `refdes-project.yaml` and `refdes-schema.yaml` |
 | [Vocabulary](vocabulary.md) | Every term the standard resolves to, with its definition |
+| [Themes](themes.md) | The built-in theme gallery and its token tables |
 | [CLI reference](cli-reference.md) | Every command and flag |
 | [Output formats](output.md) | The generated site and `items.json` |
 | [Troubleshooting](troubleshooting.md) | Error messages and what to do about them |

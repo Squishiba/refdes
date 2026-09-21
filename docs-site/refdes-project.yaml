@@ -43,6 +43,7 @@ site:
     - parts
     - schema-reference
     - vocabulary
+    - themes
     - cli-reference
     - output
     - troubleshooting
