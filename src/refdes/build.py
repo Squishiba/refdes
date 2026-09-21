@@ -1048,12 +1048,51 @@ def _make_calc_resolver(project: Project, by_key: dict[str, Item]):
     return resolve
 
 
+def _make_source_resolver(project: Project, item, records: dict, resolved: dict, uses: list):
+    """The resolver a `source("path", "key")` line calls: authorization by the
+    same-item citation rule, then the value the lockfile pinned. It never opens
+    the cited file (docs/design/calc-sources.md §5) -- a file that changed
+    since the pin is `citations.verify()`'s loud warning, and the value stays
+    the reviewed one until `refdes fetch --update` accepts the change.
+
+    `resolved` maps the authored (path, key) to (canonical path, locked text or
+    None) for the row's provenance badge; `uses` accumulates every use for the
+    content hash, `None` standing for a value that did not resolve."""
+
+    def resolve(path: str, key: str) -> str:
+        canon, problem = citations_mod.authorize_source_path(project, item, path)
+        if problem:
+            uses.append((path, key, None))
+            raise calc.CalcError(f"source({path!r}, {key!r}): {problem}")
+        text = citations_mod.locked_source_value(records.get(canon), key)
+        resolved[(path, key)] = (canon, text)
+        uses.append((canon, key, text))
+        if text is None:
+            raise calc.CalcError(
+                f"source({path!r}, {key!r}) has no locked value -- run "
+                f"'refdes fetch --path {canon}' to extract and pin it"
+            )
+        return text
+
+    return resolve
+
+
 def _run_item_calcs(project: Project, item, by_key: dict[str, Item]) -> None:
     """Evaluate one item's calc blocks -- the per-item half of run_calcs,
     extracted so the scheduler can call it in dependency order. `item._env`
     is populated here and cached; the scheduler guarantees every item this
     one references has already been evaluated (or failed) before it runs."""
-    env: dict[str, calc.Value] = {calc.RESOLVER_KEY: _make_calc_resolver(project, by_key)}
+    records = getattr(project, "_source_lock", None)
+    if records is None:
+        records = project._source_lock = citations_mod.load_lockfile(project)
+    source_resolved: dict[tuple[str, str], tuple[str, str | None]] = {}
+    item._source_uses = []
+    env: dict[str, calc.Value] = {
+        calc.RESOLVER_KEY: _make_calc_resolver(project, by_key),
+        calc.SOURCE_RESOLVER_KEY: _make_source_resolver(
+            project, item, records, source_resolved, item._source_uses
+        ),
+    }
     # name -> line first assigned, threaded across every block of this item
     # exactly like `env` -- what lets evaluate_block catch a name reused in
     # a later block, not just within one block. The duplicate-name rule is
@@ -1075,6 +1114,11 @@ def _run_item_calcs(project: Project, item, by_key: dict[str, Item]) -> None:
                 line=outcome.line,
                 reference=outcome.reference,
             )
+            if outcome.source is not None:
+                canon, locked = source_resolved.get(outcome.source, ("", None))
+                line.source_path = canon or outcome.source[0]
+                line.source_key = outcome.source[1]
+                line.source_locked = locked or ""
             diag_line = outcome.line if outcome.line is not None else item.source_line
             if outcome.warning:
                 project.warn(
@@ -1117,6 +1161,7 @@ def _run_item_calcs(project: Project, item, by_key: dict[str, Item]) -> None:
                 item.calc_values[outcome.name] = line.result
             item.calcs.append(line)
     del env[calc.RESOLVER_KEY]
+    del env[calc.SOURCE_RESOLVER_KEY]
     item._env = env  # retained for check evaluation and cross-item references
     item._calc_failed = failed
 
@@ -1138,6 +1183,7 @@ def run_calcs(project: Project) -> None:
     outside the cycle gets one note naming the upstream failure rather than
     N restatements of it."""
     by_key = _key_index(project)
+    project._source_lock = citations_mod.load_lockfile(project)
     # Identity -> "visiting" (on the current DFS path) or "done" (env ready
     # or failed). Items are unhashable-by-value here, so id() is the key.
     state: dict[int, str] = {}
@@ -1305,7 +1351,10 @@ def run_checks(project: Project) -> None:
 #      target reduced to that key (docs/design/backlog.md, finding 35 §4).
 #      An item with no such reference has the exact same payload as
 #      format 3, so no existing item's hash moves. Finding 26's source()
-#      values will join this same format number, not a fifth.
+#      values joined this same format number, not a fifth: an item with a
+#      `source("path", "key")` calc line also hashes each (canonical path,
+#      key, locked decimal text) it resolved (docs/design/calc-sources.md
+#      section 9). An item with no source() line is unchanged.
 # Recorded per baseline entry (lifecycle.py) so a partially-migrated baseline
 # stays precisely describable; consulted by the migration in
 # lifecycle.py/seal.py/keys.py, never by an ordinary build.
@@ -1319,6 +1368,7 @@ def _hash_payload(
     link_values,
     checks_values=None,
     calc_refs=None,
+    source_inputs=None,
 ) -> dict[str, object]:
     """Everything compute_hashes() and hash_for_format() have in common: which
     fields/body enter the hash, and under what normalization. The two things
@@ -1331,7 +1381,11 @@ def _hash_payload(
     calc references do (`calc_refs`, called once per item, returning
     ``(body_text, resolved_refs)`` or ``None`` for an item with no such
     reference -- which then hashes exactly as it did under format 3, so an
-    item that never uses the feature can never churn because of it) --
+    item that never uses the feature can never churn because of it) and,
+    also from format 4 on (finding 26 joined finding 35's bump rather than
+    taking a fifth), how an item's `source()` values do (`source_inputs`,
+    called once per item, returning a list or ``None`` for an item with no
+    `source()` line -- hash-neutral for every item that has none) --
     everything else here is shared, so the hash
     definitions can never drift apart from each other by accident.
     """
@@ -1360,6 +1414,15 @@ def _hash_payload(
                 # The resolved upstream values are arithmetic input -- content
                 # of this item, exactly as finding 26 decided for source().
                 payload["calc_refs"] = resolved
+        if source_inputs is not None:
+            inputs = source_inputs(item)
+            if inputs is not None:
+                # The locked scalar is arithmetic input, so content of this
+                # item (docs/design/calc-sources.md section 9): the value the
+                # calc used, not the source file's hash -- an unrelated edit to
+                # the file must not invalidate this item, and an accepted
+                # `fetch --update` that moves the value must.
+                payload["source_values"] = inputs
         normalized = re.sub(r"\s+", " ", body_text).strip()
         payload["body"] = normalized
 
@@ -1572,6 +1635,20 @@ def _calc_refs_hash_value(by_key: dict[str, Item], project: Project, item: Item)
     return "\n".join(body_lines), resolved
 
 
+def _source_inputs_hash_value(item: Item):
+    """What an item's `source()` lines contribute to its content hash (HASH_FORMAT
+    4, finding 26), or ``None`` when it has none: the sorted, de-duplicated
+    ``[canonical path, key, locked decimal text]`` triples the calc actually
+    resolved -- and only those. No fetch timestamp, no file sha256, no
+    unreferenced lock value, no reader version. A use that failed to resolve
+    contributes ``None`` for its value: the build reports the error at the
+    line, this only has to be deterministic and distinct from a real value."""
+    uses = getattr(item, "_source_uses", None)
+    if not uses:
+        return None
+    return sorted([canon, key, text] for canon, key, text in set(uses))
+
+
 def compute_hashes(project: Project) -> None:
     """Hash only the fields whose on_change mode is `invalidate`.
 
@@ -1639,6 +1716,7 @@ def hash_payload_builder(project: Project, hash_format: int):
         (lambda item: _calc_refs_hash_value(by_key, project, item))
         if hash_format >= 4 else None
     )
+    source_inputs = _source_inputs_hash_value if hash_format >= 4 else None
     return lambda item, spec: _hash_payload(
         item, spec, project,
         link_values=lambda targets: sorted(
@@ -1646,6 +1724,7 @@ def hash_payload_builder(project: Project, hash_format: int):
         ),
         checks_values=checks_values,
         calc_refs=calc_refs,
+        source_inputs=source_inputs,
     )
 
 
@@ -1703,6 +1782,18 @@ def _calc_table_html(lines: list[CalcLine]) -> str:
         # A cross-item reference renders as the dependency it is -- the
         # target's display id and the name, key half hidden (keys.md §3).
         expr_cell = _esc(line.display_expression)
+        if line.source_path and not line.error:
+            # Provenance sits beside the expression, never in hover-only UI
+            # (docs/design/calc-sources.md section 6): which file, which key,
+            # and the locked value the arithmetic actually used.
+            expr_cell += (
+                f'<span class="calc-source">source: {_esc(line.source_path)} '
+                f'&middot; {_esc(line.source_key)} = {_esc(line.source_locked)}</span>'
+            )
+            if line.source_drift:
+                expr_cell += (
+                    f'<span class="calc-source-drift">&#9888; {_esc(line.source_drift)}</span>'
+                )
         if line.error:
             rows.append(
                 f'<tr class="calc-row calc-error">'

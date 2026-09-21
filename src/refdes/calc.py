@@ -210,7 +210,7 @@ EQUATIONS: dict[str, Equation] = {}
 
 # `_q` is the quantity literal the lexer emits, intercepted ahead of any registry
 # lookup, so an equation registered under it could never be reached.
-RESERVED_NAMES = {"_q"}
+RESERVED_NAMES = {"_q", "source"}
 
 EQUATION_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
@@ -251,6 +251,17 @@ def validate_equations(equations: dict[str, Equation]) -> None:
                 f"{name!r} is not a usable equation name; use letters, digits, "
                 "and underscores, starting with a letter or underscore"
             )
+    for name, eq in equations.items():
+        # docs/design/calc-sources.md §9: an equation is a project-wide formula,
+        # so it may not reach into a file -- only an item's own calc line, whose
+        # item cites the file, can. A source-derived Value may be passed in.
+        for node in ast.walk(parse_expression(eq.expr)):
+            if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                    and node.func.id == "source"):
+                raise CalcError(
+                    f"equation {name!r} calls source(); source() is only valid "
+                    "as the whole right-hand side of an item's own calc line"
+                )
     for name in equations:
         _walk_equation_cycle(name, equations, [])
 
@@ -457,6 +468,11 @@ def _eval_node(node: ast.AST, env: dict[str, Value]) -> Value:
         if not isinstance(node.func, ast.Name):
             raise CalcError("only plain function calls are allowed")
         name = node.func.id
+        if name == "source":
+            raise CalcError(
+                "source() is only valid as the whole right-hand side of an item "
+                'calc line: name = source("cited/file.csv", "key") | unit'
+            )
         if name == "_q":
             args = [a.value for a in node.args if isinstance(a, ast.Constant)]
             if len(args) != 2:
@@ -513,11 +529,17 @@ def evaluate_assignment(expression: str, env: dict[str, Value]) -> Value:
     if len(parts) > 2:
         raise CalcError("only one ± tolerance is allowed per assignment")
 
-    base = evaluate(parts[0], env)
+    return apply_tolerance(evaluate(parts[0], env), parts[1], env)
+
+
+def apply_tolerance(base: Value, tol_text: str, env: dict[str, Value]) -> Value:
+    """`base ± tol_text`: the tolerance half of `evaluate_assignment`, split out
+    so a `source()` line (whose base is a locked scalar, not an expression)
+    honours exactly the same grammar."""
     if base.has_width:
         raise CalcError("cannot apply ± to a value that already has a tolerance")
 
-    tol_text = parts[1].strip()
+    tol_text = tol_text.strip()
     percent = PERCENT_RE.match(tol_text)
     if percent:
         fraction = float(percent.group(1)) / 100.0
@@ -826,6 +848,46 @@ CROSS_REF_RE = re.compile(
     r"^(?P<target>[A-Za-z0-9][A-Za-z0-9_-]*(?:@[A-Za-z0-9_-]+)?)"
     r"\.(?P<name>[A-Za-z_][A-Za-z0-9_]*)$"
 )
+# `eff = source("analysis/power-budget.csv", "tps62913_half_load_eff") | 1`
+# (docs/design/calc-sources.md §1): the whole right-hand side is one call with
+# exactly two string literals, optionally followed by `± tolerance`. Strings
+# have no escapes -- a quote inside a path or key is not supported -- so the
+# grammar has one reading. The pipe unit has already been split off by then.
+_STRING = r"""(?:"([^"]*)"|'([^']*)')"""
+SOURCE_CALL_RE = re.compile(
+    rf"^source\(\s*{_STRING}\s*,\s*{_STRING}\s*\)\s*(?:(?:±|\+/-)\s*(?P<tol>.+?))?\s*$"
+)
+SOURCE_START_RE = re.compile(r"^source\s*\(")
+
+
+def parse_source_call(expression: str) -> tuple[str, str, str] | None:
+    """`(path, key, tolerance text or "")` for a well-formed source() right-hand
+    side, or None when the text is not one. A caller that sees
+    SOURCE_START_RE match but this return None reports a malformed call."""
+    match = SOURCE_CALL_RE.match(expression.strip())
+    if not match:
+        return None
+    path = match.group(1) if match.group(1) is not None else match.group(2)
+    key = match.group(3) if match.group(3) is not None else match.group(4)
+    return path, key, match.group("tol") or ""
+
+
+def split_comment(line: str) -> tuple[str, str]:
+    """`(code, comment)` at the first `#` that is not inside a quoted string --
+    a source() key may legitimately contain one. Every other line has no
+    quotes, so this is `line.partition("#")` for them."""
+    quote = ""
+    for i, ch in enumerate(line):
+        if quote:
+            if ch == quote:
+                quote = ""
+        elif ch in "\"'":
+            quote = ch
+        elif ch == "#":
+            return line[:i], line[i + 1:]
+    return line, ""
+
+
 # `P | mW = V * I` -- the unit in the one place it does not go. Caught to name
 # the fix rather than the generic "expected an assignment".
 LEADING_PIPE_RE = re.compile(
@@ -911,6 +973,10 @@ class CalcOutcome:
     # environment under `RESOLVER_KEY` (a callable taking the reference text
     # and returning a `Value`, or raising with the message to report).
     reference: str = ""
+    # Set on a `source("path", "key")` line: the path and key exactly as
+    # authored. The value comes from the resolver installed under
+    # SOURCE_RESOLVER_KEY -- the citation lockfile, never the file itself.
+    source: tuple[str, str] | None = None
 
 
 # Key under which the caller installs a cross-item reference resolver in the
@@ -919,6 +985,11 @@ class CalcOutcome:
 # are `[A-Za-z_][A-Za-z0-9_]*` and the lexer never produces `__`-prefixed
 # lookups).
 RESOLVER_KEY = "__refdes_calc_resolver__"
+# Same idea for `source()` lines: a callable taking (path, key) exactly as
+# authored and returning the locked decimal text, or raising CalcError with
+# the message to report. Absent, a source() line is an error rather than a
+# guess -- evaluation never opens the cited file (docs/design/calc-sources.md §5).
+SOURCE_RESOLVER_KEY = "__refdes_calc_source_resolver__"
 
 
 def assigned_names(source: str) -> set[str]:
@@ -985,7 +1056,7 @@ def evaluate_block(
 
         comment = ""
         if "#" in line:
-            line, _, comment = line.partition("#")
+            line, comment = split_comment(line)
             comment = comment.strip()
             line = line.rstrip()
 
@@ -1124,6 +1195,15 @@ def evaluate_block(
             )
             continue
 
+        if SOURCE_START_RE.match(expression.strip()):
+            outcomes.append(_evaluate_source_line(
+                name, expression, comment, annotation, unit_style, line_number, env,
+            ))
+            if outcomes[-1].value is not None:
+                env[name] = outcomes[-1].value
+                origins[name] = line_number
+            continue
+
         ref_match = CROSS_REF_RE.match(expression.strip())
         if ref_match:
             reference = expression.strip()
@@ -1205,6 +1285,77 @@ def evaluate_block(
                         warning, unit_style=unit_style, line=line_number)
         )
     return outcomes
+
+
+def _evaluate_source_line(
+    name: str, expression: str, comment: str, annotation: str, unit_style: str,
+    line_number: int | None, env: dict,
+) -> CalcOutcome:
+    """One `name = source("path", "key") [± tol] | unit` assignment.
+
+    The unit assertion is mandatory (§6): the reader supplies no unit, so a
+    bare `1850` from a milliwatt spreadsheet would otherwise flow into the
+    arithmetic as an unlabelled number. `| 1` states "dimensionless" out loud.
+    """
+    parsed = parse_source_call(expression)
+
+    def fail(message: str, source=None) -> CalcOutcome:
+        return CalcOutcome(name, expression, comment, None, message, annotation,
+                           unit_style=unit_style, line=line_number, source=source)
+
+    if parsed is None:
+        return fail(
+            "malformed source() call -- it takes exactly two string literals and "
+            'must be the whole right-hand side: source("cited/file.csv", "key") | unit'
+        )
+    path, key, tol = parsed
+    if not annotation:
+        return fail(
+            f"source({path!r}, {key!r}) needs an explicit unit -- the file supplies "
+            f"a bare number, so declare what it is: `{name} = {expression.strip()} "
+            "| unit` (`| 1` for a dimensionless value)",
+            (path, key),
+        )
+    resolver = env.get(SOURCE_RESOLVER_KEY)
+    if resolver is None:
+        return fail("source() is not supported in this evaluation context", (path, key))
+    try:
+        text = resolver(path, key)
+        # The declared unit LABELS the file's bare number (section 6): 1850 in
+        # a milliwatt sheet under `| W` is 1850 W, on screen, not a converted
+        # 1.85 W -- so this is not convert_value's dimensionality assertion.
+        unit = annotation.strip()
+        unit = "" if unit == "1" else _to_pint_units(unit)
+        try:
+            value = quantity(text, unit)
+        except CalcError:
+            raise CalcError(f"unknown unit {annotation!r} in declaration") from None
+        if tol:
+            value = apply_tolerance(value, tol, env)
+    except Exception as exc:  # noqa: BLE001 -- resolver/pint/math surface many types
+        return fail(str(exc), (path, key))
+    return CalcOutcome(name, expression, comment, value, None, annotation,
+                       unit_style=unit_style, line=line_number, source=(path, key))
+
+
+def source_calls_in_block(block: str) -> list[tuple[int, str, str, str]]:
+    """Every well-formed `name = source("path", "key")` line in one calc block,
+    as `(0-indexed line offset, name, path, key)` -- what `refdes fetch` walks
+    to learn which keys to extract, without evaluating anything. A malformed
+    call is not listed here; evaluation reports it at the line."""
+    out = []
+    for offset, raw_line in enumerate(block.splitlines()):
+        line = split_comment(raw_line)[0].rstrip()
+        pipe = PIPE_UNIT_RE.match(line)
+        if pipe:
+            line = pipe.group("lhs").rstrip()
+        match = ASSIGN_RE.match(line)
+        if not match:
+            continue
+        parsed = parse_source_call(match.group(2)) if SOURCE_START_RE.match(match.group(2).strip()) else None
+        if parsed:
+            out.append((offset, match.group(1), parsed[0], parsed[1]))
+    return out
 
 
 def extract_blocks(body: str) -> list[str]:

@@ -417,6 +417,16 @@ class CalcLine:
     # show it in place of the raw expression so the table reads as the
     # dependency it is; "" for an ordinary expression.
     reference: str = ""
+    # Set on a `source("path", "key")` line: the canonical cited path, the key,
+    # and the value the lockfile pinned ("" when none resolved). What the
+    # rendered row shows as its provenance badge (docs/design/calc-sources.md §6).
+    source_path: str = ""
+    source_key: str = ""
+    source_locked: str = ""
+    # Non-empty when the cited file no longer matches its pin: the loud
+    # drift text (file, key, locked vs current value, the accept command).
+    # Set by citations.verify(); the build keeps using `source_locked`.
+    source_drift: str = ""
 
     @property
     def display_expression(self) -> str:

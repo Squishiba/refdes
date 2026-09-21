@@ -47,11 +47,15 @@ import posixpath
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from decimal import Decimal
+from pathlib import Path
 from urllib.parse import urlparse
 
 import yaml
 
 from . import boards as boards_mod
+from . import calc as calc_mod
+from . import sources as sources_mod
 from .model import CitationSpec, CitationStatus, Item, PartUsage, Project
 from .parse import yaml_safe_load
 
@@ -425,39 +429,110 @@ def save_lockfile(project: Project, records: dict[str, dict]) -> None:
 # -------------------------------------------------------------------- collection
 
 
+def _item_specs(project: Project, item: Item) -> list[CitationSpec]:
+    """Every citation one item declares across its `citations:`-typed fields."""
+    out: list[CitationSpec] = []
+    spec = project.types.get(item.type)
+    if spec is None:
+        return out
+    for fname, fspec in spec.fields.items():
+        if fspec.type != "citations":
+            continue
+        entries = item.fields.get(fname)
+        if not isinstance(entries, list):
+            continue  # malformed -- reported by validate_items
+        for index, entry in enumerate(entries):
+            if not isinstance(entry, dict) or not entry.get("path"):
+                continue  # malformed -- reported by validate_items
+            out.append(
+                CitationSpec(
+                    field=fname,
+                    index=index,
+                    path=str(entry["path"]),
+                    rev=str(entry.get("rev") or ""),
+                    page=str(entry.get("page") or ""),
+                    section=str(entry.get("section") or ""),
+                    part_number=str(entry.get("part_number") or ""),
+                    keep_copy=bool(entry.get("keep_copy", False)),
+                    id=str(entry.get("id") or ""),
+                )
+            )
+    return out
+
+
 def collect(project: Project) -> list[tuple[Item, CitationSpec]]:
     """Every citation declared across every `citations:`-typed field, in order."""
-    out: list[tuple[Item, CitationSpec]] = []
-    for item in project.local_items:
-        spec = project.types.get(item.type)
-        if spec is None:
+    return [
+        (item, cspec)
+        for item in project.local_items
+        for cspec in _item_specs(project, item)
+    ]
+
+
+# ------------------------------------------------------------- calc source() uses
+
+
+def authorize_source_path(project: Project, item: Item, path: str) -> tuple[str, str]:
+    """`(canonical path, "")` when `path` is a repo-local file this item itself
+    cites under `citations:`, else `("", why not)` (docs/design/calc-sources.md
+    §1). The one rule shared by fetch (which keys to extract) and evaluation
+    (which lock record to read), so the two can never disagree about what a
+    `source()` line is allowed to name."""
+    try:
+        kind, canon = classify(project.root, path)
+    except CitationError as exc:
+        return "", str(exc)
+    if kind != "local":
+        return "", (
+            f"{path!r} is a remote citation; source() reads only a repo-local "
+            "file committed with the project"
+        )
+    for cspec in _item_specs(project, item):
+        try:
+            ckind, ccanon = classify(project.root, cspec.path)
+        except CitationError:
             continue
-        for fname, fspec in spec.fields.items():
-            if fspec.type != "citations":
-                continue
-            entries = item.fields.get(fname)
-            if not isinstance(entries, list):
-                continue  # malformed -- reported by validate_items
-            for index, entry in enumerate(entries):
-                if not isinstance(entry, dict) or not entry.get("path"):
-                    continue  # malformed -- reported by validate_items
-                out.append(
-                    (
-                        item,
-                        CitationSpec(
-                            field=fname,
-                            index=index,
-                            path=str(entry["path"]),
-                            rev=str(entry.get("rev") or ""),
-                            page=str(entry.get("page") or ""),
-                            section=str(entry.get("section") or ""),
-                            part_number=str(entry.get("part_number") or ""),
-                            keep_copy=bool(entry.get("keep_copy", False)),
-                            id=str(entry.get("id") or ""),
-                        ),
-                    )
+        if ckind == "local" and ccanon == canon:
+            return canon, ""
+    return "", (
+        f"{item.id} does not cite {canon!r}; add it to this item's citations: "
+        "(a citation on another item does not authorize this one)"
+    )
+
+
+@dataclass
+class SourceUse:
+    """One `name = source("path", "key")` line, located for fetch."""
+
+    item: Item
+    name: str
+    path: str  # as authored
+    key: str
+    line: int | None
+    canon: str = ""  # canonical local path when authorized
+    problem: str = ""  # why it is not authorized ("" when it is)
+
+
+def collect_source_uses(project: Project) -> list[SourceUse]:
+    out: list[SourceUse] = []
+    for item in project.local_items:
+        for block, offset in calc_mod.extract_blocks_with_lines(item.body):
+            for line_offset, name, path, key in calc_mod.source_calls_in_block(block):
+                line = (
+                    item.body_line + offset + line_offset
+                    if item.body_line is not None else None
                 )
+                canon, problem = authorize_source_path(project, item, path)
+                out.append(SourceUse(item, name, path, key, line, canon, problem))
     return out
+
+
+def locked_source_value(record: dict | None, key: str) -> str | None:
+    """The canonical decimal text the lockfile pinned for `key`, or None."""
+    entry = ((record or {}).get("values") or {}).get(key)
+    if isinstance(entry, dict) and entry.get("value") is not None:
+        return str(entry["value"])
+    return None
 
 
 def by_path(
@@ -578,8 +653,14 @@ def verify(project: Project, require: bool = False) -> None:
         _apply_section(project, item, spec, record, status, severity)
         item.citations.append(status)
 
+    source_drift = _source_drift(project, changed_local)
     for canon, citers in sorted(changed_local.items()):
         ids = ", ".join(sorted(set(citers)))
+        if canon in source_drift:
+            # The file feeds calc values: the generic "changed" note is not
+            # loud enough, and would hide which numbers are now stale.
+            (project.error if require else project.warn)(source_drift[canon])
+            continue
         (project.error if require else project.warn)(
             f"local citation {canon!r} has changed since it was pinned -- "
             f"review the change, then run 'refdes fetch --update --path "
@@ -601,6 +682,60 @@ def verify(project: Project, require: bool = False) -> None:
                 f"across {ids} -- pick one so the keep-a-copy decision is "
                 f"unambiguous"
             )
+
+
+def _source_drift(project: Project, changed_local: dict[str, list[str]]) -> dict[str, str]:
+    """For each changed local file that feeds `source()` values, the loud
+    warning text (docs/design/calc-sources.md section 11 Q2, decided
+    2026-09-21): the file, every used key with the value the lockfile pinned
+    against the value the file holds now, and the exact command that accepts
+    the change. The build keeps using the *locked* value regardless -- this
+    only describes the gap, and marks the affected calc rows so the rendered
+    item shows it too.
+
+    Reading the file here is diagnostic only. The value a calc row evaluates
+    to came from the lockfile before this ran and nothing below can alter it;
+    if the file can no longer be read as a source at all, that is said in
+    place of a value."""
+    used: dict[str, dict[str, tuple[str, list[str]]]] = defaultdict(dict)
+    for item in project.local_items:
+        for canon, key, text in getattr(item, "_source_uses", []):
+            if canon not in changed_local or text is None:
+                continue
+            _t, ids = used[canon].setdefault(key, (text, []))
+            if item.id not in ids:
+                ids.append(item.id)
+    out: dict[str, str] = {}
+    for canon, keys in sorted(used.items()):
+        try:
+            now = _extract_source_values(project, canon, {k: [] for k in keys})
+            failure = ""
+        except sources_mod.SourceExtractionError as exc:
+            now, failure = {}, "; ".join(exc.problems)
+        command = f"refdes fetch --update --path {canon}"
+        parts = []
+        for key, (locked, ids) in sorted(keys.items()):
+            current = _value_text(now.get(key))
+            who = ", ".join(sorted(ids))
+            if failure:
+                gap = f"locked {locked}, but the file can no longer supply it ({failure})"
+            elif current == locked:
+                gap = f"locked {locked}, file now {current} (this value is unchanged)"
+            else:
+                gap = f"locked {locked}, file now {current} (CHANGED)"
+            parts.append(f"{key!r}: {gap} [used by {who}]")
+            drift = f"{canon} changed: {key!r} {gap} -- accept with: {command}"
+            for item in project.local_items:
+                for line in item.calcs:
+                    if line.source_path == canon and line.source_key == key:
+                        line.source_drift = drift
+        out[canon] = (
+            f"SOURCE FILE CHANGED: {canon!r} no longer matches its pin, but the "
+            f"build is still using the LOCKED values, not the file -- "
+            + "; ".join(parts)
+            + f". Review the change, then accept it with: {command}"
+        )
+    return out
 
 
 def _apply_section(project, item, spec, record, status, severity) -> None:
@@ -803,6 +938,114 @@ class FetchResult:
     # Sections that did resolve, as {section as written: page}, for the caller
     # to print next to the pin.
     sections: dict[str, int] = field(default_factory=dict)
+    # calc `source()` extraction (docs/design/calc-sources.md section 5).
+    # `source_errors` are failures that leave the path's old record untouched;
+    # `source_values` is {key: canonical text} this run newly recorded or
+    # changed; `source_changes` are the `path: key: old -> new` lines of an
+    # update; `source_warnings` the advisory 1000x notes; `source_notes` plain
+    # statements (e.g. "file changed, locked values kept").
+    source_errors: list[str] = field(default_factory=list)
+    source_values: dict[str, str] = field(default_factory=dict)
+    source_changes: list[str] = field(default_factory=list)
+    source_warnings: list[str] = field(default_factory=list)
+    source_notes: list[str] = field(default_factory=list)
+
+
+def _extract_source_values(
+    project: Project, canon: str, keys: dict[str, list[str]]
+) -> dict[str, dict]:
+    """Every used key of one local file, in one parse, as lockfile `values`
+    entries -- or SourceExtractionError. Nothing is written here: the caller
+    replaces the path's record only if this returns."""
+    reader = sources_mod.reader_for(canon)
+    got = reader.extract(
+        Path(os.path.join(project.root, canon)),
+        [sources_mod.SourceRequest(canon, key) for key in sorted(keys)],
+    )
+    return {k: {"reader": v.reader, "value": v.text} for k, v in sorted(got.items())}
+
+
+def _value_text(entry) -> str | None:
+    return str(entry["value"]) if isinstance(entry, dict) and "value" in entry else None
+
+
+def _diff_source_values(canon: str, old: dict, new: dict, result: FetchResult) -> None:
+    """Fill `result` with what changed between two `values` maps: the
+    `old -> new` diff lines, and the advisory 1000x note (never a block --
+    section 6, decided 2026-09-19)."""
+    for key in sorted(new):
+        before, after = _value_text(old.get(key)), _value_text(new[key])
+        if after is None:
+            continue
+        if before is None:
+            result.source_values[key] = after
+            continue
+        if before == after:
+            continue
+        result.source_values[key] = after
+        result.source_changes.append(f"{canon}: {key}: {before} -> {after}")
+        try:
+            old_d, new_d = Decimal(before), Decimal(after)
+        except Exception:  # noqa: BLE001 -- a hand-edited lock value; the diff line still shows it
+            continue
+        if old_d != 0 and new_d != 0 and (new_d == old_d * 1000 or new_d * 1000 == old_d):
+            result.source_warnings.append(
+                f"{canon}: {key}: changed by exactly a factor of 1000 "
+                f"({before} -> {after}) -- check the spreadsheet's unit (mW vs W?) "
+                f"against the `| unit` on the calc line; advisory only"
+            )
+
+
+def _refresh_pinned_sources(
+    project: Project, canon: str, existing: dict, keys: dict[str, list[str]],
+    result: FetchResult,
+) -> bool:
+    """The no-`--update` half for a path that is already pinned: extract the
+    used keys that are missing, but only from bytes that ARE the pinned bytes.
+    True when the record changed."""
+    values = existing.get("values") or {}
+    if not keys:
+        if values:
+            existing.pop("values")  # nothing cites a key from this file any more
+            return True
+        return False
+    target = os.path.join(project.root, canon)
+    missing = sorted(k for k in keys if _value_text(values.get(k)) is None)
+    pinned = str(existing.get("sha256") or "")
+    if not os.path.isfile(target):
+        if missing:
+            result.source_errors.append(
+                f"{canon}: source key(s) {', '.join(map(repr, missing))} were never "
+                "extracted and the cited file is not on disk"
+            )
+        return False
+    if _sha256_file(target) != pinned:
+        if missing:
+            result.source_errors.append(
+                f"{canon}: source key(s) {', '.join(map(repr, missing))} were never "
+                "extracted, and the file has changed since it was pinned -- "
+                "extracting now would pair the old hash with new bytes. Review the "
+                f"change, then run 'refdes fetch --update --path {canon}'"
+            )
+        else:
+            result.source_notes.append(
+                "the file changed since it was pinned; the locked source values "
+                f"are kept -- accept the change with 'refdes fetch --update --path {canon}'"
+            )
+        return False
+    try:
+        new_values = _extract_source_values(project, canon, keys)
+    except sources_mod.SourceExtractionError as exc:
+        result.source_errors.extend(
+            f"{p} (source key extraction; the record is unchanged)" for p in exc.problems
+        )
+        return False
+    if new_values == values:
+        return False
+    _diff_source_values(canon, values, new_values, result)
+    existing["values"] = new_values
+    existing["fetched"] = _now_iso()
+    return True
 
 
 def _section_bytes(project, kind, canon, record):
@@ -920,6 +1163,22 @@ def fetch_all(
     results: list[FetchResult] = []
     changed = False
 
+    # {canonical path: {source key: [citing item ids]}} from EVERY item, for the
+    # same reason as sections: a re-pin replaces the whole record, so it has to
+    # carry every key anyone uses, not only this run's scope. A use that names
+    # a file its own item does not cite is that fetch's error -- never a silent
+    # extraction for an unauthorized reader of the file.
+    source_keys: dict[str, dict[str, list[str]]] = defaultdict(lambda: defaultdict(list))
+    for use in collect_source_uses(project):
+        if use.problem:
+            if item_id is None or use.item.id == item_id:
+                results.append(FetchResult(
+                    path=use.path,
+                    error=f"{use.item.id}: source({use.path!r}, {use.key!r}): {use.problem}",
+                ))
+            continue
+        source_keys[use.canon][use.key].append(use.item.id)
+
     for target in sorted(wants_keep_copy):
         try:
             kind, canon = classify(project.root, target)
@@ -983,6 +1242,10 @@ def fetch_all(
                     result.section_errors = [
                         _section_failure(canon, f, todo) for f in failures
                     ]
+            if _refresh_pinned_sources(
+                project, canon, existing, source_keys.get(canon, {}), result
+            ):
+                changed = True
             result.sections = resolved
             merged = {**kept, **resolved}
             if merged != already or ("sections_sha256" in existing) != bool(merged):
@@ -1007,6 +1270,30 @@ def fetch_all(
             continue
 
         digest = hashlib.sha256(data).hexdigest()
+        # Source values are extracted BEFORE anything is written and pinned
+        # with the bytes they were read from: a failure leaves the path's old
+        # record exactly as it was (never a new hash over a stale or partial
+        # value set, never the old hash over new bytes).
+        new_values: dict[str, dict] = {}
+        keys_here = source_keys.get(canon)
+        if kind == "local" and keys_here:
+            try:
+                new_values = _extract_source_values(project, canon, keys_here)
+            except sources_mod.SourceExtractionError as exc:
+                results.append(FetchResult(
+                    path=canon,
+                    source_errors=[
+                        f"{p} (the existing record for {canon} is unchanged)"
+                        for p in exc.problems
+                    ],
+                ))
+                continue
+            if _sha256_file(os.path.join(project.root, canon)) != digest:
+                results.append(FetchResult(
+                    path=canon,
+                    error="the file changed while it was being fetched; run again",
+                ))
+                continue
         if want_keep_copy:
             os.makedirs(copies_dir(project), exist_ok=True)
             with open(kept_copy_path(project, digest, canon), "wb") as fh:
@@ -1036,17 +1323,21 @@ def fetch_all(
             # The pages are only meaningful next to the bytes they came from.
             # `build` checks this against `sha256` before trusting one.
             record["sections_sha256"] = digest
+        result = FetchResult(
+            path=canon,
+            sha256=digest,
+            kept_copy=want_keep_copy,
+            sections=resolved,
+            section_errors=[_section_failure(canon, f, sections) for f in failures],
+        )
+        if new_values:
+            record["values"] = new_values
+            _diff_source_values(
+                canon, (previous or {}).get("values") or {}, new_values, result
+            )
         records[canon] = record
         changed = True
-        results.append(
-            FetchResult(
-                path=canon,
-                sha256=digest,
-                kept_copy=want_keep_copy,
-                sections=resolved,
-                section_errors=[_section_failure(canon, f, sections) for f in failures],
-            )
-        )
+        results.append(result)
 
     if changed:
         save_lockfile(project, records)

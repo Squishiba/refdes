@@ -574,9 +574,28 @@ def cmd_fetch(args) -> int:
             failed += 1
             print(f"FAILED  {r.path}  {r.error}", file=sys.stderr)
             continue
+        if r.source_errors and not r.sha256:
+            # The pin was NOT written: a source() key could not be extracted,
+            # so the path's previous record (if any) is exactly as it was.
+            for source_error in r.source_errors:
+                failed += 1
+                print(f"FAILED  {source_error}", file=sys.stderr)
+            continue
         verb = "skipped" if r.skipped else "fetched"
         kept = "kept" if r.kept_copy else "hash-only"
         print(f"{verb:8} {r.path}  sha256={r.sha256[:12]}...  {kept}")
+        for key, value in sorted(r.source_values.items()):
+            if not any(c.startswith(f"{r.path}: {key}: ") for c in r.source_changes):
+                print(f"         extracted {r.path} {key} = {value}")
+        for change in r.source_changes:
+            print(f"         source value changed  {change}")
+        for note in r.source_notes:
+            print(f"         source: {note}")
+        for warning in r.source_warnings:
+            print(f"WARNING  {warning}", file=sys.stderr)
+        for source_error in r.source_errors:
+            failed += 1
+            print(f"FAILED  {source_error}", file=sys.stderr)
         for section, page in sorted(r.sections.items()):
             print(f"         section {section!r} -> page {page}")
         # The pin succeeded but the outline lookup did not: report it as its own
@@ -1385,7 +1404,9 @@ def main(argv: list[str] | None = None) -> int:
         "`.refdes/citations.yaml` lockfile, and keeps the bytes in "
         "`.refdes/copies/` for any remote citation that declares "
         "`keep_copy: true`. Already-pinned paths are skipped unless --update is "
-        "given.",
+        "given. A local file cited by a calc `source(\"path\", \"key\")` line "
+        "also has each used key extracted and pinned in the lockfile; "
+        "--update is how a changed file's new values are accepted.",
     )
     p_fetch.add_argument("--item", help="fetch only this item's citations")
     p_fetch.add_argument("--path", help="fetch only this citation path")

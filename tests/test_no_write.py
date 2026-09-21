@@ -117,6 +117,17 @@ def _snapshot_project(tmp_path):
         "    datasheets:\n      - path: https://example.com/datasheet.pdf\n",
         encoding="utf-8",
     )
+    # A calc `source()` line whose CSV has drifted from its lockfile pin, so
+    # check/build exercise the loud-drift path (which reads the file) and must
+    # still write nothing (docs/design/calc-sources.md section 9, --no-write).
+    (tmp_path / "analysis").mkdir()
+    (tmp_path / "analysis" / "b.csv").write_text("key,value\nk,3\n", encoding="utf-8")
+    (items / "src.md").write_text(
+        "---\nid: CMP-002\ntype: component\nboard: board-a\ntitle: Sourced.\n"
+        "datasheets:\n  - path: analysis/b.csv\n---\n\n"
+        '```calc\nP = source("analysis/b.csv", "k") | W\n```\n',
+        encoding="utf-8",
+    )
     refdes_dir = tmp_path / ".refdes"
     refdes_dir.mkdir(exist_ok=True)
     (refdes_dir / "citations.yaml").write_text(
@@ -124,7 +135,13 @@ def _snapshot_project(tmp_path):
         "  https://example.com/datasheet.pdf:\n"
         "    sha256: deadbeef\n"
         "    fetched: '2026-01-01T00:00:00Z'\n"
-        "    kept_copy: false\n",
+        "    kept_copy: false\n"
+        "  analysis/b.csv:\n"
+        "    sha256: deadbeef\n"
+        "    fetched: '2026-01-01T00:00:00Z'\n"
+        "    kept_copy: false\n"
+        "    values:\n"
+        "      k: {reader: csv, value: '2'}\n",
         encoding="utf-8",
     )
     # A schema.json older than both config files: every _load() command

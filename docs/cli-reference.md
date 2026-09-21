@@ -307,6 +307,14 @@ outline is read once, at fetch time, and the page it points at is recorded in
 the lockfile. This is the only part of refdes that reads a PDF, and it needs
 the optional extra — `pip install refdes[pdf]`.
 
+A local file cited by a calc [`source("path", "key")`](math.md#reading-a-value-from-a-source-file)
+line also has each used key extracted and pinned under its lockfile record
+(`values:`), atomically with the file hash: if any key cannot be read, the old
+record is left exactly as it was. Without `--update`, missing keys are
+extracted only while the file still matches its pin; a changed file is skipped
+(its locked values are kept) or, when a key was never extracted, refused --
+`--update` accepts the change and prints each moved value as `old -> new`.
+
 ```bash
 refdes fetch
 refdes fetch --item CMP-PWR-001

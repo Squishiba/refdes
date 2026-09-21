@@ -102,6 +102,62 @@ Renaming a value *inside* the target has no surrogate to protect it (a calc
 name is not a key): every dependent fails loudly at its own reference line,
 which is the report.
 
+## Reading a value from a source file
+
+A number that lives in a spreadsheet export -- a power budget, a measured
+table -- can be pulled into a calc block by name instead of being retyped:
+
+```calc
+eff = source("analysis/power-budget.csv", "tps62913_half_load_eff") | 1
+P   = source("analysis/power-budget.csv", "rail_3v3_power") | W
+```
+
+The file is an ordinary repo-local [citation](markdown.md#citing-a-datasheet)
+**declared on the same item** (`citations: [{path: analysis/power-budget.csv}]`);
+a citation on another item, or a remote URL, does not authorize the read. The
+CSV is a `key,value` table (extra columns are allowed for your own notes):
+
+```csv
+key,value,source_note
+tps62913_half_load_eff,0.93,TPS62913 datasheet rev E figure at half load
+```
+
+`refdes fetch` reads the file once, pins each key you used in
+`.refdes/citations.yaml`, and from then on `check` and `build` read only that
+lockfile -- they never open the CSV. The rules that keep a wrong number from
+slipping in:
+
+- **Exact key, one row.** A missing key, a duplicated key, a duplicated
+  `key`/`value` header, a blank or non-numeric cell, `100 mW`, `1,000`,
+  `1_000`, non-ASCII digits, or an overflow is an error at fetch time and
+  leaves the previous pin untouched.
+- **The unit is yours to declare, and is mandatory** -- `| 1` for a
+  dimensionless value. It *labels* the file's bare number: `1850` in a
+  milliwatt sheet under `| W` shows as `1850 W`, on purpose, so the mismatch is
+  visible instead of quietly converted. `refdes fetch --update` also prints an
+  advisory warning when a value changes by exactly 1000x.
+- **A tolerance goes on the calc line**: `source(...) ± 2 % | 1`.
+- `source(...)` must be the whole right-hand side (not inside an expression),
+  and is not callable from a project equation.
+
+### When the file changes
+
+A changed source file **warns loudly; it does not fail the build**, and the
+build keeps using the reviewed, locked value until you accept the change:
+
+```
+WARNING <project> — SOURCE FILE CHANGED: 'analysis/power-budget.csv' no longer matches its pin, but the build is still using the LOCKED values, not the file -- 'rail_3v3_power': locked 1.85, file now 2.3 (CHANGED) [used by LOG-PWR-001]. Review the change, then accept it with: refdes fetch --update --path analysis/power-budget.csv
+```
+
+The same text shows under the affected calc row on the rendered item.
+`refdes fetch --update` is the acceptance gate: it prints
+`analysis/power-budget.csv: rail_3v3_power: 1.85 -> 2.3`, re-pins the file and
+its values together, and the next build uses `2.3`. CI can promote the warning
+to an error with `--require-citations`. The locked value is part of the item's
+content hash (`hash_format` 4), so an accepted update marks the item changed
+even though its text did not; an unrelated edit elsewhere in the file does not.
+Design: [calc-sources](design/calc-sources.md).
+
 ## Referencing results in prose
 
 ```markdown
