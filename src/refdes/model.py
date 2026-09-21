@@ -209,6 +209,10 @@ class ItemType:
     prefix: str
     label: str
     plural: str = ""
+    # The one type this extends (docs/design/extends.md), "" when it extends
+    # nothing. Single level: never a type that itself extends. A subtype
+    # satisfies every link target list naming its parent -- see is_subtype().
+    extends: str = ""
     fields: dict[str, FieldSpec] = field(default_factory=dict)
     links: dict[str, list[str]] = field(default_factory=dict)  # link name -> allowed target types
     preview: list[str] = field(default_factory=list)
@@ -251,6 +255,25 @@ class ItemType:
     verifying_statuses: list[str] | None = None
     # The type's own definition (finding 38); "" when undeclared.
     doc: str = ""
+
+
+def build_subtype_map(types: dict[str, "ItemType"]) -> dict[str, set[str]]:
+    """{parent: {child, ...}} for every `extends:` edge (docs/design/extends.md §3.3).
+
+    Built from `extends:` edges only: two types sharing an included set are
+    unrelated here (composition.md §5)."""
+    sub: dict[str, set[str]] = {}
+    for tname, spec in types.items():
+        if spec.extends:
+            sub.setdefault(spec.extends, set()).add(tname)
+    return sub
+
+
+def is_subtype(child: str, parent: str, subtype_map: dict[str, set[str]]) -> bool:
+    """True when `child` is `parent` or extends it -- what every ALLOW consumer
+    (link-target validation, schema completion, group tests) asks instead of
+    comparing type names for equality. Single level, so no closure is walked."""
+    return child == parent or child in subtype_map.get(parent, ())
 
 
 @dataclass
@@ -655,6 +678,10 @@ class Project:
     # as a link target -- every consumer that treats a string as *the* key
     # reads `item.key` (empty for a provisional entry), never a dict key here.
     items: dict[str, Item] = field(default_factory=dict)
+    # Whether coverage reports render a subtype's items under its parent's
+    # section (docs/design/extends.md §4.1). `coverage.group_inherited` in
+    # refdes-project.yaml; true by default for every project.
+    group_inherited: bool = True
     # Display id -> the same dict key `items` uses for that item (surrogate
     # key or provisional handle). The reverse index a "look up by display id"
     # site uses (item_by_id() below); items itself is no longer keyed by
@@ -769,6 +796,23 @@ class Project:
     # pinned version produced the types/link_types it already has in hand.
     standard_base: str = ""
     standard_version: int | None = None
+
+    @property
+    def subtype_map(self) -> dict[str, set[str]]:
+        """{parent: {child, ...}} over this project's `extends:` edges."""
+        return build_subtype_map(self.types)
+
+    def is_subtype(self, child: str, parent: str) -> bool:
+        return is_subtype(child, parent, self.subtype_map)
+
+    def accepts_type(self, actual: str, allowed: list[str]) -> bool:
+        """Whether an item of type `actual` satisfies a link target list:
+        an empty list is unrestricted, otherwise `actual` must be one of the
+        named types or a subtype of one (docs/design/extends.md §3)."""
+        if not allowed:
+            return True
+        sub = self.subtype_map
+        return any(is_subtype(actual, name, sub) for name in allowed)
 
     @property
     def local_items(self) -> list[Item]:

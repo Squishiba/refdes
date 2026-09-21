@@ -91,6 +91,23 @@ and this project uses [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **`extends:` -- single-level type inheritance, engine** (`docs/design/extends.md`
+  phase 1). A type may declare `extends: <type>` and write only its delta:
+  `fields:`/`links:` merge by key (an override replaces the whole definition),
+  `body:` and every scalar (`coverable`, `coverable_statuses`,
+  `satisfying_statuses`, `preview`, ...) are inherited unless the child gives
+  its own. `prefix:`, `label:` and `plural:` are identity properties and are
+  never inherited -- a child missing any of them is a load error, as is
+  extending a type that itself extends (`types.thermal_bound.extends names
+  'bound', which itself extends 'requirement'. Single-level inheritance only;
+  ...`), extending a set, an unknown type, or itself, a preset extending
+  another preset's type, making a parent-required field optional, or lifting a
+  parent's `append_only`. Resolution runs on the fully merged schema, so an
+  overlay edit to a parent reaches its children. `ItemType.extends`,
+  `Project.subtype_map` and `is_subtype()` expose the relation; consumers
+  (link validation, coverage, index, completion) follow in later phases, and
+  the bundled standard adopts it last. Nothing in hardware@3 uses it yet.
+
 - **Surrogate keys, layer 2: hashing on the key, and link expansion**
   (`docs/design/keys.md`). Two changes, landed together because the second
   has to be provably neutral against the first:

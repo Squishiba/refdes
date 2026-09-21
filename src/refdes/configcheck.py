@@ -57,6 +57,7 @@ TYPE_KEYS = frozenset(
         "label",
         "plural",
         "include",
+        "extends",
         "fields",
         "links",
         "body",
@@ -434,6 +435,8 @@ class BlockChecker:
         spec = self.mapping(entry, path, "a mapping of type settings")
         self.keys(spec, TYPE_KEYS, path, "a types: entry")
         self.string(spec.get("prefix"), f"{path}.prefix")
+        if "extends" in spec:
+            self.string(spec.get("extends"), f"{path}.extends")
         self.string(spec.get("label"), f"{path}.label")
         self.string(spec.get("plural"), f"{path}.plural")
         self.definition(spec.get("doc"), f"{path}.doc")

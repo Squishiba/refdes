@@ -1,0 +1,985 @@
+{
+ "types": {
+  "requirement": {
+   "name": "requirement",
+   "prefix": "REQ",
+   "label": "Requirement",
+   "plural": "Requirements",
+   "fields": {
+    "source": {
+     "name": "source",
+     "type": "text",
+     "on_change": "log",
+     "required": false,
+     "choices": null,
+     "default": null,
+     "required_when": null,
+     "doc": "Where the item's content came from \u2014 a spec section, a datasheet, a conversation. Kept out of the content hash, so correcting it never marks downstream items suspect."
+    },
+    "note": {
+     "name": "note",
+     "type": "text",
+     "on_change": "log",
+     "required": false,
+     "choices": null,
+     "default": null,
+     "required_when": null,
+     "doc": "A free-text remark about the item's provenance, kept beside the item instead of inside its body. Kept out of the content hash."
+    },
+    "tags": {
+     "name": "tags",
+     "type": "list",
+     "on_change": "ignore",
+     "required": false,
+     "choices": null,
+     "default": null,
+     "required_when": null,
+     "doc": "Free-form labels for grouping and finding items; free-text search matches tags as well as titles. Kept out of the content hash."
+    },
+    "owner": {
+     "name": "owner",
+     "type": "person",
+     "on_change": "log",
+     "required": false,
+     "choices": null,
+     "default": null,
+     "required_when": null,
+     "doc": "The person responsible for this item \u2014 who a question about it goes to. Kept out of the content hash, so ownership changes never invalidate downstream work."
+    },
+    "last_reviewed": {
+     "name": "last_reviewed",
+     "type": "date",
+     "on_change": "ignore",
+     "required": false,
+     "choices": null,
+     "default": null,
+     "required_when": null,
+     "doc": "The date this item was last reviewed. Bookkeeping only: kept out of the content hash."
+    },
+    "title": {
+     "name": "title",
+     "type": "text",
+     "on_change": "invalidate",
+     "required": false,
+     "choices": null,
+     "default": null,
+     "required_when": null,
+     "doc": "An optional short label for tables and previews. The requirement's content is the body, not this."
+    },
+    "status": {
+     "name": "status",
+     "type": "enum",
+     "on_change": "invalidate",
+     "required": false,
+     "choices": [
+      "draft",
+      "active",
+      "retired"
+     ],
+     "default": "draft",
+     "required_when": null,
+     "doc": "Lifecycle of the requirement. Only active requirements count toward coverage; draft and retired ones are excluded."
+    },
+    "rationale": {
+     "name": "rationale",
+     "type": "text",
+     "on_change": "invalidate",
+     "required": false,
+     "choices": null,
+     "default": null,
+     "required_when": null,
+     "doc": "Why this requirement exists \u2014 the reasoning behind the statement, kept separate from the statement itself."
+    }
+   },
+   "links": {
+    "refines": [
+     "requirement"
+    ],
+    "governed_by": [
+     "requirement",
+     "bound"
+    ],
+    "part_of": [
+     "group"
+    ]
+   },
+   "preview": [
+    "status",
+    "title"
+   ],
+   "body_on_change": "invalidate",
+   "body_required": true,
+   "append_only": false,
+   "satisfying_statuses": null,
+   "check_severity": "error",
+   "coverable": true,
+   "coverable_statuses": [
+    "active"
+   ],
+   "verifying_statuses": null,
+   "doc": "Something the design must achieve, stated as one prose body. Counts toward coverage while active; a draft or retired requirement is left out of coverage entirely."
+  },
+  "bound": {
+   "name": "bound",
+   "prefix": "BND",
+   "label": "Bound",
+   "plural": "Bounds",
+   "fields": {
+    "source": {
+     "name": "source",
+     "type": "text",
+     "on_change": "log",
+     "required": false,
+     "choices": null,
+     "default": null,
+     "required_when": null,
+     "doc": "Where the item's content came from \u2014 a spec section, a datasheet, a conversation. Kept out of the content hash, so correcting it never marks downstream items suspect."
+    },
+    "note": {
+     "name": "note",
+     "type": "text",
+     "on_change": "log",
+     "required": false,
+     "choices": null,
+     "default": null,
+     "required_when": null,
+     "doc": "A free-text remark about the item's provenance, kept beside the item instead of inside its body. Kept out of the content hash."
+    },
+    "tags": {
+     "name": "tags",
+     "type": "list",
+     "on_change": "ignore",
+     "required": false,
+     "choices": null,
+     "default": null,
+     "required_when": null,
+     "doc": "Free-form labels for grouping and finding items; free-text search matches tags as well as titles. Kept out of the content hash."
+    },
+    "owner": {
+     "name": "owner",
+     "type": "person",
+     "on_change": "log",
+     "required": false,
+     "choices": null,
+     "default": null,
+     "required_when": null,
+     "doc": "The person responsible for this item \u2014 who a question about it goes to. Kept out of the content hash, so ownership changes never invalidate downstream work."
+    },
+    "last_reviewed": {
+     "name": "last_reviewed",
+     "type": "date",
+     "on_change": "ignore",
+     "required": false,
+     "choices": null,
+     "default": null,
+     "required_when": null,
+     "doc": "The date this item was last reviewed. Bookkeeping only: kept out of the content hash."
+    },
+    "title": {
+     "name": "title",
+     "type": "text",
+     "on_change": "invalidate",
+     "required": false,
+     "choices": null,
+     "default": null,
+     "required_when": null,
+     "doc": "An optional short label for tables and previews. The bound's content is the body, not this."
+    },
+    "limit": {
+     "name": "limit",
+     "type": "limit",
+     "on_change": "invalidate",
+     "required": true,
+     "choices": null,
+     "default": null,
+     "required_when": null,
+     "doc": "The numeric limit itself, parsed as a quantity with a comparison \u2014 '>= 9 V', '<= 600 mA'. Required, and it is what makes this bound checkable by other items' checks."
+    },
+    "status": {
+     "name": "status",
+     "type": "enum",
+     "on_change": "invalidate",
+     "required": false,
+     "choices": [
+      "draft",
+      "active",
+      "retired"
+     ],
+     "default": "draft",
+     "required_when": null,
+     "doc": "Lifecycle of the bound. Only active bounds count toward coverage; draft and retired ones are excluded."
+    },
+    "rationale": {
+     "name": "rationale",
+     "type": "text",
+     "on_change": "invalidate",
+     "required": false,
+     "choices": null,
+     "default": null,
+     "required_when": null,
+     "doc": "Why this limit is what it is \u2014 the reasoning behind the number."
+    }
+   },
+   "links": {
+    "refines": [
+     "bound"
+    ],
+    "derives_from": [
+     "requirement",
+     "bound"
+    ],
+    "part_of": [
+     "group"
+    ]
+   },
+   "preview": [
+    "status",
+    "title",
+    "limit"
+   ],
+   "body_on_change": "invalidate",
+   "body_required": true,
+   "append_only": false,
+   "satisfying_statuses": null,
+   "check_severity": "error",
+   "coverable": true,
+   "coverable_statuses": [
+    "active"
+   ],
+   "verifying_statuses": null,
+   "doc": "A numeric limit the design must respect \u2014 a voltage, a current, a tolerance. Its limit field makes it checkable by other items' checks. Counts toward coverage while active."
+  },
+  "decision": {
+   "name": "decision",
+   "prefix": "DEC",
+   "label": "Decision",
+   "plural": "Decisions",
+   "fields": {
+    "source": {
+     "name": "source",
+     "type": "text",
+     "on_change": "log",
+     "required": false,
+     "choices": null,
+     "default": null,
+     "required_when": null,
+     "doc": "Where the item's content came from \u2014 a spec section, a datasheet, a conversation. Kept out of the content hash, so correcting it never marks downstream items suspect."
+    },
+    "note": {
+     "name": "note",
+     "type": "text",
+     "on_change": "log",
+     "required": false,
+     "choices": null,
+     "default": null,
+     "required_when": null,
+     "doc": "A free-text remark about the item's provenance, kept beside the item instead of inside its body. Kept out of the content hash."
+    },
+    "tags": {
+     "name": "tags",
+     "type": "list",
+     "on_change": "ignore",
+     "required": false,
+     "choices": null,
+     "default": null,
+     "required_when": null,
+     "doc": "Free-form labels for grouping and finding items; free-text search matches tags as well as titles. Kept out of the content hash."
+    },
+    "owner": {
+     "name": "owner",
+     "type": "person",
+     "on_change": "log",
+     "required": false,
+     "choices": null,
+     "default": null,
+     "required_when": null,
+     "doc": "The person responsible for this item \u2014 who a question about it goes to. Kept out of the content hash, so ownership changes never invalidate downstream work."
+    },
+    "last_reviewed": {
+     "name": "last_reviewed",
+     "type": "date",
+     "on_change": "ignore",
+     "required": false,
+     "choices": null,
+     "default": null,
+     "required_when": null,
+     "doc": "The date this item was last reviewed. Bookkeeping only: kept out of the content hash."
+    },
+    "citations": {
+     "name": "citations",
+     "type": "citations",
+     "on_change": "invalidate",
+     "required": false,
+     "choices": null,
+     "default": null,
+     "required_when": null,
+     "doc": "External documents this item relies on. Each entry needs a path \u2014 an http(s) URL or a project-root-relative file \u2014 and may carry rev, page, section, part_number, keep_copy and an id for [[cite:]] references."
+    },
+    "title": {
+     "name": "title",
+     "type": "text",
+     "on_change": "invalidate",
+     "required": true,
+     "choices": null,
+     "default": null,
+     "required_when": null,
+     "doc": "What was decided, in one line. Required \u2014 every decision needs a label."
+    },
+    "status": {
+     "name": "status",
+     "type": "enum",
+     "on_change": "invalidate",
+     "required": false,
+     "choices": [
+      "proposed",
+      "in_progress",
+      "accepted",
+      "on_hold",
+      "rejected",
+      "superseded"
+     ],
+     "default": "proposed",
+     "required_when": null,
+     "doc": "Where the decision stands. Only an accepted decision counts as settled and closes coverage on what it satisfies."
+    },
+    "rationale": {
+     "name": "rationale",
+     "type": "text",
+     "on_change": "invalidate",
+     "required": false,
+     "choices": null,
+     "default": null,
+     "required_when": {
+      "status": "rejected"
+     },
+     "doc": "Why this decision, and why not the alternatives. Required when the decision is rejected \u2014 the reason a rejection happened is the point of recording it."
+    },
+    "date": {
+     "name": "date",
+     "type": "date",
+     "on_change": "log",
+     "required": false,
+     "choices": null,
+     "default": null,
+     "required_when": null,
+     "doc": "When the decision was made. Kept out of the content hash, so fixing a date never marks downstream items suspect."
+    },
+    "options": {
+     "name": "options",
+     "type": "options",
+     "on_change": "invalidate",
+     "required": false,
+     "choices": null,
+     "default": null,
+     "required_when": null,
+     "doc": "The alternatives considered, as name / verdict / because entries. Rendered as the options-considered panel on the decision's page."
+    },
+    "checks": {
+     "name": "checks",
+     "type": "checks",
+     "on_change": "invalidate",
+     "required": false,
+     "choices": null,
+     "default": null,
+     "required_when": null,
+     "doc": "Numeric checks: each entry compares a value from this item's calc block against a bound's limit. A failed check here is reported as an error."
+    }
+   },
+   "links": {
+    "satisfies": [
+     "requirement",
+     "bound"
+    ],
+    "constrained_by": [
+     "bound"
+    ],
+    "supersedes": [
+     "decision"
+    ],
+    "selects": [
+     "component"
+    ],
+    "blocked_by": [],
+    "recorded_by": [
+     "log"
+    ],
+    "part_of": [
+     "group"
+    ]
+   },
+   "preview": [
+    "status",
+    "title",
+    "date"
+   ],
+   "body_on_change": "invalidate",
+   "body_required": false,
+   "append_only": false,
+   "satisfying_statuses": [
+    "accepted"
+   ],
+   "check_severity": "error",
+   "coverable": null,
+   "coverable_statuses": null,
+   "verifying_statuses": null,
+   "doc": "A design choice that was made \u2014 what was picked, why, and what it satisfies. A settled (accepted) decision closes coverage on what it satisfies; a failing check on a decision is an error."
+  },
+  "test": {
+   "name": "test",
+   "prefix": "TST",
+   "label": "Test",
+   "plural": "Tests",
+   "fields": {
+    "source": {
+     "name": "source",
+     "type": "text",
+     "on_change": "log",
+     "required": false,
+     "choices": null,
+     "default": null,
+     "required_when": null,
+     "doc": "Where the item's content came from \u2014 a spec section, a datasheet, a conversation. Kept out of the content hash, so correcting it never marks downstream items suspect."
+    },
+    "note": {
+     "name": "note",
+     "type": "text",
+     "on_change": "log",
+     "required": false,
+     "choices": null,
+     "default": null,
+     "required_when": null,
+     "doc": "A free-text remark about the item's provenance, kept beside the item instead of inside its body. Kept out of the content hash."
+    },
+    "tags": {
+     "name": "tags",
+     "type": "list",
+     "on_change": "ignore",
+     "required": false,
+     "choices": null,
+     "default": null,
+     "required_when": null,
+     "doc": "Free-form labels for grouping and finding items; free-text search matches tags as well as titles. Kept out of the content hash."
+    },
+    "owner": {
+     "name": "owner",
+     "type": "person",
+     "on_change": "log",
+     "required": false,
+     "choices": null,
+     "default": null,
+     "required_when": null,
+     "doc": "The person responsible for this item \u2014 who a question about it goes to. Kept out of the content hash, so ownership changes never invalidate downstream work."
+    },
+    "last_reviewed": {
+     "name": "last_reviewed",
+     "type": "date",
+     "on_change": "ignore",
+     "required": false,
+     "choices": null,
+     "default": null,
+     "required_when": null,
+     "doc": "The date this item was last reviewed. Bookkeeping only: kept out of the content hash."
+    },
+    "title": {
+     "name": "title",
+     "type": "text",
+     "on_change": "invalidate",
+     "required": true,
+     "choices": null,
+     "default": null,
+     "required_when": null,
+     "doc": "What the test proves, in one line. Required."
+    },
+    "status": {
+     "name": "status",
+     "type": "enum",
+     "on_change": "invalidate",
+     "required": false,
+     "choices": [
+      "planned",
+      "passing",
+      "failing",
+      "blocked"
+     ],
+     "default": "planned",
+     "required_when": null,
+     "doc": "Result of the test. Only a passing test counts as having verified what it points at."
+    }
+   },
+   "links": {
+    "verifies": [
+     "requirement",
+     "bound"
+    ],
+    "part_of": [
+     "group"
+    ]
+   },
+   "preview": [
+    "status",
+    "title"
+   ],
+   "body_on_change": "invalidate",
+   "body_required": false,
+   "append_only": false,
+   "satisfying_statuses": null,
+   "check_severity": "error",
+   "coverable": null,
+   "coverable_statuses": null,
+   "verifying_statuses": [
+    "passing"
+   ],
+   "doc": "A verification item that proves a requirement or bound. Its verifies links count toward coverage when the test's status is passing."
+  },
+  "component": {
+   "name": "component",
+   "prefix": "CMP",
+   "label": "Component",
+   "plural": "Components",
+   "fields": {
+    "source": {
+     "name": "source",
+     "type": "text",
+     "on_change": "log",
+     "required": false,
+     "choices": null,
+     "default": null,
+     "required_when": null,
+     "doc": "Where the item's content came from \u2014 a spec section, a datasheet, a conversation. Kept out of the content hash, so correcting it never marks downstream items suspect."
+    },
+    "note": {
+     "name": "note",
+     "type": "text",
+     "on_change": "log",
+     "required": false,
+     "choices": null,
+     "default": null,
+     "required_when": null,
+     "doc": "A free-text remark about the item's provenance, kept beside the item instead of inside its body. Kept out of the content hash."
+    },
+    "tags": {
+     "name": "tags",
+     "type": "list",
+     "on_change": "ignore",
+     "required": false,
+     "choices": null,
+     "default": null,
+     "required_when": null,
+     "doc": "Free-form labels for grouping and finding items; free-text search matches tags as well as titles. Kept out of the content hash."
+    },
+    "owner": {
+     "name": "owner",
+     "type": "person",
+     "on_change": "log",
+     "required": false,
+     "choices": null,
+     "default": null,
+     "required_when": null,
+     "doc": "The person responsible for this item \u2014 who a question about it goes to. Kept out of the content hash, so ownership changes never invalidate downstream work."
+    },
+    "last_reviewed": {
+     "name": "last_reviewed",
+     "type": "date",
+     "on_change": "ignore",
+     "required": false,
+     "choices": null,
+     "default": null,
+     "required_when": null,
+     "doc": "The date this item was last reviewed. Bookkeeping only: kept out of the content hash."
+    },
+    "citations": {
+     "name": "citations",
+     "type": "citations",
+     "on_change": "invalidate",
+     "required": false,
+     "choices": null,
+     "default": null,
+     "required_when": null,
+     "doc": "External documents this item relies on. Each entry needs a path \u2014 an http(s) URL or a project-root-relative file \u2014 and may carry rev, page, section, part_number, keep_copy and an id for [[cite:]] references."
+    },
+    "title": {
+     "name": "title",
+     "type": "text",
+     "on_change": "invalidate",
+     "required": true,
+     "choices": null,
+     "default": null,
+     "required_when": null,
+     "doc": "What the component is, in one line. Required."
+    },
+    "part_number": {
+     "name": "part_number",
+     "type": "text",
+     "on_change": "invalidate",
+     "required": false,
+     "choices": null,
+     "default": null,
+     "required_when": null,
+     "doc": "The manufacturer part number. Indexed into the parts page, alongside part numbers cited inside citations entries."
+    },
+    "refdes": {
+     "name": "refdes",
+     "type": "list",
+     "on_change": "log",
+     "required": false,
+     "choices": null,
+     "default": null,
+     "required_when": null,
+     "doc": "Reference designators on the board \u2014 U14, R7 \u2014 where this part is placed. Kept out of the content hash."
+    },
+    "status": {
+     "name": "status",
+     "type": "enum",
+     "on_change": "invalidate",
+     "required": false,
+     "choices": [
+      "candidate",
+      "selected",
+      "obsolete"
+     ],
+     "default": "candidate",
+     "required_when": null,
+     "doc": "Where the part stands in this design. Only a selected component counts as settled and closes coverage on what it satisfies."
+    },
+    "rationale": {
+     "name": "rationale",
+     "type": "text",
+     "on_change": "invalidate",
+     "required": false,
+     "choices": null,
+     "default": null,
+     "required_when": {
+      "links": "alternate"
+     },
+     "doc": "Why this part, or \u2014 when an alternate link is present \u2014 what makes that alternate not a drop-in. Required whenever an alternate link exists."
+    },
+    "checks": {
+     "name": "checks",
+     "type": "checks",
+     "on_change": "invalidate",
+     "required": false,
+     "choices": null,
+     "default": null,
+     "required_when": null,
+     "doc": "Numeric checks: each entry compares a value from this item's calc block against a bound's limit, so a component can demonstrate compliance with a bound directly."
+    }
+   },
+   "links": {
+    "satisfies": [
+     "requirement",
+     "bound"
+    ],
+    "constrained_by": [
+     "bound"
+    ],
+    "drop_in": [
+     "component"
+    ],
+    "alternate": [
+     "component"
+    ],
+    "part_of": [
+     "group"
+    ]
+   },
+   "preview": [
+    "status",
+    "title",
+    "part_number"
+   ],
+   "body_on_change": "invalidate",
+   "body_required": false,
+   "append_only": false,
+   "satisfying_statuses": [
+    "selected"
+   ],
+   "check_severity": "error",
+   "coverable": null,
+   "coverable_statuses": null,
+   "verifying_statuses": null,
+   "doc": "A part the design uses. A selected component closes coverage on what it satisfies, and it can carry its own checks against bounds. Drop-in and alternate claims between components are made here, not facts from a parts database."
+  },
+  "group": {
+   "name": "group",
+   "prefix": "GRP",
+   "label": "Group",
+   "plural": "Groups",
+   "fields": {
+    "source": {
+     "name": "source",
+     "type": "text",
+     "on_change": "log",
+     "required": false,
+     "choices": null,
+     "default": null,
+     "required_when": null,
+     "doc": "Where the item's content came from \u2014 a spec section, a datasheet, a conversation. Kept out of the content hash, so correcting it never marks downstream items suspect."
+    },
+    "note": {
+     "name": "note",
+     "type": "text",
+     "on_change": "log",
+     "required": false,
+     "choices": null,
+     "default": null,
+     "required_when": null,
+     "doc": "A free-text remark about the item's provenance, kept beside the item instead of inside its body. Kept out of the content hash."
+    },
+    "tags": {
+     "name": "tags",
+     "type": "list",
+     "on_change": "ignore",
+     "required": false,
+     "choices": null,
+     "default": null,
+     "required_when": null,
+     "doc": "Free-form labels for grouping and finding items; free-text search matches tags as well as titles. Kept out of the content hash."
+    },
+    "owner": {
+     "name": "owner",
+     "type": "person",
+     "on_change": "log",
+     "required": false,
+     "choices": null,
+     "default": null,
+     "required_when": null,
+     "doc": "The person responsible for this item \u2014 who a question about it goes to. Kept out of the content hash, so ownership changes never invalidate downstream work."
+    },
+    "last_reviewed": {
+     "name": "last_reviewed",
+     "type": "date",
+     "on_change": "ignore",
+     "required": false,
+     "choices": null,
+     "default": null,
+     "required_when": null,
+     "doc": "The date this item was last reviewed. Bookkeeping only: kept out of the content hash."
+    },
+    "title": {
+     "name": "title",
+     "type": "text",
+     "on_change": "log",
+     "required": true,
+     "choices": null,
+     "default": null,
+     "required_when": null,
+     "doc": "The name of the collection. Required \u2014 an unnamed group names nothing. Kept out of the content hash, so renaming a group never marks its members suspect."
+    }
+   },
+   "links": {},
+   "preview": [
+    "title"
+   ],
+   "body_on_change": "log",
+   "body_required": false,
+   "append_only": false,
+   "satisfying_statuses": null,
+   "check_severity": "error",
+   "coverable": false,
+   "coverable_statuses": null,
+   "verifying_statuses": null,
+   "doc": "A named collection of items \u2014 'the PCIe interface spec' \u2014 that names the collection without letting it stand in for its members. Members point here with part_of; a group never lists its members, never appears in coverage, and nothing may satisfy one."
+  },
+  "log": {
+   "name": "log",
+   "prefix": "LOG",
+   "label": "Log entry",
+   "plural": "Log entries",
+   "fields": {
+    "source": {
+     "name": "source",
+     "type": "text",
+     "on_change": "log",
+     "required": false,
+     "choices": null,
+     "default": null,
+     "required_when": null,
+     "doc": "Where the item's content came from \u2014 a spec section, a datasheet, a conversation. Kept out of the content hash, so correcting it never marks downstream items suspect."
+    },
+    "note": {
+     "name": "note",
+     "type": "text",
+     "on_change": "log",
+     "required": false,
+     "choices": null,
+     "default": null,
+     "required_when": null,
+     "doc": "A free-text remark about the item's provenance, kept beside the item instead of inside its body. Kept out of the content hash."
+    },
+    "tags": {
+     "name": "tags",
+     "type": "list",
+     "on_change": "ignore",
+     "required": false,
+     "choices": null,
+     "default": null,
+     "required_when": null,
+     "doc": "Free-form labels for grouping and finding items; free-text search matches tags as well as titles. Kept out of the content hash."
+    },
+    "date": {
+     "name": "date",
+     "type": "date",
+     "on_change": "invalidate",
+     "required": true,
+     "choices": null,
+     "default": null,
+     "required_when": null,
+     "doc": "When this entry was written. Required \u2014 an undated log entry cannot be ordered in time."
+    },
+    "summary": {
+     "name": "summary",
+     "type": "text",
+     "on_change": "invalidate",
+     "required": true,
+     "choices": null,
+     "default": null,
+     "required_when": null,
+     "doc": "One-line account of what happened, shown in log listings above the body."
+    },
+    "author": {
+     "name": "author",
+     "type": "person",
+     "on_change": "invalidate",
+     "required": false,
+     "choices": null,
+     "default": null,
+     "required_when": null,
+     "doc": "Who wrote the entry."
+    }
+   },
+   "links": {
+    "addresses": [
+     "requirement",
+     "bound"
+    ],
+    "amends": [
+     "log"
+    ],
+    "records": [
+     "decision"
+    ]
+   },
+   "preview": [
+    "date",
+    "author",
+    "summary"
+   ],
+   "body_on_change": "invalidate",
+   "body_required": false,
+   "append_only": true,
+   "satisfying_statuses": null,
+   "check_severity": "error",
+   "coverable": null,
+   "coverable_statuses": null,
+   "verifying_statuses": null,
+   "doc": "A dated entry in the design log \u2014 work done, questions raised, corrections. Entries are append-only: each is sealed on the first build where it has no errors, and after that editing it is a build error \u2014 corrections are new entries with amends."
+  }
+ },
+ "link_types": {
+  "refines": {
+   "name": "refines",
+   "inverse": "refined_by",
+   "label": "Refines",
+   "trace": true,
+   "doc": "A narrower, more detailed version of the same kind of statement: a requirement refining a requirement, or a bound refining a bound. Same category of thing, different altitude."
+  },
+  "derives_from": {
+   "name": "derives_from",
+   "inverse": "derived_by",
+   "label": "Derives from",
+   "trace": true,
+   "doc": "A bound whose value follows from a requirement or another bound \u2014 where the number came from, not a restatement of it."
+  },
+  "governed_by": {
+   "name": "governed_by",
+   "inverse": "governs",
+   "label": "Governed by",
+   "trace": true,
+   "doc": "This requirement must comply with a general rule stated elsewhere \u2014 another requirement or a bound \u2014 without being a narrower version of it. Traceability only; it never feeds coverage."
+  },
+  "satisfies": {
+   "name": "satisfies",
+   "inverse": "satisfied_by",
+   "label": "Satisfies",
+   "trace": true,
+   "doc": "A decision or component claims to meet a requirement or bound. This is the link that closes coverage once the claiming item reaches a satisfying status."
+  },
+  "constrained_by": {
+   "name": "constrained_by",
+   "inverse": "constrains",
+   "label": "Constrained by",
+   "trace": true,
+   "doc": "A decision or component that must respect a bound. Traceability only \u2014 it does not close coverage on the bound; satisfies does."
+  },
+  "verifies": {
+   "name": "verifies",
+   "inverse": "verified_by",
+   "label": "Verifies",
+   "trace": true,
+   "doc": "A test proves a requirement or bound. Counts toward coverage when the test's status is one of the type's verifying_statuses."
+  },
+  "addresses": {
+   "name": "addresses",
+   "inverse": "addressed_by",
+   "label": "Addresses",
+   "trace": false,
+   "doc": "A log entry records work done on a requirement or bound. Counts as addressed coverage \u2014 someone has worked on it and written it up \u2014 without claiming it is met."
+  },
+  "records": {
+   "name": "records",
+   "inverse": "recorded_by",
+   "label": "Records",
+   "trace": false,
+   "doc": "A log entry records a decision \u2014 the design-log side of the decision's own recorded_by end of the same edge."
+  },
+  "amends": {
+   "name": "amends",
+   "inverse": "amended_by",
+   "label": "Amends",
+   "trace": false,
+   "doc": "A log entry corrects an earlier log entry. Entries are append-only, so a correction is written as a new entry pointing back at this one rather than as an edit."
+  },
+  "supersedes": {
+   "name": "supersedes",
+   "inverse": "superseded_by",
+   "label": "Supersedes",
+   "trace": false,
+   "doc": "This decision replaces an older one. The older decision keeps its history; moving its status to superseded is your edit, not something the link does by itself. Because the two are separate claims, a build warns when this link says superseded and the target's status says something else."
+  },
+  "selects": {
+   "name": "selects",
+   "inverse": "selected_by",
+   "label": "Selects",
+   "trace": true,
+   "doc": "A decision picks a component. The component's own status marks it selected; this link records which decision made the pick. A build warns when either half is missing and the other is not."
+  },
+  "blocked_by": {
+   "name": "blocked_by",
+   "inverse": "blocks",
+   "label": "Blocked by",
+   "trace": true,
+   "doc": "Something is holding this decision up. Name only the immediate blocker; reports resolve the chain to its root. May point at an item of any type; a cycle is a build error."
+  },
+  "part_of": {
+   "name": "part_of",
+   "inverse": "contains",
+   "label": "Part of",
+   "trace": true,
+   "doc": "This item belongs to a group. Membership is always declared by the member, never by the group; contains is the computed backlink."
+  },
+  "drop_in": {
+   "name": "drop_in",
+   "inverse": "drop_in",
+   "label": "Drop-in",
+   "trace": true,
+   "doc": "This component is a drop-in second source for that one \u2014 interchangeable as claimed, no review needed. Self-inverse, and restricted to component-to-component. For a part that is close but needs checking before it goes in a design, use alternate."
+  },
+  "alternate": {
+   "name": "alternate",
+   "inverse": "alternate",
+   "label": "Alternate",
+   "trace": true,
+   "doc": "This component is functionally close to that one but not a drop-in: check before substituting. Self-inverse, component-to-component, and the rationale explaining what differs is required."
+  }
+ }
+}

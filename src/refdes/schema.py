@@ -615,6 +615,7 @@ def load_project(config_path: str | None = None, start: str = ".") -> Project:
             prefix=tspec.get("prefix", tname[:3].upper()),
             label=tspec.get("label", tname.title()),
             plural=tspec.get("plural", "") or f"{tspec.get('label', tname.title())}s",
+            extends=str(tspec.get("extends") or ""),
             fields=fields,
             links=links,
             preview=list(tspec.get("preview") or []),

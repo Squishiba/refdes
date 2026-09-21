@@ -83,6 +83,8 @@ def resolve_namespaces(
                 "or a set, not both"
             )
 
+    types = _resolve_extends(types, sets)
+
     return sets, link_types, types, warnings
 
 
@@ -201,6 +203,22 @@ def _load_standard(
                     _normalize_set_entry(spec) if ns_name == "sets" else spec
                 )
                 origin[key] = f"preset {preset_name!r}"
+
+    # A preset is an independent bundle: extending another preset's type would
+    # make the two order-dependent (docs/design/extends.md §2.4). A base type,
+    # or a type of the same preset, is a fine parent.
+    for tname, spec in types.items():
+        parent = spec.get("extends") if isinstance(spec, dict) else None
+        if not parent or origin.get(("types", tname), "").startswith("the "):
+            continue
+        parent_origin = origin.get(("types", parent), "")
+        if parent_origin.startswith("preset") and parent_origin != origin[("types", tname)]:
+            raise SchemaError(
+                f"types.{tname}.extends names {parent!r}, which belongs to "
+                f"{parent_origin}; {origin[('types', tname)]} may extend a base "
+                "type or a type of its own, never another preset's -- presets "
+                "are independent bundles"
+            )
 
     return sets, link_types, types
 
@@ -538,3 +556,99 @@ def _merge_types(
             result[tname] = expanded_overlay
 
     return result
+
+
+# Identity/presentation properties a subtype must declare itself
+# (docs/design/extends.md §2.2, §9 Q1): inheriting them would make a
+# specialization silently adopt its parent's identity. `doc:` is the type's
+# own definition and is likewise never inherited.
+_NOT_INHERITED = ("prefix", "label", "plural", "doc")
+
+
+def _resolve_extends(types: dict[str, Any], sets: dict[str, Any]) -> dict[str, Any]:
+    """Resolve `extends:` on the fully merged types map (docs/design/extends.md §2.3).
+
+    The single pass after base -> presets -> overlay have merged and
+    `include:` has been expanded, so a parent's set contributions and any
+    overlay edit to the parent reach its children (composition.md §4: the
+    parent is the weakest layer). Single level only -- a parent that itself
+    extends is an error, so there is no chain to walk and no cycle to detect
+    beyond a type naming itself.
+
+    `extends:` stays on the resolved dict: schema.py records it on
+    `ItemType.extends`, which is where `Project.subtype_map` reads it.
+    """
+    resolved: dict[str, Any] = {}
+    for tname, spec in types.items():
+        parent_name = spec.get("extends") if isinstance(spec, dict) else None
+        if not parent_name:
+            resolved[tname] = spec
+            continue
+        if parent_name == tname:
+            raise SchemaError(f"types.{tname}.extends names itself")
+        if parent_name in sets and parent_name not in types:
+            raise SchemaError(
+                f"types.{tname}.extends names {parent_name!r}, which is a set, "
+                "not a type; sets are shareable fragments -- extends names a type"
+            )
+        if parent_name not in types:
+            close = difflib.get_close_matches(str(parent_name), sorted(types), n=1, cutoff=0.5)
+            hint = f" Did you mean {close[0]!r}?" if close else ""
+            raise SchemaError(
+                f"types.{tname}.extends names unknown type {parent_name!r}.{hint}"
+            )
+        grandparent = (types[parent_name] or {}).get("extends")
+        if grandparent:
+            raise SchemaError(
+                f"types.{tname}.extends names {parent_name!r}, which itself "
+                f"extends {grandparent!r}. Single-level inheritance only; "
+                f"{tname} must extend {grandparent!r} directly or not use extends:."
+            )
+        for key in ("prefix", "label", "plural"):
+            if not spec.get(key):
+                raise SchemaError(
+                    f"types.{tname} extends {parent_name!r} but does not declare "
+                    f"{key!r}; prefix, label and plural are identity properties a "
+                    "subtype must declare itself, never inherits"
+                )
+        resolved[tname] = _apply_parent(tname, spec, parent_name, types[parent_name] or {})
+    return resolved
+
+
+def _apply_parent(
+    tname: str, child: dict[str, Any], parent_name: str, parent: dict[str, Any]
+) -> dict[str, Any]:
+    """The child's spec laid over its parent's: `_merge_type_dict` semantics
+    (scalars, and `body:`, replaced wholesale; `fields:` and `links:` merged by
+    key, an override replacing the whole definition), minus the properties
+    that are never inherited, with the two Liskov guards on top."""
+    inheritable = {k: v for k, v in parent.items() if k not in _NOT_INHERITED}
+    merged = _merge_type_dict(inheritable, child)
+
+    if parent.get("append_only") is True and child.get("append_only") is False:
+        raise SchemaError(
+            f"types.{tname}.append_only is false, but {parent_name!r} is "
+            "append_only: a subtype cannot lift the append-only guarantee it "
+            "would be substituted under"
+        )
+    child_fields = child.get("fields") or {}
+    for fname, pspec in (parent.get("fields") or {}).items():
+        cspec = child_fields.get(fname)
+        if cspec is None or not (pspec or {}).get("required"):
+            continue
+        if not (cspec or {}).get("required"):
+            raise SchemaError(
+                f"types.{tname}.fields.{fname} is not required, but {parent_name!r} "
+                "requires it: a subtype cannot make a parent-required field optional"
+            )
+
+    # Inherited-only fields keep the parent's order; the child's own fields
+    # follow in the order the child declares them. The child's own block reads
+    # top to bottom the way it is authored, and overriding an inherited field
+    # neither hides it nor leaves it stranded at its parent position.
+    for key in ("fields", "links"):
+        own = child.get(key) or {}
+        ordered = {n: v for n, v in (parent.get(key) or {}).items() if n not in own}
+        ordered.update(own)
+        merged[key] = {n: v for n, v in ordered.items() if v is not None} if key == "links" else ordered
+    return merged

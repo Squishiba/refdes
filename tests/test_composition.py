@@ -7,10 +7,9 @@ merge is by-name with whole-spec replacement. Two *sets* fighting is loud
 error -- except when a set contributes nothing that survives, which warns
 (§6.3).
 
-Two tests named in §6.3 are deferred with the `extends:` engine itself:
-`test_extends_naming_a_set_is_an_error` and
-`test_extends_and_include_together_own_declaration_wins` -- there is no
-`extends:` to point at a set yet.
+The two tests §6.3 tied to `extends:` (`test_extends_naming_a_set_is_an_error`,
+`test_extends_and_include_together_own_declaration_wins`) ride the extends
+engine and sit at the end of this file.
 """
 
 from __future__ import annotations
@@ -19,6 +18,7 @@ import pytest
 from conftest import write_project_config
 from helpers import _build_at
 
+from refdes import standards
 from refdes.schema import SchemaError, load_project
 
 BASE_TYPE = (
@@ -377,3 +377,87 @@ def test_partial_shadow_does_not_warn(tmp_path):
     assert not any(
         "contributes nothing" in d.message for d in project.warnings
     )
+
+
+# ------------------------------------------------------- with `extends:`
+
+
+def test_extends_naming_a_set_is_an_error(tmp_path):
+    """A set is a shareable fragment, not a type: `extends:` names a type
+    (composition.md §5, §6.1 item 5)."""
+    with pytest.raises(SchemaError) as exc:
+        _load(
+            tmp_path,
+            "sets:\n"
+            "  common:\n"
+            "    fields:\n"
+            "      title: { type: text }\n"
+            "types:\n"
+            "  note:\n"
+            "    extends: common\n"
+            "    prefix: NTE\n"
+            "    label: Note\n"
+            "    plural: Notes\n",
+        )
+    assert (
+        "types.note.extends names 'common', which is a set, not a type; "
+        "sets are shareable fragments -- extends names a type"
+    ) in str(exc.value)
+
+
+def test_extends_and_include_together_own_declaration_wins(tmp_path, monkeypatch):
+    """The four layers of composition.md §4, weakest to strongest -- the
+    parent, the included sets, the type's own declaration, and an overlay edit
+    to the parent (which lands in the parent's layer for its children, not as a
+    fifth voice) -- each with its winner asserted on one child."""
+    root = tmp_path / "std" / "hardware" / "v1"
+    root.mkdir(parents=True)
+    (root / "base.yaml").write_text(
+        "link_types:\n"
+        "  refines: { inverse: refined_by }\n"
+        "sets:\n"
+        "  s:\n"
+        "    fields:\n"
+        "      b: { type: text, doc: from the set }\n"
+        "      c: { type: text, doc: from the set }\n"
+        "types:\n"
+        "  p:\n"
+        "    prefix: PAR\n"
+        "    label: Parent\n"
+        "    plural: Parents\n"
+        "    fields:\n"
+        "      a: { type: text, doc: from the parent }\n"
+        "      b: { type: text, doc: from the parent }\n"
+        "      c: { type: text, doc: from the parent }\n"
+        "      e: { type: text, doc: from the parent }\n"
+        "    links:\n"
+        "      refines: [p]\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(standards, "_STANDARDS_ROOT", str(tmp_path / "std"))
+    project = _load(
+        tmp_path,
+        "standard: { base: hardware, version: 1 }\n"
+        "types:\n"
+        "  p:\n"
+        "    fields:\n"
+        "      d: { type: text, doc: added to the parent by the overlay }\n"
+        "      e: { type: text, doc: the overlay edited the parent }\n"
+        "  k:\n"
+        "    extends: p\n"
+        "    include: [s]\n"
+        "    prefix: KID\n"
+        "    label: Kid\n"
+        "    plural: Kids\n"
+        "    fields:\n"
+        "      c: { type: text, doc: the type's own }\n",
+    )
+    fields = project.types["k"].fields
+    assert fields["a"].doc == "from the parent"  # only the parent speaks
+    assert fields["b"].doc == "from the set"  # a set beats the parent
+    assert fields["c"].doc == "the type's own"  # the type beats set and parent
+    assert fields["d"].doc == "added to the parent by the overlay"  # parent layer
+    assert fields["e"].doc == "the overlay edited the parent"  # overlay edit reaches the child
+    assert project.types["k"].links["refines"] == ["p"]
+    # The parent's own resolved spec is untouched by its child.
+    assert project.types["p"].fields["b"].doc == "from the parent"
