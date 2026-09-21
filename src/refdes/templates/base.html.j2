@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{% block title %}{{ project.title }}{% endblock %}</title>
 <link rel="stylesheet" href="assets/style.css">
+{% if theme_css %}<link rel="stylesheet" href="{{ theme_css }}">
+{% endif %}
 </head>
 <body>
 <aside class="sidenav">

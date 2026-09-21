@@ -749,6 +749,14 @@ class Project:
     # source so the same image referenced from many items/pages hashes once.
     assets: dict[str, str] = field(default_factory=dict)
     asset_dirs: list[str] = field(default_factory=list)  # site.assets: raw config
+    # `site.theme:` -- the built-in theme this project selects -- and
+    # `site.tokens:`, its own token overrides merged over that theme. Both are
+    # validated at load by theme.py; `render_site` turns the merged overrides
+    # into the generated `assets/theme.css`. The default theme with no
+    # overrides writes no file at all, which is what keeps an un-themed
+    # project's output byte-identical to a pre-theming build.
+    theme: str = "default"
+    theme_tokens: dict[str, str] = field(default_factory=dict)
     # Figure id -> (owner label for a collision message, source file, source
     # line or None) -- one flat, project-wide namespace, the same posture
     # item ids already have (docs/design/index-blocks.md §9). Populated by

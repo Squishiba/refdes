@@ -33,6 +33,7 @@ from __future__ import annotations
 import difflib
 from typing import Any
 
+from . import theme as theme_mod
 from .model import ON_CHANGE_MODES, SchemaError
 
 # What a field's `type:` may be. Derived from the one mapping of declared field
@@ -43,7 +44,9 @@ from .schema_json import _FIELD_TYPE_MAP
 
 FIELD_TYPES = frozenset(_FIELD_TYPE_MAP) | {"enum"}
 
-SITE_KEYS = frozenset({"title", "out", "version", "pages", "nav", "assets"})
+SITE_KEYS = frozenset(
+    {"title", "out", "version", "pages", "nav", "assets", "theme", "tokens"}
+)
 ID_KEYS = frozenset({"width", "ledger"})
 HISTORY_KEYS = frozenset({"default"})
 COVERAGE_KEYS = frozenset({"group_inherited"})
@@ -204,7 +207,18 @@ class BlockChecker:
     def site(self, raw: dict) -> dict:
         block = self.mapping(raw.get("site"), "site", "a mapping of site settings")
         self.keys(block, SITE_KEYS, "site", "site:")
+        theme = self.string(block.get("theme"), "site.theme", theme_mod.DEFAULT_THEME)
+        try:
+            theme_mod.validate_theme_name(theme)
+            tokens = theme_mod.validate_token_overrides(block.get("tokens"))
+        except SchemaError as exc:
+            # The theme module's own messages, in this file's voice: same text,
+            # with the config file named in front of it like every other
+            # settings diagnostic.
+            raise self.error(str(exc)) from None
         return {
+            "theme": theme,
+            "tokens": tokens,
             "title": self.string(block.get("title"), "site.title", "Design Reference")
             or "Design Reference",
             "out": self.string(block.get("out"), "site.out", "_site") or "_site",

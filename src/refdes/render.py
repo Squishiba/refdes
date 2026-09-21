@@ -18,6 +18,7 @@ from . import dates
 from . import history as history_mod
 from . import ids as ids_mod
 from . import nav as nav_mod
+from . import theme as theme_mod
 from . import tree as tree_mod
 from . import vocabulary as vocabulary_mod
 from .model import Item, Project
@@ -755,7 +756,12 @@ def _copy_project_assets(project: Project, out_dir: str, written: set[str]) -> N
     guard `render_site` already applies to a page whose slug collides with a
     generated report.
     """
-    reserved = set(os.listdir(ASSET_DIR)) if os.path.isdir(ASSET_DIR) else set()
+    # `theme.css` is not in ASSET_DIR -- it is generated per project, after this
+    # copy -- but it is just as template-owned, and a project directory of that
+    # name would otherwise land on top of it.
+    reserved = (
+        set(os.listdir(ASSET_DIR)) if os.path.isdir(ASSET_DIR) else set()
+    ) | {theme_mod.THEME_CSS_NAME}
     asset_out = os.path.join(out_dir, "assets")
     for rel, dest_rel in sorted(project.assets.items()):
         top = dest_rel.split("/", 1)[0]
@@ -799,6 +805,26 @@ def _copy_datasheet_assets(project: Project, out_dir: str, written: set[str]) ->
         os.makedirs(os.path.dirname(dest), exist_ok=True)
         shutil.copy2(src, dest)
         written.add(target)
+
+
+def _write_theme_css(project: Project, out_dir: str, written: set[str]) -> None:
+    """Emit the project's resolved theme overrides as `assets/theme.css`.
+
+    The generated file redefines tokens and nothing else (theme.py is what
+    guarantees that), and it is linked after `assets/style.css` so the cascade
+    does the rest. No overrides -- the default theme and no `site: tokens:` --
+    means no file at all, and no `<link>` either: an un-themed project's output
+    stays byte-for-byte what it was before theming existed.
+    """
+    overrides = theme_mod.resolve(project.theme, project.theme_tokens)
+    if not overrides:
+        return
+    asset_out = os.path.join(out_dir, "assets")
+    os.makedirs(asset_out, exist_ok=True)
+    target = f"assets/{theme_mod.THEME_CSS_NAME}"
+    with open(os.path.join(asset_out, theme_mod.THEME_CSS_NAME), "w", encoding="utf-8") as fh:
+        fh.write(theme_mod.render_theme_css(overrides))
+    written.add(target)
 
 
 def _prune_stale_output(out_dir: str, written: set[str]) -> None:
@@ -856,6 +882,15 @@ def render_site(project: Project, draft: bool = False) -> str:
         autoescape=True,
         trim_blocks=True,
         lstrip_blocks=True,
+    )
+    # The theme's generated stylesheet, or "" when there is none. A global
+    # rather than a per-call argument because base.html.j2 is the only consumer
+    # and every page inherits it; the empty string is what keeps the `<link>`
+    # line from rendering at all in an un-themed build.
+    env.globals["theme_css"] = (
+        f"assets/{theme_mod.THEME_CSS_NAME}"
+        if theme_mod.resolve(project.theme, project.theme_tokens)
+        else ""
     )
     env.globals["draft_build"] = draft
     env.globals["check_state"] = _check_state
@@ -967,6 +1002,7 @@ def render_site(project: Project, draft: bool = False) -> str:
             written.update(_asset_file_list(ASSET_DIR))
         _copy_project_assets(project, out_dir, written)
         _copy_datasheet_assets(project, out_dir, written)
+        _write_theme_css(project, out_dir, written)
         _prune_stale_output(out_dir, written)
         return out_dir
 
@@ -1250,6 +1286,7 @@ def render_site(project: Project, draft: bool = False) -> str:
         written.update(_asset_file_list(ASSET_DIR))
     _copy_project_assets(project, out_dir, written)
     _copy_datasheet_assets(project, out_dir, written)
+    _write_theme_css(project, out_dir, written)
 
     _prune_stale_output(out_dir, written)
     return out_dir

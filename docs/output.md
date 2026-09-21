@@ -18,6 +18,45 @@
 | `<id>.html` | One page per item, lowercased ID (`req-pwr-002.html`) |
 | `items.json` | The machine-readable export |
 | `assets/` | The stylesheet and script, plus every local image, `site.assets:` directory, and kept citation copy your project references — see [images and other local files](markdown.md#images-and-other-local-files) |
+| `assets/theme.css` | Generated only when the project sets `site.theme:` overrides or `site.tokens:` — the token overrides, and nothing else. See [theming](#theming) |
+
+## Theming
+
+The site's look is a set of design tokens declared on `:root` in
+`assets/style.css`: colours (`--bg`, `--fg`, `--accent`, …), type (`--sans`,
+`--text-base`, `--weight-semibold`), spacing (`--space-4`) and radii
+(`--radius-md`). A theme is a flat list of `--token: value` pairs configured
+under `site:` — there is no theme file format, no selector, no nesting, and no
+remote theme, so a theme cannot change layout, hide a section, or fetch
+anything:
+
+```yaml
+site:
+  theme: default
+  tokens:
+    --accent: "#b3541e"
+    --sans: Georgia, serif
+```
+
+`refdes build` merges the project's `site.tokens:` over the named theme and
+emits the result as `assets/theme.css`, linked after `assets/style.css` on
+every page. The generated file redefines tokens and nothing else, and it is
+tracked in `.refdes-manifest.json` like any other output, so removing the theme
+removes the file. With no theme configured no file is written and no `<link>`
+is emitted: an un-themed build is byte-for-byte what it was before theming
+existed.
+
+Validation is strict because CSS is not. An unknown theme name or an unknown
+token name is a build error — with a *Did you mean* hint — since a mistyped
+custom property is otherwise "invalid at computed-value time", which renders as
+*unset* and leaves the site half-themed with no diagnostic anywhere. A token
+value must be one plain CSS value: `;`, `{`, `}`, `<`, `@import`, `url(`, a
+comment opener or an escape is refused, which is what keeps a value from
+turning into a rule. `--good`, `--bad`, `--warn` and `--claim` are verdict
+colours, not decorative ones, and cannot be reassigned yet.
+
+Dark mode stays refdes's: the `prefers-color-scheme` palette in `style.css` is
+not part of the themeable set, and an override applies to both palettes.
 
 Static files. No server, no build step for the reader, no network calls. Hover
 previews are inlined at build time; with JavaScript disabled every reference is

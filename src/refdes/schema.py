@@ -722,6 +722,8 @@ def load_project(config_path: str | None = None, start: str = ".") -> Project:
         pages_dir=site["pages"],
         nav_order=site["nav"],
         asset_dirs=site["assets"],
+        theme=site["theme"],
+        theme_tokens=site["tokens"],
         imports=import_specs,
         types=types,
         link_types=link_types,
