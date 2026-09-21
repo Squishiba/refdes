@@ -347,3 +347,73 @@ def test_former_ids_confirm_under_no_write_refuses(tmp_path, capsys):
     assert status == 2
     assert "refusing" in err
     assert not any(_changed(before, root).values())
+
+
+# ---------------------------------------------------------------- the editor's
+# read path (docs/design/browser-editor.md, Slice 0): loader.load_readonly is
+# the one side-effect-free load/build entry point the browser editor consumes.
+
+
+def test_load_readonly_leaves_whole_project_tree_byte_identical(tmp_path, capsys):
+    from refdes import loader
+
+    root, config = _snapshot_project(tmp_path)
+    capsys.readouterr()
+    before = _snapshot(root)
+
+    project = loader.load_readonly(config)
+    assert project.item_by_id("REQ-002").key == ""  # keyless, and stayed so
+    assert project.item_by_id("LOG-001") is not None
+    assert not any(_changed(before, root).values())
+
+
+def test_load_readonly_overlay_shows_candidate_without_touching_disk(tmp_path, capsys):
+    from refdes import loader
+
+    root, config = _snapshot_project(tmp_path)
+    capsys.readouterr()
+    before = _snapshot(root)
+    path = root / "items" / "r.yaml"
+    candidate = path.read_text(encoding="utf-8").replace(
+        "Keyless item, pending a mint.", "Edited in memory only."
+    )
+
+    project = loader.load_readonly(config, overlay={str(path): candidate})
+    assert project.item_by_id("REQ-002").fields["text"] == "Edited in memory only."
+    assert project.item_by_id("REQ-001").fields["text"] == "Seeded requirement."
+    assert not any(_changed(before, root).values())
+
+    # ...and the same load without the overlay sees the file as it is.
+    assert loader.load_readonly(config).item_by_id("REQ-002").fields["text"] == (
+        "Keyless item, pending a mint."
+    )
+
+
+def test_load_readonly_overlay_can_introduce_a_new_source_file(tmp_path, capsys):
+    from refdes import loader
+
+    root, config = _snapshot_project(tmp_path)
+    capsys.readouterr()
+    before = _snapshot(root)
+    new_path = root / "items" / "extra" / "new.yaml"
+
+    project = loader.load_readonly(
+        config,
+        overlay={
+            str(new_path): (
+                "defaults: { type: requirement, board: board-a }\n"
+                "items:\n  - id: REQ-777\n    text: Only in the overlay.\n"
+            )
+        },
+    )
+    assert project.item_by_id("REQ-777") is not None
+    assert not new_path.exists()
+    assert not any(_changed(before, root).values())
+
+
+def test_load_tree_refuses_an_overlay_combined_with_writes(tmp_path):
+    from refdes import loader
+
+    root, config = _snapshot_project(tmp_path)
+    with pytest.raises(ValueError):
+        loader.load_tree(config, write=True, overlay={str(root / "items" / "r.yaml"): ""})

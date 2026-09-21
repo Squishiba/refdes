@@ -710,6 +710,13 @@ class Project:
     # project. The CLI needs imported keyed targets before source write-back
     # expands a bare link; build() shares that same loaded graph afterward.
     imports_loaded: bool = False
+    # In-memory replacement source text, keyed by normalized absolute path
+    # (`parse.overlay_key`). parse reads a listed file from here instead of
+    # disk, and a listed path that does not exist yet still joins the source
+    # set -- how the browser editor builds and validates a candidate edit
+    # before anything is written (docs/design/browser-editor.md, Slice 0).
+    # Empty for every ordinary command.
+    source_overlay: dict[str, str] = field(default_factory=dict)
     coverage: dict[str, Coverage] = field(default_factory=dict)
     # Per-(item, board) coverage for the members of the groups named in a
     # board's `conforms_to:` -- {(item_id, board_name): Coverage}. Stays empty

@@ -689,8 +689,7 @@ def parse_markdown_file(project: Project, path: str) -> list[Item]:
 
 def parse_list_file(project: Project, path: str) -> list[Item]:
     rel = _relpath(project, path)
-    with open(path, "r", encoding="utf-8") as fh:
-        text = fh.read()
+    text = read_source(project, path)
     try:
         raw = yaml.load(text, Loader=_LineLoader) or {}
     except yaml.YAMLError as exc:
@@ -755,18 +754,48 @@ def parse_list_file(project: Project, path: str) -> list[Item]:
         if item:
             out.append(item)
     return out
+def overlay_key(path: str) -> str:
+    """The form a path takes as a `Project.source_overlay` key."""
+    return os.path.normcase(os.path.abspath(path))
+
+
+def read_source(project: Project, path: str) -> str:
+    """One item source file's text: the in-memory overlay when it names this
+    path, the file on disk otherwise (text mode, so CRLF reads as LF)."""
+    overlaid = project.source_overlay.get(overlay_key(path))
+    if overlaid is not None:
+        return overlaid
+    with open(path, "r", encoding="utf-8") as fh:
+        return fh.read()
+
+
+def _is_source_name(name: str) -> bool:
+    return not name.startswith(".") and name.endswith((".md", ".yaml", ".yml"))
+
+
 def source_files(project: Project) -> list[str]:
     items_dir = os.path.join(project.root, "items")
     found: list[str] = []
-    if not os.path.isdir(items_dir):
-        return found
-    for dirpath, dirnames, filenames in os.walk(items_dir):
-        dirnames[:] = [d for d in dirnames if not d.startswith(".")]
-        for name in sorted(filenames):
-            if name.startswith("."):
+    if os.path.isdir(items_dir):
+        for dirpath, dirnames, filenames in os.walk(items_dir):
+            dirnames[:] = [d for d in dirnames if not d.startswith(".")]
+            for name in sorted(filenames):
+                if _is_source_name(name):
+                    found.append(os.path.join(dirpath, name))
+    if project.source_overlay:
+        # An overlaid path that is not on disk yet is a file the candidate
+        # would create; it joins the set exactly where a real one would.
+        known = {overlay_key(p) for p in found}
+        items_root = overlay_key(items_dir) + os.sep
+        for key in project.source_overlay:
+            if key in known or not key.startswith(items_root):
                 continue
-            if name.endswith((".md", ".yaml", ".yml")):
-                found.append(os.path.join(dirpath, name))
+            rel_parts = key[len(items_root):].split(os.sep)
+            if any(part.startswith(".") for part in rel_parts) or not _is_source_name(
+                rel_parts[-1]
+            ):
+                continue
+            found.append(os.path.join(items_dir, *rel_parts))
     return sorted(found)
 
 

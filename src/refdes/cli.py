@@ -14,11 +14,9 @@ from . import citations as citations_mod
 from . import diagram as diagram_mod
 from . import former_ids as former_ids_mod
 from . import ids as ids_mod
-from . import imports as imports_mod
 from . import keys as keys_mod
 from . import lifecycle as lifecycle_mod
-from . import links as links_mod
-from . import parse as parse_mod
+from . import loader as loader_mod
 from . import render as render_mod
 from . import revise as revise_mod
 from . import scaffold as scaffold_mod
@@ -39,108 +37,19 @@ def _fix_console() -> None:
             pass
 
 
-def _parse_items(
-    project: Project, require_ids: bool, discard: tuple[int, int] | None
-) -> tuple[int, int]:
-    """Parse (or re-parse) project.items/pending, returning the (start, end)
-    index range this call's own diagnostics occupy in project.diagnostics.
-
-    `discard`, when given, is that same kind of range from a PREVIOUS parse
-    of this project, removed before this one runs. That matters because
-    keys.mint_missing()/links.expand_missing() write into the source tree
-    and then need a fresh parse: minting inserts a `key:` line, which shifts
-    every subsequent line number in that file -- and item.source_line, read
-    from the *original* parse, is exactly what a later write-back (link
-    expansion's own, or a following reload) keys on. Without discarding the
-    stale range first, reparsing would simply re-derive the same parse-time
-    diagnostics (a missing-id error, a malformed-YAML error, ...) from the
-    now-current files and append them a second time, on top of the first
-    parse's now-outdated set -- silently doubling every such diagnostic
-    rather than describing the project once, correctly.
-    """
-    if discard is not None:
-        del project.diagnostics[discard[0] : discard[1]]
-        project.items = {}
-        project.items_by_id = {}
-        project.pending = []
-    start = len(project.diagnostics)
-    parse_mod.load_items(project, require_ids=require_ids)
-    return start, len(project.diagnostics)
-
-
 def _load(args, require_ids: bool = True) -> tuple[Project, bool]:
     """Returns (project, schema_was_stale) -- the second only ever True when
     a `.refdes/schema.json` from a previous run predates the newer of the two
     config files (`refdes-project.yaml`/`refdes-schema.yaml`), which every
     caller except `cmd_check` ignores; `check` surfaces it as the one narrow
     trip-wire for the gap this command's own aggressive regeneration doesn't
-    otherwise close."""
-    project = load_project(config_path=args.config)
-    # A cheap side effect of loading, not a job of its own -- every command
-    # that reaches this point has already resolved the full merged schema,
-    # so writing .refdes/schema.json here is the same housekeeping posture
-    # `build` already applies to .refdes/boards.yaml and the ID ledger
-    # (docs/design/standard-library.md §12). `--no-write` suppresses it but
-    # still gets the staleness verdict, so `check`'s trip-wire diagnostic
-    # survives a read-only pass (docs/design/keys.md §2).
-    schema_was_stale = schema_json_mod.write_schema(project, write=not args.no_write)
-    parse_span = _parse_items(project, require_ids, discard=None)
+    otherwise close.
 
-    # Same posture, extended to surrogate keys (docs/design/keys.md §2): a key
-    # has none of what makes `refdes id` a deliberate, separate step, so any
-    # command that already loads the project fills in missing ones as a side
-    # effect. `--no-write` is the escape for a genuinely read-only pass (CI
-    # checking out a tree, inspecting someone else's project, a bisect over
-    # historical commits): it now gates every incidental write in the load
-    # path -- minting, expansion, schema.json here, and, in build(), the
-    # seals and the membership manifest (docs/design/keys.md §9 item 4).
-    minted = keys_mod.mint_missing(project, write=not args.no_write)
-    if minted:
-        parse_span = _parse_items(project, require_ids, discard=parse_span)
-
-    # Imported artifacts join the resolution scope before structured link
-    # expansion: a bare local link to an imported keyed item must freeze to
-    # the same composite form as a local target. load_imports() is idempotent,
-    # so build() reuses this populated graph.
-    imports_mod.load_imports(project)
-
-    # §3: maintain structured links as `DISPLAY-ID@key` composites. Bare
-    # references to keyed targets gain their key half; stale display halves
-    # refresh after a target rename unless the old label now names a different
-    # live item. Must run after minting (a target needs its own key before
-    # there's anything to expand into). The source rewrite updates item.links
-    # in memory and preserves line counts, so imported targets remain loaded.
-    links_mod.expand_missing(project, write=not args.no_write)
-
-    # Same treatment for `checks: [{value, against}]` -- `against:` names an
-    # item the same way a structured link target does but isn't a `links:`
-    # reference, so expand_missing() alone never sees it (docs/design/keys.md's
-    # disclosed gap, closed). The in-memory update above also keeps imported
-    # targets available for this companion expansion.
-    links_mod.expand_missing_checks(project, write=not args.no_write)
-
-    # Same treatment for cross-item calc references (`V_in = DEC-PWR-001.V_in`,
-    # finding 35): a bare target freezes to the composite and stale display
-    # halves refresh through the same _planned_target rule. Under --no-write
-    # the bare reference still resolves on the display id; only the write-back
-    # is skipped.
-    links_mod.expand_missing_calc_refs(project, write=not args.no_write)
-
-    # A bare follows reference means "continue this thread", not "pin this
-    # named entry". Resolve it once to the current frozen-edge tip after keys
-    # exist, then reparse so build sees the durable composite-or-bare-key
-    # spelling. The same global --no-write gate that protects ordinary link
-    # expansion also protects this append-only-sensitive rewrite.
-    frozen_follows = links_mod.freeze_follows(project, write=not args.no_write)
-    if frozen_follows:
-        # The follow-freeze writer is the one later source rewrite that still
-        # needs a reparse. Rebuild the imported portion of the resolution
-        # scope afterward so build() never sees a local-only graph.
-        project.imports_loaded = False
-        _parse_items(project, require_ids, discard=parse_span)
-        imports_mod.load_imports(project)
-
-    return project, schema_was_stale
+    The pipeline itself lives in `loader.load_tree`, shared with the browser
+    editor's read-only path; `--no-write` is its `write=False`."""
+    return loader_mod.load_tree(
+        args.config, require_ids=require_ids, write=not args.no_write
+    )
 
 
 def _refuse_no_write(command: str, what: str) -> int:
