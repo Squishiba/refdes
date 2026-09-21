@@ -57,3 +57,15 @@ Task: implement extends.md in full, phased per its section 8; report to refdes-2
 - Presets untouched (Q5). The four `[requirement, bound]` target lists left alone (collapsing them would
   change the resolved schema).
 - The composition.md sets-factoring oracle (same test name) is NOT done -- out of scope here.
+
+## Follow-on: overlay link nulls on extending types (backlog finding 21) -- finished
+- `standards._merge_types` now keeps an overlay `links: {verb: null}` through the
+  base+overlay merge when the merged type has `extends:` and the verb is not in the
+  base type's own links; `_apply_parent` then un-declares it after inheritance.
+  Chosen over a literal two-pass resolve: same result, no second walk. Removed
+  `_check_overlay_link_nulls` and its "not supported yet" error.
+- Ordinary-type nulls and own-declaration nulls behave as before (own-declared link
+  nulled by overlay still pops, so no new error there).
+- tests/test_extends.py: the old error test is now positive; added tests for
+  parent-never-declared, overlay type with own extends+nulls, parent edit + child null.
+- Docs: extends.md 12, backlog finding 21, CHANGELOG stale sentence, new fragment.

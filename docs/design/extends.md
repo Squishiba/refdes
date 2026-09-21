@@ -563,14 +563,17 @@ Where the build settles something the spec left open or contradicted itself.
 - **Single-level error** uses §6.2's wording without the `ERROR file:line —`
   frame (schema errors carry no position). The set-named-as-parent message says
   "set", not "field_set" (composition.md predates the rename).
-- **Known gap, loud not silent.** An overlay's `links: { verb: null }` on a
-  type that extends, for a verb the type does not itself declare, cannot
-  suppress the inherited link: the overlay merge runs before `extends:` resolves
-  and would pop it as a no-op. It is a `SchemaError` naming the verb
-  (`_check_overlay_link_nulls`), never a silent success. Follow-on, tracked in
-  `backlog.md` finding 21: resolve `extends:` in two passes so overlay nulls are
-  interpreted after inheritance. A null in the type's own declaration (what
-  `bound` uses) works.
+- **Overlay nulls on an extending type (was a known gap, now closed).** An
+  overlay's `links: { verb: null }` on a type that extends, for a verb the type
+  does not itself declare, suppresses the inherited link. `_merge_types` used
+  to pop such a null as a no-op (a stopgap `SchemaError`,
+  `_check_overlay_link_nulls`, made that loud); it now carries the null through
+  the base+overlay merge on any type that extends, and `_apply_parent`
+  interprets it after inheritance, exactly like a null in the type's own
+  declaration. A null for a verb the parent never declares stays the existing
+  error. An overlay type that declares its own `extends:` and nulls, and an
+  overlay that edits a parent while nulling in its child, both work.
+  Backlog finding 21.
 - **Tree page honours subtypes.** `tree.py`'s group decisions were the
   literal `type == "group"` checks; they now read `project.is_subtype(...)`,
   so a type that `extends: group` behaves as a group everywhere the tree

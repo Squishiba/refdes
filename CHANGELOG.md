@@ -100,8 +100,8 @@ and this project uses [Semantic Versioning](https://semver.org/).
   un-declares the `governed_by` link it would inherit with `governed_by: null`,
   a new `extends:` mechanism: `verb: null` in a child's `links:` removes an
   inherited link (not `[]`, which means unrestricted). An overlay writing that
-  null for a link the type only inherits is a load error, not a silent no-op
-  (proper support needs two-pass resolution; tracked in the backlog). No
+  null for a link the type only inherits suppresses it (see the changelog
+  fragment `extends-overlay-link-null`). No
   migration. The design-debate preset does not adopt
   `extends:` until after threads Phase 4.
 

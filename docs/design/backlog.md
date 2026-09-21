@@ -561,14 +561,13 @@ to get separate ones; a project that wants the old output sets
 `coverage.group_inherited: false`. The spec's original `false` default is kept
 there as the rejected option.
 
-**Follow-on (outstanding): two-pass `extends:` resolution.** An overlay's
-`links: { verb: null }` on a type that extends cannot yet suppress a link the
-type only receives from its parent: the overlay merge runs before `extends:`
-resolves and would pop the null as a no-op. It is a load error today
-(`standards._check_overlay_link_nulls`) rather than a silent wrong answer.
-Proper support resolves `extends:` in two passes so an overlay's nulls are
-interpreted after inheritance. A null in the type's *own* declaration already
-works (extends.md §2.2).
+**Follow-on (shipped): overlay nulls on an extending type.** An overlay's
+`links: { verb: null }` on a type that extends now suppresses a link the type
+only receives from its parent. Rather than a literal second resolution pass,
+`_merge_types` keeps the null through the base+overlay merge when the merged
+type extends, so `_apply_parent` interprets it after inheritance; the stopgap
+`_check_overlay_link_nulls` error is removed. The resolved hardware@3 schema is
+byte-identical (oracle test unchanged). extends.md §12.
 
 **Local model: not suitable to design, suitable to implement once specced.**
 What was hard here was the judgement — whether universal (Liskov)

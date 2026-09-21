@@ -529,36 +529,6 @@ def _merge_type_dict(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str,
     return result
 
 
-def _check_overlay_link_nulls(
-    tname: str, base: dict[str, Any], overlay: dict[str, Any]
-) -> None:
-    """Refuse an overlay `links: { verb: null }` that could only mean
-    "suppress an inherited link".
-
-    On an ordinary type, null removes the type's own declared link and the
-    merge below does exactly that. But this merge runs *before* `extends:`
-    resolves, so on a type that extends, a null for a verb the type itself does
-    not declare would be popped as a no-op and the link would then arrive from
-    the parent anyway -- the author believes it is suppressed and it is not.
-    Loud instead. Known gap (docs/design/extends.md §12): proper support needs
-    `extends:` resolved in two passes so an overlay's nulls are interpreted
-    after inheritance.
-    """
-    parent = overlay.get("extends") or base.get("extends")
-    if not parent:
-        return
-    own = base.get("links") or {}
-    for verb, targets in (overlay.get("links") or {}).items():
-        if targets is None and verb not in own:
-            raise SchemaError(
-                f"types.{tname}.links.{verb} is null, but {verb!r} is not declared "
-                f"on {tname} itself -- it would come from its parent {parent!r}. "
-                "Suppressing an inherited-via-extends link from an overlay is not "
-                "supported yet (docs/design/extends.md §12, follow-on: two-pass "
-                f"resolution); write the null in {tname}'s own declaration instead"
-            )
-
-
 def _merge_types(
     base_types: dict[str, Any],
     project_types_raw: dict[str, Any],
@@ -579,13 +549,22 @@ def _merge_types(
             continue
         expanded_overlay = _expand_include(traw, sets, f"types.{tname}", warnings)
         if tname in result:
-            _check_overlay_link_nulls(tname, result[tname], expanded_overlay)
             merged = _merge_type_dict(result[tname], expanded_overlay)
             # A null already carried by the base type's own declaration is
             # extends: suppression (extends.md §2.2); the merge would pop it.
             for verb, targets in (result[tname].get("links") or {}).items():
                 if targets is None and (expanded_overlay.get("links") or {}).get(verb, "") in (None, ""):
                     merged["links"][verb] = None
+            # An overlay null for a verb the type does not itself declare has
+            # nothing to pop on an ordinary type. On a type that extends, it
+            # means "un-declare the inherited link": carry the null through so
+            # `_apply_parent` interprets it after inheritance (extends.md
+            # §2.2, §12) instead of the merge dropping it as a no-op.
+            if merged.get("extends"):
+                own_links = result[tname].get("links") or {}
+                for verb, targets in (expanded_overlay.get("links") or {}).items():
+                    if targets is None and verb not in own_links:
+                        merged["links"][verb] = None
             result[tname] = merged
         else:
             result[tname] = expanded_overlay

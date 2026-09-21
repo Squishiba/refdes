@@ -683,16 +683,63 @@ def test_overlay_can_retype_bound_to_extend_nothing_by_removing_it(tmp_path):
     assert "bound" in message and "extends" not in message
 
 
-def test_overlay_cannot_suppress_a_link_that_arrives_via_extends(tmp_path):
-    """The overlay merge runs before `extends:` resolves, so this null used to
-    be popped as a no-op and `part_of` then came back from `requirement` -- a
-    silent wrong answer. It is an error until two-pass resolution lands
-    (extends.md §12)."""
-    message = _err(
+def test_overlay_suppresses_a_link_that_arrives_via_extends(tmp_path):
+    """The overlay's null is interpreted after inheritance: `part_of` comes
+    from `requirement`, and the null un-declares it on `bound` only."""
+    project = _load(
         tmp_path, HARDWARE3 + "types:\n  bound:\n    links:\n      part_of: null\n"
     )
-    assert "types.bound.links.part_of is null" in message
-    assert "not supported yet" in message and "'requirement'" in message
+    assert "part_of" not in project.types["bound"].links
+    assert "part_of" in project.types["requirement"].links
+
+
+def test_overlay_null_for_a_verb_the_parent_never_declared_is_still_an_error(tmp_path):
+    message = _err(
+        tmp_path, HARDWARE3 + "types:\n  bound:\n    links:\n      nonesuch: null\n"
+    )
+    assert "types.bound.links.nonesuch is null" in message
+    assert "'requirement' declares no link 'nonesuch'" in message
+
+
+def test_overlay_type_with_its_own_extends_and_nulls(tmp_path):
+    """A brand-new overlay type that extends and nulls an inherited link."""
+    project = _load(
+        tmp_path,
+        HARDWARE3
+        + "types:\n"
+        "  soft_bound:\n"
+        "    extends: requirement\n"
+        "    prefix: SFB\n"
+        "    label: Soft bound\n"
+        "    plural: Soft bounds\n"
+        "    links:\n"
+        "      part_of: null\n"
+        "      governed_by: null\n",
+    )
+    links = project.types["soft_bound"].links
+    assert "part_of" not in links and "governed_by" not in links
+    assert "part_of" in project.types["requirement"].links
+
+
+def test_overlay_edits_parent_and_nulls_in_the_child_together(tmp_path):
+    """The parent gains a field and a link target list in the overlay; the
+    child inherits the field, but not the link the overlay nulls on it."""
+    project = _load(
+        tmp_path,
+        HARDWARE3
+        + "types:\n"
+        "  requirement:\n"
+        "    fields:\n"
+        "      verification_plan: { type: text }\n"
+        "    links:\n"
+        "      part_of: [group]\n"
+        "  bound:\n"
+        "    links:\n"
+        "      part_of: null\n",
+    )
+    assert "verification_plan" in project.types["bound"].fields
+    assert "part_of" not in project.types["bound"].links
+    assert "part_of" in project.types["requirement"].links
 
 
 def test_overlay_null_on_an_ordinary_type_still_removes_its_own_link(tmp_path):
