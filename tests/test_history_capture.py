@@ -19,7 +19,6 @@ import json
 import os
 import shutil
 
-import pytest
 from conftest import write_project_config
 
 from refdes import build as build_mod
