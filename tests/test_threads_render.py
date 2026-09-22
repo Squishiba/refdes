@@ -18,6 +18,8 @@ from __future__ import annotations
 
 import os
 
+import pytest
+
 from conftest import write_project_config
 
 from refdes import build as build_mod
