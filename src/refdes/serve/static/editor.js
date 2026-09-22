@@ -11,6 +11,7 @@ import { api } from './api.js';
 import {
   getDraft, setDraftField, setDraftBody, setDraftRevision, clearDraft, isDirty,
 } from './drafts.js';
+import { createLinksSection } from './links.js';
 
 function el(tag, cls, text) {
   const node = document.createElement(tag);
@@ -56,6 +57,12 @@ export function createEditor(item, handle, onSaved, onDiscarded) {
 
   const messages = el('div', 'edit-messages');
   block.appendChild(messages);
+
+  // Link pickers live inside the edit block: their adds and removes are
+  // draft ops, so the one Save button, the one revision, and the one
+  // conflict screen cover them exactly like a field edit (Slice 2).
+  const linksSection = createLinksSection(item, handle, refreshStatus);
+  if (linksSection) block.appendChild(linksSection);
   const conflictBox = el('div', 'conflict');
   conflictBox.hidden = true;
   block.appendChild(conflictBox);
@@ -124,6 +131,12 @@ export function createEditor(item, handle, onSaved, onDiscarded) {
       ops.push({ op: 'set_field', field: name, value: coerce(specs[name], value) });
     }
     if (draft.body !== null) ops.push({ op: 'set_body', text: draft.body });
+    for (const [verb, targets] of Object.entries(draft.links.add)) {
+      for (const target of targets) ops.push({ op: 'add_link', verb, target });
+    }
+    for (const [verb, targets] of Object.entries(draft.links.remove)) {
+      for (const target of targets) ops.push({ op: 'remove_link', verb, target });
+    }
     return ops;
   }
 
@@ -137,7 +150,14 @@ export function createEditor(item, handle, onSaved, onDiscarded) {
       rev = payload.revision;
       setDraftRevision(handle, rev);
       if (one.op === 'set_field') delete draft.fields[one.field];
-      else draft.body = null;
+      else if (one.op === 'set_body') draft.body = null;
+      else {
+        const side = one.op === 'add_link' ? 'add' : 'remove';
+        const list = draft.links[side][one.verb] || [];
+        const at = list.indexOf(one.target);
+        if (at >= 0) list.splice(at, 1);
+        if (!list.length) delete draft.links[side][one.verb];
+      }
     }
     return rev;
   }
@@ -219,7 +239,11 @@ export function createEditor(item, handle, onSaved, onDiscarded) {
 
   function describeDraft(ops) {
     return (ops || pendingOps())
-      .map((one) => (one.op === 'set_field' ? `${one.field}: ${one.value}` : `body:\n${one.text}`))
+      .map((one) => {
+        if (one.op === 'set_field') return `${one.field}: ${one.value}`;
+        if (one.op === 'set_body') return `body:\n${one.text}`;
+        return `${one.op} ${one.verb} -> ${one.target}`;
+      })
       .join('\n\n');
   }
 

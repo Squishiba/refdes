@@ -107,3 +107,35 @@ def test_served_js_parses_as_es2020_modules():
         assert not stack, f"{name}: unclosed {stack}"
         top = re.findall(r"^(?:const|let|var|function|class)\s+([A-Za-z_$][\w$]*)", text, re.MULTILINE)
         assert len(top) == len(set(top)), f"{name}: duplicate top-level declaration in {name}"
+
+
+# ------------------------------------------------------------ link pickers
+
+
+def test_the_link_picker_is_wired_into_the_editor():
+    """Slice 2's UI has to actually reach the page: links.js must exist, be
+    imported by editor.js (the import-graph walk above proves it resolves),
+    and the save path must know the two link ops. A picker nothing imports
+    is a picker nobody sees."""
+    with open(os.path.join(STATIC, "editor.js"), encoding="utf-8") as fh:
+        editor = fh.read()
+    assert "from './links.js'" in editor
+    assert "createLinksSection" in editor
+    assert "'add_link'" in editor and "'remove_link'" in editor
+    assert os.path.isfile(os.path.join(STATIC, "links.js"))
+
+
+def test_the_link_draft_rides_the_one_draft_mechanism():
+    """Link adds/removes are draft ops in the same draft as fields and the
+    body -- the design forbids a second draft mechanism."""
+    with open(os.path.join(STATIC, "drafts.js"), encoding="utf-8") as fh:
+        drafts = fh.read()
+    assert "links: { add: {}, remove: {} }" in drafts
+    assert "draftLinkAdd" in drafts and "draftLinkRemove" in drafts
+    # and the picker sends handles, never a composite it invented itself
+    with open(os.path.join(STATIC, "links.js"), encoding="utf-8") as fh:
+        picker = fh.read()
+    assert "draftLinkAdd(handle, verb, row.handle || row.id)" in picker
+    # the picker never builds a DISPLAY-ID@key composite itself: the service
+    # owns that spelling, so the client must not even look like it does
+    assert "@${" not in picker
