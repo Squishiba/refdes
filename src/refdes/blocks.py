@@ -109,11 +109,24 @@ class BlockSpec:
     name: str
     required: tuple[str, ...]
     optional: tuple[str, ...]
-    render: Callable[[Project, dict[str, str]], str]
+    # `render(project, params, where)` -- `where` is the page's source path, so
+    # a block that warns can name the page it warned from
+    # (docs/design/candidate-parts.md §3.7). Renderers that never warn accept
+    # it and ignore it.
+    render: Callable[..., str]
+    # The accepted set as the unknown-parameter error lists it. Defaults to
+    # required-then-optional; `{{compare}}` overrides it to spell the set in
+    # the order its own error message reads (docs/design/candidate-parts.md
+    # §3.7), which is not the order the two tuples happen to be written in.
+    accepts: tuple[str, ...] | None = None
 
     @property
     def all_params(self) -> tuple[str, ...]:
         return self.required + self.optional
+
+    @property
+    def accepted_set(self) -> tuple[str, ...]:
+        return self.accepts if self.accepts is not None else self.all_params
 
 
 def _validate_params(spec: BlockSpec, params: dict[str, str]) -> None:
@@ -121,7 +134,7 @@ def _validate_params(spec: BlockSpec, params: dict[str, str]) -> None:
         if key not in spec.all_params:
             raise _BlockError(
                 f"unknown parameter {key!r}. {spec.name} accepts: "
-                + ", ".join(spec.all_params) + "."
+                + ", ".join(spec.accepted_set) + "."
             )
     for key in spec.required:
         if key not in params:
@@ -131,7 +144,7 @@ def _validate_params(spec: BlockSpec, params: dict[str, str]) -> None:
 # --------------------------------------------------------------- {{index}}
 
 
-def _render_index(project: Project, params: dict[str, str]) -> str:
+def _render_index(project: Project, params: dict[str, str], where: str = "") -> str:
     type_name = params["type"]
     by_field = params["by"]
     board = params.get("board")
@@ -400,7 +413,7 @@ def _render_branch(label: str, nodes: list[CascadeNode], project: Project, direc
     return f'<li class="cascade-branch">{label}{inner}</li>'
 
 
-def _render_cascade(project: Project, params: dict[str, str]) -> str:
+def _render_cascade(project: Project, params: dict[str, str], where: str = "") -> str:
     root_id = params["from"]
     direction = params["direction"]
     depth_raw = params.get("depth", "3")
@@ -455,7 +468,7 @@ def _render_cascade(project: Project, params: dict[str, str]) -> str:
 # ---------------------------------------------------------------- {{tree}}
 
 
-def _render_tree(project: Project, params: dict[str, str]) -> str:
+def _render_tree(project: Project, params: dict[str, str], where: str = "") -> str:
     """The whole containment forest, optionally narrowed to one board or one
     workspace.
 
@@ -495,9 +508,275 @@ def _render_tree(project: Project, params: dict[str, str]) -> str:
     return markup
 
 
+# -------------------------------------------------------------- {{compare}}
+
+# The three states a comparison cell can be in, spelled out once under every
+# table (docs/design/candidate-parts.md §3.5): an empty cell reads as "no" to
+# a reviewer, and "nobody wrote it down" is a different finding from "it
+# fails".
+_COMPARE_MISSING = "\u2014"
+_COMPARE_LEGEND = (
+    '<p class="compare-legend">'
+    '<span class="compare-missing">\u2014</span> not specified'
+    "&nbsp;&nbsp;&nbsp;&nbsp;pass/fail checked"
+    "&nbsp;&nbsp;&nbsp;&nbsp;"
+    '<span class="check-error">error</span> check could not be evaluated'
+    "</p>"
+)
+# Without `against=` there are no verdict cells to explain, only the em dash.
+_COMPARE_LEGEND_SPEC_ONLY = (
+    '<p class="compare-legend">'
+    '<span class="compare-missing">\u2014</span> not specified'
+    "</p>"
+)
+
+
+def _compare_missing_cell() -> str:
+    return f'<td class="compare-missing">{_COMPARE_MISSING}</td>'
+
+
+def _compare_cell(text: str, css: str = "") -> str:
+    return f'<td class="{css}">{_esc(text)}</td>' if css else f"<td>{_esc(text)}</td>"
+
+
+def _compare_field_text(value) -> str:
+    """A field value as table text: a list joins with commas, anything else is
+    its own string. Empty in, empty out -- the caller renders the em dash.
+
+    An unset field is None, and `str(None)` is "None": the one string that
+    must never reach a cell (docs/design/candidate-parts.md §3.5)."""
+    if value is None:
+        return ""
+    if isinstance(value, (list, tuple)):
+        return ", ".join(str(v) for v in value)
+    return str(value)
+
+
+def _compare_margin(margin: float | None) -> str:
+    """`+88%`, `\u221233%`, `0%` -- integer percent, signed, with the typographic
+    minus (U+2212) the spec's own table uses, and no sign on zero
+    (docs/design/candidate-parts.md §3.4). None (no notion of margin) renders
+    nothing: the verdict alone is the cell."""
+    if margin is None:
+        return ""
+    pct = round(margin * 100)
+    if pct > 0:
+        return f" +{pct}%"
+    if pct < 0:
+        return f" \u2212{abs(pct)}%"
+    return " 0%"
+
+
+def _compare_bound_targets(project: Project, bound_ids: list[str]) -> list[tuple[str, str]]:
+    """Resolve `against=` to (display id, limit text) pairs, in the order written.
+
+    Only the bound's *text* is read here -- the limit string as authored --
+    never parsed. The verdict and margin in each cell come from `item.checks`,
+    which `run_checks` already filled (docs/design/candidate-parts.md §3.2).
+    """
+    targets: list[tuple[str, str]] = []
+    for bound_id in bound_ids:
+        target = project.item_by_id(bound_id)
+        if target is None:
+            raise _BlockError(f"{bound_id} does not exist.{_suggest(bound_id, project.items_by_id)}")
+        target_spec = project.types.get(target.type)
+        if target_spec is None or "limit" not in target_spec.fields:
+            raise _BlockError(
+                f"{bound_id!r} declares no limit. compare's against= needs a bound "
+                "(a type with a 'limit' field)."
+            )
+        limit_text = str(target.fields.get("limit") or "").strip()
+        targets.append((bound_id, f"{bound_id} {limit_text}".strip()))
+    return targets
+
+
+def _compare_columns(
+    project: Project, spec, params: dict[str, str], rows: list[Item]
+) -> list[tuple[str, str, str]]:
+    """The `columns=` list as (header, kind, name) triples, kind in
+    {"field", "calc"}. Default: the type's declared `preview:` list, falling
+    back to `title` (docs/design/candidate-parts.md §3.4).
+
+    A bare name must be a declared field -- the message is `{{index}}`'s shape
+    plus the `calc:` hint, so an author who has seen one has seen both. A
+    `calc:` name no row defines is an error naming what the first row does
+    define; a name some rows define is legal, and the rows without it render
+    the em dash.
+    """
+    raw = params.get("columns")
+    if raw is None:
+        names = list(spec.preview) or ["title"]
+    else:
+        names = [c.strip() for c in raw.split(",") if c.strip()]
+
+    columns: list[tuple[str, str, str]] = []
+    for name in names:
+        if name.startswith("calc:"):
+            calc_name = name[len("calc:"):]
+            if rows and not any(calc_name in item.calc_values for item in rows):
+                first = rows[0]
+                defined = ", ".join(sorted(first.calc_values)) or "no calc values"
+                raise _BlockError(
+                    f"calc:{calc_name} is not a calc value any row in this selection "
+                    f"defines. {first.id} defines: {defined}."
+                )
+            columns.append((calc_name, "calc", calc_name))
+            continue
+        if name not in spec.fields:
+            raise _BlockError(
+                f"type {spec.name!r} has no field {name!r}. Declared fields: "
+                + ", ".join(sorted(spec.fields)) + ".\n"
+                f"For a calc value, write calc:{name}."
+            )
+        columns.append((name, "field", name))
+    return columns
+
+
+def _compare_status_filter(spec, params: dict[str, str]) -> list[str] | None:
+    """`status=` validated against the type's declared choices; None means
+    every status the type declares, which is no filter at all."""
+    raw = params.get("status")
+    if raw is None:
+        return None
+    wanted = [s.strip() for s in raw.split(",") if s.strip()]
+    status_spec = spec.fields.get("status")
+    choices = list(status_spec.choices) if status_spec is not None else []
+    for value in wanted:
+        if value not in choices:
+            raise _BlockError(
+                f"type {spec.name!r} has no status {value!r}. Declared choices: "
+                + ", ".join(choices) + "."
+            )
+    return wanted
+
+
+def _render_compare(project: Project, params: dict[str, str], where: str = "") -> str:
+    """The comparison table (docs/design/candidate-parts.md §3).
+
+    Reads `item.checks` -- results `run_checks` already produced -- and formats
+    them. It never evaluates a bound, never touches `item._env`, and never
+    decides anything: "nobody checked" and "checked and failed" are different
+    cells, and only the first is this block's to draw.
+    """
+    type_name = params["type"]
+    spec = project.types.get(type_name)
+    if spec is None:
+        raise _BlockError(f"unknown type {type_name!r}.{_suggest(type_name, project.types)}")
+
+    bound_ids = [b.strip() for b in params.get("against", "").split(",") if b.strip()]
+    if bound_ids and "checks" not in spec.fields:
+        raise _BlockError(
+            f"type {type_name!r} declares no 'checks' field, so there is nothing to "
+            f"compare against {bound_ids[0]}. Drop against=, or compare a type that "
+            "declares checks."
+        )
+
+    board = params.get("board")
+    tag = params.get("tag")
+    if board is not None and board not in project.boards:
+        raise _BlockError(f"unknown board {board!r}.{_suggest(board, project.boards)}")
+    known_tags = {t for item in project.local_items for t in _item_tags(item)}
+    if tag is not None and tag not in known_tags:
+        raise _BlockError(f"unknown tag {tag!r}.{_suggest(tag, known_tags)}")
+
+    statuses = _compare_status_filter(spec, params)
+
+    # A board's index also lists the members of its `includes:` groups
+    # (finding 33); rows are local-only -- an imported component is another
+    # project's candidate with another project's checks.
+    included = boards_mod.included_map(project, board)
+    listed_types = {type_name}
+    if _subtypes_param(project, params):
+        listed_types |= project.subtype_map.get(type_name, set())
+    rows = [
+        item
+        for item in project.local_items
+        if item.type in listed_types
+        and (board is None or boards_mod.displays(item, board, included))
+        and (tag is None or tag in _item_tags(item))
+        and (statuses is None or str(item.fields.get("status")) in statuses)
+    ]
+    # ID ascending, always: no `order=`, no `sort=` (docs/design/candidate-parts.md
+    # §3.3). A table that reorders itself when someone edits a bound turns a
+    # review diff into noise; ranking is summary.html's job.
+    rows.sort(key=lambda i: i.id or "")
+
+    # Validated before the empty state: a typo'd column or a bound that is not
+    # a bound is an authoring error whether or not this selection has rows.
+    columns = _compare_columns(project, spec, params, rows)
+    bounds = _compare_bound_targets(project, bound_ids)
+
+    if not rows:
+        return f'<p class="compare-empty">No {type_name} items.</p>'
+
+    headers = ["ID"] + [header for header, _kind, _name in columns]
+    headers += [header for _bound_id, header in bounds]
+    if bounds:
+        headers.append("Checks")
+
+    checked_bounds: set[str] = set()
+    body_rows = []
+    for item in rows:
+        cells = [f"<td>{_esc(item.id)}</td>"]
+        for _header, kind, name in columns:
+            if kind == "calc":
+                # The formatted result run_calcs already stored -- the one
+                # surface a calc value has that is not the raw pint quantity.
+                text = item.calc_values.get(name, "")
+            else:
+                text = _compare_field_text(item.fields.get(name))
+            cells.append(_compare_missing_cell() if not text else _compare_cell(text))
+
+        passed = total = 0
+        for bound_id, _header in bounds:
+            result = next((c for c in item.checks if c.against == bound_id), None)
+            if result is None:
+                cells.append(_compare_missing_cell())
+                continue
+            checked_bounds.add(bound_id)
+            total += 1
+            if result.ok is None:
+                cells.append('<td class="check-error">error</td>')
+            elif result.ok:
+                passed += 1
+                cells.append(_compare_cell(f"pass{_compare_margin(result.margin)}"))
+            else:
+                cells.append(_compare_cell(f"fail{_compare_margin(result.margin)}", "check-fail"))
+        if bounds:
+            cells.append(
+                _compare_missing_cell() if total == 0 else _compare_cell(f"{passed}/{total}")
+            )
+        body_rows.append("<tr>" + "".join(cells) + "</tr>")
+
+    # An all-em-dash column reads as a completed comparison, which is this
+    # project's characteristic bug: a build that reports success while the
+    # thing is missing (docs/design/candidate-parts.md §3.7).
+    for bound_id, _header in bounds:
+        if bound_id not in checked_bounds:
+            project.warn(
+                f"no {type_name} in this selection has a checks: entry against "
+                f"{bound_id}. Its column will be empty.",
+                file=where,
+            )
+
+    head = "".join(f"<th>{_esc(h)}</th>" for h in headers)
+    legend = _COMPARE_LEGEND if bounds else _COMPARE_LEGEND_SPEC_ONLY
+    return (
+        f'<table class="compare-table"><thead><tr>{head}</tr></thead>'
+        f"<tbody>{''.join(body_rows)}</tbody></table>" + legend
+    )
+
+
 # --------------------------------------------------------------- dispatch
 
 _REGISTRY: dict[str, BlockSpec] = {
+    "compare": BlockSpec(
+        name="compare",
+        required=("type",),
+        optional=("against", "board", "columns", "status", "subtypes", "tag"),
+        accepts=("against", "board", "columns", "status", "subtypes", "tag", "type"),
+        render=_render_compare,
+    ),
     "index": BlockSpec(
         name="index", required=("by", "type"), optional=("board", "tag", "subtypes"), render=_render_index
     ),
@@ -551,7 +830,7 @@ def extract_blocks(project: Project, source: str, where_file: str) -> tuple[str,
         params = _parse_params(name_match.group(2))
         try:
             _validate_params(block_spec, params)
-            html = block_spec.render(project, params)
+            html = block_spec.render(project, params, where_file)
         except _BlockError as exc:
             project.error(f"{{{{{content}}}}} — {exc}", file=where_file, line=line_no)
             html = f'<p class="block-error">⚠ {_esc(str(exc))}</p>'
