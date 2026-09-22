@@ -64,7 +64,6 @@ window.addEventListener('hashchange', renderRoute);
 renderRoute();
 
 const gitBadge = document.getElementById('git-badge');
-const gitBadge = document.getElementById('git-badge');
 let openRevision = null;   // the revision the current view was loaded against
 
 export function currentRevision() { return openRevision; }
@@ -107,6 +106,8 @@ export async function poll() {
   }
 }
 
+// A rebuild re-renders the view; an unsaved draft survives it because drafts
+// live in drafts.js, not in the DOM the re-render replaces.
 window.addEventListener('refdes:rebuilt', renderRoute);
 
 poll();

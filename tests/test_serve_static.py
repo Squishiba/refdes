@@ -1,0 +1,109 @@
+"""Static checks on the served editor (docs/design/browser-editor.md, Security
+and "No Node build step"): the shell is packaged plain ES modules under a CSP of
+`script-src 'self'`, so anything inline is both a CSP violation and a hole.
+
+No browser here, so these are text checks over the files the server serves:
+no inline script or inline event handler anywhere in the shell, no `eval` or
+`new Function`, and every module the shell loads (directly or by import) exists.
+"""
+
+from __future__ import annotations
+
+import os
+import re
+
+import pytest
+
+STATIC = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src", "refdes", "serve", "static"
+)
+
+INLINE_HANDLER = re.compile(r"""\son[a-z]+\s*[:=]""", re.IGNORECASE)
+DYNAMIC_CODE = re.compile(r"\b(eval|new\s+Function|setTimeout\s*\(\s*['\"]|setInterval\s*\(\s*['\"])")
+JS_IMPORT = re.compile(r"""from\s+['"]([^'"]+\.js)['"]""")
+HTML_ASSET = re.compile(r"""(?:src|href)\s*=\s*["']/edit/static/([^"']+)["']""")
+SCRIPT_WITHOUT_SRC = re.compile(r"<script(?![^>]*\bsrc=)[^>]*>", re.IGNORECASE)
+
+
+def js_files():
+    return sorted(n for n in os.listdir(STATIC) if n.endswith(".js"))
+
+
+@pytest.mark.parametrize("name", js_files())
+def test_no_inline_handlers_or_dynamic_code_in_served_js(name):
+    with open(os.path.join(STATIC, name), encoding="utf-8") as fh:
+        text = fh.read()
+    assert not INLINE_HANDLER.search(text), f"{name}: an inline event handler is a CSP violation"
+    assert not DYNAMIC_CODE.search(text), f"{name}: no eval/new Function in the editor"
+    assert "javascript:" not in text
+
+
+def test_the_shell_has_no_inline_script_or_handler():
+    with open(os.path.join(STATIC, "index.html"), encoding="utf-8") as fh:
+        html = fh.read()
+    assert not SCRIPT_WITHOUT_SRC.search(html), "index.html may only load scripts by src"
+    assert not INLINE_HANDLER.search(html)
+    assert "javascript:" not in html
+
+
+def test_every_asset_the_shell_loads_exists():
+    with open(os.path.join(STATIC, "index.html"), encoding="utf-8") as fh:
+        html = fh.read()
+    named = set(HTML_ASSET.findall(html))
+    assert named, "index.html should reference its own static assets"
+    for name in named:
+        assert os.path.isfile(os.path.join(STATIC, name)), f"index.html loads a missing file: {name}"
+
+
+def test_every_module_import_resolves():
+    """The import graph, walked from what index.html loads: a typo'd module name
+    is a blank page in the browser and nothing else would notice."""
+    with open(os.path.join(STATIC, "index.html"), encoding="utf-8") as fh:
+        entry = {n for n in HTML_ASSET.findall(fh.read()) if n.endswith(".js")}
+    assert entry
+    seen = set()
+    while entry:
+        name = entry.pop()
+        if name in seen:
+            continue
+        seen.add(name)
+        path = os.path.join(STATIC, name)
+        assert os.path.isfile(path), f"the editor imports a module that does not exist: {name}"
+        with open(path, encoding="utf-8") as fh:
+            for target in JS_IMPORT.findall(fh.read()):
+                if target.startswith("./"):
+                    entry.add(target[2:])
+                else:
+                    entry.add(target)
+
+
+def test_served_js_parses_as_es2020_modules():
+    """No Node here, so the cheapest real check: every module's braces, parens
+    and brackets balance and no `const`/`let` is declared twice in the same
+    top-level scope -- the class of mistake that turns a module into a blank
+    page with one console line."""
+    for name in js_files():
+        with open(os.path.join(STATIC, name), encoding="utf-8") as fh:
+            text = fh.read()
+        depth = {"(": ")", "[": "]", "{": "}"}
+        stack = []
+        in_string = None
+        escaped = False
+        for ch in text:
+            if in_string:
+                if escaped:
+                    escaped = False
+                elif ch == "\\":
+                    escaped = True
+                elif ch == in_string:
+                    in_string = None
+                continue
+            if ch in "'\"`":
+                in_string = ch
+            elif ch in depth:
+                stack.append(depth[ch])
+            elif stack and ch in ")]}":
+                assert stack.pop() == ch, f"{name}: unbalanced {ch}"
+        assert not stack, f"{name}: unclosed {stack}"
+        top = re.findall(r"^(?:const|let|var|function|class)\s+([A-Za-z_$][\w$]*)", text, re.MULTILINE)
+        assert len(top) == len(set(top)), f"{name}: duplicate top-level declaration in {name}"
