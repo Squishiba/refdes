@@ -10,8 +10,6 @@ import os
 import re
 from typing import Any
 
-import yaml
-
 from . import build as build_mod
 from . import parse as parse_mod
 from . import standards

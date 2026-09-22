@@ -378,7 +378,7 @@ def test_adopt_freezes_follows_inside_its_transaction(tmp_path, capsys):
     output = capsys.readouterr().out
     project = _project(tmp_path)
     head = project.item_by_id("LOG-001")
-    assert f"froze 1 follows reference(s)" in output
+    assert "froze 1 follows reference(s)" in output
     assert f"follows: [LOG-001@{head.key}]" in path.read_text(encoding="utf-8")
 
 

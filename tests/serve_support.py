@@ -11,6 +11,7 @@ import hashlib
 import http.client
 import json
 import os
+import socket
 from urllib.parse import urlsplit
 
 from conftest import write_project_config
@@ -325,12 +326,59 @@ class Client:
             if token:
                 hdrs["X-Refdes-Token"] = self.app.token
             hdrs.update(headers or {})
-            conn.request(method, path, body=body, headers=hdrs)
-            resp = conn.getresponse()
+            # A refusal decided on the headers alone -- the 413 for an
+            # oversized body is issued before a single body byte is read --
+            # can land while this side is still writing, and the failure
+            # surfaces here rather than at getresponse(). The answer is
+            # already on its way, so fall through and read it: what these
+            # tests assert is the status the server chose, not whether the
+            # body made it. A server that closes without ever answering is
+            # still a failure, and the original write error is what gets
+            # raised in that case.
+            send_error = None
+            try:
+                conn.request(method, path, body=body, headers=hdrs)
+            except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError) as exc:
+                send_error = exc
+            try:
+                resp = conn.getresponse()
+            except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+                if send_error is not None:
+                    raise send_error
+                raise
             data = resp.read()
             return resp.status, {k.lower(): v for k, v in resp.getheaders()}, data
         finally:
             conn.close()
+
+    def post_declaring_length(self, path: str, content_length: int) -> int:
+        """POST headers claiming `content_length`, and then no body at all.
+
+        The server's oversized-body gate reads the Content-Length header, not
+        the body, so this gets a deterministic answer. Shipping the whole
+        declared body instead races the server's close: a socket closed with
+        unread data in its receive buffer sends RST rather than FIN, and that
+        can discard the very 413 the test is asserting -- which is why the
+        full-body version of this check passed on Windows and failed on Linux.
+
+        The check's position is part of what is under test. If the size gate
+        ever moved after the body read, this call blocks until the socket
+        times out instead of passing, so the fix cannot silently regress into
+        "read the oversized body, then complain about its size".
+        """
+        request = (
+            f"POST {path} HTTP/1.1\r\n"
+            f"Host: 127.0.0.1:{self.port}\r\n"
+            f"Origin: http://127.0.0.1:{self.port}\r\n"
+            f"Content-Type: application/json\r\n"
+            f"X-Refdes-Token: {self.app.token}\r\n"
+            f"Content-Length: {content_length}\r\n"
+            f"\r\n"
+        ).encode("ascii")
+        with socket.create_connection(("127.0.0.1", self.port), timeout=10) as sock:
+            sock.sendall(request)
+            head = sock.recv(1024)
+        return int(head.split(b"\r\n", 1)[0].split(b" ")[1])
 
     def page(self, path: str, **kw):
         return self.request("GET", path, cookie=True, **kw)

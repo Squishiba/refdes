@@ -1,0 +1,97 @@
+Task: add a GitHub Actions test workflow (.github/workflows/tests.yml)
+
+Status: finished locally; PR opened, not merged.
+
+What was done
+-------------
+1. Read .github/workflows/docs.yml as the tone/structure template (header
+   comment explains WHY the workflow exists, not what each line does;
+   actions/checkout@v4 + actions/setup-python@v5; python 3.11; no secrets).
+2. Confirmed pyproject.toml: requires-python = ">=3.11", so 3.11 is both the
+   floor and what docs.yml already uses. The `dev` extra declares pytest>=8.0
+   and ruff>=0.6 (plus pypdf, which the citation-section tests need so they
+   build real PDFs instead of skipping), so `pip install -e ".[dev]"` is
+   enough -- no ad-hoc `pip install pytest ruff` needed.
+3. Created .github/workflows/tests.yml: pull_request (any branch) + push to
+   main; matrix over ubuntu-latest and windows-latest with fail-fast: false;
+   permissions: contents: read only; concurrency cancels superseded runs.
+   Steps: checkout, setup-python 3.11, pip install -e ".[dev]", then
+   `ruff check --select E9,F src tests` and `python -m pytest -q` as separate
+   named steps so a red run names the failing gate.
+4. docs.yml untouched; no other workflow touched.
+
+Why the ruff gate is scoped to E9,F
+-----------------------------------
+AGENTS.md records that `ruff check .` has ~99 pre-existing findings, so an
+unscoped run is not a usable gate. E9 (syntax errors) + F (undefined names,
+unused imports, redefinitions) is the "actually broken" subset.
+
+Pre-existing E9,F findings fixed (separate commit)
+-------------------------------------------------
+The specified gate was NOT clean on main, so it would have been red on
+arrival. Four findings, all mechanical, no behavior change:
+  src/refdes/scaffold.py:13        F401 `import yaml` unused (scaffold uses
+                                   parse.yaml_safe_load, not yaml directly)
+  tests/test_board_contracts.py:17 F401 `refdes.parse` imported unused
+  tests/test_keys_adopt.py:381     F541 f-string without placeholders
+  tests/test_threads_render.py:283 F821 `pytest.fail` used without
+                                   `import pytest` -- latent: the monkeypatched
+                                   lambda would have raised NameError instead of
+                                   reporting the intended failure
+Nothing was silenced or noqa'd.
+
+Verification
+------------
+- python -m pytest -q : 1885 passed (run before the edits, and again after).
+- ruff check --select E9,F src tests : All checks passed (exit 0).
+- YAML well-formed: python -c "import yaml; yaml.safe_load(...)" -> ok.
+- Actions used (checkout@v4, setup-python@v5) are the same pins docs.yml
+  already uses; `git log --all -- .github/workflows/` shows no other pins.
+- Note: local python is 3.14 while CI pins 3.11; the suite is green here on
+  3.14, so 3.11 remains the version CI actually proves.
+
+CI run 1 (run 35679076349): red on both OSes -- two real bugs, not workflow bugs
+-----------------------------------------------------------------------------
+1. tests/test_load_time_writes.py:205 used path.read_text(encoding=..., newline=...).
+   Path.read_text only gained `newline` in Python 3.13; the declared floor is
+   3.11 and CI pins the floor, so it TypeErrored on both runners. It passed
+   locally because the local interpreter is 3.14 -- exactly the class of bug a
+   floor-pinned CI exists to catch. Fixed with the builtin open(), which has
+   always taken newline with the same semantics. Repo-wide grep: this was the
+   only read_text(newline=...) anywhere; the seven write_text(newline=...) call
+   sites are fine (Path.write_text gained newline in 3.10).
+
+2. tests/test_serve_security.py::test_post_needs_origin_content_type_and_bounded_
+   body, ubuntu only (windows passed -- the reason the matrix exists). It pushed
+   a real 1 MiB+1 body to trigger the 413. src/refdes/serve/server.py:293 issues
+   the 413 from Content-Length WITHOUT reading the body -- correct, and worth
+   keeping: a client must not be able to make `refdes serve` buffer an oversized
+   request. But that means the server answers and closes while the client is
+   still writing, and a socket closed with unread data sends RST rather than FIN,
+   so the client saw BrokenPipeError out of sendall -- and the RST can discard
+   the 413 as well, which no amount of client-side retry logic recovers.
+
+   Two changes, neither of which weakens the assertion:
+   - tests/serve_support.py Client.request now tolerates a send torn down
+     mid-write and still reads the response the server already sent; if the
+     response is genuinely absent, the original write error is re-raised rather
+     than a confusing empty-status read.
+   - Added Client.post_declaring_length(): sends the oversized Content-Length
+     and no body. Deterministic on both OSes, and it pins the property the
+     guard actually provides -- refuse on the header, before reading. If the
+     size check ever moved after the body read, this call blocks until the
+     socket timeout instead of quietly passing.
+   - The original full-body send is kept as its own test,
+     test_an_oversized_upload_does_not_wedge_the_server, asserting the thing
+     that is NOT platform-dependent: the server neither hangs nor dies, still
+     answers a normal request afterwards, and still refuses the next oversized
+     one. Whether this particular client sees 413 or a torn-down connection is
+     the race, and the test says so instead of pretending otherwise.
+
+Local after the fixes: 1886 passed (1885 before, +1 new test).
+
+Known non-issue
+---------------
+tests/test_threads_render.py has a pre-existing I001 (import-sort) finding
+under ruff 0.16 -- present at HEAD before this change, and `I` is not part of
+the E9,F gate, so it was left alone rather than reformatted as a side effect.

@@ -14,7 +14,7 @@ import pytest
 from conftest import write_project_config
 from helpers import _build_at
 
-from refdes import parse, render
+from refdes import render
 from refdes.schema import SchemaError
 
 CONFORMS_SCHEMA = """\
