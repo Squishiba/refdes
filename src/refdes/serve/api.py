@@ -11,7 +11,7 @@ import os
 import urllib.parse
 
 from ..model import CHECK_VIOLATION, Diagnostic, Item, Project
-from ..patcher import PROTECTED_FIELDS, SetBody, SetField
+from ..patcher import PROTECTED_FIELDS, AddLink, RemoveLink, SetBody, SetField
 from ..seal import is_sealed
 from . import edit as edit_mod
 from . import filters as filters_mod
@@ -166,11 +166,26 @@ def edit_state(app, project: Project, item: Item) -> dict:
                 "required": bool(fspec.required) if fspec else False,
                 "value_type": _value_type(value),
             }
+    # Slice 2's link pickers: one entry per verb the item's type declares,
+    # with the target types the schema allows (the UI feeds these to the
+    # /api/items filter) and the targets currently written on the item, so
+    # the picker can mark them and offer removal without a second request.
+    link_verbs = {}
+    for verb, allowed in sorted((spec.links if spec else {}).items()):
+        if blocked:
+            link_verbs[verb] = {"editable": False, "reason": blocked}
+            continue
+        link_verbs[verb] = {
+            "editable": True,
+            "target_types": list(allowed),
+            "targets": sorted(item.links.get(verb) or []),
+        }
     return {
         "file_revision": revision,
         "editable": blocked is None,
         "reason": blocked,
         "fields": fields,
+        "links": link_verbs,
         "body": {"editable": blocked is None, "reason": blocked},
     }
 
@@ -268,8 +283,16 @@ def _apply_edit(app, ref: str, body) -> tuple[int, dict]:
         if not isinstance(text, str):
             return 400, {"error": "set_body needs a text string"}
         op = SetBody(text)
+    elif op_name in ("add_link", "remove_link"):
+        verb = body.get("verb")
+        target = body.get("target")
+        if not isinstance(verb, str) or not verb:
+            return 400, {"error": f"{op_name} needs a verb"}
+        if not isinstance(target, str) or not target:
+            return 400, {"error": f"{op_name} needs a target: an item handle, display id or key"}
+        op = AddLink(verb, target) if op_name == "add_link" else RemoveLink(verb, target)
     else:
-        return 400, {"error": "op must be 'set_field' or 'set_body'"}
+        return 400, {"error": "op must be 'set_field', 'set_body', 'add_link' or 'remove_link'"}
 
     project = app.state.snapshot.project
     result = edit_mod.apply_edit(

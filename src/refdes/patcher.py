@@ -138,6 +138,38 @@ class SetBody:
     text: str
 
 
+@dataclass(frozen=True)
+class AddLink:
+    """Append one target to the item's `verb` link list.
+
+    `target` is the full text to write -- the caller resolves identity, so by
+    the time this op reaches the patcher it is already the `DISPLAY-ID@key`
+    composite the rest of the codebase writes (docs/design/keys.md §3); the
+    patcher never invents a key or a display half. The list may be spelled
+    today as a scalar, a flow list, or a block list; the edit preserves each
+    existing target's own spelling and comments and grows the shape in place.
+    """
+
+    verb: str
+    target: str
+
+
+@dataclass(frozen=True)
+class RemoveLink:
+    """Remove one target from the item's `verb` link list.
+
+    `target` names the link to drop: a composite `DISPLAY-ID@key`, a bare key
+    half, or a bare display id. Matching follows the codebase's identity rule
+    -- composites match on the key half, bare spellings match the composite's
+    display half -- so an unexpanded bare target is removable by the item it
+    points at. Removing the last target deletes the `verb:` entry itself; an
+    empty `verb:` left behind would be a new shape the author never wrote.
+    """
+
+    verb: str
+    target: str
+
+
 # --------------------------------------------------------------- locate state
 
 
@@ -186,7 +218,7 @@ def plan_patch(text: str, ref: str, op: Any, *, path: str | None = None) -> Patc
     `SetBody`. Pure: nothing is read from or written to disk, and `text` is not
     modified.
     """
-    if not isinstance(op, (SetField, SetBody)):
+    if not isinstance(op, (SetField, SetBody, AddLink, RemoveLink)):
         return Refusal(f"unsupported operation {type(op).__name__}", ref=ref, path=path)
     try:
         f = _load(text)
@@ -199,8 +231,10 @@ def plan_patch(text: str, ref: str, op: Any, *, path: str | None = None) -> Patc
 
     if isinstance(op, SetField):
         plan = _plan_field(f, item, op)
-    else:
+    elif isinstance(op, SetBody):
         plan = _plan_body(f, item, op)
+    else:
+        plan = _plan_link(f, item, op)
     if isinstance(plan, Refusal):
         return replace(
             plan,
@@ -271,7 +305,11 @@ def patch_item(text: str, ref: str, op: Any, *, path: str | None = None) -> tupl
 
 
 def _op_name(op: Any) -> str:
-    return "set_field" if isinstance(op, SetField) else "set_body"
+    if isinstance(op, SetField):
+        return "set_field"
+    if isinstance(op, SetBody):
+        return "set_body"
+    return "add_link" if isinstance(op, AddLink) else "remove_link"
 
 
 # ------------------------------------------------------------------- loading
@@ -810,6 +848,381 @@ def _key_end(item: _Item, name: str) -> int | None:
     return item.base + keyn.end_mark.index
 
 
+# ---------------------------------------------------------------- link plans
+
+
+def _link_halves(text: str) -> tuple[str, str]:
+    """(display half, key half) of a link target; the key half is "" when bare."""
+    display, _, key = text.partition("@")
+    return display, key
+
+
+def _link_matches(source: str, wanted: str) -> bool:
+    """Whether a source spelling names the target `wanted`.
+
+    The codebase's identity rule for composites (docs/design/keys.md §3, and
+    the refresh cases in links._planned_target): the key half is identity, the
+    display half is a label. So two composites match on their keys; a bare
+    spelling matches the composite whose display half it is; two bare spellings
+    match on text. A stale display half is deliberately not a match reason --
+    two different keys never match, whatever their labels say.
+    """
+    s_disp, s_key = _link_halves(source)
+    w_disp, w_key = _link_halves(wanted)
+    if s_key and w_key:
+        return s_key == w_key
+    if s_key:
+        # source is a composite, wanted is bare: a bare wanted may name either
+        # half -- the display id, or the key half on its own
+        return w_disp in (s_disp, s_key)
+    if w_key:
+        return s_disp == w_disp
+    return source == wanted
+
+
+def _plan_link(f: _File, item: _Item, op: Any) -> PatchPlan | Refusal:
+    verb = op.verb
+    if verb in PROTECTED_FIELDS or verb == "body":
+        return Refusal(
+            f"'{verb}' is not a link a patch can add or remove",
+            ref=item.ref,
+            field=verb,
+            line=item.key_line,
+        )
+    emitted, _note = _emit_scalar(
+        op.target, style=None, indent=0, eol=f.eol, allow_block=False, original=""
+    )
+    if emitted is None:
+        return Refusal(
+            f"cannot emit link target {op.target!r} as a YAML scalar PyYAML reads back unchanged",
+            ref=item.ref,
+            field=verb,
+        )
+    got = item.fields.get(verb)
+    if isinstance(got, list):
+        return Refusal(
+            f"'{verb}' appears {len(got)} times in item {item.ref}; the patch cannot "
+            "tell which list to change",
+            ref=item.ref,
+            field=verb,
+            line=got[0].start_mark.line + 1,
+        )
+    if isinstance(op, AddLink):
+        return _plan_link_add(f, item, verb, got, op.target, emitted)
+    return _plan_link_remove(f, item, verb, got, op.target)
+
+
+def _link_elements(node: yaml.Node) -> list[yaml.ScalarNode] | Refusal:
+    if not isinstance(node, yaml.SequenceNode):
+        kind = type(node).__name__.replace("Node", "").lower()
+        return Refusal(f"the value is a {kind}, not a list of scalar link targets")
+    out = []
+    for child in node.value:
+        if not isinstance(child, yaml.ScalarNode):
+            return Refusal(
+                f"a {type(child).__name__.replace('Node', '').lower()} sits in the link list; "
+                "only scalar targets are supported",
+                line=child.start_mark.line + 1,
+            )
+        out.append(child)
+    return out
+
+
+def _plan_link_add(
+    f: _File, item: _Item, verb: str, got: Any, raw_target: str, emitted: str
+) -> PatchPlan | Refusal:
+    if got is None:
+        # A new verb is inserted with the raw value: _plan_insert owns the
+        # emission, so a target needing quotes is quoted once, not twice.
+        return _plan_insert(f, item, verb, raw_target, f"link '{verb}'")
+    if isinstance(got, yaml.ScalarNode):
+        if got.value in (None, "") or "\n" in got.value:
+            return Refusal(
+                f"'{verb}' on item {item.ref} is not a single link target",
+                ref=item.ref,
+                field=verb,
+                line=got.start_mark.line + 1,
+            )
+        if _link_matches(got.value, emitted):
+            return Refusal(
+                f"item {item.ref} already links {emitted}",
+                ref=item.ref,
+                field=verb,
+                line=got.start_mark.line + 1,
+            )
+        if _comment_between(f.text, _key_end(item, verb), item.base + got.start_mark.index):
+            return Refusal(
+                f"a comment sits between '{verb}:' and its value on item {item.ref}",
+                ref=item.ref,
+                field=verb,
+                line=got.start_mark.line + 1,
+            )
+        start = item.base + got.start_mark.index
+        end = item.base + got.end_mark.index
+        original = f.text[start:end]
+        replacement = f"[{original}, {emitted}]"
+        return PatchPlan(
+            ref=item.ref,
+            op="add_link",
+            shape=item.shape,
+            start=start,
+            end=end,
+            replacement=replacement,
+            original=original,
+            start_line=_file_line(f, item, got.start_mark.line + 1),
+            end_line=_file_line(f, item, got.end_mark.line + 1),
+            old_value=got.value,
+            new_value=[got.value, emitted],
+            field=verb,
+            notes=("scalar target widened to a flow list; the original spelling is kept",),
+        )
+    elements = _link_elements(got)
+    if isinstance(elements, Refusal):
+        return replace(elements, ref=item.ref, field=verb)
+    for child in elements:
+        if _link_matches(child.value, emitted):
+            return Refusal(
+                f"item {item.ref} already links {emitted}",
+                ref=item.ref,
+                field=verb,
+                line=child.start_mark.line + 1,
+            )
+    if got.flow_style:
+        if not elements:
+            start = item.base + got.start_mark.index
+            end = item.base + got.end_mark.index
+            replacement = f"[{emitted}]"
+        else:
+            last = elements[-1]
+            start = end = item.base + last.end_mark.index
+            replacement = f", {emitted}"
+        return PatchPlan(
+            ref=item.ref,
+            op="add_link",
+            shape=item.shape,
+            start=start,
+            end=end,
+            replacement=replacement,
+            original=f.text[start:end],
+            start_line=_file_line(f, item, got.start_mark.line + 1),
+            end_line=_file_line(f, item, got.end_mark.line + 1),
+            old_value=[c.value for c in elements],
+            new_value=[c.value for c in elements] + [emitted],
+            field=verb,
+            notes=("appended inside the flow list; no existing target was rewritten",),
+        )
+    if not elements:  # pragma: no cover - an empty block sequence cannot parse
+        return Refusal(
+            f"'{verb}' on item {item.ref} is an empty list the patch cannot bound",
+            ref=item.ref,
+            field=verb,
+        )
+    last = elements[-1]
+    elem_end = item.base + last.end_mark.index
+    # The scalar's column sits past the "- "; the dash belongs two columns
+    # earlier, where the author's own entries put theirs.
+    if last.start_mark.column < 2:
+        return Refusal(
+            f"the block list under '{verb}' on item {item.ref} is indented in a way "
+            "the patcher cannot extend",
+            ref=item.ref,
+            field=verb,
+            line=last.start_mark.line + 1,
+        )
+    indent = " " * (last.start_mark.column - 2)
+    nl = f.text.find("\n", elem_end)
+    if nl == -1:
+        pos = len(f.text)
+    else:
+        # Insert before the break that closes the last target's line, so a
+        # trailing comment on that line stays attached to the target it names.
+        pos = nl - 1 if nl > 0 and f.text[nl - 1] == "\r" else nl
+    replacement = f"{f.eol}{indent}- {emitted}"
+    return PatchPlan(
+        ref=item.ref,
+        op="add_link",
+        shape=item.shape,
+        start=pos,
+        end=pos,
+        replacement=replacement,
+        original="",
+        start_line=_file_line(f, item, last.start_mark.line + 1),
+        end_line=_file_line(f, item, last.end_mark.line + 1),
+        old_value=[c.value for c in elements],
+        new_value=[c.value for c in elements] + [emitted],
+        field=verb,
+        notes=("appended as a new block-list entry; no existing target was rewritten",),
+    )
+
+
+def _plan_key_line_removal(
+    f: _File, item: _Item, verb: str, value_node: yaml.Node
+) -> PatchPlan | Refusal:
+    """Delete the whole `verb:` entry -- key, value, and the break that ends it.
+
+    Used when the last target goes away. The span grows from the key's own
+    line-start through the value's last line break so no orphan blank line is
+    left behind; a comment anywhere on the covered text would be destroyed by
+    the delete, and the patcher does not destroy comments it cannot re-home.
+    """
+    keyn = item.key_nodes.get(verb)
+    if keyn is None or isinstance(keyn, list):  # pragma: no cover - lookup already resolved it
+        return Refusal(
+            f"cannot find the key node for '{verb}' on item {item.ref}",
+            ref=item.ref,
+            field=verb,
+        )
+    key_start = item.base + keyn.start_mark.index
+    value_start = item.base + value_node.start_mark.index
+    value_end = item.base + value_node.end_mark.index
+    block_list = isinstance(value_node, yaml.SequenceNode) and not value_node.flow_style
+    if keyn.end_mark.line != value_node.start_mark.line and not block_list:
+        return Refusal(
+            f"'{verb}' starts on a different line from its key on item {item.ref}; "
+            "the entry's bounds are not the patcher's to guess",
+            ref=item.ref,
+            field=verb,
+            line=keyn.start_mark.line + 1,
+        )
+    nl = f.text.find("\n", value_end)
+    end = len(f.text) if nl == -1 else nl + 1
+    tail = f.text[value_end : end]
+    if "#" in tail or "#" in f.text[keyn.end_mark.index + item.base : value_start]:
+        return Refusal(
+            f"a comment sits on the '{verb}' entry of item {item.ref}; deleting the "
+            "entry with its last link would destroy it",
+            ref=item.ref,
+            field=verb,
+            line=keyn.start_mark.line + 1,
+        )
+    start = f.text.rfind("\n", 0, key_start) + 1
+    original = f.text[start:end]
+    return PatchPlan(
+        ref=item.ref,
+        op="remove_link",
+        shape=item.shape,
+        start=start,
+        end=end,
+        replacement="",
+        original=original,
+        start_line=_file_line(f, item, keyn.start_mark.line + 1),
+        end_line=_file_line(f, item, value_node.end_mark.line + 1),
+        old_value=[value_node.value] if isinstance(value_node, yaml.ScalarNode) else None,
+        new_value=None,
+        field=verb,
+        notes=("the last target went: the whole verb entry was removed",),
+    )
+
+
+def _plan_link_remove(
+    f: _File, item: _Item, verb: str, got: Any, wanted: str
+) -> PatchPlan | Refusal:
+    if got is None:
+        return Refusal(
+            f"item {item.ref} has no '{verb}' links to remove",
+            ref=item.ref,
+            field=verb,
+            line=item.key_line,
+        )
+    if isinstance(got, yaml.ScalarNode):
+        if not _link_matches(got.value or "", wanted):
+            return Refusal(
+                f"item {item.ref} does not link {wanted}",
+                ref=item.ref,
+                field=verb,
+                line=got.start_mark.line + 1,
+            )
+        return _plan_key_line_removal(f, item, verb, got)
+    elements = _link_elements(got)
+    if isinstance(elements, Refusal):
+        return replace(elements, ref=item.ref, field=verb)
+    hits = [c for c in elements if _link_matches(c.value, wanted)]
+    if not hits:
+        return Refusal(
+            f"item {item.ref} does not link {wanted}",
+            ref=item.ref,
+            field=verb,
+            line=got.start_mark.line + 1,
+        )
+    if len(hits) > 1:
+        return Refusal(
+            f"{wanted} is linked {len(hits)} times by '{verb}' on item {item.ref}; "
+            "the patch cannot tell which spelling to remove",
+            ref=item.ref,
+            field=verb,
+            line=hits[0].start_mark.line + 1,
+        )
+    el = hits[0]
+    if len(elements) == 1:
+        return _plan_key_line_removal(f, item, verb, got)
+
+    if got.flow_style:
+        idx = elements.index(el)
+        start = item.base + el.start_mark.index
+        end = item.base + el.end_mark.index
+        if idx < len(elements) - 1:
+            nxt = item.base + elements[idx + 1].start_mark.index
+            gap = f.text[end:nxt]
+            end = nxt
+        else:
+            prev = item.base + elements[idx - 1].end_mark.index
+            gap = f.text[prev:start]
+            start = prev
+        if "#" in gap or "," not in gap:
+            return Refusal(
+                f"the separator around {wanted} in item {item.ref} is not a plain comma "
+                "(a comment or unusual layout is in the way)",
+                ref=item.ref,
+                field=verb,
+                line=el.start_mark.line + 1,
+            )
+        remaining = [c.value for c in elements if c is not el]
+        return PatchPlan(
+            ref=item.ref,
+            op="remove_link",
+            shape=item.shape,
+            start=start,
+            end=end,
+            replacement="",
+            original=f.text[start:end],
+            start_line=_file_line(f, item, el.start_mark.line + 1),
+            end_line=_file_line(f, item, el.end_mark.line + 1),
+            old_value=[c.value for c in elements],
+            new_value=remaining,
+            field=verb,
+        )
+
+    # block list: remove the entry's whole line, indent included
+    line_start = f.text.rfind("\n", 0, item.base + el.start_mark.index) + 1
+    nl = f.text.find("\n", item.base + el.end_mark.index)
+    end = len(f.text) if nl == -1 else nl + 1
+    head = f.text[line_start : item.base + el.start_mark.index]
+    tail = f.text[item.base + el.end_mark.index : end]
+    if "#" in head or "#" in tail:
+        return Refusal(
+            f"a comment sits on the line holding {wanted} in item {item.ref}; removing "
+            "the entry would destroy it",
+            ref=item.ref,
+            field=verb,
+            line=el.start_mark.line + 1,
+        )
+    remaining = [c.value for c in elements if c is not el]
+    return PatchPlan(
+        ref=item.ref,
+        op="remove_link",
+        shape=item.shape,
+        start=line_start,
+        end=end,
+        replacement="",
+        original=f.text[line_start:end],
+        start_line=_file_line(f, item, el.start_mark.line + 1),
+        end_line=_file_line(f, item, el.end_mark.line + 1),
+        old_value=[c.value for c in elements],
+        new_value=remaining,
+        field=verb,
+    )
+
+
 # ---------------------------------------------------------------- body plans
 
 
@@ -1265,19 +1678,60 @@ def _projection_index(f: _File, ref: str) -> int:
     raise _LocateError(f"item {ref} is not in this file")
 
 
+def _expected_fields(fields: dict, plan: PatchPlan, op: Any) -> dict:
+    """The edited item's fields after the patch, as the projection spells them.
+
+    Link ops are computed from the *current* projection value, not from the
+    op alone: the patch appends to or subtracts from whatever list is there,
+    and the projection comparison must describe the same arithmetic or a
+    correct patch fails its own proof. A markdown body is not a field, so
+    SetBody never appears here -- the caller handles it.
+    """
+    out = dict(fields)
+    name = plan.field or "body"
+    if isinstance(op, SetField):
+        out[name] = op.value
+    elif isinstance(op, AddLink):
+        current = fields.get(name)
+        if current is None and name not in fields:
+            out[name] = op.target  # a new verb is inserted as a scalar
+        elif isinstance(current, list):
+            out[name] = list(current) + [op.target]
+        elif isinstance(current, str):
+            out[name] = [current, op.target]
+        else:
+            raise _LocateError(f"cannot add a link to a {type(current).__name__}")
+    elif isinstance(op, RemoveLink):
+        current = fields.get(name)
+        if isinstance(current, list):
+            kept = [t for t in current if not _link_matches(str(t), op.target)]
+            if len(kept) == len(current):
+                raise _LocateError(f"no link to {op.target} to remove")
+            if kept:
+                out[name] = kept
+            else:
+                out.pop(name)
+        elif isinstance(current, str):
+            if not _link_matches(current, op.target):
+                raise _LocateError(f"no link to {op.target} to remove")
+            out.pop(name)
+        else:
+            raise _LocateError(f"cannot remove a link from a {type(current).__name__}")
+    return out
+
+
 def _expected_projection(entry: Any, plan: PatchPlan, op: Any) -> Any:
     if isinstance(entry, dict):
-        out = dict(entry)
-        name = plan.field or "body"
-        out[name] = op.text if isinstance(op, SetBody) else op.value
-        return out
-    if isinstance(entry, tuple):  # markdown: (fields, body)
+        if isinstance(op, SetBody):  # a list file keeps its body as a `body:` field
+            out = dict(entry)
+            out[plan.field or "body"] = op.text
+            return out
+        return _expected_fields(entry, plan, op)
+    if isinstance(entry, tuple):  # markdown: (fields, body) -- the body is not a field
         fields, body = entry
-        out = dict(fields)
         if isinstance(op, SetBody):
-            return (out, op.text)
-        out[plan.field] = op.value
-        return (out, body)
+            return (dict(fields), op.text)
+        return (_expected_fields(fields, plan, op), body)
     raise _LocateError("unsupported projection entry")
 
 

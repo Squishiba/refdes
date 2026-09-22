@@ -8,7 +8,9 @@ const PREFIX = 'refdes.draft.v1.';
 const memory = new Map();
 
 function emptyDraft() {
-  return { revision: null, fields: {}, body: null };
+  // links are pending ops, not values: `add`/`remove` map verb -> targets,
+  // and a target pending on one side is absent from the other (Slice 2).
+  return { revision: null, fields: {}, body: null, links: { add: {}, remove: {} } };
 }
 
 function key(handle) {
@@ -20,10 +22,12 @@ function load(handle) {
     const raw = sessionStorage.getItem(key(handle));
     if (!raw) return emptyDraft();
     const parsed = JSON.parse(raw);
+    const links = parsed.links || {};
     return {
       revision: parsed.revision || null,
       fields: parsed.fields || {},
       body: parsed.body === undefined ? null : parsed.body,
+      links: { add: links.add || {}, remove: links.remove || {} },
     };
   } catch (_) {
     return emptyDraft(); // a private-mode or quota failure costs persistence, not editing
@@ -45,7 +49,12 @@ export function getDraft(handle) {
 }
 
 export function isDirty(draft) {
-  return Object.keys(draft.fields).length > 0 || draft.body !== null;
+  return (
+    Object.keys(draft.fields).length > 0 ||
+    draft.body !== null ||
+    Object.keys(draft.links.add).length > 0 ||
+    Object.keys(draft.links.remove).length > 0
+  );
 }
 
 export function hasAnyDraft() {
@@ -63,6 +72,32 @@ export function setDraftField(handle, name, value) {
 export function setDraftBody(handle, text) {
   const draft = getDraft(handle);
   draft.body = text;
+  persist(handle, draft);
+  return draft;
+}
+
+function linkToggle(draft, side, verb, target) {
+  const here = draft.links[side];
+  const other = draft.links[side === 'add' ? 'remove' : 'add'];
+  if (!here[verb]) here[verb] = [];
+  if (!here[verb].includes(target)) here[verb].push(target);
+  if (other[verb]) {
+    other[verb] = other[verb].filter((t) => t !== target);
+    if (!other[verb].length) delete other[verb];
+  }
+  if (!here[verb].length) delete here[verb];
+}
+
+export function draftLinkAdd(handle, verb, target) {
+  const draft = getDraft(handle);
+  linkToggle(draft, 'add', verb, target);
+  persist(handle, draft);
+  return draft;
+}
+
+export function draftLinkRemove(handle, verb, target) {
+  const draft = getDraft(handle);
+  linkToggle(draft, 'remove', verb, target);
   persist(handle, draft);
   return draft;
 }

@@ -48,9 +48,9 @@ import threading
 from dataclasses import dataclass
 from typing import Any
 
-from .. import loader, patcher, seal
+from .. import links, loader, patcher, seal
 from ..model import CHECK_VIOLATION, Diagnostic, ERROR, Item, Project
-from ..patcher import PatchPlan, Refusal, SetBody, SetField
+from ..patcher import AddLink, PatchPlan, Refusal, RemoveLink, SetBody, SetField
 
 CONFIG_NAME = "refdes-project.yaml"
 
@@ -70,7 +70,7 @@ class EditRequest:
 
     who: str
     ref: str
-    op: Any  # patcher.SetField | patcher.SetBody
+    op: Any  # patcher.SetField | patcher.SetBody | patcher.AddLink | patcher.RemoveLink
     expected_revision: str  # content revision of the target FILE, as the client saw it
 
 
@@ -239,7 +239,17 @@ def _apply_locked(config: str, request: EditRequest):
     except UnicodeDecodeError:
         return Refused(who, ref, f"{path} is not UTF-8 text", path=path)
 
-    plan = patcher.plan_patch(text, ref, request.op, path=path)
+    op = request.op
+    if isinstance(op, (AddLink, RemoveLink)):
+        # Resolve the target under the write lock, against the same snapshot
+        # the patch will be planned against: the composite is decided here,
+        # never by the browser, and a target that cannot be named faithfully
+        # is a refusal before a single byte is planned (Slice 2).
+        op, reason = _resolve_link_op(before, item, op)
+        if reason is not None:
+            return Refused(who, ref, reason, path=path)
+
+    plan = patcher.plan_patch(text, ref, op, path=path)
     if isinstance(plan, Refusal):
         return Refused(who, ref, plan.reason, path=path)
     new_text = patcher.apply_patch(text, plan)
@@ -300,6 +310,42 @@ def _item_path(project: Project, item: Item) -> str | None:
 
 
 # ------------------------------------------------------------------- conflict
+
+
+def _resolve_link_op(project: Project, item: Item, op):
+    """Turn a browser-side link intent into a patcher op that is safe to write.
+
+    The verb must be declared by the item's type, and for an add the target
+    must exist, be of a type the verb accepts, and carry a key: the written
+    text is always the `DISPLAY-ID@key` composite `links.composite_for`
+    spells, so a target with a null artifact key -- an imported item, or one
+    whose key was never minted -- is refused rather than written as a bare
+    id (docs/design/browser-editor.md, Slice 2). Removal needs no identity:
+    the patcher matches whatever spelling is on disk by its display or key
+    half, which is exactly how a dangling target should be removable.
+    """
+    spec = project.types.get(item.type)
+    if spec is None or op.verb not in spec.links:
+        declared = sorted(spec.links) if spec else []
+        where = f"; {item.type} declares {', '.join(declared)}" if declared else ""
+        return None, f"{item.type} does not declare the link '{op.verb}'{where}"
+    if isinstance(op, RemoveLink):
+        return RemoveLink(op.verb, op.target), None
+    allowed = spec.links[op.verb]
+    target = _find_item(project, op.target)
+    if target is None:
+        return None, f"no item {op.target!r} in this project to link to"
+    if not project.accepts_type(target.type, allowed):
+        wants = "any declared type" if not allowed else "targets of type " + ", ".join(allowed)
+        return None, f"'{op.verb}' accepts {wants}; {target.id} is a {target.type}"
+    composite = links.composite_for(target)
+    if composite is None:
+        return None, (
+            f"{target.id} carries no artifact key, so no DISPLAY-ID@key composite can be "
+            "written for it; linking it as a bare id would drop the identity the link is "
+            "for, which the editor refuses rather than guesses"
+        )
+    return AddLink(op.verb, composite), None
 
 
 def _conflict(who, ref, path, before, request, current_revision) -> Conflict:
@@ -369,6 +415,8 @@ def _attributed(d, item: Item, op: Any) -> bool:
     refs = {r for r in (item.id, item.key) if r}
     if not d.item_id or d.item_id not in refs:
         return False
+    if isinstance(op, (AddLink, RemoveLink)):
+        return d.message.startswith(f"{op.verb}:") or f"'{op.verb}'" in d.message
     if isinstance(op, SetField):
         name = op.name
         return d.message.startswith(f"{name}:") or f"'{name}'" in d.message
