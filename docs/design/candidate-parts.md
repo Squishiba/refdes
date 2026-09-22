@@ -638,7 +638,7 @@ defaults:
   citations:
     - path: datasheets/mp1584.pdf
       id: mp1584-ds
-      kept_copy: true
+      keep_copy: true
   checks:
     - { value: I_out, against: BND-PWR-011 }
     - { value: I_q,   against: BND-PWR-012 }
