@@ -44,11 +44,35 @@ No new tests (engine worker owns tests).
   schemas, not the standard — no test edits needed.
 - v1/v2 standards untouched (byte-identical-when-unused holds trivially).
 
-## Status
+## Status (history — resolved below)
 BLOCKED on sequencing: full suite can only pass once the engine worker's
 schema.py/build.py changes are in the tree. Awaiting orchestrator decision on
 whether to open this PR now (stacked on the engine PR) or wait for the engine
 to land on main first, merge into this branch, rerun, then open.
+
+## Unblocked (engine PR merged 2026-09-22)
+Orchestrator confirmed option (a) and merged the engine PR
+("severity-mapping", refdes-145) to main. Follow-up work, all green:
+1. `git merge origin/main` — clean.
+2. Engine PR's `test_scalar_severity_unchanged` (param over v1/2/3 x presets)
+   asserted NO type resolves to a mapping; hardware@3 component now does.
+   Adjusted to pin component@3's exact mapping while keeping scalar
+   assertions for every other type/version (intent: catch accidental
+   mappings elsewhere) — per orchestrator instruction.
+3. Regenerated the two resolved-schema oracle fixtures
+   (`tests/fixtures/hardware3_resolved.json`,
+   `hardware3_design_debate_resolved.json`) via `oracle_dump.resolved_dump`
+   (scratch script `.scratch/regenerate_hardware3_fixtures.py`) — the
+   fixtures snapshot the standard, and component now resolves to the
+   mapping + 4-choice enum.
+4. Ran `python docs-site/gen_examples.py` — regenerated the injected blocks
+   in `docs/schema-reference.md` (component scaffold choices + rejected) and
+   `docs/vocabulary.md` (component status doc + rejected); verified the diff
+   was ONLY my data change's delta.
+5. Full suite: **1939 passed, 0 failed**. `ruff check --select E9,F` on the
+   touched Python file (tests/test_check_severity_status.py): clean. No other
+   .py files touched.
+6. Pushed branch, opened PR against main, reported to refdes-2.
 
 ## Orchestrator decision (2026-09-22, refdes-2)
 Option (a): **wait**. The 126 red tests are expected and correct — they prove
