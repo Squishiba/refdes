@@ -49,3 +49,15 @@ BLOCKED on sequencing: full suite can only pass once the engine worker's
 schema.py/build.py changes are in the tree. Awaiting orchestrator decision on
 whether to open this PR now (stacked on the engine PR) or wait for the engine
 to land on main first, merge into this branch, rerun, then open.
+
+## Orchestrator decision (2026-09-22, refdes-2)
+Option (a): **wait**. The 126 red tests are expected and correct — they prove
+the data change needs the engine worker's schema.py acceptance. Do NOT push or
+open a PR yet. Stay idle until refdes-2 pings that the engine PR
+("severity-mapping", refdes-145) has merged to main. Then:
+1. `git merge origin/main` into `ao/refdes-147/root`.
+2. Rerun the full suite (`python -m pytest -q`) to confirm green.
+3. Open the PR as a **normal PR against main** (not stacked — repo has no
+   stacked-PR precedent). `gh pr create --base main`.
+4. Report with PR URL via `ao send --session refdes-2`.
+Branch is committed at a0ec91a; nothing further to do while waiting.
