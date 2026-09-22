@@ -135,16 +135,42 @@ def test_post_needs_origin_content_type_and_bounded_body(served):
         headers={"Origin": good, "Content-Type": "text/plain"},
     )
     assert status == 415
-    status, _h, _b = client.request(
-        "POST", "/api/nothing", token=True, body=b"x" * (1024 * 1024 + 1),
-        headers={"Origin": good, "Content-Type": "application/json"},
-    )
-    assert status == 413
+    # The bound is on Content-Length, asserted that way rather than by pushing
+    # 1 MiB+1 of real body: the server refuses before reading any of it, so a
+    # client that sends the whole body races the refusal and can lose it to an
+    # RST. See Client.post_declaring_length.
+    assert client.post_declaring_length("/api/nothing", 1024 * 1024 + 1) == 413
     status, _h, _b = client.request(
         "POST", "/api/nothing", body=b"{}",
         headers={"Origin": good, "Content-Type": "application/json"},
     )
     assert status == 403  # no token
+
+
+def test_an_oversized_upload_does_not_wedge_the_server(served):
+    """Pushing a real body over the bound is the abusive case the 413 exists
+    for, and it is the case that races: the server answers on the header and
+    closes without draining, so the client may see the answer or may see the
+    connection torn down mid-write. Either is acceptable; what is not is the
+    server hanging, dying, or the test client raising something unrelated --
+    which is what happened on the Linux runner (BrokenPipeError out of
+    serve_support.Client.request) while Windows, which does not tear down the
+    same way, passed."""
+    app, client, _r = served
+    good = f"http://127.0.0.1:{app.port}"
+    oversized = b"x" * (1024 * 1024 + 1)
+    try:
+        status, _h, _b = client.request(
+            "POST", "/api/nothing", token=True, body=oversized,
+            headers={"Origin": good, "Content-Type": "application/json"},
+        )
+        seen = status
+    except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+        seen = 413  # refused and torn down: the same verdict, delivered worse
+    assert seen == 413
+    # Still serving, and still refusing, after the torn-down upload.
+    assert client.request("GET", "/api/revision", token=True)[0] == 200
+    assert client.post_declaring_length("/api/nothing", 1024 * 1024 + 1) == 413
 
 
 def test_a_cross_origin_get_is_rejected_too(served):

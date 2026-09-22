@@ -50,6 +50,46 @@ Verification
 - Note: local python is 3.14 while CI pins 3.11; the suite is green here on
   3.14, so 3.11 remains the version CI actually proves.
 
+CI run 1 (run 35679076349): red on both OSes -- two real bugs, not workflow bugs
+-----------------------------------------------------------------------------
+1. tests/test_load_time_writes.py:205 used path.read_text(encoding=..., newline=...).
+   Path.read_text only gained `newline` in Python 3.13; the declared floor is
+   3.11 and CI pins the floor, so it TypeErrored on both runners. It passed
+   locally because the local interpreter is 3.14 -- exactly the class of bug a
+   floor-pinned CI exists to catch. Fixed with the builtin open(), which has
+   always taken newline with the same semantics. Repo-wide grep: this was the
+   only read_text(newline=...) anywhere; the seven write_text(newline=...) call
+   sites are fine (Path.write_text gained newline in 3.10).
+
+2. tests/test_serve_security.py::test_post_needs_origin_content_type_and_bounded_
+   body, ubuntu only (windows passed -- the reason the matrix exists). It pushed
+   a real 1 MiB+1 body to trigger the 413. src/refdes/serve/server.py:293 issues
+   the 413 from Content-Length WITHOUT reading the body -- correct, and worth
+   keeping: a client must not be able to make `refdes serve` buffer an oversized
+   request. But that means the server answers and closes while the client is
+   still writing, and a socket closed with unread data sends RST rather than FIN,
+   so the client saw BrokenPipeError out of sendall -- and the RST can discard
+   the 413 as well, which no amount of client-side retry logic recovers.
+
+   Two changes, neither of which weakens the assertion:
+   - tests/serve_support.py Client.request now tolerates a send torn down
+     mid-write and still reads the response the server already sent; if the
+     response is genuinely absent, the original write error is re-raised rather
+     than a confusing empty-status read.
+   - Added Client.post_declaring_length(): sends the oversized Content-Length
+     and no body. Deterministic on both OSes, and it pins the property the
+     guard actually provides -- refuse on the header, before reading. If the
+     size check ever moved after the body read, this call blocks until the
+     socket timeout instead of quietly passing.
+   - The original full-body send is kept as its own test,
+     test_an_oversized_upload_does_not_wedge_the_server, asserting the thing
+     that is NOT platform-dependent: the server neither hangs nor dies, still
+     answers a normal request afterwards, and still refuses the next oversized
+     one. Whether this particular client sees 413 or a torn-down connection is
+     the race, and the test says so instead of pretending otherwise.
+
+Local after the fixes: 1886 passed (1885 before, +1 new test).
+
 Known non-issue
 ---------------
 tests/test_threads_render.py has a pre-existing I001 (import-sort) finding

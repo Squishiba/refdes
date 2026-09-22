@@ -202,7 +202,12 @@ def _guard_rolls_back_broken_rewrite(tmp_path, before: str, expected_count: int)
         path=str(path), rel="items/r.md", before=before, after=after
     )
     revise.write_rewrites_verified(project, [rewrite])
-    assert path.read_text(encoding="utf-8", newline="\n") == before
+    # open(), not Path.read_text(): read_text only grew a `newline` parameter
+    # in 3.13, and refdes supports 3.11 (pyproject's requires-python floor),
+    # where this TypeErrors. The builtin has always taken it, with the same
+    # meaning -- no translation of the file's own line endings.
+    with open(path, encoding="utf-8", newline="\n") as fh:
+        assert fh.read() == before
     assert any("rolled back" in str(d) for d in project.diagnostics)
 
 
