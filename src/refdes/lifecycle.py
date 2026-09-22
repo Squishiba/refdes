@@ -557,10 +557,15 @@ def _rule_unverified_requirements(project: Project) -> list[str]:
 
 
 def _rule_info_check_failures(project: Project) -> list[str]:
+    # Per-item resolution (docs/design/candidate-parts.md §4.5): with a
+    # status-mapped check_severity, a status change alone moves an item in or
+    # out of this bucket -- candidate -> selected turns an info failure into a
+    # build-blocking error, so the gate must resolve severity per item, not per
+    # type.
     out = []
     for item in project.local_items:
         spec = project.types.get(item.type)
-        if spec is None or spec.check_severity != INFO:
+        if build_mod._severity_for(spec, item) != INFO:
             continue
         if any(c.ok is False for c in item.checks):
             out.append(item.id)
