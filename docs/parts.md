@@ -84,3 +84,42 @@ and doesn't belong here. Recording that *you've decided* two parts are
 interchangeable for *this design* is a reviewable claim, which is exactly
 refdes's domain — see [links: `drop_in` and
 `alternate`](links.md#part-equivalence-drop_in-and-alternate).
+
+## Candidate parts: the recommended layout
+
+A part shortlist is a **list file**, one per board:
+
+```yaml
+# items/power/candidates.yaml
+defaults:
+  type: component
+  status: candidate
+
+items:
+  - id: CMP-PWR-014
+    title: MP1584EN buck module
+    part_number: MP1584EN-LF-Z
+```
+
+`defaults:` merges under every entry, and an entry's own value wins, so the
+shortlist's shared `status: candidate` is written once and the winner
+overrides it in place:
+
+```yaml
+  - id: CMP-PWR-014
+    title: MP1584EN buck module
+    status: selected    # DEC-PWR-007 selects this one
+```
+
+The winner does **not** move to a separate file — one file, one status
+edit, one `selects:` link, and every candidate stays in the same
+`{{compare}}` scope. A file whose `defaults:` declares a `status` no item
+in it actually has (after every entry's own value won) gets a
+project-suppressible warning calling the dead default out — set an item's
+status, or drop the `status:` from `defaults:`.
+
+The file name is a convention, nothing more: the tool derives nothing from
+it, and renaming the file changes nothing. `refdes new component --list`
+prints this skeleton (with the type's own status default and field set) to
+stdout — redirect it into place and fill in the entries:
+`refdes new component --list > items/power/candidates.yaml`.

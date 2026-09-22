@@ -777,6 +777,10 @@ def cmd_init(args) -> int:
         print(f"standard: {standard}@{version}{preset_note}")
     else:
         print("standard: none -- types:/link_types: are yours to declare")
+    print(
+        "candidate parts live in items/<board>/candidates.yaml -- "
+        "docs/parts.md#candidate-parts-the-recommended-layout"
+    )
     return 0
 
 
@@ -790,7 +794,10 @@ def cmd_new(args) -> int:
         hint = f" Did you mean {close[0]!r}?" if close else ""
         print(f"unknown type {args.type!r}.{hint}", file=sys.stderr)
         return 1
-    sys.stdout.write(scaffold_mod.new_item_text(args.type, spec))
+    if args.list:
+        sys.stdout.write(scaffold_mod.new_list_text(args.type, spec))
+    else:
+        sys.stdout.write(scaffold_mod.new_item_text(args.type, spec))
     return 0
 
 
@@ -1556,13 +1563,21 @@ def main(argv: list[str] | None = None) -> int:
     p_new = sub.add_parser(
         "new",
         help="print a starter item for one type to stdout",
-        description="Scaffold a starter item's front matter for TYPE, generated "
+        description="Scaffold a starter item's front matter (or, with --list, "
+        "a starter list file) for TYPE, generated "
         "from the identical resolved schema 'refdes schema --json' emits -- not "
         "a second, hand-maintained template that could drift from it. Prints to "
         "stdout; redirect it where you want the item to live, e.g. "
         "'refdes new decision > items/power/dec-005.md'.",
     )
     p_new.add_argument("type", help="an item type in the merged schema, standard or project-defined")
+    p_new.add_argument(
+        "--list",
+        action="store_true",
+        help="print a list-file skeleton (defaults: plus one empty entry) "
+        "instead of a single item -- redirect it into place, e.g. "
+        "'refdes new component --list > items/power/candidates.yaml'",
+    )
     p_new.set_defaults(func=cmd_new)
 
     p_schema = sub.add_parser(
