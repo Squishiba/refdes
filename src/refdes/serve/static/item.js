@@ -1,10 +1,13 @@
-// The read-only item view: fields, body, links both directions, coverage,
-// checks, and diagnostics — everything rendered from what /api/item/<ref>
-// returns. The client interprets nothing: no field is hidden or reordered by
-// a guess about the schema, and there are no editing controls (that is
-// Slice 1 chunk 3). Alongside, the real rendered preview page in an iframe.
+// The item view: fields, body, links both directions, coverage, checks, and
+// diagnostics — everything rendered from what /api/item/<ref> returns. The
+// client interprets nothing: no field is hidden or reordered by a guess about
+// the schema, and editability comes from the server's `edit` block, not from a
+// name the script recognises. Editable scalars get a control, the body gets a
+// textarea, and everything read-only says why (editor.js owns the draft).
+// Alongside, the real rendered preview page in an iframe.
 
 import { api } from './api.js';
+import { createEditor } from './editor.js';
 
 const STAGES = ['open', 'addressed', 'claimed', 'satisfied', 'verified'];
 
@@ -21,18 +24,27 @@ function section(title) {
   return s;
 }
 
-function fieldTable(fields, inherited) {
+function fieldTable(item, editor) {
   const table = el('table', 'fields');
-  for (const [name, value] of Object.entries(fields || {})) {
+  const editInfo = (item.edit && item.edit.fields) || {};
+  for (const [name, value] of Object.entries(item.fields || {})) {
     const tr = el('tr');
     const th = el('th');
     th.textContent = name;
-    if (inherited && inherited.includes(name)) {
+    if (item.inherited_fields.includes(name)) {
       th.appendChild(el('span', 'badge inherited', 'inherited'));
     }
     tr.appendChild(th);
     const td = el('td');
-    td.textContent = Array.isArray(value) ? value.join(', ') : String(value ?? '');
+    const control = editor && editor.fieldControl(name, value);
+    if (control) {
+      td.appendChild(control);
+    } else {
+      td.textContent = Array.isArray(value) ? value.join(', ') : String(value ?? '');
+      const info = editInfo[name];
+      if (info && !info.editable) td.appendChild(el('span', 'badge readonly', info.reason));
+      else td.appendChild(el('span', 'badge readonly', 'read only'));
+    }
     tr.appendChild(td);
     table.appendChild(tr);
   }
@@ -134,11 +146,21 @@ export async function renderItem(container, handle) {
   head.appendChild(el('p', 'muted', `${item.source_file}:${item.source_line}`));
   container.appendChild(head);
 
-  container.appendChild(fieldTable(item.fields, item.inherited_fields));
+  const rerender = () => renderItem(container, handle);
+  const editor = createEditor(item, handle, rerender, rerender);
+
+  container.appendChild(fieldTable(item, editor));
 
   const body = section('Body');
-  body.appendChild(el('pre', 'body-text', item.body || '(empty)'));
+  const bodyArea = editor.bodyControl(item.body);
+  if (bodyArea) body.appendChild(bodyArea);
+  else {
+    body.appendChild(el('pre', 'body-text', item.body || '(empty)'));
+    const info = item.edit && item.edit.body;
+    if (info && !info.editable) body.appendChild(el('p', 'badge readonly', info.reason));
+  }
   container.appendChild(body);
+  container.appendChild(editor.node);
 
   const links = section('Links');
   links.appendChild(el('h3', null, 'Outgoing'));
