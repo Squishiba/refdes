@@ -256,11 +256,12 @@ types:
     label: Component
     preview: [status, title, part_number]
     satisfying_statuses: [selected]
+    check_severity: { candidate: info, selected: error, rejected: info, obsolete: info }
     fields:
       title:       { doc: "What the component is, in one line. Required." }
       part_number: { type: text, on_change: invalidate, doc: "The manufacturer part number. Indexed into the parts page, alongside part numbers cited inside citations entries." }
       refdes:      { type: list, on_change: log, doc: "Reference designators on the board — U14, R7 — where this part is placed. Kept out of the content hash." }
-      status:      { type: enum, choices: [candidate, selected, obsolete], default: candidate, on_change: invalidate, doc: "Where the part stands in this design. Only a selected component counts as settled and closes coverage on what it satisfies." }
+      status:      { type: enum, choices: [candidate, selected, rejected, obsolete], default: candidate, on_change: invalidate, doc: "Where the part stands in this design. Only a selected component counts as settled and closes coverage on what it satisfies; a rejected one was considered and not chosen, and never satisfies." }
       rationale:   { type: text, on_change: invalidate, required_when: {links: alternate}, doc: "Why this part, or — when an alternate link is present — what makes that alternate not a drop-in. Required whenever an alternate link exists." }
       checks:      { type: checks, on_change: invalidate, doc: "Numeric checks: each entry compares a value from this item's calc block against a bound's limit, so a component can demonstrate compliance with a bound directly." }
     include: [provenance, stewardship, citations, named_title, grouped, claims, invalidate_body]
