@@ -1,0 +1,54 @@
+# Runs the test suite on every change. Until now the ~1,900 tests in tests/
+# only ever ran on whichever machine happened to write them: nothing between
+# "a commit is pushed" and "someone notices main is broken" executed them, so
+# a regression could sit on main indefinitely -- and only on one platform,
+# since refdes declares itself OS-independent while its tests write real files
+# and compare paths. Hence the ubuntu/windows matrix: path separators, temp
+# directories and file locking are exactly where a suite that is green on one
+# OS goes red on the other.
+#
+# Ruff runs as its own step, scoped to E9,F, rather than `ruff check .`: the
+# repo has ~99 pre-existing findings under ruff's default rule set (see
+# AGENTS.md), so an unscoped run tells you nothing about *this* change. E9
+# (syntax errors) and F (undefined names, unused imports, redefinitions) are
+# the "something is actually broken" subset -- a clean run of those is a
+# precondition for the tests being worth running at all.
+name: Tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+# A new push to the same branch or PR supersedes the run in flight; unlike the
+# docs deploy there is nothing here with a side effect worth finishing.
+concurrency:
+  group: tests-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # One platform going red shouldn't hide whether the other one did too.
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          # pyproject.toml's requires-python floor, and what docs.yml uses.
+          python-version: "3.11"
+      # The dev extra is what the suite actually needs: pytest, plus pypdf so
+      # the citation-section tests build real PDFs instead of skipping
+      # themselves into a falsely green run.
+      - run: pip install -e ".[dev]"
+      - name: Ruff (E9,F)
+        run: ruff check --select E9,F src tests
+      - name: pytest
+        run: python -m pytest -q

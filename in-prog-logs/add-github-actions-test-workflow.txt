@@ -1,0 +1,57 @@
+Task: add a GitHub Actions test workflow (.github/workflows/tests.yml)
+
+Status: finished locally; PR opened, not merged.
+
+What was done
+-------------
+1. Read .github/workflows/docs.yml as the tone/structure template (header
+   comment explains WHY the workflow exists, not what each line does;
+   actions/checkout@v4 + actions/setup-python@v5; python 3.11; no secrets).
+2. Confirmed pyproject.toml: requires-python = ">=3.11", so 3.11 is both the
+   floor and what docs.yml already uses. The `dev` extra declares pytest>=8.0
+   and ruff>=0.6 (plus pypdf, which the citation-section tests need so they
+   build real PDFs instead of skipping), so `pip install -e ".[dev]"` is
+   enough -- no ad-hoc `pip install pytest ruff` needed.
+3. Created .github/workflows/tests.yml: pull_request (any branch) + push to
+   main; matrix over ubuntu-latest and windows-latest with fail-fast: false;
+   permissions: contents: read only; concurrency cancels superseded runs.
+   Steps: checkout, setup-python 3.11, pip install -e ".[dev]", then
+   `ruff check --select E9,F src tests` and `python -m pytest -q` as separate
+   named steps so a red run names the failing gate.
+4. docs.yml untouched; no other workflow touched.
+
+Why the ruff gate is scoped to E9,F
+-----------------------------------
+AGENTS.md records that `ruff check .` has ~99 pre-existing findings, so an
+unscoped run is not a usable gate. E9 (syntax errors) + F (undefined names,
+unused imports, redefinitions) is the "actually broken" subset.
+
+Pre-existing E9,F findings fixed (separate commit)
+-------------------------------------------------
+The specified gate was NOT clean on main, so it would have been red on
+arrival. Four findings, all mechanical, no behavior change:
+  src/refdes/scaffold.py:13        F401 `import yaml` unused (scaffold uses
+                                   parse.yaml_safe_load, not yaml directly)
+  tests/test_board_contracts.py:17 F401 `refdes.parse` imported unused
+  tests/test_keys_adopt.py:381     F541 f-string without placeholders
+  tests/test_threads_render.py:283 F821 `pytest.fail` used without
+                                   `import pytest` -- latent: the monkeypatched
+                                   lambda would have raised NameError instead of
+                                   reporting the intended failure
+Nothing was silenced or noqa'd.
+
+Verification
+------------
+- python -m pytest -q : 1885 passed (run before the edits, and again after).
+- ruff check --select E9,F src tests : All checks passed (exit 0).
+- YAML well-formed: python -c "import yaml; yaml.safe_load(...)" -> ok.
+- Actions used (checkout@v4, setup-python@v5) are the same pins docs.yml
+  already uses; `git log --all -- .github/workflows/` shows no other pins.
+- Note: local python is 3.14 while CI pins 3.11; the suite is green here on
+  3.14, so 3.11 remains the version CI actually proves.
+
+Known non-issue
+---------------
+tests/test_threads_render.py has a pre-existing I001 (import-sort) finding
+under ruff 0.16 -- present at HEAD before this change, and `I` is not part of
+the E9,F gate, so it was left alone rather than reformatted as a side effect.
