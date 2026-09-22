@@ -236,7 +236,12 @@ class ItemType:
     # the default; a type whose items are still candidates being compared (e.g.
     # "option") can set this to INFO so a failed criterion is a finding, not a
     # build-blocking defect.
-    check_severity: str = ERROR
+    # docs/design/candidate-parts.md §4: either a scalar (applies to every item
+    # of the type, unchanged behaviour) or a mapping from `status` values to
+    # levels, resolved per item by build._severity_for. A mapping must cover
+    # every declared status or declare a `default:` key (schema validation);
+    # extends/overlay replacement is wholesale, never a merge.
+    check_severity: str | dict[str, str] = ERROR
     # Engine-level coverage-participation flags -- schema language, not standard
     # content (docs/design/standard-library.md §2). None means "not declared":
     # compute_coverage() falls back to the pre-existing name-based convention

@@ -458,6 +458,58 @@ def _doc_text(value: Any, path: str) -> str:
     return value
 
 
+def _parse_check_severity(
+    tname: str, tspec: dict[str, Any], fields: dict[str, FieldSpec]
+) -> str | dict[str, str]:
+    """One type's `check_severity:` (docs/design/candidate-parts.md §4.3).
+
+    Scalar: today's rule, unchanged -- a level from DIAGNOSTIC_LEVELS. Mapping:
+    status value (or `default:`) to level, which must declare a `status` field,
+    use only declared choices as keys, and cover every declared choice or
+    declare `default:` (§4.4: an unlisted status with no default is a load
+    error, never a silent `error` at the worst possible moment).
+    """
+    raw = tspec.get("check_severity", ERROR)
+    if not isinstance(raw, dict):
+        if raw not in DIAGNOSTIC_LEVELS:
+            raise SchemaError(
+                f"types.{tname}.check_severity must be one of {list(DIAGNOSTIC_LEVELS)}, "
+                f"got {raw!r}"
+            )
+        return raw
+
+    status_field = fields.get("status")
+    if status_field is None:
+        raise SchemaError(
+            f"types.{tname}.check_severity is a mapping but type '{tname}' declares "
+            "no 'status' field. Write check_severity: error, or declare status."
+        )
+    choices = [str(c) for c in (status_field.choices or [])]
+
+    resolved: dict[str, str] = {}
+    for key, level in raw.items():
+        if key != "default" and key not in choices:
+            raise SchemaError(
+                f"types.{tname}.check_severity key {key!r} is not a declared status. "
+                f"Declared choices: {', '.join(choices)}."
+            )
+        if level not in DIAGNOSTIC_LEVELS:
+            raise SchemaError(
+                f"types.{tname}.check_severity[{key}] must be one of "
+                f"{list(DIAGNOSTIC_LEVELS)}, got {level!r}"
+            )
+        resolved[str(key)] = str(level)
+
+    if "default" not in resolved:
+        for choice in choices:
+            if choice not in resolved:
+                raise SchemaError(
+                    f"types.{tname}.check_severity does not cover status "
+                    f"{choice!r}. Add it, or add default: <level>."
+                )
+    return resolved
+
+
 def load_project(config_path: str | None = None, start: str = ".") -> Project:
     path = config_path or find_config(start)
     if os.path.basename(os.path.abspath(path)) == LEGACY_CONFIG_NAME:
@@ -591,12 +643,7 @@ def load_project(config_path: str | None = None, start: str = ".") -> Project:
                 )
             satisfying_statuses = [str(s) for s in satisfying_statuses]
 
-        check_severity = tspec.get("check_severity", ERROR)
-        if check_severity not in DIAGNOSTIC_LEVELS:
-            raise SchemaError(
-                f"types.{tname}.check_severity must be one of {list(DIAGNOSTIC_LEVELS)}, "
-                f"got {check_severity!r}"
-            )
+        check_severity = _parse_check_severity(tname, tspec, fields)
 
         coverable_raw = tspec.get("coverable")
         coverable = None if coverable_raw is None else bool(coverable_raw)

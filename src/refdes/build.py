@@ -1231,11 +1231,27 @@ def run_calcs(project: Project) -> None:
 _CHECK_EMITTERS = {ERROR: Project.error, WARNING: Project.warn, INFO: Project.info}
 
 
+def _severity_for(spec, item) -> str:
+    """Resolve one item's `check_severity` (docs/design/candidate-parts.md §4.2).
+
+    A scalar spec is that value, no other code path -- projects that never use
+    the mapping form see byte-identical behaviour (§4.6). A mapping spec
+    selects by the item's `status` field. Load-time validation guarantees the
+    mapping covers every declared status or declares `default:`, so the
+    fallback here only guards a status the schema cannot produce (a missing
+    field value), where `error` is the safe reading."""
+    severity = spec.check_severity if spec is not None else ERROR
+    if isinstance(severity, dict):
+        status = str((item.fields or {}).get("status", ""))
+        return severity.get(status, severity.get("default", ERROR))
+    return severity
+
+
 def run_checks(project: Project) -> None:
     by_key = _key_index(project)
     for item in project.local_items:
         spec = project.types.get(item.type)
-        check_severity = spec.check_severity if spec else ERROR
+        check_severity = _severity_for(spec, item)
         # A failing check on a candidate item (check_severity: info) is the
         # finding, not a defect -- everything else about a `checks:` entry
         # (malformed shape, an unresolved target, a target with no limit) is a

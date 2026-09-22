@@ -51,7 +51,7 @@ against the eight names.
 | `missing_kept_copies` | a `keep_copy: true` citation's local blob is missing |
 | `uncovered_requirements` | a non-draft coverable item's coverage stage is `open` |
 | `unverified_requirements` | a non-draft coverable item isn't yet `verified` |
-| `info_check_failures` | a failing check on a `check_severity: info` type |
+| `info_check_failures` | a failing check whose resolved `check_severity` is `info` |
 | `unaccepted_board_moves` | an item's board differs from `.refdes/boards.yaml` |
 | `unaccepted_workspace_moves` | an item's workspace differs from `.refdes/boards.yaml`'s `workspaces:` key ([workspaces](workspaces.md)) |
 
@@ -64,6 +64,16 @@ fixed property of `release`.
 
 **Why nothing defaults on for `revision`.** A revision is a checkpoint, not
 a readiness claim. The only thing that blocks one by default is the floor.
+
+**A status change alone can change the gate.** `check_severity:` may be
+written as a mapping from `status` to level (docs/design/candidate-parts.md
+§4), and this rule resolves it per item, not per type. A component whose
+failing check is `info` at `status: candidate` becomes a build-blocking
+`error` the moment it moves to `selected` — so `refdes release` can go from
+clean to blocked on a one-word status edit. That is the feature, not a side
+effect: the moment you commit to a part, its numbers have to hold. The
+rule's offender list stays item IDs, and the diff view already reports the
+status change that caused it.
 
 **Draft detection** reads whichever field a type calls `status`, the same
 field-existence convention `satisfying_statuses:`/`coverable_statuses:`
