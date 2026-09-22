@@ -307,6 +307,17 @@ class LinkExpansionPlan:
     remaining: int = 0
 
 
+def composite_for(item: Item) -> str | None:
+    """The `DISPLAY-ID@key` spelling of a link target, or None when the item
+    carries no key to write. This is the one composite rule in the codebase:
+    the same text `_planned_target` expands a bare reference to, so a link
+    written by the editor and a link expanded by the freeze pass are spelled
+    identically (docs/design/keys.md §3)."""
+    if item is None or not item.id or not item.key:
+        return None
+    return f"{item.id}@{item.key}"
+
+
 def _planned_target(
     project: Project, by_key: dict[str, Item], pointer: str, item: Item, target: str
 ) -> str | None:
@@ -331,7 +342,7 @@ def _planned_target(
         resolved = project.item_by_id(target)
         if resolved is None or not resolved.key:
             return None
-        return f"{target}@{resolved.key}"
+        return composite_for(resolved)
 
     old_display, _, key = target.partition("@")
     resolved = by_key.get(key)
