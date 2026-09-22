@@ -1,0 +1,71 @@
+# Phase 4 of docs/design/candidate-parts.md — list layout tooling
+
+Branch: ao/refdes-149/root
+Worktree: C:\Users\Jared\.ao\data\worktrees\refdes\refdes-149
+
+## What shipped here
+
+1. **`defaults:` dead-status warning (parse.py)**
+   - New `_warn_dead_defaults_status()` helper, called at the end of both
+     `parse_markdown_file` and `parse_list_file`.
+   - Fires (warning level, `project.warn`) when the file's `defaults:`
+     declares a `status:` value that no item in the file actually carries
+     (every entry's own value won, or no entries yet). Message names the
+     fix: set an item's status, or drop the status: key from defaults:.
+   - Entirely content-derived — nothing path-based — so renaming/moving the
+     file changes nothing that fires (design §6.1/§6.3).
+   - Default suppresses itself for types without a status field: the value
+     is stored as an unknown field (parse.py:_build_item line ~504) which
+     matches the any() check, and the existing "unknown field 'status'"
+     warning already names the problem.
+   - `defaults_line` convention matches the existing defaults-leak tests:
+     line of the block's first key, not the `defaults:` line itself.
+
+2. **`refdes new <type> --list` (scaffold.py + cli.py)**
+   - New `scaffold.new_list_text()`; the per-field / per-link line rendering
+     factored into `_item_field_line()`/`_item_link_line()` shared with
+     `new_item_text()` so the two skeletons can't drift.
+   - Emits mapping form (`defaults:` + `items:`) that parse_list_file
+     requires (design's bare top-level-list sketch would be rejected).
+   - `defaults:` carries `type:` and `status:` (only when the type declares
+     a status field WITH an enum default); item entry restates neither.
+   - cli.py: `--list` flag on `p_new`; `cmd_new` branches; nothing written
+     with or without `--no-write` (load_project is read-only), so redirect +
+     --no-write compose safely.
+   - `refdes init` closing message gained a line pointing at the new
+     docs/parts.md layout section (§6.1 says do this).
+
+3. **docs/parts.md** — "Candidate parts: the recommended layout" section:
+   `items/<board>/candidates.yaml`, defaults merging, winner overrides in
+   place, name is convention-only, --list redirect snippet.
+
+4. **tests** — tests/test_component_rejected.py created with exactly the two
+   §9 tests: `test_defaults_status_warning`, `test_new_list_skeleton`.
+   Module docstring notes the other four tests are Phase 1/3 work landing
+   separately (avoiding a merge collision with the parallel worker).
+
+5. **changelog.d/candidate-list-layout.added.md** — two bullets (warning +
+   --list/init pointer).
+
+## Difficulties
+
+- First test run: asserted `dead[0].line == 3` but the `__line__`
+  annotation convention points at the defaults block's first key (line 2);
+  fixed assertion to match the established convention (test_parse.py:183).
+- Second run: the "matched status → no warning" case also picked up the
+  still-renamed shortlist.yaml's warning; scoped the assertion to the
+  matched file's diagnostics.
+- The `p_new` help text initially contained a literal newline inside a
+  string literal (syntax error); rewritten as adjacent literals.
+- The installed `refdes.exe` isn't on the worktree's src; live checks must
+  run via `$env:PYTHONPATH=src; python -m`/python -c.
+
+## Verification
+
+- `python -m pytest -q` → 1941 passed (full suite).
+- `ruff check --select E9,F` on the four touched files → clean.
+- `refdes audit` on the repo's own project → no dead-configuration warnings.
+
+## Status
+
+Finished. Pending: commit, push, PR to main (no merge), ao send report.

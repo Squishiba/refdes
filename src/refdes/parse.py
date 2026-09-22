@@ -587,6 +587,39 @@ def md_front_matter_blocks(lines: list[str]) -> tuple[list[tuple[int, int, dict]
     return blocks, errors
 
 
+def _warn_dead_defaults_status(
+    project: Project,
+    defaults: dict[str, Any],
+    out: list[Item],
+    rel: str,
+    defaults_line: int | None,
+) -> None:
+    """A `defaults:` block that declares a `status` value no item in the
+    file actually carries (candidate parts §6.3) is dead configuration --
+    the status field's own strictness already reports a value outside the
+    enum, so the remaining trap is a plausibly-typed value that nothing
+    inherits because every item overrode it, or no item was written yet.
+
+    Warning, not error: a shortlist mid-editing is a normal state, and the
+    fix is a one-line content edit (set an item's status, or drop the
+    'status:' key from defaults:). Everything here is content-derived --
+    nothing about the file's name or location is read, so a rename, move,
+    or reorganisation cannot change what fires (candidate parts §6.1).
+    """
+    value = defaults.get("status")
+    if not isinstance(value, str):
+        return
+    if any(item.fields.get("status") == value for item in out):
+        return
+    project.warn(
+        f"this file's defaults: declares 'status: {value}' but no item in it "
+        f"has that status -- the defaults entry is dead configuration. Set an "
+        f"item's status to {value!r}, or drop the 'status:' key from defaults:.",
+        file=rel,
+        line=defaults_line,
+    )
+
+
 def parse_markdown_file(project: Project, path: str) -> list[Item]:
     """Read one or more `---`-fenced item documents from a single .md file.
 
@@ -684,6 +717,7 @@ def parse_markdown_file(project: Project, path: str) -> list[Item]:
         )
         if item:
             out.append(item)
+    _warn_dead_defaults_status(project, defaults, out, rel, defaults_line)
     return out
 
 
@@ -753,6 +787,7 @@ def parse_list_file(project: Project, path: str) -> list[Item]:
         )
         if item:
             out.append(item)
+    _warn_dead_defaults_status(project, defaults, out, rel, defaults_line)
     return out
 def overlay_key(path: str) -> str:
     """The form a path takes as a `Project.source_overlay` key."""

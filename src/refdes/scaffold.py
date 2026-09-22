@@ -130,34 +130,42 @@ def _field_hint(fname: str, fspec) -> str:
     return fspec.type
 
 
+def _item_field_line(fname: str, fspec) -> str:
+    """One field's line in a `refdes new` skeleton (shared by the single-item
+    and --list forms): a required field with a declared `default:` is written
+    with that default, a required field with none gets an empty placeholder,
+    an optional field is written commented-out, with the same choices:/type
+    hint the schema's own `description` carries."""
+    hint = _field_hint(fname, fspec)
+    if fspec.default is not None:
+        return f"{fname}: {fspec.default}  # {hint}"
+    if fspec.required:
+        return f"{fname}:  # required -- {hint}"
+    cond = ""
+    if fspec.required_when:
+        cond = f"; required when {_format_required_when(fspec.required_when)}"
+    return f"# {fname}:  # {hint}{cond}"
+
+
+def _item_link_line(lname: str, targets) -> str:
+    """One link's commented-out line in a `new` skeleton, naming its allowed
+    target types the same way the schema's description does."""
+    target_desc = ", ".join(targets) if targets else "any"
+    return f"# {lname}: []  # target: {target_desc}"
+
+
 def new_item_text(type_name: str, spec: ItemType) -> str:
     """Scaffold one item's front matter for `type_name`, generated from the
     identical resolved `ItemType` the JSON Schema (schema_json.py) and
     `items.json` (render.py) both read -- not a second, hand-maintained
     template per type that could drift from either (docs/design/
     standard-library.md §12's closing section).
-
-    A required field with a declared `default:` is written with that
-    default; a required field with none gets an empty placeholder; an
-    optional field is written commented-out, with the same choices:/type
-    hint the schema's own `description` carries; a link is written
-    commented-out, naming its allowed target types the same way.
     """
     lines = ["---", "id:", f"type: {type_name}"]
     for fname, fspec in spec.fields.items():
-        hint = _field_hint(fname, fspec)
-        if fspec.default is not None:
-            lines.append(f"{fname}: {fspec.default}  # {hint}")
-        elif fspec.required:
-            lines.append(f"{fname}:  # required -- {hint}")
-        else:
-            cond = ""
-            if fspec.required_when:
-                cond = f"; required when {_format_required_when(fspec.required_when)}"
-            lines.append(f"# {fname}:  # {hint}{cond}")
+        lines.append(_item_field_line(fname, fspec))
     for lname, targets in spec.links.items():
-        target_desc = ", ".join(targets) if targets else "any"
-        lines.append(f"# {lname}: []  # target: {target_desc}")
+        lines.append(_item_link_line(lname, targets))
     lines.append("---")
     lines.append("")
     # body: is reserved, not a field, so it never shows up in the loop above
@@ -167,6 +175,42 @@ def new_item_text(type_name: str, spec: ItemType) -> str:
         lines.append("<!-- required: the content itself goes here. -->")
     else:
         lines.append("<!-- optional body. -->")
+    lines.append("")
+    return "\n".join(lines)
+
+
+def new_list_text(type_name: str, spec: ItemType) -> str:
+    """Scaffold a list file for `type_name` for `refdes new <type> --list`:
+    a `defaults:` block carrying the items' shared type and the status
+    field's declared default (omitted entirely when the type declares no
+    status field), then one empty entry.
+
+    The file takes the mapping form a list file must have (`defaults:` plus
+    an `items:` key) rather than the bare top-level list in the design's
+    sketch, so redirecting the output straight into place can't produce a
+    file `parse_list_file` rejects. The per-entry fields are exactly what
+    `new_item_text` scaffolds for the same type; `type:` and a defaulted
+    `status:` live in `defaults:` instead of every entry, and an entry's own
+    value wins (the layout's "one status edit" property -- candidate parts
+    §6.1/§6.4).
+    """
+    lines = ["---", "defaults:", f"  type: {type_name}"]
+    status = spec.fields.get("status")
+    if status is not None and status.default is not None:
+        lines.append(f"  status: {status.default}")
+    lines.append("")
+    lines.append("items:")
+    lines.append("  - id:")
+    for fname, fspec in spec.fields.items():
+        if fname == "status" and status is not None and status.default is not None:
+            continue  # already in the defaults: block above
+        lines.append(f"    {_item_field_line(fname, fspec)}")
+    for lname, targets in spec.links.items():
+        lines.append(f"    {_item_link_line(lname, targets)}")
+    if spec.body_required:
+        lines.append("    # body:  # required: the content itself goes here.")
+    else:
+        lines.append("    # body:  # optional body.")
     lines.append("")
     return "\n".join(lines)
 
