@@ -1,0 +1,87 @@
+# Candidate-parts Phase 1 — data/docs only
+
+## Task
+Phase 1 of docs/design/candidate-parts.md (merged at 7b37229): mechanical data
++ docs changes only. The ENGINE worker (another session) handles schema.py /
+build.py / lifecycle.py in parallel.
+
+## Changes made
+1. `src/refdes/standards/hardware/v3/base.yaml`, `component`:
+   - `status` choices `[candidate, selected, obsolete]` →
+     `[candidate, selected, rejected, obsolete]` (design §5.1, doc text updated
+     per §5.1 too).
+   - Added `check_severity: { candidate: info, selected: error, rejected: info,
+     obsolete: info }` per design §4.1/§5.4 (was implicit `error` via engine
+     default — `component` had no explicit `check_severity` before).
+2. `docs/standard-library.md`:
+   - New `hardware@3` changelog bullet (item 5) per design §8.
+   - The "What's in it" lifecycle table row for `component` updated to
+     `candidate → selected / rejected / obsolete` (kept consistent with the
+     same feature; not in §8's list explicitly).
+3. `changelog.d/hardware-v3-rejected-status.added.md` added.
+
+## Not touched
+No .py files (engine worker owns schema.py/build.py/lifecycle.py).
+No new tests (engine worker owns tests).
+
+## Verification
+- Full `python -m pytest -q`: **126 failed, 1788 passed, 9 errors** — every
+  single failure/error is the SAME root cause:
+  `refdes.model.SchemaError: types.component.check_severity must be one of
+  ['error', 'warning', 'info'], got {'candidate': 'info', ...}` raised by
+  `src/refdes/schema.py:596`. The current tree's `schema.py` does NOT yet
+  accept the mapping form — that validation/resolution is the engine worker's
+  parallel job (schema.py/build.py). No other failure reason exists behind the
+  visible tracebacks. Repo's own project pins hardware@3, hence repo-loading
+  tests fail the same way.
+- `ruff check --select E9,F`: nothing to run — no `.py` file was touched
+  (touched files are base.yaml, a .md doc, a .md changelog fragment). The
+  earlier run pointed ruff at non-Python files and is meaningless (ruff
+  parses them as Python and reports invalid-syntax).
+- No existing test asserts the bundled hardware@3 `component` enum or its
+  scalar severity; the `[candidate, selected, obsolete]` strings in
+  `tests/test_parse.py` and `tests/test_status_links.py` are local fixture
+  schemas, not the standard — no test edits needed.
+- v1/v2 standards untouched (byte-identical-when-unused holds trivially).
+
+## Status (history — resolved below)
+BLOCKED on sequencing: full suite can only pass once the engine worker's
+schema.py/build.py changes are in the tree. Awaiting orchestrator decision on
+whether to open this PR now (stacked on the engine PR) or wait for the engine
+to land on main first, merge into this branch, rerun, then open.
+
+## Unblocked (engine PR merged 2026-09-22)
+Orchestrator confirmed option (a) and merged the engine PR
+("severity-mapping", refdes-145) to main. Follow-up work, all green:
+1. `git merge origin/main` — clean.
+2. Engine PR's `test_scalar_severity_unchanged` (param over v1/2/3 x presets)
+   asserted NO type resolves to a mapping; hardware@3 component now does.
+   Adjusted to pin component@3's exact mapping while keeping scalar
+   assertions for every other type/version (intent: catch accidental
+   mappings elsewhere) — per orchestrator instruction.
+3. Regenerated the two resolved-schema oracle fixtures
+   (`tests/fixtures/hardware3_resolved.json`,
+   `hardware3_design_debate_resolved.json`) via `oracle_dump.resolved_dump`
+   (scratch script `.scratch/regenerate_hardware3_fixtures.py`) — the
+   fixtures snapshot the standard, and component now resolves to the
+   mapping + 4-choice enum.
+4. Ran `python docs-site/gen_examples.py` — regenerated the injected blocks
+   in `docs/schema-reference.md` (component scaffold choices + rejected) and
+   `docs/vocabulary.md` (component status doc + rejected); verified the diff
+   was ONLY my data change's delta.
+5. Full suite: **1939 passed, 0 failed**. `ruff check --select E9,F` on the
+   touched Python file (tests/test_check_severity_status.py): clean. No other
+   .py files touched.
+6. Pushed branch, opened PR against main, reported to refdes-2.
+
+## Orchestrator decision (2026-09-22, refdes-2)
+Option (a): **wait**. The 126 red tests are expected and correct — they prove
+the data change needs the engine worker's schema.py acceptance. Do NOT push or
+open a PR yet. Stay idle until refdes-2 pings that the engine PR
+("severity-mapping", refdes-145) has merged to main. Then:
+1. `git merge origin/main` into `ao/refdes-147/root`.
+2. Rerun the full suite (`python -m pytest -q`) to confirm green.
+3. Open the PR as a **normal PR against main** (not stacked — repo has no
+   stacked-PR precedent). `gh pr create --base main`.
+4. Report with PR URL via `ao send --session refdes-2`.
+Branch is committed at a0ec91a; nothing further to do while waiting.

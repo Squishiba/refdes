@@ -110,9 +110,13 @@ def _mapping_project(tmp_path, *, status="candidate", checks_extra="", sub=""):
 @pytest.mark.parametrize("version", [1, 2, 3])
 @pytest.mark.parametrize("presets", [[], ["design-debate"]])
 def test_scalar_severity_unchanged(tmp_path, version, presets):
-    """Resolved-schema oracle over every bundled standard: with no project
-    using the mapping form, every resolved check_severity is still the same
-    scalar it was before the mapping existed (§4.6)."""
+    """Resolved-schema oracle over every bundled standard: every resolved
+    check_severity is the same scalar it was before the mapping existed (§4.6)
+    -- with one deliberate exception. hardware@3's `component` ships the status
+    mapping `{candidate: info, selected: error, rejected: info, obsolete: info}`
+    (candidate-parts.md §5.4), pinned exactly here; everything else must stay a
+    scalar. Any other type resolving to a mapping is an accidental one this
+    test exists to catch."""
     preset_yaml = "".join(f"    - {p}\n" for p in presets)
     write_project_config(
         tmp_path,
@@ -122,6 +126,15 @@ def test_scalar_severity_unchanged(tmp_path, version, presets):
     )
     project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
     for name, spec in project.types.items():
+        if version == 3 and name == "component":
+            assert spec.check_severity == {
+                "candidate": "info",
+                "selected": "error",
+                "rejected": "info",
+                "obsolete": "info",
+            }, "hardware@3 component is the one known mapping (candidate-parts.md §5.4)"
+            assert set(spec.check_severity.values()) <= set(DIAGNOSTIC_LEVELS)
+            continue
         assert not isinstance(spec.check_severity, dict), (
             f"hardware@{version} type {name} resolved to a mapping"
         )

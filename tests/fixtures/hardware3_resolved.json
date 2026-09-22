@@ -92,15 +92,15 @@
     }
    },
    "links": {
+    "part_of": [
+     "group"
+    ],
     "refines": [
      "requirement"
     ],
     "governed_by": [
      "requirement",
      "bound"
-    ],
-    "part_of": [
-     "group"
     ]
    },
    "preview": [
@@ -221,15 +221,15 @@
     }
    },
    "links": {
+    "part_of": [
+     "group"
+    ],
     "refines": [
      "bound"
     ],
     "derives_from": [
      "requirement",
      "bound"
-    ],
-    "part_of": [
-     "group"
     ]
    },
    "preview": [
@@ -386,6 +386,9 @@
     }
    },
    "links": {
+    "part_of": [
+     "group"
+    ],
     "satisfies": [
      "requirement",
      "bound"
@@ -402,9 +405,6 @@
     "blocked_by": [],
     "recorded_by": [
      "log"
-    ],
-    "part_of": [
-     "group"
     ]
    },
    "preview": [
@@ -507,12 +507,12 @@
     }
    },
    "links": {
+    "part_of": [
+     "group"
+    ],
     "verifies": [
      "requirement",
      "bound"
-    ],
-    "part_of": [
-     "group"
     ]
    },
    "preview": [
@@ -635,11 +635,12 @@
      "choices": [
       "candidate",
       "selected",
+      "rejected",
       "obsolete"
      ],
      "default": "candidate",
      "required_when": null,
-     "doc": "Where the part stands in this design. Only a selected component counts as settled and closes coverage on what it satisfies."
+     "doc": "Where the part stands in this design. Only a selected component counts as settled and closes coverage on what it satisfies; a rejected one was considered and not chosen, and never satisfies."
     },
     "rationale": {
      "name": "rationale",
@@ -665,6 +666,9 @@
     }
    },
    "links": {
+    "part_of": [
+     "group"
+    ],
     "satisfies": [
      "requirement",
      "bound"
@@ -677,9 +681,6 @@
     ],
     "alternate": [
      "component"
-    ],
-    "part_of": [
-     "group"
     ]
    },
    "preview": [
@@ -693,7 +694,12 @@
    "satisfying_statuses": [
     "selected"
    ],
-   "check_severity": "error",
+   "check_severity": {
+    "candidate": "info",
+    "selected": "error",
+    "rejected": "info",
+    "obsolete": "info"
+   },
    "coverable": null,
    "coverable_statuses": null,
    "verifying_statuses": null,

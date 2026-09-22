@@ -32,7 +32,7 @@ the standard link vocabulary:
 | `bound` | `BND` | `draft` → `active` → `retired` | A machine-checkable limit, compared against a `calc` result |
 | `decision` | `DEC` | `proposed` → `in_progress` → `accepted` / `on_hold` / `rejected` / `superseded` | A settled choice, with options considered |
 | `test` | `TST` | `planned` → `passing` / `failing` / `blocked` | Proof a requirement or bound holds |
-| `component` | `CMP` | `candidate` → `selected` / `obsolete` | A specific part realizing a decision |
+| `component` | `CMP` | `candidate` → `selected` / `rejected` / `obsolete` | A specific part realizing a decision |
 | `log` | `LOG` | — (append-only) | The dated, unedited record of how the design got here |
 
 And fifteen link verbs, each declared on the type that would naturally author
@@ -470,6 +470,20 @@ nothing.
    pinned at `hardware@3` that still writes `equivalent:` gets a build error
    naming `drop_in` — an unknown link verb is otherwise only a warning, and a
    dropped traceability edge is exactly the thing that must not pass quietly.
+
+5. **`component.status` gains `rejected`, and `component.check_severity`
+   becomes status-dependent.** The component enum is now
+   `[candidate, selected, rejected, obsolete]`: a part this design considered
+   and did not choose is recorded as `rejected`, which is deliberately not
+   `obsolete` — "we did not pick it" is history, while "we picked it and the
+   manufacturer discontinued it" is a supply-chain alert, and a `rejected`
+   part never satisfies coverage (`satisfying_statuses` is still `[selected]`).
+   In the same release, `component.check_severity` ships as a mapping keyed by
+   status — `{ candidate: info, selected: error, rejected: info, obsolete: info }`
+   — so a rejected part failing a criterion is recorded as the reason it was
+   rejected (a finding, not a build-blocking error) while a selected part
+   failing one is a broken design. A project that wants `error` everywhere
+   writes `check_severity: error` in its overlay, exactly as before.
 
 `hardware@1` and `@2` resolve exactly as they always have — including the
 verb, which those two still spell `equivalent`.

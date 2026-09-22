@@ -92,7 +92,7 @@ A part the design uses. A selected component closes coverage on what it satisfie
 | `title` | What the component is, in one line. Required. | text | yes |
 | `part_number` | The manufacturer part number. Indexed into the parts page, alongside part numbers cited inside citations entries. | text | no |
 | `refdes` | Reference designators on the board — U14, R7 — where this part is placed. Kept out of the content hash. | list | no |
-| `status` | Where the part stands in this design. Only a selected component counts as settled and closes coverage on what it satisfies. | enum | no |
+| `status` | Where the part stands in this design. Only a selected component counts as settled and closes coverage on what it satisfies; a rejected one was considered and not chosen, and never satisfies. | enum | no |
 | `rationale` | Why this part, or — when an alternate link is present — what makes that alternate not a drop-in. Required whenever an alternate link exists. | text | no |
 | `checks` | Numeric checks: each entry compares a value from this item's calc block against a bound's limit, so a component can demonstrate compliance with a bound directly. | checks | no |
 

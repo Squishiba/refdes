@@ -618,7 +618,7 @@ type: component
 title:  # required -- text
 # part_number:  # text
 # refdes:  # list
-status: candidate  # choices: candidate, selected, obsolete
+status: candidate  # choices: candidate, selected, rejected, obsolete
 # rationale:  # text; required when it has a link under 'alternate'
 # checks:  # checks
 # part_of: []  # target: group
