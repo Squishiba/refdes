@@ -40,6 +40,28 @@ reviews and lands, same as the living-notes phases).
   'refdes'`), so behavior claims are source-read, not executed. The doc says
   so explicitly in §2.
 
+## 2026-09-23 pass — decisions recorded, PR
+
+Jared answered all five §7 questions (recorded in the doc as decided,
+2026-09-23): D1 pane-only (site publication deferred, not implied); scope any
+item; coupling BOTH (resolves via §7.5 — workbench is a mode of the item's
+own /preview/ page, one implementation serves VS Code-side and /edit/-side
+use; explicit note added under §3); ~1 s rebuild fine for v1 with cheap wins
+folded into W1–W3 opportunistically (W4 reframed accordingly; no speculative
+optimizations); URL surface = `?workbench=1`-style mode, not a new route.
+Status line now "Architecture decided (2026-09-23)".
+
+Merge check: `git fetch origin` — `origin/main` is still `7544a38`, the exact
+commit this branch was cut from; the merge is a no-op, no drift. All quoted
+citations in §2 re-verified against source after the fetch (cli.py serve
+description, filters.py ~1 s baseline note, api.py full-rebuild-after-save
+comment, serve/__init__.py toolbar line, server.py Poller 1 s, preview.py
+generation swap, living-notes quotes) — all still present; the doc cites
+files + quoted strings, not line numbers, so nothing needed correcting.
+
+Tests: `python -m pytest -q` → 2011 passed (176 s). No implementation of
+W1–W4 started, per instruction.
+
 ## Difficulties
 
 None material. `cd` is shell-whitelisted-out in this session; worked around by

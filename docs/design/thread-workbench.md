@@ -1,6 +1,6 @@
-Status: **Proposal — draft for review.** Not ratified; nothing here is a
-decision of record. Sections §7 lists the questions Jared must answer before
-any of it moves.
+Status: **Architecture decided (2026-09-23)** — Jared answered all five
+questions in §7; each is recorded below as decided, not an option under
+continued review. Implementation (W1–W4, §8) has not started.
 
 # Thread workbench: a live authoring pane for working notes
 
@@ -96,6 +96,14 @@ Three clauses, in order of priority:
    diverge on meaning, the pane becomes a second compiler wearing a viewer's
    clothes, and the edit → build → view chasm reopens in a new costume.
 
+**One pane, both couplings (decided 2026-09-23, §7.3 × §7.5).** Because the
+workbench is a *mode of the item's own `/preview/` page* — a URL that exists
+independently of `/edit/` — it is inherently usable standing alone next to an
+external editor (Jared writes prose in VS Code today), and equally reachable
+as a link from `/edit/` once that is the primary authoring surface. There is
+no standalone-vs-integrated fork to build: one implementation serves both
+couplings, and neither editor is a dependency of the other.
+
 ## 4. Invariants
 
 - **Rendering never captures.** Living-notes: "no snapshot is created by
@@ -116,7 +124,7 @@ Candidates, each an overlay per §3.3:
 
 | # | Decoration | Source of truth | Notes |
 |---|---|---|---|
-| D1 | **Calc values inline** — evaluated result rendered beside each `{{value}}`/dotted reference in prose, name as attribution | calc evaluator, already expanded to `DISPLAY-ID@key` | Needs the §7.1 syntax decision |
+| D1 | **Calc values inline** — evaluated result rendered beside each `{{value}}`/dotted reference in prose, name as attribution | calc evaluator, already expanded to `DISPLAY-ID@key` | Decided §7.1: pane-only overlay; publishing live numbers on the site is a separate, later decision |
 | D2 | **Image provenance** — resolved source path + content hash on hover; ambiguity/absence as an inline squiggle at the `![]()` | the asset-search the build already runs | Turns the two image failure modes into author-time signals |
 | D3 | **Inline diagnostics** — build diagnostics for this entry (unit errors, dead links, image ambiguity) mapped to file:line and rendered in place | the build's diagnostic list, already file:line-shaped | The single highest-friction reducer |
 | D4 | **Thread panel pinned** — the folded "currently concludes" panel (threads.md Phase 3b) fixed at the top of the pane, fork warnings prominent | `chains.py` fold, already built and memoized | This is the "see what's actually going on" content mid-thread |
@@ -134,28 +142,34 @@ plus the invariants (§4) are what keep it from sliding into a second editor
 runtime to maintain. Every decoration must answer to: *which existing Python
 mechanism produces this, and how does it strip at publish?*
 
-## 7. Open questions (for Jared)
+## 7. Questions — decided (Jared, 2026-09-23)
 
-1. **Inline values in prose: pane-only, or first-class?** Is D1 an overlay the
-   site never shows, or does `{{value REF.key}}` in prose also render the
-   *number* (name as hover) on the published site? Pane-only is cheaper and
-   diff-stable; first-class makes published prose self-updating but puts live
-   numbers into every downstream diff. Recommendation: decide separately from
-   this doc; D1 ships pane-only either way.
-2. **Scope: thread tips only, or any item?** Recommendation: any item — the
-   mechanism is item-scoped; tips are just the killer app. A `log` head, a
-   `decision` under revision, and a part record all benefit from D2/D3.
-3. **Coupling to an editor.** Side-by-side with `/edit/` in the browser, or a
-   standalone pane meant to sit next to an external editor (VS Code extension
-   consuming the serve API)? The token-gated API already exists; the VS Code
-   extension (`editors/vscode/`) is the natural second client.
-4. **Latency budget.** Is the ~1 s full rebuild (filters.py note) acceptable
-   for v1, with incremental/single-item rendering deferred to W4?
-   Recommendation: yes — measure before optimizing.
-5. **Does the pane need its own URL surface** (`/workbench/<ref>`) or is it a
-   mode of the existing `/preview/` page for that item? Recommendation: a mode
-   of the item's preview page — one URL per item, `?workbench=1` or a toggle —
-   so D1–D5 decorate the real page rather than a parallel template.
+1. **Inline values in prose: pane-only, or first-class?**
+   **Decided: pane-only for now.** D1 is an overlay the site never shows.
+   Publishing live numbers to the rendered site is deferred as a separate,
+   later decision — it is not implied or pre-committed by anything here.
+2. **Scope: thread tips only, or any item?**
+   **Decided: any item.** The mechanism is item-scoped; thread tips are the
+   killer app, not the boundary. A `log` head, a `decision` under revision,
+   and a part record all benefit from D2/D3.
+3. **Coupling to an editor.**
+   **Decided: both.** Jared writes prose directly in VS Code today (that is
+   what exists), and intends to author through the browser `/edit/` UI once it
+   is built out; the pane must be usable alongside either. This resolves via
+   §7.5 rather than forking: the workbench is a mode of the item's own
+   `/preview/` page with its own URL, independent of `/edit/` — standalone
+   next to an external editor today, linkable from `/edit/` later, one
+   implementation either way. See the note under §3.
+4. **Latency budget.**
+   **Decided: ~1 s full rebuild is fine for v1**, but cheap, obvious wins are
+   picked up opportunistically *during* W1–W3, not parked in a deferred
+   phase — see the reframed W4 in §8. Explicit constraint: do not invent
+   speculative optimizations; if nothing cheap is visible while implementing
+   W1–W3, say so plainly rather than manufacturing a change.
+5. **URL surface.**
+   **Decided: a mode of the existing `/preview/` page** for the item — one URL
+   per item, `?workbench=1` or a toggle — not a new `/workbench/<ref>` route.
+   D1–D5 decorate the real page, not a parallel template.
 
 ## 8. Phasing
 
@@ -164,10 +178,14 @@ mechanism produces this, and how does it strip at publish?*
   auto-reload on revision change. No decorations. Mostly glue.
 - **W2 — squiggles.** D3 diagnostics mapped into the page + D2 image
   provenance. Both read data the build already produces.
-- **W3 — values.** D1 inline calc values (after the §7.1 decision) and a
+- **W3 — values.** D1 inline calc values (pane-only per §7.1) and a
   show-values toggle on calc tables.
-- **W4 — speed (optional).** Single-item / incremental rebuild if W1–W3 feel
-  the ~1 s ceiling.
+- **W4 — speed (folded in, not deferred-as-a-phase).** Per §7.4: cheap,
+  obvious wins — e.g. avoiding redundant work already visible in the build
+  path — get folded into W1–W3 as they are encountered. A dedicated
+  incremental/single-item rebuild effort stays deferred unless the ~1 s
+  ceiling is actually felt. No speculative optimizations: if nothing cheap is
+  visible while implementing W1–W3, that is the finding, stated plainly.
 
 Each phase is independently shippable and independently verifiable against the
 contract: for every rendered fact, name the Python mechanism that produced it.
