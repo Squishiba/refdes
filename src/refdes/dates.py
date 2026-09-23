@@ -46,6 +46,22 @@ def _value_pattern(date_format: str) -> re.Pattern[str]:
     )
 
 
+def format_date(value: date, date_format: str) -> str:
+    """Render one calendar date in the project's configured format -- the
+    write-side counterpart of `parse_date`, so a date the tool creates (a new
+    log entry's `date:`, say) is spelled the way the project spells dates and
+    reparses as the same day. The format is validated first, so this can only
+    ever produce what `parse_date` accepts."""
+    validated = validate_format(date_format)
+    first, separator, second, third = _FORMAT_RE.fullmatch(validated).groups()  # type: ignore[union-attr]
+    parts = {
+        "YYYY": f"{value.year:04d}",
+        "MM": f"{value.month:02d}",
+        "DD": f"{value.day:02d}",
+    }
+    return separator.join((parts[first], parts[second], parts[third]))
+
+
 def parse_date(value: object, date_format: str) -> date:
     """Parse one strict date, accepting ``-``, ``/``, or ``.`` separators."""
     match = _value_pattern(date_format).fullmatch(str(value))

@@ -497,3 +497,65 @@ def test_prefix_mismatch_is_a_nonblocking_warning_in_check_output(tmp_path, caps
     assert status == 0
     assert "WARNING items/r.yaml:" in output
     assert "id 'CNA-001' does not match this item's prefix 'CAN'" in output
+
+
+# ------------------------------------------------- pure planning (Slice 3)
+
+PLAN_SCHEMA = (
+    "site: { title: T, out: _site }\n"
+    "id: { width: 3 }\n"
+    "types:\n"
+    "  requirement: { prefix: REQ, fields: { text: { type: text, required: true } } }\n"
+)
+
+
+@pytest.fixture
+def plan_project(tmp_path):
+    write_project_config(tmp_path, PLAN_SCHEMA)
+    items = tmp_path / "items"
+    items.mkdir()
+    (items / "r.yaml").write_text(
+        "defaults: { type: requirement }\n"
+        "items:\n"
+        "  - id: REQ-001\n"
+        "    text: One.\n",
+        encoding="utf-8",
+    )
+    project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
+    parse.load_items(project, require_ids=False)
+    return tmp_path, project
+
+
+def test_plan_new_id_previews_next_free_and_touches_nothing(plan_project):
+    """The editor previews an id before the author saves; a preview must not
+    reserve anything (docs/design/browser-editor.md, Slice 3)."""
+    root, project = plan_project
+    ledger = root / ".refdes" / "ids.yaml"
+    before = (root / "items" / "r.yaml").read_bytes()
+
+    new_id, reason = ids.plan_new_id(project, "requirement")
+    assert reason is None and new_id == "REQ-002"
+    # previewing twice is idempotent and writes no ledger, no item file
+    again, _ = ids.plan_new_id(project, "requirement")
+    assert again == "REQ-002"
+    assert not ledger.exists()
+    assert (root / "items" / "r.yaml").read_bytes() == before
+
+
+def test_plan_new_id_explicit_override_is_honoured_or_refused(plan_project):
+    _root, project = plan_project
+    assert ids.plan_new_id(project, "requirement", explicit_id="REQ-042") == ("REQ-042", None)
+    # a live id, a malformed id, and another type's prefix are all refused
+    for bad in ("REQ-001", "not-an-id", "DEC-042"):
+        new_id, reason = ids.plan_new_id(project, "requirement", explicit_id=bad)
+        assert new_id is None and reason
+
+
+def test_reserve_id_burns_so_the_next_plan_moves_on(plan_project):
+    root, project = plan_project
+    ledger = root / ".refdes" / "ids.yaml"
+    ids.reserve_id(project, "REQ-002")
+    assert ledger.exists()
+    assert "REQ-002" in ledger.read_text(encoding="utf-8")
+    new_id, _ = ids.plan_new_id(project, "requirement")
+    assert new_id == "REQ-003"
