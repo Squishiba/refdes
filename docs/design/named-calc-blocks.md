@@ -1,14 +1,15 @@
-Status: proposed (drafted 2026-09-23) — a design spec, not a decision. Every
-open question in §11 carries a recommendation, and each recommendation is the
-default if Jared lets it stand unanswered. §12 records what was considered and
-rejected. This spec deliberately *removes* one thing people expect from a
-"named block" feature (§4): the research in §2 says the value-reference half is
+Status: **Architecture decided (2026-09-24)** — all ten §11 questions
+answered; §11.5's `id=` key change is the one place the doc's own
+recommendation was NOT taken as written (`name=` → `id=`), everything else
+confirmed as recommended. Implementation not started. §12 records what was
+considered and rejected. This spec deliberately *removes* one thing people
+expect from a "named block" feature (§4): the research in §2 says the value-reference half is
 already solved, and adding a second spelling for it would be the second
 representation of one fact this project keeps refusing.
 
 # Named calc blocks: naming a calculation, and referring to the whole of it
 
-## Decision (recap, as proposed)
+## Decision (recap, as decided 2026-09-24)
 
 A calc block's **values** already have names, and any one of them is already
 referenceable from another item (`DEC-PWR-001.V_in`, `docs/math.md`
@@ -19,7 +20,7 @@ diagnostic that wants to say *which* calculation.
 
 Four changes, and the second one is a non-change on purpose:
 
-- **(A) A name on the fence line** (§3) — ```` ```calc name="losses" ````. An
+- **(A) A name on the fence line** (§3) — ```` ```calc id="losses" ````. An
   attribute in the fence's info string, using the same `key="value"`
   microsyntax `{{index}}` and the image `{width=… caption="…"}` suffix already
   use. Opt-in: an unnamed block is legal, renders byte-for-byte as today, and
@@ -101,7 +102,7 @@ guess:
 | If one item has two blocks that assign the same name, does the later one silently shadow the earlier? | **No.** It is a hard build error, already worded the house way: `'X' is assigned twice in this item -- first at line 41, again at line 63. A name can only be assigned once per item (blocks share one item-wide scope); rename one of them, e.g. 'X' -> 'X_2'.` `origins` is threaded across every block of the item exactly like `env`. | `calc.evaluate_block`, `build._run_item_calcs` (`origins` comment) |
 | Does a block have any identity — a name, a number, anything addressable? | **No.** `extract_blocks_with_lines` returns `(text, line-offset)` pairs; `render_bodies` addresses them by list index for placeholder swapping; nothing in the author-facing grammar can name one. | `calc.extract_blocks_with_lines`, `build.render_bodies` |
 | If something goes wrong in the second block, is it locatable? | **By line number only.** `start_line = item.body_line + offset`, so every `CalcOutcome.line` and every diagnostic is absolute. Correct, and not quotable. | `build._run_item_calcs` |
-| Is text after ```` ```calc ```` on the fence line legal? | **Yes, and silently ignored.** `CALC_BLOCK_RE` is `` ^```calc[^\n]*\n(.*?)^```$ `` — everything from `calc` to the newline is matched and thrown away. ```` ```calc name=losses ````, ```` ```calc frobnicate ````, ```` ```calc because I felt like it ```` all parse today and mean nothing. | `calc.CALC_BLOCK_RE` |
+| Is text after ```` ```calc ```` on the fence line legal? | **Yes, and silently ignored.** `CALC_BLOCK_RE` is `` ^```calc[^\n]*\n(.*?)^```$ `` — everything from `calc` to the newline is matched and thrown away. ```` ```calc id=losses ````, ```` ```calc frobnicate ````, ```` ```calc because I felt like it ```` all parse today and mean nothing. | `calc.CALC_BLOCK_RE` |
 
 Two honest corrections to the brief this spec was written from:
 
@@ -113,8 +114,8 @@ Two honest corrections to the brief this spec was written from:
 - **There *is* a silent-acceptance gap, and it is on the fence line.** Any text
   after ```` ```calc ```` is discarded today. That is precisely the shape of
   quiet failure this project treats as a bug: an author writes
-  ```` ```calc name=losses ```` (single quotes missing, `naem=` misspelled, a
-  trailing comment), the build says nothing, and the name they meant to give
+  ```` ```calc id=losses ```` (quotes missing, `name=` left over from an
+  earlier draft of this spec, a trailing comment), the build says nothing, and the name they meant to give
   the block simply does not exist. §3.4 turns that silence into a validated
   attribute, and that is a real gap this proposal closes.
 
@@ -125,7 +126,7 @@ Two honest corrections to the brief this spec was written from:
 ### 3.1 Syntax
 
 ````markdown
-```calc name="losses"
+```calc id="losses"
 P_out  = V_out * I_load | W
 P_diss = P_out * (1/eff - 1) | W
 ```
@@ -168,7 +169,7 @@ to survive markdown paragraph splitting between the directive and its block.
 
 ```
 calc-fence  = "```calc" [ 1*WSP attribute *(" " attribute) ] EOL
-attribute   = "name=" dquote name dquote
+attribute   = "id=" dquote name dquote
 name        = lowercase-letter [ *( lowercase-letter | digit | "_" | "-" ) ]
 ```
 
@@ -180,13 +181,22 @@ name        = lowercase-letter [ *( lowercase-letter | digit | "_" | "-" ) ]
   pasted where a value name belongs and look right. It is a naming convention
   enforced by a build error, not a scoping trick — block names and value names
   live in different namespaces regardless (§4.2).
-- **Quoted value**, `name="losses"`, exactly like `caption="…"` and
+- **The key is `id=`, not `name=`** (decided, §11.5). The instinct behind the
+  lowercase-hyphen value — a block's identifier should look like the other
+  referenceable-thing identifiers in this project — governs the *key's*
+  spelling too, not just the value's shape: a citation carries
+  `id: mp1584-ds`, a figure carries `id="fig-curve"`, and now so does a calc
+  block. Jared's framing: *"the tangential idea here is to make calc blocks
+  behave like items do. Or at least, treat them the same, to the point that
+  it's intuitive using both because the process for one carries to the
+  other."*
+- **Quoted value**, `id="losses"`, exactly like `caption="…"` and
   `type="decision"`. Unquoted is rejected: `width=60%` is unquoted in the image
   suffix because it is a number; every string-valued attribute in the project
   is quoted.
 - **Length**: 1–40 characters. Long enough for `thermal_headroom`, short enough
   to appear in a caption and an error message without wrapping.
-- **One attribute today.** `name` is the only one defined. An unknown attribute
+- **One attribute today.** `id` is the only one defined. An unknown attribute
   is an error naming the accepted set (§7), which is what makes "add more later"
   safe rather than a future ambiguity.
 
@@ -196,8 +206,9 @@ The fence line goes from "anything goes, all of it ignored" to "a grammar, or a
 build error". The errors (§7) are:
 
 - an info string that is not a valid attribute list (```` ```calc losses ```` —
-  a bare word; ```` ```calc name=losses ```` — unquoted; ```` ```calc
-  naem="losses" ```` — misspelled key);
+  a bare word; ```` ```calc id=losses ```` — unquoted; ```` ```calc
+  name="losses" ```` — the key from earlier drafts of this spec, now an
+  unknown attribute);
 - a name outside the grammar (`Losses`, `1losses`, `losses!`);
 - a duplicate name within one item.
 
@@ -534,13 +545,13 @@ assigned-twice message (`calc.py`), the cross-item reference messages
 **On the fence (build error, at the fence line):**
 
 ```
-ERROR calc fence: unknown attribute 'naem' -- a calc fence accepts
-    name="..."; write name="losses".
+ERROR calc fence: unknown attribute 'name' -- a calc fence accepts
+    id="..."; write id="losses".
 ```
 
 ```
 ERROR calc fence: 'losses' is not an attribute -- attributes are key="value";
-    write name="losses".
+    write id="losses".
 ```
 
 ```
@@ -573,7 +584,7 @@ WARNING [[DEC-PWR-001#calc:loess]]: DEC-PWR-001 has no calc block named 'loess'
 
 ```
 WARNING [[DEC-PWR-001#calc:losses]]: DEC-PWR-001 has calc blocks but none is
-    named -- add name="..." to its fence to make this link work.
+    named -- add id="..." to its fence to make this link work.
 ```
 
 **On `{{calcblock}}` (build error, `⚠` rendered in place):**
@@ -610,7 +621,7 @@ WARNING [[DEC-PWR-001#calc:losses]]: DEC-PWR-001 has calc blocks but none is
 - A named block nobody references. A name is documentation on the rendering; a
   warning here would push authors to delete the thing that makes the item
   readable in order to silence the tool.
-- A block name equal to a value name in the same item (`name="eff"` alongside
+- A block name equal to a value name in the same item (`id="eff"` alongside
   `eff = 0.93`). Different namespaces, different positions, and the `calc:`
   prefix keeps the shared fragment namespace unambiguous. It is *confusing*, so
   `docs/math.md` says "name a block for what it computes, not for what it
@@ -654,7 +665,7 @@ checks:
 
 ## Working
 
-```calc name="supply"
+```calc id="supply"
 V_in   = 12 V ± 5%      # nominal supply, 5% tolerance
 V_out  = 3.3 V
 I_load = 1.2 A
@@ -663,7 +674,7 @@ eff    = 0.93           # TPS62913 datasheet, half load
 
 The converter loses this at full load:
 
-```calc name="losses"
+```calc id="losses"
 P_out  = V_out * I_load | W
 P_diss = P_out * (1/eff - 1) | W
 A_board = 1.4 inch * 0.9 inch   # area allocated to the power stage
@@ -759,11 +770,11 @@ other, because there is one evaluator.
 
 | Test | Pins |
 |---|---|
-| `test_named_fence_parses` | ```` ```calc name="losses" ```` evaluates its lines exactly as an unnamed fence does; the name reaches `CalcLine.block`. |
+| `test_named_fence_parses` | ```` ```calc id="losses" ```` evaluates its lines exactly as an unnamed fence does; the name reaches `CalcLine.block`. |
 | `test_unnamed_block_html_unchanged` | An unnamed block's rendered HTML is byte-identical to today's, including an item with several unnamed blocks. |
 | `test_named_block_renders_caption_and_anchor` | `id="calc-losses"` and a caption carrying the name. |
 | `test_fence_attribute_errors` | The four §7 fence messages — unknown key, bare word, unquoted value, bad name charset — message for message. |
-| `test_duplicate_block_name_in_item_errors` | Two `name="losses"` in one item → one error naming both lines and suggesting a rename. |
+| `test_duplicate_block_name_in_item_errors` | Two `id="losses"` in one item → one error naming both lines and suggesting a rename. |
 | `test_same_block_name_in_two_items_is_fine` | Per-item uniqueness only (§11.2). |
 | `test_scope_unchanged_by_naming` | A value assigned in block `supply` is used by block `losses`; and a name reused across the two blocks is still the assigned-twice error. |
 | `test_block_qualified_reference_errors` | `DEC-PWR-001.losses.P_diss` → the §7 error naming `DEC-PWR-001.P_diss`; the plain form still resolves. |
@@ -775,7 +786,7 @@ other, because there is one evaluator.
 | Test | Pins |
 |---|---|
 | `test_hash_format_stays_4` | `build.HASH_FORMAT == 4`; no new payload key for an item with named blocks and no references. |
-| `test_naming_moves_owner_hash_only` | Adding `name="losses"` changes the owner's `content_hash` and no other item's. |
+| `test_naming_moves_owner_hash_only` | Adding `id="losses"` changes the owner's `content_hash` and no other item's. |
 | `test_rename_block_leaves_dependents_alone` | Renaming a block does not move a dependent item's hash or its `calc_reference_snapshot`. |
 | `test_calc_hash_unaffected_by_fence` | `calc_hash_for` is identical before and after adding/renaming a fence name, while `content_hash` differs. |
 
@@ -801,19 +812,22 @@ other, because there is one evaluator.
 
 ---
 
-## 11. Open questions for Jared
+## 11. Questions — decided (Jared, 2026-09-24)
 
-Each carries a recommendation; unanswered means the recommendation stands.
+All ten were answered on 2026-09-24; each is recorded below as decided, not an
+option under continued review. Nine were confirmed as recommended; §11.5 is
+the one the doc's own recommendation lost.
 
-1. **Do unnamed blocks stay legal?** — **Recommended: yes, naming is opt-in.**
+1. **Do unnamed blocks stay legal?** — **Decided: yes, naming is opt-in —
+   confirmed.**
    Most items have one block and nothing to point at it; requiring a name would
    be mandatory ceremony on 100% of items to serve the few that need it, and it
    would change the rendered HTML of every existing item for no reason (§3.5
    pins the byte-identical case). A name is needed exactly when something —
    prose, a page, a second block — wants to say which one.
 
-2. **Per-item or per-project block-name uniqueness?** — **Recommended:
-   per-item.** A block's whole scope is its item: `env` and `origins` are
+2. **Per-item or per-project block-name uniqueness?** — **Decided: per-item
+   — confirmed.** A block's whole scope is its item: `env` and `origins` are
    item-wide, and every cross-item reference already names the item first, so a
    project-wide uniqueness rule buys no disambiguation. It would cost real
    pain: renaming a block in one item would be constrained by what someone named
@@ -823,44 +837,65 @@ Each carries a recommendation; unanswered means the recommendation stands.
    ambient context" trap finding 36 §1 names.
 
 3. **Is rejecting `ITEM.block.NAME` right, or do you want the qualified spelling
-   available anyway?** — **Recommended: reject it, with an error that names the
-   plain form** (§4.2). This is the one place this spec says "no" to the brief's
+   available anyway?** — **Decided: reject it, with an error that names the
+   plain form — confirmed** (§4.2). This is the one place this spec says "no" to the brief's
    "reference any part of it", because the research says that half already works
    and is already unambiguous. If you want it anyway, the cost is §4.2's four
    items, in particular that it makes the one-name-per-item rule optional.
 
 4. **Is the fence attribute the right home, or do you want a header line inside
-   the block?** — **Recommended: the fence** (§3.2). Inside-the-block headers
+   the block?** — **Decided: the fence info string — the ```` ```calc ````
+   opening line itself, not a header inside the block — confirmed** (§3.2). Inside-the-block headers
    touch every line-level parser in `calc.py` and land in the rendered row count;
    the info string is the one place the existing regex already skips.
 
-5. **`name="losses"` or a bare word?** — **Recommended: `name="…"`.** The key
-   makes the next attribute additive instead of ambiguous, and matches
-   `caption="…"` / `type="decision"`.
+5. **`name="losses"` or a bare word?** — **Decided: a key, not a bare word —
+   and the key is renamed from `name=` to `id=`.** This is the one question
+   answered against the doc's written recommendation. Jared's rationale:
+   *"the tangential idea here is to make calc blocks behave like items do. Or
+   at least, treat them the same, to the point that it's intuitive using both
+   because the process for one carries to the other."* The §3.3 precedent —
+   block identifiers look like the other referenceable-thing identifiers here
+   (citation `id: mp1584-ds`, figure `id="fig-curve"`) — now governs the
+   key's spelling, not just the value's lowercase-hyphen shape. The rest of
+   the answer stands: a quoted `key="value"` attribute, matching
+   `caption="…"` / `type="decision"`. `#calc:losses` is unaffected — that
+   prefix was never `#calc:name`. And this rename touches only the
+   block-level attribute: a calc value's own name (`P_diss`, `V_in`) is
+   unchanged everywhere, including all of §4.
 
-6. **Is bulk import (`(b)`) really off the table?** — **Recommended: yes**
-   (§5.1(b)). If a project genuinely needs "the same six values, here too", the
-   honest version of that is six dotted references, or a third item both read
-   from, or a cited CSV both read with `source()`.
+6. **Is bulk import (`(b)`) really off the table?** — **Decided: rejected,
+   off the table — confirmed.** Jared asked why, and the §5.1(b) reasoning
+   was given in full and accepted as sufficient: an upstream author could
+   inject or collide names in a downstream item's namespace; it is the
+   `docs/design/calc-sources.md` §2 completeness trap in miniature; it would
+   be the first wildcard anywhere in the calc language; it makes the
+   `calc_refs` hash payload an unstable *set* rather than a list of fixed
+   references; and it saves little, since six values is six lines that each
+   document the dependency. If a project genuinely needs "the same six
+   values, here too", the honest version of that is six dotted references, or
+   a third item both read from, or a cited CSV both read with `source()`.
+   §5.1(b) already states all of this, unchanged.
 
 7. **Does `{{calcblock}}` need a `board=`/`tag=`-style narrowing, or a way to
-   render *all* of an item's named blocks?** — **Recommended: neither.** One
-   item, one named block, one directive; two blocks is two directives (§5.4).
+   render *all* of an item's named blocks?** — **Decided: neither — taken
+   as-is.** One item, one named block, one directive; two blocks is two
+   directives (§5.4).
 
 8. **Should a block name be required to differ from every value name in its
-   item?** — **Recommended: no** (§7, last block). They are different namespaces
+   item?** — **Decided: no — taken as-is** (§7, last block). They are different namespaces
    and the `calc:` prefix keeps the shared one unambiguous; a build error for a
    legal, unambiguous thing is not how this project spells a style preference.
 
-9. **Should `#calc:` misses be warnings or errors?** — **Recommended: warnings**,
-   matching `[[…]]` and `#field` misses (`docs/links.md`): a broken prose link
-   must not fail a build. `{{calcblock}}` misses *are* errors, matching every
-   other block's parameter validation.
+9. **Should `#calc:` misses be warnings or errors?** — **Decided: warnings —
+   confirmed**, matching `[[…]]` and `#field` misses (`docs/links.md`): a
+   broken prose link must not fail a build. `{{calcblock}}` misses *are*
+   errors, matching every other block's parameter validation.
 
-10. **Does the name render as a caption on the item page?** — **Recommended:
-    yes**, and only for named blocks (§3.5), because the caption is what makes
-    the name visible to a reader who never sees the source — which is the point
-    of naming it at all.
+10. **Does the name render as a caption on the item page?** — **Decided:
+    yes, and only for named blocks — taken as-is** (§3.5), because the caption
+    is what makes the name visible to a reader who never sees the source —
+    which is the point of naming it at all.
 
 ---
 
