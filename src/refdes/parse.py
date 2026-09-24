@@ -641,8 +641,10 @@ def parse_markdown_file(project: Project, path: str) -> list[Item]:
     file, the Markdown spelling of a YAML list file's `- section: <type>` entry.
     """
     rel = _relpath(project, path)
-    with open(path, "r", encoding="utf-8") as fh:
-        text = fh.read()
+    # read_source, not open(): the in-memory overlay must be visible here too
+    # -- a candidate edit to a Markdown file (or a file a creation would add)
+    # is exactly what the overlay load is meant to show (loader.load_readonly).
+    text = read_source(project, path)
     lines = text.split("\n")
 
     blocks, errors = md_front_matter_blocks(lines)
@@ -799,7 +801,10 @@ def read_source(project: Project, path: str) -> str:
     path, the file on disk otherwise (text mode, so CRLF reads as LF)."""
     overlaid = project.source_overlay.get(overlay_key(path))
     if overlaid is not None:
-        return overlaid
+        # The same line-ending normalization text mode gives the disk read:
+        # a CRLF candidate's overlay must parse exactly like the CRLF file
+        # it would become on disk.
+        return overlaid.replace("\r\n", "\n")
     with open(path, "r", encoding="utf-8") as fh:
         return fh.read()
 

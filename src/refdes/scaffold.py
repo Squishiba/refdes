@@ -179,6 +179,23 @@ def new_item_text(type_name: str, spec: ItemType) -> str:
     return "\n".join(lines)
 
 
+def initial_field_values(spec: ItemType, values: dict) -> dict:
+    """The field set a created item starts with -- the identical set
+    `new_item_text` scaffolds, resolved to values: an author-supplied value
+    wins, a field with a declared `default:` falls back to that default (the
+    same rule `_item_field_line` writes the default into a skeleton), and
+    anything else is left out for the schema's own required/optional checks
+    to judge. Shared so the editor's create path and `refdes new` can never
+    disagree about which fields an item of this type starts with."""
+    out: dict = {}
+    for fname, fspec in spec.fields.items():
+        if fname in values:
+            out[fname] = values[fname]
+        elif fspec.default is not None:
+            out[fname] = fspec.default
+    return out
+
+
 def new_list_text(type_name: str, spec: ItemType) -> str:
     """Scaffold a list file for `type_name` for `refdes new <type> --list`:
     a `defaults:` block carrying the items' shared type and the status

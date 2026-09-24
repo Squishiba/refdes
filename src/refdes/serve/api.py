@@ -34,10 +34,16 @@ def handle(app, method: str, path: str, query: dict[str, list[str]], body) -> tu
         if method == "POST":
             return _apply_edit(app, ref, body)
         return 405, {"error": "method not allowed"}
+    if path == "/api/create/schema" and method in ("GET", "HEAD"):
+        return _create_schema(app)
+    if path == "/api/create/preview" and method in ("GET", "HEAD"):
+        return _create_preview(app, query)
+    if path == "/api/items/create" and method == "POST":
+        return _create_item(app, body)
     if path.startswith("/api/item/") and method in ("GET", "HEAD"):
         ref = urllib.parse.unquote(path[len("/api/item/"):])
         return _item_view(app, ref)
-    if path in ("/api/items", ) or path.startswith("/api/item/"):
+    if path in ("/api/items", "/api/items/create") or path.startswith("/api/item/"):
         return 405, {"error": "method not allowed"}
     return 404, {"error": "not found"}
 
@@ -101,8 +107,9 @@ def diag_dict(d: Diagnostic) -> dict:
 
 # Field types whose values are collections: the patcher replaces scalar spans
 # only, so these are read-only in the form (docs/design/browser-editor.md,
-# "Editing fields" -- links have their own picker, a later slice).
-NON_SCALAR_FIELD_TYPES = frozenset({"list", "checks", "citations", "options"})
+# "Editing fields" -- links have their own picker, a later slice). The create
+# path enforces the same rule from the one constant in serve.edit.
+NON_SCALAR_FIELD_TYPES = edit_mod.NON_SCALAR_FIELD_TYPES
 
 
 def _value_type(value) -> str:
@@ -332,6 +339,134 @@ def _apply_edit(app, ref: str, body) -> tuple[int, dict]:
             "current_revision": result.current_revision,
             "current_text": result.current_text,
             "diff": result.diff,
+        }
+    if isinstance(result, edit_mod.Invalid):
+        return 422, {
+            "kind": "invalid",
+            "ok": False,
+            "message": result.message,
+            "reason": result.message,
+            "path": shown(result.path),
+            "diagnostics": [diag_dict(d) for d in result.diagnostics],
+        }
+    return 422, {
+        "kind": "refused",
+        "ok": False,
+        "message": result.message,
+        "reason": result.reason,
+        "path": shown(result.path),
+    }
+
+
+# ---------------------------------------------------------------- creation
+
+
+def _create_schema(app) -> tuple[int, dict]:
+    """What a New Item form needs, answered from the resolved schema: every
+    declared type with its prefix, whether it is append-only (the amend
+    flow), whether it declares `amends`, its fields with control-relevant
+    metadata, and the project's boards/workspaces/date_format. The client
+    interprets nothing it is not told here."""
+    project = app.state.snapshot.project
+    types = []
+    for name, spec in sorted(project.types.items()):
+        fields = {}
+        for fname, fspec in spec.fields.items():
+            fields[fname] = {
+                "type": fspec.type,
+                "required": bool(fspec.required),
+                "choices": list(fspec.choices) if fspec.type == "enum" else None,
+                "default": fspec.default,
+                "creatable": fspec.type not in NON_SCALAR_FIELD_TYPES,
+            }
+        types.append(
+            {
+                "name": name,
+                "prefix": spec.prefix,
+                "label": spec.label,
+                "append_only": bool(spec.append_only),
+                "amends": "amends" in spec.links,
+                "fields": fields,
+            }
+        )
+    return 200, {
+        "types": types,
+        "boards": list(project.boards),
+        "workspaces": list(project.workspaces),
+        "date_format": project.date_format,
+    }
+
+
+def _create_preview(app, query: dict[str, list[str]]) -> tuple[int, dict]:
+    """The id that WOULD be minted and the destination that WOULD be used,
+    planned purely (serve.edit.preview_creation) -- nothing is reserved."""
+    type_name = (query.get("type") or [""])[0]
+    if not type_name:
+        return 400, {"error": "type is required: ?type=<declared type>"}
+    board = (query.get("board") or [""])[0] or None
+    explicit = (query.get("id") or [""])[0] or None
+    destination = (query.get("destination") or [""])[0] or None
+    return 200, edit_mod.preview_creation(
+        app.state.snapshot.project,
+        type_name,
+        explicit_id=explicit,
+        board=board,
+        destination=destination,
+    )
+
+
+def _create_item(app, body) -> tuple[int, dict]:
+    """`POST /api/items/create` -- the HTTP face of `serve.edit.create_item`.
+    Same result-to-status mapping as the edit route: Created 200, Refused and
+    Invalid 422, malformed request 400."""
+    if getattr(app, "read_only", False):
+        return 403, {
+            "kind": "refused",
+            "error": "this server was started with --no-write: creation is disabled",
+        }
+    if not isinstance(body, dict):
+        return 400, {"error": "expected a JSON object"}
+    type_name = body.get("type")
+    if not isinstance(type_name, str) or not type_name:
+        return 400, {"error": "type is required: a declared item type"}
+    fields = body.get("fields", {})
+    if not isinstance(fields, dict):
+        return 400, {"error": "fields must be an object"}
+    for key_name in ("id", "destination", "amends"):
+        value = body.get(key_name)
+        if value is not None and not isinstance(value, str):
+            return 400, {"error": f"{key_name} must be a string when given"}
+
+    project = app.state.snapshot.project
+    result = edit_mod.create_item(
+        project.root,
+        edit_mod.CreateRequest(
+            who="local",
+            type=type_name,
+            fields=fields,
+            id=body.get("id"),
+            destination=body.get("destination"),
+            amends=body.get("amends"),
+        ),
+    )
+
+    def shown(path):
+        if not path:
+            return None
+        text = os.path.relpath(path, project.root).replace("\\", "/")
+        return path.replace("\\", "/") if text.startswith("..") else text
+
+    if isinstance(result, edit_mod.Created):
+        app.state.refresh()
+        return 200, {
+            "kind": "created",
+            "ok": True,
+            "message": result.message,
+            "id": result.item_id,
+            "key": result.key,
+            "type": result.type,
+            "path": shown(result.path),
+            "revision": result.revision,
         }
     if isinstance(result, edit_mod.Invalid):
         return 422, {
