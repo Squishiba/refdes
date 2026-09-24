@@ -448,6 +448,27 @@ def test_load_readonly_overlay_shows_candidate_without_touching_disk(tmp_path, c
     )
 
 
+def test_load_readonly_overlay_applies_to_markdown_files_too(tmp_path, capsys):
+    """The overlay used to be visible only to list files: parse_markdown_file
+    opened its file directly, so a candidate edit to a .md file was validated
+    against the OLD bytes -- and a file a creation would add failed the
+    candidate load outright. The overlay IS the candidate, Markdown included
+    (found by the Slice 3 create path, which validates a new .md this way)."""
+    from refdes import loader
+
+    root, config = _snapshot_project(tmp_path)
+    capsys.readouterr()
+    md = root / "items" / "note.md"
+    md.write_text(
+        "---\nid: REQ-500\ntype: requirement\nboard: board-a\ntext: Original.\n---\n\nBody.\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    candidate = md.read_text(encoding="utf-8").replace("text: Original.", "text: Overlaid.")
+    project = loader.load_readonly(config, overlay={str(md): candidate})
+    assert project.item_by_id("REQ-500").fields["text"] == "Overlaid."
+
+
 def test_load_readonly_overlay_can_introduce_a_new_source_file(tmp_path, capsys):
     from refdes import loader
 

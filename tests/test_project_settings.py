@@ -422,3 +422,37 @@ def test_reserved_filename_guard_covers_per_board_report_names(board_project):
     project = _build_at(board_project)
     render.render_site(project)
     assert any("generated report" in d.message for d in project.errors)
+
+
+# ------------------------------------------------------- date formatting
+
+
+@pytest.mark.parametrize(
+    ("fmt", "expected"),
+    [
+        ("YYYY-MM-DD", "2026-02-07"),
+        ("MM/DD/YYYY", "02/07/2026"),
+        ("DD.MM.YYYY", "07.02.2026"),
+    ],
+)
+def test_format_date_writes_what_parse_date_reads(fmt, expected):
+    """The write-side counterpart of the strict parser: a date the tool
+    creates (a new log entry's `date:`) must be spelled in the project's
+    format and reparses as the same calendar day."""
+    from datetime import date
+
+    from refdes import dates
+
+    value = date(2026, 2, 7)
+    text = dates.format_date(value, fmt)
+    assert text == expected
+    assert dates.parse_date(text, fmt) == value
+
+
+def test_format_date_rejects_an_unsupported_format():
+    from datetime import date
+
+    from refdes import dates
+
+    with pytest.raises(ValueError):
+        dates.format_date(date(2026, 2, 7), "YYYY/DD")

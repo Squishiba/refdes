@@ -126,11 +126,95 @@ def orphaned_allocations(project: Project) -> list[str]:
     return sorted(allocated - live - former)
 
 
+def prefix_for_type(project: Project, type_name: str) -> str:
+    """The prefix a *new* item of `type_name` numbers under: the type's
+    declared prefix, or the first three letters upper-cased -- the same rule
+    `prefix_for` applies to a parsed item, without needing an item."""
+    spec = project.types.get(type_name)
+    return spec.prefix if spec else type_name[:3].upper()
+
+
 def prefix_for(project: Project, item: Item) -> str:
     if item.prefix_hint:
         return item.prefix_hint
-    spec = project.types.get(item.type)
-    return spec.prefix if spec else item.type[:3].upper()
+    return prefix_for_type(project, item.type)
+
+
+def format_id(project: Project, prefix: str, number: int) -> str:
+    """One display id spelled the project's way: prefix, zero-padding to
+    `id.width`. The single formatting rule shared by `allocate()` and the
+    editor's pure planning step, so a previewed id and an allocated one can
+    never be spelled differently."""
+    return f"{prefix}-{number:0{project.id_width}d}"
+
+
+def plan_new_id(
+    project: Project,
+    type_name: str,
+    *,
+    explicit_id: str | None = None,
+    marks: dict[str, int] | None = None,
+) -> tuple[str | None, str | None]:
+    """Plan one new item's display id -- purely: no ledger write, no file
+    touched at all beyond reading it. Returns `(new_id, None)`, or
+    `(None, reason)` when the explicit override collides or is malformed.
+
+    Split out of `allocate()` (docs/design/browser-editor.md, Slice 3) so the
+    editor can *preview* the id an item would get -- "the ID shown before
+    saving is the ID the item gets" -- without reserving anything. The
+    reservation is `reserve_id()`, which runs only inside the same
+    transaction as the file write. `marks` lets a caller compute the
+    high-water once and plan several candidates; recomputing it here is what
+    makes each preview see the current truth.
+
+    An explicit override is honoured verbatim (the same posture as a
+    numeric-hint item in `allocate()`), and refused -- never renumbered --
+    when its number is at or below the high-water for its prefix: live ids,
+    `former_ids:`, burned numbers and ledger allocations all count there.
+    """
+    if marks is None:
+        marks = high_water(project, load_ledger(project))
+    prefix = prefix_for_type(project, type_name)
+    if explicit_id is not None:
+        candidate = explicit_id.strip()
+        parsed = split_id(candidate)
+        if parsed is None:
+            return None, (
+                f"{candidate!r} is not shaped like a display id (a PREFIX-NNN "
+                "form such as REQ-042)"
+            )
+        if not candidate.startswith(f"{prefix}-"):
+            return None, (
+                f"{candidate!r} does not use prefix {prefix!r}, which is what "
+                f"type {type_name!r} numbers under"
+            )
+        number = parsed[1]
+        if number <= marks.get(prefix, 0):
+            return None, (
+                f"id {candidate!r} is already used or was burned under prefix "
+                f"{prefix!r} (highest number so far {marks.get(prefix, 0)}) -- "
+                "ids are never reused; pick a higher number or omit the "
+                "override to take the next free one"
+            )
+        return candidate, None
+    number = marks.get(prefix, 0) + 1
+    return format_id(project, prefix, number), None
+
+
+def reserve_id(project: Project, new_id: str) -> None:
+    """The ledger mutation that reserves `new_id`: recorded as allocated, and
+    its number burned as high-water. The counterpart of `plan_new_id` --
+    consequential, so it is called only inside the same transaction as the
+    file write that puts the id on disk, never by a preview."""
+    ledger = load_ledger(project)
+    allocated = ledger.setdefault("allocated", [])
+    if new_id not in allocated:
+        allocated.append(new_id)
+    burned = ledger.setdefault("burned", {})
+    parsed = split_id(new_id)
+    if parsed:
+        burned[parsed[0]] = max(int(burned.get(parsed[0], 0)), parsed[1])
+    save_ledger(project, ledger)
 
 
 def validate_prefixes(project: Project) -> None:
@@ -366,7 +450,7 @@ def allocate(project: Project, dry_run: bool = False) -> list[tuple[Item, str]]:
             continue
         prefix = prefix_for(project, item)
         marks[prefix] = marks.get(prefix, 0) + 1
-        new_id = f"{prefix}-{marks[prefix]:0{project.id_width}d}"
+        new_id = format_id(project, prefix, marks[prefix])
         assignments.append((item, new_id))
 
     if dry_run:

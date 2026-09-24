@@ -12,6 +12,7 @@ import {
   getDraft, setDraftField, setDraftBody, setDraftRevision, clearDraft, isDirty,
 } from './drafts.js';
 import { createLinksSection } from './links.js';
+import { fieldControlNode } from './controls.js';
 
 function el(tag, cls, text) {
   const node = document.createElement(tag);
@@ -86,28 +87,13 @@ export function createEditor(item, handle, onSaved, onDiscarded) {
     const spec = (edit.fields || {})[name];
     if (!spec || !spec.editable) return null;
     specs[name] = spec;
-    let node;
-    if (spec.control === 'select') {
-      node = el('select', 'field-edit');
-      for (const choice of spec.choices || []) {
-        const option = el('option', null, choice);
-        option.value = choice;
-        node.appendChild(option);
-      }
-    } else {
-      node = el('input', 'field-edit');
-      node.type = 'text';
-    }
     const shown = name in draft.fields ? draft.fields[name] : (value ?? '');
-    node.value = shown === null ? '' : String(shown);
-    const commit = () => {
+    // controls.js owns the enum/text control; the draft owns the value.
+    return fieldControlNode(spec, shown, (node) => {
       setDraftField(handle, name, node.value);
       note('');
       refreshStatus();
-    };
-    node.addEventListener('input', commit);
-    node.addEventListener('change', commit);
-    return node;
+    });
   }
 
   function bodyControl(value) {

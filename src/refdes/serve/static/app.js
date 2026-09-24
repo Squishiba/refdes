@@ -7,6 +7,7 @@ import { api } from './api.js';
 import { parseFilters, filterQuery, renderSidebar } from './filters.js';
 import { renderList } from './list.js';
 import { renderItem } from './item.js';
+import { createForm } from './create.js';
 
 const banner = document.getElementById('banner');
 const sidebar = document.getElementById('sidebar');
@@ -18,6 +19,11 @@ function parseRoute() {
   const q = hash.indexOf('?');
   const path = q === -1 ? hash : hash.slice(0, q);
   const filters = parseFilters(hash);
+  if (path === '#/new') {
+    // #/new?type=log&amends=LOG-001 — the amend affordance links here so the
+    // form opens pre-filled; the form itself fetches the schema it needs.
+    return { name: 'create', handle: null, filters, params: new URLSearchParams(q === -1 ? '' : hash.slice(q + 1)) };
+  }
   const m = path.match(/^#\/items(?:\/(.+))?$/);
   if (!m) return { name: 'items', handle: null, filters };
   return { name: 'item', handle: m[1] ? decodeURIComponent(m[1]) : null, filters };
@@ -47,7 +53,14 @@ async function renderRoute() {
     location.hash = `#/items${filterQuery(next)}`;
   });
   renderList(listPane, payload, route.filters);
-  if (route.handle) {
+  if (route.name === 'create') {
+    detailPane.textContent = '';
+    detailPane.appendChild(createForm({
+      type: route.params.get('type'),
+      amends: route.params.get('amends'),
+      board: route.params.get('board'),
+    }));
+  } else if (route.handle) {
     renderItem(detailPane, route.handle);
   } else if (payload.items.length === 1) {
     renderItem(detailPane, payload.items[0].handle);

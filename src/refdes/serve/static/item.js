@@ -144,6 +144,13 @@ export async function renderItem(container, handle) {
   else if (item.append_only) add('append-only, not yet sealed', 'warn');
   head.appendChild(meta);
   head.appendChild(el('p', 'muted', `${item.source_file}:${item.source_line}`));
+  if (item.sealed && item.append_only && item.id) {
+    // "Amend this sealed log": the correction is a NEW entry carrying an
+    // amends: composite; the sealed entry's bytes are never touched.
+    const amend = el('a', 'btn amend-log', 'Amend this sealed log');
+    amend.href = `#/new?type=${encodeURIComponent(item.type)}&amends=${encodeURIComponent(item.id)}`;
+    head.appendChild(amend);
+  }
   container.appendChild(head);
 
   const rerender = () => renderItem(container, handle);
