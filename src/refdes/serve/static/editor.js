@@ -12,7 +12,7 @@ import {
   getDraft, setDraftField, setDraftBody, setDraftRevision, clearDraft, isDirty,
 } from './drafts.js';
 import { createLinksSection } from './links.js';
-import { fieldControlNode } from './controls.js';
+import { fieldControlNode, applyControl } from './controls.js';
 
 function el(tag, cls, text) {
   const node = document.createElement(tag);
@@ -83,29 +83,48 @@ export function createEditor(item, handle, onSaved, onDiscarded) {
 
   // ------------------------------------------------------------- controls
 
-  function fieldControl(name, value) {
+  function fieldControl(name, value, existing) {
     const spec = (edit.fields || {})[name];
     if (!spec || !spec.editable) return null;
     specs[name] = spec;
     const shown = name in draft.fields ? draft.fields[name] : (value ?? '');
     // controls.js owns the enum/text control; the draft owns the value.
-    return fieldControlNode(spec, shown, (node) => {
+    // `existing` is a control node carried over from the previous render of
+    // this same field: applyControl re-binds it to this editor instance and
+    // updates its value in place, so the node survives the rebuild and the
+    // caret can be restored into it (update.js). A field that is no longer
+    // editable returns null above, and its old control is simply dropped.
+    const writeDraft = (node) => {
       setDraftField(handle, name, node.value);
       note('');
       refreshStatus();
-    });
+    };
+    const node = applyControl(existing, spec, shown, writeDraft)
+      || fieldControlNode(spec, shown, writeDraft);
+    node.setAttribute('data-edit-key', `field:${name}`);
+    return node;
   }
 
-  function bodyControl(value) {
+  function bodyControl(value, existing) {
     if (!edit.body || !edit.body.editable) return null;
-    const area = el('textarea', 'body-edit');
+    // Same in-place rule as a field: adopt the carried-over textarea when the
+    // previous render had one, re-bind its listener to this editor instance,
+    // and write the value only when it differs from what is already there.
+    const area = existing && existing.tagName === 'TEXTAREA'
+      ? existing
+      : el('textarea', 'body-edit');
     area.rows = 12;
-    area.value = draft.body !== null ? draft.body : (value || '');
-    area.addEventListener('input', () => {
+    area.setAttribute('data-edit-key', 'body');
+    if (area._refdesCommit) area.removeEventListener('input', area._refdesCommit);
+    const shown = draft.body !== null ? draft.body : (value || '');
+    if (area.value !== shown) area.value = shown;
+    const writeBody = () => {
       setDraftBody(handle, area.value);
       note('');
       refreshStatus();
-    });
+    };
+    area._refdesCommit = writeBody;
+    area.addEventListener('input', writeBody);
     return area;
   }
 
