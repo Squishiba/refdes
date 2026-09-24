@@ -2101,6 +2101,16 @@ def _process_images(
     src is actually made to work end to end, a broken one should stop the build.
     """
 
+    def record(ok: bool, src: str, rel: str | None = None, dest: str | None = None) -> None:
+        # Thread workbench W2: remember what this pass already decided, per
+        # item, so the preview decorator can show provenance and failure
+        # markers without re-running the search. Pure bookkeeping on values
+        # computed anyway; pages (where_id None) have no entry to key by.
+        if where_id:
+            project.image_results.setdefault(where_id, []).append(
+                {"src": src, "ok": ok, "rel": rel, "dest": dest}
+            )
+
     def swap(match: re.Match) -> str:
         prefix, src, suffix = match.group(1), match.group(2), match.group(3)
         if not src or _URL_SCHEME_RE.match(src):
@@ -2114,9 +2124,11 @@ def _process_images(
                     f"image src {src!r} does not exist",
                     file=where_file, line=where_line, item_id=where_id,
                 )
+                record(False, src)
                 return match.group(0)
             found = _search_image_src(project, src, where_file, where_line, where_id)
             if found is None:
+                record(False, src)
                 return match.group(0)
             full_path = found
         rel = os.path.relpath(full_path, project.root).replace("\\", "/")
@@ -2129,6 +2141,7 @@ def _process_images(
                 digest = hashlib.sha256(fh.read()).hexdigest()[:16]
             dest = _hashed_leaf(rel, digest)
             project.assets[rel] = dest
+        record(True, src, rel, dest)
         return f"{prefix}assets/{dest}{suffix}"
 
     return IMG_SRC_RE.sub(swap, html)

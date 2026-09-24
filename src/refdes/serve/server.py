@@ -20,6 +20,7 @@ import html as html_mod
 import json
 import mimetypes
 import os
+import re
 import threading
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -51,6 +52,90 @@ def _reload_probe(token: str, serial: int) -> str:
         f'<meta name="refdes-token" content="{html_mod.escape(token, quote=True)}">'
         f'<meta name="refdes-serial" content="{int(serial)}">'
         '<script type="module" src="/edit/static/preview.js"></script>'
+    )
+
+
+_IMG_TAG_RE = re.compile(r"<img\b[^>]*>", re.IGNORECASE)
+_SRC_ATTR_RE = re.compile(r'\bsrc="([^"]*)"', re.IGNORECASE)
+# The content-hash segment `_hashed_leaf` appends: 16 hex digits before the
+# extension of the assets/-relative destination.
+_HASH_LEAF_RE = re.compile(r"\.([0-9a-f]{16})\.[^.]+$")
+
+
+def _decorate_images(page: str, project, item) -> str:
+    """Thread workbench W2 (D2): image provenance on the previewed item's own
+    `<img>` tags, from the results `build._process_images` already recorded.
+    A resolved image gets its source path and content hash as hover-visible
+    attributes; one the build could not resolve (missing or ambiguous) gets a
+    visible inline marker instead of rendering as a silent broken image
+    (docs/design/thread-workbench.md §1, "Images are queries, not paths").
+    Response-only, like the toolbar: the generation on disk stays the
+    published page. Nothing here resolves anything -- it reads what the
+    build decided."""
+    results = project.image_results.get(item.id)
+    if not results:
+        return page
+    provenance = {}
+    failed = set()
+    for r in results:
+        if r["ok"]:
+            provenance["assets/" + r["dest"]] = r["rel"]
+        else:
+            failed.add(r["src"])
+
+    def swap(match: re.Match) -> str:
+        tag = match.group(0)
+        src_attr = _SRC_ATTR_RE.search(tag)
+        if src_attr is None:
+            return tag
+        src = src_attr.group(1)
+        if src in failed:
+            return tag + (
+                '<span class="refdes-squiggle bad mono small">'
+                f"refdes: image {html_mod.escape(repr(src), quote=False)} did not resolve"
+                " — see the Diagnostics panel</span>"
+            )
+        rel = provenance.get(src)
+        if rel is None:
+            return tag
+        digest = _HASH_LEAF_RE.search(src.rpartition("/")[2])
+        shown = f"{rel} · {digest.group(1)}" if digest else rel
+        attrs = (
+            f' data-refdes-src="{html_mod.escape(rel, quote=True)}"'
+            f' title="{html_mod.escape(shown, quote=True)}"'
+        )
+        end = src_attr.end()
+        return tag[:end] + attrs + tag[end:]
+
+    return _IMG_TAG_RE.sub(swap, page)
+
+
+def _diagnostics_panel(project, item) -> str:
+    """Thread workbench W2 (D3): this item's own build diagnostics, rendered
+    in the response of its preview page. Filtered to the item by id or by its
+    own source file -- the same file:line-shaped data `refdes build` prints
+    and the index page lists, in the index page's own markup
+    (`templates/index.html.j2`). Response-only decoration like everything
+    else here."""
+    diags = [
+        d
+        for d in project.diagnostics
+        if d.item_id == item.id or (d.file and d.file == item.source_file)
+    ]
+    if not diags:
+        return ""
+    lis = "".join(
+        f'<li class="{"bad" if d.level == "error" else "warn"}">'
+        f"{html_mod.escape(d.level)} — {html_mod.escape(d.where)}"
+        + (f" [{html_mod.escape(d.item_id)}]" if d.item_id else "")
+        + f": {html_mod.escape(d.message)}</li>"
+        for d in diags
+    )
+    return (
+        '<section class="refdes-diags panel">'
+        "<h2>Diagnostics for this item</h2>"
+        f'<ul class="tight mono small">{lis}</ul>'
+        "</section>"
     )
 
 
@@ -267,12 +352,17 @@ class _Handler(BaseHTTPRequestHandler):
             page = data.decode("utf-8")
         except UnicodeDecodeError:
             return data
+        project = self.app.state.snapshot.project
         links = ['<a href="/edit/">Editor</a>']
-        for key, slug_file in api.item_pages(self.app.state.snapshot.project).items():
+        item = None
+        for key, slug_file in api.item_pages(project).items():
             if slug_file == filename:
                 href = html_mod.escape("/edit/#/items/" + quote(key, safe=""))
                 links.append(f'<a href="{href}">Edit this item</a>')
+                item = project.items[key]
                 break
+        if item is not None:
+            page = _decorate_images(page, project, item)
         bar = (
             '<div class="refdes-serve-bar"><span>refdes serve &middot; preview</span>'
             + "".join(links)
@@ -284,8 +374,13 @@ class _Handler(BaseHTTPRequestHandler):
         if head_at != -1:
             page = page[:head_at] + _BAR_HEAD + probe + page[head_at:]
             lower = page.lower()
+        panel = _diagnostics_panel(project, item) if item is not None else ""
         body_at = lower.rfind("</body>")
-        page = page[:body_at] + bar + page[body_at:] if body_at != -1 else page + bar
+        page = (
+            page[:body_at] + panel + bar + page[body_at:]
+            if body_at != -1
+            else page + panel + bar
+        )
         return page.encode("utf-8")
 
     # ------------------------------------------------------------------ api

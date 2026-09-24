@@ -754,6 +754,15 @@ class Project:
     # source so the same image referenced from many items/pages hashes once.
     assets: dict[str, str] = field(default_factory=dict)
     asset_dirs: list[str] = field(default_factory=list)  # site.assets: raw config
+    # Per-item image resolution results, recorded as a side effect of the
+    # build's own `_process_images` pass (no second search, no new
+    # evaluation): item id -> [{"src": as written, "ok": bool, "rel":
+    # project-root-relative source path or None, "dest": assets/-relative
+    # destination or None}]. The rendered HTML alone cannot say which
+    # `<img>` failed -- an unresolved src passes the rewrite untouched --
+    # so the preview decorator (docs/design/thread-workbench.md W2) reads
+    # this instead of re-running the asset search.
+    image_results: dict[str, list[dict]] = field(default_factory=dict)
     # `site.theme:` -- the built-in theme this project selects -- and
     # `site.tokens:`, its own token overrides merged over that theme. Both are
     # validated at load by theme.py; `render_site` turns the merged overrides
