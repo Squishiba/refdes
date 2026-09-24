@@ -516,7 +516,7 @@ class SourceUse:
 def collect_source_uses(project: Project) -> list[SourceUse]:
     out: list[SourceUse] = []
     for item in project.local_items:
-        for block, offset in calc_mod.extract_blocks_with_lines(item.body):
+        for block, offset, _block_id in calc_mod.extract_blocks_with_lines(item.body):
             for line_offset, name, path, key in calc_mod.source_calls_in_block(block):
                 line = (
                     item.body_line + offset + line_offset

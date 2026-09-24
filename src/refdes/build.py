@@ -1102,7 +1102,41 @@ def _run_item_calcs(project: Project, item, by_key: dict[str, Item]) -> None:
     origins: dict[str, int | None] = {}
     item_sealed: bool | None = None  # lazy: only retired lines ask the seal files
     failed = False
-    for block, offset in calc.extract_blocks_with_lines(item.body):
+    # The fence info string is a grammar now, not a shrug (docs/design/
+    # named-calc-blocks.md §3.4): every invalid fence is a build error at the
+    # fence line's file:line, with the §7 message naming the fix.
+    for fence_offset, fence_msg in calc.fence_errors(item.body):
+        fence_line = (
+            item.body_line + fence_offset
+            if item.body_line is not None else item.source_line
+        )
+        project.error(
+            fence_msg, file=item.source_file, line=fence_line, item_id=item.id
+        )
+        failed = True
+    # Block names are unique per item, not per project (§11.2 decided):
+    # the same shape as the value-name rule `origins` enforces below.
+    named_fences: dict[str, int] = {}
+    for _block, offset, block_id in calc.extract_blocks_with_lines(item.body):
+        if block_id is None:
+            continue
+        fence_line = (
+            item.body_line + offset - 1
+            if item.body_line is not None else item.source_line
+        )
+        first = named_fences.get(block_id)
+        if first is not None:
+            project.error(
+                f"calc block '{block_id}' is named twice in this item -- first "
+                f"at line {first}, again at line {fence_line}. A block name can "
+                "only be used once per item (values already share one item-wide "
+                f"scope); rename one of them, e.g. '{block_id}' -> '{block_id}_2'.",
+                file=item.source_file, line=fence_line, item_id=item.id,
+            )
+            failed = True
+        else:
+            named_fences[block_id] = fence_line
+    for block, offset, block_id in calc.extract_blocks_with_lines(item.body):
         start_line = item.body_line + offset if item.body_line is not None else None
         for outcome in calc.evaluate_block(block, env, start_line=start_line, origins=origins):
             line = CalcLine(
@@ -1113,6 +1147,7 @@ def _run_item_calcs(project: Project, item, by_key: dict[str, Item]) -> None:
                 unit_style=outcome.unit_style,
                 line=outcome.line,
                 reference=outcome.reference,
+                block=block_id or "",
             )
             if outcome.source is not None:
                 canon, locked = source_resolved.get(outcome.source, ("", None))
@@ -1786,7 +1821,13 @@ def legacy_hash_for(item: Item, project: Project) -> str:
 # -------------------------------------------------------------------------- markdown
 
 
-def _calc_table_html(lines: list[CalcLine]) -> str:
+def _calc_table_html(lines: list[CalcLine], block: str = "") -> str:
+    # A named block's table gains an anchor and a caption (§3.5, decided
+    # §11.10); an unnamed block's HTML is byte-for-byte what it always was --
+    # pinned by tests/test_calc_block_names.py, because most items have one
+    # unnamed block and nothing about them should move.
+    anchor = f' id="calc-{_esc(block)}"' if block else ""
+    caption = f'<caption class="calc-caption">{_esc(block)}</caption>' if block else ""
     rows = []
     for line in lines:
         name_cell = _esc(line.name)
@@ -1832,7 +1873,7 @@ def _calc_table_html(lines: list[CalcLine]) -> str:
             f'<td class="calc-result">{_esc(line.result)} {bounds}</td>'
             f"{comment}</tr>"
         )
-    return '<table class="calc">' + "".join(rows) + "</table>"
+    return f'<table class="calc"{anchor}>' + caption + "".join(rows) + "</table>"
 
 
 def _esc(text: str) -> str:
@@ -2420,7 +2461,9 @@ def render_bodies(project: Project) -> None:
         # Swap calc blocks for placeholders, render, then inject the evaluated
         # tables. The placeholder has to be plain text -- an HTML comment would be
         # escaped, since we render markdown with html disabled on purpose.
-        blocks = calc.extract_blocks(source)
+        extracted = calc.extract_blocks_with_lines(source)
+        blocks = [block for block, _, _ in extracted]
+        block_names = [name or "" for _, _, name in extracted]
         for index in range(len(blocks)):
             source = calc.CALC_BLOCK_RE.sub(
                 f"\n{_placeholder(index)}\n", source, count=1
@@ -2433,7 +2476,7 @@ def render_bodies(project: Project) -> None:
             count = _calc_line_count(blocks[index])
             chunk = item.calcs[cursor : cursor + count]
             cursor += count
-            table = _calc_table_html(chunk)
+            table = _calc_table_html(chunk, block=block_names[index])
             token = _placeholder(index)
             if f"<p>{token}</p>" in html:
                 html = html.replace(f"<p>{token}</p>", table)
