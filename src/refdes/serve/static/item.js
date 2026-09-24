@@ -8,6 +8,7 @@
 
 import { api } from './api.js';
 import { createEditor } from './editor.js';
+import { captureFocus, collectControls, restoreFocus } from './update.js';
 
 const STAGES = ['open', 'addressed', 'claimed', 'satisfied', 'verified'];
 
@@ -24,7 +25,7 @@ function section(title) {
   return s;
 }
 
-function fieldTable(item, editor) {
+function fieldTable(item, editor, controls) {
   const table = el('table', 'fields');
   const editInfo = (item.edit && item.edit.fields) || {};
   for (const [name, value] of Object.entries(item.fields || {})) {
@@ -36,7 +37,10 @@ function fieldTable(item, editor) {
     }
     tr.appendChild(th);
     const td = el('td');
-    const control = editor && editor.fieldControl(name, value);
+    // A control for a field that existed in the previous render is carried
+    // over and updated in place (editor.js), not rebuilt: that is what keeps
+    // focus and the caret alive across a revision-triggered re-render.
+    const control = editor && editor.fieldControl(name, value, controls && controls.get(`field:${name}`));
     if (control) {
       td.appendChild(control);
     } else {
@@ -121,16 +125,27 @@ function checksBlock(checks) {
 }
 
 export async function renderItem(container, handle) {
-  container.textContent = '';
-  container.appendChild(el('p', 'muted', 'Loading item…'));
+  // A revision-triggered re-render of the item already on screen keeps the
+  // old view up while the fresh one is fetched (keystrokes during the fetch
+  // still land in the draft), then rebuilds with the old controls carried
+  // over: focus and the caret are captured just before the swap and restored
+  // into the same logical field afterwards (update.js). A first render, or a
+  // different item, still shows the loading line.
+  if (container.dataset.renderedHandle !== handle || !container.firstChild) {
+    container.textContent = '';
+    container.appendChild(el('p', 'muted', 'Loading item…'));
+  }
   let item;
   try {
     item = await api(`/api/item/${encodeURIComponent(handle)}`);
   } catch (err) {
     container.textContent = '';
+    container.dataset.renderedHandle = '';
     container.appendChild(el('p', 'banner bad', `Could not load the item: ${err.message}`));
     return;
   }
+  const focus = captureFocus(container);
+  const controls = collectControls(container);
   container.textContent = '';
 
   const head = section(`${item.id || item.handle} — ${item.title}`);
@@ -156,10 +171,10 @@ export async function renderItem(container, handle) {
   const rerender = () => renderItem(container, handle);
   const editor = createEditor(item, handle, rerender, rerender);
 
-  container.appendChild(fieldTable(item, editor));
+  container.appendChild(fieldTable(item, editor, controls));
 
   const body = section('Body');
-  const bodyArea = editor.bodyControl(item.body);
+  const bodyArea = editor.bodyControl(item.body, controls.get('body'));
   if (bodyArea) body.appendChild(bodyArea);
   else {
     body.appendChild(el('pre', 'body-text', item.body || '(empty)'));
@@ -194,4 +209,7 @@ export async function renderItem(container, handle) {
   frame.setAttribute('title', 'Rendered preview of this item');
   preview.appendChild(frame);
   container.appendChild(preview);
+
+  container.dataset.renderedHandle = handle;
+  restoreFocus(container, focus);
 }

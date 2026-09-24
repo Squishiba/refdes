@@ -228,6 +228,60 @@ def test_the_item_view_offers_a_link_to_its_preview_page():
     assert "'_blank'" in item
 
 
+# ------------------------------------------------- rebuild focus preservation
+
+
+def test_the_rebuild_updates_controls_instead_of_replacing_them():
+    """The focus-loss fix (in-prog-logs/browser-editor-edit-ui.md, "Focus is
+    lost"): a revision-triggered re-render must carry controls over by field
+    identity instead of tearing them down. Static checks: the pure update
+    helpers exist in update.js (focus and selection captured and restored),
+    item.js wires them around the re-render, and the controls carry a stable
+    data-edit-key so identity survives the rebuild."""
+    assert os.path.isfile(os.path.join(STATIC, "update.js"))
+    with open(os.path.join(STATIC, "update.js"), encoding="utf-8") as fh:
+        update = fh.read()
+    for fn in (
+        "export function captureFocus",
+        "export function restoreFocus",
+        "export function collectControls",
+    ):
+        assert fn in update, f"update.js is missing {fn}"
+    assert "data-edit-key" in update
+    # the caret travels too, not just focus
+    assert "selectionStart" in update and "setSelectionRange" in update
+
+    with open(os.path.join(STATIC, "item.js"), encoding="utf-8") as fh:
+        item = fh.read()
+    assert "from './update.js'" in item
+    assert "captureFocus(container)" in item
+    # focus is captured before the container is cleared and restored after
+    # the whole view (including the preview section) is rebuilt
+    assert item.index("captureFocus(container)") < item.index("restoreFocus(container, focus)")
+    assert item.index("restoreFocus(container, focus)") > item.rindex("container.textContent = ''")
+    # controls are carried into the new render by field identity
+    assert "controls.get(`field:${name}`)" in item
+    assert "editor.bodyControl(item.body, controls.get('body'))" in item
+
+
+def test_a_carried_over_control_is_rebound_not_double_bound():
+    """Reusing a control node across a re-render is only correct if the old
+    change handler is detached first (otherwise one keystroke writes the
+    draft twice through two closures) and the value is written only when it
+    differs (otherwise a rebuild fights the author's typing)."""
+    with open(os.path.join(STATIC, "controls.js"), encoding="utf-8") as fh:
+        controls = fh.read()
+    assert "export function applyControl" in controls
+    assert "removeEventListener" in controls
+    assert "if (node.value !== shown)" in controls
+    with open(os.path.join(STATIC, "editor.js"), encoding="utf-8") as fh:
+        editor = fh.read()
+    assert "from './controls.js'" in editor and "applyControl" in editor
+    # the body textarea follows the same in-place rule
+    assert "if (area.value !== shown)" in editor
+    assert "area.removeEventListener" in editor
+
+
 def test_a_sealed_log_offers_the_amend_flow():
     """"Amend this sealed log" links to a pre-filled create form: the
     correction is a new entry, so the affordance must exist on the sealed
