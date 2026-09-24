@@ -57,3 +57,30 @@ plus override". Display-ID rename stays out of scope.
   filled with today in the project's `date_format` (the log-creation
   requirement); an explicit value is validated by the delta gate like any
   other field.
+- **Create-form field values travel as strings.** The UI sends every text
+  control's value verbatim; the patcher's round-trip-checked emitter decides
+  the YAML spelling. A `number` field therefore lands quoted unless the
+  value round-trips unquoted — same posture as `SetField` edits, so no new
+  rule, but worth knowing when creating numeric fields.
+- **Destination suggestion ties** go to the file whose items the loader saw
+  first (a `Counter.most_common` detail), so a type split evenly across two
+  files may suggest either. The field is an editable suggestion by design;
+  tests assert membership, not the tie winner.
+
+## Found on the way (fixed in this branch)
+
+- `parse_markdown_file` bypassed `read_source`, so overlays were invisible
+  to `.md` files: candidate Markdown edits were gated against the OLD bytes
+  and a candidate new `.md` failed the load outright. Fixed in parse.py
+  (overlay CRLF normalized to match the text-mode disk read); regression
+  tests in `tests/test_no_write.py`.
+
+## Status
+
+All three chunks landed: ids/dates primitives, `create_item` service +
+API, and the UI (`controls.js` extraction, `create.js` at `#/new`, the
+amend affordance on sealed append-only items). Tests:
+`tests/test_serve_create.py` (service + HTTP, sabotage-style byte-identical
+refusals), additions to `tests/test_ids.py`, `tests/test_project_settings.py`,
+`tests/test_no_write.py`, `tests/test_serve_static.py` (UI wiring, shared
+controls, never-mints posture).

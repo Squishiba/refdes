@@ -139,3 +139,58 @@ def test_the_link_draft_rides_the_one_draft_mechanism():
     # the picker never builds a DISPLAY-ID@key composite itself: the service
     # owns that spelling, so the client must not even look like it does
     assert "@${" not in picker
+
+
+# ------------------------------------------------------------- creation UI
+
+
+def test_the_new_item_form_is_wired_into_the_shell():
+    """Slice 3's UI has to actually reach the page: create.js must exist, be
+    imported by app.js, be routed at #/new, and be offered by the nav. A form
+    nothing routes to is a form nobody sees."""
+    assert os.path.isfile(os.path.join(STATIC, "create.js"))
+    with open(os.path.join(STATIC, "app.js"), encoding="utf-8") as fh:
+        app = fh.read()
+    assert "from './create.js'" in app
+    assert "#/new" in app
+    with open(os.path.join(STATIC, "index.html"), encoding="utf-8") as fh:
+        html = fh.read()
+    assert 'href="#/new"' in html
+
+
+def test_the_create_form_asks_the_server_and_never_mints():
+    """The id the form shows is the server's pure plan (preview reserves
+    nothing), submission goes to the one create endpoint, and the client never
+    builds a composite or a key -- the same posture as the link picker."""
+    with open(os.path.join(STATIC, "create.js"), encoding="utf-8") as fh:
+        create = fh.read()
+    assert "/api/create/schema" in create
+    assert "/api/create/preview" in create
+    assert "/api/items/create" in create
+    assert "@${" not in create
+
+
+def test_the_field_controls_are_shared_not_duplicated():
+    """editor.js and create.js must build field controls from the same code:
+    the design says the create form reuses the editor's controls, and a second
+    copy is exactly the drift the reuse was meant to prevent."""
+    assert os.path.isfile(os.path.join(STATIC, "controls.js"))
+    for name in ("editor.js", "create.js"):
+        with open(os.path.join(STATIC, name), encoding="utf-8") as fh:
+            text = fh.read()
+        assert "from './controls.js'" in text, f"{name} must use the shared controls"
+        assert "fieldControlNode" in text
+    with open(os.path.join(STATIC, "controls.js"), encoding="utf-8") as fh:
+        controls = fh.read()
+    assert "export function fieldControlNode" in controls
+
+
+def test_a_sealed_log_offers_the_amend_flow():
+    """"Amend this sealed log" links to a pre-filled create form: the
+    correction is a new entry, so the affordance must exist on the sealed
+    item and must route to creation, not pretend to edit the sealed entry."""
+    with open(os.path.join(STATIC, "item.js"), encoding="utf-8") as fh:
+        item = fh.read()
+    assert "Amend this sealed log" in item
+    assert "#/new?type=" in item
+    assert "amends=" in item
