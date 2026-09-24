@@ -60,6 +60,9 @@ def test_every_module_import_resolves():
     is a blank page in the browser and nothing else would notice."""
     with open(os.path.join(STATIC, "index.html"), encoding="utf-8") as fh:
         entry = {n for n in HTML_ASSET.findall(fh.read()) if n.endswith(".js")}
+    # preview.js is an entry too: injected into preview pages by the server's
+    # decoration rather than referenced by index.html.
+    entry.add("preview.js")
     assert entry
     seen = set()
     while entry:
@@ -183,6 +186,46 @@ def test_the_field_controls_are_shared_not_duplicated():
     with open(os.path.join(STATIC, "controls.js"), encoding="utf-8") as fh:
         controls = fh.read()
     assert "export function fieldControlNode" in controls
+
+
+# ------------------------------------------------- preview auto-reload (W1)
+
+
+def test_the_preview_page_carries_a_self_reload_probe():
+    """Thread workbench W1: a served preview page must ship the polling
+    probe, and the probe must follow the house pattern -- poll
+    /api/revision and reload when the serial moves, importing the shared
+    api.js rather than inventing a second transport or a push channel."""
+    assert os.path.isfile(os.path.join(STATIC, "preview.js"))
+    with open(os.path.join(STATIC, "preview.js"), encoding="utf-8") as fh:
+        preview = fh.read()
+    assert "from './api.js'" in preview
+    assert "/api/revision" in preview
+    assert "location.reload()" in preview
+    assert "refdes-serial" in preview
+
+
+def test_the_server_injects_the_probe_into_preview_responses():
+    """The probe is decoration: the server injects the serial it rendered
+    and the probe script into the HTTP response, like the toolbar."""
+    server = os.path.join(
+        os.path.dirname(STATIC), "server.py"
+    )
+    with open(server, encoding="utf-8") as fh:
+        text = fh.read()
+    assert 'name="refdes-serial"' in text
+    assert "/edit/static/preview.js" in text
+
+
+def test_the_item_view_offers_a_link_to_its_preview_page():
+    """Thread workbench W1: from /edit/ the author can open the item's own
+    /preview/ page -- the link is built from the server-provided `page`,
+    never a slug the client guesses."""
+    with open(os.path.join(STATIC, "item.js"), encoding="utf-8") as fh:
+        item = fh.read()
+    assert "Open preview" in item
+    assert "/preview/${encodeURIComponent(item.page)}" in item
+    assert "'_blank'" in item
 
 
 def test_a_sealed_log_offers_the_amend_flow():

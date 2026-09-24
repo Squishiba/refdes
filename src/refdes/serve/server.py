@@ -40,6 +40,20 @@ _STATIC_TYPES = {
 _BAR_HEAD = '<link rel="stylesheet" href="/edit/static/bar.css">'
 
 
+def _reload_probe(token: str, serial: int) -> str:
+    """The W1 auto-reload probe (docs/design/thread-workbench.md): the serial
+    of the snapshot being served, the launch token (the same meta the editor
+    shell carries -- the page is already cookie-gated on that token), and the
+    module that polls /api/revision and reloads when the serial moves. Like
+    the toolbar, this lives only in the HTTP response, never in the rendered
+    files."""
+    return (
+        f'<meta name="refdes-token" content="{html_mod.escape(token, quote=True)}">'
+        f'<meta name="refdes-serial" content="{int(serial)}">'
+        '<script type="module" src="/edit/static/preview.js"></script>'
+    )
+
+
 class _Server(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = False  # never share a port with a stale listener
@@ -264,10 +278,11 @@ class _Handler(BaseHTTPRequestHandler):
             + "".join(links)
             + "</div>"
         )
+        probe = _reload_probe(self.app.token, self.app.state.snapshot.serial)
         lower = page.lower()
         head_at = lower.rfind("</head>")
         if head_at != -1:
-            page = page[:head_at] + _BAR_HEAD + page[head_at:]
+            page = page[:head_at] + _BAR_HEAD + probe + page[head_at:]
             lower = page.lower()
         body_at = lower.rfind("</body>")
         page = page[:body_at] + bar + page[body_at:] if body_at != -1 else page + bar

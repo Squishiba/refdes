@@ -181,6 +181,14 @@ export async function renderItem(container, handle) {
   container.appendChild(diagnosticsBlock(item.diagnostics));
 
   const preview = section('Rendered preview');
+  // W1 of the thread workbench: the item's own preview page, opened beside
+  // the editor (a new tab, the same convention as the shell's "Rendered
+  // site" nav link). It reloads itself on rebuild (preview.js).
+  const open = el('a', 'btn open-preview', 'Open preview');
+  open.href = `/preview/${encodeURIComponent(item.page)}`;
+  open.target = '_blank';
+  open.rel = 'noopener';
+  preview.appendChild(open);
   const frame = el('iframe', 'preview-frame');
   frame.src = `/preview/${encodeURIComponent(item.page)}`;
   frame.setAttribute('title', 'Rendered preview of this item');
