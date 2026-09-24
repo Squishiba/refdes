@@ -432,6 +432,12 @@ class CalcLine:
     # drift text (file, key, locked vs current value, the accept command).
     # Set by citations.verify(); the build keeps using `source_locked`.
     source_drift: str = ""
+    # The owning block's fence name (`id="..."`, docs/design/named-calc-blocks.md
+    # §3.6), or "" for an unnamed block. What lets a renderer caption and
+    # anchor a named block's table -- and later `{{calcblock}}` pick its rows
+    # -- without a second walk of the source. A label on the rendering, not a
+    # scope: `env` and `origins` stay item-wide (§3.5).
+    block: str = ""
 
     @property
     def display_expression(self) -> str:

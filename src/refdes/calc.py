@@ -822,6 +822,104 @@ def format_bounds(value: Value, digits: int = 4) -> str:
 # ------------------------------------------------------------------------ calc blocks
 
 CALC_BLOCK_RE = re.compile(r"^```calc[^\n]*\n(.*?)^```\s*$", re.DOTALL | re.MULTILINE)
+
+
+class CalcFenceError(CalcError):
+    """A ```calc fence info string that is not a valid attribute list
+    (docs/design/named-calc-blocks.md §3.3, §7). Raised by `parse_fence_attrs`;
+    the build reports it at the fence line as a build error."""
+
+
+# A block name (docs/design/named-calc-blocks.md §3.3): lowercase-initial,
+# lowercase-hyphen like citation ids and figure ids, 1-40 characters. Value
+# names (`P_diss`, `V_in`) are a different namespace and unchanged.
+BLOCK_NAME_RE = re.compile(r"[a-z][a-z0-9_-]{0,39}")
+
+
+def _suggest_block_name(name: str) -> str:
+    """The fix a bad block name gets: lowercased, invalid characters dropped,
+    leading digits dropped ('Losses' -> 'losses', '1losses' -> 'losses').
+    Falls back to the lowercased original when nothing survives."""
+    candidate = re.sub(r"[^a-z0-9_-]", "", name.lower()).lstrip("0123456789")
+    if not BLOCK_NAME_RE.fullmatch(candidate):
+        return name.lower()
+    return candidate
+
+
+def parse_fence_attrs(info: str) -> str | None:
+    """Parse the info string of a ```calc fence -- everything between the
+    fence marker and the newline -- and return the block's `id` or None.
+
+    The grammar (docs/design/named-calc-blocks.md §3.3):
+
+        calc-fence  = "```calc" [ 1*WSP attribute *(" " attribute) ] EOL
+        attribute   = "id=" dquote name dquote
+        name        = lowercase-letter [ *( lowercase-letter | digit | "_" | "-" ) ]
+
+    `id` is the only attribute defined; anything else is a CalcFenceError
+    naming the accepted set (§7's messages, verbatim). This replaces "any
+    trailing text is silently ignored" (§2) with a validated attribute --
+    a deliberate compatibility change (§3.4).
+    """
+    text = info.strip()
+    if not text:
+        return None
+    block_id: str | None = None
+    for token in text.split():
+        key, sep, value = token.partition("=")
+        if not sep:
+            raise CalcFenceError(
+                f"calc fence: {token!r} is not an attribute -- attributes are "
+                f'key="value"; write id="{token}".'
+            )
+        if key != "id":
+            raise CalcFenceError(
+                f"calc fence: unknown attribute {key!r} -- a calc fence accepts "
+                f'id="..."; write id="{value.strip(chr(34))}".'
+            )
+        if block_id is not None:
+            raise CalcFenceError(
+                'calc fence: id is given twice -- a calc fence accepts one '
+                'id="..."; keep one.'
+            )
+        if len(value) >= 2 and value.startswith('"') and value.endswith('"'):
+            name = value[1:-1]
+            if not BLOCK_NAME_RE.fullmatch(name):
+                raise CalcFenceError(
+                    f"calc fence: block name {name!r} must match "
+                    f"[a-z][a-z0-9_-]* -- write '{_suggest_block_name(name)}'."
+                )
+            block_id = name
+            continue
+        bare = value.strip('"')
+        raise CalcFenceError(
+            f"calc fence: {bare!r} is not an attribute -- attributes are "
+            f'key="value"; write id="{bare}".'
+        )
+    return block_id
+
+
+def _fence_info(match: re.Match) -> str:
+    """The info string of a CALC_BLOCK_RE match: the fence line's text after
+    the opening ```calc."""
+    head = match.group(0).split("\n", 1)[0]
+    return head[len("```calc"):]
+
+
+def fence_errors(body: str) -> list[tuple[int, str]]:
+    """(0-indexed line of the fence within `body`, message) for every calc
+    fence whose info string fails `parse_fence_attrs`. The caller turns each
+    into a build error at the fence's absolute line -- `extract_blocks_with_lines`
+    stays lenient (an unnamed `None` for a bad fence) so hashing, rendering
+    and citation walks never crash on a project that is already failing."""
+    out: list[tuple[int, str]] = []
+    for match in CALC_BLOCK_RE.finditer(body):
+        try:
+            parse_fence_attrs(_fence_info(match))
+        except CalcFenceError as exc:
+            out.append((body.count("\n", 0, match.start()), str(exc)))
+    return out
+
 ASSIGN_RE = re.compile(r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+?)\s*$")
 # Retired spelling of the unit assertion: `P_diss : W = V_out * I_load`.
 # Matched only to produce the error that names the fix -- it is no longer
@@ -847,6 +945,14 @@ PIPE_UNIT_RE = re.compile(r"^(?P<lhs>.+?)\s*\|\s*(?P<unit>[^|]+?)\s*$")
 CROSS_REF_RE = re.compile(
     r"^(?P<target>[A-Za-z0-9][A-Za-z0-9_-]*(?:@[A-Za-z0-9_-]+)?)"
     r"\.(?P<name>[A-Za-z_][A-Za-z0-9_]*)$"
+)
+# A dotted reference with a block half spliced in: `DEC-PWR-001.losses.P_diss`.
+# Rejected, never resolved (docs/design/named-calc-blocks.md §4.2, §7): a calc
+# value is named by ITEM.NAME and that is already unique per item. CROSS_REF_RE
+# allows exactly one dot, so any dotted reference with two or more is this.
+BLOCK_QUALIFIED_REF_RE = re.compile(
+    r"^(?P<target>[A-Za-z0-9][A-Za-z0-9_-]*(?:@[A-Za-z0-9_-]+)?)"
+    r"(?:\.[A-Za-z_][A-Za-z0-9_]*){2,}$"
 )
 # `eff = source("analysis/power-budget.csv", "tps62913_half_load_eff") | 1`
 # (docs/design/calc-sources.md §1): the whole right-hand side is one call with
@@ -1204,6 +1310,23 @@ def evaluate_block(
                 origins[name] = line_number
             continue
 
+        qualified = BLOCK_QUALIFIED_REF_RE.match(expression.strip())
+        if qualified:
+            ref = expression.strip()
+            parts = ref.split(".")
+            plain = f"{parts[0]}.{parts[-1]}"
+            dropped = "".join(f".{part}" for part in parts[1:-1])
+            outcomes.append(
+                CalcOutcome(
+                    name, expression, comment, None,
+                    f"cross-item reference {ref!r} names a block -- a calc "
+                    f"value is named by ITEM.NAME, and {plain} already names "
+                    f"it uniquely. Drop '{dropped}'.",
+                    annotation, unit_style=unit_style, line=line_number,
+                )
+            )
+            continue
+
         ref_match = CROSS_REF_RE.match(expression.strip())
         if ref_match:
             reference = expression.strip()
@@ -1359,16 +1482,23 @@ def source_calls_in_block(block: str) -> list[tuple[int, str, str, str]]:
 
 
 def extract_blocks(body: str) -> list[str]:
-    return [block for block, _ in extract_blocks_with_lines(body)]
+    return [block for block, _, _ in extract_blocks_with_lines(body)]
 
 
-def extract_blocks_with_lines(body: str) -> list[tuple[str, int]]:
-    """Like extract_blocks, but paired with each block's 0-indexed line offset
-    within `body` -- the piece a caller needs to turn a line number inside the
-    block into an absolute source line (add Item.body_line)."""
+def extract_blocks_with_lines(body: str) -> list[tuple[str, int, str | None]]:
+    """Like extract_blocks, but each block paired with its 0-indexed line
+    offset within `body` -- the piece a caller needs to turn a line number
+    inside the block into an absolute source line (add Item.body_line) -- and
+    its fence name (`id="..."`, docs/design/named-calc-blocks.md §3) or None.
+    A fence whose info string fails the grammar reports None here; the build
+    surfaces the error via `fence_errors`, at the fence line."""
     out = []
     for match in CALC_BLOCK_RE.finditer(body):
         block = match.group(1)
         offset = body.count("\n", 0, match.start(1))
-        out.append((block, offset))
+        try:
+            block_id = parse_fence_attrs(_fence_info(match))
+        except CalcFenceError:
+            block_id = None
+        out.append((block, offset, block_id))
     return out
