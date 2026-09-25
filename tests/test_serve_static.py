@@ -217,6 +217,24 @@ def test_the_server_injects_the_probe_into_preview_responses():
     assert "/edit/static/preview.js" in text
 
 
+def test_the_calc_value_toggle_is_wired_without_inline_script():
+    """Thread workbench W3: the show-values toggle is a plain button the
+    server injects into calc tables and a listener in preview.js -- CSP is
+    script-src 'self', so an inline onclick would silently do nothing."""
+    with open(os.path.join(STATIC, "preview.js"), encoding="utf-8") as fh:
+        preview = fh.read()
+    assert "refdes-values-toggle" in preview
+    assert "refdes-values-off" in preview
+    assert "addEventListener" in preview
+    server = os.path.join(os.path.dirname(STATIC), "server.py")
+    with open(server, encoding="utf-8") as fh:
+        text = fh.read()
+    assert 'class="refdes-values-toggle"' in text
+    assert "data-refdes-calc" in text
+    # the injected button carries no handler attribute of its own
+    assert "onclick" not in text
+
+
 def test_the_item_view_offers_a_link_to_its_preview_page():
     """Thread workbench W1: from /edit/ the author can open the item's own
     /preview/ page -- the link is built from the server-provided `page`,

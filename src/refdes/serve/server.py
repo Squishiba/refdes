@@ -26,6 +26,8 @@ from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, unquote, urlencode, urlsplit
 
+from .. import calc
+from ..build import INLINE_VALUE_RE
 from . import api, security
 from .preview import PreviewManager
 from .state import Poller, ProjectState
@@ -110,6 +112,17 @@ def _decorate_images(page: str, project, item) -> str:
     return _IMG_TAG_RE.sub(swap, page)
 
 
+_CODE_ELEM_RE = re.compile(r"<code\b[^>]*>.*?</code>", re.DOTALL)
+_PRE_REGION_RE = re.compile(r"<pre\b[\s\S]*?</pre>", re.IGNORECASE)
+_CALC_TABLE_RE = re.compile(r'<table class="calc"[\s\S]*?</table>', re.IGNORECASE)
+
+
+def _esc_code(text: str) -> str:
+    # What markdown-it leaves inside an inline code span: only these three
+    # characters are escaped there, so this is the comparison the W3 walk needs.
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
 def _diagnostics_panel(project, item) -> str:
     """Thread workbench W2 (D3): this item's own build diagnostics, rendered
     in the response of its preview page. Filtered to the item by id or by its
@@ -137,6 +150,101 @@ def _diagnostics_panel(project, item) -> str:
         f'<ul class="tight mono small">{lis}</ul>'
         "</section>"
     )
+
+
+# The W3 toggle: one button per calc table, shown only when the page carries
+# at least one value attribution. `preview.js` flips `refdes-values-off` on
+# the root element; `bar.css` does the hiding. No semantics -- the badge
+# content was decided by the build; the toggle only flips visibility.
+_VALUES_TOGGLE = (
+    '<button type="button" class="refdes-values-toggle" aria-pressed="true">'
+    "values</button>"
+)
+
+
+def _add_values_toggle(page: str) -> str:
+    out = []
+    last = 0
+    for match in _CALC_TABLE_RE.finditer(page):
+        out.append(page[last : match.start()])
+        table = match.group(0)
+        if 'class="calc-caption"' in table:
+            table = table.replace("</caption>", _VALUES_TOGGLE + "</caption>", 1)
+        else:
+            open_end = table.index(">") + 1
+            caption = '<caption class="calc-caption refdes-only">' + _VALUES_TOGGLE + "</caption>"
+            table = table[:open_end] + caption + table[open_end:]
+        out.append(table)
+        last = match.end()
+    out.append(page[last:])
+    return "".join(out)
+
+
+def _decorate_calc_values(page: str, item) -> str:
+    """Thread workbench W3 (D1, docs/design/thread-workbench.md §7.1): the
+    published page already renders every `{{name}}` prose reference as its
+    evaluated value -- as a bare <code> span with the name destroyed. The
+    pane puts the name back beside the value (D1's "name as attribution"),
+    plus the owning block's name for free from `CalcLine.block`
+    (docs/design/named-calc-blocks.md §5.5). Response-only like every other
+    decoration here; the values come from `item.calc_values`, the strings
+    the build already formatted -- nothing is evaluated or re-evaluated.
+
+    Identification is a parallel walk, not a guess: the build substituted
+    INLINE_VALUE_RE over the body in document order, so the k-th surviving
+    reference's value is the k-th matching <code> element in the page. The
+    walk only advances on an exact text match, so an author's own code span
+    (any text that is not the current expected value) is left untouched.
+    `{{name | unit}}` references are deliberately skipped: their rendered
+    text is a build-time conversion stored nowhere, and recomputing it would
+    be re-evaluation. A code span whose text coincides with the current
+    expected value can be decorated; the attribution it shows is still a
+    real build fact."""
+    body = calc.CALC_BLOCK_RE.sub("", item.body)
+    refs = [
+        m.group(1)
+        for m in INLINE_VALUE_RE.finditer(body)
+        if not (m.group(2) or "").strip() and m.group(1) in item.calc_values
+    ]
+    if not refs:
+        return page
+    blocks = {}
+    for line in item.calcs:
+        blocks.setdefault(line.name, line.block)
+    pre_regions = [m.span() for m in _PRE_REGION_RE.finditer(page)]
+    cursor = [0]
+    decorated = [0]
+
+    def swap(match: re.Match) -> str:
+        i = cursor[0]
+        if i >= len(refs):
+            return match.group(0)
+        name = refs[i]
+        tag = match.group(0)
+        open_end = tag.index(">") + 1
+        inner = tag[open_end:-len("</code>")]
+        if inner != _esc_code(item.calc_values[name]):
+            return tag
+        cursor[0] += 1
+        decorated[0] += 1
+        block = blocks.get(name, "")
+        title = f"{name} = {item.calc_values[name]}"
+        if block:
+            title += f" (block: {block})"
+        attrs = (
+            f' data-refdes-calc="{html_mod.escape(name, quote=True)}"'
+            f' title="{html_mod.escape(title, quote=True)}"'
+        )
+        badge = ""
+        if not any(start <= match.start() < end for start, end in pre_regions):
+            label = f"{name} · {block}" if block else name
+            badge = f'<span class="refdes-calc-attr">{html_mod.escape(label)}</span>'
+        return tag[: open_end - 1] + attrs + ">" + tag[open_end:] + badge
+
+    page = _CODE_ELEM_RE.sub(swap, page)
+    if decorated[0]:
+        page = _add_values_toggle(page)
+    return page
 
 
 class _Server(ThreadingHTTPServer):
@@ -363,6 +471,7 @@ class _Handler(BaseHTTPRequestHandler):
                 break
         if item is not None:
             page = _decorate_images(page, project, item)
+            page = _decorate_calc_values(page, item)
         bar = (
             '<div class="refdes-serve-bar"><span>refdes serve &middot; preview</span>'
             + "".join(links)
