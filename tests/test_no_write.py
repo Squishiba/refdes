@@ -408,6 +408,94 @@ def test_former_ids_confirm_under_no_write_refuses(tmp_path, capsys):
     assert not any(_changed(before, root).values())
 
 
+# ---------------------------------------------------------- `--dry-run` is a
+# write promise too: `id --dry-run` and `stub-tests --dry-run` said they wrote
+# nothing while the *load* on the way in still minted `key:` lines into the
+# item sources. A dry run is `--no-write` for the command's own work; it has to
+# be for the load it does first, or "writes nothing" is only true of the part
+# nobody was looking at.
+
+
+def _run_dry_run(config, argv):
+    return cli_mod.main(["-c", config] + argv + ["--dry-run"])
+
+
+def test_id_dry_run_leaves_the_whole_tree_byte_identical(tmp_path, capsys):
+    root, config = _snapshot_project(tmp_path)
+    with open(root / "items" / "r.yaml", "a", encoding="utf-8") as fh:
+        fh.write("  - text: No id yet, pending allocation.\n")
+    capsys.readouterr()
+    before = _snapshot(root)
+
+    status = _run_dry_run(config, ["id"])
+    out = capsys.readouterr().out
+    assert status == 0
+    assert "would allocate" in out
+    assert not any(_changed(before, root).values())
+
+
+def test_id_dry_run_mints_no_key_lines(tmp_path, capsys):
+    """The specific leak: an id-less item has no `key:`, and loading mints one
+    and writes it back, so the dry run's "would allocate" answer came attached
+    to a file it had already edited."""
+    root, config = _snapshot_project(tmp_path)
+    with open(root / "items" / "r.yaml", "a", encoding="utf-8") as fh:
+        fh.write("  - text: No id yet, pending allocation.\n")
+    path = root / "items" / "r.yaml"
+    before = path.read_text(encoding="utf-8")
+
+    assert _run_dry_run(config, ["id"]) == 0
+    capsys.readouterr()
+    assert path.read_text(encoding="utf-8") == before
+    assert path.read_text(encoding="utf-8").count("key:") == before.count("key:")
+
+
+def test_stub_tests_dry_run_leaves_the_whole_tree_byte_identical(tmp_path, capsys):
+    from helpers import BLOCKS_ITEMS, BLOCKS_SCHEMA
+
+    write_project_config(tmp_path, BLOCKS_SCHEMA)
+    items = tmp_path / "items"
+    items.mkdir()
+    for name, text in BLOCKS_ITEMS.items():
+        (items / name).write_text(text, encoding="utf-8")
+    (tmp_path / "pages").mkdir()
+    config = str(tmp_path / "refdes-project.yaml")
+    capsys.readouterr()
+    before = _snapshot(tmp_path)
+
+    status = _run_dry_run(config, ["stub-tests"])
+    out = capsys.readouterr().out
+    assert status == 0
+    assert "would write" in out
+    assert not any(_changed(before, tmp_path).values())
+
+
+def test_id_dry_run_still_reports_the_allocation_it_would_make(tmp_path, capsys):
+    """The fix must not turn a dry run into a no-op: the number it reports is
+    the thing the user asked for."""
+    root, config = _snapshot_project(tmp_path)
+    with open(root / "items" / "r.yaml", "a", encoding="utf-8") as fh:
+        fh.write("  - text: No id yet, pending allocation.\n")
+    capsys.readouterr()
+
+    assert _run_dry_run(config, ["id"]) == 0
+    out = capsys.readouterr().out
+    assert "would allocate REQ-" in out
+    assert "would allocate 1 id(s)" in out
+
+
+def test_id_without_dry_run_still_mints_and_writes(tmp_path):
+    """The other direction: suppressing the load's writes must not leak into a
+    real run."""
+    root, config = _snapshot_project(tmp_path)
+    with open(root / "items" / "r.yaml", "a", encoding="utf-8") as fh:
+        fh.write("  - text: No id yet, pending allocation.\n")
+    before = _snapshot(root)
+
+    assert cli_mod.main(["-c", config, "id"]) == 0
+    assert any(_changed(before, root).values())
+
+
 # ------------------------------------- the global --no-write help text agrees with
 # the exit-code table in docs/cli-reference.md about which commands report.
 

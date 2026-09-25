@@ -48,9 +48,22 @@ def _load(args, require_ids: bool = True) -> tuple[Project, bool]:
     otherwise close.
 
     The pipeline itself lives in `loader.load_tree`, shared with the browser
-    editor's read-only path; `--no-write` is its `write=False`."""
+    editor's read-only path. `write=False` is `--no-write` -- and `--dry-run`
+    too, which is the same promise made by a different name: a command that
+    has already been told to report rather than write must not have the *load*
+    on the way in write anyway. Loading mints every missing surrogate key and
+    expands bare link references into `ID@key` composites (docs/design/keys.md
+    §2), so `refdes id --dry-run` used to answer "would allocate 1 id(s)" over
+    an item file it had already edited to add a `key:` line to. `--no-write`
+    already forced `args.dry_run` in the two commands that have a `--dry-run`
+    and load this way (`cmd_id`, `cmd_stub_tests`), so this is exactly the code
+    path `--no-write` was already tested through -- there is no third
+    behaviour here to get right.
+    """
     return loader_mod.load_tree(
-        args.config, require_ids=require_ids, write=not args.no_write
+        args.config,
+        require_ids=require_ids,
+        write=not (args.no_write or getattr(args, "dry_run", False)),
     )
 
 

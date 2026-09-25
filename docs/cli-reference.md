@@ -268,13 +268,21 @@ list entry it sits, so the file never ends up holding two `id:` keys.
 
 | Option | Effect |
 |---|---|
-| `--dry-run` | Show what would be allocated and skip the `id:` write-back. It is not write-free: loading the project can still mint missing surrogate `key:` fields and refresh `.refdes/schema.json`. Put the global `--no-write` first for a preview that writes nothing at all. |
+| `--dry-run` | Show what would be allocated and write nothing at all — no `id:` write-back, and no incidental load-time write either, so every source file is left byte-identical. |
 
 ```bash
 refdes id --dry-run
 refdes --no-write id --dry-run
 refdes id
 ```
+
+A `--dry-run` is a write promise for the whole run, not just for the
+allocation it reports: loading the project mints missing surrogate `key:`
+fields and expands bare link references into `DISPLAY-ID@key` composites
+(surrogate [keys](design/keys.md)), so a dry run that only suppressed its own
+`id:` write-back would still have edited the item files on the way in. It does
+not — put the global `--no-write` first only when you want the run refused or
+re-reported in `--no-write` terms as well.
 
 ```
 allocated REQ-PWR-005  (items/requirements/power.yaml:36) The unit shall tolerate a reversed input without damage.
