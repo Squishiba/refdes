@@ -12,7 +12,7 @@ refdes id
 ```
 
 ```
-allocated REQ-PWR-005  (items/requirements/power.yaml:36)  The unit shall tolerate...
+allocated REQ-PWR-005  (items/requirements/power.yaml:36) The unit shall tolerate...
 allocated 1 id(s)
 ```
 
@@ -21,7 +21,7 @@ The ID is written back into your source file, preserving comments and indentatio
 ```yaml
   # No id yet — refdes id will allocate one here.
   - id: REQ-PWR-005
-    text: The unit shall tolerate a sustained 40 V input transient for 100 ms.
+    body: The unit shall tolerate a sustained 40 V input transient for 100 ms.
 ```
 
 Use `--dry-run` to see what would be allocated without writing.
@@ -38,7 +38,7 @@ defaults:
   prefix: CAN
 items:
   - id: "042"
-    text: Bit-timing tolerance, matching the CAN transceiver datasheet's own
+    body: Bit-timing tolerance, matching the CAN transceiver datasheet's own
           numbering.
 ```
 
@@ -48,7 +48,7 @@ attach:
 ```yaml
 items:
   - id: CAN-042
-    text: Bit-timing tolerance, matching the CAN transceiver datasheet's own
+    body: Bit-timing tolerance, matching the CAN transceiver datasheet's own
           numbering.
 ```
 
@@ -83,11 +83,11 @@ file. Inserting an item later gives it the next free number wherever it sits:
 ```yaml
 items:
   - id: REQ-TMP-001
-    text: First.
+    body: First.
   - id: REQ-TMP-003     # inserted later, keeps its own number
-    text: Inserted in the middle.
+    body: Inserted in the middle.
   - id: REQ-TMP-002
-    text: Second.
+    body: Second.
 ```
 
 Out of order in the file, stable forever. Display order comes from the file, not
@@ -218,7 +218,7 @@ records what an item used to be called, so those references still resolve:
 
 ```yaml
 - id: REQ-CAN-001
-  text: The bus shall recover from a bit error within one frame.
+  body: The bus shall recover from a bit error within one frame.
   former_ids: [CAN_00]
 ```
 

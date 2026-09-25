@@ -53,7 +53,8 @@ covers, and `refdes init --standard none` if you'd rather author every type
 by hand, as every project did before this existed. `init` also writes
 `.vscode/settings.json`, wiring up field/link completion for
 `items/**/*.yaml` files if you're using VS Code — see [editor
-support](standard-library.md#editor-support-json-schema-emission).
+support](standard-library.md#editor-support-json-schema-emission). `items/` is not
+created for you — make it, and any folders under it, yourself:
 
 ```
 my-board/
@@ -96,7 +97,7 @@ refdes id
 
 ```
 allocated REQ-PWR-001  (items/requirements/power.yaml:9) The unit shall operate from an input supply of 9 V to 36 V.
-allocated REQ-PWR-002  (items/requirements/power.yaml:12) The 3V3 rail shall supply 1.2 A continuous.
+allocated REQ-PWR-002  (items/requirements/power.yaml:13) The 3V3 rail shall supply 1.2 A continuous.
 allocated 2 id(s)
 ```
 
@@ -105,8 +106,8 @@ The IDs are now written into your file. They will never change. See [IDs](ids.md
 ## 3. Add a bound with a real limit
 
 A **bound** is a machine-checkable limit — the type that makes the next step
-possible. (It was called `constraint` up to `hardware@2`; see [the standard
-library](standard-library.md#versioning-and-pinning).)
+possible. (It was called `constraint` in `hardware@1`, before the rename; see
+[the standard library](standard-library.md#versioning-and-pinning).)
 
 `items/bounds/thermal.yaml`
 

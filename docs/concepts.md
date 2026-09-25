@@ -3,7 +3,7 @@
 ## Items
 
 Everything is an **item**: a requirement, a bound, a decision, a component, a
-test, a log entry. An item has
+test, a log entry, a group. An item has
 
 - a stable **ID** (`REQ-PWR-002`) that never changes,
 - a **type**, which decides what fields and links are legal,
