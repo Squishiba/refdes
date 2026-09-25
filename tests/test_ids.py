@@ -254,6 +254,202 @@ def test_quoted_numeric_id_expands_inside_a_flow_style_entry(tmp_path):
     assert reparsed["items"] == [{"id": "CAN-042", "text": "flow style entry"}]
 
 
+# ------------------------------------- a hint that is not the item's first key
+#
+# The write-back used to look only at the line an item *starts* on when
+# deciding whether it already held an `id:`. A hint written under `type:` /
+# `title:` -- the ordinary shape, since a hand-written item leads with its
+# type -- was therefore missed, and a second `id:` line got spliced in above
+# it. YAML resolves a repeated key to the *last* one, so the hint won: the
+# item reloaded as `007`, `refdes check` reported "has no prefix yet"
+# (parse.py's pending-item diagnostic), and a second `refdes id` refused it
+# as a burned-number collision. The hint line must be *replaced* wherever in
+# the entry it sits, not shadowed by a new one.
+
+
+def _hint_project(tmp_path, name, source, *, crlf=False):
+    write_project_config(tmp_path, NUMERIC_HINT_SCHEMA)
+    items = tmp_path / "items"
+    items.mkdir()
+    path = items / name
+    if crlf:
+        path.write_bytes(source.replace("\n", "\r\n").encode("utf-8"))
+    else:
+        path.write_text(source, encoding="utf-8")
+    return tmp_path, path
+
+
+def _assert_clean_and_idempotent(root, capsys):
+    """`refdes check` clean, and a second `refdes id` a no-op. These are the
+    two symptoms of the leftover hint: the item reads as unallocated again
+    (check), and re-allocating it burns a second id (id)."""
+    cfg = str(root / "refdes-project.yaml")
+    assert cli_mod.main(["-c", cfg, "check"]) == 0, capsys.readouterr().out
+
+    capsys.readouterr()
+    assert cli_mod.main(["-c", cfg, "id"]) == 0
+    assert "no items are missing an id" in capsys.readouterr().out
+
+    project = load_project(config_path=cfg)
+    parse.load_items(project, require_ids=False)
+    assert not project.pending, "the item must not still look unallocated on reparse"
+    assert ids.allocate(project) == []
+
+
+@pytest.mark.parametrize("hint", ["'007'", '"007"'])
+def test_markdown_hint_below_other_keys_is_replaced_not_shadowed(tmp_path, capsys, hint):
+    root, path = _hint_project(
+        tmp_path, "r.md", f"---\ntype: requirement\ntext: Legacy number.\nid: {hint}\n---\nBody.\n"
+    )
+    assert cli_mod.main(["-c", str(root / "refdes-project.yaml"), "id"]) == 0
+
+    front_matter = path.read_text(encoding="utf-8").split("---")[1]
+    assert front_matter.count("id:") == 1, f"expected one 'id:' key, got:\n{front_matter}"
+    assert "id: REQ-007" in front_matter
+    _assert_clean_and_idempotent(root, capsys)
+
+
+@pytest.mark.parametrize("hint", ["'007'", '"007"'])
+def test_list_hint_below_other_keys_is_replaced_not_shadowed(tmp_path, capsys, hint):
+    root, path = _hint_project(
+        tmp_path,
+        "r.yaml",
+        "defaults: { type: requirement }\n"
+        f"items:\n  - type: requirement\n    text: Legacy number.\n    id: {hint}\n",
+    )
+    assert cli_mod.main(["-c", str(root / "refdes-project.yaml"), "id"]) == 0
+
+    text = path.read_text(encoding="utf-8")
+    assert text.count("id:") == 1, f"expected one 'id:' key, got:\n{text}"
+    assert "id: REQ-007" in text
+    _assert_clean_and_idempotent(root, capsys)
+
+
+def test_crlf_hint_file_is_rewritten_without_touching_its_line_endings(tmp_path, capsys):
+    """The hint's own line is replaced; every other byte -- CRLF included --
+    is the file's own. Read back as bytes, since text mode would hide a
+    translation that the writer is not supposed to make."""
+    root, path = _hint_project(
+        tmp_path,
+        "r.md",
+        "---\ntype: requirement\ntext: Legacy number.\nid: '007'\n---\nBody.\n",
+        crlf=True,
+    )
+    assert cli_mod.main(["-c", str(root / "refdes-project.yaml"), "id"]) == 0
+
+    raw = path.read_bytes()
+    assert b"id: REQ-007\r\n" in raw
+    assert b"'007'" not in raw
+    assert b"\n" not in raw.replace(b"\r\n", b""), "a lone LF crept in"
+    _assert_clean_and_idempotent(root, capsys)
+
+
+def test_unquoted_hint_is_refused_and_the_file_is_never_rewritten(tmp_path, capsys):
+    """The unquoted spelling of a numeric hint, end to end. YAML hands
+    `id: 007` to the parser as an int (007 is octal), so it is refused rather
+    than expanded -- which means an unquoted hint can never reach the
+    write-back. What must hold is that the file is left exactly as written:
+    no `id:` line is inserted beside it, and nothing is burned."""
+    root, path = _hint_project(
+        tmp_path,
+        "r.md",
+        "---\ntype: requirement\ntext: Unquoted.\nid: 007\n---\nBody.\n",
+    )
+    before = path.read_bytes()
+
+    # Exit 1: the parse-time refusal is the only diagnostic there is, and it
+    # is an error precisely so the run cannot pass as a clean no-op.
+    assert cli_mod.main(["-c", str(root / "refdes-project.yaml"), "id"]) == 1
+    assert path.read_bytes() == before
+    assert not (root / ".refdes" / "ids.yaml").exists()
+    # The diagnostic lands on stderr (see the neighbouring "unquoted number"
+    # test, which reads it off the project's own error list instead).
+    assert "octal" in capsys.readouterr().err
+
+
+# ------------------------------- where the widened search must NOT reach
+#
+# The fix widened the search for an existing key line from "the line the item
+# starts on" to the whole entry. These pin the boundaries that widening is
+# only safe inside: another item's key, a nested mapping's key, and a block
+# scalar's body all sit at other columns and are never this item's own key.
+
+
+@pytest.mark.parametrize("hint", ["'007'", '"007"', "007"])
+def test_markdown_writer_replaces_the_hint_line_wherever_it_sits(hint):
+    """`insert_into_markdown` matches the hint as written -- single-quoted,
+    double-quoted, or bare -- and replaces that line, wherever in the block
+    it is."""
+    lines = ["---", "type: requirement", f"id: {hint}", "text: x", "---"]
+    assert ids.insert_into_markdown(lines, 2, "id: REQ-007", old_value="007") == [
+        "---", "type: requirement", "id: REQ-007", "text: x", "---",
+    ]
+
+
+@pytest.mark.parametrize("hint", ["'007'", '"007"', "007"])
+def test_list_writer_replaces_the_hint_line_wherever_it_sits(hint):
+    lines = [
+        "items:", "  - type: requirement", f"    id: {hint}", "    text: x",
+        "  - text: y",
+    ]
+    assert ids.insert_into_list(lines, 2, "id", "REQ-007", old_value="007") == [
+        "items:", "  - type: requirement", "    id: REQ-007", "    text: x",
+        "  - text: y",
+    ]
+
+
+def test_list_writer_handles_a_shallow_first_key_and_deeper_continuations():
+    """`LIST_ENTRY_RE` yields the entry's *minimum* column, but a hand-written
+    entry may align its keys further right -- `- type: ...` followed by
+    `    id: '007'` is valid YAML and the ordinary shape."""
+    lines = ["items:", "  - type: requirement", "    id: '007'", "    text: x"]
+    assert ids.insert_into_list(lines, 2, "id", "REQ-007", old_value="007") == [
+        "items:", "  - type: requirement", "    id: REQ-007", "    text: x",
+    ]
+
+
+def test_markdown_writer_does_not_reach_into_the_next_block_or_a_nested_key():
+    lines = ["---", "type: requirement", "meta:", "  id:", "---"]
+    assert ids.insert_into_markdown(lines, 2, "id: REQ-001") == [
+        "---", "id: REQ-001", "type: requirement", "meta:", "  id:", "---",
+    ]
+
+    two = [
+        "---", "type: requirement", "text: a", "---", "Body.",
+        "---", "type: requirement", "id:", "text: b", "---",
+    ]
+    out = ids.insert_into_markdown(two, 2, "id: REQ-001")
+    assert out[1] == "id: REQ-001"
+    assert out[8] == "id:", "the next item's own placeholder must be left alone"
+
+
+def test_markdown_writer_does_not_reach_into_a_block_scalar_body():
+    """The one place a same-spelling line really can appear: a `|` value's
+    body is text, not front matter, and rewriting it would edit the item's
+    prose. YAML requires a block scalar's body to sit past its key's column,
+    which is exactly the restriction that keeps it out of reach."""
+    lines = ["---", "type: requirement", "text: |", "  id: '007'", "---"]
+    assert ids.insert_into_markdown(lines, 2, "id: REQ-007", old_value="007") == [
+        "---", "id: REQ-007", "type: requirement", "text: |", "  id: '007'", "---",
+    ]
+
+
+def test_list_writer_does_not_reach_the_next_entry_or_a_nested_key():
+    lines = ["items:", "  - type: requirement", "    meta:", "      id:", "    text: x"]
+    assert ids.insert_into_list(lines, 2, "id", "REQ-001") == [
+        "items:", "  - id: REQ-001", "    type: requirement", "    meta:", "      id:",
+        "    text: x",
+    ]
+
+    two = [
+        "items:", "  - type: requirement", "    text: a",
+        "  - id:", "    text: b",
+    ]
+    out = ids.insert_into_list(two, 2, "id", "REQ-001")
+    assert out[1] == "  - id: REQ-001"
+    assert out[4] == "  - id:", "the next entry's own placeholder must be left alone"
+
+
 def test_unquoted_numeric_id_is_refused_not_silently_mangled(tmp_path):
     """YAML reads an unquoted leading zero as octal (042 -> 34); trusting it
     would risk freezing the wrong id forever, so it's refused rather than

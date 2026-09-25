@@ -17,7 +17,7 @@ from collections import defaultdict
 import yaml
 
 from .model import Item, Project, provisional_handle
-from .parse import yaml_safe_load
+from .parse import FENCE_RE, yaml_safe_load
 
 ID_RE = re.compile(r"^([A-Z][A-Z0-9]*(?:-[A-Z0-9]+)*)-(\d+)$")
 LIST_ENTRY_RE = re.compile(r"^(\s*)-(\s+)(\S.*)$")
@@ -34,6 +34,68 @@ def _value_pattern(old_value: str | None) -> str:
     if old_value is None:
         return ""
     return rf"[\"']?{re.escape(old_value)}[\"']?"
+
+
+def _leading_ws(line: str) -> str:
+    return line[: len(line) - len(line.lstrip())]
+
+
+def _col(line: str) -> int:
+    """The column a line's first non-space character sits at."""
+    return len(_leading_ws(line))
+
+
+def _find_key_line(
+    lines: list[str], start: int, stop: int, key: str, value_pattern: str, column: int
+) -> int | None:
+    """Index of the first line in ``lines[start:stop]`` that is exactly
+    ``<column spaces>key: <value>`` and nothing else, or None.
+
+    Restricted to lines at the *entry's own* key column, deliberately. Every
+    other line in the entry is a sibling key at a different column, a nested
+    mapping or sequence, or a block scalar's body -- and YAML requires a block
+    scalar's body to be indented *past* its key, so no such line can ever sit
+    at that column. That restriction is what makes it safe to search the whole
+    entry rather than only the line the item starts on: the widened search
+    still cannot reach a same-spelling line that YAML would not itself have
+    read as this key.
+
+    `value_pattern` is `_value_pattern`'s, so this matches the hint as it was
+    written (quoted or not), and a bare `key:` placeholder when `old_value` is
+    None.
+    """
+    line_re = re.compile(rf"^{' ' * column}{re.escape(key)}:\s*{value_pattern}\s*$")
+    for i in range(start, stop):
+        if line_re.match(lines[i]):
+            return i
+    return None
+
+
+def _front_matter_end(lines: list[str], index: int) -> int:
+    """Where the front-matter block whose first key line is `index` ends: the
+    next `---` line, by the parser's own fence rule (`md_front_matter_blocks`
+    pairs each opening fence with the next one), or ``len(lines)`` if the
+    block never closes."""
+    for i in range(index + 1, len(lines)):
+        if FENCE_RE.match(lines[i]):
+            return i
+    return len(lines)
+
+
+def _entry_key_column(lines: list[str], index: int, stop: int, min_col: int) -> int:
+    """The column a block-sequence entry's continuation keys sit at: the
+    indentation of the first non-blank line after its `- ` line.
+
+    `LIST_ENTRY_RE` only yields the entry's *minimum* column (the character
+    right after the dash and its following spaces), but YAML lets a hand-
+    written entry align the rest of its keys further right -- and
+    `- type: requirement` followed by `    id: '007'` is ordinary and valid.
+    Falls back to `min_col` for an entry with no continuation line at all.
+    """
+    for i in range(index + 1, stop):
+        if lines[i].strip():
+            return max(_col(lines[i]), min_col)
+    return min_col
 
 
 def split_id(item_id: str) -> tuple[str, int] | None:
@@ -324,10 +386,19 @@ def insert_into_markdown(
     nothing were ever written -- looking unallocated again on the very next
     parse, and burning another id if `refdes id` runs again on it.
 
-    `old_value`, when given, is the exact text currently on that line (e.g.
-    a bare-numeric `id:` hint being expanded -- finding 8 Part 1) and is
-    matched literally; otherwise only a *bare* key (a scaffolded placeholder
-    with no value at all) is replaced, matching the original, narrower fix.
+    The search for that line covers the whole front-matter block, not just
+    the line the item starts on, because the key need not be first: an author
+    writing `type:`/`title:` above `id: '007'` is the ordinary case, and
+    matching only the first key line is exactly what let a second `id:` line
+    be added above the hint (finding 8 Part 1's write-back, at its original
+    scale -- the file ended up with both `id: REQ-007` and `id: '007'`, and
+    since YAML takes the last one the item reloaded as `007`, `check`
+    reported "has no prefix yet", and a second `refdes id` refused it as a
+    burned-number collision). `old_value`, when given, is the exact text
+    currently on that line (a bare-numeric `id:` hint being expanded) and is
+    matched literally, quoted or not; otherwise only a *bare* key (a
+    scaffolded placeholder with no value at all) is replaced, matching the
+    original, narrower fix.
     """
     index = max(0, line_no - 1)
     key = new_line.split(":", 1)[0].strip()
@@ -351,8 +422,13 @@ def insert_into_markdown(
         else:
             new_inner = f"{key}: {value}" if not inner else f"{key}: {value}, {inner}"
         return lines[:index] + [f"{{{new_inner}}}"] + lines[index + 1 :]
-    if index < len(lines) and re.match(rf"^{re.escape(key)}:\s*{value_pattern}\s*$", lines[index]):
-        return lines[:index] + [new_line] + lines[index + 1 :]
+    if index < len(lines):
+        hit = _find_key_line(
+            lines, index, _front_matter_end(lines, index), key, value_pattern,
+            _col(lines[index]),
+        )
+        if hit is not None:
+            return lines[:hit] + [new_line] + lines[hit + 1 :]
     return lines[:index] + [new_line] + lines[index:]
 
 
@@ -369,11 +445,18 @@ def insert_into_list(
     instead of corrupting the file.
 
     If the target line already *is* `{key}:` -- bare, or already holding
-    `old_value` when given (a bare-numeric `id:` hint being expanded,
-    finding 8 Part 1) -- its value is replaced in place rather than
-    inserting a second `{key}:` above it, in both block and flow style; see
-    insert_into_markdown()'s docstring for why a duplicate key is a
-    correctness bug, not a cosmetic one.
+    `old_value` when given (a bare-numeric `id:` hint being expanded) -- its
+    value is replaced in place rather than inserting a second `{key}:` above
+    it, in both block and flow style; see insert_into_markdown()'s docstring
+    for why a duplicate key is a correctness bug, not a cosmetic one.
+
+    In block style the search covers the whole entry, not just the line the
+    entry starts on: an `id:` hint under a `- type:`/`- title:` first key is
+    the ordinary spelling, and matching only that line is what left the hint
+    in place beside the newly inserted `- id: REQ-007`, which YAML then read
+    last. The search stops at the first line dedented out of this entry and
+    stays at the entry's own key column, so it cannot reach a following
+    entry's keys.
     """
     index = line_no - 1
     if not (0 <= index < len(lines)):
@@ -398,6 +481,16 @@ def insert_into_list(
         return lines[:index] + [f"{indent}-{sep}{{{new_inner}}}"] + lines[index + 1 :]
     if re.match(rf"^{re.escape(key)}:\s*{value_pattern}\s*$", rest):
         return lines[:index] + [f"{indent}- {key}: {value}"] + lines[index + 1 :]
+    min_col = len(indent) + len(sep)
+    stop = len(lines)
+    for i in range(index + 1, len(lines)):
+        if lines[i].strip() and _col(lines[i]) < min_col:
+            stop = i
+            break
+    column = _entry_key_column(lines, index, stop, min_col)
+    hit = _find_key_line(lines, index + 1, stop, key, value_pattern, column)
+    if hit is not None:
+        return lines[:hit] + [f"{' ' * column}{key}: {value}"] + lines[hit + 1 :]
     replacement = [f"{indent}- {key}: {value}", f"{indent}  {rest}"]
     return lines[:index] + replacement + lines[index + 1 :]
 
@@ -472,7 +565,12 @@ def allocate(project: Project, dry_run: bool = False) -> list[tuple[Item, str]]:
 
     for rel, entries in by_file.items():
         path = os.path.join(project.root, rel)
-        with open(path, "r", encoding="utf-8") as fh:
+        # newline="", not the default: in universal-newlines mode the read has
+        # already rewritten every CRLF to LF, so the style check below could
+        # only ever see "\n" -- and a CRLF file came back out of `refdes id`
+        # silently converted, every untouched line of it rewritten for a
+        # one-line edit. splitlines() drops the terminators either way.
+        with open(path, "r", encoding="utf-8", newline="") as fh:
             text = fh.read()
         newline = "\r\n" if "\r\n" in text else "\n"
         lines = text.splitlines()
