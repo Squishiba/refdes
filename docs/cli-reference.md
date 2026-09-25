@@ -762,14 +762,37 @@ So on a hand-rolled schema, a type or required-field rename is a **hand edit
 to both files, made together**: rename the key in `refdes-schema.yaml` and the
 `type:`/`prefix:` and `id:` lines in the item files in one editing pass, then
 run `refdes check` to confirm the two agree. The renames `refdes revise` *can*
-do alone on such a project are the prefix, id, and **optional**-field renames
-— an optional field rename lands as an `unknown field 'label' on spec` warning
-until you add the field to the schema yourself.
+do alone on such a project are the prefix, id, **optional**-field, and
+**link-verb** renames — an optional field rename lands as an
+`unknown field 'label' on spec` warning until you add the field to the schema
+yourself, and a link-verb rename has to name a verb the project already knows.
+
+**A link rename onto a verb the project does not have is refused up front,
+before anything is written.** A `links:` entry renaming `refines` to `narrows`
+on a project that declares no `narrows` is a hand edit to both files, made
+together, exactly like a type rename:
+
+```
+$ refdes revise rename.yaml
+refused:
+  link rename 'refines' -> 'narrows': 'narrows' is not a link type this project knows, and `refdes revise` only rewrites item files -- the data would be renamed into a verb no schema declares, and an unknown link verb is a warning rather than an error, so every edge this rename touched would silently stop being one. Add the verb to refdes-schema.yaml's `link_types:` (and to the renaming type's own `links:`) and re-run.
+```
+
+The refusal is deliberately early rather than left to the after-rewrite
+validation, because a renamed-into-nothing verb is only a *warning* — nothing
+downstream would have rolled it back. Renaming a verb the project *does* have
+is fine, from either end of the edge: `refines: refined_by` is accepted, since
+a link is spelled from whichever side the item is on. Renaming onto a verb that
+is already in use is a different refusal, the collision one
+(`'narrows' already names an existing link type`).
 
 For a bundled standard's own version bump there is no such problem: the
 schema moves with the data inside one verified operation, because
 `refdes standard upgrade` (above) supplies the schema edit itself. That is why
-it exists and why `revise` defers to it.
+it exists and why `revise` defers to it. A standard's own migration is allowed
+to rename a verb the *current* version has never heard of — hardware v2's
+`equivalent` becomes v3's `drop_in`, and `drop_in` is not a v2 verb at all —
+so the new version's vocabulary arrives with the same step.
 
 **Structured references move; prose does not.** A link's own target list —
 in either YAML spelling, `key: [A, B]` or a block sequence of `- A` entries

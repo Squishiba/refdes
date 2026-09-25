@@ -286,6 +286,143 @@ def test_revise_refuses_a_self_contradictory_mapping():
     assert any("collides" in e for e in errors)
 
 
+# ------------------------------- a link rename's target verb is validated like a type's
+
+
+def _link_rename_project(tmp_path):
+    """A hand-rolled project whose `bound` type declares a link from both
+    ends (`refines` and its inverse `refined_by`), so a rename onto either
+    spelling is a real rename and a rename onto a third name is not."""
+    write_project_config(
+        tmp_path,
+        "site: { title: T, out: _site }\n"
+        "link_types:\n"
+        "  refines:  { inverse: refined_by, label: Refines }\n"
+        "  verifies: { inverse: verified_by, label: Verifies }\n"
+        "types:\n"
+        "  bound:\n"
+        "    prefix: BND\n"
+        "    fields: { text: { type: text, required: true } }\n"
+        "    links: { refines: [bound], refined_by: [bound] }\n",
+    )
+    items = tmp_path / "items"
+    items.mkdir()
+    (items / "i.yaml").write_text(
+        "defaults: { type: bound, prefix: BND }\n"
+        "items:\n"
+        "  - id: BND-001\n    text: Base bound.\n"
+        "  - id: BND-002\n    text: Narrower bound.\n    refines: [BND-001]\n",
+        encoding="utf-8",
+    )
+    return tmp_path
+
+
+def test_check_ambiguous_allows_a_link_rename_onto_a_known_verb(tmp_path):
+    root = _link_rename_project(tmp_path)
+    project = load_project(config_path=str(root / "refdes-project.yaml"))
+    errors = revise.check_ambiguous(
+        project, revise.Mapping(links={"refines": "refined_by"})
+    )
+    assert errors == []
+
+
+def test_check_ambiguous_refuses_a_link_rename_onto_an_undeclared_verb(tmp_path):
+    """The gap: a *type* rename onto a type the project doesn't have is
+    caught by the reload-and-verify step, and a *link* rename onto a verb
+    the project doesn't have is not -- an unknown verb is only a warning, so
+    the rewrite lands and every edge it renamed is now a dead key."""
+    root = _link_rename_project(tmp_path)
+    project = load_project(config_path=str(root / "refdes-project.yaml"))
+    errors = revise.check_ambiguous(
+        project, revise.Mapping(links={"refines": "narrows"})
+    )
+    assert any(
+        "link rename 'refines' -> 'narrows'" in e and "narrows" in e for e in errors
+    ), errors
+
+
+def test_link_rename_onto_an_undeclared_verb_is_refused_before_anything_is_written(tmp_path):
+    root = _link_rename_project(tmp_path)
+    path = root / "items" / "i.yaml"
+    before = path.read_bytes()
+
+    result = revise.apply(str(root), revise.Mapping(links={"refines": "narrows"}))
+    assert not result.ok
+    assert any("'narrows'" in e for e in result.errors)
+    assert path.read_bytes() == before
+    assert result.changed_files == []
+
+
+def test_link_rename_onto_an_undeclared_verb_is_refused_in_dry_run_too(tmp_path):
+    root = _link_rename_project(tmp_path)
+    path = root / "items" / "i.yaml"
+    before = path.read_bytes()
+
+    result = revise.apply(
+        str(root), revise.Mapping(links={"refines": "narrows"}), dry_run=True
+    )
+    assert not result.ok
+    assert any("'narrows'" in e for e in result.errors)
+    assert path.read_bytes() == before
+
+
+def test_a_known_link_rename_still_applies(tmp_path):
+    """The check must not refuse the rename it is meant to permit."""
+    root = _link_rename_project(tmp_path)
+    result = revise.apply(str(root), revise.Mapping(links={"refines": "refined_by"}))
+    assert result.ok, result.errors
+    text = (root / "items" / "i.yaml").read_text(encoding="utf-8")
+    assert "refined_by: [BND-001" in text
+    assert "refines:" not in text
+
+
+def test_a_link_rename_onto_an_inverse_spelling_is_allowed(tmp_path):
+    """A link may be spelled from either end, so `refined_by` is a verb this
+    project knows even though it is not a `link_types:` key of its own. A
+    check that only consulted `project.link_types` would refuse a rename
+    onto a perfectly valid spelling."""
+    root = _link_rename_project(tmp_path)
+    project = load_project(config_path=str(root / "refdes-project.yaml"))
+    assert "refined_by" not in project.link_types
+    assert "refined_by" in project.inverse_of
+
+    errors = revise.check_ambiguous(
+        project, revise.Mapping(links={"refines": "refined_by"})
+    )
+    assert errors == []
+
+
+def test_standard_upgrade_link_rename_onto_a_new_version_verb_still_applies(tmp_path):
+    """The one caller that legitimately renames a verb the *current* schema
+    has never heard of: hardware v2's `equivalent` becomes v3's `drop_in`,
+    and `drop_in` is not a v2 link type at all. A target-verb check that did
+    not exempt this path would make the bundled migration unapplicable."""
+    (tmp_path / "refdes-project.yaml").write_text(
+        "standard: { base: hardware, version: 2 }\n"
+        "site: { title: T, out: _site }\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "items").mkdir()
+    (tmp_path / "items" / "c.yaml").write_text(
+        "defaults: { type: component }\n"
+        "items:\n"
+        "  - id: CMP-001\n    title: 5 V regulator\n    body: The 5 V regulator.\n"
+        "    equivalent: [CMP-002]\n"
+        "  - id: CMP-002\n    title: 3.3 V regulator\n    body: The 3.3 V regulator.\n",
+        encoding="utf-8",
+    )
+
+    project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
+    assert "drop_in" not in project.link_types  # v2 has never heard of it
+    assert "equivalent" in project.link_types
+
+    results = revise.apply_standard_upgrade(str(tmp_path), 3)
+    assert all(r.result.ok for r in results), [r.result.errors for r in results]
+    text = (tmp_path / "items" / "c.yaml").read_text(encoding="utf-8")
+    assert "drop_in: [CMP-002]" in text
+    assert "equivalent:" not in text
+
+
 # ------------------------------------------- an unreadable mapping file is a config error
 
 
