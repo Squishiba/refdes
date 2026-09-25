@@ -263,14 +263,8 @@ Allocate IDs for items that have none, writing them into the source files.
 Also expands a quoted bare number (`id: "042"`) into a full id against its
 prefix, freezing the author's own chosen number rather than picking the next
 free one — see [choosing your own number](ids.md#choosing-your-own-number).
-
-> **Known issue (verified against `hardware@3`, not yet fixed):** the expansion
-> writes the full id as an extra line and leaves the quoted hint in place, so
-> the front matter ends up holding both `id: REQ-PWR-042` and `id: "042"`. YAML
-> reads the quoted value last, and the item then loads as `id: 042` and reports
-> `id: 042 has no prefix yet`; a second `refdes id` run rejects the same item as
-> a burned-number collision. Prefer leaving `id:` blank and letting `refdes id`
-> assign the number until this is fixed.
+The expansion replaces the hint line wherever in the item's front matter or
+list entry it sits, so the file never ends up holding two `id:` keys.
 
 | Option | Effect |
 |---|---|
