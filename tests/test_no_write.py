@@ -408,6 +408,62 @@ def test_former_ids_confirm_under_no_write_refuses(tmp_path, capsys):
     assert not any(_changed(before, root).values())
 
 
+# ------------------------------------- the global --no-write help text agrees with
+# the exit-code table in docs/cli-reference.md about which commands report.
+
+
+def _no_write_help(capsys):
+    with pytest.raises(SystemExit):
+        cli_mod.main(["--no-write", "--help"])
+    return capsys.readouterr().out
+
+
+def test_no_write_help_lists_calc_rewrite_among_the_reporting_commands(capsys):
+    """`calc-rewrite` sets `dry_run` from `--no-write` (cli.py's cmd_calc_rewrite)
+    exactly like `revise` and `id`, so it reports and writes nothing -- which is
+    what docs/cli-reference.md's global `--no-write` table says. The global help
+    string listed the reporting commands and left `calc-rewrite` out, so the
+    flag's own documentation under-promised what it suppresses."""
+    out = _no_write_help(capsys)
+    reporting = out.split("explicit write commands either")[1]
+    assert "calc-rewrite" in reporting
+
+
+def test_no_write_help_lists_every_command_the_docs_table_lists_as_reporting(capsys):
+    """Pins the whole reporting list, not just the one gap, so the next command
+    added to either side has to be added to the other."""
+    out = _no_write_help(capsys)
+    reporting = " ".join(out.split("explicit write commands either")[1].split())
+    listing = reporting.split(") or refuse")[0]
+    listed = {name.strip() for name in listing.split("(", 1)[1].rstrip(")").split(",")}
+    assert listed == {"id", "revise", "calc-rewrite", "stub-tests", "revision", "release", "keys adopt"}
+
+
+def test_calc_rewrite_under_no_write_reports_and_writes_nothing(tmp_path, capsys):
+    """The behaviour the help text now claims, pinned from the other side:
+    a project with a retired calc line in it, run under `--no-write`, reports
+    the line it would rewrite and leaves the file byte-identical."""
+    from test_calc_rewrite import YAML_ITEM, SCHEMA  # the retired spelling under test
+
+    write_project_config(tmp_path, SCHEMA)
+    items = tmp_path / "items"
+    items.mkdir()
+    timing = items / "timing.yaml"
+    timing.write_text(YAML_ITEM, encoding="utf-8")
+    assert "t : ms = 2.5 s" in timing.read_text(encoding="utf-8")
+
+    config = str(tmp_path / "refdes-project.yaml")
+    capsys.readouterr()
+    before = _snapshot(tmp_path)
+
+    status = _run_no_write(config, ["calc-rewrite"])
+    out = capsys.readouterr().out
+    assert status == 0
+    assert "would rewrite" in out
+    assert "t : ms = 2.5 s -> t = 2.5 s | ms" in out
+    assert not any(_changed(before, tmp_path).values())
+    assert "t : ms = 2.5 s" in timing.read_text(encoding="utf-8")
+
 # ---------------------------------------------------------------- the editor's
 # read path (docs/design/browser-editor.md, Slice 0): loader.load_readonly is
 # the one side-effect-free load/build entry point the browser editor consumes.
