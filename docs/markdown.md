@@ -109,6 +109,14 @@ an ordinary `[text](file.pdf)` link to a local file, or a `site.assets:`
 directory linked to by hand, is not rewritten; see [`[text](file.pdf)` and
 other local links](#text-file-pdf-and-other-local-links) below.
 
+An image's bytes are content, not just cache material: since hash format 5 the
+file behind every local image an **item body** references contributes its path
+and content digest to that item's [content hash](change-tracking.md). Swapping
+the bytes of `pattern.png` moves the hash of every item that references it, so
+sealed entries and baselines notice an image swap instead of quietly displaying
+a different figure. URL images contribute nothing, and an item that references
+no image hashes exactly as before.
+
 A `src` that does not resolve is a **build error**, not a warning — unlike a
 dangling cross-reference there is no sensible way to render a missing image,
 so a broken one stops the build:

@@ -117,7 +117,10 @@ Linux CI checkout". Both are directly reusable here.
 normalized body text (`build.py:1427-1490`); the body text contains the
 `![alt](path)` string, not the bytes it points at. Replacing the file behind a
 sealed entry's image changes what that sealed record displays and leaves the
-seal verifying. `is_sealed` (`seal.py:199`) is the predicate; `apply_edit`
+seal verifying. **Update (2026-09-25, §15.6 decided):** no longer true —
+`HASH_FORMAT` 5 puts each referenced image's content digest into its owner's
+content hash, so swapping the bytes behind a sealed entry's image now breaks
+the seal loudly. `is_sealed` (`seal.py:199`) is the predicate; `apply_edit`
 already refuses a sealed item under the lock (`serve/edit.py:233`).
 
 ## 3. Proposal in one page
@@ -433,6 +436,8 @@ Refuse to *create* a file at a path a sealed entry references (that is the §9.2
 capture case with a seal on it). Whether the same check belongs in `refdes
 build` — turning the silent hand-edit case into a loud one — is a bigger
 question with a hash-format cost attached, and §15.6 leaves it to Jared.
+**Decided (2026-09-25):** Jared approved the build side — `HASH_FORMAT` 5
+makes the silent hand-edit case loud; see §15.6.
 
 ## 11. Transport and the security surface
 
@@ -567,10 +572,20 @@ Each carries a recommendation; unanswered means the recommendation stands.
    them from the editor is the one option that can destroy work.
 
 6. **Should `refdes build` error when a sealed entry's image bytes changed?**
-   — **Recommended: no, not yet.** It is the right long answer to §10, and it
-   means image bytes enter the hash, which is a `HASH_FORMAT` bump with every
-   cost that implies (`build.py:1424`, currently 4). Editor-side refusal is the
-   cheap half and ships independently.
+   — *Recommended: no, not yet* — **decided otherwise by Jared, 2026-09-25:
+   bump.** `HASH_FORMAT` is now 5: every local image an item's body references
+   contributes its resolved project-relative path and content digest to that
+   item's content hash (`build._image_inputs_hash_value`, plan and
+   migration analysis in `in-prog-logs/hash-images.md`, pins in
+   `tests/test_image_hash.py`), so replacing the bytes behind a sealed entry's
+   image now moves its `content_hash` with the text untouched and the existing
+   modified-since-sealed error fires — the silent hand-edit case is loud.
+   Image-free items hash exactly as before; formats ≤ 4 reconstruct without
+   images, so existing seals and baselines carry forward and none looks
+   edited; an image swap predating an entry's first format-5 seal/stamp is
+   grandfathered silently, because the old record never stored a digest to
+   compare against. Editor-side refusal (§10) stands and ships
+   independently.
 
 7. **Does a replace of a multiply-referenced file need a confirmation, or only
    a disclosure?** — **Recommended: disclosure in the `Conflict`, and the

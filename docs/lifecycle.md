@@ -176,11 +176,13 @@ A baseline's whole point is to stay legible after the live item is gone —
 
 ### Hash format versioning
 
-Each baseline entry records `hash_format` (currently **4**). When the hash
+Each baseline entry records `hash_format` (currently **5**). When the hash
 definition evolves (format 1: display-id link targets; format 2: resolved-key
 link targets, raw `checks: against:`; format 3: `checks: against:` also reduced
 to keys; format 4: cross-item calc references hash their resolved key and
-resolved value -- an item with none hashes exactly as under format 3), a baseline that is read for a diff or a stamp migrates itself: each
+resolved value -- an item with none hashes exactly as under format 3; format 5:
+every local image an item's body references hashes its resolved project-relative
+path and content digest -- an item with none hashes exactly as under format 4), a baseline that is read for a diff or a stamp migrates itself: each
 legacy-format entry's hash is recomputed under its recorded definition against
 the live item. If it matches, the entry is carried forward to the current
 format; if not, the item genuinely changed, and the entry stays at the format it
