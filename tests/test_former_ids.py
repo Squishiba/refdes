@@ -10,7 +10,7 @@ from conftest import write_project_config
 
 from refdes import build as build_mod
 from refdes import cli as cli_mod
-from refdes import former_ids, ids, lifecycle, parse, render
+from refdes import former_ids, ids, keys as keys_mod, lifecycle, parse, render
 from refdes.schema import load_project
 
 # ------------------------------------------------------------------ former_ids
@@ -304,6 +304,83 @@ def test_propose_errors_with_no_baseline_stamped(tmp_path):
     project = _propose_build(root)
     with pytest.raises(former_ids.ProposeError, match="no baseline stamped yet"):
         former_ids.propose(project)
+
+
+def test_propose_reports_the_real_old_title_for_a_keyed_rename(tmp_path):
+    """A baseline is keyed by *display* id and carries the surrogate in a
+    `key:` field, so looking the entry up under the surrogate itself misses
+    and every exact candidate used to print its old title as empty -- the one
+    field that tells a human which item they are about to re-identify."""
+    key = keys_mod.mint()
+    root = _former_ids_project(
+        tmp_path,
+        "defaults: { type: requirement }\n"
+        f"items:\n  - id: REQ-001\n    key: {key}\n    text: The bus shall recover.\n",
+    )
+    project = _propose_build(root)
+    lifecycle.stamp(project, kind="revision", name="rev-a")
+
+    (root / "items" / "r.yaml").write_text(
+        "defaults: { type: requirement }\n"
+        f"items:\n  - id: REQ-002\n    key: {key}\n    text: The bus shall recover.\n",
+        encoding="utf-8",
+    )
+    project2 = _propose_build(root)
+    candidates = former_ids.propose(project2)
+    assert len(candidates) == 1
+    c = candidates[0]
+    assert (c.old_id, c.new_id) == ("REQ-001", "REQ-002")
+    assert c.exact and c.confidence == 1.0
+    assert c.old_title == "The bus shall recover."
+    assert c.old_type == "requirement"
+
+
+def test_cli_propose_prints_the_old_title_of_a_keyed_rename(tmp_path, capsys):
+    """The empty title was visible in the command's own output, not just in
+    the API -- which is where a reviewer would have noticed it."""
+    key = keys_mod.mint()
+    root = _former_ids_project(
+        tmp_path,
+        "defaults: { type: requirement }\n"
+        f"items:\n  - id: REQ-001\n    key: {key}\n    text: The bus shall recover.\n",
+    )
+    project = _propose_build(root)
+    lifecycle.stamp(project, kind="revision", name="rev-a")
+
+    (root / "items" / "r.yaml").write_text(
+        "defaults: { type: requirement }\n"
+        f"items:\n  - id: REQ-002\n    key: {key}\n    text: The bus shall recover.\n",
+        encoding="utf-8",
+    )
+    status = cli_mod.main(["-c", str(root / "refdes-project.yaml"), "former-ids", "propose"])
+    assert status == 0
+    out = capsys.readouterr().out
+    assert "REQ-001 (requirement 'The bus shall recover.')" in out
+
+
+def test_propose_reports_the_real_old_title_for_an_adopted_key_keyed_rename(tmp_path):
+    """`refdes keys adopt` flips the map to key-keyed with the display id
+    inside -- the shape the buggy lookup *did* handle. Both shapes have to
+    keep working, so this pins the second one explicitly."""
+    key = keys_mod.mint()
+    root = _former_ids_project(
+        tmp_path,
+        "defaults: { type: requirement }\n"
+        f"items:\n  - id: REQ-001\n    key: {key}\n    text: The bus shall recover.\n",
+    )
+    project = _propose_build(root)
+    lifecycle.stamp(project, kind="revision", name="rev-a")
+    assert cli_mod.main(["-c", str(root / "refdes-project.yaml"), "keys", "adopt"]) == 0
+
+    (root / "items" / "r.yaml").write_text(
+        "defaults: { type: requirement }\n"
+        f"items:\n  - id: REQ-002\n    key: {key}\n    text: The bus shall recover.\n",
+        encoding="utf-8",
+    )
+    project2 = _propose_build(root)
+    candidates = former_ids.propose(project2)
+    assert len(candidates) == 1
+    assert candidates[0].old_title == "The bus shall recover."
 
 
 def test_propose_matches_a_renumbered_item_by_title_similarity(tmp_path):

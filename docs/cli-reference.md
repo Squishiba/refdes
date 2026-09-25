@@ -939,13 +939,9 @@ minted automatically:
 ```
 $ refdes former-ids propose
 2 candidate former-id mapping(s):
-  CAN_00 (requirement '') -> REQ-CAN-001 ('The bus shall recover...')  exact match (surrogate key)
-  TST-CAN-00 (test '') -> TST-CAN-004 ('Verify CAN_00')  exact match (surrogate key)
+  CAN_00 (requirement 'The bus shall recover...') -> REQ-CAN-001 ('The bus shall recover...')  exact match (surrogate key)
+  TST-CAN-00 (test 'Verify CAN_00') -> TST-CAN-004 ('Verify CAN_00')  exact match (surrogate key)
 ```
-
-The old title prints empty on this path: the pairing is read out of the
-baseline's key identity rather than by id, and the old title does not come
-back with it (see `propose` in `src/refdes/former_ids.py`).
 
 `--confirm` names the candidates to accept, and each one is written in the
 order you listed them:
@@ -969,7 +965,7 @@ candidate list is printed either way, then the refusal:
 ```
 $ refdes former-ids propose --confirm NOPE-999
 1 candidate former-id mapping(s):
-  CAN_00 (requirement '') -> REQ-CAN-001 ('The bus shall recover...')  exact match (surrogate key)
+  CAN_00 (requirement 'The bus shall recover...') -> REQ-CAN-001 ('The bus shall recover...')  exact match (surrogate key)
 error: not a currently proposed candidate: NOPE-999 -- run 'refdes former-ids propose' again to see current candidates
 ```
 
