@@ -357,9 +357,9 @@ things that can go wrong and what each one says.
 
 Report everything that has been made less visible: fields excluded from
 invalidation, item-level overrides and their stated reasons, resealed log entries,
-orphaned ledger allocations, [board](multi-board.md) and
-[workspace](workspaces.md) moves, what's changed since the last [revision and
-release](lifecycle.md), [blocked_by
+orphaned ledger allocations, what's changed since the last [revision and
+release](lifecycle.md), baseline keys no current item declares, [board](multi-board.md)
+and [workspace](workspaces.md) moves, [blocked_by
 chains](links.md#blocked-by-and-the-cascade-report), imported projects,
 [citations](markdown.md#citing-a-datasheet), [parts](parts.md), and
 [former ids](ids.md#renumbering-former-ids).
@@ -408,6 +408,9 @@ Since last release (rev-b, 2026-07-02T16:40:00Z):
     BND-THM-001 -> BND-THM-004   (m9n2b5v8c1w)
   (7 unchanged)
 
+Older baseline keys no current item declares:
+  (none)
+
 Board moves since the manifest was last written:
   (none)
 
@@ -430,7 +433,7 @@ Parts:
 Former IDs:
   CAN_00         -> REQ-CAN-001
 
-16 items audited (16 local)
+16 items audited (15 local)
 ```
 
 The "Board moves" section only appears for a project that has declared a
@@ -438,7 +441,12 @@ The "Board moves" section only appears for a project that has declared a
 `workspaces:`. "Baselines" always appears — a project that has never run
 `refdes revision`/`refdes release` (still in **draft**) shows `(none stamped
 yet -- project is in draft)` there instead, and each "Since last..." section
-shows `(no revision/release stamped yet)`.
+shows `(no revision/release stamped yet)`. A project that has stamped a
+revision but no release still gets the section, with `most recent release:
+(none stamped yet)` under the stamp line.
+
+"Older baseline keys no current item declares:" is printed unconditionally, so
+it shows `(none)` on a project that has never stamped a baseline at all.
 
 **`relabelled`** — items that have the same surrogate key but a new display ID.
 This happens when an item is renamed (its `id:` changed) after a baseline was
@@ -466,6 +474,10 @@ registry, a `— workspace(s):` line the same way — a flat-layout project
 never populates an item's workspace in the first place, so that line simply
 never appears there rather than showing up empty.
 
+An import declared with a `version:` reads `pinned to 2026.3`; one declared
+without one reads `unpinned`, and its items still count toward the
+`N items audited (M local)` trailer even though only `M` are local.
+
 ---
 
 ## `refdes init`
@@ -484,33 +496,51 @@ refdes init --standard none
 refdes init --preset design-debate
 ```
 
-Refuses to run if `refdes-project.yaml` already exists in the current directory.
+Refuses to run if `refdes-project.yaml` already exists in the current
+directory. It writes to the current directory and ignores the global `-c`.
+The name checks — an unknown `--standard`, an unknown `--preset`, a preset
+combined with `--standard none`, an existing config — are all configuration
+errors: exit 2, nothing written.
 
 ---
 
 ## `refdes new <type>`
 
-Print a starter item's front matter for `TYPE` to stdout — any type in the
-merged schema, standard or project-defined. See [the standard
-library](standard-library.md#refdes-new-lt-type-gt).
+Print a starter item's front matter — plus a one-line body stub — for `TYPE`
+to stdout, generated from the same resolved schema `refdes schema --json`
+emits: any type in the merged schema, standard or project-defined. See [the
+standard library](standard-library.md#refdes-new-lt-type-gt).
+
+| Option | Effect |
+|---|---|
+| `--list` | Print a list-file skeleton (a `defaults:` block and an `items:` list holding one empty entry) instead of a single item. |
 
 ```bash
 refdes new decision > items/power/dec-005.md
+refdes new component --list > items/power/candidates.yaml
 ```
 
 An unknown type exits 1 with a did-you-mean suggestion, the same as an
-unknown type anywhere else in the tool.
+unknown type anywhere else in the tool. Outside a project it still works,
+falling back to the bundled standard. `refdes new` writes nothing itself —
+every command that loads a project refreshes `.refdes/schema.json`, and this
+one deliberately does not.
 
 ---
 
 ## `refdes schema --json`
 
-Print the project's merged JSON Schema to stdout. The same document is
-written to `.refdes/schema.json` by every command that loads the project
-(`build`, `check`, `index`, `id`, `fetch`, `audit`, and this command
-itself); this is the explicit, standalone form, for piping into something
-else or inspecting directly. See [editor
+Print the project's merged JSON Schema to stdout. `--json` is the default, so
+a bare `refdes schema` prints the same document. The same document is written,
+byte for byte, to `.refdes/schema.json` by every command that loads the
+project — `build`, `check`, `index`, `ls`, `id`, `fetch`, `audit`, `revision`,
+`release`, `stub-tests`, and `former-ids`; this is the explicit, standalone
+form, for piping into something else or inspecting directly. See [editor
 support](standard-library.md#editor-support-json-schema-emission).
+
+`refdes schema` itself is read-only: it writes nothing, not even the schema
+file it prints. `refdes new` is the other project-aware command that stays
+out of that list.
 
 ```bash
 refdes schema --json > schema.json
@@ -519,17 +549,30 @@ refdes schema --json | jq '."$defs".decision__bare.properties'
 
 ---
 
-## `refdes schema --graph`
+## `refdes schema --graph [type]`
 
-Print the project's actual type/link graph as an SVG document to stdout —
-the same resolved schema `--json` emits, walked with a different renderer.
-Generated, not hand-drawn, so a preset or project overlay changing a verb
-can't leave it silently stale. It is byte-for-byte the drawing every built
-site puts at the top of its [vocabulary page](vocabulary.md).
+Print the project's actual type/link graph to stdout — the same resolved
+schema `--json` emits, walked with a different renderer. Generated, not
+hand-drawn, so a preset or project overlay changing a verb can't leave it
+silently stale.
+
+Without `TYPE`, this is **one SVG document per type, plus the coverage spine
+at the top**, each a standalone document, all concatenated to stdout. That is
+not a single valid SVG file, so don't redirect the bare form into one:
 
 ```bash
-refdes schema --graph > graph.svg
+refdes schema --graph requirement > graph.svg   # one type -- a valid file
+refdes schema --graph                           # every type, plus the spine
 ```
+
+With `TYPE`, only that type's diagram is drawn:
+
+```bash
+refdes schema --graph decision > decision.svg
+```
+
+Each one is byte-for-byte the drawing the built site puts on the matching
+[vocabulary](vocabulary.md) page.
 
 Plain SVG with no script in it: open the file in a browser, embed it in a
 page, commit it beside a README. Its colours are the site's CSS custom
@@ -537,6 +580,8 @@ properties with literal fallbacks, so it follows a theme when it is inside
 one and still renders standalone. (This output used to be Mermaid source,
 which needed a renderer of someone else's choosing — and went stale in the
 docs page that embedded it anyway.)
+
+An unknown `TYPE` exits 1 and names the types the project has.
 
 ---
 
@@ -556,7 +601,13 @@ ordinary diagnostics, printed the same way `check`'s are — **before**
 writing the config change, then writes it regardless; the command's job is
 to surface the consequence, not to block an author who already decided to
 accept it. Exits 1 if the report contains any error, 0 otherwise; either
-way, the removal is applied.
+way, the removal is applied. When the report has errors, a closing
+`N error(s) above -- fix these, or add the preset back with 'refdes
+standard add-preset'` names the way back.
+
+Both exit 2 without touching the config on a name that isn't a usable
+change: `add-preset` on a preset already selected, `remove-preset` on one
+that isn't, and either on a name that doesn't exist at the pinned version.
 
 ---
 
@@ -591,6 +642,12 @@ Stops at the first version step that fails, leaving the project fully
 valid at whatever version it reached — never partway through a single
 step's own rewrite. Exits 1 on failure, 0 once every step to `--to N` has
 applied.
+
+Forward-only, and it checks its target before touching anything: a project
+already at or past `--to N`, and a non-integer `--to`, both exit 2 without
+writing. A `--to` past the newest bundled version is not caught that way —
+the chain attempts the step and the rewritten project fails to load, which is
+also an exit 1 with the config left at the version it had.
 
 > **The project must validate first — but a failing check is not that.**
 > Both this and `refdes revise` refuse if the project doesn't validate: an
