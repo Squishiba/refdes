@@ -59,6 +59,15 @@ Claims checked with real commands, not memory:
 - Report to refdes-2 at each chunk boundary via
   `ao send --session refdes-2 --message ...`.
 
+## Chunk 3 — done (PR open)
+
+- `python -m pytest -q -x` -> 2112 passed (235.8 s).
+- `python -m ruff check --select E9,F src tests` -> clean.
+- Pushed `ao/refdes-166/docs-status-housekeeping` with `-u`.
+- PR opened, base main, not merged:
+  https://github.com/Squishiba/refdes/pull/29
+- Progress reported to refdes-2 at the chunk boundaries and at PR open.
+
 ## Status
 
-In progress until the PR is open and reported.
+Finished.
