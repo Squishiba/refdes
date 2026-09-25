@@ -432,6 +432,16 @@ are key. It is a requirement on the editor work, not a decided implementation �
 this document has not settled what the picker lists, how a named key is chosen
 from it, or where the resulting `source("path", "key")` text is emitted.
 
+**Proposed, 2026-09-25:** [editor-source-picker.md](editor-source-picker.md)
+settles those three questions — the picker lists the item's own cited files a
+reader can read, keys come from the existing Python reader through one new
+`list_entries` method (no second CSV parser in the browser), and the composed
+line is emitted by the server and inserted into the body draft. Its §4 is the
+part this document had not seen coming: a body naming an unpinned key is a new
+item error, so the diagnostic gate refuses the save, which means Accept has to
+write the item file and the lockfile as one operation. Status there is
+*proposed*; nothing is implemented.
+
 #### PDF datasheet values
 
 **Raised by Jared on 2026-09-21. Status: NOT DECIDED IMPLEMENTATION / later
