@@ -183,6 +183,37 @@ Split it across two lines.
 **Units display oddly (`2 J` for a torque).**
 `N·m` and `J` are dimensionally identical. Pin it: `tq = ... | N*m`.
 
+**`calc fence: unknown attribute 'name' -- a calc fence accepts id="..."; write id="losses".`**
+A calc fence's info string has exactly one attribute, `id="..."`. `name=` was an
+earlier draft's spelling. The fix is in the message: write `id="losses"`.
+
+**`calc fence: 'losses' is not an attribute -- attributes are key="value"; write id="losses".`**
+Two mistakes get this message: a bare word after ```` ```calc ````
+(```` ```calc losses ````) and an unquoted value (```` ```calc id=losses ````).
+Attributes are `key="value"`, and a string value is double-quoted. Write
+`id="losses"`.
+
+**`calc fence: block name 'Losses' must match [a-z][a-z0-9_-]* -- write 'losses'.`**
+Block names are lowercase-hyphen, 1–40 characters — the citation-id and
+figure-id shape, not the symbol-shaped calc value names. The message's
+suggestion is the fix: `Losses`, `1losses`, and `losses!` all become `losses`.
+See [naming a calc block](math.md#naming-a-calc-block).
+
+**`calc block 'losses' is named twice in this item -- first at line 8, again at line 12. A block name can only be used once per item (values already share one item-wide scope); ...`**
+Two fences in one item carry the same `id="..."`. Block names are unique per
+item, because the values inside the blocks already share one item-wide scope —
+the name would disambiguate nothing. Rename one of the blocks ("rename one of
+them, e.g. 'losses' -> 'losses_2'"), in both item and page references to it.
+The same name in two different items is fine.
+
+**`[[DEC-PWR-001#calc:loess]]: DEC-PWR-001 has no calc block named 'loess' (it names: losses).`**
+A `[[…#calc:name]]` fragment in prose named a block the target doesn't have;
+the warning lists the names it does. Like any unresolved `[[…]]`, this is a
+**warning**, not an error — the build succeeds, and the reference stays in the
+text, rendered as an unresolved link. Use one of the listed names. If the
+target's blocks are all unnamed, the warning says so and names the fix — add
+`id="..."` to the fence; a target with no calc blocks says that instead.
+
 ## Checks
 
 **`check refers to 'P_dens', which no calc block defines`**
