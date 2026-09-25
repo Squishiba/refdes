@@ -399,8 +399,11 @@ def test_source_lock_timestamp_and_unreferenced_values_do_not_change_hash(tmp_pa
 
 
 def test_item_without_source_has_no_source_values_in_its_hash_payload(tmp_path):
-    """Hash-neutral: no source() line, no `source_values` key, so HASH_FORMAT 4
-    hashes the item exactly as it did before finding 26 landed. Format stays 4."""
+    """Hash-neutral: no source() line, no `source_values` key (and no image,
+    so no `images` key either), so the current HASH_FORMAT hashes the item
+    exactly as it did before finding 26 landed. Format is 5 (the image-bytes
+    bump, editor-image-upload.md §15.6); an image-free, source-free item's
+    payload is unchanged from format 3."""
     config = _setup(tmp_path, items={"a.md": _item(
         "DEC-001", "```calc\nx = 2 A\n```\n", cite="")})
     project = _project(config)
@@ -408,7 +411,10 @@ def test_item_without_source_has_no_source_values_in_its_hash_payload(tmp_path):
     payload = build_mod.hash_payload_builder(project, build_mod.HASH_FORMAT)(
         item, project.types[item.type])
     assert "source_values" not in payload
-    assert build_mod.HASH_FORMAT == 4
+    assert "images" not in payload
+    assert build_mod.HASH_FORMAT == 5
+    assert payload == build_mod.hash_payload_builder(project, 3)(
+        item, project.types[item.type])
 
 
 def test_source_value_reaches_the_payload_only_for_the_used_key(tmp_path):

@@ -1418,10 +1418,21 @@ def run_checks(project: Project) -> None:
 #      `source("path", "key")` calc line also hashes each (canonical path,
 #      key, locked decimal text) it resolved (docs/design/calc-sources.md
 #      section 9). An item with no source() line is unchanged.
+#   5 (2026-09-25, docs/design/editor-image-upload.md §15.6 decided by Jared)
+#      -- an item whose body references local images hashes each resolved
+#      image's project-relative path and content digest (_image_inputs_hash_
+#      value), so replacing the bytes behind a sealed entry's image moves the
+#      seal's hash instead of silently changing what the sealed record shows.
+#      An item with no image reference has the exact same payload as format 4,
+#      so no existing item's hash moves. Image changes that happened *before*
+#      an entry was stamped under format <= 4 stay silent -- those records
+#      never recorded image digests, and reconstructing formats <= 4 ignores
+#      images, which is what keeps the bump from making any existing item or
+#      seal look edited (the keys.md §5(c) carry-forward rule).
 # Recorded per baseline entry (lifecycle.py) so a partially-migrated baseline
 # stays precisely describable; consulted by the migration in
 # lifecycle.py/seal.py/keys.py, never by an ordinary build.
-HASH_FORMAT = 4
+HASH_FORMAT = 5
 
 
 def _hash_payload(
@@ -1432,6 +1443,7 @@ def _hash_payload(
     checks_values=None,
     calc_refs=None,
     source_inputs=None,
+    image_inputs=None,
 ) -> dict[str, object]:
     """Everything compute_hashes() and hash_for_format() have in common: which
     fields/body enter the hash, and under what normalization. The two things
@@ -1486,6 +1498,15 @@ def _hash_payload(
                 # the file must not invalidate this item, and an accepted
                 # `fetch --update` that moves the value must.
                 payload["source_values"] = inputs
+        if image_inputs is not None:
+            images = image_inputs(item)
+            if images is not None:
+                # The bytes behind this body's images are content too
+                # (HASH_FORMAT 5, editor-image-upload.md §15.6): a swapped
+                # image moves this hash with the text untouched. Absent
+                # entirely for a body that references no image, so an
+                # image-free item's format-5 payload is its format-4 payload.
+                payload["images"] = images
         normalized = re.sub(r"\s+", " ", body_text).strip()
         payload["body"] = normalized
 
@@ -1712,6 +1733,67 @@ def _source_inputs_hash_value(item: Item):
     return sorted([canon, key, text] for canon, key, text in set(uses))
 
 
+def _image_inputs_hash_value(project: Project, item: Item, digest_cache: dict):
+    """What an item's referenced images contribute to its content hash
+    (HASH_FORMAT 5, docs/design/editor-image-upload.md §15.6), or ``None``
+    when its body references none: the sorted, de-duplicated
+    ``[project-relative path, digest]`` pairs for every local image the body
+    resolves -- ``digest`` being the same first-16-hex sha256 `_process_images`
+    splices into the published asset leaf, so a hash contribution is directly
+    comparable with the output filename. Resolution mirrors `_process_images`
+    exactly: relative to the item's own source file first (always wins), then
+    the bare-name `site.assets:` search (`_search_image_matches`, the shared
+    pure half of `_search_image_src`, so the two resolutions can never drift).
+
+    An unresolved or ambiguous src contributes ``[raw src, None]``: the render
+    pass reports both as build errors at the reference, this only has to be
+    deterministic and distinct from any real pair -- the posture of a ``None``
+    calc-ref value. URL-scheme srcs contribute nothing, same skip as
+    `_process_images`. The src set comes from the same markdown-it
+    configuration `render_bodies` uses, so the hash pass and the render pass
+    see the identical set of images: code fences and escaped raw `<img>`
+    (html is disabled) contribute none, link-wrapped images contribute theirs.
+    """
+    md = MarkdownIt("gfm-like", {"html": False, "linkify": False})
+    srcs = []
+    for token in md.parse(item.body):
+        for child in token.children or ():
+            if child.type == "image":
+                src = child.attrGet("src") or ""
+                if src and not _URL_SCHEME_RE.match(src):
+                    srcs.append(src)
+    if not srcs:
+        return None
+    entries = set()
+    for src in srcs:
+        full_path = os.path.normpath(
+            os.path.join(project.root, os.path.dirname(item.source_file), src)
+        )
+        if os.path.isfile(full_path):
+            resolved = full_path
+        elif "/" in src or "\\" in src:
+            entries.add((src, None))
+            continue
+        else:
+            matches = _search_image_matches(project, src)
+            if len(matches) != 1:
+                # Unresolved (0) or ambiguous (2+): both are build errors at
+                # render; one deterministic sentinel covers both.
+                entries.add((src, None))
+                continue
+            resolved = os.path.normpath(os.path.join(project.root, matches[0]))
+        rel = os.path.relpath(resolved, project.root).replace("\\", "/")
+        digest = digest_cache.get(rel)
+        if digest is None:
+            try:
+                with open(resolved, "rb") as fh:
+                    digest = hashlib.sha256(fh.read()).hexdigest()[:16]
+            except OSError:
+                digest = None
+        entries.add((rel, digest))
+    return sorted([list(entry) for entry in entries])
+
+
 def compute_hashes(project: Project) -> None:
     """Hash only the fields whose on_change mode is `invalidate`.
 
@@ -1763,6 +1845,9 @@ def hash_payload_builder(project: Project, hash_format: int):
     (_checks_hash_value). Format 4 (finding 35, 2026-09-21): format 3, plus
     an item's cross-item calc references hash as resolved key + resolved
     value (_calc_refs_hash_value); an item with none is identical to format 3.
+    Format 5 (editor-image-upload.md §15.6, 2026-09-25): format 4, plus an
+    item's referenced images hash as resolved path + content digest
+    (_image_inputs_hash_value); an item with none is identical to format 4.
     """
     if hash_format <= 1:
         return lambda item, spec: _hash_payload(
@@ -1780,6 +1865,11 @@ def hash_payload_builder(project: Project, hash_format: int):
         if hash_format >= 4 else None
     )
     source_inputs = _source_inputs_hash_value if hash_format >= 4 else None
+    image_digests: dict[str, str] = {}
+    image_inputs = (
+        (lambda item: _image_inputs_hash_value(project, item, image_digests))
+        if hash_format >= 5 else None
+    )
     return lambda item, spec: _hash_payload(
         item, spec, project,
         link_values=lambda targets: sorted(
@@ -1788,6 +1878,7 @@ def hash_payload_builder(project: Project, hash_format: int):
         checks_values=checks_values,
         calc_refs=calc_refs,
         source_inputs=source_inputs,
+        image_inputs=image_inputs,
     )
 
 
@@ -2144,6 +2235,27 @@ def _hashed_leaf(rel: str, digest: str) -> str:
     return f"{directory}/{hashed_leaf}" if directory else hashed_leaf
 
 
+def _search_image_matches(project: Project, src: str) -> list[str]:
+    """The pure half of `_search_image_src`: every project-relative match for
+    a bare image leaf on the declared `site.assets:` directories, deduplicated
+    in walk order, no diagnostics. Shared with the HASH_FORMAT 5 image inputs
+    (`_image_inputs_hash_value`) so the hash pass and the render pass can
+    never resolve a bare src differently; error reporting stays with the
+    caller that renders."""
+    matches: list[str] = []
+    for rel_dir in project.asset_dirs:
+        full_dir = os.path.join(project.root, rel_dir)
+        if not os.path.isdir(full_dir):
+            continue
+        for dirpath, _dirnames, filenames in os.walk(full_dir):
+            if src in filenames:
+                rel = os.path.relpath(os.path.join(dirpath, src), project.root)
+                rel = rel.replace("\\", "/")
+                if rel not in matches:
+                    matches.append(rel)
+    return matches
+
+
 def _search_image_src(
     project: Project,
     src: str,
@@ -2165,17 +2277,7 @@ def _search_image_src(
     than the one meant" is this project's characteristic failure. Returns the
     resolved absolute path, or None after reporting the error.
     """
-    matches: list[str] = []
-    for rel_dir in project.asset_dirs:
-        full_dir = os.path.join(project.root, rel_dir)
-        if not os.path.isdir(full_dir):
-            continue
-        for dirpath, _dirnames, filenames in os.walk(full_dir):
-            if src in filenames:
-                rel = os.path.relpath(os.path.join(dirpath, src), project.root)
-                rel = rel.replace("\\", "/")
-                if rel not in matches:
-                    matches.append(rel)
+    matches = _search_image_matches(project, src)
     if len(matches) == 1:
         return os.path.normpath(os.path.join(project.root, matches[0]))
     if len(matches) > 1:
