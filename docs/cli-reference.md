@@ -7,7 +7,7 @@ refdes [-c CONFIG] [--no-write] {serve,build,check,revision,release,index,ls,id,
 | Global option | Effect |
 |---|---|
 | `-c`, `--config PATH` | Use this `refdes-project.yaml`. Default: search upward from the current directory. |
-| `--no-write` | Never modify anything under `items/` or `.refdes/`. Suppresses: key minting, link/check expansion to composite form, `.refdes/schema.json` regeneration, seal recording, board/workspace membership manifest, baseline stamping, and the ID ledger. Explicit write commands behave differently: commands with `--dry-run` (`id`, `revise`, `stub-tests`) report what would change and write nothing; `revision`/`release` report "would stamp" and write nothing; `keys adopt` reports the full plan and writes nothing; commands that fundamentally write (`fetch`, `init`, `standard upgrade`, `standard add-preset`, `standard remove-preset`, `former-ids propose --confirm`, `history capture`, `history redact`, `history migrate-seals`) **refuse to run** under `--no-write` and exit 2. `refdes build --no-write` still writes the site — that is the command's own output, not a side effect. |
+| `--no-write` | Never modify anything under `items/` or `.refdes/`. Suppresses: key minting, link/check expansion to composite form, `.refdes/schema.json` regeneration, seal recording, board/workspace membership manifest, baseline stamping, and the ID ledger. Explicit write commands behave differently: commands with `--dry-run` (`id`, `revise`, `calc-rewrite`, `stub-tests`) report what would change and write nothing; `revision`/`release` report "would stamp" and write nothing; `keys adopt` reports the full plan and writes nothing; commands that fundamentally write (`fetch`, `init`, `standard upgrade`, `standard add-preset`, `standard remove-preset`, `former-ids propose --confirm`, `history capture`, `history redact`, `history migrate-seals`) **refuse to run** under `--no-write` and exit 2. `refdes build --no-write` still writes the site — that is the command's own output, not a side effect. |
 
 Exit codes: `0` success, `1` errors found, `2` configuration error (including `--no-write` refusal).
 
@@ -684,11 +684,6 @@ prefixes:
   CON: BND
 ```
 
-```bash
-refdes revise rename.yaml
-refdes revise rename.yaml --dry-run   # show what would change, write nothing
-```
-
 For a bundled standard's own version upgrade, use `refdes standard upgrade
 --to N` instead (above) — it needs no hand-written mapping. `revise` is
 for your own project-local renames: something not part of the standard,
@@ -702,11 +697,62 @@ memory before anything touches disk: an ambiguous mapping (two old names
 targeting the same new one, or a target name already in use) is refused
 up front; a rename the rewrite can't locate, or that leaves the rewritten
 project invalid, is refused and rolled back completely, never partially
-applied. A type or required-field rename needs the schema to move with
-the data — `revise` alone only touches item files, never `refdes-schema.yaml`'s
-own `types:`/`link_types:` — so on a hand-rolled schema, pair the rename
-with your own edit to `refdes-schema.yaml` (in whichever order makes both sides
-agree once both are done).
+applied. A project that already has build errors is also refused up front,
+so a hash change caused by a rename can't hide behind an already-broken build.
+
+| Option | Effect |
+|---|---|
+| `--dry-run` | Show which files would change and nothing more; write nothing |
+
+```bash
+refdes revise rename.yaml --dry-run
+refdes revise rename.yaml
+```
+
+The dry run also names the minting and link expansion the real run performs
+*first*, before the rename itself, so you can see the whole effect in one
+pass:
+
+```
+would change 2 file(s):
+  items/board-a/log.yaml
+  items/board-a/requirements.yaml
+
+6 line(s) the real run would first mint/expand to composite form (keys + references), before the rename itself:
+  items/board-a/log.yaml:11  addresses: [REQ-PWR-001@9cp6y36m2ht] -> addresses: [NEED-PWR-001@9cp6y36m2ht]
+  items/board-a/requirements.yaml:3  prefix: REQ-PWR -> prefix: NEED-PWR
+  items/board-a/requirements.yaml:10  id: REQ-PWR-001 -> id: NEED-PWR-001
+```
+
+A mapping that doesn't apply to this project at all is not an error — it
+prints `nothing to do -- mapping doesn't apply to this project` and exits 0.
+On success, a rename that moved a stamped baseline's entries forward says so
+on a `baselines carried forward: rev-a` line.
+
+**A type or required-field rename cannot be done with `refdes revise` alone.**
+The rename only touches item files, never `refdes-schema.yaml`'s own
+`types:`/`link_types:` — but the project is validated both before and after,
+and neither state is valid on its own: with the data renamed and the schema
+not, the build reports `unknown type 'spec2'. Did you mean 'spec'?`; with the
+schema renamed and the data not, it reports `unknown type 'spec'. Did you mean
+'spec2'?`. `revise` refuses on a project that already has build errors and
+refuses one the rewrite would break, so both orders are refused and both leave
+the project exactly as it was. A *required*-field rename is the same story
+(`missing required field 'title'` one way, `missing required field 'label'` the
+other).
+
+So on a hand-rolled schema, a type or required-field rename is a **hand edit
+to both files, made together**: rename the key in `refdes-schema.yaml` and the
+`type:`/`prefix:` and `id:` lines in the item files in one editing pass, then
+run `refdes check` to confirm the two agree. The renames `refdes revise` *can*
+do alone on such a project are the prefix, id, and **optional**-field renames
+— an optional field rename lands as an `unknown field 'label' on spec` warning
+until you add the field to the schema yourself.
+
+For a bundled standard's own version bump there is no such problem: the
+schema moves with the data inside one verified operation, because
+`refdes standard upgrade` (above) supplies the schema edit itself. That is why
+it exists and why `revise` defers to it.
 
 **Structured references move; prose does not.** A link's own target list —
 in either YAML spelling, `key: [A, B]` or a block sequence of `- A` entries
@@ -743,16 +789,27 @@ rename from turning a clean build into a failing one.
 Rewrite every retired `name : unit = expression` calc line to the pipe
 form `name = expression | unit`, in place:
 
+| Option | Effect |
+|---|---|
+| `--dry-run` | Show every line that would change; write nothing |
+
 ```bash
 refdes calc-rewrite --dry-run   # show every line that would change
 refdes calc-rewrite             # rewrite them
 ```
 
+Running it on a project with nothing to change prints
+`nothing to rewrite -- no old-spelling calc lines found` and exits 0.
+
 Only lines inside ```calc fences in item bodies are touched — prose and
-`{{name}}` references are never rewritten. Indentation, trailing comments
-and the equals-column alignment are preserved, and a tolerance that sat in
-the old annotation moves to the expression: `P : W ± 10% = V * I` becomes
-`P = V * I ± 10% | W`.
+`{{name}}` references are never rewritten, and a fence outside any item's own
+text is not this command's to rewrite either. Indentation, trailing comments
+and the equals-column alignment are preserved:
+
+```
+  items/board-a/log.yaml:18  P : W = V * I -> P = V * I | W
+  items/board-a/log.yaml:19  Q   : mW   = P * 1000    # aligned block -> Q          = P * 1000 | mW    # aligned block
+```
 
 The operation is transactional like `refdes revise`: the rewritten project
 is reloaded and fully validated, and every calc's evaluated result and unit
@@ -761,10 +818,31 @@ differently rolls every file back. Content hashes and calc hashes are
 carried forward across stamped baselines **and** seal files, because a
 spelling-only rewrite is not a content change.
 
+A tolerance that sat in the old annotation (`P : W ± 10% = V * I`) is the one
+case the rewrite does **not** do for you, though the build error names exactly
+the right fix (`write 'P = V * I ± 10% | W'; run 'refdes calc-rewrite'`). The
+line never computed under the old spelling, so the before-picture has no value
+to preserve, and the equality check fails:
+
+```
+refused:
+  a rewritten calc changes meaning:
+  items/board-a/log.yaml:7 P: was '' in unit 'W ± 10%', now evaluates to '14.4 W' in unit 'W' -- a rewrite must not change what a calc computes
+```
+
+Apply that one line by hand, then re-run `calc-rewrite` for the rest. (A known
+source inconsistency, not a documented workflow.)
+
 Sealed append-only entries are never rewritten: their lines are listed on
 stdout and left exactly as written. That is why the retired spelling still
 *evaluates* — a sealed entry renders its numbers — even though anywhere
-else in a project it is a build error naming the exact fix.
+else in a project it is a build error naming the exact fix. That listing is
+printed on its own even when nothing else changed:
+
+```
+1 old-spelling calc line(s) in sealed append-only entries left as written -- seals are historical records and are never rewritten; these stay on the old spelling (which still evaluates) until history-backed resealing lands or they are deliberately resealed:
+  items/board-a/log.yaml:18 [LOG-A-001] P : W = V * I
+```
 
 ---
 
@@ -971,6 +1049,12 @@ changed files:
   .refdes/keys-adopted.yaml
 Review the diff before committing.
 ```
+
+The four count lines are always printed, including at zero, and the
+`baselines`/`seals`/`membership manifests` sections appear only for the
+storage files that actually exist. Under `--dry-run` the same plan is printed
+with `would mint`/`would expand`/`would freeze` wording and
+`would be rebased:` headings, plus a `files that would change:` list.
 
 `uncomparable` entries (baseline or seal entries that genuinely changed since
 the stamp, so their old-format hash no longer matches the current content)
@@ -1205,7 +1289,8 @@ python -m http.server -d _site 8000
 | `.refdes/log-seal-<board>.yaml` | **yes** | Append-only seals for one registered board's own log entries |
 | `.refdes/boards.yaml` | **yes** | Board and workspace drift manifest; the `workspaces:` section only appears for a project that has declared `workspaces:` |
 | `.refdes/citations.yaml` | **yes** | Citation lockfile (sha256, fetch time, kept-copy flag); written only by `refdes fetch` |
-| `.refdes/baselines/<name>.yaml` | **yes** | One file per `refdes revision`/`refdes release` stamp. Not rewritten by any ordinary command; `refdes revise` and `refdes standard upgrade` do edit it, to carry an item's content hash across a rename |
+| `.refdes/baselines/<name>.yaml` | **yes** | One file per `refdes revision`/`refdes release` stamp. Not rewritten by any ordinary command; `refdes revise`, `refdes calc-rewrite` and `refdes standard upgrade` do edit it, to carry an item's content hash across a rename or a spelling-only rewrite |
+| `.refdes/keys-adopted.yaml` | **yes** | Adoption marker written once by `refdes keys adopt`; its presence is what makes future stamps, seals and membership manifests use key-keyed storage |
 | `.refdes/schema.json` | **no, gitignored** | The project's merged JSON Schema, for editor completion; rewritten by every command that loads the project |
 | `.refdes/copies/` | **no, gitignored** | Kept local copies of datasheet bytes, content-addressed by sha256; written only by `refdes fetch --path ...` for a remote citation with `keep_copy: true` |
 | `.refdes/history/` | **yes** | Captured-history store: content-addressed snapshot objects and derived-id events; written by the `follows:` capture and by `refdes history capture`/`redact`/`migrate-seals` |
