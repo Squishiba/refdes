@@ -16,6 +16,7 @@ from collections import defaultdict
 
 import yaml
 
+from . import textio
 from .model import Item, Project, provisional_handle
 from .parse import FENCE_RE, yaml_safe_load
 
@@ -130,9 +131,12 @@ def save_ledger(project: Project, ledger: dict) -> None:
         "# Refdes ID ledger — allocated IDs are never reused, even after an item\n"
         "# is deleted. Do not hand-edit unless you know why you are doing it.\n"
     )
-    with open(path, "w", encoding="utf-8") as fh:
-        fh.write(header)
-        yaml.safe_dump(ledger, fh, sort_keys=True, default_flow_style=False)
+    # newline="": the ledger is machine-owned and regenerated whole, so its
+    # bytes must not depend on who ran the command. Without it a text-mode
+    # write translated every LF to CRLF on Windows, so a committed
+    # `.refdes/ids.yaml` flipped line endings depending on the platform that
+    # last allocated an id. Same reasoning as lifecycle/seal/boards' saves.
+    textio.write_text(path, header + yaml.safe_dump(ledger, sort_keys=True, default_flow_style=False))
 
 
 def high_water(project: Project, ledger: dict) -> dict[str, int]:
@@ -565,15 +569,15 @@ def allocate(project: Project, dry_run: bool = False) -> list[tuple[Item, str]]:
 
     for rel, entries in by_file.items():
         path = os.path.join(project.root, rel)
-        # newline="", not the default: in universal-newlines mode the read has
-        # already rewritten every CRLF to LF, so the style check below could
-        # only ever see "\n" -- and a CRLF file came back out of `refdes id`
-        # silently converted, every untouched line of it rewritten for a
-        # one-line edit. splitlines() drops the terminators either way.
-        with open(path, "r", encoding="utf-8", newline="") as fh:
-            text = fh.read()
-        newline = "\r\n" if "\r\n" in text else "\n"
-        lines = text.splitlines()
+        # textio, not open(): a text-mode read has already rewritten every CRLF
+        # to LF by the time anything could ask what style the file was in, and
+        # a text-mode write hands the whole file to the platform's newline
+        # translation -- so on Windows a one-line id insertion came back as a
+        # whole-file reformat to CRLF. SourceText keeps each line's own
+        # terminator, so an LF file stays LF, a CRLF file stays CRLF, and a
+        # mixed file keeps its mix outside the line that changed.
+        source = textio.SourceText.of(path)
+        lines = source.lines
 
         for item, new_id in sorted(entries, key=lambda e: e[0].source_line, reverse=True):
             old_value = item.numeric_id_hint or None
@@ -602,8 +606,7 @@ def allocate(project: Project, dry_run: bool = False) -> list[tuple[Item, str]]:
                     continue
                 lines = updated
 
-        with open(path, "w", encoding="utf-8", newline="") as fh:
-            fh.write(newline.join(lines) + newline)
+        textio.write_text(path, source.render(lines))
 
     written = [(item, new_id) for item, new_id in assignments if id(item) not in failed]
 

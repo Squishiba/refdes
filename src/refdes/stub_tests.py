@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import os
 
+from . import textio
 from .model import Item, Project, SchemaError
 
 
@@ -63,8 +64,8 @@ def _already_covered(project: Project, verifier_types: set[str]) -> set[str]:
     return covered
 
 
-def _item_block(lines: list[str]) -> str:
-    return "---\n" + "\n".join(lines) + "\n"
+def _item_block(lines: list[str], eol: str = "\n") -> str:
+    return "---" + eol + eol.join(lines) + eol
 
 
 def generate(
@@ -132,6 +133,18 @@ def generate(
             parts.append(bspec.path_segment if bspec else board)
         target = os.path.join(project.root, *parts, "stub-tests.md")
 
+        # The ending the appended block should wear: the file's own, if it
+        # exists, and LF if it does not. `open(..., "a", encoding="utf-8")` in
+        # text mode was handing the whole block to the platform's newline
+        # translation, so appending to an LF file on Windows wrote CRLF into
+        # the middle of it -- a file this command then treats as its own and
+        # appends to again. A brand-new file takes LF, matching every other
+        # file the tool creates and `.gitattributes`.
+        if os.path.isfile(target) and os.path.getsize(target) > 0:
+            eol = textio.append_ending(textio.read_text(target))
+        else:
+            eol = textio.LF
+
         blocks = []
         for item in items:
             lines = [f"type: {verifier_type}", f"title: Verify {item.id}"]
@@ -140,8 +153,8 @@ def generate(
             if has_method:
                 lines.append('method: ""')
             lines.append(f"verifies: [{item.id}]")
-            blocks.append(_item_block(lines))
-        text = "".join(blocks) + "---\n"
+            blocks.append(_item_block(lines, eol))
+        text = "".join(blocks) + "---" + eol
 
         if not dry_run:
             os.makedirs(os.path.dirname(target), exist_ok=True)
@@ -150,9 +163,11 @@ def generate(
                 with open(target, "rb") as fh:
                     fh.seek(-1, os.SEEK_END)
                     if fh.read(1) != b"\n":
-                        prefix = "\n"
-            with open(target, "a", encoding="utf-8") as fh:
-                fh.write(prefix + text)
+                        prefix = eol
+            # Binary append: the block already carries its own terminators, and
+            # text mode would translate them a second time.
+            with open(target, "ab") as fh:
+                fh.write((prefix + text).encode("utf-8"))
 
         rel = os.path.relpath(target, project.root).replace("\\", "/")
         written.append((rel, [i.id for i in items]))

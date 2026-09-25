@@ -25,6 +25,7 @@ from dataclasses import dataclass, field
 import yaml
 
 from . import keys as keys_mod
+from . import textio
 from .ids import split_id
 from .model import Item, Project
 from .parse import yaml_safe_load
@@ -251,8 +252,7 @@ def format_manifest(project: Project, manifest: Manifest) -> str:
 def save_manifest(project: Project, manifest: Manifest) -> None:
     path = manifest_path(project)
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w", encoding="utf-8", newline="") as fh:
-        fh.write(format_manifest(project, manifest))
+    textio.write_text(path, format_manifest(project, manifest))
 
 
 def _membership_parts(

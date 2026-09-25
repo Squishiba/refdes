@@ -60,6 +60,7 @@ from . import seal as seal_mod
 import yaml
 
 from . import keys as keys_mod
+from . import textio
 from .model import Item
 from .parse import yaml_safe_load
 
@@ -246,8 +247,11 @@ def save_object(root: str, item: Item) -> tuple[str, str]:
             )
         return digest, path
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w", encoding="utf-8") as fh:
-        fh.write(text)
+    # Content-addressed and immutable: this file is written once and never
+    # rewritten, so its bytes must be the same whoever captured it. A
+    # text-mode write made them CRLF on Windows and LF on Linux for identical
+    # content.
+    textio.write_text(path, text)
     return digest, path
 
 
@@ -361,8 +365,7 @@ def append_event(
             )
         return path
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w", encoding="utf-8") as fh:
-        fh.write(_format_yaml(payload, _EVENT_HEADER))
+    textio.write_text(path, _format_yaml(payload, _EVENT_HEADER))
     return path
 
 

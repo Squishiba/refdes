@@ -13,6 +13,7 @@ from typing import Any
 from . import build as build_mod
 from . import parse as parse_mod
 from . import standards
+from . import textio
 from .build import _format_required_when
 from .model import ItemType, SchemaError
 from .parse import yaml_safe_load
@@ -274,8 +275,13 @@ def add_preset(project_root: str, preset_name: str) -> None:
     and sets simply join the merged schema -- no migration step, no
     re-running init (docs/design/standard-library.md §8)."""
     config_path = os.path.join(project_root, "refdes-project.yaml")
-    with open(config_path, encoding="utf-8") as fh:
-        raw_text = fh.read()
+    # textio both ways. The read was text mode, so a CRLF config arrived here
+    # already folded to LF, and the write was text mode, so the platform
+    # translated it again -- adding one preset to an LF config rewrote the
+    # whole file to CRLF on Windows, and adding one to a CRLF config rewrote it
+    # to LF on Linux. `_edit_presets_list` is a comment-preserving span edit on
+    # the raw text precisely so nothing outside `presets: [...]` moves.
+    raw_text = textio.read_text(config_path)
     raw = yaml_safe_load(raw_text) or {}
     standard_cfg = _read_standard_cfg(raw)
 
@@ -295,8 +301,7 @@ def add_preset(project_root: str, preset_name: str) -> None:
         raise SchemaError(f"preset {preset_name!r} is already selected")
 
     new_text = _edit_presets_list(raw_text, lambda lst: lst + [preset_name])
-    with open(config_path, "w", encoding="utf-8") as fh:
-        fh.write(new_text)
+    textio.write_text(config_path, new_text)
 
 
 def remove_preset(project_root: str, preset_name: str) -> list:
@@ -312,8 +317,7 @@ def remove_preset(project_root: str, preset_name: str) -> list:
     author who has already decided to accept it.
     """
     config_path = os.path.join(project_root, "refdes-project.yaml")
-    with open(config_path, encoding="utf-8") as fh:
-        raw_text = fh.read()
+    raw_text = textio.read_text(config_path)
     raw = yaml_safe_load(raw_text) or {}
     standard_cfg = _read_standard_cfg(raw)
     current = standard_cfg.get("presets") or []
@@ -328,8 +332,7 @@ def remove_preset(project_root: str, preset_name: str) -> list:
     # Simulate the removal via a scratch copy in the same directory, so the
     # report reflects the post-removal state before the real file is touched.
     scratch_path = config_path + ".scratch"
-    with open(scratch_path, "w", encoding="utf-8") as fh:
-        fh.write(new_text)
+    textio.write_text(scratch_path, new_text)
     try:
         project = load_project(config_path=scratch_path)
         parse_mod.load_items(project, require_ids=False)
@@ -338,7 +341,6 @@ def remove_preset(project_root: str, preset_name: str) -> list:
     finally:
         os.remove(scratch_path)
 
-    with open(config_path, "w", encoding="utf-8") as fh:
-        fh.write(new_text)
+    textio.write_text(config_path, new_text)
 
     return diagnostics

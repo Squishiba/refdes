@@ -36,6 +36,7 @@ from dataclasses import dataclass, field
 from . import build as build_mod
 from . import calc
 from . import seal as seal_mod
+from . import textio
 from .model import RETIRED_UNIT_SPELLING, Item, Project
 from .revise import (
     FileRewrite,
@@ -44,7 +45,6 @@ from .revise import (
     _carry_forward_seals,
     _line_diff_report,
     _load_and_validate,
-    _newline_style,
     _restore_seal_files,
     carry_forward_baselines,
     restore_rewrites,
@@ -99,10 +99,9 @@ def _item_spans(rel: str, lines: list[str], items: list[Item]) -> list[tuple[int
 def _rewrite_file(
     project: Project, path: str, rel: str
 ) -> tuple[FileRewrite, list[str], list[str], list[int]]:
-    with open(path, "r", encoding="utf-8", newline="") as fh:
-        text = fh.read()
-    newline = _newline_style(text)
-    lines = text.splitlines()
+    source = textio.SourceText.of(path)
+    text = source.text
+    lines = source.lines
     items = [i for i in project.local_items if i.source_file == rel]
     spans = _item_spans(rel, lines, items)
 
@@ -132,9 +131,7 @@ def _rewrite_file(
         out[i] = new
         changed_lines.append(i + 1)
 
-    after = newline.join(out)
-    if lines and text.endswith(("\n", "\r\n")):
-        after += newline
+    after = source.render(out)
     return FileRewrite(path=path, rel=rel, before=text, after=after), errors, sealed, changed_lines
 
 
@@ -312,8 +309,7 @@ def _dry_run(
         shutil.copytree(root, copy, ignore=shutil.ignore_patterns("_site", ".git"))
         for rw in rewrites:
             dest = os.path.join(copy, *rw.rel.split("/"))
-            with open(dest, "w", encoding="utf-8", newline="") as fh:
-                fh.write(rw.after)
+            textio.write_text(dest, rw.after)
         copy_config = os.path.join(copy, "refdes-project.yaml")
         try:
             project_after = _load_and_validate(copy_config)

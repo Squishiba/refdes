@@ -30,6 +30,7 @@ import yaml
 
 from . import build as build_mod
 from . import keys as keys_mod
+from . import textio
 from .model import INFO, RELEASE_GATE_DEFAULTS, Item, Project, SchemaError
 from .parse import yaml_safe_load
 
@@ -257,8 +258,7 @@ def _save_baseline_file(project: Project, data: dict) -> str:
     """Persist ``format_baseline``'s source-reviewable baseline shape."""
     path = baseline_path(project, data["name"])
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w", encoding="utf-8", newline="") as fh:
-        fh.write(format_baseline(data))
+    textio.write_text(path, format_baseline(data))
     return path
 
 

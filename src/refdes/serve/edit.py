@@ -54,7 +54,7 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Any
 
-from .. import dates, ids, keys, links, loader, patcher, scaffold, seal
+from .. import dates, ids, keys, links, loader, patcher, scaffold, seal, textio
 from ..model import CHECK_VIOLATION, Diagnostic, ERROR, Item, Project
 from ..parse import yaml_safe_load
 from ..patcher import AddLink, PatchPlan, Refusal, RemoveLink, SetBody, SetField
@@ -647,7 +647,12 @@ def _create_locked(config: str, request: CreateRequest):
                 original = fh.read().decode("utf-8")
         except (OSError, UnicodeDecodeError) as exc:
             return Refused(who, new_id, f"could not read {rel}: {exc}")
-        eol = "\r\n" if "\r\n" in original else "\n"
+        # The ending of the line the new block is being appended *after*, not
+        # "CRLF if the file mentions CRLF anywhere": appending to a file whose
+        # tail is LF used to hand the new item CRLF endings, because an
+        # unrelated line higher up was CRLF. The block joins the end, so it
+        # takes the end's style.
+        eol = textio.append_ending(original)
         if dest["kind"] == "append-md":
             block = ["---", f"id: {new_id}", f"key: {key}", f"type: {request.type}", *body, "---", ""]
         else:

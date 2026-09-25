@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING
 import yaml
 
 from . import ids as ids_mod
+from . import textio
 from .model import Diagnostic, Item, Project
 from .parse import yaml_safe_load
 
@@ -664,12 +665,11 @@ def plan_missing(
     for rel, entries in by_file.items():
         path = os.path.join(project.root, rel)
         if source_texts is not None and rel in source_texts:
-            text = source_texts[rel]
+            source = textio.SourceText(source_texts[rel])
         else:
-            with open(path, "r", encoding="utf-8", newline="") as fh:
-                text = fh.read()
-        newline = "\r\n" if "\r\n" in text else "\n"
-        lines = text.splitlines()
+            source = textio.SourceText.of(path)
+        text = source.text
+        lines = source.lines
 
         # Bottom-up so earlier line numbers stay valid as keys are inserted --
         # the same discipline ids.allocate() and former_ids.confirm() use for
@@ -698,7 +698,7 @@ def plan_missing(
                     continue
                 lines = updated
 
-        after = newline.join(lines) + newline
+        after = source.render(lines)
         if after != text:
             plan.rewrites.append(FileRewrite(path=path, rel=rel, before=text, after=after))
 
