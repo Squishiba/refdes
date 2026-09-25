@@ -124,7 +124,7 @@ Candidates, each an overlay per §3.3:
 
 | # | Decoration | Source of truth | Notes |
 |---|---|---|---|
-| D1 | **Calc values inline** — evaluated result rendered beside each `{{value}}`/dotted reference in prose, name as attribution | calc evaluator, already expanded to `DISPLAY-ID@key` | Decided §7.1: pane-only overlay; publishing live numbers on the site is a separate, later decision |
+| D1 | **Calc values inline** — evaluated result rendered beside each `{{value}}`/dotted reference in prose, name as attribution | calc evaluator, already expanded to `DISPLAY-ID@key` | Decided §7.1: pane-only overlay; publishing live numbers on the site is a separate, later decision — `CalcLine.block` (named-calc-blocks §3.6) already tags each row with its block's name, so the attribution gets *which* named calculation a value came from at zero cost |
 | D2 | **Image provenance** — resolved source path + content hash on hover; ambiguity/absence as an inline squiggle at the `![]()` | the asset-search the build already runs | Turns the two image failure modes into author-time signals |
 | D3 | **Inline diagnostics** — build diagnostics for this entry (unit errors, dead links, image ambiguity) mapped to file:line and rendered in place | the build's diagnostic list, already file:line-shaped | The single highest-friction reducer |
 | D4 | **Thread panel pinned** — the folded "currently concludes" panel (threads.md Phase 3b) fixed at the top of the pane, fork warnings prominent | `chains.py` fold, already built and memoized | This is the "see what's actually going on" content mid-thread |

@@ -367,6 +367,22 @@ item, the field, and the type. A field shown in its own section — `options`,
 `checks`, a citations field — links to that section; a field declared but empty
 links to the collapsed row where it would have been.
 
+A named [calc block](math.md#naming-a-calc-block) gets the same envelope with
+a `calc:` prefix —
+`[[DEC-PWR-001#calc:losses]]`, or `[[DEC-PWR-001#calc:losses|the losses
+calculation]]` — which links to that block's table on the target's page. The
+`id="losses"` an author writes on a `calc` block's fence line gives the block
+its name, and the named block's table is what the link points at. It links;
+it never inlines the numbers, so it cannot go stale when a result moves. The
+`calc:` prefix is required: field names are schema-declared, while calc block
+names are author-chosen and exist only once a fence says so, and a bare
+fragment is read as a field name — `[[DEC-PWR-001#losses]]` warns that type
+`decision` declares no field `losses` rather than guessing. A miss on a
+`#calc:` fragment is a warning that says what the target actually has — a
+block of another name (naming them), fences with no name at all, or no calc
+blocks — never a build failure, the same unresolved-reference posture as
+above.
+
 A `[[fig:some-id]]` reference — the same `[[...]]` envelope, a `fig:` prefix —
 resolves to a numbered figure instead of an item. See [width and
 captions](markdown.md#width-and-captions).
@@ -376,7 +392,9 @@ citation's row on the page of the item that declared it — the citation's own
 `id:` must be given explicitly first, unlike a figure's. See [citing a
 datasheet](markdown.md#citing-a-datasheet). Like a figure reference, a
 `#field` fragment on either a `fig:` or `cite:` reference is a warning, not a
-link — neither is addressed by field.
+link — neither is addressed by field. A `#calc:` fragment is the same
+warning: fig and cite references are addressed by figure and citation, not
+by calc block.
 
 ## Hover previews
 

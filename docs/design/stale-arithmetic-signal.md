@@ -78,7 +78,10 @@ exception rather than pretending it fits the existing shape for free:
   display-relevant plaintext on a baseline entry).
 - `calc_hash`: a hash of the item's calc-block source text, normalized the
   same way the body hash already normalizes whitespace, joined
-  deterministically if the item has more than one block.
+  deterministically if the item has more than one block. Because the fence's
+  `id="..."` sits outside the hashed calc text, renaming a block moves
+  `content_hash` but not `calc_hash` — precisely the "the page changed for
+  another reason" case this signal must ignore.
 
 Both are omitted from an entry entirely when they don't apply (no `status`
 field, or no `calc` block) — same absent-means-not-applicable posture
