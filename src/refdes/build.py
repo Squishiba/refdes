@@ -46,10 +46,22 @@ from .model import (
 # the target item's page; it is never inlined, and a composite `ID@key` target
 # is not admitted here because those only ever appear in structured link
 # fields, never in prose (docs/design/keys.md).
+# The fragment may instead be `calc:<name>` (docs/design/named-calc-blocks.md
+# §5.3), which links to that named block's table on the target's page. A colon
+# is admitted in the fragment at most once. `calc:` is the only namespace
+# defined, and field names never contain a colon, so any other `a:b` is a
+# typo'd namespace -- `field_anchor` reports it by name rather than letting it
+# fall through to the field check or reach the page as literal text (the same
+# "silently-ignored author intent is the failure" call §3.4 makes for the
+# fence line).
 EXPLICIT_REF_RE = re.compile(
-    r"\[\[\s*([A-Za-z0-9\-_:]+)(?:#([A-Za-z0-9_\-]+))?\s*"
+    r"\[\[\s*([A-Za-z0-9\-_:]+)(?:#([A-Za-z0-9_\-]+(?::[A-Za-z0-9_\-]+)?))?\s*"
     r"(?:\|\s*([^\]]+?)\s*)?\]\]"
 )
+# The one namespaced fragment this project defines. A bare `#losses` would land
+# in the same namespace as schema-declared field names and have to be resolved
+# by a precedence rule nobody reading the page can see (§5.3).
+CALC_FRAGMENT_PREFIX = "calc:"
 # Bare reference: REQ-PWR-002 appearing in prose.
 BARE_REF_RE = re.compile(r"(?<![\w\-/])([A-Z][A-Z0-9]*(?:-[A-Z0-9]+)*-\d{1,6})(?![\w\-])")
 # Inline calc value: {{P_diss}}, optionally presented in another unit:
@@ -1910,16 +1922,75 @@ def _linkify(
 ) -> str:
     """Turn IDs into preview-bearing links, skipping code and pre regions."""
 
-    def field_anchor(item: Item, field: str | None) -> str | None:
-        """`#field` checked against the target's own type, as an href suffix.
+    def calc_anchor(item: Item, name: str, ref: str) -> str | None:
+        """`#calc:<name>` checked against the target's own named calc blocks.
 
-        None means the type does not declare the field -- reported, never
+        Same posture as `field_anchor` below and for the same reason: None
+        means the target has no such block, the miss is reported, and the
+        caller must not emit an anchor for it. It is a *warning*, never an
+        error (§11.9 decided): a broken prose link must not fail a build, the
+        way an unresolved `[[...]]` never does.
+
+        The names come from the target's fence lines, not from its evaluated
+        rows, so a named block that produced no rows is still a name the item
+        has -- the anchor Phase 1 puts on the table is what this resolves to.
+        """
+        fences = calc.extract_blocks_with_lines(item.body)
+        names = [block_id for _, _, block_id in fences if block_id]
+        if name in names:
+            return f"#calc-{name}"
+        if names:
+            project.warn(
+                f"{ref}: {item.id} has no calc block named {name!r} "
+                f"(it names: {', '.join(names)}).",
+                file=where_file, line=where_line, item_id=where_id,
+            )
+            return None
+        if fences:
+            project.warn(
+                f'{ref}: {item.id} has calc blocks but none is named -- add '
+                f'id="..." to its fence to make this link work.',
+                file=where_file, line=where_line, item_id=where_id,
+            )
+            return None
+        # Not one of §7's two shapes: the target computes nothing at all, so
+        # neither "it names: ..." nor "none is named" is true of it. Same level,
+        # same posture, and a fix that is true for this target.
+        project.warn(
+            f"{ref}: {item.id} has no calc blocks -- a #calc: fragment names a "
+            f'```calc block given id="...", and this item computes nothing.',
+            file=where_file, line=where_line, item_id=where_id,
+        )
+        return None
+
+    def field_anchor(item: Item, field: str | None, ref: str) -> str | None:
+        """A `#fragment` checked against the target, as an href suffix.
+
+        `calc:<name>` resolves against the item's named calc blocks (§5.3);
+        anything else is a field name, checked against the target's own type.
+
+        None means the target has no such field or block -- reported, never
         swallowed, and the caller must not emit an anchor for it. A field that
         is declared but empty on this item still resolves: item.html.j2 keeps
         an anchor for every declared field, rendered or not.
         """
         if field is None:
             return ""
+        if field.startswith(CALC_FRAGMENT_PREFIX):
+            return calc_anchor(item, field[len(CALC_FRAGMENT_PREFIX) :], ref)
+        if ":" in field:
+            # `#blox:losses`: a namespace that does not exist. Before the
+            # fragment group admitted a colon this reference simply did not
+            # match, so it reached the page as literal text -- silent, which is
+            # the failure this project keeps refusing. Now it is reported, and
+            # names the only two fragment kinds there are.
+            project.warn(
+                f"{ref}: {item.id} has no {field!r} fragment -- a fragment is a "
+                f"field name declared on {item.type!r}, or calc:<name> for a "
+                f'named ```calc block.',
+                file=where_file, line=where_line, item_id=where_id,
+            )
+            return None
         spec = project.types.get(item.type)
         if spec is not None and field in spec.fields:
             return f"#field-{field}"
@@ -1936,6 +2007,9 @@ def _linkify(
         explicit: bool,
         field: str | None = None,
     ) -> str:
+        # The reference as the author wrote it, for the fragment diagnostics
+        # that need to quote it (§7 spells them `[[ID#calc:name]]: ...`).
+        fragment_ref = f"[[{target_id}#{field}]]" if field else ""
         if explicit and field is not None and target_id.startswith("fig:"):
             # Figures are addressed by their own id, not by field; saying so
             # beats silently dropping the fragment.
@@ -1996,7 +2070,7 @@ def _linkify(
                 # must see it landed somewhere else, not be quietly redirected
                 # (finding 12).
                 owner = project.item_by_id(former_owner_id)
-                anchor = field_anchor(owner, field) or ""
+                anchor = field_anchor(owner, field, fragment_ref) or ""
                 text = label or target_id
                 return (
                     f'<a class="ref ref-former" href="{owner.slug}.html{anchor}" '
@@ -2011,10 +2085,18 @@ def _linkify(
                 )
                 return f'<span class="ref ref-missing" title="unknown item">{target_id}</span>'
             return target_id
-        anchor = field_anchor(target, field)
+        anchor = field_anchor(target, field, fragment_ref)
         if anchor is None:
+            # A fragment miss renders the reference's own text, in red, exactly
+            # like an unresolved item reference: the sentence stays readable and
+            # says what did not resolve, and no anchor is emitted for a target
+            # that has nothing to land on.
+            kind = (
+                "unknown calc block" if (field or "").startswith(CALC_FRAGMENT_PREFIX)
+                else "unknown field"
+            )
             return (
-                f'<span class="ref ref-missing" title="unknown field">'
+                f'<span class="ref ref-missing" title="{kind}">'
                 f"{label or f'{target_id}#{field}'}"
                 f"</span>"
             )
