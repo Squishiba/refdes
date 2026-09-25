@@ -147,8 +147,26 @@ def mapping_from_dict(raw: dict[str, Any], source: str) -> Mapping:
 
 
 def load_mapping(path: str) -> Mapping:
-    with open(path, "r", encoding="utf-8") as fh:
-        raw = yaml_safe_load(fh) or {}
+    """Read a hand-written mapping file, refusing an unreadable one as the
+    configuration error it is.
+
+    A path that doesn't exist, isn't a file, or doesn't parse used to escape
+    as a raw `FileNotFoundError` / `IsADirectoryError` / `yaml.YAMLError`
+    traceback out of here and past the `except SchemaError` in `cmd_revise`
+    -- the one place that turns a bad mapping file into the exit-2 the
+    global exit-code table promises. Wrap all three here, so that handler is
+    the only exit and the message is one line naming the file.
+    """
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            raw = yaml_safe_load(fh) or {}
+    except OSError:
+        raise SchemaError(f"no such mapping file: {path}") from None
+    except yaml.YAMLError as exc:
+        # str(exc) is PyYAML's own multi-line mark-and-caret report; keep the
+        # location, collapse it to a single line so this stays a one-line error.
+        detail = " ".join(str(exc).split())
+        raise SchemaError(f"mapping file could not be parsed: {path}: {detail}") from None
     return mapping_from_dict(raw, path)
 
 

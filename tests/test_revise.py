@@ -13,8 +13,10 @@ from conftest import write_project_config
 from helpers import REPO, _build_at
 
 from refdes import build as build_mod
+from refdes import cli as cli_mod
 from refdes import keys as keys_mod
 from refdes import lifecycle, parse, revise, seal, standards
+from refdes.model import SchemaError
 from refdes.schema import load_project
 
 # ------------------------------------------------------------ revise (finding 12)
@@ -282,6 +284,80 @@ def test_revise_refuses_a_self_contradictory_mapping():
     mapping = revise.Mapping(prefixes={"REQ": "R", "RSK": "R"})
     errors = revise.check_ambiguous(project, mapping)
     assert any("collides" in e for e in errors)
+
+
+# ------------------------------------------- an unreadable mapping file is a config error
+
+
+def test_load_mapping_refuses_a_file_that_does_not_exist(tmp_path):
+    missing = str(tmp_path / "nope.yaml")
+    with pytest.raises(SchemaError, match="no such mapping file"):
+        revise.load_mapping(missing)
+
+
+def test_load_mapping_refuses_a_directory(tmp_path):
+    with pytest.raises(SchemaError, match="no such mapping file"):
+        revise.load_mapping(str(tmp_path))
+
+
+def test_load_mapping_refuses_unparseable_yaml(tmp_path):
+    path = tmp_path / "bad.yaml"
+    path.write_text("types:\n  requirement: [unclosed\n", encoding="utf-8")
+    with pytest.raises(SchemaError, match="could not be parsed"):
+        revise.load_mapping(str(path))
+
+
+def test_cli_revise_missing_mapping_file_exits_2_with_one_line(tmp_path, capsys):
+    """docs/cli-reference.md's exit-code table promises 2 for a configuration
+    error; a nonexistent mapping file used to escape as a FileNotFoundError
+    traceback with exit 1 instead."""
+    write_project_config(tmp_path, REVISE_SCHEMA)
+    (tmp_path / "items").mkdir()
+    (tmp_path / "items" / "i.yaml").write_text("items: []\n", encoding="utf-8")
+    config = str(tmp_path / "refdes-project.yaml")
+    missing = str(tmp_path / "nope.yaml")
+
+    assert cli_mod.main(["-c", config, "revise", missing]) == 2
+    err = capsys.readouterr().err
+    assert f"no such mapping file: {missing}" in err
+    assert "Traceback" not in err
+    assert len([ln for ln in err.splitlines() if ln.strip()]) == 1
+
+
+def test_cli_revise_unparseable_mapping_file_exits_2_with_one_line(tmp_path, capsys):
+    write_project_config(tmp_path, REVISE_SCHEMA)
+    (tmp_path / "items").mkdir()
+    (tmp_path / "items" / "i.yaml").write_text("items: []\n", encoding="utf-8")
+    bad = tmp_path / "bad.yaml"
+    bad.write_text("types:\n  bound: [unclosed\n", encoding="utf-8")
+    config = str(tmp_path / "refdes-project.yaml")
+
+    assert cli_mod.main(["-c", config, "revise", str(bad)]) == 2
+    err = capsys.readouterr().err
+    assert "could not be parsed" in err
+    assert "Traceback" not in err
+    assert len([ln for ln in err.splitlines() if ln.strip()]) == 1
+
+
+def test_cli_revise_a_bad_mapping_file_writes_nothing(tmp_path, capsys):
+    """The refusal has to come before any of the mint/expand work the dry run
+    names, not after it."""
+    write_project_config(tmp_path, REVISE_SCHEMA)
+    items = tmp_path / "items"
+    items.mkdir()
+    path = items / "i.yaml"
+    path.write_text(
+        "defaults: { type: bound, prefix: BND }\n"
+        "items:\n  - id: BND-001\n    text: t\n    limit: \"<= 1 W\"\n",
+        encoding="utf-8",
+    )
+    before = path.read_bytes()
+
+    assert cli_mod.main(
+        ["-c", str(tmp_path / "refdes-project.yaml"), "revise", str(tmp_path / "nope.yaml")]
+    ) == 2
+    capsys.readouterr()
+    assert path.read_bytes() == before
 
 
 def _label_schema(tmp_path) -> None:

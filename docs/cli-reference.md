@@ -724,6 +724,23 @@ would change 2 file(s):
   items/board-a/requirements.yaml:10  id: REQ-PWR-001 -> id: NEED-PWR-001
 ```
 
+A mapping file that cannot be read is refused before anything is touched —
+no project load, no minting, no dry-run report — with a one-line `error:` and
+exit 2, like any other configuration error:
+
+```
+$ refdes revise nope.yaml
+error: no such mapping file: nope.yaml
+```
+
+A mapping file that exists but doesn't parse gets the same treatment, with
+PyYAML's own mark-and-caret detail collapsed onto the one line:
+
+```
+$ refdes revise broken.yaml
+error: mapping file could not be parsed: broken.yaml: while parsing a flow sequence in "<unicode string>", line 2, column 16: requirement: [unclosed ^ expected ',' or ']', but got '<stream end>'
+```
+
 A mapping that doesn't apply to this project at all is not an error — it
 prints `nothing to do -- mapping doesn't apply to this project` and exits 0.
 On success, a rename that moved a stamped baseline's entries forward says so
