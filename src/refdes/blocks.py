@@ -119,6 +119,11 @@ class BlockSpec:
     # the order its own error message reads (docs/design/candidate-parts.md
     # §3.7), which is not the order the two tuples happen to be written in.
     accepts: tuple[str, ...] | None = None
+    # Whether the missing-required-parameter error names the accepted set
+    # instead of the family default. `{{calcblock}}` sets it because
+    # docs/design/named-calc-blocks.md §7 spells that error with the accepted
+    # set -- the same reason `accepts` exists: the wording is the spec's.
+    missing_names_accepted: bool = False
 
     @property
     def all_params(self) -> tuple[str, ...]:
@@ -138,6 +143,12 @@ def _validate_params(spec: BlockSpec, params: dict[str, str]) -> None:
             )
     for key in spec.required:
         if key not in params:
+            if spec.missing_names_accepted:
+                raise _BlockError(
+                    f"missing required parameter {key!r}. {spec.name} accepts: "
+                    + ", ".join(spec.accepted_set)
+                    + "."
+                )
             raise _BlockError(f"{spec.name} is missing required parameter {key!r}.")
 
 
@@ -767,9 +778,89 @@ def _render_compare(project: Project, params: dict[str, str], where: str = "") -
     )
 
 
+# --------------------------------------------------------------- {{calcblock}}
+
+
+def _calcblock_target(project: Project, item_id: str) -> Item | None:
+    """`item=` resolved: a display id, or a `DISPLAY-ID@key` composite (§5.4).
+
+    The composite is resolved by its key half, which is what a composite means
+    everywhere else in this project (the label may be stale; the key resolves).
+    """
+    item = project.item_by_id(item_id)
+    if item is None and "@" in item_id:
+        item = project.items.get(item_id.partition("@")[2])
+    return item
+
+
+def _render_calcblock(project: Project, params: dict[str, str], where: str = "") -> str:
+    """One named calc block's rows on a narrative page
+    (docs/design/named-calc-blocks.md §5.4).
+
+    Reads `item.calcs` -- the rows `run_calcs` already produced, tagged with
+    their block by `CalcLine.block` (§3.6) -- and formats them with the very
+    renderer the owner's own page uses. It never evaluates: no `item._env`, no
+    `calc.evaluate_block`, no verdict of its own. An error row renders here as
+    the error row it is on the owner's page, because the failure is the owner's
+    and the build already reported it at the owner's line (§5.4).
+
+    The table is byte-identical to the owner's -- anchor and caption included,
+    since it is the same call to the same function -- preceded by one caption
+    line naming the owning item (bare, so the page's own `_linkify` pass links
+    it for free, exactly as `{{index}}`'s ID cells are) and the block name.
+    """
+    # build.py imports this module, so the shared renderer comes in by call,
+    # the way links.py pulls _calc_reference_targets.
+    from .build import _calc_table_html
+
+    item_id = params["item"]
+    block = params["block"]
+    item = _calcblock_target(project, item_id)
+    if item is None:
+        raise _BlockError(f"{item_id} does not exist.{_suggest(item_id, project.items_by_id)}")
+    if item.external:
+        raise _BlockError(
+            f"{item.id!r} is an imported item. Imported items carry no calc "
+            "blocks in this project; render the upstream project's own page "
+            "instead."
+        )
+    if not item.calcs:
+        raise _BlockError(
+            f"{item.id} has no calc blocks. calcblock renders a named "
+            "```calc block; this item computes nothing."
+        )
+
+    rows = [line for line in item.calcs if line.block == block]
+    if not rows:
+        names = sorted({line.block for line in item.calcs if line.block})
+        if not names:
+            # Named-block-missing on an item that computes but names nothing:
+            # §7's `#calc:` warning wording, which is the same finding.
+            raise _BlockError(
+                f"{item.id} has calc blocks but none is named -- add "
+                'id="..." to its fence to make this block work.'
+            )
+        raise _BlockError(
+            f"{item.id!r} has no calc block named {block!r}. It names: "
+            + ", ".join(names)
+            + "."
+        )
+
+    caption = f'<p class="calcblock-caption">{_esc(item.id)} / {_esc(block)}</p>'
+    return caption + _calc_table_html(rows, block=block)
+
+
 # --------------------------------------------------------------- dispatch
 
 _REGISTRY: dict[str, BlockSpec] = {
+    "calcblock": BlockSpec(
+        name="calcblock",
+        required=("item", "block"),
+        optional=(),
+        accepts=("block", "item"),
+        missing_names_accepted=True,
+        render=_render_calcblock,
+    ),
     "compare": BlockSpec(
         name="compare",
         required=("type",),
