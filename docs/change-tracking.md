@@ -87,9 +87,11 @@ Precedence: item field override → whole-item mode → schema field → project
 
 ## The content hash
 
-Each item's hash is computed over its `invalidate` fields, its links, and its body
-(if the body is `invalidate`). It appears at the foot of every item page and in
-`items.json`:
+Each item's hash is computed over its `invalidate` fields, its links, its body
+(if the body is `invalidate`), and — since hash format 5 — the bytes of the
+local images its body references, so replacing a figure's bytes marks every
+item using it changed even when no text moved. It appears at the foot of every
+item page and in `items.json`:
 
 ```json
 "content_hash": "673e6ba11269f350"
@@ -105,10 +107,10 @@ links work the same way.
 ### Hash format versioning
 
 The content hash definition is versioned (`hash_format`, recorded per baseline
-and seal entry; currently **4**). When the hash definition changes (e.g. link
+and seal entry; currently **5**). When the hash definition changes (e.g. link
 targets switching from display-id text to resolved keys, `checks: against:`
-entries being reduced to keys, or a cross-item calc reference's resolved value
-joining the hash), a baseline stamped under the old definition
+entries being reduced to keys, a cross-item calc reference's resolved value
+joining the hash, or — format 5 — referenced image bytes joining it), a baseline stamped under the old definition
 would show every item as "changed" purely because the *definition* moved, not
 because content changed.
 

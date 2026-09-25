@@ -58,13 +58,15 @@ def _edit(tmp_path, name: str, old: str, new: str) -> None:
     path.write_text(text.replace(old, new), encoding="utf-8")
 
 
-def test_hash_format_stays_4(tmp_path):
-    """§6.1: HASH_FORMAT stays 4 -- naming enters no payload as a new key.
-    Sabotage: a `block`/`calc_blocks` key added to _hash_payload, or a bump
-    to 5, fails here. The format-3-vs-4 identity is the strong pin: an item
-    with named blocks and no references hashes exactly like a format-3 item,
-    so naming cannot register anywhere the old format didn't look."""
-    assert build_mod.HASH_FORMAT == 4
+def test_hash_format_bumped_to_5_moves_nothing_here(tmp_path):
+    """§6.1, re-pinned by the HASH_FORMAT 5 bump (editor-image-upload.md
+    §15.6): naming still enters no payload as a new key -- the format-3-vs-4
+    identity holds. And because this project has no images, the format-4-vs-5
+    identity holds too: the image-bytes bump moves no image-free item, the
+    same no-churn argument every earlier bump made. Sabotage: a `block`/
+    `calc_blocks` key added to _hash_payload, or a format 5 that looks at
+    anything but images, fails here."""
+    assert build_mod.HASH_FORMAT == 5
     p = _build(tmp_path, {
         "a.md": _item("DEC-001", '```calc id="losses"\nV_in = 12 V\n```\n'),
         "b.md": _item("DEC-002", "prose only, no calc at all\n"),
@@ -72,10 +74,11 @@ def test_hash_format_stays_4(tmp_path):
     assert not p.errors, p.errors
     for item in p.local_items:
         spec = p.types[item.type]
+        five = build_mod.hash_payload_builder(p, 5)(item, spec)
         four = build_mod.hash_payload_builder(p, 4)(item, spec)
         three = build_mod.hash_payload_builder(p, 3)(item, spec)
-        assert four == three
-        assert item.content_hash == build_mod.hash_for_format(item, p, 3)
+        assert five == four == three
+        assert item.content_hash == build_mod.hash_for_format(item, p, 4)
 
 
 def test_naming_moves_owner_hash_only(tmp_path):
