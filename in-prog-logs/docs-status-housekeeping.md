@@ -71,3 +71,32 @@ Claims checked with real commands, not memory:
 ## Status
 
 Finished.
+
+---
+
+## Follow-up (refdes-2, after PR #29 merged)
+
+Orchestrator follow-up: the paragraph after the corrected CI sentence in
+`docs/design/browser-editor.md` still said "CI validates the save is currently
+a promise with nothing behind it" — stale now that `.github/workflows/tests.yml`
+exists. Reword just that paragraph, minimal edit, on a NEW branch off
+origin/main.
+
+Verification: PR #29 merged into main (`e81208a`). New branch
+`ao/refdes-166/browser-editor-ci-reword` created from `origin/main`.
+
+Edit: replaced the three-line paragraph (doc lines 275-277 at the time) with a
+version that says test CI now has real runs behind it (pytest + E9,F ruff on
+every pull request) while noting the shape's specific verdict — a `refdes check`
+run against the pushed branch — is still not in the workflow and would have to
+be added before the shape could be trusted. Nothing else in the file changed.
+
+Changelog fragment: skipped deliberately — optional per the orchestrator for
+docs-only, and PR #29 already carried the docs-status fragment
+(`changelog.d/design-doc-statuses.fixed.md`); this paragraph is internal
+design-doc precision, not a user-visible change.
+
+Gate: `python -m pytest -q -x` then `python -m ruff check --select E9,F src
+tests`, then `git push -u origin ao/refdes-166/browser-editor-ci-reword`; PR via
+`gh pr create --base main`, not merged. Reported to refdes-2 at the PR-open
+boundary.
