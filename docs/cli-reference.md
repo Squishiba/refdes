@@ -1,7 +1,7 @@
 # CLI reference
 
 ```
-refdes [-c CONFIG] {build,check,revision,release,index,serve,ls,id,fetch,audit,init,new,schema,standard,revise,stub-tests,former-ids} [options]
+refdes [-c CONFIG] [--no-write] {serve,build,check,revision,release,index,ls,id,fetch,audit,init,new,schema,standard,keys,revise,calc-rewrite,stub-tests,former-ids,history} [options]
 ```
 
 | Global option | Effect |
@@ -25,6 +25,7 @@ Validate, evaluate, and render the site plus `items.json`.
 | `--accept-board-move` | Accept a recorded [board](multi-board.md) or [workspace](workspaces.md) change for an item |
 | `--require-citations` | Promote the unpinned-citation (info) and missing-cache-blob (warning) [citation](markdown.md#citing-a-datasheet) diagnostics to errors |
 | `--dry-run` | Render the site without sealing |
+| `-v`, `--verbose` | Also show info-level diagnostics (routine states hidden by default) |
 
 ```bash
 refdes build
@@ -56,10 +57,13 @@ failing check. Do not use it in CI — it defeats the point.
 ## `refdes check`
 
 Validate without rendering. Faster, and verifies existing seals without creating
-new ones — which makes it the right command for CI and pre-commit hooks. Nothing
-of the project's own is written: no site, no seal, no board or citation manifest,
-no baseline. (`.refdes/schema.json`, the gitignored editor-completion schema, is
-refreshed by every command that loads the project, this one included.)
+new ones — which makes it the right command for CI and pre-commit hooks. No
+rendered output, no new seal, no board or citation manifest, and no baseline is
+written. Loading the project can still write back surrogate `key:` fields and
+expand resolvable link and `check` targets to composite form, and
+`.refdes/schema.json` (the gitignored editor-completion schema) is refreshed by
+every command that loads the project, this one included. Run
+`refdes --no-write check` for a run that writes none of those either.
 
 ```bash
 refdes check
@@ -217,7 +221,7 @@ reference while reviewing a PR diff.
 | `--board BOARD` | Only items on this board |
 | `--file PATH` | Only items declared in this source file |
 | `--tag TEXT` | Only items with a tag containing this text |
-| `QUERY` (positional, optional) | Free text, matched against title and `tags:`, case-insensitive |
+| `QUERY ...` (positional, optional) | Free text, matched against title and `tags:`, case-insensitive. Zero or more words; the whole quoted string is the query, as in `refdes ls "current limit"` |
 
 ```bash
 refdes ls
@@ -260,12 +264,21 @@ Also expands a quoted bare number (`id: "042"`) into a full id against its
 prefix, freezing the author's own chosen number rather than picking the next
 free one — see [choosing your own number](ids.md#choosing-your-own-number).
 
+> **Known issue (verified against `hardware@3`, not yet fixed):** the expansion
+> writes the full id as an extra line and leaves the quoted hint in place, so
+> the front matter ends up holding both `id: REQ-PWR-042` and `id: "042"`. YAML
+> reads the quoted value last, and the item then loads as `id: 042` and reports
+> `id: 042 has no prefix yet`; a second `refdes id` run rejects the same item as
+> a burned-number collision. Prefer leaving `id:` blank and letting `refdes id`
+> assign the number until this is fixed.
+
 | Option | Effect |
 |---|---|
-| `--dry-run` | Show what would be allocated, write nothing |
+| `--dry-run` | Show what would be allocated and skip the `id:` write-back. It is not write-free: loading the project can still mint missing surrogate `key:` fields and refresh `.refdes/schema.json`. Put the global `--no-write` first for a preview that writes nothing at all. |
 
 ```bash
 refdes id --dry-run
+refdes --no-write id --dry-run
 refdes id
 ```
 
