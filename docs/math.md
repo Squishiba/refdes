@@ -28,7 +28,61 @@ P_dens  = P_diss / A_board | W/in^2              → 0.2366 W/in²
 ```
 
 Variables are visible to later lines in the same item, across multiple blocks.
-They are **not** shared between items — unless you name the item, below.
+They are **not** shared between items — unless a reference to the item's values
+names them, below.
+
+## Naming a calc block
+
+A calc block can carry a name, which is how an item with two calculations says
+which is which — and how prose can point at one table instead of "the second
+calc block":
+
+````markdown
+```calc id="losses"
+P_out  = V_out * I_load | W
+P_diss = P_out * (1/eff - 1) | W
+```
+````
+
+`id="..."` is an attribute on the opening fence line — the fence's info
+string, quoted exactly like `caption="..."` on a figure or `type="decision"`
+on a page block. Naming is **opt-in**: a ```` ```calc ```` with no attribute is
+legal and renders byte-for-byte as it always has; a block needs no name until
+something wants to point at it.
+
+The name is lowercase, 1–40 characters, matching `[a-z][a-z0-9_-]{0,39}` — the
+same shape as citation ids and figure ids, and deliberately not the
+symbol-shaped value names (`P_diss`) a block assigns, so a bare token's kind is
+readable and a block name can never be pasted where a value name belongs and
+look right. `id` is the only attribute the fence accepts: anything else on the
+fence line — a bare word, an unquoted value, an unknown key, a name outside the
+grammar — is a build error at the fence line naming the fix (see
+[troubleshooting](troubleshooting.md)).
+
+What a name is: **a label on the rendering.** A named block's table gains an
+anchor (`#calc-<name>`) and a caption carrying the name, so the two
+calculations in an item are distinguishable on its page.
+`[[DEC-PWR-001#calc:losses]]` in prose links straight to that table, and
+`{{calcblock item="DEC-PWR-001" block="losses"}}` on a page renders it — both
+address the block itself, never its individual values.
+
+What a name is **not**:
+
+- **Not a scope.** `env` and the one-name-per-item rule stay item-wide: a value
+  assigned in block `supply` is visible to block `losses` exactly as it is now,
+  and two blocks assigning the same value name still get the ordinary "assigned
+  twice" error. Naming a block must not become a way to make two `P_diss`
+  values coexist.
+- **Not a key.** No `@key` composite, no expansion pass, nothing `refdes keys`
+  touches. Renaming a block breaks the prose and page blocks that point at it,
+  loudly, at the referring site — and no arithmetic, because no arithmetic
+  refers to blocks.
+- **Not a value qualifier.** Block names never appear in a value reference; see
+  the next section.
+
+Block names are unique per item: two `id="losses"` fences in one item are a
+build error naming both lines and the rename fix. The same name in two
+different items is fine.
 
 ## Referencing another item's values
 
@@ -55,6 +109,12 @@ exports list. The pipe unit works on a reference like on any line:
 `V_in = DEC-PWR-001.V_in | mV` re-expresses the target's value in millivolts.
 Units and tolerances flow through untouched: a reference to `12 V ± 5%` arrives
 with its ±5% intact, which is exactly what a retyped `12 V` loses.
+
+A reference never names a block: the target half is an item, the name half is a
+value, and that is the whole grammar — block names are labels on the rendering,
+not part of value resolution. So `DEC-PWR-001.losses.P_diss` is a build error
+naming the working form `DEC-PWR-001.P_diss`, not a second spelling of one
+reference.
 
 A reference binds a name exactly as an assignment does, so the one-name-per-item
 rule is unchanged: an item that both assigns `V_in` and references it gets the

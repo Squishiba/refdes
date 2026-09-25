@@ -42,12 +42,19 @@ Wide tables scroll inside their own box rather than pushing the page sideways.
 ### Calc blocks
 
 ````markdown
-```calc
+```calc id="losses"
 P = 3.3 V * 1.2 A | W
 ```
 ````
 
 Evaluated at build time and rendered as a results table. See [math](math.md).
+
+The fence info string — everything between ```` ```calc ```` and the newline —
+is meaningful: `id="..."` names the block (see [naming a calc
+block](math.md#naming-a-calc-block)). Anything else there is a **build error**
+at the fence line, not text that is quietly ignored: a bare word, an unquoted
+value, an unknown attribute, or a name outside the lowercase grammar each gets
+a message naming the fix (see [troubleshooting](troubleshooting.md)).
 
 ### Inline values
 
