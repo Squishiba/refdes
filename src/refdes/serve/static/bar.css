@@ -9,3 +9,18 @@
 .refdes-serve-bar a { color: #9fd3ff; text-decoration: none; }
 .refdes-serve-bar a:hover { text-decoration: underline; }
 @media print { .refdes-serve-bar { display: none; } }
+/* Thread workbench W3: inline calc-value attributions and their toggle.
+   Response-only, like everything else in this file. */
+.refdes-calc-attr {
+  margin-left: 4px; padding: 0 4px; border-radius: 3px;
+  background: #eef2f7; color: #35485c; border: 1px solid #cbd6e2;
+  font: 11px/1.6 ui-monospace, Consolas, monospace; white-space: nowrap;
+}
+.refdes-values-toggle {
+  margin-left: 8px; padding: 0 8px; border-radius: 4px; cursor: pointer;
+  border: 1px solid #cbd6e2; background: #f5f7fa; color: #35485c;
+  font: 11px/1.6 system-ui, sans-serif;
+}
+.refdes-values-toggle[aria-pressed="false"] { opacity: .55; }
+.refdes-values-off .refdes-calc-attr { display: none; }
+@media print { .refdes-calc-attr, .refdes-values-toggle { display: none; } }

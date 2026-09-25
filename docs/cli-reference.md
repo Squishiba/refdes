@@ -989,6 +989,16 @@ refdes serve --no-open
   your OS temp directory, removed on Ctrl+C and pruned on a later launch if a
   crash left it behind. An "Editor" / "Edit this item" toolbar is added to the
   *HTTP response* only; a `_site/` you publish never contains it.
+- **The preview is a workbench (thread workbench, `docs/design/thread-workbench.md`).**
+  Served item pages carry author decorations the published site never shows —
+  the item's own build diagnostics in a panel, image provenance (resolved
+  source path and content hash, or a marker where an image did not resolve),
+  and inline calc-value attributions: each `{{name}}` reference the build
+  rendered as a bare value gains its name (and owning calc block's name) as a
+  hover title and a small label, with a **values** toggle on each calc table
+  to hide them. Every decoration is response-only like the toolbar, and every
+  value on it is a string the build already computed — nothing is evaluated
+  in the browser.
 - **Loading writes nothing.** No key is minted, no link expanded, nothing
   sealed, no `.refdes/schema.json` written — the same guarantee as
   `--no-write`, pinned by `tests/test_no_write.py`. Files you edit outside the

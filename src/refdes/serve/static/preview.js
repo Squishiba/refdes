@@ -25,5 +25,22 @@ export async function poll() {
   }
 }
 
+// W3 show-values toggle (docs/design/thread-workbench.md §8): each calc
+// table on a decorated preview page carries a button that hides or shows
+// the inline value attributions page-wide. The badges' content was decided
+// by the build; this only flips visibility -- no semantics, no fetch.
+export function wireValueToggles(doc = document) {
+  for (const btn of doc.querySelectorAll('.refdes-values-toggle')) {
+    btn.addEventListener('click', () => {
+      const off = doc.documentElement.classList.toggle('refdes-values-off');
+      for (const other of doc.querySelectorAll('.refdes-values-toggle')) {
+        other.setAttribute('aria-pressed', off ? 'false' : 'true');
+      }
+    });
+  }
+}
+
+wireValueToggles();
+
 poll();
 setInterval(poll, 2000);
