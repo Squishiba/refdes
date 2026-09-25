@@ -1003,7 +1003,11 @@ refdes serve --no-open
   sealed, no `.refdes/schema.json` written — the same guarantee as
   `--no-write`, pinned by `tests/test_no_write.py`. Files you edit outside the
   browser are picked up by polling (content hashes, so a touch changes
-  nothing) and the preview is rebuilt.
+  nothing) and the preview is rebuilt. The watched inputs are the config
+  files, item and page sources, `.refdes/` state, imported artifacts, and
+  **every file under a `site.assets:` directory**: adding, replacing, or
+  deleting an image moves the revision and rebuilds the preview just like a
+  text edit does, whether or not any document references that file yet.
 
 The editor is served from `/edit/` as plain JavaScript and CSS packaged with
 refdes; no Node or build step is involved, and none of it is ever part of the

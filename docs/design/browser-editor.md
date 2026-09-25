@@ -622,9 +622,13 @@ append-only entries. A client poll of a lightweight revision endpoint updates
 open clean pages; no WebSocket dependency is needed.
 
 For edits made outside the browser, the server polls mtimes and then confirms
-content hashes for the project inputs. Polling is boring and portable on
-Windows; adding a filesystem-watcher dependency is not justified for one
-local user. A change invalidates the in-memory model and triggers a debounced
+content hashes for the project inputs. Those inputs include every file under a
+`site.assets:` directory (decided 2026-09-25, `docs/design/editor-image-upload.md`
+15.1): adding, replacing, or deleting an image is an
+external change like any other, and the watched set is every file image
+resolution could pick up rather than only the referenced ones. Polling is
+boring and portable on Windows; adding a filesystem-watcher dependency is not
+justified for one local user. A change invalidates the in-memory model and triggers a debounced
 read-only rebuild. Clean forms reload automatically. Dirty forms remain intact
 and show a conflict banner with reload/diff choices; they can no longer save
 against the old revision.

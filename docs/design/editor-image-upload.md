@@ -6,6 +6,12 @@ unanswered. §16 records what was considered and rejected. Nothing here is
 implemented, and §2's claims about current behaviour were each checked against
 the code or a run, with the citation at the claim.
 
+Update: §15.1 is answered — Jared decided on 2026-09-25 that images are build
+inputs, and that slice is implemented: `serve.state.project_inputs` walks
+every `site.assets:` directory into the watched set and the revision.
+Sections 2, 8, 12, 14 and 16 carry notes where the decision superseded them.
+The upload feature itself is still unimplemented.
+
 # Image upload in the browser editor, and what a binary conflict is
 
 ## 1. The deferred item
@@ -64,17 +70,22 @@ candidate build still reports the image missing and `project.assets` stays
 empty. **The bytes must be on disk before any body edit referencing them can
 pass the gate.** That single fact fixes the ordering of every design below.
 
-**Images are not semantic inputs.** `serve.state.project_inputs` returns the
-two config files, item sources, page `.md` files, `.refdes/` state, and imported
-artifacts (`serve/state.py:38-80`). A probe over a project holding
-`items/figures/missing.png` returns exactly `items/dec-a.md` and the two configs
-— the image is not there. Two consequences, both load-bearing:
+**Images are semantic inputs.** *(Updated 2026-09-25: this is what §15.1
+settled, and the slice that changed it is in.)* `serve.state.project_inputs`
+returns the two config files, item sources, page `.md` files, `.refdes/`
+state, imported artifacts, **and every file under a declared `site.assets:`
+directory** (`serve/state.py`, `_asset_files`). The asset-directory walk is
+the whole set rather than the referenced subset, because resolution is a query
+over those directories (§9.1 and §9.2 are the consequences of that for
+uploads). Two consequences, both load-bearing:
 
-- an image change does not move the revision token, so a body save cannot
-  detect that an image it references was swapped under it; and
-- `refresh()` compares signatures over those same paths and returns `False`
-  when they are unchanged (`serve/state.py:213-224`), so **uploading an image
-  does not rebuild the preview.** The author would upload, save, and see nothing.
+- an image change moves the revision token, so a body save can detect that an
+  image it references was swapped under it; and
+- `refresh()` compares signatures over those same paths, so **adding,
+  replacing, or deleting an image rebuilds the preview** with no intervening
+  body save. A file outside every declared asset directory is still not an
+  input, and the per-tick cost stays a `(mtime, size)` stat until something
+  actually differs.
 
 **The write path has the right primitives already.** `apply_edit` is the one
 entry point, and a refusal is a value, not an exception
@@ -343,13 +354,19 @@ existing file** (write nothing, insert the reference to what is already there).
 There is no merge, for exactly the reason the text model refuses one: it would
 produce a thing that looks fine and means something neither author wrote.
 
-**Why images stay out of the revision token.** Adding every image to
-`project_inputs` would mean one image edit invalidates every open form in the
-project, and would put megabytes of binary into a hash computed on every poll
-tick. The cost of keeping them out is that an external swap of an image is
-invisible to a body save — and that is acceptable, because the body's own text
-did change or it did not, and the image's identity is checked where the image is
-written. §15.1 keeps this open.
+**Why images are in the revision token.** *(Superseded: §15.1 decided the
+opposite on 2026-09-25, and `project_inputs` now walks the `site.assets:`
+directories. What follows is the reasoning as drafted, kept because §9 and §10
+still depend on the facts it names.)* Adding every image to `project_inputs`
+means one image edit invalidates every open form in the project, and puts
+megabytes of binary into the content hash. The hash is not computed on every
+poll tick — the tick compares a `(mtime, size)` signature first and only
+re-hashes when that differs (`serve/state.py`) — so the per-tick cost of the
+decision is a stat per watched file. What the decision buys is the two
+consequences of the old gap reversed: an external swap of an image now moves
+the revision, and an upload rebuilds the preview without an intervening body
+save. The body's own text is still what a save is checked against, and the
+image's identity is still checked where the image is written.
 
 ## 9. The two conflicts against other documents
 
@@ -484,12 +501,14 @@ reinterpreted as something executable by the browser.
 
 ## 12. Preview freshness after an upload
 
-Uploading an image does not rebuild the preview, because `refresh()` diffs
-signatures over `project_inputs` and images are not in it (§2). The upload
-endpoint must therefore force a rebuild explicitly — a `force` flag on
-`refresh()`, or a direct call into `serve.preview.PreviewManager.render` (`serve/preview.py:77`). Without it
-the author uploads, sees nothing change, uploads again, and now has a conflict
-with a file they do not believe exists.
+*Updated 2026-09-25:* images are in `project_inputs` now (§15.1), so the
+poller notices an uploaded file on its own and rebuilds. Forcing the rebuild
+from the endpoint is still the right call: the poll is debounced across two
+ticks (`serve/state.py`, `Poller`), and an author who uploads and immediately
+looks at the preview should not be staring at the generation from before the
+upload. Keep the explicit rebuild — a `force` flag on `refresh()`, or a direct
+call into `serve.preview.PreviewManager.render` (`serve/preview.py:77`) — and
+treat the poller as the backstop for files the editor did not write.
 
 The subsequent body save rebuilds anyway through the normal save path, so the
 forced rebuild is only for the window between upload and save — which is exactly
@@ -533,7 +552,7 @@ No git operation is performed by the upload endpoint: no stage, no commit, no
 | `test_upload_that_would_create_ambiguity_refuses` | A leaf already present in another declared `site.assets:` dir → refusal naming both paths, before the write. |
 | `test_upload_that_would_capture_a_bare_reference_refuses` | §9.2: a bare `curve.png` in a sibling document resolving elsewhere → refusal naming that document and its current resolution. |
 | `test_replace_reports_every_referencing_item` | Two items reference the file; the `Conflict` payload names both. |
-| `test_upload_does_not_move_the_revision` | Project revision identical before and after an upload (§8's deliberate gap, pinned so it cannot regress silently). |
+| `test_upload_moves_the_revision` | An upload changes the project revision and rebuilds the preview (§15.1's decision, pinned by `tests/test_serve_state.py` for the hand-written case; the endpoint case lands with Phase 1). |
 | `test_upload_forces_a_preview_rebuild` | The new asset is present in the current generation without an intervening body save. |
 | `test_upload_requires_token_and_origin` | Missing token → 403; cross-origin → 403; `--no-write` → 403. |
 | `test_upload_content_type_allowlist` | `application/octet-stream` accepted; `multipart/form-data`, `text/plain`, and a missing `Content-Type` → 415. |
@@ -546,11 +565,20 @@ until the feature ships.
 
 Each carries a recommendation; unanswered means the recommendation stands.
 
-1. **Do images stay out of the revision token?** — **Recommended: yes.**
-   Including them makes one image edit invalidate every open form and puts
-   megabytes into every poll hash. `expected_hash` at the upload endpoint covers
-   the case that matters. The accepted cost is that an external swap of a
-   referenced image is invisible to a body save.
+1. **Do images stay out of the revision token?** — **DECIDED: no, they do not
+   stay out** (Jared, 2026-09-25). Images are part of the build, so `refdes
+   serve` watches them and folds them into the revision exactly like every
+   other project input. `serve.state.project_inputs` now walks every declared
+   `site.assets:` directory and includes every file under it — not only the
+   files some body currently references, because adding a file can retire an
+   absent or ambiguous resolution error and deleting one can raise it. Adding,
+   replacing, or deleting such a file moves the revision and rebuilds the
+   preview; a file outside every declared directory is still not an input.
+   The cost the recommendation foresaw is accepted: an image edit invalidates
+   open forms, and the poll's cheap `(mtime, size)` signature stage is what
+   keeps the per-tick cost a stat rather than a re-read of the bytes. The
+   upload endpoint's `expected_hash` still covers the replace-conflict case.
+   §8 and §16.7 are superseded by this.
 
 2. **Is the default destination the item's own directory?** — **Recommended:
    yes** (§4). The alternative — a project-wide `assets/` convention — invents a
@@ -626,8 +654,8 @@ Each carries a recommendation; unanswered means the recommendation stands.
    (`model.py:730`) and every reader of it is text-mode; a parallel binary
    overlay is a second mechanism through the loader to save one round trip.
    Revisit if the two-step ordering ever proves genuinely painful in use.
-7. **Add images to `project_inputs` so the revision covers them.** Rejected —
-   §15.1.
+7. **Keep images out of `project_inputs`.** Rejected — §15.1 decided the other
+   way on 2026-09-25; images are watched inputs and are in the revision.
 8. **Auto-delete an orphaned upload when the body save fails.** Rejected — §7.
 9. **Accept SVG because the preview CSP defangs it.** Rejected — §6.
 10. **A generic project file-read endpoint so the editor can show any file.**
