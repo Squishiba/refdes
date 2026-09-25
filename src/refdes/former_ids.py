@@ -27,6 +27,7 @@ from dataclasses import dataclass
 from . import ids as ids_mod
 from . import keys as keys_mod
 from . import lifecycle
+from . import textio
 from .model import Project, SchemaError
 
 # Below this, two titles are not meaningfully alike -- shown only as a
@@ -179,10 +180,12 @@ def confirm(project: Project, candidates: list[Candidate], old_ids: list[str]) -
 
     for rel, entries in by_file.items():
         path = os.path.join(project.root, rel)
-        with open(path, "r", encoding="utf-8") as fh:
-            text = fh.read()
-        newline = "\r\n" if "\r\n" in text else "\n"
-        lines = text.splitlines()
+        # This read was in text mode, which is the whole bug: universal
+        # newlines had already folded every CRLF to LF before the style check
+        # below could run, so a CRLF file left `--confirm` entirely LF and an LF
+        # file was handed to the platform's newline translation on the way out.
+        source = textio.SourceText.of(path)
+        lines = source.lines
 
         # Rewrite bottom-up so earlier line numbers stay valid as we insert --
         # same discipline ids.allocate() uses for the same reason.
@@ -211,8 +214,7 @@ def confirm(project: Project, candidates: list[Candidate], old_ids: list[str]) -
                     continue
                 lines = updated
 
-        with open(path, "w", encoding="utf-8", newline="") as fh:
-            fh.write(newline.join(lines) + newline)
+        textio.write_text(path, source.render(lines))
 
     for c in confirmed:
         project.item_by_id(c.new_id).former_ids.append(c.old_id)

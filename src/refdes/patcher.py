@@ -321,6 +321,14 @@ def _load(text: str) -> _File:
         raise _LocateError("the patcher takes text, not bytes; decode the source first")
     if text.startswith("\ufeff"):
         raise _LocateError("the file carries a UTF-8 BOM, which shifts every byte offset", 1)
+    # The patcher never writes a file: `plan_patch` returns a plan and
+    # `apply_patch` returns new text, and the caller decides whether those
+    # bytes reach disk. Its `eol` is therefore not a write-back concern -- it
+    # only decides what a *newly emitted* line inside an edited span looks
+    # like, and `_check_replacement_eol` proves the span agrees with it. So it
+    # keeps the rule it has always had ("the file mentions CRLF, so new lines
+    # are CRLF"), which tests/test_patcher.py pins for a mixed file. The
+    # files-on-disk line endings are textio's business, not this module's.
     eol = "\r\n" if "\r\n" in text else "\n"
     if _is_markdown(text):
         return _load_markdown(text, eol)

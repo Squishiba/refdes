@@ -56,6 +56,7 @@ import yaml
 from . import boards as boards_mod
 from . import calc as calc_mod
 from . import sources as sources_mod
+from . import textio
 from .model import CitationSpec, CitationStatus, Item, PartUsage, Project
 from .parse import yaml_safe_load
 
@@ -419,11 +420,16 @@ def save_lockfile(project: Project, records: dict[str, dict]) -> None:
         "# `refdes fetch`.\n"
         "# Never hand-edit the sha256.\n"
     )
-    with open(path, "w", encoding="utf-8") as fh:
-        fh.write(header)
-        yaml.safe_dump(
-            {"citations": records}, fh, sort_keys=True, default_flow_style=False
-        )
+    # The lockfile is machine-owned and rewritten whole, so its bytes must not
+    # depend on the platform that last ran `refdes fetch`: a text-mode write
+    # translated every LF to CRLF on Windows, and this file is committed.
+    textio.write_text(
+        path,
+        header
+        + yaml.safe_dump(
+            {"citations": records}, sort_keys=True, default_flow_style=False
+        ),
+    )
 
 
 # -------------------------------------------------------------------- collection

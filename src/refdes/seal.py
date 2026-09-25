@@ -26,6 +26,7 @@ from collections.abc import Mapping
 import yaml
 
 from . import keys as keys_mod
+from . import textio
 from .model import Item, Project
 from .parse import yaml_safe_load
 
@@ -143,8 +144,7 @@ def format_seals(seals: Seals) -> str:
 def save_seals(project: Project, seals: Seals, board: str = "") -> None:
     path = seal_path(project, board)
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w", encoding="utf-8", newline="") as fh:
-        fh.write(format_seals(seals))
+    textio.write_text(path, format_seals(seals))
 
 
 def _matches_sealed_hash(

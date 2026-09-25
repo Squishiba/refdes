@@ -41,6 +41,7 @@ from . import lifecycle, parse
 from . import links as links_mod
 from . import seal as seal_mod
 from . import standards as standards_mod
+from . import textio
 from .model import CHECK_VIOLATION, Item, Project, SchemaError
 from .parse import yaml_safe_load
 from .schema import load_project
@@ -557,10 +558,6 @@ def _rewrite_citation_region(
     return rewrote
 
 
-def _newline_style(text: str) -> str:
-    return "\r\n" if "\r\n" in text else "\n"
-
-
 @dataclass
 class FileRewrite:
     path: str
@@ -574,8 +571,7 @@ def write_rewrites(rewrites: list[FileRewrite]) -> None:
     """Write a computed set using the transaction engine's exact text mode."""
     for rewrite in rewrites:
         os.makedirs(os.path.dirname(rewrite.path), exist_ok=True)
-        with open(rewrite.path, "w", encoding="utf-8", newline="") as fh:
-            fh.write(rewrite.after)
+        textio.write_text(rewrite.path, rewrite.after)
 
 
 def restore_rewrites(rewrites: list[FileRewrite]) -> None:
@@ -585,8 +581,7 @@ def restore_rewrites(rewrites: list[FileRewrite]) -> None:
             if os.path.isfile(rewrite.path):
                 os.remove(rewrite.path)
             continue
-        with open(rewrite.path, "w", encoding="utf-8", newline="") as fh:
-            fh.write(rewrite.before)
+        textio.write_text(rewrite.path, rewrite.before)
 
 
 def _parse_item_count(rel: str, text: str) -> int | None:
@@ -644,8 +639,7 @@ def write_rewrites_verified(project, rewrites: list[FileRewrite]) -> None:
         before_count = _parse_item_count(rewrite.rel, rewrite.before)
         if before_count is None:
             continue
-        with open(rewrite.path, "r", encoding="utf-8", newline="") as fh:
-            after = fh.read()
+        after = textio.read_text(rewrite.path)
         after_count = _parse_item_count(rewrite.rel, after)
         if after_count is not None and after_count >= before_count:
             continue
@@ -726,10 +720,9 @@ def _stale_mapped_names(rel: str, text: str, mapping: Mapping) -> list[str]:
 
 
 def _rewrite_file(project: Project, path: str, rel: str, mapping: Mapping) -> tuple[FileRewrite, list[str]]:
-    with open(path, "r", encoding="utf-8", newline="") as fh:
-        text = fh.read()
-    newline = _newline_style(text)
-    lines = text.splitlines()
+    source = textio.SourceText.of(path)
+    text = source.text
+    lines = source.lines
 
     items = [i for i in project.local_items if i.source_file == rel]
 
@@ -738,10 +731,11 @@ def _rewrite_file(project: Project, path: str, rel: str, mapping: Mapping) -> tu
     lines, link_errors = _rewrite_fields_and_links(lines, rel, items, mapping, project)
     errors = errors + link_errors
 
-    after = newline.join(lines)
-    if lines and text.endswith(("\n", "\r\n")):
-        after += newline
-    return FileRewrite(path=path, rel=rel, before=text, after=after), errors
+    # render() rather than a whole-file `newline.join(lines)`: a rename that
+    # touches three lines must not restyle the other three hundred, and a file
+    # with no trailing newline must not acquire one. The trailing-break fixup
+    # this used to do by hand is what render() does per line.
+    return FileRewrite(path=path, rel=rel, before=text, after=source.render(lines)), errors
 
 
 def _rename_prefix(prefix: str, prefixes: dict[str, str]) -> str | None:
@@ -777,15 +771,13 @@ def _capture_seal_files(project: Project) -> dict[str, str]:
     for board in {""} | set(project.boards):
         path = seal_mod.seal_path(project, board)
         if os.path.isfile(path):
-            with open(path, "r", encoding="utf-8") as fh:
-                out[path] = fh.read()
+            out[path] = textio.read_text(path)
     return out
 
 
 def _restore_seal_files(original: dict[str, str]) -> None:
-    for path, text in original.items():
-        with open(path, "w", encoding="utf-8") as fh:
-            fh.write(text)
+    for path, value in original.items():
+        textio.write_text(path, value)
 
 
 # -------------------------------------------------------------------- result
@@ -902,8 +894,7 @@ def _snapshot_item_texts(project: Project) -> dict[str, str]:
             continue
         path = os.path.join(project.root, *rel.split("/"))
         if os.path.isfile(path):
-            with open(path, "r", encoding="utf-8", newline="") as fh:
-                out[rel] = fh.read()
+            out[rel] = textio.read_text(path)
     return out
 
 
@@ -937,17 +928,14 @@ def _simulate_key_ensure(
                 if errors:
                     return errors, []
                 if rw.after != rw.before:
-                    with open(path, "w", encoding="utf-8", newline="") as fh:
-                        fh.write(rw.after)
+                    textio.write_text(path, rw.after)
             _refresh_display_halves(copy_config)
         report: list[str] = []
-        for rel, text in sorted(snapshot.items()):
+        for rel, value in sorted(snapshot.items()):
             path = os.path.join(copy, *rel.split("/"))
             if not os.path.isfile(path):
                 continue
-            with open(path, "r", encoding="utf-8", newline="") as fh:
-                after = fh.read()
-            report.extend(_line_diff_report(rel, text, after))
+            report.extend(_line_diff_report(rel, value, textio.read_text(path)))
         return blockers, report
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
@@ -1209,16 +1197,14 @@ def apply(
     write_rewrites(rewrites)
 
     original_seals = _capture_seal_files(project_before)
-    with open(config_path, "r", encoding="utf-8") as fh:
-        config_before = fh.read()
+    config_before = textio.read_text(config_path)
 
     def _rollback() -> None:
         restore_rewrites(refresh_rewrites)
         restore_rewrites(rewrites)
         restore_rewrites(ensure_rewrites)
         _restore_seal_files(original_seals)
-        with open(config_path, "w", encoding="utf-8", newline="") as fh:
-            fh.write(config_before)
+        textio.write_text(config_path, config_before)
 
     if mutate_config is not None:
         mutate_config(config_path)
@@ -1257,8 +1243,7 @@ def apply(
     # meant to move rolls the whole revision back.
     stale_after: list[str] = []
     for rw in rewrites:
-        with open(rw.path, "r", encoding="utf-8", newline="") as fh:
-            stale_after += _stale_mapped_names(rw.rel, fh.read(), mapping)
+        stale_after += _stale_mapped_names(rw.rel, textio.read_text(rw.path), mapping)
     if stale_after:
         _rollback()
         return RevisionResult(
@@ -1299,8 +1284,7 @@ def apply(
         path = os.path.join(project_before.root, *rel.split("/"))
         if not os.path.isfile(path):
             continue
-        with open(path, "r", encoding="utf-8", newline="") as fh:
-            now = fh.read()
+        now = textio.read_text(path)
         if now != before and rel not in {r.rel for r in rewrites} | {
             r.rel for r in ensure_rewrites
         }:
@@ -1599,8 +1583,15 @@ def _bump_standard_version(config_path: str, new_version: int) -> None:
     revise.py ever touches, and only this one number, only for a bundled
     standard's own upgrade (never for plain `revise`, which has no
     standard.version to move)."""
-    with open(config_path, "r", encoding="utf-8") as fh:
-        lines = fh.read().splitlines(keepends=True)
+    # SourceText, not splitlines(keepends=True) over a text-mode read: the
+    # text-mode read had already folded every CRLF to LF, and the bare
+    # `open(..., "w")` handed the result to the platform's newline translation
+    # -- so bumping one number in a CRLF config rewrote all of it on Linux, and
+    # bumping one number in an LF config rewrote all of it on Windows. The
+    # `keepends=True` was also what let the two ends disagree about whether a
+    # line ended in "\n"; `.render()` decides per line instead.
+    source = textio.SourceText.of(config_path)
+    lines = source.lines
 
     for i, line in enumerate(lines):
         if _STANDARD_KEY_RE.match(line):
@@ -1613,8 +1604,7 @@ def _bump_standard_version(config_path: str, new_version: int) -> None:
         if count != 1:
             raise SchemaError(f"{config_path}: could not find version: inside the standard: block")
         lines[i] = new_line
-        with open(config_path, "w", encoding="utf-8") as fh:
-            fh.writelines(lines)
+        textio.write_text(config_path, source.render(lines))
         return
 
     base_indent = len(line) - len(line.lstrip(" "))
@@ -1630,8 +1620,7 @@ def _bump_standard_version(config_path: str, new_version: int) -> None:
         new_line, count = _VERSION_KV_RE.subn(rf"\g<1>{new_version}\g<2>", candidate)
         if count:
             lines[j] = new_line
-            with open(config_path, "w", encoding="utf-8") as fh:
-                fh.writelines(lines)
+            textio.write_text(config_path, source.render(lines))
             return
         j += 1
     raise SchemaError(f"{config_path}: could not find version: inside the standard: block")

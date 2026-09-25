@@ -20,6 +20,7 @@ import os
 from typing import Any
 
 from . import diagram
+from . import textio
 from .model import ON_CHANGE_MODES, FieldSpec, ItemType, Project
 
 SCHEMA_REL_PATH = os.path.join(".refdes", "schema.json")
@@ -347,7 +348,9 @@ def write_schema(project: Project, write: bool = True) -> bool:
     if not write:
         return was_stale
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w", encoding="utf-8") as fh:
-        json.dump(build_schema(project), fh, indent=2)
-        fh.write("\n")
+    # newline="": this file is regenerated on every load and is gitignored, but
+    # its bytes should still not depend on the platform that generated them --
+    # a text-mode write made them CRLF on Windows and LF on Linux for identical
+    # schema. Matches lifecycle/seal/boards/ids/citations/history.
+    textio.write_text(path, json.dumps(build_schema(project), indent=2) + "\n")
     return was_stale

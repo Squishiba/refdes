@@ -28,6 +28,7 @@ from . import history as history_mod
 from . import keys as keys_mod
 from . import parse as parse_mod
 from . import seal as seal_mod
+from . import textio
 from .model import Item, Project
 
 if TYPE_CHECKING:
@@ -402,12 +403,11 @@ def plan_expansion(
     for rel in files_touched:
         path = os.path.join(project.root, rel)
         if source_texts is not None and rel in source_texts:
-            text = source_texts[rel]
+            source = textio.SourceText(source_texts[rel])
         else:
-            with open(path, "r", encoding="utf-8", newline="") as fh:
-                text = fh.read()
-        newline = "\r\n" if "\r\n" in text else "\n"
-        lines = text.splitlines()
+            source = textio.SourceText.of(path)
+        text = source.text
+        lines = source.lines
 
         # Every item in this file, not just the ones being rewritten:
         # _item_spans needs the full set to bound each span correctly.
@@ -442,7 +442,7 @@ def plan_expansion(
                 own_targets = replacements_by_item[id(item)]
                 applied_by_item[id(item)] |= applied & own_targets.keys()
 
-        after = newline.join(lines) + newline
+        after = source.render(lines)
         if after != text:
             plan.files.append(FileRewrite(path=path, rel=rel, before=text, after=after))
 
@@ -575,12 +575,11 @@ def _freeze_rewrite_plan(
     for rel in sorted({item.source_file for item, *_ in candidates}):
         path = os.path.join(project.root, rel)
         if source_texts is not None and rel in source_texts:
-            text = source_texts[rel]
+            source = textio.SourceText(source_texts[rel])
         else:
-            with open(path, "r", encoding="utf-8", newline="") as fh:
-                text = fh.read()
-        newline = "\r\n" if "\r\n" in text else "\n"
-        lines = text.splitlines()
+            source = textio.SourceText.of(path)
+        text = source.text
+        lines = source.lines
         file_items = [item for item in project.local_items if item.source_file == rel]
         for item, start, end in _item_spans(rel, lines, file_items):
             replacements = replacements_by_item.get(id(item))
@@ -589,7 +588,7 @@ def _freeze_rewrite_plan(
                     lines, start, end, "follows", replacements
                 )
                 _dedupe_follows_field(lines, start, end)
-        after = newline.join(lines) + newline
+        after = source.render(lines)
         if after != text:
             plan.files.append(FileRewrite(path=path, rel=rel, before=text, after=after))
 
@@ -843,12 +842,11 @@ def plan_check_expansion(
     for rel in files_touched:
         path = os.path.join(project.root, rel)
         if source_texts is not None and rel in source_texts:
-            text = source_texts[rel]
+            source = textio.SourceText(source_texts[rel])
         else:
-            with open(path, "r", encoding="utf-8", newline="") as fh:
-                text = fh.read()
-        newline = "\r\n" if "\r\n" in text else "\n"
-        lines = text.splitlines()
+            source = textio.SourceText.of(path)
+        text = source.text
+        lines = source.lines
 
         file_items = [i for i in project.local_items if i.source_file == rel]
         for item, start, end in _item_spans(rel, lines, file_items):
@@ -879,7 +877,7 @@ def plan_check_expansion(
                 own_targets = replacements_by_item[id(item)]
                 applied_by_item[id(item)] |= applied & own_targets.keys()
 
-        after = newline.join(lines) + newline
+        after = source.render(lines)
         if after != text:
             plan.files.append(FileRewrite(path=path, rel=rel, before=text, after=after))
 
@@ -1044,12 +1042,11 @@ def plan_calc_ref_expansion(
     for rel in files_touched:
         path = os.path.join(project.root, rel)
         if source_texts is not None and rel in source_texts:
-            text = source_texts[rel]
+            source = textio.SourceText(source_texts[rel])
         else:
-            with open(path, "r", encoding="utf-8", newline="") as fh:
-                text = fh.read()
-        newline = "\r\n" if "\r\n" in text else "\n"
-        lines = text.splitlines()
+            source = textio.SourceText.of(path)
+        text = source.text
+        lines = source.lines
 
         # Spans are item-to-item, not `_item_spans`: that helper bounds a
         # markdown item at its first fence (link fields live in front matter),
@@ -1073,7 +1070,7 @@ def plan_calc_ref_expansion(
                     lines, start, end, repl
                 )
 
-        after = newline.join(lines) + newline
+        after = source.render(lines)
         if after != text:
             plan.files.append(FileRewrite(path=path, rel=rel, before=text, after=after))
 
