@@ -150,3 +150,51 @@ from throwaway projects under `.scratch/proj` … `.scratch/projD`
 
 `python -m pytest -q -x` and `python -m ruff check --select E9,F src tests` run
 at the end; results in the report to the orchestrator.
+
+## Conflict resolution (PR #40)
+
+`main` advanced under PRs #39 (chunk 3b: stub-tests/former-ids/history) and
+#41 (getting-started, authoring, concepts, ids, checks, coverage), so
+`git merge origin/main` reported one content conflict, in
+`docs/cli-reference.md`.
+
+It was a single-line conflict: both sides had independently edited the global
+`--no-write` table row.
+
+- **My side** (chunk 3a) added `calc-rewrite` to the "commands with
+  `--dry-run` that report and write nothing" list.
+- **main's side** (chunk 3b) added `history capture`, `history redact` and
+  `history migrate-seals` to the "refuse to run under `--no-write`" list.
+
+These are different lists in the same row, so the resolution keeps both: the
+dry-run list reads `id`, `revise`, `calc-rewrite`, `stub-tests`, and the
+refusal list reads `fetch`, `init`, `standard upgrade`, `standard add-preset`,
+`standard remove-preset`, `former-ids propose --confirm`, `history capture`,
+`history redact`, `history migrate-seals`. Every write command is now covered
+in exactly one of the two lists.
+
+I had deliberately backed the `history` addition out of my own version,
+because verifying it was chunk 3b's scope and not mine; main has now verified
+and landed it, so it stays.
+
+Other shared tables auto-merged, and both sides' edits survived — checked
+explicitly rather than trusting the auto-merge:
+
+- "Files the tool writes": my `.refdes/keys-adopted.yaml` row and my
+  `refdes calc-rewrite` addition to the baselines row are both present
+  alongside main's `.refdes/history/` row.
+- No conflict markers remain anywhere in the file.
+
+Re-verified after the merge, rather than carried over from the earlier run,
+because the merged row now asserts more than either side did alone:
+`refdes --no-write calc-rewrite` on a project with an old-spelling line still
+prints `would rewrite 1 calc line(s) in 1 file(s):` and leaves the file
+byte-identical, exit 0. Worth noting that the installed CLI's own `--no-write`
+help string still does *not* list `calc-rewrite` among the reporting commands —
+the docs are more accurate than the built-in help here, which is consistent
+with the source-bug list above.
+
+Gate re-run after the merge: `python -m pytest -q -x` → 2154 passed;
+`python -m ruff check --select E9,F src tests` → all checks passed. GitHub
+reports the PR `MERGEABLE` / `mergeStateStatus: CLEAN`. Not merged.
+
