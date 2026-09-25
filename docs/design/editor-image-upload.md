@@ -10,6 +10,11 @@ Update: §15.1 is answered — Jared decided on 2026-09-25 that images are build
 inputs, and that slice is implemented: `serve.state.project_inputs` walks
 every `site.assets:` directory into the watched set and the revision.
 Sections 2, 8, 12, 14 and 16 carry notes where the decision superseded them.
+
+Update: §15.6 is answered too — Jared decided on 2026-09-25 to take the
+`HASH_FORMAT` bump, and it is in: format 5 folds each referenced image's
+content digest into its owner's content hash, so a swapped image breaks a
+seal loudly (§2, §10, §15.6; plan in `in-prog-logs/hash-images.md`).
 The upload feature itself is still unimplemented.
 
 # Image upload in the browser editor, and what a binary conflict is

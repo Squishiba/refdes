@@ -149,8 +149,10 @@ Walk-through of every consumer (all verified against the code):
   `seal._matches_sealed_hash`, which matches old seals under their recorded
   format (see above), so migration proceeds for untouched-text items exactly
   as before.
-- **Editor (`serve/`):** the revision token and `project_inputs` exclude
-  images (`serve/state.py:38-80`) and the save gate is a *delta of error sets*
+- **Editor (`serve/`):** *(update — §15.1 was decided the other way by PR
+  #34 while this bump was in flight: `project_inputs` now includes the
+  `site.assets:` trees, so an image swap moves the revision token and
+  rebuilds the preview.)* The save gate remains a *delta of error sets*
   (`serve/edit.py:29-31`), not a content-hash comparison — an image byte
   change produces no new errors, so editor saves are unaffected. The
   editor-side sealed-image refusals of `editor-image-upload.md` §10 remain
