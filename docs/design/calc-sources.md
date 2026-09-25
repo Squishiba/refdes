@@ -178,6 +178,18 @@ the picker lists, how a named key is chosen from it, and where the resulting
 `source("path", "key")` text is emitted are the editor design's to settle.
 Cross-referenced from `docs/design/browser-editor.md`.
 
+**Note (2026-09-25).** The editor half of this requirement is proposed in
+[editor-source-picker.md](editor-source-picker.md): what the picker lists (the
+item's own cited files a registered reader can read), how a key is chosen (a
+confirm step showing the raw cell text, the canonical decimal, the row's line
+and context columns, and the pinned value beside it, with a unit field that has
+no default), and where the text is emitted (composed server-side, inserted into
+the body draft). It also surfaces a constraint §1 and §5 had not stated: an item
+body naming an unpinned key is a build error, so the editor's diagnostic gate
+refuses such a save — which means Accept must write the body and the lockfile
+together, and cannot be a text insert plus a later `refdes fetch`.
+Status: proposed, nothing implemented.
+
 **Note (2026-09-21).** The requirement above already covers CSV/xlsx: a picker
 in the editor lists the keys/values of a pinned source file, the author picks
 one, and the editor writes the `source("path", "key")` text — unchanged.
