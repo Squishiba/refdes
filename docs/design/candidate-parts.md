@@ -1,7 +1,9 @@
-Status: proposed (drafted 2026-09-21) — a design spec, not a decision. Every
-open question in §10 carries a recommendation, and each recommendation is the
-default if Jared lets it stand unanswered. §11 records what was already
-considered and rejected, including one rejection Jared made directly.
+Status: **shipped (2026-09-25)** — all five phases in §12 have landed:
+`{{compare}}` renders in `blocks.py` (§3), `check_severity` accepts a status
+mapping (§4), `hardware@3`'s `component.status` includes `rejected` (§5), and
+`refdes new --list` plus the dead-`defaults:` warning ship in the CLI (§6).
+§10's questions were implemented as recommended; §11 records what was
+considered and rejected, including the rejection Jared made directly.
 
 # Candidate parts: comparing, disqualifying, and selecting
 

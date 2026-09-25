@@ -1,7 +1,9 @@
 Status: **Architecture decided (2026-09-24)** — all ten §11 questions
 answered; §11.5's `id=` key change is the one place the doc's own
 recommendation was NOT taken as written (`name=` → `id=`), everything else
-confirmed as recommended. Implementation not started. §12 records what was
+confirmed as recommended. **All five phases (§13) have landed**: named fences
+and per-item uniqueness (1), `[[ID#calc:name]]` fragments (2), `{{calcblock}}`
+(3), the hash pins (4), and the docs (5). §12 records what was
 considered and rejected. This spec deliberately *removes* one thing people
 expect from a "named block" feature (§4): the research in §2 says the value-reference half is
 already solved, and adding a second spelling for it would be the second

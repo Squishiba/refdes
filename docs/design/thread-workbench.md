@@ -1,6 +1,7 @@
 Status: **Architecture decided (2026-09-23)** — Jared answered all five
 questions in §7; each is recorded below as decided, not an option under
-continued review. Implementation (W1–W4, §8) has not started.
+continued review. Implementation is underway: W1 ("pin") and W2
+("squiggles") have landed (§8); W3 ("values") is in progress.
 
 # Thread workbench: a live authoring pane for working notes
 

@@ -269,9 +269,9 @@ Filtering, link picking, and ID allocation all need project-wide data the API
 does not have, which means either shipping the whole tree to the browser or
 running a server: the argument for the local server returns.
 
-It is also worth being blunt about the CI half. This repository has **no test CI
-today**: `.github/workflows/` contains only `docs.yml`, and that workflow fails
-at its `configure-pages` step because GitHub Pages is disabled on the repository.
+It is also worth being blunt about the CI half. This repository has test CI
+today: `.github/workflows/tests.yml` runs pytest and the E9,F ruff gate on
+ubuntu and windows.
 “CI validates the save” is currently a promise with nothing behind it, and it
 would have to be built before this shape could be trusted — work that is worth
 doing regardless of which editor wins.
