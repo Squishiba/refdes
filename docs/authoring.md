@@ -14,7 +14,7 @@ defaults:
   prefix: REQ-PWR
   owner: J. Bin
   tags: [power]
-  status: accepted
+  status: active
 
 items:
   - id: REQ-PWR-001
@@ -261,7 +261,7 @@ types:
 ```
 
 The [standard library](standard-library.md) already declares this for `requirement`
-and the other five starter types — this is what a custom type, or an override of
+and the other six starter types — this is what a custom type, or an override of
 a standard one, looks like.
 
 An unknown field is a **warning**, not an error, and the value is kept. The warning
@@ -280,9 +280,9 @@ enforced; the rest are documentation for readers and for future validation.
 ### Titles
 
 An item's display title is its `title` field, its `text` field (a hand-rolled
-project schema is still free to use that name), its `body` (truncated to a
-sentence-length preview), its `summary`, its `name`, or its ID — the first of
-those it actually has, in that order. This is why a `requirement`/`bound`
+project schema is still free to use that name), its `summary`, its `name`, its
+`body` (truncated to a sentence-length preview), or its ID — the first of those
+it actually has, in that order. This is why a `requirement`/`bound`
 needs no `title:` at all in the common case: the sentence lives in `body:`,
 and the title falls back to *that*, truncated if it runs long — a decision or
 test, whose real content lives elsewhere (`options:`, a linked `checks:`),
@@ -330,12 +330,13 @@ These are never treated as fields:
 | `history` | Item-level [`on_change` overrides](change-tracking.md) |
 | `prefix` | [ID allocator](ids.md) prefix, item overrides file `defaults:` |
 | `board` | [Board](multi-board.md) override, item overrides file `defaults:` |
+| `workspace` | [Workspace](workspaces.md) override, item overrides file `defaults:` |
+| `key` | Surrogate identity ([design](design/keys.md)), minted on first `id` allocation |
+| `former_ids` | IDs this item replaced after a renumbering |
 
 `prefix` and `board` are reserved only where the item's own type does not already
 declare a field of that name — a schema written before either key existed keeps
-working unchanged. (The starter schema's `log` type still has its own hand-typed
-`board` field for this reason; it predates the reserved key and should eventually
-move to it.)
+working unchanged.
 
 ## Folder layout
 
