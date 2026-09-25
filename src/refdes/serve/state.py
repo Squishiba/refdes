@@ -35,10 +35,37 @@ _STATE_SUFFIXES = (".yaml", ".yml", ".json")
 _DISPOSABLE_STATE = {"schema.json"}
 
 
+def _asset_files(project: Project) -> set[str]:
+    """Every file under a declared `site.assets:` directory, walked.
+
+    Images are build inputs (Jared's 2026-09-25 decision, docs/design/
+    editor-image-upload.md 15.1), and image resolution is a *query*:
+    `_search_image_src` matches a bare `src` against any file in any declared
+    directory, and `collect_static_assets` registers every file there without a
+    reference. So the watched set is every file resolution could pick up, not
+    the subset some body currently names -- adding an image can retire an
+    absent/ambiguous error, and deleting one can create it.
+
+    The walk mirrors those two functions exactly (same directories, same
+    no-reference-needed breadth, missing directory skipped) so the watcher can
+    never watch a file the build cannot resolve, or miss one it can.
+    """
+    found: set[str] = set()
+    for rel_dir in project.asset_dirs:
+        full_dir = os.path.join(project.root, rel_dir)
+        if not os.path.isdir(full_dir):
+            continue
+        for dirpath, _dirnames, filenames in os.walk(full_dir):
+            for name in filenames:
+                found.add(os.path.join(dirpath, name))
+    return found
+
+
 def project_inputs(project: Project) -> list[str]:
     """Absolute paths of every file whose content is a semantic project input:
-    the two config files, item sources, page sources, `.refdes/` state, and
-    imported artifacts. Sorted; may name files that no longer exist."""
+    the two config files, item sources, page sources, `.refdes/` state,
+    imported artifacts, and every file under a `site.assets:` directory.
+    Sorted; may name files that no longer exist."""
     root = project.root
     found: set[str] = set()
     for name in CONFIG_NAMES:
@@ -63,6 +90,7 @@ def project_inputs(project: Project) -> list[str]:
                 found.add(path)
     for spec in project.imports:
         found.add(os.path.join(root, spec.items_path))
+    found.update(_asset_files(project))
     return sorted(found)
 
 

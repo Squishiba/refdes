@@ -9,7 +9,8 @@ import subprocess
 import time
 
 import pytest
-from serve_support import Client, make_project
+from conftest import write_project_config
+from serve_support import SERVE_SCHEMA, Client, make_project
 
 from refdes.serve.server import EditorApp
 from refdes.serve.state import Poller, ProjectState, git_status, project_inputs
@@ -40,6 +41,126 @@ def test_inputs_cover_config_items_and_state_but_not_disposables(state):
     assert {"refdes-project.yaml", "refdes-schema.yaml", "items/reqs.yaml", "items/notes.md"} <= rels
     assert ".refdes/ids.yaml" in rels
     assert ".refdes/schema.json" not in rels
+
+
+# ------------------------------------------------------------- image inputs
+#
+# Images are project inputs (docs/design/editor-image-upload.md 15.1, decided
+# by Jared 2026-09-25): every file under a declared `site.assets:` directory is
+# watched, because image resolution is a query over those directories, not a
+# fixed reference -- adding a file can retire an absent/ambiguous error and
+# deleting one can raise it.
+
+ASSET_SCHEMA = SERVE_SCHEMA.replace(
+    'site:\n  title: "Serve test"\n',
+    'site:\n  title: "Serve test"\n  assets: [figures, photos/shared]\n',
+)
+
+
+def _assets_project(tmp_path):
+    """The serve fixture re-declared with two `site.assets:` directories."""
+    config = make_project(tmp_path)
+    write_project_config(tmp_path, ASSET_SCHEMA)
+    return config
+
+
+def _rels(st, root):
+    return {
+        os.path.relpath(p, str(root)).replace("\\", "/")
+        for p in project_inputs(st.snapshot.project)
+    }
+
+
+def test_every_file_under_a_declared_asset_dir_is_an_input(tmp_path):
+    st = ProjectState(_assets_project(tmp_path))
+    st.load()
+    (tmp_path / "figures" / "sub").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "figures" / "curve.png").write_bytes(b"\x89PNG one")
+    (tmp_path / "figures" / "sub" / "deep.png").write_bytes(b"\x89PNG two")
+    assert {"figures/curve.png", "figures/sub/deep.png"} <= _rels(st, tmp_path)
+    # A declared directory that does not exist is not an error and adds nothing.
+    assert not any(r.startswith("photos/") for r in _rels(st, tmp_path))
+
+
+def test_adding_replacing_or_deleting_an_image_moves_the_revision(tmp_path):
+    from refdes.serve.preview import PreviewManager
+
+    preview = PreviewManager()
+    try:
+        st = ProjectState(_assets_project(tmp_path), preview)
+        st.load()
+        base_rev, base_gen = st.snapshot.revision, preview.current
+        (tmp_path / "figures").mkdir(exist_ok=True)
+        image = tmp_path / "figures" / "curve.png"
+
+        image.write_bytes(b"\x89PNG first")
+        assert st.refresh() is True
+        first_rev, first_gen = st.snapshot.revision, preview.current
+        assert first_rev != base_rev and first_gen != base_gen
+
+        # Replacing the bytes of the same path, same name, same size class.
+        image.write_bytes(b"\x89PNG second")
+        assert st.refresh() is True
+        assert st.snapshot.revision not in {base_rev, first_rev}
+
+        # An unreferenced image counts too: nothing in any body names it.
+        (tmp_path / "figures" / "unused.png").write_bytes(b"\x89PNG spare")
+        assert st.refresh() is True
+        unused_rev = st.snapshot.revision
+
+        # Deleting one file returns the fingerprint to the state that had the
+        # other one only: the revision is content, not an append log.
+        image.unlink()
+        assert st.refresh() is True
+        assert st.snapshot.revision != unused_rev
+    finally:
+        preview.close()
+
+
+def test_a_second_copy_of_a_bare_name_in_another_asset_dir_is_a_change(tmp_path):
+    """The ambiguity case: no existing file is touched, and the build changes."""
+    st = ProjectState(_assets_project(tmp_path))
+    st.load()
+    rev = st.snapshot.revision
+    (tmp_path / "figures").mkdir(exist_ok=True)
+    (tmp_path / "figures" / "curve.png").write_bytes(b"\x89PNG one")
+    assert st.refresh() is True
+    ambiguous_rev = st.snapshot.revision
+    (tmp_path / "photos" / "shared").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "photos" / "shared" / "curve.png").write_bytes(b"\x89PNG two")
+    assert st.refresh() is True
+    assert st.snapshot.revision not in {rev, ambiguous_rev}
+
+
+def test_files_outside_the_declared_asset_dirs_are_not_inputs(tmp_path):
+    st = ProjectState(_assets_project(tmp_path))
+    st.load()
+    rev = st.snapshot.revision
+    stray = tmp_path / "notes" / "curve.png"
+    stray.parent.mkdir(exist_ok=True)
+    stray.write_bytes(b"\x89PNG not an input")
+    (tmp_path / "figures.txt").write_text("not in the asset directory\n", encoding="utf-8")
+    assert st.pending_signature() is None
+    assert st.refresh() is False
+    assert st.snapshot.revision == rev
+
+
+def test_the_poller_rebuilds_on_an_image_change(tmp_path):
+    st = ProjectState(_assets_project(tmp_path))
+    st.load()
+    poller = Poller(st, interval=0.05)
+    poller.start()
+    try:
+        rev = st.snapshot.revision
+        image = tmp_path / "figures" / "curve.png"
+        image.parent.mkdir(exist_ok=True)
+        image.write_bytes(b"\x89PNG polled")
+        deadline = time.time() + 15
+        while st.snapshot.revision == rev and time.time() < deadline:
+            time.sleep(0.05)
+        assert st.snapshot.revision != rev
+    finally:
+        poller.stop()
 
 
 def test_a_touch_is_not_a_change(state):
