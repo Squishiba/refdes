@@ -168,7 +168,7 @@ warnings.
 
 Diagnostics also have an `info` level, for the routine state of an
 incomplete project — hidden by default, shown with `-v`/`--verbose` on
-`check` or `build`. The [`blocked_by:` stale check](links.md#blocked-by-and-the-cascade-report)
+`check` or `build`. The [`blocked_by:` stale check](links.md#blocked_by-and-the-cascade-report)
 is the one thing in this area that's `info`; nothing else coverage produces
 is, but `-v` is worth knowing about even if you came here for coverage.
 
@@ -197,7 +197,7 @@ claim traces to **exactly one** root. An item whose claimer has no
 roots, keeps its ordinary per-item warning instead — a misleading one-line
 summary would be worse than not summarizing it. `coverage.html` shows the
 same chain inline next to every claimed item's row. See
-[`blocked_by:`](links.md#blocked-by-and-the-cascade-report) for the edge
+[`blocked_by:`](links.md#blocked_by-and-the-cascade-report) for the edge
 itself and the rest of its surfaces (`refdes audit`, the item page).
 
 ## Which statuses count as satisfying

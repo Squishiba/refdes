@@ -10,7 +10,7 @@ is the `bound` type:
 
 ```yaml
 - id: BND-THM-001
-  text: Board power density
+  body: Board power density
   limit: "<= 0.15 W/in^2"
   rationale: Natural convection only — the enclosure is sealed.
 ```
@@ -62,18 +62,18 @@ engineering arguments wearing one sentence, and give each its own item:
 
 ```yaml
 - id: BND-SNS-010
-  text: Sensor accuracy
-  limit: "<= 0.01"   # 1 % of full scale, as a dimensionless fraction -- % is not a unit
+  body: Sensor accuracy
+  limit: "<= 1 %"    # 1 % of full scale -- % is a unit the tool understands
   rationale: Control loop tolerance budget assumes 1 % worst case.
 
 - id: BND-SNS-011
-  text: Operating temperature
+  body: Operating temperature
   limit: "0 degC .. 60 degC"
   rationale: Enclosure is rated for this range; the sensor must not be the
     limiting part.
 
 - id: BND-SNS-012
-  text: Input clamp voltage
+  body: Input clamp voltage
   limit: "<= 12 V"
   rationale: TVS clamp voltage margin against the input's absolute max rating.
 ```

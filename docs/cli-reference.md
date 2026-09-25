@@ -7,7 +7,7 @@ refdes [-c CONFIG] [--no-write] {serve,build,check,revision,release,index,ls,id,
 | Global option | Effect |
 |---|---|
 | `-c`, `--config PATH` | Use this `refdes-project.yaml`. Default: search upward from the current directory. |
-| `--no-write` | Never modify anything under `items/` or `.refdes/`. Suppresses: key minting, link/check expansion to composite form, `.refdes/schema.json` regeneration, seal recording, board/workspace membership manifest, baseline stamping, and the ID ledger. Explicit write commands behave differently: commands with `--dry-run` (`id`, `revise`, `calc-rewrite`, `stub-tests`) report what would change and write nothing; `revision`/`release` report "would stamp" and write nothing; `keys adopt` reports the full plan and writes nothing; commands that fundamentally write (`fetch`, `init`, `standard upgrade`, `standard add-preset`, `standard remove-preset`, `former-ids propose --confirm`) **refuse to run** under `--no-write` and exit 2. `refdes build --no-write` still writes the site — that is the command's own output, not a side effect. |
+| `--no-write` | Never modify anything under `items/` or `.refdes/`. Suppresses: key minting, link/check expansion to composite form, `.refdes/schema.json` regeneration, seal recording, board/workspace membership manifest, baseline stamping, and the ID ledger. Explicit write commands behave differently: commands with `--dry-run` (`id`, `revise`, `calc-rewrite`, `stub-tests`) report what would change and write nothing; `revision`/`release` report "would stamp" and write nothing; `keys adopt` reports the full plan and writes nothing; commands that fundamentally write (`fetch`, `init`, `standard upgrade`, `standard add-preset`, `standard remove-preset`, `former-ids propose --confirm`, `history capture`, `history redact`, `history migrate-seals`) **refuse to run** under `--no-write` and exit 2. `refdes build --no-write` still writes the site — that is the command's own output, not a side effect. |
 
 Exit codes: `0` success, `1` errors found, `2` configuration error (including `--no-write` refusal).
 
@@ -872,10 +872,13 @@ allocate the new items' ids.
 
 ```
 $ refdes stub-tests
-wrote 3 stub(s) to items/power/stub-tests.md: REQ-PWR-004, REQ-PWR-005, BND-THM-002
+wrote 3 stub(s) to items/power/stub-tests.md: BND-PWR-002, REQ-PWR-004, REQ-PWR-005
 wrote 3 stub test(s) across 1 file(s)
 Run 'refdes id' to allocate ids for the new items.
 ```
+
+Ids are listed sorted, and each file only ever holds stubs for items in its
+own (workspace, board) scope.
 
 The generated items carry the verifier type's own default prefix (`TST`),
 not one derived from the board they land in — so in a project whose boards
@@ -911,9 +914,13 @@ refdes former-ids propose --confirm CAN_00,CAN_01
 ```
 
 Compares the most recent [baseline](lifecycle.md) snapshot to the live
-project: an id that was there at baseline time but is gone now, matched by
-title similarity against a same-type id that's new since, is a candidate,
-shown with its confidence:
+project: an id that was there at baseline time but is gone now, matched
+against a same-type id that's new since, is a candidate, shown with how the
+match was made.
+
+Against a **legacy baseline with no surrogate keys** — the pre-keys shape
+this command was written for — the pairing comes from title similarity and
+is scored:
 
 ```
 $ refdes former-ids propose
@@ -921,7 +928,29 @@ $ refdes former-ids propose
   CAN_00 (requirement 'The bus shall recover...') -> REQ-CAN-001 ('The bus shall recover...')  confidence 94%
 
 Nothing written. Re-run with --confirm OLD_ID[,OLD_ID...] to record the ones you accept as former_ids:.
+```
 
+Against a **baseline stamped today**, which carries surrogate keys, a display
+rename needs no inference at all: the key proves the two ids are the same
+item, so those candidates come back exact and the line says so instead of
+printing a score. This is the form you will normally see, since keys are
+minted automatically:
+
+```
+$ refdes former-ids propose
+2 candidate former-id mapping(s):
+  CAN_00 (requirement '') -> REQ-CAN-001 ('The bus shall recover...')  exact match (surrogate key)
+  TST-CAN-00 (test '') -> TST-CAN-004 ('Verify CAN_00')  exact match (surrogate key)
+```
+
+The old title prints empty on this path: the pairing is read out of the
+baseline's key identity rather than by id, and the old title does not come
+back with it (see `propose` in `src/refdes/former_ids.py`).
+
+`--confirm` names the candidates to accept, and each one is written in the
+order you listed them:
+
+```
 $ refdes former-ids propose --confirm CAN_00
 wrote former_ids: [CAN_00] to REQ-CAN-001 (items/can/requirements.yaml)
 ```
@@ -934,11 +963,32 @@ inference only ever drafts a suggestion here — the `former_ids:` entry
 `--confirm` writes is what build actually reads afterward, never a fuzzy
 match recomputed on the fly. An id passed to `--confirm` that isn't among
 the currently proposed candidates is refused, not guessed at — re-run
-`propose` without `--confirm` first if the project has changed since.
+`propose` without `--confirm` first if the project has changed since. The
+candidate list is printed either way, then the refusal:
+
+```
+$ refdes former-ids propose --confirm NOPE-999
+1 candidate former-id mapping(s):
+  CAN_00 (requirement '') -> REQ-CAN-001 ('The bus shall recover...')  exact match (surrogate key)
+error: not a currently proposed candidate: NOPE-999 -- run 'refdes former-ids propose' again to see current candidates
+```
+
+Picking the baseline is the other way this fails, and both cases exit 1
+without proposing anything:
+
+- no baseline at all — `error: no baseline stamped yet -- nothing to compare
+  against. Run 'refdes revision <name>' first.`
+- `--baseline NAME` that names nothing — `error: no baseline named 'NAME'`
 
 An items file that fails to parse is printed to stderr, and on the path where
 nothing matched it says so and exits 1: those files were never searched, so
 "no candidate former-id mappings found" would be a claim about them too.
+
+```
+$ refdes former-ids propose
+ERROR   items/power/broken.md:1 — no YAML front-matter (file must start with '---')
+no candidate former-id mappings found -- 1 load error(s); files that failed to load were not searched
+```
 
 ---
 
@@ -1058,6 +1108,14 @@ byte-identical), an explicit capture carries `occurred_at` — it is the
 author moment §2 names as allowed to stamp a clock, and it cannot replay
 without running this exact command.
 
+An ITEM that is neither a display id nor a surrogate key in this project is
+refused with exit 2 and nothing written:
+
+```
+$ refdes history capture NOPE-999
+error: no item 'NOPE-999' in this project (looked up by display id, then surrogate key)
+```
+
 ### `refdes history redact <item-or-object> --confirm`
 
 Remove matching history objects and events from `.refdes/history/` and
@@ -1080,8 +1138,20 @@ cannot un-publish a leak, only clear the working store. Redaction events
 themselves are never redaction targets — removing the audit trail of a
 prior redaction would make the second leak indistinguishable from no
 leak. An object shared by two identical items is deleted only when the
-last event referencing it goes. The removal is transactional: any failure
+last event referencing it goes: redacting one of two byte-identical
+requirements reports `redacted 0 object(s) and 1 event(s)` and leaves the
+shared snapshot in place. The removal is transactional: any failure
 restores every file it had deleted.
+
+Two outcomes that are not failures:
+
+- A TARGET that names no item and is not a 64-hex digest is refused with
+  exit 2: `error: no item or history object 'NOPE-999' in this project (an
+  item is addressed by display id or surrogate key; an object by its full
+  64-hex digest)`.
+- A TARGET that resolves but has nothing captured yet exits 0 and says so
+  — and does *not* print the Git warning, since nothing was redacted:
+  `no history objects or events matched LOG-A-011; nothing was redacted`.
 
 ### `refdes history migrate-seals [--capture-current]`
 
@@ -1090,14 +1160,22 @@ write one `legacy-seal` marker event per seal record: **recorded hash
 only; original content was not captured.** The seal files themselves are
 read, never modified, and stay on disk until a later phase retires them
 (the migration must have run before legacy seal support ever goes away).
-Idempotent via the derived event ids.
+Idempotent via the derived event ids, so a second run reports each record
+rather than rewriting it:
 
 ```bash
 refdes history migrate-seals
 # legacy-seal marker for LOG-A-001 (.refdes/log-seal-board-a.yaml)
 #   recorded hash only; original content was not captured; the seal file is left untouched
 # 1 legacy-seal marker(s) written, 0 already present
+
+$ refdes history migrate-seals
+# LOG-A-001: already migrated (.refdes/log-seal-board-a.yaml)
+# 0 legacy-seal marker(s) written, 1 already present
 ```
+
+A project with no seal files at all yet is not an error — it prints
+`no legacy seal files found; nothing to migrate` and exits 0.
 
 A marker carries no snapshot object — its reason names the seal file and
 the recorded hash, and nothing about it may imply the original text is
@@ -1105,8 +1183,17 @@ recoverable. `--capture-current` additionally captures the *current*
 snapshot of each sealed item whose live content still matches its
 recorded hash, as a clearly dated `migrated-current` event — never
 labelled seal-time text, which is the specific misrepresentation the
-design forbids. An item whose live content has drifted reports `differs`
-and is not captured.
+design forbids. Each record then reports one of three outcomes on its own
+line:
+
+```
+#   captured current content of LOG-A-001 as a migrated-current event -- clearly dated, not seal-time text
+#   LOG-A-001: live content differs from the recorded hash; no migrated-current snapshot was taken
+#   LOG-A-001: no live item for this seal record; no migrated-current snapshot was taken
+```
+
+`--capture-current` is safe to re-run: the marker ids are derived, so
+repeating it never duplicates a capture.
 
 ---
 
