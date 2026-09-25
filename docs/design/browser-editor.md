@@ -272,9 +272,11 @@ running a server: the argument for the local server returns.
 It is also worth being blunt about the CI half. This repository has test CI
 today: `.github/workflows/tests.yml` runs pytest and the E9,F ruff gate on
 ubuntu and windows.
-“CI validates the save” is currently a promise with nothing behind it, and it
-would have to be built before this shape could be trusted — work that is worth
-doing regardless of which editor wins.
+“CI validates the save” now has real runs behind it: `.github/workflows/tests.yml`
+runs pytest and the E9,F ruff gate on every pull request. What this shape still
+depends on is a `refdes check` verdict against the pushed branch, which the
+current workflow does not run — that job would have to be added before the shape
+could be trusted, and it is worth doing regardless of which editor wins.
 
 **Verdict (decided):** reject for the v1 primary editor; keep as a possible
 later “fix a typo from anywhere” path, contingent on real test CI existing.
