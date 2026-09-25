@@ -130,6 +130,43 @@ it would replace it with a cascade wearing a hat — so `via=` is reported
 as the unknown parameter it is, and nesting by some other relation stays
 `{{cascade}}`'s job.
 
+## `{{calcblock}}`
+
+```markdown
+{{calcblock item="DEC-PWR-001" block="losses"}}
+```
+
+Renders one named [calc block](math.md#naming-a-calc-block)'s rows on a
+narrative page. A `calc`
+block gets a name from the `id="..."` on its fence line; that name anchors
+the block's table on the owner's page, and `{{calcblock}}` re-renders the
+same table — same anchor, caption, rows — for the page that wants it, with a
+caption line above naming the owning item (linked) and the block. Parameters:
+
+| Parameter | Required | Meaning |
+|---|---|---|
+| `item` | yes | A local item's display id (or `DISPLAY-ID@key` composite). Must exist. |
+| `block` | yes | A calc block name that item actually has (`id="..."` on one of its fences). |
+
+Two properties follow from the implementation:
+
+- **It renders calc results; it never evaluates.** The rows come from the
+  already-evaluated `CalcLine`s the build computed for the item, so the
+  directive can never print a number the owner's page doesn't print. If the
+  owner's calc failed, the build already failed at the owner's line, and the
+  error row renders here unchanged — `{{calcblock}}` passes through, it
+  doesn't re-judge.
+- **Local items only.** An imported item carries no body or calc blocks in
+  this project, so `item=` refuses one and says to read the upstream
+  project's own page instead.
+
+An empty *selection* is not a state this block has. `{{cascade}}` and
+`{{compare}}` deliberately render a "nothing found" note when their result
+is legitimately empty; naming a block that doesn't exist — or an item with
+no named blocks — is always an authoring mistake, so every nothing-to-render
+case is a build error (below) with `⚠` in place: never an empty table, never
+a silent drop.
+
 ## Failure modes
 
 The blocks validate strictly and name the specific fix, the same bar every
@@ -155,6 +192,39 @@ other refdes diagnostic holds to:
     'sortt'. index accepts: by, type, board, tag, subtypes.
 ```
 
+```
+{{calcblock item="DEC-PWR-001" block="loess"}} — 'DEC-PWR-001' has no calc
+    block named 'loess'. It names: losses, supply.
+```
+
+```
+{{calcblock item="CMP-PWR-001" block="losses"}} — CMP-PWR-001 has no calc
+    blocks. calcblock renders a named ```calc block; this item computes
+    nothing.
+```
+
+```
+{{calcblock item="DEC-THM-009" block="losses"}} — DEC-THM-009 has calc
+    blocks but none is named -- add id="..." to its fence to make this block
+    work.
+```
+
+```
+{{calcblock item="CMP-X-001" block="losses"}} — 'CMP-X-001' is an imported
+    item. Imported items carry no calc blocks in this project; render the
+    upstream project's own page instead.
+```
+
+```
+{{calcblock item="DEC-PWR-001"}} — missing required parameter 'block'.
+    calcblock accepts: block, item.
+```
+
+```
+{{calcblock item="DEC-PWR-001" block="losses" all="true"}} — unknown
+    parameter 'all'. calcblock accepts: block, item.
+```
+
 A block that fails validation renders a visible `⚠` marker in its place on
 the page — the build still stops with a nonzero exit, but the broken
 directive isn't silently swallowed while you're reading the diagnostic.
@@ -166,7 +236,9 @@ Refdes's generated blocks take **parameters, never expressions.** `index`,
 accepts a small, closed set of named parameters, each with one fixed
 meaning, validated against the resolved schema at build time. There is no
 comparison operator, no `and`/`or`, no wildcard, and no nesting one block
-inside another. A block only ever selects and arranges items that already
+inside another. `{{calcblock}}` takes one block *name* — the absence of an
+`all=` is the no-wildcard rule holding at the calc boundary. A block only
+ever selects and arranges items that already
 exist in the project; it cannot decide that something exists, is true, or
 is correct, and it cannot be composed into an expression the tool would have
 to parse and evaluate. That is what keeps a generated index or cascade as
