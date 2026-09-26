@@ -92,3 +92,23 @@ ul.diagnostics, ul.checks { list-style: none; margin: 0; padding: 0; }
 .link-candidates { max-height: 180px; overflow-y: auto; border: 1px solid var(--line); border-radius: 4px; padding: 4px 6px; background: #fafbfc; }
 .link-candidates .link-line { justify-content: space-between; }
 .btn.link-add, .btn.link-remove, .btn.link-undo { font-size: 11px; padding: 1px 8px; margin-left: 6px; }
+
+/* The image picker (docs/design/editor-image-upload.md §17, Phase 0): a filter
+   over the images the project already has, each row a thumbnail from the
+   preview surface, the name and path, and the reference it would insert. It is
+   the one read-only affordance in the body area -- nothing here uploads, and
+   images.js owns the states; this only draws them. */
+.images-edit { margin: 8px 0; }
+.image-filter { width: 100%; box-sizing: border-box; padding: 2px 6px; border: 1px solid var(--line); border-radius: 4px; font: inherit; margin-bottom: 4px; }
+.image-list { max-height: 220px; overflow-y: auto; border: 1px solid var(--line); border-radius: 4px; padding: 4px 6px; background: #fafbfc; }
+.image-line { display: flex; gap: 8px; align-items: center; justify-content: space-between; padding: 3px 0; border-bottom: 1px solid #eef1f4; }
+.image-line:last-child { border-bottom: none; }
+.image-text { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+.image-name { font-weight: 600; }
+.image-rel, .image-size { font-size: 11px; color: var(--muted); font-family: monospace; overflow-wrap: anywhere; }
+.image-thumb { width: 56px; height: 40px; object-fit: contain; background: #fff; border: 1px solid var(--line); border-radius: 3px; flex: none; }
+.image-thumb.missing { display: inline-flex; align-items: center; justify-content: center; color: var(--muted); }
+.btn.image-insert { font-size: 11px; padding: 1px 8px; flex: none; }
+.image-note { margin: 4px 0 0; font-size: 12px; }
+.image-note.good { color: var(--ok); }
+.image-note.warn { color: var(--warn); }

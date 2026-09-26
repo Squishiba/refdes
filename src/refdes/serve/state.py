@@ -35,7 +35,7 @@ _STATE_SUFFIXES = (".yaml", ".yml", ".json")
 _DISPOSABLE_STATE = {"schema.json"}
 
 
-def _asset_files(project: Project) -> set[str]:
+def asset_files(project: Project) -> set[str]:
     """Every file under a declared `site.assets:` directory, walked.
 
     Images are build inputs (Jared's 2026-09-25 decision, docs/design/
@@ -48,7 +48,9 @@ def _asset_files(project: Project) -> set[str]:
 
     The walk mirrors those two functions exactly (same directories, same
     no-reference-needed breadth, missing directory skipped) so the watcher can
-    never watch a file the build cannot resolve, or miss one it can.
+    never watch a file the build cannot resolve, or miss one it can. The image
+    picker's list reads the same walk (`serve.api._images`), so the editor
+    cannot offer an image the build would not resolve either.
     """
     found: set[str] = set()
     for rel_dir in project.asset_dirs:
@@ -90,7 +92,7 @@ def project_inputs(project: Project) -> list[str]:
                 found.add(path)
     for spec in project.imports:
         found.add(os.path.join(root, spec.items_path))
-    found.update(_asset_files(project))
+    found.update(asset_files(project))
     return sorted(found)
 
 

@@ -68,7 +68,11 @@ shippable.
   display-half refresh has landed, but rename waits until that machinery has
   been exercised independently on real projects.
 - Uploading or managing image files. The body editor can reference existing
-  project files in the first version; upload is a later capability.
+  project files in the first version; upload is a later capability. **The
+  referencing half has since landed**: an image picker lists the images under
+  the declared `site.assets:` directories and inserts a relative reference into
+  the body draft (`docs/design/editor-image-upload.md` §17, Phase 0). Uploading
+  and managing the files is still deferred to that document's later phases.
 - Editing project settings, schema overlays, defaults blocks, section markers,
   narrative pages, baselines, seals, or ID-ledger files directly.
 - Git staging, commits, branch switching, merge resolution, or history UI.
@@ -1083,7 +1087,10 @@ editor-only plumbing.
 
 - Display-ID rename using the landed inbound-label refresh machinery after
   independent real-project exercise.
-- Image upload/copy and binary conflict policy.
+- Image upload/copy and binary conflict policy. The picker that stands in for
+  it is no longer missing (see "Deferred", above; and
+  `docs/design/editor-image-upload.md` §17, Phase 0); what is left here is the
+  bytes and the conflicts around them.
 - VS Code custom-editor adapter over the same application services.
 - Project/schema/defaults/section editing, only if real use shows forms need
   them.
@@ -1120,7 +1127,9 @@ points and are not polish.
 5. **Editing Markdown bodies with an authoritative preview.** Source-text
    editing of both body forms, insertion helpers for `[[ID]]`, `[[fig:id]]`,
    images, and calc fences, and a preview produced by the real build pipeline
-   with the document context labelled. Existing images by picker; no upload.
+   with the document context labelled. Existing images by picker (**shipped** —
+   the image half of this item; the `[[ID]]`, `[[fig:id]]`, and calc-fence
+   insertion helpers are still outstanding); no upload.
 6. **Structured links, add and remove.** Per-verb pickers filtered to the
    allowed target types, composite writes from a selected key, imported keyed
    targets supported, and every supported list style preserved on disk.

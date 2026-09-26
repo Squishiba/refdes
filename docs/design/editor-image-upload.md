@@ -30,6 +30,29 @@ content digest into its owner's content hash, so a swapped image breaks a
 seal loudly (§2, §10, §15.6; plan in `in-prog-logs/hash-images.md`).
 The upload feature itself is still unimplemented.
 
+Update: **Phase 0 has shipped** (2026-09-25) — the picker, alone and
+independently, as §17's row 0 scopes it. `GET /api/images?item=<handle>`
+(`serve/api.py` `_images`) lists the images under the declared `site.assets:`
+directories, using the same walk `state.asset_files` watches and
+`build.collect_static_assets` publishes, and returns for each the exact
+reference to insert, relative to that item's own source file;
+`serve/static/images.js` lists them, filters them, and inserts one into the
+body draft through the existing `setDraftBody` path, so the ordinary Save
+posts an ordinary `set_body`. No upload, no `POST /api/assets`, no Phase 1 or
+later. Pinned by `tests/test_serve_images.py` and the static checks in
+`tests/test_serve_static.py`.
+
+Two things §2 and §16.10 turned out to make easy, verified by running rather
+than reading: the thumbnail needs **no new read endpoint** at all — a file
+under a declared asset directory is identity-mapped in `project.assets` by
+`collect_static_assets`, so the build's own `assets/<rel>` path is already
+served by the existing `/preview/` surface under the session cookie, and the
+picker just uses the build's answer — and a filename markdown would
+percent-encode (a space, a non-ASCII character) is not referenceable by any
+spelling today, because the build resolves the *rendered* `src` without
+decoding it, so the picker reports those rows as not insertable rather than
+handing over text the save would refuse.
+
 # Image upload in the browser editor, and what a binary conflict is
 
 ## 1. The deferred item
@@ -72,7 +95,10 @@ is no picker: a search of `src/refdes/serve/static/` for `image`, `asset`,
 `figure`, or `insert` finds nothing. The body control is a plain textarea with
 no insertion helper of any kind. So the boundary drawn at `:419-422` was never
 actually crossed in either direction — upload is absent, and so is the thing
-that was supposed to stand in for it.
+that was supposed to stand in for it. *(Updated 2026-09-25: the second half is
+no longer true. Phase 0 landed — `serve/static/images.js` and
+`GET /api/images`; the body control now has an insertion helper, and the
+upload half of the boundary is still uncrossed.)*
 
 **The delta gate already refuses a dangling image, and nothing can pre-stage
 one.** A body edit whose text references a file that is not on disk is blocked
@@ -693,7 +719,7 @@ Each carries a recommendation; unanswered means the recommendation stands.
 
 | Phase | Scope |
 |---|---|
-| **0. Picker** | The v1 item that never shipped (§2, §15.10): list existing project images, insert a relative reference into the draft. No upload, no new endpoint. Independently useful. |
+| **0. Picker** | The v1 item that never shipped (§2, §15.10): list existing project images, insert a relative reference into the draft. No upload, no new endpoint. Independently useful. **Shipped 2026-09-25.** |
 | **1. Bytes** | `POST /api/assets`; content-type branch and asset cap in `_api`; sniff-based type allowlist; single-segment name validation; `_atomic_create` for new files; §5 collision table; forced preview rebuild. No §9 checks yet. |
 | **2. Conflicts** | `expected_hash` and the replace path through `_atomic_replace`; §9.1 ambiguity check; §9.2 capture check over `Project.image_results`; §9.3 referencing-item disclosure. |
 | **3. Seals** | §10: sealed-target refusal, sealed-referenced-file refusal. |

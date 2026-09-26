@@ -175,8 +175,13 @@ export async function renderItem(container, handle) {
 
   const body = section('Body');
   const bodyArea = editor.bodyControl(item.body, controls.get('body'));
-  if (bodyArea) body.appendChild(bodyArea);
-  else {
+  if (bodyArea) {
+    body.appendChild(bodyArea);
+    // The image picker inserts into that textarea, so it belongs beside it
+    // rather than in the Edit block below (editor.js builds it; the draft it
+    // writes is the same one a field edit uses).
+    if (editor.imagePicker) body.appendChild(editor.imagePicker);
+  } else {
     body.appendChild(el('pre', 'body-text', item.body || '(empty)'));
     const info = item.edit && item.edit.body;
     if (info && !info.editable) body.appendChild(el('p', 'badge readonly', info.reason));
