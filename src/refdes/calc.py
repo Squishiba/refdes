@@ -117,22 +117,134 @@ def _power(base: Value, exponent: Value) -> Value:
     e = float(exponent.nom.to("dimensionless").magnitude)
     if e != int(e) and _spans_zero(base):
         raise CalcError("fractional power of a range that includes zero")
-    nom = base.nom**e
-    candidates = [base.lo**e, base.hi**e]
+    # `what` and `fix` describe the operation as the author wrote it, so the
+    # diagnostic names the expression rather than the type that came back.
+    what = f"`{_shown(base.nom)} ** {e:g}`"
+    fix = _FRACTIONAL_FIX if e != int(e) else _REAL_FIX
+    try:
+        nom = _real(base.nom**e, what, fix)
+        candidates = [_real(q**e, what, fix) for q in (base.lo, base.hi)]
+    except (ValueError, OverflowError, ZeroDivisionError) as exc:
+        raise CalcError(f"{what} {_power_reason(exc)}") from exc
     if _spans_zero(base) and int(e) == e and int(e) % 2 == 0:
         candidates.append(0 * nom.units)
     return _span(candidates, nom)
 
 
+# ------------------------------------------------------------------------ domain
+
+# Every way an expression can leave the reals, and what to say about it.
+#
+# Left alone they fail in four different ways, and not one of them is a message
+# an engineer can act on. `math` raises ValueError for a log domain and
+# OverflowError for an exp that will not fit; comparing two complex tolerances
+# raises a bare TypeError; and pint does not refuse anything at all -- it answers
+# `(-1) ** 0.5` with a complex Quantity, so evaluation *succeeds*, the value is
+# recorded, and the build then dies inside the formatter as an uncaught
+# `TypeError: float() argument must be a string or a real number, not 'complex'`
+# with no file, no line, and no mention of the square root.
+#
+# So the rule this module holds itself to: a value that is not a real number is a
+# CalcError, raised where the argument is still in hand, and never a value handed
+# on to be formatted. `_real` is where that is enforced.
+
+_SQRT_FIX = (
+    "the square root of a negative number has no real value; check the sign "
+    "of the argument"
+)
+_LOG_FIX = "a logarithm is undefined at zero and for negative values"
+_OVERFLOW_FIX = "the result is beyond the largest number a float can hold"
+_FRACTIONAL_FIX = (
+    "a fractional power of a negative number has no real value; check the sign "
+    "of the base"
+)
+_REAL_FIX = "the result is not a real number"
+
+
+def _shown(q, digits: int = 4) -> str:
+    """A quantity as the reader would see it, for a diagnostic that names the
+    offending value. Never raises: the message must not be the thing that
+    crashes the build."""
+    try:
+        return format_quantity(q, digits)
+    except Exception:
+        return str(getattr(q, "magnitude", q))
+
+
+def _is_imaginary(q) -> bool:
+    """Whether `q` is a quantity pint built out of a *complex* magnitude.
+
+    A float and an int have `.imag` too (always 0), so one attribute read covers
+    every numeric type pint hands back here -- and a result that is real but
+    negative, which is perfectly legal, is not caught by it.
+    """
+    return getattr(getattr(q, "magnitude", q), "imag", 0) != 0
+
+
+def _is_negative(q) -> bool:
+    """Whether `q` is a real quantity below zero.
+
+    An offset unit has no meaningful comparison to zero and pint refuses the
+    question, so the answer there is False and `_real` still has the last word on
+    whatever the operation came back as.
+    """
+    try:
+        return bool(q < 0)
+    except Exception:
+        return False
+
+
+def _real(q, what: str, fix: str):
+    """Hand back `q` if it is a real number, and refuse it in words if it is not.
+
+    Applied to every corner of a result, not just the nominal one: a tolerance
+    interval can dip below zero while its nominal value is fine (`5 ± 6` is
+    [-1, 11]), and a guard that looked only at the nominal would let a complex
+    bound through into `format_bounds` -- the same crash by another route.
+    """
+    if _is_imaginary(q):
+        raise CalcError(f"{what} is not a real number — {fix}")
+    return q
+
+
+def _power_reason(exc: Exception) -> str:
+    if isinstance(exc, OverflowError):
+        return f"overflowed — {_OVERFLOW_FIX}"
+    if isinstance(exc, ZeroDivisionError):
+        return "is undefined — zero to a negative power is not a number"
+    return f"is not a real number — {_FRACTIONAL_FIX}"
+
+
 # ------------------------------------------------------------------------ functions
 
 
-def _monotonic(fn, name: str):
+def _fn_sqrt(v: Value) -> Value:
+    """`sqrt` is the one function whose domain failure is silent rather than
+    loud: pint answers a negative argument with a complex Quantity instead of
+    raising, so the value sails through evaluation intact and detonates later, in
+    the formatter, as a traceback that names no line. The check is here, at the
+    point where the argument is still in hand, and it names the value that is
+    wrong -- a range that reaches below zero counts, because its low bound is
+    the corner that would come back complex.
+    """
+    negative = next((q for q in (v.lo, v.nom, v.hi) if _is_negative(q)), None)
+    if negative is not None:
+        raise CalcError(
+            f"sqrt() of a negative value ({_shown(negative)}) is not a real "
+            f"number — {_SQRT_FIX}"
+        )
+    return _monotonic(lambda q: q**0.5, "sqrt", "sqrt()", _SQRT_FIX)(v)
+
+
+def _monotonic(fn, name: str, real_what: str = "", real_fix: str = ""):
     def apply(v: Value) -> Value:
         try:
-            return Value(fn(v.nom), fn(v.lo), fn(v.hi))
+            corners = (fn(v.nom), fn(v.lo), fn(v.hi))
         except pint.DimensionalityError as exc:
             raise CalcError(f"{name}() {exc}") from exc
+        if real_what:
+            corners = tuple(_real(c, real_what, real_fix) for c in corners)
+        return Value(*corners)
 
     return apply
 
@@ -154,13 +266,38 @@ def _fn_max(*vs: Value) -> Value:
     return _span(_corners(*vs), nom)
 
 
-def _dimensionless(fn, name: str):
+def _dimensionless(fn, name: str, fix: str):
+    """A `math` function of a dimensionless argument, corner by corner.
+
+    `math` reports its own domain failures in its own words -- `ValueError:
+    math domain error` for `ln(0)`, `OverflowError: math range error` for an
+    `exp` that will not fit -- and those become whatever the enclosing handler
+    makes of them. Each corner is therefore evaluated under its own try, and the
+    message names the corner that actually failed: `ln(2 ± 2)` is perfectly legal
+    at the nominal value and undefined at the low bound, which is the bound a
+    reader needs to be told about.
+    """
+
+    def wrap(q):
+        return Q(fn(float(q.to("dimensionless").magnitude)), "dimensionless")
+
     def apply(v: Value) -> Value:
         if not v.nom.dimensionless:
             raise CalcError(f"{name}() needs a dimensionless argument, got {v.nom.units:~P}")
 
-        wrap = lambda q: Q(fn(float(q.to("dimensionless").magnitude)), "dimensionless")  # noqa: E731
-        return Value(wrap(v.nom), wrap(v.lo), wrap(v.hi))
+        corners = []
+        for q in (v.nom, v.lo, v.hi):
+            try:
+                corners.append(wrap(q))
+            except ValueError as exc:
+                raise CalcError(
+                    f"{name}() needs a positive argument, got {_shown(q)} — {_LOG_FIX}"
+                ) from exc
+            except OverflowError as exc:
+                raise CalcError(
+                    f"{name}() overflowed on {_shown(q)} — {_OVERFLOW_FIX}"
+                ) from exc
+        return Value(*corners)
 
     return apply
 
@@ -169,13 +306,13 @@ def _build_functions() -> dict:
     import math
 
     return {
-        "sqrt": _monotonic(lambda q: q**0.5, "sqrt"),
+        "sqrt": _fn_sqrt,
         "abs": _fn_abs,
         "min": _fn_min,
         "max": _fn_max,
-        "exp": _dimensionless(math.exp, "exp"),
-        "ln": _dimensionless(math.log, "ln"),
-        "log10": _dimensionless(math.log10, "log10"),
+        "exp": _dimensionless(math.exp, "exp", _OVERFLOW_FIX),
+        "ln": _dimensionless(math.log, "ln", _LOG_FIX),
+        "log10": _dimensionless(math.log10, "log10", _LOG_FIX),
     }
 
 

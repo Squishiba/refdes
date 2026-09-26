@@ -1203,9 +1203,29 @@ def _run_item_calcs(project: Project, item, by_key: dict[str, Item]) -> None:
                         file=item.source_file, line=diag_line, item_id=item.id,
                     )
             if outcome.value is not None:
-                line.result = calc.format_value(outcome.value, project.sigfigs)
-                line.bounds = calc.format_bounds(outcome.value, project.sigfigs)
-                item.calc_values[outcome.name] = line.result
+                # Formatting runs on a value the evaluator already accepted, so
+                # it sits outside the handler that turns an *evaluation* failure
+                # into a line error -- and a formatter failure used to abort the
+                # whole command with a traceback naming no file and no line (the
+                # `sqrt(-1)` complex-magnitude bug). Whatever it raises is still
+                # this line's problem, so it is reported like every other calc
+                # error and the build continues to the next line.
+                try:
+                    result = calc.format_value(outcome.value, project.sigfigs)
+                    bounds = calc.format_bounds(outcome.value, project.sigfigs)
+                except Exception as exc:  # noqa: BLE001 -- pint raises many types
+                    failed = True
+                    message = f"the value could not be formatted: {exc}"
+                    if not line.error:
+                        line.error = message
+                    project.error(
+                        f"calc {outcome.name or outcome.expression!r}: {message}",
+                        file=item.source_file, line=diag_line, item_id=item.id,
+                    )
+                else:
+                    line.result = result
+                    line.bounds = bounds
+                    item.calc_values[outcome.name] = result
             item.calcs.append(line)
     del env[calc.RESOLVER_KEY]
     del env[calc.SOURCE_RESOLVER_KEY]
