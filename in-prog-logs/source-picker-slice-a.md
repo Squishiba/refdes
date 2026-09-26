@@ -10,8 +10,24 @@ Branch `editor/source-picker-slice-a`, off `origin/main` (`16bbc64`).
 ## Status
 
 Done and committed. Full suite green (2335 passed, 1 skipped — up from 2292 on
-`main`, so +43 new tests), `ruff check --select E9,F src tests` clean. Not
-merged.
+`main`, so +43 new tests), `ruff check --select E9,F src tests` clean. PR #49
+against `main`, run 36215022947, all three jobs green. **Not merged** (Jared
+reviews and lands).
+
+CI, which is the part that actually counts:
+
+```
+success  windows-latest          3.11   2336 passed in 204.11s
+success  ubuntu-latest / py3.13  3.13   2335 passed, 1 skipped in 148.65s
+success  ubuntu-latest           3.11   (also runs ruff --select E9,F: "All checks passed!")
+```
+
+The Windows job is the one worth noting for this change: it is where the
+`test_the_picker_never_returns_an_absolute_server_path` assertion has teeth,
+because `os.path.join` yields backslashes there and `_relativise` has to
+normalise the target's separators before folding the reader's diagnostics back
+to a project-relative spelling. The 2336-vs-2335 difference is the existing
+Windows-only citation test, not anything from this slice.
 
 ## What landed
 
