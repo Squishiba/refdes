@@ -15,6 +15,7 @@ from ..patcher import PROTECTED_FIELDS, AddLink, RemoveLink, SetBody, SetField
 from ..seal import is_sealed
 from . import edit as edit_mod
 from . import filters as filters_mod
+from . import sources as sources_mod
 from . import state as state_mod
 from .filters import FilterError, check_state, item_tags
 
@@ -25,6 +26,9 @@ def item_pages(project: Project) -> dict[str, str]:
     return {key: f"{item.slug}.html" for key, item in project.items.items()}
 
 
+# Three source-read routes are dispatched below through `_SOURCE_ROUTES`, which
+# is declared with their handlers further down this file. They are all GET: a
+# non-GET on one is a 405 here, the same as any other `/api/item/` route.
 def handle(app, method: str, path: str, query: dict[str, list[str]], body) -> tuple[int, dict]:
     if path == "/api/revision" and method in ("GET", "HEAD"):
         return 200, app.state.revision_info()
@@ -43,6 +47,14 @@ def handle(app, method: str, path: str, query: dict[str, list[str]], body) -> tu
         return _images(app, (query.get("item") or [""])[0])
     if path == "/api/items/create" and method == "POST":
         return _create_item(app, body)
+    if path.startswith("/api/item/"):
+        for suffix, handler in _SOURCE_ROUTES:
+            if not path.endswith(suffix):
+                continue
+            if method not in ("GET", "HEAD"):
+                return 405, {"error": "method not allowed"}
+            ref = urllib.parse.unquote(path[len("/api/item/"):-len(suffix)])
+            return handler(app, ref, query)
     if path.startswith("/api/item/") and method in ("GET", "HEAD"):
         ref = urllib.parse.unquote(path[len("/api/item/"):])
         return _item_view(app, ref)
@@ -256,6 +268,96 @@ def _item_view(app, ref: str) -> tuple[int, dict]:
         ],
         "diagnostics": _diagnostics_for(project, item, handle),
     }
+
+
+# ----------------------------------------------------------- reading source files
+#
+# docs/design/editor-source-picker.md §2, §5, §6, §7 -- Slice A, "the service
+# reads": three GET routes, no writes. Each names one item, and the service
+# authorizes the path with `citations.authorize_source_path` -- the same call
+# `refdes fetch` and the source resolver make -- so the picker can never be
+# authorized for a file the fetcher would refuse. They are added as routes here
+# and nowhere else, which is what makes them inherit the launch-token, Host and
+# Origin checks every other `/api/` request already passes: no new surface, no
+# new security posture, just a new path into the same one.
+#
+# There is no seal or external-item gate here, and that is deliberate rather
+# than forgotten (§9 Q6, recommended A): these are reads, seeing where a value
+# came from is review, and the refusal that belongs to a sealed or imported
+# item is Accept's -- a body write, already refused by the edit route with the
+# existing reason.
+
+
+def _item_sources(app, ref: str, query: dict[str, list[str]]) -> tuple[int, dict]:
+    """`GET /api/item/<ref>/sources` -- the item's own cited files a reader can
+    read, each with its pin state and the values already pinned for it."""
+    project = app.state.snapshot.project
+    item, _handle = _find_item(project, ref)
+    if item is None:
+        return 404, {"error": f"no item matches {ref!r}"}
+    return 200, sources_mod.files_payload(project, item)
+
+
+def _source_entries(app, ref: str, query: dict[str, list[str]]) -> tuple[int, dict]:
+    """`GET /api/item/<ref>/sources/entries?path=&q=` -- the rows of one cited
+    file, read live, each labelled with the value the lockfile pins beside it."""
+    project = app.state.snapshot.project
+    item, _handle = _find_item(project, ref)
+    if item is None:
+        return 404, {"error": f"no item matches {ref!r}"}
+    path = (query.get("path") or [""])[0]
+    if not path:
+        return 400, {"error": "path is required: ?path=<a citation path this item declares>"}
+    try:
+        return 200, sources_mod.entries_payload(
+            project, item, path, (query.get("q") or [""])[0]
+        )
+    except sources_mod.SourceRefusal as exc:
+        return _refused(exc)
+
+
+def _source_propose(app, ref: str, query: dict[str, list[str]]) -> tuple[int, dict]:
+    """`GET /api/item/<ref>/sources/propose?path=&key=&unit=&name=` -- the calc
+    line this `(path, key, unit, name)` composes to, composed and checked here
+    so the browser never assembles the text and never learns the grammar."""
+    project = app.state.snapshot.project
+    item, _handle = _find_item(project, ref)
+    if item is None:
+        return 404, {"error": f"no item matches {ref!r}"}
+    for name in ("path", "key"):
+        if not (query.get(name) or [""])[0]:
+            what = "a citation path this item declares" if name == "path" else (
+                "a key from the file's key column"
+            )
+            return 400, {"error": f"{name} is required: ?{name}=<{what}>"}
+    try:
+        return 200, sources_mod.propose_payload(
+            project, item,
+            path=(query.get("path") or [""])[0],
+            key=(query.get("key") or [""])[0],
+            unit=(query.get("unit") or [""])[0],
+            name=(query.get("name") or [""])[0],
+        )
+    except sources_mod.SourceRefusal as exc:
+        return _refused(exc)
+
+
+def _refused(exc: sources_mod.SourceRefusal) -> tuple[int, dict]:
+    """A read the authorizer, the registry or the row itself refused. 422 with
+    the reason verbatim, in the edit route's `refused` vocabulary, because that
+    is the shape the browser already knows how to read off an authoring
+    outcome -- the request was well-formed; what it asked for is not this
+    item's to read."""
+    return 422, {"kind": "refused", "ok": False, "error": str(exc), "reason": str(exc)}
+
+
+# Longest suffix first: `/sources` is a suffix of the other two, and a plain
+# `endswith("/sources")` would swallow both.
+_SOURCE_ROUTES = (
+    ("/sources/entries", _source_entries),
+    ("/sources/propose", _source_propose),
+    ("/sources", _item_sources),
+)
 
 
 # ------------------------------------------------------------------ the write

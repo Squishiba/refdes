@@ -443,8 +443,14 @@ reader can read, keys come from the existing Python reader through one new
 line is emitted by the server and inserted into the body draft. Its §4 is the
 part this document had not seen coming: a body naming an unpinned key is a new
 item error, so the diagnostic gate refuses the save, which means Accept has to
-write the item file and the lockfile as one operation. Status there is
-*proposed*; nothing is implemented.
+write the item file and the lockfile as one operation.
+
+**Slice A landed 2026-09-25** (status there is now *proposed; Slice A landed*):
+`GET /api/item/<ref>/sources`, `…/sources/entries?path=&q=` and
+`…/sources/propose?path=&key=&unit=&name=` read, and the path-confinement rules
+are proven by tests. There is no panel in the editor yet, and nothing in the
+picker writes: Accept (Slice B) is the lockfile write, and the panel itself is
+Slice C.
 
 #### PDF datasheet values
 
