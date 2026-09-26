@@ -15,6 +15,7 @@ from ..patcher import PROTECTED_FIELDS, AddLink, RemoveLink, SetBody, SetField
 from ..seal import is_sealed
 from . import edit as edit_mod
 from . import filters as filters_mod
+from . import state as state_mod
 from .filters import FilterError, check_state, item_tags
 
 
@@ -38,12 +39,14 @@ def handle(app, method: str, path: str, query: dict[str, list[str]], body) -> tu
         return _create_schema(app)
     if path == "/api/create/preview" and method in ("GET", "HEAD"):
         return _create_preview(app, query)
+    if path == "/api/images" and method in ("GET", "HEAD"):
+        return _images(app, (query.get("item") or [""])[0])
     if path == "/api/items/create" and method == "POST":
         return _create_item(app, body)
     if path.startswith("/api/item/") and method in ("GET", "HEAD"):
         ref = urllib.parse.unquote(path[len("/api/item/"):])
         return _item_view(app, ref)
-    if path in ("/api/items", "/api/items/create") or path.startswith("/api/item/"):
+    if path in ("/api/items", "/api/images", "/api/items/create") or path.startswith("/api/item/"):
         return 405, {"error": "method not allowed"}
     return 404, {"error": "not found"}
 
@@ -483,4 +486,147 @@ def _create_item(app, body) -> tuple[int, dict]:
         "message": result.message,
         "reason": result.reason,
         "path": shown(result.path),
+    }
+
+
+# ---------------------------------------------------------------- image picker
+#
+# docs/design/editor-image-upload.md §17, Phase 0: list the images the project
+# already has so the author can reference one, and nothing else. Read-only --
+# no upload, no write endpoint, no bytes accepted -- and the reference the
+# author picks travels out through the ordinary `set_body` save like any other
+# body edit (the client inserts it into the draft; design §7).
+#
+# What the list can name is decided by the build, not here. `state.asset_files`
+# is the walk `project_inputs` already watches and `build.collect_static_assets`
+# already publishes: every file under a declared `site.assets:` directory, with
+# no reference needed, because a bare `<img src>` is resolved by searching those
+# directories (`build._search_image_src`). So a file this endpoint can offer is a
+# file the build can already resolve, and one it cannot offer was never
+# reachable by a reference in the first place.
+#
+# The bytes come from the preview surface rather than a new read endpoint: a
+# file under a declared asset directory is identity-mapped in `project.assets`
+# (`collect_static_assets`), so the build's own answer for it is `assets/<rel>`
+# in the current generation, and the existing `/preview/` route serves that with
+# `PreviewManager.open_file`'s real-path containment, the session cookie,
+# `nosniff`, and `PREVIEW_CSP` (docs/design/browser-editor.md, Security: no
+# generic file-read endpoint; design §16.10, whose "unnecessary: the preview
+# generation already serves the asset" holds here too). The client names no
+# path, so there is no client path to confine.
+
+# The image file types the picker offers. This is a *display* filter on the walk
+# above, not a resolution rule: the build resolves a src by exact filename with
+# no extension test at all (`build._process_images`), so a file outside this set
+# is still perfectly valid to reference by hand -- the picker just does not
+# volunteer it. SVG is listed, not refused, for the same reason: refusing it is
+# an upload-side policy decision (design §6, about bytes arriving from a
+# browser), and this endpoint accepts no bytes and reads none.
+IMAGE_SUFFIXES = frozenset(
+    {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp", ".tif", ".tiff", ".avif", ".ico"}
+)
+
+
+def image_alt(name: str) -> str:
+    """Default alt text for a picked image: the filename's stem, never empty
+    (design §7 -- an empty `alt` is a silent accessibility failure). Brackets
+    are escaped because the stem lands inside `![...]`."""
+    stem = name.rsplit(".", 1)[0] if "." in name.lstrip(".") else name
+    return (stem or name).replace("[", "\\[").replace("]", "\\]").replace("\n", " ").strip() or name
+
+
+def image_markdown(src: str, alt: str) -> str:
+    """The exact `![alt](src)` line the client inserts, composed here so the
+    browser never builds a path spelling of its own. A destination containing a
+    space or a parenthesis takes markdown's `<...>` form, which is what makes a
+    file called `thermal curve.png` insertable at all."""
+    target = f"<{src}>" if any(ch in src for ch in " ()<>") else src
+    return f"![{alt}]({target})"
+
+
+def referenceable(src: str) -> bool:
+    """Whether the build could resolve `src` exactly as written.
+
+    Markdown's renderer percent-encodes a destination it does not consider
+    URL-safe, and the build resolves the *rendered* `src` against the
+    filesystem without decoding it (`build._process_images` walks the HTML), so
+    a file whose name carries a space or a non-ASCII character cannot be
+    referenced by any spelling: `![a](<figures/thermal curve.png>)` renders a
+    src of `figures/thermal%20curve.png` and the lookup misses. Rather than
+    hand the author a reference the save would refuse, the picker reports the
+    file and says why it is not offerable.
+
+    `quote(src) == src` is the conservative direction: the renderer's encoder
+    is narrower than `quote`, so a name refused here can still work when typed
+    by hand (`a(b).png`, `a#b.png`), while a name accepted here is one no
+    encoder rewrites."""
+    return urllib.parse.quote(src, safe="/") == src
+
+
+def _image_row(project: Project, item: Item, full_path: str) -> dict | None:
+    """One row of `GET /api/images`, or None when the file is not an image the
+    picker offers. `rel` is the build's own project-relative spelling and `src`
+    is that path as this item's source file must spell it -- the relative lookup
+    that runs first and always wins (docs/markdown.md), so the inserted text
+    resolves to this exact file whatever else shares the leaf name."""
+    rel = os.path.relpath(full_path, project.root).replace("\\", "/")
+    name = rel.rpartition("/")[2]
+    if os.path.splitext(name)[1].lower() not in IMAGE_SUFFIXES:
+        return None
+    source_dir = os.path.join(project.root, os.path.dirname(item.source_file.replace("\\", "/")))
+    src = os.path.relpath(os.path.join(project.root, rel), source_dir).replace("\\", "/")
+    try:
+        size = os.path.getsize(full_path)
+    except OSError:
+        size = 0
+    alt = image_alt(name)
+    row = {
+        "rel": rel,
+        "name": name,
+        "alt": alt,
+        "bytes": size,
+        "src": src,
+        "insertable": referenceable(src),
+    }
+    if row["insertable"]:
+        row["markdown"] = image_markdown(src, alt)
+    else:
+        row["note"] = (
+            "this filename cannot be referenced as written: markdown "
+            "percent-encodes it and the build resolves the encoded form. It "
+            "needs renaming before any body can point at it."
+        )
+    dest = project.assets.get(rel)
+    if dest:
+        # The build's own answer, not a guess: a declared asset-directory file
+        # is identity-mapped, so this is the file the preview already serves.
+        row["thumb"] = "/preview/assets/" + urllib.parse.quote(dest)
+    return row
+
+
+def _images(app, ref: str) -> tuple[int, dict]:
+    """`GET /api/images?item=<handle>` -- the picker's list.
+
+    Item-scoped because the answer depends on the item: a src is relative to
+    *that* item's source file, and only the item's own draft can receive the
+    insertion. An unknown item 404s like `_item_view`; an item with no source
+    file has no base to be relative to and says so rather than guessing a root."""
+    project = app.state.snapshot.project
+    item, _handle = _find_item(project, ref)
+    if item is None:
+        return 404, {"error": f"no item matches {ref!r}"}
+    if not item.source_file:
+        return 400, {"error": "this item has no source file, so no relative path to offer"}
+    rows = [
+        row
+        for row in (_image_row(project, item, path) for path in state_mod.asset_files(project))
+        if row is not None
+    ]
+    rows.sort(key=lambda row: row["rel"])
+    return 200, {
+        "item": item.id or ref,
+        "source_file": item.source_file.replace("\\", "/"),
+        "asset_dirs": list(project.asset_dirs),
+        "images": rows,
+        "total": len(rows),
     }

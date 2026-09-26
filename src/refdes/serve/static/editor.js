@@ -12,6 +12,7 @@ import {
   getDraft, setDraftField, setDraftBody, setDraftRevision, clearDraft, isDirty,
 } from './drafts.js';
 import { createLinksSection } from './links.js';
+import { createImagePicker } from './images.js';
 import { fieldControlNode, applyControl } from './controls.js';
 
 function el(tag, cls, text) {
@@ -44,7 +45,7 @@ export function createEditor(item, handle, onSaved, onDiscarded) {
     // Nothing to save: say why instead of offering a button that cannot work.
     // The server refuses independently; this only stops the false affordance.
     block.appendChild(el('p', 'muted', edit.reason || 'This item is read only.'));
-    return { node: block, fieldControl: () => null, bodyControl: () => null };
+    return { node: block, fieldControl: () => null, bodyControl: () => null, imagePicker: null };
   }
 
   const bar = el('div', 'edit-bar');
@@ -82,6 +83,35 @@ export function createEditor(item, handle, onSaved, onDiscarded) {
   }
 
   // ------------------------------------------------------------- controls
+
+  // The body textarea of the current render, kept here so an insertion helper
+  // (the image picker) can put text into the same control the author types
+  // into -- there is one body control, one draft, one save.
+  let bodyArea = null;
+
+  // Insert text into the body draft at the caret (or at the end when the caret
+  // is nowhere), as its own paragraph unless the caret is already at a
+  // paragraph boundary. It is a draft op like any keystroke: `setDraftBody`
+  // through the commit the textarea already carries, so nothing is posted until
+  // Save and the ordinary revision check, delta gate, and conflict screen
+  // cover it.
+  function insertIntoBody(text) {
+    const area = bodyArea;
+    if (!area) return;
+    const at = area.selectionStart === null ? area.value.length : area.selectionStart;
+    const tail = area.selectionEnd === null ? at : area.selectionEnd;
+    const before = area.value.slice(0, at);
+    const after = area.value.slice(tail);
+    const open = before === '' || before.endsWith('\n\n') ? '' : '\n\n';
+    const close = after === '' || after.startsWith('\n\n') ? '' : '\n\n';
+    const chunk = open + text + close;
+    area.value = before + chunk + after;
+    const caret = before.length + chunk.length;
+    area.setSelectionRange(caret, caret);
+    area.focus();
+    if (area._refdesCommit) area._refdesCommit();
+    else setDraftBody(handle, area.value);
+  }
 
   function fieldControl(name, value, existing) {
     const spec = (edit.fields || {})[name];
@@ -125,6 +155,7 @@ export function createEditor(item, handle, onSaved, onDiscarded) {
     };
     area._refdesCommit = writeBody;
     area.addEventListener('input', writeBody);
+    bodyArea = area;
     return area;
   }
 
@@ -253,5 +284,12 @@ export function createEditor(item, handle, onSaved, onDiscarded) {
   }
 
   refreshStatus();
-  return { node: block, fieldControl, bodyControl };
+  return {
+    node: block,
+    fieldControl,
+    bodyControl,
+    // Built here (it needs the insert callback) and placed by item.js in the
+    // Body section, under the textarea it writes into.
+    imagePicker: createImagePicker(item, handle, insertIntoBody),
+  };
 }

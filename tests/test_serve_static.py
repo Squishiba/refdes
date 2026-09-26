@@ -309,3 +309,74 @@ def test_a_sealed_log_offers_the_amend_flow():
     assert "Amend this sealed log" in item
     assert "#/new?type=" in item
     assert "amends=" in item
+
+
+# ------------------------------------------------------------- image picker
+
+
+def test_the_image_picker_is_wired_into_the_body():
+    """Phase 0's UI has to actually reach the page: images.js must exist, be
+    imported by editor.js (the import-graph walk above proves it resolves), and
+    be placed in the Body section by item.js, under the textarea it writes
+    into. A picker nothing renders is a picker nobody sees."""
+    assert os.path.isfile(os.path.join(STATIC, "images.js"))
+    with open(os.path.join(STATIC, "editor.js"), encoding="utf-8") as fh:
+        editor = fh.read()
+    assert "from './images.js'" in editor
+    assert "createImagePicker" in editor
+    with open(os.path.join(STATIC, "item.js"), encoding="utf-8") as fh:
+        item = fh.read()
+    assert "editor.imagePicker" in item
+    # it is placed beside the body control, not in the Edit block below
+    body_at = item.index("const bodyArea = editor.bodyControl(")
+    assert body_at < item.index("editor.imagePicker")
+
+
+def test_the_image_picker_asks_the_server_and_composes_nothing():
+    """The list is the server's, and so is the text: images.js sends the item's
+    handle and inserts the exact `![alt](src)` line it is handed, rather than
+    building a path spelling of its own -- the same posture as the link picker
+    and the create form, and the one that keeps a reference from disagreeing
+    with what the build resolves."""
+    with open(os.path.join(STATIC, "images.js"), encoding="utf-8") as fh:
+        picker = fh.read()
+    assert "/api/images?item=${encodeURIComponent(handle)}" in picker
+    assert "from './api.js'" in picker
+    assert "insert(row.markdown)" in picker
+    for invented in ("![", "](", "../"):
+        assert invented not in picker, f"the client must not compose {invented!r} itself"
+
+
+def test_the_image_picker_uploads_nothing():
+    """Phase 0 is the read-only half (docs/design/editor-image-upload.md §17).
+    A file input, a drop target, or a call to the upload route would be Phase 1
+    arriving early -- and Phase 1 has a hole by design until Phase 2 closes it,
+    so the client must not be able to reach it."""
+    with open(os.path.join(STATIC, "images.js"), encoding="utf-8") as fh:
+        picker = fh.read()
+    assert "/api/assets" not in picker
+    assert "type = 'file'" not in picker and 'type="file"' not in picker
+    assert "POST" not in picker
+    assert "multipart" not in picker
+    assert "FileReader" not in picker
+    # and no new op name: the insertion rides the body save that already exists
+    with open(os.path.join(STATIC, "editor.js"), encoding="utf-8") as fh:
+        editor = fh.read()
+    assert "setDraftBody(handle, area.value)" in editor
+    assert "area._refdesCommit" in editor
+
+
+def test_the_thumbnail_is_the_preview_surface_and_not_a_new_endpoint():
+    """A picker is for choosing a picture, so the row shows one -- from the
+    build's own published asset, under the session cookie an `<img>` can carry.
+    The CSP forbids an inline onerror, so the fallback for a thumbnail that is
+    not in the current generation is a listener, and a failed load leaves the
+    row usable."""
+    with open(os.path.join(STATIC, "images.js"), encoding="utf-8") as fh:
+        picker = fh.read()
+    assert "row.thumb" in picker
+    assert "img.src = row.thumb" in picker
+    assert "loading = 'lazy'" in picker
+    assert "addEventListener('error'" in picker
+    assert "onerror" not in picker
+    assert "insertable" in picker, "a row the server cannot reference says so"
