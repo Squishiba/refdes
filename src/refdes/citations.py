@@ -435,8 +435,15 @@ def save_lockfile(project: Project, records: dict[str, dict]) -> None:
 # -------------------------------------------------------------------- collection
 
 
-def _item_specs(project: Project, item: Item) -> list[CitationSpec]:
-    """Every citation one item declares across its `citations:`-typed fields."""
+def item_specs(project: Project, item: Item) -> list[CitationSpec]:
+    """Every citation one item declares across its `citations:`-typed fields.
+
+    Public because three callers now need it and none of them should re-derive
+    it: `collect()` (this project), `authorize_source_path()` (is this path one
+    *this* item cites), and the editor's read-only source listing, which walks
+    one item's own declarations so that the rule deciding what may be listed is
+    the same rule deciding what may be read.
+    """
     out: list[CitationSpec] = []
     spec = project.types.get(item.type)
     if spec is None:
@@ -471,7 +478,7 @@ def collect(project: Project) -> list[tuple[Item, CitationSpec]]:
     return [
         (item, cspec)
         for item in project.local_items
-        for cspec in _item_specs(project, item)
+        for cspec in item_specs(project, item)
     ]
 
 
@@ -493,7 +500,7 @@ def authorize_source_path(project: Project, item: Item, path: str) -> tuple[str,
             f"{path!r} is a remote citation; source() reads only a repo-local "
             "file committed with the project"
         )
-    for cspec in _item_specs(project, item):
+    for cspec in item_specs(project, item):
         try:
             ckind, ccanon = classify(project.root, cspec.path)
         except CitationError:
