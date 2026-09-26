@@ -2,7 +2,7 @@
 
 A new project's `refdes-project.yaml` doesn't need to declare `requirement`,
 `bound`, or any of the usual hardware-traceability vocabulary by hand.
-`refdes` ships a **standard dictionary** — six item types, their fields, their
+`refdes` ships a **standard dictionary** — seven item types, their fields, their
 status lifecycles, and the link vocabulary connecting them — bundled inside
 the package and resolved live, by reference, into every project that opts in.
 
@@ -23,7 +23,7 @@ have no `refdes-schema.yaml` at all — and their absence is the point:
 
 ## What's in it
 
-Six types, each with a `prefix`, a `status` lifecycle (where it has one), and
+Seven types, each with a `prefix`, a `status` lifecycle (where it has one), and
 the standard link vocabulary:
 
 | Type | Prefix | Status lifecycle | Purpose |
@@ -33,6 +33,7 @@ the standard link vocabulary:
 | `decision` | `DEC` | `proposed` → `in_progress` → `accepted` / `on_hold` / `rejected` / `superseded` | A settled choice, with options considered |
 | `test` | `TST` | `planned` → `passing` / `failing` / `blocked` | Proof a requirement or bound holds |
 | `component` | `CMP` | `candidate` → `selected` / `rejected` / `obsolete` | A specific part realizing a decision |
+| `group` | `GRP` | — (never coverable) | A named collection — "the PCIe interface spec" — that names the collection without standing in for its members |
 | `log` | `LOG` | — (append-only) | The dated, unedited record of how the design got here |
 
 And fifteen link verbs, each declared on the type that would naturally author
@@ -484,6 +485,24 @@ nothing.
    rejected (a finding, not a build-blocking error) while a selected part
    failing one is a broken design. A project that wants `error` everywhere
    writes `check_severity: error` in its overlay, exactly as before.
+
+6. **A new `group` type (prefix `GRP`), and a new `part_of:` link to reach
+   it.** A group is a named collection — "the PCIe interface spec" — that
+   names the collection without letting it stand in for its members.
+   Membership is declared by the *member*, pointing at the group with
+   `part_of:` (available to `requirement`, `bound`, `decision`, `test`, and
+   `component`); a group never lists its own occupants, and `contains` exists
+   only as the computed inverse backlink, so a group cannot silently enlarge
+   its own meaning as its contents grow. To gather items under a name, author
+   `part_of: [GRP-…]` on each member and read a group's contents through its
+   `contains` backlinks.
+
+   The two properties the type exists to guarantee are negative ones. A group
+   is `coverable: false`, so it never appears in [coverage](coverage.md) and
+   never acquires a coverage stage; and it is deliberately absent from every
+   `satisfies:` target list, so nothing may claim it — the asymmetry that
+   stops a group from discharging its members' obligations by being satisfied
+   itself, which is the failure mode this addition was framed against.
 
 `hardware@1` and `@2` resolve exactly as they always have — including the
 verb, which those two still spell `equivalent`.
