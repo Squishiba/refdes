@@ -112,11 +112,24 @@ site:
   theme: paper
   tokens:
     --accent: '#8a1010'   # both palettes
+```
+
+Or target one palette at a time, with the two headings and nothing
+else in the block:
+
+```yaml
+site:
+  theme: paper
+  tokens:
     light:
       --bg: '#fffdf7'     # light mode only
     dark:
       --bg: '#17140f'     # dark mode only
 ```
+
+Mixing the two forms in one `tokens:` block is a load-time error, so an
+author never has to work out which of two equally valid-looking
+overrides won.
 
 A light-only override no longer bleeds into dark mode: the build
 re-asserts the effective dark palette inside the dark blocks, so the

@@ -280,7 +280,7 @@ fetched, hashed, optionally kept, exactly as before. Anything else means
 holding `refdes-project.yaml`), slash-separated:
 
 ```yaml
-- id: BND-MECH-001
+- id: CMP-MECH-001
   title: Board outline
   citations:
     - path: docs/mech/board-outline.pdf
@@ -438,6 +438,6 @@ option to turn this on.
 
 ## Where markdown is *not* used
 
-Field values are plain text, not markdown. A requirement's `text`, a bound's
+Field values are plain text, not markdown. A requirement's `body`, a bound's
 `rationale`, and an option's `because` all render literally. If you need
 formatting, put it in the body.

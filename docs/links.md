@@ -22,8 +22,8 @@ constrained_by: [BND-THM-001]
 ```
 
 The [standard library](standard-library.md) already declares this vocabulary for
-the six standard types, so most projects never write a `types:...links:` block at
-all — this is what to reach for on a custom type, or one the standard doesn't
+the seven standard types, so most projects never write a `types:...links:` block
+at all — this is what to reach for on a custom type, or one the standard doesn't
 cover.
 
 Pointing at a nonexistent item, or at an item of a type the schema disallows, is a
@@ -68,7 +68,8 @@ modified.
 current tip (becoming `DISPLAY-ID@key` or a bare key for an id-less tip). Once
 frozen, it follows the same rename-refresh rule as any other composite.
 **It is not yet available to authors:** no bundled standard declares the verb,
-so writing `follows:` today is an unknown-link error. The chain behaviour
+so writing `follows:` today reports `unknown field 'follows' on <type>` and the
+build still succeeds — an unnoticed thread, not a failed one. The chain behaviour
 ships with the threads work — see [threads](design/threads.md).
 
 ## Back-links are computed
@@ -107,7 +108,7 @@ stdout.
 |---|---|---|
 | `refines` | `refined_by` | a requirement narrowing another requirement, or a bound narrowing another bound |
 | `derives_from` | `derived_by` | a bound derived from a requirement or another bound |
-| `governed_by` | `governs` | a requirement that must comply with a general rule stated in another requirement or bound — see [below](#governed-by-vs-refines-vs-constrained-by) |
+| `governed_by` | `governs` | a requirement that must comply with a general rule stated in another requirement or bound — see [below](#governed_by-vs-refines-vs-constrained_by) |
 | `satisfies` | `satisfied_by` | decision or component → requirement or bound |
 | `constrained_by` | `constrains` | decision or component → bound — traceability only, does **not** feed [coverage](coverage.md#which-links-feed-coverage) |
 | `verifies` | `verified_by` | test → requirement or bound |
@@ -116,7 +117,7 @@ stdout.
 | `amends` | `amended_by` | log entry → earlier log entry |
 | `records` | `recorded_by` | log entry → decision |
 | `supersedes` | `superseded_by` | decision → older decision |
-| `blocked_by` | `blocks` | decision → anything holding it up — see [below](#blocked-by-and-the-cascade-report) |
+| `blocked_by` | `blocks` | decision → anything holding it up — see [below](#blocked_by-and-the-cascade-report) |
 | `part_of` | `contains` | an item belonging to a group — requirement, bound, decision, test, or component → group |
 | `drop_in` | `drop_in` (self-inverse) | component → drop-in second source, no review needed — see [below](#part-equivalence-drop_in-and-alternate) |
 | `alternate` | `alternate` (self-inverse) | component → functionally close, check before substituting — see [below](#part-equivalence-drop_in-and-alternate) |

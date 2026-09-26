@@ -99,9 +99,8 @@ alongside any board groups nested inside it.
 - **All the usual markdown.** See the [markdown reference](markdown.md), including
   tables and fenced code.
 - **Get an on-page contents list.** Any page with more than two `##` headings gets
-  a sticky contents list built from its headings, each with a stable anchor, which
-  highlights the section currently in view as you scroll. See [site
-  navigation](output.md#site-navigation) for the sidebar that carries it.
+  a sticky contents list built from its headings, each with a stable anchor. See
+  [site navigation](output.md#site-navigation) for the sidebar that carries it.
 
 Pages do **not** get `calc` blocks evaluated — arithmetic belongs to items, where
 it can be checked against a bound.
@@ -132,8 +131,6 @@ With no items, the coverage page, design log, full record, and `items.json` are 
 skipped, and the nav shows only your pages. A page called `index` becomes
 `index.html`; if you have both pages and items, the item dashboard moves to
 `items.html` so your landing page can be prose.
-
-A schema block is still required by the config format, even when nothing uses it.
 
 ## Building it
 
