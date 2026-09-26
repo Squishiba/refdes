@@ -4,6 +4,14 @@ behaviour. It settles the editor half of the requirement recorded in
 from an outside file", Jared, 2026-09-19) and is cross-referenced from
 `docs/design/browser-editor.md`, "Source-value picker".
 
+Update: §9 Q2 is answered — Jared decided on 2026-09-26 to go with the
+simplest option (A), to keep this moving rather than block on it: an item
+that cites no CSV yet gets the empty-state message and the exact YAML
+snippet to paste in by hand (§8); no citation-write patcher op ships with
+this. A narrower middle option — a patcher op that writes only a bare
+`path:` entry, short of a full citations row editor — was considered and set
+aside for later rather than built now.
+
 # Editor source-value picker
 
 ## 1. Problem
@@ -416,12 +424,12 @@ Recommendations are mine; the questions are Jared's to answer.
      with a manual step in the middle, which is what the picker exists to
      remove.
 2. **Should the picker be able to add the missing `citations:` entry?**
-   - **A. Not in v1 (recommended).** §8: show the rule and the snippet.
-   - B. Add a narrow `add_citation` patcher op alongside it.
-   - *The real cost of A:* the picker is useless on an item that has never
-     cited a CSV, which is every item the first time. If that reads as worse
-     than a collection-field patch op, B is defensible — but it should be
-     designed as the citations row editor, not as a special case here.
+   - **DECIDED: A** (Jared, 2026-09-26, to keep moving rather than block
+     here). Not in v1. §8: show the rule and the snippet.
+   - B. Add a narrow `add_citation` patcher op alongside it. Not taken; the
+     real cost of A — the picker is useless on an item that has never cited
+     a CSV, which is every item the first time — is accepted rather than
+     built around, and stays a candidate for a later pass.
 3. **Is showing the file's live value acceptable, or should the panel show only
    what the lockfile pins?**
    - **A. Show live, labelled, with the pinned value beside it (recommended).** §5.
