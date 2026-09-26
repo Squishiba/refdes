@@ -866,20 +866,18 @@ differently rolls every file back. Content hashes and calc hashes are
 carried forward across stamped baselines **and** seal files, because a
 spelling-only rewrite is not a content change.
 
-A tolerance that sat in the old annotation (`P : W ± 10% = V * I`) is the one
-case the rewrite does **not** do for you, though the build error names exactly
-the right fix (`write 'P = V * I ± 10% | W'; run 'refdes calc-rewrite'`). The
-line never computed under the old spelling, so the before-picture has no value
-to preserve, and the equality check fails:
+A tolerance that sat in the old annotation (`P : W ± 10% = V * I`) is rewritten
+like any other line, to exactly the form the build error names:
 
 ```
-refused:
-  a rewritten calc changes meaning:
-  items/board-a/log.yaml:7 P: was '' in unit 'W ± 10%', now evaluates to '14.4 W' in unit 'W' -- a rewrite must not change what a calc computes
+  items/board-a/log.yaml:18  P : W +/- 10% = V * I -> P = V * I ± 10% | W
 ```
 
-Apply that one line by hand, then re-run `calc-rewrite` for the rest. (A known
-source inconsistency, not a documented workflow.)
+That line never computed under the old spelling — a tolerance next to the
+unit cannot parse — so it had no before-picture to compare against, and the
+transactional guard has nothing to protect. The post-rewrite validation is
+what stands behind it: if the line still does not compute after the rewrite,
+the run refuses and rolls everything back, exactly as for any other line.
 
 Sealed append-only entries are never rewritten: their lines are listed on
 stdout and left exactly as written. That is why the retired spelling still

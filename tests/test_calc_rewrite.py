@@ -7,6 +7,8 @@ which is the honest baseline for a new command.
 
 from __future__ import annotations
 
+from unittest import mock
+
 import pytest
 from conftest import write_project_config
 
@@ -212,6 +214,114 @@ def test_value_changing_rewrite_refused_and_rolled_back(calc_project, monkeypatc
     assert "t : ms = 2.5 s" in (calc_project / "items" / "timing.yaml").read_text(
         encoding="utf-8"
     )
+
+
+# ------------------- the tolerance the build error points calc-rewrite at
+#
+# `check` says: a tolerance belongs on the right-hand side, write
+# `P = V * I ± 10% | W`, run `refdes calc-rewrite`. But calc-rewrite refused
+# the file, reporting the before-picture as "was '' in unit 'W +/- 10%'": the
+# line never computed under the old spelling, and the guard that is supposed
+# to skip exactly that case never fired.
+
+
+TOLERANCE_ITEM = (
+    "defaults:\n"
+    "  type: decision\n"
+    "  prefix: DEC\n"
+    "items:\n"
+    "  - id: DEC-900\n"
+    "    title: Tolerance case\n"
+    "    body: |\n"
+    "      ```calc\n"
+    "      V_supply = 12 V\n"
+    "      I_load = 1.2 A\n"
+    "      P : W +/- 10% = V_supply * I_load\n"
+    "      ```\n"
+)
+
+
+def test_tolerance_line_rewrites_rather_than_refuses(tmp_path):
+    write_project_config(tmp_path, SCHEMA)
+    items = tmp_path / "items"
+    items.mkdir()
+    (items / "tol.yaml").write_text(TOLERANCE_ITEM, encoding="utf-8")
+
+    result = calc_rewrite.apply(str(tmp_path))
+    assert result.ok, result.errors
+    text = (items / "tol.yaml").read_text(encoding="utf-8")
+    assert "P : W +/- 10%" not in text
+    # The tolerance lands on the right-hand side, spelled the way calc's
+    # TOLERANCE_SPLIT accepts and re-renders: U+00B1, not the ASCII "+/-" the
+    # old spelling happened to be typed with.
+    assert "P = V_supply * I_load ± 10% | W" in text
+
+
+def test_the_rewritten_tolerance_line_is_exactly_what_check_asked_for(tmp_path):
+    """The point of the fix: `check` names a specific replacement, and after
+    `calc-rewrite` the project must be in that state -- the same error gone."""
+    write_project_config(tmp_path, SCHEMA)
+    items = tmp_path / "items"
+    items.mkdir()
+    (items / "tol.yaml").write_text(TOLERANCE_ITEM, encoding="utf-8")
+
+    before = _load(tmp_path)
+    tolerance_error = next(
+        d for d in before.errors if "a tolerance belongs on the right-hand side" in d.message
+    )
+    assert "run 'refdes calc-rewrite'" in tolerance_error.message
+
+    assert calc_rewrite.apply(str(tmp_path)).ok
+    after = _load(tmp_path)
+    assert not [
+        d for d in after.errors if "a tolerance belongs on the right-hand side" in d.message
+    ]
+    assert not [d for d in after.errors if d.code == RETIRED_UNIT_SPELLING]
+
+
+def test_the_tolerance_line_still_evaluates_after_the_rewrite(tmp_path):
+    """Not a pass because the guard stopped looking: the rewritten line has to
+    compute the number the old spelling was reaching for, tolerance and all."""
+    write_project_config(tmp_path, SCHEMA)
+    items = tmp_path / "items"
+    items.mkdir()
+    (items / "tol.yaml").write_text(TOLERANCE_ITEM, encoding="utf-8")
+
+    assert calc_rewrite.apply(str(tmp_path)).ok
+    after = _load(tmp_path)
+    calc_line = next(c for c in after.item_by_id("DEC-900").calcs if c.name == "P")
+    assert calc_line.error is None
+    assert "14.4" in calc_line.result
+    assert calc_line.bounds, "a +/- 10% line must carry an interval, not a point"
+
+
+def test_a_line_that_computed_before_still_guards_its_value(tmp_path):
+    """The other direction, and the reason the guard exists: a line that DID
+    compute before must still be refused if the rewrite would change what it
+    computes. Skipping the no-value case must not have skipped this one."""
+    write_project_config(tmp_path, SCHEMA)
+    items = tmp_path / "items"
+    items.mkdir()
+    (items / "dec.md").write_text(MD_ITEM, encoding="utf-8")
+
+    def changes_the_value(line):
+        code = line.partition("#")[0]
+        match = calc.ANNOTATED_RE.match(code.strip())
+        if not match:
+            return None
+        name, unit, expression = match.groups()
+        if unit != "W":
+            return None
+        indent = line[: len(line) - len(line.lstrip())]
+        comment = line[line.index("#"):] if "#" in line else ""
+        return f"{indent}{name} = {expression} | mW{comment}"
+
+    before = (items / "dec.md").read_bytes()
+    with mock.patch.object(calc_rewrite, "rewrite_line", changes_the_value):
+        result = calc_rewrite.apply(str(tmp_path))
+    assert not result.ok
+    assert any("rolled back" in e for e in result.errors)
+    assert (items / "dec.md").read_bytes() == before
 
 
 def test_baselines_do_not_show_rewritten_items_as_changed(calc_project):
