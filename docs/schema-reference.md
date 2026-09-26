@@ -20,6 +20,7 @@ coverage:    { ... }   # coverage presentation (grouping subtypes under their pa
 date_format:  YYYY-MM-DD  # log-date order; default shown
 units:       { ... }   # preferred display units
 standard:    { ... }   # the bundled standard dictionary, or "none"
+equations:   { ... }   # project-defined named equations for calc blocks
 imports:     [ ... ]   # other projects to read
 boards:      { ... }   # opt-in board registry
 workspaces:  { ... }   # opt-in workspace registry, one level above boards
@@ -66,10 +67,18 @@ site:
   tokens:
     --accent: "#b3541e"      # both palettes
     --sans: Georgia, serif
+```
+
+```yaml
+site:
+  theme: slate
+  tokens:
     light:
       --bg: "#fdfcf9"        # light mode only
+      --sans: Georgia, serif
     dark:
       --bg: "#10141a"        # dark mode only
+      --sans: Georgia, serif
 ```
 
 A theme is a flat list of design-token pairs per palette and nothing else.
@@ -84,7 +93,10 @@ fetch.
 A bare `--token` pair applies to **both** palettes — that is what it has always
 meant, and it still does. Nesting under the `light:` and `dark:` headings
 targets one palette; a block that uses those headings may contain nothing
-else.
+else. The two forms are alternatives, not a mix: putting a bare `--accent`
+beside `light:`/`dark:` is a load error, because there would be no way to say
+which palette it belonged to. Repeat the pair under both headings when you
+want a token set in both.
 
 `site.tokens:` is **merged over** the theme, and the theme over the built-in
 default: a token you do not mention keeps its default value rather than going
@@ -308,6 +320,7 @@ types:
 |---|---|---|
 | `prefix` | first 3 letters, uppercased | ID prefix when a list file gives none |
 | `label` | title-cased name | Display name |
+| `plural` | title-cased `label` + `s` | Display name for a collection of this type; required alongside `label` under `extends` |
 | `append_only` | `false` | Seal items of this type after first build |
 | `preview` | `[]` | Fields shown in hover previews and index columns |
 | `fields` | `{}` | Legal fields |
@@ -362,6 +375,12 @@ per-link marker. That holds one way only: a list naming the subtype still
 refuses the parent. Inheritance is one level: extending a type that itself
 extends is a load error, as are extending a set, making a parent-required field
 optional, and turning `append_only` off under an append-only parent.
+
+The one-level rule is easy to trip on a project pinned to **hardware@3**, where
+`bound` is itself a subtype: `bound` is `extends: requirement`, so the example
+above does *not* load as written -- `thermal_bound` must extend `requirement`
+directly. Use a parent that is not itself a subtype (a project-declared base
+type, or `requirement`).
 
 ### Field options
 
@@ -699,6 +718,7 @@ boards:
     token: A
     path: brd-a
     conforms_to: [GRP-DBG]   # group items whose members this board owes
+    includes: [GRP-COMMON]  # group items whose members this board displays
 ```
 
 | Key | Required | Purpose |
@@ -707,6 +727,7 @@ boards:
 | `token` | no | Checked against item id prefixes; unset means no check |
 | `path` | no, defaults to the key | The `items/` path segment, if different from the key |
 | `conforms_to` | no | A list of group ids whose members get a per-(item, board) coverage result; anything but a list of strings, or a target that is not an existing group, is a build error ([multiple boards](multi-board.md#conforming-to-a-shared-contract)) |
+| `includes` | no | A list of group ids whose members are *displayed* on that board's scoped pages and labelled shared, via the group; never counted toward the board's own numbers. Same list-of-strings and existing-group errors as `conforms_to` ([including a shared group](multi-board.md#including-a-shared-group)) |
 
 Absent entirely, this key does nothing: no item gets a board, and the site is
 unaffected. With it, a board is the first path segment under `items/` matched
