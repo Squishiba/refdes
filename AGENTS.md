@@ -11,9 +11,10 @@ that as the default risk, not the exception.
   settings — `site:`, `standard:`, `id:`, `boards:`, `workspaces:`,
   `units:`, `history:`, `equations:`, and the process settings like
   `sigfigs:` and `release_gate:`. `refdes-schema.yaml` is optional and
-  holds only the project's own `types:`/`link_types:`/`field_sets:`
+  holds only the project's own `types:`/`link_types:`/`sets:`
   overlay — most projects never have one, and a `types:` left in
-  `refdes-project.yaml` is an error, not a silent merge.
+  `refdes-project.yaml` is an error, not a silent merge. (`field_sets:`
+  was the old name for `sets:`; leaving it is now a hard error too.)
 - The bundled standard is at **`hardware@3`, itself unreleased** (see
   `CHANGELOG.md`'s `[Unreleased]` section and `src/refdes/standards/hardware/v3/`).
   Don't assume `hardware@2` behavior still holds, and don't cite `hardware@3`

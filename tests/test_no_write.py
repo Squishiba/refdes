@@ -408,6 +408,150 @@ def test_former_ids_confirm_under_no_write_refuses(tmp_path, capsys):
     assert not any(_changed(before, root).values())
 
 
+# ---------------------------------------------------------- `--dry-run` is a
+# write promise too: `id --dry-run` and `stub-tests --dry-run` said they wrote
+# nothing while the *load* on the way in still minted `key:` lines into the
+# item sources. A dry run is `--no-write` for the command's own work; it has to
+# be for the load it does first, or "writes nothing" is only true of the part
+# nobody was looking at.
+
+
+def _run_dry_run(config, argv):
+    return cli_mod.main(["-c", config] + argv + ["--dry-run"])
+
+
+def test_id_dry_run_leaves_the_whole_tree_byte_identical(tmp_path, capsys):
+    root, config = _snapshot_project(tmp_path)
+    with open(root / "items" / "r.yaml", "a", encoding="utf-8") as fh:
+        fh.write("  - text: No id yet, pending allocation.\n")
+    capsys.readouterr()
+    before = _snapshot(root)
+
+    status = _run_dry_run(config, ["id"])
+    out = capsys.readouterr().out
+    assert status == 0
+    assert "would allocate" in out
+    assert not any(_changed(before, root).values())
+
+
+def test_id_dry_run_mints_no_key_lines(tmp_path, capsys):
+    """The specific leak: an id-less item has no `key:`, and loading mints one
+    and writes it back, so the dry run's "would allocate" answer came attached
+    to a file it had already edited."""
+    root, config = _snapshot_project(tmp_path)
+    with open(root / "items" / "r.yaml", "a", encoding="utf-8") as fh:
+        fh.write("  - text: No id yet, pending allocation.\n")
+    path = root / "items" / "r.yaml"
+    before = path.read_text(encoding="utf-8")
+
+    assert _run_dry_run(config, ["id"]) == 0
+    capsys.readouterr()
+    assert path.read_text(encoding="utf-8") == before
+    assert path.read_text(encoding="utf-8").count("key:") == before.count("key:")
+
+
+def test_stub_tests_dry_run_leaves_the_whole_tree_byte_identical(tmp_path, capsys):
+    from helpers import BLOCKS_ITEMS, BLOCKS_SCHEMA
+
+    write_project_config(tmp_path, BLOCKS_SCHEMA)
+    items = tmp_path / "items"
+    items.mkdir()
+    for name, text in BLOCKS_ITEMS.items():
+        (items / name).write_text(text, encoding="utf-8")
+    (tmp_path / "pages").mkdir()
+    config = str(tmp_path / "refdes-project.yaml")
+    capsys.readouterr()
+    before = _snapshot(tmp_path)
+
+    status = _run_dry_run(config, ["stub-tests"])
+    out = capsys.readouterr().out
+    assert status == 0
+    assert "would write" in out
+    assert not any(_changed(before, tmp_path).values())
+
+
+def test_id_dry_run_still_reports_the_allocation_it_would_make(tmp_path, capsys):
+    """The fix must not turn a dry run into a no-op: the number it reports is
+    the thing the user asked for."""
+    root, config = _snapshot_project(tmp_path)
+    with open(root / "items" / "r.yaml", "a", encoding="utf-8") as fh:
+        fh.write("  - text: No id yet, pending allocation.\n")
+    capsys.readouterr()
+
+    assert _run_dry_run(config, ["id"]) == 0
+    out = capsys.readouterr().out
+    assert "would allocate REQ-" in out
+    assert "would allocate 1 id(s)" in out
+
+
+def test_id_without_dry_run_still_mints_and_writes(tmp_path):
+    """The other direction: suppressing the load's writes must not leak into a
+    real run."""
+    root, config = _snapshot_project(tmp_path)
+    with open(root / "items" / "r.yaml", "a", encoding="utf-8") as fh:
+        fh.write("  - text: No id yet, pending allocation.\n")
+    before = _snapshot(root)
+
+    assert cli_mod.main(["-c", config, "id"]) == 0
+    assert any(_changed(before, root).values())
+
+
+# ------------------------------------- the global --no-write help text agrees with
+# the exit-code table in docs/cli-reference.md about which commands report.
+
+
+def _no_write_help(capsys):
+    with pytest.raises(SystemExit):
+        cli_mod.main(["--no-write", "--help"])
+    return capsys.readouterr().out
+
+
+def test_no_write_help_lists_calc_rewrite_among_the_reporting_commands(capsys):
+    """`calc-rewrite` sets `dry_run` from `--no-write` (cli.py's cmd_calc_rewrite)
+    exactly like `revise` and `id`, so it reports and writes nothing -- which is
+    what docs/cli-reference.md's global `--no-write` table says. The global help
+    string listed the reporting commands and left `calc-rewrite` out, so the
+    flag's own documentation under-promised what it suppresses."""
+    out = _no_write_help(capsys)
+    reporting = out.split("explicit write commands either")[1]
+    assert "calc-rewrite" in reporting
+
+
+def test_no_write_help_lists_every_command_the_docs_table_lists_as_reporting(capsys):
+    """Pins the whole reporting list, not just the one gap, so the next command
+    added to either side has to be added to the other."""
+    out = _no_write_help(capsys)
+    reporting = " ".join(out.split("explicit write commands either")[1].split())
+    listing = reporting.split(") or refuse")[0]
+    listed = {name.strip() for name in listing.split("(", 1)[1].rstrip(")").split(",")}
+    assert listed == {"id", "revise", "calc-rewrite", "stub-tests", "revision", "release", "keys adopt"}
+
+
+def test_calc_rewrite_under_no_write_reports_and_writes_nothing(tmp_path, capsys):
+    """The behaviour the help text now claims, pinned from the other side:
+    a project with a retired calc line in it, run under `--no-write`, reports
+    the line it would rewrite and leaves the file byte-identical."""
+    from test_calc_rewrite import YAML_ITEM, SCHEMA  # the retired spelling under test
+
+    write_project_config(tmp_path, SCHEMA)
+    items = tmp_path / "items"
+    items.mkdir()
+    timing = items / "timing.yaml"
+    timing.write_text(YAML_ITEM, encoding="utf-8")
+    assert "t : ms = 2.5 s" in timing.read_text(encoding="utf-8")
+
+    config = str(tmp_path / "refdes-project.yaml")
+    capsys.readouterr()
+    before = _snapshot(tmp_path)
+
+    status = _run_no_write(config, ["calc-rewrite"])
+    out = capsys.readouterr().out
+    assert status == 0
+    assert "would rewrite" in out
+    assert "t : ms = 2.5 s -> t = 2.5 s | ms" in out
+    assert not any(_changed(before, tmp_path).values())
+    assert "t : ms = 2.5 s" in timing.read_text(encoding="utf-8")
+
 # ---------------------------------------------------------------- the editor's
 # read path (docs/design/browser-editor.md, Slice 0): loader.load_readonly is
 # the one side-effect-free load/build entry point the browser editor consumes.

@@ -147,8 +147,26 @@ def mapping_from_dict(raw: dict[str, Any], source: str) -> Mapping:
 
 
 def load_mapping(path: str) -> Mapping:
-    with open(path, "r", encoding="utf-8") as fh:
-        raw = yaml_safe_load(fh) or {}
+    """Read a hand-written mapping file, refusing an unreadable one as the
+    configuration error it is.
+
+    A path that doesn't exist, isn't a file, or doesn't parse used to escape
+    as a raw `FileNotFoundError` / `IsADirectoryError` / `yaml.YAMLError`
+    traceback out of here and past the `except SchemaError` in `cmd_revise`
+    -- the one place that turns a bad mapping file into the exit-2 the
+    global exit-code table promises. Wrap all three here, so that handler is
+    the only exit and the message is one line naming the file.
+    """
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            raw = yaml_safe_load(fh) or {}
+    except OSError:
+        raise SchemaError(f"no such mapping file: {path}") from None
+    except yaml.YAMLError as exc:
+        # str(exc) is PyYAML's own multi-line mark-and-caret report; keep the
+        # location, collapse it to a single line so this stays a one-line error.
+        detail = " ".join(str(exc).split())
+        raise SchemaError(f"mapping file could not be parsed: {path}: {detail}") from None
     return mapping_from_dict(raw, path)
 
 
@@ -172,13 +190,24 @@ def _collisions(mapping_dict: dict[str, str], label: str) -> list[str]:
     return errors
 
 
-def check_ambiguous(project: Project, mapping: Mapping) -> list[str]:
+def check_ambiguous(
+    project: Project, mapping: Mapping, schema_moving: bool = False
+) -> list[str]:
     """Every reason `mapping` cannot safely apply to `project`, checked
     before anything is touched -- same posture as `former_ids.confirm` and
     `lifecycle.stamp`: refuse rather than guess. An old==new entry is a
     no-op, not an error (lets a chained migration.yaml name a rename that
     happens not to apply to one particular project without that being a
-    hard failure)."""
+    hard failure).
+
+    `schema_moving` is set only by `apply_standard_upgrade`, the one caller
+    that legitimately renames a name the *current* schema has never heard of
+    -- hardware v2's `equivalent` becomes v3's `drop_in`, and `drop_in` is
+    not a v2 link type at all, because the new standard's own vocabulary
+    arrives with the same step. Plain `revise` passes False: it only ever
+    rewrites item files and never `refdes-schema.yaml`/the standard pin, so
+    every name in the mapping has to be one the project already knows.
+    """
     errors: list[str] = []
     errors += _collisions(mapping.types, "type")
     errors += _collisions(mapping.links, "link")
@@ -200,6 +229,34 @@ def check_ambiguous(project: Project, mapping: Mapping) -> list[str]:
             errors.append(
                 f"link rename {old!r} -> {new!r}: {new!r} already names an existing link type"
             )
+        # The other direction. A *type* rename onto a name the project lacks
+        # is caught for us: the rewritten project fails to load with
+        # `unknown type`, and apply() rolls the whole thing back. An unknown
+        # *link* verb is only a warning, so nothing downstream noticed --
+        # `links: {refines: narrows}` rewrote every `refines:` line to
+        # `narrows:`, and each one silently stopped being a traceability
+        # edge. Validated here instead, before anything is written.
+        #
+        # Scoped to renames that actually apply to this project (the old verb
+        # is one it knows) so a mapping naming a verb this project never had
+        # still reports "nothing to do" rather than a hard failure, and
+        # skipped entirely for a standard upgrade, whose target verb arrives
+        # with the new version's own vocabulary.
+        if (
+            not schema_moving
+            and _verb_known(project, old)
+            and not _verb_known(project, new)
+            and new not in mapping.links
+        ):
+            errors.append(
+                f"link rename {old!r} -> {new!r}: {new!r} is not a link type this "
+                "project knows, and `refdes revise` only rewrites item files -- "
+                "the data would be renamed into a verb no schema declares, and an "
+                "unknown link verb is a warning rather than an error, so every "
+                "edge this rename touched would silently stop being one. Add the "
+                "verb to refdes-schema.yaml's `link_types:` (and to the renaming "
+                "type's own `links:`) and re-run."
+            )
 
     for tname, frenames in mapping.fields.items():
         spec = project.types.get(tname)
@@ -215,6 +272,15 @@ def check_ambiguous(project: Project, mapping: Mapping) -> list[str]:
                 )
 
     return errors
+
+
+def _verb_known(project: Project, name: str) -> bool:
+    """Whether `name` is a link verb this project can actually resolve --
+    from either end of the edge. `project.link_types` holds the declared
+    direction; `project.inverse_of` is the two-way map schema.py builds, so
+    it also answers for `refined_by`, `verified_by`, and every other inverse
+    spelling an item file may legitimately use."""
+    return name in project.link_types or name in project.inverse_of
 
 
 def check_body_merge_conflicts(project: Project, mapping: Mapping) -> list[str]:
@@ -1117,7 +1183,9 @@ def apply(
             + [str(d) for d in blocking],
         )
 
-    ambiguous = check_ambiguous(project_before, mapping)
+    ambiguous = check_ambiguous(
+        project_before, mapping, schema_moving=standard_transition is not None
+    )
     ambiguous += check_body_merge_conflicts(project_before, mapping)
     if ambiguous:
         return RevisionResult(ok=False, errors=ambiguous)

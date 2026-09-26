@@ -154,10 +154,26 @@ def _snapshot_diff(before: dict, after: dict) -> list[str]:
     for pos, calcs in sorted(before.items()):
         after_calcs = after.get(pos, {})
         for name, (result, unit) in sorted(calcs.items()):
-            if result is None:
-                # The line did not compute before the rewrite (a retired
-                # spelling with a second defect, say). There is no value to
-                # preserve; the post-rewrite validation guards that line.
+            if not result:
+                # The line did not compute before the rewrite, so there is no
+                # value to preserve and nothing for a comparison to protect;
+                # the post-rewrite validation guards that line instead.
+                #
+                # This used to read `result is None`, which never fired:
+                # `CalcLine.result` is a `str` and build.py only assigns it
+                # when the outcome carried a value, so a line that did not
+                # compute holds the dataclass default `""`, never None. The
+                # case the comment describes -- a retired spelling that never
+                # evaluated -- therefore fell through to the comparison below
+                # and was reported as a meaning change against its own empty
+                # before-picture. That is the tolerance line: `P : W +/- 10%
+                # = V * I` cannot parse (finding 9 -- a tolerance belongs on
+                # the right-hand side), so it never computed, its annotation
+                # is the un-split `W +/- 10%`, and rewriting it to the pipe
+                # form `check` itself tells you to write produced a real
+                # value and a `W` unit. Both differences were artefacts of
+                # the line never having computed, and the guard refused the
+                # exact rewrite the build error named.
                 continue
             new_result, new_unit = after_calcs.get(name, (None, None))
             if (new_result, new_unit) == (result, unit):

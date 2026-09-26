@@ -79,6 +79,29 @@ def _baseline_carries_keys(baseline) -> bool:
     )
 
 
+def _entry_for_relabel(baseline, old_id: str, key: str) -> dict:
+    """The stamped record for a relabelled pair, in either §5 storage shape.
+
+    A baseline that is *not* adopted is keyed by display id and carries the
+    surrogate inside a `key:` field, so indexing the map by the surrogate --
+    which is what `diff.relabelled` hands back -- finds nothing and every
+    `old_title` came back empty. An adopted baseline *is* keyed by surrogate,
+    so the same lookup works there. Resolve both, by key first (that is the
+    identity the rename was proven by) and by display id second, so a mixed
+    baseline left by an uncomparable historical entry still resolves.
+    """
+    entry = baseline.items.get(key)
+    if entry is not None:
+        return entry
+    for record_id, candidate in baseline.items.items():
+        identity = keys_mod.baseline_identity(record_id, candidate)
+        if identity is None:
+            continue
+        if identity[0] == key or identity[1] == old_id:
+            return candidate
+    return {}
+
+
 def propose(
     project: Project, baseline_name: str | None = None, write: bool = True
 ) -> list[Candidate]:
@@ -107,7 +130,7 @@ def propose(
             new_item = project.item_by_id(new_id)
             if new_item is None or new_item.former_ids:
                 continue
-            entry = baseline.items.get(_key) or {}
+            entry = _entry_for_relabel(baseline, old_id, _key)
             out.append(
                 Candidate(
                     old_id=old_id,

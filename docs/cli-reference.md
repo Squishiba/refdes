@@ -268,13 +268,21 @@ list entry it sits, so the file never ends up holding two `id:` keys.
 
 | Option | Effect |
 |---|---|
-| `--dry-run` | Show what would be allocated and skip the `id:` write-back. It is not write-free: loading the project can still mint missing surrogate `key:` fields and refresh `.refdes/schema.json`. Put the global `--no-write` first for a preview that writes nothing at all. |
+| `--dry-run` | Show what would be allocated and write nothing at all — no `id:` write-back, and no incidental load-time write either, so every source file is left byte-identical. |
 
 ```bash
 refdes id --dry-run
 refdes --no-write id --dry-run
 refdes id
 ```
+
+A `--dry-run` is a write promise for the whole run, not just for the
+allocation it reports: loading the project mints missing surrogate `key:`
+fields and expands bare link references into `DISPLAY-ID@key` composites
+(surrogate [keys](design/keys.md)), so a dry run that only suppressed its own
+`id:` write-back would still have edited the item files on the way in. It does
+not — put the global `--no-write` first only when you want the run refused or
+re-reported in `--no-write` terms as well.
 
 ```
 allocated REQ-PWR-005  (items/requirements/power.yaml:36) The unit shall tolerate a reversed input without damage.
@@ -724,6 +732,23 @@ would change 2 file(s):
   items/board-a/requirements.yaml:10  id: REQ-PWR-001 -> id: NEED-PWR-001
 ```
 
+A mapping file that cannot be read is refused before anything is touched —
+no project load, no minting, no dry-run report — with a one-line `error:` and
+exit 2, like any other configuration error:
+
+```
+$ refdes revise nope.yaml
+error: no such mapping file: nope.yaml
+```
+
+A mapping file that exists but doesn't parse gets the same treatment, with
+PyYAML's own mark-and-caret detail collapsed onto the one line:
+
+```
+$ refdes revise broken.yaml
+error: mapping file could not be parsed: broken.yaml: while parsing a flow sequence in "<unicode string>", line 2, column 16: requirement: [unclosed ^ expected ',' or ']', but got '<stream end>'
+```
+
 A mapping that doesn't apply to this project at all is not an error — it
 prints `nothing to do -- mapping doesn't apply to this project` and exits 0.
 On success, a rename that moved a stamped baseline's entries forward says so
@@ -745,14 +770,37 @@ So on a hand-rolled schema, a type or required-field rename is a **hand edit
 to both files, made together**: rename the key in `refdes-schema.yaml` and the
 `type:`/`prefix:` and `id:` lines in the item files in one editing pass, then
 run `refdes check` to confirm the two agree. The renames `refdes revise` *can*
-do alone on such a project are the prefix, id, and **optional**-field renames
-— an optional field rename lands as an `unknown field 'label' on spec` warning
-until you add the field to the schema yourself.
+do alone on such a project are the prefix, id, **optional**-field, and
+**link-verb** renames — an optional field rename lands as an
+`unknown field 'label' on spec` warning until you add the field to the schema
+yourself, and a link-verb rename has to name a verb the project already knows.
+
+**A link rename onto a verb the project does not have is refused up front,
+before anything is written.** A `links:` entry renaming `refines` to `narrows`
+on a project that declares no `narrows` is a hand edit to both files, made
+together, exactly like a type rename:
+
+```
+$ refdes revise rename.yaml
+refused:
+  link rename 'refines' -> 'narrows': 'narrows' is not a link type this project knows, and `refdes revise` only rewrites item files -- the data would be renamed into a verb no schema declares, and an unknown link verb is a warning rather than an error, so every edge this rename touched would silently stop being one. Add the verb to refdes-schema.yaml's `link_types:` (and to the renaming type's own `links:`) and re-run.
+```
+
+The refusal is deliberately early rather than left to the after-rewrite
+validation, because a renamed-into-nothing verb is only a *warning* — nothing
+downstream would have rolled it back. Renaming a verb the project *does* have
+is fine, from either end of the edge: `refines: refined_by` is accepted, since
+a link is spelled from whichever side the item is on. Renaming onto a verb that
+is already in use is a different refusal, the collision one
+(`'narrows' already names an existing link type`).
 
 For a bundled standard's own version bump there is no such problem: the
 schema moves with the data inside one verified operation, because
 `refdes standard upgrade` (above) supplies the schema edit itself. That is why
-it exists and why `revise` defers to it.
+it exists and why `revise` defers to it. A standard's own migration is allowed
+to rename a verb the *current* version has never heard of — hardware v2's
+`equivalent` becomes v3's `drop_in`, and `drop_in` is not a v2 verb at all —
+so the new version's vocabulary arrives with the same step.
 
 **Structured references move; prose does not.** A link's own target list —
 in either YAML spelling, `key: [A, B]` or a block sequence of `- A` entries
@@ -818,20 +866,18 @@ differently rolls every file back. Content hashes and calc hashes are
 carried forward across stamped baselines **and** seal files, because a
 spelling-only rewrite is not a content change.
 
-A tolerance that sat in the old annotation (`P : W ± 10% = V * I`) is the one
-case the rewrite does **not** do for you, though the build error names exactly
-the right fix (`write 'P = V * I ± 10% | W'; run 'refdes calc-rewrite'`). The
-line never computed under the old spelling, so the before-picture has no value
-to preserve, and the equality check fails:
+A tolerance that sat in the old annotation (`P : W ± 10% = V * I`) is rewritten
+like any other line, to exactly the form the build error names:
 
 ```
-refused:
-  a rewritten calc changes meaning:
-  items/board-a/log.yaml:7 P: was '' in unit 'W ± 10%', now evaluates to '14.4 W' in unit 'W' -- a rewrite must not change what a calc computes
+  items/board-a/log.yaml:18  P : W +/- 10% = V * I -> P = V * I ± 10% | W
 ```
 
-Apply that one line by hand, then re-run `calc-rewrite` for the rest. (A known
-source inconsistency, not a documented workflow.)
+That line never computed under the old spelling — a tolerance next to the
+unit cannot parse — so it had no before-picture to compare against, and the
+transactional guard has nothing to protect. The post-rewrite validation is
+what stands behind it: if the line still does not compute after the rewrite,
+the run refuses and rolls everything back, exactly as for any other line.
 
 Sealed append-only entries are never rewritten: their lines are listed on
 stdout and left exactly as written. That is why the retired spelling still
@@ -939,13 +985,9 @@ minted automatically:
 ```
 $ refdes former-ids propose
 2 candidate former-id mapping(s):
-  CAN_00 (requirement '') -> REQ-CAN-001 ('The bus shall recover...')  exact match (surrogate key)
-  TST-CAN-00 (test '') -> TST-CAN-004 ('Verify CAN_00')  exact match (surrogate key)
+  CAN_00 (requirement 'The bus shall recover...') -> REQ-CAN-001 ('The bus shall recover...')  exact match (surrogate key)
+  TST-CAN-00 (test 'Verify CAN_00') -> TST-CAN-004 ('Verify CAN_00')  exact match (surrogate key)
 ```
-
-The old title prints empty on this path: the pairing is read out of the
-baseline's key identity rather than by id, and the old title does not come
-back with it (see `propose` in `src/refdes/former_ids.py`).
 
 `--confirm` names the candidates to accept, and each one is written in the
 order you listed them:
@@ -969,7 +1011,7 @@ candidate list is printed either way, then the refusal:
 ```
 $ refdes former-ids propose --confirm NOPE-999
 1 candidate former-id mapping(s):
-  CAN_00 (requirement '') -> REQ-CAN-001 ('The bus shall recover...')  exact match (surrogate key)
+  CAN_00 (requirement 'The bus shall recover...') -> REQ-CAN-001 ('The bus shall recover...')  exact match (surrogate key)
 error: not a currently proposed candidate: NOPE-999 -- run 'refdes former-ids propose' again to see current candidates
 ```
 
