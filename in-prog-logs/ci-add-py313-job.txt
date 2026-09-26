@@ -53,8 +53,25 @@ Verification
 
 CI result (the part that actually counts)
 ----------------------------------------
-PR run: all three checks green -- test (ubuntu-latest), test (windows-latest),
-test313 (ubuntu-latest / py3.13). See in-prog-logs/ for the run ids.
+PR #48, run 36212474583, conclusion: success. All three jobs green:
+  success  windows-latest            3.11
+  success  ubuntu-latest             3.11
+  success  ubuntu-latest / py3.13    3.13   (job 108321752837, 2m50s)
+
+The new job's own log proves it is a genuinely different install, which is
+the whole point of it (`gh api .../actions/jobs/108321752837/logs`):
+  3.13 job: Successfully set up CPython (3.13.15) ... pint-0.26.1
+  3.11 job: Python/3.11.16 ...           pint-0.25.3
+  3.13 pytest: 2292 passed, 1 skipped in 155.82s
+So the two jobs are not the same suite run twice -- they resolve different
+pint releases, and 0.26 is the one that spells micro as U+03BC. That is the
+micro-sign bug's habitat, and CI now stands on it.
+
+Pre-existing annotations on the run (also on main, not from this change):
+Node.js 20 deprecation on checkout@v4/setup-python@v5, and the
+ubuntu-latest -> Ubuntu 26 migration notice.
+
+NOT merged, per instructions.
 
 Difficulties / notes
 --------------------
