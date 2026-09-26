@@ -11,6 +11,8 @@ instead of letting the listing choose one.
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from refdes import sources
@@ -189,6 +191,63 @@ def test_list_entries_fails_on_a_bad_header_like_extract_does(tmp_path):
     # A file that is not there says so rather than listing nothing.
     with pytest.raises(SourceExtractionError, match="cannot read file"):
         sources.list_entries(tmp_path / "absent.csv")
+
+
+def test_list_entries_names_the_file_with_the_label_it_is_given(tmp_path):
+    # `label` is the file's name in every message the result carries, including
+    # the per-row `problem` a successful listing ships. A caller reading a file
+    # on an author's behalf -- the editor serving `project.root + canon` -- must
+    # be able to say which file without saying where on the server it is, and
+    # this is the reader-level half of that promise: the label the caller passes
+    # is the label the reader uses, in both the failing and the succeeding case.
+    path = _write(tmp_path, "key,value\nd,1\nd,2\nbad,abc\n")
+    listing = sources.list_entries(path, label="analysis/budget.csv")
+    assert str(tmp_path) not in json.dumps([e.problem for e in listing.entries])
+    for entry in listing.entries:
+        assert entry.problem.startswith("analysis/budget.csv:"), entry.problem
+    assert "appears on 2 rows (lines 2, 3)" in listing.entries[0].problem
+    assert "not a plain ASCII decimal" in listing.entries[2].problem
+    # A file that is not there is named by the label, and the OS error's own
+    # text -- which interpolates the path it was raised on -- does not undo it.
+    with pytest.raises(SourceExtractionError) as info:
+        sources.list_entries(tmp_path / "absent.csv", label="analysis/budget.csv")
+    assert "analysis/budget.csv: cannot read file: No such file or directory" in str(
+        info.value
+    )
+    assert str(tmp_path) not in str(info.value)
+    # The label reaches the whole-file failures too, not just the row ones.
+    for text, fragment in (
+        ("Key,value\nfoo,1\n", "no 'key' column"),
+        ('key,value\nfoo,"1\n', "malformed CSV"),
+        ("", "the file is empty"),
+    ):
+        with pytest.raises(SourceExtractionError) as info:
+            sources.list_entries(_write(tmp_path, text), label="analysis/budget.csv")
+        assert fragment in str(info.value)
+        assert str(tmp_path) not in str(info.value)
+    with pytest.raises(SourceExtractionError) as info:
+        sources.list_entries(path, label="analysis/budget.csv", max_bytes=1)
+    assert "analysis/budget.csv: the file is" in str(info.value)
+    assert str(tmp_path) not in str(info.value)
+    # And without a label the reader still names the file it read, for the
+    # callers that are reading a file whose path they already have.
+    default = sources.list_entries(_write(tmp_path, "key,value\nd,1\nd,2\n"))
+    assert default.entries[0].problem.startswith(
+        (tmp_path / "t.csv").as_posix() + ":"
+    )
+    # A reader that cannot enumerate is named by the label too.
+    class NoEnumerate:
+        name = "opaque"
+        extensions = (".opaque",)
+
+    sources.register(NoEnumerate())
+    try:
+        with pytest.raises(SourceExtractionError, match="analysis/budget.csv:"):
+            sources.list_entries(
+                _write(tmp_path, "x\n", "t.opaque"), label="analysis/budget.csv"
+            )
+    finally:
+        sources._READERS.pop(".opaque", None)
 
 
 def test_a_reader_without_list_entries_raises_instead_of_returning_nothing(tmp_path):

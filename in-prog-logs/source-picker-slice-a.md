@@ -9,12 +9,10 @@ Branch `editor/source-picker-slice-a`, off `origin/main` (`16bbc64`).
 
 ## Status
 
-Done and committed. Full suite green (2335 passed, 1 skipped — up from 2292 on
-`main`, so +43 new tests), `ruff check --select E9,F src tests` clean. PR #49
-against `main`, run 36215022947, all three jobs green. **Not merged** (Jared
-reviews and lands).
+Done and committed. Full suite green, `ruff check --select E9,F src tests`
+clean. PR #49 against `main`. **Not merged** (Jared reviews and lands).
 
-CI, which is the part that actually counts:
+Final CI on the branch, run 36215298825, all three jobs green:
 
 ```
 success  windows-latest          3.11   2336 passed in 204.11s
@@ -24,10 +22,8 @@ success  ubuntu-latest           3.11   (also runs ruff --select E9,F: "All chec
 
 The Windows job is the one worth noting for this change: it is where the
 `test_the_picker_never_returns_an_absolute_server_path` assertion has teeth,
-because `os.path.join` yields backslashes there and `_relativise` has to
-normalise the target's separators before folding the reader's diagnostics back
-to a project-relative spelling. The 2336-vs-2335 difference is the existing
-Windows-only citation test, not anything from this slice.
+because `os.path.join` yields backslashes there. The 2336-vs-2335 difference is
+the existing Windows-only citation test, not anything from this slice.
 
 ## What landed
 
@@ -127,15 +123,12 @@ is also what §9 Q4 recommended, and said so in the payload.
 - **The lockfile is read through `project._source_lock`** when the loaded model
   already holds the parsed copy (`build.py:1112,1266`), else
   `citations.load_lockfile`. Read-only either way; writing it is Slice B.
-- **No absolute server path leaves the process.** This one needed real care: a
-  reader names the file it was handed, and what it is handed is
-  `project.root + canon`, so its diagnostics carry the absolute path. Every
-  `SourceExtractionError.problems` list is folded back to the canonical
-  project-relative spelling before it is put in a payload
-  (`_relativise`). `test_the_picker_never_returns_an_absolute_server_path` walks
-  every string in six payloads — including a reader's own "no 'value' column"
-  text and a refused `/etc/passwd` — and asserts none of them is absolute, starts
-  with `/`, or contains a backslash.
+- **No absolute server path leaves the process.** See the review finding below —
+  the first attempt at this was incomplete, and the fix is now at the source
+  rather than in a post-hoc rewrite.
+  `test_the_picker_never_returns_an_absolute_server_path` walks every string in
+  six payloads and asserts none of them is absolute, starts with `/`, or
+  contains a backslash.
 
 ## `?q=`
 
@@ -177,24 +170,130 @@ genuinely sealed fixture (`log-seal.yaml` on disk) and a genuine
   are labelled suggestions; there is no default and no stored per-key choice
   (§9 Q7).
 
-## Environment gotcha worth writing down
+## Review finding: a real leak, in the success path (PR #49, pre-merge)
 
-The shared venv at `/home/jorb/work/venv-refdes` has refdes installed
-**editable from `/home/jorb/work/refdes`** — a different checkout, on `main` at
-`16bbc64`. Running `/home/jorb/work/venv-refdes/bin/python -m pytest` from this
-worktree imports the *other* tree's `src/refdes`, and the new tests fail on a
-missing `list_entries` rather than on anything real. The correct invocation here
-is:
+Found in review, fixed on the same branch before merge.
+
+**The bug.** An authorized, correctly-cited CSV with a duplicate key returned
+rows whose `problem` read `/home/<user>/…/analysis/power.csv: key 'dup' appears
+on 2 rows…` — the full absolute server path, revealing the server's home
+directory and username to anything that could reach the endpoint. The
+top-level `path` field was correctly relative, so this directly contradicted
+this module's own docstring ("the path a payload carries back is the canonical
+project-relative one this call returns, so no absolute server path leaves the
+process"). Repro is in `.scratch/repro_sp49.py`: before the fix, 4 of 4
+row-level problems leaked; after, 0 of 4.
+
+**Why my own test missed it.** `test_the_picker_never_returns_an_absolute_server_path`
+walks every string in six payloads, which is the right shape — but every one of
+those six was a *failing* listing or a *refusal*. The success path, the one that
+actually ships rows, was never in the list. A leak test that only ever sees one
+branch is a test of the branch you remembered, not of the promise.
+
+**Root cause.** `sources.list_entries()` did `label = path.as_posix()`, with no
+way to separate *the path bytes are read from* from *the name the messages say*.
+`serve/sources.py` had a `_relativise()` helper that did the right
+post-hoc string-replace — but it was only ever applied to `exc.problems` in
+`_listing()`'s whole-file-failure branch. The per-row `entry.problem` strings,
+shipped by `_entry_dict()` on the success path, never went through it.
+
+**The fix: (a), at the source.** `sources.list_entries()` (module level) and
+`CsvReader.list_entries()` take `label: str | None = None`, defaulting to
+`path.as_posix()`. `serve/sources.py`'s `_listing()` passes `label=canon`. The
+absolute path is now never the source of the label, so every string the reader
+produces — row problems *and* whole-file diagnostics — is project-relative
+before it reaches the serve layer, and `_relativise()` is **deleted**. That is
+the real argument for (a) over (b): a post-hoc rewriter is a thing you have to
+remember to apply to every new field, and this one was remembered for one branch
+and not the other.
+
+**A second leak the regression test caught on the way in.** `label=` alone was
+not enough: `sources.py` interpolated `str(OSError)` into the "cannot read file"
+message, and `str(OSError)` *itself* contains the absolute filename it was
+raised on. A cited-but-absent file therefore still leaked the server root, even
+with a correct label. Fixed with a `_cannot_read()` helper that uses
+`exc.strerror` ("No such file or directory", "Permission denied" — no path in
+it) and falls back to the errno. So there were two layers to the same bug: the
+label the reader *writes*, and text it *interpolates from the OS*.
+
+**And a third vector, found by auditing rather than by testing.** After the fix
+I wrote a scratch script (`.scratch/audit_leaks.py`) that walks *every* string
+in *every* reachable payload — 67 payloads / 167 strings, covering successful
+listings with row problems, header failures, the byte-cap refusal, a missing
+file, no registered reader, a remote URL, an escaping path, an absolute path, an
+unknown path, and `propose` with a valid unit, a bad unit, a colliding name and
+a non-identifier name. Against the pre-fix code it reports **6 leaks**; against
+the fixed code, **0**. Six, not four, because `/propose` quotes a row's
+`problem` back verbatim when it refuses an unselectable key — so the same leak
+reached a *refusal* on a second endpoint, which neither the reported repro nor
+my own new test covered. Both vectors are now in the regression test. I would
+not have found that one by reading the diff; it took walking every payload.
+
+**Tests added (+2).**
+- `test_a_row_problem_never_carries_an_absolute_server_path` (endpoint): an
+  authorized, correctly-cited CSV with a duplicated key, a non-numeric value and
+  a blank key; asserts three problems are produced (so it cannot pass
+  vacuously), that none contains the project root, that each starts with
+  `analysis/budget.csv:`, and that the *whole payload* walked contains no
+  absolute or backslash path. Then the same walk over three `/propose`
+  responses on that same file — the duplicated key (refused), the non-numeric
+  key (refused) and the good key (200) — because the refusal quotes the row
+  problem back.
+- `test_list_entries_names_the_file_with_the_label_it_is_given` (reader): pins
+  the reader-level contract — the label reaches row problems, header failures,
+  malformed-CSV failures, the empty-file failure, the byte-cap refusal, the
+  "cannot read file" message, and the "reader cannot enumerate" message; and
+  that omitting the label still names the file the caller already has.
+
+**Both verified failing against the pre-fix code first** (pre-fix modules
+restored from `HEAD` over the working tree, tests run, fix restored, checksums
+re-verified):
+- endpoint test: `assert '/tmp/pytest-of-jorb/…/test_a_row_problem_never_carri0'
+  not in '…/analysis/budget.csv: key 'dup' appears on 2 rows (lines 3, 4)…'`
+- reader test: `TypeError: list_entries() got an unexpected keyword argument
+  'label'`
+
+After the fix: 2337 passed, 1 skipped; `ruff check --select E9,F src tests`
+clean.
+
+**Deliberate asymmetry, so nobody "fixes" it later.** `extract()` keeps
+`path.as_posix()` and the full `str(OSError)`. Its problems are printed by
+`refdes fetch` on the console of the author who ran the command, and never
+reach a response, so it has no serving caller to protect. `list_entries` does
+have one, which is the whole reason for the parameter.
+
+**No new changelog fragment.** This is a fix to an unshipped slice in the same
+unmerged PR; `changelog.d/source-picker-reads.added.md` already claims "no
+absolute server path leaves the process", and that claim is now actually true.
+A separate `.fixed.md` would describe a bug no release ever contained.
+
+## How to run the suite here (corrected — my first version of this was wrong)
+
+I originally wrote in this log that the shared venv
+(`/home/jorb/work/venv-refdes`) is installed editable from `/home/jorb/work/refdes`
+— a different checkout, on `main` — and that `PYTHONPATH=src` is required. **That
+claim is wrong**, and I only found out because a verification step behaved
+impossibly: I staged pre-fix modules in a scratch directory and set
+`PYTHONPATH` to them, and the "pre-fix" tests still passed.
+
+The actual mechanism is `tests/conftest.py:13`, which runs before any test
+module and does `sys.path.insert(0, <repo>/src)` unconditionally. So the bare
+command
 
 ```
-PYTHONPATH=src /home/jorb/work/venv-refdes/bin/python -m pytest -q
+/home/jorb/work/venv-refdes/bin/python -m pytest -q
 ```
 
-`PYTHONPATH` precedes site-packages `.pth` entries, so this worktree's `src`
-wins. CI is unaffected: `.github/workflows/tests.yml` does
-`pip install -e ".[dev]"` inside the repo it checks out. **A bare
-`…/bin/python -m pytest` in this worktree is not evidence of anything** — worth
-knowing before trusting a green run here.
+**does** test this worktree, `PYTHONPATH` or not, and the full-gate numbers
+quoted throughout this log are from that bare command. Confirmed directly:
+`refdes.sources.__file__` under pytest resolves inside this worktree, and the
+whole 2337-test run above used no `PYTHONPATH`.
+
+The venv's `.pth` does point at the other checkout, which is why this looked
+like a hazard, but `conftest.py` wins over it and the hazard is not real. Worth
+having checked rather than asserted — the log had been making a confident claim
+about the test environment that was false, which is the exact failure mode this
+project's own instructions warn about.
 
 ## Test names vs §10
 
@@ -213,6 +312,8 @@ design both call for them and §10 is a minimum:
   the whole surface, plus a byte comparison of the lockfile across all of it)
 - `test_a_no_write_server_still_offers_the_picker`
 - `test_the_proposal_refuses_a_key_source_cannot_express`
+- `test_a_row_problem_never_carries_an_absolute_server_path` (the review fix)
+- `test_list_entries_names_the_file_with_the_label_it_is_given` (the review fix)
 
 ## Verified, not remembered
 

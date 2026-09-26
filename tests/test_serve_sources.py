@@ -587,6 +587,70 @@ def test_the_picker_is_not_a_write_surface(served):
         assert snapshot_tree(root) == before
 
 
+def test_a_row_problem_never_carries_an_absolute_server_path(tmp_path):
+    """§6, and the case the payload-level walk above missed.
+
+    Every string that reaches a response is checked there -- but that test only
+    ever read *failing* listings and refusals. A listing that SUCCEEDS still
+    ships the reader's per-row diagnostics on each unselectable row, and those
+    name the file the reader was handed, which is `project.root + canon`. The
+    top-level `path` field was always relative; the row `problem` strings were
+    not, and they handed the server's home directory and username to anything
+    that could reach the endpoint.
+
+    So this asserts the narrow thing directly, on the narrowest possible
+    fixture: an authorized, correctly-cited CSV whose rows have problems. If
+    the label the reader writes ever stops being the caller's label again, this
+    fails.
+    """
+    root = make_root(tmp_path, csv=BROKEN_CSV)
+    app = start(root)
+    try:
+        client = Client(app)
+        absolute = str(root.resolve())
+        url = sources_url("DEC-001", "/entries") + "?path=analysis/budget.csv"
+        status, payload = client.api_get(url)
+        assert status == 200, payload
+        # The fixture has to be one that actually produces row problems, or
+        # this test would pass vacuously.
+        problems = [e for e in payload["entries"] if e["problem"]]
+        assert len(problems) == 3, payload["entries"]
+
+        for entry in payload["entries"]:
+            for text in (entry["problem"], entry["key"], entry["raw"], entry["value"]):
+                assert absolute not in text, (entry, text)
+            if not entry["problem"]:
+                continue
+            # ...and the canonical spelling is what is there instead.
+            assert entry["problem"].startswith("analysis/budget.csv:"), entry["problem"]
+            assert not entry["problem"].startswith("/"), entry["problem"]
+            assert "\\" not in entry["problem"], entry["problem"]
+
+        # The whole payload, walked, not just the problem strings: the leak was
+        # a field-by-field oversight once already.
+        for text in strings(payload):
+            assert absolute not in text, text
+            assert not text.startswith("/"), text
+            assert "\\" not in text, text
+
+        # The proposal endpoint quotes a row's problem back when it refuses an
+        # unselectable key, so it carried the same leak by a different route --
+        # a refusal, not a row. Both are covered, and the valid key on the same
+        # broken file is covered too.
+        for key, unit in (("dup", "1"), ("not_a_number", "1"), ("rail_load", "W")):
+            status, payload = client.api_get(
+                sources_url("DEC-001", "/propose")
+                + f"?path=analysis/budget.csv&key={key}&unit={unit}"
+            )
+            assert status in (200, 422), (key, payload)
+            for text in strings(payload):
+                assert absolute not in text, (key, text)
+                assert not text.startswith("/"), (key, text)
+                assert "\\" not in text, (key, text)
+    finally:
+        app.stop()
+
+
 def test_the_picker_never_returns_an_absolute_server_path(tmp_path):
     # §6: responses carry project-relative paths only. The picker's payloads
     # are built from the canonical path `authorize_source_path` returns, and

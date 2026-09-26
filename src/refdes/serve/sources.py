@@ -17,13 +17,22 @@ applies:
   read -- so the picker can never be authorized for something the fetcher
   would refuse, and its refusal is that function's own message. The path a
   payload carries back is the canonical project-relative one this call
-  returns, so no absolute server path leaves the process.
+  returns.
 - **Only a file with a registered reader.** Dispatch is `sources.reader_for`
   by extension, exactly as extraction dispatches. A cited `.xlsx`, `.pdf`,
   `.py` or extensionless file is refused with the registry's own words and is
   never opened; there is no fallback text parse here either.
 - **Bounded.** The byte and row caps live in `refdes.sources`, where the file
   is read, so they bound the read rather than the response.
+
+**No absolute server path leaves the process, in any string.** That has to hold
+for the reader's per-row diagnostics and not just for the `path` field, and it
+is enforced by *naming* rather than by scrubbing: the reader is given the file
+to read (`project.root + canon`) and, separately, `label=canon` -- the only
+name it is allowed to say out loud -- so every message it produces is already
+project-relative. An earlier version of this module rewrote the absolute path
+out of the reader's text after the fact, and covered one branch and not the
+other; see `_listing`.
 
 Reads are allowed on a sealed or imported item (`editor-source-picker.md` §9
 Q6, recommended A): seeing where a value came from is review, and a sealed
@@ -100,16 +109,6 @@ def _reader(canon: str) -> sources_mod.SourceReader:
         raise SourceRefusal("; ".join(exc.problems)) from exc
 
 
-def _relativise(problems: list[str], target: str, canon: str) -> list[str]:
-    """The reader's own problem text with the server's absolute path folded back
-    to the canonical project-relative one. A reader names the file it was
-    handed, and the file it was handed is `project.root + canon`; the panel
-    must show the author's path, and no absolute server path leaves the process
-    (editor-source-picker.md §6)."""
-    spelled = target.replace("\\", "/")
-    return [p.replace(spelled, canon) for p in problems]
-
-
 def _entry_dict(entry: sources_mod.SourceEntry) -> dict:
     """One row as the wire sees it. `value` is what the file holds now and what
     a pick would extract; `pinned` (added by the caller, next to it) is what the
@@ -130,6 +129,15 @@ def _entry_dict(entry: sources_mod.SourceEntry) -> dict:
 def _listing(project: Project, canon: str, reader: str) -> dict:
     """The rows of one cited file, as a payload.
 
+    The reader is handed `project.root + canon` -- that is the file to read --
+    and `label=canon` -- that is the only name it is allowed to say out loud.
+    Every string it produces is therefore already project-relative before it
+    gets here: the whole-file diagnostics of a failure *and* the per-row
+    `problem` of a success. Nothing is rewritten after the fact, which is the
+    point: a leak this module once had came from a post-hoc fixup that covered
+    one branch and not the other, and a `label` cannot be forgotten by the next
+    thing added to a row.
+
     A file `extract()` cannot read -- no `key` or `value` column, a duplicated
     header, a malformed CSV, an empty file, a file above the byte cap -- is
     answered with the reader's problems verbatim and no rows at all: a file
@@ -137,7 +145,7 @@ def _listing(project: Project, canon: str, reader: str) -> dict:
     states, not request failures, so they are a 200 with nothing to pick."""
     target = _target(project, canon)
     try:
-        listing = sources_mod.list_entries(Path(target))
+        listing = sources_mod.list_entries(Path(target), label=canon)
     except sources_mod.SourceExtractionError as exc:
         return {
             "path": canon,
@@ -145,7 +153,7 @@ def _listing(project: Project, canon: str, reader: str) -> dict:
             "entries": [],
             "truncated": False,
             "rows": 0,
-            "problems": _relativise(exc.problems, target, canon),
+            "problems": list(exc.problems),
         }
     return {
         "path": canon,

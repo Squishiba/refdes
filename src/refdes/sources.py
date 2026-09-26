@@ -252,6 +252,7 @@ class CsvReader:
         self,
         path: Path,
         *,
+        label: str | None = None,
         max_rows: int = MAX_LIST_ROWS,
         max_bytes: int = MAX_LIST_BYTES,
     ) -> SourceListing:
@@ -266,33 +267,41 @@ class CsvReader:
         *that row* unselectable and leaves the rest of the file listed. The
         author is being shown their own file, and "this row is broken, here is
         why" is more use than an empty panel.
+
+        `label` is the file's name in every message this produces, and it is a
+        parameter rather than `path.as_posix()` because the two are not the same
+        thing for a caller serving a path to somebody else: the editor reads
+        `project.root + canon` and must not hand the root back inside a
+        diagnostic. Anything embedded in a `SourceEntry.problem` is the author's
+        to read, so the default here is the full path only because every
+        non-serving caller is reading a file it already knows the name of.
         """
-        label = path.as_posix()
+        name = label if label else path.as_posix()
         try:
             size = path.stat().st_size
         except OSError as exc:
-            raise SourceExtractionError([f"{label}: cannot read file: {exc}"]) from exc
+            raise _cannot_read(name, exc) from exc
         if size > max_bytes:
             raise SourceExtractionError([
-                f"{label}: the file is {size} bytes and a source listing refuses "
+                f"{name}: the file is {size} bytes and a source listing refuses "
                 f"anything above {max_bytes} bytes ({max_bytes // 1024} KiB) -- "
                 "split it, or point the citation at the rows you need"
             ])
         try:
             with open(path, "r", encoding="utf-8-sig", newline="") as fh:
                 header_line, header, records, truncated = _read_rows(
-                    fh, label, max_rows
+                    fh, name, max_rows
                 )
         except UnicodeDecodeError as exc:
             raise SourceExtractionError(
-                [f"{label}: not valid UTF-8 ({exc.reason} at byte {exc.start})"]
+                [f"{name}: not valid UTF-8 ({exc.reason} at byte {exc.start})"]
             ) from exc
         except OSError as exc:
-            raise SourceExtractionError([f"{label}: cannot read file: {exc}"]) from exc
+            raise _cannot_read(name, exc) from exc
 
         problems: list[str] = []
-        key_col = _header_column(header, "key", label, header_line, problems)
-        value_col = _header_column(header, "value", label, header_line, problems)
+        key_col = _header_column(header, "key", name, header_line, problems)
+        value_col = _header_column(header, "value", name, header_line, problems)
         if problems:
             raise SourceExtractionError(problems)
 
@@ -303,7 +312,7 @@ class CsvReader:
             if len(row) != len(header):
                 entries.append(SourceEntry(
                     _cell(row, key_col), _cell(row, value_col), "", line, context,
-                    f"{label}:{line}: row has {len(row)} field(s) but the header "
+                    f"{name}:{line}: row has {len(row)} field(s) but the header "
                     f"has {len(header)} (an unquoted comma inside a cell?)",
                 ))
                 continue
@@ -312,7 +321,7 @@ class CsvReader:
             if key == "":
                 entries.append(SourceEntry(
                     key, raw, "", line, context,
-                    f"{label}:{line}: the key cell is blank",
+                    f"{name}:{line}: the key cell is blank",
                 ))
                 continue
             positions[key].append(len(entries))
@@ -321,7 +330,7 @@ class CsvReader:
             except ValueError as exc:
                 entries.append(SourceEntry(
                     key, raw, "", line, context,
-                    f"{label}:{line}: key {key!r}: {exc}",
+                    f"{name}:{line}: key {key!r}: {exc}",
                 ))
                 continue
             entries.append(SourceEntry(key, raw, value, line, context))
@@ -335,7 +344,7 @@ class CsvReader:
                 continue
             where = ", ".join(str(entries[i].line) for i in spots)
             duplicate = (
-                f"{label}: key {key!r} appears on {len(spots)} rows (lines {where}); "
+                f"{name}: key {key!r} appears on {len(spots)} rows (lines {where}); "
                 f"a source key must be unique -- both rows are listed, and neither "
                 f"can be picked until the file names one of them differently"
             )
@@ -359,6 +368,19 @@ def _clip(text: str) -> str:
     """`text` cut to a readable length, with an explicit `…` when it was cut --
     a silent cut would look like the author's own data ending there."""
     return text if len(text) <= _CONTEXT_CHARS else text[:_CONTEXT_CHARS] + "…"
+
+
+def _cannot_read(name: str, exc: OSError) -> SourceExtractionError:
+    """`name` cannot be read, with the reason and without the path.
+
+    `str(OSError)` interpolates the filename it was raised on -- the absolute
+    path this reader was handed -- so a `label` is not enough on its own here:
+    the one string that would undo it is the error's own text. `strerror` is
+    the message the OS gave ("No such file or directory", "Permission denied")
+    with no path in it, and the errno covers the rare OSErrors that carry none.
+    """
+    reason = exc.strerror or f"OS error {exc.errno}"
+    return SourceExtractionError([f"{name}: cannot read file: {reason}"])
 
 
 def _context(
@@ -458,6 +480,7 @@ def reader_for(path: str) -> SourceReader:
 def list_entries(
     path: Path,
     *,
+    label: str | None = None,
     max_rows: int = MAX_LIST_ROWS,
     max_bytes: int = MAX_LIST_BYTES,
 ) -> SourceListing:
@@ -468,15 +491,21 @@ def list_entries(
     be read at all. A reader that cannot enumerate raises, rather than
     answering with nothing: "this file has no keys" is the one reply a listing
     must never invent.
+
+    `label` is the file's name in every message the result carries, and it
+    reaches the reader for exactly the reason `CsvReader.list_entries` documents:
+    a caller serving a path to somebody else must not hand back the filesystem
+    path it read the bytes from.
     """
-    reader = reader_for(path.as_posix())
+    name = label if label else path.as_posix()
+    reader = reader_for(name)
     lister = getattr(reader, "list_entries", None)
     if lister is None:
         raise SourceExtractionError(
-            [f"{path.as_posix()}: the {reader.name} reader can extract named "
+            [f"{name}: the {reader.name} reader can extract named "
              "keys but cannot list a file's entries"]
         )
-    return lister(path, max_rows=max_rows, max_bytes=max_bytes)
+    return lister(path, label=label, max_rows=max_rows, max_bytes=max_bytes)
 
 
 register(CsvReader())
