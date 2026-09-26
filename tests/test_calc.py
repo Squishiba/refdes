@@ -470,6 +470,46 @@ def test_sigfig_str_boundary_cases(magnitude, digits, expected):
     assert calc._sigfig_str(magnitude, digits) == expected
 
 
+# --------------------------------------------------------------- micro sign
+
+
+@pytest.mark.parametrize("written", ["uF", "µF", "μF"])
+def test_format_quantity_prints_the_micro_sign_whatever_pint_spells(written):
+    """Micro prints as U+00B5 MICRO SIGN, not U+03BC GREEK SMALL LETTER MU.
+
+    pint <= 0.25 emits U+00B5 and pint >= 0.26 emits U+03BC from the same
+    `default_en.txt` alias list, and 0.26 is also the first release that
+    installs on Python 3.12+ -- so the rendered character used to depend on the
+    interpreter, not on the project. All three input spellings read back as the
+    SI symbol, which is the one docs/design/candidate-parts.md §7.4 documents.
+    """
+    env = {}
+    calc.evaluate_block(f"C = 47 {written}", env)
+    shown = calc.format_value(env["C"])
+    assert shown == "47 µF"
+    assert "μ" not in shown
+
+
+@pytest.mark.parametrize(
+    "source, expected",
+    [
+        ("x = 1 uA + 1 V", "cannot add µA and V — the units do not match"),
+        ("x = exp(1 uA)", "exp() needs a dimensionless argument, got µA"),
+        ("c = 1 uF | V", "declared as V but the expression evaluates to µF"),
+    ],
+)
+def test_calc_errors_print_the_same_micro_sign_as_values(source, expected):
+    """A diagnostic that names a unit is a display of that unit, like any other.
+
+    Leaving the error paths on pint's raw spelling meant a build could report
+    `60 µA` in a table and `60 μA` in the error under it -- same page, one
+    invisible byte apart, and the mismatch that made
+    test_compare_renders_pass_and_fail_columns depend on the pint version.
+    """
+    outcomes = calc.evaluate_block(source, {})
+    assert outcomes[0].error == expected
+
+
 @pytest.mark.parametrize(
     "source",
     [

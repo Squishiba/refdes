@@ -254,6 +254,12 @@ whitespace:
 Separators inside a unit are `/` for division, `·` for product, and `^` for
 exponent. `µ`, `μ`, and `u` all work as the micro prefix; `Ω` and `ohm` both work.
 
+Which of the three you write does not survive to the page: a micro value always
+displays with the SI micro sign, so `47 uF` renders as `47 µF`. Refdes pins that
+spelling rather than taking the units library's, because the library spells it
+`µ` up to pint 0.25 and `μ` from 0.26 on — two code points that look identical,
+and a different pint on every Python version.
+
 ### `mil` and house units
 
 `mil` and `mils` mean 0.001 inch, as they do on every PCB. The underlying units
