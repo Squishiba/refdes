@@ -98,7 +98,7 @@ def _binary(op: str, a: Value, b: Value) -> Value:
     except pint.DimensionalityError as exc:
         verb = {"+": "add", "-": "subtract", "*": "multiply", "/": "divide"}[op]
         raise CalcError(
-            f"cannot {verb} {a.nom.units:~P} and {b.nom.units:~P} "
+            f"cannot {verb} {_display_units(a.nom.units)} and {_display_units(b.nom.units)} "
             f"— the units do not match"
         ) from exc
     raise CalcError(f"unsupported operator {op!r}")
@@ -283,7 +283,9 @@ def _dimensionless(fn, name: str, fix: str):
 
     def apply(v: Value) -> Value:
         if not v.nom.dimensionless:
-            raise CalcError(f"{name}() needs a dimensionless argument, got {v.nom.units:~P}")
+            raise CalcError(
+                f"{name}() needs a dimensionless argument, got {_display_units(v.nom.units)}"
+            )
 
         corners = []
         for q in (v.nom, v.lo, v.hi):
@@ -496,6 +498,36 @@ def _to_pint_units(unit: str) -> str:
     return _ALIAS_TOKEN_RE.sub(
         lambda m: _unit_aliases.get(m.group(0), m.group(0)), unit
     )
+
+
+# ------------------------------------------------------- the micro sign, on output
+#
+# The counterpart of `_to_pint_units` above. That one picks the spelling pint
+# parses happily; this one picks the spelling *refdes* prints, because pint's
+# own choice is not stable across its releases and the two micro prefixes are
+# different code points that render identically: pint <= 0.25 emits U+00B5
+# MICRO SIGN, pint >= 0.26 emits U+03BC GREEK SMALL LETTER MU (read out of each
+# release's `default_en.txt`, where it is the first alias after `micro- =`).
+#
+# That is not a library style preference a site can shrug off. pint 0.26 is also
+# the first release whose `Requires-Python` is >= 3.12, so the version that
+# changed the character is exactly the version a newer interpreter installs:
+# the same source tree rendered `60 µA` on Python 3.11 and `60 μA` on 3.13,
+# which made `tests/test_compare_block.py` -- and any site built on a newer
+# interpreter -- disagree with the spelling docs/design/candidate-parts.md §7.4
+# documents, over one invisible byte.
+#
+# So every place that prints a unit prints U+00B5, the SI symbol, whatever pint
+# does. Input is unaffected: `docs/math.md` "Writing units" still takes `u`,
+# `µ` and `μ` as the micro prefix, because `_to_pint_units` normalizes those
+# before pint ever sees them.
+_GREEK_MU = "μ"
+_MICRO_SIGN = "µ"
+
+
+def _display_units(units) -> str:
+    """pint's short pretty form of `units`, micro spelled U+00B5 MICRO SIGN."""
+    return f"{units:~P}".replace(_GREEK_MU, _MICRO_SIGN)
 
 
 def _lex(expression: str) -> str:
@@ -938,12 +970,12 @@ def format_quantity(q, digits: int = 4) -> str:
     if not _unit_map(q):
         return _sigfig_str(float(q.magnitude), digits)
     if q.dimensionless:
-        return f"{_sigfig_str(float(q.magnitude), digits)} {q.units:~P}"
+        return f"{_sigfig_str(float(q.magnitude), digits)} {_display_units(q.units)}"
     try:
         shown = _simplify(q)
     except Exception:
         shown = q
-    return f"{_sigfig_str(float(shown.magnitude), digits)} {shown.units:~P}"
+    return f"{_sigfig_str(float(shown.magnitude), digits)} {_display_units(shown.units)}"
 
 
 def format_value(value: Value, digits: int = 4) -> str:
@@ -1260,7 +1292,7 @@ def convert_value(value: Value, unit: str) -> Value:
     except pint.DimensionalityError as exc:
         raise CalcError(
             f"declared as {unit} but the expression evaluates to "
-            f"{value.nom.units:~P}"
+            f"{_display_units(value.nom.units)}"
         ) from exc
     except Exception as exc:
         raise CalcError(f"unknown unit {unit!r} in declaration") from exc
