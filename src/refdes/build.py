@@ -71,7 +71,20 @@ INLINE_VALUE_RE = re.compile(
     r"\{\{\s*([A-Za-z_][A-Za-z0-9_]*)(?:\s*\|\s*([^{}|]+?))?\s*\}\}"
 )
 # Regions of rendered HTML where references must not be linkified.
-PROTECTED_RE = re.compile(r"<pre\b[\s\S]*?</pre>|<code\b[\s\S]*?</code>", re.IGNORECASE)
+#
+# `<pre>`/`<code>` because a code sample is text *about* ids, not ids in prose.
+# `<a>` for the same reason with a sharper edge: the only markup that reaches
+# `_linkify` already carrying anchors is a generated block that reuses another
+# page's markup -- `{{tree}}` ships `tree.render_tree_html`'s output, which is
+# the same HTML `tree.html` shows, with every item id already the text of an
+# `<a class="ref">`. Re-wrapping those produced
+# `<a class="ref" href="g.html" data-ref="<a class="ref" ...>ID</a>`, an anchor
+# start tag inside another anchor start tag, with a fragment of markup in
+# `data-ref`. Non-greedy, because an anchor cannot contain another element and
+# an unclosed `<a>` is not something this pipeline can produce.
+PROTECTED_RE = re.compile(
+    r"<pre\b[\s\S]*?</pre>|<code\b[\s\S]*?</code>|<a\b[\s\S]*?</a>", re.IGNORECASE
+)
 # `<img src="...">` as markdown-it emits it -- html is off, so this only ever comes
 # from `![alt](src)`, never from a literal tag the author typed. Three groups so a
 # rewrite can replace just the URL and leave the rest of the tag untouched.
@@ -1203,9 +1216,29 @@ def _run_item_calcs(project: Project, item, by_key: dict[str, Item]) -> None:
                         file=item.source_file, line=diag_line, item_id=item.id,
                     )
             if outcome.value is not None:
-                line.result = calc.format_value(outcome.value, project.sigfigs)
-                line.bounds = calc.format_bounds(outcome.value, project.sigfigs)
-                item.calc_values[outcome.name] = line.result
+                # Formatting runs on a value the evaluator already accepted, so
+                # it sits outside the handler that turns an *evaluation* failure
+                # into a line error -- and a formatter failure used to abort the
+                # whole command with a traceback naming no file and no line (the
+                # `sqrt(-1)` complex-magnitude bug). Whatever it raises is still
+                # this line's problem, so it is reported like every other calc
+                # error and the build continues to the next line.
+                try:
+                    result = calc.format_value(outcome.value, project.sigfigs)
+                    bounds = calc.format_bounds(outcome.value, project.sigfigs)
+                except Exception as exc:  # noqa: BLE001 -- pint raises many types
+                    failed = True
+                    message = f"the value could not be formatted: {exc}"
+                    if not line.error:
+                        line.error = message
+                    project.error(
+                        f"calc {outcome.name or outcome.expression!r}: {message}",
+                        file=item.source_file, line=diag_line, item_id=item.id,
+                    )
+                else:
+                    line.result = result
+                    line.bounds = bounds
+                    item.calc_values[outcome.name] = result
             item.calcs.append(line)
     del env[calc.RESOLVER_KEY]
     del env[calc.SOURCE_RESOLVER_KEY]

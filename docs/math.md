@@ -440,10 +440,24 @@ unknown function 'sin'; available: abs, exp, ln, log10, max, min, sqrt
 equation cycle: a -> b -> a
 exponent must be dimensionless
 declared as W but the expression evaluates to V/A
+sqrt() of a negative value (-1) is not a real number — the square root of a negative number has no real value; check the sign of the argument
+ln() needs a positive argument, got 0 — a logarithm is undefined at zero and for negative values
+exp() overflowed on 10000 — the result is beyond the largest number a float can hold
 ```
 
 Every one is a build error. There is no path by which a dimensional mistake
-produces a number.
+produces a number, and no path by which an expression that leaves the reals
+produces a *result* either: `sqrt()` of a negative, a logarithm of zero or a
+negative, an `exp` that will not fit a float, and a fractional power of a
+negative are all reported on the calc line that asked for them, with the value
+that was wrong named in the message.
+
+The domain is checked on every corner of a tolerance range, not just the nominal
+value: `v = 5 ± 6` is `[-1, 11]`, and `sqrt(v)` is rejected on its low bound
+even though `sqrt(5)` is perfectly real.
+
+Trigonometric functions are not available at all (see [Functions](#functions)),
+so there is no `asin(2)` to report on.
 
 ## Known limitations
 
