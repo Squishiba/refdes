@@ -11,6 +11,19 @@ inputs, and that slice is implemented: `serve.state.project_inputs` walks
 every `site.assets:` directory into the watched set and the revision.
 Sections 2, 8, 12, 14 and 16 carry notes where the decision superseded them.
 
+Update: §15.8 is answered too — Jared decided on 2026-09-26: no copy, in
+either direction. Bringing in bytes from outside the project is upload (§5–§7),
+which always writes into the project; there is no "leave it where it is"
+mode for a truly external file, since `build.py` has no way to resolve a
+path outside the project tree and doing so would break the build on any
+other machine or in CI. And picking an *existing* project image that lives in
+a directory other than the current item's own was considered — the toggle
+would be "duplicate the bytes into my directory" vs "reference it in place" —
+and rejected too: it doesn't buy anything the existing bare-name
+`site.assets:` search doesn't already give you, and it adds a choice an
+author has to understand for no real gain. So Phase 0's picker (§17) needs no
+copy logic at all: it always references an image wherever it already lives.
+
 Update: §15.6 is answered too — Jared decided on 2026-09-25 to take the
 `HASH_FORMAT` bump, and it is in: format 5 folds each referenced image's
 content digest into its owner's content hash, so a swapped image breaks a
@@ -625,10 +638,15 @@ Each carries a recommendation; unanswered means the recommendation stands.
    author's re-issue with the fresh hash *is* the confirmation** (§9.3). A
    second modal for the same fact is noise.
 
-8. **Is the copy half of "upload/copy" in scope?** — **Recommended: no, and it
-   should be its own short spec.** "Copy" means a file already in the project
-   moving or being referenced from a second place, which is a reference question
-   with no binary transport in it, and bundling it makes §7 do double duty.
+8. **Is the copy half of "upload/copy" in scope?** — **DECIDED: no, and not
+   later either** (Jared, 2026-09-26). Both readings of "copy" were considered
+   and rejected outright, not deferred: (a) copying external bytes in place
+   without writing them into the project isn't buildable under this project's
+   image-resolution model without a real architecture change, and isn't
+   wanted; (b) duplicating an already-in-project image into the current
+   item's own directory, as an alternative to referencing it where it already
+   sits, was judged not worth the added choice. No toggle, in either
+   direction — a picked image is always referenced wherever it lives.
 
 9. **Any aggregate limit — count, total bytes, per-session?** — **Recommended:
    no.** One author, loopback, and the token gate already bounds the population
