@@ -111,9 +111,9 @@ The reason step 3 has to land **before** `_linkify` is the one placement
 decision in this document that isn't just "match the existing precedent" —
 it's load-bearing. An index table's cells are, overwhelmingly, item IDs. If
 the generated `<table>` is injected before `_linkify` runs, `_linkify`'s
-existing regex pass over the *whole* rendered page (it already treats
-`<pre>`/`<code>` as the only protected region — `PROTECTED_RE`,
-`src/refdes/build.py:24`) picks up every ID cell for free and turns it into
+existing regex pass over the *whole* rendered page (it treats `<pre>`,
+`<code>` and `<a>` as protected regions — `PROTECTED_RE`,
+`src/refdes/build.py`) picks up every ID cell for free and turns it into
 a real cross-reference link with the standard hover preview, `data-ref`
 attribute, and "missing" styling if the target vanished — identical to a
 hand-typed `[[DEC-PWR-002]]` anywhere else on the page. The block itself
@@ -124,6 +124,16 @@ separate post-processing pass after `_linkify` — doing it after would mean
 either duplicating `_linkify`'s link-building logic inside the index block
 (two places that can drift) or shipping an index whose entries don't behave
 like every other reference on the page.
+
+The `<a>` entry in `PROTECTED_RE` is the other half of that contract, and it
+exists because of `{{tree}}`: the tree block *does* ship markup, reusing
+`tree.render_tree_html`'s output, which is already linked for the tree page.
+Without the `<a>` entry the linkifier found those ids again and wrapped them
+a second time — `<a class="ref" href="g.html" data-ref="<a class="ref" ...>ID</a>`,
+an anchor start tag inside another one. A block may emit either shape (bare
+IDs and let the page link them, as `{{index}}` and `{{cascade}}` do, or its own
+already-linked markup, as `{{tree}}` does); `_linkify` has to be right about
+both, and the invariant is that it never rewrites markup it did not write.
 
 `_process_images` and `_apply_figure_attrs` are unaffected either way —
 neither touches table markup — so their relative order versus the table

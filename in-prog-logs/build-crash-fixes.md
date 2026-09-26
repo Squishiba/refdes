@@ -123,3 +123,120 @@ ERROR items/part.md:16 [DEC-001] — calc 'g': `2 ** 10000` overflowed — the r
 Exit 1 (2 with `--keep-going`, as documented). `docs/math.md`'s "Errors you will
 see" section lists the new messages and says why a domain failure can never
 produce a result. Full suite: 2274 passed.
+
+---
+
+## Bug 2 — `{{tree}}` on a page nests an anchor inside an anchor
+
+### Symptom (reproduced before touching anything)
+
+`.scratch/fixture/` — a project with `pages/overview.md` carrying `{{tree}}`,
+`{{index}}` (twice), `{{cascade}}` and `{{compare}}`, plus prose with an explicit
+reference, a bare ID, a fragment reference, a dangling reference, a page link and
+an ID in inline code. Built with the unfixed code, `pages/overview.html` came out
+with:
+
+```html
+<a class="ref" href="grp-001.html" data-ref="<a class="ref" href="grp-001.html" data-ref="GRP-001">GRP-001</a>
+```
+
+An `<a>` start tag inside another `<a>` start tag.
+
+### Why
+
+`{{tree}}` is the one block that ships *its own* links: `blocks._render_tree`
+returns `tree.render_tree_html(...)` verbatim, and that markup is the same HTML
+`tree.html` shows, with every item ID already the text of an `<a class="ref">`.
+Then `render_pages` calls `_linkify` over the finished page, and
+`build.PROTECTED_RE` — `<pre>`/`<code>` only — let those IDs be found a second
+time and wrapped again.
+
+The other three blocks are fine precisely because they emit *bare* ID text
+(`{{index}}`'s `<td>{id}</td>`, `{{cascade}}`'s list items, `{{compare}}`'s
+cells) and rely on the page's linkify pass, which is the design
+`docs/design/index-blocks.md` §"step 3" argues for. `{{tree}}` is the one block
+that took the other branch, and `_linkify` had no rule for it.
+
+**Why nobody caught it:** a tag-depth scan does not see it. The inner `>` closes
+the outer start tag first, so a parser reads `data-ref="<a class="` as an
+attribute value and the inner `<a` never registers as a nested element — the page
+*looks* right, and only the bytes are wrong. The first detector I wrote
+(`</?a\b[^>]*>` + depth counting) reported zero nested anchors on the broken
+output; the check that works is `<a\b[^>]*<a\b` — a second `<a` before the tag
+closes.
+
+### Fix
+
+One line of `PROTECTED_RE`, plus the reasoning that belongs with it:
+
+```python
+PROTECTED_RE = re.compile(
+    r"<pre\b[\s\S]*?</pre>|<code\b[\s\S]*?</code>|<a\b[\s\S]*?</a>", re.IGNORECASE
+)
+```
+
+Non-greedy, because an anchor cannot contain another element and this pipeline
+cannot emit an unclosed `<a>`. `_linkify`'s existing chunked sweep then leaves
+anchor regions alone exactly as it already left code regions alone.
+
+### Tests (`tests/test_linkify_anchors.py`, new — 13 cases)
+
+Two fixtures off one config: `nested_project` (item titles hold no IDs) and
+`title_id_project` (a title mentions `REQ-001`).
+
+- The bug: no `<a` inside an `<a>` on the page, in every tree row, and in every
+  page of the built site; every `data-ref` value on the page is a bare ID; every
+  anchor `render_tree_html` produced appears in the page's tree region verbatim.
+- The other direction: the tree's own links survive (a fix that dropped them
+  would pass the nesting check and lose the feature).
+- Untouched: prose (explicit / bare / fragment / dangling / page / in-code, one
+  assertion each), `{{index}}`, `{{cascade}}`, `{{compare}}`, an item body, and
+  `tree.html` itself.
+- And the case a careless fix would break: an ID in an item *title* — plain text
+  inside `<span class="muted">`, not inside an anchor — is still linked.
+
+**Failed before the fix: 5 of 13** (the four nesting/`data-ref` tests and
+"anchors survive verbatim", which carries a `data-ref="<a` assertion). The eight
+"everything else" cases passed before *and* after, which is what makes them
+evidence: they are the ones that had to keep passing. I also tried a stricter
+version of the byte-identity test — the page's tree region compared equal to
+`render_tree_html`'s output — and dropped it, because it is not true and should
+not be: the generator emits `(expanded under Power > GRP-001)` as *plain text*,
+and the page linkifier has always linked that, before this change and after it.
+Asserting it would have pinned a bug as a requirement.
+
+### Verified after the fix — full before/after site builds
+
+`.scratch/snapshot.py` copies a built `_site`; `.scratch/nested_anchors.py` is the
+`<a\b[^>]*<a\b` scan; `.scratch/diff_blocks.py` splits the changed HTML so the
+report says which block changed. Compared by SHA-256 per file:
+
+```
+repo-site:    45 files before, 45 after, 0 changed
+fixture-site: 25 files before, 25 after, 1 changed
+    overview.html
+```
+
+Zero changes across this repository's own site build (20 items, calc blocks,
+checks, no pages) and exactly one changed file in the fixture — the one page that
+has a `{{tree}}`. Within it, the unified diff of block-level chunks is a single
+`@@ -53 +53 @@`: the `<ul class="tree">` line. The prose paragraph, both index
+tables, the cascade and the compare table are byte-identical, as are all 24 other
+files (`item pages, tree.html, index.html, items.json, the manifest`).
+
+The repository's own build still reports the pre-existing sample-project failure
+(`DEC-PWR-001` P_dens vs `BND-THM-001`), unchanged and unrelated; it was in the
+before snapshot too.
+
+### Docs
+
+- `docs/blocks.md`, `{{tree}}` section: the block ships its own links, the
+  linkifier leaves them alone, and an ID in the tree's own plain text is still
+  linked.
+- `docs/design/index-blocks.md` §step 3: the claim that `<pre>`/`<code>` are
+  "the only protected region" was stale after this change, so it now names `<a>`
+  and states the invariant — a block may emit bare IDs *or* already-linked
+  markup, and `_linkify` never rewrites markup it did not write.
+
+Full suite: 2287 passed (2274 + the 13 new ones).
+

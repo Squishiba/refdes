@@ -71,7 +71,20 @@ INLINE_VALUE_RE = re.compile(
     r"\{\{\s*([A-Za-z_][A-Za-z0-9_]*)(?:\s*\|\s*([^{}|]+?))?\s*\}\}"
 )
 # Regions of rendered HTML where references must not be linkified.
-PROTECTED_RE = re.compile(r"<pre\b[\s\S]*?</pre>|<code\b[\s\S]*?</code>", re.IGNORECASE)
+#
+# `<pre>`/`<code>` because a code sample is text *about* ids, not ids in prose.
+# `<a>` for the same reason with a sharper edge: the only markup that reaches
+# `_linkify` already carrying anchors is a generated block that reuses another
+# page's markup -- `{{tree}}` ships `tree.render_tree_html`'s output, which is
+# the same HTML `tree.html` shows, with every item id already the text of an
+# `<a class="ref">`. Re-wrapping those produced
+# `<a class="ref" href="g.html" data-ref="<a class="ref" ...>ID</a>`, an anchor
+# start tag inside another anchor start tag, with a fragment of markup in
+# `data-ref`. Non-greedy, because an anchor cannot contain another element and
+# an unclosed `<a>` is not something this pipeline can produce.
+PROTECTED_RE = re.compile(
+    r"<pre\b[\s\S]*?</pre>|<code\b[\s\S]*?</code>|<a\b[\s\S]*?</a>", re.IGNORECASE
+)
 # `<img src="...">` as markdown-it emits it -- html is off, so this only ever comes
 # from `![alt](src)`, never from a literal tag the author typed. Three groups so a
 # rewrite can replace just the URL and leave the rest of the tag untouched.

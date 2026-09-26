@@ -130,6 +130,15 @@ it would replace it with a cascade wearing a hat — so `via=` is reported
 as the unknown parameter it is, and nesting by some other relation stays
 `{{cascade}}`'s job.
 
+The tree is the one block that ships its **own** links rather than bare ID
+text: it renders `tree.html`'s markup, where every item ID is already a link,
+because that is the same view. The page's linkifier leaves existing links
+alone — as it already did for `<code>` and `<pre>` — so a row reads as one
+link, not a link inside a link. An ID sitting in the tree's own *plain text*,
+such as an item title that mentions another item, or the
+`(expanded under ...)` hint, is still linked on the page, the same as any
+other ID in prose.
+
 ## `{{calcblock}}`
 
 ```markdown
