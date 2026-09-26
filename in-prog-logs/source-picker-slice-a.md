@@ -253,8 +253,30 @@ re-verified):
 - reader test: `TypeError: list_entries() got an unexpected keyword argument
   'label'`
 
-After the fix: 2337 passed, 1 skipped; `ruff check --select E9,F src tests`
-clean.
+After the fix: 2365 passed, 1 skipped (the rebased tree also carries the image
+picker's tests from #50); `ruff check --select E9,F src tests` clean.
+
+**Two process notes from getting this landed.**
+
+*My new test failed CI on Windows, and it was the test's fault, not the fix's.*
+The first Windows run of the fix reported
+`assert 'analysis/budget.csv: cannot read file: No such file or directory' in
+'analysis/budget.csv: cannot read file: The system cannot find the file
+specified'` — `exc.strerror` is the platform's wording, and I had pinned the
+Linux one. The property that matters held on both: the message is the label
+plus the reason, and contains no path. The assertion now checks that shape
+instead, and no other test in `tests/` pins OS error wording, so this now
+matches the repo's convention. Worth recording that the fix's first CI signal
+came from the *new* test and not from the new code.
+
+*`main` moved while I was on this, and the PR went CONFLICTING.* #50 (an image
+picker, `docs/design/editor-image-upload.md`) landed and touches
+`src/refdes/serve/api.py`, so the branch needed a rebase onto `origin/main` and
+a `--force-with-lease` push — the push being forced only because the rebase
+rewrote my own three commits on my own feature branch. The conflict was one
+import line: both slices added a `from . import <mod> as <mod>_mod`, resolved
+by keeping both in alphabetical order. Nothing of #50's was modified, and the
+suite was re-run on the rebased tree before pushing.
 
 **Deliberate asymmetry, so nobody "fixes" it later.** `extract()` keeps
 `path.as_posix()` and the full `str(OSError)`. Its problems are printed by

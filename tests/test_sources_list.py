@@ -209,12 +209,16 @@ def test_list_entries_names_the_file_with_the_label_it_is_given(tmp_path):
     assert "not a plain ASCII decimal" in listing.entries[2].problem
     # A file that is not there is named by the label, and the OS error's own
     # text -- which interpolates the path it was raised on -- does not undo it.
+    # The reason is asserted only as "there is one": its wording is the
+    # platform's ("No such file or directory" on Linux, "The system cannot find
+    # the file specified" on Windows), and pinning either would fail a CI job
+    # for saying nothing useful about this slice.
     with pytest.raises(SourceExtractionError) as info:
         sources.list_entries(tmp_path / "absent.csv", label="analysis/budget.csv")
-    assert "analysis/budget.csv: cannot read file: No such file or directory" in str(
-        info.value
-    )
-    assert str(tmp_path) not in str(info.value)
+    message = str(info.value)
+    assert message.startswith("analysis/budget.csv: cannot read file: ")
+    assert str(tmp_path) not in message
+    assert len(message) > len("analysis/budget.csv: cannot read file: ")
     # The label reaches the whole-file failures too, not just the row ones.
     for text, fragment in (
         ("Key,value\nfoo,1\n", "no 'key' column"),
