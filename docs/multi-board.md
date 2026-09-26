@@ -191,7 +191,7 @@ rather than once per character of a bare string:
 
 ```
 configuration error: boards.board-a conforms_to must be a list of group ids,
-        got 'GRP-DBG' -- write conforms_to: [GRP-DBG]
+        got 'GRP-DBG' -- write conforms_to: [GRP-001]
 ```
 
 `coverage-<board>.html` grows a **Conforming contracts** table listing those

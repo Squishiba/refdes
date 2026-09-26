@@ -142,6 +142,11 @@ stamped_at: 2026-08-17T14:03:00Z
 stamped_by: "jbin"              # OS username by default -- see below
 refdes_version: "0.3.0"
 
+# The standard the project was pinned to when this baseline was stamped.
+standard:
+  base: hardware
+  version: 3
+
 # Present only for kind: release -- which rules were active and passed, so
 # re-reading an old release stays meaningful after release_gate: is later
 # tightened.
@@ -156,16 +161,22 @@ gate:
   unaccepted_workspace_moves: pass
 
 items:
-  CMP-PWR-001: {hash: 673e6ba11269f350, type: component, title: "Buck converter"}
-  DEC-PWR-001: {hash: a1b2c3d4e5f60718, type: decision, title: "LDO vs. buck for 3V3 rail"}
+  CMP-PWR-001: {hash: 673e6ba11269f350, type: component, title: "Buck converter",
+    hash_format: 5, key: pktmysgxn8x, verdict: selected}
+  DEC-PWR-001: {hash: a1b2c3d4e5f60718, type: decision, title: "LDO vs. buck for 3V3 rail",
+    hash_format: 5, key: fd24s541bbt, verdict: accepted, calc_hash: d73ecea8e6f01f1e}
   # ... one entry per local item
 ```
 
 This is assembly, not new machinery — every value already exists by the
-time `build()` returns (`item.content_hash`, `item.type`, `item.title`,
-the gate results). Scoped to local items only, matching every other
-manifest in the project (imports are read-only, and not this project's
-readiness question).
+time `build()` returns (`item.content_hash`, `item.type`, `item.title`, the
+gate results, the resolved standard pin). `hash_format`, `key`, `verdict`,
+`calc_hash`, and `calc_refs` are the per-item additions: the first two are
+always written, the rest only when they apply — `verdict` only for a type
+with a verdict-bearing status field, `calc_hash`/`calc_refs` only for an
+item with calc blocks or cross-item calc references. Scoped to local items
+only, matching every other manifest in the project (imports are read-only,
+and not this project's readiness question).
 
 **`type`/`title` per item, not just a hash**, is the one departure from the
 terser `id: hash` shape `.refdes/log-seal.yaml`/`.refdes/boards.yaml` use.
@@ -248,7 +259,7 @@ Since last release (rev-b, 2026-07-02T16:40:00Z):
   changed   9   CMP-PWR-001, DEC-PWR-001, DEC-PWR-002, REQ-PWR-002, ...
   added     4   TST-PWR-003, TST-PWR-004, DEC-PWR-003, CMP-PWR-005
   removed   1
-    REQ-OLD-002 (requirement) "Legacy input protection" — no longer in the project
+    REQ-OLD-002 (requirement) 'Legacy input protection' — no longer in the project
   relabelled 2
     REQ-PWR-009 -> REQ-PWR-012   (k7f3m2q9x4a)
     BND-THM-001 -> BND-THM-004   (m9n2b5v8c1w)

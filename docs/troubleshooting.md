@@ -42,9 +42,21 @@ item is not in the project at all.
 A warning. The value is kept but not validated. Fix the spelling or declare the
 field in the schema.
 
-**`missing required field 'text'`**
-The schema marks it `required: true`. In the bundled standard, `requirement` and
-`bound` use `text`; `decision`, `test`, and `component` use `title`.
+**`missing required field 'title'`**
+The schema marks it `required: true`. In the bundled standard, `decision`,
+`test`, and `component` use `title`. `requirement` and `bound` have no
+required field at all under **hardware@3** -- their content lives in the
+markdown `body:`, which is required but enforced as a *warning*, so a stub
+can exist while it is still being drafted:
+
+```
+WARNING items/reqs.yaml:7 [REQ-PWR-001] — body: is empty -- title: is an
+        optional short label, not a substitute for the content itself.
+```
+
+The older `missing required field 'text'` message belongs to hardware@2,
+where `requirement`/`bound` had a required `text:` field. Under hardware@3
+writing `text:` gets the rename diagnostic below instead.
 
 **`status: 'in-review' is not one of ['draft', 'active', 'retired']`**
 Use one of the declared `choices`, or add yours to the schema.
