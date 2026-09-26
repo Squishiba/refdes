@@ -358,9 +358,9 @@ Derived results collapse to named units where that is clearer:
 
 | Computed | Displayed |
 |---|---|
-| `volt * ampere` | `3.96 W` |
-| `millivolt / ampere` | `41.67 mΩ` |
-| `1 / microsecond` | `454.5 kHz` |
+| `volt * ampere` | `1 W` |
+| `millivolt / ampere` | `1 mΩ` |
+| `1 / microsecond` | `1 MHz` |
 
 But a unit you wrote yourself is never rewritten. `1.4 inch` stays inches,
 `0.5 h` stays hours, `W/in^2` stays per square inch. Only compound and reciprocal
@@ -375,10 +375,10 @@ Which units are candidates is set by `units.preferred` in
 
 `sqrt`, `abs`, `min`, `max`, `exp`, `ln`, `log10`.
 
-`exp`, `ln`, and `log10` require dimensionless arguments. `min` and `max` take two
-or more. Trigonometric functions are **not** available — intervals through
-non-monotonic functions need range analysis that is not implemented, and silently
-under-wide bounds would be worse than no support.
+`exp`, `ln`, and `log10` require dimensionless arguments. `min` and `max` take
+any number of arguments. Trigonometric functions are **not** available — intervals
+through non-monotonic functions need range analysis that is not implemented, and
+silently under-wide bounds would be worse than no support.
 
 ## Project equations
 
@@ -434,7 +434,7 @@ question that needn't exist.
 
 ```
 cannot add V and A — the units do not match
-cannot divide by a value whose tolerance range includes zero
+division by a value whose tolerance range includes zero
 unknown unit 'wat'
 unknown function 'sin'; available: abs, exp, ln, log10, max, min, sqrt
 equation cycle: a -> b -> a
@@ -448,6 +448,7 @@ produces a number.
 ## Known limitations
 
 - **Torque reads as energy.** `N·m` and `J` are dimensionally identical, so a
-  torque displays as joules. Pin it with `tq = ... | N*m`. Every units library has
-  this; none solve it without a separate notion of quantity kind.
+  torque displays as joules, and a `| N*m` assertion does not pin it back. Every
+  units library has this; none solve it without a separate notion of quantity
+  kind.
 - **No solving for unknowns.** Forward evaluation only. Symbolic solve is planned.

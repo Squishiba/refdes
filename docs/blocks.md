@@ -90,7 +90,7 @@ links of the traced types is a normal, valid state.
 
 ### Relationship to the `blocked_by:` cascade report
 
-A separate, not-yet-implemented feature ([the standard library
+A separate feature ([the standard library
 design](design/standard-library.md) §9) walks `blocked_by:` links the same
 rooted, bounded way, to compute a project's stale-blocker diagnostics. That
 report and `{{cascade}}` are **two features sharing one walk primitive, not

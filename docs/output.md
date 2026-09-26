@@ -35,10 +35,6 @@ site:
   theme: paper
   tokens:
     --accent: "#b3541e"      # both palettes
-    light:
-      --bg: "#fffdf7"        # light mode only
-    dark:
-      --bg: "#17140f"        # dark mode only
 ```
 
 `site.theme:` selects a built-in — `default`, `high-contrast`, `paper`, or
@@ -46,7 +42,9 @@ site:
 page — and `refdes build` merges the project's `site.tokens:` over it and
 emits the result as `assets/theme.css`, linked after `assets/style.css` on
 every page. A bare `--token` pair applies to both palettes; a `light:` or
-`dark:` heading targets one. The generated file redefines tokens and nothing
+`dark:` heading targets one, and a `tokens:` block that uses those headings may
+contain only them — mixing a bare pair in with them is a load-time error. The
+generated file redefines tokens and nothing
 else, and it is tracked in `.refdes-manifest.json` like any other output, so
 removing the theme removes the file. With no theme configured no file is
 written and no `<link>` is emitted: an un-themed build is byte-for-byte what
@@ -281,9 +279,9 @@ structure — there is nothing to hand-maintain and no `nav:` tree to write.
   JavaScript is involved, and it works with JavaScript disabled.
 
 A page with more than two `##` headings additionally gets an on-page contents
-list built from those headings. Where JavaScript is available, it highlights
-the section currently in view as you scroll; without it, it stays an ordinary
-list of working anchors.
+list built from those headings — an ordinary list of working anchors. The
+scroll-spy that highlights the section in view belongs to `document.html`'s own
+contents list, not this one.
 
 The print stylesheet hides all of this.
 
