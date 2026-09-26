@@ -1,0 +1,84 @@
+Task: add a Python 3.13 CI job to .github/workflows/tests.yml
+
+Status: DONE -- PR opened, both jobs green, not merged.
+
+What was done
+-------------
+1. Read .github/workflows/tests.yml first. The existing job is a matrix over
+   `os` only ([ubuntu-latest, windows-latest]) with `python-version: "3.11"`
+   hard-coded in setup-python. Chose a SECOND job over a `python-version`
+   matrix axis, and the reason is in the YAML comment: adding a dimension
+   would either (a) give the existing 3.11 pair a second, different install
+   via `include:`, i.e. change the job that must not change, or (b) put 3.13
+   on Windows too, which the task explicitly excludes for CI time. Two
+   mirrored step lists is the smaller diff.
+2. New job `test313`, name "ubuntu-latest / py3.13", runs-on ubuntu-latest
+   (literal, no matrix), steps: checkout@v4, setup-python@v5 with
+   "3.13", `pip install -e ".[dev]"`, `python -m pytest -q`. Same action pins
+   as the existing job. Plain `pip install -e ".[dev]"` -- no constraint
+   file, no pins -- so it resolves whatever a fresh user install resolves.
+3. No Ruff step in the new job, and said so in the comment: E9,F answers
+   "is this change syntactically broken" for the same source the 3.11 job
+   already linted; re-linting on a second interpreter tests ruff, not the
+   suite.
+4. changelog.d/ci-py313-job.added.md, following changelog.d/README.md
+   (slug.category.md, bullets, no headings, wrapped like its neighbours).
+   Category `added`: a second interpreter in CI is a new capability. There
+   was deliberately no fragment for the original tests.yml, so this is the
+   first CI-only entry; the user asked for one.
+
+Why the pint claim in the comments is not from memory
+-----------------------------------------------------
+changelog.d/micro-sign-display.fixed.md (commit 6bb1363, HEAD) already
+records it: pint spells micro as U+00B5 up to 0.25 and U+03BC from 0.26 on,
+and 0.26 is the first pint installable on Python 3.12+. Confirmed
+independently that the local 3.13 venv has Pint 0.26.1, i.e. the 3.13 CI job
+will in fact resolve the newer character.
+
+Verification
+------------
+- YAML parses; job/step structure dumped and compared:
+    jobs: ['test', 'test313']
+    test    -> ${{ matrix.os }}  | matrix os + 3.11 + Ruff(E9,F) + pytest  (untouched)
+    test313 -> ubuntu-latest / py3.13 | ubuntu-latest + 3.13 + pytest
+  `git diff --stat` = 1 file, 35 insertions, 0 deletions -- pure addition,
+  the 3.11 job is byte-identical.
+- Local sanity only (NOT proof of CI): /home/jorb/work/venv-refdes/bin/python
+  is 3.13.5 with Pint 0.26.1 --
+    ruff check --select E9,F src tests : All checks passed
+    python -m pytest -q               : 2292 passed, 1 skipped in ~108s
+  The 1 skip is tests/test_citations.py:1165 "case-sensitive filesystem: the
+  path is simply missing there" -- a Windows-only assumption, expected on
+  Linux, not a falsely-green skip.
+
+CI result (the part that actually counts)
+----------------------------------------
+PR #48, run 36212474583, conclusion: success. All three jobs green:
+  success  windows-latest            3.11
+  success  ubuntu-latest             3.11
+  success  ubuntu-latest / py3.13    3.13   (job 108321752837, 2m50s)
+
+The new job's own log proves it is a genuinely different install, which is
+the whole point of it (`gh api .../actions/jobs/108321752837/logs`):
+  3.13 job: Successfully set up CPython (3.13.15) ... pint-0.26.1
+  3.11 job: Python/3.11.16 ...           pint-0.25.3
+  3.13 pytest: 2292 passed, 1 skipped in 155.82s
+So the two jobs are not the same suite run twice -- they resolve different
+pint releases, and 0.26 is the one that spells micro as U+03BC. That is the
+micro-sign bug's habitat, and CI now stands on it.
+
+Pre-existing annotations on the run (also on main, not from this change):
+Node.js 20 deprecation on checkout@v4/setup-python@v5, and the
+ubuntu-latest -> Ubuntu 26 migration notice.
+
+NOT merged, per instructions.
+
+Difficulties / notes
+--------------------
+- None blocking. One judgement call worth recording: a matrix axis was
+  rejected for the reason above, so the two jobs' step lists are duplicated.
+  If a third interpreter ever lands, that duplication wants a reusable
+  workflow or a composite action -- not worth it at two.
+- AGENTS.md's ruff caveat still holds (`ruff check .` is ~99 findings wide);
+  the E9,F scoping was kept and the new job inherits the same scope by not
+  linting at all.

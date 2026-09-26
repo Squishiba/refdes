@@ -52,3 +52,38 @@ jobs:
         run: ruff check --select E9,F src tests
       - name: pytest
         run: python -m pytest -q
+
+  # A second interpreter, not a third OS. pip resolves `pint>=0.23` to the
+  # newest release each interpreter can install, and those sets differ: pint
+  # 0.25 spells its micro prefix U+00B5 MICRO SIGN, 0.26+ spells it U+03BC
+  # GREEK SMALL LETTER MU -- the same glyph, a different code point, chosen by
+  # pint rather than by us. 0.26 is also the first pint installable on Python
+  # 3.12+, so a 3.11-only job can never see it, and a micro value rendered as
+  # `µA` in one place and `μA` in another shipped green through it (fixed in
+  # 6bb1363). The interpreter is what selects the dependency set, so the only
+  # way to find the next one of those is to run the suite on it.
+  #
+  # A separate job rather than a `python-version` axis on the matrix above: the
+  # matrix is the OS pair at the floor version, and folding the interpreter in
+  # would either change what those two jobs install (adding an `include:` that
+  # 3.11-ubuntu gets a second, different copy of) or put 3.13 on Windows too --
+  # the very platform this second job exists to avoid paying for. Ubuntu only:
+  # the OS axis above already covers the path-separator and file-locking
+  # differences, so a second OS buys nothing here.
+  #
+  # No Ruff step: E9,F is about whether *this change* is syntactically broken,
+  # which the 3.11 job above has already answered for the same source. This job
+  # exists to run the suite, not to lint it twice.
+  test313:
+    name: ubuntu-latest / py3.13
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          # The newest version in pyproject.toml's requires-python range, whose
+          # classifiers already claim 3.11 through 3.13.
+          python-version: "3.13"
+      - run: pip install -e ".[dev]"
+      - name: pytest
+        run: python -m pytest -q
