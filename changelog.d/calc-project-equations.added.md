@@ -1,5 +1,5 @@
 - **Calc blocks can call named equations the project defines** (new
-  `equations:` block in `refdes.yaml`, documented in `docs/math.md`), so a
+  `equations:` block in `refdes-project.yaml`, documented in `docs/math.md`), so a
   formula is written once and reused instead of retyped per output, per
   rail, per input: declare
   `current_limit: {params: [K, V, R], expr: K * V / R}` once and call

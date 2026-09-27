@@ -13,7 +13,8 @@ that first**:
 pip install refdes
 ```
 
-Then open any folder containing a `refdes.yaml`. The extension activates on its own.
+Then open any folder containing a `refdes-project.yaml`. The extension activates on
+its own.
 
 If `refdes` is not on your `PATH` — for instance it lives in a project virtualenv —
 point the setting at it:
@@ -125,7 +126,7 @@ lexer. If highlighting and the parser ever disagree, the parser is right.
 
 No build step — it is plain JavaScript. Open `editors/vscode/` in VS Code and press
 <kbd>F5</kbd>; a second window opens with the extension loaded. Open a folder
-containing a `refdes.yaml` in that window.
+containing a `refdes-project.yaml` in that window.
 
 ## Licence
 
