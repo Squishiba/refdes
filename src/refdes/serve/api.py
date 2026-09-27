@@ -757,9 +757,12 @@ def _images(app, ref: str) -> tuple[int, dict]:
 # that no longer matches comes back as a 409 carrying the *current* hash, so a
 # client can re-fetch and decide again without guessing.
 #
-# Not in this slice: the §10 sealed-target and sealed-referenced refusals
-# (Phase 3). The §9.3 disclosure of which items a replace changes is here; the
-# refusal when one of them is sealed is not.
+# Phase 3 ("Seals") is here too: the request's `item` is passed to `store_asset`
+# so a sealed target is refused under the write lock before any byte is written,
+# and a replace or a create that would change what a sealed entry displays comes
+# back as a 422 `refusal: "sealed"` naming the sealed item, not as a confirmable
+# 409. The item view already carries `sealed` and `edit.editable: false` for the
+# client to grey the control out with (Phase 4); the endpoint does not rely on it.
 
 
 def _upload_asset(app, query: dict[str, list[str]], body) -> tuple[int, dict]:
@@ -768,7 +771,11 @@ def _upload_asset(app, query: dict[str, list[str]], body) -> tuple[int, dict]:
     the raw bytes as the request body (§11: raw bytes, not multipart, not
     base64; metadata only in the query). The response carries `from_source`
     -- `rel` rewritten relative to the item's source file -- because that is
-    the exact spelling the client inserts into the draft (§7)."""
+    the exact spelling the client inserts into the draft (§7).
+
+    An `item` that is sealed is refused outright (§10), whether or not `dest`
+    was given as well: the upload is for that entry, and its body can never
+    carry the reference."""
     if getattr(app, "read_only", False):
         return 403, {
             "kind": "refused",
@@ -804,6 +811,10 @@ def _upload_asset(app, query: dict[str, list[str]], body) -> tuple[int, dict]:
         name=name,
         data=body,
         expected_hash=expected_hash,
+        # §10: the item this upload is for, not just the directory it implies. A
+        # sealed target is refused inside `store_asset`, under the write lock,
+        # before any byte is written.
+        item=item,
     )
 
     if isinstance(result, upload_mod.Uploaded):

@@ -11,9 +11,19 @@ already resolves, and a replace changes what every referring item shows.
 Refusals are values, not exceptions, in `serve/edit.py`'s style;
 `serve/api.py` turns them into status codes.
 
-Explicitly not here yet: the §10 sealed-target and sealed-referenced refusals
--- Phase 3. §9.3 says a replace whose blast radius includes a sealed entry
-"becomes a refusal instead (§10)"; the disclosure is here, the refusal is not.
+Phase 3 ("Seals", §17) adds the two §10 refusals. An upload *for* a sealed item
+is refused before any byte is written, because the body edit that would
+reference the image is itself refused under the same lock (`serve/edit.py`,
+`seal.is_sealed`), so the bytes would be an orphan on an item that can never
+take the reference. And a file a sealed entry references cannot be replaced or
+created from here: a seal hashes fields and normalized body text -- the path in
+`![alt](path)`, not the bytes -- so swapping the file behind a sealed entry's
+reference changes what that record displays while its hash still verifies.
+§9.3's disclosure still covers every referrer; what a *sealed* referrer changes
+is that a confirmable conflict becomes a refusal, named by the sealed item. The
+endpoint deletes nothing (§11), so §10's "or delete" has no editor surface to
+refuse yet -- the rule is stated here so the next endpoint that removes a file
+knows it applies.
 
 Every check needs the built `Project`, not just its root: §9.1 asks the build's
 own search (`build._search_image_matches`) what the leaf resolves to on the
@@ -40,7 +50,8 @@ from dataclasses import dataclass
 
 from ..build import _search_image_matches
 from ..citations import case_mismatch
-from ..model import Project
+from ..model import Item, Project
+from ..seal import is_sealed
 from . import security
 from .edit import _atomic_create, _atomic_replace, write_lock_for
 
@@ -329,9 +340,7 @@ def _ambiguity_refusal(project: Project, rel: str, matches: list[str]) -> Refuse
     )
 
 
-def _capture_refusal(
-    project: Project, rel: str, sources: dict[str, str]
-) -> Refused | None:
+def _capture_refusal(project: Project, rel: str, sources: dict[str, str]) -> Refused | None:
     """§9.2: refuse a write that would silently re-point another item's image.
 
     The relative lookup runs first and always wins (docs/markdown.md), so
@@ -389,9 +398,19 @@ def _capture_refusal(
             )
     if not rows:
         return None
+    # §10: the same capture, on an entry that is supposed to be append-only, is
+    # the sharper of the two refusals, so it is the one the author reads. The
+    # rows are the same rows -- the sealed flag is what distinguishes them.
+    sealed = _mark_sealed(project, rows)
+    if sealed:
+        return _sealed_capture_refusal(rel, leaf, rows, sealed)
     named = "; ".join(
         f"{row['item']} ({row['source_file']}) writes {leaf!r}, which "
-        + (f"resolves to {row['resolves_to']} today" if row["resolves_to"] else "resolves to nothing today")
+        + (
+            f"resolves to {row['resolves_to']} today"
+            if row["resolves_to"]
+            else "resolves to nothing today"
+        )
         for row in rows
     )
     return Refused(
@@ -403,6 +422,156 @@ def _capture_refusal(
         f"references to a path relative to their own source file",
         422,
         kind="capture",
+        details=tuple(rows),
+    )
+
+
+# ------------------------------------------------ the §10 seals, before the write
+#
+# A seal hashes an item's fields and its normalized body text
+# (`build.compute_hashes`, `build.hash_payload_builder`), and the body text of an
+# item with an image contains `![alt](path)` -- a path, not the bytes behind it.
+# So the bytes a sealed entry points at sit outside everything the seal protects,
+# while being the one thing that determines what the sealed page shows. The build
+# side of that is already shipped: HASH_FORMAT 5 folds each referenced image's
+# resolved path and digest into the item's hash
+# (`build._image_inputs_hash_value`, `tests/test_image_hash.py`), so a hand edit
+# to the file moves `content_hash` and `seal.verify`'s existing
+# modified-since-sealed error fires. These are the editor-side refusals §10 asks
+# for, which ship independently of it.
+#
+# Both are refusals rather than confirmable conflicts, which is the difference
+# from §9.3: a disclosure lets an author proceed, and there is nothing here for
+# them to proceed with. A sealed entry's illustration is not the author's to
+# swap, whatever hash they carry -- `expected_hash` confirms *which* version you
+# mean to overwrite, and no version of that answers for the sealed record.
+
+
+def _mark_sealed(project: Project, rows: list[dict]) -> list[dict]:
+    """Set `sealed` on each disclosure row and return the sealed ones (§10).
+
+    Rows come from `image_results`, which is keyed by *display* id, so the item
+    is resolved with `item_by_id` rather than `project.items.get` (whose keys
+    are surrogate keys or provisional handles). An id with no live item is not
+    sealed and is not refused -- the row still discloses, because a stale record
+    is not a reason to hide a blast radius.
+
+    Cheap by construction: `is_sealed` returns False on the type lookup alone
+    for anything that is not append-only, so a diagram referenced by ordinary
+    requirements and decisions costs no disk read at all."""
+    sealed: list[dict] = []
+    for row in rows:
+        item = project.item_by_id(row["item"])
+        row["sealed"] = item is not None and is_sealed(project, item)
+        if row["sealed"]:
+            sealed.append(row)
+    return sealed
+
+
+def _sealed_target_refusal(project: Project, item: Item | None) -> Refused | None:
+    """§10, first half: refuse an upload *for* a sealed item, before any byte is
+    written.
+
+    The reference can only reach disk through a body save, and a body save on a
+    sealed item is refused under the same write lock (`serve/edit.py`,
+    `seal.is_sealed`). Writing the image first therefore cannot produce a working
+    edit -- only an orphan attached to an item that can never take it, in the one
+    project state where the author has no way to remove the reference themselves
+    either. So the request's item is checked, not trusted to the client's UI, and
+    checked under the lock like every other mutation check.
+
+    Only the item the upload is *for* is in question here: `is_sealed`, the exact
+    predicate `apply_edit` uses, so the two refusals cannot disagree about which
+    items are sealed. An upload with no item -- `dest` given on its own -- has no
+    sealed target, and is still subject to the sealed-*referenced* checks."""
+    if item is None or not is_sealed(project, item):
+        return None
+    ref = item.id or item.key or "this item"
+    return Refused(
+        f"{ref} is a sealed append-only entry, so no image can be uploaded for it: "
+        "the body edit that would reference the image is itself refused, so the "
+        "bytes could only ever be an orphan on an entry that can never take the "
+        "reference (docs/design/editor-image-upload.md §10). Nothing was written: "
+        "a correction to what a sealed entry says or shows means appending a new "
+        "entry that `amends:` it, and uploading the image for that entry instead",
+        422,
+        kind="sealed",
+        details=(
+            {
+                "item": ref,
+                "source_file": (item.source_file or "").replace("\\", "/"),
+                "sealed": True,
+            },
+        ),
+    )
+
+
+def _sealed_replace_refusal(rel: str, rows: list[dict], sealed: list[dict]) -> Refused | None:
+    """§10, the sharp one: refuse to replace a file a sealed entry references.
+
+    Called once the bytes are known to differ, so re-uploading the identical
+    bytes stays the §5 no-op it has always been -- nothing about what the sealed
+    entry displays changes, so there is nothing to refuse. `rows` is §9.3's
+    disclosure for this same path and `sealed` the same rows filtered by
+    `_mark_sealed`: the sealed entries are a subset of the referrers, not a
+    second computation of them. The message names the sealed ones, because they
+    are the reason; `details` carries every referrer, because the blast radius is
+    still worth seeing -- a dialog can say "this one is why, and this other one
+    would have changed too"."""
+    if not sealed:
+        return None
+    named = "; ".join(
+        f"{row['item']} ({row['source_file']}) references it as "
+        f"{', '.join(row['srcs']) or 'an image'}"
+        for row in sealed
+    )
+    return Refused(
+        f"{rel} cannot be replaced: {named}, and a seal hashes an entry's fields "
+        "and normalized body text -- the path in `![alt](path)`, not the bytes "
+        "behind it. Replacing this file would change what a sealed record displays "
+        "while its hash still verifies: the audit trail would say the entry is "
+        "untouched and the entry would show a different picture "
+        "(docs/design/editor-image-upload.md §10). Nothing was written, and no "
+        "`expected_hash` changes that -- the file behind a sealed entry's "
+        "reference is not replaceable from the editor; a correction means "
+        "appending a new entry that `amends:` the sealed one",
+        422,
+        kind="sealed",
+        details=tuple(rows),
+    )
+
+
+def _sealed_capture_refusal(
+    rel: str, leaf: str, rows: list[dict], sealed: list[dict]
+) -> Refused:
+    """§10's "refuse to *create* a file at a path a sealed entry references":
+    §9.2's capture with a seal on it.
+
+    Same scan, same rows, same "nothing was written" -- the sealed variant is
+    what the author reads instead of the plain capture refusal, because "this "
+    "would silently re-point a document" understates "this would silently "
+    "re-point a record that is supposed to be unchangeable". As in
+    `_sealed_replace_refusal`, the message names the sealed entries and `details`
+    keeps every captured referrer."""
+    named = "; ".join(
+        f"{row['item']} ({row['source_file']}) writes {leaf!r}, which "
+        + (
+            f"resolves to {row['resolves_to']} today"
+            if row["resolves_to"]
+            else "resolves to nothing today"
+        )
+        for row in sealed
+    )
+    return Refused(
+        f"{rel} cannot be created: {named}. Those entries are sealed append-only "
+        "records, and a seal hashes the body text -- the path, not the bytes -- so "
+        "a file landing here would change what a sealed record displays while its "
+        "hash still verifies: §9.2's silent capture, on an entry that is meant to "
+        "be unchangeable (docs/design/editor-image-upload.md §10). Nothing was "
+        "written: upload under a different name, or into a directory those items' "
+        "own source files do not sit in",
+        422,
+        kind="sealed",
         details=tuple(rows),
     )
 
@@ -431,6 +600,7 @@ def store_asset(
     name: str,
     data: bytes,
     expected_hash: str = "",
+    item: Item | None = None,
 ):
     """Store one uploaded image in the project. Returns `Uploaded`, `Conflict`,
     or `Refused`; on any non-`Uploaded` nothing is written.
@@ -448,9 +618,15 @@ def store_asset(
     nothing else -- a hash that does not match is still a `Conflict`, with
     nothing written.
 
+    `item` is the item the upload is *for* -- the one whose draft will carry the
+    reference -- when the request named one. It is not only how the default
+    destination is chosen (§4): a sealed target is refused outright (§10), and
+    that is the one thing a client-side check cannot be trusted to have done.
+
     The whole decide-then-write sequence runs under the project's write lock:
-    the §5 collision table and the §9 checks are all check-then-act, and an
-    unguarded one can be raced by a concurrent upload or save of the same path.
+    the §5 collision table, the §9 checks and the §10 seal checks are all
+    check-then-act, and an unguarded one can be raced by a concurrent upload or
+    save of the same path.
     """
     root = os.path.abspath(project.root)
 
@@ -491,6 +667,16 @@ def store_asset(
     target = os.path.join(dest_dir, name)
 
     with write_lock_for(root):
+        # §10 first, before a single byte is decided about: an upload for a
+        # sealed item has no outcome that is not an orphan, because the body
+        # save that would reference it is refused under this same lock. Checked
+        # here rather than in `serve/api.py`, because "under the write lock, on
+        # the request the endpoint actually received" is the posture every other
+        # mutation check in this package keeps.
+        refusal = _sealed_target_refusal(project, item)
+        if refusal is not None:
+            return refusal
+
         # Case-only collision first: on a case-insensitive filesystem the
         # exact-spelling check below would read the *other* file's bytes and
         # call a different file "identical" or "conflicting" without naming
@@ -526,23 +712,36 @@ def store_asset(
                 return Refused(f"could not read the existing {rel}: {exc}", 500)
             current = digest_of(existing)
             # §9.3: every outcome that leaves a file at `rel` discloses the
-            # items currently showing it. The refusal for a *sealed* referrer
-            # is Phase 3's (§10); the disclosure is here, because the author has
-            # to know the blast radius before they confirm, not afterwards.
-            referencing = tuple(_referencing_items(project, rel, sources))
+            # items currently showing it, because the author has to know the
+            # blast radius before they confirm, not afterwards. Each row also
+            # carries whether that referrer is sealed -- the same scan §10's
+            # refusal below is decided on, so the disclosure and the refusal
+            # cannot disagree about who is looking at this file, and every
+            # response from this branch carries rows of one shape.
+            referencing = _referencing_items(project, rel, sources)
+            sealed = _mark_sealed(project, referencing)
 
             if existing == data:
-                # §5 row 2: identical bytes are not a conflict. No write --
-                # not even a rewrite of the same bytes -- and the client
-                # inserts the reference anyway.
+                # §5 row 2 first, ahead of §10: identical bytes change nothing
+                # about what any sealed entry displays, so the no-op stays a
+                # no-op. The refusal below is about *changing* the file.
                 return Uploaded(
                     rel=rel,
                     digest=current,
                     size=len(existing),
                     created=False,
                     message="identical bytes already at the destination; nothing was written",
-                    referenced_by=referencing,
+                    referenced_by=tuple(referencing),
                 )
+
+            # §10, the sharp case: a sealed entry is among the referrers, so
+            # this replace is not the author's to make -- not unconfirmed, and
+            # not confirmed with a fresh `expected_hash` either. Refused rather
+            # than offered as a conflict, because a conflict is a question and
+            # there is no answer here that lets the write proceed.
+            sealed_refusal = _sealed_replace_refusal(rel, referencing, sealed)
+            if sealed_refusal is not None:
+                return sealed_refusal
 
             if not expected_hash:
                 return Conflict(
@@ -552,7 +751,7 @@ def store_asset(
                     "replace it or choose another name",
                     current_hash=current,
                     current_size=len(existing),
-                    referenced_by=referencing,
+                    referenced_by=tuple(referencing),
                 )
 
             if expected_hash != current:
@@ -569,7 +768,7 @@ def store_asset(
                     kind="expected_hash",
                     current_hash=current,
                     current_size=len(existing),
-                    referenced_by=referencing,
+                    referenced_by=tuple(referencing),
                 )
 
             # §8 row 1: the client confirmed this exact version, so replace it
@@ -588,7 +787,7 @@ def store_asset(
                 replaced=True,
                 message=f"replaced the {len(existing)} bytes at {rel} ({current}) with "
                 f"{len(data)} bytes ({digest_of(data)})",
-                referenced_by=referencing,
+                referenced_by=tuple(referencing),
             )
 
         if expected_hash:
@@ -604,7 +803,9 @@ def store_asset(
             )
 
         # §9.2, before anything is written: does landing this file change what
-        # another item's page shows?
+        # another item's page shows? Which includes §10's sharper version of the
+        # same question: a referrer that is sealed turns this into a refusal that
+        # names the sealed entry, from inside the same scan.
         refusal = _capture_refusal(project, rel, sources)
         if refusal is not None:
             return refusal
