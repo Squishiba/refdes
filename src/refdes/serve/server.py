@@ -5,7 +5,10 @@ Routing, in order of what a request must clear:
 1. `Host` must be an accepted loopback host:port -- before anything else, so a
    DNS-rebinding request reveals nothing, not even a 404 shape;
 2. `/api/*` needs the launch token in `X-Refdes-Token` (reads too); a POST also
-   needs a matching `Origin`, a JSON content type, and a bounded body;
+   needs a matching `Origin`, an accepted content type (`application/json`, or
+   `application/octet-stream` on the one upload route `/api/assets`), and a
+   bounded body -- 1 MiB for JSON, the larger `MAX_ASSET_BYTES` for uploads;
+   both bounds are on the header, checked before any byte is read;
 3. every other surface (`/preview/`, `/edit/`) needs the session cookie, which
    only the launch URL (`/?token=...`) sets -- `SameSite=Strict`, `HttpOnly`,
    then a redirect that strips the token from the address bar.
@@ -31,9 +34,17 @@ from ..build import INLINE_VALUE_RE
 from . import api, security
 from .preview import PreviewManager
 from .state import Poller, ProjectState
+from .upload import MAX_ASSET_BYTES
 
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 MAX_BODY_BYTES = 1024 * 1024
+# The upload cap is `MAX_ASSET_BYTES` (imported above, defined in `upload.py`):
+# deliberately its own, larger number than MAX_BODY_BYTES, because a full-page
+# schematic screenshot clears 1 MiB routinely and raising the shared JSON cap for
+# images would raise it for everything. Like MAX_BODY_BYTES it is checked against
+# Content-Length before a byte is read; `store_asset` then checks the bytes it is
+# handed, so a lying Content-Length buys neither an unbounded read nor an
+# oversized write (design §6).
 _STATIC_TYPES = {
     ".js": "text/javascript; charset=utf-8",
     ".css": "text/css; charset=utf-8",
@@ -503,18 +514,41 @@ class _Handler(BaseHTTPRequestHandler):
             if not security.origin_ok(self.headers.get("Origin"), self.headers.get("Host"), app.port):
                 return self._deny(403, "forbidden")
             ctype = (self.headers.get("Content-Type") or "").split(";")[0].strip().lower()
-            if ctype != "application/json":
-                return self._deny(415, "expected application/json")
+            is_asset_upload = path == "/api/assets"
+            if is_asset_upload:
+                # The one additional literal the allowlist admits, and only on
+                # this route (docs/design/editor-image-upload.md §11): raw
+                # bytes, metadata in the query, nothing parsed here. The type
+                # of the bytes is decided downstream by sniffing them -- this
+                # header is not consulted for that.
+                if ctype != "application/octet-stream":
+                    return self._deny(415, "expected application/octet-stream")
+                cap = MAX_ASSET_BYTES
+            else:
+                if ctype != "application/json":
+                    return self._deny(415, "expected application/json")
+                cap = MAX_BODY_BYTES
             try:
                 length = int(self.headers.get("Content-Length") or "")
             except ValueError:
                 return self._deny(411, "Content-Length required")
-            if length < 0 or length > MAX_BODY_BYTES:
+            if length < 0 or length > cap:
                 return self._deny(413, "request too large")
-            try:
-                body = json.loads(self.rfile.read(length).decode("utf-8"))
-            except (ValueError, UnicodeDecodeError):
-                return self._json(400, {"error": "invalid JSON"})
+            data = self.rfile.read(length)
+            if len(data) > cap:
+                # Unreachable through read(length) with a checked length, and
+                # kept on purpose (§6): the cap is enforced against the header
+                # *and* against the bytes read, so no refactor to a read-until
+                # -EOF quietly turns a lying Content-Length into an unbounded
+                # read.
+                return self._deny(413, "request too large")
+            if is_asset_upload:
+                body = data
+            else:
+                try:
+                    body = json.loads(data.decode("utf-8"))
+                except (ValueError, UnicodeDecodeError):
+                    return self._json(400, {"error": "invalid JSON"})
         elif self.command not in ("GET", "HEAD"):
             return self._deny(405, "method not allowed")
         status, payload = api.handle(app, self.command, path, query, body)

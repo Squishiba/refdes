@@ -8,6 +8,7 @@ never from a file scan.
 from __future__ import annotations
 
 import os
+import posixpath
 import urllib.parse
 
 from ..model import CHECK_VIOLATION, Diagnostic, Item, Project
@@ -16,6 +17,7 @@ from ..seal import is_sealed
 from . import edit as edit_mod
 from . import filters as filters_mod
 from . import state as state_mod
+from . import upload as upload_mod
 from .filters import FilterError, check_state, item_tags
 
 
@@ -41,12 +43,16 @@ def handle(app, method: str, path: str, query: dict[str, list[str]], body) -> tu
         return _create_preview(app, query)
     if path == "/api/images" and method in ("GET", "HEAD"):
         return _images(app, (query.get("item") or [""])[0])
+    if path == "/api/assets":
+        if method == "POST":
+            return _upload_asset(app, query, body)
+        return 405, {"error": "method not allowed"}
     if path == "/api/items/create" and method == "POST":
         return _create_item(app, body)
     if path.startswith("/api/item/") and method in ("GET", "HEAD"):
         ref = urllib.parse.unquote(path[len("/api/item/"):])
         return _item_view(app, ref)
-    if path in ("/api/items", "/api/images", "/api/items/create") or path.startswith("/api/item/"):
+    if path in ("/api/items", "/api/images", "/api/items/create", "/api/assets") or path.startswith("/api/item/"):
         return 405, {"error": "method not allowed"}
     return 404, {"error": "not found"}
 
@@ -629,4 +635,104 @@ def _images(app, ref: str) -> tuple[int, dict]:
         "asset_dirs": list(project.asset_dirs),
         "images": rows,
         "total": len(rows),
+    }
+
+
+# ------------------------------------------------------------------ upload
+#
+# docs/design/editor-image-upload.md §17 Phase 1 "Bytes": `POST /api/assets`.
+# The upload endpoint writes bytes and returns a path; it never touches any
+# body (§7) -- the reference reaches disk through the ordinary `set_body`
+# save, with the ordinary revision check and delta gate. The ordering
+# upload-then-save is forced by the gate (§2), not chosen. The service rules
+# -- destination and name validation, sniffed type, the §5 collision table,
+# the atomic create -- live in `serve/upload.py`; this is the HTTP face,
+# mapping results to statuses like `_apply_edit` and `_create_item` do.
+#
+# Not in this slice: `expected_hash` and the replace path (§8) and the §9
+# checks against other documents (Phase 2), and the §10 sealed-target and
+# sealed-referenced refusals (Phase 3). The design ships Phase 1 with that
+# hole open on purpose -- an upload can break another document -- and Phase 2
+# exists to close it. Do not close it here.
+
+
+def _upload_asset(app, query: dict[str, list[str]], body) -> tuple[int, dict]:
+    """`POST /api/assets?dest=<dir>&name=<file>`, or `item=<handle>` to
+    default the destination to that item's own source directory (§4), with
+    the raw bytes as the request body (§11: raw bytes, not multipart, not
+    base64; metadata only in the query). The response carries `from_source`
+    -- `rel` rewritten relative to the item's source file -- because that is
+    the exact spelling the client inserts into the draft (§7)."""
+    if getattr(app, "read_only", False):
+        return 403, {
+            "kind": "refused",
+            "error": "this server was started with --no-write: uploads are disabled",
+        }
+    if not isinstance(body, bytes):
+        return 400, {"error": "expected raw request bytes"}
+    name = (query.get("name") or [""])[0]
+    dest = (query.get("dest") or [""])[0]
+    item_ref = (query.get("item") or [""])[0]
+    project = app.state.snapshot.project
+
+    item = None
+    if item_ref:
+        item, _handle = _find_item(project, item_ref)
+        if item is None:
+            return 404, {"error": f"no item matches {item_ref!r}"}
+    if not dest:
+        if item is None:
+            return 400, {
+                "error": "dest is required when no item is given: the upload writes beside something"
+            }
+        if not item.source_file:
+            return 400, {
+                "error": "this item has no source file, so there is no directory beside it to write to"
+            }
+        dest = posixpath.dirname(item.source_file.replace("\\", "/"))
+
+    result = upload_mod.store_asset(project.root, dest=dest, name=name, data=body)
+
+    if isinstance(result, upload_mod.Uploaded):
+        # §12: force the rebuild now rather than wait for the debounced
+        # two-tick poller -- the author is about to look at the preview to
+        # decide whether the file just dropped is the one they meant. An
+        # upload into a declared `site.assets:` directory is a semantic
+        # input (§15.1), so refresh() rebuilds the model and the generation;
+        # an upload beside the source is not an input until a body
+        # references it (§7's orphan), and refresh() is a correct no-op
+        # there. The poller stays the backstop for files the editor did not
+        # write.
+        app.state.refresh()
+        source_dir = (
+            posixpath.dirname(item.source_file.replace("\\", "/"))
+            if item is not None and item.source_file
+            else None
+        )
+        from_source = (
+            posixpath.relpath(result.rel, source_dir) if source_dir is not None else result.rel
+        )
+        return 200, {
+            "kind": "uploaded",
+            "ok": True,
+            "message": result.message,
+            "rel": result.rel,
+            "from_source": from_source,
+            "hash": result.digest,
+            "bytes": result.size,
+            "created": result.created,
+        }
+    if isinstance(result, upload_mod.Conflict):
+        return 409, {
+            "kind": "conflict",
+            "ok": False,
+            "error": result.reason,
+            "message": result.reason,
+            "path": result.rel,
+        }
+    return result.status, {
+        "kind": "refused",
+        "ok": False,
+        "error": result.reason,
+        "message": result.reason,
     }
