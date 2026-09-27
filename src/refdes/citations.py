@@ -216,9 +216,20 @@ def case_mismatch(project_root: str, rel: str) -> str | None:
 # instead of a number. Resolution happens exclusively at `refdes fetch` time,
 # against the bytes being pinned -- `build`/`check` read the recorded page out
 # of the lockfile and never open a PDF. pypdf is an optional extra, imported
-# lazily here and nowhere else, so a project with no `section:` never needs it.
+# lazily through `_import_pypdf()` below and nowhere else: a project with no
+# `section:` and no datasheet to browse never needs it. The one other caller is
+# the editor's PDF page reader (`sources._pypdf_reader`,
+# docs/design/editor-pdf-picker.md §7), which is also why the install hint below
+# is a shared constant rather than a literal in one message.
 
-PDF_EXTRA_ERROR = "section: needs the optional PDF extra: pip install refdes[pdf]"
+PDF_EXTRA_INSTALL = "pip install refdes[pdf]"
+# The one sentence that says what to do about a missing extra. It is a constant
+# rather than a literal in two messages because two features now refuse on it --
+# `section:` resolution and the editor's PDF page reader
+# (docs/design/editor-pdf-picker.md §8) -- and an install hint that reads
+# differently depending on which one you hit is a hint nobody can act on.
+PDF_EXTRA_HINT = f"needs the optional PDF extra: {PDF_EXTRA_INSTALL}"
+PDF_EXTRA_ERROR = f"section: {PDF_EXTRA_HINT}"
 
 
 class SectionError(Exception):

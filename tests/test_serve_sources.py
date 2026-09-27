@@ -161,21 +161,22 @@ def test_the_source_picker_lists_only_the_citing_item_s_own_files(served):
 
 
 def test_the_file_list_says_why_a_cited_file_is_not_listable(tmp_path):
-    # A cited .pdf, a remote URL and a path that escapes the root are all named
-    # with the reason, and none of them is listable. This is the honest gap of
-    # §8 -- an item that cites no readable file gets an empty picker -- made
-    # legible rather than silent.
+    # A cited .xlsx (a PDF is listable now that it has a reader -- see
+    # tests/test_serve_pdf_sources.py), a remote URL and a path that escapes the
+    # root are all named with the reason, and none of them is listable. This is
+    # the honest gap of §8 -- an item that cites no readable file gets an empty
+    # picker -- made legible rather than silent.
     root = make_root(tmp_path, items=(
         "defaults: { type: decision }\n"
         "items:\n"
         "  - id: DEC-003\n"
         "    citations:\n"
-        "      - path: analysis/sheet.pdf\n"
+        "      - path: analysis/sheet.xlsx\n"
         "      - path: https://example.com/budget.csv\n"
         "      - path: ../outside/budget.csv\n"
         "      - path: analysis/budget.csv\n"
     ))
-    (root / "analysis" / "sheet.pdf").write_bytes(b"%PDF-1.4\n")
+    (root / "analysis" / "sheet.xlsx").write_bytes(b"PK\x03\x04 not a zip we read")
     app = start(root)
     try:
         client = Client(app)
@@ -183,7 +184,7 @@ def test_the_file_list_says_why_a_cited_file_is_not_listable(tmp_path):
         assert status == 200, payload
         assert [f["path"] for f in payload["files"]] == ["analysis/budget.csv"]
         reasons = {p["path"]: p["problem"] for p in payload["problems"]}
-        assert "no source reader for '.pdf' files" in reasons["analysis/sheet.pdf"]
+        assert "no source reader for '.xlsx' files" in reasons["analysis/sheet.xlsx"]
         assert "remote citation" in reasons["https://example.com/budget.csv"]
         assert "escapes the project root" in reasons["../outside/budget.csv"]
     finally:
@@ -515,15 +516,17 @@ def test_the_picker_refuses_an_absolute_path_and_a_path_that_escapes_the_root(se
 
 def test_the_picker_refuses_a_cited_file_with_no_registered_reader(tmp_path):
     # Dispatch is `reader_for()` by extension, the same registry extraction
-    # uses, and it is not a fallback to a text parse. A cited `.pdf` is named
-    # with the registry's own words and never opened.
-    root = make_root(tmp_path, files={"analysis/sheet.pdf": "%PDF-1.4\n"})
+    # uses, and it is not a fallback to a text parse. A cited `.pptx` is named
+    # with the registry's own words and never opened -- and `.pdf` is *not* in
+    # this set any more, because it has a reader now (a gated one: see
+    # tests/test_serve_pdf_sources.py).
+    root = make_root(tmp_path, files={"analysis/sheet.pptx": "PK\x03\x04"})
     (root / "items" / "decisions.yaml").write_text(
         "defaults: { type: decision }\n"
         "items:\n"
         "  - id: DEC-004\n"
         "    citations:\n"
-        "      - path: analysis/sheet.pdf\n"
+        "      - path: analysis/sheet.pptx\n"
         "      - path: analysis/noext\n"
         "      - path: analysis/script.py\n",
         encoding="utf-8",
@@ -534,7 +537,7 @@ def test_the_picker_refuses_a_cited_file_with_no_registered_reader(tmp_path):
     try:
         client = Client(app)
         for path, fragment in (
-            ("analysis/sheet.pdf", "no source reader for '.pdf' files"),
+            ("analysis/sheet.pptx", "no source reader for '.pptx' files"),
             ("analysis/noext", "no source reader for 'a file with no extension'"),
             ("analysis/script.py", "no source reader for '.py' files"),
         ):

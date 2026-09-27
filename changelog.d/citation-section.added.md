@@ -18,8 +18,9 @@
   have. `section:` needs the bytes, so it is allowed on a local `path:` and on
   a remote citation with `keep_copy: true`, and refused at build time on a
   hash-only remote citation. Resolution needs the new optional extra
-  `refdes[pdf]` (`pip install refdes[pdf]`); nothing else in refdes reads a
-  PDF, and a project with no `section:` never imports it. A `section:` with no
+  `refdes[pdf]` (`pip install refdes[pdf]`), which is imported lazily and only
+  by the features that read a PDF, so a project with no `section:` and no
+  datasheet to browse never imports it. A `section:` with no
   resolved page in the lockfile warns at build, and is an error under
   `--require-citations`. A page belongs to the bytes it was read out of: the
   lockfile records the sha256 the pages were resolved against, `build` checks it
