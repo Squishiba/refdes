@@ -742,20 +742,24 @@ def _images(app, ref: str) -> tuple[int, dict]:
 
 # ------------------------------------------------------------------ upload
 #
-# docs/design/editor-image-upload.md §17 Phase 1 "Bytes": `POST /api/assets`.
-# The upload endpoint writes bytes and returns a path; it never touches any
-# body (§7) -- the reference reaches disk through the ordinary `set_body`
-# save, with the ordinary revision check and delta gate. The ordering
-# upload-then-save is forced by the gate (§2), not chosen. The service rules
-# -- destination and name validation, sniffed type, the §5 collision table,
-# the atomic create -- live in `serve/upload.py`; this is the HTTP face,
+# docs/design/editor-image-upload.md §17 Phase 1 "Bytes" and Phase 2
+# "Conflicts": `POST /api/assets`. The upload endpoint writes bytes and returns
+# a path; it never touches any body (§7) -- the reference reaches disk through
+# the ordinary `set_body` save, with the ordinary revision check and delta
+# gate. The ordering upload-then-save is forced by the gate (§2), not chosen.
+# The service rules -- destination and name validation, sniffed type, the §5
+# collision table, the atomic create and replace, and the three §9 checks
+# against other documents -- live in `serve/upload.py`; this is the HTTP face,
 # mapping results to statuses like `_apply_edit` and `_create_item` do.
 #
-# Not in this slice: `expected_hash` and the replace path (§8) and the §9
-# checks against other documents (Phase 2), and the §10 sealed-target and
-# sealed-referenced refusals (Phase 3). The design ships Phase 1 with that
-# hole open on purpose -- an upload can break another document -- and Phase 2
-# exists to close it. Do not close it here.
+# `expected_hash` (§8) is the binary `expected_revision`: the hash the last
+# response returned, re-issued to say "yes, replace this exact version". A hash
+# that no longer matches comes back as a 409 carrying the *current* hash, so a
+# client can re-fetch and decide again without guessing.
+#
+# Not in this slice: the §10 sealed-target and sealed-referenced refusals
+# (Phase 3). The §9.3 disclosure of which items a replace changes is here; the
+# refusal when one of them is sealed is not.
 
 
 def _upload_asset(app, query: dict[str, list[str]], body) -> tuple[int, dict]:
@@ -775,6 +779,7 @@ def _upload_asset(app, query: dict[str, list[str]], body) -> tuple[int, dict]:
     name = (query.get("name") or [""])[0]
     dest = (query.get("dest") or [""])[0]
     item_ref = (query.get("item") or [""])[0]
+    expected_hash = (query.get("expected_hash") or [""])[0]
     project = app.state.snapshot.project
 
     item = None
@@ -793,7 +798,13 @@ def _upload_asset(app, query: dict[str, list[str]], body) -> tuple[int, dict]:
             }
         dest = posixpath.dirname(item.source_file.replace("\\", "/"))
 
-    result = upload_mod.store_asset(project.root, dest=dest, name=name, data=body)
+    result = upload_mod.store_asset(
+        project,
+        dest=dest,
+        name=name,
+        data=body,
+        expected_hash=expected_hash,
+    )
 
     if isinstance(result, upload_mod.Uploaded):
         # §12: force the rebuild now rather than wait for the debounced
@@ -823,6 +834,11 @@ def _upload_asset(app, query: dict[str, list[str]], body) -> tuple[int, dict]:
             "hash": result.digest,
             "bytes": result.size,
             "created": result.created,
+            # §8 row 1, §9.3: a replace changed what these items show. The
+            # disclosure is the confirmation's other half -- not a second
+            # modal, but not something to discover afterwards either.
+            "replaced": result.replaced,
+            "referenced_by": list(result.referenced_by),
         }
     if isinstance(result, upload_mod.Conflict):
         return 409, {
@@ -831,10 +847,25 @@ def _upload_asset(app, query: dict[str, list[str]], body) -> tuple[int, dict]:
             "error": result.reason,
             "message": result.reason,
             "path": result.rel,
+            # Which of §5's collision and §8's hash check said no, and the
+            # hash a re-issue must carry: a client that has to branch on this
+            # should not have to parse the message to find out.
+            "conflict": result.kind,
+            "current_hash": result.current_hash,
+            "current_size": result.current_size,
+            # §9.3: the blast radius of the replace the author is about to
+            # confirm, named before they confirm it.
+            "referenced_by": list(result.referenced_by),
         }
     return result.status, {
         "kind": "refused",
         "ok": False,
         "error": result.reason,
         "message": result.reason,
+        "reason": result.reason,
+        # "ambiguity" (§9.1) and "capture" (§9.2) name the two checks against
+        # other documents, each with its own way out; everything else is a
+        # plain refusal of this request.
+        "refusal": result.kind,
+        "details": list(result.details),
     }
