@@ -369,6 +369,39 @@ _SOURCE_ROUTES = (
 # ------------------------------------------------------------------ the write
 
 
+def _parse_pins(raw) -> tuple[tuple, str]:
+    """The request's `pin` field as `SourcePin`s, or a reason it is not one.
+
+    One pin or a list of them -- an accept is usually one key, and the shape that
+    reads best for one should not be a special case of the shape for several.
+    Each names a path, a key, and the unit and name of the line that must be in
+    the body; anything else in the object, a `value` included, is ignored rather
+    than trusted, because the number comes from the reader (§5).
+    """
+    if raw is None:
+        return (), ""
+    entries = raw if isinstance(raw, list) else [raw]
+    pins = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            return (), "pin must be an object with a path and a key, or a list of them"
+        for name in ("path", "key"):
+            if not isinstance(entry.get(name), str) or not entry.get(name):
+                return (), f"pin needs a {name}: the citation path and the source key it pins"
+        for name in ("unit", "name"):
+            if entry.get(name) is not None and not isinstance(entry[name], str):
+                return (), f"pin {name} must be a string"
+        pins.append(
+            edit_mod.SourcePin(
+                path=entry["path"],
+                key=entry["key"],
+                unit=entry.get("unit") or "",
+                name=entry.get("name") or "",
+            )
+        )
+    return tuple(pins), ""
+
+
 def _apply_edit(app, ref: str, body) -> tuple[int, dict]:
     """`POST /api/item/<ref>/edit` -- the HTTP face of `serve.edit.apply_edit`.
 
@@ -388,6 +421,9 @@ def _apply_edit(app, ref: str, body) -> tuple[int, dict]:
         return 400, {"error": "expected_revision is required: the file_revision from GET /api/item/<ref>"}
 
     op_name = body.get("op")
+    pins, bad_pins = _parse_pins(body.get("pin"))
+    if bad_pins:
+        return 400, {"error": bad_pins}
     if op_name == "set_field":
         field = body.get("field")
         value = body.get("value")
@@ -411,11 +447,18 @@ def _apply_edit(app, ref: str, body) -> tuple[int, dict]:
         op = AddLink(verb, target) if op_name == "add_link" else RemoveLink(verb, target)
     else:
         return 400, {"error": "op must be 'set_field', 'set_body', 'add_link' or 'remove_link'"}
+    if pins and op_name != "set_body":
+        # Not a refusal, and not a silent drop either: a pin has nowhere to live
+        # without a body naming it, and saving the body separately would be the
+        # half-commit §4 exists to prevent.
+        return 400, {"error": "pin is only accepted on op 'set_body': a source value is pinned by the body that names it"}
 
     project = app.state.snapshot.project
     result = edit_mod.apply_edit(
         project.root,
-        edit_mod.EditRequest(who="local", ref=ref, op=op, expected_revision=expected),
+        edit_mod.EditRequest(
+            who="local", ref=ref, op=op, expected_revision=expected, pins=pins
+        ),
     )
 
     def shown(path):
@@ -438,6 +481,10 @@ def _apply_edit(app, ref: str, body) -> tuple[int, dict]:
             "path": shown(result.path),
             "revision": result.revision,
             "describe": result.plan.describe(),
+            # What the reader read and the lockfile now pins, for an accept.
+            # Nothing here came from the request: a `value` sent by the client is
+            # ignored, which is the point (§5 -- one parser of a source file).
+            "pinned": [dict(entry) for entry in result.pinned],
             "diagnostics": [diag_dict(d) for d in result.diagnostics if d.level != CHECK_VIOLATION],
         }
     if isinstance(result, edit_mod.Conflict):

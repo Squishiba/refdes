@@ -114,9 +114,18 @@ class SourceReader(Protocol):
     extensions: tuple[str, ...]
 
     def extract(
-        self, path: Path, requests: Collection[SourceRequest]
+        self,
+        path: Path,
+        requests: Collection[SourceRequest],
+        *,
+        label: str | None = None,
     ) -> Mapping[str, ExtractedSource]:
-        """Return every requested key or raise SourceExtractionError."""
+        """Return every requested key or raise SourceExtractionError.
+
+        `label` names the file in the problems raised, exactly as it does on
+        `list_entries`: a caller that read the bytes at a server path but serves
+        a project-relative one has to say which name the messages may use.
+        Default: the path it was handed."""
 
     # `list_entries` is deliberately NOT declared here. Enumeration is optional
     # -- a format whose keys are not enumerable is a real possibility -- and
@@ -188,10 +197,19 @@ class CsvReader:
     extensions = (".csv",)
 
     def extract(
-        self, path: Path, requests: Collection[SourceRequest]
+        self,
+        path: Path,
+        requests: Collection[SourceRequest],
+        *,
+        label: str | None = None,
     ) -> dict[str, ExtractedSource]:
         wanted = sorted({r.key for r in requests})
-        label = path.as_posix()
+        # The name every problem below says. A caller serving a project-relative
+        # path passes it here, so the filesystem path the bytes came from is
+        # never in a string the caller did not choose (`list_entries` documents
+        # why this is naming rather than a nicety: a post-hoc scrub covered one
+        # branch and not the other).
+        label = label if label else path.as_posix()
         try:
             with open(path, "r", encoding="utf-8-sig", newline="") as fh:
                 header_line, header, records, _truncated = _read_rows(fh, label)

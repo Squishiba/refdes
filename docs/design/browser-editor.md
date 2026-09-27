@@ -445,12 +445,21 @@ part this document had not seen coming: a body naming an unpinned key is a new
 item error, so the diagnostic gate refuses the save, which means Accept has to
 write the item file and the lockfile as one operation.
 
-**Slice A landed 2026-09-25** (status there is now *proposed; Slice A landed*):
-`GET /api/item/<ref>/sources`, `…/sources/entries?path=&q=` and
-`…/sources/propose?path=&key=&unit=&name=` read, and the path-confinement rules
-are proven by tests. There is no panel in the editor yet, and nothing in the
-picker writes: Accept (Slice B) is the lockfile write, and the panel itself is
-Slice C.
+**Slice A landed 2026-09-25**: `GET /api/item/<ref>/sources`,
+`…/sources/entries?path=&q=` and `…/sources/propose?path=&key=&unit=&name=`
+read, and the path-confinement rules are proven by tests.
+
+**Slice B landed 2026-09-27**: Accept is that one operation. `set_body`
+widened with `pin` writes `.refdes/citations.yaml` first, so the delta gate
+judges the candidate the save actually produces, and every refusal after that
+write restores the previous lockfile bytes — the first two-file transaction this
+editor performs, and still one apply-operation call with one mutation entry
+point. What it pins is what the Python reader read from the live file, under
+`refdes fetch`'s non-`--update` policy: a file that moved since it was pinned is
+refused with the `fetch --update` command to run instead.
+
+There is no panel in the editor yet — that is Slice C, and from here it is
+composition: three reads, one widened save.
 
 #### PDF datasheet values
 
