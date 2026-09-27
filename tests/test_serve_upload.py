@@ -1,5 +1,5 @@
-"""`POST /api/assets` -- Phase 1 "Bytes" and Phase 2 "Conflicts"
-(docs/design/editor-image-upload.md §17).
+"""`POST /api/assets` -- Phase 1 "Bytes", Phase 2 "Conflicts" and Phase 3
+"Seals" (docs/design/editor-image-upload.md §17).
 
 The claims pinned here are the ones those two slices are scoped by:
 
@@ -34,8 +34,14 @@ The claims pinned here are the ones those two slices are scoped by:
 * and the endpoint writes bytes only. It never touches a `.md` or `.yaml`, and
   the reference reaches disk through the ordinary `set_body` save (§7).
 
-Not here: the §10 sealed-target and sealed-referenced refusals (Phase 3), the
-client (Phase 4), or the docs pass (Phase 5).
+* the two §10 seal refusals, both decided before any byte is written: an upload
+  *for* a sealed entry refuses outright (its body save is refused too, so the
+  bytes could only be an orphan), and a file a sealed entry references cannot be
+  replaced or created from here -- a seal hashes the body text, which holds the
+  path, not the bytes. No `expected_hash` buys either write back; identical
+  bytes, which change nothing, stay the §5 no-op they were.
+
+Not here: the client (Phase 4) or the docs pass (Phase 5).
 """
 
 from __future__ import annotations
@@ -52,6 +58,7 @@ from serve_support import Client, make_filter_project, snapshot_tree
 
 from refdes import build as build_mod
 from refdes import parse as parse_mod
+from refdes import seal as seal_mod
 from refdes.schema import load_project
 from refdes.serve import edit as edit_mod
 from refdes.serve import upload as upload_mod
@@ -1099,6 +1106,309 @@ def test_the_checks_see_only_what_the_last_build_recorded(tmp_path):
     upload_mod.store_asset(project, dest="items", name="curve.png", data=NEW_CURVE)
     assert project.image_results == before
     assert (root / "items" / "curve.png").read_bytes() == NEW_CURVE
+
+
+# ------------------------------------------------------------------ §10 seals
+#
+# Two refusals, both decided before any byte is written. An upload *for* a
+# sealed entry has no outcome that is not an orphan -- the body save that would
+# carry the reference is refused under the same lock, so the image would sit
+# beside an entry that can never point at it. And a file a sealed entry
+# references cannot be replaced or created from here, because a seal hashes the
+# entry's fields and normalized body text: the `![alt](path)` path, not the
+# bytes behind it. Swap the file and the sealed record displays a different
+# picture while its hash still verifies -- which is why §9.3's *disclose and let
+# the author confirm* turns into a refusal here, and why no `expected_hash` buys
+# the write back.
+
+LOG_WITH_IMAGE = """\
+defaults: { type: log, board: board-a, workspace: platform }
+items:
+  - id: LOG-001
+    summary: Bench notes for the rail.
+    body: |
+      ![the curve as measured on the bench](curve.png)
+"""
+
+
+def seal_the_project(root):
+    """Seal what is on disk the way it gets sealed in real life: one writable
+    build records each append-only entry's content hash in
+    `.refdes/log-seal*.yaml`. That file is what `seal.is_sealed` reads, so a
+    fixture that wants a sealed item has to build once with `seal_write=True`
+    -- the same move `tests/test_serve_edit.py::test_sealed_item_is_refused_and_untouched`
+    makes."""
+    project = load_project(config_path=str(root / "refdes-project.yaml"))
+    parse_mod.load_items(project)
+    build_mod.build(project, seal_write=True)
+    assert list((root / ".refdes").glob("log-seal*.yaml")), "the fixture sealed nothing"
+    sealed = project.item_by_id("LOG-001")
+    assert sealed is not None and seal_mod.is_sealed(project, sealed)
+    return project
+
+
+def make_sealed_project(tmp_path):
+    """A project with one sealed log entry whose body references a bare
+    `curve.png` that resolves to `figures/curve.png`: the exact state §10's
+    second refusal is about. The image is a real build input and `image_results`
+    really does name LOG-001 as a referrer -- `sealed_image` asserts it."""
+    root = make_upload_project(tmp_path)
+    (root / "items" / "log.yaml").write_text(LOG_WITH_IMAGE, encoding="utf-8")
+    (root / "figures" / "curve.png").write_bytes(OLD_CURVE)
+    seal_the_project(root)
+    return root
+
+
+@pytest.fixture
+def sealed_image(tmp_path):
+    """The served form of `make_sealed_project`."""
+    root = make_sealed_project(tmp_path)
+    project = built_project(root)
+    assert [row["item"] for row in upload_mod._referencing_items(
+        project, "figures/curve.png", upload_mod._source_files_by_id(project)
+    )] == ["LOG-001"], "the precondition: the build records the sealed entry as a referrer"
+    app, client = _serve(root)
+    try:
+        yield app, client, tmp_path
+    finally:
+        app.stop()
+
+
+def test_sealed_item_refuses_upload_before_any_write(sealed_image):
+    """§14's test, §10's first half. The upload carries the item it is for, and
+    that item is sealed, so the request refuses: the body edit that would
+    reference the image is itself refused, which makes any bytes written here an
+    orphan on an entry that can never take the reference. Nothing lands on disk,
+    in a project that was clean to begin with."""
+    _app, client, root = sealed_image
+    before = snapshot_tree(root)
+    status, payload = upload(client, name="bench.png", item="LOG-001", data=PNG)
+    assert status == 422, payload
+    assert payload["kind"] == "refused"
+    assert payload["refusal"] == "sealed"
+    assert "LOG-001" in payload["error"], "the refusal names the entry it refused for"
+    assert not (root / "items" / "bench.png").exists()
+    assert snapshot_tree(root) == before, "not one byte of the project moved"
+
+
+def test_a_sealed_upload_refusal_says_why_and_where_to_go_instead(sealed_image):
+    """A refusal that only says "sealed" leaves the author holding a rejected
+    drop. The actionable facts are the two the design names: the body edit is
+    what is refused (so this is not the upload endpoint being fussy), and a
+    correction to a sealed entry means appending one that `amends:` it -- which
+    is an entry an upload *can* be for."""
+    _app, client, _root = sealed_image
+    _status, payload = upload(client, name="bench.png", item="LOG-001", data=PNG)
+    message = payload["error"]
+    assert "sealed" in message and "amends" in message
+    assert "Nothing was written" in message
+    assert [row["item"] for row in payload["details"]] == ["LOG-001"]
+    assert payload["details"][0]["source_file"] == "items/log.yaml"
+    assert str(_root) not in message
+
+
+def test_the_upload_refusal_and_the_body_save_refusal_agree(sealed_image):
+    """The two refusals use the same predicate -- `seal.is_sealed`, the one
+    `apply_edit` applies under the write lock -- so an author cannot be told the
+    body is frozen and then handed an upload that assumes it is not. Pinned by
+    refusing both mutations on the same item in the same session."""
+    _app, client, root = sealed_image
+    _status, item = client.api_get("/api/item/LOG-001")
+    status, edit = client.api_post(
+        "/api/item/LOG-001/edit",
+        {
+            "op": "set_body",
+            "text": "![a different curve](bench.png)\n",
+            "expected_revision": item["edit"]["file_revision"],
+        },
+    )
+    assert status == 422 and "sealed" in edit["reason"], edit
+    upload_status, upload_payload = upload(client, name="bench.png", item="LOG-001", data=PNG)
+    assert upload_status == 422 and upload_payload["refusal"] == "sealed"
+    assert not (root / "items" / "bench.png").exists()
+
+
+def test_a_sealed_target_is_refused_whatever_destination_it_is_given(sealed_image):
+    """The refusal is about the entry the upload is *for*, not about where the
+    bytes would land: an explicit `dest` somewhere else does not launder it, since
+    the reference still has to reach LOG-001's body. Nor does a name that would
+    collide with nothing."""
+    _app, client, root = sealed_image
+    status, payload = upload(
+        client, name="somewhere-else.png", item="LOG-001", dest="figures", data=PNG
+    )
+    assert status == 422 and payload["refusal"] == "sealed", payload
+    assert not (root / "figures" / "somewhere-else.png").exists()
+
+
+def test_an_append_only_entry_that_is_not_yet_sealed_takes_the_upload(tmp_path):
+    """The negative, and the reason the check is `is_sealed` rather than
+    `type.append_only`: an append-only entry is only frozen once a build has
+    sealed it, and the first image for a brand-new log entry is the ordinary
+    case. Mirrors `test_append_only_item_without_a_seal_may_be_edited`."""
+    root = make_sealed_project(tmp_path)
+    (root / "items" / "log.yaml").write_text(
+        LOG_WITH_IMAGE
+        + "  - id: LOG-002\n"
+        "    summary: A second entry, written after the build that sealed the first.\n",
+        encoding="utf-8",
+    )
+    project = built_project(root)
+    fresh = project.item_by_id("LOG-002")
+    assert fresh is not None and not seal_mod.is_sealed(project, fresh)
+    result = upload_mod.store_asset(
+        project, dest="items", name="bench-2.png", data=PNG, item=fresh
+    )
+    assert isinstance(result, upload_mod.Uploaded), result
+    assert (root / "items" / "bench-2.png").read_bytes() == PNG
+
+
+def test_replacing_a_file_a_sealed_item_references_refuses(sealed_image):
+    """§14's test, §10's sharp case. `figures/curve.png` is not part of any
+    sealed entry's hashed text -- the seal hashes the *path* in
+    `![alt](curve.png)`, not the bytes behind it -- so replacing it changes what
+    a sealed record displays while that record still verifies as untouched. The
+    refusal names the sealed item, and the file keeps its bytes."""
+    _app, client, root = sealed_image
+    before = snapshot_tree(root)
+    status, payload = upload(client, name="curve.png", dest="figures", data=NEW_CURVE)
+    assert status == 422, payload
+    assert payload["kind"] == "refused"
+    assert payload["refusal"] == "sealed"
+    assert "LOG-001" in payload["error"], "the sealed item is named, not 'an item is sealed'"
+    assert "items/log.yaml" in payload["error"]
+    assert "figures/curve.png" in payload["error"]
+    assert (root / "figures" / "curve.png").read_bytes() == OLD_CURVE
+    assert snapshot_tree(root) == before
+
+
+def test_no_expected_hash_confirms_a_sealed_entrys_image_away(sealed_image):
+    """The difference from §9.3, and the reason this is a refusal rather than a
+    409: a conflict is a question, and there is no answer here. Carrying the
+    current hash -- the exact confirmation that replaces any other file -- changes
+    nothing, because what is protected is not the author's ownership of the file
+    but the sealed record's immutability."""
+    _app, client, root = sealed_image
+    current = "sha256:" + hashlib.sha256(OLD_CURVE).hexdigest()
+    status, payload = upload(
+        client,
+        name="curve.png",
+        dest="figures",
+        data=NEW_CURVE,
+        expected_hash=current,
+    )
+    assert status == 422, payload
+    assert payload["refusal"] == "sealed"
+    assert "expected_hash" in payload["error"], "and the message says a hash does not help"
+    assert (root / "figures" / "curve.png").read_bytes() == OLD_CURVE
+
+
+def test_identical_bytes_to_a_sealed_entrys_image_are_still_a_no_op(sealed_image):
+    """§5's idempotence outranks §10 when nothing would change: re-uploading the
+    bytes that are already there leaves every sealed page displaying exactly what
+    it displays now, so there is nothing to refuse. The refusal is about changing
+    the file, not about touching its path."""
+    _app, client, root = sealed_image
+    status, payload = upload(client, name="curve.png", dest="figures", data=OLD_CURVE)
+    assert status == 200, payload
+    assert payload["created"] is False and payload["replaced"] is False
+    assert (root / "figures" / "curve.png").read_bytes() == OLD_CURVE
+
+
+def test_creating_a_file_a_sealed_entry_would_capture_refuses(sealed_image):
+    """§10's "refuse to *create* a file at a path a sealed entry references":
+    §9.2's capture with a seal on it. LOG-001 writes a bare `curve.png` that
+    resolves to `figures/curve.png` today, and a src that resolves beside its own
+    source file always wins -- so `items/curve.png` would silently re-point a
+    sealed record. Same scan as Phase 2's capture check, and now the sharper of
+    the two refusals."""
+    _app, client, root = sealed_image
+    before = snapshot_tree(root)
+    status, payload = upload(client, name="curve.png", dest="items", data=NEW_CURVE)
+    assert status == 422, payload
+    assert payload["refusal"] == "sealed"
+    assert "LOG-001" in payload["error"]
+    assert "figures/curve.png" in payload["error"], "and what it resolves to today"
+    assert not (root / "items" / "curve.png").exists()
+    assert snapshot_tree(root) == before
+
+
+def test_a_sealed_refusal_still_discloses_every_referrer(tmp_path):
+    """The refusal is about the sealed entries; the disclosure stays the whole
+    blast radius. Two items reference the file and only one is sealed, so the
+    message names the sealed one and `details` carries both rows, each flagged,
+    so a dialog can say "this one is why, and this other one would have changed
+    too"."""
+    root = make_sealed_project(tmp_path)
+    (root / "items" / "decs.yaml").write_text(DECS_WITH_IMAGE, encoding="utf-8")
+    project = built_project(root)
+    sealed = project.item_by_id("LOG-001")
+    assert seal_mod.is_sealed(project, sealed)
+    result = upload_mod.store_asset(
+        project, dest="figures", name="curve.png", data=NEW_CURVE
+    )
+    assert isinstance(result, upload_mod.Refused) and result.kind == "sealed", result
+    assert [row["item"] for row in result.details] == ["DEC-001", "LOG-001"]
+    assert {row["sealed"] for row in result.details} == {True, False}
+    assert "LOG-001" in result.reason
+    assert (root / "figures" / "curve.png").read_bytes() == OLD_CURVE
+
+
+def test_an_unsealed_referrer_is_still_a_confirmable_conflict(referencing):
+    """Phase 3 must not have turned every replace into a refusal: with no sealed
+    entry looking at the file, §9.3's disclose-and-confirm still applies, and the
+    disclosure rows now carry the `sealed` flag that says so -- the same field
+    that makes the refusal, computed the same way."""
+    _app, client, root = referencing
+    status, payload = upload(client, name="curve.png", dest="figures", data=NEW_CURVE)
+    assert status == 409, payload
+    assert payload["conflict"] == "collision"
+    assert [row["item"] for row in payload["referenced_by"]] == ["DEC-001", "TST-001"]
+    assert all(row["sealed"] is False for row in payload["referenced_by"])
+    status, payload = upload(
+        client,
+        name="curve.png",
+        dest="figures",
+        data=NEW_CURVE,
+        expected_hash=_hash(OLD_CURVE),
+    )
+    assert status == 200 and payload["replaced"] is True, payload
+    assert all(row["sealed"] is False for row in payload["referenced_by"])
+
+
+def test_a_sealed_item_that_never_referenced_the_file_does_not_freeze_it(tmp_path):
+    """The scope of the second refusal is *referenced*, not *present*: a sealed
+    entry in the same project, or even the same directory, does not make every
+    upload in sight illegal. The check reads the build's own per-item
+    resolutions, so an entry that does not resolve to this file has no say."""
+    root = make_sealed_project(tmp_path)
+    project = built_project(root)
+    result = upload_mod.store_asset(
+        project, dest="items", name="unrelated.png", data=NEW_CURVE
+    )
+    assert isinstance(result, upload_mod.Uploaded), result
+    assert (root / "items" / "unrelated.png").read_bytes() == NEW_CURVE
+    captured = upload_mod.store_asset(
+        project, dest="items", name="curve.png", data=NEW_CURVE
+    )
+    assert isinstance(captured, upload_mod.Refused) and captured.kind == "sealed", captured
+
+
+def test_what_the_refusal_prevents_is_only_loud_at_the_next_build(sealed_image):
+    """§10's premise, pinned the way Phase 2 pinned §9.1 and §9.2: the damage is
+    real, and the editor is the only place it can be stopped *before* it shows.
+    Hand-write the bytes the endpoint refuses to write and the sealed page shows
+    the new picture; the build catches it afterwards -- HASH_FORMAT 5 folds each
+    referenced image's digest into the entry's hash, so the seal now reports the
+    entry as modified (tests/test_image_hash.py pins that half). Loud eventually
+    is not the same as refused, which is why this refusal ships alongside it."""
+    app, _client, root = sealed_image
+    assert not [d for d in app.state.snapshot.project.errors if "sealed" in d.message]
+    (root / "figures" / "curve.png").write_bytes(NEW_CURVE)
+    assert app.state.refresh() is True, "a file under site.assets: is a build input"
+    messages = [d.message for d in app.state.snapshot.project.errors if "sealed" in d.message]
+    assert messages, "the build-side loudness this refusal exists to pre-empt"
+    assert "LOG-001" in messages[0]
 
 
 # ---------------------------------------------------------------- atomicity
