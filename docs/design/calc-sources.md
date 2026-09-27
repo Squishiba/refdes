@@ -227,6 +227,19 @@ Sequencing: build after the CSV/xlsx picker, as its own later slice. The PDF
 reader is one more source type behind the same picker UI and the same
 confirm-before-accept step.
 
+**Note (2026-09-27).** The editor half of this requirement is proposed in
+[editor-pdf-picker.md](editor-pdf-picker.md): what the browser shows (a
+server-extracted positioned-text view of the page with the candidate row
+highlighted; faithful rendering via vendored pdf.js priced as an explicit
+later option), how a candidate is found (pypdf text extraction with
+coordinates -- the already-optional `refdes[pdf]` extra, no new dependency),
+how the min/typ/max rule becomes mechanical (every numeric token of the
+row, none pre-selected), and how Accept reuses the CSV picker's
+one-operation accept (`editor-source-picker.md` §4) rather than inventing a
+second write path. A PDF source value's durable key is an author-named key
+re-located at fetch time by its quoted row text -- the `section:` pattern
+applied to a table row. Status: proposed, nothing implemented.
+
 ---
 
 ## 2. Why refdes does not sum over items
