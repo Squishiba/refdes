@@ -380,3 +380,72 @@ def test_the_thumbnail_is_the_preview_surface_and_not_a_new_endpoint():
     assert "addEventListener('error'" in picker
     assert "onerror" not in picker
     assert "insertable" in picker, "a row the server cannot reference says so"
+
+
+# ------------------------------------------------------------ source picker
+
+
+def test_the_picker_is_wired_into_the_editor():
+    """The new module must be imported, placed under the body control, and
+    send pins with the existing body save. The import-graph test checks that
+    the module itself resolves."""
+    assert os.path.isfile(os.path.join(STATIC, "sourcepicker.js"))
+    with open(os.path.join(STATIC, "editor.js"), encoding="utf-8") as fh:
+        editor = fh.read()
+    with open(os.path.join(STATIC, "item.js"), encoding="utf-8") as fh:
+        item = fh.read()
+    assert "from './sourcepicker.js'" in editor
+    assert "createSourcePicker(item, handle, edit.body && edit.body.editable ? acceptSource : null)" in editor
+    assert "editor.sourcePicker" in item
+    assert item.index("const bodyArea = editor.bodyControl(") < item.index("editor.sourcePicker")
+    assert "{ pin: draft.pins }" in editor
+    assert "op: 'set_body'" in editor
+
+
+def test_the_browser_parses_no_csv():
+    """The picker sees only JSON from the three service reads. It never
+    fetches a source path or splits file text into rows or cells."""
+    with open(os.path.join(STATIC, "sourcepicker.js"), encoding="utf-8") as fh:
+        picker = fh.read()
+    assert "from './api.js'" in picker
+    assert "api(base)" in picker
+    assert "${base}/entries?" in picker
+    assert "${base}/propose?" in picker
+    assert "payload.entries" in picker and "initial.entry" in picker
+    assert ".split(',')" not in picker and '.split(",")' not in picker
+    assert ".split('\\n')" not in picker and '.split("\\n")' not in picker
+    assert "fetch(" not in picker and "FileReader" not in picker
+    assert "source(\"" not in picker, "the server composes the calc line"
+
+
+def test_the_picker_inserts_through_the_existing_draft_mechanism():
+    with open(os.path.join(STATIC, "editor.js"), encoding="utf-8") as fh:
+        editor = fh.read()
+    with open(os.path.join(STATIC, "drafts.js"), encoding="utf-8") as fh:
+        drafts = fh.read()
+    with open(os.path.join(STATIC, "sourcepicker.js"), encoding="utf-8") as fh:
+        picker = fh.read()
+    assert "setDraftBody(handle, area.value)" in editor
+    assert "addDraftPin(handle" in editor
+    assert "pin: draft.pins" in editor
+    assert "return saveAll()" in editor
+    assert "method: 'POST'" in editor and "op: 'set_body'" in editor
+    assert "pins: parsed.pins || []" in drafts
+    assert "proposal.line" in editor
+    assert "insertIntoBody(proposal.line)" not in editor
+    assert "if (!blocks.length) throw new Error" in editor
+    assert "blocks[blocks.length - 1]" in editor
+    assert "body.indexOf('\\n', caret)" in editor
+    for name in ("accept_source", "pin_source", "source_accept"):
+        assert f"op: '{name}'" not in editor + picker
+
+
+def test_the_unit_field_starts_empty_and_accept_is_disabled_until_it_is_filled():
+    with open(os.path.join(STATIC, "sourcepicker.js"), encoding="utf-8") as fh:
+        picker = fh.read()
+    assert "unit.value = ''" in picker
+    assert "button.disabled = true" in picker
+    assert "if (!chosenUnit || !chosenName" in picker
+    assert "button.disabled = !accept || !current || !unit.value.trim()" in picker
+    assert "initial.units" in picker and "unit.value = value" in picker
+    assert "line.textContent = proposal.line" in picker

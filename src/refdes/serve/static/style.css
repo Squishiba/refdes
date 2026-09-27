@@ -112,3 +112,27 @@ ul.diagnostics, ul.checks { list-style: none; margin: 0; padding: 0; }
 .image-note { margin: 4px 0 0; font-size: 12px; }
 .image-note.good { color: var(--ok); }
 .image-note.warn { color: var(--warn); }
+
+/* Source values: file, row and explicit confirmation remain visible together. */
+.source-picker { margin: 12px 0; border-top: 1px solid var(--line); padding-top: 8px; }
+.source-picker h4 { margin: 8px 0 4px; }
+.source-file-row, .source-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 3px 0; }
+.source-file-row .source-detail { color: var(--warn); font-size: 12px; }
+.source-filter, .source-input-label input { width: 100%; padding: 3px 6px; border: 1px solid var(--line); border-radius: 4px; font: inherit; }
+.source-row-list { max-height: 220px; overflow-y: auto; border: 1px solid var(--line); border-radius: 4px; padding: 4px 6px; }
+.source-key { font-family: monospace; font-weight: 600; overflow-wrap: anywhere; }
+.source-preview { font-family: monospace; }
+.source-row .bad { color: var(--bad); }
+.source-confirm { border: 1px solid var(--line); border-radius: 4px; padding: 8px; margin-top: 8px; }
+.source-fact { display: flex; gap: 8px; padding: 2px 0; }
+.source-label { color: var(--muted); min-width: 115px; flex: none; }
+.source-value { white-space: pre-wrap; overflow-wrap: anywhere; }
+.source-context { margin: 4px 0; }
+.source-context .source-fact { padding-left: 12px; }
+.source-line { display: block; white-space: pre-wrap; overflow-wrap: anywhere; background: #f7f8fa; padding: 6px; margin: 4px 0; }
+.source-input-label { display: block; margin: 6px 0; }
+.source-suggestions { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; }
+.source-changed, .source-error { margin: 4px 0; }
+.source-changed { color: var(--warn); }
+.source-error { color: var(--bad); }
+.source-empty { white-space: pre-wrap; background: #f7f8fa; padding: 6px; }
