@@ -95,6 +95,14 @@ Verified
   are on main) and RUF015/RUF059 in tests, none of which are in a gate rule.
 - The new tests were also run on **pypdf 6.19.0** in a second venv (the floor
   this change sets): 69 passed there too, including `test_citation_sections.py`.
+- The **windows-latest CI job** earned its keep on the first push: it caught a
+  message of mine spelling a path with `os.path.relpath`, which is
+  slash-separated on Linux and backslashed on Windows -- a native-separator path
+  reaching a response, invisible on the platform it was written on. Fixed with
+  `Path(...).as_posix()`, and the no-leak test now walks the "kept copy is
+  missing" payload too, which is the message that carries a path this module
+  builds. (`citations._resolve` has the same `os.path.relpath` interpolation in
+  a *build diagnostic*; not in scope here, and not a response.)
 - `release.py`'s `assemble_fragments` folds both new changelog fragments
   (checked on a read-only copy of `CHANGELOG.md`; the file was not written).
 

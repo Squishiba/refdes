@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 
 import pytest
 from conftest import write_project_config
@@ -713,23 +714,35 @@ def test_no_pdf_bytes_and_no_absolute_server_path_appear_in_any_response(tmp_pat
     """§8: under option A no PDF byte leaves the process at all -- the responses
     are JSON of extracted text, coordinates and numbers. Every string in every
     payload is walked, on the succeeding and the failing paths, because the leak
-    this project has already had came from a fixup that covered one branch."""
+    this project has already had came from a fixup that covered one branch.
+
+    The `\\` assertion is the one Windows earns: a message that spells a path
+    with `os.path.relpath` is slash-separated on Linux and backslashed there,
+    so a leak of this shape is invisible on the platform it was written on."""
     root = served_project(tmp_path)
     (root / "datasheets" / "junk.pdf").write_bytes(b"this is not a PDF")
     (root / "items" / "decisions.yaml").write_text(
         ITEMS + "  - id: DEC-008\n"
         "    citations:\n"
         "      - path: datasheets/junk.pdf\n"
-        "      - path: datasheets/missing.pdf\n",
+        "      - path: datasheets/missing.pdf\n"
+        "  - id: DEC-009\n"
+        f"    citations:\n"
+        f"      - path: {REMOTE}/gone.pdf\n"
+        f"        keep_copy: true\n",
         encoding="utf-8",
     )
+    # a kept copy that is not on disk, so the refusal that names where it would
+    # be is walked too -- that message carries a path this module builds
+    keep_copy(root, f"{REMOTE}/gone.pdf", PDF)
+    os.remove(next((root / ".refdes" / "copies").iterdir()))
     app = start(root)
     try:
         client = Client(app)
         absolute = str(root.resolve())
         payloads = [
             client.api_get(sources_url(ref))[1]
-            for ref in ("DEC-001", "DEC-002", "DEC-003", "DEC-008")
+            for ref in ("DEC-001", "DEC-002", "DEC-003", "DEC-008", "DEC-009")
         ]
         payloads += [
             client.api_get(page_url("DEC-001", "datasheets/sheet.pdf", page))[1]
@@ -739,6 +752,7 @@ def test_no_pdf_bytes_and_no_absolute_server_path_appear_in_any_response(tmp_pat
             client.api_get(page_url("DEC-008", "datasheets/junk.pdf"))[1],
             client.api_get(page_url("DEC-001", "/etc/passwd"))[1],
             client.api_get(page_url("DEC-003", "datasheets/sheet.pdf"))[1],
+            client.api_get(page_url("DEC-009", f"{REMOTE}/gone.pdf"))[1],
         ]
         for payload in payloads:
             for text in strings(payload):
@@ -748,7 +762,7 @@ def test_no_pdf_bytes_and_no_absolute_server_path_appear_in_any_response(tmp_pat
                 assert "%PDF" not in text, text
         # the unreadable datasheet is named by its project-relative label, with
         # pypdf's own message under it and no traceback
-        junk = payloads[-3]
+        junk = payloads[-4]
         assert junk["kind"] == "refused"
         assert "datasheets/junk.pdf: pypdf could not read the PDF" in junk["error"]
         assert "Traceback" not in junk["error"]
@@ -757,6 +771,11 @@ def test_no_pdf_bytes_and_no_absolute_server_path_appear_in_any_response(tmp_pat
         assert missing["kind"] == "refused"
         assert "datasheets/missing.pdf: cannot read file" in missing["error"]
         assert absolute not in missing["error"]
+        # and the kept copy that is not there is named project-relative and
+        # slash-separated, on every platform
+        gone = payloads[-1]
+        assert gone["kind"] == "refused"
+        assert "is missing at .refdes/copies/" in gone["error"]
         # and the raw response is JSON, not a byte of the document
         status, _headers, body = client.request(
             "GET", page_url("DEC-001", "datasheets/sheet.pdf", 2), token=True

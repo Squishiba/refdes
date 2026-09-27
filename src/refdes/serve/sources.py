@@ -234,10 +234,13 @@ def _kept_copy(project: Project, spec, record: dict) -> tuple[str, str]:
         )
     blob = citations_mod.kept_copy_path(project, sha, spec.path)
     if not os.path.isfile(blob):
+        # `as_posix()` on the relpath, because this string goes into a response:
+        # on Windows `os.path.relpath` spells it with backslashes, and every
+        # other path a payload carries is project-relative and slash-separated.
+        where = Path(os.path.relpath(blob, project.root)).as_posix()
         return "", (
-            f"local copy of {spec.path} is missing at "
-            f"{os.path.relpath(blob, project.root)}; run 'refdes fetch --update "
-            f"--path {spec.path}' with the network available"
+            f"local copy of {spec.path} is missing at {where}; run 'refdes fetch "
+            f"--update --path {spec.path}' with the network available"
         )
     if citations_mod._sha256_file(blob) != sha:
         # The blob is named for its own hash, so this is a corrupted or tampered
