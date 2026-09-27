@@ -1,9 +1,11 @@
-Status: **proposed**; **Slice A landed 2026-09-25** (§11). `sources.list_entries`
-+ `SourceEntry` and the three read endpoints ship, with their authorization and
-caps and the reader/endpoint tests — the service reads, and there is no panel
-and no lockfile write yet. Slice B (accept) and Slice C (the panel) are still
-design only, and so is everything they decide. This document still changes no
-authoring behaviour: it settles the editor half of the requirement recorded in
+Status: **proposed**; **Slices A and B landed** (§11). `sources.list_entries` +
+`SourceEntry` and the three read endpoints ship, with their authorization and
+caps and the reader/endpoint tests, and §4's accept ships: one widened
+`set_body` request writes the item and `.refdes/citations.yaml` as one
+operation inside the write lock, with the rollback, proven against the CLI's
+own fetch semantics. What is still design only is the panel — Slice C — and
+the UI rows of §10. This document still changes no authoring behaviour: it
+settles the editor half of the requirement recorded in
 `docs/design/calc-sources.md` §1 ("Requirement: a picker for importing values
 from an outside file", Jared, 2026-09-19) and is cross-referenced from
 `docs/design/browser-editor.md`, "Source-value picker".
@@ -540,11 +542,17 @@ reader/endpoint tests. No UI. This slice is independently useful: it is the API
 a CLI `refdes sources list --item X` or a future xlsx picker both sit on, and it
 is where the path-confinement rules get proven.
 
-**Slice B — accept.** The widened `set_body` request, the lockfile write and
-its rollback inside the existing write lock, and the accept tests. Land B
-before any UI: it is the only part that writes tracked state, and it should be
-proven against the CLI's own fetch semantics while the only caller is a test.
-Not started.
+**Slice B — accept. LANDED 2026-09-27.** The widened `set_body` request, the
+lockfile write and its rollback inside the existing write lock, and the accept
+tests (`tests/test_serve_sources_accept.py`). Land B before any UI: it is the
+only part that writes tracked state, and it should be proven against the CLI's
+own fetch semantics while the only caller is a test.
+
+The request field is `pin`: one `{path, key, unit, name}` or a list of them,
+alongside `op: "set_body"`, `text` and `expected_revision`. There is no `value`
+field — a `value` in the request is ignored, not validated (§5). A successful
+accept answers with `pinned: [{path, key, reader, value}]`, the value the reader
+read, which is what the panel repeats back. `pin` on any other op is a 400.
 
 **Slice C — the panel.** `sourcepicker.js`, the file → key → confirm flow, the
 unit field with no default, insertion through `setDraftBody`, the static and

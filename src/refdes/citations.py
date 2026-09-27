@@ -420,9 +420,18 @@ def load_lockfile(project: Project) -> dict[str, dict]:
     return dict(data.get("citations") or {})
 
 
-def save_lockfile(project: Project, records: dict[str, dict]) -> None:
-    path = lockfile_path(project)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
+def lockfile_text(records: dict[str, dict]) -> str:
+    """The whole lockfile's text for these records -- the bytes `save_lockfile`
+    writes, in memory.
+
+    Split out of `save_lockfile` because there is a second writer of this file:
+    the editor's accept operation (docs/design/editor-source-picker.md §4) has
+    to stage the file and replace it atomically inside its own transaction, and
+    a lockfile it writes has to be a lockfile `refdes fetch` would have written
+    -- same header, same key order, same line endings -- so the next fetch sees
+    a normal file and skips it. Two places spelling the format is how the two
+    stop agreeing; this is the one place.
+    """
     header = (
         "# Refdes citation lockfile. Computed provenance for each cited path --\n"
         "# sha256, fetch timestamp, kept-copy flag, resolved sections and the\n"
@@ -431,16 +440,18 @@ def save_lockfile(project: Project, records: dict[str, dict]) -> None:
         "# `refdes fetch`.\n"
         "# Never hand-edit the sha256.\n"
     )
+    return header + yaml.safe_dump(
+        {"citations": records}, sort_keys=True, default_flow_style=False
+    )
+
+
+def save_lockfile(project: Project, records: dict[str, dict]) -> None:
+    path = lockfile_path(project)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
     # The lockfile is machine-owned and rewritten whole, so its bytes must not
     # depend on the platform that last ran `refdes fetch`: a text-mode write
     # translated every LF to CRLF on Windows, and this file is committed.
-    textio.write_text(
-        path,
-        header
-        + yaml.safe_dump(
-            {"citations": records}, sort_keys=True, default_flow_style=False
-        ),
-    )
+    textio.write_text(path, lockfile_text(records))
 
 
 # -------------------------------------------------------------------- collection
@@ -976,15 +987,21 @@ class FetchResult:
 
 
 def _extract_source_values(
-    project: Project, canon: str, keys: dict[str, list[str]]
+    project: Project, canon: str, keys: dict[str, list[str]], *, label: str | None = None
 ) -> dict[str, dict]:
     """Every used key of one local file, in one parse, as lockfile `values`
     entries -- or SourceExtractionError. Nothing is written here: the caller
-    replaces the path's record only if this returns."""
+    replaces the path's record only if this returns.
+
+    `label` is what the reader calls the file in its problems. `fetch` leaves it
+    unset and prints a real path to a terminal; a caller answering a browser
+    passes the project-relative name, because the root it read the bytes from is
+    not information to hand out (`editor-source-picker.md` §6)."""
     reader = sources_mod.reader_for(canon)
     got = reader.extract(
         Path(os.path.join(project.root, canon)),
         [sources_mod.SourceRequest(canon, key) for key in sorted(keys)],
+        label=label,
     )
     return {k: {"reader": v.reader, "value": v.text} for k, v in sorted(got.items())}
 
@@ -1070,6 +1087,101 @@ def _refresh_pinned_sources(
     existing["values"] = new_values
     existing["fetched"] = _now_iso()
     return True
+
+
+def stage_source_pins(
+    project: Project, records: dict[str, dict], pins: list[tuple[str, str]]
+) -> tuple[list[str], list[dict]]:
+    """Add `(canon, key)` pins to `records` in memory, exactly as `refdes fetch`
+    would have written them, and report what stopped it.
+
+    This is the accept operation's half of docs/design/editor-source-picker.md
+    §4: the editor writes the lockfile, and what it writes has to be what fetch
+    writes -- the same record keys, the same `values` shape, the same policy
+    about which bytes a value may come from -- or the next `refdes fetch` looks
+    at the file and sees something it did not write. So this does not
+    reimplement that policy, it applies it:
+
+    - **A path with no record is allowed**, and gets the record `fetch_all`
+      would have made for it: `sha256`, `fetched`, `kept_copy: false` (a local
+      file is already local -- `fetch` makes `keep_copy:` on one an error),
+      `bytes`, and `values`. Hash and value are pinned in one write, which is
+      the only way a key can be pinned from bytes nobody has accepted yet.
+    - **A path with a record is only re-read from the bytes that record names.**
+      A file whose hash moved is refused in `fetch`'s own words, pointing at
+      `refdes fetch --update`: re-accepting a changed source value stays a
+      deliberate act in a terminal where the `old -> new` diff is printed
+      (`calc-sources.md` Q2, decided 2026-09-21).
+    - **A value already pinned for another key survives.** `values` is merged,
+      never replaced by the one key being accepted -- the whole-map replacement
+      `_refresh_pinned_sources` does is correct for a fetch that walked every
+      body in the project and wrong for one key from one item.
+
+    `records` is mutated only when every pin succeeded; on any error nothing
+    changed and the caller writes nothing either. Returns `(errors, pinned)`,
+    `pinned` being one `{path, key, reader, value}` per accepted pair -- the
+    value the *reader* read, which is the only value this operation knows.
+    """
+    wanted: dict[str, list[str]] = {}
+    for canon, key in pins:
+        keys = wanted.setdefault(canon, [])
+        if key not in keys:
+            keys.append(key)
+
+    errors: list[str] = []
+    staged: dict[str, dict] = {}
+    pinned: list[dict] = []
+    for canon in sorted(wanted):
+        target = os.path.join(project.root, canon)
+        if not os.path.isfile(target):
+            errors.append(f"{canon}: cited local file {canon!r} is not on disk")
+            continue
+        record = records.get(canon)
+        digest = _sha256_file(target)
+        if record is not None and str(record.get("sha256") or "") != digest:
+            errors.append(
+                f"{canon}: the file has changed since it was pinned -- accepting "
+                f"{wanted[canon][0]!r} from these bytes would pair the old hash "
+                "with new ones. Review the change, then run "
+                f"'refdes fetch --update --path {canon}'"
+            )
+            continue
+        # Everything this file already pins is re-read alongside the new key,
+        # from bytes just confirmed to BE the pinned ones: `values` is written
+        # whole, so a key left out of the extraction is a key deleted.
+        keep = {
+            k: v for k, v in ((record or {}).get("values") or {}).items() if _value_text(v)
+        }
+        try:
+            values = _extract_source_values(
+                project, canon, {k: [] for k in sorted(set(keep) | set(wanted[canon]))},
+                label=canon,
+            )
+        except sources_mod.SourceExtractionError as exc:
+            errors.extend(f"{p} (nothing was pinned)" for p in exc.problems)
+            continue
+        new_record = dict(record) if record else {
+            "sha256": digest,
+            "fetched": _now_iso(),
+            "kept_copy": False,
+            "bytes": os.path.getsize(target),
+        }
+        if values != keep or record is None:
+            new_record["values"] = values
+            if record is not None:
+                new_record["fetched"] = _now_iso()
+        staged[canon] = new_record
+        for key in sorted(wanted[canon]):
+            entry = values.get(key)
+            if entry is None:  # unreachable past the reader; a missing key is its error
+                errors.append(f"{canon}: {key!r} was not extracted")
+                continue
+            pinned.append({"path": canon, "key": key, **entry})
+
+    if errors:
+        return errors, []
+    records.update(staged)
+    return [], pinned
 
 
 def _section_bytes(project, kind, canon, record):

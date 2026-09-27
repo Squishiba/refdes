@@ -839,6 +839,76 @@ def propose_payload(
     return payload
 
 
+def body_source_pairs(project: Project, item: Item, body: str) -> set[tuple[str, str]]:
+    """Every `(canonical path, key)` a `source()` call in `body` asks for.
+
+    The same walk `citations.collect_source_uses` does, on one body instead of a
+    whole project: `calc.source_calls_in_block` is the evaluator's grammar, so a
+    line indented differently, or with a different unit, or a different variable
+    name, is still the same pair -- which is exactly why this is not a string
+    match against the composed line. A match on text would refuse a body the
+    evaluator reads fine, and agreeing with the evaluator about which keys a body
+    names is the whole point:
+    `citations.stage_source_pins` is about to pin one, and a pin nothing cites is
+    dead state in a tracked file (editor-source-picker.md §4).
+
+    A path this item does not cite is not a pair, and is not reported here: that
+    is the validator's error to make, on the line that made it.
+    """
+    pairs: set[tuple[str, str]] = set()
+    for block, _offset, _block_id in calc_mod.extract_blocks_with_lines(body):
+        for _line, _name, raw_path, key in calc_mod.source_calls_in_block(block):
+            canon, why = citations_mod.authorize_source_path(project, item, raw_path)
+            if not why:
+                pairs.add((canon, key))
+    return pairs
+
+
+def accept_plan(
+    project: Project,
+    item: Item,
+    *,
+    path: str,
+    key: str,
+    unit: str = "",
+    name: str = "",
+    body: str,
+) -> dict:
+    """§4 step 3, under the write lock: re-validate the pick, compose its line,
+    and prove the body being saved is the body that names it.
+
+    The re-validation is `propose_payload`, called again. Not a second copy of
+    its rules -- authorization against the server's copy of the item, the key
+    still existing, the row still being selectable, the name still usable, the
+    unit still checking out, and the line composed by the same `_compose` that
+    showed it to the author. Whatever changed between the proposal and the
+    accept, this sees the state as of the accept, which is the only state worth
+    checking.
+
+    Two things a proposal cannot know are checked here. That a unit arrived at
+    all -- the panel disables Accept until it has one, and a disabled button is
+    not a rule -- and that the submitted body carries a `source()` call for this
+    exact pair, which is what makes the body and the pin one fact rather than two
+    writes that happen to be adjacent.
+
+    Raises `SourceRefusal`; returns the proposal payload, whose `line` is the
+    text and whose `path` is canonical.
+    """
+    proposal = propose_payload(project, item, path=path, key=key, unit=unit, name=name)
+    if not proposal["complete"]:
+        raise SourceRefusal(
+            proposal.get("reason")
+            or "a source value cannot be pinned without the unit it is to be read as"
+        )
+    if (proposal["path"], proposal["key"]) not in body_source_pairs(project, item, body):
+        raise SourceRefusal(
+            f"the body being saved names no source() call for {proposal['key']!r} in "
+            f"{proposal['path']} -- a source value is pinned only for a body that "
+            "asks for it, so nothing was written"
+        )
+    return proposal
+
+
 def _compose(name: str, canon: str, key: str, unit: str) -> str:
     """`name = source("path", "key") | unit`, checked against the evaluator's
     own grammar before it is returned.

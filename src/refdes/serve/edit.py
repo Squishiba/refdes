@@ -35,6 +35,16 @@ journal, which is a later slice):
 7. write atomically -- temp file in the same directory, flush, fsync,
    `os.replace` -- then re-read and confirm the bytes are the planned bytes.
 
+One save writes two files. A `set_body` carrying `pin` (docs/design/
+editor-source-picker.md §4 -- the editor's source-value picker accepting a
+value) writes `.refdes/citations.yaml` as well as the item, because a body with
+a `source()` line whose key is not pinned is an item that does not build and a
+pinned key no body names is dead state in a tracked file. The lockfile lands
+first, so the delta gate judges the candidate the save actually produces, and
+every refusal after it restores the previous lockfile bytes. It is still one
+apply-operation call and still one mutation entry point; what widened is the
+request, not the number of writers.
+
 `apply_edit` addresses an existing field, body, or link; `create_item` is
 Slice 3's entry point, which does mint a key, reserve an id, and write a new
 item -- inside the same lock, with the same refuse-as-a-value posture, and
@@ -54,16 +64,42 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Any
 
+from .. import citations as citations_mod
 from .. import dates, ids, keys, links, loader, patcher, scaffold, seal, textio
 from ..model import CHECK_VIOLATION, Diagnostic, ERROR, Item, Project
 from ..parse import yaml_safe_load
 from ..patcher import AddLink, PatchPlan, Refusal, RemoveLink, SetBody, SetField
 from . import security
+from . import sources as sources_mod
 
 CONFIG_NAME = "refdes-project.yaml"
 
 
 # ------------------------------------------------------------------- requests
+
+
+@dataclass(frozen=True)
+class SourcePin:
+    """One source value the request asks to pin, as the client named it
+    (docs/design/editor-source-picker.md §4).
+
+    A path, a key, and the unit and name of the calc line that must be in the
+    body this request saves. **No value**: the number comes from the reader
+    inside the accept operation and from nowhere else (§5 -- a browser-side
+    parser would be a second authority on what a CSV says, and the disagreement
+    between two of them is the silent-wrong-value class this project keeps
+    finding). A `value` key in the request is ignored, not trusted.
+
+    It travels with a `set_body` op and is never an op of its own: the body and
+    the pin are one fact -- a line naming an unpinned key is an item that will
+    not build, and a pinned key no line names is dead state in a tracked file --
+    so they commit together or not at all.
+    """
+
+    path: str
+    key: str
+    unit: str = ""
+    name: str = ""
 
 
 @dataclass(frozen=True)
@@ -80,6 +116,11 @@ class EditRequest:
     ref: str
     op: Any  # patcher.SetField | patcher.SetBody | patcher.AddLink | patcher.RemoveLink
     expected_revision: str  # content revision of the target FILE, as the client saw it
+    # Source values to pin alongside this edit (`SourcePin`). Only a `set_body`
+    # may carry them, because only a body can name them; the write is then a
+    # transaction over two files -- the item and `.refdes/citations.yaml` --
+    # inside this one lock. Empty for every edit that is not an accept.
+    pins: tuple = ()
 
 
 # -------------------------------------------------------------------- results
@@ -95,6 +136,9 @@ class Applied:
     revision: str
     plan: PatchPlan
     diagnostics: tuple = ()
+    # What an accept pinned, as `{path, key, reader, value}` -- the value the
+    # reader read. Empty for an ordinary save, and never a value the client sent.
+    pinned: tuple = ()
     ok: bool = True
 
     @property
@@ -262,19 +306,34 @@ def _apply_locked(config: str, request: EditRequest):
         return Refused(who, ref, plan.reason, path=path)
     new_text = patcher.apply_patch(text, plan)
 
+    # An accept: the body op plus the keys to pin. One operation over two files
+    # (docs/design/editor-source-picker.md §4), and the only one here that is.
+    # It runs before the candidate load rather than after it because the
+    # candidate has to resolve the new `source()` line against the lockfile that
+    # is about to exist -- the loader's overlay covers item source files and
+    # nothing else, so the pin is real on disk by then and every later failure
+    # below has to put it back.
+    new_body = op.text if isinstance(op, SetBody) else None
+    accept, reason = _accept_pins(before, item, request.pins, new_body)
+    if reason is not None:
+        return Refused(who, ref, reason, path=path)
+
     try:
         after = loader.load_readonly(config, overlay={path: new_text})
     except Exception as exc:  # noqa: BLE001 - a candidate that will not load is a result
+        _undo_accept(accept)
         return Refused(
             who, ref, f"the edited project did not load: {type(exc).__name__}: {exc}", path=path
         )
 
     blocking = _blocking_diagnostics(before, after, item, request.op)
     if blocking:
+        _undo_accept(accept)
         return Invalid(who, ref, tuple(blocking), path=path)
 
     failure = _atomic_replace(path, new_text.encode("utf-8"))
     if failure is not None:
+        _undo_accept(accept)
         return Refused(who, ref, failure, path=path)
 
     return Applied(
@@ -284,7 +343,138 @@ def _apply_locked(config: str, request: EditRequest):
         revision=file_revision(path),
         plan=plan,
         diagnostics=tuple(after.diagnostics),
+        pinned=() if accept is None else accept.pinned,
     )
+
+
+# ------------------------------------------------------------------- accepting
+#
+# docs/design/editor-source-picker.md §4. A picked source value is two writes --
+# a line in an item's body and a pin in `.refdes/citations.yaml` -- that are
+# meaningful only together, so they are one operation: neither lands without the
+# other, and a refusal anywhere leaves both files exactly as they were.
+
+
+@dataclass
+class _LockfileWrite:
+    """One lockfile write, with what it replaced.
+
+    `previous` is None when the project had no lockfile at all, which is a
+    different rollback from a restore: an accept of an unpinned citation into a
+    project nobody has ever fetched creates the file, and a refusal has to leave
+    a project with no lockfile rather than one holding an empty `citations: {}`.
+    """
+
+    path: str
+    previous: bytes | None
+    staged: bytes
+    written: bool = False
+
+    def rollback(self) -> None:
+        if self.written:
+            self.written = False
+            _rollback(self.path, self.previous)
+
+
+@dataclass
+class _Acceptance:
+    """What an accept decided, before the body it belongs to has landed.
+
+    `lock` is what to put back if anything past here fails; `pinned` is what the
+    reader read, which is the only thing about the pick worth telling the caller
+    back. The composed line is deliberately not carried: the author already has
+    it -- it is the text in the body being saved -- and a second copy of it here
+    would be a second thing to keep in agreement.
+    """
+
+    lock: _LockfileWrite | None
+    pinned: tuple = ()
+
+
+def _undo_accept(accept: _Acceptance | None) -> None:
+    """§4's step 6: the lockfile goes back before the refusal is returned.
+
+    Bytes restored from memory, not a transaction journal -- the design says so
+    out loud rather than papering over it: the window is one `os.replace` wide,
+    and the failure mode if the process dies inside it is a lockfile pinning a
+    key no item names, which is inert, visible in `git status`, and cleaned by
+    the next `refdes fetch`.
+    """
+    if accept is not None:
+        accept.lock.rollback()
+
+
+def _accept_pins(
+    before: Project, item: Item, pins: tuple, new_body: str | None
+) -> tuple[_Acceptance | None, str | None]:
+    """Re-validate the picks, extract their values, and write the lockfile.
+
+    Returns `(acceptance, None)` or `(None, reason)`; a reason means nothing was
+    written anywhere. Called under the write lock, after the body patch is
+    planned and before the candidate project is loaded.
+
+    The order is the design's, and each step is the same code another command
+    already runs:
+
+    1. `sources.accept_plan` -- Slice A's `propose_payload` again, against the
+       server's copy of the item, so authorization, the key still existing and
+       still selectable, the name, the unit and the composed line are one rule
+       with one spelling rather than a second copy of them; plus the check only
+       an accept can make, that the body being saved names the pair.
+    2. `citations.stage_source_pins` -- the extraction and the record, under
+       fetch's non-`--update` policy, in the shape fetch writes.
+    3. the write, atomic and whole-file, in the same bytes `save_lockfile`
+       would have produced.
+    """
+    if not pins:
+        return None, None
+    if new_body is None:
+        return None, (
+            "a source value is pinned by the body that names it: pin is only "
+            "accepted on a set_body edit"
+        )
+    try:
+        plans = [
+            sources_mod.accept_plan(
+                before, item, path=p.path, key=p.key, unit=p.unit, name=p.name,
+                body=new_body,
+            )
+            for p in pins
+        ]
+    except sources_mod.SourceRefusal as exc:
+        return None, str(exc)
+
+    # Fresh from disk, not the snapshot's copy: under this lock, the file is the
+    # state, and a pin written by a fetch since the snapshot was built belongs
+    # in what we write back.
+    records = citations_mod.load_lockfile(before)
+    errors, pinned = citations_mod.stage_source_pins(
+        before, records, [(p["path"], p["key"]) for p in plans]
+    )
+    if errors:
+        return None, "; ".join(errors)
+
+    lock_path = citations_mod.lockfile_path(before)
+    try:
+        with open(lock_path, "rb") as fh:
+            previous = fh.read()
+    except OSError:
+        previous = None
+    staged = citations_mod.lockfile_text(records).encode("utf-8")
+    lock = _LockfileWrite(path=lock_path, previous=previous, staged=staged)
+    # Nothing changed -- re-accepting a key that is already pinned from these
+    # same bytes -- then nothing is written: a save that pins nothing new leaves
+    # the lockfile's mtime alone, and has no rollback to perform.
+    if staged != previous:
+        failure = (
+            _atomic_replace(lock_path, staged)
+            if previous is not None
+            else _atomic_create(lock_path, staged)
+        )
+        if failure is not None:
+            return None, failure
+        lock.written = True
+    return _Acceptance(lock=lock, pinned=tuple(pinned)), None
 
 
 # ------------------------------------------------------------------ resolution
