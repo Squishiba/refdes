@@ -391,7 +391,12 @@ a picked value exactly as they do to a typed sentence — no second editor state
 - **PDF datasheet values.** Deferred, and explicitly the *reason* §3's confirm
   contract exists. It needs a PDF text-and-coordinates library plus page
   rendering, and `browser-editor.md` calls it "the heaviest dependency the
-  editor has". It is its own slice, behind this panel.
+  editor has". It is its own slice, behind this panel. Now proposed in
+  [editor-pdf-picker.md](editor-pdf-picker.md): one more reader behind this
+  same panel and this §4 accept -- the PDF picker adds a reader and a page
+  view, not a second write path -- on the existing optional `refdes[pdf]`
+  extra, with the page context and candidate-list rules of
+  `calc-sources.md` §1 carried through unchanged.
 - **Editing, creating, uploading, or writing back to a source file.** A source
   file is read-only to the editor, in every direction (`calc-sources.md` §10).
 - **`refdes fetch --update` from the browser.** §4. Re-accepting a changed
