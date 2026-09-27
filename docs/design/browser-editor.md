@@ -1097,7 +1097,11 @@ editor-only plumbing.
   it is no longer missing (see "Deferred", above; and
   `docs/design/editor-image-upload.md` §17, Phase 0); what is left here is the
   bytes and the conflicts around them.
-- VS Code custom-editor adapter over the same application services.
+- VS Code custom-editor adapter over the same application services. **Designed
+  2026-09-27:** [`editor-vscode-adapter.md`](editor-vscode-adapter.md) — VS Code
+  as a new *client* of the `refdes serve` API that already ships, never a second
+  implementation; it works through the launch token, starts read-only, and puts
+  a writable `CustomTextEditorProvider` outside its horizon (§3.5, §8).
 - Project/schema/defaults/section editing, only if real use shows forms need
   them.
 - Incremental build/render optimization, only if measured project size makes a
