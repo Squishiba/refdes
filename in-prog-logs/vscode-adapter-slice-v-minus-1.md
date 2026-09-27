@@ -2,7 +2,10 @@
 
 Task: `docs/design/editor-vscode-adapter.md` §8, "Slice V−1 — make the shell
 alive (a bug fix, not a feature)". Branch `fix/vscode-adapter-activation`.
-Status: **finished** — committed, pushed, PR opened.
+Status: **finished** — committed (`82f1140`), pushed, PR opened:
+https://github.com/Squishiba/refdes/pull/58. CI green on all three jobs —
+`gh pr checks 58 --repo Squishiba/refdes --watch`: ubuntu-latest pass 3m39s,
+ubuntu-latest / py3.13 pass 2m43s, windows-latest pass 6m7s.
 
 ## The bug, as the design doc states it
 
