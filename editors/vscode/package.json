@@ -24,7 +24,7 @@
   "bugs": { "url": "https://github.com/Squishiba/refdes/issues" },
   "galleryBanner": { "color": "#14171A", "theme": "dark" },
   "main": "./extension.js",
-  "activationEvents": ["workspaceContains:**/refdes.yaml"],
+  "activationEvents": ["workspaceContains:**/refdes-project.yaml"],
   "extensionDependencies": ["redhat.vscode-yaml"],
   "contributes": {
     "commands": [

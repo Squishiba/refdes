@@ -36,12 +36,12 @@ function config() {
   return vscode.workspace.getConfiguration("refdes");
 }
 
-/** Walk up from a path looking for refdes.yaml. */
+/** Walk up from a path looking for refdes-project.yaml. */
 function findRoot(startPath) {
   let dir = startPath;
   if (fs.existsSync(dir) && fs.statSync(dir).isFile()) dir = path.dirname(dir);
   for (let i = 0; i < 40 && dir; i++) {
-    if (fs.existsSync(path.join(dir, "refdes.yaml"))) return dir;
+    if (fs.existsSync(path.join(dir, "refdes-project.yaml"))) return dir;
     const parent = path.dirname(dir);
     if (parent === dir) break;
     dir = parent;
@@ -420,7 +420,7 @@ function updateCalcDecorations(editor) {
 async function runVisible(args, message) {
   const root = currentRoot();
   if (!root) {
-    vscode.window.showWarningMessage("Refdes: no refdes.yaml found.");
+    vscode.window.showWarningMessage("Refdes: no refdes-project.yaml found.");
     return null;
   }
   output.clear();
