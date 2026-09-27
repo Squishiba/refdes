@@ -39,13 +39,23 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# pypdf resolves a citation's `section:` against the pinned PDF's own outline,
-# at `refdes fetch` time only (finding 23 Part 2). Optional because it is the
-# only thing in refdes that reads a PDF, and it is imported lazily: a project
-# with no `section:` never needs it installed. `dev` carries it too so the test
-# suite builds real PDFs rather than skipping the tests that need them.
-pdf = ["pypdf>=4.0"]
-dev = ["pytest>=8.0", "build>=1.0", "twine>=5.0", "jsonschema>=4.0", "ruff>=0.6", "pypdf>=4.0"]
+# pypdf reads a cited PDF, in two places and both behind this one extra: it
+# resolves a citation's `section:` against the pinned PDF's own outline at
+# `refdes fetch` time (finding 23 Part 2), and it extracts a page's text and
+# coordinates for the editor's source picker
+# (docs/design/editor-pdf-picker.md). Optional because both are lazy: a project
+# with no `section:` and no datasheet to browse never imports it. `dev` carries
+# it too so the test suite builds real PDFs rather than skipping the tests that
+# need them.
+#
+# 6.19 is the floor rather than 4.0 because that is where pypdf's
+# `visitor_text` started reporting a text matrix per run: before it, every run
+# it inserted a space in front of was handed a zeroed one, which put most of a
+# datasheet table's cells on the page's bottom-left corner. The page view cannot
+# place a row without coordinates, and a page drawn in the corner is a wrong
+# answer wearing a working shape.
+pdf = ["pypdf>=6.19"]
+dev = ["pytest>=8.0", "build>=1.0", "twine>=5.0", "jsonschema>=4.0", "ruff>=0.6", "pypdf>=6.19"]
 
 [project.urls]
 Homepage = "https://github.com/Squishiba/refdes"

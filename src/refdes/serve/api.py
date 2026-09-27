@@ -279,9 +279,10 @@ def _item_view(app, ref: str) -> tuple[int, dict]:
 # ----------------------------------------------------------- reading source files
 #
 # docs/design/editor-source-picker.md §2, §5, §6, §7 -- Slice A, "the service
-# reads": three GET routes, no writes. Each names one item, and the service
-# authorizes the path with `citations.authorize_source_path` -- the same call
-# `refdes fetch` and the source resolver make -- so the picker can never be
+# reads", and docs/design/editor-pdf-picker.md §2, §4, §8 -- Slice P-A, the same
+# for a PDF's pages. Four GET routes, no writes. Each names one item, and the
+# service authorizes the path with `citations.authorize_source_path` -- the same
+# call `refdes fetch` and the source resolver make -- so the picker can never be
 # authorized for a file the fetcher would refuse. They are added as routes here
 # and nowhere else, which is what makes them inherit the launch-token, Host and
 # Origin checks every other `/api/` request already passes: no new surface, no
@@ -348,6 +349,33 @@ def _source_propose(app, ref: str, query: dict[str, list[str]]) -> tuple[int, di
         return _refused(exc)
 
 
+def _source_page(app, ref: str, query: dict[str, list[str]]) -> tuple[int, dict]:
+    """`GET /api/item/<ref>/sources/page?path=&page=` -- one page of a cited PDF
+    as positioned text, its runs grouped into rows, and every number in them as
+    a candidate with its column-header guess.
+
+    `page` is optional: without it the page is the one the citation names
+    (`page:`, else the page the lockfile resolved for a `section:`), which is
+    where the picker opens. The browser receives the runs and their coordinates
+    and never a PDF byte (editor-pdf-picker.md §5, option A)."""
+    project = app.state.snapshot.project
+    item, _handle = _find_item(project, ref)
+    if item is None:
+        return 404, {"error": f"no item matches {ref!r}"}
+    path = (query.get("path") or [""])[0]
+    if not path:
+        return 400, {"error": "path is required: ?path=<a citation path this item declares>"}
+    page = (query.get("page") or [""])[0].strip()
+    if page and not (page.isascii() and page.isdigit() and int(page) >= 1):
+        # A page is a positive integer or it is not a page this can open, and
+        # saying so here is cheaper than opening a document to find out.
+        return 400, {"error": "page must be a positive integer: ?page=<a page number>"}
+    try:
+        return 200, sources_mod.page_payload(project, item, path, page)
+    except sources_mod.SourceRefusal as exc:
+        return _refused(exc)
+
+
 def _refused(exc: sources_mod.SourceRefusal) -> tuple[int, dict]:
     """A read the authorizer, the registry or the row itself refused. 422 with
     the reason verbatim, in the edit route's `refused` vocabulary, because that
@@ -357,11 +385,12 @@ def _refused(exc: sources_mod.SourceRefusal) -> tuple[int, dict]:
     return 422, {"kind": "refused", "ok": False, "error": str(exc), "reason": str(exc)}
 
 
-# Longest suffix first: `/sources` is a suffix of the other two, and a plain
-# `endswith("/sources")` would swallow both.
+# Longest suffix first: `/sources` is a suffix of the other three, and a plain
+# `endswith("/sources")` would swallow them.
 _SOURCE_ROUTES = (
     ("/sources/entries", _source_entries),
     ("/sources/propose", _source_propose),
+    ("/sources/page", _source_page),
     ("/sources", _item_sources),
 )
 

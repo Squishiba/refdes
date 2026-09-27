@@ -301,6 +301,95 @@ def _pin_lifecycle_citation(root) -> None:
     )
 
 
+# ------------------------------------------------------------------- real PDFs
+#
+# The PDF reader's tests need *real* PDF bytes, because the thing under test is
+# what pypdf makes of a page: a stub would only prove that this module can read
+# its own dict. So the fixture is a real, minimal PDF -- a catalog, a page tree,
+# one Type1 base font, and one content stream per page, with a correct xref
+# table -- written here rather than pulled in as a binary fixture, so a test can
+# say "a table row at y=640 with these three numbers" and have the page really
+# contain it. `tests/test_citation_sections.py` needs only bookmarks, which
+# pypdf's own writer builds more conveniently, so it keeps using that.
+
+PAGE_WIDTH = 612
+PAGE_HEIGHT = 792
+
+
+def pdf_escape(text: str) -> str:
+    """`text` as a PDF literal string's body."""
+    return text.replace("\\", r"\\").replace("(", r"\(").replace(")", r"\)")
+
+
+def pdf_run(x: float, y: float, text: str, size: float = 9.0) -> str:
+    """One positioned text run, as a content-stream fragment.
+
+    A separate `BT`/`ET` per run is deliberate: pypdf's `visitor_text` reports
+    each of these as its own run with its own text matrix, which is the shape a
+    datasheet's table cells arrive in and the shape row grouping has to cope
+    with. Real producers also emit several runs per line and several lines per
+    `BT` block, and the tests cover both.
+    """
+    return (
+        f"BT /F1 {size:g} Tf 1 0 0 1 {x:g} {y:g} Tm ({pdf_escape(text)}) Tj ET\n"
+    )
+
+
+def pdf_page(*runs: str) -> str:
+    """A page's content stream: the runs, in the order they are painted."""
+    return "".join(runs)
+
+
+def pdf_bytes(*pages: str) -> bytes:
+    """A real PDF file, one content stream per page, as bytes.
+
+    Letter-size, Helvetica, no compression, no object streams -- the smallest
+    thing pypdf will read that still has real pages, real fonts and real text
+    operators, which is all the extraction path looks at.
+    """
+    contents = [page if isinstance(page, str) else "".join(page) for page in pages]
+    objects: dict[int, bytes] = {}
+    page_ids = []
+    next_id = 4
+    for _ in contents:
+        page_ids.append((next_id, next_id + 1))
+        next_id += 2
+    kids = " ".join(f"{pid} 0 R" for pid, _contents in page_ids)
+    objects[1] = b"<< /Type /Catalog /Pages 2 0 R >>"
+    objects[2] = f"<< /Type /Pages /Kids [{kids}] /Count {len(contents)} >>".encode()
+    objects[3] = b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"
+    for index, (page_id, content_id) in enumerate(page_ids):
+        objects[page_id] = (
+            f"<< /Type /Page /Parent 2 0 R "
+            f"/MediaBox [0 0 {PAGE_WIDTH} {PAGE_HEIGHT}] "
+            f"/Resources << /Font << /F1 3 0 R >> >> "
+            f"/Contents {content_id} 0 R >>"
+        ).encode()
+        stream = contents[index].encode("latin-1", "replace")
+        objects[content_id] = (
+            f"<< /Length {len(stream)} >>\nstream\n".encode()
+            + stream
+            + b"endstream"
+        )
+
+    out = bytearray(b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\n")
+    offsets: dict[int, int] = {}
+    for number in sorted(objects):
+        offsets[number] = len(out)
+        out += f"{number} 0 obj\n".encode() + objects[number] + b"\nendobj\n"
+    start = len(out)
+    size = max(objects) + 1
+    out += f"xref\n0 {size}\n".encode()
+    out += b"0000000000 65535 f \n"
+    for number in range(1, size):
+        out += f"{offsets[number]:010d} 00000 n \n".encode()
+    out += (
+        f"trailer\n<< /Size {size} /Root 1 0 R >>\n"
+        f"startxref\n{start}\n%%EOF\n"
+    ).encode()
+    return bytes(out)
+
+
 # ------------------------------------------------------------- generated blocks
 
 BLOCKS_SCHEMA = """\

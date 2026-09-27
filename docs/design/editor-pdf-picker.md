@@ -1,10 +1,14 @@
-Status: **proposed** (drafted 2026-09-27) — a design spec, not a decision, and
-nothing in it is implemented. It is the PDF-flavored sibling of
-`docs/design/editor-source-picker.md` and settles the editor half of the
-requirement recorded in `docs/design/calc-sources.md` §1 ("New, raised by Jared
-on 2026-09-21: a picker for values in a PDF datasheet"), which is the primary
-source for what was already agreed about this feature's shape: show the value
-in context on the page, list every candidate in a table row, pre-select
+Status: **proposed** (drafted 2026-09-27); **Slice P-A landed 2026-09-27** (§12).
+The service reads PDF pages — `sources.page_candidates()` (pypdf visitor
+extraction, row grouping, the CSV reader's own numeric grammar, named caps), the
+import-gated `pdf` reader, and one read endpoint — and the page view, the confirm
+step and accept are still design only, as is everything they decide. This
+document is still a design spec, not a decision, and it is the PDF-flavored
+sibling of `docs/design/editor-source-picker.md` and settles the editor half of
+the requirement recorded in `docs/design/calc-sources.md` §1 ("New, raised by
+Jared on 2026-09-21: a picker for values in a PDF datasheet"), which is the
+primary source for what was already agreed about this feature's shape: show the
+value in context on the page, list every candidate in a table row, pre-select
 nothing, record what the author confirmed, fail visibly on unreadable pages.
 Every open question in §10 carries a recommendation. It is cross-referenced
 from `docs/design/calc-sources.md` §1 and from
@@ -13,6 +17,45 @@ document's confirm-before-accept contract (§3), its one-operation accept (§4),
 its one-reader-in-Python rule (§5), and its path-confinement invariants (§6)
 unchanged — this document does not re-litigate any of them, it applies them to
 a PDF.
+
+**What landing P-A settled, and where to look for it.** The document left four
+things to the code, and the code fixed them; the design intent is unchanged and
+these are the readings it was ambiguous about:
+
+- **The endpoint** is one route, `GET /api/item/<ref>/sources/page?path=&page=`
+  (§2.2's "A new endpoint"): the page as positioned text, its runs grouped into
+  rows, and every number in them as a candidate. `page` is optional; without it
+  the page is the one the citation names (§2.2), read out of the lockfile and
+  used only while it belongs to the bytes now pinned, exactly as the rendered
+  link uses it. §12's plural "the page/candidate read endpoints" is that route
+  plus `GET /api/item/<ref>/sources`, which now lists a cited PDF with
+  `browse: "pages"` and the page to open at (§2.1's "page-mode marker").
+- **The caps** (§4, §10 Q7) are named in `sources.py` beside `MAX_LIST_ROWS`:
+  `MAX_PDF_BYTES` 32 MiB, `MAX_PAGE_CANDIDATES` 200, and `MAX_PAGE_SPANS` 1000.
+  The span cap *reports* a too-dense page and shows none of it; the candidate cap
+  stops the page and names what it did not read, which is the CSV row cap's
+  posture. The row tolerance is half a font size, derived from the size rather
+  than being a constant.
+- **The quote** a value is recorded by (§6) is the row's tokens joined by one
+  space, verbatim, and the row's identity for re-location is its non-numeric
+  tokens (`PageRow.labels`), matched exactly and case-sensitively. §6's
+  illustrative quote shows comma separators, which is the panel's rendering of a
+  row rather than a spelling; P-C should record the space-joined form, since
+  re-location matches the token sequence and the join has to be fixed before
+  anything is written to a lockfile.
+- **A PDF is not a keyed source file.** `PdfReader` deliberately does not
+  implement `extract()`: a `source()` line naming a PDF says so out loud rather
+  than pinning a number nobody confirmed (that is §6's quoted-row re-location,
+  Slice P-C), and `/sources/entries?path=…pdf` answers that a PDF has no key
+  column instead of returning an empty table. A cited `.pdf` therefore reaches
+  `GET /api/item/<ref>/sources` as a browsable file and a remote one only when
+  the fetch kept the bytes (§10 Q4 option A, the kept copy read and checked
+  against its pinned sha256).
+- **The extra's floor moved to pypdf 6.19**, for the reason in §2's dependency
+  paragraph, and the reader refuses a page whose runs all sit on the page origin
+  — the old symptom — with the installed version quoted and the fix named,
+  rather than drawing a page in the corner.
+
 
 # Editor PDF datasheet picker
 
@@ -101,15 +144,20 @@ Insert source value → [file] ─┬─ csv → [key]    → [confirm: row, con
 **The dependency, stated plainly.** `browser-editor.md` calls this "the
 heaviest dependency the editor has", and that sentence is worth keeping in
 view. This design's answer is that the *Python* dependency is already paid:
-`pypdf>=4.0` is an optional extra (`pyproject.toml:47`, `pdf =
-["pypdf>=4.0"]`), imported lazily at exactly one place
-(`citations._import_pypdf()`, `citations.py:247-257`), already used to read a
-PDF's outline at fetch time. The picker adds **no new mandatory dependency
-and no new optional one**: it reuses `refdes[pdf]`, and without it the picker
-offers no PDFs and shows the existing `PDF_EXTRA_ERROR` install hint. What
-would be heavy — vendoring pdf.js for faithful page rendering, or a
-server-side rasterizer — is deliberately deferred (§5, §10 Q1), and the v1
-page view costs nothing to install.
+`pypdf` is an optional extra (`pyproject.toml`, `pdf = ["pypdf>=6.19"]`),
+imported lazily at exactly one place (`citations._import_pypdf()`), already
+used to read a PDF's outline at fetch time. The picker adds **no new mandatory
+dependency and no new optional one**: it reuses `refdes[pdf]`, and without it
+the picker offers no PDFs and shows the existing install hint. The one thing
+landing it did move is that extra's **floor**, from 4.0 to 6.19: before 6.19
+pypdf's `visitor_text` handed every run it inserted a space in front of a
+*zeroed* text matrix, so most of a datasheet table's cells came back on the
+page's bottom-left corner and no row could be placed — a page drawn in the
+corner is a wrong answer wearing a working shape. A version floor on an extra
+that is already optional is not a new dependency, and `section:` resolution
+works on any of them. What would be heavy — vendoring pdf.js for faithful page
+rendering, or a server-side rasterizer — is deliberately deferred (§5, §10
+Q1), and the v1 page view costs nothing to install.
 
 ## 3. The confirm step, PDF flavor
 
@@ -506,14 +554,14 @@ End to end:
 Mirrors `editor-source-picker.md` §11 exactly: read-only service first, then
 the panel, then the write — and the write is shared, not forked.
 
-**Slice P-A — the service reads PDFs.** `sources.page_candidates()` (pypdf
-visitor extraction, row grouping, candidate grammar reuse, caps), the
-`pdf` reader registration (extension-gated, import-gated), the page/candidate
-read endpoints, opening at the cited `page:`/`section:` from the lockfile, and
-the extraction + endpoint tests above. No UI, no writes. Independently useful
-(the same API a future CLI `refdes sources pdf-page` sits on) and it is where
-the confinement rules get re-proven for a new file type. May land any time
-after CSV Slice A (§10 Q6).
+**Slice P-A — the service reads PDFs. LANDED 2026-09-27.**
+`sources.page_candidates()` (pypdf visitor extraction, row grouping, candidate
+grammar reuse, caps), the `pdf` reader registration (extension-gated,
+import-gated), the page read endpoint, opening at the cited `page:`/`section:`
+from the lockfile, and the extraction + endpoint tests. No UI, no writes.
+Independently useful (the same API a future CLI `refdes sources pdf-page` sits
+on) and it is where the confinement rules get re-proven for a new file type.
+May land any time after CSV Slice A (§10 Q6) — it did.
 
 **Slice P-B — the page view and confirm step.** The positioned-text view,
 candidate list with header guesses, the visible-failure states, and the
