@@ -481,11 +481,12 @@ def resolve_link_target(by_key: dict[str, Item], project: Project, target: str) 
     return project.item_by_id(target)
 
 
-def _unknown_key_message(pointer: str, target_id: str) -> str:
+def _unknown_key_message(project: Project, pointer: str, target_id: str) -> str:
     """Layer-3 diagnostic for a composite or bare key with no live target.
 
     Shared, not duplicated, between structured links (`resolve_links`) and
-    `checks: against:` (`run_checks`): both point at a target the same way,
+    `checks: against:` (`run_checks`) and cross-item calc references: all
+    point at a target the same way,
     and `pointer` supplies only the verb phrase (for example, "refines
     points at" or "check against"). The remaining text deliberately never
     falls back to a display ID; for a composite its label may be stale, and
@@ -494,13 +495,32 @@ def _unknown_key_message(pointer: str, target_id: str) -> str:
     label, separator, key = target_id.partition("@")
     if not separator:
         return (
-            f"{pointer} key {target_id!r}, which no item declares. Either the "
-            "target was deleted, or this reference predates it."
+            f"{pointer} key {target_id!r}, which no item declares. The target "
+            "may have been deleted or its key lost or changed. Check git history "
+            "before restoring the original key or removing the reference."
         )
-    return (
+    message = (
         f"{pointer} key {key!r} (labelled {label}), which no item declares. "
-        "The label may be stale; the key is what resolves. Either the target "
-        "was deleted, or this reference predates it."
+    )
+    live = project.item_by_id(label)
+    if live is None:
+        return message + (
+            "The label may be stale; the key is what resolves. The target may "
+            "have been deleted or its key lost or changed. Check git history "
+            "before restoring the original key or removing the reference."
+        )
+    declared = f"declares key {live.key!r}" if live.key else "declares no key"
+    loss = "lost and regenerated" if live.key else "lost"
+    message += (
+        f"A live item labelled {label} {declared}. Its key may have been {loss}, "
+        "or the label may now name a different item. The "
+        "label is not used as a fallback. Check git history to confirm identity. "
+    )
+    if live.external:
+        return message + "If it is the same item, restore its original key upstream."
+    return message + (
+        f"If it is the same item, run `refdes keys restore {label}@{key} "
+        "--dry-run`, then repeat without --dry-run to restore the original key."
     )
 
 
@@ -550,7 +570,7 @@ def resolve_links(project: Project) -> None:
                 target = resolve_link_target(by_key, project, target_id)
                 if target is None:
                     if "@" in target_id or bare_key:
-                        message = _unknown_key_message(f"{link_name} points at", target_id)
+                        message = _unknown_key_message(project, f"{link_name} points at", target_id)
                     else:
                         message = f"{link_name} points at {target_id!r}, which does not exist"
                     project.error(
@@ -1047,7 +1067,7 @@ def _make_calc_resolver(project: Project, by_key: dict[str, Item]):
         if target is None:
             if "@" in target_str or _is_bare_key_token(target_str):
                 raise calc.CalcError(
-                    _unknown_key_message(f"calc reference {reference!r}", target_str)
+                    _unknown_key_message(project, f"calc reference {reference!r}", target_str)
                 )
             raise calc.CalcError(
                 f"no item {target_str!r} -- cross-item reference {reference!r} "
@@ -1394,7 +1414,7 @@ def run_checks(project: Project) -> None:
             if target is None:
                 if "@" in target_id:
                     result.detail = f"key {target_id.partition('@')[2]!r} does not resolve"
-                    message = _unknown_key_message("check against", target_id)
+                    message = _unknown_key_message(project, "check against", target_id)
                 else:
                     result.detail = f"{target_id} does not exist"
                     message = f"check against {target_id!r}, which does not exist"

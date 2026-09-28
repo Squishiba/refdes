@@ -294,7 +294,9 @@ def test_unknown_key_in_against_reports_layer3_no_display_id_fallback(tmp_path):
     assert len(project.errors) == 1
     message = project.errors[0].message
     assert "check against key 'k2p9w3x1r7s' (labelled BND-001), which no item declares" in message
-    assert "label may be stale; the key is what resolves" in message
+    assert "A live item labelled BND-001 declares no key" in message
+    assert "Its key may have been lost, or the label may now name a different item" in message
+    assert "The label is not used as a fallback" in message
 
 
 # ----------------------------------------------------- evaluation through a composite

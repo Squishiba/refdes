@@ -16,6 +16,7 @@ from . import diagram as diagram_mod
 from . import former_ids as former_ids_mod
 from . import history as history_mod
 from . import ids as ids_mod
+from . import key_restore as key_restore_mod
 from . import keys as keys_mod
 from . import lifecycle as lifecycle_mod
 from . import loader as loader_mod
@@ -1033,6 +1034,29 @@ def cmd_standard_upgrade(args) -> int:
     return 0 if ok else 1
 
 
+def cmd_keys_restore(args) -> int:
+    dry_run = args.dry_run or args.no_write
+    result = key_restore_mod.apply(
+        _standard_project_root(args), args.targets, dry_run=dry_run
+    )
+    if not result.ok:
+        print("would refuse:" if dry_run else "refused:", file=sys.stderr)
+        for error in result.errors:
+            print(f"  {error}", file=sys.stderr)
+        return 1
+    if not result.changes:
+        print("nothing to do -- original keys already declared")
+        return 0
+    for display, previous, original in result.changes:
+        action = "would restore" if dry_run else "restored"
+        print(f"{action} {display}: {previous or '(no key)'} -> {original}")
+    print("files would change:" if dry_run else "changed files:")
+    for path in result.changed_files:
+        print(f"  {path}")
+    print("Review the diff before committing.")
+    return 0
+
+
 def cmd_keys_adopt(args) -> int:
     if args.no_write:
         args.dry_run = True  # --no-write: show the complete plan, write nothing
@@ -1713,6 +1737,22 @@ def main(argv: list[str] | None = None) -> int:
         "--dry-run", action="store_true", help="show the complete plan without writing"
     )
     p_keys_adopt.set_defaults(func=cmd_keys_adopt)
+
+    p_keys_restore = keys_sub.add_parser(
+        "restore",
+        help="restore explicitly supplied original item keys",
+        description="After checking git history to confirm each item's identity, "
+        "supply DISPLAY-ID@ORIGINAL-KEY for every lost or regenerated key. "
+        "Validate the proposed project before writing and reload afterwards; "
+        "any failure restores the original files. References and history are "
+        "not rewritten. Refuses keys already owned by another item or current "
+        "keys recorded in history. Supply multiple targets to repair them together.",
+    )
+    p_keys_restore.add_argument("targets", nargs="+", metavar="DISPLAY-ID@ORIGINAL-KEY")
+    p_keys_restore.add_argument(
+        "--dry-run", action="store_true", help="validate the complete plan without writing"
+    )
+    p_keys_restore.set_defaults(func=cmd_keys_restore)
 
     p_revise = sub.add_parser(
         "revise",
