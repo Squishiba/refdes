@@ -1,10 +1,14 @@
-Status: **proposed**; **Slices A and B landed** (§11). `sources.list_entries` +
+Status: **proposed**; **Slices A, B, and C landed** (§11). `sources.list_entries` +
 `SourceEntry` and the three read endpoints ship, with their authorization and
 caps and the reader/endpoint tests, and §4's accept ships: one widened
 `set_body` request writes the item and `.refdes/citations.yaml` as one
 operation inside the write lock, with the rollback, proven against the CLI's
-own fetch semantics. What is still design only is the panel — Slice C — and
-the UI rows of §10. This document still changes no authoring behaviour: it
+own fetch semantics. So does the panel: `sourcepicker.js` runs the file → key →
+confirm flow beside the body and saves through `setDraftBody`, taking all four
+of §10's UI, static rows with it. What is still design only is the one §10
+end-to-end row that did not ship —
+`test_a_picked_value_survives_a_rebuild_and_drifts_when_the_csv_changes`. This
+document still changes no authoring behaviour: it
 settles the editor half of the requirement recorded in
 `docs/design/calc-sources.md` §1 ("Requirement: a picker for importing values
 from an outside file", Jared, 2026-09-19) and is cross-referenced from
@@ -554,10 +558,15 @@ field — a `value` in the request is ignored, not validated (§5). A successful
 accept answers with `pinned: [{path, key, reader, value}]`, the value the reader
 read, which is what the panel repeats back. `pin` on any other op is a 400.
 
-**Slice C — the panel.** `sourcepicker.js`, the file → key → confirm flow, the
-unit field with no default, insertion through `setDraftBody`, the static and
-end-to-end tests. This is the slice the author feels, and it is deliberately
-last: with A and B proven, C is composition.
+**Slice C — the panel. LANDED 2026-09-27.** `sourcepicker.js`, the file → key →
+confirm flow, the unit field with no default, insertion through `setDraftBody`,
+the static and end-to-end tests. Two things beyond that list shipped with it:
+the proposed, editable variable name field of §7, and read-only browsing for
+sealed and imported bodies (§6, §9 Q6), which the editor builds with a null
+accept callback so the panel offers without Accept. One §10 row did not ship:
+`test_a_picked_value_survives_a_rebuild_and_drifts_when_the_csv_changes`. This
+is the slice the author feels, and it is deliberately last: with A and B proven,
+C is composition.
 
 **Later.** The citations row editor, which is what unlocks "cite a new file"
 (§8). The xlsx reader behind the same `list_entries` contract. The PDF
