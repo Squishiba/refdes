@@ -338,10 +338,12 @@ types:
 `satisfying_statuses` requires the type to declare a `status` field — the project
 fails to load if it doesn't.
 
-`check_severity` must be `error`, `warning`, or `info`. It only changes how a
-*failing* check is reported — the check still runs, and `item.checks` (and the
-rendered Checks table) still shows pass/fail exactly the same way regardless of
-the setting.
+`check_severity` must be `error`, `warning`, or `info`, or a mapping from a
+`status` value to one of those levels (`default:` is then mandatory). It only
+changes how a *failing* check is reported — the check still runs, and
+`item.checks` (and the rendered Checks table) still shows pass/fail exactly the
+same way regardless of the setting. See
+[severity per status](checks.md#severity-per-status) for the mapping form.
 
 `coverable`, `coverable_statuses`, and `verifying_statuses` are engine
 capabilities, not standard-specific plumbing — available on any type in any
