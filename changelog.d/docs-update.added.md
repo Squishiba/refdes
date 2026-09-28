@@ -5,7 +5,7 @@
   - `refdes keys adopt`: new command section with `--dry-run`, report lines, adoption marker, transactional/idempotent behavior
   - Surrogate keys: user-facing explanation in IDs guide covering identity, link resolution, baselines, seals, board membership, corruption detection
   - Key corruption diagnostics: malformed key, duplicate key, key changed/deleted since baseline, older baseline audit info
-  - Content hash versioning (`hash_format`, currently 3): automatic migration for provably unchanged entries, `uncomparable` reported by `refdes keys adopt`
+  - Content hash versioning (`hash_format`): every stored hash records the format it was computed under, so the hashing rules can change without invalidating all existing hashes. Entries whose recorded hash still matches their current content under the older rules migrate automatically; anything else is left untouched and reported as `uncomparable` by `refdes keys adopt` rather than guessed at
   - Board manifest after adoption: key-keyed storage, stale entries pruned for deleted items
   - Log ordering uses project's `date_format:` for chronological sorting
   - `refdes check` warns when `.refdes/schema.json` is older than config (and "not refreshed" under `--no-write`)
