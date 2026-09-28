@@ -103,7 +103,9 @@ Commit `.refdes/log-seal.yaml` (and any `.refdes/log-seal-<board>.yaml`) along
 with your entries.
 
 `refdes check` verifies existing seals without creating new ones, so it is safe
-in CI. `refdes build` seals anything new it finds.
+in CI. `refdes build` seals anything new it finds — which means an entry that
+has never been through a build is not passing an append-only check: it has no
+seal to pass or fail, and editing it fails nothing.
 
 ### Adopting boards on a project that already has `.refdes/log-seal.yaml`
 
