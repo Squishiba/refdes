@@ -104,47 +104,56 @@ either value; surrogate keys keep it from blocking the build.
 **`key 'k7f3m2q9x4' is malformed: expected exactly 11 characters`** /
 **`key 'k7f3m2q9x4l' is malformed: contains a character outside the key alphabet`** /
 **`key 'k7f3m2q9x4c' is malformed: check character mismatch`**
-Each one continues `A key is written by refdes and never edited by hand, so this
-line has been corrupted — restore it from git rather than guessing.`, and a
-check-character mismatch ends with `(Expected check character 'a'.)`. A malformed
-key inside a link target names the link instead —
+All three continue with the same sentence: `A key is written by refdes and never
+edited by hand, so this line has been corrupted — restore it from git rather than
+guessing.` A check-character mismatch appends `(Expected check character 'a'.)`.
+Inside a link target the message names the link instead of the item —
 `key 'k7f3m2q9x4c' in refines target (labelled REQ-PWR-002) is malformed: ...`.
-The key line in the source file has been corrupted (edited by hand, merge conflict,
-or encoding issue). Keys are written by `refdes` and never edited by hand.
+The key line in the source file has been corrupted: a hand edit, a merge
+conflict, an encoding change. `refdes` writes that line, and it is never edited
+by hand.
 **Remedy:** restore the line from git (`git checkout -- <file>`).
 
 **`key 'k7f3m2q9x4a' on REQ-PWR-004 (local items/requirements/power.yaml:12) is already used by REQ-PWR-007 (local items/requirements/power.yaml:19)`**
-Two items share the same surrogate key — a line was duplicated (copy-paste,
-merge conflict, or a botched edit). A key is unique by construction.
+Two items claim the same surrogate key, and a key is unique by construction. A
+key line got duplicated: copy-paste, a merge conflict, a botched edit.
 **Remedy:** delete the `key:` line from one of the items and rebuild — it will be
 re-minted with a fresh key.
 
 **`key changed since baseline 'rev-b': was 'k7f3m2q9x4a', now 'm9n2b5v8c1w'. A key never changes legitimately.`**
-An item's surrogate key differs from what was recorded in the latest baseline.
-This means the `key:` line was edited or replaced.
+An item's surrogate key no longer matches what the latest baseline recorded, so
+the `key:` line was edited or replaced.
 **Remedy:** restore the old key from git; if the item genuinely is a new one,
-delete the `key:` line and let it be re-minted, and give it a new display `id:`
-too.
+delete the `key:` line and let it be re-minted, and give it a new display `id:`.
 
 **`key deleted since baseline 'rev-b': was 'k7f3m2q9x4a', now no key is declared.`**
-An item that had a key at baseline time no longer has one. The message goes on to
-name where the old key survives (`The old key is recorded for REQ-PWR-002 in
-baseline 'rev-b'.`), and adds a note when two records disagree about it.
+An item that had a key at baseline time no longer declares one. The message goes
+on to say where the old key is still recorded (`The old key is recorded for
+REQ-PWR-002 in baseline 'rev-b'.`), and adds a note when two records disagree
+about it.
 **Remedy:** restore the old key from git; if the item genuinely is a new one,
 delete the `key:` line (if any) and let it be re-minted, and give it a new
-display `id:` too.
+display `id:`.
 
 **`older baseline 'rev-a' references key 'k7f3m2q9x4a' for REQ-PWR-002, which no current item declares. The item may have been deleted legitimately; this is audit information, not a build error.`**
-An older baseline (not the latest) contains a key that no live item has. This
-is informational — the item was likely deleted. `refdes audit` reports this so
-you can verify it was intentional.
+An older baseline — not the latest — names a key that no live item has. The build
+is fine; `refdes audit` lists it so you can confirm the deletion was deliberate.
 **Remedy:** if the item was deleted on purpose, nothing to do. If it was
 renamed, ensure its `former_ids:` records the old display id.
 
 **`refines points at key 'k7f3m2q9x4a' (labelled REQ-PWR-002), which no item declares. The label may be stale; the key is what resolves. Either the target was deleted, or this reference predates it.`** /
 **`check against key 'k7f3m2q9x4a' (labelled REQ-PWR-002), which no item declares. ...`**
-A structured link or `checks: against:` entry references a surrogate key that no live item has. The display label (if present) may be stale; the key is the immutable identity used for resolution. This happens when a target item was deleted, or the reference was written before the target existed. A still-bare key in a structured link drops the label clause (`refines points at key 'k7f3m2q9x4a', which no item declares. ...`); a bare display id that resolves to nothing is the ordinary `... points at 'REQ-PWR-002', which does not exist`.
-**Remedy:** if the target was deleted, remove the link or `checks:` entry. If the target should exist, ensure it has a `key:` line (run a writable command to mint missing keys) and that the key matches.
+A structured link or a `checks: against:` entry points at a surrogate key that no
+live item declares. The display label (if present) may be stale; the key is the
+immutable identity, and resolution goes by it. Either the target item was
+deleted, or the reference predates it.
+Two shapes of the same report. A key still bare drops the label clause —
+`refines points at key 'k7f3m2q9x4a', which no item declares. ...` — while a
+bare display id that resolves to nothing gets the ordinary `... points at
+'REQ-PWR-002', which does not exist`.
+**Remedy:** if the target was deleted, remove the link or `checks:` entry. If the
+target should exist, give it a `key:` line (run a writable command to mint
+missing keys) and check that the key matches.
 
 ## Links
 
