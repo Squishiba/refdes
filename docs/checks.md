@@ -179,7 +179,7 @@ reported as:
 
 ```yaml
 types:
-  option:
+  component:
     check_severity: info      # candidates are scored, not asserted
 ```
 
@@ -190,7 +190,10 @@ types:
 | `info` | an info diagnostic — hidden unless `-v`/`--verbose`, does not fail the build |
 
 That is one level per *type*: every item of the type fails the same way,
-whatever its status.
+whatever its status. On `component` under `hardware@3` that also replaces the
+status mapping the standard ships — see
+[Severity per status](#severity-per-status) below, which varies it by status
+instead.
 
 This only changes the diagnostic for a check that *ran and failed*. The item
 page's `fail` badge and the check table's detail string are unaffected — a
