@@ -67,12 +67,16 @@ shippable.
 - Display-ID rename. The first version displays the ID as read-only. The
   display-half refresh has landed, but rename waits until that machinery has
   been exercised independently on real projects.
-- Uploading or managing image files. The body editor can reference existing
-  project files in the first version; upload is a later capability. **The
-  referencing half has since landed**: an image picker lists the images under
-  the declared `site.assets:` directories and inserts a relative reference into
-  the body draft (`docs/design/editor-image-upload.md` §17, Phase 0). Uploading
-  and managing the files is still deferred to that document's later phases.
+- Uploading or managing image files. **Image upload has shipped**: the body
+  editor accepts PNG, JPEG, GIF, and WebP files up to 8 MiB, previews them
+  before upload, and inserts the returned reference into the body draft. The
+  upload endpoint writes bytes only; ordinary Save writes the Markdown. It
+  refuses unsafe destinations, unsupported or mismatched file types, unsafe
+  name collisions, cross-document image-resolution conflicts, and changes to
+  images referenced by sealed entries. Existing project images remain
+  available through the picker. The separate image management and deletion UI
+  is still deferred; see
+  [`editor-image-upload.md`](editor-image-upload.md) for the shipped behavior.
 - Editing project settings, schema overlays, defaults blocks, section markers,
   narrative pages, baselines, seals, or ID-ledger files directly.
 - Git staging, commits, branch switching, merge resolution, or history UI.
@@ -1102,10 +1106,10 @@ editor-only plumbing.
 
 - Display-ID rename using the landed inbound-label refresh machinery after
   independent real-project exercise.
-- Image upload/copy and binary conflict policy. The picker that stands in for
-  it is no longer missing (see "Deferred", above; and
-  `docs/design/editor-image-upload.md` §17, Phase 0); what is left here is the
-  bytes and the conflicts around them.
+- Image management beyond upload, including browsing files outside the picker,
+  moving or deleting images, and copy workflows. Upload itself and its binary
+  conflict policy have shipped; see "Deferred", above, and
+  [`editor-image-upload.md`](editor-image-upload.md) §17.
 - VS Code custom-editor adapter over the same application services. **Designed
   2026-09-27:** [`editor-vscode-adapter.md`](editor-vscode-adapter.md) — VS Code
   as a new *client* of the `refdes serve` API that already ships, never a second

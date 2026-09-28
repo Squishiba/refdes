@@ -472,6 +472,31 @@ def test_the_thumbnail_is_the_preview_surface_and_not_a_new_endpoint():
     assert "insertable" in picker, "a row the server cannot reference says so"
 
 
+def test_markdown_docs_describe_the_shipped_image_upload_contract():
+    """Keep the author-facing upload section aligned with the implemented
+    format/size limits and upload-then-save flow."""
+    docs = os.path.join(os.path.dirname(STATIC), "..", "..", "..", "docs")
+    with open(os.path.join(docs, "markdown.md"), encoding="utf-8") as fh:
+        markdown = fh.read()
+    section = markdown.split("### Uploading an image from the browser editor", 1)[1]
+    section = section.split("### Width and captions", 1)[0]
+    for claim in (
+        "PNG, JPEG, GIF, or WebP",
+        "8 MiB",
+        "does not edit the item's Markdown",
+        "ordinary **Save**",
+        "sealed entry",
+    ):
+        assert claim in section
+
+    with open(os.path.join(docs, "design", "browser-editor.md"), encoding="utf-8") as fh:
+        design = fh.read()
+    deferred = design.split("### Deferred", 1)[1].split("### ", 1)[0]
+    later = design.split("### Later", 1)[1].split("### ", 1)[0]
+    assert "Image upload has shipped" in deferred
+    assert "Image management beyond upload" in later
+
+
 # ------------------------------------------------------------ source picker
 
 
