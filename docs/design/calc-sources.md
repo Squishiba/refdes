@@ -11,7 +11,7 @@ blocks. Its two arguments are a repo-local citation `path:` and a reader-defined
 named key:
 
 ```calc
-eff : 1 = source("analysis/power-budget.csv", "tps62913_half_load_eff")
+eff = source("analysis/power-budget.csv", "tps62913_half_load_eff") | 1
 ```
 
 `source()` is deliberately not an I/O function. `refdes fetch` reads the cited
