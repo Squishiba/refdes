@@ -251,7 +251,7 @@ def apply(project_root: str, dry_run: bool = False) -> AdoptionResult:
         storage = keys_mod.plan_surrogate_storage(project, {}, original)
         with open(path, "r", encoding="utf-8", newline="") as fh:
             before = fh.read()
-        after = seal_mod.format_seals(storage.seals)
+        after = seal_mod.format_seals(storage.seals, seal_mod.load_reseals(project, board))
         if after != before:
             rewrites.append(
                 revise.FileRewrite(path=path, rel=rel, before=before, after=after)

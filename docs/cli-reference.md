@@ -392,6 +392,9 @@ Item-level overrides:
 Append-only entries edited after sealing:
   (none)
 
+Accepted append-only reseals (durable history):
+  (none)
+
 Ledger entries with no live item and no former_ids: explaining them:
   (none)
 

@@ -141,12 +141,30 @@ amending entries, and `LOG-A-003` shows `amended_by: [LOG-A-006]`.
 `refdes build --reseal` accepts an edit to a sealed entry, on any board. Name a
 board to scope it to just that board's own entries — `refdes build --reseal
 power` — leaving every other board's edits to fail as a normal violation. It is
-reported as a warning at the time and listed permanently by `refdes audit`:
+reported as a warning at the time. The seal file retains a `reseals` event for
+each accepted edit: the item label and key (when available), UTC timestamp,
+and old/new hashes. `refdes audit` reads those durable events separately from
+outstanding edits that have not been accepted (`src/refdes/seal.py::verify`,
+`src/refdes/cli.py::cmd_audit`; verified with `refdes build --reseal` and
+`refdes audit`):
 
 ```
 Append-only entries edited after sealing:
-  LOG-A-003
+  (none)
+
+Accepted append-only reseals (durable history):
+  LOG-001 [unboarded] 2026-09-28T05:54:27.345055+00:00 edit
+    key kqkm6e6dv9c
+    was 4d34265af98c51b2, now 71059aef2108bb46
 ```
+
+Repeated reseals append events, including edits that restore older content.
+Deliberate removals accepted by `--reseal` also retain the removed hash and
+are shown as `remove`, with `now (removed)`. A preview (`--dry-run` or
+`--no-write`) records neither a seal nor an acceptance event. Keep the seal
+files committed alongside the item sources; their hashes record acceptance,
+not the old text itself. Past reseals made before this mechanism was added
+cannot be reconstructed from the current seal file.
 
 Overriding is allowed. Overriding invisibly is not — the same principle that
 governs [change tracking](change-tracking.md).

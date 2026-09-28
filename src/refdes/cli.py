@@ -633,6 +633,20 @@ def cmd_audit(args) -> int:
     else:
         print("  (none)")
 
+    print("\nAccepted append-only reseals (durable history):")
+    history = seal_mod.reseal_history(project)
+    if history:
+        for board, event in history:
+            print(
+                f"  {event['id']} [{board or 'unboarded'}] {event['occurred_at']} "
+                f"{event['action']}"
+            )
+            if event.get("key"):
+                print(f"    key {event['key']}")
+            print(f"    was {event['old_hash']}, now {event['new_hash'] or '(removed)'}")
+    else:
+        print("  (none)")
+
     # Informational only -- issue #6, finding 10 part 2's narrower half. Not
     # a warning or an error anywhere else: an id going missing from the
     # ledger's perspective is the ordinary shape of deleting an item, not a
@@ -1392,7 +1406,8 @@ def main(argv: list[str] | None = None) -> int:
         const=seal_mod.RESEAL_ALL,
         default=None,
         metavar="BOARD",
-        help="accept edits to sealed append-only entries (recorded in `audit`); "
+        help="accept edits/removals of sealed append-only entries (persisted in "
+        "the seal file and shown in `audit`); "
         "bare, this accepts every board's edits, or name one board to scope it, "
         "e.g. --reseal power",
     )
@@ -1538,7 +1553,8 @@ def main(argv: list[str] | None = None) -> int:
         "baseline diffs, and imports",
         description="List everything the build tracks but does not fail on: schema "
         "fields excluded from invalidation, item-level history overrides, "
-        "append-only log entries edited after sealing (--reseal), accepted and "
+        "outstanding append-only seal drift and durable accepted reseal history "
+        "(--reseal), accepted and "
         "outstanding board and workspace moves (--accept-board-move), what's "
         "changed since the last revision and the last release (see 'refdes "
         "revision'/'refdes release'), and imported projects. Suppression is "
