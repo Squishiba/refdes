@@ -1,7 +1,7 @@
 # This project's own schema overlay.
 #
 # Optional, and the only file of its kind: it holds `types:`, `link_types:` and
-# `field_sets:` and nothing else. Everything the project *sets* -- site, id,
+# `sets:` and nothing else. Everything the project *sets* -- site, id,
 # boards, units, history, the standard pin, process policy -- lives in
 # refdes-project.yaml, which is also what makes this directory a project.
 #
