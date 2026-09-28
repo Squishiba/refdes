@@ -141,6 +141,30 @@ def test_cli_init_end_to_end(tmp_path, monkeypatch, capsys):
     assert f"standard: hardware@{standards.latest_version('hardware')}" in out
 
 
+def test_cli_init_points_at_the_published_docs_site_not_a_repo_relative_path(
+    tmp_path, monkeypatch, capsys
+):
+    """The candidate-parts pointer was `docs/parts.md#...`, a repo-relative
+    path. `init` creates no docs/ directory, and the wheel ships no .md files
+    at all, so that string named a file that did not exist for anyone who
+    installed refdes -- on the very first thing the tool ever says (user-sim
+    run 1, finding L1). It has to be the published site, which resolves for a
+    checkout user and a wheel user alike."""
+    monkeypatch.chdir(tmp_path)
+    assert cli_mod.main(["init"]) == 0
+    out = capsys.readouterr().out
+
+    assert not (tmp_path / "docs").exists(), (
+        "if init ever started generating a docs/ directory, this test's premise "
+        "-- that the pointer cannot be repo-relative -- would need revisiting"
+    )
+    assert "docs/parts.md" not in out
+    assert (
+        "https://squishiba.github.io/refdes/parts.html"
+        "#candidate-parts-the-recommended-layout"
+    ) in out
+
+
 # --------------------------------------------------------------- refdes new
 
 

@@ -59,7 +59,7 @@ dev = ["pytest>=8.0", "build>=1.0", "twine>=5.0", "jsonschema>=4.0", "ruff>=0.6"
 
 [project.urls]
 Homepage = "https://github.com/Squishiba/refdes"
-Documentation = "https://github.com/Squishiba/refdes/tree/main/docs"
+Documentation = "https://squishiba.github.io/refdes"
 Source = "https://github.com/Squishiba/refdes"
 Issues = "https://github.com/Squishiba/refdes/issues"
 

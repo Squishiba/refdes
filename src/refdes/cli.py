@@ -29,6 +29,16 @@ from . import stub_tests as stub_tests_mod
 from .model import INVALIDATE, Project
 from .schema import SchemaError, load_project
 
+# Where the docs actually are for someone who installed refdes from a wheel.
+# A repo-relative "docs/parts.md" resolves only inside a git checkout of this
+# repo, and the wheel ships no .md files at all (packages.find is scoped to
+# src/, package-data carries only templates/standards/serve-static), so such a
+# path names a file that does not exist for the person reading it -- in the
+# brand-new project `refdes init` just created for them. The published Pages
+# site is the one form of the reference that resolves everywhere; .github/
+# workflows/docs.yml deploys docs-site/ to it on every push to main.
+DOCS_URL = "https://squishiba.github.io/refdes"
+
 
 def _fix_console() -> None:
     """Windows consoles default to cp1252, which cannot print Ω, µ, or ±."""
@@ -806,7 +816,7 @@ def cmd_init(args) -> int:
         print("standard: none -- types:/link_types: are yours to declare")
     print(
         "candidate parts live in items/<board>/candidates.yaml -- "
-        "docs/parts.md#candidate-parts-the-recommended-layout"
+        f"{DOCS_URL}/parts.html#candidate-parts-the-recommended-layout"
     )
     return 0
 
