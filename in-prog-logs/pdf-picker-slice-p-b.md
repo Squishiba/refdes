@@ -69,3 +69,10 @@ claimed. Changelog fragment: changelog.d/pdf-picker-panel.added.md.
 Publication is the remaining step: commit these explicit paths, push
 premium-bedbug, and open a PR against main. PDF accept remains intentionally
 unavailable, as Slice P-C rather than unfinished P-B work.
+
+Publication finished: implementation commit de3339d was pushed to
+origin/premium-bedbug. Opened PR #67 with gh pr create:
+https://github.com/Squishiba/refdes/pull/67
+The worktree was clean after the implementation commit; this final log entry
+is committed and pushed separately to record the completed task.
+Status: finished — Slice P-B implemented, verified, committed, pushed and PR open.
