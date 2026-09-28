@@ -687,6 +687,30 @@ class BlockedChain:
 
 
 @dataclass
+class LoadWrites:
+    """What this run's own load wrote into the source tree, as a side effect
+    of loading rather than as the command the user asked for (docs/design/
+    keys.md §2): keys minted, and bare/stale reference texts rewritten into
+    `DISPLAY-ID@key` composites -- link targets, `checks: against:`, cross-item
+    calc references and frozen `follows:` edges, all counted together.
+
+    Filled in by `loader.load_tree` and read by any command whose own verdict
+    would otherwise contradict it -- `refdes id` answering "no items are
+    missing an id" over files it just edited. Stays all-zero (and therefore
+    falsy) when nothing was written, which is the steady state: `write=False`
+    (`--no-write`/`--dry-run`) makes every one of those steps return nothing,
+    so a reader gated on this prints nothing on a read-only run without having
+    to know about the flag at all.
+    """
+
+    minted_keys: int = 0
+    rewritten_targets: int = 0
+
+    def __bool__(self) -> bool:
+        return bool(self.minted_keys or self.rewritten_targets)
+
+
+@dataclass
 class Project:
     title: str
     out_dir: str
@@ -739,6 +763,11 @@ class Project:
     # project. The CLI needs imported keyed targets before source write-back
     # expands a bare link; build() shares that same loaded graph afterward.
     imports_loaded: bool = False
+    # The source writes `load_tree` itself performed during this load -- see
+    # `LoadWrites`. Empty (falsy) for a project that was loaded without any
+    # incidental write, which is every steady-state run and every `--no-write`
+    # one.
+    load_writes: LoadWrites = field(default_factory=LoadWrites)
     # In-memory replacement source text, keyed by normalized absolute path
     # (`parse.overlay_key`). parse reads a listed file from here instead of
     # disk, and a listed path that does not exist yet still joins the source

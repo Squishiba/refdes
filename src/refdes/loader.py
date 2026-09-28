@@ -66,6 +66,10 @@ def load_tree(
 ) -> tuple[Project, bool]:
     """Returns (project, schema_was_stale); see `cli._load` for the latter.
 
+    Whatever this load writes into the source tree is also counted on
+    `project.load_writes` (see `model.LoadWrites`), so a command can report
+    the side effect it arrived with instead of contradicting it.
+
     `overlay` maps item-source paths to replacement text (see
     `Project.source_overlay`). Overlays are only meaningful read-only: the
     write-back steps address files by path and line, and would rewrite the
@@ -98,6 +102,7 @@ def load_tree(
     # seals and the membership manifest (docs/design/keys.md §9 item 4).
     minted = keys_mod.mint_missing(project, write=write)
     if minted:
+        project.load_writes.minted_keys = len(minted)
         parse_span = parse_items(project, require_ids, discard=parse_span)
 
     # Imported artifacts join the resolution scope before structured link
@@ -112,21 +117,21 @@ def load_tree(
     # live item. Must run after minting (a target needs its own key before
     # there's anything to expand into). The source rewrite updates item.links
     # in memory and preserves line counts, so imported targets remain loaded.
-    links_mod.expand_missing(project, write=write)
+    expanded_links = links_mod.expand_missing(project, write=write)
 
     # Same treatment for `checks: [{value, against}]` -- `against:` names an
     # item the same way a structured link target does but isn't a `links:`
     # reference, so expand_missing() alone never sees it (docs/design/keys.md's
     # disclosed gap, closed). The in-memory update above also keeps imported
     # targets available for this companion expansion.
-    links_mod.expand_missing_checks(project, write=write)
+    expanded_checks = links_mod.expand_missing_checks(project, write=write)
 
     # Same treatment for cross-item calc references (`V_in = DEC-PWR-001.V_in`,
     # finding 35): a bare target freezes to the composite and stale display
     # halves refresh through the same _planned_target rule. Under --no-write
     # the bare reference still resolves on the display id; only the write-back
     # is skipped.
-    links_mod.expand_missing_calc_refs(project, write=write)
+    expanded_calc_refs = links_mod.expand_missing_calc_refs(project, write=write)
 
     # A bare follows reference means "continue this thread", not "pin this
     # named entry". Resolve it once to the current frozen-edge tip after keys
@@ -134,6 +139,16 @@ def load_tree(
     # spelling. The same global --no-write gate that protects ordinary link
     # expansion also protects this append-only-sensitive rewrite.
     frozen_follows = links_mod.freeze_follows(project, write=write)
+    # The tally of everything this load itself rewrote, for whoever reports on
+    # the run (see `Project.load_writes`). All five steps return [] when
+    # `write` is False, so a `--no-write`/`--dry-run` load leaves this falsy
+    # and its caller prints nothing about writes it did not make.
+    project.load_writes.rewritten_targets = (
+        len(expanded_links)
+        + len(expanded_checks)
+        + len(expanded_calc_refs)
+        + len(frozen_follows)
+    )
     if frozen_follows:
         # The follow-freeze writer is the one later source rewrite that still
         # needs a reparse. Rebuild the imported portion of the resolution
