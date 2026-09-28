@@ -136,3 +136,13 @@ ul.diagnostics, ul.checks { list-style: none; margin: 0; padding: 0; }
 .source-changed { color: var(--warn); }
 .source-error { color: var(--bad); }
 .source-empty { white-space: pre-wrap; background: #f7f8fa; padding: 6px; }
+.source-page-nav, .source-candidates { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
+.source-page-viewport { max-height: 480px; overflow: auto; border: 1px solid var(--line); background: #e9edf2; }
+.source-page { position: relative; flex: none; background: white; color: #18202a; overflow: hidden; }
+.source-page-span { position: absolute; white-space: pre; line-height: 1; transform: translateY(-80%); z-index: 1; }
+.source-page-highlight { position: absolute; pointer-events: none; }
+.source-page-row-highlight { background: #fff1a8; }
+.source-page-token-highlight { outline: 2px solid #b26000; background: #ffe19a; }
+.source-pdf-row { border-bottom: 1px solid var(--line); padding: 4px; }
+.source-quoted { display: flex; gap: 8px; margin: 4px 0; }
+.source-quoted mark { background: #ffe19a; color: #18202a; }

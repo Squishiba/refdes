@@ -1,9 +1,11 @@
-Status: **proposed** (drafted 2026-09-27); **Slice P-A landed 2026-09-27** (§12).
+Status: **partially implemented** (drafted 2026-09-27); **Slices P-A and P-B
+landed 2026-09-27** (§12).
 The service reads PDF pages — `sources.page_candidates()` (pypdf visitor
 extraction, row grouping, the CSV reader's own numeric grammar, named caps), the
-import-gated `pdf` reader, and one read endpoint — and the page view, the confirm
-step and accept are still design only, as is everything they decide. This
-document is still a design spec, not a decision, and it is the PDF-flavored
+import-gated `pdf` reader, and one read endpoint — and the editor now displays
+the page and reviews a candidate through the shared CSV confirm panel. PDF
+accept and quoted-row re-location remain design only. This document is still
+a design spec for those remaining steps, and it is the PDF-flavored
 sibling of `docs/design/editor-source-picker.md` and settles the editor half of
 the requirement recorded in `docs/design/calc-sources.md` §1 ("New, raised by
 Jared on 2026-09-21: a picker for values in a PDF datasheet"), which is the
@@ -563,11 +565,28 @@ Independently useful (the same API a future CLI `refdes sources pdf-page` sits
 on) and it is where the confinement rules get re-proven for a new file type.
 May land any time after CSV Slice A (§10 Q6) — it did.
 
-**Slice P-B — the page view and confirm step.** The positioned-text view,
+**Slice P-B — the page view and confirm step. LANDED 2026-09-27.** The positioned-text view,
 candidate list with header guesses, the visible-failure states, and the
 confirm panel extended to a PDF pick — reusing the CSV panel's contract
 (§3), which means it lands with or after CSV Slice C so one panel serves both
 (§10 Q6).
+
+Implementation: `serve/static/sourcepicker.js` branches on `browse: "pages"`
+in the same file list, reads the existing page endpoint, places spans within
+the page's `page_box` (MediaBox bounds from `sources.py`), and highlights a row
+and token only after a candidate click. The shared `showConfirm` controls
+add the whole row, quote, header guess and editable source key; the unit
+starts empty for either reader. No PDF is parsed or served to the browser.
+
+The existing proposal read (`serve/api.py`, `serve/sources.py`) also accepts
+`page`, `row`, `token` (index among all row tokens), and the displayed page's
+`sha256`, with `key` initially omitted for a server proposal. It re-authorizes
+and re-reads the candidate, refuses a stale digest, compares the author's key
+with its pin, and composes the line through the same helper as CSV. PDF
+proposals return `accept_supported: false` with a visible saving-unavailable explanation:
+the preview can be complete but Accept stays disabled and no draft or pin is
+written. `tests/test_serve_pdf_sources.py` exercises these reads through HTTP;
+`tests/test_serve_static.py` checks the shared panel and cancellation wiring.
 
 **Slice P-C — accept.** The pdf reader's `extract()` implementing quoted-row
 re-location (§6), riding Slice B's widened edit op unchanged. **Blocked on

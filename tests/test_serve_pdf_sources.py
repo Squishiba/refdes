@@ -1,5 +1,5 @@
 """The PDF read endpoints (docs/design/editor-pdf-picker.md §2.1, §2.2, §4, §6,
-§8, §11 -- Slice P-A; the endpoint half of the design's named tests).
+§8, §11 -- Slices P-A and P-B; the endpoint half of the design's named tests).
 
 Through the real HTTP surface against a real fixture project, in the posture
 `test_serve_sources.py` uses: one `served` fixture, a real `EditorApp`, real PDF
@@ -10,9 +10,9 @@ PDF, so the tests that matter most are the ones that try to make them read a
 document the item has not cited, and the ones that prove no PDF byte and no
 absolute server path ever leaves the process.
 
-Nothing here writes. The page view and the confirm step are Slice P-B and
-accept is Slice P-C, and the absence of a lockfile write is asserted rather than
-assumed.
+Nothing here writes. PDF proposal reads extend the shared confirm contract
+in Slice P-B, and accept remains Slice P-C. The absence of a lockfile write is
+asserted rather than assumed.
 """
 
 from __future__ import annotations
@@ -20,6 +20,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+from urllib.parse import urlencode
 
 import pytest
 from conftest import write_project_config
@@ -71,7 +72,7 @@ items:
       - path: datasheets/sheet.pdf
         page: "2"
     body: |
-      ```{{calc
+      ```calc
       P = 1 | 1
       ```
   - id: DEC-002
@@ -549,6 +550,7 @@ def test_the_page_payload_carries_the_rows_the_min_typ_max_rule_needs(served):
     assert payload["spans"][0] == {
         "text": "VOUT Efficiency", "x": 72.0, "y": 700.0, "size": 9.0, "width": 67.5,
     }
+    assert payload["page_box"] == [0.0, 0.0, 612.0, 792.0]
     assert payload["span_count"] == len(payload["spans"])
     assert payload["candidate_count"] == 3
     assert payload["limits"] == {
@@ -871,5 +873,138 @@ def test_reading_a_pdf_page_writes_nothing_anywhere(tmp_path):
             assert status in (200, 400, 404, 422), (call, status)
             assert snapshot_tree(root) == before, call
         assert (root / ".refdes" / "citations.yaml").read_bytes() == lock
+    finally:
+        app.stop()
+
+
+# ----------------------------------------------------------- confirm (P-B)
+
+
+def proposal_url(client, ref="DEC-001", path="datasheets/sheet.pdf", **overrides):
+    status, page = client.api_get(page_url(ref, path))
+    assert status == 200, page
+    row = next(row for row in page["rows"] if row["candidate_count"])
+    token = next(token for token in row["tokens"] if token["candidate"])
+    query = {
+        "path": path, "page": page["page"], "row": row["index"],
+        "token": token["index"], "sha256": page["sha256"],
+    }
+    query.update(overrides)
+    return sources_url(ref, "/propose") + "?" + urlencode(query)
+
+
+def test_pdf_confirm_returns_verbatim_context_and_no_default_unit_or_accept(served):
+    _app, client, root = served
+    before = snapshot_tree(root)
+    status, payload = client.api_get(proposal_url(client, token=1))
+    assert status == 200, payload
+    entry = payload["entry"]
+    assert (entry["raw"], entry["value"], entry["header_guess"]) == ("3.30", "3.30", "TYP")
+    assert entry["quoted"] == entry["row"]["text"] == "3.15 3.30 3.45"
+    assert [t["text"] for t in entry["row"]["tokens"] if t["candidate"]] == [
+        "3.15", "3.30", "3.45",
+    ]
+    assert entry["page"] == 2 and entry["numeric_index"] == 1
+    assert payload["key"] == payload["name"] == "value"
+    assert payload["unit"] == "" and payload["line"] is None
+    assert payload["complete"] is False and payload["accept_supported"] is False
+    assert "PDF saving is not available yet" in payload["accept_reason"]
+    assert snapshot_tree(root) == before
+
+
+def test_pdf_proposal_composes_server_side_and_shows_pin_for_the_authors_key(tmp_path):
+    from refdes import calc as calc_mod
+
+    root = served_project(tmp_path)
+    (root / "items" / "decisions.yaml").write_text(
+        ITEMS.replace("P = 1 | 1", "value = 1 | 1"), encoding="utf-8",
+    )
+    add_lock(root, {"datasheets/sheet.pdf": {
+        "sha256": hashlib.sha256(PDF).hexdigest(),
+        "values": {"typical": {"reader": "pdf", "value": "3.25"}},
+    }})
+    app = start(root)
+    try:
+        client = Client(app)
+        before = snapshot_tree(root)
+        status, payload = client.api_get(proposal_url(
+            client, key="typical", name="voltage", unit="V", token=1, value="999",
+        ))
+        assert status == 200, payload
+        assert payload["line"] == 'voltage = source("datasheets/sheet.pdf", "typical") | V'
+        expression = payload["line"].split(" = ", 1)[1].rsplit(" | ", 1)[0]
+        assert calc_mod.parse_source_call(expression)[:2] == (
+            "datasheets/sheet.pdf", "typical",
+        )
+        assert payload["complete"] is True and payload["accept_supported"] is False
+        assert payload["entry"]["value"] == "3.30"  # browser's 999 is ignored
+        assert payload["entry"]["pinned"] == "3.25" and payload["entry"]["changed"]
+        status, empty_unit = client.api_get(proposal_url(client, key="typical", token=1))
+        assert status == 200 and empty_unit["entry"]["pinned"] == "3.25"
+        assert empty_unit["line"] is None and empty_unit["complete"] is False
+        status, initial = client.api_get(proposal_url(client))
+        assert status == 200 and initial["name"] == "value_2"
+        status, unpinned = client.api_get(proposal_url(client, key="different", unit="1"))
+        assert status == 200 and unpinned["entry"]["pinned"] is None
+        assert unpinned["entry"]["changed"] is False
+        assert snapshot_tree(root) == before
+    finally:
+        app.stop()
+
+
+@pytest.mark.parametrize("overrides, reason", [
+    ({"page": "0"}, "page must be"),
+    ({"row": "-1"}, "row must be"),
+    ({"token": "1.0"}, "token must be"),
+    ({"token": ""}, "token must be"),
+    ({"row": "0", "token": "0"}, "not a numeric candidate"),
+    ({"token": "99"}, "not a numeric candidate"),
+    ({"sha256": "stale"}, "changed since the page was read"),
+    ({"sha256": ""}, "changed since the page was read"),
+    ({"unit": "not_a_unit"}, "unknown unit"),
+    ({"name": "P"}, "already assigned"),
+    ({"name": "bad name"}, "not usable as a calc variable"),
+    ({"key": 'bad"key', "unit": "V"}, "no source() spelling"),
+])
+def test_pdf_proposal_refuses_invalid_selection_and_shared_contract_errors(served, overrides, reason):
+    _app, client, root = served
+    before = snapshot_tree(root)
+    status, payload = client.api_get(proposal_url(client, **overrides))
+    assert status == 422, payload
+    assert reason in payload["error"]
+    assert str(root) not in payload["error"]
+    assert snapshot_tree(root) == before
+
+
+def test_pdf_proposal_is_confined_token_gated_and_read_only(served):
+    _app, client, root = served
+    good_url = proposal_url(client, unit="1", key="confirmed")
+    before = snapshot_tree(root)
+    assert client.request("GET", good_url)[0] == 403
+    for ref, path in (("DEC-003", "datasheets/sheet.pdf"), ("DEC-001", "/etc/passwd"),
+                      ("DEC-001", "../outside.pdf"), ("DEC-001", "other.pdf")):
+        query = urlencode({"path": path, "page": 2, "row": 2, "token": 0, "sha256": "x"})
+        status, payload = client.api_get(sources_url(ref, "/propose") + "?" + query)
+        assert status == 422, payload
+        assert str(root) not in payload["error"]
+    assert snapshot_tree(root) == before
+    # Same item, same digest, but bytes changed after viewing the page.
+    (root / "datasheets" / "sheet.pdf").write_bytes(pdf_bytes(PROSE, TABLE, SECOND))
+    status, payload = client.api_get(good_url)
+    assert status == 422 and "changed since the page was read" in payload["error"]
+
+
+def test_pdf_proposal_reviews_kept_copies_and_single_candidates_on_no_write_server(tmp_path):
+    root = served_project(tmp_path)
+    app = start(root, read_only=True)
+    try:
+        client = Client(app)
+        before = snapshot_tree(root)
+        status, payload = client.api_get(proposal_url(client, "DEC-002", REMOTE, unit="1"))
+        assert status == 200, payload
+        assert payload["entry"]["row"]["candidate_count"] == 1
+        assert payload["entry"]["raw"] == "0.98"
+        assert payload["accept_supported"] is False
+        assert snapshot_tree(root) == before
     finally:
         app.stop()

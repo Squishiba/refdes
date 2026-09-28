@@ -326,12 +326,15 @@ def _source_entries(app, ref: str, query: dict[str, list[str]]) -> tuple[int, di
 def _source_propose(app, ref: str, query: dict[str, list[str]]) -> tuple[int, dict]:
     """`GET /api/item/<ref>/sources/propose?path=&key=&unit=&name=` -- the calc
     line this `(path, key, unit, name)` composes to, composed and checked here
-    so the browser never assembles the text and never learns the grammar."""
+    so the browser never assembles the text and never learns the grammar.
+    A PDF pick also supplies page/row/token/sha256; key is initially proposed.
+    Its preview uses the same contract, with saving unavailable until P-C."""
     project = app.state.snapshot.project
     item, _handle = _find_item(project, ref)
     if item is None:
         return 404, {"error": f"no item matches {ref!r}"}
-    for name in ("path", "key"):
+    pdf_pick = any(field in query for field in ("page", "row", "token"))
+    for name in (("path",) if pdf_pick else ("path", "key")):
         if not (query.get(name) or [""])[0]:
             what = "a citation path this item declares" if name == "path" else (
                 "a key from the file's key column"
@@ -344,6 +347,10 @@ def _source_propose(app, ref: str, query: dict[str, list[str]]) -> tuple[int, di
             key=(query.get("key") or [""])[0],
             unit=(query.get("unit") or [""])[0],
             name=(query.get("name") or [""])[0],
+            page=(query.get("page") or [""])[0],
+            row=(query.get("row") or [""])[0],
+            token=(query.get("token") or [""])[0],
+            sha256=(query.get("sha256") or [""])[0],
         )
     except sources_mod.SourceRefusal as exc:
         return _refused(exc)

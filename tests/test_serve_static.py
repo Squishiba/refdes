@@ -449,3 +449,78 @@ def test_the_unit_field_starts_empty_and_accept_is_disabled_until_it_is_filled()
     assert "button.disabled = !accept || !current || !unit.value.trim()" in picker
     assert "initial.units" in picker and "unit.value = value" in picker
     assert "line.textContent = proposal.line" in picker
+
+
+# --------------------------------------------------------- PDF picker (P-B)
+
+
+def source_picker_text():
+    with open(os.path.join(STATIC, "sourcepicker.js"), encoding="utf-8") as fh:
+        return fh.read()
+
+
+def test_the_pdf_page_view_parses_no_pdf_in_the_browser():
+    picker = source_picker_text()
+    assert "${base}/page?path=" in picker
+    assert "payload.spans" in picker and "payload.page_box" in picker
+    assert "span.x - left" in picker and "top - span.y" in picker
+    assert "span.size" in picker
+    assert "Positioned-text reconstruction" in picker
+    assert "no graphics or original fonts" in picker
+    for forbidden in ("pdf.js", "pdfjs", "FileReader", "arrayBuffer", "fetch(", "innerHTML"):
+        assert forbidden not in picker
+    with open(os.path.join(STATIC, "style.css"), encoding="utf-8") as fh:
+        css = fh.read()
+    assert ".source-page-span { position: absolute" in css
+    assert ".source-page-viewport" in css and "overflow: auto" in css
+
+
+def test_the_pdf_confirm_step_reuses_the_csv_confirm_panel_and_its_empty_unit_field():
+    picker = source_picker_text()
+    assert "file.browse === 'rows' || file.browse === 'pages'" in picker
+    assert "function showConfirm(path, key, pdf = null)" in picker
+    assert picker.count("'Confirm source value'") == 1
+    assert picker.count("const unit = el('input', 'source-unit')") == 1
+    assert "unit.value = ''" in picker and "unit.placeholder" not in picker
+    assert "candidateList(pdf.payload, entry.row)" in picker
+    for text in ("Whole row", "Quoted row to record", "Column header guess", "Source key"):
+        assert text in picker
+    assert "token.index === entry.token ? 'mark' : 'span'" in picker
+    assert "pinned.querySelector('.source-value').textContent = proposal.entry.pinned" in picker
+
+
+def test_nothing_is_preselected_even_when_the_page_has_exactly_one_candidate():
+    picker = source_picker_text()
+    listing = picker[picker.index("function candidateList"):picker.index("function highlightPdf")]
+    assert "row.tokens.filter((token) => token.candidate)" in listing
+    assert "column header guess:" in listing
+    assert "addEventListener('click', () => showConfirm" in listing
+    page = picker[picker.index("function showPage"):picker.index("files.appendChild(el('p'")]
+    assert "showConfirm(" not in page
+    assert "candidate_count === 1" not in picker
+    assert ".click()" not in picker and ".selected =" not in picker
+
+
+def test_pdf_navigation_and_failures_clear_stale_picks_and_report_the_server_reason():
+    picker = source_picker_text()
+    page = picker[picker.index("function showPage"):picker.index("files.appendChild(el('p'")]
+    assert "const request = ++rowRequest" in page
+    assert "proposalRequest += 1" in page and "confirm.textContent = ''" in page
+    assert "if (request !== rowRequest) return" in page
+    assert "showPage(file.path)" in picker  # initial read omits page
+    for text in ("payload.prev", "payload.next", "payload.cited.detail", "payload.detail",
+                 "payload.too_dense", "payload.drifted", "err.message", "Retry page"):
+        assert text in page
+    assert "if (payload.too_dense) return" in page
+    assert "highlightPdf(pdf.payload, pdf.row, pdf.token)" in picker
+    assert "source-page-row-highlight" in picker and "source-page-token-highlight" in picker
+
+
+def test_pdf_confirm_cannot_save_before_p_c_and_introduces_no_write_path():
+    picker = source_picker_text()
+    assert "current.accept_supported === false || busy" in picker
+    assert "proposal.accept_supported === false || busy" in picker
+    assert "initial.accept_reason" in picker
+    assert "sha256=${encodeURIComponent(pdf.payload.sha256)}" in picker
+    assert "const saved = await accept(current)" in picker
+    assert "method: 'POST'" not in picker and "op:" not in picker
