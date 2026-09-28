@@ -892,9 +892,38 @@ used as a fallback:
 ```
 ERROR   items/io/decisions.md:8 [DEC-IO-005] — satisfies points at key
         'k2p9w3x1r7s' (labelled REQ-IO-AI-001), which no item declares. The
-        label may be stale; the key is what resolves. Either the target was
-        deleted, or this reference predates it.
+        label may be stale; the key is what resolves. The target may have
+        been deleted or its key lost or changed. Check git history before
+        restoring the original key or removing the reference.
 ```
+
+**Recovery decision, 2026-09-28:** the message above applies when the label
+matches no live item. When it does match, `build._unknown_key_message` reports
+the live item's different key (or missing key), and names both possibilities:
+key loss/regeneration and a label reused by a different item. It does not
+infer continuity and never changes the resolution rule. The same diagnostic
+serves structured links, `checks: against:`, and cross-item calc references.
+
+`refdes keys restore DISPLAY-ID@ORIGINAL-KEY ...` is the explicit recovery
+transaction (`refdes/key_restore.py`). The author checks history to confirm
+identity and supplies the original key; the command restores that item's
+`key:` rather than rewriting references to a replacement identity. A
+`--dry-run` fully validates a source overlay without writing, as does global
+`--no-write`. Multiple identities can be restored together. Restoration
+refuses keys owned by another item, current keys recorded anywhere in
+baseline/seal/membership/captured-event history, and any structural errors in
+the proposed project. After writing it reloads and validates, rolling back on
+failure.
+It never rebases history or changes references. Imported items are repaired
+upstream. Ordinary editor field edits remain unable to change `key:`.
+
+Adoption's existing gate stays in place: a composite's label is not proof
+that adoption can attach its old key to the current item. Automatic repair
+by label would reintroduce the very display-id reuse ambiguity this design
+removes. A new key can still be minted after loss when there is no recorded
+identity for the minting guard (§2/Layer 4); restoration now gives that case
+an explicit recovery path. Full reasoning and alternatives are recorded in
+`in-prog-logs/surrogate-key-recovery.md`.
 
 ### Layer 4 — the baseline lint
 

@@ -7,7 +7,7 @@ refdes [-c CONFIG] [--no-write] {serve,build,check,revision,release,index,ls,id,
 | Global option | Effect |
 |---|---|
 | `-c`, `--config PATH` | Use this `refdes-project.yaml`. Default: search upward from the current directory. |
-| `--no-write` | Never modify anything under `items/` or `.refdes/`. Suppresses: key minting, link/check expansion to composite form, `.refdes/schema.json` regeneration, seal recording, board/workspace membership manifest, baseline stamping, and the ID ledger. Explicit write commands behave differently: commands with `--dry-run` (`id`, `revise`, `calc-rewrite`, `stub-tests`) report what would change and write nothing; `revision`/`release` report "would stamp" and write nothing; `keys adopt` reports the full plan and writes nothing; commands that fundamentally write (`fetch`, `init`, `standard upgrade`, `standard add-preset`, `standard remove-preset`, `former-ids propose --confirm`, `history capture`, `history redact`, `history migrate-seals`) **refuse to run** under `--no-write` and exit 2. `refdes build --no-write` still writes the site — that is the command's own output, not a side effect. |
+| `--no-write` | Never modify anything under `items/` or `.refdes/`. Suppresses: key minting, link/check expansion to composite form, `.refdes/schema.json` regeneration, seal recording, board/workspace membership manifest, baseline stamping, and the ID ledger. Explicit write commands behave differently: commands with `--dry-run` (`id`, `revise`, `calc-rewrite`, `stub-tests`) report what would change and write nothing; `revision`/`release` report "would stamp" and write nothing; `keys adopt` and `keys restore` report the full plan and write nothing; commands that fundamentally write (`fetch`, `init`, `standard upgrade`, `standard add-preset`, `standard remove-preset`, `former-ids propose --confirm`, `history capture`, `history redact`, `history migrate-seals`) **refuse to run** under `--no-write` and exit 2. `refdes build --no-write` still writes the site — that is the command's own output, not a side effect. |
 
 Exit codes: `0` success, `1` errors found, `2` configuration error (including `--no-write` refusal).
 
@@ -1119,6 +1119,46 @@ changes are rolled back; running it again on an already-adopted project prints
 `nothing to do -- project already adopted` and exits 0. The project must
 validate cleanly (no build errors) before adoption runs — `keys adopt` refuses
 on a broken project.
+
+---
+
+## `refdes keys restore`
+
+Restore explicitly supplied original surrogate keys after accidental loss or
+regeneration. Check git history first: a matching display id alone cannot
+prove that a live item is the original item.
+
+```bash
+refdes keys restore REQ-PWR-002@k7f3m2q9x4a --dry-run
+refdes keys restore REQ-PWR-002@k7f3m2q9x4a
+```
+
+Replace the example with your item's display id and original key. Supply
+multiple `DISPLAY-ID@ORIGINAL-KEY` arguments to repair several items together.
+
+| Flag | Meaning |
+|---|---|
+| `--dry-run` | Fully validate the proposed restoration and report the key changes and files without writing |
+
+Global `--no-write` also selects the dry run. Successful restoration exits 0;
+a refused restoration exits 1. A repeat with already-restored keys reports
+`nothing to do -- original keys already declared`.
+
+The command changes only the supplied items' `key:` fields, preserving other
+source text. It leaves references, baselines, seals, and membership records
+intact. It loads without minting keys, validates an in-memory source overlay,
+writes the planned files, then reloads and validates again. A write or reload
+failure restores the original file bytes.
+
+It refuses malformed keys, keys owned by another local or imported item,
+unknown or imported target items, ambiguous source edits, and replacement keys
+already recorded in any baseline, seal, membership manifest, or captured-history
+event. Discarding a recorded replacement key would orphan that history. The
+proposed project must have no structural build errors: include all lost keys
+in one command and fix
+unrelated errors first. An evaluated check that violates a bound is allowed,
+following the existing transaction policy. This recovery is implemented by
+`src/refdes/key_restore.py`; adoption retains its existing build-error gate.
 
 ---
 

@@ -141,19 +141,42 @@ is fine; `refdes audit` lists it so you can confirm the deletion was deliberate.
 **Remedy:** if the item was deleted on purpose, nothing to do. If it was
 renamed, ensure its `former_ids:` records the old display id.
 
-**`refines points at key 'k7f3m2q9x4a' (labelled REQ-PWR-002), which no item declares. The label may be stale; the key is what resolves. Either the target was deleted, or this reference predates it.`** /
+**`refines points at key 'k7f3m2q9x4a' (labelled REQ-PWR-002), which no item declares. ...`** /
 **`check against key 'k7f3m2q9x4a' (labelled REQ-PWR-002), which no item declares. ...`**
-A structured link or a `checks: against:` entry points at a surrogate key that no
-live item declares. The display label (if present) may be stale; the key is the
-immutable identity, and resolution goes by it. Either the target item was
-deleted, or the reference predates it.
+A structured link, a `checks: against:` entry, or a cross-item calc reference
+points at a surrogate key that no live item declares. Resolution uses the key;
+the display label is never a fallback. The target may have been deleted, or its
+key lost or changed. When the label names a live item, the diagnostic reports
+that item's current key (or that it has none):
+
+`A live item labelled REQ-PWR-002 declares key '...'. Its key may have been lost and regenerated, or the label may now name a different item.`
+
+Losing a `key:` line can cause a writable load to mint a replacement if no
+baseline, seal, or adopted membership record remembers the original. Inbound
+composite references still carry the original key and then fail to resolve.
 Two shapes of the same report. A key still bare drops the label clause —
 `refines points at key 'k7f3m2q9x4a', which no item declares. ...` — while a
 bare display id that resolves to nothing gets the ordinary `... points at
 'REQ-PWR-002', which does not exist`.
-**Remedy:** if the target was deleted, remove the link or `checks:` entry. If the
-target should exist, give it a `key:` line (run a writable command to mint
-missing keys) and check that the key matches.
+**Remedy:** check git history to confirm whether this is the original item.
+If it is, restore its **original** key, preserving its references and history:
+
+```bash
+refdes keys restore REQ-PWR-002@k7f3m2q9x4a --dry-run
+refdes keys restore REQ-PWR-002@k7f3m2q9x4a
+```
+
+Use the actual original key from your project's history/reference. Supply
+multiple `DISPLAY-ID@ORIGINAL-KEY` arguments if several keys were lost. The
+command validates the proposed project before writing; see
+[`keys restore`](cli-reference.md#refdes-keys-restore) for refusals. If the
+target is imported, restore the key in its upstream project and regenerate
+the imported artifact.
+
+If the target was deliberately deleted, remove the reference. If the label now
+names a different item, confirm the intended target before changing the
+reference. Minting another key cannot restore the old identity, and
+`keys adopt` continues to refuse unresolved references.
 
 ## Links
 

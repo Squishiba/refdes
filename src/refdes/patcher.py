@@ -218,6 +218,23 @@ def plan_patch(text: str, ref: str, op: Any, *, path: str | None = None) -> Patc
     `SetBody`. Pure: nothing is read from or written to disk, and `text` is not
     modified.
     """
+    return _plan_patch(text, ref, op, path=path)
+
+
+def plan_key_restore(
+    text: str, ref: str, key: str, *, path: str | None = None
+) -> PatchPlan | Refusal:
+    """Bounded key restoration for the explicit recovery transaction only.
+
+    The caller proves identity/uniqueness and validates the whole project.
+    Ordinary SetField edits remain forbidden from touching identity.
+    """
+    return _plan_patch(text, ref, SetField("key", key), path=path, restore_key=True)
+
+
+def _plan_patch(
+    text: str, ref: str, op: Any, *, path: str | None, restore_key: bool = False
+) -> PatchPlan | Refusal:
     if not isinstance(op, (SetField, SetBody, AddLink, RemoveLink)):
         return Refusal(f"unsupported operation {type(op).__name__}", ref=ref, path=path)
     try:
@@ -230,7 +247,7 @@ def plan_patch(text: str, ref: str, op: Any, *, path: str | None = None) -> Patc
         return replace(item, op=_op_name(op), path=path)
 
     if isinstance(op, SetField):
-        plan = _plan_field(f, item, op)
+        plan = _plan_field(f, item, op, restore_key=restore_key)
     elif isinstance(op, SetBody):
         plan = _plan_body(f, item, op)
     else:
@@ -664,9 +681,11 @@ def _plan_insert(f: _File, item: _Item, name: str, value: Any, what: str) -> Pat
     )
 
 
-def _plan_field(f: _File, item: _Item, op: SetField) -> PatchPlan | Refusal:
+def _plan_field(
+    f: _File, item: _Item, op: SetField, *, restore_key: bool = False
+) -> PatchPlan | Refusal:
     name = op.name
-    if name in PROTECTED_FIELDS:
+    if name in PROTECTED_FIELDS and not (restore_key and name == "key"):
         return Refusal(
             f"'{name}' is identity, not a field: rewriting it orphans every link "
             "that names it, which is a rename operation and not this one",
