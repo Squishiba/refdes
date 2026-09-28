@@ -334,36 +334,126 @@ def test_the_image_picker_is_wired_into_the_body():
 
 def test_the_image_picker_asks_the_server_and_composes_nothing():
     """The list is the server's, and so is the text: images.js sends the item's
-    handle and inserts the exact `![alt](src)` line it is handed, rather than
-    building a path spelling of its own -- the same posture as the link picker
-    and the create form, and the one that keeps a reference from disagreeing
-    with what the build resolves."""
+    handle and inserts the exact `![alt](src)` line it is handed. Phase 4's
+    upload composes the `![alt](…)` wrapper itself (§7 says the client does),
+    but the path inside it is still the server's `from_source` -- the client
+    never builds a path spelling of its own, the same posture as the link
+    picker, and the one that keeps a reference from disagreeing with what the
+    build resolves."""
     with open(os.path.join(STATIC, "images.js"), encoding="utf-8") as fh:
         picker = fh.read()
     assert "/api/images?item=${encodeURIComponent(handle)}" in picker
     assert "from './api.js'" in picker
     assert "insert(row.markdown)" in picker
-    for invented in ("![", "](", "../"):
+    # the upload insertion wraps the server's spelling, nothing of its own
+    assert "insert(`![${stemOf(file.name)}](${payload.from_source})`)" in picker
+    for invented in ("../",):
         assert invented not in picker, f"the client must not compose {invented!r} itself"
 
 
-def test_the_image_picker_uploads_nothing():
-    """Phase 0 is the read-only half (docs/design/editor-image-upload.md §17).
-    A file input, a drop target, or a call to the upload route would be Phase 1
-    arriving early -- and Phase 1 has a hole by design until Phase 2 closes it,
-    so the client must not be able to reach it."""
+def test_the_upload_ui_is_wired_into_the_image_panel():
+    """Phase 4 (§17): drag-and-drop and a file input live in the same panel as
+    the Phase 0 list -- the panel editor.js builds and item.js places. A drop
+    target and a file input that reach no handler are decoration."""
     with open(os.path.join(STATIC, "images.js"), encoding="utf-8") as fh:
         picker = fh.read()
-    assert "/api/assets" not in picker
-    assert "type = 'file'" not in picker and 'type="file"' not in picker
-    assert "POST" not in picker
-    assert "multipart" not in picker
-    assert "FileReader" not in picker
-    # and no new op name: the insertion rides the body save that already exists
+    assert "type = 'file'" in picker
+    assert "addEventListener('drop'" in picker
+    assert "addEventListener('dragover'" in picker
+    assert "event.dataTransfer" in picker
+    assert "chooseFile" in picker
+
+
+def test_the_upload_previews_as_a_data_url_before_any_request():
+    """§11 and §17: the author sees the picked bytes -- as a browser-built
+    `data:` URL, which the editor CSP (`img-src 'self' data:`) already allows
+    -- before a single byte is posted. The POST only happens behind the
+    explicit Upload button, so the preview is always the file as picked."""
+    with open(os.path.join(STATIC, "images.js"), encoding="utf-8") as fh:
+        picker = fh.read()
+    assert "new FileReader()" in picker
+    assert "readAsDataURL" in picker
+    assert "previewImg.src = String(reader.result)" in picker
+    assert "preview.hidden = false" in picker
+    # the request is behind the button, not inside the pick handler
+    assert "upload.addEventListener('click', () => sendUpload(''))" in picker
+
+
+def test_the_upload_posts_raw_bytes_to_the_asset_route():
+    """§11: raw bytes as the body, metadata in the query, one dedicated fetch
+    in api.js (which owns the launch token). No multipart, no base64 -- both
+    explicitly rejected designs (§16.2, §16.3)."""
+    with open(os.path.join(STATIC, "images.js"), encoding="utf-8") as fh:
+        picker = fh.read()
+    assert "/api/assets?" in picker
+    assert "postRaw" in picker
+    assert "FormData" not in picker and "multipart" not in picker
+    assert "btoa" not in picker
+    with open(os.path.join(STATIC, "api.js"), encoding="utf-8") as fh:
+        apijs = fh.read()
+    assert "export async function postRaw" in apijs
+    assert "'application/octet-stream'" in apijs
+    assert "body: bytes" in apijs
+    # the token still only ever comes from api.js
+    assert "'X-Refdes-Token': token" in apijs
+    assert "X-Refdes-Token" not in picker
+
+
+def test_the_upload_inserts_into_the_draft_and_never_posts_a_body():
+    """§7's forced ordering: upload, then insert, then the ordinary Save.
+    The upload path must not reach an item-edit endpoint -- the reference
+    lands in the draft through the same insert callback the Phase 0 picker
+    uses, and default alt text is the filename stem (§7), never empty."""
+    with open(os.path.join(STATIC, "images.js"), encoding="utf-8") as fh:
+        picker = fh.read()
+    assert "/api/item/" not in picker
+    assert "set_body" not in picker
+    assert "stemOf" in picker
+    # the insertion is the editor's caret-insert path, shared with Phase 0
     with open(os.path.join(STATIC, "editor.js"), encoding="utf-8") as fh:
         editor = fh.read()
+    assert "createImagePicker(item, handle, insertIntoBody)" in editor
     assert "setDraftBody(handle, area.value)" in editor
     assert "area._refdesCommit" in editor
+
+
+def test_the_binary_conflict_offers_replace_or_cancel():
+    """§8's conflict dialog, binary variant: the same visual/interaction
+    convention as editor.js's text conflict -- a `.conflict` box, an h3,
+    muted facts, a `pre.conflict-diff`, and `.conflict-actions` buttons --
+    but with size/hash facts instead of a diff (there is none for two
+    binaries), and replace meaning re-issue with the server's `current_hash`
+    as `expected_hash`. The disclosure of referencing items (§9.3) is in the
+    box, not a second modal (§15.7)."""
+    with open(os.path.join(STATIC, "images.js"), encoding="utf-8") as fh:
+        picker = fh.read()
+    assert "el('div', 'conflict')" in picker
+    assert "'conflict-diff'" in picker
+    assert "'conflict-actions'" in picker
+    assert "no visual diff" in picker
+    assert "current_hash" in picker and "current_size" in picker
+    assert "referenced_by" in picker
+    assert "sendUpload(payload.current_hash)" in picker
+    assert "'Replace'" in picker and "'Cancel'" in picker
+    assert "expected_hash" in picker
+
+
+def test_a_sealed_refusal_is_a_hard_refusal_not_a_confirmable_conflict():
+    """§10: a sealed refusal has no `expected_hash` that unlocks it, so the
+    UI must show it as a hard refusal. The replace path is reached only from
+    a 409 conflict payload -- exactly one call site passes a server hash --
+    and a `kind: refused` payload never renders the conflict box."""
+    with open(os.path.join(STATIC, "images.js"), encoding="utf-8") as fh:
+        picker = fh.read()
+    assert "kind === 'refused'" in picker
+    assert "refusal === 'sealed'" in picker
+    assert "no confirmation unlocks it" in picker
+    # the only re-issue with a server-supplied hash is the conflict box's
+    # Replace button; the plain upload sends an empty expected_hash
+    assert picker.count("sendUpload(payload.current_hash)") == 1
+    assert "sendUpload('')" in picker
+    # the conflict box is only ever opened from the 409 branch
+    assert picker.count("showBinaryConflict(") == 2
 
 
 def test_the_thumbnail_is_the_preview_surface_and_not_a_new_endpoint():
