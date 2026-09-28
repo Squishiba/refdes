@@ -565,7 +565,23 @@ def _build_item(
             # A typo'd link name (`sattisfies:` for `satisfies:`) doesn't just lose a
             # field -- it drops a traceability edge, so it must fail the build rather
             # than pass with a warning that's easy to miss.
+            #
+            # A misspelled *field* name is the same failure one level down. `partnum:`
+            # for `part_number:` is not a field the author wanted and the schema is
+            # missing; it is that field's value going nowhere, and when the field feeds
+            # a derived report -- `part_number` feeds the parts index -- the item drops
+            # out of the one report the field exists to feed, with no error anywhere.
+            # The value is still stored afterward, exactly as the link branch stores
+            # its value below: the build is red either way, and a red build that also
+            # threw the author's text away is harder to repair than one that kept it.
+            #
+            # Only a *confident* match moves the severity. A key close to nothing has
+            # no typo interpretation -- forward-compat, a future schema version,
+            # deliberate extra metadata -- and stays the warning below with its
+            # did-you-mean hint untouched, the same posture `serve.filters.parse_filters`
+            # takes toward an unrecognized query parameter.
             link_match = difflib.get_close_matches(key, sorted(spec.links), n=1, cutoff=0.6)
+            field_match = difflib.get_close_matches(key, sorted(spec.fields), n=1, cutoff=0.6)
             preset_name = project.preset_provided_links.get(key)
             if preset_name and key not in project.link_types:
                 project.error(
@@ -579,6 +595,13 @@ def _build_item(
                     f"unknown field {key!r} on {spec.label.lower()} -- did you mean "
                     f"the link {link_match[0]!r}? A misspelled link name silently "
                     f"drops the edge instead of erroring.",
+                    file=rel, line=line, item_id=item.id or "?",
+                )
+            elif field_match:
+                project.error(
+                    f"unknown field {key!r} on {spec.label.lower()} -- did you mean "
+                    f"the field {field_match[0]!r}? A misspelled field name silently "
+                    f"drops it instead of erroring.",
                     file=rel, line=line, item_id=item.id or "?",
                 )
             else:

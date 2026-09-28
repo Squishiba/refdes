@@ -264,12 +264,32 @@ The [standard library](standard-library.md) already declares this for `requireme
 and the other six starter types — this is what a custom type, or an override of
 a standard one, looks like.
 
-An unknown field is a **warning**, not an error, and the value is kept. The warning
-suggests a correction:
+An unknown field whose spelling is close to one the type declares is a build
+**error**, and the message names the field it thinks you meant:
 
 ```
-WARNING items/requirements/power.yaml:12 [REQ-PWR-002] — unknown field 'sorce'
-        on requirement. Did you mean 'source'?
+ERROR items/requirements/power.yaml:12 [REQ-PWR-002] — unknown field 'sorce' on
+        requirement -- did you mean the field 'source'? A misspelled field name
+        silently drops it instead of erroring.
+```
+
+A misspelled field name is not a field you wanted that the schema happens to
+lack; it is the field you wanted, with its value going nowhere. `part_number`
+feeds the parts index, so a green build over `partnum:` means the part quietly
+left the one report the field exists to feed. A misspelled *link* verb
+(`sattisfies:`) has always failed the build for the same reason — a silently
+dropped edge is not something a warning can be trusted to catch — and a field
+is that loss one level down. The value is kept either way, so the file you are
+fixing still holds what you wrote.
+
+An unknown field with nothing close to it stays a **warning**, and the value is
+kept: forward-compatible metadata, a field a future schema version will declare,
+deliberate extra data. There is no typo to correct there, so the build stays
+green and says what it saw:
+
+```
+WARNING items/parts/power.yaml:12 [CMP-004] — unknown field 'thermal_model' on
+        component.
 ```
 
 Field types are declarative. Today `enum` (checked against `choices`), `limit`
