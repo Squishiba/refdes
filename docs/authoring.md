@@ -275,7 +275,7 @@ ERROR items/requirements/power.yaml:12 [REQ-PWR-002] — unknown field 'sorce' o
 
 A misspelled field name is not a field you wanted that the schema happens to
 lack; it is the field you wanted, with its value going nowhere. `part_number`
-feds the parts index, so a green build over `partnum:` means the part quietly
+feeds the parts index, so a green build over `partnum:` means the part quietly
 left the one report the field exists to feed. A misspelled *link* verb
 (`sattisfies:`) has always failed the build for the same reason — a silently
 dropped edge is not something a warning can be trusted to catch — and a field
