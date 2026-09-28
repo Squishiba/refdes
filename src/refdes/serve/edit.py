@@ -67,7 +67,7 @@ from typing import Any
 from .. import citations as citations_mod
 from .. import dates, ids, keys, links, loader, patcher, scaffold, seal, textio
 from ..model import CHECK_VIOLATION, ERROR, Diagnostic, Item, Project
-from ..parse import yaml_safe_load
+from ..parse import front_matter_defaults_block, md_front_matter_blocks, yaml_safe_load
 from ..patcher import AddLink, PatchPlan, Refusal, RemoveLink, SetBody, SetField
 from ..sources import PdfAnchor
 from . import security
@@ -831,7 +831,20 @@ def _create_locked(config: str, request: CreateRequest):
     if reason is not None:
         return Refused(who, "", reason)
 
-    new_id, reason = ids.plan_new_id(before, request.type, explicit_id=request.id)
+    # The destination's own `defaults.prefix` is the series this item is
+    # about to be numbered under -- the same override every item already in
+    # that file carries, and the same one `refdes id` honours for the same
+    # file. Planning from the bare type prefix instead minted ids the file's
+    # prefix did not cover (`REQ-001` in a file of `REQ-SYS-*`), which only
+    # `refdes check` noticed, as a warning, after the id was already written
+    # and burned.
+    dest_defaults = dest.get("defaults") or {}
+    new_id, reason = ids.plan_new_id(
+        before,
+        request.type,
+        explicit_id=request.id,
+        prefix_hint=str(dest_defaults.get("prefix") or ""),
+    )
     if reason is not None:
         return Refused(who, "", reason)
     key = _fresh_key(before)
@@ -843,7 +856,7 @@ def _create_locked(config: str, request: CreateRequest):
             return Refused(who, new_id, reason)
         link_lines.append(line)
 
-    body, reason = _item_lines(spec, fields, link_lines)
+    body, reason = _item_lines(spec, fields, link_lines, inherited=frozenset(dest_defaults))
     if reason is not None:
         return Refused(who, new_id, reason)
 
@@ -985,7 +998,16 @@ def _resolve_destination(project: Project, request: CreateRequest):
     existing multi-item Markdown file), new-md (a new single-item Markdown
     file). Everything else -- path escapes, a non-source extension, a new
     YAML file, a list file whose `items:` block cannot be safely grown -- is
-    a reason."""
+    a reason.
+
+    For the two append shapes, `dest['defaults']` is the destination file's
+    own file-wide `defaults:` mapping -- the one the loader merges under
+    every item in that file. An item appended there inherits it like any
+    other, so the id series it numbers under and the field values it starts
+    with are that file's to decide, not the type's. new-md has no
+    `defaults:` key at all: a file that does not exist yet cannot declare
+    any, which is exactly the state `refdes id` would find it in.
+    """
     dest = (request.destination or "").strip().replace("\\", "/")
     if not dest:
         dest = suggest_destination(
@@ -1014,19 +1036,31 @@ def _resolve_destination(project: Project, request: CreateRequest):
         return rel, {"kind": "new-md"}, None
     if os.path.isdir(path):
         return None, None, f"{rel} is a directory"
+
+    # Both existing-file shapes are read here, once, because the item about
+    # to be appended inherits the destination file's own `defaults:` exactly
+    # as the loader hands it to every item already in that file -- and the
+    # prefix and status that implies have to be known *before* an id is
+    # planned and the item's lines are emitted. A file that does not exist
+    # yet (new-md) has no defaults to inherit, so it plans from the type.
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            text = fh.read()
+    except (OSError, UnicodeDecodeError) as exc:
+        return None, None, f"could not read {rel}: {exc}"
     if ext == ".md":
-        return rel, {"kind": "append-md"}, None
+        blocks, _errors = md_front_matter_blocks(text.split("\n"))
+        return rel, {
+            "kind": "append-md",
+            "defaults": front_matter_defaults_block(blocks) or {},
+        }, None
 
     # An existing YAML list file: it must be a mapping with a block-style
     # `items:` list, and that list must be the last block in the file --
     # anything else means a safe append (every existing byte untouched)
     # cannot be promised, which is a refusal, not a guess.
     try:
-        with open(path, "r", encoding="utf-8") as fh:
-            text = fh.read()
         data = yaml_safe_load(text)
-    except (OSError, UnicodeDecodeError) as exc:
-        return None, None, f"could not read {rel}: {exc}"
     except Exception as exc:  # noqa: BLE001 - a YAML error here is a refusal reason
         return None, None, f"{rel} does not parse: {type(exc).__name__}"
     if not isinstance(data, dict) or not isinstance(data.get("items"), list):
@@ -1059,8 +1093,13 @@ def _resolve_destination(project: Project, request: CreateRequest):
         if indent is None and entry:
             indent = entry.group(1)
     defaults = data.get("defaults")
-    file_type = defaults.get("type") if isinstance(defaults, dict) else None
-    return rel, {"kind": "append-yaml", "indent": indent or "  ", "type": file_type}, None
+    defaults = defaults if isinstance(defaults, dict) else {}
+    return rel, {
+        "kind": "append-yaml",
+        "indent": indent or "  ",
+        "type": defaults.get("type"),
+        "defaults": defaults,
+    }, None
 
 
 def _fresh_key(project: Project) -> str:
@@ -1101,11 +1140,21 @@ def _amends_line(project: Project, spec, ref: str):
     return f"amends: [{composite}]", None
 
 
-def _item_lines(spec, fields: dict, link_lines: list[str]):
+def _item_lines(spec, fields: dict, link_lines: list[str], inherited: frozenset = frozenset()):
     """The new item's YAML lines after id/key: board/workspace, then the
     initial field set -- scaffold.initial_field_values, the same resolution
     `refdes new` scaffolds -- emitted through the patcher's round-trip-verified
-    scalar emitter, then any link lines."""
+    scalar emitter, then any link lines.
+
+    A field named in `inherited` (the destination file's `defaults:`) is
+    left off when its value is only the type's declared fallback. The item
+    would inherit the file's value anyway, and writing the fallback made it
+    *override* that value instead: a file whose `defaults:` said
+    `status: active` collected items stamped `status: draft`, one line per
+    item, and the file's own setting was quietly dead. A value the author
+    supplied is written even then -- overriding the file is what supplying
+    one means.
+    """
     lines: list[str] = []
     for name in ("board", "workspace"):
         if name in fields:
@@ -1115,7 +1164,10 @@ def _item_lines(spec, fields: dict, link_lines: list[str]):
             if text is None:
                 return None, f"the value for {name!r} cannot be emitted as YAML"
             lines.append(f"{name}: {text}")
-    for fname, value in scaffold.initial_field_values(spec, fields).items():
+    initial = scaffold.initial_field_values(spec, fields)
+    for fname, value in initial.items():
+        if fname in inherited and fname not in fields:
+            continue
         text, _note = patcher._emit_scalar(
             value, style=None, indent=0, eol="\n", allow_block=False, original=""
         )
@@ -1223,9 +1275,27 @@ def preview_creation(
             "destination": None,
             "destination_exists": False,
         }
-    new_id, reason = ids.plan_new_id(project, type_name, explicit_id=explicit_id)
     dest = (destination or "").strip().replace("\\", "/") or suggest_destination(
         project, type_name, board=board
+    )
+    # Resolved exactly as `create_item` will resolve it, so a destination
+    # file's own `defaults.prefix` reaches the previewed id too -- this form
+    # promises that the id shown before saving is the id the item gets, and a
+    # prefix the preview cannot see is one more way that promise breaks.
+    # A destination the create would refuse still previews its bare type
+    # prefix; the refusal is the save's to report, not the preview's to hide.
+    _rel, resolved, _why = _resolve_destination(
+        project,
+        CreateRequest(
+            who="preview",
+            type=type_name,
+            fields={} if board is None else {"board": board},
+            destination=dest,
+        ),
+    )
+    prefix_hint = str((resolved or {}).get("defaults", {}).get("prefix") or "")
+    new_id, reason = ids.plan_new_id(
+        project, type_name, explicit_id=explicit_id, prefix_hint=prefix_hint
     )
     exists = os.path.exists(os.path.join(project.root, dest.replace("/", os.sep)))
     return {"id": new_id, "reason": reason, "destination": dest, "destination_exists": exists}

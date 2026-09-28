@@ -747,6 +747,34 @@ def test_plan_new_id_explicit_override_is_honoured_or_refused(plan_project):
         assert new_id is None and reason
 
 
+def test_plan_new_id_takes_the_destinations_prefix_over_the_bares(plan_project):
+    """`prefix_hint` is the destination file's `defaults.prefix` -- the same
+    override `prefix_for` reads off an already-parsed item, and the one the
+    editor must apply to an item that does not exist yet. Without it the
+    editor and `refdes id` numbered the same file from different series."""
+    _root, project = plan_project
+    assert ids.plan_new_id(project, "requirement", prefix_hint="REQ-SYS") == ("REQ-SYS-001", None)
+    # the two series keep separate high waters: the project's REQ-001 does
+    # not occupy REQ-SYS-001
+    assert ids.plan_new_id(
+        project, "requirement", prefix_hint="REQ-SYS", explicit_id="REQ-SYS-009"
+    ) == ("REQ-SYS-009", None)
+    # an empty hint is the type's bare prefix, not a prefix of ""
+    assert ids.plan_new_id(project, "requirement", prefix_hint="") == ("REQ-002", None)
+
+
+def test_plan_new_id_explicit_override_is_judged_against_the_hinted_prefix(plan_project):
+    _root, project = plan_project
+    new_id, reason = ids.plan_new_id(
+        project, "requirement", explicit_id="REQ-042", prefix_hint="REQ-SYS"
+    )
+    assert new_id is None
+    assert "REQ-SYS" in reason and "defaults" in reason
+    assert ids.plan_new_id(
+        project, "requirement", explicit_id="REQ-SYS-042", prefix_hint="REQ-SYS"
+    ) == ("REQ-SYS-042", None)
+
+
 def test_reserve_id_burns_so_the_next_plan_moves_on(plan_project):
     root, project = plan_project
     ledger = root / ".refdes" / "ids.yaml"

@@ -220,6 +220,254 @@ def test_create_writes_a_new_single_item_markdown_file(project_root):
     assert after_tree == before_tree
 
 
+# ------------------------------------------- the destination file's own defaults
+#
+# The item about to be created inherits the destination file's `defaults:`
+# exactly as every item already in that file does. When that block declares a
+# `prefix:`, the new item is numbered under it -- the series `refdes id` picks
+# for the same file. The create path used to plan from the bare type prefix
+# instead, so a file of `REQ-SYS-*` collected `REQ-001` (a warning from
+# `refdes check` about an id already written *and burned*).
+
+PREFIXED_REQS = """\
+defaults:
+  type: requirement
+  prefix: REQ-SYS
+  owner: J. Bin
+
+items:
+  - id: REQ-SYS-001
+    text: The rail shall supply 3.3 V.
+  - id: REQ-SYS-002
+    text: Nothing addresses this yet.
+"""
+
+# A type whose `status` field declares a default, the way the bundled
+# standard's types do -- the case where a created item's initial field set
+# carries a value the destination file may already be supplying.
+STATUS_SCHEMA = """\
+site:
+  title: "Destination defaults test"
+date_format: DD/MM/YYYY
+id:
+  width: 3
+types:
+  requirement:
+    prefix: REQ
+    fields:
+      text: { type: text, required: true }
+      status: { type: enum, choices: [draft, active], default: draft }
+"""
+
+PREFIXED_MD = """\
+---
+defaults:
+  type: requirement
+  prefix: REQ-SYS
+---
+
+---
+id: REQ-SYS-001
+text: The rail shall supply 3.3 V.
+---
+
+---
+id: REQ-SYS-002
+text: Nothing addresses this yet.
+---
+"""
+
+
+@pytest.fixture
+def prefixed_root(tmp_path):
+    """The bug report's repro, verbatim in shape: a list file whose
+    `defaults.prefix` (REQ-SYS) is not the type's bare prefix (REQ)."""
+    write_project_config(tmp_path, SCHEMA)
+    items = tmp_path / "items"
+    items.mkdir()
+    (items / "reqs.yaml").write_text(PREFIXED_REQS, encoding="utf-8", newline="\n")
+    (items / "notes.md").write_text(PREFIXED_MD, encoding="utf-8", newline="\n")
+    return tmp_path
+
+
+def test_create_uses_the_destination_files_prefix_not_the_bare_type_prefix(prefixed_root):
+    """The regression, as the report states it: creating into a file whose
+    `defaults.prefix` differs from the type's must produce `REQ-SYS-*`, and
+    must not produce `REQ-*` at all."""
+    result = create_item(
+        str(prefixed_root),
+        edit_mod.CreateRequest(
+            who="t", type="requirement", fields={"text": "A new rail."},
+            destination="items/reqs.yaml",
+        ),
+    )
+    assert isinstance(result, Created), result.message
+    assert result.item_id == "REQ-SYS-003"
+
+    after = read(prefixed_root / "items" / "reqs.yaml")
+    assert "id: REQ-SYS-003" in after
+    assert "REQ-001\n" not in after.replace("REQ-SYS-001", "").replace("REQ-SYS-002", "")
+
+    # The wrong series is not merely absent from the file, it is not burned:
+    # a REQ-001 here would outlive the mistake in .refdes/ids.yaml.
+    ledger = (prefixed_root / ".refdes" / "ids.yaml").read_text(encoding="utf-8")
+    assert "REQ-SYS-003" in ledger
+    assert not any(line.strip() == "- REQ-001" for line in ledger.splitlines())
+
+
+def test_the_created_id_is_the_one_refdes_id_would_have_assigned(prefixed_root, tmp_path):
+    """The guarantee, stated as an equality: the same file, filled the same
+    way by `refdes id` and by the editor's create endpoint, ends up with the
+    same id. Built as two projects rather than one assertion about a literal,
+    so it keeps holding if the numbering ever moves."""
+    from refdes import ids as ids_mod
+
+    def fresh(root):
+        root.mkdir(parents=True)
+        write_project_config(root, SCHEMA)
+        (root / "items").mkdir()
+        (root / "items" / "reqs.yaml").write_text(
+            PREFIXED_REQS, encoding="utf-8", newline="\n"
+        )
+        return root
+
+    twin = fresh(tmp_path / "twin")
+    with open(twin / "items" / "reqs.yaml", "a", encoding="utf-8", newline="\n") as fh:
+        fh.write("  - text: A new rail.\n")
+    project = load_and_parse(twin)
+    allocated = ids_mod.allocate(project)
+    assert [new_id for _item, new_id in allocated] == ["REQ-SYS-003"]
+
+    created = create_item(
+        str(prefixed_root),
+        edit_mod.CreateRequest(
+            who="t", type="requirement", fields={"text": "A new rail."},
+            destination="items/reqs.yaml",
+        ),
+    )
+    assert isinstance(created, Created), created.message
+    assert created.item_id == allocated[0][1]
+
+
+def test_create_in_a_markdown_file_honours_its_first_block_prefix(prefixed_root):
+    """A Markdown file declares the same file-wide `defaults:` as a list
+    file, in its first front-matter block -- so an item appended to one is
+    numbered from it too."""
+    result = create_item(
+        str(prefixed_root),
+        edit_mod.CreateRequest(
+            who="t", type="requirement", fields={"text": "From the editor."},
+            destination="items/notes.md",
+        ),
+    )
+    assert isinstance(result, Created), result.message
+    assert result.item_id == "REQ-SYS-003"
+    assert "id: REQ-SYS-003" in read(prefixed_root / "items" / "notes.md")
+
+
+def test_create_in_a_brand_new_file_numbers_from_the_type(prefixed_root):
+    """A file that does not exist yet cannot declare a `defaults:` block, so
+    there is nothing to inherit and the type's bare prefix is correct --
+    the same answer `refdes id` gives an item in a file with no defaults.
+    Not a silent fallback: it is the only answer available."""
+    result = create_item(
+        str(prefixed_root),
+        edit_mod.CreateRequest(
+            who="t", type="requirement", fields={"text": "First in a new file."},
+            destination="items/decisions/elsewhere.md",
+        ),
+    )
+    assert isinstance(result, Created), result.message
+    assert result.item_id == "REQ-001"  # the bare type prefix: nothing to inherit
+
+
+def test_preview_shows_the_destination_files_prefix_too(prefixed_root):
+    """`format_id` exists so "a previewed id and an allocated one can never
+    be spelled differently". The prefix was the half of that promise the
+    preview could not keep: it showed REQ-004 and saving wrote REQ-SYS-003."""
+    preview = edit_mod.preview_creation(
+        load_and_parse(prefixed_root), "requirement", destination="items/reqs.yaml"
+    )
+    assert preview["id"] == "REQ-SYS-003"
+
+    created = create_item(
+        str(prefixed_root),
+        edit_mod.CreateRequest(
+            who="t", type="requirement", fields={"text": "Promised id."},
+            destination="items/reqs.yaml",
+        ),
+    )
+    assert isinstance(created, Created)
+    assert created.item_id == preview["id"]
+
+
+def test_explicit_id_override_is_judged_against_the_destination_files_prefix(prefixed_root):
+    """The override is checked against the prefix the item will actually be
+    numbered under, and the refusal says where that prefix came from."""
+    wrong = create_item(
+        str(prefixed_root),
+        edit_mod.CreateRequest(
+            who="t", type="requirement", fields={"text": "Wrong series."},
+            id="REQ-050", destination="items/reqs.yaml",
+        ),
+    )
+    assert isinstance(wrong, Refused)
+    assert "REQ-SYS" in wrong.reason and "defaults" in wrong.reason
+    assert not (prefixed_root / ".refdes").exists()  # refused burns nothing
+
+    ok = create_item(
+        str(prefixed_root),
+        edit_mod.CreateRequest(
+            who="t", type="requirement", fields={"text": "Right series."},
+            id="REQ-SYS-050", destination="items/reqs.yaml",
+        ),
+    )
+    assert isinstance(ok, Created) and ok.item_id == "REQ-SYS-050"
+
+
+def test_a_field_the_destination_defaults_supply_is_not_written_onto_the_item(tmp_path):
+    """The same "the create path never looked at the file" bug, in its
+    second dress: a file whose `defaults.status` is `active` was collecting
+    items stamped `status: draft`, one explicit line per item, each one
+    overriding the file. The item inherits `active`; the line is gone."""
+    write_project_config(tmp_path, STATUS_SCHEMA)
+    (tmp_path / "items").mkdir()
+    (tmp_path / "items" / "reqs.yaml").write_text(
+        "defaults: { type: requirement, status: active }\n"
+        "items:\n"
+        "  - id: REQ-001\n    text: The rail shall supply 3.3 V.\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+
+    inherited = create_item(
+        str(tmp_path),
+        edit_mod.CreateRequest(
+            who="t", type="requirement", fields={"text": "Inherits active."},
+            destination="items/reqs.yaml",
+        ),
+    )
+    assert isinstance(inherited, Created), inherited.message
+    # One `status:` in the file, and it is the defaults block's: the new
+    # entry carries none of its own to override it with.
+    assert read(tmp_path / "items" / "reqs.yaml").count("status:") == 1
+
+    # An author-supplied value is still the author's: overriding the file is
+    # what supplying one means.
+    chosen = create_item(
+        str(tmp_path),
+        edit_mod.CreateRequest(
+            who="t", type="requirement",
+            fields={"text": "Explicitly draft.", "status": "draft"},
+            destination="items/reqs.yaml",
+        ),
+    )
+    assert isinstance(chosen, Created), chosen.message
+    project = load_and_parse(tmp_path)
+    assert project.item_by_id(inherited.item_id).fields["status"] == "active"
+    assert project.item_by_id(chosen.item_id).fields["status"] == "draft"
+
+
 # ------------------------------------------------------------------- identity
 
 

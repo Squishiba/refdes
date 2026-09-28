@@ -620,6 +620,35 @@ def _warn_dead_defaults_status(
     )
 
 
+def front_matter_defaults_block(blocks: list[tuple[int, int, dict]]) -> dict | None:
+    """A Markdown file's file-wide `defaults:` mapping, or None when it has
+    none -- the *first* front-matter block, and only when its one real key is
+    `defaults:`. Line bookkeeping (`__line__`) is stripped, so this is the
+    mapping items inherit, not the raw parse of it.
+
+    The single reading of that block, shared by `parse_markdown_file` (which
+    merges it under every item that follows) and by a caller that needs a
+    Markdown file's defaults without building its items -- `serve.edit`
+    planning an id for an item it is about to append, which must number it
+    under the same prefix the loader will hand the item once it lands. A
+    `defaults:` block anywhere but the first is a different thing entirely
+    (an error, per `parse_markdown_file`), so returning None for one that is
+    not first is the same answer the loader acts on.
+
+    An empty `defaults:` is still a block: `{}` is a mapping, and the item
+    still inherits (nothing). None means "no block here", never "an empty
+    one" -- the distinction `parse_markdown_file` needs to know that block
+    zero was consumed rather than parsed as an item.
+    """
+    if not blocks:
+        return None
+    parsed = blocks[0][2]
+    if not _only_key(parsed, "defaults"):
+        return None
+    raw = parsed.get("defaults")
+    return _strip_lines(raw) if isinstance(raw, dict) else None
+
+
 def parse_markdown_file(project: Project, path: str) -> list[Item]:
     """Read one or more `---`-fenced item documents from a single .md file.
 
@@ -653,15 +682,18 @@ def parse_markdown_file(project: Project, path: str) -> list[Item]:
     if not blocks:
         return []
 
-    defaults: dict[str, Any] = {}
-    defaults_line: int | None = None
-    start = 0
-    first_keys = {k for k in blocks[0][2] if k != "__line__"}
-    if first_keys == {"defaults"} and isinstance(blocks[0][2].get("defaults"), dict):
-        raw_defaults = blocks[0][2]["defaults"]
-        defaults_line = raw_defaults.get("__line__")
-        defaults = _strip_lines(raw_defaults)
+    raw_defaults = front_matter_defaults_block(blocks)
+    if raw_defaults is None:
+        # No defaults block, or one that is not the first: block zero is an
+        # item. `defaults_line` reads the raw parse for the bookkeeping key
+        # the stripped mapping above no longer carries.
+        start = 0
+        defaults_line = None
+        defaults = {}
+    else:
         start = 1
+        defaults_line = blocks[0][2]["defaults"].get("__line__")
+        defaults = raw_defaults
     default_type = defaults.get("type")
 
     item_blocks = blocks[start:]
