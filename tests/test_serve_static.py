@@ -606,7 +606,7 @@ def test_pdf_navigation_and_failures_clear_stale_picks_and_report_the_server_rea
     assert "source-page-row-highlight" in picker and "source-page-token-highlight" in picker
 
 
-def test_pdf_confirm_cannot_save_before_p_c_and_introduces_no_write_path():
+def test_pdf_confirm_uses_the_existing_save_path_and_persists_its_session_selection():
     picker = source_picker_text()
     assert "current.accept_supported === false || busy" in picker
     assert "proposal.accept_supported === false || busy" in picker
@@ -614,3 +614,11 @@ def test_pdf_confirm_cannot_save_before_p_c_and_introduces_no_write_path():
     assert "sha256=${encodeURIComponent(pdf.payload.sha256)}" in picker
     assert "const saved = await accept(current)" in picker
     assert "method: 'POST'" not in picker and "op:" not in picker
+    with open(os.path.join(STATIC, "editor.js"), encoding="utf-8") as fh:
+        editor = fh.read()
+    assert "...(proposal.reader === 'pdf' ? {" in editor
+    assert "page: proposal.page, row: proposal.row, token: proposal.token" in editor
+    assert "sha256: proposal.sha256" in editor
+    assert "setDraftBody(handle, area.value)" in editor
+    assert "addDraftPin(handle, {" in editor
+    assert "quoted: proposal" not in editor and "value: proposal.entry" not in editor

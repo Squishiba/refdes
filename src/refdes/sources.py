@@ -26,11 +26,10 @@ to be *found and read* rather than looked up (docs/design/editor-pdf-picker.md
 one page as positioned text with its runs grouped into rows and every number
 grouped into candidates, each labelled with the value `parse_decimal` would pin
 and with a *guessed* column header -- and the same ASCII decimal grammar, the
-same registry, and the same refusal to invent a number. It deliberately does
-NOT implement `extract()`: a PDF source value is picked by a human from a
-page's candidates and re-extracted by quoted row at fetch time
-(editor-pdf-picker.md §6), and until that lands a `source()` line naming a PDF
-says so out loud rather than pinning a number nobody confirmed. pypdf is the
+same registry, and the same refusal to invent a number. `extract()` re-locates
+a human-confirmed row across all pages by its exact non-numeric tokens and
+selects the recorded numeric-token index (editor-pdf-picker.md §6). Without
+that confirmed anchor a named key cannot supply a value. pypdf is the
 already-optional `refdes[pdf]` extra, so the reader registers on `.pdf` only
 when it imports, and a project with no datasheet never needs it.
 
@@ -50,6 +49,7 @@ import re
 import sys
 from collections import defaultdict
 from collections.abc import Collection, Mapping
+from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -69,9 +69,23 @@ class SourceExtractionError(Exception):
 
 
 @dataclass(frozen=True)
+class PdfAnchor:
+    """A confirmed row: page for display, quote for identity, numeric index.
+
+    `token` is zero-based among numeric tokens, unlike a session pick's index
+    among all row tokens. Coordinates are never part of durable provenance.
+    """
+
+    page: int
+    quoted: str
+    token: int
+
+
+@dataclass(frozen=True)
 class SourceRequest:
     path: str  # canonical project-relative citation path
     key: str  # source() key, opaque and exact
+    anchor: PdfAnchor | None = None
 
 
 @dataclass(frozen=True)
@@ -79,6 +93,7 @@ class ExtractedSource:
     reader: str  # stable reader identifier, e.g. "csv"
     key: str
     value: Decimal  # finite, unitless scalar only
+    anchor: PdfAnchor | None = None
 
     @property
     def text(self) -> str:
@@ -654,13 +669,9 @@ class PdfReader:
     Registered on `.pdf` only when pypdf imports (editor-pdf-picker.md §8), so
     the extra stays optional and a project with no datasheet never needs it.
 
-    `extract()` is *not* implemented, on purpose. A PDF has no named keys: a
-    value is named by a page and a quoted row, chosen by the author in the
-    editor's confirm step, and pinned by re-extracting it from the quoted text
-    at fetch time (editor-pdf-picker.md §6, §12 Slice P-C). Until that lands,
-    `refdes fetch` on a `source()` line naming a PDF must say exactly that -- a
-    file `fetch` cannot read is a file the picker must not browse, and this is
-    the same rule read from the other side.
+    A PDF has no named keys. `extract()` needs the quoted row the author
+    confirmed and its numeric-token index; it searches every page for an
+    exact label match, refusing missing and ambiguous rows (§6, Slice P-C).
     """
 
     name = "pdf"
@@ -673,20 +684,75 @@ class PdfReader:
         *,
         label: str | None = None,
     ) -> Mapping[str, ExtractedSource]:
-        # The keyword is the `SourceReader` protocol's, and every caller passes
-        # it -- `citations._extract_source_values` does, which is how a `source()`
-        # line naming a PDF reaches here. Refusing without accepting it would be
-        # a `TypeError` where the answer is a `SourceExtractionError`, and a
-        # caller serving a project-relative path is only allowed to say that
-        # name, never the server path it read these bytes from.
-        label = label if label else path.as_posix()
-        keys = ", ".join(sorted({request.key for request in requests})) or "none"
-        raise SourceExtractionError([
-            f"{label}: the pdf reader does not extract values: a PDF's values "
-            "are picked from a page's candidates and re-extracted from the "
-            f"quoted row (editor-pdf-picker.md §6) -- no value was extracted for "
-            f"key(s) {keys}"
-        ])
+        name = label if label else path.as_posix()
+        anchors: dict[str, PdfAnchor] = {}
+        problems: list[str] = []
+        for request in requests:
+            anchor = request.anchor
+            if anchor is None:
+                problems.append(
+                    f"{name}: key {request.key!r} has no confirmed quoted row -- "
+                    "choose a PDF candidate in the editor and confirm it first"
+                )
+            elif (not isinstance(anchor.quoted, str) or not anchor.quoted.strip()
+                  or type(anchor.page) is not int or anchor.page < 1
+                  or type(anchor.token) is not int or anchor.token < 0):
+                problems.append(f"{name}: key {request.key!r} has invalid quoted-row provenance")
+            elif request.key in anchors and anchors[request.key] != anchor:
+                problems.append(f"{name}: key {request.key!r} names conflicting quoted rows")
+            else:
+                anchors[request.key] = anchor
+        if problems:
+            raise SourceExtractionError(problems)
+        if not anchors:
+            return {}
+        labels = {key: pdf_quote_labels(a.quoted) for key, a in anchors.items()}
+        wanted = set(labels.values())
+        matches: dict[tuple[str, ...], list[tuple[int, PageRow]]] = defaultdict(list)
+        with _open_pdf(path, name, MAX_PDF_BYTES) as document:
+            count = len(document.pages)
+            for number, pdf_page in enumerate(document.pages, 1):
+                listing = _pdf_page_listing(
+                    pdf_page, number, count, name, MAX_PAGE_SPANS, MAX_PAGE_CANDIDATES,
+                )
+                if listing.too_dense or listing.truncated:
+                    # A prefix cannot prove uniqueness across the document.
+                    problems.append(f"{name}: page {number}: {listing.detail}")
+                    continue
+                for row in listing.rows:
+                    if row.labels in wanted:
+                        matches[row.labels].append((number, row))
+        out: dict[str, ExtractedSource] = {}
+        for key, anchor in sorted(anchors.items()):
+            found = matches[labels[key]]
+            if not found:
+                problems.append(
+                    f"{name}: key {key!r}: gone -- the text you confirmed no longer "
+                    f"exists in this revision (was page {anchor.page})"
+                )
+            elif len(found) > 1:
+                locations = ", ".join(f"page {p}, row {r.index}" for p, r in found)
+                problems.append(
+                    f"{name}: key {key!r}: ambiguous quoted row ({locations}); "
+                    "never choosing between matching rows"
+                )
+            else:
+                number, row = found[0]
+                if anchor.token >= row.candidate_count:
+                    problems.append(
+                        f"{name}: key {key!r}: page {number} has no numeric token "
+                        f"at index {anchor.token} in the confirmed row"
+                    )
+                    continue
+                value = parse_decimal(row.candidates[anchor.token].text)
+                # Keep the author's full quote for review; page tracks where
+                # that row now lives, while its numeric text may have drifted.
+                out[key] = ExtractedSource(
+                    self.name, key, value, replace(anchor, page=number),
+                )
+        if problems:
+            raise SourceExtractionError(problems)
+        return out
 
     def list_entries(
         self,
@@ -698,9 +764,6 @@ class PdfReader:
     ) -> SourceListing:
         """Refuses, with the reason a PDF cannot be listed as a key table.
 
-        Not an absent method, because an absent one would be reported as "the pdf
-        reader can extract named keys but cannot list a file's entries" -- which
-        is the wrong half of the story while `extract()` is unimplemented too.
         The row list a PDF has is a page's rows, and those are read per page.
         """
         name = label if label else path.as_posix()
@@ -741,85 +804,112 @@ class PdfReader:
                 f"{name}: page {page} is not a page of a document; pages are "
                 "counted from 1"
             ])
-        try:
-            size = path.stat().st_size
-        except OSError as exc:
-            raise _cannot_read(name, exc) from exc
-        if size > max_bytes:
-            raise SourceExtractionError([
-                f"{name}: the file is {size} bytes and a page read refuses "
-                f"anything above {max_bytes} bytes ({max_bytes >> 20} MiB) -- "
-                "cite the datasheet revision you need, or a smaller document"
-            ])
-        reader_cls = _pypdf_reader(name)
-        try:
-            with open(path, "rb") as fh:
-                document = reader_cls(fh)
-                count = len(document.pages)
-                if page > count:
-                    raise SourceExtractionError([
-                        f"{name}: page {page} is not in this document -- it has "
-                        f"{count} page(s)"
-                    ])
-                pdf_page = document.pages[page - 1]
-                page_box = tuple(float(v) for v in pdf_page.mediabox)
-                left, bottom, right, top = page_box
-                if (not all(math.isfinite(v) for v in page_box)
-                        or right <= left or top <= bottom):
-                    raise SourceExtractionError([f"{name}: this page has invalid page bounds"])
-                spans, too_dense = _page_spans(pdf_page, max_spans)
-                if not too_dense and _positions_missing(spans):
-                    version = _pypdf_version() or "unknown version"
-                    raise SourceExtractionError([
-                        f"{name}: this pypdf ({version}) does not report where "
-                        "the text on a page is, so its rows cannot be placed on "
-                        "the page -- the pdf source reader needs pypdf>=6.19: "
-                        "pip install -U 'refdes[pdf]'"
-                    ])
-        except SourceExtractionError:
-            raise
-        except OSError as exc:
-            raise _cannot_read(name, exc) from exc
-        except Exception as exc:  # pypdf raises many types here, none of them ours
-            raise SourceExtractionError([
-                f"{name}: pypdf could not read the PDF: {exc}"
-            ]) from exc
+        with _open_pdf(path, name, max_bytes) as document:
+            count = len(document.pages)
+            if page > count:
+                raise SourceExtractionError([
+                    f"{name}: page {page} is not in this document -- it has "
+                    f"{count} page(s)"
+                ])
+            return _pdf_page_listing(
+                document.pages[page - 1], page, count, name, max_spans, max_candidates,
+            )
 
-        if too_dense:
-            return PageListing(
-                page, count, (), (), span_count=len(spans), too_dense=True,
-                page_box=page_box,
-                detail=(
-                    f"this page holds more than {max_spans} text runs, which is "
-                    "too dense to browse as positioned text -- nothing past the "
-                    "cap was read, so what is here is no part of the page"
-                ),
-            )
-        if not spans:
-            return PageListing(
-                page, count, (), (), span_count=0, page_box=page_box,
-                detail=(
-                    f"could not read page {page} -- no extractable text (this "
-                    "looks like a scanned or image-only PDF; OCR is out of scope)"
-                ),
-            )
-        rows, candidates, truncated = _page_rows(spans, max_candidates)
-        detail = ""
-        if truncated:
-            detail = (
-                f"stopped at the {max_candidates}-candidate cap; the rest of "
-                f"page {page} was not read, so it is in no count here"
-            )
-        elif not candidates:
-            detail = (
-                f"page {page} has {len(spans)} text run(s) but no number that "
-                "reads as a plain ASCII decimal, so there is nothing to choose "
-                "here"
-            )
+
+def pdf_quote_labels(quoted: str) -> tuple[str, ...]:
+    """Whitespace-normalized, case-sensitive non-numeric tokens of a quote.
+
+    Use the candidate grammar itself, including its finite-number check, so
+    labels have exactly the same identity here and in PageRow.labels.
+    """
+    return tuple(t for t in quoted.split() if not _numeric_value(t))
+
+
+def _check_pdf_size(path: Path, name: str, max_bytes: int) -> None:
+    """Refuse an oversized PDF before any caller reads its bytes."""
+    try:
+        size = path.stat().st_size
+    except OSError as exc:
+        raise _cannot_read(name, exc) from exc
+    if size > max_bytes:
+        raise SourceExtractionError([
+            f"{name}: the file is {size} bytes and a page read refuses "
+            f"anything above {max_bytes} bytes ({max_bytes >> 20} MiB) -- "
+            "cite the datasheet revision you need, or a smaller document"
+        ])
+
+
+@contextmanager
+def _open_pdf(path: Path, name: str, max_bytes: int):
+    """One bounded parse, with the same label discipline on every reader path."""
+    _check_pdf_size(path, name, max_bytes)
+    reader_cls = _pypdf_reader(name)
+    try:
+        with open(path, "rb") as fh:
+            yield reader_cls(fh)
+    except SourceExtractionError:
+        raise
+    except OSError as exc:
+        raise _cannot_read(name, exc) from exc
+    except Exception as exc:  # pypdf raises many types here, none of them ours
+        raise SourceExtractionError([
+            f"{name}: pypdf could not read the PDF: {exc}"
+        ]) from exc
+
+
+def _pdf_page_listing(
+    pdf_page, page: int, count: int, name: str, max_spans: int, max_candidates: int,
+) -> PageListing:
+    """Shared row/token extraction for browsing and quoted-row re-location."""
+    page_box = tuple(float(v) for v in pdf_page.mediabox)
+    left, bottom, right, top = page_box
+    if (not all(math.isfinite(v) for v in page_box)
+            or right <= left or top <= bottom):
+        raise SourceExtractionError([f"{name}: this page has invalid page bounds"])
+    spans, too_dense = _page_spans(pdf_page, max_spans)
+    if not too_dense and _positions_missing(spans):
+        version = _pypdf_version() or "unknown version"
+        raise SourceExtractionError([
+            f"{name}: this pypdf ({version}) does not report where "
+            "the text on a page is, so its rows cannot be placed on "
+            "the page -- the pdf source reader needs pypdf>=6.19: "
+            "pip install -U 'refdes[pdf]'"
+        ])
+    if too_dense:
         return PageListing(
-            page, count, tuple(spans), rows, len(spans), candidates, truncated,
-            detail=detail, page_box=page_box,
+            page, count, (), (), span_count=len(spans), too_dense=True,
+            page_box=page_box,
+            detail=(
+                f"this page holds more than {max_spans} text runs, which is "
+                "too dense to browse as positioned text -- nothing past the "
+                "cap was read, so what is here is no part of the page"
+            ),
         )
+    if not spans:
+        return PageListing(
+            page, count, (), (), span_count=0, page_box=page_box,
+            detail=(
+                f"could not read page {page} -- no extractable text (this "
+                "looks like a scanned or image-only PDF; OCR is out of scope)"
+            ),
+        )
+    rows, candidates, truncated = _page_rows(spans, max_candidates)
+    detail = ""
+    if truncated:
+        detail = (
+            f"stopped at the {max_candidates}-candidate cap; the rest of "
+            f"page {page} was not read, so it is in no count here"
+        )
+    elif not candidates:
+        detail = (
+            f"page {page} has {len(spans)} text run(s) but no number that "
+            "reads as a plain ASCII decimal, so there is nothing to choose "
+            "here"
+        )
+    return PageListing(
+        page, count, tuple(spans), rows, len(spans), candidates, truncated,
+        detail=detail, page_box=page_box,
+    )
 
 
 def _pypdf_reader(name: str):

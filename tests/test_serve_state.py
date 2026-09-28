@@ -297,7 +297,10 @@ def _git(root, *args):
     subprocess.run(["git", "-C", str(root), *args], check=True, capture_output=True)
 
 
-def test_git_status_is_advisory_and_never_stages_anything(tmp_path):
+def test_git_status_is_advisory_and_never_stages_anything(tmp_path, monkeypatch):
+    # The fixture starts outside a repo even with --basetemp in .scratch/.
+    # Git still discovers the fixture's own repo once the test initializes it.
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path.parent))
     config = make_project(tmp_path)
     assert git_status(str(tmp_path)) == {"available": False}
 

@@ -8,8 +8,9 @@ picked `(path, key)` would compose to. Accepting a pick writes the item and the
 lockfile and is Slice B; the panel is Slice C. A PDF adds one more read -- a
 page, as positioned text with its numeric candidates -- and reuses the proposal
 read for a deliberately selected row/token (Slice P-B). Its key is proposed
-from the row labels and is author-editable; saving it remains unavailable
-until Slice P-C. The picker opens the page its citation already names.
+from the row labels and is author-editable; Slice P-C passes that confirmed
+row into Slice B's existing accept transaction. The picker opens the page its
+citation already names.
 Nothing in this module writes anything, and nothing in it is reachable for a
 file the item has not already cited.
 
@@ -460,6 +461,17 @@ def page_payload(project: Project, item: Item, path: str, page: str = "") -> dic
         open_page, origin, cited["detail"] = _cited_page(spec, record)
         wanted = open_page or 1
         origin = origin or "default"
+
+    def digest_now():
+        try:
+            sources_mod._check_pdf_size(Path(target), label, sources_mod.MAX_PDF_BYTES)
+            return citations_mod._sha256_file(target)
+        except sources_mod.SourceExtractionError as exc:
+            raise SourceRefusal("; ".join(exc.problems)) from exc
+        except OSError as exc:
+            raise SourceRefusal(f"{label}: cannot read file: {exc.strerror}") from exc
+
+    digest = digest_now()
     try:
         listing = sources_mod.page_candidates(Path(target), wanted, label=label)
     except sources_mod.SourceExtractionError as exc:
@@ -479,7 +491,8 @@ def page_payload(project: Project, item: Item, path: str, page: str = "") -> dic
             # Page 1 is unreadable too, so the document is: say that, rather than
             # hanging the stale page number on an error about something else.
             raise SourceRefusal("; ".join(retry.problems)) from retry
-    digest = citations_mod._sha256_file(target)
+    if digest_now() != digest:
+        raise SourceRefusal("this PDF changed while the page was read; reopen it to review it")
     pinned = str(record.get("sha256") or "")
     return {
         "path": label,
@@ -821,7 +834,7 @@ def _pdf_proposal(
     project: Project, item: Item, *, path: str, key: str, unit: str,
     name: str, page: str, row: str, token: str, sha256: str,
 ) -> dict:
-    """Read a deliberately selected candidate; never accept or pin it (P-C).
+    """Read a deliberately selected candidate; never write a pin here.
 
     Coordinates identify a session pick only. The digest guards against a
     changed file between the page read and this read, and the quote and decimal
@@ -859,11 +872,12 @@ def _pdf_proposal(
             name = f"{stem}_{suffix}"
             suffix += 1
     payload = _proposal(item, listing["path"], key, entry, unit, name)
+    _canon, accept_reason = citations_mod.authorize_source_path(project, item, listing["path"])
     payload.update({
         "reader": "pdf", "page": listing["page"], "row": selected_row["index"],
         "token": selected["index"], "sha256": listing["sha256"],
-        "accept_supported": False,
-        "accept_reason": "PDF saving is not available yet. You can review this pick.",
+        "accept_supported": not bool(accept_reason),
+        "accept_reason": accept_reason,
         "drifted": listing["drifted"],
     })
     return payload
@@ -942,6 +956,10 @@ def accept_plan(
     unit: str = "",
     name: str = "",
     body: str,
+    page: str = "",
+    row: str = "",
+    token: str = "",
+    sha256: str = "",
 ) -> dict:
     """§4 step 3, under the write lock: re-validate the pick, compose its line,
     and prove the body being saved is the body that names it.
@@ -963,7 +981,13 @@ def accept_plan(
     Raises `SourceRefusal`; returns the proposal payload, whose `line` is the
     text and whose `path` is canonical.
     """
-    proposal = propose_payload(project, item, path=path, key=key, unit=unit, name=name)
+    # Browsing a kept remote PDF is allowed; source() still only names a
+    # repo-local citation. Use its existing authorization before any write.
+    _authorise(project, item, path)
+    proposal = propose_payload(
+        project, item, path=path, key=key, unit=unit, name=name,
+        page=page, row=row, token=token, sha256=sha256,
+    )
     if not proposal["complete"]:
         raise SourceRefusal(
             proposal.get("reason")
