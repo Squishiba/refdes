@@ -160,6 +160,13 @@ The prefix comes from, in order:
 Prefixes may contain hyphens, which is how you get `REQ-PWR-001` and `BND-THM-001`
 from the same `requirement`/`bound` types.
 
+Whatever mints an id follows that list, `refdes id` and the
+[browser editor's New Item form](cli-reference.md#refdes-serve) alike: an item
+created into a file whose `defaults.prefix` is `REQ-PWR` gets a `REQ-PWR-*` id,
+the same one `refdes id` would have given it. A brand-new file has no
+`defaults:` block to inherit, so the first item in one numbers from the type's
+own prefix.
+
 **A hand-typed id should start with this prefix.** Declaring `prefix: CAN`
 and then typing `id: CNA-001` — usually a typo, not a deliberate choice —
 is shown by `refdes check` as a nonblocking warning and is never silently

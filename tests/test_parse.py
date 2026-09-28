@@ -387,3 +387,30 @@ def test_per_item_prefix_overrides_file_defaults_in_markdown(tmp_path):
     got = {item.fields["title"]: new_id for item, new_id in assignments}
     assert got["Uses the file default"] == "DEC-DEFAULT-001"
     assert got["Uses its own prefix"] == "DEC-OWN-001"
+
+
+def test_front_matter_defaults_block_reads_only_the_first_and_only_a_defaults_block():
+    """The block `parse_markdown_file` merges under every item, exposed for a
+    caller that needs a Markdown file's defaults without its items -- the
+    editor planning an id for an item it is about to append. Reading it any
+    more loosely would number that item from a series the loader never
+    applies."""
+    def defaults_of(text):
+        blocks, _errors = parse.md_front_matter_blocks(text.split("\n"))
+        return parse.front_matter_defaults_block(blocks)
+
+    assert defaults_of(
+        "---\ndefaults:\n  type: requirement\n  prefix: REQ-SYS\n---\n\nbody\n"
+    ) == {"type": "requirement", "prefix": "REQ-SYS"}
+    # a first block that is an item, not a defaults block
+    assert defaults_of("---\nid: REQ-001\nbody: x\n---\n") is None
+    # no front matter at all
+    assert defaults_of("just prose\n") is None
+    # a defaults block that is not first is an error the loader reports, not
+    # a second application point -- and never the file's defaults
+    assert defaults_of(
+        "---\nid: REQ-001\nbody: x\n---\n---\ndefaults:\n  prefix: NOPE\n---\n"
+    ) is None
+    # an empty defaults mapping is still a block: the loader consumes block
+    # zero and merges nothing under the items
+    assert defaults_of("---\ndefaults: {}\n---\n---\nbody: x\n---\n") == {}

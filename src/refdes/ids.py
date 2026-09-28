@@ -220,6 +220,7 @@ def plan_new_id(
     *,
     explicit_id: str | None = None,
     marks: dict[str, int] | None = None,
+    prefix_hint: str = "",
 ) -> tuple[str | None, str | None]:
     """Plan one new item's display id -- purely: no ledger write, no file
     touched at all beyond reading it. Returns `(new_id, None)`, or
@@ -233,6 +234,18 @@ def plan_new_id(
     high-water once and plan several candidates; recomputing it here is what
     makes each preview see the current truth.
 
+    `prefix_hint` is the destination's file-level `defaults: {prefix: ...}`
+    -- exactly what `Item.prefix_hint` (`model.py`) carries for an item that
+    already inherits it, and it wins over the type's bare prefix the same way
+    `prefix_for` resolves an existing item. `allocate()` gets that for free
+    because it plans an `Item` the loader has already parsed; the editor
+    plans an item that does not exist yet, so the caller resolves the
+    destination's own defaults and hands them over here. Without it this
+    function numbered every new item from the type's prefix even when the
+    file it was about to land in declared a different series -- the editor
+    and `refdes id` disagreed about the same file, and `refdes check` could
+    only warn about the id the editor had already written and burned.
+
     An explicit override is honoured verbatim (the same posture as a
     numeric-hint item in `allocate()`), and refused -- never renumbered --
     when its number is at or below the high-water for its prefix: live ids,
@@ -240,7 +253,7 @@ def plan_new_id(
     """
     if marks is None:
         marks = high_water(project, load_ledger(project))
-    prefix = prefix_for_type(project, type_name)
+    prefix = prefix_hint or prefix_for_type(project, type_name)
     if explicit_id is not None:
         candidate = explicit_id.strip()
         parsed = split_id(candidate)
@@ -250,10 +263,12 @@ def plan_new_id(
                 "form such as REQ-042)"
             )
         if not candidate.startswith(f"{prefix}-"):
-            return None, (
-                f"{candidate!r} does not use prefix {prefix!r}, which is what "
-                f"type {type_name!r} numbers under"
+            source = (
+                "which is what the destination file's defaults: declare"
+                if prefix_hint
+                else f"which is what type {type_name!r} numbers under"
             )
+            return None, f"{candidate!r} does not use prefix {prefix!r}, {source}"
         number = parsed[1]
         if number <= marks.get(prefix, 0):
             return None, (
