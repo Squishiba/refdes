@@ -152,4 +152,9 @@ before and after: `items/d.yaml 52b02d7e94c1`, `items/r.yaml c48263ed0f85`,
 `refdes-project.yaml 7434ab48d5ef`, `refdes-schema.yaml 8a8cd461f48f`; total
 `key:` occurrences across the tree: 0.
 
+### CI
+
+PR #97 (https://github.com/Squishiba/refdes/pull/97) — all three checks pass:
+`ubuntu-latest` 4m20s, `ubuntu-latest / py3.13` 4m34s, `windows-latest` 5m10s.
+
 Task finished.
