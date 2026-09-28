@@ -94,6 +94,12 @@ prints `refdes (version unknown -- not installed as a package)`, still exit 0.
 Committed as `fix(cli): --version prints the version you actually have`,
 pushed to `origin/fix/version-flag`, PR: https://github.com/Squishiba/refdes/pull/91
 
+## CI
+
+GitHub Actions on PR #91, run 36398433334: `ubuntu-latest` pass (4m4s),
+`ubuntu-latest / py3.13` pass (4m38s), `windows-latest` pass (4m57s). All
+checks green.
+
 ## Follow-ups noticed, not taken
 
 - `editors/vscode/package.json` still says `"version": "0.1.0"`. That is the
