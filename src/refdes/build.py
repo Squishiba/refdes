@@ -7,6 +7,7 @@ import html as html_entities
 import json
 import os
 import re
+import threading
 
 from markdown_it import MarkdownIt
 
@@ -1766,6 +1767,45 @@ def _source_inputs_hash_value(item: Item):
     return sorted([canon, key, text] for canon, key, text in set(uses))
 
 
+# One markdown-it parser per thread, not per item. Constructing a MarkdownIt
+# costs ~0.09 ms and `_image_inputs_hash_value` ran it once per item: 1602
+# constructions for a 1600-item corpus, measured at ~45% of model-build time.
+# Sharing one instance is also what *enforces* the constraint that docstring
+# states -- that the hash pass and `render_bodies` see the identical set of
+# images. Three copies of the same literal are three chances to drift.
+#
+# Thread-local rather than a bare module global, because a MarkdownIt instance
+# is mutable: `configure()`, `enable()`, `disable()` and `use()` all rewrite
+# its rule chains, and `refdes serve` runs a poller thread
+# (`serve/state.py` `Poller`) plus one thread per HTTP connection
+# (`serve/server.py` `ThreadingHTTPServer`), with `loader.load_readonly` able
+# to run concurrently. A shared instance would work today -- nothing in
+# `src/` or `tests/` calls any of those four methods (grepped), and
+# markdown-it's own `parse`/`render` build a fresh `StateCore` and a fresh
+# `env` per call and never write to the instance -- but per-thread ownership
+# keeps that a property of this module rather than a promise about
+# markdown-it's internals that a future release could break. Cost is one
+# parser per live thread instead of one per item.
+_MD_LOCAL = threading.local()
+
+
+def _markdown_parser() -> MarkdownIt:
+    """This thread's markdown-it parser, built on first use.
+
+    The configuration is load-bearing, not a preference: `gfm-like` for the
+    tables and strikethrough a hardware document needs for pin maps and BOM
+    excerpts; `linkify` off because bare IDs are our own concern; `html` off
+    so a document can never inject markup -- which is also why an escaped raw
+    `<img>` contributes no image to `_image_inputs_hash_value`. Every caller
+    goes through here so the hash pass and the render pass cannot disagree.
+    """
+    md = getattr(_MD_LOCAL, "markdown_it", None)
+    if md is None:
+        md = MarkdownIt("gfm-like", {"html": False, "linkify": False})
+        _MD_LOCAL.markdown_it = md
+    return md
+
+
 def _image_inputs_hash_value(project: Project, item: Item, digest_cache: dict):
     """What an item's referenced images contribute to its content hash
     (HASH_FORMAT 5, docs/design/editor-image-upload.md §15.6), or ``None``
@@ -1787,7 +1827,7 @@ def _image_inputs_hash_value(project: Project, item: Item, digest_cache: dict):
     see the identical set of images: code fences and escaped raw `<img>`
     (html is disabled) contribute none, link-wrapped images contribute theirs.
     """
-    md = MarkdownIt("gfm-like", {"html": False, "linkify": False})
+    md = _markdown_parser()
     srcs = []
     for token in md.parse(item.body):
         for child in token.children or ():
@@ -2679,10 +2719,7 @@ def _inline_value_replacer(project: Project, item: Item):
 
 
 def render_bodies(project: Project) -> None:
-    # gfm-like adds tables and strikethrough, which a hardware document needs for
-    # pin maps and BOM excerpts. linkify stays off: bare IDs are our own concern,
-    # and raw HTML stays off so a document can never inject markup.
-    md = MarkdownIt("gfm-like", {"html": False, "linkify": False})
+    md = _markdown_parser()
 
     for item in project.local_items:
         # Substitute inline calc values before markdown sees the text.
@@ -2723,7 +2760,7 @@ def render_bodies(project: Project) -> None:
 def render_pages(project: Project) -> None:
     """Render narrative pages: markdown, generated blocks, item cross-references,
     page-to-page links."""
-    md = MarkdownIt("gfm-like", {"html": False, "linkify": False})
+    md = _markdown_parser()
     known = {page.slug for page in project.pages}
 
     for page in project.pages:

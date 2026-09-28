@@ -1,0 +1,1 @@
+- Improved build performance by reusing one markdown-it parser per thread instead of constructing a fresh one for every item, while preserving existing render results, image hashing, and error diagnostics. Model build for a 1600-item project drops from ~320 ms to ~132 ms; `refdes check` from ~372 ms to ~189 ms.
