@@ -328,7 +328,7 @@ def _source_propose(app, ref: str, query: dict[str, list[str]]) -> tuple[int, di
     line this `(path, key, unit, name)` composes to, composed and checked here
     so the browser never assembles the text and never learns the grammar.
     A PDF pick also supplies page/row/token/sha256; key is initially proposed.
-    Its preview uses the same contract, with saving unavailable until P-C."""
+    Its preview and accept use the same confirm and edit contracts."""
     project = app.state.snapshot.project
     item, _handle = _find_item(project, ref)
     if item is None:
@@ -411,8 +411,9 @@ def _parse_pins(raw) -> tuple[tuple, str]:
     One pin or a list of them -- an accept is usually one key, and the shape that
     reads best for one should not be a special case of the shape for several.
     Each names a path, a key, and the unit and name of the line that must be in
-    the body; anything else in the object, a `value` included, is ignored rather
-    than trusted, because the number comes from the reader (§5).
+    the body. A PDF session pick adds page/row/token/sha256; the server derives
+    its quote and numeric-token index again. Other fields, a `value` included,
+    are ignored because the number comes from the reader (§5).
     """
     if raw is None:
         return (), ""
@@ -424,15 +425,23 @@ def _parse_pins(raw) -> tuple[tuple, str]:
         for name in ("path", "key"):
             if not isinstance(entry.get(name), str) or not entry.get(name):
                 return (), f"pin needs a {name}: the citation path and the source key it pins"
-        for name in ("unit", "name"):
+        for name in ("unit", "name", "sha256"):
             if entry.get(name) is not None and not isinstance(entry[name], str):
                 return (), f"pin {name} must be a string"
+        selection = {}
+        for name in ("page", "row", "token"):
+            value = entry.get(name, "")
+            if not isinstance(value, str) and type(value) is not int:
+                return (), f"pin {name} must be an integer or an integer string"
+            selection[name] = str(value)
         pins.append(
             edit_mod.SourcePin(
                 path=entry["path"],
                 key=entry["key"],
                 unit=entry.get("unit") or "",
                 name=entry.get("name") or "",
+                sha256=entry.get("sha256") or "",
+                **selection,
             )
         )
     return tuple(pins), ""

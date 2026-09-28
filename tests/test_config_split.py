@@ -9,6 +9,8 @@ passed against a hand-rolled schema field the shipped standard no longer had.
 
 from __future__ import annotations
 
+import os
+
 import pytest
 
 from refdes.schema import (
@@ -98,12 +100,19 @@ def test_two_file_layout_without_an_overlay_file(tmp_path):
     assert "audit_note" not in project.types
 
 
-def test_a_legacy_refdes_yaml_is_rejected_naming_both_replacements(tmp_path):
+def test_a_legacy_refdes_yaml_is_rejected_naming_both_replacements(tmp_path, monkeypatch):
     """The error is the feature: it is how a user discovers the split, so it
     has to name both files and say what goes in each."""
     (tmp_path / "refdes.yaml").write_text(
         PROJECT_SETTINGS + "\ntypes:\n  note: { prefix: NOTE, fields: {} }\n",
         encoding="utf-8",
+    )
+
+    # This fixture is a standalone filesystem for upward discovery. A
+    # --basetemp under the checkout must not inherit its project marker.
+    dirname = os.path.dirname
+    monkeypatch.setattr(
+        os.path, "dirname", lambda path: path if path == str(tmp_path) else dirname(path),
     )
 
     with pytest.raises(SchemaError) as excinfo:

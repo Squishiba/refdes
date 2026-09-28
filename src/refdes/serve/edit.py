@@ -66,9 +66,10 @@ from typing import Any
 
 from .. import citations as citations_mod
 from .. import dates, ids, keys, links, loader, patcher, scaffold, seal, textio
-from ..model import CHECK_VIOLATION, Diagnostic, ERROR, Item, Project
+from ..model import CHECK_VIOLATION, ERROR, Diagnostic, Item, Project
 from ..parse import yaml_safe_load
 from ..patcher import AddLink, PatchPlan, Refusal, RemoveLink, SetBody, SetField
+from ..sources import PdfAnchor
 from . import security
 from . import sources as sources_mod
 
@@ -100,6 +101,11 @@ class SourcePin:
     key: str
     unit: str = ""
     name: str = ""
+    # PDF session coordinates, re-read to derive durable quoted-row provenance.
+    page: str = ""
+    row: str = ""
+    token: str = ""
+    sha256: str = ""
 
 
 @dataclass(frozen=True)
@@ -437,7 +443,7 @@ def _accept_pins(
         plans = [
             sources_mod.accept_plan(
                 before, item, path=p.path, key=p.key, unit=p.unit, name=p.name,
-                body=new_body,
+                body=new_body, page=p.page, row=p.row, token=p.token, sha256=p.sha256,
             )
             for p in pins
         ]
@@ -448,8 +454,23 @@ def _accept_pins(
     # state, and a pin written by a fetch since the snapshot was built belongs
     # in what we write back.
     records = citations_mod.load_lockfile(before)
+    anchors = {}
+    digests = {}
+    for plan in plans:
+        if plan.get("reader") != "pdf":
+            continue
+        entry = plan["entry"]
+        pair = (plan["path"], plan["key"])
+        anchor = PdfAnchor(
+            entry["page"], entry["quoted"], entry["numeric_index"],
+        )
+        if pair in anchors and anchors[pair] != anchor:
+            return None, f"{pair[0]}: key {pair[1]!r} names conflicting PDF candidates"
+        anchors[pair] = anchor
+        digests[plan["path"]] = plan["sha256"]
     errors, pinned = citations_mod.stage_source_pins(
-        before, records, [(p["path"], p["key"]) for p in plans]
+        before, records, [(p["path"], p["key"]) for p in plans],
+        anchors=anchors, digests=digests,
     )
     if errors:
         return None, "; ".join(errors)

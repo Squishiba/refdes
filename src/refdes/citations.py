@@ -987,7 +987,9 @@ class FetchResult:
 
 
 def _extract_source_values(
-    project: Project, canon: str, keys: dict[str, list[str]], *, label: str | None = None
+    project: Project, canon: str, keys: dict[str, list[str]], *, label: str | None = None,
+    values: dict | None = None,
+    anchors: dict[str, sources_mod.PdfAnchor] | None = None,
 ) -> dict[str, dict]:
     """Every used key of one local file, in one parse, as lockfile `values`
     entries -- or SourceExtractionError. Nothing is written here: the caller
@@ -996,14 +998,37 @@ def _extract_source_values(
     `label` is what the reader calls the file in its problems. `fetch` leaves it
     unset and prints a real path to a terminal; a caller answering a browser
     passes the project-relative name, because the root it read the bytes from is
-    not information to hand out (`editor-source-picker.md` §6)."""
+    not information to hand out (`editor-source-picker.md` §6).
+
+    PDF requests take their confirmed anchors from `values` (the old record,
+    or the fresh on-disk lockfile when omitted). Accept can add server-derived
+    `anchors`; the browser's quote is never an input to this function.
+    """
     reader = sources_mod.reader_for(canon)
+    if values is None:
+        values = (load_lockfile(project).get(canon) or {}).get("values") or {}
+    requests = []
+    for key in sorted(keys):
+        anchor = (anchors or {}).get(key)
+        entry = values.get(key)
+        if anchor is None and reader.name == "pdf" and isinstance(entry, dict):
+            # Validation belongs to the reader, including malformed lockfile
+            # provenance: no guessed page or numeric index on a partial pin.
+            anchor = sources_mod.PdfAnchor(
+                entry.get("page"), entry.get("quoted"), entry.get("token"),
+            )
+        requests.append(sources_mod.SourceRequest(canon, key, anchor))
     got = reader.extract(
         Path(os.path.join(project.root, canon)),
-        [sources_mod.SourceRequest(canon, key) for key in sorted(keys)],
+        requests,
         label=label,
     )
-    return {k: {"reader": v.reader, "value": v.text} for k, v in sorted(got.items())}
+    return {
+        k: {"reader": v.reader, "value": v.text, **({
+            "page": v.anchor.page, "quoted": v.anchor.quoted, "token": v.anchor.token,
+        } if v.anchor is not None else {})}
+        for k, v in sorted(got.items())
+    }
 
 
 def _value_text(entry) -> str | None:
@@ -1075,7 +1100,7 @@ def _refresh_pinned_sources(
             )
         return False
     try:
-        new_values = _extract_source_values(project, canon, keys)
+        new_values = _extract_source_values(project, canon, keys, values=values)
     except sources_mod.SourceExtractionError as exc:
         result.source_errors.extend(
             f"{p} (source key extraction; the record is unchanged)" for p in exc.problems
@@ -1090,7 +1115,9 @@ def _refresh_pinned_sources(
 
 
 def stage_source_pins(
-    project: Project, records: dict[str, dict], pins: list[tuple[str, str]]
+    project: Project, records: dict[str, dict], pins: list[tuple[str, str]], *,
+    anchors: dict[tuple[str, str], sources_mod.PdfAnchor] | None = None,
+    digests: dict[str, str] | None = None,
 ) -> tuple[list[str], list[dict]]:
     """Add `(canon, key)` pins to `records` in memory, exactly as `refdes fetch`
     would have written them, and report what stopped it.
@@ -1121,6 +1148,11 @@ def stage_source_pins(
     changed and the caller writes nothing either. Returns `(errors, pinned)`,
     `pinned` being one `{path, key, reader, value}` per accepted pair -- the
     value the *reader* read, which is the only value this operation knows.
+
+    PDF pins also carry `page`, `quoted`, and the numeric `token` index. Their
+    `anchors` come from server re-validation of a session pick, and `digests`
+    guards the bytes that pick belonged to through the second extraction.
+    A key already naming another PDF candidate cannot be rebound by accept.
     """
     wanted: dict[str, list[str]] = {}
     for canon, key in pins:
@@ -1138,6 +1170,9 @@ def stage_source_pins(
             continue
         record = records.get(canon)
         digest = _sha256_file(target)
+        if canon in (digests or {}) and digests[canon] != digest:
+            errors.append(f"{canon}: this PDF changed since the page was read; reopen it")
+            continue
         if record is not None and str(record.get("sha256") or "") != digest:
             errors.append(
                 f"{canon}: the file has changed since it was pinned -- accepting "
@@ -1152,13 +1187,33 @@ def stage_source_pins(
         keep = {
             k: v for k, v in ((record or {}).get("values") or {}).items() if _value_text(v)
         }
+        selected = {key: a for (path, key), a in (anchors or {}).items() if path == canon}
+        conflict = False
+        for key, anchor in selected.items():
+            old = keep.get(key)
+            if old is not None and (
+                old.get("reader") != "pdf" or old.get("token") != anchor.token
+                or not isinstance(old.get("quoted"), str)
+                or sources_mod.pdf_quote_labels(old["quoted"])
+                != sources_mod.pdf_quote_labels(anchor.quoted)
+            ):
+                errors.append(
+                    f"{canon}: key {key!r} already names a different confirmed PDF "
+                    "candidate -- choose a new source key"
+                )
+                conflict = True
+        if conflict:
+            continue
         try:
             values = _extract_source_values(
                 project, canon, {k: [] for k in sorted(set(keep) | set(wanted[canon]))},
-                label=canon,
+                label=canon, values=keep, anchors=selected,
             )
         except sources_mod.SourceExtractionError as exc:
             errors.extend(f"{p} (nothing was pinned)" for p in exc.problems)
+            continue
+        if _sha256_file(target) != digest:
+            errors.append(f"{canon}: the file changed while it was being read; reopen it")
             continue
         new_record = dict(record) if record else {
             "sha256": digest,
@@ -1414,7 +1469,10 @@ def fetch_all(
         keys_here = source_keys.get(canon)
         if kind == "local" and keys_here:
             try:
-                new_values = _extract_source_values(project, canon, keys_here)
+                new_values = _extract_source_values(
+                    project, canon, keys_here,
+                    values=(records.get(canon) or {}).get("values") or {},
+                )
             except sources_mod.SourceExtractionError as exc:
                 results.append(FetchResult(
                     path=canon,

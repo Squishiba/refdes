@@ -1,11 +1,12 @@
-Status: **partially implemented** (drafted 2026-09-27); **Slices P-A and P-B
+Status: **implemented** (drafted 2026-09-27); **Slices P-A, P-B and P-C
 landed 2026-09-27** (§12).
 The service reads PDF pages — `sources.page_candidates()` (pypdf visitor
 extraction, row grouping, the CSV reader's own numeric grammar, named caps), the
 import-gated `pdf` reader, and one read endpoint — and the editor now displays
 the page and reviews a candidate through the shared CSV confirm panel. PDF
-accept and quoted-row re-location remain design only. This document is still
-a design spec for those remaining steps, and it is the PDF-flavored
+accept now rides the existing body/pin transaction, and fetch re-locates the
+confirmed quoted row across pages. This document records that design and its
+implementation, and it is the PDF-flavored
 sibling of `docs/design/editor-source-picker.md` and settles the editor half of
 the requirement recorded in `docs/design/calc-sources.md` §1 ("New, raised by
 Jared on 2026-09-21: a picker for values in a PDF datasheet"), which is the
@@ -45,10 +46,10 @@ these are the readings it was ambiguous about:
   row rather than a spelling; P-C should record the space-joined form, since
   re-location matches the token sequence and the join has to be fixed before
   anything is written to a lockfile.
-- **A PDF is not a keyed source file.** `PdfReader` deliberately does not
-  implement `extract()`: a `source()` line naming a PDF says so out loud rather
-  than pinning a number nobody confirmed (that is §6's quoted-row re-location,
-  Slice P-C), and `/sources/entries?path=…pdf` answers that a PDF has no key
+- **A PDF is not a keyed source file.** At P-A, `PdfReader.extract()` refused
+  every request; P-C now requires the author's confirmed quoted-row anchor
+  instead of inferring a number from a key. `/sources/entries?path=…pdf` still
+  answers that a PDF has no key
   column instead of returning an empty table. A cited `.pdf` therefore reaches
   `GET /api/item/<ref>/sources` as a browsable file and a remote one only when
   the fetch kept the bytes (§10 Q4 option A, the kept copy read and checked
@@ -583,14 +584,39 @@ The existing proposal read (`serve/api.py`, `serve/sources.py`) also accepts
 `sha256`, with `key` initially omitted for a server proposal. It re-authorizes
 and re-reads the candidate, refuses a stale digest, compares the author's key
 with its pin, and composes the line through the same helper as CSV. PDF
-proposals return `accept_supported: false` with a visible saving-unavailable explanation:
-the preview can be complete but Accept stays disabled and no draft or pin is
-written. `tests/test_serve_pdf_sources.py` exercises these reads through HTTP;
+proposals initially returned `accept_supported: false` with a visible
+saving-unavailable explanation; P-C enables accept for repo-local picks.
+`tests/test_serve_pdf_sources.py` exercises these reads through HTTP;
 `tests/test_serve_static.py` checks the shared panel and cancellation wiring.
 
-**Slice P-C — accept.** The pdf reader's `extract()` implementing quoted-row
-re-location (§6), riding Slice B's widened edit op unchanged. **Blocked on
-CSV Slice B by design**: this slice adds a reader, not a write path.
+**Slice P-C — accept. LANDED 2026-09-27.** `PdfReader.extract()` implements
+quoted-row re-location (§6), riding Slice B's existing `set_body`/pin edit
+operation, write lock, diagnostic gate and rollback. It shares page extraction
+with browsing, parses the document once, searches every page for exact
+case-sensitive non-numeric labels, and refuses missing or ambiguous rows and
+incomplete reads. The index is zero-based among numeric tokens. The lockfile
+stores the full confirmed space-joined quote and that index; a successful
+re-location updates the display page while retaining the author's quote.
+
+`serve/api.py` and `serve/edit.py` carry the session page/row/all-token index
+and sha256 through accept; `serve/sources.py` re-reads them to derive the
+anchor, and `citations.stage_source_pins` extracts again before staging the
+record. Values and quotes supplied by the client are ignored. A changed pin
+still requires terminal `fetch --update`; a key already naming another PDF
+candidate requires a new key. `serve/static/editor.js` persists the session
+selection with the draft pin, so the shared confirm panel's Accept uses the
+existing Save path. Fetch and build's diagnostic-only drift read receive the
+saved anchor too (`citations._extract_source_values`).
+
+Local PDF proposals return `accept_supported: true`. Kept remote PDFs remain
+browsable, but `source()` still accepts only repo-local files under
+`citations.authorize_source_path`; their proposals carry that actual refusal
+reason and keep Accept disabled. The read-only and sealed/imported-item write
+restrictions are inherited from the existing edit operation.
+
+Verified against `tests/test_sources_pdf.py`, `tests/test_serve_pdf_sources.py`
+and `tests/test_serve_static.py`: moved/changed rows, gone/ambiguous refusals,
+server-owned provenance, pin/body rollback, stale picks and the draft wiring.
 
 **Later.** pdf.js faithful rendering, if positioned text proves too crude
 (§5, §10 Q1). The citations row editor (shared enabler,

@@ -33,7 +33,7 @@ from refdes import citations as citations_mod
 from refdes import cli as cli_mod
 from refdes import sources
 from refdes.schema import load_project
-from refdes.sources import SourceExtractionError, SourceRequest
+from refdes.sources import PdfAnchor, SourceExtractionError, SourceRequest
 
 # A min/typ/max table, laid out the way a datasheet lays one out: a label row
 # above the numbers, three columns, and the unit in prose beside them. The one
@@ -642,18 +642,13 @@ def test_a_reader_without_pages_raises_instead_of_returning_an_empty_page(tmp_pa
         assert sources.page_candidates.__kwdefaults__[keyword] == value
 
 
-def test_the_pdf_reader_does_not_extract_a_value_or_list_a_key_table_yet(tmp_path):
-    # Slice P-A is the read half. `extract()` is the write half's reader method
-    # (editor-pdf-picker.md §6, §12 Slice P-C), and until it lands a `source()`
-    # line naming a PDF has to say so out loud: a file `fetch` cannot read is a
-    # file the picker must not browse, and the same rule read from the other
-    # side. Silence here would be a fetch that pins nothing and says nothing.
+def test_the_pdf_reader_requires_a_confirmed_quote_and_cannot_list_a_key_table(tmp_path):
     path = _write(tmp_path, pdf_bytes(TABLE))
     reader = sources.reader_for("analysis/sheet.pdf")
     with pytest.raises(SourceExtractionError) as info:
         reader.extract(path, [SourceRequest("analysis/sheet.pdf", "eff_typ")])
     message = str(info.value)
-    assert "the pdf reader does not extract values" in message
+    assert "has no confirmed quoted row" in message
     assert "quoted row" in message and "eff_typ" in message
     # A PDF has no key column either, and saying that is better than reporting
     # the reader as a keyed one that cannot enumerate.
@@ -713,7 +708,7 @@ def test_a_pdf_cited_source_key_fails_fetch_as_a_source_error_not_a_crash(
     code = cli_mod.main(["-c", config, "fetch"])
     err = capsys.readouterr().err
     assert code == 1, err
-    assert "the pdf reader does not extract values" in err, err
+    assert "has no confirmed quoted row" in err, err
     assert "TypeError" not in err, err
     assert not (tmp_path / ".refdes" / "citations.yaml").exists(), (
         "the refusal still wrote a lockfile"
@@ -733,7 +728,7 @@ def test_the_source_value_call_site_passes_its_label_to_the_pdf_reader(tmp_path)
         )
     message = str(info.value)
     assert message.startswith(f"{PDF_CITE}: "), message
-    assert "the pdf reader does not extract values" in message
+    assert "has no confirmed quoted row" in message
     assert str(tmp_path) not in message, message
 
 
@@ -766,3 +761,171 @@ def test_the_values_offered_are_decimals_a_lockfile_could_hold(tmp_path):
         for token in row.candidates:
             assert Decimal(token.value) == Decimal(token.text)
             assert str(Decimal(token.value)) == token.value
+
+
+# ------------------------------------------------------- quoted-row re-location
+
+
+def extract_pdf(tmp_path, data, anchors):
+    path = _write(tmp_path, data)
+    return sources.PdfReader().extract(
+        path, [SourceRequest(PDF_CITE, k, a) for k, a in anchors.items()], label=PDF_CITE,
+    )
+
+
+def test_extract_relocates_exact_labels_across_pages_and_uses_the_numeric_index(tmp_path):
+    # Numeric tokens inside the conditions count too; the session's all-token
+    # index and the durable numeric index cannot be substituted for each other.
+    row = pdf_page(pdf_run(72, 500, "Efficiency 12 V half load 0.90 0.95 0.99"))
+    anchor = PdfAnchor(14, "Efficiency\t12  V half\nload 0.90 0.93 0.99", 2)
+    got = extract_pdf(tmp_path, pdf_bytes(PROSE, pdf_page(), row), {"eff_typ": anchor})
+    assert got["eff_typ"].value == Decimal("0.95")
+    assert got["eff_typ"].anchor == PdfAnchor(3, anchor.quoted, 2)
+    assert got["eff_typ"].reader == "pdf"
+
+
+def test_extract_reads_every_requested_key_in_one_document_parse(tmp_path, monkeypatch):
+    real = sources._pypdf_reader
+    opened = []
+
+    def reader(name):
+        cls = real(name)
+
+        def counted(stream):
+            opened.append(stream)
+            return cls(stream)
+
+        return counted
+
+    monkeypatch.setattr(sources, "_pypdf_reader", reader)
+    second = pdf_page(pdf_run(72, 400, "Load regulation 0.98"))
+    got = extract_pdf(tmp_path, pdf_bytes(TABLE, second), {
+        "typ": PdfAnchor(1, "3.15 3.30 3.45 mA", 1),
+        "reg": PdfAnchor(2, "Load regulation 0.98", 0),
+    })
+    assert {k: v.text for k, v in got.items()} == {"reg": "0.98", "typ": "3.30"}
+    assert len(opened) == 1
+
+
+@pytest.mark.parametrize("text", ["efficiency 0.95", "Efficiency changed 0.95", "Other 0.95"])
+def test_extract_never_fuzzes_or_case_folds_a_quote(tmp_path, text):
+    with pytest.raises(SourceExtractionError) as info:
+        extract_pdf(tmp_path, pdf_bytes(pdf_page(pdf_run(72, 500, text))), {
+            "eff_typ": PdfAnchor(14, "Efficiency 0.93", 0),
+        })
+    message = str(info.value)
+    assert "gone -- the text you confirmed no longer exists" in message
+    assert "was page 14" in message and "eff_typ" in message
+    assert str(tmp_path) not in message
+
+
+@pytest.mark.parametrize("same_page", [False, True])
+def test_extract_reports_all_matching_rows_and_never_prefers_the_old_page(tmp_path, same_page):
+    first = pdf_run(72, 600, "Efficiency 0.93")
+    second = pdf_run(72, 400, "Efficiency 0.95")
+    data = pdf_bytes(pdf_page(first, second)) if same_page else pdf_bytes(
+        pdf_page(first), pdf_page(second),
+    )
+    with pytest.raises(SourceExtractionError) as info:
+        extract_pdf(tmp_path, data, {"eff_typ": PdfAnchor(1, "Efficiency 0.93", 0)})
+    message = str(info.value)
+    assert "ambiguous quoted row" in message
+    assert "page 1, row 0" in message
+    assert ("page 1, row 1" if same_page else "page 2, row 0") in message
+
+
+def test_extract_refuses_a_missing_numeric_index_and_returns_no_partial_map(tmp_path):
+    with pytest.raises(SourceExtractionError) as info:
+        extract_pdf(tmp_path, pdf_bytes(TABLE), {
+            "good": PdfAnchor(1, "3.15 3.30 3.45 mA", 1),
+            "bad": PdfAnchor(1, "3.15 3.30 3.45 mA", 3),
+        })
+    assert "no numeric token at index 3" in str(info.value)
+
+
+@pytest.mark.parametrize("anchor", [
+    PdfAnchor(0, "Efficiency 0.93", 0), PdfAnchor(1, "", 0),
+    PdfAnchor(1, None, 0), PdfAnchor(1, "Efficiency 0.93", -1),
+    PdfAnchor(1, "Efficiency 0.93", True), PdfAnchor(True, "Efficiency 0.93", 0),
+])
+def test_extract_refuses_malformed_provenance_as_a_source_error(tmp_path, anchor):
+    with pytest.raises(SourceExtractionError, match="invalid quoted-row provenance"):
+        extract_pdf(tmp_path, pdf_bytes(TABLE), {"eff_typ": anchor})
+
+
+@pytest.mark.parametrize("cap, value, reason", [
+    ("MAX_PDF_BYTES", 10, "above 10 bytes"),
+    ("MAX_PAGE_SPANS", 2, "too dense"),
+    ("MAX_PAGE_CANDIDATES", 2, "2-candidate cap"),
+])
+def test_extract_refuses_incomplete_reads_even_after_a_match(tmp_path, monkeypatch, cap, value, reason):
+    # A match before a truncated page is insufficient: the unread portion
+    # might hold a duplicate. Scanned/blank pages themselves have no text rows.
+    monkeypatch.setattr(sources, cap, value)
+    matching = pdf_page(pdf_run(72, 700, "Efficiency 0.93"))
+    with pytest.raises(SourceExtractionError) as info:
+        extract_pdf(tmp_path, pdf_bytes(matching, TABLE), {
+            "eff_typ": PdfAnchor(1, "Efficiency 0.93", 0),
+        })
+    assert reason in str(info.value)
+    assert str(tmp_path) not in str(info.value)
+
+
+def test_extract_wraps_unreadable_pdf_errors_with_the_relative_label(tmp_path):
+    with pytest.raises(SourceExtractionError) as info:
+        extract_pdf(tmp_path, b"junk", {"eff_typ": PdfAnchor(1, "Efficiency 0.93", 0)})
+    assert "pypdf could not read the PDF" in str(info.value)
+    assert str(info.value).startswith(PDF_CITE + ":")
+    assert str(tmp_path) not in str(info.value)
+
+
+def pin_pdf_project(tmp_path):
+    config = _fetch_project(tmp_path)
+    project = load_project(config_path=config)
+    records = {}
+    errors, pinned = citations_mod.stage_source_pins(
+        project, records, [(PDF_CITE, "eff_typ")],
+        anchors={(PDF_CITE, "eff_typ"): PdfAnchor(1, "3.15 3.30 3.45 mA", 1)},
+    )
+    assert not errors, errors
+    assert pinned[0]["value"] == "3.30"
+    citations_mod.save_lockfile(project, records)
+    return config
+
+
+def test_fetch_update_relocates_a_confirmed_value_and_prints_its_drift(tmp_path, capsys):
+    config = pin_pdf_project(tmp_path)
+    lock = tmp_path / ".refdes" / "citations.yaml"
+    before = lock.read_bytes()
+    assert cli_mod.main(["-c", config, "fetch"]) == 0
+    assert lock.read_bytes() == before, "ordinary fetch changed confirmed provenance"
+    changed = TABLE.replace("3.30", "3.95")
+    (tmp_path / PDF_CITE).write_bytes(pdf_bytes(PROSE, changed))
+    capsys.readouterr()
+    assert cli_mod.main(["-c", config, "fetch", "--update"]) == 0
+    output = capsys.readouterr()
+    assert "3.30 -> 3.95" in output.out + output.err
+    project = load_project(config_path=config)
+    record = citations_mod.load_lockfile(project)[PDF_CITE]
+    assert record["values"]["eff_typ"] == {
+        "reader": "pdf", "value": "3.95", "page": 2,
+        "quoted": "3.15 3.30 3.45 mA", "token": 1,
+    }
+    assert record["sha256"] == citations_mod._sha256_file(str(tmp_path / PDF_CITE))
+
+
+@pytest.mark.parametrize("pages, reason", [
+    ((PROSE,), "gone"), ((TABLE, TABLE), "ambiguous quoted row"),
+])
+def test_fetch_update_preserves_the_old_record_on_gone_or_ambiguous_rows(
+    tmp_path, capsys, pages, reason,
+):
+    config = pin_pdf_project(tmp_path)
+    lock = tmp_path / ".refdes" / "citations.yaml"
+    before = lock.read_bytes()
+    (tmp_path / PDF_CITE).write_bytes(pdf_bytes(*pages))
+    assert cli_mod.main(["-c", config, "fetch", "--update"]) == 1
+    message = capsys.readouterr().err
+    assert reason in message
+    assert ("was page 1" if reason == "gone" else "page 2") in message
+    assert lock.read_bytes() == before

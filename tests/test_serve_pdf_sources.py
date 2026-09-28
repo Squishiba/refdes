@@ -24,11 +24,14 @@ from urllib.parse import urlencode
 
 import pytest
 from conftest import write_project_config
-from helpers import pdf_bytes, pdf_page, pdf_run
+from helpers import _build_at, pdf_bytes, pdf_page, pdf_run
 from serve_support import Client, snapshot_tree
+from test_serve_sources_accept import accept, calc_body
 
+from refdes import build as build_mod
 from refdes import citations as citations_mod
 from refdes import cli as cli_mod
+from refdes import sources as sources_mod
 from refdes.schema import load_project
 from refdes.serve.server import EditorApp
 
@@ -893,7 +896,7 @@ def proposal_url(client, ref="DEC-001", path="datasheets/sheet.pdf", **overrides
     return sources_url(ref, "/propose") + "?" + urlencode(query)
 
 
-def test_pdf_confirm_returns_verbatim_context_and_no_default_unit_or_accept(served):
+def test_pdf_confirm_returns_verbatim_context_and_no_default_unit(served):
     _app, client, root = served
     before = snapshot_tree(root)
     status, payload = client.api_get(proposal_url(client, token=1))
@@ -907,8 +910,8 @@ def test_pdf_confirm_returns_verbatim_context_and_no_default_unit_or_accept(serv
     assert entry["page"] == 2 and entry["numeric_index"] == 1
     assert payload["key"] == payload["name"] == "value"
     assert payload["unit"] == "" and payload["line"] is None
-    assert payload["complete"] is False and payload["accept_supported"] is False
-    assert "PDF saving is not available yet" in payload["accept_reason"]
+    assert payload["complete"] is False and payload["accept_supported"] is True
+    assert payload["accept_reason"] == ""
     assert snapshot_tree(root) == before
 
 
@@ -936,7 +939,7 @@ def test_pdf_proposal_composes_server_side_and_shows_pin_for_the_authors_key(tmp
         assert calc_mod.parse_source_call(expression)[:2] == (
             "datasheets/sheet.pdf", "typical",
         )
-        assert payload["complete"] is True and payload["accept_supported"] is False
+        assert payload["complete"] is True and payload["accept_supported"] is True
         assert payload["entry"]["value"] == "3.30"  # browser's 999 is ignored
         assert payload["entry"]["pinned"] == "3.25" and payload["entry"]["changed"]
         status, empty_unit = client.api_get(proposal_url(client, key="typical", token=1))
@@ -1005,6 +1008,303 @@ def test_pdf_proposal_reviews_kept_copies_and_single_candidates_on_no_write_serv
         assert payload["entry"]["row"]["candidate_count"] == 1
         assert payload["entry"]["raw"] == "0.98"
         assert payload["accept_supported"] is False
+        assert "source() reads only a repo-local file" in payload["accept_reason"]
         assert snapshot_tree(root) == before
     finally:
         app.stop()
+
+
+# ------------------------------------------------------------- accept (P-C)
+
+# Put the labels and the conditions in the data row itself: a separate title
+# above an otherwise numeric-only row cannot make that row's identity unique.
+ACCEPT_TABLE = pdf_page(
+    pdf_run(200, 660, "MIN"), pdf_run(280, 660, "TYP"), pdf_run(360, 660, "MAX"),
+    pdf_run(20, 640, "Efficiency 12 V half load"),
+    pdf_run(200, 640, "0.90"), pdf_run(280, 640, "0.93"),
+    pdf_run(360, 640, "0.99"), pdf_run(440, 640, "mA"),
+)
+ACCEPT_PDF = pdf_bytes(PROSE, ACCEPT_TABLE, SECOND, BLANK)
+ACCEPT_QUOTE = "Efficiency 12 V half load 0.90 0.93 0.99 mA"
+
+
+@pytest.fixture
+def pdf_accept(tmp_path):
+    root = make_root(tmp_path, pdf=ACCEPT_PDF)
+    fetch(root)
+    app = start(root)
+    try:
+        yield app, Client(app), root
+    finally:
+        app.stop()
+
+
+def confirmed_pick(client, **overrides):
+    query = {"key": "eff_typ", "name": "eff", "unit": "1", "token": 6, **overrides}
+    status, proposal = client.api_get(proposal_url(client, **query))
+    assert status == 200, proposal
+    assert proposal["complete"] and proposal["accept_supported"]
+    return proposal
+
+
+def pdf_pin(proposal, **overrides):
+    pin = {k: proposal[k] for k in ("path", "key", "unit", "name", "page", "row", "token", "sha256")}
+    pin.update(overrides)
+    return pin
+
+
+def pdf_lock(root):
+    project = load_project(config_path=str(root / "refdes-project.yaml"))
+    return citations_mod.load_lockfile(project)["datasheets/sheet.pdf"]
+
+
+def test_a_picked_datasheet_value_saves_and_resolves_without_a_cli_step(pdf_accept):
+    app, client, root = pdf_accept
+    proposal = confirmed_pick(client)
+    assert proposal["entry"]["numeric_index"] == 2 and proposal["token"] == 6
+    status, saved = accept(
+        client, root, text=calc_body("P = 1 | 1", proposal["line"]),
+        pins=pdf_pin(proposal, value="999", quoted="Fake 999", numeric_index=99),
+    )
+    assert status == 200, saved
+    record = pdf_lock(root)
+    assert record["values"] == {"eff_typ": {
+        "reader": "pdf", "value": "0.93", "page": 2, "quoted": ACCEPT_QUOTE, "token": 2,
+    }}
+    assert saved["pinned"] == [{"path": proposal["path"], "key": "eff_typ", **record["values"]["eff_typ"]}]
+    assert "header_guess" not in record["values"]["eff_typ"]
+    status, item = client.api_get("/api/item/DEC-001")
+    assert status == 200 and proposal["line"] in item["body"]
+    preview = app.preview.open_file([item["page"]])
+    assert preview is not None
+    with preview:
+        html = preview.read().decode("utf-8")
+    assert 'class="calc-name">eff' in html and 'class="calc-result">0.93' in html
+
+
+def test_a_picked_datasheet_value_survives_rebuild_and_drifts_until_fetch_update(pdf_accept, capsys):
+    _app, client, root = pdf_accept
+    proposal = confirmed_pick(client)
+    status, saved = accept(client, root, text=calc_body(proposal["line"]), pins=pdf_pin(proposal))
+    assert status == 200, saved
+    lock = root / ".refdes" / "citations.yaml"
+    before = lock.read_bytes()
+    fetch(root)
+    assert lock.read_bytes() == before
+    changed = ACCEPT_TABLE.replace("0.93", "0.95")
+    (root / "datasheets" / "sheet.pdf").write_bytes(pdf_bytes(PROSE, SECOND, changed, BLANK))
+    project = build_mod.build(_build_at(root))
+    line = next(line for i in project.local_items if i.id == "DEC-001" for line in i.calcs if line.name == "eff")
+    assert line.source_locked == "0.93" and line.error is None
+    assert "locked 0.93, file now 0.95 (CHANGED)" in line.source_drift
+    assert "refdes fetch --update --path datasheets/sheet.pdf" in line.source_drift
+    assert lock.read_bytes() == before
+    capsys.readouterr()
+    fetch(root, "--update")
+    output = capsys.readouterr()
+    assert "0.93 -> 0.95" in output.out + output.err
+    assert pdf_lock(root)["values"]["eff_typ"] == {
+        "reader": "pdf", "value": "0.95", "page": 3, "quoted": ACCEPT_QUOTE, "token": 2,
+    }
+    project = build_mod.build(_build_at(root))
+    line = next(line for i in project.local_items if i.id == "DEC-001" for line in i.calcs if line.name == "eff")
+    assert line.source_locked == "0.95" and not line.source_drift
+
+
+def test_pdf_accept_pins_a_never_fetched_hash_and_value_together(tmp_path):
+    root = make_root(tmp_path, pdf=ACCEPT_PDF)
+    app = start(root)
+    try:
+        client = Client(app)
+        proposal = confirmed_pick(client)
+        status, saved = accept(client, root, text=calc_body(proposal["line"]), pins=pdf_pin(proposal))
+        assert status == 200, saved
+        record = pdf_lock(root)
+        assert record["sha256"] == hashlib.sha256(ACCEPT_PDF).hexdigest()
+        assert record["bytes"] == len(ACCEPT_PDF) and record["kept_copy"] is False
+        assert record["values"]["eff_typ"]["value"] == "0.93"
+    finally:
+        app.stop()
+
+
+def test_pdf_accept_preserves_other_keys_and_refuses_rebinding_a_key(pdf_accept):
+    _app, client, root = pdf_accept
+    proposal = confirmed_pick(client)
+    status, saved = accept(client, root, text=calc_body(proposal["line"]), pins=pdf_pin(proposal))
+    assert status == 200, saved
+    status, second = client.api_get(proposal_url(client, page=3, row=1, token=0, key="reg", name="reg", unit="1"))
+    assert status == 200, second
+    status, saved = accept(client, root, text=calc_body(proposal["line"], second["line"]), pins=pdf_pin(second))
+    assert status == 200, saved
+    assert {k: v["value"] for k, v in pdf_lock(root)["values"].items()} == {"eff_typ": "0.93", "reg": "0.98"}
+    before = snapshot_tree(root)
+    status, refused = accept(
+        client, root, text=calc_body(proposal["line"], second["line"]),
+        pins=pdf_pin(second, key="eff_typ", name="other"),
+    )
+    assert status == 422 and "already names a different confirmed PDF candidate" in refused["reason"]
+    assert snapshot_tree(root) == before
+
+
+@pytest.mark.parametrize("change, reason", [
+    ({"sha256": "stale"}, "changed since the page was read"),
+    ({"sha256": ""}, "changed since the page was read"),
+    ({"row": 99}, "not a numeric candidate"),
+    ({"token": 0}, "not a numeric candidate"),
+    ({"unit": ""}, "there is no default"),
+    ({"unit": "invalid_unit"}, "unknown unit"),
+    ({"path": "other.pdf"}, "does not cite"),
+    ({"path": "../escape.pdf"}, "escapes"),
+    ({"path": "/etc/passwd"}, "absolute"),
+])
+def test_a_refused_pdf_accept_leaves_item_and_lockfile_byte_identical(pdf_accept, change, reason):
+    _app, client, root = pdf_accept
+    proposal = confirmed_pick(client)
+    before = snapshot_tree(root)
+    status, refused = accept(client, root, text=calc_body(proposal["line"]), pins=pdf_pin(proposal, **change))
+    assert status == 422, refused
+    assert reason in refused["reason"]
+    assert str(root) not in json.dumps(refused)
+    assert snapshot_tree(root) == before
+
+
+def test_pdf_accept_refuses_changed_pinned_bytes_and_directs_fetch_update(pdf_accept):
+    _app, client, root = pdf_accept
+    (root / "datasheets" / "sheet.pdf").write_bytes(ACCEPT_PDF.replace(b"0.93", b"0.95"))
+    # Fresh live-page selection still cannot re-pin changed bytes in the editor.
+    proposal = confirmed_pick(client)
+    before = snapshot_tree(root)
+    status, refused = accept(client, root, text=calc_body(proposal["line"]), pins=pdf_pin(proposal))
+    assert status == 422, refused
+    assert "changed since it was pinned" in refused["reason"]
+    assert "refdes fetch --update --path datasheets/sheet.pdf" in refused["reason"]
+    assert snapshot_tree(root) == before
+
+
+def test_pdf_accept_refuses_ambiguous_rows_even_when_the_selected_page_is_unique(tmp_path):
+    root = make_root(tmp_path, pdf=pdf_bytes(PROSE, ACCEPT_TABLE, ACCEPT_TABLE))
+    fetch(root)
+    app = start(root)
+    try:
+        client = Client(app)
+        proposal = confirmed_pick(client)
+        before = snapshot_tree(root)
+        status, refused = accept(client, root, text=calc_body(proposal["line"]), pins=pdf_pin(proposal))
+        assert status == 422, refused
+        assert "ambiguous quoted row" in refused["reason"]
+        assert "page 2" in refused["reason"] and "page 3" in refused["reason"]
+        assert snapshot_tree(root) == before
+    finally:
+        app.stop()
+
+
+@pytest.mark.parametrize("pinned", [False, True])
+def test_pdf_accept_rolls_back_the_pin_when_the_body_fails_the_gate(tmp_path, pinned):
+    root = make_root(tmp_path, pdf=ACCEPT_PDF)
+    if pinned:
+        fetch(root)
+    app = start(root)
+    try:
+        client = Client(app)
+        proposal = confirmed_pick(client)
+        before = snapshot_tree(root)
+        status, refused = accept(
+            client, root, text=calc_body(proposal["line"], "eff = 2 | 1"), pins=pdf_pin(proposal),
+        )
+        assert status == 422 and refused["kind"] == "invalid", refused
+        assert snapshot_tree(root) == before
+        assert (root / ".refdes" / "citations.yaml").exists() is pinned
+    finally:
+        app.stop()
+
+
+def test_a_no_write_server_browses_pdfs_and_refuses_pdf_accept(tmp_path):
+    root = make_root(tmp_path, pdf=ACCEPT_PDF)
+    fetch(root)
+    app = start(root, read_only=True)
+    try:
+        client = Client(app)
+        proposal = confirmed_pick(client)
+        before = snapshot_tree(root)
+        status, refused = accept(client, root, text=calc_body(proposal["line"]), pins=pdf_pin(proposal))
+        assert status == 403 and "--no-write" in refused["error"]
+        assert snapshot_tree(root) == before
+    finally:
+        app.stop()
+
+
+@pytest.mark.parametrize("change", [{"page": True}, {"token": []}, {"sha256": 42}])
+def test_malformed_pdf_pins_are_a_400_without_writes(pdf_accept, change):
+    _app, client, root = pdf_accept
+    proposal = confirmed_pick(client)
+    before = snapshot_tree(root)
+    status, refused = accept(client, root, text=calc_body(proposal["line"]), pins=pdf_pin(proposal, **change))
+    assert status == 400, refused
+    assert snapshot_tree(root) == before
+
+
+def test_pdf_accept_requires_a_body_naming_the_pin_and_the_launch_token(pdf_accept):
+    _app, client, root = pdf_accept
+    proposal = confirmed_pick(client)
+    before = snapshot_tree(root)
+    status, refused = accept(client, root, text=calc_body("P = 1 | 1"), pins=pdf_pin(proposal))
+    assert status == 422 and "names no source() call" in refused["reason"]
+    assert client.request("POST", "/api/item/DEC-001/edit", body=json.dumps({
+        "op": "set_body", "text": calc_body(proposal["line"]), "pin": pdf_pin(proposal),
+    }).encode())[0] == 403
+    assert snapshot_tree(root) == before
+
+
+def test_pdf_accept_refuses_two_candidates_for_one_key(pdf_accept):
+    _app, client, root = pdf_accept
+    proposal = confirmed_pick(client)
+    before = snapshot_tree(root)
+    status, refused = accept(
+        client, root, text=calc_body(proposal["line"]),
+        pins=[pdf_pin(proposal), pdf_pin(proposal, token=7)],
+    )
+    assert status == 422 and "conflicting PDF candidates" in refused["reason"]
+    assert snapshot_tree(root) == before
+
+
+def test_pdf_accept_rejects_a_change_between_revalidation_and_pin_staging(pdf_accept, monkeypatch):
+    _app, client, root = pdf_accept
+    proposal = confirmed_pick(client)
+    before = snapshot_tree(root)
+    original = citations_mod.stage_source_pins
+
+    def stage(*args, **kwargs):
+        (root / proposal["path"]).write_bytes(ACCEPT_PDF.replace(b"0.93", b"0.95"))
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(citations_mod, "stage_source_pins", stage)
+    status, refused = accept(client, root, text=calc_body(proposal["line"]), pins=pdf_pin(proposal))
+    assert status == 422 and "changed since the page was read" in refused["reason"]
+    after = snapshot_tree(root)
+    assert {path for path in before if before[path] != after[path]} == {proposal["path"]}
+
+
+def test_a_kept_remote_pdf_can_be_reviewed_but_cannot_bypass_source_authorization(served):
+    _app, client, root = served
+    status, proposal = client.api_get(proposal_url(client, "DEC-002", REMOTE, unit="1"))
+    assert status == 200 and not proposal["accept_supported"]
+    before = snapshot_tree(root)
+    status, refused = accept(
+        client, root, text=calc_body(proposal["line"]), pins=pdf_pin(proposal), ref="DEC-002",
+    )
+    assert status == 422 and "source() reads only a repo-local file" in refused["reason"]
+    assert snapshot_tree(root) == before
+
+
+def test_pdf_page_digest_checks_the_byte_cap_before_hashing(pdf_accept, monkeypatch):
+    _app, client, root = pdf_accept
+    monkeypatch.setattr(sources_mod, "MAX_PDF_BYTES", 10)
+
+    def hash_file(_target):
+        pytest.fail("the oversized PDF was read before its byte-cap refusal")
+
+    monkeypatch.setattr(citations_mod, "_sha256_file", hash_file)
+    before = snapshot_tree(root)
+    status, refused = client.api_get(page_url("DEC-001", "datasheets/sheet.pdf", 2))
+    assert status == 422 and "above 10 bytes" in refused["error"]
+    assert snapshot_tree(root) == before

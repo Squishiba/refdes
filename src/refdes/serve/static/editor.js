@@ -150,6 +150,9 @@ export function createEditor(item, handle, onSaved, onDiscarded) {
     setDraftBody(handle, area.value);
     addDraftPin(handle, {
       path: proposal.path, key: proposal.key, unit: proposal.unit, name: proposal.name,
+      ...(proposal.reader === 'pdf' ? {
+        page: proposal.page, row: proposal.row, token: proposal.token, sha256: proposal.sha256,
+      } : {}),
     });
     refreshStatus();
     area.focus();
