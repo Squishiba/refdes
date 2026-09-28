@@ -106,7 +106,8 @@ def _load_standard(
     base_name = cfg.get("base")
     if base_name not in _KNOWN_BASES:
         raise SchemaError(
-            f"standard.base must be one of {list(_KNOWN_BASES)}, got {base_name!r}"
+            f"standard.base must be one of {', '.join(_KNOWN_BASES)}, "
+            f"got {base_name!r}"
         )
 
     version = cfg.get("version")
@@ -256,7 +257,10 @@ def latest_version(base_name: str) -> int:
     written as a real number so the pin is verifiable from the moment the
     project file exists."""
     if base_name not in _KNOWN_BASES:
-        raise SchemaError(f"standard.base must be one of {list(_KNOWN_BASES)}, got {base_name!r}")
+        raise SchemaError(
+            f"standard.base must be one of {', '.join(_KNOWN_BASES)}, "
+            f"got {base_name!r}"
+        )
     versions = [
         int(name[1:]) for name in _available_versions(base_name) if name.startswith("v")
     ]

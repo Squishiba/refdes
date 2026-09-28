@@ -43,6 +43,13 @@ from .model import ON_CHANGE_MODES, SchemaError
 from .schema_json import _FIELD_TYPE_MAP
 
 FIELD_TYPES = frozenset(_FIELD_TYPE_MAP) | {"enum"}
+# The same set in *declared* order -- `_FIELD_TYPE_MAP`'s own order, then the
+# `enum` that map handles separately. Membership tests use the frozenset above;
+# this is what a message names the valid types in, because a human reading
+# "one of the field types ..." should get the project's declared order, not an
+# alphabetical one (#83's contract: name the values, in the order they are
+# declared, never a Python repr).
+FIELD_TYPE_ORDER = (*_FIELD_TYPE_MAP, "enum")
 
 SITE_KEYS = frozenset(
     {"title", "out", "version", "pages", "nav", "assets", "theme", "tokens"}
@@ -199,7 +206,7 @@ class BlockChecker:
         if value is None:
             return default
         if value not in ON_CHANGE_MODES:
-            raise self.wrong(path, f"one of {list(ON_CHANGE_MODES)}", value)
+            raise self.wrong(path, f"one of {', '.join(ON_CHANGE_MODES)}", value)
         return str(value)
 
     # ------------------------------------------------------- settings blocks
@@ -378,7 +385,9 @@ class BlockChecker:
         declared = block.get("type", "text")
         if declared not in FIELD_TYPES:
             raise self.wrong(
-                f"{path}.type", f"one of the field types {sorted(FIELD_TYPES)}", declared
+                f"{path}.type",
+                f"one of the field types {', '.join(FIELD_TYPE_ORDER)}",
+                declared,
             )
         if "choices" in block:
             self.string_list(block.get("choices"), f"{path}.choices", "a list of choices")
