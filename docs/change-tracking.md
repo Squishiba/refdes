@@ -161,6 +161,9 @@ Item-level overrides:
 
 Append-only entries edited after sealing:
   (none)
+
+Accepted append-only reseals (durable history):
+  (none)
 ```
 
 Suppression is allowed. Invisible suppression is not.

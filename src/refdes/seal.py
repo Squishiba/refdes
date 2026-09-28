@@ -21,12 +21,13 @@ board it hasn't been physically migrated out to yet -- see `verify()`.
 from __future__ import annotations
 
 import os
+import tempfile
 from collections.abc import Mapping
+from datetime import datetime, timezone
 
 import yaml
 
 from . import keys as keys_mod
-from . import textio
 from .model import Item, Project
 from .parse import yaml_safe_load
 
@@ -35,8 +36,9 @@ RESEAL_ALL = "*"  # sentinel: --reseal with no board name means "every board"
 
 _HEADER = (
     "# Refdes append-only seals. Each entry records the content hash of a log\n"
-    "# entry at the time it was first built. Editing a sealed entry fails the\n"
+    "# entry at its first build or latest accepted reseal. Editing it fails the\n"
     "# build; append a new entry that `amends` it instead.\n"
+    "# reseals records deliberate edits/removals; preserve every past event.\n"
 )
 
 
@@ -122,29 +124,111 @@ def _with_seal_hash(value: SealValue, new_hash: str, hash_format: int) -> SealVa
     return entry
 
 
-def load_seals(project: Project, board: str = "") -> Seals:
+def _load_seal_data(project: Project, board: str = "") -> dict:
     path = seal_path(project, board)
     if not os.path.isfile(path):
         return {}
     with open(path, "r", encoding="utf-8") as fh:
         data = yaml_safe_load(fh) or {}
+    if not isinstance(data, dict):
+        raise ValueError(f"{path}: seal file must be a mapping")
+    events = data.get("reseals", [])
+    if not isinstance(events, list) or any(
+        not isinstance(event, dict)
+        or not {"id", "action", "old_hash", "new_hash", "occurred_at"} <= event.keys()
+        or event["action"] not in ("edit", "remove")
+        or any(
+            not isinstance(event[field], str) or not event[field]
+            for field in ("id", "old_hash", "occurred_at")
+        )
+        or (
+            event["action"] == "edit"
+            and (not isinstance(event["new_hash"], str) or not event["new_hash"])
+        )
+        or (event["action"] == "remove" and event["new_hash"] is not None)
+        for event in events
+    ):
+        raise ValueError(f"{path}: malformed reseal history; refusing to discard it")
+    return data
+
+
+def load_seals(project: Project, board: str = "") -> Seals:
+    data = _load_seal_data(project, board)
     return {
         str(record_id): dict(value) if isinstance(value, Mapping) else str(value)
         for record_id, value in (data.get("sealed") or {}).items()
     }
 
 
-def format_seals(seals: Seals) -> str:
+def load_reseals(project: Project, board: str = "") -> list[dict]:
+    """Accepted reseal events, in append order, independent of live items."""
+    return _load_seal_data(project, board).get("reseals", [])
+
+
+def reseal_history(project: Project) -> list[tuple[str, dict]]:
+    """All durable events, including files for boards no longer declared."""
+    directory = os.path.dirname(seal_path(project))
+    boards = {""} | set(project.boards)
+    if os.path.isdir(directory):
+        for name in os.listdir(directory):
+            if name.startswith("log-seal-") and name.endswith(".yaml"):
+                boards.add(name[len("log-seal-") : -len(".yaml")])
+    return [(board, event) for board in sorted(boards) for event in load_reseals(project, board)]
+
+
+def format_seals(seals: Seals, reseals: list[dict] | None = None) -> str:
     """Serialize seals identically for adoption planning and persistence."""
-    return _HEADER + yaml.safe_dump(
-        {"sealed": seals}, sort_keys=True, default_flow_style=False
-    )
+    data = {"sealed": seals}
+    if reseals:
+        data["reseals"] = reseals
+    return _HEADER + yaml.safe_dump(data, sort_keys=True, default_flow_style=False)
 
 
-def save_seals(project: Project, seals: Seals, board: str = "") -> None:
+def save_seals(
+    project: Project, seals: Seals, board: str = "", *, events: list[dict] | None = None
+) -> None:
+    """Replace active seals and append events together; never erase history."""
     path = seal_path(project, board)
+    history = load_reseals(project, board) + (events or [])
+    payload = format_seals(seals, history)
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    textio.write_text(path, format_seals(seals))
+    # A failed write must leave both the old hash and its history intact.
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", newline="", dir=os.path.dirname(path),
+            prefix=".log-seal-", suffix=".tmp", delete=False,
+        ) as fh:
+            temporary = fh.name
+            fh.write(payload)
+            fh.flush()
+            os.fsync(fh.fileno())
+        if os.path.exists(path):
+            os.chmod(temporary, os.stat(path).st_mode & 0o777)
+        os.replace(temporary, path)
+    finally:
+        if temporary is not None and os.path.exists(temporary):
+            os.unlink(temporary)
+
+
+def _reseal_event(
+    display_id: str, key: str | None, recorded: str, new_hash: str | None,
+    hash_format: int | None,
+) -> dict:
+    from . import build as build_mod
+
+    event = {
+        "action": "edit" if new_hash is not None else "remove",
+        "id": display_id,
+        "old_hash": recorded,
+        "new_hash": new_hash,
+        "old_hash_format": hash_format,
+        "new_hash_format": build_mod.HASH_FORMAT if new_hash is not None else None,
+        "occurred_at": datetime.now(timezone.utc).isoformat(),
+    }
+    if key:
+        event["key"] = key
+    return event
 
 
 def _matches_sealed_hash(
@@ -247,6 +331,7 @@ def verify(project: Project, write: bool = False, reseal: str | None = None) -> 
 
     base = load_seals(project, board="")
     base_changed = False
+    base_events: list[dict] = []
     live_keys = {item.key for item in project.local_items if item.key}
     # An entry this very build flagged with an ERROR is never sealed: the
     # author is told to fix it, and sealing it now would turn that fix into
@@ -259,6 +344,7 @@ def verify(project: Project, write: bool = False, reseal: str | None = None) -> 
     for board in _boards_in_play(project):
         entries = append_only_items(project, board=board)
         changed = False
+        events: list[dict] = [] if board else base_events
         if board:
             seals = load_seals(project, board)
             for item in entries:
@@ -321,15 +407,26 @@ def verify(project: Project, write: bool = False, reseal: str | None = None) -> 
                 continue
 
             if reseal_here:
+                message = (
+                    "resealed after an edit to a sealed entry"
+                    if write else "would reseal after an edit to a sealed entry"
+                )
+                record_notice = (
+                    "This is recorded in the audit output."
+                    if write else "No seal or audit record was written."
+                )
                 project.warn(
-                    f"resealed after an edit to a sealed entry (was {recorded}, "
-                    f"now {item.content_hash}). This is recorded in the audit output.",
+                    f"{message} (was {recorded}, now {item.content_hash}). {record_notice}",
                     file=item.source_file, line=item.source_line, item_id=item.id,
                 )
                 seals[record_id] = _with_seal_hash(
                     value, item.content_hash, hash_format=build_mod.HASH_FORMAT
                 )
                 changed = True
+                if write:
+                    events.append(_reseal_event(
+                        item.id, item.key, recorded, item.content_hash, hash_format
+                    ))
             else:
                 project.seal_violations.append(item.id)
                 hint = f"--reseal {board}" if board else "--reseal"
@@ -342,7 +439,7 @@ def verify(project: Project, write: bool = False, reseal: str | None = None) -> 
 
         if board:
             if write and changed:
-                save_seals(project, seals, board)
+                save_seals(project, seals, board, events=events)
             if write:
                 for item in entries:
                     inherited = _find_seal(base, item, live_keys)
@@ -352,15 +449,16 @@ def verify(project: Project, write: bool = False, reseal: str | None = None) -> 
         elif changed:
             base_changed = True
 
-    if _report_deleted(project, base, write=write, reseal=reseal):
+    if _report_deleted(project, base, write=write, reseal=reseal, base_events=base_events):
         base_changed = True
 
     if write and base_changed:
-        save_seals(project, base, board="")
+        save_seals(project, base, board="", events=base_events)
 
 
 def _report_deleted(
-    project: Project, base: Seals, write: bool, reseal: str | None
+    project: Project, base: Seals, write: bool, reseal: str | None,
+    base_events: list[dict],
 ) -> bool:
     """Report every sealed entry whose identity is no longer in the project.
 
@@ -386,6 +484,7 @@ def _report_deleted(
     for board in sorted({""} | set(project.boards)):
         seals = base if board == "" else load_seals(project, board)
         orphans = []
+        events: list[dict] = [] if board else base_events
         for record_id, value in seals.items():
             key, display_id, _recorded, _hash_format = _seal_parts(record_id, value)
             if key is None:
@@ -403,12 +502,18 @@ def _report_deleted(
         hint = f"--reseal {board}" if board else "--reseal"
         for record_id, display_id in sorted(orphans, key=lambda pair: pair[1]):
             if reseal_here:
+                acceptance = (
+                    "accepting the removal and dropping its seal; recorded in audit."
+                    if write else "would accept the removal; no seal or audit record was written."
+                )
                 project.warn(
                     f"{display_id} was sealed as append-only and is no longer in "
-                    "the project -- accepting the removal and dropping its seal.",
+                    f"the project -- {acceptance}",
                     item_id=display_id,
                 )
                 if write:
+                    key, _id, recorded, hash_format = _seal_parts(record_id, seals[record_id])
+                    events.append(_reseal_event(display_id, key, recorded, None, hash_format))
                     del seals[record_id]
             else:
                 project.error(
@@ -421,7 +526,7 @@ def _report_deleted(
                 )
         if reseal_here and write:
             if board:
-                save_seals(project, seals, board)
+                save_seals(project, seals, board, events=events)
             else:
                 base_changed = True
     return base_changed
