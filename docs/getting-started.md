@@ -8,12 +8,26 @@ the build will catch a genuine design problem.
 
 ```bash
 python -m venv .venv
-./.venv/Scripts/python.exe -m pip install -e .
 ```
 
-On macOS or Linux the interpreter is `.venv/bin/python`. Everything below assumes
-`refdes` is on your path; if it isn't, use
-`./.venv/Scripts/python.exe -m refdes.cli` instead.
+Then install into it with your venv's own interpreter. That path differs by
+platform — use the one that matches your machine:
+
+Linux and macOS:
+
+```bash
+./.venv/bin/python -m pip install -e .
+```
+
+Windows (PowerShell):
+
+```bat
+.\.venv\Scripts\python.exe -m pip install -e .
+```
+
+Everything below assumes `refdes` is on your path. If it isn't, run the module
+through the venv interpreter instead — `./.venv/bin/python -m refdes.cli` on
+Linux and macOS, `.\.venv\Scripts\python.exe -m refdes.cli` on Windows.
 
 ## 1. Create the project
 
