@@ -273,6 +273,34 @@ items:
 Log entries are **append-only**. Once built, editing this entry fails the build;
 corrections are appended with `amends:`. See [the design log](design-log.md).
 
+**Nothing above turns the build green, and superseding the decision will not
+either.** Write a passing decision that carries `supersedes: [DEC-PWR-001]`, set
+`DEC-PWR-001`'s status to `superseded`, and `refdes check` still reports the
+old failure. That is history, not a bug — the decision's own numbers stay on
+the record, and a superseded decision still shows as having missed the bound.
+`decision` ships `check_severity: error` for every status, so nothing about the
+walkthrough clears it for you.
+
+To let settled history drop to a non-blocking level, map the statuses in
+`refdes-schema.yaml`:
+
+```yaml
+types:
+  decision:
+    check_severity:
+      default: error
+      superseded: info
+      rejected: info
+```
+
+`default:` is required — omit it and the project refuses to load with
+`types.decision.check_severity does not cover status 'proposed'`. Statuses you
+do not map keep `default:`, so a decision that is still `accepted` and still
+failing remains a build error. A demoted failure is not gone either; it moves
+to `refdes check -v`. `component` ships a mapping like this already. See
+[candidates vs. decisions](checks.md#candidates-vs-decisions) and the
+[types reference](schema-reference.md#types).
+
 ## Where to go next
 
 - [Concepts](concepts.md) for the model behind all of this
