@@ -474,6 +474,24 @@ be a list of entries that each have at least a `path`. The rest are
 declarative — they document intent and are where future validation will hook
 in.
 
+**A field typed `list`, `options`, `checks`, or `citations` must be written as
+a YAML list.** Anything else is a build error naming the field, its type and
+what it was given:
+
+```
+ERROR   items/cmp.yaml:3 [CMP-010] — field 'tags' is a list field, but it
+was given a string 'power, analog' -- write it as a list, one entry per value
+(tags: [first, second]).
+```
+
+The value is never split on a delimiter for you: `tags: "power, analog"` is
+one tag whose text happens to contain a comma, and guessing would be right
+here and silently wrong for a tag that legitimately contains one. A *link*
+verb is not affected — `satisfies: REQ-001` as a bare scalar is one target,
+one edge, and loses nothing. A bare `tags:` with nothing after the colon is
+YAML null rather than a scalar, and is handled as one: it takes the field's
+`default` if it has one, with a warning, exactly like an omitted key.
+
 Four field *names* have behaviour attached regardless of declared type:
 
 | Field | Behaviour |

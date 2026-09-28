@@ -17,7 +17,13 @@ from typing import Any
 
 import yaml
 
-from .model import ON_CHANGE_MODES, Item, Project, provisional_handle
+from .model import (
+    NON_SCALAR_FIELD_TYPES,
+    ON_CHANGE_MODES,
+    Item,
+    Project,
+    provisional_handle,
+)
 
 FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n?(.*)$", re.DOTALL)
 # A candidate fence line: `---` alone on its line.
@@ -331,6 +337,78 @@ def _resolve_id_value(
     return text, "", False
 
 
+def _value_shape(value: Any) -> str:
+    """What a YAML value *is*, in the words a diagnostic should use -- not
+    `type(value).__name__`, which says 'str' where the author wrote
+    `tags: "power, analog"` and needs to be told 'a string'."""
+    if isinstance(value, bool):
+        return "a boolean"
+    if isinstance(value, (int, float)):
+        return "a number"
+    if isinstance(value, str):
+        return "a string"
+    if isinstance(value, dict):
+        return "a mapping"
+    return f"a {type(value).__name__}"
+
+
+def _reject_scalar_collection(
+    project: Project,
+    name: str,
+    fspec,
+    value: Any,
+    rel: str,
+    line: int,
+    item_id: str,
+) -> None:
+    """Fail the build when a collection-typed field was written as a scalar.
+
+    `tags: "power, analog"` is not a list of two tags, and nothing downstream
+    can tell the difference: the value survives as the single tag
+    `"power, analog"`, the build is green, and the only place a newcomer
+    checks -- `refdes ls --tag analog` -- still "finds" the item, because tag
+    matching is a substring test. So the wrong value looks right everywhere it
+    can be looked at, which is what makes this a build error and not a
+    warning.
+
+    Refusing rather than splitting on a comma is deliberate: a delimiter guess
+    is right for `"power, analog"` and silently wrong for `"power, analog, 3.3V"`
+    or a tag that legitimately contains a comma. The editor's create path
+    already takes the same posture on the same fields
+    (`serve/edit.py::_creation_fields`) -- the loader had no equivalent, which
+    was the actual inconsistency.
+
+    A bare `tags:` (YAML null) is left to the existing explicit-null
+    diagnostic, which coalesces it into the field's default with a warning --
+    that one is already reported, and reporting it twice for one keystroke
+    helps nobody.
+    """
+    if value is None or isinstance(value, list):
+        return
+    if fspec.type not in NON_SCALAR_FIELD_TYPES:
+        return
+    preview = repr(value)
+    if len(preview) > 60:
+        preview = preview[:57] + "..."
+    # Say the comma part only when there is one: for `tags: power` a substring
+    # search does find the item, and a diagnostic claiming otherwise would be
+    # a second wrong thing in a message whose job is to be believed.
+    consequence = (
+        ": the comma is part of the value, so a search for either of those "
+        "values matches only by substring, and the stored value is never "
+        "equal to either of them"
+        if isinstance(value, str) and "," in value
+        else ": the build cannot tell whether you meant that one value or several"
+    )
+    project.error(
+        f"field {name!r} is a {fspec.type} field, but it was given "
+        f"{_value_shape(value)} {preview} -- write it as a list, one entry per "
+        f"value ({name}: [first, second]). A scalar is never split; it is kept "
+        f"as one entry{consequence}.",
+        file=rel, line=line, item_id=item_id or "?",
+    )
+
+
 def _build_item(
     project: Project,
     raw: dict[str, Any],
@@ -443,6 +521,14 @@ def _build_item(
             targets = value if isinstance(value, list) else [value]
             item.links[key] = [str(t) for t in targets if t]
         elif key in spec.fields:
+            fspec = spec.fields[key]
+            # A value inherited from `defaults:` is reported at the defaults
+            # block's own line, not at whichever item happened to be first to
+            # be diagnosed -- the key the author has to edit is up there.
+            source_line = (defaults_line or line) if key in inherited else line
+            _reject_scalar_collection(
+                project, key, fspec, value, rel, source_line, item.id or "?"
+            )
             item.fields[key] = _strip_lines(value)
         elif (spec.name, key) in _RENAMED_FIELDS:
             new_key = _RENAMED_FIELDS[(spec.name, key)]
