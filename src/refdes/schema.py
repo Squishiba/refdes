@@ -135,14 +135,15 @@ def _validate_settings(raw: dict[str, Any]) -> dict[str, Any]:
     item_layout = raw.get("item_layout", "flat")
     if item_layout not in ITEM_LAYOUTS:
         raise _settings_error(
-            f"item_layout must be one of {list(ITEM_LAYOUTS)}, got {item_layout!r}"
+            f"item_layout must be one of {', '.join(ITEM_LAYOUTS)}, "
+            f"got {item_layout!r}"
         )
 
     baseline_identity = raw.get("baseline_identity", "os_user")
     if baseline_identity not in BASELINE_IDENTITIES:
         raise _settings_error(
-            f"baseline_identity must be one of {list(BASELINE_IDENTITIES)}, "
-            f"got {baseline_identity!r}"
+            f"baseline_identity must be one of "
+            f"{', '.join(BASELINE_IDENTITIES)}, got {baseline_identity!r}"
         )
 
     require_rejection_rationale = raw.get("require_rejection_rationale", True)
@@ -167,8 +168,8 @@ def _validate_settings(raw: dict[str, Any]) -> dict[str, Any]:
     cross_workspace_severity = raw.get("cross_workspace_severity", WARNING)
     if cross_workspace_severity not in DIAGNOSTIC_LEVELS:
         raise _settings_error(
-            f"cross_workspace_severity must be one of {list(DIAGNOSTIC_LEVELS)}, "
-            f"got {cross_workspace_severity!r}"
+            f"cross_workspace_severity must be one of "
+            f"{', '.join(DIAGNOSTIC_LEVELS)}, got {cross_workspace_severity!r}"
         )
 
     release_gate = {name: dict(rule) for name, rule in RELEASE_GATE_DEFAULTS.items()}
@@ -199,7 +200,7 @@ def _validate_settings(raw: dict[str, Any]) -> dict[str, Any]:
             hint = f" Did you mean {close[0]!r}?" if close else ""
             raise _settings_error(
                 f"release_gate.{rule_name} is not a known rule "
-                f"(one of {list(RELEASE_GATE_DEFAULTS)}).{hint}"
+                f"(one of {', '.join(RELEASE_GATE_DEFAULTS)}).{hint}"
             )
         rule_cfg = rule_cfg or {}
         if not isinstance(rule_cfg, dict):
@@ -419,8 +420,8 @@ def _validate_required_when(types: dict[str, ItemType]) -> None:
                         raise SchemaError(
                             f"types.{tname}.fields.{fname}.required_when "
                             f"references {key}: {value!r}, which is not among "
-                            f"{key}'s declared choices: {choices}. Update or "
-                            "remove the required_when clause."
+                            f"{key}'s declared choices: {', '.join(choices)}. "
+                            "Update or remove the required_when clause."
                         )
 
 
@@ -473,8 +474,8 @@ def _parse_check_severity(
     if not isinstance(raw, dict):
         if raw not in DIAGNOSTIC_LEVELS:
             raise SchemaError(
-                f"types.{tname}.check_severity must be one of {list(DIAGNOSTIC_LEVELS)}, "
-                f"got {raw!r}"
+                f"types.{tname}.check_severity must be one of "
+                f"{', '.join(DIAGNOSTIC_LEVELS)}, got {raw!r}"
             )
         return raw
 
@@ -496,7 +497,7 @@ def _parse_check_severity(
         if level not in DIAGNOSTIC_LEVELS:
             raise SchemaError(
                 f"types.{tname}.check_severity[{key}] must be one of "
-                f"{list(DIAGNOSTIC_LEVELS)}, got {level!r}"
+                f"{', '.join(DIAGNOSTIC_LEVELS)}, got {level!r}"
             )
         resolved[str(key)] = str(level)
 
@@ -589,7 +590,7 @@ def load_project(config_path: str | None = None, start: str = ".") -> Project:
             if on_change not in ON_CHANGE_MODES:
                 raise SchemaError(
                     f"types.{tname}.fields.{fname}.on_change must be one of "
-                    f"{list(ON_CHANGE_MODES)}, got {on_change!r}"
+                    f"{', '.join(ON_CHANGE_MODES)}, got {on_change!r}"
                 )
             required = bool(fspec.get("required", False))
             required_when = fspec.get("required_when")
@@ -630,7 +631,8 @@ def load_project(config_path: str | None = None, start: str = ".") -> Project:
         body_on_change = body_cfg.get("on_change", default_on_change)
         if body_on_change not in ON_CHANGE_MODES:
             raise SchemaError(
-                f"types.{tname}.body.on_change must be one of {list(ON_CHANGE_MODES)}"
+                f"types.{tname}.body.on_change must be one of "
+                f"{', '.join(ON_CHANGE_MODES)}"
             )
         body_required = bool(body_cfg.get("required", False))
 

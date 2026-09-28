@@ -148,8 +148,20 @@ def test_standard_unknown_base_is_rejected(tmp_path):
         "site: { title: T, out: _site }\n"
         "standard: { base: nope, version: 1, presets: [] }\n",
     )
-    with pytest.raises(SchemaError, match="standard.base must be one of"):
+    with pytest.raises(SchemaError, match="standard.base must be one of hardware") as excinfo:
         load_project(config_path=str(tmp_path / "refdes-project.yaml"))
+    assert "['" not in str(excinfo.value)
+
+
+def test_latest_version_unknown_base_names_the_known_bases_as_prose():
+    """`latest_version()` is the `refdes init` path and carries the same
+    message; it must not reintroduce the list repr the loader no longer
+    prints."""
+    with pytest.raises(SchemaError) as excinfo:
+        standards.latest_version("nope")
+    message = str(excinfo.value)
+    assert "standard.base must be one of hardware, got 'nope'" in message
+    assert "['" not in message
 
 
 def test_pinning_a_version_that_does_not_exist_is_a_clear_error(tmp_path):
@@ -562,8 +574,11 @@ def test_required_when_dangling_enum_value_errors_at_load(tmp_path):
         "    fields:\n"
         "      status: { type: enum, choices: [proposed, accepted], default: proposed }\n",
     )
-    with pytest.raises(SchemaError, match="not among status's declared choices"):
+    with pytest.raises(SchemaError) as excinfo:
         load_project(config_path=str(tmp_path / "refdes-project.yaml"))
+    message = str(excinfo.value)
+    assert "not among status's declared choices: proposed, accepted." in message
+    assert "['" not in message
 
 
 def test_required_when_and_required_together_is_a_load_error(tmp_path):

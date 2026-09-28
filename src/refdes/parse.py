@@ -413,7 +413,7 @@ def _build_item(
     if isinstance(history, str):
         if history not in ON_CHANGE_MODES:
             project.error(
-                f"history: {history!r} must be one of {list(ON_CHANGE_MODES)}",
+                f"history: {history!r} must be one of {', '.join(ON_CHANGE_MODES)}",
                 file=rel, line=line, item_id=item.id,
             )
         else:

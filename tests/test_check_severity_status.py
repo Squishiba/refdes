@@ -211,8 +211,28 @@ def test_mapping_rejects_unknown_level(tmp_path):
     message = _err(tmp_path, schema)
     assert (
         "types.part.check_severity[candidate] must be one of "
-        "['error', 'warning', 'info'], got 'note'" in message
+        "error, warning, info, got 'note'" in message
     )
+    assert "['" not in message
+
+
+def test_scalar_check_severity_outside_levels_has_no_list_repr(tmp_path):
+    """The scalar form carries the same defect once: it named the levels as
+    a `['error', 'warning', 'info']` repr. Same comma-joined contract as the
+    mapping form above."""
+    schema = MAPPING_SCHEMA.replace(
+        "    check_severity:\n      candidate: info      # a candidate failing a "
+        "criterion is the finding\n      selected: error      # the part you "
+        "actually chose must pass\n      rejected: info       # history, not a "
+        "defect\n",
+        "    check_severity: note\n",
+    )
+    message = _err(tmp_path, schema)
+    assert (
+        "types.part.check_severity must be one of "
+        "error, warning, info, got 'note'" in message
+    )
+    assert "['" not in message
 
 
 def test_mapping_requires_exhaustive_or_default(tmp_path):

@@ -224,7 +224,9 @@ def test_project_settings_item_layout_rejects_a_free_form_pattern(tmp_path):
     """The user explicitly rejected general pattern syntax -- only the two
     fixed shapes are valid, not e.g. "<workspace>/<board>"."""
     config = _write_minimal_project(tmp_path, 'item_layout: "<workspace>/<board>"\n')
-    with pytest.raises(SchemaError, match=r"item_layout must be one of \['flat', 'workspace'\]"):
+    with pytest.raises(
+        SchemaError, match=r"item_layout must be one of flat, workspace"
+    ):
         load_project(config_path=str(config))
 
 
@@ -236,8 +238,22 @@ def test_project_settings_baseline_identity_accepts_git_identity(tmp_path):
 
 def test_project_settings_baseline_identity_rejects_unknown_value(tmp_path):
     config = _write_minimal_project(tmp_path, "baseline_identity: ldap\n")
-    with pytest.raises(SchemaError, match="baseline_identity must be one of"):
+    with pytest.raises(
+        SchemaError, match=r"baseline_identity must be one of os_user, git_identity"
+    ):
         load_project(config_path=str(config))
+
+
+def test_project_settings_cross_workspace_severity_error_has_no_list_repr(tmp_path):
+    """The valid levels are named in prose, not as a `['error', 'warning',
+    'info']` repr -- a message a human reads must not carry a Python repr."""
+    config = _write_minimal_project(tmp_path, "cross_workspace_severity: shout\n")
+    with pytest.raises(SchemaError) as excinfo:
+        load_project(config_path=str(config))
+    message = str(excinfo.value)
+    assert "cross_workspace_severity must be one of error, warning, info" in message
+    assert "got 'shout'" in message
+    assert "[" not in message and "]" not in message
 
 
 def test_project_settings_require_rejection_rationale_must_be_boolean(tmp_path):
@@ -276,6 +292,20 @@ def test_project_settings_release_gate_rejects_unknown_rule_with_a_suggestion(tm
     )
     with pytest.raises(SchemaError, match=r"draft_item.*Did you mean 'draft_items'"):
         load_project(config_path=str(config))
+
+
+def test_project_settings_release_gate_unknown_rule_lists_known_rules_as_prose(tmp_path):
+    """Same contract as the enum errors: the known-rule names are a comma-
+    joined list, not a `['draft_items', ...]` repr."""
+    config = _write_minimal_project(
+        tmp_path, "release_gate:\n  nope: { release: true }\n",
+    )
+    with pytest.raises(SchemaError) as excinfo:
+        load_project(config_path=str(config))
+    message = str(excinfo.value)
+    assert "release_gate.nope is not a known rule (one of " in message
+    assert "draft_items, unpinned_citations, missing_kept_copies" in message
+    assert "['" not in message
 
 
 def test_project_settings_release_gate_names_the_rule_rename(tmp_path):

@@ -332,7 +332,7 @@ diagnostics, never the verdict.
 |---|---|
 | Mapping on a type with no `status` field | `types.foo.check_severity is a mapping but type 'foo' declares no 'status' field. Write check_severity: error, or declare status.` — mirrors the existing rule that `satisfying_statuses:` requires a `status` field (`docs/schema-reference.md` §type keys). |
 | A key that is not one of the status enum's `choices` | `types.component.check_severity key 'choosen' is not a declared status. Declared choices: candidate, selected, rejected, obsolete.` A key that can never match is dead configuration. |
-| A value outside `DIAGNOSTIC_LEVELS` | today's message, extended to name the key: `types.component.check_severity[candidate] must be one of [error, warning, info], got 'note'`. |
+| A value outside `DIAGNOSTIC_LEVELS` | today's message, extended to name the key: `types.component.check_severity[candidate] must be one of error, warning, info, got 'note'`. |
 | A status with no entry and no `default:` | `types.component.check_severity does not cover status 'rejected'. Add it, or add default: <level>.` See §4.4. |
 | `default:` as a mapping key | Legal, and it is the fallback for any status not listed. Its value is validated like any other. |
 
