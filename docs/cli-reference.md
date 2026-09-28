@@ -1,11 +1,12 @@
 # CLI reference
 
 ```
-refdes [-c CONFIG] [--no-write] {serve,build,check,revision,release,index,ls,id,fetch,audit,init,new,schema,standard,keys,revise,calc-rewrite,stub-tests,former-ids,history} [options]
+refdes [-V] [-c CONFIG] [--no-write] {serve,build,check,revision,release,index,ls,id,fetch,audit,init,new,schema,standard,keys,revise,calc-rewrite,stub-tests,former-ids,history} [options]
 ```
 
 | Global option | Effect |
 |---|---|
+| `-V`, `--version` | Print one line, `refdes <version>`, naming the `refdes` you are actually holding, and exit `0`. Needs no project, no config, and no subcommand. The number is read from the installed package's own metadata, so it cannot disagree with what `pip show refdes` reports; run from a raw checkout with nothing installed, it prints `refdes (version unknown -- not installed as a package)` rather than raising. |
 | `-c`, `--config PATH` | Use this `refdes-project.yaml`. Default: search upward from the current directory. |
 | `--no-write` | Never modify anything under `items/` or `.refdes/`. Suppresses: key minting, link/check expansion to composite form, `.refdes/schema.json` regeneration, seal recording, board/workspace membership manifest, baseline stamping, and the ID ledger. Explicit write commands behave differently: commands with `--dry-run` (`id`, `revise`, `calc-rewrite`, `stub-tests`) report what would change and write nothing; `revision`/`release` report "would stamp" and write nothing; `keys adopt` and `keys restore` report the full plan and write nothing; commands that fundamentally write (`fetch`, `init`, `standard upgrade`, `standard add-preset`, `standard remove-preset`, `former-ids propose --confirm`, `history capture`, `history redact`, `history migrate-seals`) **refuse to run** under `--no-write` and exit 2. `refdes build --no-write` still writes the site — that is the command's own output, not a side effect. |
 

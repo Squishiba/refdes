@@ -7,6 +7,7 @@ import json
 import os
 import re
 import sys
+from importlib.metadata import PackageNotFoundError
 
 from . import adopt as adopt_mod
 from . import build as build_mod
@@ -14,6 +15,7 @@ from . import calc_rewrite as calc_rewrite_mod
 from . import citations as citations_mod
 from . import diagram as diagram_mod
 from . import former_ids as former_ids_mod
+from . import get_version, standards
 from . import history as history_mod
 from . import ids as ids_mod
 from . import key_restore as key_restore_mod
@@ -25,7 +27,6 @@ from . import revise as revise_mod
 from . import scaffold as scaffold_mod
 from . import schema_json as schema_json_mod
 from . import seal as seal_mod
-from . import standards
 from . import stub_tests as stub_tests_mod
 from .model import INVALIDATE, Project
 from .schema import SchemaError, load_project
@@ -1389,12 +1390,30 @@ def cmd_history_migrate_seals(args) -> int:
     return 0
 
 
+def _version_line() -> str:
+    """The `--version` output: the installed package's own version, or an
+    honest admission when running from a raw checkout with nothing installed.
+    Never raises -- a version flag that dies with a traceback is worse than
+    one that says it does not know."""
+    try:
+        return f"refdes {get_version()}"
+    except PackageNotFoundError:
+        return "refdes (version unknown -- not installed as a package)"
+
+
 def main(argv: list[str] | None = None) -> int:
     _fix_console()
 
     parser = argparse.ArgumentParser(
         prog="refdes",
         description="Reference documentation for hardware design decisions.",
+    )
+    parser.add_argument(
+        "-V",
+        "--version",
+        action="version",
+        version=_version_line(),
+        help="show the installed version and exit",
     )
     parser.add_argument("-c", "--config", help="path to refdes-project.yaml")
     parser.add_argument(

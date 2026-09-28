@@ -58,7 +58,10 @@ That's the whole file `refdes init` writes. Rename the title to taste.
 
 `version: 3` is whatever the installed `refdes` currently bundles as newest —
 never the literal word `"latest"`. A later `refdes` may write a higher number
-here; that is expected, and not a sign this page is out of date.
+here; that is expected, and not a sign this page is out of date. When you need
+to know which `refdes` you are holding, ask it: `refdes --version` (or `-V`)
+prints the installed version and exits — see [the CLI
+reference](cli-reference.md).
 
 Nothing here defines a `requirement` or a `link_types:` block. That comes from
 the pinned standard, resolved live from the installed `refdes` package. See
