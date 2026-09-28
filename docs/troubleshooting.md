@@ -38,9 +38,13 @@ A [multi-item markdown file](authoring.md#several-items-in-one-file) reads every
 blocks failing to parse — the line number points inside it. Until it parses, that
 item is not in the project at all.
 
-**`unknown field 'sorce'. Did you mean 'source'?`**
-A warning. The value is kept but not validated. Fix the spelling or declare the
-field in the schema.
+**`unknown field 'sorce' on requirement -- did you mean the field 'source'?`**
+A build error. The key is close enough to a declared field that a typo is the
+only reading, and a misspelled name means the value never reached the field —
+nor the report that field feeds (`part_number` → the parts index). Fix the
+spelling. An unknown field with nothing close to it is only a warning
+(`unknown field 'thermal_model' on component.`) and its value is kept: that is
+the forward-compatible case, where there is no typo to correct.
 
 **`missing required field 'title'`**
 The schema marks it `required: true`. In the bundled standard, `decision`,
