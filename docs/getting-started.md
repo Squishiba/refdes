@@ -40,21 +40,25 @@ id:
   ledger: .refdes/ids.yaml
 ```
 
-That's the whole file `refdes init` writes — rename the title to taste.
-`version: 3` is whatever the installed `refdes` currently bundles as newest,
-never the literal word `"latest"` — a later `refdes` may write a higher
-number here; that's expected, not a sign this page is out of date. Nothing
-here defines a `requirement` or a `link_types:` block — that all comes from
-the pinned standard, resolved live from the installed `refdes` package. If
-you define types of your own, they go in an optional `refdes-schema.yaml`
-beside this file — that one holds only `types:`, `link_types:`, and
-`sets:`. See [the standard library](standard-library.md) for what it
-covers, and `refdes init --standard none` if you'd rather author every type
-by hand, as every project did before this existed. `init` also writes
-`.vscode/settings.json`, wiring up field/link completion for
+That's the whole file `refdes init` writes. Rename the title to taste.
+
+`version: 3` is whatever the installed `refdes` currently bundles as newest —
+never the literal word `"latest"`. A later `refdes` may write a higher number
+here; that is expected, and not a sign this page is out of date.
+
+Nothing here defines a `requirement` or a `link_types:` block. That comes from
+the pinned standard, resolved live from the installed `refdes` package. See
+[the standard library](standard-library.md) for what it covers. If you would
+rather author every type by hand, as every project did before this existed,
+`refdes init --standard none` starts you there instead. Types you define
+yourself go in an optional `refdes-schema.yaml` beside this file — that one
+holds only `types:`, `link_types:`, and `sets:`.
+
+`init` also writes `.vscode/settings.json`, wiring up field/link completion for
 `items/**/*.yaml` files if you're using VS Code — see [editor
-support](standard-library.md#editor-support-json-schema-emission). `items/` is not
-created for you — make it, and any folders under it, yourself:
+support](standard-library.md#editor-support-json-schema-emission).
+
+`items/` is not created for you. Make it, and any folders under it, yourself:
 
 ```
 my-board/
@@ -127,14 +131,14 @@ items:
 ```
 
 `limit` is a real field type. `<= 0.15 W/in^2` is parsed into a quantity, not
-stored as a string, which is what makes the next step possible.
+stored as a string.
 
 ## 4. Write a decision that does arithmetic
 
 Items with a body go in their own markdown file. Not sure what fields a
 decision takes? `refdes new decision` prints a starter with every field
 commented in, generated from the same resolved schema an editor's
-completion reads — no trip back to this page needed.
+completion reads.
 
 ```bash
 refdes new decision > items/decisions/dec-pwr-001-regulator.md
@@ -224,7 +228,7 @@ items:
     verifies: [REQ-PWR-001]
 ```
 
-Note the test declares `verifies`. The requirement does not need to mention the
+The test declares `verifies`. The requirement does not need to mention the
 test — back-links are computed. `REQ-PWR-001` now shows as **verified** on
 `coverage.html`, while `REQ-PWR-002` shows as **satisfied** but not verified.
 
