@@ -85,7 +85,14 @@ prints `refdes (version unknown -- not installed as a package)`, still exit 0.
   `ruff check --select I` on the three touched Python files → clean; the
   repo's 24 other pre-existing `I001` findings were left alone per
   `AGENTS.md`.
-- Full suite: see the note below.
+- Full suite: `python -m pytest -q` → **2693 passed, 2 skipped** in ~199 s.
+  (First attempt used `--timeout=600`, which this venv's pytest rejects -- no
+  `pytest-timeout` plugin; re-ran without it.)
+
+## Outcome
+
+Committed as `fix(cli): --version prints the version you actually have`,
+pushed to `origin/fix/version-flag`, PR: https://github.com/Squishiba/refdes/pull/91
 
 ## Follow-ups noticed, not taken
 
