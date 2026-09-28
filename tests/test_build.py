@@ -12,7 +12,7 @@ from conftest import write_project_config
 from helpers import COVERAGE_SCHEMA, _build_at, _project
 
 from refdes import build as build_mod
-from refdes import calc, parse, render
+from refdes import calc, keys as keys_mod, parse, render
 from refdes import cli as cli_mod
 from refdes.build import _esc as _build_esc
 from refdes.schema import SchemaError, load_project
@@ -84,6 +84,98 @@ def test_satisfying_statuses_requires_a_status_field(tmp_path):
     write_project_config(tmp_path, NO_STATUS_FIELD_SCHEMA)
     with pytest.raises(SchemaError, match="satisfying_statuses"):
         load_project(config_path=str(tmp_path / "refdes-project.yaml"))
+
+
+# -------------------------------------------------------- diagnostic prose
+#
+# A message a newcomer reads must not carry a Python repr. Two shapes leaked:
+# a list interpolated straight into an f-string (a bracket-list), and a
+# composite link target quoted in full. Both pinned here because neither is
+# load-bearing for anything -- they are only visible if a human reads them.
+
+PROSE_SCHEMA = """\
+site: { title: "Prose test", out: _site }
+id: { width: 3 }
+link_types:
+  refines: { inverse: refined_by, label: "Refines" }
+types:
+  requirement:
+    prefix: REQ
+    label: Requirement
+    fields:
+      text: { type: text, required: true }
+      status: { type: enum, choices: [candidate, selected, rejected, obsolete] }
+  bound:
+    prefix: BND
+    label: Bound
+    fields:
+      text: { type: text, required: true }
+    links:
+      refines: [bound]
+"""
+
+
+def _prose_project(root, files):
+    root.mkdir(parents=True, exist_ok=True)
+    write_project_config(root, PROSE_SCHEMA)
+    items = root / "items"
+    items.mkdir()
+    for name, text in files.items():
+        (items / name).write_text(text, encoding="utf-8")
+    project = load_project(config_path=str(root / "refdes-project.yaml"))
+    parse.load_items(project)
+    build_mod.build(project)
+    return project
+
+
+def test_the_enum_error_lists_its_choices_as_prose_not_a_python_list(tmp_path):
+    def one(value):
+        return _prose_project(
+            tmp_path / value.replace(" ", "_"),
+            {
+                "r.yaml": "defaults: { type: requirement }\n"
+                "items:\n"
+                f"  - id: REQ-001\n    text: Target.\n    status: {value}\n"
+            },
+        )
+
+    message = next(
+        d.message for d in one("picked").errors if "is not one of" in d.message
+    )
+    assert message == (
+        "status: 'picked' is not one of candidate, selected, rejected, obsolete."
+    )
+    # A "helpful" nearby match is still appended, and still prose.
+    assert any(
+        d.message.endswith(
+            "is not one of candidate, selected, rejected, obsolete. "
+            "Did you mean 'selected'?"
+        )
+        for d in one("seleced").errors
+    ), [d.message for d in one("seleced").errors]
+
+
+def test_the_wrong_link_type_error_names_the_bare_display_id(tmp_path):
+    """`refines: [bound]` pointed at a requirement used to read
+    "refines may point at ['bound'], but REQ-001@<key> is a requirement": a
+    list repr, and a surrogate key -- an implementation detail of the file --
+    dropped into the one sentence a newcomer most needs to read cleanly. The
+    resolved reference is the live item's own id."""
+    key = keys_mod.mint()
+    project = _prose_project(
+        tmp_path,
+        {
+            "r.yaml": "defaults: { type: requirement }\n"
+            f"items:\n  - id: REQ-001\n    key: {key}\n    text: Target.\n",
+            "b.yaml": "defaults: { type: bound }\n"
+            "items:\n"
+            f"  - id: BND-001\n    text: Bound.\n    refines: [REQ-001@{key}]\n",
+        },
+    )
+
+    message = next(d.message for d in project.errors if "may point at" in d.message)
+    assert message == "refines may point at bound, but REQ-001 is a requirement"
+    assert "@" not in message and "[" not in message
 
 
 # ---------------------------------------------------- coverage warning aggregation

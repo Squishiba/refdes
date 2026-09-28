@@ -113,7 +113,7 @@ def test_hardware_v2_restricts_equivalent_and_alternate_to_components(tmp_path):
     component -> component. v2 restores the intent."""
     project = _equivalence_project(tmp_path, version=2)
     assert any(
-        "equivalent may point at ['component']" in d.message and "REQ-001" in d.message
+        "equivalent may point at component" in d.message and "REQ-001" in d.message
         for d in project.errors
     ), [str(d) for d in project.errors]
 

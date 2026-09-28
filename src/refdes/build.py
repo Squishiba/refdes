@@ -232,7 +232,8 @@ def validate_items(project: Project) -> None:
                 hint = f" Did you mean {close[0]!r}?" if close else ""
                 _field_error(
                     project, item, fname,
-                    f"{fname}: {value!r} is not one of {fspec.choices}.{hint}",
+                    f"{fname}: {value!r} is not one of "
+                    f"{', '.join(fspec.choices)}.{hint}",
                 )
             elif fspec.type == "date":
                 try:
@@ -559,18 +560,25 @@ def resolve_links(project: Project) -> None:
                         item_id=item.id,
                     )
                     continue
-                if allowed and not any(
-                    is_subtype(target.type, name, subtypes) for name in allowed
-                ):
-                    project.error(
-                        f"{link_name} may point at {allowed}, but {target_id} is a "
-                        f"{target.type}",
-                        file=item.source_file, line=item.source_line, item_id=item.id,
-                    )
-                    continue
                 inverse = project.inverse_of.get(link_name, f"{link_name}_by")
                 source_ref = item.id or item.key
                 target_ref = target.id or target.key
+                if allowed and not any(
+                    is_subtype(target.type, name, subtypes) for name in allowed
+                ):
+                    # `target_ref`, not the raw `target_id`: a link reached
+                    # through a composite carries `DISPLAY-ID@key`, and the key
+                    # is an implementation detail of the file, not something to
+                    # read in a message meant for a human (model.py's
+                    # resolved_links/links contract). It is also always current,
+                    # so the stale-label hazard _unknown_key_message reports
+                    # cannot arise here.
+                    project.error(
+                        f"{link_name} may point at {', '.join(allowed)}, but "
+                        f"{target_ref} is a {target.type}",
+                        file=item.source_file, line=item.source_line, item_id=item.id,
+                    )
+                    continue
                 target.backlinks.setdefault(inverse, []).append(source_ref)
                 item.resolved_links.setdefault(link_name, []).append(target_ref)
 
@@ -2362,13 +2370,16 @@ def _search_image_src(
             file=where_file, line=where_line, item_id=where_id,
         )
         return None
+    # The whole parenthetical is one clause in both branches: "searched ..." is
+    # what the populated half needs, and the empty half has nothing that was
+    # searched, so a bare "searched" in front of it read as a run-on.
     searched = (
-        "the site.assets directories: " + ", ".join(project.asset_dirs)
+        f"searched the site.assets directories: {', '.join(project.asset_dirs)}"
         if project.asset_dirs
         else "no site.assets directories are declared to search"
     )
     project.error(
-        f"image src {src!r} does not exist (searched {searched})",
+        f"image src {src!r} does not exist ({searched})",
         file=where_file, line=where_line, item_id=where_id,
     )
     return None

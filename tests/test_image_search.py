@@ -137,6 +137,42 @@ def test_bare_filename_found_nowhere_errors_naming_the_searched_dirs(tmp_path):
     assert "shots" in failing and "more" in failing
 
 
+def test_the_missing_image_sentence_is_grammatical_with_and_without_assets(tmp_path):
+    """Both branches share one parenthetical, and neither may run on. With
+    `site.assets:` declared the clause is "searched the site.assets
+    directories: ..."; with none declared there is nothing that was searched,
+    so the sentence has to end differently rather than prefixing a second
+    clause with "searched"."""
+    write_project_config(tmp_path, _config("shots, more"))
+    _item(tmp_path, "![the board](board.png)\n")
+    (tmp_path / "shots").mkdir()
+
+    declared = _load(tmp_path)
+    with_assets = next(
+        d.message for d in declared.errors if "board.png" in d.message
+    )
+    assert with_assets == (
+        "image src 'board.png' does not exist "
+        "(searched the site.assets directories: shots, more)"
+    )
+
+    bare = tmp_path / "bare"
+    bare.mkdir()
+    write_project_config(bare, COVERAGE_SCHEMA)
+    _item(bare, "![the board](board.png)\n")
+
+    undeclared = _load(bare)
+    without_assets = next(
+        d.message for d in undeclared.errors if "board.png" in d.message
+    )
+    assert without_assets == (
+        "image src 'board.png' does not exist "
+        "(no site.assets directories are declared to search)"
+    )
+    # The specific failure this pins: two clauses welded into one.
+    assert "searched no site.assets" not in without_assets
+
+
 def test_a_multi_segment_path_is_never_searched(tmp_path):
     """`shots/board.png` was written as a specific location; a failing one stays
     a plain does-not-exist error rather than resolving by leaf name."""

@@ -80,8 +80,8 @@ fails the build:
 ```
 ERROR items/log/board-a.yaml:33 [LOG-A-003] — LOG-A-003 is append-only and has
       been modified since it was sealed. Append a new entry with
-      `amends: [LOG-A-003]` instead, or run with --reseal if the edit is
-      deliberate.
+      `amends: [LOG-A-003]` instead, or run with `refdes build --reseal` if the
+      edit is deliberate.
 ```
 
 **Deleting a sealed entry fails the same way.** A page torn out of the
@@ -91,7 +91,7 @@ notebook is worse than one written over, so the two are reported alike:
 ERROR  LOG-A-003 is append-only and was sealed, but no item with that id is
        in the project any more. An append-only entry is corrected by appending
        one that `amends` it, never by deleting it -- restore it, or run with
-       --reseal if the removal is deliberate.
+       `refdes build --reseal` if the removal is deliberate.
 ```
 
 An id that is still in the project under a different board, or that another
