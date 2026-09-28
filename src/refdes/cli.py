@@ -1479,9 +1479,12 @@ def main(argv: list[str] | None = None) -> int:
         help="validate without rendering",
         description="Validate the project without rendering a site: parse every "
         "item, resolve links, run calcs and checks, and verify (but never create "
-        "or update) append-only seals and board-drift records. Exits non-zero on "
-        "any error. Nothing of the project's own is written -- no site, no seal, "
-        "no board or citation manifest, no baseline. The one exception is "
+        "or update) append-only seals and board-drift records. A seal exists only "
+        "once 'build' has run over the entry, so an entry that has never been built "
+        "has no append-only protection at all, however many clean runs of this "
+        "command it has behind it. Exits non-zero on any error. Nothing of the "
+        "project's own is written -- no site, no seal, no board or citation "
+        "manifest, no baseline. The one exception is "
         "'.refdes/schema.json', the gitignored editor-completion schema every "
         "project-loading command refreshes.",
     )
