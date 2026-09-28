@@ -189,10 +189,68 @@ types:
 | `warning` | a warning — visible by default, does not fail the build |
 | `info` | an info diagnostic — hidden unless `-v`/`--verbose`, does not fail the build |
 
+That is one level per *type*: every item of the type fails the same way,
+whatever its status.
+
 This only changes the diagnostic for a check that *ran and failed*. The item
 page's `fail` badge and the check table's detail string are unaffected — a
 candidate that fails a criterion still shows `fail`, exactly as a decision
 would, because a comparison table needs every row read the same way.
+
+### Severity per status
+
+A single level is sometimes too blunt, because the same item is worth a
+different weight at different stages. A part on a shortlist is a finding; the
+same part, once you have committed to it, is a defect. For that, write
+`check_severity` as a mapping from `status` to level instead of a scalar:
+
+```yaml
+types:
+  decision:
+    check_severity:
+      default: error
+      superseded: info       # settled history, not a defect
+      rejected: info
+```
+
+`default:` is the level every status you did not list resolves to, and the
+mapping must have one — or must list every declared status outright. A mapping
+that would leave some status with no level at all is refused at load:
+
+```
+$ refdes check
+configuration error: types.decision.check_severity does not cover status 'proposed'. Add it, or add default: <level>.
+```
+
+So the overlay above demotes a superseded decision's failure to `-v` without
+weakening a live one: a `decision` that is still `accepted` and still failing
+resolves to `default: error` and still fails the build. The mapping is resolved
+per item, not per type, which means a one-word status edit is all it takes to
+move a failure from hidden to build-blocking — or back. `refdes release` reads
+the same resolved level, so the gate moves with it; see
+[the readiness gate](lifecycle.md#the-readiness-gate).
+
+The bundled standard ships exactly this for `component` — under `standard:
+hardware@3`, with no overlay of your own:
+
+```yaml
+component:
+  check_severity: { candidate: info, selected: error, rejected: info, obsolete: info }
+```
+
+A `component` that is a `candidate` and fails a criterion reports `info` and
+does not fail the build; move the same item to `selected` without touching its
+numbers and the identical failure is a build error. An overlay that names
+`component` replaces that mapping wholesale — it is not merged with it.
+
+A mapping has three more load-time refusals, all worth knowing before you write
+one: a key that is not one of the type's declared `status` choices
+(`types.decision.check_severity key 'choosen' is not a declared status.
+Declared choices: proposed, in_progress, accepted, on_hold, rejected,
+superseded.`), a mapping on a type that declares no `status` field at all
+(`types.group.check_severity is a mapping but type 'group' declares no
+'status' field. Write check_severity: error, or declare status.`), and a value
+outside the three levels above (`default:` included).
 
 Checks that could not be evaluated at all (below) are always errors,
 regardless of `check_severity`: a typo'd value name or a missing target is an
