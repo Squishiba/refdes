@@ -47,8 +47,8 @@ picture:
   that declares no `coverable:` falls back to the old convention
   (`requirement`/`constraint` are coverable by name -- the two names that
   convention has ever recognized, kept as-is for compatibility rather than
-  following the `hardware@2` rename) with a one-time warning;
-  the [standard library](standard-library.md) declares it explicitly on both.
+  following the `hardware@2` rename) with a one-time warning. The
+  [standard library](standard-library.md) declares it explicitly on both.
 - **`coverable_statuses:`** narrows which of those items actually participate,
   by `status`. Unset, it excludes only `status: retired` (if the type has a
   `status` field at all) — the original behavior. Set, it's an *inclusion*
@@ -69,39 +69,41 @@ are that project's problem.
 ## Which links feed coverage
 
 **Deliberate convention, not an accident of naming:** every link this
-standard authors to make a coverage claim is active voice —
-`satisfies`, `verifies`, `addresses` — and coverage is computed from
-*only* the three backlinks their inverses produce: `satisfied_by`,
-`verified_by`, `addressed_by` (`build.compute_coverage`). Every link
-authored in the passive `X_by` form instead — `constrained_by`,
-`governed_by`, `blocked_by` — is deliberately kept out of that computation.
-None of `constrains`, `governs`, or `blocks` (their own backlinks) is ever
-read by it either.
+standard authors to make a coverage claim is active voice — `satisfies`,
+`verifies`, `addresses`. Coverage is computed from *only* the three backlinks
+their inverses produce: `satisfied_by`, `verified_by`, `addressed_by`
+(`build.compute_coverage`). Every link authored in the passive `X_by` form
+instead — `constrained_by`, `governed_by`, `blocked_by` — is deliberately
+kept out of that computation. None of `constrains`, `governs`, or `blocks`
+(their own backlinks) is ever read by it either.
 
 The name is the signal: if you're authoring a link to make something count
-as done, reach for the active form. If what you're authoring is a passive
-`..._by`, it traces a relationship without ever closing coverage on its
-own — most concretely, **`constrained_by` does not feed coverage**,
-however strongly the name suggests otherwise. A decision that only
-`constrained_by`'s a bound leaves it exactly as open as if no link existed
-at all; `satisfies` is what closes it (see the
+as done, reach for the active form. A passive `..._by` traces a relationship
+without ever closing coverage on its own.
+
+Most concretely, **`constrained_by` does not feed coverage**, however
+strongly the name suggests otherwise. A decision that only `constrained_by`'s
+a bound leaves it exactly as open as if no link existed at all. `satisfies`
+is what closes it (see the
 [`governed_by` vs. `constrained_by`](links.md#governed_by-vs-refines-vs-constrained_by)
 distinction).
 
 This holds without exception across the bundled standard's own vocabulary —
 checked, not assumed. One general engine capability is worth flagging rather
 than glossing over, though: [links are declarable from either
-end](links.md#back-links-are-computed), and coverage's read of `verified_by`
-is intentionally symmetric with `verifies` (`build._verifier_type_names`) to
-support a legacy spelling where a requirement declares `verified_by: [test]`
-directly instead of the test declaring `verifies:`. Authored that way,
-`verified_by` — despite the `_by` suffix — *is* the coverage-feeding form.
-The bundled standard itself never authors this way (`test.links.verifies:
-[requirement, bound]` is always the spelling in `base.yaml`), so the
-convention holds unbroken within this vocabulary as shipped — but it is a
-standard-library authoring choice, not a rule the schema engine itself
-enforces, and a project overlay that reaches for the legacy `verified_by:`
-spelling is the one place the passive form does feed coverage.
+end](links.md#back-links-are-computed). Coverage's read of `verified_by` is
+intentionally symmetric with `verifies` (`build._verifier_type_names`), and
+that symmetry exists to support a legacy spelling: a requirement declaring
+`verified_by: [test]` directly, instead of the test declaring `verifies:`.
+Authored that way, `verified_by` — despite the `_by` suffix — *is* the
+coverage-feeding form.
+
+The bundled standard itself never authors it that way
+(`test.links.verifies: [requirement, bound]` is always the spelling in
+`base.yaml`), so the convention holds unbroken within this vocabulary as
+shipped. It is a standard-library authoring choice, not a rule the schema
+engine itself enforces, and a project overlay that reaches for the legacy
+`verified_by:` spelling is the one place the passive form does feed coverage.
 
 ## The coverage page
 
@@ -116,10 +118,10 @@ carried it there:
 | REQ-PWR-003 | Converter efficiency shall exceed 90 % at half load. | satisfied | LOG-A-003, LOG-A-004, LOG-A-006 | — | DEC-PWR-001 | — |
 | REQ-PWR-001 | The unit shall operate from an input supply of 9 V to 36 V. | verified | LOG-A-001 | — | — | TST-PWR-001 |
 
-**Claimed by** is its own column, separate from **Satisfied by**: an
+**Claimed by** is its own column, separate from **Satisfied by**. An
 unsettled decision claiming a requirement is not the same as a settled one
-meeting it (see [the five stages](#the-five-stages)), and
-collapsing the two is exactly what this page exists to avoid.
+meeting it (see [the five stages](#the-five-stages)). Collapsing the two is
+exactly what this page exists to avoid.
 
 Counts by stage appear at the top, and the site index carries an **Outstanding
 work** panel with the same rows. Each item's own page shows a coverage strip.
@@ -128,20 +130,24 @@ work** panel with the same rows. Each item's own page shows a coverage strip.
 
 One platform-wide requirement — "every board uses the standard debug header" —
 is one item, so the table above goes `satisfied` the moment *any* board
-complies. A board that declares `conforms_to: [GRP-…]` gets the same four
-stages computed again for each member of that group, counting only that board's
-own satisfiers: `coverage-<board>.html` grows a **Conforming contracts** table,
-and a row on `coverage.html` gains `not yet satisfied on boards: board-b`. A
-satisfier with no board counts toward no board's per-board result, while still
+complies.
+
+A board that declares `conforms_to: [GRP-…]` gets the same four stages
+computed again for each member of that group, counting only that board's own
+satisfiers.
+
+`coverage-<board>.html` grows a **Conforming contracts** table, and a row on
+`coverage.html` gains `not yet satisfied on boards: board-b`. A satisfier
+with no board counts toward no board's per-board result, while still
 satisfying the item for the project as a whole. See
 [multiple boards](multi-board.md#conforming-to-a-shared-contract).
 
 ## Warnings
 
-Two of the five stages are individually uninteresting at scale — a project
+Two of the five stages are individually uninteresting at scale. A project
 early in its life is mostly `open`, and "satisfied but not verified" is
-routine noise before a test plan exists — so the build collapses each into
-one summary line instead of one warning per item:
+routine noise before a test plan exists. The build collapses each into one
+summary line instead of one warning per item:
 
 ```
 WARNING <project> — 3 item(s) with no coverage — see coverage.html
@@ -169,7 +175,7 @@ warnings.
 Diagnostics also have an `info` level, for the routine state of an
 incomplete project — hidden by default, shown with `-v`/`--verbose` on
 `check` or `build`. The [`blocked_by:` stale check](links.md#blocked_by-and-the-cascade-report)
-is the one thing in this area that's `info`; nothing else coverage produces
+is the one thing in this area that's `info`. Nothing else coverage produces
 is, but `-v` is worth knowing about even if you came here for coverage.
 
 ## When the claimer is blocked
@@ -195,10 +201,11 @@ Deliberately conservative: an item is only folded into this line when its
 claim traces to **exactly one** root. An item whose claimer has no
 `blocked_by` chain at all, or whose several claimers trace to *different*
 roots, keeps its ordinary per-item warning instead — a misleading one-line
-summary would be worse than not summarizing it. `coverage.html` shows the
-same chain inline next to every claimed item's row. See
-[`blocked_by:`](links.md#blocked_by-and-the-cascade-report) for the edge
-itself and the rest of its surfaces (`refdes audit`, the item page).
+summary would be worse than not summarizing it.
+
+`coverage.html` shows the same chain inline next to every claimed item's
+row. See [`blocked_by:`](links.md#blocked_by-and-the-cascade-report) for the
+edge itself and the rest of its surfaces (`refdes audit`, the item page).
 
 ## Which statuses count as satisfying
 
@@ -253,10 +260,12 @@ types:
 
 Without `verifying_statuses:`, a `planned` or `failing` test still counts as
 having verified the requirement it links to — which is what let a merely-linked
-test hide behind a green coverage page. With it, only a `passing` test does;
-the rest leave the requirement at whatever stage it would otherwise reach
-(typically `satisfied`, if something has claimed it, or `addressed`/`open`
-otherwise). The [standard library](standard-library.md) sets this on `test`.
+test hide behind a green coverage page.
+
+With it, only a `passing` test does. The rest leave the requirement at
+whatever stage it would otherwise reach (typically `satisfied`, if something
+has claimed it, or `addressed`/`open` otherwise). The
+[standard library](standard-library.md) sets this on `test`.
 
 | `verifying_statuses:` | Behavior |
 |---|---|
@@ -288,16 +297,17 @@ refdes id   # allocate ids for the new items
 Writes one multi-item markdown file per board (or workspace), not one file
 per item — a whole board's worth of gaps closes as a single, reviewable
 diff. Deduplicates by the declared `verifies:` edge itself, not by text: an
-item that already has a test (`planned` or otherwise, allocated an id or
-not) is skipped, so running it again after adding new requirements is safe
-and only ever adds what's newly missing. A prior run's file is appended to,
-never overwritten.
+item that already has a test (`planned` or otherwise, allocated an id or not)
+is skipped.
+
+Running it again after adding new requirements is safe, and only ever adds
+what's newly missing. A prior run's file is appended to, never overwritten.
 
 **The prerequisite is `verifying_statuses:`, already covered
 [above](#which-statuses-count-as-verifying).** A generated stub's `status:`
 is the type's own declared default (`planned` in the bundled standard),
-deliberately not one of `verifying_statuses:` — so a fresh stub never
-retroactively marks its target `verified`. Coverage stays exactly as
+deliberately not one of `verifying_statuses:`. So a fresh stub never
+retroactively marks its target `verified`, and coverage stays exactly as
 honest immediately after a `stub-tests` run as it was the moment before.
 
 **A generated stub takes the type's default prefix**, not one built from the
@@ -317,11 +327,13 @@ this is much cheaper to fix beforehand than after.
 
 **Refdes does not own test items once they're written.** One test often
 verifies several requirements at once (a single thermal soak covering five
-thermal requirements); one requirement often needs several tests at
-different corners. The generated one-test-per-requirement file is a
-starting point for exactly that reason — restructure it, merge stubs
-together, split one apart, however the real test plan actually needs to
-work. See [CLI reference](cli-reference.md#refdes-stub-tests).
+thermal requirements), and one requirement often needs several tests at
+different corners.
+
+The generated one-test-per-requirement file is a starting point for exactly
+that reason — restructure it, merge stubs together, split one apart, however
+the real test plan actually needs to work. See
+[CLI reference](cli-reference.md#refdes-stub-tests).
 
 ## In `items.json`
 
