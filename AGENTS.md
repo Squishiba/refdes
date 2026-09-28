@@ -19,12 +19,23 @@ that as the default risk, not the exception.
   `CHANGELOG.md`'s `[Unreleased]` section and `src/refdes/standards/hardware/v3/`).
   Don't assume `hardware@2` behavior still holds, and don't cite `hardware@3`
   as shipped in a release — it isn't yet.
-- **Surrogate keys (`docs/design/keys.md`) are partially landed.** Key
+- **Surrogate keys (`docs/design/keys.md`) are fully landed.** Key
   minting, composite-link expansion (`DISPLAY-ID@key`), and hashing-on-key
-  are implemented; the corruption lint, `refdes keys adopt`, the
-  display-half refresh-on-rename, and any `revise.py`/`former_ids.py` change
-  are still design only. Concretely: `Item.links` holds the raw, possibly
-  composite target text (what hashing/write-back reads) — **anything that
+  are implemented, and so are the four that used to be design-only: the
+  corruption lint (`keys.malformed_key_message()`, reported for declared
+  keys by `keys.validate()` and for composite link targets by
+  `build.resolve_links`), `refdes keys adopt` (`cli.cmd_keys_adopt` over
+  `adopt.py`, recording `.refdes/keys-adopted.yaml`), the display-half
+  refresh-on-rename (`links._planned_target`, which refuses the refresh and
+  warns when the stale label names a *different* live item), and the
+  `revise.py`/`former_ids.py` cleanup — `revise` no longer rewrites bare
+  references, relabels the id ledger, or remaps baseline/seal record ids
+  (`_rewrite_reference_ids`, `_relabel_ledger`, `_restore_ledger` and the
+  burned-prefix check are gone), with `_rename_prefix` deliberately kept as
+  the id/prefix-line helper. Nothing in that design doc is still design
+  only; its own implementation-status paragraph is the record. Concretely:
+  `Item.links` holds the raw, possibly composite target text (what
+  hashing/write-back reads) — **anything that
   merely walks the link graph should read `Item.resolved_links` instead**
   (always-bare, always-current display ids), never raw `links` directly,
   or it will silently stop matching the moment a target is
