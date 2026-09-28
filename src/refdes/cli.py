@@ -1184,6 +1184,15 @@ def cmd_stub_tests(args) -> int:
     if args.no_write:
         args.dry_run = True  # --no-write: report the stubs, write nothing
     project, _stale = _load(args, require_ids=False)
+    # Same gap `cmd_id` had (F5): this command loads the way that command
+    # does, so on a project whose keys don't exist yet it rewrites item files
+    # while reporting that nothing is missing a test. Name what the load wrote
+    # before the verdict that made the silence surprising. `load_writes` stays
+    # empty under --no-write/--dry-run and in the steady state, so both keep
+    # printing exactly what they printed before.
+    notice = _load_write_notice(project)
+    if notice:
+        print(notice)
     build_mod.build(project, seal_write=False, reseal=False)
     if project.errors:
         return _report(project)
