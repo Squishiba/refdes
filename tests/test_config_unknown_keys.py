@@ -247,6 +247,56 @@ def test_workspaces_block_must_be_a_mapping(tmp_path):
     _wrong_type(tmp_path, "workspaces")
 
 
+# -------------------------------------------------- the doc pointer (finding 8)
+
+# Finding 8: the `boards:`/`workspaces:` unknown-key error names the legal keys
+# and the typo, but not where the keys are *documented* -- so the reader is told
+# the block is wrong and left to guess. Only these two blocks get the pointer,
+# and each gets the page that actually documents it.
+
+
+def test_board_unknown_key_points_at_the_multi_board_doc(tmp_path):
+    _write(tmp_path, "boards:\n  main:\n    root: something\n")
+    message = _error(tmp_path)
+    assert "boards.main.root is not valid" in message, message
+    assert "See docs/multi-board.md." in message, message
+
+
+def test_workspace_unknown_key_points_at_the_workspaces_doc(tmp_path):
+    """`docs/multi-board.md` mentions `workspaces:` twice and both times only
+    as a link onward, naming no key of the block -- so `workspaces:` points at
+    its own page, not at the boards one."""
+    _write(tmp_path, "item_layout: workspace\nworkspaces:\n  hw:\n    members: [a]\n")
+    message = _error(tmp_path)
+    assert "workspaces.hw.members is not valid" in message, message
+    assert "See docs/workspaces.md." in message, message
+    assert "multi-board" not in message, message
+
+
+def test_the_pointer_survives_the_also_unknown_clause(tmp_path):
+    """Two typos in one board: the pointer is appended after the `Also unknown:`
+    list, as its own sentence, not spliced into the middle of the clause."""
+    _write(tmp_path, "boards:\n  main:\n    rot: a\n    labl: b\n")
+    message = _error(tmp_path)
+    assert "Also unknown:" in message, message
+    assert message.endswith("See docs/multi-board.md."), message
+
+
+def test_other_blocks_get_no_doc_pointer(tmp_path):
+    """The regression guard on the scope: `BlockChecker.keys` is one method for
+    a dozen blocks, and only `boards:`/`workspaces:` are supposed to name a
+    page. A pointer here would send a reader to a page that never existed."""
+    _write(tmp_path, "site:\n  titel: Typo Test\n")
+    message = _error(tmp_path)
+    assert "site.titel is not valid" in message, message
+    assert ".md" not in message, message
+
+    _write(tmp_path, "id:\n  widht: 4\n")
+    message = _error(tmp_path)
+    assert "id.widht is not valid" in message, message
+    assert ".md" not in message, message
+
+
 # ----------------------------------------------------------------- imports
 
 
