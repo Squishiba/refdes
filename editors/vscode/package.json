@@ -33,9 +33,18 @@
       { "command": "refdes.allocateIds", "title": "Refdes: Allocate missing IDs" },
       { "command": "refdes.openPreview", "title": "Refdes: Open built site", "icon": "$(preview)" },
       { "command": "refdes.refreshIndex", "title": "Refdes: Refresh index" },
-      { "command": "refdes.toggleCalcResults", "title": "Refdes: Toggle inline calc results" }
+      { "command": "refdes.toggleCalcResults", "title": "Refdes: Toggle inline calc results" },
+      { "command": "refdes.attachServer", "title": "Refdes: Attach to running server" },
+      { "command": "refdes.openInEditor", "title": "Refdes: Open in editor" },
+      { "command": "refdes.showServerLog", "title": "Refdes: Show server log" }
     ],
     "menus": {
+      "commandPalette": [
+        {
+          "command": "refdes.openInEditor",
+          "when": "false"
+        }
+      ],
       "editor/title": [
         {
           "command": "refdes.build",

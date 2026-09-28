@@ -70,12 +70,19 @@ support](https://github.com/Squishiba/refdes/blob/main/docs/standard-library.md#
 for the full story.
 
 **Hover.** Hover any ID for its type, title, key fields, coverage stage, and any
-failing checks.
+failing checks. When a live snapshot is connected (see [Live snapshot](#live-snapshot)),
+the hover also carries the three facts only a snapshot has — coverage stage, check
+state, and the diagnostics attributed to that item — under a *From `refdes serve`*
+heading.
 
 **Go to definition.** <kbd>F12</kbd> or ctrl-click an ID to jump to where it is
 defined, including inside a list file or a multi-item markdown file (several
 `---`-fenced items sharing one `.md` file, optionally under a leading
 `defaults:` block).
+
+**Open in editor.** A CodeLens sits on an item's own `id:` line. It opens that
+item's form in the browser editor, in your system browser. The extension never
+renders a form and never writes an item file — the browser editor owns both.
 
 **Syntax highlighting** for `calc` blocks in both markdown and YAML bodies —
 variables, units, unit assertions, numbers, functions, and tolerances.
@@ -90,8 +97,38 @@ variables, units, unit assertions, numbers, functions, and tolerances.
 | Refdes: Open built site | Opens `_site/index.html` |
 | Refdes: Refresh index | Re-reads the project |
 | Refdes: Toggle inline calc results | Show/hide the inline values |
+| Refdes: Attach to running server | Use a `refdes serve` you started yourself |
+| Refdes: Show server log | The output channel behind the snapshot status item |
 
-A status bar item shows item count and error count; click it to run a check.
+A status bar item shows item count and error count; click it to run a check. A
+second one shows the live snapshot — see below.
+
+## Live snapshot
+
+Three of the facts above — an item's coverage stage, its check state, and the
+diagnostics attributed to it — come from a running `refdes serve` rather than from
+`refdes index`, because a snapshot is the only place they exist as *current* state.
+Everything else still comes from the index, and which path produced what stays
+visible in a second status bar item:
+
+| Status | Means |
+|---|---|
+| `Refdes: no server` | nothing has asked for a snapshot fact yet |
+| `Refdes: starting server` | `refdes serve` is booting |
+| `Refdes: snapshot 7` | connected — 7 is the serial from `GET /api/revision` |
+| `Refdes: server died` | the process exited, or stopped answering |
+
+Click it for the Refdes output channel, which carries everything the server printed,
+prefixed `[serve]`.
+
+The server starts on demand — the first hover on an ID asks for it — one per project
+per window, and it is killed when the window closes. Its launch token lives in the
+extension host's memory and nowhere else: not in a setting, not on disk, not in a
+command line. It never appears in the output channel either.
+
+To run the server yourself instead — to watch it, or to share it with a browser tab —
+start it and paste the launch URL it prints into **Refdes: Attach to running server**.
+If a hover shows no snapshot facts, the status item says why.
 
 ## Settings
 
@@ -103,10 +140,14 @@ A status bar item shows item count and error count; click it to run a check.
 
 ## How it works
 
-Everything comes from one call to `refdes index --compact`, which emits the
+Almost everything comes from one call to `refdes index --compact`, which emits the
 whole project as JSON — items, fields, links, source locations, calc results,
-coverage, and diagnostics — without rendering the site. The extension has no parser
-of its own, so it cannot drift from the real tool.
+coverage, and diagnostics — without rendering the site. The three live-snapshot
+facts come from `GET /api/item/<ref>` on `refdes serve` instead. Either way the
+server decides them and the extension renders them: it has no parser and no
+validation logic of its own, so it cannot drift from the real tool. Where the two
+paths could disagree about the same fact — coverage stage — the snapshot's answer
+is the one the hover shows, and the status item tells you a snapshot is behind it.
 
 The one exception is the TextMate grammar, which necessarily re-implements the unit
 lexer. If highlighting and the parser ever disagree, the parser is right.
