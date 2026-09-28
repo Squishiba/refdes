@@ -173,6 +173,36 @@ directory turns an existing, unmodified document's image into the ambiguity
 error above — which is the point of erroring rather than picking. If you want
 the reference pinned so it can never drift, write the relative path.
 
+### Uploading an image from the browser editor
+
+When editing an item with `refdes serve`, the image panel can also upload a
+local PNG, JPEG, GIF, or WebP file. The editor previews the picked bytes before
+uploading. By default, the file is written beside the item's source file; the
+server accepts an explicit existing project directory as an alternate
+destination. It does not create directories. The filename must be a single
+safe path segment, the extension must match the file signature, and files are
+limited to 8 MiB. SVG and other formats are refused.
+
+Uploading writes only the image bytes. It does not edit the item's Markdown:
+after upload, the editor inserts an image reference into the body draft, and
+the ordinary **Save** applies that text edit. The new file can remain unused
+if you cancel or the body save is refused. A relative reference is pinned to
+that file; a bare filename can use the `site.assets:` search described above.
+
+If the destination already contains identical bytes, the upload is a no-op. If
+it contains different bytes, the editor reports the current file's size and
+hash and offers **Replace** or cancel. Replacing is confirmed by reissuing the
+request with that hash; if the file changes again, the editor must resolve the
+new conflict. The editor also refuses an upload that would make a bare
+`site.assets:` reference ambiguous, redirect an existing bare-name reference,
+or change an image referenced by a sealed entry. It reports which items a
+confirmed replacement would affect.
+
+Uploaded files are ordinary project files: refdes does not stage or commit
+them. An upload into a declared `site.assets:` directory refreshes the preview
+immediately; an image beside the item source is not a build input until a
+body references it and is saved.
+
 ### Width and captions
 
 A Quarto-style attribute suffix directly after the image, on the same line,

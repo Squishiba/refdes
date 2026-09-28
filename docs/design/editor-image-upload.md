@@ -602,8 +602,10 @@ No git operation is performed by the upload endpoint: no stage, no commit, no
 | `test_upload_content_type_allowlist` | `application/octet-stream` accepted; `multipart/form-data`, `text/plain`, and a missing `Content-Type` → 415. |
 | `test_atomic_replace_rolls_back_on_verify_mismatch` | A replace whose re-read differs restores the original bytes, via the existing `_atomic_replace` posture. |
 
-`tests/test_docs_examples.py` gains nothing: no author-facing syntax changes
-until the feature ships.
+The §14 upload cases are now present in `tests/test_serve_upload.py`. The
+author-facing reference in `docs/markdown.md` documents the shipped editor
+workflow; it does not change Markdown syntax, so
+`tests/test_docs_examples.py` needs no generated-example updates.
 
 ## 15. Open questions for Jared
 
