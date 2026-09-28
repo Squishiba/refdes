@@ -18,8 +18,10 @@ import re
 
 import pytest
 from conftest import write_project_config
+from helpers import _build_at
 from serve_support import Client, snapshot_tree
 
+from refdes import render
 from refdes.serve.server import EditorApp
 
 SCHEMA = """\
@@ -78,6 +80,21 @@ Q = 3 W
 Cites {{Q}}.
 """
 
+TABLE_ONLY_MD = """\
+---
+id: DEC-003
+type: decision
+board: board-a
+title: A block nobody cites in prose
+---
+
+```calc id="lone"
+R_load = 47 ohm
+```
+
+The table stands on its own; no `{{...}}` reference names it anywhere.
+"""
+
 PLAIN_MD = """\
 ---
 id: NOTE-001
@@ -97,6 +114,7 @@ def served(tmp_path):
     items.mkdir()
     (items / "named.md").write_text(NAMED_MD, encoding="utf-8")
     (items / "unnamed.md").write_text(UNNAMED_MD, encoding="utf-8")
+    (items / "table-only.md").write_text(TABLE_ONLY_MD, encoding="utf-8")
     (items / "plain.md").write_text(PLAIN_MD, encoding="utf-8")
     app = EditorApp(str(tmp_path / "refdes-project.yaml"), poll_interval=0.05)
     app.start()
@@ -161,6 +179,18 @@ def test_a_dotted_prose_mention_stays_undecorated(served):
     assert html.count("refdes-calc-attr") == 1
 
 
+def test_a_calc_table_nobody_cites_in_prose_gets_no_toggle(served):
+    # The toggle controls the values the pane *adds*. With no inline
+    # attribution on the page there is nothing for it to hide, so a table
+    # alone gains no button -- the reading recorded in
+    # in-prog-logs/wb-w3-values.md, pinned here.
+    app, client = served
+    html = _body(client, app, "DEC-003")
+    assert '<table class="calc"' in html
+    assert "refdes-values-toggle" not in html
+    assert "refdes-calc-attr" not in html
+
+
 def test_an_item_without_calc_values_gets_nothing(served):
     app, client = served
     html = _body(client, app, "NOTE-001")
@@ -210,3 +240,37 @@ def test_the_decoration_never_reaches_the_rendered_files(served):
     assert "data-refdes-calc" not in on_disk
     # the inline value is still the plain published form
     assert "<code>12 V</code>" in on_disk
+
+
+def test_a_real_publish_of_the_same_project_shows_none_of_it(tmp_path, served):
+    """§4's "Never touches `_site/`" checked at the publish boundary rather
+    than the serve one: the same sources on disk, run through the build's own
+    `render_site`, produce a site with none of the workbench's markers and
+    the plain published form of the value. The decoration exists only in
+    `serve/server.py::_decorate`, so this is structural, not luck."""
+    app, client = served
+    decorated = _body(client, app, "DEC-001")
+    assert "refdes-calc-attr" in decorated and "refdes-values-toggle" in decorated
+
+    out = render.render_site(_build_at(tmp_path))
+    pages = 0
+    for dirpath, _d, names in os.walk(out):
+        for n in names:
+            if not n.endswith(".html"):
+                continue
+            pages += 1
+            with open(os.path.join(dirpath, n), encoding="utf-8") as fh:
+                text = fh.read()
+            for marker in (
+                "refdes-calc-attr",
+                "refdes-values-toggle",
+                "data-refdes-calc",
+                "refdes-serve-bar",
+            ):
+                assert marker not in text, f"{marker} leaked into {n}"
+    assert pages > 1
+    with open(os.path.join(out, "dec-001.html"), encoding="utf-8") as fh:
+        published = fh.read()
+    # the value is published, the attribution is not
+    assert "<code>12 V</code>" in published
+    assert "V_in" not in published.partition("<table")[0]

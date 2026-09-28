@@ -1,7 +1,14 @@
 Status: **Architecture decided (2026-09-23)** — Jared answered all five
 questions in §7; each is recorded below as decided, not an option under
-continued review. Implementation is underway: W1 ("pin") and W2
-("squiggles") have landed (§8); W3 ("values") is in progress.
+continued review. **W1 ("pin"), W2 ("squiggles") and W3 ("values") have
+landed** (§8), each as a response-only decoration on the item's own preview
+page; the records are `in-prog-logs/thread-workbench-w1.md`,
+`thread-workbench-w2.md` and `wb-w3-values.md` (with
+`thread-workbench-w3.md` as W3's phase summary). W4 stays folded in per
+§7.4, and its finding is the same in all three logs: nothing cheap and
+obvious was visible in the touch path, so no speculative optimization was
+made. One half of D1 is deliberately **not** shipped — dotted `ITEM.NAME`
+mentions in prose stay undecorated, per the note under §5.
 
 # Thread workbench: a live authoring pane for working notes
 
@@ -131,6 +138,21 @@ Candidates, each an overlay per §3.3:
 | D4 | **Thread panel pinned** — the folded "currently concludes" panel (threads.md Phase 3b) fixed at the top of the pane, fork warnings prominent | `chains.py` fold, already built and memoized | This is the "see what's actually going on" content mid-thread |
 | D5 | **Edited-after-captured marker** | living-notes history comparison | Makes the capture boundary visible exactly where it matters |
 
+**Dotted references, and what W3 left open.** `DEC-PWR-001.V_in` is real
+syntax *inside a calc block* (`calc.CROSS_REF_RE`), where the table already
+shows expression and result. In **prose** it is not a supported reference:
+the ID half linkifies and the `.V_in` tail is inert text, and the
+`{{DEC-001.P_diss}}` spelling does not match `build.INLINE_VALUE_RE` at all
+— named-calc-blocks §4.3 defers that spelling to D1, which is this row.
+Decorating it anyway would set a number beside text the site gives no
+meaning, which §3.3 forbids, so W3 shipped D1 for `{{name}}` references
+only (`item.calc_values`, plus `CalcLine.block` for the attribution), and
+leaves `{{name | unit}}` in its plain published form — that converted string
+is stored nowhere, so showing it would mean re-evaluating it. **Open
+question for Jared:** should prose dotted refs become real site-side syntax
+first? If they do, the pane half is trivial — the targets' `calc_values`
+already exist.
+
 ## 6. Why this is not "become Calcpad" / not IDE creep
 
 Calcpad's liveness is bought with document-local semantics: nothing has to be
@@ -176,11 +198,12 @@ mechanism produces this, and how does it strip at publish?*
 
 - **W1 — pin.** Preview already rebuilds on change and swaps generations
   atomically; add "open this item's preview page" from `/edit/` and
-  auto-reload on revision change. No decorations. Mostly glue.
+  auto-reload on revision change. No decorations. Mostly glue. **Landed.**
 - **W2 — squiggles.** D3 diagnostics mapped into the page + D2 image
-  provenance. Both read data the build already produces.
+  provenance. Both read data the build already produces. **Landed.**
 - **W3 — values.** D1 inline calc values (pane-only per §7.1) and a
-  show-values toggle on calc tables.
+  show-values toggle on calc tables. **Landed** for `{{name}}` references;
+  dotted prose mentions are held back per the note under §5.
 - **W4 — speed (folded in, not deferred-as-a-phase).** Per §7.4: cheap,
   obvious wins — e.g. avoiding redundant work already visible in the build
   path — get folded into W1–W3 as they are encountered. A dedicated
