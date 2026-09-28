@@ -409,7 +409,7 @@ def test_a_parent_does_not_satisfy_a_list_naming_only_its_subtype(tmp_path):
         CONSUMER_ITEMS + "  - { id: BND-002, type: bnd, title: X, refines: [REQ-001] }\n",
     )
     assert any(
-        "refines may point at ['bnd'], but REQ-001 is a req" in d.message
+        "refines may point at bnd, but REQ-001 is a req" in d.message
         for d in project.errors
     ), [d.message for d in project.errors]
 

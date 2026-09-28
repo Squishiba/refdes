@@ -182,6 +182,52 @@ def test_reseal_scoped_to_one_board_does_not_accept_another_boards_deletion(
     assert "LOG-B-001" in seal.load_seals(project2, board="board-b")
 
 
+def test_the_violation_hint_names_a_command_the_printing_command_actually_has(
+    sealed_board_project,
+):
+    """The hint used to read `run with --reseal`, and `refdes check` is one of
+    the two commands that print it -- under `check`, following the advice
+    verbatim is a usage dump and exit 2, because `check` has no `--reseal`.
+    The message names `refdes build --reseal` instead, and the boarded case
+    keeps its board scope."""
+    project = _build_at(sealed_board_project)
+    build_mod.build(project, seal_write=True)
+
+    (sealed_board_project / "items" / "board-a" / "log.yaml").write_text(
+        "defaults: { type: log, prefix: LOG-A }\n"
+        "items:\n  - id: LOG-A-001\n    summary: edited\n",
+        encoding="utf-8",
+    )
+    (sealed_board_project / "items" / "log.yaml").write_text(
+        "defaults: { type: log, prefix: LOG-X }\n"
+        "items:\n  - id: LOG-X-001\n    summary: edited\n",
+        encoding="utf-8",
+    )
+
+    # Read-only verification is what `refdes check` runs, and what raises both.
+    project2 = _load_and_build(sealed_board_project, seal_write=False, reseal=False)
+    boarded = [d.message for d in project2.errors if "LOG-A-001 is append-only" in d.message]
+    unboarded = [
+        d.message for d in project2.errors if "LOG-X-001 is append-only" in d.message
+    ]
+    assert boarded and unboarded, [str(d) for d in project2.errors]
+    assert "run with refdes build --reseal board-a if the edit is deliberate" in boarded[0]
+    assert "run with refdes build --reseal if the edit is deliberate" in unboarded[0]
+    # The bare flag is what was wrong: nothing may suggest it again.
+    for message in boarded + unboarded:
+        assert "--reseal" not in message.replace("refdes build --reseal", "")
+
+    # The deletion half names the same command, and was wrong in the same way.
+    _empty_the_board_log(sealed_board_project, "board-b", "LOG-B")
+    project3 = _load_and_build(sealed_board_project, seal_write=False, reseal=False)
+    deleted = [d.message for d in project3.errors if "no item with that id" in d.message]
+    assert deleted, [str(d) for d in project3.errors]
+    assert (
+        "restore it, or run with refdes build --reseal board-b if the removal "
+        "is deliberate." in deleted[0]
+    ), deleted[0]
+
+
 def test_a_renumbered_entry_claimed_by_former_ids_is_not_a_deletion(tmp_path):
     """`former_ids:` is exactly the mechanism for an id retired in favour of a
     new one, so its old seal entry has not been deleted -- the entry is still

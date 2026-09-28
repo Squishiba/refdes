@@ -58,7 +58,7 @@ The older `missing required field 'text'` message belongs to hardware@2,
 where `requirement`/`bound` had a required `text:` field. Under hardware@3
 writing `text:` gets the rename diagnostic below instead.
 
-**`status: 'in-review' is not one of ['draft', 'active', 'retired']`**
+**`status: 'in-review' is not one of draft, active, retired`**
 Use one of the declared `choices`, or add yours to the schema.
 
 **`unknown type 'constraint' -- it is now 'bound' in hardware@2 ...`**
@@ -161,7 +161,7 @@ missing keys) and check that the key matches.
 Typo, deleted item, or a failed import. Check the import errors first — they
 cascade.
 
-**`constrained_by may point at ['bound'], but REQ-PWR-002 is a requirement`**
+**`constrained_by may point at bound, but REQ-PWR-002 is a requirement`**
 Wrong link type. `constrained_by` is reserved for the limit-bearing case —
 a `bound` and `checks:` actually involved — and only ever targets `bound`.
 To point at a requirement instead, use `satisfies` (decision/component,

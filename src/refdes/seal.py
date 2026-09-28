@@ -51,6 +51,18 @@ def seal_path(project: Project, board: str = "") -> str:
     return os.path.join(project.root, ".refdes", name)
 
 
+def _reseal_hint(board: str) -> str:
+    """The command to run when a sealed-entry violation was deliberate.
+
+    Spells out `refdes build` because both verify() callers print the same
+    error and only one of them -- `refdes build` -- has `--reseal`. Under
+    `refdes check`, a bare `--reseal` is not advice, it is a usage dump and
+    an exit code 2: the command being suggested is one the printing command
+    does not accept.
+    """
+    return f"refdes build --reseal {board}" if board else "refdes build --reseal"
+
+
 SealValue = str | dict[str, object]
 Seals = dict[str, SealValue]
 
@@ -429,11 +441,10 @@ def verify(project: Project, write: bool = False, reseal: str | None = None) -> 
                     ))
             else:
                 project.seal_violations.append(item.id)
-                hint = f"--reseal {board}" if board else "--reseal"
                 project.error(
                     f"{item.id} is append-only and has been modified since it was "
                     f"sealed. Append a new entry with `amends: [{item.id}]` instead, "
-                    f"or run with {hint} if the edit is deliberate.",
+                    f"or run with {_reseal_hint(board)} if the edit is deliberate.",
                     file=item.source_file, line=item.source_line, item_id=item.id,
                 )
 
@@ -499,7 +510,7 @@ def _report_deleted(
         if not orphans:
             continue
         reseal_here = bool(reseal) and (reseal == RESEAL_ALL or reseal == board)
-        hint = f"--reseal {board}" if board else "--reseal"
+        hint = _reseal_hint(board)
         for record_id, display_id in sorted(orphans, key=lambda pair: pair[1]):
             if reseal_here:
                 acceptance = (
