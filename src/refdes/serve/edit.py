@@ -66,7 +66,14 @@ from typing import Any
 
 from .. import citations as citations_mod
 from .. import dates, ids, keys, links, loader, patcher, scaffold, seal, textio
-from ..model import CHECK_VIOLATION, ERROR, Diagnostic, Item, Project
+from ..model import (
+    CHECK_VIOLATION,
+    ERROR,
+    NON_SCALAR_FIELD_TYPES,
+    Diagnostic,
+    Item,
+    Project,
+)
 from ..parse import front_matter_defaults_block, md_front_matter_blocks, yaml_safe_load
 from ..patcher import AddLink, PatchPlan, Refusal, RemoveLink, SetBody, SetField
 from ..sources import PdfAnchor
@@ -753,8 +760,11 @@ def _restore(path: str, original: bytes) -> None:
 
 # Field types whose values are collections: creation writes scalar fields
 # only; a collection is edited after the item exists (same rule the edit
-# form enforces, one constant shared with the API).
-NON_SCALAR_FIELD_TYPES = frozenset({"list", "checks", "citations", "options"})
+# form enforces). The set itself lives in model.py, because the loader
+# refuses the same scalar on the way in and the two must not drift.
+# `NON_SCALAR_FIELD_TYPES` above is imported, not defined here, so
+# `edit.NON_SCALAR_FIELD_TYPES` still resolves for anything that has always
+# read it from this module.
 
 
 @dataclass(frozen=True)

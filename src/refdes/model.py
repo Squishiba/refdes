@@ -130,6 +130,24 @@ class FieldSpec:
     doc: str = ""
 
 
+# The `FieldSpec.type` values whose values are *collections*, not scalars.
+#
+# It lives here, in the model, because it is a fact about the shape of a
+# declared field, and both halves of the tool need it: the editor's creation
+# path (`serve/edit.py`) refuses to write one of these from a scalar, and the
+# loader (`parse.py`) refuses to *read* one that was written as a scalar. They
+# used to disagree -- the editor said "collections are not created here" while
+# the loader silently kept `tags: "power, analog"` as a single tag, green build
+# and all -- which is the wrong way round for a value whose whole point is
+# being queried element by element.
+#
+# Deliberately *not* about link fields. A link verb takes a bare scalar as a
+# one-element target list (`satisfies: REQ-001` is one edge, not a
+# mis-written list), and that leniency is intended and unchanged -- a scalar
+# there loses nothing, since one target is what was written.
+NON_SCALAR_FIELD_TYPES = frozenset({"list", "checks", "citations", "options"})
+
+
 @dataclass
 class LinkType:
     name: str

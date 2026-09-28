@@ -11,7 +11,13 @@ import os
 import posixpath
 import urllib.parse
 
-from ..model import CHECK_VIOLATION, Diagnostic, Item, Project
+from ..model import (
+    CHECK_VIOLATION,
+    NON_SCALAR_FIELD_TYPES,
+    Diagnostic,
+    Item,
+    Project,
+)
 from ..patcher import PROTECTED_FIELDS, AddLink, RemoveLink, SetBody, SetField
 from ..seal import is_sealed
 from . import edit as edit_mod
@@ -129,8 +135,9 @@ def diag_dict(d: Diagnostic) -> dict:
 # Field types whose values are collections: the patcher replaces scalar spans
 # only, so these are read-only in the form (docs/design/browser-editor.md,
 # "Editing fields" -- links have their own picker, a later slice). The create
-# path enforces the same rule from the one constant in serve.edit.
-NON_SCALAR_FIELD_TYPES = edit_mod.NON_SCALAR_FIELD_TYPES
+# path and the loader enforce the same rule from the one constant in model.py,
+# imported above and named here so `api.NON_SCALAR_FIELD_TYPES` keeps
+# resolving for whatever reads it from this module.
 
 
 def _value_type(value) -> str:
