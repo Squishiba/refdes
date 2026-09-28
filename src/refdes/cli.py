@@ -92,6 +92,22 @@ def _refuse_no_write(command: str, what: str) -> int:
     return 2
 
 
+def _load_write_notice(project: Project) -> str | None:
+    """One terse line naming what this run's own load wrote into the source
+    tree (docs/design/keys.md §2), or None when it wrote nothing. The count
+    keeps `(s)` rather than hand-pluralising, the way `id`'s own
+    "allocated N id(s)" line already does."""
+    writes = project.load_writes
+    if not writes:
+        return None
+    parts = []
+    if writes.minted_keys:
+        parts.append(f"minted {writes.minted_keys} key(s)")
+    if writes.rewritten_targets:
+        parts.append(f"rewrote {writes.rewritten_targets} reference(s)")
+    return f"({' and '.join(parts)} while loading)"
+
+
 def _visible(
     project: Project, verbose: bool, board: str | None, workspace: str | None = None
 ) -> list:
@@ -467,6 +483,15 @@ def cmd_id(args) -> int:
     if args.no_write:
         args.dry_run = True  # --no-write: report the allocation, write nothing
     project, _stale = _load(args, require_ids=False)
+    # Loading mints every missing key and expands bare link targets on disk
+    # (docs/design/keys.md §2), so on a project whose keys don't exist yet
+    # this command rewrites item files while reporting that nothing is
+    # missing. Name what it wrote, ahead of the verdict that made the silence
+    # surprising. `load_writes` stays empty under --no-write/--dry-run and in
+    # the steady state, so both keep printing exactly what they printed before.
+    notice = _load_write_notice(project)
+    if notice:
+        print(notice)
     # Nothing pending is only the honest answer when every file loaded: an
     # item in a file that failed to parse is not in project.pending either,
     # so "no items are missing an id" would be a claim about files this run

@@ -22,6 +22,8 @@ Fixes here:
 
 from __future__ import annotations
 
+import re
+
 from conftest import write_project_config
 
 from refdes import build as build_mod
@@ -217,3 +219,111 @@ def test_write_guard_judges_multi_item_markdown(tmp_path):
 
 def test_write_guard_judges_markdown_body_with_thematic_break(tmp_path):
     _guard_rolls_back_broken_rewrite(tmp_path, THEMATIC_BREAK_MD, expected_count=1)
+
+
+# -------------------------------------- the load's own writes get reported (F5)
+
+LINK_SCHEMA = (
+    "site: { title: T, out: _site }\n"
+    "link_types:\n"
+    "  refines: { inverse: refined_by, label: Refines }\n"
+    "types:\n"
+    "  requirement:\n"
+    "    prefix: REQ\n"
+    "    fields:\n"
+    "      text: { type: text, required: true }\n"
+    "    links:\n"
+    "      refines: [requirement]\n"
+)
+
+# Both items already carry a display id, so `refdes id` has nothing to
+# allocate -- while the load on the way in mints two keys and expands the bare
+# `refines:` target. Saying only "no items are missing an id" over three
+# rewritten lines of the project is the F5 defect.
+ID_ITEMS = (
+    "defaults: { type: requirement }\n"
+    "items:\n"
+    "  - id: REQ-001\n"
+    "    text: Target.\n"
+    "  - id: REQ-002\n"
+    "    text: Refiner.\n"
+    "    refines: [REQ-001]\n"
+)
+
+
+def _id_project(tmp_path, items_yaml=ID_ITEMS):
+    write_project_config(tmp_path, LINK_SCHEMA)
+    items = tmp_path / "items"
+    items.mkdir()
+    (items / "r.yaml").write_text(items_yaml, encoding="utf-8")
+    return str(tmp_path / "refdes-project.yaml")
+
+
+def test_id_reports_the_keys_and_link_target_its_load_wrote(tmp_path, capsys):
+    cfg = _id_project(tmp_path)
+    assert cli_mod.main(["-c", cfg, "id"]) == 0
+    out = capsys.readouterr().out
+    assert "minted 2 key(s) and rewrote 1 reference(s) while loading" in out
+    assert "no items are missing an id" in out
+
+
+def test_id_reports_load_writes_alongside_its_own_allocation(tmp_path, capsys):
+    """A brand-new item: the load mints its key (keys are independent of ids),
+    the command allocates its id. Both are said; `allocated N id(s)` is
+    unchanged."""
+    cfg = _id_project(
+        tmp_path, "defaults: { type: requirement }\nitems:\n  - text: Brand new.\n"
+    )
+    assert cli_mod.main(["-c", cfg, "id"]) == 0
+    out = capsys.readouterr().out
+    assert "(minted 1 key(s) while loading)" in out
+    assert "allocated 1 id(s)" in out
+
+
+def test_id_quiet_case_prints_only_its_own_verdict(tmp_path, capsys):
+    """Steady state -- nothing pending, nothing minted, nothing expanded: the
+    second run prints exactly the one line it printed before this fix."""
+    cfg = _id_project(tmp_path)
+    assert cli_mod.main(["-c", cfg, "id"]) == 0
+    capsys.readouterr()
+    assert cli_mod.main(["-c", cfg, "id"]) == 0
+    assert capsys.readouterr().out == "no items are missing an id\n"
+
+
+def test_id_names_only_the_rewrite_when_the_keys_already_exist(tmp_path, capsys):
+    """Keys on disk, one target put back to bare: the notice names the rewrite
+    and no minting that did not happen."""
+    cfg = _id_project(tmp_path)
+    assert cli_mod.main(["-c", cfg, "id"]) == 0
+    path = tmp_path / "items" / "r.yaml"
+    minted = path.read_text(encoding="utf-8")
+    bare = re.sub(r"REQ-001@\w+", "REQ-001", minted)
+    assert bare != minted
+    path.write_text(bare, encoding="utf-8")
+    capsys.readouterr()
+
+    assert cli_mod.main(["-c", cfg, "id"]) == 0
+    out = capsys.readouterr().out
+    assert out.startswith("(rewrote 1 reference(s) while loading)")
+    assert "minted" not in out
+
+
+def test_id_no_write_says_nothing_about_writes_it_did_not_make(tmp_path, capsys):
+    """`--no-write` gates every incidental write in the load path, so there is
+    nothing to report and the file stays byte-identical."""
+    cfg = _id_project(tmp_path)
+    path = tmp_path / "items" / "r.yaml"
+    before = path.read_text(encoding="utf-8")
+    assert cli_mod.main(["--no-write", "-c", cfg, "id"]) == 0
+    assert capsys.readouterr().out == "no items are missing an id\n"
+    assert path.read_text(encoding="utf-8") == before
+
+
+def test_id_dry_run_says_nothing_about_writes_it_did_not_make(tmp_path, capsys):
+    """`--dry-run` is the same promise under a different name (cli._load)."""
+    cfg = _id_project(tmp_path)
+    path = tmp_path / "items" / "r.yaml"
+    before = path.read_text(encoding="utf-8")
+    assert cli_mod.main(["-c", cfg, "id", "--dry-run"]) == 0
+    assert capsys.readouterr().out == "no items are missing an id\n"
+    assert path.read_text(encoding="utf-8") == before
