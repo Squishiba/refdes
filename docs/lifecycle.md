@@ -67,12 +67,14 @@ a readiness claim. The only thing that blocks one by default is the floor.
 
 **A status change alone can change the gate.** `check_severity:` may be
 written as a mapping from `status` to level (docs/design/candidate-parts.md
-§4), and this rule resolves it per item, not per type. A component whose
-failing check is `info` at `status: candidate` becomes a build-blocking
-`error` the moment it moves to `selected` — so `refdes release` can go from
-clean to blocked on a one-word status edit. That is the feature, not a side
-effect: the moment you commit to a part, its numbers have to hold. The
-rule's offender list stays item IDs, and the diff view already reports the
+§4), and this rule resolves it per item, not per type.
+
+A component whose failing check is `info` at `status: candidate` becomes a
+build-blocking `error` the moment it moves to `selected`. So `refdes release`
+can go from clean to blocked on a one-word status edit. That is the feature,
+not a side effect: the moment you commit to a part, its numbers have to hold.
+
+The rule's offender list stays item IDs, and the diff view already reports the
 status change that caused it.
 
 **Draft detection** reads whichever field a type calls `status`, the same
@@ -103,8 +105,8 @@ release 'rev-b' blocked -- not stamped:
   pass     unaccepted_workspace_moves
 ```
 
-Fix what's listed and run it again — there's no flag to override or skip a
-rule for one run; adjust `release_gate:` in `refdes-project.yaml` if a rule
+Fix what's listed and run it again. There's no flag to override or skip a
+rule for one run — adjust `release_gate:` in `refdes-project.yaml` if a rule
 genuinely shouldn't apply to this project.
 
 ```console
@@ -170,13 +172,16 @@ items:
 
 This is assembly, not new machinery — every value already exists by the
 time `build()` returns (`item.content_hash`, `item.type`, `item.title`, the
-gate results, the resolved standard pin). `hash_format`, `key`, `verdict`,
-`calc_hash`, and `calc_refs` are the per-item additions: the first two are
-always written, the rest only when they apply — `verdict` only for a type
-with a verdict-bearing status field, `calc_hash`/`calc_refs` only for an
-item with calc blocks or cross-item calc references. Scoped to local items
-only, matching every other manifest in the project (imports are read-only,
-and not this project's readiness question).
+gate results, the resolved standard pin).
+
+`hash_format`, `key`, `verdict`, `calc_hash`, and `calc_refs` are the per-item
+additions. The first two are always written; the rest only when they apply —
+`verdict` for a type with a verdict-bearing status field,
+`calc_hash`/`calc_refs` for an item with calc blocks or cross-item calc
+references.
+
+Scoped to local items only, matching every other manifest in the project
+(imports are read-only, and not this project's readiness question).
 
 **`type`/`title` per item, not just a hash**, is the one departure from the
 terser `id: hash` shape `.refdes/log-seal.yaml`/`.refdes/boards.yaml` use.
@@ -187,23 +192,33 @@ A baseline's whole point is to stay legible after the live item is gone —
 
 ### Hash format versioning
 
-Each baseline entry records `hash_format` (currently **5**). When the hash
-definition evolves (format 1: display-id link targets; format 2: resolved-key
-link targets, raw `checks: against:`; format 3: `checks: against:` also reduced
-to keys; format 4: cross-item calc references hash their resolved key and
-resolved value -- an item with none hashes exactly as under format 3; format 5:
-every local image an item's body references hashes its resolved project-relative
-path and content digest -- an item with none hashes exactly as under format 4), a baseline that is read for a diff or a stamp migrates itself: each
-legacy-format entry's hash is recomputed under its recorded definition against
-the live item. If it matches, the entry is carried forward to the current
-format; if not, the item genuinely changed, and the entry stays at the format it
-was stamped at. This keeps a baseline diff from falsely flagging every item as
-"changed" when only the hash definition moved. `refdes keys adopt` names the
-entries it cannot carry (`uncomparable baseline entry <name>: <id>`); everywhere
-else an entry that stayed behind is reported as `uncomparable`, never as
-`changed` — `refdes audit` prints an `uncomparable N` line in the baseline diff,
-and `refdes revision`/`refdes release` name them when a re-stamp conflicts —
-because "changed" claims the content moved, and that is exactly the claim these
+Each baseline entry records `hash_format` (currently **5**).
+
+Five definitions so far, oldest first. Format 1 hashed display-id link
+targets. Format 2 switched those to resolved keys and left `checks: against:`
+raw. Format 3 reduced `checks: against:` to keys too. Format 4 added
+cross-item calc references, hashing each one's resolved key and the value it
+resolved to. Format 5 added images: every local image an item's body
+references hashes its resolved project-relative path and content digest.
+
+An item with no cross-item calc reference hashes exactly as it did under
+format 3, and an item with no image hashes exactly as it did under format 4,
+so those two additions cost an ordinary item nothing.
+
+When the hash definition evolves, a baseline read for a diff or a stamp
+migrates itself. Each legacy-format entry's hash is recomputed under its
+recorded definition against the live item. If it matches, the entry is
+carried forward to the current format; if not, the item genuinely changed,
+and the entry stays at the format it was stamped at. This keeps a baseline
+diff from falsely flagging every item as "changed" when only the hash
+definition moved.
+
+`refdes keys adopt` names the entries it cannot carry
+(`uncomparable baseline entry <name>: <id>`). Everywhere else an entry that
+stayed behind is reported as `uncomparable`, never as `changed` —
+`refdes audit` prints an `uncomparable N` line in the baseline diff, and
+`refdes revision`/`refdes release` name them when a re-stamp conflicts.
+"Changed" claims the content moved, and that is exactly the claim these
 entries make impossible. They are not counted as unchanged either.
 
 ### `stamped_by`
@@ -218,7 +233,7 @@ baseline_identity: os_user   # os_user | git_identity — default: os_user
 - **`git_identity`** — `git config user.name`. Opt-in, for a name that
   matches what already appears on commits and in the design log. If it
   can't be resolved (git missing, not a repo, or `user.name` unset), the
-  build **warns and falls back to `os_user`** — it never errors, since
+  build **warns and falls back to `os_user`** — it never errors.
   `stamped_by` is metadata no gate rule reads, and a missing name string
   should never be able to block a release.
 
@@ -228,9 +243,9 @@ form — this is deliberately not the git-history layer (below).
 ## The diff: what changed, and since when
 
 Two independently useful questions, both answered by comparing the current
-build's item hashes against a stored baseline's — surfaced through **`refdes
-audit`**, not a third command (that's already `audit`'s job: "everything the
-build tracks but does not fail on").
+build's item hashes against a stored baseline's. Both surface through
+**`refdes audit`**, not a third command — that's already `audit`'s job:
+"everything the build tracks but does not fail on".
 
 - **Since last revision** — against the most recently stamped baseline of
   *either* kind. The tight, day-to-day question: what's moved since I last
@@ -268,24 +283,26 @@ Since last release (rev-b, 2026-07-02T16:40:00Z):
 
 **`relabelled`** — items that have the same surrogate key but a new display ID.
 This happens when an item is renamed (its `id:` changed) after a baseline was
-stamped: the key is the immutable identity, so the baseline diff recognises it
+stamped. The key is the immutable identity, so the baseline diff recognises it
 as the same item and reports it as `relabelled` rather than `removed` + `added`.
 The surrogate key is shown in parentheses.
 
 No baselines of a given kind yet → `(no revision stamped yet)` / `(no
 release stamped yet)`, not an error — `audit` already runs with zero
 preconditions and this doesn't change that. A project that has stamped
-nothing at all is in **draft**; this "Baselines:" section is where that
+nothing at all is in **draft**. This "Baselines:" section is where that
 state is actually visible, since `check`/`build` stay exactly as
 permissive as they always were.
 
 Item-scoped, not field-scoped: the diff tells you *which* items moved, not
 *what* moved within them. Field-level detail is one `git diff` away once you
 know which two commits to compare — which is exactly the scoped list this
-diff supplies. See [suspect links](change-tracking.md) for the closest thing
-to a "what's worth re-reviewing" answer that exists today; a baseline's
-`items:` map is exactly the "hash at this point in time" data a future
-edge-scoped suspect-link mechanism would need on the target side.
+diff supplies.
+
+See [suspect links](change-tracking.md) for the closest thing to a "what's
+worth re-reviewing" answer that exists today. A baseline's `items:` map is
+exactly the "hash at this point in time" data a future edge-scoped
+suspect-link mechanism would need on the target side.
 
 ## Not the git-history layer
 
@@ -323,13 +340,13 @@ exists:
 `.refdes/baselines/<name>.yaml` like any other tracked file. Because
 "latest" (both questions above) is a directory scan, not a maintained
 pointer, deleting a baseline needs no cleanup elsewhere: the next `refdes
-audit` simply finds a different file as latest, or reports nothing stamped
+audit` finds a different file as latest, or reports nothing stamped
 if none remain.
 
 **Releasing when a revision is newer.** No special handling. `release` and
 `revision` are peers writing into the same name/hash space, not a strict
 lineage — a release never needs to "catch up to" the latest revision. If a
-release happens to be identical to the latest revision, the diff simply
+release happens to be identical to the latest revision, the diff
 reports zero changes.
 
 **An item deleted since a baseline was stamped.** Reported by the diff as
