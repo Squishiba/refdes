@@ -9,10 +9,13 @@ detail, alternatives considered, a "what I'd prototype first" section) once
 someone actually starts implementing it — until then, this is the whole
 record.
 
-Verified against the actual codebase as of commit `e73ffea` (2026-09-15,
-`main`). Re-check before trusting an "outstanding" or "done" mark that's more
-than a few commits old — this file decays exactly like the implementation
-status headers on the spec docs do.
+Verified against the actual codebase on 2026-09-27, at `bda7ab5` on branch
+`rare-jellyfish`, by reading the files each entry names. A prior pass
+(`in-prog-logs/release-readiness-audit.md` §6) found nine `Status:` lines
+stale against this tree; those were re-verified and corrected in
+`in-prog-logs/fix-backlog-stale-status-lines.md`. Re-check before trusting an
+"outstanding" or "done" mark that's more than a few commits old — this file
+decays exactly like the implementation status headers on the spec docs do.
 
 ## Source
 
@@ -98,19 +101,24 @@ them (the 2026-09-01 re-posting; issue #6's attachment carries the same 1–11).
 
 ### 1 — No published or CI-built copy of the reference docs site exists anywhere
 
-**Status: shipped, not yet deploying.** Shipped in `089fdbe`:
+**Status: shipped, and deploying.** Shipped in `089fdbe`:
 `.github/workflows/docs.yml` builds `docs-site/` and deploys it to GitHub
 Pages on every push to `main` (`actions/configure-pages` +
 `actions/deploy-pages`). `1f1ec03` later added the
 `docs-site/gen_examples.py --check` staleness gate to the same workflow's
-build job (finding 20). It is not yet deploying, though: every run of the
-workflow since it was added (56 runs, first 2026-08-22) fails at
-`actions/configure-pages` with "Get Pages site failed ... verify that the
-repository has Pages enabled and configured to build using GitHub Actions"
-(HttpError Not Found) — the repository has Pages disabled (`has_pages:
-false`). The build steps pass (pip install, `gen_examples.py --check`,
-`refdes build` in `docs-site/`). The fix is a repository setting, not code:
-Settings → Pages → Build and deployment → Source: GitHub Actions.
+build job (finding 20). It took a repository setting to fix, not code —
+Settings → Pages → Build and deployment → Source: GitHub Actions — and
+**that setting has since been made** (verified 2026-09-27:
+`gh api repos/Squishiba/refdes/pages` reports `"status": "built"` and
+`"html_url": "https://squishiba.github.io/refdes/"` with `"build_type":
+"workflow"`, and `gh api repos/Squishiba/refdes` reports `has_pages: true`).
+The original symptom — every run failing at `actions/configure-pages` with
+"Get Pages site failed … verify that the repository has Pages enabled and
+configured to build using GitHub Actions" (HttpError Not Found) — is gone;
+the last five `docs.yml` runs on `main` were all `conclusion: success`, the
+most recently run `36371871267` at 2026-09-28T02:58:41Z. The build steps
+(pip install, `gen_examples.py --check`, `refdes build` in `docs-site/`)
+passed throughout, including while the deploy half was still failing.
 
 ### 2 — `section:` markers validate fine in `refdes check` but fail every schema in the editor
 
@@ -318,20 +326,28 @@ source file and board, `editors/vscode/extension.js`); finding 9 as
 finding 10 as `next_ids` in the index payload (`payload["next_ids"]`,
 `src/refdes/render.py`); and finding 13 in `1cf3e88`.
 
-**Status: architecture decided (2026-09-16); remaining work is v1 scope, not
-shape.** [`browser-editor.md`](browser-editor.md) settled on option B — a local
+**Status: architecture decided (2026-09-16); shipped since, and still moving.**
+[`browser-editor.md`](browser-editor.md) settled on option B — a local
 `refdes serve` whose rendered site is the preview, with a separate `/edit/`
 application over the same plain files, so `_site/` stays static and the
 “Edit this item” affordance exists only while the server runs. Its **Decisions**
 section records the calls that followed from that, and **What v1 must deliver**
-is the checklist to build against. Two items there are what make this more than
-a form, and both are the author's own stated pain points: **filtering** as a
+is the checklist that was built against. Two items there are what make this more
+than a form, and both are the author's own stated pain points: **filtering** as a
 first-class surface (type, board, workspace, tag, source file, coverage stage,
 check state, blocked state, link relationships, and free text — combinable,
 counted, and held in the URL), and **identity handled for the author** (no
 hand-typed IDs anywhere: `next_ids` offered at creation, allocation
 authoritative under the save lock, link composites written from a picked key).
-No implementation exists.
+**Both have landed** (verified 2026-09-27): `src/refdes/serve/` is a
+ten-module package (`api.py`, `edit.py`, `filters.py`, `preview.py`,
+`security.py`, `server.py`, `sources.py`, `state.py`, `upload.py`,
+`__init__.py`) over a `static/` front end carrying the read list and item
+routes, the editor, creation, link editing, image upload, and the source
+picker; `serve/edit.py` is the single write path (`apply_edit(project_root,
+request)`) behind it. `refdes serve` is registered in the CLI
+(`src/refdes/cli.py:1367-1368`). What is outstanding is no longer shape or
+architecture; it is the remaining v1 slices.
 
 **Local model: not suitable.** This one survives the revised rule unchanged:
 it is design-judgment-heavy UI work with no mechanical acceptance test —
@@ -357,13 +373,18 @@ declares `recorded_by: [log]` alongside
 `satisfies`/`constrained_by`/`supersedes`/`selects`/`blocked_by` — one line,
 no new verb, exactly as scoped.
 
-**Worth flagging: this may become moot.** `docs/design/threads.md` (design
-only, not implemented — see its own status header) states explicitly that
-if the thread model ever lands, "the observation that `records`/`recorded_by`
-(finding 16) dissolves" — collapsing `log`/`decision` into one chained-item
-type removes the append-only-can't-point-forward problem structurally,
-rather than patching around it one verb at a time. Until threads.md moves
-past design-only, finding 16 is still a valid, independent, one-line fix.
+**Worth flagging: this may become moot.** `docs/design/threads.md` states
+explicitly that if the thread model ever lands, "the observation that
+`records`/`recorded_by` (finding 16) dissolves" — collapsing `log`/`decision`
+into one chained-item type removes the append-only-can't-point-forward
+problem structurally, rather than patching around it one verb at a time.
+**The thread model has since moved past design-only** — `threads.md`'s own
+header reads "**Status: Phase 3a implemented.**" (`threads.md:17`), verified
+against this tree, with `src/refdes/chains.py` (the `follows:` chain walk —
+tips, the per-field fold, fork and cycle diagnostics) as the landed slice.
+So the flag is live, not hypothetical: finding 16's one-line fix still ships
+independently, and the structural resolution is now the thread line of work
+rather than a someday maybe.
 
 **Local model (not decided — my read): suitable.** One line in a bundled
 standard file, with an end-to-end verification transcript already given in
@@ -394,10 +415,11 @@ two-tier identity problem) for free — there's no separate "the thread as a
 mutable whole" to name, only entries, which already have identity the same
 way every item does under `docs/design/keys.md`.
 
-`threads.md` is itself **design only** — nothing in it is implemented (see
-its own status header). Finding 17 shouldn't be treated as a live task
-distinct from that document; if this work happens, it happens as
-`threads.md`, not as a resurrection of finding 17's original per-item
+`threads.md` is no longer **design only** — its own header reads "**Status:
+Phase 3a implemented.**" (`threads.md:17`, verified against this tree; the
+landed slice includes `src/refdes/chains.py`). Finding 17 shouldn't be treated
+as a live task distinct from that document; if this work happens, it happens
+as `threads.md`, not as a resurrection of finding 17's original per-item
 "folding" proposal.
 
 **Local model: not applicable** — this is a design note, not an
@@ -841,17 +863,27 @@ becomes derived, which is backwards, and round-trips the moment an engineer
 edits it) and changes the failure class from "the document is wrong" to
 "refdes corrupted my schematic."
 
-**Status: outstanding — design drafted, awaiting review.** No `xlsx`/`csv`/
-`openpyxl` reference exists anywhere in the package, and the lockfile records
-hashes only, never extracted values. The blocker that parked this finding —
-finding 25's Part 2, a citation being able to name a repo-local file — has
-landed on `main` (`2001801`, `4496053`, 2026-09-15), so the finding is no
-longer parked; only review of the draft design stands between it and
-implementation. The draft also answers a question someone will ask again:
-item-based aggregation (summing a field over a set of items) was considered
-and rejected, for the completeness reason recorded in
-`docs/design/calc-sources.md` §2.
-**Design:** `docs/design/calc-sources.md` is the draft implementation specification, awaiting Jared's review.
+**Status: implemented for CSV; xlsx still outstanding; design reviewed.** The
+claim that no CSV reader exists in the package is no longer true —
+`src/refdes/sources.py` is the reader module (`extensions = (".csv",)` at
+`sources.py:230`, `csv.reader(fh, strict=True)` at `sources.py:465`), and
+`calc.py:643` documents the accepted line shape as
+`name = source("cited/file.csv", "key") | unit`. The lockfile still records
+hashes alongside the locked extracted values; the values are what calc
+evaluation now consumes. The blocker that parked this finding — finding 25's
+Part 2, a citation being able to name a repo-local file — landed on `main`
+earlier (`2001801`, `4496053`, 2026-09-15). **XLSX is still outstanding** and
+is still scoped to an optional `openpyxl` extra in a later minor release
+(`calc-sources.md` §"V1 is CSV only"); that half of the original status was
+accurate and stays. The draft design status also moved on independently:
+`docs/design/calc-sources.md:1-3` reads "**Status: Reviewed** — Jared's
+decisions recorded 2026-09-19; question 2 … decided 2026-09-21 … All section 11
+questions are now answered", so it is no longer awaiting review. The draft
+also answers a question someone will ask again: item-based aggregation
+(summing a field over a set of items) was considered and rejected, for the
+completeness reason recorded in `docs/design/calc-sources.md` §2.
+**Design:** `docs/design/calc-sources.md` is the implementation specification
+the shipped CSV reader was built from.
 
 **Local model (not decided — my read): not suitable.** The mechanical parts
 (a CSV reader, a lockfile field) are easy, but the correctness claim is "the
@@ -1399,8 +1431,18 @@ might not even write. `includes:` names **groups only**, not individual item
 ids — the finding's own lean, taken as the default because Jared did not
 object, and marked revisitable: if the ceremony of a `GRP-` item holding three
 components turns out to cost more than the asymmetry with `conforms_to:`, that
-is the knob to turn. Nothing here is implemented yet; `includes:` still appears
-nowhere in the package.
+is the knob to turn. **This has since shipped, and with it the
+asymmetry this entry argued for**: `includes:` appears in the package —
+`includes: list[str]` on the board spec (`src/refdes/model.py:174`), and
+`included_map()` in `src/refdes/boards.py:116-146` as the one place
+inclusion is resolved (each named group's `contains` backlinks, never a
+group that lists its members). `displays()` (`src/refdes/boards.py:149-158`)
+is the single display predicate over owned-or-included, carrying the
+constraint this entry identified as the whole point: "Never use this where a
+number is produced — tallies, coverage and gates keep using `item.board`
+alone." So the display/count separation landed as designed, and the
+`_board_gate` conflation hazard was avoided by having two predicates instead
+of one widened one.
 
 **Local model (not decided — my read): not suitable.** The code change is
 small and the display half is loud, but the correctness claim is "this item is
@@ -1423,14 +1465,25 @@ conflation in all five filter sites at once.
 **Source: Jared, while using refdes at work, not from an issue.** "I would
 like the editor to have flavor and not be some basic gruel engineers are so
 very familiar with." The ask is about the *editor*, but the editor does not
-exist yet (`cli.py:1182-1520` registers build/check/revision/release/index/ls/
-id/fetch/audit/init/new/schema/standard/keys/revise/stub-tests/former-ids —
-there is no `serve`), and the look it would inherit does. This finding is
-therefore about theming the site first, with the editor as the second
-consumer (§5). Written for someone who does not write CSS: where a term is
-load-bearing, it is explained in the sentence that uses it.
+exist yet is out of date: the editor **does** exist now — `refdes serve` is
+registered in the CLI (`src/refdes/cli.py:1367-1368`) and backs
+`src/refdes/serve/`, and the top-level subcommand list has grown past the one
+this finding was written against to include `serve`, `keys` (`cli.py:1674`),
+`calc-rewrite` (`cli.py:1715`) and `history` (`cli.py:1787`, with
+`capture`/`redact`/`migrate-seals` beneath it). What the editor inherits is
+the look described below, and the order this finding proposed — theme the site
+first, editor as the second consumer — is the order that was followed. Written
+for someone who does not write CSS: where a term is load-bearing, it is
+explained in the sentence that uses it.
 
-**What exists today, verified against the files.** `src/refdes/templates/
+**What existed when this finding was written, surveyed against the files
+then.** *(Point-in-time survey, 2026-09-21. The token layer has since landed —
+`style.css` is 572 lines rather than 441, `var()` appears 580 times rather
+than 138, and it now carries a non-colour token block at `style.css:29+` — so
+the counts below describe the pre-theming stylesheet, not the current one.
+The two `render.py` line pointers for the `_site/assets/` copy are dropped
+rather than renumbered, since they have drifted and the mechanism is
+unchanged.)* `src/refdes/templates/
 assets/style.css` is 441 lines and defines eleven custom properties on `:root`
 (`style.css:1-13`) — `--bg`, `--fg`, `--muted`, `--line`, `--panel`,
 `--accent`, `--good`, `--bad`, `--warn`, `--claim`, and `--mono` (which is a
@@ -1438,11 +1491,11 @@ font *stack*, not a colour). A `prefers-color-scheme: dark` block
 (`style.css:15-28`) redefines the ten colour tokens, and `var()` is used 138
 times across the rest of the file, so colours themselves are in decent shape:
 only two colour literals survive outside `:root` — `color: #fff` on
-`.type-badge` (`style.css:192`) and the `rgba(0,0,0,.18)` shadow on
-`#preview-card` (`style.css:397`) — and the fourteen `color-mix()` uses derive
+`.type-badge` and the `rgba(0,0,0,.18)` shadow on
+`#preview-card` (both still present in the current file, now at
+`style.css:256` and `:528`) — and the fourteen `color-mix()` uses derive
 their tints *from* the tokens, so they follow a theme automatically. The
-stylesheet is linked once, `base.html.j2:6`, and copied to `_site/assets/` by
-`render.py:880-882` (empty-project path) and `render.py:1112-1114`.
+stylesheet was linked once, at the top of `base.html.j2`.
 
 **The gap, and it is most of the work: everything that is not a colour.**
 Counted in the same file: 66 `font-size` declarations, 65 of them literal px
@@ -1457,10 +1510,12 @@ shorthand at `style.css:36`, with a second hardcoded `system-ui, sans-serif`
 at `style.css:183` — so there is no token anywhere that changes what the site
 *is* typographically, only what it is coloured. The surfaces that carry the
 most personality (`.pill` and `.type-badge`, the `.panel`/`.notice`/`.option`
-boxes, `.timeline` and the thread styles at `style.css:337-372`, the table
+boxes, `.timeline` and the thread styles, the table
 rules on `.grid`/`.fields`/`.calc`) are all built from those literals. A theme
-cannot reach any of them today. That is the refactor this finding is actually
-about, and it should be said plainly rather than discovered halfway through.
+could not reach any of them at the time of the survey — that was the refactor
+this finding is actually about, and it should be said plainly rather than
+discovered halfway through. (It has since been done; see the **Status:** line
+below.)
 
 **1. Scope — three sizes, and why the middle one.**
 
@@ -1649,8 +1704,21 @@ built-ins, warning for project themes). v1 refuses layout-changing themes,
 remote theme URLs, any project CSS file that a built-in theme depends on,
 reassignment of `--good`/`--bad`/`--warn`/`--claim` outside their semantic
 bands, and a theme format with selectors, nesting, or anything else that
-makes a theme a program rather than a list of pairs. Implementation not
-started.
+makes a theme a program rather than a list of pairs. **Implementation not
+outstanding — it has shipped, in the three steps this section ordered.**
+Step 1 (the token layer) is a provable no-op and is covered by
+`tests/test_style_tokens.py`. Step 2a (`site: theme:` and `site: tokens:`) is
+in the `site:` key allowlist (`src/refdes/configcheck.py:48`), validated at
+`configcheck.py:210`/`:213`, and plumbed through `src/refdes/schema.py:772-773`
+onto the site spec (`src/refdes/model.py:772-781`). Step 2b is
+`src/refdes/theme.py` (the built-in themes, the token override merge, and the
+generated `assets/theme.css` that only redefines tokens) and
+`src/refdes/contrast.py` (the WCAG contrast arithmetic for palette pairs). The
+v1 refusals this section lists are the ones the code actually enforces: a
+theme is data, not a program (`theme.py`), an unknown theme name or token name
+is an error with a did-you-mean rather than a quiet fallback (`theme.py`), and
+a non-hex colour is skipped by the contrast check rather than guessed at
+(`contrast.py`).
 
 ---
 
@@ -2543,7 +2611,9 @@ appear in no generated schema output; the generated-block syntax
 straight out of the registry at `blocks.py:416-426`, matched by the
 whole-line `{{ ... }}` form at `blocks.py:46`); and the two bits of inline
 syntax that live in markdown rather than YAML — `calc` blocks and their
-`name : unit = expr` assignments (`calc.py:792-796`) with inline `{{P_diss}}`
+`name = expr | unit` assignments (`PIPE_UNIT_RE` at `calc.py:1105`, split at
+`calc.py:1354-1357`; the retired `name : unit = expr` spelling is now a build
+error, `calc.py:1415-1416`) with inline `{{P_diss}}`
 references (`build.py:52`), and the image attribute suffix
 `{width=60% caption="..." id="fig-curve"}` whose accepted names are
 `IMAGE_ATTR_NAMES` at `build.py:78`. A generator that walks `project.types`
@@ -2585,10 +2655,20 @@ Mermaid in this project, so there is one diagram mechanism — the SVG emitter o
 §6 — and the checked-in Mermaid block at `docs/links.md:97-123` is deleted with
 it, not regenerated.
 (One half of the staleness claim above has since been fixed: `part_of`/`contains`
-is now a row of the hand-written verb table, `docs/links.md:143`, landed in
-`e43bbdb`. The embedded diagram is still stale — `grep -n part_of docs/links.md`
-matches the table row and the `hardware@3` note under it, never the diagram —
-which is the point this section makes.)
+is now a row of the hand-written verb table, `docs/links.md:121`, landed in
+`e43bbdb`.) **The staleness this section argued about then got its own
+proof: the embedded diagram did not get fixed, it got deleted.** The
+checked-in Mermaid block is gone exactly as the decision above said it would
+be — `docs/links.md` carries no Mermaid block at all now, only prose at
+`:100` saying the diagram is plain SVG, and the all-at-once view is the
+generated vocabulary page (`docs/links.md:94-105`, "generated from the
+resolved schema rather than hand-drawn, so it can't quietly go stale"). So
+`grep -n part_of docs/links.md` matching the table row and the `hardware@3`
+note and nothing else is no longer evidence of a stale diagram; it is the
+diagram's absence. The finding's shape held anyway — the honest outcome was not
+"regenerate the diagram" but "stop checking in a diagram the gate does not
+cover", and the `--graph` flag now emits that same SVG rather than Mermaid
+(`cli.py:1607`).
 
 **3. Where the definitions live.** Three options, and the interesting part is
 that the cheapest-looking one turned out not to be blocked at all — by either of
