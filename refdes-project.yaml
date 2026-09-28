@@ -5,7 +5,7 @@
 # width, the board and workspace registries, units, change-tracking policy,
 # which standard the project is pinned to, and the process/formatting
 # preferences below. The one thing it does not hold is the project's own schema
-# overlay (types:, link_types:, field_sets:), which lives in
+# overlay (types:, link_types:, sets:), which lives in
 # refdes-schema.yaml and is absent from most projects.
 #
 # (Before this split these were two files, refdes.yaml and refdes-project.yaml,
