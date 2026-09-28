@@ -495,6 +495,8 @@ def test_a_pypdf_that_does_not_report_positions_is_refused_not_drawn(tmp_path,
     ]
 
     class OldPage:
+        mediabox = (0, 0, 612, 792)
+
         def extract_text(self, visitor_text=None):
             for text, x, y in calls:
                 visitor_text(text, [1, 0, 0, 1, 0, 0], [1, 0, 0, 1, x, y], None, 9.0)
@@ -536,6 +538,8 @@ def test_a_row_with_a_run_at_the_page_origin_is_not_mistaken_for_that(tmp_path,
     ]
 
     class CornerPage:
+        mediabox = (0, 0, 612, 792)
+
         def extract_text(self, visitor_text=None):
             for text, x, y in calls:
                 visitor_text(text, [1, 0, 0, 1, 0, 0], [1, 0, 0, 1, x, y], None, 9.0)
@@ -557,6 +561,19 @@ def test_a_row_with_a_run_at_the_page_origin_is_not_mistaken_for_that(tmp_path,
 
 
 # ------------------------------------------------------------- the registration
+
+
+@pytest.mark.parametrize("box", [b"1 2 900 500", b"1 2 001 500"])
+def test_page_geometry_comes_from_the_pdf_and_invalid_bounds_fail_visibly(tmp_path, box):
+    # Equal-length replacement preserves the real PDF's xref offsets.
+    data = pdf_bytes(PROSE).replace(b"0 0 612 792", box)
+    if box == b"1 2 001 500":
+        with pytest.raises(SourceExtractionError, match="invalid page bounds"):
+            _page(tmp_path, data)
+    else:
+        listing = _page(tmp_path, data)
+        assert listing.page_box == (1.0, 2.0, 900.0, 500.0)
+        assert listing.spans[0].x == 72.0 and listing.spans[0].y == 700.0
 
 
 def test_the_pdf_reader_registers_on_pdf_case_insensitively():

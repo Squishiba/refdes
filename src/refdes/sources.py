@@ -635,6 +635,10 @@ class PageListing:
     too_dense: bool = False
     detail: str = ""
 
+    # PDF user-space bounds, retained so the view need not guess a page size
+    # from its text (which would turn a sparse page into a zoomed-in fragment).
+    page_box: tuple[float, float, float, float] = (0, 0, 612, 792)
+
     @property
     def prev(self) -> int | None:
         return self.page - 1 if self.page > 1 else None
@@ -747,7 +751,13 @@ class PdfReader:
                         f"{name}: page {page} is not in this document -- it has "
                         f"{count} page(s)"
                     ])
-                spans, too_dense = _page_spans(document.pages[page - 1], max_spans)
+                pdf_page = document.pages[page - 1]
+                page_box = tuple(float(v) for v in pdf_page.mediabox)
+                left, bottom, right, top = page_box
+                if (not all(math.isfinite(v) for v in page_box)
+                        or right <= left or top <= bottom):
+                    raise SourceExtractionError([f"{name}: this page has invalid page bounds"])
+                spans, too_dense = _page_spans(pdf_page, max_spans)
                 if not too_dense and _positions_missing(spans):
                     version = _pypdf_version() or "unknown version"
                     raise SourceExtractionError([
@@ -768,6 +778,7 @@ class PdfReader:
         if too_dense:
             return PageListing(
                 page, count, (), (), span_count=len(spans), too_dense=True,
+                page_box=page_box,
                 detail=(
                     f"this page holds more than {max_spans} text runs, which is "
                     "too dense to browse as positioned text -- nothing past the "
@@ -776,7 +787,7 @@ class PdfReader:
             )
         if not spans:
             return PageListing(
-                page, count, (), (), span_count=0,
+                page, count, (), (), span_count=0, page_box=page_box,
                 detail=(
                     f"could not read page {page} -- no extractable text (this "
                     "looks like a scanned or image-only PDF; OCR is out of scope)"
@@ -797,7 +808,7 @@ class PdfReader:
             )
         return PageListing(
             page, count, tuple(spans), rows, len(spans), candidates, truncated,
-            detail=detail,
+            detail=detail, page_box=page_box,
         )
 
 

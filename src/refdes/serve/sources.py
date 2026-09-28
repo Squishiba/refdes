@@ -6,11 +6,12 @@ Three reads of a keyed file and no writes: which of this item's own cited files
 a reader can list, what rows one of those files holds, and the calc line a
 picked `(path, key)` would compose to. Accepting a pick writes the item and the
 lockfile and is Slice B; the panel is Slice C. A PDF adds one more read -- a
-page, as positioned text with its numeric candidates -- and no write at all. A
-PDF is not a keyed table, so it has no rows to list and no key to compose a
-`source()` call from yet; what it has is pages, and the picker opens the one its
-citation already names. Nothing in this module writes anything, and nothing in
-it is reachable for a file the item has not already cited.
+page, as positioned text with its numeric candidates -- and reuses the proposal
+read for a deliberately selected row/token (Slice P-B). Its key is proposed
+from the row labels and is author-editable; saving it remains unavailable
+until Slice P-C. The picker opens the page its citation already names.
+Nothing in this module writes anything, and nothing in it is reachable for a
+file the item has not already cited.
 
 The confinement is inherited rather than reimplemented, in the order it
 applies:
@@ -496,6 +497,7 @@ def page_payload(project: Project, item: Item, path: str, page: str = "") -> dic
         "pinned_sha256": pinned,
         "drifted": bool(pinned) and digest != pinned,
         "spans": [_span_dict(span) for span in listing.spans],
+        "page_box": list(listing.page_box),
         "rows": [_row_dict(row) for row in listing.rows],
         "span_count": listing.span_count,
         "candidate_count": listing.candidate_count,
@@ -776,6 +778,10 @@ def propose_payload(
     key: str,
     unit: str = "",
     name: str = "",
+    page: str = "",
+    row: str = "",
+    token: str = "",
+    sha256: str = "",
 ) -> dict:
     """§7: the exact calc line a picked `(path, key, unit, name)` would insert,
     composed here rather than in the browser, and the row it was read from.
@@ -785,6 +791,11 @@ def propose_payload(
     supply one, which is why `line` is null and `complete` is false rather than
     a default appearing in the gap.
     """
+    if page or row or token:
+        return _pdf_proposal(
+            project, item, path=path, key=key, unit=unit, name=name,
+            page=page, row=row, token=token, sha256=sha256,
+        )
     canon = _authorise(project, item, path)
     reader = _reader(canon)
     listing = _listing(project, canon, reader.name)
@@ -802,6 +813,64 @@ def propose_payload(
     # rather than costing the panel a second request for a number it already
     # needs beside the live one (§3).
     entry = _with_pin(entry, _lockfile(project).get(canon) or {})
+
+    return _proposal(item, canon, key, entry, unit, name)
+
+
+def _pdf_proposal(
+    project: Project, item: Item, *, path: str, key: str, unit: str,
+    name: str, page: str, row: str, token: str, sha256: str,
+) -> dict:
+    """Read a deliberately selected candidate; never accept or pin it (P-C).
+
+    Coordinates identify a session pick only. The digest guards against a
+    changed file between the page read and this read, and the quote and decimal
+    always come from Python's fresh extraction, never the browser.
+    """
+    for text, label, minimum in ((page, "page", 1), (row, "row", 0), (token, "token", 0)):
+        if not text.isascii() or not text.isdigit() or int(text) < minimum:
+            raise SourceRefusal(f"{label} must be an integer >= {minimum} for a PDF pick")
+    listing = page_payload(project, item, path, page)
+    if not sha256 or sha256 != listing["sha256"]:
+        raise SourceRefusal(
+            "this PDF changed since the page was read; reopen the page to review it"
+        )
+    if listing["too_dense"]:
+        raise SourceRefusal(listing["detail"])
+    selected_row = next((r for r in listing["rows"] if r["index"] == int(row)), None)
+    selected = next(
+        (t for t in (selected_row or {}).get("tokens", []) if t["index"] == int(token)), None
+    )
+    if selected is None or not selected["candidate"]:
+        raise SourceRefusal("this row/token is not a numeric candidate; pick one the page lists")
+    key = key.strip() or _proposed_name(" ".join(selected_row["labels"]))
+    entry = _with_pin({
+        "key": key, "raw": selected["text"], "value": selected["value"],
+        "page": listing["page"], "row": selected_row,
+        "token": selected["index"], "numeric_index": selected["numeric_index"],
+        "quoted": selected_row["text"], "header_guess": selected["header_guess"],
+    }, _lockfile(project).get(listing["path"]) or {})
+    if not name:
+        stem = _proposed_name(key)
+        name = stem
+        suffix = 2
+        taken = _item_names(item)
+        while name in taken:
+            name = f"{stem}_{suffix}"
+            suffix += 1
+    payload = _proposal(item, listing["path"], key, entry, unit, name)
+    payload.update({
+        "reader": "pdf", "page": listing["page"], "row": selected_row["index"],
+        "token": selected["index"], "sha256": listing["sha256"],
+        "accept_supported": False,
+        "accept_reason": "PDF saving is not available yet. You can review this pick.",
+        "drifted": listing["drifted"],
+    })
+    return payload
+
+
+def _proposal(item: Item, canon: str, key: str, entry: dict, unit: str, name: str) -> dict:
+    """Shared confirm contract: author-owned unit/name, server-owned syntax."""
 
     chosen = (name or _proposed_name(key)).strip()
     if not _NAME_RE.match(chosen):
