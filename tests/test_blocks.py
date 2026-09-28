@@ -6,6 +6,7 @@ Split out of the original monolithic tests/test_refdes.py.
 from __future__ import annotations
 
 import json
+import re
 
 import pytest
 from conftest import write_project_config
@@ -273,6 +274,39 @@ def test_ls_free_text_matches_tags_not_just_title(blocks_project, capsys):
     assert "DEC-001" in out
     assert "DEC-002" not in out
     assert "DEC-003" not in out
+
+
+def test_ls_free_text_matches_a_full_id(blocks_project, capsys):
+    """The query someone types right after `refdes id` prints one is the id
+    itself; free text has to reach `id:` as well as title and tags. Nothing
+    in the fixture's titles or tags contains "DEC-001", so a hit can only
+    come from the id."""
+    status = cli_mod.main(
+        ["-c", str(blocks_project / "refdes-project.yaml"), "ls", "DEC-001"]
+    )
+    assert status == 0
+    out = capsys.readouterr().out
+    assert "DEC-001" in out
+    assert "DEC-002" not in out and "REQ-001" not in out
+
+
+def test_ls_free_text_matches_a_partial_lowercased_id(blocks_project, capsys):
+    """Substring and case-insensitivity work on ids exactly as they do on
+    titles: "dec-00" is three decisions, and not the requirement."""
+    cli_mod.main(["-c", str(blocks_project / "refdes-project.yaml"), "ls", "dec-00"])
+    out = capsys.readouterr().out
+    assert "DEC-001" in out and "DEC-002" in out and "DEC-003" in out
+    assert "REQ-001" not in out and "CMP-001" not in out
+
+
+def test_ls_help_says_free_text_matches_ids(capsys):
+    """The help text must not claim title-and-tags-only now that ids match."""
+    with pytest.raises(SystemExit) as excinfo:
+        cli_mod.main(["ls", "--help"])
+    assert excinfo.value.code == 0
+    # argparse wraps help text at the terminal width, so match across the
+    # wrap rather than assuming the phrase lands on one line.
+    assert re.search(r"id,\s+title\s+and\s+tags", capsys.readouterr().out)
 
 
 def test_ls_filters_by_source_file(blocks_project, capsys):

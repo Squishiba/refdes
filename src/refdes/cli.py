@@ -403,10 +403,12 @@ def cmd_ls(args) -> int:
     Code extension: a quick check over SSH, a scripted query, or reviewing
     a PR diff and deciding what to reference.
 
-    Free-text matches title *and* `tags:` -- tags: is `on_change: ignore`
+    Free-text matches id, title *and* `tags:` -- tags: is `on_change: ignore`
     (freely re-tagged without invalidating anything downstream), which is
     what makes it the right place to invest in findability in the first
-    place; the search has to actually reach it for that to matter.
+    place; the search has to actually reach it for that to matter. The id is
+    in the haystack too, because the natural query right after `refdes id`
+    prints one is the id itself.
     """
     project, _stale = _load(args, require_ids=False)
     # Items in a file that failed to parse are not in the listing and never
@@ -431,7 +433,7 @@ def cmd_ls(args) -> int:
         if args.tag and not any(args.tag.lower() in t.lower() for t in tags):
             continue
         if query:
-            haystack = " ".join([item.title, *tags]).lower()
+            haystack = " ".join([item.id, item.title, *tags]).lower()
             if query not in haystack:
                 continue
         rows.append(item)
@@ -1500,7 +1502,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     p_ls.add_argument(
         "query", nargs="*",
-        help="free text, matched against title and tags: (case-insensitive)",
+        help="free text, matched against id, title and tags: (case-insensitive)",
     )
     p_ls.add_argument("--type", help="only items of this type")
     p_ls.add_argument("--board", help="only items on this board")
