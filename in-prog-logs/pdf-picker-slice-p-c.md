@@ -65,3 +65,9 @@ Scoped ruff check on the touched Python files with --select E4,E7,E9,F,I
 passed, as did git diff --check. All scratch fixtures, probes, logs and the PR
 body remain in .scratch/. Implementation and validation finished; committing,
 pushing upbeat-zebra and opening the PR next.
+
+Finished: committed implementation as ad33d01, pushed upbeat-zebra to origin,
+and opened https://github.com/Squishiba/refdes/pull/71 with gh pr create.
+The implementation commit left the worktree clean. This final log entry is
+being committed and pushed separately to record publication; no code changed
+after the successful full-suite and scoped-ruff gates.
