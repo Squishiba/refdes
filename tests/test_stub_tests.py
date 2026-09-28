@@ -302,3 +302,79 @@ def test_cli_stub_tests_reports_nothing_to_do(stub_project, capsys):
     assert status == 0
     out = capsys.readouterr().out
     assert "no coverable item is missing a verifying test" in out
+
+
+# ------------------------------ the load's own writes get reported (F5, again)
+#
+# `stub-tests` loads exactly the way `id` does -- it is the other command
+# `--no-write` forces onto `--dry-run` (cli._load) -- so it had the same gap:
+# the load on the way in mints every missing surrogate key and expands bare
+# link targets into `DISPLAY-ID@key` composites (docs/design/keys.md §2),
+# while the command itself reported only its own verdict. The `stub_project`
+# fixture is already the F5 shape: three items carrying display ids, no `key:`
+# lines, and one bare `satisfies: [REQ-002]`. Mirrors the `cmd_id` cases in
+# tests/test_load_time_writes.py.
+
+
+def _stub_cli(stub_project, *argv):
+    return cli_mod.main(
+        ["-c", str(stub_project / "refdes-project.yaml")] + list(argv)
+    )
+
+
+def test_cli_stub_tests_reports_the_keys_and_link_target_its_load_wrote(
+    stub_project, capsys
+):
+    assert _stub_cli(stub_project, "stub-tests") == 0
+    out = capsys.readouterr().out
+    assert "minted 3 key(s) and rewrote 1 reference(s) while loading" in out
+    assert "wrote 2 stub test(s)" in out
+
+
+def test_cli_stub_tests_quiet_case_prints_only_its_own_verdict(stub_project, capsys):
+    """Steady state -- nothing pending, nothing minted, nothing expanded: the
+    run prints exactly the one line it printed before this fix. Run 1 mints
+    keys for the three fixture items, run 2 for the two stub items it just
+    wrote; by run 3 every item on disk has a key."""
+    assert _stub_cli(stub_project, "stub-tests") == 0
+    assert _stub_cli(stub_project, "stub-tests") == 0
+    capsys.readouterr()
+    assert _stub_cli(stub_project, "stub-tests") == 0
+    assert capsys.readouterr().out == "no coverable item is missing a verifying test\n"
+
+
+def test_cli_stub_tests_no_write_says_nothing_about_writes_it_did_not_make(
+    stub_project, capsys
+):
+    """`--no-write` gates every incidental write in the load path, so there is
+    nothing to report and the tree stays byte-identical."""
+    before = {
+        p: p.read_text(encoding="utf-8")
+        for p in sorted((stub_project / "items").rglob("*.md"))
+    }
+    assert _stub_cli(stub_project, "--no-write", "stub-tests") == 0
+    out = capsys.readouterr().out
+    assert "while loading" not in out
+    assert "would write 2 stub test(s)" in out
+    assert {
+        p: p.read_text(encoding="utf-8")
+        for p in sorted((stub_project / "items").rglob("*.md"))
+    } == before
+
+
+def test_cli_stub_tests_dry_run_says_nothing_about_writes_it_did_not_make(
+    stub_project, capsys
+):
+    """`--dry-run` is the same promise under a different name (cli._load)."""
+    before = {
+        p: p.read_text(encoding="utf-8")
+        for p in sorted((stub_project / "items").rglob("*.md"))
+    }
+    assert _stub_cli(stub_project, "stub-tests", "--dry-run") == 0
+    out = capsys.readouterr().out
+    assert "while loading" not in out
+    assert "would write 2 stub test(s)" in out
+    assert {
+        p: p.read_text(encoding="utf-8")
+        for p in sorted((stub_project / "items").rglob("*.md"))
+    } == before
