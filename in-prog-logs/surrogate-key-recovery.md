@@ -93,3 +93,9 @@ never rewritten or rebased by recovery.
 
 Implementation, regression coverage, docs, changelog, and recorded design
 decisions are complete. Publishing the `immense-dodo` branch for the requested PR.
+
+## Finished
+
+Committed the fix as `bc1d28b` and pushed `immense-dodo`. Opened
+[PR #84](https://github.com/Squishiba/refdes/pull/84), with the design choice,
+alternatives, exact repro result, and test evidence in its description.
