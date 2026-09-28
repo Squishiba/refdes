@@ -93,6 +93,15 @@ _SET_ENTRY_KEYS = frozenset({"fields", "links", "body"})
 LINK_TYPE_KEYS = frozenset({"inverse", "label", "trace", "doc"})
 EQUATION_KEYS = frozenset({"params", "expr", "note"})
 
+# The page each of the two multi-item blocks is documented in, named in its
+# unknown-key error (finding 8). One page each, not one shared page: `boards:`
+# is docs/multi-board.md, and `workspaces:` is its own page -- multi-board.md
+# mentions workspaces twice but only ever as a link onward, and never names a
+# key of the block. Two pointers, not one, because a doc pointer is only worth
+# having if the page it names actually documents the block.
+BOARDS_DOC = "docs/multi-board.md"
+WORKSPACES_DOC = "docs/workspaces.md"
+
 
 def _got(value: Any) -> str:
     """A value as it appears in a diagnostic, shortened when it is a whole mapping."""
@@ -112,11 +121,19 @@ class BlockChecker:
     def wrong(self, path: str, what: str, value: Any) -> SchemaError:
         return self.error(f"{path} must be {what}, got {_got(value)}")
 
-    def keys(self, block: dict, known: frozenset, path: str, what: str) -> None:
+    def keys(
+        self, block: dict, known: frozenset, path: str, what: str, doc: str | None = None
+    ) -> None:
         """Reject every key of `block` outside `known`, naming each one's block path.
 
         All of them at once: a block with two typos is one read of an error,
         not one per `refdes check`.
+
+        `doc` names a page documenting the block, appended to the message when
+        given (finding 8). It is opt-in per call site because only some of the
+        blocks this one method serves have a page: the message already names
+        every legal key, so the page is there for what those keys *mean*, and
+        that is only worth pointing at where the page really is.
         """
         unknown = [key for key in block if key not in known]
         if not unknown:
@@ -130,6 +147,13 @@ class BlockChecker:
             message += " Also unknown: " + "; ".join(
                 f"{path}.{key}{self._hint(key, known)}" for key in rest
             )
+        if doc:
+            # Its own sentence, with its own terminator: the clause before it
+            # ends on a bare key name when there was no did-you-mean hint, and
+            # already ends in `?` when there was -- without the guard the no-hint
+            # case reads "... label, path, token See docs/multi-board.md."
+            lead = "" if message.endswith(("?", ".")) else "."
+            message += f"{lead} See {doc}."
         raise self.error(message)
 
     def _hint(self, key: Any, known: frozenset) -> str:
@@ -292,7 +316,7 @@ class BlockChecker:
         for name, entry in block.items():
             path = f"boards.{name}"
             spec = self.mapping(entry, path, "a mapping of board settings")
-            self.keys(spec, BOARD_KEYS, path, "a boards: entry")
+            self.keys(spec, BOARD_KEYS, path, "a boards: entry", doc=BOARDS_DOC)
             boards[name] = {
                 "label": self.string(spec.get("label"), f"{path}.label", str(name))
                 or str(name),
@@ -342,7 +366,9 @@ class BlockChecker:
         for name, entry in block.items():
             path = f"workspaces.{name}"
             spec = self.mapping(entry, path, "a mapping of workspace settings")
-            self.keys(spec, WORKSPACE_KEYS, path, "a workspaces: entry")
+            self.keys(
+                spec, WORKSPACE_KEYS, path, "a workspaces: entry", doc=WORKSPACES_DOC
+            )
             workspaces[name] = {
                 "label": self.string(spec.get("label"), f"{path}.label", str(name))
                 or str(name),
