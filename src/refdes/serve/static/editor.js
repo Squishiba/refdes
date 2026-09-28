@@ -9,10 +9,11 @@
 
 import { api } from './api.js';
 import {
-  getDraft, setDraftField, setDraftBody, setDraftRevision, clearDraft, isDirty,
+  getDraft, setDraftField, setDraftBody, addDraftPin, setDraftRevision, clearDraft, isDirty,
 } from './drafts.js';
 import { createLinksSection } from './links.js';
 import { createImagePicker } from './images.js';
+import { createSourcePicker } from './sourcepicker.js';
 import { fieldControlNode, applyControl } from './controls.js';
 
 function el(tag, cls, text) {
@@ -45,7 +46,10 @@ export function createEditor(item, handle, onSaved, onDiscarded) {
     // Nothing to save: say why instead of offering a button that cannot work.
     // The server refuses independently; this only stops the false affordance.
     block.appendChild(el('p', 'muted', edit.reason || 'This item is read only.'));
-    return { node: block, fieldControl: () => null, bodyControl: () => null, imagePicker: null };
+    return {
+      node: block, fieldControl: () => null, bodyControl: () => null,
+      imagePicker: null, sourcePicker: createSourcePicker(item, handle, null),
+    };
   }
 
   const bar = el('div', 'edit-bar');
@@ -113,6 +117,51 @@ export function createEditor(item, handle, onSaved, onDiscarded) {
     else setDraftBody(handle, area.value);
   }
 
+  // Source lines belong inside an existing calc fence. A caret inside one
+  // chooses the next line boundary; otherwise the last calc fence gets it.
+  // The server has already composed `proposal.line`: this code only places it.
+  function insertSourceLine(proposal) {
+    const area = bodyArea;
+    if (!area) throw new Error('This item has no editable body.');
+    const body = area.value;
+    const fence = new RegExp('^\\x60{3}(calc[^\\n]*)?[ \\t]*\\r?$', 'gm');
+    const blocks = [];
+    let opened = null;
+    let match;
+    while ((match = fence.exec(body)) !== null) {
+      if (opened === null && match[1]) {
+        opened = match.index + match[0].length;
+      } else if (opened !== null && !match[1]) {
+        blocks.push({ start: opened, end: match.index });
+        opened = null;
+      }
+    }
+    if (!blocks.length) throw new Error('Add a ```calc``` fence to this body before picking a source value.');
+    const caret = area.selectionStart;
+    const active = blocks.find((block) => caret > block.start && caret < block.end);
+    const chosen = active || blocks[blocks.length - 1];
+    const nextLine = active ? body.indexOf('\n', caret) : -1;
+    const at = nextLine >= 0 && nextLine < chosen.end ? nextLine + 1 : chosen.end;
+    const prefix = at > 0 && body[at - 1] !== '\n' ? '\n' : '';
+    const inserted = prefix + proposal.line + '\n';
+    area.value = body.slice(0, at) + inserted + body.slice(at);
+    const after = at + inserted.length;
+    area.setSelectionRange(after, after);
+    setDraftBody(handle, area.value);
+    addDraftPin(handle, {
+      path: proposal.path, key: proposal.key, unit: proposal.unit, name: proposal.name,
+    });
+    refreshStatus();
+    area.focus();
+  }
+
+  async function acceptSource(proposal) {
+    insertSourceLine(proposal);
+    // Save uses the existing set_body route, revision and conflict handling.
+    // The pin lives in the same persisted draft as the new line for retries.
+    return saveAll();
+  }
+
   function fieldControl(name, value, existing) {
     const spec = (edit.fields || {})[name];
     if (!spec || !spec.editable) return null;
@@ -166,7 +215,7 @@ export function createEditor(item, handle, onSaved, onDiscarded) {
     for (const [name, value] of Object.entries(draft.fields)) {
       ops.push({ op: 'set_field', field: name, value: coerce(specs[name], value) });
     }
-    if (draft.body !== null) ops.push({ op: 'set_body', text: draft.body });
+    if (draft.body !== null) ops.push({ op: 'set_body', text: draft.body, ...(draft.pins.length ? { pin: draft.pins } : {}) });
     for (const [verb, targets] of Object.entries(draft.links.add)) {
       for (const target of targets) ops.push({ op: 'add_link', verb, target });
     }
@@ -184,9 +233,10 @@ export function createEditor(item, handle, onSaved, onDiscarded) {
         body: Object.assign({}, one, { expected_revision: rev }),
       });
       rev = payload.revision;
+      revision = rev;
       setDraftRevision(handle, rev);
       if (one.op === 'set_field') delete draft.fields[one.field];
-      else if (one.op === 'set_body') draft.body = null;
+      else if (one.op === 'set_body') { draft.body = null; draft.pins = []; }
       else {
         const side = one.op === 'add_link' ? 'add' : 'remove';
         const list = draft.links[side][one.verb] || [];
@@ -207,12 +257,14 @@ export function createEditor(item, handle, onSaved, onDiscarded) {
       note('Saved.', 'good');
       refreshStatus();
       onSaved();
+      return true;
     } catch (err) {
       save.disabled = false;
       refreshStatus();
       if (err.status === 409) showConflict(err.payload || {}, ops, atRevision || revision);
       else if (err.status === 422) showBlocked(err.payload || {});
       else note(`The save failed: ${err.message}`, 'bad');
+      return false;
     }
   }
 
@@ -291,5 +343,6 @@ export function createEditor(item, handle, onSaved, onDiscarded) {
     // Built here (it needs the insert callback) and placed by item.js in the
     // Body section, under the textarea it writes into.
     imagePicker: createImagePicker(item, handle, insertIntoBody),
+    sourcePicker: createSourcePicker(item, handle, edit.body && edit.body.editable ? acceptSource : null),
   };
 }

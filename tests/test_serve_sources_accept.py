@@ -148,6 +148,55 @@ def test_an_accepted_value_resolves_with_no_cli_step_in_between(served):
     assert line.source_locked == "0.93", "the row is not evaluating the pinned number"
 
 
+def test_a_picked_value_saves_and_resolves_without_a_cli_step(served):
+    """Follow the panel's three reads and its one write through HTTP, then
+    inspect the refreshed item and served preview without running fetch."""
+    app, client, root = served
+    status, listed = client.api_get("/api/item/DEC-001/sources")
+    assert status == 200, listed
+    path = next(file["path"] for file in listed["files"] if file["browse"] == "rows")
+    status, rows = client.api_get(f"/api/item/DEC-001/sources/entries?path={path}&q=eff")
+    assert status == 200, rows
+    chosen = next(entry for entry in rows["entries"] if entry["key"] == "eff")
+    assert chosen["selectable"] and chosen["value"] == "0.93"
+
+    status, initial = client.api_get(
+        f"/api/item/DEC-001/sources/propose?path={path}&key={chosen['key']}"
+    )
+    assert status == 200 and not initial["complete"] and initial["line"] is None
+    status, proposal = client.api_get(
+        f"/api/item/DEC-001/sources/propose?path={path}&key={chosen['key']}&unit=1&name={initial['name']}"
+    )
+    assert status == 200 and proposal["complete"], proposal
+    status, before = client.api_get("/api/item/DEC-001")
+    assert status == 200, before
+    body = before["body"].replace("```\n", proposal["line"] + "\n```\n", 1)
+    assert proposal["line"] in body
+
+    status, saved = client.api_post(EDIT, {
+        "op": "set_body",
+        "text": body,
+        "expected_revision": before["edit"]["file_revision"],
+        "pin": [{
+            "path": proposal["path"], "key": proposal["key"],
+            "unit": proposal["unit"], "name": proposal["name"],
+        }],
+    })
+    assert status == 200, saved
+    assert saved["pinned"][0]["value"] == "0.93"
+    status, after = client.api_get("/api/item/DEC-001")
+    assert status == 200, after
+    assert proposal["line"] in after["body"]
+    page = app.preview.open_file([after["page"]])
+    assert page is not None
+    with page:
+        html = page.read().decode("utf-8")
+    table = html[html.index('<table class="calc"'):]
+    table = table[:table.index("</table>")]
+    assert 'class="calc-name">eff' in table
+    assert 'class="calc-result">0.93' in table
+
+
 def test_accept_of_an_unpinned_citation_pins_the_hash_and_the_value_in_one_record(
     tmp_path,
 ):

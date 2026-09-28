@@ -10,7 +10,7 @@ const memory = new Map();
 function emptyDraft() {
   // links are pending ops, not values: `add`/`remove` map verb -> targets,
   // and a target pending on one side is absent from the other (Slice 2).
-  return { revision: null, fields: {}, body: null, links: { add: {}, remove: {} } };
+  return { revision: null, fields: {}, body: null, pins: [], links: { add: {}, remove: {} } };
 }
 
 function key(handle) {
@@ -27,6 +27,7 @@ function load(handle) {
       revision: parsed.revision || null,
       fields: parsed.fields || {},
       body: parsed.body === undefined ? null : parsed.body,
+      pins: parsed.pins || [],
       links: { add: links.add || {}, remove: links.remove || {} },
     };
   } catch (_) {
@@ -72,6 +73,15 @@ export function setDraftField(handle, name, value) {
 export function setDraftBody(handle, text) {
   const draft = getDraft(handle);
   draft.body = text;
+  persist(handle, draft);
+  return draft;
+}
+
+export function addDraftPin(handle, pin) {
+  const draft = getDraft(handle);
+  if (!draft.pins.some((p) => p.path === pin.path && p.key === pin.key)) {
+    draft.pins.push(pin);
+  }
   persist(handle, draft);
   return draft;
 }

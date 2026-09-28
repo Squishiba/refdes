@@ -181,10 +181,12 @@ export async function renderItem(container, handle) {
     // rather than in the Edit block below (editor.js builds it; the draft it
     // writes is the same one a field edit uses).
     if (editor.imagePicker) body.appendChild(editor.imagePicker);
+    if (editor.sourcePicker) body.appendChild(editor.sourcePicker);
   } else {
     body.appendChild(el('pre', 'body-text', item.body || '(empty)'));
     const info = item.edit && item.edit.body;
     if (info && !info.editable) body.appendChild(el('p', 'badge readonly', info.reason));
+    if (editor.sourcePicker) body.appendChild(editor.sourcePicker);
   }
   container.appendChild(body);
   container.appendChild(editor.node);
