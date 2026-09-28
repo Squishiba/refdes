@@ -663,9 +663,19 @@ class PdfReader:
     extensions = (".pdf",)
 
     def extract(
-        self, path: Path, requests: Collection[SourceRequest]
+        self,
+        path: Path,
+        requests: Collection[SourceRequest],
+        *,
+        label: str | None = None,
     ) -> Mapping[str, ExtractedSource]:
-        label = path.as_posix()
+        # The keyword is the `SourceReader` protocol's, and every caller passes
+        # it -- `citations._extract_source_values` does, which is how a `source()`
+        # line naming a PDF reaches here. Refusing without accepting it would be
+        # a `TypeError` where the answer is a `SourceExtractionError`, and a
+        # caller serving a project-relative path is only allowed to say that
+        # name, never the server path it read these bytes from.
+        label = label if label else path.as_posix()
         keys = ", ".join(sorted({request.key for request in requests})) or "none"
         raise SourceExtractionError([
             f"{label}: the pdf reader does not extract values: a PDF's values "

@@ -26,10 +26,13 @@ from decimal import Decimal
 from pathlib import Path
 
 import pytest
+from conftest import write_project_config
 from helpers import pdf_bytes, pdf_page, pdf_run
 
 from refdes import citations as citations_mod
+from refdes import cli as cli_mod
 from refdes import sources
+from refdes.schema import load_project
 from refdes.sources import SourceExtractionError, SourceRequest
 
 # A min/typ/max table, laid out the way a datasheet lays one out: a label row
@@ -641,6 +644,80 @@ def test_the_pdf_reader_does_not_extract_a_value_or_list_a_key_table_yet(tmp_pat
         sources.list_entries(path, label="analysis/sheet.pdf")
     assert "a PDF has no key column" in str(info.value)
     assert str(tmp_path) not in str(info.value)
+
+
+# ------------------------------------------------- the fetch path (regression)
+#
+# `citations._extract_source_values` calls `reader.extract(..., label=...)`, and
+# every caller of it -- `refdes fetch`, the drift warning, and the editor's
+# accept -- goes through that one call site. `PdfReader.extract` was left on the
+# pre-`label` signature when `CsvReader.extract` gained the keyword, so a
+# `source()` line naming a `.pdf` raised `TypeError: PdfReader.extract() got an
+# unexpected keyword argument 'label'` out of the CLI instead of the reader's own
+# `SourceExtractionError`. A unit call without the keyword cannot see that, so
+# these go through the real caller.
+
+FETCH_CONFIG = """\
+site: { title: PDF source fetch, out: _site }
+types:
+  decision:
+    prefix: DEC
+    fields:
+      citations: { type: citations, on_change: invalidate }
+"""
+PDF_CITE = "datasheets/sheet.pdf"
+PDF_SOURCE = f'```calc\nP = source("{PDF_CITE}", "eff_typ") | 1\n```\n'
+
+
+def _fetch_project(tmp_path, *, body: str = PDF_SOURCE) -> str:
+    """A real project citing a real PDF, with one `source()` line naming it.
+
+    Returns the config path, so the test runs the real `refdes fetch`."""
+    write_project_config(tmp_path, FETCH_CONFIG)
+    (tmp_path / "datasheets").mkdir()
+    (tmp_path / "datasheets" / "sheet.pdf").write_bytes(pdf_bytes(TABLE))
+    items = tmp_path / "items"
+    items.mkdir()
+    (items / "a.md").write_text(
+        f"---\nid: DEC-001\ntype: decision\ncitations:\n  - path: {PDF_CITE}\n---\n\n"
+        f"{body}",
+        encoding="utf-8",
+    )
+    return str(tmp_path / "refdes-project.yaml")
+
+
+def test_a_pdf_cited_source_key_fails_fetch_as_a_source_error_not_a_crash(
+    tmp_path, capsys
+):
+    # The regression: `refdes fetch` on a `source()` line naming a PDF must come
+    # back as the reader's refusal -- a reported failure, exit 1, nothing pinned
+    # -- and not as an uncaught `TypeError` traceback out of `main`.
+    config = _fetch_project(tmp_path)
+    code = cli_mod.main(["-c", config, "fetch"])
+    err = capsys.readouterr().err
+    assert code == 1, err
+    assert "the pdf reader does not extract values" in err, err
+    assert "TypeError" not in err, err
+    assert not (tmp_path / ".refdes" / "citations.yaml").exists(), (
+        "the refusal still wrote a lockfile"
+    )
+
+
+def test_the_source_value_call_site_passes_its_label_to_the_pdf_reader(tmp_path):
+    # The accept path's call, made directly: `_extract_source_values` hands the
+    # reader `label=canon` so a browser-facing failure can never carry the
+    # server path it read the bytes from. The pdf reader has to honour that the
+    # way `list_entries` and `page_candidates` already do.
+    config = _fetch_project(tmp_path)
+    project = load_project(config_path=config)
+    with pytest.raises(SourceExtractionError) as info:
+        citations_mod._extract_source_values(
+            project, PDF_CITE, {"eff_typ": []}, label=PDF_CITE
+        )
+    message = str(info.value)
+    assert message.startswith(f"{PDF_CITE}: "), message
+    assert "the pdf reader does not extract values" in message
+    assert str(tmp_path) not in message, message
 
 
 # ------------------------------------------------------------------ multi-page
