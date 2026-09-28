@@ -221,7 +221,7 @@ reference while reviewing a PR diff.
 | `--board BOARD` | Only items on this board |
 | `--file PATH` | Only items declared in this source file |
 | `--tag TEXT` | Only items with a tag containing this text |
-| `QUERY ...` (positional, optional) | Free text, matched against title and `tags:`, case-insensitive. Zero or more words; the whole quoted string is the query, as in `refdes ls "current limit"` |
+| `QUERY ...` (positional, optional) | Free text, matched against the item's id, its title and `tags:`, case-insensitive. Zero or more words; the whole quoted string is the query, as in `refdes ls "current limit"` or `refdes ls req-sys-0` |
 
 ```bash
 refdes ls
@@ -245,6 +245,13 @@ retagging never invalidates anything downstream; that asymmetry is what
 makes it the right place to invest in findability, and what makes searching
 it (not just the title) worth having. `--tag` narrows to tag-only matching,
 for when that's specifically what's meant.
+
+The id is in the same haystack: `refdes ls REQ-SYS-001` finds that item, and
+so does a partial or lowercased id (`refdes ls req-sys-0`). Substring and
+case rules are identical to the title and tag matching — there is no
+exact-id-only mode. The query someone types immediately after `refdes id`
+prints a fresh id is that id, and before this `ls` answered it with
+"no items match".
 
 **`lint_own_tags: true`** in `refdes-project.yaml` (default off) warns on an
 item whose `tags:` are entirely inherited from its file's `defaults:` — as
