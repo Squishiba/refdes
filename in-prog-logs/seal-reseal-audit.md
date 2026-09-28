@@ -92,3 +92,8 @@ UTC timestamps are event metadata; the list's append order is retained.
 
 Implementation, docs, changelog and validation finished. PR publication is
 the remaining delivery step.
+
+## Delivery
+
+Committed the fix as `403eb2e`, pushed `royal-sheep`, and opened
+[PR #81](https://github.com/Squishiba/refdes/pull/81). Task finished.
