@@ -379,6 +379,145 @@ def test_an_edit_on_one_file_leaves_another_files_diagnostics_alone(project_root
     assert any("bogus" in d.message for d in result.diagnostics)
 
 
+def _counting_build(builds):
+    """`build()` wrapped to record that it ran, and what it was run on."""
+    real = build_mod.build
+
+    def counting(project, *args, **kwargs):
+        builds.append(len(project.items))
+        return real(project, *args, **kwargs)
+
+    return counting
+
+
+def test_a_clean_save_builds_the_project_once(project_root, monkeypatch):
+    """The before snapshot's `build()` is deferred to the gate, and a candidate
+    with no error to compare never asks for it: one save, one build. The second
+    full build was the most expensive line in a save and nothing reads what it
+    produces here -- `Applied.diagnostics` is the candidate's, and the gate
+    reads only `len(before.local_items)`, which the parse alone answers."""
+    path = target(project_root)
+    # REQ-002 is broken in the fixture on purpose; repair it first so this is a
+    # candidate the gate has nothing to compare.
+    assert isinstance(
+        edit_mod.apply_edit(
+            str(project_root), req(("REQ-002", SetField("status", "approved"), path))
+        ),
+        Applied,
+    )
+
+    builds = []
+    monkeypatch.setattr(build_mod, "build", _counting_build(builds))
+    result = edit_mod.apply_edit(
+        str(project_root), req(("REQ-001", SetField("text", "The rail shall supply 5 V."), path))
+    )
+
+    assert isinstance(result, Applied), result.message
+    assert len(builds) == 1, f"expected one build, got {len(builds)}: {builds}"
+
+
+def test_a_candidate_with_an_error_builds_the_before_snapshot_too(project_root, monkeypatch):
+    """The deferral is not a weakening of the gate: when the candidate carries
+    an error, the before snapshot gets the build it was only deferred, so the
+    comparison is against the same built diagnostics it always was."""
+    path = target(project_root)
+    builds = []
+    monkeypatch.setattr(build_mod, "build", _counting_build(builds))
+    result = edit_mod.apply_edit(
+        str(project_root), req(("REQ-001", SetField("status", "not-a-choice"), path))
+    )
+
+    assert isinstance(result, Invalid), result.message
+    assert len(builds) == 2, f"expected the candidate and the before build, got {builds}"
+
+
+def test_a_project_that_will_not_build_is_refused_as_the_project(project_root):
+    """A half-written `.refdes/citations.yaml` breaks `build()` and nothing in
+    the parse, so it used to fail in the eager before load and be refused as
+    "the project did not load". Now the before build happens after the
+    candidate load, and without the check in `_apply_locked` the refusal would
+    blame the edit for the project's own broken state -- the one word "edited"
+    is the difference between telling the author to fix their lockfile and
+    telling them to fix their sentence."""
+    path = target(project_root)
+    (project_root / ".refdes").mkdir(exist_ok=True)
+    (project_root / ".refdes" / "citations.yaml").write_text(
+        "citations: [ this is not : valid yaml\n", encoding="utf-8"
+    )
+
+    result = edit_mod.apply_edit(
+        str(project_root), req(("REQ-001", SetField("text", "The rail shall supply 5 V."), path))
+    )
+
+    assert isinstance(result, Refused), result.message
+    assert "the project did not load" in result.message, result.message
+    assert "the edited project" not in result.message, result.message
+    assert read(path) == REQS
+
+
+def test_a_deferred_build_that_raises_is_a_refusal_not_an_exception(project_root, monkeypatch):
+    """Same failure posture, asserted directly: a before snapshot whose build
+    raises comes back as `Refused`, in the words the eager load used to give,
+    and writes nothing.
+
+    This is the case the deferral cannot cover by reordering, because the build
+    is the only thing that finds it -- and an exception escaping `apply_edit` is
+    not a value. The HTTP face has no catch-all, so the browser would get a
+    closed connection where it used to get a refusal."""
+    path = target(project_root)
+    real = build_mod.build
+
+    def only_the_unoverlaid_tree_raises(project, *args, **kwargs):
+        if not getattr(project, "source_overlay", None):
+            raise RuntimeError("simulated build failure on the tree on disk")
+        return real(project, *args, **kwargs)
+
+    monkeypatch.setattr(build_mod, "build", only_the_unoverlaid_tree_raises)
+    result = edit_mod.apply_edit(
+        str(project_root), req(("REQ-001", SetField("status", "not-a-choice"), path))
+    )
+
+    assert isinstance(result, Refused), result.message
+    assert "the project did not load" in result.message, result.message
+    assert read(path) == REQS
+
+
+def test_a_clean_save_never_builds_the_snapshot_it_compares_against(project_root, monkeypatch):
+    """The one place the deferral is not byte-for-byte the old behaviour, said
+    out loud: work that is not done cannot fail.
+
+    A project that parses but will not build used to refuse every save, because
+    the before build ran first whatever the edit was -- including the edit that
+    would have fixed it. Now a candidate the gate has nothing to compare never
+    builds the on-disk snapshot, so that repair goes through. Narrow (it needs a
+    build failure the overlay does not share) and in the direction the delta
+    gate already faces, but it is a difference and not a free one."""
+    path = target(project_root)
+    # REQ-002 is broken in the fixture on purpose, and a pre-existing error is
+    # one the gate has something to compare: repair it first, or this is not the
+    # clean candidate the before build is skipped for.
+    assert isinstance(
+        edit_mod.apply_edit(
+            str(project_root), req(("REQ-002", SetField("status", "approved"), path))
+        ),
+        Applied,
+    )
+    real = build_mod.build
+
+    def only_the_unoverlaid_tree_raises(project, *args, **kwargs):
+        if not getattr(project, "source_overlay", None):
+            raise RuntimeError("simulated build failure on the tree on disk")
+        return real(project, *args, **kwargs)
+
+    monkeypatch.setattr(build_mod, "build", only_the_unoverlaid_tree_raises)
+    result = edit_mod.apply_edit(
+        str(project_root), req(("REQ-001", SetField("text", "The rail shall supply 5 V."), path))
+    )
+
+    assert isinstance(result, Applied), result.message
+    assert "The rail shall supply 5 V." in read(path)
+
+
 # --------------------------------------------------------------- refusals
 
 

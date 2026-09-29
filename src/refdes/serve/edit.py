@@ -16,8 +16,10 @@ journal, which is a later slice):
 1. take the per-project write lock, so two applies in one process cannot
    interleave;
 2. resolve the item and its file through the side-effect-free load
-   (`loader.load_readonly`), which is also where the before-diagnostics come
-   from;
+   (`loader.load_tree`, read-only), which is also where the before-diagnostics
+   come from -- its `build()` deferred, because the only thing that reads the
+   before snapshot's build output is step 6's gate, and only when the candidate
+   has an error to compare (`_load_before`);
 3. compare the file's current content revision with the `expected_revision`
    the client saw. A mismatch is a `Conflict`: the current span text and a
    unified diff of the draft against disk come back, and **nothing is merged**
@@ -27,7 +29,8 @@ journal, which is a later slice):
 5. plan the edit with `patcher`, whose own fidelity proof means a `Refusal`
    here is the patcher saying "I cannot bound this edit" -- also a result;
 6. run the **delta** diagnostic gate: load the whole project again with the
-   candidate text as a source overlay and compare error sets. Only a *newly
+   candidate text as a source overlay and compare error sets -- building the
+   before snapshot now, and only now, if the candidate has an error at all. Only a *newly
    introduced* error blocks, or a pre-existing error attributed to the field
    or body being edited and still present. An unrelated pre-existing error on
    an already-broken item never blocks the repair that is the reason the
@@ -64,6 +67,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from typing import Any
 
+from .. import build as build_mod
 from .. import citations as citations_mod
 from .. import dates, ids, keys, links, loader, patcher, scaffold, seal, textio
 from ..model import (
@@ -266,10 +270,62 @@ def apply_edit(project_root: str, request: EditRequest):
         return _apply_locked(config, request)
 
 
+def _load_before(config: str, *, full: bool) -> tuple[Project, bool]:
+    """The project as it stands on disk, with `build()` deferred.
+
+    `loader.load_readonly` is `load_tree` + `build`, and everything the before
+    snapshot is read for *before* the candidate is loaded -- resolving the item,
+    its file and its revision, the imported and sealed refusals, the link-target
+    resolution -- is config, parse and import state, which `load_tree`
+    produces in full. (`seal.is_sealed` is the instructive one: it walks every
+    declared board precisely because board resolution has not happened yet in
+    the load path it was written for.) Build output is read off the before
+    snapshot in two places only: the accept's re-validation, which reads the
+    item's evaluated calc lines, and the delta gate's error set.
+
+    So `full` -- an accept -- keeps the eager `load_readonly`, and an ordinary
+    save takes the unbuilt snapshot and gets its build at the gate, if the gate
+    needs one at all. The accept keeps it eager for a second reason too:
+    `_accept_pins` writes `.refdes/citations.yaml`, which a build reads, so a
+    build of `before` deferred past that write would not be the same build.
+
+    `create_item` does not use this at all -- see the note in `_create_locked`
+    on the board it suggests a destination from.
+
+    Returns `(project, built)`; `built` says whether the build already ran.
+    A build that this defers still has to be able to fail the same way it did
+    inside `load_readonly` -- see `_build_before`.
+    """
+    if full:
+        return loader.load_readonly(config), True
+    project, _stale = loader.load_tree(config, require_ids=False, write=False)
+    return project, False
+
+
+def _build_before(project: Project) -> str | None:
+    """Run the before snapshot's deferred build; return None, or the reason.
+
+    `loader.load_readonly` built the snapshot it was handed, and the call that
+    used it sat in a `try/except Exception` that turned any failure into
+    `Refused("the project did not load: ...")`. Deferring the build past that
+    handler would let a project that parses but will not build -- a half-written
+    `.refdes/citations.yaml`, a history event that is not YAML, an image file
+    the renderer cannot open -- raise out of `apply_edit` instead, and the HTTP
+    face has no catch-all: the connection would close with no response at all.
+    Authoring outcomes are values, so it comes back as the same refusal, in the
+    same words.
+    """
+    try:
+        build_mod.build(project, seal_write=False, reseal=False)
+    except Exception as exc:  # noqa: BLE001 - same posture as the load above
+        return f"the project did not load: {type(exc).__name__}: {exc}"
+    return None
+
+
 def _apply_locked(config: str, request: EditRequest):
     who, ref = request.who, request.ref
     try:
-        before = loader.load_readonly(config)
+        before, before_built = _load_before(config, full=bool(request.pins))
     except Exception as exc:  # noqa: BLE001 - a project that will not load is a result
         return Refused(who, ref, f"the project did not load: {type(exc).__name__}: {exc}")
 
@@ -335,9 +391,28 @@ def _apply_locked(config: str, request: EditRequest):
         after = loader.load_readonly(config, overlay={path: new_text})
     except Exception as exc:  # noqa: BLE001 - a candidate that will not load is a result
         _undo_accept(accept)
+        # The before snapshot's build is deferred to below this point, so a
+        # project that will not build at all now fails here first -- and what it
+        # fails on has nothing to do with the edit. Ask the unedited tree
+        # whether it builds, and if it does not, say that instead: one extra
+        # build, on a path that is already refusing.
+        if not before_built:
+            failure = _build_before(before)
+            if failure is not None:
+                return Refused(who, ref, failure)
         return Refused(
             who, ref, f"the edited project did not load: {type(exc).__name__}: {exc}", path=path
         )
+
+    # The gate compares the candidate's error set against the before snapshot's,
+    # and only ever reads that set off `before`. With nothing to compare it
+    # reads `len(before.local_items)` and nothing else, so the before build --
+    # the other half of what a `load_readonly` costs -- runs here rather than
+    # at the top of the function, and not at all on a clean candidate.
+    if not before_built and _has_gate_errors(after):
+        failure = _build_before(before)
+        if failure is not None:
+            return Refused(who, ref, failure)
 
     blocking = _blocking_diagnostics(before, after, item, request.op)
     if blocking:
@@ -635,6 +710,18 @@ def _errors(project: Project) -> dict[tuple, Any]:
     return out
 
 
+def _has_gate_errors(project: Project) -> bool:
+    """Whether `project` carries an error the delta gate would compare --
+    `_errors`' own filter as a predicate, including its exclusion of failing
+    engineering checks. The gate iterates the candidate's error set and looks
+    each one up in the before snapshot's, so a candidate with no such error
+    never reads the before snapshot's diagnostics, and the before snapshot
+    needs no build to answer for it."""
+    return any(
+        d.level == "error" and d.code != CHECK_VIOLATION for d in project.diagnostics
+    )
+
+
 def _attributed(d, item: Item, op: Any) -> bool:
     """Whether a pre-existing error on the edited item belongs to the field or
     body this edit touches."""
@@ -826,6 +913,12 @@ def create_item(project_root: str, request: CreateRequest):
 def _create_locked(config: str, request: CreateRequest):
     who = request.who
     try:
+        # Eager, unlike `apply_edit`'s before snapshot: `_resolve_destination`
+        # suggests a destination by `item.board`, and `item.board` is assigned by
+        # `boards.resolve()`, which is a build step -- an unbuilt snapshot has
+        # every item on no board, and a creation with a `board:` field would be
+        # offered a different file. `_load_before`'s deferral is only sound where
+        # nothing reads build output off the snapshot.
         before = loader.load_readonly(config)
     except Exception as exc:  # noqa: BLE001 - a project that will not load is a result
         return Refused(who, "", f"the project did not load: {type(exc).__name__}: {exc}")
