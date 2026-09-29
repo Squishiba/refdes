@@ -324,7 +324,8 @@ link survives a Linux CI checkout — absolute paths, drive letters,
 backslashes, `..` escapes, symlinks pointing out of the project, and
 `keep_copy:` on a local path are all refused, never guessed. A local file that
 changed since it was pinned is a warning naming every citer (review, then
-`refdes fetch --update --path <path>`), an error with `--require-citations`;
+`refdes fetch --update --path <path>`), an error with
+`refdes build --require-citations`;
 a cited file that doesn't exist is an error, always.
 
 ### Citing a section by name
@@ -431,16 +432,18 @@ datasheets are generally copyrighted, so "pinned but not kept" (hash-only)
 is a complete mode on its own, not a fallback. Citing the same remote path with
 inconsistent `keep_copy:` flags across items is a warning.
 
-**Verification**, checked at every `build` and `check`, offline:
+**Verification**, checked at every `build` and `check`, offline. Both commands report
+the same severities; only `build` can escalate them, so the soft rows below stay
+warnings at `check` and never fail it:
 
 | Situation | Severity |
 |---|---|
-| No lockfile entry for a cited path | info (error with `--require-citations`) — routine until `refdes fetch` runs, so it's hidden unless `-v`/`--verbose` |
-| `keep_copy: true`, but the local blob is missing | warning (error with `--require-citations`) |
+| No lockfile entry for a cited path | info (error with `refdes build --require-citations`) — routine until `refdes fetch` runs, so it's hidden unless `-v`/`--verbose` |
+| `keep_copy: true`, but the local blob is missing | warning (error with `refdes build --require-citations`) |
 | The local blob's hash no longer matches its recorded sha256 | **error, always** |
 | A cited local file doesn't exist | **error, always** |
-| A cited local file changed since it was pinned | warning naming every citer (error with `--require-citations`) |
-| A `section:` with no resolved page in the lockfile — never fetched, or fetched without `refdes[pdf]` installed | warning naming every citer (error with `--require-citations`) |
+| A cited local file changed since it was pinned | warning naming every citer (error with `refdes build --require-citations`) |
+| A `section:` with no resolved page in the lockfile — never fetched, or fetched without `refdes[pdf]` installed | warning naming every citer (error with `refdes build --require-citations`) |
 
 The hash-mismatch case is never soft-failed — a corrupted or tampered local
 cache is not something `--require-citations` or its absence should decide.
