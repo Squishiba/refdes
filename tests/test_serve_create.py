@@ -20,7 +20,7 @@ import pytest
 from conftest import write_project_config
 
 from refdes import build as build_mod
-from refdes import dates, parse
+from refdes import dates, loader, parse
 from refdes.schema import load_project
 from refdes.serve import edit as edit_mod
 from refdes.serve.edit import Created, Invalid, Refused, create_item
@@ -971,6 +971,67 @@ def test_destination_is_suggested_from_the_type_and_overridable(project_root):
     )
     assert isinstance(result, Created), result.message
     assert result.path.replace("\\", "/").endswith("items/decs.yaml")
+
+
+def test_a_board_field_suggests_a_file_already_on_that_board(tmp_path):
+    """A `board:` among the fields steers the suggested destination to a file
+    already on that board, even when another file holds more items of the type
+    -- and the create lands where the preview said it would.
+
+    The suggestion reads `item.board`, which `boards.resolve()` assigns during a
+    build. That is why `create_item`'s before snapshot is a full `load_readonly`
+    while `apply_edit`'s defers its build: on an unbuilt snapshot every item is
+    on no board, the board preference silently degrades to the overall
+    most-common file, and the form's preview and the save disagree about where
+    the item goes."""
+    root = tmp_path
+    two_boards = SCHEMA.replace(
+        'boards:\n  board-a:\n    label: "Board A"\n',
+        'boards:\n  board-a:\n    label: "Board A"\n  board-b:\n    label: "Board B"\n',
+    )
+    write_project_config(root, two_boards)
+    items = root / "items"
+    items.mkdir()
+    (items / "many-b.yaml").write_text(
+        "defaults: { type: requirement, board: board-b }\n"
+        "items:\n"
+        "  - id: REQ-101\n    text: On B.\n"
+        "  - id: REQ-102\n    text: On B.\n"
+        "  - id: REQ-103\n    text: On B.\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    (items / "few-a.yaml").write_text(
+        "defaults: { type: requirement, board: board-a }\n"
+        "items:\n  - id: REQ-001\n    text: On A.\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    many = read(items / "many-b.yaml")
+
+    built = loader.load_readonly(str(root / "refdes-project.yaml"))
+    assert edit_mod.suggest_destination(built, "requirement") == "items/many-b.yaml"
+    assert (
+        edit_mod.suggest_destination(built, "requirement", board="board-a")
+        == "items/few-a.yaml"
+    )
+    # the form's promise and the save have to agree, or the preview lies
+    assert (
+        edit_mod.preview_creation(built, "requirement", board="board-a")["destination"]
+        == "items/few-a.yaml"
+    )
+
+    result = create_item(
+        str(root),
+        edit_mod.CreateRequest(
+            who="t", type="requirement", fields={"text": "New on A.", "board": "board-a"}
+        ),
+    )
+
+    assert isinstance(result, Created), result.message
+    assert result.path.replace("\\", "/") == (items / "few-a.yaml").as_posix()
+    assert "New on A." in read(items / "few-a.yaml")
+    assert read(items / "many-b.yaml") == many
 
 
 # ---------------------------------------------------------------- HTTP face
