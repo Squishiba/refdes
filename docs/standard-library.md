@@ -309,11 +309,27 @@ no refdes-aware watcher can hit.
 **Getting an editor to actually use it**, for `items/**/*.yaml` list files:
 
 ```json
-// .vscode/settings.json -- refdes init writes this for you
+// .vscode/settings.json -- what `refdes init` writes, with your own
+// project's absolute schema path filled in
 {
-  "yaml.schemas": { "./.refdes/schema.json": ["items/**/*.yaml"] }
+  "yaml.schemas": {
+    "/home/you/widget/.refdes/schema.json": ["items/**/*.yaml"]
+  }
 }
 ```
+
+That path is absolute, not the `./.refdes/schema.json` one might expect, and
+deliberately so: `redhat.vscode-yaml` does not reliably scope a relative
+schema path to the workspace folder that declared it, so two refdes projects
+open in one VS Code session — a multi-root workspace, or simply switching
+folders without a full reload — could validate one project's files against
+the other's schema, and two projects' schemas can differ arbitrarily. An
+absolute path names one file. The price is that the file is machine-specific,
+so `refdes init` adds `.vscode/settings.json` to the project's `.gitignore`
+rather than leaving one developer's home directory for every other clone to
+inherit; editor settings you *mean* to share belong in a file you write
+yourself. Where `.vscode/settings.json` already exists `init` leaves it
+untouched and prints the exact `"yaml.schemas"` line to add by hand.
 
 This is `redhat.vscode-yaml` (the de facto YAML language server for VS
 Code) reading a standard setting; the refdes extension declares it as an

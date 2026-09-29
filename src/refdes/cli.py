@@ -834,8 +834,13 @@ def cmd_init(args) -> int:
         )
     standard = None if args.standard == "none" else args.standard
     presets = list(args.preset or [])
-    path = scaffold_mod.init(os.getcwd(), standard=standard, presets=presets)
-    rel = os.path.relpath(path, os.getcwd()).replace("\\", "/")
+    cwd = os.getcwd()
+    # Asked before init runs: afterwards .vscode/settings.json is there either
+    # way, and nothing distinguishes the file init wrote from the one it left
+    # alone -- and that skip used to print nothing at all (user-sim run 2, BUG 3).
+    skipped_vscode_settings = scaffold_mod.vscode_settings_exists(cwd)
+    path = scaffold_mod.init(cwd, standard=standard, presets=presets)
+    rel = os.path.relpath(path, cwd).replace("\\", "/")
     print(f"wrote {rel}")
     if standard is not None:
         version = standards.latest_version(standard)
@@ -843,6 +848,8 @@ def cmd_init(args) -> int:
         print(f"standard: {standard}@{version}{preset_note}")
     else:
         print("standard: none -- types:/link_types: are yours to declare")
+    if skipped_vscode_settings:
+        print(scaffold_mod.vscode_settings_note(cwd))
     print(
         "candidate parts live in items/<board>/candidates.yaml -- "
         f"{DOCS_URL}/parts.html#candidate-parts-the-recommended-layout"
