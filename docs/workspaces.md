@@ -182,7 +182,13 @@ workspace: product-a
 
 ```bash
 refdes check --workspace product-a
+refdes ls --workspace product-a
 ```
+
+`ls` takes the flag for the same reason: "what's in product-a?" is the first
+question a workspace invites, and the listing command could previously ask
+about a board, a type, a file or a tag — but not a workspace, even though
+`index --compact` had been exporting one per item all along.
 
 Same report-filter posture as `--board`, and combinable with it: the whole
 project still parses and every link still resolves — a decision in one
