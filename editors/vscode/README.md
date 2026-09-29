@@ -169,6 +169,11 @@ No build step — it is plain JavaScript. Open `editors/vscode/` in VS Code and 
 <kbd>F5</kbd>; a second window opens with the extension loaded. Open a folder
 containing a `refdes-project.yaml` in that window.
 
+There is no automated or headless test coverage for this extension, so checking
+the features above means exercising them in a real VS Code instance; reading
+`extension.js` can show the pieces are wired together, but it is not the same
+as having watched them work.
+
 ## Licence
 
 MIT.
