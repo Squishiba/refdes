@@ -12,6 +12,29 @@ refdes [-V] [-c CONFIG] [--no-write] {serve,build,check,revision,release,index,l
 
 Exit codes: `0` success, `1` errors found, `2` configuration error (including `--no-write` refusal).
 
+One case the two non-zero codes do not divide cleanly, worth knowing before you
+branch on it: **an argument naming something that does not exist** — an item id,
+a baseline, a preset, a type, a file. Each command decides for itself, and its
+section above or below is the authority; today the split is:
+
+| You named | Command | Exit |
+|---|---|---|
+| an item that is not in the project | `history capture`, `history redact` | `2` |
+| a preset the pinned standard lacks, or one not selected | `standard add-preset`, `standard remove-preset` | `2` |
+| a mapping file that is not on disk | `revise` | `2` |
+| a revision name that is not a usable name | `revision`, `release` | `2` |
+| a base standard or preset that does not exist | `init` | `2` |
+| an item that is not in the project, or one with no `citations:` field; a path nothing cites | `fetch --item`, `fetch --path` | `1` |
+| a baseline that was never stamped | `former-ids propose --baseline` | `1` |
+| a type the merged schema does not declare | `new`, `schema --graph` | `1` |
+| a board or workspace that is not declared | `check --board`, `check --workspace`, `build --reseal` | `1` |
+
+The `1` rows are not one rule applied consistently: the last of them reports
+through the ordinary `ERROR <project> — …` diagnostic channel, where `1` is the
+only code a diagnostic gets. Treat any non-zero as failure unless you have
+read the specific command's section. `refdes ls --board nosuchboard` is the one
+command that reports a name nobody declared as `no items match` and exits `0`.
+
 ---
 
 ## `refdes build`
@@ -366,6 +389,22 @@ A `section:` that cannot be resolved is reported as its own `FAILED` line and
 makes the exit code nonzero, even though the pin itself succeeded — see
 [citing a section by name](markdown.md#citing-a-section-by-name) for the six
 things that can go wrong and what each one says.
+
+An `--item`/`--path` that names nothing is not a failed fetch: nothing is
+requested, nothing is pinned, and the refusal is a single line rather than a
+`FAILED` entry. It exits `1`.
+
+```bash
+refdes fetch --item NOPE-1
+error: no item 'NOPE-1' in this project
+```
+
+The three refusals are `--item` naming no item in the project, `--item` naming
+an item that declares no `citations:` field, and `--path` no citation in the
+project cites. `refdes history capture` answers the same-looking mistake with
+exit `2` instead; the table under exit codes at the top of this file lists which
+commands do which, because a script that branches on the difference cannot
+derive it from `1`/`2` alone.
 
 ---
 
