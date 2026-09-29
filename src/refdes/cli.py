@@ -1585,8 +1585,12 @@ def main(argv: list[str] | None = None) -> int:
         help="run the readiness gate and stamp a baseline if it passes",
         description="Run the full readiness gate (release_gate: in "
         "refdes-project.yaml) and stamp .refdes/baselines/<name>.yaml only "
-        "if every enabled rule passes. On failure, nothing is written and "
-        "the blocking rules are printed. Running this when the project "
+        "if every enabled rule passes. The eight rules are draft_items, "
+        "unpinned_citations, missing_kept_copies, uncovered_requirements, "
+        "unverified_requirements, info_check_failures, "
+        "unaccepted_board_moves, and unaccepted_workspace_moves. On failure, "
+        "nothing is written and the blocking rules are printed. Running this "
+        "when the project "
         "isn't ready *is* the check -- there is no --dry-run. Takes exactly "
         "one argument (the name); the global --no-write flag is accepted to "
         "report what would be stamped without writing.",
@@ -1770,8 +1774,9 @@ def main(argv: list[str] | None = None) -> int:
         "and carries content hashes forward in every stamped baseline and "
         "seal so the rename doesn't look like a content change. Never "
         "merges steps: a multi-version jump is always applied as its full "
-        "chain of individual deltas, in order. Refuses (rolling back "
-        "cleanly) rather than guessing at an ambiguous or ill-formed step.",
+        "chain of individual deltas, in order. Refuses the failing step, "
+        "rolling it back cleanly rather than guessing at an ambiguous or "
+        "ill-formed one; earlier steps in the chain stay applied.",
     )
     p_standard_upgrade.add_argument(
         "--to", type=int, required=True, metavar="N",
