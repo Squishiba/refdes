@@ -60,7 +60,7 @@ import os
 import re
 import threading
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
 from typing import Any
 
@@ -776,7 +776,14 @@ class CreateRequest:
     `amends` names a sealed log entry this new entry corrects -- the sealed
     entry itself is never touched, the correction is pure creation with an
     `amends:` composite (docs/design/living-notes.md, "corrections are new
-    entries"). `who` is the same permissions seam as `EditRequest`."""
+    entries"). `links` maps a declared link verb to the one or more targets
+    it should carry at creation -- the generalisation of `amends`, which is
+    the same mechanism with the verb spelled for it (Slice 2's link adds,
+    applied while the item does not exist yet). Targets are refs as the
+    client knows them: display id, surrogate key, or a `DISPLAY@key`
+    composite; the composite that lands on disk is re-derived server-side
+    under the write lock, never taken from the request. `who` is the same
+    permissions seam as `EditRequest`."""
 
     who: str
     type: str
@@ -784,6 +791,7 @@ class CreateRequest:
     id: str | None = None
     destination: str | None = None
     amends: str | None = None
+    links: dict[str, list[str]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -865,6 +873,21 @@ def _create_locked(config: str, request: CreateRequest):
         if reason is not None:
             return Refused(who, new_id, reason)
         link_lines.append(line)
+
+    # Every other verb the type declares, resolved the same way and in the
+    # same locked breath: nothing is written unless all of it resolves, so an
+    # item never lands with half the links its creation asked for.
+    extra_links, reason = _link_lines(before, spec, request.links)
+    if reason is not None:
+        return Refused(who, new_id, reason)
+    if request.amends and "amends" in (request.links or {}):
+        return Refused(
+            who,
+            new_id,
+            "'amends' was requested twice -- once as `amends:` and once in "
+            "`links:`; one creation writes each verb once",
+        )
+    link_lines.extend(extra_links)
 
     body, reason = _item_lines(spec, fields, link_lines, inherited=frozenset(dest_defaults))
     if reason is not None:
@@ -1148,6 +1171,87 @@ def _amends_line(project: Project, spec, ref: str):
             "identity the link is for"
         )
     return f"amends: [{composite}]", None
+
+
+def _link_target(project: Project, verb: str, ref: str, allowed: list[str]):
+    """One creation link target -> the composite to write, or a reason.
+
+    The spellings accepted are the ones `_resolve_link_op` accepts for an
+    ordinary link add -- the `project.items` handle, the display id, the key
+    -- plus a `DISPLAY@key` composite a client already resolved as far as it
+    could: the key half is what resolves (docs/design/keys.md §3), the label
+    half is only a label. Either way the text returned is
+    `links.composite_for`'s own output, so a composite the client got wrong
+    (or stale) cannot reach the disk."""
+    target = _find_item(project, ref)
+    if target is None and "@" in ref:
+        target = project.items.get(ref.partition("@")[2])
+    if target is None:
+        return None, f"no item {ref!r} in this project to link to with '{verb}'"
+    if not project.accepts_type(target.type, allowed):
+        wants = "any declared type" if not allowed else "targets of type " + ", ".join(allowed)
+        return None, f"'{verb}' accepts {wants}; {target.id} is a {target.type}"
+    composite = links.composite_for(target)
+    if composite is None:
+        return None, (
+            f"{target.id} carries no artifact key, so no DISPLAY-ID@key composite "
+            "can be written for it; linking it with a bare id would drop the "
+            "identity the link is for"
+        )
+    return composite, None
+
+
+def _link_lines(project: Project, spec, links_map):
+    """The link lines for a new item, for any verb the type declares --
+    `_amends_line` generalised, and resolved by the same rules the edit
+    route's `AddLink` uses (`_resolve_link_op`): the verb must be declared,
+    every target must exist and be of a type the verb accepts, and what is
+    written is always the `DISPLAY-ID@key` composite. Anything that does not
+    resolve is a reason, which refuses the whole creation -- the same
+    posture `_amends_line` has, and the reason this runs before a byte is
+    planned rather than as a follow-up edit.
+
+    One line per verb, in the flow-sequence spelling the standard's own items
+    write (`addresses: [REQ-PWR-001@…, REQ-PWR-002@…]`), so one target and
+    five targets are spelled the same way `amends:` already spells one."""
+    if not links_map:
+        return [], None
+    if not isinstance(links_map, dict):
+        return None, "links must be an object mapping link verbs to lists of target refs"
+    lines: list[str] = []
+    for verb, targets in links_map.items():
+        if not isinstance(verb, str) or not verb.strip():
+            return None, "every links: key must be a link verb name"
+        if not isinstance(targets, list) or not targets:
+            return None, (
+                f"links {verb!r} needs a non-empty list of target refs "
+                "(a display id, surrogate key, or DISPLAY@key composite each)"
+            )
+        if verb not in spec.links:
+            declared = ", ".join(sorted(spec.links)) or "no links at all"
+            return None, f"{spec.name} does not declare the link {verb!r}; it declares {declared}"
+        allowed = spec.links[verb]
+        composites: list[str] = []
+        for ref in targets:
+            if not isinstance(ref, str) or not ref.strip():
+                return None, f"links {verb!r} needs non-empty target refs"
+            composite, reason = _link_target(project, verb, ref.strip(), allowed)
+            if reason is not None:
+                return None, reason
+            # Compared on the resolved composite, not the spelling sent, so
+            # `REQ-001`, its bare key and the composite are one target asked
+            # for twice -- which is what the edit route already refuses with
+            # "item X already links Y" (`patcher.py`). A new item is the one
+            # place there is no existing line to refuse against, so the
+            # request itself is where the duplicate has to be caught.
+            if composite in composites:
+                return None, (
+                    f"links {verb!r} names {composite.partition('@')[0]} twice; "
+                    "one creation links each target once"
+                )
+            composites.append(composite)
+        lines.append(f"{verb}: [{', '.join(composites)}]")
+    return lines, None
 
 
 def _item_lines(spec, fields: dict, link_lines: list[str], inherited: frozenset = frozenset()):
