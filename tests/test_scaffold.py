@@ -7,10 +7,13 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import shutil
+import subprocess
 
 import pytest
 from conftest import write_project_config
-from helpers import _build_at_repo_schema
+from helpers import REPO, _build_at_repo_schema
 
 from refdes import cli as cli_mod
 from refdes import parse, standards
@@ -129,6 +132,179 @@ def test_init_two_projects_get_disambiguated_schema_paths(tmp_path):
     key_a = next(iter(settings_a["yaml.schemas"]))
     key_b = next(iter(settings_b["yaml.schemas"]))
     assert key_a != key_b, "two projects produced the identical, collision-prone schema key"
+
+
+# ---------------- the consequences of that absolute path (user-sim run 2, BUG 3)
+#
+# The absolute path above is right; what was missing is everything that
+# follows from it: the file it lands in is machine-specific, so it must not
+# look committable; the docs must show what is actually emitted; and a
+# settings file that was already there must not be skipped without a word.
+
+
+def test_init_gitignores_the_vscode_settings_it_writes(tmp_path):
+    scaffold_mod.init(str(tmp_path))
+    assert ".vscode/settings.json" in (
+        tmp_path / ".gitignore"
+    ).read_text(encoding="utf-8").splitlines()
+
+
+def test_init_vscode_settings_is_ignored_by_git(tmp_path):
+    """The claim in git's own terms rather than as a substring of a file: a
+    fresh `refdes init` leaves no committable file holding one machine's
+    absolute path. Before the fix this probe exited 1 -- not ignored -- and
+    `git status` listed `?? .vscode/`."""
+    git = shutil.which("git")
+    if git is None:
+        pytest.skip("git is not on PATH")
+    proj = tmp_path / "proj"
+    scaffold_mod.init(str(proj))
+    subprocess.run([git, "init", "-q", str(proj)], check=True)
+
+    probe = subprocess.run(
+        [git, "-C", str(proj), "check-ignore", ".vscode/settings.json"],
+        capture_output=True,
+        text=True,
+    )
+    assert probe.returncode == 0, "git does not ignore .vscode/settings.json"
+    assert probe.stdout.strip() == ".vscode/settings.json"
+
+    status = subprocess.run(
+        [git, "-C", str(proj), "status", "--porcelain"],
+        capture_output=True,
+        text=True,
+    )
+    assert ".vscode" not in status.stdout
+
+
+def test_init_ignores_the_file_not_the_whole_vscode_directory(tmp_path):
+    """`.vscode/tasks.json` and friends are shareable -- this repo commits its
+    own -- so the entry names one file. A directory-wide ignore would forbid
+    committing anything else a project wants in `.vscode/`."""
+    scaffold_mod.init(str(tmp_path))
+    gitignore = (tmp_path / ".gitignore").read_text(encoding="utf-8")
+    patterns = [
+        line.strip()
+        for line in gitignore.splitlines()
+        if line.strip() and not line.strip().startswith("#")
+    ]
+    assert patterns == [".vscode/settings.json"]
+
+
+def test_init_keeps_an_existing_gitignore_and_adds_the_entry_once(tmp_path):
+    (tmp_path / ".gitignore").write_text("_site/\n.refdes/copies/\n", encoding="utf-8")
+    scaffold_mod.init(str(tmp_path))
+    text = (tmp_path / ".gitignore").read_text(encoding="utf-8")
+    assert text.startswith("_site/\n.refdes/copies/\n")
+    assert text.count(".vscode/settings.json") == 1
+
+
+def test_init_appends_with_the_existing_gitignore_line_ending(tmp_path):
+    (tmp_path / ".gitignore").write_bytes(b"_site/\r\n")
+    scaffold_mod.init(str(tmp_path))
+    raw = (tmp_path / ".gitignore").read_bytes()
+    assert b"\r\n\r\n# Written by `refdes init`" in raw
+    assert raw.count(b"\n") == raw.count(b"\r\n"), "appended block grew an LF island"
+
+
+@pytest.mark.parametrize(
+    "covering",
+    [
+        ".vscode/settings.json",
+        "/.vscode/settings.json",
+        "**/.vscode/settings.json",
+        ".vscode",
+        ".vscode/",
+        "/.vscode/",
+        "**/.vscode/",
+        # an explicit negation is also the project having already decided:
+        # git takes the last match, so appending ours would out-rank it
+        "!.vscode/settings.json",
+    ],
+)
+def test_init_leaves_a_gitignore_that_already_addresses_it_untouched(tmp_path, covering):
+    (tmp_path / ".gitignore").write_text(f"{covering}\n", encoding="utf-8")
+    scaffold_mod.init(str(tmp_path))
+    assert (tmp_path / ".gitignore").read_text(encoding="utf-8") == f"{covering}\n"
+
+
+def test_init_adds_the_entry_for_an_unrelated_similar_pattern(tmp_path):
+    """Guards the coverage check against matching on substring rather than
+    on a whole pattern line."""
+    (tmp_path / ".gitignore").write_text(".vscodeignore\n", encoding="utf-8")
+    scaffold_mod.init(str(tmp_path))
+    assert ".vscode/settings.json" in (
+        tmp_path / ".gitignore"
+    ).read_text(encoding="utf-8").splitlines()
+
+
+def test_init_writes_no_gitignore_entry_when_it_wrote_no_vscode_settings(tmp_path):
+    """The entry exists because `init` wrote a machine-specific file. With
+    nothing written there is nothing of ours to ignore."""
+    scaffold_mod.init(str(tmp_path), write_vscode_settings=False)
+    assert not (tmp_path / ".vscode").exists()
+    assert not (tmp_path / ".gitignore").exists()
+
+
+def test_cli_notes_an_existing_vscode_settings_file_instead_of_skipping_silently(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".vscode").mkdir()
+    before = '{\n  // hand-written, and comments are legal here\n  "editor.formatOnSave": true\n}\n'
+    (tmp_path / ".vscode" / "settings.json").write_text(before, encoding="utf-8")
+
+    assert cli_mod.main(["init"]) == 0
+    out = capsys.readouterr().out
+
+    assert "note: .vscode/settings.json already exists; left it alone" in out
+    assert "yaml.schemas" in out and "schema completion" in out
+    # the real absolute path, not a `<path>` placeholder: the line is
+    # paste-ready into the file the note names. Normalised through abspath on
+    # this side too, because init's path comes from os.getcwd() -- which on
+    # Windows hands back the long form of an 8.3 temp directory.
+    assert ".refdes/schema.json" in out
+    assert os.path.abspath(str(tmp_path)).replace("\\", "/") in out
+    assert "<path>" not in out
+
+    # the file is byte-for-byte what it was. init does not merge into a file
+    # it does not own -- .vscode/settings.json is JSONC, so a comment-
+    # preserving merge is a parser rather than a patch, and a merge would
+    # write a machine-specific path into a file the author may already track.
+    assert (tmp_path / ".vscode" / "settings.json").read_text(encoding="utf-8") == before
+    # and nothing of ours was written, so no .gitignore entry either
+    assert not (tmp_path / ".gitignore").exists()
+
+
+def test_cli_prints_no_skip_note_when_it_wrote_the_settings_file(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    assert cli_mod.main(["init"]) == 0
+    assert "already exists" not in capsys.readouterr().out
+
+
+def test_docs_show_the_absolute_schema_path_init_actually_emits():
+    """docs/standard-library.md showed `"./.refdes/schema.json"` under "refdes
+    init writes this for you" while the code emits an absolute path (user-sim
+    run 2, BUG 3). Same gate as test_docs_examples.py runs on the generated
+    type examples: the page must agree with what the tool does."""
+    with open(os.path.join(REPO, "docs", "standard-library.md"), encoding="utf-8") as fh:
+        doc = fh.read()
+
+    blocks = [b for b in doc.split("```")[1:] if "yaml.schemas" in b]
+    assert blocks, "docs/standard-library.md no longer shows a yaml.schemas example"
+    lines = blocks[0].splitlines()
+    if lines and lines[0].strip() in ("json", "jsonc"):
+        lines = lines[1:]
+    body = "\n".join(line for line in lines if not line.strip().startswith("//"))
+    key = next(iter(json.loads(body)["yaml.schemas"]))
+
+    assert key.startswith("/") or re.match(r"^[A-Za-z]:[\\/]", key), (
+        f"the documented example is not the absolute path init emits: {key!r}"
+    )
+    # and the page says why, rather than just differing: multi-root schema
+    # resolution is the reason the code gives, and the gitignore the consequence
+    assert "multi-root" in doc
+    assert ".gitignore" in doc
 
 
 def test_cli_init_end_to_end(tmp_path, monkeypatch, capsys):

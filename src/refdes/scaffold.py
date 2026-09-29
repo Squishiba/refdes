@@ -12,12 +12,19 @@ from typing import Any
 
 from . import build as build_mod
 from . import parse as parse_mod
-from . import standards
-from . import textio
+from . import standards, textio
 from .build import _format_required_when
 from .model import ItemType, SchemaError
 from .parse import yaml_safe_load
 from .schema import load_project
+
+
+def _vscode_schema_path(target_dir: str) -> str:
+    """This project's own `.refdes/schema.json`, in the form `yaml.schemas`
+    wants it: absolute, with forward slashes even on Windows."""
+    return os.path.abspath(
+        os.path.join(target_dir, ".refdes", "schema.json")
+    ).replace("\\", "/")
 
 
 def _vscode_settings_text(target_dir: str) -> str:
@@ -32,12 +39,129 @@ def _vscode_settings_text(target_dir: str) -> str:
     other's schema -- a false rejection, not a near-miss, since the two
     schemas can differ arbitrarily (finding 9). An absolute path names one
     specific file unambiguously regardless of how many folders are open.
+
+    The cost of that correctness is that the file names one machine, which is
+    why writing it also puts it in `.gitignore` (see
+    `_ensure_vscode_settings_gitignored`) and why an existing one is never
+    silently skipped (see `vscode_settings_note`).
     """
-    schema_path = os.path.abspath(
-        os.path.join(target_dir, ".refdes", "schema.json")
-    ).replace("\\", "/")
-    settings = {"yaml.schemas": {schema_path: ["items/**/*.yaml"]}}
+    settings = {"yaml.schemas": {_vscode_schema_path(target_dir): ["items/**/*.yaml"]}}
     return json.dumps(settings, indent=2) + "\n"
+
+
+# The block `init` appends to the project's .gitignore, written the way this
+# repo's own .gitignore states its reasoning: the per-machine file named, the
+# reason in a comment above it, the surrounding directory left alone -- a
+# project's `.vscode/extensions.json` or `tasks.json` are shareable and worth
+# committing, which is exactly why `.vscode/` as a whole must NOT be ignored.
+_VSCODE_GITIGNORE_BLOCK = (
+    "# Written by `refdes init`. The yaml.schemas path in this file is an\n"
+    "# absolute path into one checkout, so a committed copy hands every other\n"
+    "# clone a schema that resolves to nothing -- silently, in both tools.\n"
+    "# Editor settings you mean to share belong in a file you write yourself.\n"
+    ".vscode/settings.json\n"
+)
+
+# Patterns that already cover `.vscode/settings.json`, so appending our own
+# would be noise. A small literal set on purpose rather than git's pattern
+# language: `init` runs in directories that are not git repositories at all,
+# so this cannot ask git what it thinks.
+_GITIGNORE_COVERS_VSCODE_SETTINGS = frozenset(
+    {
+        ".vscode/settings.json",
+        "/.vscode/settings.json",
+        "**/.vscode/settings.json",
+        ".vscode",
+        ".vscode/",
+        "/.vscode/",
+        "**/.vscode/",
+    }
+)
+
+
+def _gitignore_addresses_vscode_settings(text: str) -> bool:
+    """Whether some pattern in `text` already states the project's position on
+    `.vscode/settings.json` -- an ignore pattern or an explicit `!` negation.
+
+    A negation counts: whoever wrote `!.vscode/settings.json` means to track
+    that file, and git takes the *last* matching pattern, so appending ours
+    would quietly out-rank a deliberate choice. Comments and blank lines do
+    not."""
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if stripped.lstrip("!") in _GITIGNORE_COVERS_VSCODE_SETTINGS:
+            return True
+    return False
+
+
+def _ensure_vscode_settings_gitignored(target_dir: str) -> None:
+    """Make sure the project's `.gitignore` ignores `.vscode/settings.json`,
+    creating `.gitignore` when the project has none.
+
+    Append-only and idempotent: `.gitignore` is hand-authored and hand-commented
+    like refdes-project.yaml, so nothing outside the appended block moves, and
+    when some existing pattern already covers the file nothing is written at
+    all. Appended block takes the file's own line ending (textio's
+    `append_ending` rule), so a CRLF gitignore does not grow an LF island.
+    """
+    path = os.path.join(target_dir, ".gitignore")
+    if not os.path.isfile(path):
+        textio.write_text(path, _VSCODE_GITIGNORE_BLOCK)
+        return
+    existing = textio.read_text(path)
+    if _gitignore_addresses_vscode_settings(existing):
+        return
+    ending = textio.append_ending(existing)
+    gap = ending if existing.strip() else ""
+    block = _VSCODE_GITIGNORE_BLOCK.replace("\n", ending)
+    textio.write_text(path, existing + gap + block)
+
+
+def _write_vscode_settings(target_dir: str) -> bool:
+    """Write `.vscode/settings.json`, unless one is already there -- a file the
+    author wrote is not `init`'s to overwrite, and merging into one is not
+    safe either: `.vscode/settings.json` is JSONC (VS Code accepts comments,
+    and comments in a real settings file are the norm, this repo's own among
+    them), so `json.loads` cannot read the common case.
+
+    Returns True when this call wrote the file -- which is exactly when the
+    machine-specific absolute path inside it is `init`'s responsibility, and
+    so the only case that gets the `.gitignore` entry. A settings file that
+    was already there may already be tracked, where a gitignore line would do
+    nothing but promise.
+    """
+    settings_path = os.path.join(target_dir, ".vscode", "settings.json")
+    if os.path.isfile(settings_path):
+        return False
+    os.makedirs(os.path.dirname(settings_path), exist_ok=True)
+    textio.write_text(settings_path, _vscode_settings_text(target_dir))
+    return True
+
+
+def vscode_settings_exists(target_dir: str) -> bool:
+    """True when `refdes init` will find an existing `.vscode/settings.json`
+    and leave it alone. The caller has to ask BEFORE init runs: afterwards the
+    file is present either way, and nothing on disk distinguishes the file
+    init wrote from the one it skipped."""
+    return os.path.isfile(os.path.join(target_dir, ".vscode", "settings.json"))
+
+
+def vscode_settings_note(target_dir: str) -> str:
+    """The one-line note `refdes init` prints when it left an existing
+    `.vscode/settings.json` alone. Without it the command exits 0 having
+    silently not wired up schema completion, which is the state a newcomer
+    with a workspace settings file already in place lands in (user-sim run 2,
+    BUG 3). The absolute path is spelled out rather than left a `<path>`
+    placeholder so the line is paste-ready into the file it names. Printed by
+    the CLI -- this module does not print.
+    """
+    return (
+        "note: .vscode/settings.json already exists; left it alone. Add "
+        f'"yaml.schemas": {{"{_vscode_schema_path(target_dir)}": '
+        '["items/**/*.yaml"]} yourself for schema completion.'
+    )
 
 
 def _init_yaml(base: str | None, version: int | None, presets: list[str]) -> str:
@@ -78,6 +202,12 @@ def init(
     "latest": resolved here, once, to the concrete integer the installed
     tool currently ships as newest.
 
+    Also writes `.vscode/settings.json` for schema completion, and -- because
+    the schema path in it is absolute and machine-specific -- makes sure the
+    project's `.gitignore` covers that file. An existing `.vscode/settings.json`
+    is left exactly as it is and no gitignore entry is added for it; the CLI
+    prints `vscode_settings_note` in that case, so the skip is never silent.
+
     Returns the path written. Raises SchemaError if refdes-project.yaml already
     exists at the target, or if `presets` is given with `standard=None`
     (every preset's types target base types, so presets require a base).
@@ -111,13 +241,8 @@ def init(
     with open(config_path, "w", encoding="utf-8") as fh:
         fh.write(_init_yaml(standard, version, presets))
 
-    if write_vscode_settings:
-        vscode_dir = os.path.join(target_dir, ".vscode")
-        settings_path = os.path.join(vscode_dir, "settings.json")
-        if not os.path.isfile(settings_path):
-            os.makedirs(vscode_dir, exist_ok=True)
-            with open(settings_path, "w", encoding="utf-8") as fh:
-                fh.write(_vscode_settings_text(target_dir))
+    if write_vscode_settings and _write_vscode_settings(target_dir):
+        _ensure_vscode_settings_gitignored(target_dir)
 
     return config_path
 
