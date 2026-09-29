@@ -169,10 +169,18 @@ No build step — it is plain JavaScript. Open `editors/vscode/` in VS Code and 
 <kbd>F5</kbd>; a second window opens with the extension loaded. Open a folder
 containing a `refdes-project.yaml` in that window.
 
-There is no automated or headless test coverage for this extension, so checking
-the features above means exercising them in a real VS Code instance; reading
-`extension.js` can show the pieces are wired together, but it is not the same
-as having watched them work.
+There is automated coverage, but it is static rather than live.
+`tests/test_vscode_extension.py` runs with the project's test suite and checks
+this extension's source as text against the server it talks to: the activation
+marker, the `refdes serve:` launch line, the `X-Refdes-Token` header, the
+item-view facts the hover renders, and the ban on writing an item file from
+here. `tests/test_vscode_adapter_contract.py` pins the server side of that same
+contract, driving a real `refdes serve` over real sockets.
+
+What that does not do is run the extension inside VS Code: there is no
+`@vscode/test-electron` harness, so checking the features above still means
+exercising them in a real instance. Reading the source can show the pieces are
+wired together, but it is not the same as having watched them work.
 
 ## Licence
 
