@@ -257,6 +257,34 @@ def test_ls_filters_by_board(blocks_project, capsys):
     assert "DEC-003" not in out  # on the thermal board, not power
 
 
+def test_ls_workspace_flag_matches_nothing_without_a_workspaces_registry(
+    blocks_project, capsys
+):
+    """`--workspace` is accepted everywhere, but this project declares no
+    `workspaces:` registry, so no item has a workspace and the honest answer
+    is the one `--board` already gives for a board that isn't there."""
+    status = cli_mod.main(
+        [
+            "-c",
+            str(blocks_project / "refdes-project.yaml"),
+            "ls",
+            "--workspace",
+            "product-a",
+        ]
+    )
+    assert status == 0
+    assert "no items match" in capsys.readouterr().out
+
+
+def test_ls_help_advertises_the_workspace_flag(capsys):
+    """F1's whole complaint is that the listing command can't answer "what's in
+    workspace X" -- so the flag has to be findable from `ls --help` alone."""
+    with pytest.raises(SystemExit) as excinfo:
+        cli_mod.main(["ls", "--help"])
+    assert excinfo.value.code == 0
+    assert "--workspace" in capsys.readouterr().out
+
+
 def test_ls_filters_by_tag(blocks_project, capsys):
     """DEC-001 (tags: [layout, review]) and DEC-002 (tags: [review]) both
     carry the review tag; DEC-003 has no tags: of its own at all."""

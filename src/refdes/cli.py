@@ -455,6 +455,8 @@ def cmd_ls(args) -> int:
             continue
         if args.board and item.board != args.board:
             continue
+        if args.workspace and item.workspace != args.workspace:
+            continue
         if file_filter and item.source_file != file_filter:
             continue
         tags = _item_tags(item)
@@ -1611,6 +1613,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     p_ls.add_argument("--type", help="only items of this type")
     p_ls.add_argument("--board", help="only items on this board")
+    p_ls.add_argument("--workspace", help="only items in this workspace")
     p_ls.add_argument("--file", help="only items declared in this source file")
     p_ls.add_argument("--tag", help="only items with a tag containing this text")
     p_ls.set_defaults(func=cmd_ls)

@@ -220,6 +220,7 @@ reference while reviewing a PR diff.
 |---|---|
 | `--type TYPE` | Only items of this type |
 | `--board BOARD` | Only items on this board |
+| `--workspace WORKSPACE` | Only items in this [workspace](workspaces.md) |
 | `--file PATH` | Only items declared in this source file |
 | `--tag TEXT` | Only items with a tag containing this text |
 | `QUERY ...` (positional, optional) | Free text, matched against the item's id, its title and `tags:`, case-insensitive. Zero or more words; the whole quoted string is the query, as in `refdes ls "current limit"` or `refdes ls req-sys-0` |
@@ -227,6 +228,7 @@ reference while reviewing a PR diff.
 ```bash
 refdes ls
 refdes ls --type bound --board platform
+refdes ls --workspace product-a
 refdes ls --file items/common/power.yaml
 refdes ls "current limit"
 refdes ls --tag "current limit"
@@ -238,6 +240,14 @@ complete answer.
 
 The board column is omitted entirely when the project has no `boards:`
 registry, matching every other place board is conditionally shown.
+
+Every filter here combines as a plain AND, and `--workspace` is no exception —
+boards and workspaces are independent groupings (one level apart, per
+[workspaces](workspaces.md)), so `--workspace product-a --board board-a` is a
+meaningful narrowing rather than a contradiction. On a project with no
+`workspaces:` registry no item has a workspace, so `--workspace anything` is
+"no items match" — and, like `--board`, an unknown name is answered that way
+rather than with `check`'s registry error.
 
 Free text matches `tags:` as well as the title — deliberately, since the
 real recall pattern is usually "I remember it was something about a current

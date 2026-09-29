@@ -398,6 +398,93 @@ def test_check_unknown_workspace_flag_is_a_clear_error(workspace_project, capsys
     assert "--workspace 'nope' is not a workspace declared" in err
 
 
+def test_ls_workspace_flag_lists_only_that_workspaces_items(workspace_project, capsys):
+    """F1: `check --workspace` could scope to a workspace, `ls` could not, so
+    "what's in product-a?" had no answer in the listing command."""
+    status = cli_mod.main(
+        [
+            "-c",
+            str(workspace_project / "refdes-project.yaml"),
+            "ls",
+            "--workspace",
+            "product-a",
+        ]
+    )
+    assert status == 0
+    out = capsys.readouterr().out
+    # product-a has exactly REQ-A-001, DEC-A-001, DEC-A-002 -- the same three
+    # `check --workspace product-a` counts above.
+    assert "REQ-A-001" in out and "DEC-A-001" in out and "DEC-A-002" in out
+    assert "REQ-PLAT-001" not in out and "DEC-B-001" not in out
+
+
+def test_ls_workspace_flag_is_a_shared_workspace_its_own_row(workspace_project, capsys):
+    cli_mod.main(
+        [
+            "-c",
+            str(workspace_project / "refdes-project.yaml"),
+            "ls",
+            "--workspace",
+            "platform",
+        ]
+    )
+    out = capsys.readouterr().out
+    assert "REQ-PLAT-001" in out
+    assert "DEC-A-001" not in out and "DEC-B-001" not in out
+
+
+def test_ls_workspace_flag_combines_as_and_with_type_and_board(workspace_project, capsys):
+    """Board and workspace are independent fields -- a workspace groups boards
+    one level above the hardware grouping (docs/workspaces.md) -- so both
+    combinations are meaningful, and both AND like every other `ls` filter."""
+    cli_mod.main(
+        [
+            "-c",
+            str(workspace_project / "refdes-project.yaml"),
+            "ls",
+            "--workspace",
+            "product-a",
+            "--type",
+            "decision",
+        ]
+    )
+    out = capsys.readouterr().out
+    assert "DEC-A-001" in out and "DEC-A-002" in out
+    assert "REQ-A-001" not in out
+
+    cli_mod.main(
+        [
+            "-c",
+            str(workspace_project / "refdes-project.yaml"),
+            "ls",
+            "--workspace",
+            "product-a",
+            "--board",
+            "board-b",
+        ]
+    )
+    assert "no items match" in capsys.readouterr().out
+
+
+def test_ls_unknown_workspace_matches_nothing_rather_than_erroring(workspace_project, capsys):
+    """Deliberate asymmetry with `check`: `check --workspace nope` is a registry
+    error and exit 1 because `check` is a gate, while `ls` is a query and
+    `ls --board nosuch` already answers a typo with "no items match", exit 0.
+    `--workspace` follows `--board`, which is what "filter the same way" means
+    here."""
+    status = cli_mod.main(
+        [
+            "-c",
+            str(workspace_project / "refdes-project.yaml"),
+            "ls",
+            "--workspace",
+            "nope",
+        ]
+    )
+    assert status == 0
+    assert "no items match" in capsys.readouterr().out
+
+
 def test_workspace_pages_render_with_nested_board_groups(workspace_project):
     project = _build_at(workspace_project)
     out = render.render_site(project)
