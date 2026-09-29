@@ -646,6 +646,21 @@ def _create_item(app, body) -> tuple[int, dict]:
         value = body.get(key_name)
         if value is not None and not isinstance(value, str):
             return 400, {"error": f"{key_name} must be a string when given"}
+    # `links`: verb -> one or more target refs. Whether the verb is declared
+    # and whether each target resolves to a linkable item is the create
+    # service's call, under the write lock, against the state it is about to
+    # write -- this only refuses what could not be a request at all, the same
+    # split as `fields` above.
+    links_body = body.get("links", {})
+    if not isinstance(links_body, dict):
+        return 400, {"error": "links must be an object mapping link verbs to lists of targets"}
+    for verb, targets in links_body.items():
+        if not isinstance(verb, str) or not verb:
+            return 400, {"error": "links keys must be link verb names"}
+        if not isinstance(targets, list) or not targets:
+            return 400, {"error": f"links {verb!r} must be a non-empty list of target refs"}
+        if not all(isinstance(target, str) and target for target in targets):
+            return 400, {"error": f"links {verb!r} takes its target refs as strings"}
 
     project = app.state.snapshot.project
     result = edit_mod.create_item(
@@ -657,6 +672,7 @@ def _create_item(app, body) -> tuple[int, dict]:
             id=body.get("id"),
             destination=body.get("destination"),
             amends=body.get("amends"),
+            links=links_body,
         ),
     )
 

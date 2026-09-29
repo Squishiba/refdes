@@ -36,6 +36,8 @@ boards:
     label: "Board A"
 link_types:
   amends: { inverse: amended_by, label: Amends }
+  refines: { inverse: refined_by, label: Refines }
+  governed_by: { inverse: governs, label: Governed by }
 types:
   requirement:
     prefix: REQ
@@ -43,6 +45,9 @@ types:
     fields:
       text: { type: text, required: true }
       status: { type: enum, choices: [draft, approved] }
+    links:
+      refines: [requirement]
+      governed_by: [requirement, decision]
   decision:
     prefix: DEC
     fields:
@@ -132,6 +137,18 @@ def tree(root, *subdirs) -> dict[str, str]:
                 with open(path, "rb") as fh:
                     files[rel] = hashlib.sha256(fh.read()).hexdigest()
     return files
+
+
+def mint_keys(root):
+    """Keys on disk for the fixture's items. `load_readonly` -- the load every
+    create plans against -- never mints, and a link target with no key is a
+    refusal by design, so the link tests that mean to *succeed* have to put
+    keys there first, the way any writable command would."""
+    project = load_project(config_path=str(root / "refdes-project.yaml"))
+    parse.load_items(project)
+    from refdes import keys as keys_mod
+
+    keys_mod.mint_missing(project, write=True)
 
 
 def mint_and_seal(root):
@@ -682,6 +699,263 @@ def test_amends_requires_the_verb_and_a_keyed_target(project_root):
     assert tree(project_root, "items", ".refdes") == before
 
 
+# ------------------------------------------------------- links at creation
+#
+# The other half of what the create form could not do (in-prog-logs/
+# user-sim-release-gate-run1.md, F1): it could write an item's scalar shell and
+# nothing else, so "a requirement that refines REQ-001" was a create plus one
+# `add_link` edit per link. `CreateRequest.links` is `amends:` generalised to
+# any verb the type declares -- same locked resolution, same
+# `DISPLAY-ID@key` text, same single write. Every "no" below is asserted as a
+# result *and* as a byte-identical tree: a link that will not resolve refuses
+# the whole creation, so an item never lands with half the links it asked for.
+
+KEYLESS = """\
+defaults: { type: requirement, board: board-a }
+items:
+  - id: REQ-090
+    text: A requirement whose key was never minted.
+"""
+
+
+def test_a_declared_link_is_written_resolved_at_creation(project_root):
+    mint_keys(project_root)
+    target_key = load_and_parse(project_root).item_by_id("REQ-001").key
+    assert target_key
+    path = project_root / "items" / "reqs.yaml"
+    before = read(path)
+
+    result = create_item(
+        str(project_root),
+        edit_mod.CreateRequest(
+            who="t", type="requirement", fields={"text": "Narrows the rail."},
+            destination="items/reqs.yaml", links={"refines": ["REQ-001"]},
+        ),
+    )
+    assert isinstance(result, Created), result.message
+    after = read(path)
+    # still one write, still a pure append: the link is in the first bytes
+    assert after.startswith(before)
+    assert f"refines: [REQ-001@{target_key}]" in after
+
+    project = load_and_parse(project_root)
+    new = project.item_by_id(result.item_id)
+    assert new.links["refines"] == [f"REQ-001@{target_key}"]
+    build_mod.resolve_links(project)
+    assert new.resolved_links["refines"] == ["REQ-001"]
+
+
+def test_a_multi_target_verb_is_one_flow_sequence_line(project_root):
+    """The shape the standard's own items write -- `addresses: [A@k, B@k]` --
+    one line per verb, targets in the order they were asked for."""
+    mint_keys(project_root)
+    project = load_and_parse(project_root)
+    k_req = project.item_by_id("REQ-002").key
+    k_dec = project.item_by_id("DEC-001").key
+
+    result = create_item(
+        str(project_root),
+        edit_mod.CreateRequest(
+            who="t", type="requirement", fields={"text": "Governed from two places."},
+            destination="items/reqs.yaml", links={"governed_by": ["REQ-002", "DEC-001"]},
+        ),
+    )
+    assert isinstance(result, Created), result.message
+    text = read(project_root / "items" / "reqs.yaml")
+    assert f"governed_by: [REQ-002@{k_req}, DEC-001@{k_dec}]" in text
+    lines = [ln for ln in text.splitlines() if ln.strip().startswith("governed_by:")]
+    assert len(lines) == 1
+
+    after = load_and_parse(project_root)
+    build_mod.resolve_links(after)
+    new = after.item_by_id(result.item_id)
+    assert new.resolved_links["governed_by"] == ["REQ-002", "DEC-001"]
+
+
+@pytest.mark.parametrize("destination", ["items/notes.md", "items/nested/more.md"])
+def test_links_reach_every_destination_shape(project_root, destination):
+    """`link_lines` is appended to the item's own lines, so the append-md and
+    new-md shapes need nothing special -- asserted rather than assumed."""
+    mint_keys(project_root)
+    target_key = load_and_parse(project_root).item_by_id("REQ-001").key
+    result = create_item(
+        str(project_root),
+        edit_mod.CreateRequest(
+            who="t", type="requirement", fields={"text": "Linked in markdown."},
+            destination=destination, links={"refines": ["REQ-001"]},
+        ),
+    )
+    assert isinstance(result, Created), result.message
+    assert f"refines: [REQ-001@{target_key}]" in read(result.path)
+    new = load_and_parse(project_root).item_by_id(result.item_id)
+    assert new.links["refines"] == [f"REQ-001@{target_key}"]
+
+
+def test_a_request_that_supplies_no_links_writes_no_link_lines(project_root):
+    result = create_item(
+        str(project_root),
+        edit_mod.CreateRequest(
+            who="t", type="requirement", fields={"text": "Plain as before."},
+            destination="items/reqs.yaml",
+        ),
+    )
+    assert isinstance(result, Created), result.message
+    text = read(project_root / "items" / "reqs.yaml")
+    for verb in ("refines", "governed_by", "amends"):
+        assert verb not in text
+
+
+def test_a_verb_the_type_does_not_declare_is_refused(project_root):
+    before = tree(project_root, "items", ".refdes")
+    r = create_item(
+        str(project_root),
+        edit_mod.CreateRequest(
+            who="t", type="requirement", fields={"text": "X."},
+            destination="items/reqs.yaml", links={"verifies": ["REQ-001"]},
+        ),
+    )
+    assert isinstance(r, Refused)
+    assert "does not declare the link 'verifies'" in r.reason
+    assert "refines, governed_by" in r.reason or "governed_by, refines" in r.reason
+    assert tree(project_root, "items", ".refdes") == before
+
+
+def test_a_target_of_the_wrong_allowed_type_names_the_types(project_root):
+    before = tree(project_root, "items", ".refdes")
+    r = create_item(
+        str(project_root),
+        edit_mod.CreateRequest(
+            who="t", type="requirement", fields={"text": "X."},
+            destination="items/reqs.yaml", links={"refines": ["DEC-001"]},
+        ),
+    )
+    assert isinstance(r, Refused)
+    assert "'refines' accepts targets of type requirement" in r.reason
+    assert "DEC-001 is a decision" in r.reason
+    assert tree(project_root, "items", ".refdes") == before
+
+
+def test_a_target_that_is_not_in_the_project_is_refused(project_root):
+    before = tree(project_root, "items", ".refdes")
+    r = create_item(
+        str(project_root),
+        edit_mod.CreateRequest(
+            who="t", type="requirement", fields={"text": "X."},
+            destination="items/reqs.yaml", links={"refines": ["REQ-999"]},
+        ),
+    )
+    assert isinstance(r, Refused) and "no item 'REQ-999'" in r.reason
+    assert tree(project_root, "items", ".refdes") == before
+
+
+def test_a_target_carrying_no_key_is_refused_the_way_amends_refuses_it(project_root):
+    """A bare id would name the target but drop the identity the link is for,
+    which is `_amends_line`'s refusal and now every verb's. The other items
+    are keyed first, so the refusal can only be about REQ-090."""
+    mint_keys(project_root)
+    (project_root / "items" / "keyless.yaml").write_text(KEYLESS, encoding="utf-8", newline="\n")
+    before = tree(project_root, "items", ".refdes")
+    r = create_item(
+        str(project_root),
+        edit_mod.CreateRequest(
+            who="t", type="requirement", fields={"text": "X."},
+            destination="items/reqs.yaml", links={"refines": ["REQ-090"]},
+        ),
+    )
+    assert isinstance(r, Refused) and "REQ-090 carries no artifact key" in r.reason
+    assert tree(project_root, "items", ".refdes") == before
+
+
+def test_a_composite_the_client_resolved_is_re_derived_not_copied(project_root):
+    """The client may name a target by composite, but what lands on disk is
+    `composite_for`'s own text, decided under the lock."""
+    mint_keys(project_root)
+    project = load_and_parse(project_root)
+    target = project.item_by_id("REQ-001")
+    result = create_item(
+        str(project_root),
+        edit_mod.CreateRequest(
+            who="t", type="requirement", fields={"text": "Named by composite."},
+            destination="items/reqs.yaml", links={"refines": [f"REQ-001@{target.key}"]},
+        ),
+    )
+    assert isinstance(result, Created), result.message
+    assert f"refines: [REQ-001@{target.key}]" in read(project_root / "items" / "reqs.yaml")
+
+
+def test_a_composite_naming_an_unknown_key_is_refused(project_root):
+    """The key half is what resolves; a composite whose key names nothing is
+    not rescued by its label half."""
+    before = tree(project_root, "items", ".refdes")
+    r = create_item(
+        str(project_root),
+        edit_mod.CreateRequest(
+            who="t", type="requirement", fields={"text": "X."},
+            destination="items/reqs.yaml", links={"refines": ["REQ-001@zzzzzzzzzzz"]},
+        ),
+    )
+    assert isinstance(r, Refused) and "no item 'REQ-001@zzzzzzzzzzz'" in r.reason
+    assert tree(project_root, "items", ".refdes") == before
+
+
+@pytest.mark.parametrize(
+    "targets",
+    [["REQ-001", "REQ-001"], ["REQ-001", "REQ-001@{key}"], ["{key}", "REQ-001"]],
+)
+def test_the_same_target_named_twice_is_refused(project_root, targets):
+    """One creation links each target once. The three spellings of the same
+    target are the point: the duplicate is caught on what it *resolves to*,
+    not on the text sent, which is the same rule that makes a client-supplied
+    composite get re-derived rather than copied."""
+    mint_keys(project_root)
+    key = load_and_parse(project_root).item_by_id("REQ-001").key
+    refs = [t.format(key=key) for t in targets]
+    before = tree(project_root, "items", ".refdes")
+    r = create_item(
+        str(project_root),
+        edit_mod.CreateRequest(
+            who="t", type="requirement", fields={"text": "X."},
+            destination="items/reqs.yaml", links={"refines": refs},
+        ),
+    )
+    assert isinstance(r, Refused) and "names REQ-001 twice" in r.reason
+    assert tree(project_root, "items", ".refdes") == before
+
+
+@pytest.mark.parametrize(
+    "links",
+    ["REQ-001", {"refines": "REQ-001"}, {"refines": []}, {"refines": [None]}, {"": ["REQ-001"]}],
+)
+def test_a_malformed_links_value_is_refused(project_root, links):
+    before = tree(project_root, "items", ".refdes")
+    r = create_item(
+        str(project_root),
+        edit_mod.CreateRequest(
+            who="t", type="requirement", fields={"text": "X."},
+            destination="items/reqs.yaml", links=links,
+        ),
+    )
+    assert isinstance(r, Refused), r.message
+    assert tree(project_root, "items", ".refdes") == before
+
+
+def test_amends_requested_as_amends_and_again_in_links_is_refused(project_root):
+    """One creation writes each verb once; two spellings of the same request
+    is a client bug, not two lines of front matter."""
+    mint_keys(project_root)
+    before = tree(project_root, "items", ".refdes")
+    r = create_item(
+        str(project_root),
+        edit_mod.CreateRequest(
+            who="t", type="log", fields={"summary": "Correction."},
+            destination="items/log.yaml", amends="LOG-001",
+            links={"amends": ["LOG-001"]},
+        ),
+    )
+    assert isinstance(r, Refused) and "twice" in r.reason
+    assert tree(project_root, "items", ".refdes") == before
+
+
 # -------------------------------------------------------------- destination
 
 
@@ -756,6 +1030,65 @@ def test_http_refusals_carry_reasons_and_write_nothing(served):
     assert status == 422 and invalid["kind"] == "invalid"
     status, bad = client.api_post("/api/items/create", {"fields": {}})
     assert status == 400
+    after = snapshot_tree(root)
+    after.pop(".refdes/schema.json", None)
+    before.pop(".refdes/schema.json", None)
+    assert after == before
+
+
+def test_http_create_with_links_writes_resolved_composites(served):
+    _app, client, root = served
+    mint_keys(root)
+    key = load_and_parse(root).item_by_id("REQ-001").key
+    status, made = client.api_post(
+        "/api/items/create",
+        {
+            "type": "requirement",
+            "fields": {"text": "Via HTTP, with links."},
+            "destination": "items/reqs.yaml",
+            "links": {"refines": ["REQ-001"], "governed_by": ["REQ-002", "DEC-001"]},
+        },
+    )
+    assert status == 200 and made["kind"] == "created", made
+    text = (root / "items" / "reqs.yaml").read_text(encoding="utf-8")
+    assert f"refines: [REQ-001@{key}]" in text
+    assert "governed_by: [REQ-002@" in text and "DEC-001@" in text
+
+
+def test_http_create_refuses_an_undeclared_verb_with_a_reason(served):
+    _app, client, root = served
+    before = snapshot_tree(root)
+    status, refused = client.api_post(
+        "/api/items/create",
+        {
+            "type": "requirement",
+            "fields": {"text": "Nope."},
+            "destination": "items/reqs.yaml",
+            "links": {"verifies": ["REQ-001"]},
+        },
+    )
+    assert status == 422 and refused["kind"] == "refused"
+    assert "does not declare the link 'verifies'" in refused["reason"]
+    after = snapshot_tree(root)
+    after.pop(".refdes/schema.json", None)
+    before.pop(".refdes/schema.json", None)
+    assert after == before
+
+
+@pytest.mark.parametrize(
+    "links",
+    ["REQ-001", {"refines": "REQ-001"}, {"refines": []}, {"refines": [3]}, {"refines": [""]}],
+)
+def test_http_create_rejects_a_malformed_links_field(served, links):
+    """Shape is a 400 here, the same split as `fields`: what the verb means
+    and whether the target resolves is the service's 422 to give."""
+    _app, client, root = served
+    before = snapshot_tree(root)
+    status, payload = client.api_post(
+        "/api/items/create",
+        {"type": "requirement", "fields": {"text": "X."}, "links": links},
+    )
+    assert status == 400, payload
     after = snapshot_tree(root)
     after.pop(".refdes/schema.json", None)
     before.pop(".refdes/schema.json", None)
