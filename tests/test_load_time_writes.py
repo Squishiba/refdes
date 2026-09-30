@@ -445,14 +445,31 @@ def _chmod_tree(root, writable: bool) -> None:
 
 
 def test_check_survives_a_read_only_tree(tmp_path, capsys):
-    """BUG 2, both crash sites at once: `.refdes/` cannot be created, and the
-    item file cannot be rewritten. Neither was caught, so `refdes check` died
-    with a PermissionError traceback instead of checking anything. A read-only
-    tree is a condition of the filesystem, not of the project: warn, and
-    report what `--no-write check` reports."""
+    """BUG 2, both crash sites refused in one run: the `.refdes/schema.json`
+    refresh and the key-mint write-back. Neither was caught, so `refdes check`
+    died with a PermissionError traceback instead of checking anything. A
+    read-only tree is a condition of the filesystem, not of the project: warn,
+    and report what `--no-write check` reports.
+
+    The schema file is created here on purpose, because that is the half of
+    `write_schema`'s write that both platforms can actually be made to refuse.
+    Refusing to *overwrite an existing file* is honoured everywhere: POSIX
+    checks the file's own mode bits, and Windows maps `0o444` to the read-only
+    attribute, which `open(path, "w")` refuses -- which is why the item file's
+    refusal has fired on every platform from the start. Refusing to *create* a
+    file is the parent directory's permission, and Windows' read-only attribute
+    on a directory does not block creating entries in it, so the fresh-checkout
+    shape where even `.refdes/` cannot be made is POSIX-only and lives in
+    `test_check_survives_a_tree_that_cannot_create_refdes`.
+    """
     cfg = _id_project(tmp_path)
     path = tmp_path / "items" / "r.yaml"
     before = path.read_text(encoding="utf-8")
+    # A checkout that has been loaded writable once has this gitignored file
+    # sitting there. Nothing in a CLI run ever reads it back -- the schema is
+    # resolved in memory -- so its contents do not matter.
+    (tmp_path / ".refdes").mkdir()
+    (tmp_path / ".refdes" / "schema.json").write_text("{}\n", encoding="utf-8")
     _chmod_tree(tmp_path, False)
     try:
         code = cli_mod.main(["-c", cfg, "check"])
@@ -466,6 +483,36 @@ def test_check_survives_a_read_only_tree(tmp_path, capsys):
     assert "could not write" in out
     assert ".refdes/schema.json" in out and "items/r.yaml" in out
     assert "2 items, 0 errors" in out
+    assert path.read_text(encoding="utf-8") == before
+
+
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="needs POSIX directory permission bits: Windows' read-only attribute "
+    "on a directory does not stop new entries being created inside it, so a "
+    "refused os.makedirs cannot be produced that way",
+)
+def test_check_survives_a_tree_that_cannot_create_refdes(tmp_path, capsys):
+    """The other statement in the same `try`: not a refused overwrite but a
+    refused `os.makedirs(".refdes")`, on a fresh checkout that never had the
+    gitignored file. Same verdict expected -- warn, name it, and check the
+    project anyway."""
+    cfg = _id_project(tmp_path)
+    path = tmp_path / "items" / "r.yaml"
+    before = path.read_text(encoding="utf-8")
+    assert not (tmp_path / ".refdes").exists()
+    _chmod_tree(tmp_path, False)
+    try:
+        code = cli_mod.main(["-c", cfg, "check"])
+    finally:
+        _chmod_tree(tmp_path, True)
+
+    captured = capsys.readouterr()
+    assert code == 0
+    out = captured.out + captured.err
+    assert "Traceback" not in out
+    assert ".refdes/schema.json" in out and "items/r.yaml" in out
+    assert not (tmp_path / ".refdes").exists()
     assert path.read_text(encoding="utf-8") == before
 
 

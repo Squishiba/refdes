@@ -311,6 +311,8 @@ before:
 - `test_check_survives_a_read_only_tree` / `..._a_read_only_items_dir` — the two
   BUG 2 sites, together and separately: exit 0, no `Traceback`, the right files
   named, the item file untouched, and `check`'s verdict unchanged.
+- `test_check_survives_a_tree_that_cannot_create_refdes` — the refused
+  `os.makedirs(".refdes")` half, POSIX-only by necessity; see the next section.
 - `test_a_refused_mint_leaves_the_run_reading_like_no_write` — the corruption
   guard above, asserted through `index`: `key: null` and the target still bare.
 - `test_commands_without_diagnostics_still_name_the_refusal` — `ls` gets the
@@ -328,13 +330,65 @@ empty. Its fixture's item has no key, so that assertion *was* the BUG 1
 silence; it now asserts the notice on stderr, and that the steady-state `ls`
 after it still prints nothing.
 
+## CI: the read-only test was asserting a POSIX-only mechanism
+
+`ubuntu-latest` and `py3.13` passed. `windows-latest` failed one test —
+`test_check_survives_a_read_only_tree` — and the failure output is the whole
+story: `items/r.yaml:1 — could not write this file` was right there, but
+`.refdes/schema.json` was missing from the output entirely.
+
+Two different filesystem operations sit in `write_schema`'s `try`, and the two
+platforms do not refuse them the same way:
+
+| refused operation | POSIX `0o555` on the dir | Windows read-only dir |
+| --- | --- | --- |
+| `os.makedirs(".refdes")` — *create* an entry | EACCES | **allowed** |
+| `open(existing, "w")` — *overwrite* a file | EACCES on the file's own bits | EACCES (read-only attribute) |
+
+The test's tree had no `.refdes/` at all — `_id_project` never makes one, and
+`schema.json` is gitignored — so the only way the schema write could fail was
+the *first* row, and Windows does not implement that row. `os.makedirs`
+succeeded, the write succeeded, nothing was refused. The item file refused on
+every platform because it is the second row, which is also why
+`test_check_survives_a_read_only_items_dir` passed on the same run.
+
+So the premise, not the assertion, was platform-specific. Split rather than
+weakened:
+
+- **`test_check_survives_a_read_only_tree`** now creates `.refdes/schema.json`
+  first, so both refusals come from the second row — overwriting an existing
+  read-only file — which both platforms honour. It still asserts *both* files
+  named in one run, which is the case it exists for.
+- **`test_check_survives_a_tree_that_cannot_create_refdes`** keeps the first
+  row, `skipif(os.name == "nt", reason="needs POSIX directory permission bits:
+  Windows' read-only attribute on a directory does not stop new entries being
+  created inside it, so a refused os.makedirs cannot be produced that way")`.
+  Reproducing that on Windows needs an ACL (`icacls /deny`), not `chmod`.
+
+**Not taken on trust.** A Linux pass says nothing about Windows, so the
+mechanism was isolated directly (`.scratch/which_bit.py`): every *directory* at
+`0o755`, only *files* at `0o444`. Both refusals still fire and `schema.json`
+keeps its `{}` placeholder — so the refusal comes from the file's own bit, not
+the directory's. And `write_schema` and `write_rewrites` both go through the
+same `textio.write_text` → plain `open(path, "w")` (`textio.py:271`), the exact
+call the Windows runner was observed refusing for `items/r.yaml`. Same function,
+same condition, already witnessed on that runner.
+
+Nothing in `src/` changed for this — the product code caught both operations
+from the start. Only the test's setup was asserting a permission Windows has no
+notion of.
+
 ## Gates
 
-- `pytest tests/` — **2792 passed, 2 skipped in 194.92s**. Clean. The two
-  skips are environment-conditional markers (`os.name != "nt"`, "needs a
-  case-insensitive filesystem", `needs_install`) in `test_serve_upload.py`,
-  `test_citations.py` and `test_version_flag.py` — none in a file this change
-  touches.
+- `pytest tests/` — **2793 passed, 2 skipped in 194.26s** after the Windows
+  split (2792 before it). Clean. The two skips are environment-conditional
+  markers (`os.name != "nt"`, "needs a case-insensitive filesystem",
+  `needs_install`) in `test_serve_upload.py`, `test_citations.py` and
+  `test_version_flag.py` — none in a file this change touches.
+- CI on the first commit of #113: `ubuntu-latest` pass, `py3.13` pass,
+  `windows-latest` fail (the one test above). Re-running on all three after the
+  split; a local Linux pass is not evidence about Windows, which is the mistake
+  that produced the failure in the first place.
 - `ruff check src/refdes/cli.py src/refdes/schema_json.py src/refdes/revise.py
   --select I,F` — 2 findings, both `I001` import-block formatting in
   `revise.py:28` and `schema_json.py:16`. Both are **pre-existing**: piping
