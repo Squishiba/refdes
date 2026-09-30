@@ -1,0 +1,34 @@
+Task: make board/workspace membership fallback lookup linear per verification pass.
+Status: in progress.
+Read AGENTS.md, the scale-test finding, boards.py lookup and callers, commit 00f9179 (git log -p -S'_find_membership'), and existing drift tests. Existing tests/test_boards.py::test_renamed_keyed_manifest_entry_does_not_claim_reused_old_id pins the live-owner display-id-reuse case. The lookup docstring requires excluding keyed entries whose owner is live. The scan chooses the first orphaned keyed entry in dict order before trying legacy display-id scalars.
+Copied gen.py, run.py, verify.py from the scale worktree into this worktree's .scratch/scale and changed run.py's REPO path. No source changes yet.
+
+Behavior tests added to tests/test_boards.py: scalar legacy entry, orphaned
+keyed fallback, and duplicate orphaned display ids with first-match ordering.
+The existing test_renamed_keyed_manifest_entry_does_not_claim_reused_old_id
+pins a still-live old owner. All 34 board tests passed before the fix. The
+new tests drive _verify_membership, the pass that now builds the index.
+
+Baseline, this worktree's src, after a build: 280 items 0.09s, 961 items
+0.57s, 3,624 items 6.28s for check. Fixed src on the same fixtures: 0.06s,
+0.18s, 0.72s. Big-fixture build after fix: 8.92s. The index is built once
+per board/workspace section. Scalar-only sections skip _membership_parts in
+the index pass; valid orphaned keyed entries use setdefault to retain the
+first dictionary-order match. A write may remove an orphaned entry or add a
+new entry only for the item being processed; local item display ids are unique,
+so this cannot change a later item's fallback match within the pass.
+
+After rebuilding the big fixture, verify.py reported no discrepancies:
+3,624 items, 1,715 coverable, all five stage counts, 28 expected conformance
+warnings, and included shared parts. The captured check output before and
+after the fix was byte-identical (cmp exit 0). The copied verifier initially
+could not find out/check2.out because run.py changes directory before writing
+relative --out paths; copied that captured output into its expected location
+inside this worktree's .scratch/ and reran successfully.
+
+Targeted board/workspace tests: 61 passed after fix. The scalar test was then
+changed to use the genuinely non-adopted board_project fixture; all 34 board
+tests passed again. Full suite: 2,864 passed, 2 skipped (201.91s). Ruff
+import-order check on touched Python files and git diff --check passed.
+
+Status: complete. Source, behavior tests, and changelog entry ready to commit.

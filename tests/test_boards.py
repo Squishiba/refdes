@@ -539,6 +539,55 @@ def test_renamed_keyed_manifest_entry_does_not_claim_reused_old_id(tmp_path):
     assert original_key != reused_key
 
 
+def test_non_adopted_scalar_membership_is_found_by_display_id(board_project):
+    project = _build_at(board_project)
+    moves = []
+    memberships = {"REQ-A-001": "board-b"}
+
+    changed = boards_mod._verify_membership(
+        project, memberships, moves, lambda item: item.board,
+        "board", False, False, False, {},
+    )
+
+    assert not changed
+    assert moves == [("REQ-A-001", "board-b", "board-a")]
+    assert memberships == {"REQ-A-001": "board-b"}
+
+
+def test_orphaned_keyed_membership_uses_recorded_display_id(tmp_path):
+    live_key, _item_path = _adopted_board_project(tmp_path)
+    project = _build_at(tmp_path)
+    orphan_key = keys_mod.mint()
+    memberships = {orphan_key: {"id": "REQ-A-001", "board": "board-b"}}
+    moves = []
+
+    boards_mod._verify_membership(
+        project, memberships, moves, lambda item: item.board,
+        "board", False, False, False, {},
+    )
+
+    assert orphan_key != live_key
+    assert moves == [("REQ-A-001", "board-b", "board-a")]
+
+
+def test_duplicate_orphaned_memberships_keep_first_match(tmp_path):
+    _live_key, _item_path = _adopted_board_project(tmp_path)
+    project = _build_at(tmp_path)
+    first_key, second_key = keys_mod.mint(), keys_mod.mint()
+    memberships = {
+        first_key: {"id": "REQ-A-001", "board": "board-b"},
+        second_key: {"id": "REQ-A-001", "board": "board-a"},
+    }
+    moves = []
+
+    boards_mod._verify_membership(
+        project, memberships, moves, lambda item: item.board,
+        "board", False, False, False, {},
+    )
+
+    assert moves == [("REQ-A-001", "board-b", "board-a")]
+
+
 def test_deleted_item_manifest_entry_is_pruned_only_by_write_enabled_build(tmp_path):
     first_key, item_path = _adopted_board_project(tmp_path)
     deleted_key = keys_mod.mint()
