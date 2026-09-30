@@ -458,6 +458,19 @@ def plan_expansion(
     return plan
 
 
+def _drop_refused(plan, refused: set[str]) -> None:
+    """A file the filesystem refused did not change, so neither its parsed
+    links nor the run's tally may claim otherwise: drop every planned rewrite
+    belonging to it before anything is applied in memory. A no-op unless a
+    write was refused -- see `revise.write_rewrites_verified()`."""
+    if refused:
+        plan.rewrites = [
+            entry
+            for entry in plan.rewrites
+            if entry[0].source_file not in refused
+        ]
+
+
 def expand_missing(project: Project, write: bool = True) -> list[tuple[Item, str, str, str]]:
     """Expand bare link targets and refresh stale composite display halves.
 
@@ -486,7 +499,7 @@ def expand_missing(project: Project, write: bool = True) -> list[tuple[Item, str
 
     from .revise import write_rewrites_verified
 
-    write_rewrites_verified(project, plan.files)
+    _drop_refused(plan, write_rewrites_verified(project, plan.files))
     replacements_by_item: dict[int, dict[str, str]] = defaultdict(dict)
     for item, _link_name, old, new in plan.rewrites:
         replacements_by_item[id(item)][old] = new
@@ -753,7 +766,7 @@ def freeze_follows(project: Project, write: bool = True) -> list[tuple[Item, str
 
     from .revise import restore_rewrites, write_rewrites_verified
 
-    write_rewrites_verified(project, plan.files)
+    _drop_refused(plan, write_rewrites_verified(project, plan.files))
     replacements_by_item: dict[int, dict[str, str]] = defaultdict(dict)
     for item, _link_name, old, new in plan.rewrites:
         replacements_by_item[id(item)][old] = new
@@ -918,7 +931,7 @@ def expand_missing_checks(
 
     from .revise import write_rewrites_verified
 
-    write_rewrites_verified(project, plan.files)
+    _drop_refused(plan, write_rewrites_verified(project, plan.files))
     replacements_by_item: dict[int, dict[str, str]] = defaultdict(dict)
     for item, _name, old, new in plan.rewrites:
         replacements_by_item[id(item)][old] = new
@@ -1115,7 +1128,7 @@ def expand_missing_calc_refs(
 
     from .revise import write_rewrites_verified
 
-    write_rewrites_verified(project, plan.files)
+    _drop_refused(plan, write_rewrites_verified(project, plan.files))
     replacements_by_item: dict[int, dict[str, str]] = defaultdict(dict)
     for item, _name, old, new in plan.rewrites:
         replacements_by_item[id(item)][old] = new

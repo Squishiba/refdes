@@ -113,14 +113,21 @@ def test_former_ids_propose_reports_load_errors(tmp_path, capsys):
 
 
 def test_clean_project_index_and_ls_unchanged(tmp_path, capsys):
-    """No load errors -> byte-identical behaviour: same stdout, nothing on
-    stderr, exit 0."""
+    """No load errors -> same stdout, exit 0.
+
+    stderr is no longer empty on the first run: this fixture's item has no
+    key, so the load minted one into the item file, and every command that
+    loads writable now says what its load wrote (in-prog-logs/
+    load-writes-everywhere-bug1.md). `index` says it on stderr because its
+    stdout is JSON for the editor. The second run is the steady state -- the
+    key is on disk now -- so `ls` prints nothing about writes, exactly as
+    before."""
     root = _project(tmp_path, broken=False)
 
     code = _cli(root, "index")
     captured = capsys.readouterr()
     assert code == 0
-    assert captured.err == ""
+    assert captured.err == "(minted 1 key(s) while loading)\n"
     payload = json.loads(captured.out)
     assert [i["id"] for i in payload["items"]] == ["REQ-001"]
 

@@ -740,7 +740,22 @@ def mint_missing(project: Project, write: bool = True) -> list[tuple[Item, str]]
     from .revise import write_rewrites_verified
 
     plan = plan_missing(project, assignments=assignments)
-    write_rewrites_verified(project, plan.rewrites)
+    refused = write_rewrites_verified(project, plan.rewrites)
+    if refused:
+        # A key the filesystem would not take is not a key. `--no-write`'s own
+        # rule -- a key is only durable once persisted, and a fresh one minted
+        # per run would make the same item resolve differently from one
+        # invocation to the next -- applies with equal force to a write that
+        # failed. Items in a file that refused stay keyless, so nothing later
+        # in this load can freeze a composite naming a key that only ever
+        # existed in memory.
+        landed = [
+            (item, new_key)
+            for item, new_key in plan.assignments
+            if item.source_file not in refused
+        ]
+        plan.remaining += len(plan.assignments) - len(landed)
+        plan.assignments = landed
     for item, new_key in plan.assignments:
         item.key = new_key
     if plan.remaining:

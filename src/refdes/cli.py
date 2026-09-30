@@ -108,6 +108,64 @@ def _load_write_notice(project: Project) -> str | None:
     return f"({' and '.join(parts)} while loading)"
 
 
+#: How many refused files one notice names before switching to a count.
+_BLOCKED_NAMED = 4
+
+
+def _load_blocked_notice(project: Project) -> str | None:
+    """The other half of the same honesty: files this load tried to write and
+    the filesystem refused (docs/design/keys.md §2). None when nothing was
+    refused, so a writable run -- and every `--no-write` run -- prints nothing
+    here either.
+
+    Only for commands that print no diagnostics of their own. Where a command
+    does report (`check`, `build`, `revision`/`release`, `index`), the warning
+    naming each refused file already reaches the user through `project.warn`,
+    and saying it twice in one run is noise that teaches people to skim past
+    the line that matters.
+    """
+    blocked = project.load_writes.blocked
+    if not blocked:
+        return None
+    if len(blocked) <= _BLOCKED_NAMED:
+        what = ", ".join(blocked)
+    else:
+        what = (
+            ", ".join(blocked[:_BLOCKED_NAMED])
+            + f" (+{len(blocked) - _BLOCKED_NAMED} more)"
+        )
+    return (
+        f"(load could not write {what} -- read-only tree? run with --no-write "
+        "to silence this)"
+    )
+
+
+def _announce_load_writes(
+    project: Project, *, stream=None, name_blocked: bool = True
+) -> None:
+    """Say what this run's load did to the source tree, before the command's
+    own output (docs/design/keys.md §2). Every command that loads through
+    `_load()` writable owes this: the load mints keys and rewrites references
+    on disk whatever the command was asked to do, and a command that reports
+    as though nothing changed while its own load edited the tree is the defect
+    this reports.
+
+    `stream` is for the commands whose stdout is machine output -- `index`
+    prints JSON, and a parenthetical line in front of it breaks every consumer
+    -- which send it to stderr instead. `name_blocked=False` is for the
+    commands that already print project diagnostics, where the per-file
+    warning carries the refusal; see `_load_blocked_notice()`.
+    """
+    out = sys.stdout if stream is None else stream
+    notice = _load_write_notice(project)
+    if notice:
+        print(notice, file=out)
+    if name_blocked:
+        refusal = _load_blocked_notice(project)
+        if refusal:
+            print(refusal, file=out)
+
+
 def _visible(
     project: Project, verbose: bool, board: str | None, workspace: str | None = None
 ) -> list:
@@ -165,6 +223,11 @@ def _report(
 
 def cmd_check(args) -> int:
     project, schema_was_stale = _load(args)
+    # `check` writes nothing of the project's own -- but its load does, and
+    # said-so or not that is the tree the user is being asked about. The
+    # per-file warnings reach this command through `_report` below, so the
+    # notice names only what landed.
+    _announce_load_writes(project, name_blocked=False)
     if schema_was_stale:
         # Name the file that actually triggered it: the mtime check is a max
         # across both config files, and a warning pointing at the wrong one
@@ -174,6 +237,17 @@ def cmd_check(args) -> int:
             project.warn(
                 f".refdes/schema.json was older than {newest} -- not refreshed "
                 "(--no-write). Run without --no-write to refresh it."
+            )
+        elif schema_json_mod.SCHEMA_REL_PATH in project.load_writes.blocked:
+            # The refresh was attempted and the filesystem refused it. Saying
+            # "refreshed" here would send the user back to their editor to
+            # re-check a completion list that is exactly as stale as it was;
+            # `write_schema` already warned about the refused write, so this
+            # only corrects the trip-wire's own verdict.
+            project.warn(
+                f".refdes/schema.json was older than {newest} -- not refreshed "
+                "(the write was refused). Make the tree writable, or run with "
+                "--no-write to skip the refresh."
             )
         else:
             project.warn(
@@ -219,6 +293,7 @@ def cmd_check(args) -> int:
 
 def cmd_build(args) -> int:
     project, _stale = _load(args)
+    _announce_load_writes(project, name_blocked=False)
     if args.out:
         project.out_dir = args.out
     if args.reseal and args.reseal != seal_mod.RESEAL_ALL and args.reseal not in project.boards:
@@ -311,6 +386,7 @@ def _run_stamp(args, kind: str) -> int:
     lifecycle_mod.validate_name(args.name)  # SchemaError -> exit 2, via main()
 
     project, _stale = _load(args)
+    _announce_load_writes(project, name_blocked=False)
     build_mod.build(project, seal_write=False, reseal=False, accept_board_move=False)
     if project.errors:
         return _report(project)
@@ -393,6 +469,10 @@ def cmd_index(args) -> int:
     prints the export instead of a report.
     """
     project, _stale = _load(args, require_ids=False)
+    # stdout here is JSON for the VS Code extension, so the load's own writes
+    # are said on stderr -- and `index`'s JSON carries the per-file warnings in
+    # its `diagnostics` array, so the refused files need no second telling.
+    _announce_load_writes(project, stream=sys.stderr, name_blocked=False)
     # A file that fails to parse is reported like everywhere else, but `index`
     # is the one command whose exit code is deliberately left alone: the VS
     # Code extension (editors/vscode/extension.js, refreshIndex) throws away
@@ -439,6 +519,7 @@ def cmd_ls(args) -> int:
     prints one is the id itself.
     """
     project, _stale = _load(args, require_ids=False)
+    _announce_load_writes(project)
     # Items in a file that failed to parse are not in the listing and never
     # can be -- say so, and don't let the listing pass for a complete answer.
     load_errors = project.errors
@@ -489,9 +570,7 @@ def cmd_id(args) -> int:
     # missing. Name what it wrote, ahead of the verdict that made the silence
     # surprising. `load_writes` stays empty under --no-write/--dry-run and in
     # the steady state, so both keep printing exactly what they printed before.
-    notice = _load_write_notice(project)
-    if notice:
-        print(notice)
+    _announce_load_writes(project)
     # Nothing pending is only the honest answer when every file loaded: an
     # item in a file that failed to parse is not in project.pending either,
     # so "no items are missing an id" would be a claim about files this run
@@ -530,6 +609,7 @@ def cmd_fetch(args) -> int:
             "fetch", "the .refdes/citations.yaml lockfile and .refdes/copies/"
         )
     project, _stale = _load(args, require_ids=False)
+    _announce_load_writes(project)
     # Pre-rename `vendor:`-era artifacts are not read by anything any more --
     # say so here too, not just at build/check time, so `refdes fetch` cannot
     # look clean while the project's old copies and lockfile keys sit stranded.
@@ -628,6 +708,7 @@ def _print_baseline_diff(diff) -> None:
 def cmd_audit(args) -> int:
     """Suppression is allowed; invisible suppression is not."""
     project, _stale = _load(args, require_ids=False)
+    _announce_load_writes(project)
     # An audit of a project whose files didn't all load is an incomplete
     # audit, and silence about that is exactly what an audit exists to
     # prevent. The report still comes out for what did load; the run fails.
@@ -1190,9 +1271,7 @@ def cmd_stub_tests(args) -> int:
     # before the verdict that made the silence surprising. `load_writes` stays
     # empty under --no-write/--dry-run and in the steady state, so both keep
     # printing exactly what they printed before.
-    notice = _load_write_notice(project)
-    if notice:
-        print(notice)
+    _announce_load_writes(project)
     build_mod.build(project, seal_write=False, reseal=False)
     if project.errors:
         return _report(project)
@@ -1223,6 +1302,7 @@ def cmd_former_ids_propose(args) -> int:
             "former-ids propose --confirm", "former_ids: into the item files"
         )
     project, _stale = _load(args, require_ids=False)
+    _announce_load_writes(project)
     # A file that never parsed was never searched for candidates either, so
     # both of this command's quiet answers -- "no candidates" and a --confirm
     # run that finds errors -- have to say so rather than pass for clean.
@@ -1293,6 +1373,7 @@ def cmd_history_capture(args) -> int:
     if args.no_write:
         return _refuse_no_write("history capture", "the .refdes/history/ store")
     project, _stale = _load(args)
+    _announce_load_writes(project)
     item = project.item_by_ref(args.item)
     if item is None:
         print(
@@ -1328,6 +1409,7 @@ def cmd_history_redact(args) -> int:
         print(_REDACT_WARNING, file=sys.stderr)
         return 2
     project, _stale = _load(args)
+    _announce_load_writes(project)
     target = args.target
     try:
         if re.fullmatch(r"[0-9a-f]{64}", target):
@@ -1378,6 +1460,7 @@ def cmd_history_migrate_seals(args) -> int:
             "history migrate-seals", "the .refdes/history/ store"
         )
     project, _stale = _load(args)
+    _announce_load_writes(project)
     if args.capture_current:
         build_mod.compute_hashes(project)
     try:
@@ -1535,11 +1618,14 @@ def main(argv: list[str] | None = None) -> int:
         "or update) append-only seals and board-drift records. A seal exists only "
         "once 'build' has run over the entry, so an entry that has never been built "
         "has no append-only protection at all, however many clean runs of this "
-        "command it has behind it. Exits non-zero on any error. Nothing of the "
-        "project's own is written -- no site, no seal, no board or citation "
-        "manifest, no baseline. The one exception is "
-        "'.refdes/schema.json', the gitignored editor-completion schema every "
-        "project-loading command refreshes.",
+        "command it has behind it. Exits non-zero on any error. This command "
+        "writes nothing of the project's own -- no site, no seal, no board or "
+        "citation manifest, no baseline. Loading the project does write, and "
+        "this command loads it like every other: surrogate 'key:' fields on "
+        "items that lack one, bare link references normalised to "
+        "'DISPLAY-ID@key' composites, and '.refdes/schema.json', the gitignored "
+        "editor-completion schema. Those are reported as they happen, and "
+        "'--no-write' skips them entirely (docs/design/keys.md §2).",
     )
     p_check.add_argument(
         "--refresh",

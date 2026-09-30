@@ -22,8 +22,12 @@ Fixes here:
 
 from __future__ import annotations
 
+import json
+import os
 import re
+import time
 
+import pytest
 from conftest import write_project_config
 
 from refdes import build as build_mod
@@ -327,3 +331,246 @@ def test_id_dry_run_says_nothing_about_writes_it_did_not_make(tmp_path, capsys):
     assert cli_mod.main(["-c", cfg, "id", "--dry-run"]) == 0
     assert capsys.readouterr().out == "no items are missing an id\n"
     assert path.read_text(encoding="utf-8") == before
+
+
+# ------------------ every command that loads writable says so (BUG 1)
+#
+# In-prog-logs/user-sim-release-gate-run2.md §0 BUG 1: the notice existed, but
+# only `id` and `stub-tests` called it, so `check` rewrote the item file and
+# then reported as though nothing had happened. These are the commands the
+# report named, each measured against the same keyless project.
+
+NOTICE = "(minted 2 key(s) and rewrote 1 reference(s) while loading)"
+
+ANNOUNCING: list[list[str]] = [
+    ["check"],
+    ["ls"],
+    ["index", "--compact"],
+    ["audit"],
+    ["build"],
+    ["revision", "rev-a"],
+    ["fetch"],
+    ["history", "capture", "REQ-001"],
+]
+
+# The ones that still run under --no-write; `fetch` and `history capture`
+# refuse outright there (`_refuse_no_write`) and are covered by their own tests.
+NO_WRITE_OK: list[list[str]] = [
+    ["check"],
+    ["ls"],
+    ["index", "--compact"],
+    ["audit"],
+    ["build"],
+    ["revision", "rev-a"],
+]
+
+
+def _stream(captured, argv):
+    """Where a command's own prose goes -- stderr for `index`, whose stdout is
+    JSON for the editor, stdout for everything else."""
+    return captured.err if argv[0] == "index" else captured.out
+
+
+@pytest.mark.parametrize("argv", ANNOUNCING)
+def test_every_writable_command_announces_what_its_load_wrote(tmp_path, capsys, argv):
+    cfg = _id_project(tmp_path)
+    path = tmp_path / "items" / "r.yaml"
+    before = path.read_text(encoding="utf-8")
+
+    assert cli_mod.main(["-c", cfg, *argv]) == 0
+
+    captured = capsys.readouterr()
+    assert NOTICE in _stream(captured, argv)
+    # The notice and the file agree: something really was written.
+    assert path.read_text(encoding="utf-8") != before
+
+
+@pytest.mark.parametrize("argv", ANNOUNCING)
+def test_the_steady_state_still_announces_nothing(tmp_path, capsys, argv):
+    """Once the tree is normalised -- keys on disk, targets composite -- no
+    command prints anything about writes. The notice reports writes, it is not
+    a banner. Primed with `check` rather than with the command itself, so a
+    command that is not idempotent (`revision rev-a` twice) is not what this
+    test is accidentally about."""
+    cfg = _id_project(tmp_path)
+    assert cli_mod.main(["-c", cfg, "check"]) == 0
+    capsys.readouterr()
+
+    assert cli_mod.main(["-c", cfg, *argv]) == 0
+    captured = capsys.readouterr()
+    assert "while loading" not in captured.out + captured.err
+
+
+@pytest.mark.parametrize("argv", NO_WRITE_OK)
+def test_no_write_still_announces_no_writes_it_did_not_make(tmp_path, capsys, argv):
+    cfg = _id_project(tmp_path)
+    path = tmp_path / "items" / "r.yaml"
+    before = path.read_text(encoding="utf-8")
+
+    assert cli_mod.main(["--no-write", "-c", cfg, *argv]) == 0
+
+    captured = capsys.readouterr()
+    assert "while loading" not in captured.out + captured.err
+    assert path.read_text(encoding="utf-8") == before
+
+
+def test_index_announces_on_stderr_and_keeps_its_stdout_json(tmp_path, capsys):
+    """`index` is the one command here whose stdout is machine output: the
+    VS Code extension parses it. The notice belongs on stderr, and the JSON
+    must stay parseable."""
+    cfg = _id_project(tmp_path)
+
+    assert cli_mod.main(["-c", cfg, "index", "--compact"]) == 0
+
+    captured = capsys.readouterr()
+    assert json.loads(captured.out)["items"]
+    assert NOTICE in captured.err
+
+
+# ------------------------- a tree that will not take a write (BUG 2)
+
+
+def _chmod_tree(root, writable: bool) -> None:
+    """Flip write permission over a whole tree (or one directory of it, files
+    included -- a read-only *directory* still permits writing through to the
+    files inside it, so both bits matter). Always restored by the caller, or
+    pytest cannot clean the temporary directory up afterwards."""
+    mode_file, mode_dir = (0o644, 0o755) if writable else (0o444, 0o555)
+    for dirpath, dirnames, filenames in os.walk(root):
+        for name in filenames:
+            os.chmod(os.path.join(dirpath, name), mode_file)
+        for name in dirnames:
+            os.chmod(os.path.join(dirpath, name), mode_dir)
+    os.chmod(root, mode_dir)
+
+
+def test_check_survives_a_read_only_tree(tmp_path, capsys):
+    """BUG 2, both crash sites at once: `.refdes/` cannot be created, and the
+    item file cannot be rewritten. Neither was caught, so `refdes check` died
+    with a PermissionError traceback instead of checking anything. A read-only
+    tree is a condition of the filesystem, not of the project: warn, and
+    report what `--no-write check` reports."""
+    cfg = _id_project(tmp_path)
+    path = tmp_path / "items" / "r.yaml"
+    before = path.read_text(encoding="utf-8")
+    _chmod_tree(tmp_path, False)
+    try:
+        code = cli_mod.main(["-c", cfg, "check"])
+    finally:
+        _chmod_tree(tmp_path, True)
+
+    captured = capsys.readouterr()
+    assert code == 0
+    out = captured.out + captured.err
+    assert "Traceback" not in out
+    assert "could not write" in out
+    assert ".refdes/schema.json" in out and "items/r.yaml" in out
+    assert "2 items, 0 errors" in out
+    assert path.read_text(encoding="utf-8") == before
+
+
+def test_check_survives_a_read_only_items_dir(tmp_path, capsys):
+    """The second site on its own: `.refdes/` is writable, so only the
+    key-mint write-back is refused -- and only the item file is named."""
+    cfg = _id_project(tmp_path)
+    items = tmp_path / "items"
+    path = items / "r.yaml"
+    before = path.read_text(encoding="utf-8")
+    _chmod_tree(items, False)
+    try:
+        code = cli_mod.main(["-c", cfg, "check"])
+    finally:
+        _chmod_tree(items, True)
+
+    captured = capsys.readouterr()
+    assert code == 0
+    out = captured.out + captured.err
+    assert "Traceback" not in out
+    assert "items/r.yaml" in out
+    assert ".refdes/schema.json" not in out
+    assert "2 items, 0 errors" in out
+    assert path.read_text(encoding="utf-8") == before
+
+
+def test_a_refused_mint_leaves_the_run_reading_like_no_write(tmp_path, capsys):
+    """A key the filesystem refused is not a key: `--no-write`'s own rule (a
+    key is only durable once persisted) applies to a failed write too. So the
+    index says `key: null` and the bare target stays bare, rather than
+    publishing a key that exists only in this process -- and, critically, no
+    later step can freeze a composite naming it into a file that *is*
+    writable, which would be a reference to nothing."""
+    cfg = _id_project(tmp_path)
+    items = tmp_path / "items"
+    _chmod_tree(items, False)
+    try:
+        code = cli_mod.main(["-c", cfg, "index", "--compact"])
+    finally:
+        _chmod_tree(items, True)
+
+    assert code == 0
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert [item["key"] for item in payload["items"]] == [None, None]
+    assert payload["items"][1]["links"]["refines"] == ["REQ-001"]
+
+
+def test_commands_without_diagnostics_still_name_the_refusal(tmp_path, capsys):
+    """`ls` prints errors and nothing else, so the per-file warning would
+    never be seen: the summary line naming the refused files is its only
+    channel. `check` does print diagnostics, and must not say it twice."""
+    cfg = _id_project(tmp_path)
+    _chmod_tree(tmp_path / "items", False)
+    try:
+        assert cli_mod.main(["-c", cfg, "ls"]) == 0
+        ls = capsys.readouterr()
+        assert cli_mod.main(["-c", cfg, "check"]) == 0
+        check = capsys.readouterr()
+    finally:
+        _chmod_tree(tmp_path / "items", True)
+
+    assert "(load could not write items/r.yaml -- read-only tree?" in ls.out
+    assert "(load could not write" not in check.out
+    assert check.out.count("could not write this file") == 1
+
+
+def test_check_does_not_call_a_refused_schema_refresh_refreshed(tmp_path, capsys):
+    """The staleness trip-wire's own honesty: it says "refreshed" because the
+    write ran. When the write was refused, the editor's completion list is
+    exactly as stale as it was, and saying otherwise sends the user back to
+    re-check a file that did not change."""
+    cfg = _id_project(tmp_path)
+    assert cli_mod.main(["-c", cfg, "check"]) == 0
+    capsys.readouterr()
+    # Make the generated file stale again -- by an hour, not by "now": the
+    # staleness check is a strict mtime comparison, and a bare os.utime() can
+    # land on the same clock tick as the write it is meant to postdate.
+    future = time.time() + 3600
+    os.utime(tmp_path / "refdes-schema.yaml", (future, future))
+    _chmod_tree(tmp_path / ".refdes", False)
+    try:
+        assert cli_mod.main(["-c", cfg, "check"]) == 0
+    finally:
+        _chmod_tree(tmp_path / ".refdes", True)
+
+    out = capsys.readouterr().out
+    assert "not refreshed (the write was refused)" in out
+    assert "-- refreshed." not in out
+
+
+def test_an_explicit_write_still_raises_on_a_read_only_tree(tmp_path):
+    """The tolerance belongs to the load, not to writes the user asked for:
+    `revise apply`, `calc-rewrite`, `keys adopt` and `keys restore` call
+    `write_rewrites` without the hook, and there a refusal is a failure."""
+    path = tmp_path / "items"
+    path.mkdir()
+    target = path / "r.yaml"
+    target.write_text("items: []\n", encoding="utf-8")
+    rewrite = revise.FileRewrite(
+        path=str(target), rel="items/r.yaml", before="items: []\n", after="items: []\n"
+    )
+    _chmod_tree(path, False)
+    try:
+        with pytest.raises(PermissionError):
+            revise.write_rewrites([rewrite])
+    finally:
+        _chmod_tree(path, True)

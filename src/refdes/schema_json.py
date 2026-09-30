@@ -347,10 +347,27 @@ def write_schema(project: Project, write: bool = True) -> bool:
     )
     if not write:
         return was_stale
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    # newline="": this file is regenerated on every load and is gitignored, but
-    # its bytes should still not depend on the platform that generated them --
-    # a text-mode write made them CRLF on Windows and LF on Linux for identical
-    # schema. Matches lifecycle/seal/boards/ids/citations/history.
-    textio.write_text(path, json.dumps(build_schema(project), indent=2) + "\n")
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        # newline="": this file is regenerated on every load and is gitignored,
+        # but its bytes should still not depend on the platform that generated
+        # them -- a text-mode write made them CRLF on Windows and LF on Linux
+        # for identical schema. Matches
+        # lifecycle/seal/boards/ids/citations/history.
+        textio.write_text(path, json.dumps(build_schema(project), indent=2) + "\n")
+    except OSError:
+        # A read-only tree (frozen CI checkout, read-only bind mount) is a
+        # condition of the filesystem, not of the project: nothing downstream
+        # reads this file during a CLI run -- `build`/`check`/`index` resolve
+        # the schema in memory, and the staleness verdict above was computed
+        # from mtimes before the write -- so the run goes on and says so.
+        # Recorded on load_writes so `check`'s trip-wire cannot call a file it
+        # failed to write "refreshed", and so the command's own summary names
+        # the refusal for the commands that print no diagnostics.
+        project.load_writes.blocked.append(SCHEMA_REL_PATH)
+        project.warn(
+            "could not write this file (read-only tree?); run with --no-write "
+            "to silence this",
+            file=SCHEMA_REL_PATH,
+        )
     return was_stale
