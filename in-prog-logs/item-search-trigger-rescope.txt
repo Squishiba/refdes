@@ -1,0 +1,20 @@
+Task: Correct the trigger analysis in docs/design/item-search-hover.md.
+
+Progress: Read AGENTS.md, the full item-search design, and the VS Code adapter design. The existing §4 counts are from repository dogfood items and agent-authored progress logs; they cannot establish Jared's authoring behavior. The shipped hover provider in editors/vscode/extension.js is invoked through VS Code's hover mechanism and currently gates on an ID-shaped token; the extension has no idle-timer or question-triggered hover logic. I am restructuring §4 around the three direct signals Jared described and updating dependent recommendations and status text.
+
+Difficulties: The existing document repeatedly cites the flawed corpus conclusion downstream, so those recommendations need coordinated updates rather than a local correction to the counts alone.
+
+Status: In progress.
+
+Progress update: Rewrote §4 around Jared's direct account. The `?` is the
+primary, ship-first invocation; the two other signals are explicitly future
+work. Documented character-change detection, replacement/paste limits, a short
+settling delay, prose-only scope, query extraction, current-item exclusion, and
+interaction with the existing ID hover. Updated the status preamble and all
+recommendations and references that had relied on the bad corpus inference.
+
+Verification: Reviewed `extension.js`'s `ID_RE` hover entry condition and
+registered providers, confirmed no text-change-triggered search is currently
+implemented, and ran `git diff --check`. No tests were run (docs-only task).
+
+Status: Documentation edits are complete and ready for review/commit.
