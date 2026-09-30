@@ -1,22 +1,20 @@
 Status: **proposed**; **no slices scoped, no code written**. Nothing in this
-document is a commitment to build it. It records a conversation about a way for
-an author who cannot remember whether a fact is already in the project to ask
-the project instead — and it records, more load-bearingly, that when the
-conversation's central heuristic was checked against this repository's own
-content, **the evidence came back against it** (§4). The recommendation that
-follows from that is to build the *search* and defer the *trigger*, which is the
-opposite of the order the conversation arrived at. Every §5 direction is a
-direction under discussion. Every §6 question carries a recommendation, and each
-recommendation is the default if Jared lets it stand unanswered.
+document is a commitment to build it. It records a way for an author who cannot
+remember whether a fact is already in the project to ask the project instead.
+The earlier §4 conclusion against the trigger was based on the wrong evidence:
+this repository's tiny dogfood items and AI-agent task logs do not represent
+Jared's private hardware-spec authoring. Jared has now described three real
+signals, and named a literal `?` as the deliberate, precise invocation that
+makes this a tool. This revision treats that character trigger as the
+load-bearing, ship-first anchor; pauses and suspected duplicates are future
+directions, not equal alternatives. Every §5 direction remains under
+discussion, and each §6 recommendation is the default if Jared lets it stand.
 
-Verified while writing: `Item`'s dataclass fields and its `title` property, the
-three existing substring matchers, `serve/api.py`'s dispatch and `_item_view`,
-`ServeClient.request`, the live hover provider, the live `refdes schema --json`
-output, `append_only` across hardware@3, and the `?`-frequency of this
-repository's real prose. Commands run are named inline; note that `refdes` on
-`PATH` is broken in the environment this was written in, so every CLI invocation
-was `PYTHONPATH=src python -m refdes.cli …`, which is why those strings appear
-instead of the bare command.
+Verified while writing: the trigger-related claims about the current VS Code
+hover provider and extension event surface against `editors/vscode/extension.js`
+and `editors/vscode/package.json`. Earlier verified search infrastructure,
+schema vocabulary, and matcher findings are retained; this revision does not
+rely on the old corpus analysis as evidence about Jared.
 
 # Item search: find the fact you cannot remember, from inside the item you are writing
 
@@ -37,10 +35,10 @@ What was asked for is that the editor notice that, search the project, and
 surface candidates — as a hover, not an intrusive popup — with no generative
 model anywhere in the loop. §2 records which parts of that is load-bearing.
 
-The need itself is real and does not depend on any of the design below: someone
-who cannot remember which item holds a fact needs a way to find it. §4 argues
-the *trigger* is the weakest link in the idea and should be the last thing built,
-not the first.
+The need itself is real and does not depend on any of the design below. Jared
+has now identified the literal `?` as the deliberate invocation: its specificity
+is what makes the search a tool rather than ambient guessing. §4 develops that
+trigger first and records two broader signals as possible later work.
 
 ## 2. What has to be true
 
@@ -58,14 +56,11 @@ this is not "add search to the editor".
    token-frequency matching over the built project is the whole of it. §9.1
    records the classifier alternative and why it is rejected rather than deferred
    for its own sake.
-2. **Wrong has to be cheap.** This is the premise that does the most work in
-   this document, and §4 leans on it hard. In the conversation's framing, a
-   false-positive trigger is "just an unwanted hover, not a wrong answer", so the
-   bar for the trigger heuristic is **"not annoying", not "accurate."** That
-   sentence is load-bearing in two directions — it argues against over-investing
-   in a classifier, and (once §4's measurement lands) it argues against
-   over-investing in the trigger at all. §4.3 is the honest consequence of
-   applying this premise consistently rather than only where it is convenient.
+2. **Wrong has to be cheap.** This constrains how search results are presented;
+   it does not erase the value of a precise invocation. A literal `?` is
+   deliberate and unambiguous as a character match, while broader pause-based
+   triggers have much more noise. §4 distinguishes those costs instead of
+   treating every trigger as the same heuristic.
 3. **The project schema is a free, domain-specific signal.** Type names, field
    names, and enum choices are a domain vocabulary that a generic search tool
    does not have, and they are already in a JSON document the repo's own rules
@@ -228,139 +223,146 @@ returns as the hover's range, and a sentence of prose has no such range. This is
 a second provider, or a restructuring of the first into a dispatcher, and it
 should be scoped as one. §6 Q4 asks whether a hover is even the right surface.
 
-## 4. The trigger heuristic, checked against real content
+## 4. The trigger: `?` first, broader signals later
 
-This is the load-bearing part of the document, and it does not go the way the
-conversation went.
+The previous version treated a count of question marks in repository text as
+evidence against the trigger. That conclusion was a real evidence-gathering
+mistake: the corpus was wrong for the question being asked. Jared has now
+described what actually happens while authoring, and specifically explained why
+the `?` is the right anchor: **"using a '?' as the trigger for the search is
+what gives it specificity; it turns it into a tool."** He named three related
+experiences, with the first deliberately serving a different design role from
+the other two:
 
-### 4.1 The target surface has zero instances of the signal
+1. He types a literal `?` mid-sentence when genuinely unsure (for example,
+   `...runs at 3.3V?`). This is the primary, deliberate invocation.
+2. He pauses without punctuation because he wonders whether he already said
+   something somewhere. This is a real experience, but an ambient and much
+   noisier possible future signal.
+3. He is about to write a number, rating, or part choice with a nagging sense it
+   may duplicate or contradict something already in the project. This describes
+   the need for retrieval, but recognizing it at the right moment is the hardest
+   trigger problem.
 
-- `items/` — **0** question marks, across 2 files, 3,391 bytes, 6 items.
-- `CHANGELOG.md` — **0** question marks, in the entire file.
+### 4.1 Why the earlier corpus counts do not answer this question
 
-The feature's trigger does not occur once in the only content corpus this
-repository has.
+The measured counts remain valid only as descriptions of those files:
+`items/` had 0 literal question marks across its six dogfood items, and
+`in-prog-logs/` had 32 after the previous analysis's filtering, with only one
+matching its narrow self-posed-content-question pattern. But `items/` is this
+repository's tiny example project, not Jared's real hardware work. The progress
+logs are AI-agent task documentation (and `AGENTS.md` explicitly requires them),
+not a human engineer's private notes while writing specs. Neither corpus is a
+sample of Jared's authoring behavior. The counts therefore neither disprove nor
+meaningfully estimate how often his `?` trigger occurs. The prior inference
+that the trigger should be deferred was unsupported and is withdrawn.
 
-### 4.2 The register analysis, and it points the other way
+### 4.2 Primary trigger mechanics: literal `?` insertion
 
-6 items is not a corpus, so this cannot refute anything, and §4.5 says so
-plainly. But `in-prog-logs/` is 178 files and 1,299,159 bytes of the author's
-own working notes — the closest thing this repository has to "a person writing
-notes". Stripping fenced code blocks and inline code spans leaves **38** `?`
-characters; removing the ones that are URL or query syntax (`?type=`, `?page=`,
-`?token=`, `method="GET"`, and anything with a path segment or a `key=value`
-shape) leaves **32**. All 32 were read, and they fall into five groups:
+A character match is deterministic and cheap. It has low recall by design: it
+fires only when Jared deliberately types the marker. That precision is the
+feature. The proposed first slice should make this a distinct, explicit search
+invocation and measure its usefulness before considering ambient triggers.
 
-| Kind | Example | Where | ~n |
-|---|---|---|---|
-| Task-list heading | `## Finished?`, `## 4. Regression check: did the predicted −40-45% model-build win materialize?` | `in-prog-logs/finding-25.md:69`, `perf-rebaseline-opp3.md:76` | 4 |
-| Quoted tool output, or a table column header | `Did you mean 'part_number'?`, `\| site \| line \| pointer? \|` | `scalar-typo-error-f3.md:101`, `config-error-doc-pointer-f8.md:58` | 11 |
-| Process self-talk | `Remaining: ruff (docs only — nothing to check?)`, `standard "is the tree clean?" step` | `finding-37-decisions-links-part-of-row.md:33`, `user-sim-release-gate-run2.md:105,269` | 3 |
-| A question about the *tool's own implementation*, asked in prose to whoever reads next | `dependent, and is the fix small and clear?`, `Which ending does a *new* line wear?` | `micro-sign-linux.md:5`, `windows-line-endings.md:138` | 13 |
-| A self-posed question about content | `design history trustworthy?` | `user-sim-release-gate-run1.md:167` | **1** |
+Mechanics to settle in implementation, while preserving that contract:
 
-**One.** In 1.3 MB of the author's own notes there is one instance of the exact
-behaviour this feature is built around, and it is about the *tool's own* design
-history, not about a design fact.
+- Observe `workspace.onDidChangeTextDocument` and inspect each inserted change.
+  Trigger only when a change inserts exactly one `?` character with no replaced
+  text (`text === "?"`, `rangeLength === 0`). This avoids treating an arbitrary
+  pasted sentence containing question marks as an invocation. VS Code's change
+  event identifies inserted text, not its physical source, so a paste consisting
+  of exactly `?` is indistinguishable from a keystroke; the design is character
+  insertion, not keyboard-layout-specific key interception.
+- Use a short settling delay (proposed 150 ms) to let the editor apply the
+  change and place the caret before requesting results. Take the query from the
+  current prose clause ending at that marker; this is deterministic text
+  extraction, not a claim to understand the question. This is event
+  coordination, not a pause/idle heuristic: the `?` event itself is required.
+  Cancel a pending invocation if the document closes or the marker is removed
+  before it runs. Do not wait for a longer idle interval or infer intent from
+  subsequent prose.
+- Search the current item's Markdown body only. Ignore front matter, fenced code
+  blocks, and inline code, where `?` commonly belongs to syntax or examples.
+  Within prose, allow the marker anywhere, including mid-sentence or after a
+  number/unit; do not require it at line end or require a WH-word. Resolve the
+  item from the current document using the existing index/source mapping.
+- Keep the marker in the document. The search is read-only and must not consume,
+  rewrite, or normalize the user's text. Results should exclude the current
+  item, since the marker is part of the text being authored and must not make
+  that item appear as its own discovery.
+- Treat the existing ID hover as a separate provider contract. It is entered
+  only when `ID_RE` finds an item id under the hover position
+  (`extension.js:28, 494-508`). A `?` in prose does not satisfy that condition.
+  A search result surfaced as a hover therefore needs a second provider (or an
+  explicit dispatcher refactor), with a `?`-range and its own result rendering;
+  it must not broaden the ID provider and change ID hover behavior.
+- A document-change event alone cannot make VS Code's passive hover appear at
+  the caret. The first slice must explicitly invoke a surface after detecting
+  `?`—for example, request the editor's hover at the marker and let the
+  question-specific provider render there. Because the caret normally lands
+  immediately after an inserted `?`, that provider must recognize the marker at
+  the recorded insertion range or immediately to the left of the caret; it must
+  not depend on `getWordRangeAtPosition` treating punctuation as a word. Use a
+  focused search result surface if hover invocation proves unreliable. Keep it
+  tied to the exact insertion event, avoid repeated display while the same marker remains, and
+  ensure another provider's hover over an ID continues to work unchanged.
+  Validate the chosen editor API behavior in an extension-host spike before
+  locking the interaction; current `extension.js` has no such trigger path.
 
-The pattern holds across the repository. `docs/design/` carries 162 `?`
-characters outside code, 156 after the same URL/query filter, and they are
-overwhelmingly §6 "Open questions" items *posed to Jared*. The register that
-uses `?` in this repository is the register of **asking a person for a
-decision**. The feature's premise assumes a different register: writing a
-question to yourself, aimed at the project. That register does not appear in the
-observed prose.
+The last point is a real integration question, not a reason to demote the
+trigger. The character condition is deterministic; VS Code's ability to invoke a
+hover at the just-edited marker is the implementation detail to prove. If the
+hover API cannot reliably show there, retain `?` as the invocation and choose a
+small explicit result surface rather than adding a semantic classifier.
 
-**One entry does argue for the need, and it is worth quoting verbatim** — the
-same release-gate log, `in-prog-logs/user-sim-release-gate-run2.md:295`:
+### 4.3 Future signals, not co-equal triggers
 
-> question ("what's in product-a?") has no answer through the listing command
+A typing pause can be measured with a deterministic debounce timer; a timer is
+not a model. Its meaning is still ambiguous: the author may be choosing words,
+distracted, or finished. The current extension has no idle-triggered hover.
+Its hover provider is called through VS Code's hover mechanism and gates on an
+ID-shaped word; the adapter design documents no suppression or noise-control
+logic beyond that entry condition (`editors/vscode/extension.js:494-508`,
+`docs/design/editor-vscode-adapter.md` §2.2). A timer that opens search after
+ordinary pauses would bypass that narrow, user-positioned hover behavior and
+could repeatedly interrupt typing. Any future pause experiment needs concrete
+noise controls—at minimum a substantial idle threshold, one invocation per
+pause episode, suppression while selection/composition or another popup is
+active, and an easy disable—and evidence from real use. It is not part of the
+ship-first trigger.
 
-That is the §1 problem stated independently, in this repository's own words,
-against `refdes ls` rather than against a hover: a question about what the
-project contains, with no way to ask it. It is evidence for **§1** and evidence
-about the **gap** §3.1 confirms — and, pointedly, it is phrased as a thing a
-*command* could not answer, which is §4.3's recommendation arriving from a
-direction this document did not go looking in.
+The "about to state a possibly duplicated fact" moment is harder still. A
+number, rating, or part choice can be detected lexically, but deciding that this
+particular fact feels familiar requires context or semantic understanding. A
+rule keyed to digits/units would produce many unrelated matches and still miss
+textual facts. Under §2.1's no-classifier/no-model constraint, a dependable
+per-keystroke detector for this signal is not realistically specified yet. The
+need it points to is better served by explicit on-demand search and perhaps a
+passive result surface that the author can open while composing, not by claiming
+that software can recognize the nagging sense itself. Keep it as future
+exploration, not a trigger commitment.
 
-This does not mean nobody does it. It means the idea's core premise — "someone
-typing a self-question into their notes is a recognizable event" — is, on this
-repository's evidence, **an assumption and not an observation**. §2.2's premise
-was reached on the grounds that a false trigger costs an unwanted hover. It is
-worth noticing that the risk here is *worse* than a false positive: it is a
-**false negative that makes the feature invisible**, and an invisible feature is
-not cheap to discover.
+### 4.4 Recommendation
 
-### 4.3 What follows, and it is a reordering
+Build deterministic search and the literal `?` invocation together in the first
+editor-facing slice, after or alongside the search backend needed to answer it.
+The marker supplies the deliberate moment; search supplies the retrieval. A
+standalone command remains useful for queries that do not arise as a typed
+question, but it is complementary and should not replace or postpone the
+primary trigger. Do not build the pause heuristic or duplicate-suspicion detector
+in that slice. Revisit either only with real authoring evidence and a concrete
+noise budget. This keeps §2.1 intact: deterministic matching and ranking may
+return imperfect candidates, but no system guesses what the author meant.
 
-Applying §2.2 honestly rather than only where it is convenient:
+### 4.5 Structural finding retained
 
-1. **Build the search; defer the trigger.** The stated need — "I cannot remember
-   which item has this" — is fully served by a query the author types. It does
-   not require them to *write a question first*, and requiring that stacks a
-   detection problem on top of a retrieval problem to serve one need. A
-   standalone `refdes search` that never has to guess when it should fire serves
-   all of the need and none of the guessing.
-2. **In VS Code, the honest first surface is a command, not a hover.** The id
-   hover shows facts about a *finished* token. A question hover fires *while the
-   author is mid-sentence*, which is the opposite of finished, and hovers are
-   transient by nature — the results scroll away, and re-typing the sentence to
-   see them again is a worse loop than re-running a command. A `Refdes: Search
-   items` quick-pick is the same feature with none of those problems. §6 Q4.
-3. **The WH-word / adjacency refinement should not be built at all.** The
-   conversation's instinct was reasonable on its own terms — "how many / where /
-   which" reads as a lookup, "is this / should this" next to a number reads as a
-   self-check. The measurement is why it is not worth the effort: refining a
-   classifier for a signal observed **once in 1.3 MB** is fitting noise, and
-   even a perfect refinement of a near-unused trigger stays near-unused. This
-   argument is independent of §2.1's no-classifier stance — it is about the
-   signal, not the method.
-4. **The known failure modes of the WH-word idea are real, and are recorded here
-   as the conversation left them**, because if the trigger is ever revived these
-   are the first things to be wrong: some genuine lookups begin with "is" ("is
-   the ADC count already decided?" is a lookup); some genuine self-checks begin
-   with "how" ("how much headroom is left?" next to a number you just computed
-   is a self-check); and an adjacency rule keyed to "a number or unit you just
-   typed" is a rule about *cursor history* rather than about the sentence, which
-   means it is untestable without a cursor and is a different feature with a
-   different failure surface.
-
-### 4.4 A structural finding the corpus check turned up
-
-`append_only: true` is on `log` **only** — verified by reading
-`src/refdes/standards/hardware/v3/base.yaml:294` against every type in the
-resolved schema; the other six types omit it entirely.
-
-And the `log` type's own `doc:`, at `base.yaml:290`, says:
-
-> "A dated entry in the design log — work done, **questions raised**,
-> corrections. Entries are append-only: each is sealed on the first build where
-> it has no errors, and after that editing it is a build error — corrections are
-> new entries with `amends`."
-
-So the one refdes type whose stated purpose includes raising questions is also
-the one type that seals its body on the first clean build, and it requires `date`
-and `summary` (`base.yaml:297-298`) — `summary` being what shows in log
-listings, not the body. **A self-question typed into a log entry's body is the
-least findable place to put one:** it is invisible in every log listing, and it
-becomes uneditable almost immediately. If the trigger is ever built, `log`
-bodies are the case to think hardest about, and probably the case to exclude.
-
-### 4.5 What this measurement is, and is not
-
-It is a measurement of a 6-item corpus, of an author with a demonstrably
-low-question-mark register, in a repository that is a tool rather than a design
-project. It is **weak evidence against a strong intuition, not proof the
-behaviour does not happen.** A real user's `items/` might be full of them. The
-honest claim is narrower than "the trigger is wrong": it is **"the trigger is
-unvalidated, and the only evidence available is negative"** — which is exactly
-the failure mode `AGENTS.md` opens by warning about, and which applies to a
-design idea just as much as to a schema.
-
-The practical consequence is a sequencing change, not a cancellation. Build the
-retrieval half, which is useful on its own terms and testable, and let real
-authoring accumulate the evidence about the trigger half that this repository
-does not have.
+`append_only: true` is on `log` only — verified in
+`src/refdes/standards/hardware/v3/base.yaml:290-298`. The `log` type's own
+`doc:` says it records "questions raised" and its entries seal on the first
+clean build. This affects where a future implementation may observe editable
+prose, but it does not undermine the `?` trigger. The search invocation should
+work in editable item prose; any exclusion for sealed log bodies should follow
+what the editor can actually edit and should be specified separately.
 
 ## 5. Direction (all of it speculative)
 
@@ -375,7 +377,9 @@ answer.
 
 The haystack is `item.id`, `item.title`, the item's `body`, and its tags. The
 first three settle the §3.2 disagreement in favour of `ls` (id included), plus
-body; §6 Q2.
+body; §6 Q2. For the `?` invocation, use the current prose clause ending at the
+inserted marker as the query text, then apply deterministic token and schema
+vocabulary weighting from §5.2. Do not ask a model to rewrite the question.
 
 **Output shape is the question's own open problem, not the search's.** `ls`
 prints a fixed-width table; a search wants id, type, board, title, **and a
@@ -454,29 +458,28 @@ module that already owns the editor's query.
 `docs/design/editor-vscode-adapter.md` §8 states the phasing philosophy this
 follows: every editor capability in this repo went read-first, and "Slice V0 is
 deliberately smaller than anything above." A search surface is read-only, so it
-fits — but §4.3 recommends the **command** shape first, not the hover:
+fits — §4.4 recommends a deliberate `?` invocation as the anchor, with a
+command as a complementary explicit route:
 
 - **A `Refdes: Search items` command**, quick-pick over `GET /api/search`, with
   the snippet in the detail line and the item's deep link
   (`ServeClient.deepLink`, already shipped at `serveClient.js:297-300`) as the
-  action. No new provider, no trigger, no cursor logic, nothing that can fire
-  while someone is typing a sentence.
-- **A hover, only if §4.3's reasoning is answered against.** It is a second
-  provider rather than a new condition on the first (§3.5), it needs a
-  sentence-shaped range where `ID_RE` gives none, and it needs a trigger whose
-  only evidence is negative. All three are reasons to sequence it last, and none
-  of them is "hard."
+  action. This complements the primary `?` trigger and supports queries that
+  are not being typed into item prose.
+- **A question-specific hover/result surface for `?`.** It is a second provider
+  rather than a new condition on the ID provider (§3.5), and must be validated
+  against the editor API as §4.2 describes. The exact character event remains
+  the trigger even if the result surface needs adjustment.
 - **No writes, no new server flags, no webview** — the same three exclusions V0
   shipped with.
 
 ## 6. Open questions for Jared
 
-**Q1 — Search first, or trigger and search together?**
-*Recommendation:* `refdes search` first, standalone, no trigger (§4.3). The need
-in §1 does not require the trigger; the trigger is the unvalidated half, and
-building it first means the feature is judged on the half with negative
-evidence. Cost of this order: the feature is invisible unless invoked, which is a
-real cost, and is why the VS Code command (§5.4) should land close behind.
+**Q1 — Search backend and `?` trigger: which lands first?**
+*Recommendation:* build the deterministic search backend and literal `?`
+invocation as one first editor-facing feature (§4.4). The backend can be
+implemented first internally, but the feature should ship with its deliberate
+trigger. Keep a command as a complementary route for queries outside prose.
 
 **Q2 — Does search index bodies, and does that change what `ls` and `q` mean?**
 `ls`'s haystack is `id + title + tags`; `q`'s is `title + tags`; neither has body
@@ -494,10 +497,10 @@ adjacent scope — it is not this feature — but shipping a fourth matcher with
 doing it makes the drift permanent.
 
 **Q4 — Hover, command, or both?**
-*Recommendation:* **command first** (§5.4), for the reasons in §4.3: a hover
-fires while a sentence is unfinished, and its result is transient in a way a
-re-runnable command's is not. The hover is the version that would feel magical if
-it worked, and §4 says the evidence for it is not there yet.
+*Recommendation:* the `?`-invoked result surface is part of the first feature
+(§4.2); validate whether the existing VS Code hover mechanism can reliably show
+it at the marker. Keep the search command as a complementary invocation. The
+ID hover remains unchanged.
 
 **Q5 — Does a question in a body match itself?**
 `Item.title` falls back to the first 90 characters of `body` when a type has no
@@ -508,11 +511,9 @@ unconditionally and before ranking, so the author is never shown the thing they
 just typed as if it were a finding elsewhere in the project.
 
 **Q6 — Is there a `log` exception?**
-§4.4: `log` is the one type whose own `doc:` says it holds "questions raised",
-and it is also `append_only`, sealed on the first clean build, with `summary`
-rather than body in listings. *Recommendation:* if a trigger is ever built, log
-bodies are excluded from it, and that exclusion is stated in the user-facing docs
-rather than left to be discovered.
+§4.5: `log` is the one type whose own `doc:` says it holds "questions raised"
+and it is also `append_only`. *Recommendation:* the trigger observes editable
+prose only; specify any sealed-body handling against actual editor behavior.
 
 **Q7 — Does this belong in `docs/index.md`'s nav?**
 *Recommendation:* no, and the other 23 files in `docs/design/` set the precedent
@@ -564,12 +565,12 @@ reason):
   presents as "no results found." This is the quiet-failure bug class named at
   `serveClient.js:136-140` and it is the most important test in this list.
 
-**One test that exists specifically to keep §4 honest:** if a trigger is ever
-built, `test_no_search_surface_fires_without_an_explicit_invocation` pins §4.3's
-conclusion in shipped behaviour rather than in prose — a search result appears in
-the editor only because the author asked for it. A test that fails when someone
-adds a speculative trigger is cheap, and it is the only durable form of "don't
-build the trigger yet."
+**Tests for the deliberate trigger:** pin that a single inserted `?` in item
+prose invokes search once after the settling delay; replacement, unrelated
+characters, fenced/inline code, front matter, and ordinary typing pauses do not.
+Also pin that ID hovers retain their existing range and content. These tests
+protect the intended specificity while leaving future ambient triggers out of
+scope.
 
 ## 8. What is still design only
 
@@ -584,8 +585,9 @@ Everything. Explicitly, with no slices scoped:
   measurement taken from `refdes schema --json` output, not an implementation.
 - **No ranking exists.** "id beats title beats body" is a sentence in §5.1, not a
   function. No score, no threshold, no snippet extractor.
-- **No trigger exists**, and §4 argues against building one for now. No WH-word
-  table, no adjacency rule, no cursor-history tracking.
+- **No search trigger exists yet.** The proposed first trigger is the literal
+  `?` character insertion (§4.2); pause and duplicate-suspicion signals remain
+  future directions, with no WH-word table or semantic detector.
 - **No hover provider for questions exists.** §3.5 establishes that the current
   one cannot host it, which is a statement about shipped code, not a proposal.
 - **No help text, no user-facing docs page, and no changelog entry** for the
@@ -596,12 +598,12 @@ Everything. Explicitly, with no slices scoped:
 **9.1 A classifier — tiny model or otherwise.**
 Rejected for now, and the reasoning is that the mechanical version has not been
 tried. §2.1's no-model stance is the constraint; the *sequence* is the argument. A
-classifier drifts from deterministic, adds a dependency, needs training examples
-that do not exist (§4.1: zero instances in `items/`, one in 1.3 MB of notes), and
-would be introduced to solve a problem the mechanical version might not have. If
-it is ever reopened, it should be reopened with real queries collected from a
-shipped §5.1 command — that is, after the thing that would tell you whether a
-classifier is needed has existed for a while.
+classifier drifts from deterministic, adds a dependency, and would need training
+examples that are not present in this repository. The `items/` and
+`in-prog-logs/` counts described in §4.1 are not evidence about
+Jared's real authoring. The classifier remains rejected by §2.1 regardless of
+trigger frequency; collect real queries through the `?` feature and command if
+future matching changes need evaluation.
 
 **9.2 Client-side search: fetch the items, filter in the extension.**
 `/api/items` already returns everything needed, capped at `DEFAULT_LIMIT = 500`
@@ -624,12 +626,13 @@ dependency attached, and §5.2's vocabulary is a better use of the same insight.
 `cmd_ls`'s own docstring calls it "the CLI-native answer to 'what already exists
 here'" (`cli.py:425-432`) — a listing. Making it a body-searching tool changes
 what every existing alias and script means, to serve a feature whose trigger is
-unvalidated. §6 Q2's recommendation is to leave both alone.
+deliberately limited to a typed `?`. §6 Q2 recommends leaving both alone.
 
 **9.5 A popup, a panel, or any intrusive suggestion.**
-Named in the ask and declined. A panel is the V1 sidebar webview that has not
-been built; a popup interrupts. The hover is deferred by §4.3 and the command is
-what §5.4 proposes instead.
+A panel is the V1 sidebar webview that has not been built. An automatically
+opening popup on ordinary typing is declined; a result surface opened only by
+the deliberate `?` is bounded by the user's invocation. The command in §5.4
+remains available for explicit searches outside that moment.
 
 ## 10. Precedent this borrows from
 
@@ -648,7 +651,7 @@ what §5.4 proposes instead.
 | read-only first, smallest slice first | `editor-vscode-adapter.md` §8 | §5.4's exclusions |
 | Python contract tests + Node-driven extension tests | `editor-vscode-adapter.md` §7; `tests/test_vscode_adapter_contract.py`, `tests/test_vscode_extension.py` | §7's whole shape |
 | `Item.title` fallback chain | `model.py:553-572` | §3.3's trap and §6 Q5 |
-| `append_only` on `log`, and its `doc:` |  `base.yaml:290, 294, 297-298` | §4.4's tension and §6 Q6 |
+| `append_only` on `log`, and its `doc:` |  `base.yaml:290, 294, 297-298` | §4.5 context for §6 Q6 |
 | `refdes schema --json` as the vocabulary source | `schema_json.py:117-148` | §5.2's 63 terms, and its `doc:` strings |
 | the asset search path (a different thing) | `backlog.md:2090+` | §3.1's note that the word "search" already means something else here |
 
