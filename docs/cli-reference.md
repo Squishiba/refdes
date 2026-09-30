@@ -493,7 +493,7 @@ Imported projects (read-only):
 
 Citations:
   https://www.ti.com/lit/ds/symlink/tps62913.pdf
-    unpinned       hash-only  cited by CMP-PWR-001
+    unpinned       no pin     cited by CMP-PWR-001
 
 Parts:
   TPS62913       used by CMP-PWR-001 (component) — board: power
@@ -541,6 +541,17 @@ its own `— board(s):` line and, for a project with a `workspaces:`
 registry, a `— workspace(s):` line the same way — a flat-layout project
 never populates an item's workspace in the first place, so that line simply
 never appears there rather than showing up empty.
+
+Each citation line is `<state>  <pin>  cited by <items>`. **`state`** is what
+verification found — `ok`, `unpinned`, `cache_missing`, `hash_mismatch` or
+`missing` (see [citing a datasheet](markdown.md#citing-a-datasheet) for what
+each costs). **`pin`** says what the lockfile holds for that path: `no pin`
+(never fetched, so nothing is pinned), `hash-only` (pinned by `sha256`, no
+local copy — the default, since datasheets are generally copyrighted) or
+`kept` (pinned, with the bytes kept at `.refdes/copies/<sha256><ext>`). The
+two columns are independent facts about the same pin, so they never
+contradict each other: an unpinned citation has no hash to be `hash-only`
+about, and says `no pin`.
 
 An import declared with a `version:` reads `pinned to 2026.3`; one declared
 without one reads `unpinned`, and its items still count toward the

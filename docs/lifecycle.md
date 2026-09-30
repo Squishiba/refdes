@@ -117,10 +117,10 @@ release 'rev-b' stamped: 41 items, all gates passed.
   .refdes/baselines/rev-b.yaml
 
 Consider recording this in the design log, e.g.:
-  - id: LOG-...
+  - id: LOG-A-0NN  # placeholder: your log prefix, next free number
     date: 2026-08-17
     summary: Released rev-b — sent to fab.
-    records: [DEC-...]
+    records: [DEC-A-0NN]  # the decision(s) this release turned on
 ```
 
 Nothing writes that log entry for you — see [After a

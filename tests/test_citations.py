@@ -759,6 +759,56 @@ def test_cli_audit_lists_citations(citation_project, capsys):
     assert "CMP-001" in out
 
 
+def _audit_citation_line(root, capsys) -> str:
+    code = cli_mod.main(["-c", str(root / "refdes-project.yaml"), "audit"])
+    assert code == 0
+    out = capsys.readouterr().out
+    lines = [line for line in out.splitlines() if "cited by CMP-001" in line]
+    assert len(lines) == 1, out
+    # column-aligned in the real output; compared field-wise here so the test
+    # is about the words, not about the column widths
+    return " ".join(lines[0].split())
+
+
+def test_cli_audit_never_calls_an_unpinned_citation_hash_only(citation_project, capsys):
+    """`unpinned  hash-only` was a self-contradiction on one line. "hash-only"
+    is this project's word for *pinned by sha256 with no kept copy*
+    (docs/markdown.md, "Pinning vs. keeping a copy"), and an unpinned citation
+    has no hash at all -- `record is None` returns before `kept_copy` is ever
+    read (citations.py:841-851). User-sim run 2, "Lower severity" list.
+    """
+    line = _audit_citation_line(citation_project, capsys)
+    assert line == "unpinned no pin cited by CMP-001"
+
+
+@pytest.mark.parametrize(
+    "kept_copy, blob, expected",
+    [(False, False, "hash-only"), (True, True, "kept")],
+)
+def test_cli_audit_pinned_citation_keeps_its_pin_words(
+    citation_project, capsys, kept_copy, blob, expected
+):
+    """Only the row that was lying changes: a pinned citation with no kept copy
+    still reads `hash-only`, and one whose bytes are kept still reads `kept`.
+    """
+    sha = hashlib.sha256(b"datasheet bytes").hexdigest()
+    _write_citation_lockfile(
+        citation_project,
+        {
+            "https://example.com/ds.pdf": {
+                "sha256": sha,
+                "fetched": "2026-01-01T00:00:00Z",
+                "kept_copy": kept_copy,
+            }
+        },
+    )
+    if blob:
+        _write_kept_copy_blob(citation_project, sha, ".pdf", b"datasheet bytes")
+
+    line = _audit_citation_line(citation_project, capsys)
+    assert line == f"ok {expected} cited by CMP-001"
+
+
 # -------------------------------------------------------------------- rendering
 
 

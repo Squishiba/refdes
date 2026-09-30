@@ -226,11 +226,16 @@ announce yet):
 
 ```
 Consider recording this in the design log, e.g.:
-  - id: LOG-A-0NN
+  - id: LOG-A-0NN  # placeholder: your log prefix, next free number
     date: 2026-08-17
     summary: Released rev-b — sent to fab.
-    records: [DEC-...]
+    records: [DEC-A-0NN]  # the decision(s) this release turned on
 ```
+
+Both ids are placeholders and say so: `LOG-A-0NN` is not shaped like a display
+id (`ids.split_id` wants a trailing `-<digits>`), so a copy-paste that skips
+substituting them fails the id check rather than minting something you then
+have to `refdes revise` away.
 
 Write the entry the same way you'd write any other — `records:` the
 decision(s) the release actually turned on, and say in `summary:` what

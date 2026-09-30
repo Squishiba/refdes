@@ -445,11 +445,19 @@ def _run_stamp(args, kind: str) -> int:
     print(f"\n{kind} {args.name!r} stamped: {outcome.item_count} items{tail}")
     print(f"  {rel_path}")
     if kind == "release":
+        # The ids here are placeholders, and have to look like it. `LOG-...`
+        # pastes as a truncated-but-plausible id and then fails the PREFIX-NNN
+        # shape check with a message about an id the author never meant to
+        # write (user-sim run 2, "Lower severity" list); `LOG-A-0NN` is the
+        # spelling docs/design-log.md and docs/design/lifecycle.md already
+        # show for this same nudge, and the trailing comment says what to
+        # substitute -- the same `refdes new` posture of marking a blank
+        # rather than filling it with something that looks finished.
         print("\nConsider recording this in the design log, e.g.:")
-        print("  - id: LOG-...")
+        print("  - id: LOG-A-0NN  # placeholder: your log prefix, next free number")
         print(f"    date: {outcome.stamped_at[:10]}")
         print(f"    summary: Released {args.name} — sent to fab.")
-        print("    records: [DEC-...]")
+        print("    records: [DEC-A-0NN]  # the decision(s) this release turned on")
     return 0
 
 
@@ -869,10 +877,23 @@ def cmd_audit(args) -> int:
         print("\nCitations:")
         for path, statuses in grouped.items():
             state = statuses[0].state
-            kept = "kept" if any(s.kept_copy for s in statuses) else "hash-only"
+            # The second column describes the pin, so it has to agree with the
+            # first. "hash-only" means pinned-by-hash-without-a-kept-copy
+            # (docs/markdown.md "Pinning vs. keeping a copy"), and an unpinned
+            # citation has no hash at all -- `record is None` short-circuits
+            # before kept_copy is ever read (citations.py:841-851) -- so
+            # printing `unpinned  hash-only` was not merely opaque, it was
+            # wrong (user-sim run 2, "Lower severity" list). Pinned rows keep
+            # their existing words; only the row that lied changes.
+            if state == "unpinned":
+                pin = "no pin"
+            elif any(s.kept_copy for s in statuses):
+                pin = "kept"
+            else:
+                pin = "hash-only"
             citers = ", ".join(sorted({s.item_id for s in statuses}))
             print(f"  {path}")
-            print(f"    {state:<14} {kept:<10} cited by {citers}")
+            print(f"    {state:<14} {pin:<10} cited by {citers}")
 
     grouped_parts = citations_mod.by_part_number(project)
     if grouped_parts:
@@ -921,17 +942,27 @@ def cmd_init(args) -> int:
     # Asked before init runs: afterwards .vscode/settings.json is there either
     # way, and nothing distinguishes the file init wrote from the one it left
     # alone -- and that skip used to print nothing at all (user-sim run 2, BUG 3).
-    skipped_vscode_settings = scaffold_mod.vscode_settings_exists(cwd)
+    # `scaffold.init` returns only the config path, so this pre-check is what
+    # tells the two outcomes apart for the announcement below.
+    vscode_settings_existed = scaffold_mod.vscode_settings_exists(cwd)
     path = scaffold_mod.init(cwd, standard=standard, presets=presets)
     rel = os.path.relpath(path, cwd).replace("\\", "/")
     print(f"wrote {rel}")
+    # init writes two files, so it names both: a second file that appears with
+    # no word about it is invisible unless you list the directory (user-sim run
+    # 2, "Lower severity" list). The skip case is named by the note below.
+    if not vscode_settings_existed:
+        print(
+            "wrote .vscode/settings.json (gitignored -- the yaml.schemas path "
+            "in it names one checkout)"
+        )
     if standard is not None:
         version = standards.latest_version(standard)
         preset_note = f", presets: {presets}" if presets else ""
         print(f"standard: {standard}@{version}{preset_note}")
     else:
         print("standard: none -- types:/link_types: are yours to declare")
-    if skipped_vscode_settings:
+    if vscode_settings_existed:
         print(scaffold_mod.vscode_settings_note(cwd))
     print(
         "candidate parts live in items/<board>/candidates.yaml -- "

@@ -38,6 +38,31 @@ workspaces:
 `workspaces:` is entirely opt-in, exactly like `boards:` — with no block,
 nothing here does anything.
 
+### Workspace names share one namespace with board names
+
+A workspace key and a board key are two different things — one is an ownership
+boundary, the other a hardware grouping — but they land in **one filename
+namespace**: both are substituted into the same generated report names —
+`coverage-<key>.html`, `document-<key>.html`, `log-<key>.html`,
+`references-<key>.html`, `summary-<key>.html` are written once per board and
+once per workspace (`src/refdes/render.py:1124-1265`, the two loops that name
+each file after its registry key) — so one name used for both would leave two
+reports fighting for the same file. The collision is therefore refused at
+load:
+
+```console
+$ refdes check
+configuration error: 'power' is declared as both a board and a workspace — boards
+and workspaces share one namespace for generated report names (e.g.
+coverage-power.html); rename one of them
+```
+
+Exit code 2, nothing built. The beat this costs is the ordering: nothing warns
+while you write the two blocks, so the error arrives after both are already
+in the file. Read your `boards:` block before naming a workspace — and note
+that `path:` aliases do **not** dodge this. `path:` renames the `items/`
+segment; the namespace that collides is the **key**.
+
 ## The two-level layout
 
 ```yaml
@@ -85,10 +110,6 @@ layout — a project that wants the cross-workspace lint without reorganizing
 every folder into `items/<workspace>/<board>/` can tag items by hand instead.
 An override naming an unregistered workspace is a build error, the same as an
 unregistered `board:`.
-
-Board and workspace keys share one namespace for generated report filenames
-(`coverage-<key>.html`) — declaring the same name as both a board and a
-workspace is a load-time error naming both sides.
 
 ## The cross-workspace reference lint
 
