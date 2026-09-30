@@ -517,7 +517,15 @@ def _unknown_key_message(project: Project, pointer: str, target_id: str) -> str:
         "label is not used as a fallback. Check git history to confirm identity. "
     )
     if live.external:
-        return message + "If it is the same item, restore its original key upstream."
+        # The composite is the reason this author is confused: a writable load
+        # of *their* project wrote it (docs/multi-board.md), so "no item
+        # declares this key" reads like a claim about a file they never
+        # touched. Say who wrote it before telling them where to fix it.
+        return message + (
+            "If it is the same item, restore its original key upstream. This "
+            "composite reference was written into your file by refdes on a "
+            "load, not typed by hand — see docs/multi-board.md."
+        )
     return message + (
         f"If it is the same item, run `refdes keys restore {label}@{key} "
         "--dry-run`, then repeat without --dry-run to restore the original key."

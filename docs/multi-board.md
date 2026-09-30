@@ -329,6 +329,24 @@ bare link to `DISPLAY-ID@key`, and an upstream display-ID rename refreshes its
 display half while the key keeps the target fixed. Older artifacts with no key
 remain display-ID-only imports.
 
+That expansion writes into **your** item files — `refdes check` is a writable
+load, so it happens on a run that feels read-only, in a file you last touched
+to change a title. Which is why losing a key upstream surfaces as an error in
+your build, against a reference you never typed:
+
+```
+ERROR items/decisions/pins.md:2 [DEC-A-001] — constrained_by points at key
+      'hfcfwy6kxy4' (labelled IFC-CAN-001), which no item declares. A live item
+      labelled IFC-CAN-001 declares key '71vt2cfhfrh'. ... If it is the same
+      item, restore its original key upstream. This composite reference was
+      written into your file by refdes on a load, not typed by hand — see
+      docs/multi-board.md.
+```
+
+The remedy is upstream, not here: restore the original key in the upstream
+project and rebuild its artifact, or accept the new key and re-point your own
+reference at it. See [surrogate keys](troubleshooting.md#surrogate-keys).
+
 ### Version pinning
 
 If the pin and the artifact disagree, the import is refused:
