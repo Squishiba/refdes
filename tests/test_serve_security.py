@@ -6,14 +6,15 @@ from __future__ import annotations
 
 import os
 import re
+import stat
 import tempfile
 
 import pytest
-from serve_support import Client, make_project, path_of, snapshot_tree
+from serve_support import Client, free_port, make_project, path_of, snapshot_tree
 
 from refdes.serve import security
 from refdes.serve.preview import MARKER, ROOT_PREFIX, PreviewManager, prune_stale
-from refdes.serve.server import EditorApp
+from refdes.serve.server import EditorApp, ServeStartupError, write_launch_file
 
 
 @pytest.fixture
@@ -49,6 +50,46 @@ def test_two_launches_get_different_tokens(tmp_path):
     finally:
         one.stop()
         two.stop()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX permission bits")
+def test_a_pinned_port_is_the_port_the_app_reports(tmp_path):
+    """`--port` reaches the listener, and every Host/cookie/Origin check follows
+    the bound port, not the ephemeral default."""
+    port = free_port()
+    app = EditorApp(make_project(tmp_path), port=port)
+    try:
+        assert app.port == port
+        assert app.httpd.server_address == ("127.0.0.1", port)
+        assert app.launch_url.startswith(f"http://127.0.0.1:{port}/?token=")
+        assert security.host_ok(f"127.0.0.1:{port}", app.port)
+        assert security.cookie_name(app.port) == f"refdes_token_{port}"
+    finally:
+        app.stop()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX permission bits")
+def test_a_busy_pinned_port_is_a_startup_error_not_a_traceback(tmp_path):
+    port = free_port()
+    held = EditorApp(make_project(tmp_path), port=port)
+    try:
+        with pytest.raises(ServeStartupError) as excinfo:
+            EditorApp(make_project(tmp_path), port=port)
+        assert f"cannot listen on 127.0.0.1:{port}" in str(excinfo.value)
+    finally:
+        held.stop()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX permission bits")
+def test_the_launch_file_is_owner_only_even_over_a_looser_one(tmp_path):
+    """`--token-file` is a bearer credential on disk, so the mode is set on the
+    descriptor: a pre-existing 0644 file is tightened, not kept."""
+    path = tmp_path / "launch-url.txt"
+    path.write_text("stale\n", encoding="utf-8")
+    os.chmod(str(path), 0o644)
+    write_launch_file(str(path), "http://127.0.0.1:1/?token=x")
+    assert stat.S_IMODE(os.stat(str(path)).st_mode) == 0o600
+    assert path.read_text(encoding="utf-8") == "http://127.0.0.1:1/?token=x\n"
 
 
 # ------------------------------------------------------------------- host

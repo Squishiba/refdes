@@ -330,13 +330,46 @@ def cmd_build(args) -> int:
     return 0
 
 
+def _serve_port_arg(text: str) -> int:
+    """argparse type for `serve --port`: a port number, or a usage error.
+
+    Checked here rather than at bind() because Python raises `OverflowError`, not
+    `OSError`, for a port outside 0-65535 -- an out-of-range value would otherwise
+    reach the user as a traceback instead of one line on stderr."""
+    try:
+        port = int(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"{text!r} is not a port number") from None
+    if not 1 <= port <= 65535:
+        raise argparse.ArgumentTypeError(f"{port} is not a port number between 1 and 65535")
+    return port
+
+
 def cmd_serve(args) -> int:
     """`refdes serve`: the loopback-only browser editor and rendered preview
     (docs/design/browser-editor.md). One project, one process."""
-    from .serve.server import EditorApp
+    from .serve.server import EditorApp, ServeStartupError
 
-    app = EditorApp(args.config, read_only=args.no_write)
+    try:
+        app = EditorApp(
+            args.config,
+            read_only=args.no_write,
+            port=args.port or 0,
+            token_file=args.token_file,
+        )
+    except ServeStartupError as exc:
+        # A startup refusal -- busy port, unwritable --token-file -- is a usage
+        # problem, so it gets the house `error:` line and exit 2 (as every other
+        # refusal in this file does), never a traceback out of socket.bind().
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
     print(f"refdes serve: {app.launch_url}", flush=True)
+    if app.token_file:
+        print(
+            f"Launch URL written to {app.token_file} (owner-only, removed on Ctrl+C);"
+            " it is a credential.",
+            flush=True,
+        )
     print("Listening on 127.0.0.1 only. The token in that URL is this launch's key;")
     print("keep it out of screenshots and shared terminals. Ctrl+C to stop.", flush=True)
     if not args.no_open:
@@ -1561,10 +1594,18 @@ def main(argv: list[str] | None = None) -> int:
 
     p_serve = sub.add_parser(
         "serve",
+        # Abbreviations are off here for one reason: `--token` is a prefix of
+        # `--token-file`, and argparse would happily accept `--token=<t>` as the
+        # latter -- turning "no flag can carry a token" (docs/design/
+        # editor-vscode-adapter.md §3.2 row 4, pinned by
+        # tests/test_vscode_adapter_contract.py) into a launch URL written to a
+        # file named after the token.
+        allow_abbrev=False,
         help="serve the rendered site and a browser editor on 127.0.0.1",
-        description="Load this one project and serve two surfaces on an "
-        "ephemeral 127.0.0.1 port: the rendered site as a preview (rebuilt "
-        "into an OS temp directory, never _site/) at /preview/, and the "
+        description="Load this one project and serve two surfaces on a "
+        "127.0.0.1 port (ephemeral by default, --port to pin one): the rendered "
+        "site as a preview (rebuilt into an OS temp directory, never _site/) at "
+        "/preview/, and the "
         "editor at /edit/. The launch URL carries a random per-launch token "
         "that gates every read and write. Loading is side-effect-free: no "
         "key minted, no link expanded, nothing sealed, and no file under "
@@ -1573,6 +1614,21 @@ def main(argv: list[str] | None = None) -> int:
     )
     p_serve.add_argument(
         "--no-open", action="store_true", help="print the launch URL but do not open a browser"
+    )
+    p_serve.add_argument(
+        "--port",
+        metavar="PORT",
+        type=_serve_port_arg,
+        help="bind this exact 127.0.0.1 port instead of an ephemeral one; a port "
+        "something else holds is an error and exit 2, never a silent fallback to "
+        "another port",
+    )
+    p_serve.add_argument(
+        "--token-file",
+        metavar="PATH",
+        help="write this launch's URL (which carries the launch token) to PATH "
+        "with owner-only permissions, so a script reads the credential instead "
+        "of scraping stdout; removed when serve stops cleanly",
     )
     p_serve.set_defaults(func=cmd_serve)
 

@@ -1,0 +1,162 @@
+Task: F8 from in-prog-logs/user-sim-release-gate-run2.md (line ~407) -- `refdes
+serve` is unusable from a script without scraping stdout. Add `--port PORT` and
+`--token-file PATH`, document both, test both, and verify by running it.
+
+Findings before writing code (all read, not assumed):
+
+- `src/refdes/serve/server.py:283` binds `(security.LOOPBACK_ADDRESS, 0)` with
+  the comment "IPv4 loopback only, ephemeral port (0): never a host argument";
+  `EditorApp.__init__` takes no port at all, and `_Server` sets
+  `allow_reuse_address = False` ("never share a port with a stale listener").
+- `cmd_serve` (src/refdes/cli.py:333-352) prints `refdes serve: {app.launch_url}`
+  and nothing else carries the token; the only serve flags are `--no-open` plus
+  the global `-c/--config` and `--no-write`.
+- The token is `secrets.token_urlsafe(32)` (src/refdes/serve/security.py:24-26)
+  -- urlsafe base64, so it can contain `-` and `_`. Confirmed the report's point
+  is ergonomics, not a live bad regex: grepped src/ and docs/ for token-shaped
+  patterns and there is none to fix.
+- What a client needs (docs/design/editor-vscode-adapter.md §3.2-3.3): the
+  `X-Refdes-Token` header value plus the port. `editors/vscode/serveClient.js`
+  `parseLaunchUrl()` already parses exactly `http://127.0.0.1:<port>/?token=<t>`.
+  So --token-file writes the full launch URL, not a bare token: one format, the
+  one the existing parser eats, and it is self-sufficient even when the port is
+  ephemeral.
+- House style for a startup refusal: `print(f"error: {exc}", file=sys.stderr)`
+  and return 2 (cli.py:1087-1089, 1396-1397, and main()'s SchemaError handler at
+  2087-2089). `1` is reserved for "the project has errors", so a bad --port is 2.
+- Precedent for file permissions: only `seal.py:219` (`os.chmod(temporary,
+  os.stat(path).st_mode & 0o777)`), which preserves an existing file's mode -- no
+  0600 precedent exists, so the mode is a decision, not a convention I found.
+- Design-doc tension worth naming: docs/design/browser-editor.md:955 says the
+  launch token must "never persist or include it in rendered files/logs", and
+  editor-vscode-adapter.md §3.2 rejects a token file as option 3. This change
+  adds exactly that, as an explicit per-launch opt-in. I am NOT rewriting either
+  design doc (dated records); the cli-reference section says plainly that the
+  flag is an opt-in deviation and why.
+
+Plan:
+
+1. server.py: `EditorApp.__init__(..., port: int = 0, token_file: str | None =
+   None)`; a `ServeStartupError` for "cannot listen" and "cannot write the token
+   file"; the token file written with O_WRONLY|O_CREAT|O_TRUNC|O_NOFOLLOW at
+   0o600 (fchmod on the fd, so a pre-existing looser file is tightened too), and
+   removed by `stop()`.
+2. cli.py: `--port` (validated 1..65535 at parse time) and `--token-file`;
+   cmd_serve maps ServeStartupError to `error: ...` + exit 2; prints where the
+   token file went.
+3. docs/cli-reference.md serve section: both flags in the option table, the
+   "Loopback only" bullet updated, a token-file bullet with the permissions and
+   the deviation spelled out.
+4. tests/test_serve_cli.py (the existing real-process serve CLI test file):
+   fixed port is the port asked for; port in use -> exit 2, one-line error, no
+   traceback; token file contains a working credential (used against /api/
+   revision); 0600; symlink refused; file gone after shutdown.
+5. changelog.d/serve-port-token-file.added.md.
+6. Run it for real: `refdes serve --port N --token-file P` against a scratch
+   project in .scratch/, curl-style request with the token from the file.
+
+Progress:
+
+- src/refdes/serve/server.py: `EditorApp.__init__` takes `port: int = 0` and
+  `token_file: str | None = None`; the `_Server((LOOPBACK_ADDRESS, port), ...)`
+  bind is wrapped so an `OSError` becomes `ServeStartupError` with a one-line
+  message (`_bind_failure_message`, which special-cases EACCES and EADDRINUSE);
+  `self.port` moved inside the try so `launch_url` is available for the token
+  file; new `write_launch_file()`; `stop()` and the failed-construction path call
+  `_remove_token_file()`. `self.token_file` is assigned only after a successful
+  write, so a failed launch can never unlink a path it did not create.
+- src/refdes/cli.py: `--port` (type `_serve_port_arg`, 1..65535) and
+  `--token-file`; `cmd_serve` catches `ServeStartupError` and does
+  the house `error: ...` + exit 2; prints one extra line naming the token file.
+  `serve`'s subparser gets `allow_abbrev=False` (see the regression below).
+- src/refdes/serve/security.py: module docstring no longer claims "ephemeral
+  port only".
+- docs/cli-reference.md serve section: both flags in the option table, a worked
+  shell recipe, the permissions/lifecycle spelled out, and the "Loopback only"
+  bullet reworded. The exit-code table at the top of that file was left alone on
+  purpose: it is scoped to "an argument naming something that does not exist"
+  (item id, baseline, preset, type, file) and a busy port is not that family --
+  the serve section carries its own exit code instead.
+- tests/test_serve_cli.py: six new real-process tests (fixed port bound and
+  served through; busy port -> exit 2, one `error:` line, no traceback, no URL
+  on stdout; --port 0/70000/not-a-port -> usage error exit 2; token file holds a
+  working credential read *only* from the file, 0600, 403 without the header and
+  200 with it; file removed on SIGINT; a stale file from a hard kill rewritten;
+  symlink refused and the victim untouched).
+- tests/serve_support.py: shared `free_port()`.
+- tests/test_serve_security.py: three in-process tests (pinned port reaches the
+  listener and the Host/cookie helpers follow it; busy pinned port raises
+  `ServeStartupError`; `write_launch_file` tightens a pre-existing 0644 file to
+  0600).
+- changelog.d/serve-port-token-file.added.md added.
+
+Difficulties / things that bit:
+
+- **A real regression the existing suite caught.** Adding `--token-file` made
+  `--token` a valid argparse *abbreviation* of it, so
+  `refdes serve --token=<t>` -- which `tests/test_vscode_adapter_contract.py::
+  test_launch_url_token_never_appears_in_argv` asserts is refused (design
+  §3.2 row 4: no flag may carry a token) -- was accepted and wrote the launch
+  URL to a file named after the token, then served forever, so the test hung
+  until its 60 s timeout. Fixed with `allow_abbrev=False` on the serve
+  subparser; verified `refdes serve --token=abc123` now exits 2 with
+  `unrecognized arguments: --token=abc123`.
+- A test of my own was wrong first: the relaunch-over-a-stale-file test read the
+  stale text because the path already existed, so `_wait_for_file` grew a
+  `differs_from` argument.
+- `--port 70000` raises `OverflowError`, not `OSError`, in Python, which is why
+  the range is checked at parse time rather than at bind().
+
+Verified by running (not by reading):
+
+- `refdes serve --help` shows both flags with the new wording.
+- Live launch against this repo's own project: `serve --no-open --port 8731
+  --token-file .scratch/f8-token.txt`. A probe read *only* the file: mode
+  `0o600`, content `http://127.0.0.1:8731/?token=Zp2F96WtmF0U5kJia7fOffLEZhQ-
+  CRPPQIy2Rcanc-Q` (port matches the requested 8731; token is 43 chars, urlsafe
+  base64 alphabet only). `GET /api/revision` with `X-Refdes-Token` from the file
+  -> 200 with keys ['git', 'load_error', 'revision', 'serial', 'stale']; the
+  same request without the header -> 403.
+- Busy port while that launch was live: second `serve --port 8731` printed
+  exactly one line, `error: cannot listen on 127.0.0.1:8731: Address already in
+  use -- something else holds it, or a launch that stopped a moment ago still
+  has sockets closing on it; choose another --port, or drop --port to get an
+  ephemeral one`, stdout empty, exit 2, no traceback.
+- `--port 70000`, `--port abc`, `--port 0` -> argparse usage error, exit 2.
+- `--token-file .scratch/no-such-dir/tok.txt` -> `error: cannot write
+  --token-file ...: No such file or directory`, exit 2.
+- Hard-killed launch left the stale token file behind (read it back); a second
+  launch on the same port and same path rewrote it with a fresh token
+  (`a2n9GD0gWcXSyzkhbEjyeJ3hClVFV_XQVUvSVD55YIE` -- contains an `_`, the exact
+  character F8 says a naive regex truncates) rather than refusing.
+- pytest: `tests/test_serve_cli.py tests/test_serve_security.py` -> 50 passed;
+  `tests/test_vscode_adapter_contract.py tests/test_serve_cli.py
+  tests/test_serve_security.py tests/test_vscode_extension.py` -> 65 passed;
+  `-k "serve or no_write or vscode or exit_codes"` -> 724 passed, 1 failed (the
+  abbreviation regression above) before the fix, and the full suite result is
+  recorded below the line.
+- `ruff check` on the six touched Python files with `--select E,F,W,I`: 8 E501
+  findings, all pre-existing lines (checked: `git diff --unified=0 | grep -E
+  "^\+.{101,}"` returns only two markdown table rows).
+
+Not verified: the Windows path (mode bits advisory, no O_NOFOLLOW) -- stated in
+the docs and the code comments as what to expect, not as something observed;
+this ran on Linux. The `webbrowser.open` interaction with `--port` was not
+exercised (every manual run used `--no-open`).
+
+Left in the tree for the orchestrator: an untracked file named
+`50f5zZb9Brp5CmXplgnyHH9_CMKasnj8dFFUyp8Qz6Q` at the repository root. It is the
+artifact of the abbreviation regression above -- while `--token` was still being
+accepted as `--token-file`, the contract test's serve child wrote its launch URL
+into a file named after its own token, in the CWD. It holds a dead token and
+nothing else, and it is NOT committed. `rm` is outside this session's shell
+allowlist, so it is left here to delete.
+
+Full suite on the committed tree: 2861 passed, 2 skipped (an earlier identical
+run predates one later change, a help-string re-line-wrap in cli.py whose
+rendered `serve --help` output was checked to be identical).
+
+Status: finished. Implementation, docs, tests, changelog fragment, and live
+verification of both flags complete. Committed as one commit staged by explicit
+paths, pushed, and PR'd against main:
+https://github.com/Squishiba/refdes/pull/116

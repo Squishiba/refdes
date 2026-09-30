@@ -19,6 +19,7 @@ are found by segment-checked lookup below fixed roots only.
 
 from __future__ import annotations
 
+import errno
 import html as html_mod
 import json
 import mimetypes
@@ -264,6 +265,69 @@ class _Server(ThreadingHTTPServer):
     app: EditorApp
 
 
+class ServeStartupError(RuntimeError):
+    """`refdes serve` could not start as asked: the `--port` it was given is not
+    free, or its `--token-file` cannot be written. `cmd_serve` turns it into one
+    `error:` line and exit 2 -- a startup refusal is a usage problem, not a
+    project error, and never a traceback."""
+
+
+def _bind_failure_message(port: int, exc: OSError) -> str:
+    """One line naming the port, why it could not be bound, and what to do.
+
+    `allow_reuse_address` stays `False` (see `_Server`), so a port a launch gave
+    up moments ago can still report busy while its accepted sockets finish
+    closing. Saying that beats letting `Address already in use` read as a crash.
+    """
+    reason = exc.strerror or str(exc)
+    if exc.errno == errno.EACCES:
+        reason = f"{reason} (ports below 1024 need elevated privileges)"
+    elif exc.errno == errno.EADDRINUSE:
+        reason = (
+            f"{reason} -- something else holds it, or a launch that stopped a "
+            "moment ago still has sockets closing on it"
+        )
+    return (
+        f"cannot listen on {security.LOOPBACK_ADDRESS}:{port}: {reason}; "
+        "choose another --port, or drop --port to get an ephemeral one"
+    )
+
+
+def write_launch_file(path: str, url: str) -> None:
+    """Write this launch's URL to `path` for scripted clients (`--token-file`).
+
+    The file holds the whole launch URL, not the bare token: the URL carries the
+    port too, so it works with an ephemeral port as well as a pinned one, and it
+    is exactly the string `editors/vscode/serveClient.js` `parseLaunchUrl()`
+    already parses -- one format, one parser.
+
+    It is a bearer credential, so: `O_NOFOLLOW` (a symlink at that path is
+    refused, never followed), `0o600`, and `fchmod` on the descriptor so a
+    pre-existing file with looser permissions is tightened rather than keeping
+    them. On Windows the mode bits are advisory and the file inherits the
+    directory's ACLs, which is why the docs tell you where to put it.
+    """
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(path, flags, 0o600)
+    except OSError as exc:
+        why = (
+            "it is a symlink"
+            if exc.errno == errno.ELOOP
+            else (exc.strerror or str(exc))
+        )
+        raise ServeStartupError(f"cannot write --token-file {path}: {why}") from exc
+    try:
+        os.fchmod(fd, 0o600)
+        os.write(fd, f"{url}\n".encode("utf-8"))
+    except OSError as exc:
+        raise ServeStartupError(
+            f"cannot write --token-file {path}: {exc.strerror or exc}"
+        ) from exc
+    finally:
+        os.close(fd)
+
+
 class EditorApp:
     """One project, one process: the loaded state, the preview, the listener."""
 
@@ -273,20 +337,34 @@ class EditorApp:
         temp_dir: str | None = None,
         poll_interval: float = 1.0,
         read_only: bool = False,
+        port: int = 0,
+        token_file: str | None = None,
     ):
         self.token = security.new_token()
         self.read_only = read_only
+        # Set only once the file exists, so a failed launch never unlinks a path
+        # it did not create (--token-file pointing at something precious).
+        self.token_file: str | None = None
         self.preview = PreviewManager(temp_dir)
         try:
             self.state = ProjectState(config_path, self.preview)
             self.state.load()
-            # IPv4 loopback only, ephemeral port (0): never a host argument.
-            self.httpd = _Server((security.LOOPBACK_ADDRESS, 0), _Handler)
+            # IPv4 loopback only: never a host argument. Port 0 is the OS's
+            # ephemeral choice, the default and the long-standing behaviour;
+            # `port` pins the one `--port` asked for (F8).
+            try:
+                self.httpd = _Server((security.LOOPBACK_ADDRESS, port), _Handler)
+            except OSError as exc:
+                raise ServeStartupError(_bind_failure_message(port, exc)) from exc
+            self.port: int = self.httpd.server_address[1]
+            if token_file is not None:
+                write_launch_file(token_file, self.launch_url)
+                self.token_file = token_file
         except BaseException:
+            self._remove_token_file()
             self.preview.close()
             raise
         self.httpd.app = self
-        self.port: int = self.httpd.server_address[1]
         self.poller = Poller(self.state, interval=poll_interval)
         self._thread: threading.Thread | None = None
 
@@ -312,6 +390,22 @@ class EditorApp:
             self._thread.join(timeout=5)
         self.httpd.server_close()
         self.preview.close()
+        self._remove_token_file()
+
+    def _remove_token_file(self) -> None:
+        """The token dies with its launch, so the file that carried it goes too.
+
+        A hard kill leaves it behind holding a token that authenticates nothing
+        (the next launch mints a new one), and `write_launch_file` truncates and
+        rewrites it, so a stale file never blocks re-launching on the same path.
+        """
+        if self.token_file is None:
+            return
+        path, self.token_file = self.token_file, None
+        try:
+            os.unlink(path)
+        except OSError:
+            pass  # already gone, or not ours to remove
 
 
 class _Handler(BaseHTTPRequestHandler):
