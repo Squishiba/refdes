@@ -173,9 +173,19 @@ refdes keys restore REQ-PWR-002@k7f3m2q9x4a
 Use the actual original key from your project's history/reference. Supply
 multiple `DISPLAY-ID@ORIGINAL-KEY` arguments if several keys were lost. The
 command validates the proposed project before writing; see
-[`keys restore`](cli-reference.md#refdes-keys-restore) for refusals. If the
-target is imported, restore the key in its upstream project and regenerate
-the imported artifact.
+[`keys restore`](cli-reference.md#refdes-keys-restore) for refusals.
+
+An **imported** target is the one case `keys restore` cannot reach, and the
+report says so by ending differently — no command, and a note about the
+reference itself:
+
+`If it is the same item, restore its original key upstream. This composite reference was written into your file by refdes on a load, not typed by hand — see docs/multi-board.md.`
+
+Nothing hand-edited that composite: the load that expanded a bare link you did
+write is what turned it into `DISPLAY-ID@key`, which is why the error can name a
+file whose only change since it last built was a title. Restore the key in the
+upstream project and regenerate the imported artifact, or accept the new key and
+re-point the reference. See [multiple boards](multi-board.md).
 
 If the target was deliberately deleted, remove the reference. If the label now
 names a different item, confirm the intended target before changing the

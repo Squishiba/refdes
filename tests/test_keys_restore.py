@@ -404,6 +404,80 @@ def test_imported_key_ownership_and_upstream_diagnostic(tmp_path):
     message = build._unknown_key_message(project, "refines points at", f"REQ-IMP-001@{current}")
     assert "restore its original key upstream" in message
     assert "refdes keys restore" not in message
+    # F4: the composite is the thing the downstream author did not write, and
+    # the message has to say so -- see the end-to-end test below for the same
+    # text arriving through the CLI.
+    assert "written into your file by refdes on a load, not typed by hand" in message
+    assert "see docs/multi-board.md" in message
+
+
+def test_external_lost_key_diagnostic_names_the_composite_as_tool_written(tmp_path, capsys):
+    """F4, end to end: the composite in the downstream file was written by a
+    `refdes check`, and the error for it says so.
+
+    An upstream artifact carrying a key, a downstream `refines` written bare by
+    its author, one ordinary writable load expanding it into their own file,
+    then the upstream key regenerated. The diagnostic the author is left with
+    has to name the composite as a refdes artifact and point at the import
+    docs, while a *local* lost key keeps the `keys restore` recipe instead.
+    """
+    config = write_project_config(tmp_path, CONFIG)
+    (tmp_path / "items").mkdir()
+    original, regenerated = keys.mint(), keys.mint()
+    artifact = tmp_path / "upstream.json"
+
+    def write_artifact(key: str) -> None:
+        artifact.write_text(
+            json.dumps(
+                {
+                    "title": "Upstream",
+                    "items": [
+                        {
+                            "id": "REQ-IMP-001",
+                            "key": key,
+                            "type": "requirement",
+                            "fields": {"title": "Imported"},
+                            "links": {},
+                        }
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+    write_artifact(original)
+    settings = tmp_path / "refdes-project.yaml"
+    settings.write_text(
+        settings.read_text() + "imports:\n  - name: upstream\n    items: upstream.json\n",
+        encoding="utf-8",
+    )
+    source = tmp_path / "items/source.yaml"
+    source.write_text(
+        "defaults: {type: requirement}\nitems:\n"
+        "  - id: REQ-002\n    title: Source\n    refines: [REQ-IMP-001]\n",
+        encoding="utf-8",
+    )
+
+    # A plain `refdes check` -- no write asked for -- expands the bare target
+    # against the imported item's key, in the downstream author's own file.
+    assert cli.main(["-c", str(config), "check"]) == 0
+    assert f"REQ-IMP-001@{original}" in source.read_text()
+
+    write_artifact(regenerated)
+    capsys.readouterr()
+    assert cli.main(["-c", str(config), "check"]) == 1
+    captured = capsys.readouterr()
+    reported = captured.out + captured.err
+    assert f"key {original!r} (labelled REQ-IMP-001), which no item declares" in reported
+    assert "written into your file by refdes on a load, not typed by hand" in reported
+    assert "see docs/multi-board.md" in reported
+    assert "refdes keys restore" not in reported
+
+    # The local branch keeps its own ending and stays free of the import clause.
+    project = loader.load_readonly(str(config))
+    local = build._unknown_key_message(project, "refines points at", f"REQ-002@{keys.mint()}")
+    assert "refdes keys restore REQ-002@" in local
+    assert "docs/multi-board.md" not in local
 
 
 def test_intervening_source_edit_is_preserved(tmp_path, monkeypatch):
