@@ -271,7 +271,7 @@ def _find_membership(
     memberships: Memberships,
     item: Item,
     kind: str,
-    live_keys: set[str],
+    orphaned_by_id: Mapping[str, tuple[str, MembershipValue, str]],
 ) -> tuple[str, MembershipValue, str] | None:
     """Find an entry by surrogate, recorded display id, then legacy id.
 
@@ -285,10 +285,9 @@ def _find_membership(
             key, _display_id, recorded = _membership_parts(item.key, keyed, kind)
             if key == item.key:
                 return item.key, keyed, recorded
-    for record_id, value in memberships.items():
-        key, display_id, recorded = _membership_parts(record_id, value, kind)
-        if key is not None and key not in live_keys and display_id == item.id:
-            return record_id, value, recorded
+    orphaned = orphaned_by_id.get(item.id)
+    if orphaned is not None:
+        return orphaned
     legacy = memberships.get(item.id)
     if legacy is None:
         return None
@@ -481,9 +480,17 @@ def _verify_membership(
     """
     changed = False
     live_keys = {item.key for item in project.local_items if item.key}
+    orphaned_by_id: dict[str, tuple[str, MembershipValue, str]] = {}
+    for record_id, value in manifest.items():
+        if not isinstance(value, Mapping):
+            continue  # scalar-only sections have no keyed fallback to index
+        key, display_id, recorded = _membership_parts(record_id, value, kind)
+        if key is not None and key not in live_keys:
+            # The old scan selected the first entry in manifest order.
+            orphaned_by_id.setdefault(display_id, (record_id, value, recorded))
     for item in sorted(project.local_items, key=lambda i: i.id):
         value = current(item)
-        found = _find_membership(manifest, item, kind, live_keys)
+        found = _find_membership(manifest, item, kind, orphaned_by_id)
         if not value and found is None:
             continue  # never assigned -- resolve()'s own diagnostic covers this
 
