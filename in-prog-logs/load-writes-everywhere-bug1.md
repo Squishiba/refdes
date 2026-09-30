@@ -437,8 +437,16 @@ test that says whether Windows agrees.
   one thing the second failure proved is that commit 2's split *did* work. A
   local Linux pass is not evidence about Windows; that assumption produced the
   first failure, and over-confidence in a mechanism table produced the second.
-- Commit 3 is the separator fix. Third run on all three platforms pending; I am
-  not calling this done until `windows-latest` says so.
+- Commit 3 (`25d0a24`) is the separator fix. **Third run green on all three:**
+  `ubuntu-latest` 4m22s, `py3.13` 4m43s, `windows-latest` 5m50s. PR `MERGEABLE`,
+  `OPEN`, three commits — `e6fa618`, `ec72d58`, `25d0a24`.
+
+The Windows half took three runs because I twice treated a Linux pass as
+evidence about a platform I wasn't testing. What would have caught it earlier:
+reading the failure output for *what did* happen (`items/r.yaml` refused; then
+`.refdes\schema.json` refused) instead of only confirming what didn't. Both
+failures were informative on their first appearance — I used the second one to
+explain the first, and only read it as a report in its own right on the third.
 - `ruff check src/refdes/cli.py src/refdes/schema_json.py src/refdes/revise.py
   --select I,F` — 2 findings, both `I001` import-block formatting in
   `revise.py:28` and `schema_json.py:16`. Both are **pre-existing**: piping
