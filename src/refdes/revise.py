@@ -633,11 +633,40 @@ class FileRewrite:
     existed: bool = True
 
 
-def write_rewrites(rewrites: list[FileRewrite]) -> None:
-    """Write a computed set using the transaction engine's exact text mode."""
+def write_rewrites(
+    rewrites: list[FileRewrite], on_error=None
+) -> list[FileRewrite]:
+    """Write a computed set using the transaction engine's exact text mode.
+
+    `on_error`, when given, is called as `on_error(rewrite, exc)` for each file
+    whose write raised `OSError`; that file is skipped rather than aborting the
+    rest, and every file that did not land is returned. Left None -- every
+    explicit write command -- the first refusal propagates, which is the right
+    answer when the user asked for the write."""
+    failed: list[FileRewrite] = []
     for rewrite in rewrites:
-        os.makedirs(os.path.dirname(rewrite.path), exist_ok=True)
-        textio.write_text(rewrite.path, rewrite.after)
+        try:
+            os.makedirs(os.path.dirname(rewrite.path), exist_ok=True)
+            textio.write_text(rewrite.path, rewrite.after)
+        except OSError as exc:
+            if on_error is None:
+                raise
+            failed.append(rewrite)
+            on_error(rewrite, exc)
+    return failed
+
+
+def _refuse_unwritable(project, rewrite: FileRewrite) -> None:
+    """One load-time write the filesystem would not accept. Wording and
+    attribution follow the parse guard below: the file names itself through
+    `file=`, the message says what happened and what to do about it."""
+    project.load_writes.blocked.append(rewrite.rel)
+    project.warn(
+        "could not write this file (read-only tree?); run with --no-write to "
+        "silence this",
+        file=rewrite.rel,
+        line=1,
+    )
 
 
 def restore_rewrites(rewrites: list[FileRewrite]) -> None:
@@ -686,7 +715,7 @@ def _parse_item_count(rel: str, text: str) -> int | None:
         return None
 
 
-def write_rewrites_verified(project, rewrites: list[FileRewrite]) -> None:
+def write_rewrites_verified(project, rewrites: list[FileRewrite]) -> set[str]:
     """Load-time write with a parse guard: no incidental write (key minting,
     link/check expansion, follows freeze) may turn a parseable item file into
     an unparseable one, or one that yields fewer items than it did before.
@@ -697,11 +726,35 @@ def write_rewrites_verified(project, rewrites: list[FileRewrite]) -> None:
     items) is restored to its exact original bytes and reported as an error
     naming the file. Files that pass stay written. A file whose *original*
     text this light check cannot judge (None) is left alone -- the guard
-    refuses over guessing, in both directions."""
+    refuses over guessing, in both directions.
+
+    A file the filesystem refuses to take at all -- a read-only checkout, a
+    frozen CI tree, a container with a read-only bind mount -- is a different
+    kind of refusal and gets a warning rather than a traceback. These writes
+    are an idempotent normalisation, and `--no-write` already runs the whole
+    load without them (bare targets still resolve on the display id), so a
+    `check` that cannot write reports what a `--no-write check` reports. The
+    refusal is recorded on `Project.load_writes.blocked`, which is what keeps
+    the run's own summary from claiming a write that never landed, and what
+    lets `refdes check`'s `.refdes/schema.json` trip-wire say "not refreshed"
+    instead of "refreshed". Explicit write commands (`revise apply`,
+    `calc-rewrite`, `keys adopt`, `keys restore`) call `write_rewrites`
+    directly and keep raising: there the user asked for the write, so a
+    refusal is a failure, not a warning.
+
+    Returns the project-relative paths of the files the filesystem refused, so
+    each caller can leave its in-memory model matching the tree it could not
+    change -- see `keys.mint_missing()`. Empty in the ordinary case."""
     if not rewrites:
-        return
-    write_rewrites(rewrites)
+        return set()
+    failed = write_rewrites(
+        rewrites,
+        on_error=lambda rewrite, exc: _refuse_unwritable(project, rewrite),
+    )
+    failed_paths = {rewrite.path for rewrite in failed}
     for rewrite in rewrites:
+        if rewrite.path in failed_paths:
+            continue
         before_count = _parse_item_count(rewrite.rel, rewrite.before)
         if before_count is None:
             continue
@@ -717,6 +770,7 @@ def write_rewrites_verified(project, rewrites: list[FileRewrite]) -> None:
             file=rewrite.rel,
             line=1,
         )
+    return {rewrite.rel for rewrite in failed}
 
 
 def _stale_mapped_names(rel: str, text: str, mapping: Mapping) -> list[str]:

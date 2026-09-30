@@ -701,10 +701,20 @@ class LoadWrites:
     (`--no-write`/`--dry-run`) makes every one of those steps return nothing,
     so a reader gated on this prints nothing on a read-only run without having
     to know about the flag at all.
+
+    The two counts are of writes that *landed*. A filesystem that refuses one
+    (a read-only checkout, a frozen CI tree) is reported in `blocked` instead,
+    with a warning naming the file: counting a write that never happened would
+    be the same dishonesty this struct exists to fix, pointed the other way.
     """
 
     minted_keys: int = 0
     rewritten_targets: int = 0
+    #: Project-relative paths this load tried to write and could not, in the
+    #: order they were refused. `refdes check` reads it to keep its
+    #: `.refdes/schema.json` trip-wire from saying "refreshed" about a file it
+    #: failed to write.
+    blocked: list[str] = field(default_factory=list)
 
     def __bool__(self) -> bool:
         return bool(self.minted_keys or self.rewritten_targets)
