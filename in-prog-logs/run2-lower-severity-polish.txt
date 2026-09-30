@@ -180,8 +180,12 @@ it moved rather than being duplicated.
 ### Final gates
 
 - Full suite: `python -m pytest -q tests` -> **2860 passed, 2 skipped in
-  204.85s** (run after all four fixes; the four touched files re-run together
-  afterwards -> 191 passed, 1 skipped).
+  204.85s**. That run predated the last two edits (the audit `kept` -> `pin`
+  local rename and one E501 wrap in test_revise_cli.py), so it was re-run on
+  the committed tree -- HEAD 82420c9, working tree clean, HEAD ==
+  origin/run2-lower-severity-polish -- -> **2860 passed, 2 skipped in 200.52s**,
+  exit 0. Same count, so those two edits moved nothing. The four touched files
+  also re-run together -> 191 passed, 1 skipped.
 - `ruff check --select E501,I,F` on the six touched files: 5 findings, all
   pre-existing (cli.py:705/813/821/1825, test_revise_cli.py:368 -- the latter
   is the same line that was 366 before my insert). One E501 I introduced in
