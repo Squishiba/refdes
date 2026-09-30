@@ -258,6 +258,8 @@ def test_cli_notes_an_existing_vscode_settings_file_instead_of_skipping_silently
     out = capsys.readouterr().out
 
     assert "note: .vscode/settings.json already exists; left it alone" in out
+    # the write announcement is for the file init actually wrote
+    assert "wrote .vscode/settings.json" not in out
     assert "yaml.schemas" in out and "schema completion" in out
     # the real absolute path, not a `<path>` placeholder: the line is
     # paste-ready into the file the note names. Normalised through abspath on
@@ -280,6 +282,29 @@ def test_cli_prints_no_skip_note_when_it_wrote_the_settings_file(tmp_path, monke
     monkeypatch.chdir(tmp_path)
     assert cli_mod.main(["init"]) == 0
     assert "already exists" not in capsys.readouterr().out
+
+
+def test_cli_announces_the_vscode_settings_file_it_wrote(tmp_path, monkeypatch, capsys):
+    """`init` writes two files and used to name one of them (user-sim run 2,
+    "Lower severity" list): `.vscode/settings.json` appeared with no word about
+    it, so the only way to learn schema completion had just been wired up -- or
+    that a machine-specific file had just been added to the tree -- was to list
+    the directory. The skip is announced (BUG 3); the write has to be too.
+    """
+    monkeypatch.chdir(tmp_path)
+    assert cli_mod.main(["init"]) == 0
+    out = capsys.readouterr().out
+
+    assert (tmp_path / ".vscode" / "settings.json").is_file()
+    assert [line for line in out.splitlines() if line.startswith("wrote ")] == [
+        "wrote refdes-project.yaml",
+        "wrote .vscode/settings.json (gitignored -- the yaml.schemas path in it "
+        "names one checkout)",
+    ]
+    # the line says why the file is not worth committing, because that is the
+    # other surprise it leaves behind: init also put it in .gitignore
+    assert "gitignored" in out
+    assert (tmp_path / ".gitignore").is_file()
 
 
 def test_docs_show_the_absolute_schema_path_init_actually_emits():

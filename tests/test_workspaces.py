@@ -11,7 +11,7 @@ import os
 import pytest
 import yaml
 from conftest import write_project_config
-from helpers import _build_at
+from helpers import REPO, _build_at
 
 from refdes import boards as boards_mod
 from refdes import build as build_mod
@@ -315,6 +315,44 @@ def test_board_and_workspace_names_may_not_collide(tmp_path):
     )
     with pytest.raises(SchemaError, match="declared as both a board and a workspace"):
         load_project(config_path=str(tmp_path / "refdes-project.yaml"))
+
+
+COLLIDING_CONFIG = (
+    "site: { title: T, out: _site }\n"
+    "boards:\n  power: { label: Power }\n"
+    "workspaces:\n  power: { label: Power }\n"
+    "types:\n  requirement: { prefix: REQ, fields: { text: { type: text } } }\n"
+)
+
+
+def test_workspaces_doc_warns_about_the_shared_name_namespace_before_it_bites(tmp_path):
+    """The collision is refused at load with a good message, but a newcomer
+    only meets it after both blocks are already written -- docs/workspaces.md
+    said so only in the middle of the `workspace:` override section (user-sim
+    run 2, "Lower severity" list). The warning has to sit where the registries
+    are first introduced, and give the error's own reason rather than a
+    paraphrase that can drift from it.
+    """
+    with open(os.path.join(REPO, "docs", "workspaces.md"), encoding="utf-8") as fh:
+        doc = fh.read()
+
+    # "Declaring workspaces" is where the two registries get their names; the
+    # section after it is the first thing a reader does once they start
+    # writing, so the note has to be before that line.
+    declaring = doc.split("## The two-level layout")[0]
+    assert declaring != doc, "docs/workspaces.md lost the section this test anchors on"
+    assert "namespace" in declaring
+
+    write_project_config(tmp_path, COLLIDING_CONFIG)
+    with pytest.raises(SchemaError) as exc:
+        load_project(config_path=str(tmp_path / "refdes-project.yaml"))
+    message = str(exc.value)
+
+    # the reason the error gives is a generated filename, and the doc names
+    # that same filename -- if the report names change, both have to move
+    assert "coverage-power.html" in message
+    assert "coverage-power.html" in declaring
+    assert "coverage-<key>.html" in declaring
 
 
 def test_workspace_drift_warns_and_accept_board_move_clears_it(workspace_project):

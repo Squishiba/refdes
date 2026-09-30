@@ -6,12 +6,14 @@ Split out of the original monolithic tests/test_refdes.py.
 from __future__ import annotations
 
 import os
+import re
 
 import pytest
 from conftest import write_project_config
-from helpers import _lc_build, _pin_lifecycle_citation
+from helpers import REPO, _lc_build, _pin_lifecycle_citation
 
 from refdes import cli as cli_mod
+from refdes import ids as ids_mod
 from refdes import lifecycle
 from refdes.schema import SchemaError
 
@@ -261,6 +263,94 @@ def test_cli_release_success_prints_log_nudge(lifecycle_project, capsys):
     assert status == 0
     assert "all gates passed" in out
     assert "Consider recording this in the design log" in out
+
+
+def _cover_both_requirements_and_release(project_dir, capsys) -> list[str]:
+    """Make the release gate passable, release, and return the nudge block the
+    command printed (header line included)."""
+    (project_dir / "items" / "reqs.yaml").write_text(
+        "defaults: { type: requirement }\n"
+        "items:\n"
+        "  - id: REQ-001\n    text: Covered.\n    status: active\n"
+        "  - id: REQ-002\n    text: Active now.\n    status: active\n",
+        encoding="utf-8",
+    )
+    (project_dir / "items" / "dec.yaml").write_text(
+        "defaults: { type: decision }\n"
+        "items:\n  - id: DEC-001\n    title: Covers both.\n"
+        "    satisfies: [REQ-001, REQ-002]\n",
+        encoding="utf-8",
+    )
+    _pin_lifecycle_citation(project_dir)
+    assert (
+        cli_mod.main(
+            ["-c", str(project_dir / "refdes-project.yaml"), "release", "rel-a"]
+        )
+        == 0
+    )
+    return _nudge_block(capsys.readouterr().out)
+
+
+def _nudge_block(text: str) -> list[str]:
+    lines = text.splitlines()
+    start = next(i for i, line in enumerate(lines) if line.startswith("Consider recording"))
+    block = [lines[start]]
+    for line in lines[start + 1:]:
+        if not line.strip() or line.startswith("```"):
+            break
+        block.append(line)
+    return block
+
+
+def _normalised_nudge(lines: list[str]) -> list[str]:
+    """Blank out the two values that legitimately differ between a live run and
+    a documentation sample: the stamp date and the release name."""
+    out = []
+    for line in lines:
+        line = re.sub(r"^\s*date: \S+\s*$", "    date: <date>", line)
+        line = re.sub(
+            r"Released \S+ \u2014 sent to fab\.", "Released <name> \u2014 sent to fab.", line
+        )
+        out.append(line)
+    return out
+
+
+def test_cli_release_log_nudge_ids_are_marked_placeholders(lifecycle_project, capsys):
+    """`  - id: LOG-...` pasted as a truncated-but-plausible id and then failed
+    the PREFIX-NNN shape check, which reads like the tool minted something odd
+    rather than like the author skipped a placeholder (user-sim run 2, "Lower
+    severity" list). Both ids now stay invalid AND say they are placeholders.
+    """
+    block = _cover_both_requirements_and_release(lifecycle_project, capsys)
+    text = "\n".join(block)
+
+    id_line = next(line for line in block if "- id:" in line)
+    placeholder = id_line.split("- id:", 1)[1].split("#", 1)[0].strip()
+    assert placeholder, id_line
+    assert ids_mod.split_id(placeholder) is None, f"{placeholder} is a real id shape"
+    assert "#" in id_line, "the placeholder is not marked as one"
+    assert "LOG-..." not in text
+
+    records_line = next(line for line in block if "records:" in line)
+    recorded = re.search(r"records: \[(.*)\]", records_line).group(1).strip()
+    assert ids_mod.split_id(recorded) is None, f"{recorded} is a real id shape"
+    assert "#" in records_line, "the placeholder is not marked as one"
+
+
+@pytest.mark.parametrize(
+    "doc",
+    ["docs/design-log.md", "docs/lifecycle.md", "docs/design/lifecycle.md"],
+)
+def test_docs_quote_the_log_nudge_the_cli_actually_prints(lifecycle_project, capsys, doc):
+    """The nudge is documentation-as-UX, so the pages quoting it have to quote
+    the real thing -- same gate `test_docs_examples.py` runs on the generated
+    type examples and `test_scaffold.py` on the `yaml.schemas` path."""
+    block = _cover_both_requirements_and_release(lifecycle_project, capsys)
+    with open(os.path.join(REPO, doc), encoding="utf-8") as fh:
+        doc_block = _nudge_block(fh.read())
+
+    assert doc_block, f"{doc} no longer shows the release log nudge"
+    assert _normalised_nudge(doc_block) == _normalised_nudge(block)
 
 
 def test_cli_invalid_name_exits_2(lifecycle_project, capsys):

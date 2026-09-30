@@ -205,8 +205,14 @@ def init(
     Also writes `.vscode/settings.json` for schema completion, and -- because
     the schema path in it is absolute and machine-specific -- makes sure the
     project's `.gitignore` covers that file. An existing `.vscode/settings.json`
-    is left exactly as it is and no gitignore entry is added for it; the CLI
-    prints `vscode_settings_note` in that case, so the skip is never silent.
+    is left exactly as it is and no gitignore entry is added for it.
+
+    Both outcomes are announced by the caller, which is the only printer here:
+    `cmd_init` asks `vscode_settings_exists` before calling this and prints
+    `wrote .vscode/settings.json` when init wrote it and `vscode_settings_note`
+    when it did not, so neither the write nor the skip is silent. The return
+    value stays the config path alone -- this function reports nothing about
+    the second file.
 
     Returns the path written. Raises SchemaError if refdes-project.yaml already
     exists at the target, or if `presets` is given with `standard=None`

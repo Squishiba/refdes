@@ -531,11 +531,15 @@ release 'rev-b' stamped: 41 items, all gates passed.
   .refdes/baselines/rev-b.yaml
 
 Consider recording this in the design log, e.g.:
-  - id: LOG-A-0NN
+  - id: LOG-A-0NN  # placeholder: your log prefix, next free number
     date: 2026-08-17
     summary: Released rev-b — sent to fab.
-    records: [DEC-...]
+    records: [DEC-A-0NN]  # the decision(s) this release turned on
 ```
+
+(As shipped: the two ids are marked as placeholders in the line itself. The
+first draft of this printed `LOG-...`, which pastes as a plausible-but-invalid
+id — see `in-prog-logs/run2-lower-severity-polish.txt`.)
 
 This is documentation-as-UX, not a new mechanism: it's a print statement
 after a successful stamp, no different in kind from `cmd_fetch`'s existing

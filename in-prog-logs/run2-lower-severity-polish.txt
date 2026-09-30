@@ -1,0 +1,202 @@
+Task: four small "lower severity" findings from in-prog-logs/user-sim-release-gate-run2.md
+(section "Lower severity, but each one costs a newcomer a beat", line 417).
+Branch: run2-lower-severity-polish (started clean at 8da6abe).
+
+Status: DONE -- all four fixed, each verified by running the command.
+Committed on branch run2-lower-severity-polish; PR against main.
+
+## Setup / how I am running things
+
+- `refdes` is not installed in the venv (`python -c "import refdes"` ->
+  ModuleNotFoundError), so real CLI runs go through `.scratch/rcli.py`, which
+  puts `src/` on sys.path, chdirs to a scratch project and calls
+  `refdes.cli.main`. Scratch projects are built by `.scratch/mkproj.py` from
+  the same config constants the tests use. Everything lives in `.scratch/`
+  (gitignored) per AGENTS.md.
+- `cd` is not on the shell whitelist here, so all commands use absolute paths.
+
+## Findings, as verified before touching anything
+
+1. init / .vscode/settings.json silence. Verified in src/refdes/cli.py:912-940:
+   `cmd_init` prints `wrote {rel}` (line 927) for refdes-project.yaml only; the
+   skip note is printed at line 935 via `scaffold_mod.vscode_settings_note()`.
+   scaffold.init (src/refdes/scaffold.py:191-236) writes both files but returns
+   only `config_path` -- the caller cannot tell whether .vscode/settings.json
+   was written. `_write_vscode_settings` (scaffold.py:113-130) already returns
+   True/False for exactly that question; the bool is dropped by `init`.
+2. workspaces/board name namespace. Error source: src/refdes/schema.py:742-751
+   ("{name!r} is declared as both a board and a workspace -- boards and
+   workspaces share one namespace for generated report names (e.g.
+   coverage-{name}.html); rename one of them"). docs/workspaces.md does mention
+   the shared namespace, but only in the last paragraph of "Overriding the
+   derived value" -- not where a newcomer reads before writing both registries.
+3. release log nudge. src/refdes/cli.py:447-452 prints `  - id: LOG-...`.
+   House convention for a placeholder id: docs/design-log.md:229 and
+   docs/design/lifecycle.md:534 already show `LOG-A-0NN` for this very nudge --
+   docs/lifecycle.md:120 still shows the literal `LOG-...`.
+4. audit `unpinned  hash-only`. src/refdes/cli.py:868-875:
+   `kept = "kept" if any(s.kept_copy ...) else "hash-only"`. For an unpinned
+   citation `record is None` (src/refdes/citations.py:841-851) so kept_copy is
+   False and the line reads "unpinned  hash-only" -- but there is no hash at
+   all, so the label is not merely opaque, it is wrong. Vocabulary as
+   documented: docs/markdown.md:426-433 "pinned but not kept (hash-only)".
+
+## Progress log
+
+### All four done, each verified by running
+
+1. init announces .vscode/settings.json -- DONE
+   - Verified open: ran `refdes init` in an empty scratch dir
+     (.scratch/proj-init2) -> printed only `wrote refdes-project.yaml`,
+     `standard: hardware@3`, the candidate-parts pointer, while
+     `.vscode/settings.json` was in fact written.
+   - scaffold.init (src/refdes/scaffold.py:191) returns only `config_path`, so
+     it does NOT report both paths. Rather than change the return type (30+ call
+     sites in tests/test_scaffold.py and test_component_rejected.py), the fix
+     uses the pre-check cmd_init already makes -- `vscode_settings_exists(cwd)`
+     before init runs, which is exactly the write/skip discriminator, since
+     cmd_init always calls init with the default write_vscode_settings=True.
+     scaffold.init's docstring now states that contract explicitly ("Both
+     outcomes are announced by the caller ... The return value stays the config
+     path alone").
+   - New output (ran it): `wrote .vscode/settings.json (gitignored -- the
+     yaml.schemas path in it names one checkout)`, right after the config line.
+     Skip case re-run in .scratch/proj-init3 (pre-existing JSONC settings file):
+     unchanged -- the #109 note prints, and no `wrote` line appears.
+   - Tests: tests/test_scaffold.py::test_cli_announces_the_vscode_settings_file_it_wrote
+     (asserts the exact two `wrote` lines, the gitignore mention, and that
+     .gitignore exists), plus a new `"wrote .vscode/settings.json" not in out`
+     assertion in the existing skip-case test.
+
+2. workspaces.md shared-name-namespace warning up front -- DONE
+   - Error source cited: src/refdes/schema.py:742-751. Ran `refdes check`
+     against .scratch/proj-collide (boards: power + workspaces: power) ->
+     `configuration error: 'power' is declared as both a board and a workspace
+     -- boards and workspaces share one namespace for generated report names
+     (e.g. coverage-power.html); rename one of them`, exit 2. That real output
+     is what the doc now quotes.
+   - docs/workspaces.md DID already mention the namespace, but only as the last
+     paragraph of "Overriding the derived value" -- i.e. after a reader has
+     written both registries and hit the error. Added a "### Workspace names
+     share one namespace with board names" subsection directly under "Declaring
+     workspaces" and deleted the buried duplicate paragraph, so the fact appears
+     once and where it can still help.
+   - Checked the claims before writing them: the generated report names are
+     keyed by the registry KEY, not the `path:` alias
+     (`for workspace_key, workspace_spec in project.workspaces.items()` and
+     `f"coverage-{workspace_key}.html"`, src/refdes/render.py:1124-1265), and
+     the collision check is `set(boards) & set(workspaces)` -- so a `path:`
+     alias genuinely does not dodge it, which the note now says. I first wrote
+     that the drift manifest shares the namespace too; dropped that, because
+     .refdes/boards.yaml keeps `boards:` and `workspaces:` as two separate
+     sections (src/refdes/boards.py:233-248) so names there do not collide
+     across kinds.
+   - Test: tests/test_workspaces.py::test_workspaces_doc_warns_about_the_shared_name_namespace_before_it_bites
+     -- triggers the real SchemaError and requires the doc to name
+     `coverage-power.html` AND to do so before the "## The two-level layout"
+     heading, so both the reason and its position are pinned.
+
+3. release log-nudge placeholder -- DONE
+   - Verified open: ran `refdes release rel-a` in .scratch/proj-release ->
+     printed `  - id: LOG-...` / `records: [DEC-...]`.
+   - House convention: docs/design-log.md:229 and docs/design/lifecycle.md:534
+     already showed `LOG-A-0NN` for this same nudge, so the CLI was the odd one
+     out; `refdes new` marks blanks with a trailing comment (`limit:  # required
+     -- limit`). Used both signals: `LOG-A-0NN` (invalid shape -- ids.ID_RE
+     requires a trailing `-<digits>`, verified against src/refdes/ids.py:23) and
+     an inline `# placeholder:` comment. `records:` got the same treatment
+     (`DEC-A-0NN`), since `DEC-...` is the identical trap one line down.
+   - New output (ran it):
+     `  - id: LOG-A-0NN  # placeholder: your log prefix, next free number` /
+     `    records: [DEC-A-0NN]  # the decision(s) this release turned on`
+   - Docs updated to match the shipped block: docs/lifecycle.md (was still
+     `LOG-...`), docs/design-log.md (added the comments + DEC-A-0NN and a
+     sentence on why they are placeholders), docs/design/lifecycle.md (spec
+     block updated with an "as shipped" note).
+   - Tests: tests/test_revise_cli.py::test_cli_release_log_nudge_ids_are_marked_placeholders
+     (both ids fail `ids.split_id`, both lines carry `#`, `LOG-...` gone) and
+     ::test_docs_quote_the_log_nudge_the_cli_actually_prints (parametrised over
+     the three doc pages; compares the printed block line-for-line, normalising
+     only the date and the release name).
+
+4. audit `unpinned  hash-only` -- DONE, chose (a) + (b)
+   - Verified open: ran `refdes audit` in .scratch/proj-audit ->
+     `    unpinned       hash-only  cited by CMP-001`.
+   - Why (a) and not just a doc gloss: the label is not merely jargon, it is
+     false. `record is None` returns before kept_copy is read
+     (src/refdes/citations.py:841-851), so an unpinned citation has no hash for
+     "hash-only" to describe. A gloss would document a wrong line.
+   - Why the change is safe: nothing parses that column. `git grep -n
+     "hash-only" -- tests editors docs-site` returns docstrings only (plus the
+     new assertions), and the only other producer of the word is the site's
+     references.html.j2 Copy column, a separately labelled table. Pinned rows
+     keep `hash-only`/`kept` byte-for-byte -- re-ran audit on .scratch/proj-release
+     (pinned, kept_copy false) -> still `ok             hash-only  cited by
+     CMP-001`; only the row that lied changed to `no pin`.
+   - The task's suggested "rev-pinned vs hash-pinned" split does not exist in
+     this data model and was not used: the lockfile record is
+     {sha256, fetched, kept_copy, bytes, sections} (citations.py:1497-1502) with
+     no rev, and `rev:` is author-declared citation metadata
+     (standards/hardware/v3/base.yaml:122), not a pinning mechanism. The real
+     axes are pinned/unpinned x kept/not-kept, which is what the new docs gloss
+     says.
+   - Also did (b): docs/cli-reference.md's audit sample now shows
+     `unpinned       no pin     cited by CMP-PWR-001` and a new paragraph
+     explains `<state>  <pin>  cited by <items>` with all five states and the
+     three pin words, linking docs/markdown.md. Nothing in the docs explained
+     this pair of columns before.
+   - Tests: tests/test_citations.py::test_cli_audit_never_calls_an_unpinned_citation_hash_only
+     and ::test_cli_audit_pinned_citation_keeps_its_pin_words (parametrised
+     hash-only / kept), both comparing the field-normalised line so column
+     widths stay free to change.
+   - NOT changed (deliberate, follow-up): references.html.j2:42 prints
+     `hash-only` for an unpinned row too, and prints `hash-only` for a pinned
+     *repo-local* citation whose bytes are the repo file itself. Both are the
+     same vocabulary wrinkle on the rendered site rather than in `audit`; that
+     output is covered by build-hash fixtures, so it wants its own pass with
+     its own evidence rather than riding along here.
+
+### Verification summary
+
+Ran (not just read):
+- `refdes init` fresh (fix 1 output) and with a pre-existing .vscode/settings.json
+  (skip case unchanged, no `wrote` line).
+- `refdes release rel-a` (fix 3 output).
+- `refdes audit` on an unpinned-citation project (fix 4 new label) and on a
+  pinned-not-kept one (label unchanged).
+- `refdes check` on a board/workspace name collision (exact error text + exit 2
+  quoted into docs/workspaces.md).
+- pytest: tests/test_scaffold.py (52 passed), tests/test_revise_cli.py (31
+  passed), tests/test_citations.py (81 passed, 1 skipped),
+  tests/test_workspaces.py (27 passed), and the full suite -- see below.
+
+Read only: the render.py report-naming loops and boards.py manifest sections
+(used to keep the docs claims true); references.html.j2 (decided out of scope).
+
+Nothing in the four was judged not-worth-fixing. Finding 2 was the closest --
+the fact was on the page already -- but in the one place it could not help, so
+it moved rather than being duplicated.
+
+### Final gates
+
+- Full suite: `python -m pytest -q tests` -> **2860 passed, 2 skipped in
+  204.85s**. That run predated the last two edits (the audit `kept` -> `pin`
+  local rename and one E501 wrap in test_revise_cli.py), so it was re-run on
+  the committed tree -- HEAD 82420c9, working tree clean, HEAD ==
+  origin/run2-lower-severity-polish -- -> **2860 passed, 2 skipped in 200.52s**,
+  exit 0. Same count, so those two edits moved nothing. The four touched files
+  also re-run together -> 191 passed, 1 skipped.
+- `ruff check --select E501,I,F` on the six touched files: 5 findings, all
+  pre-existing (cli.py:705/813/821/1825, test_revise_cli.py:368 -- the latter
+  is the same line that was 366 before my insert). One E501 I introduced in
+  test_revise_cli.py was wrapped. No unrelated findings silenced, per AGENTS.md.
+- Re-ran all three output changes once more after a last cleanup (renaming the
+  audit `kept` local to `pin`, since it no longer holds only kept/not-kept):
+  `unpinned       no pin     cited by CMP-001`; the release nudge; and
+  `wrote .vscode/settings.json (...)` on a fresh init.
+
+### Scratch
+
+.scratch/rcli.py (runs the real CLI against a dir), .scratch/mkproj.py
+(projs for audit + release), .scratch/mkcollide.py (collision project), left in
+place per AGENTS.md.
