@@ -91,6 +91,17 @@ Specifically in the directory `in-prog-logs/` as text files. Name the file
 after the task you were working on; write your incremental progress down here,
 what difficulties you may have had, and if the task was finished or not.
 
+## Identify yourself in every commit
+
+End every commit you make with a `Co-authored-by:` trailer naming the model
+that did the work, e.g. `Co-authored-by: Qwen3.8-Flash-Next
+<noreply@refdes.local>` or `Co-authored-by: Codex Luna <noreply@refdes.local>`.
+Use your harness's own attribution convention if it has one; otherwise use
+that form with your own model name. `git log` and the PR page are the only
+record of which agent wrote what once a task's own workspace is archived —
+this project has already lost that trail once, on a PR whose author field
+only showed the shared human git identity everything lands under.
+
 ## Temporary files go in .scratch/
 
 Temporary files -- scratch scripts, throwaway test projects, probe output --
