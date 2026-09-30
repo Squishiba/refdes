@@ -25,6 +25,16 @@ from .model import ON_CHANGE_MODES, FieldSpec, ItemType, Project
 
 SCHEMA_REL_PATH = os.path.join(".refdes", "schema.json")
 
+#: The same file as every message in this tool spells it. Project-relative
+#: paths are shown with "/" everywhere -- `parse.rel_source`, the `revise`
+#: report, `keys`, `history` all normalise, and it is how the docs and
+#: `--help` name this file -- but `os.path.join` makes `SCHEMA_REL_PATH`
+#: `.refdes\schema.json` on Windows. So the filesystem uses the constant above
+#: and prose uses this one; otherwise one `refdes check` on Windows prints the
+#: same file two different ways, here and in its own schema trip-wire, and a
+#: path copied out of a warning matches nothing.
+SCHEMA_REL_DISPLAY = ".refdes/schema.json"
+
 # Field `type:` -> JSON-Schema fragment, keyed only by the declared type --
 # not the field name -- so this generalizes to any project-defined field of
 # one of these types, not just the standard's own. `enum` is handled
@@ -364,10 +374,14 @@ def write_schema(project: Project, write: bool = True) -> bool:
         # Recorded on load_writes so `check`'s trip-wire cannot call a file it
         # failed to write "refreshed", and so the command's own summary names
         # the refusal for the commands that print no diagnostics.
-        project.load_writes.blocked.append(SCHEMA_REL_PATH)
+        # Display spelling, because `blocked` is a list of paths shown to a
+        # person and every other entry in it is normalised that way --
+        # `revise._refuse_unwritable` appends `rewrite.rel`, and the refused
+        # set is matched against `item.source_file`, both "/"-form.
+        project.load_writes.blocked.append(SCHEMA_REL_DISPLAY)
         project.warn(
             "could not write this file (read-only tree?); run with --no-write "
             "to silence this",
-            file=SCHEMA_REL_PATH,
+            file=SCHEMA_REL_DISPLAY,
         )
     return was_stale

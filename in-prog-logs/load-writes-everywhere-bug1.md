@@ -378,17 +378,67 @@ Nothing in `src/` changed for this — the product code caught both operations
 from the start. Only the test's setup was asserting a permission Windows has no
 notion of.
 
+### ...and the second Windows failure, which was a real product bug
+
+The split worked: the re-run shows the schema refusal firing on Windows —
+`WARNING .refdes\schema.json — could not write this file`. The test still
+failed, on the *separator*:
+
+```
+E  AssertionError: assert ('.refdes/schema.json' in
+   'WARNING .refdes\schema.json — could not write this file ...')
+```
+
+So my first diagnosis was only half right, and the fix was not "the test needed
+a pre-existing file" — that was necessary but not sufficient, and I stated it as
+the whole story. The remaining half is a defect in what I wrote, visible only on
+Windows:
+
+`SCHEMA_REL_PATH` is `os.path.join(".refdes", "schema.json")`, which is
+`.refdes\schema.json` on Windows, and I passed it straight to `project.warn` and
+into `load_writes.blocked`. But this codebase normalises project-relative paths
+in anything a person reads — `parse.rel_source`, the `revise` report
+(`cli.py:435`), `keys.py:430`, `history.py:870`, ~20 `.replace("\\", "/")` sites
+— and `revise._refuse_unwritable` appends `rewrite.rel`, and the refused set is
+matched against `item.source_file`, both already `/`-form. So `blocked` was a
+list with one foreign-spelled entry, and one `refdes check` on Windows printed
+the same file two ways: `.refdes\schema.json` in my warning and
+`.refdes/schema.json` in `check`'s own trip-wire literal (`cli.py:238-254`),
+which is also how `--help` and the docs name it. A path copied out of the warning
+matched nothing.
+
+Fixed in the product, not the test — the test's forward-slash assertion was
+correct all along and is now the guard:
+
+- `schema_json.SCHEMA_REL_DISPLAY = ".refdes/schema.json"` — the prose spelling,
+  with `SCHEMA_REL_PATH` kept for the filesystem. The `except OSError` branch
+  records and warns in display form.
+- `cli.py`'s trip-wire compares against `SCHEMA_REL_DISPLAY`.
+- The test now also asserts `".refdes\\schema.json" not in out`, so the
+  convention is pinned rather than re-derived next time it breaks.
+
+The lesson I got wrong once already: a cross-platform failure in a test I wrote
+is evidence about my code, and "the mechanism is now portable" was a conclusion I
+reached from a table rather than from the re-run's output. The re-run is the only
+test that says whether Windows agrees.
+
 ## Gates
 
-- `pytest tests/` — **2793 passed, 2 skipped in 194.26s** after the Windows
-  split (2792 before it). Clean. The two skips are environment-conditional
+- `pytest tests/` — **2793 passed, 2 skipped in 193.99s** on the final tree
+  (2792 before the Windows split; the separator fix added assertions, not a
+  test). Clean. The two skips are environment-conditional
   markers (`os.name != "nt"`, "needs a case-insensitive filesystem",
   `needs_install`) in `test_serve_upload.py`, `test_citations.py` and
   `test_version_flag.py` — none in a file this change touches.
-- CI on the first commit of #113: `ubuntu-latest` pass, `py3.13` pass,
-  `windows-latest` fail (the one test above). Re-running on all three after the
-  split; a local Linux pass is not evidence about Windows, which is the mistake
-  that produced the failure in the first place.
+- CI on #113 commit 1 (`e6fa618`): `ubuntu-latest` pass, `py3.13` pass,
+  `windows-latest` **fail** — the permission-mechanism test above.
+- CI on commit 2 (`ec72d58`): `ubuntu-latest` pass, `py3.13` pass,
+  `windows-latest` **fail** again — different cause, the separator bug, and the
+  one thing the second failure proved is that commit 2's split *did* work. A
+  local Linux pass is not evidence about Windows; that assumption produced the
+  first failure, and over-confidence in a mechanism table produced the second.
+- Commit 3 is the separator fix. Third run on all three platforms pending; I am
+  not calling this done until `windows-latest` says so.
 - `ruff check src/refdes/cli.py src/refdes/schema_json.py src/refdes/revise.py
   --select I,F` — 2 findings, both `I001` import-block formatting in
   `revise.py:28` and `schema_json.py:16`. Both are **pre-existing**: piping

@@ -481,7 +481,12 @@ def test_check_survives_a_read_only_tree(tmp_path, capsys):
     out = captured.out + captured.err
     assert "Traceback" not in out
     assert "could not write" in out
+    # Both spelled with "/", which is how this tool names project-relative
+    # paths to a person everywhere else. Asserting the separator is the point:
+    # the schema refusal once came out `.refdes\schema.json` on Windows, in the
+    # same run whose trip-wire called the same file `.refdes/schema.json`.
     assert ".refdes/schema.json" in out and "items/r.yaml" in out
+    assert ".refdes\\schema.json" not in out
     assert "2 items, 0 errors" in out
     assert path.read_text(encoding="utf-8") == before
 

@@ -238,7 +238,7 @@ def cmd_check(args) -> int:
                 f".refdes/schema.json was older than {newest} -- not refreshed "
                 "(--no-write). Run without --no-write to refresh it."
             )
-        elif schema_json_mod.SCHEMA_REL_PATH in project.load_writes.blocked:
+        elif schema_json_mod.SCHEMA_REL_DISPLAY in project.load_writes.blocked:
             # The refresh was attempted and the filesystem refused it. Saying
             # "refreshed" here would send the user back to their editor to
             # re-check a completion list that is exactly as stale as it was;

@@ -15,7 +15,10 @@
   `.refdes/schema.json` refresh or from the key-mint write-back — before it had
   checked anything. Both sites now warn (`could not write this file (read-only
   tree?); run with --no-write to silence this`) and carry on, so a `check` that
-  cannot write reports what `--no-write check` reports. A key whose write was
+  cannot write reports what `--no-write check` reports. Each refusal names its
+  file with `/` like every other message in the tool does — on Windows the
+  schema warning first came out `.refdes\schema.json`, in the same run whose
+  trip-wire called that same file `.refdes/schema.json`. A key whose write was
   refused is not applied for the run either, so nothing later in the load can
   freeze a composite naming a key that never reached disk. Commands that print
   no diagnostics of their own name the refused files in their own summary line.
