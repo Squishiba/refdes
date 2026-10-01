@@ -10,7 +10,10 @@ tests/test_no_write.py pins for the CLI (docs/design/keys.md §2).
 from __future__ import annotations
 
 import os
+import subprocess
+import sys
 import threading
+from pathlib import Path
 
 import pytest
 from conftest import write_project_config
@@ -115,6 +118,8 @@ def tree(root, *subdirs) -> dict[str, str]:
         base = os.path.join(str(root), sub)
         for dirpath, _dirs, names in os.walk(base):
             for name in names:
+                if name == "serve-write.lock":
+                    continue  # stable coordination file, not authoring content
                 path = os.path.join(dirpath, name)
                 rel = os.path.relpath(path, str(root)).replace("\\", "/")
                 with open(path, "rb") as fh:
@@ -179,6 +184,78 @@ def test_applied_returns_the_new_file_revision(project_root):
     assert isinstance(result, Applied), result.message
     assert result.revision == edit_mod.file_revision(path)
     assert result.revision != old
+
+
+def test_change_after_candidate_gate_conflicts_without_overwriting(project_root, monkeypatch):
+    path = target(project_root)
+    request = req(("REQ-001", SetField("status", "draft"), path))
+    original_gate = edit_mod._blocking_diagnostics
+
+    def competing_write(*args):
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write("# another author's change\n")
+        return original_gate(*args)
+
+    monkeypatch.setattr(edit_mod, "_blocking_diagnostics", competing_write)
+    result = edit_mod.apply_edit(str(project_root), request)
+
+    assert isinstance(result, Conflict), result
+    assert "# another author's change" in read(path)
+    assert "status: draft" not in read(path)
+
+
+def test_atomic_replace_uses_unique_temps_and_cleans_failed_write(project_root, monkeypatch):
+    path = target(project_root)
+    original_replace = os.replace
+    staged = []
+
+    def recording_replace(src, dst):
+        staged.append(src)
+        original_replace(src, dst)
+
+    monkeypatch.setattr(edit_mod.os, "replace", recording_replace)
+    assert edit_mod._atomic_replace(path, b"first\n") is None
+    assert edit_mod._atomic_replace(path, b"second\n") is None
+    assert staged[0] != staged[1]
+
+    def failed_replace(src, dst):
+        staged.append(src)
+        raise OSError("injected failure")
+
+    monkeypatch.setattr(edit_mod.os, "replace", failed_replace)
+    assert "injected failure" in edit_mod._atomic_replace(path, b"third\n")
+    assert read(path) == "second\n"
+    assert not any("refdes-tmp" in name for name in os.listdir(project_root / "items"))
+
+
+def test_disk_write_lock_blocks_another_process(project_root):
+    code = """\
+import sys
+from refdes.serve.edit import _disk_write_lock
+print('ready', flush=True)
+with _disk_write_lock(sys.argv[1]):
+    print('acquired', flush=True)
+"""
+    env = dict(os.environ, PYTHONPATH=str(Path(__file__).resolve().parents[1] / "src"))
+    with edit_mod._disk_write_lock(str(project_root)):
+        child = subprocess.Popen(
+            [sys.executable, "-c", code, str(project_root)],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            env=env,
+        )
+        try:
+            assert child.stdout.readline().strip() == "ready"
+            with pytest.raises(subprocess.TimeoutExpired):
+                child.communicate(timeout=0.3)
+        except BaseException:
+            child.kill()
+            child.wait()
+            raise
+    out, err = child.communicate(timeout=5)
+    assert child.returncode == 0, err
+    assert "acquired" in out
 
 
 def test_applied_body_edit_on_a_markdown_item(project_root):

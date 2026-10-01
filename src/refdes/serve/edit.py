@@ -61,8 +61,10 @@ import difflib
 import hashlib
 import os
 import re
+import tempfile
 import threading
 from collections import Counter
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import date
 from typing import Any
@@ -232,8 +234,8 @@ _LOCKS_GUARD = threading.Lock()
 def write_lock_for(project_root: str) -> threading.Lock:
     """The one write lock for one project root, shared by every apply in this
     process. The design's posture is that the lock stops *this* server from
-    interleaving saves; cross-process protection is the content revision, and
-    the crash journal is a later slice."""
+    interleaving saves; `_disk_write_lock` serialises the final revision check
+    and replacement across server processes."""
     key = os.path.normcase(os.path.abspath(project_root))
     with _LOCKS_GUARD:
         lock = _LOCKS.get(key)
@@ -252,6 +254,37 @@ def file_revision(path: str) -> str:
             return hashlib.sha256(fh.read()).hexdigest()
     except OSError:
         return ""
+
+
+@contextmanager
+def _disk_write_lock(root: str):
+    """Lock a stable project file while a server checks and replaces an item.
+
+    Keep the file: unlinking a lock file lets a new process lock a different
+    inode while an existing process still owns the old one.
+    """
+    directory = os.path.join(root, ".refdes")
+    os.makedirs(directory, exist_ok=True)
+    path = os.path.join(directory, "serve-write.lock")
+    with open(path, "a+b") as fh:
+        fh.seek(0)
+        if os.name == "nt":
+            import msvcrt
+
+            msvcrt.locking(fh.fileno(), msvcrt.LK_LOCK, 1)
+            try:
+                yield
+            finally:
+                fh.seek(0)
+                msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
 
 
 # ---------------------------------------------------------------- the entry point
@@ -419,7 +452,18 @@ def _apply_locked(config: str, request: EditRequest):
         _undo_accept(accept)
         return Invalid(who, ref, tuple(blocking), path=path)
 
-    failure = _atomic_replace(path, new_text.encode("utf-8"))
+    # The candidate gate can take seconds. Another server may have saved since
+    # the first check, so check again under the cross-process write lock.
+    try:
+        with _disk_write_lock(before.root):
+            current_revision = file_revision(path)
+            if current_revision != request.expected_revision:
+                _undo_accept(accept)
+                return _conflict(who, ref, path, before, request, current_revision)
+            failure = _atomic_replace(path, new_text.encode("utf-8"))
+    except OSError as exc:
+        _undo_accept(accept)
+        return Refused(who, ref, f"could not lock {path} for writing: {exc}", path=path)
     if failure is not None:
         _undo_accept(accept)
         return Refused(who, ref, failure, path=path)
@@ -783,24 +827,24 @@ def _atomic_replace(path: str, payload: bytes) -> str | None:
     temp file is discarded, and if the destination was somehow replaced and
     the re-read disagrees, the original bytes are put back."""
     directory = os.path.dirname(path)
-    tmp = os.path.join(directory, f".{os.path.basename(path)}.refdes-tmp")
+    tmp = None
     try:
         with open(path, "rb") as fh:
             original = fh.read()
     except OSError as exc:
         return f"could not read {path} before writing: {exc}"
 
-    fd = None
     try:
-        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, os.stat(path).st_mode & 0o777)
+        fd, tmp = tempfile.mkstemp(prefix=f".{os.path.basename(path)}.refdes-tmp-", dir=directory)
         with os.fdopen(fd, "wb") as fh:
-            fd = None  # fdopen owns it from here
+            os.chmod(tmp, os.stat(path).st_mode & 0o777)
             fh.write(payload)
             fh.flush()
             os.fsync(fh.fileno())
         os.replace(tmp, path)
     except OSError as exc:
-        _discard_tmp(tmp)
+        if tmp is not None:
+            _discard_tmp(tmp)
         return f"the write failed ({exc}); {path} still holds its original bytes"
 
     try:

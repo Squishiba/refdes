@@ -32,6 +32,7 @@ node_modules/
 # this also covers docs-site/.refdes/, a second refdes project living in
 # this same repo.
 **/.refdes/schema.json
+**/.refdes/serve-write.lock
 
 # A scratch refdes project used to exercise doc generation against a real
 # schema. It has its own project config and is not part of this tool -- kept
