@@ -425,13 +425,29 @@ of those must not produce a traceback — a traceback names a bug in the tool
 and says nothing about the only thing that is actually wrong, which is a
 permission bit.
 
-One sentence covers every site, so a CI log filter written against it does not
-miss half the refusals (`refdes.model.read_only_refusal` is the single
-spelling; run-3's N2 is the report that asked for it):
+One sentence covers every load-time site, so a CI log filter written against it
+does not miss half the refusals (`refdes.model.read_only_refusal` is the single
+spelling; run-3's N2 is the report that asked for it, and it is why the
+no-diagnostics summary line is now built from that same function rather than
+carrying a second, near-identical wording of its own):
 
 ```
 could not write this file (read-only tree?); run with --no-write to silence this
 ```
+
+The two shapes a load-time refusal arrives in differ only in what surrounds
+that sentence: a per-file diagnostic for a command that reports, a
+parenthesised summary naming the files for one that does not. Both carry the
+sentence itself, byte for byte.
+
+The refusals for a write the *user asked for* — a baseline stamp, a history
+snapshot, a carried-forward seal — name their destination first and so do not
+contain that string; what they share with it, and with each other, is
+`(read-only tree?)`. That is the substring to write a log filter against.
+The site render is the one site outside even that: it reports the operating
+system's own reason, because that write can be refused for reasons unrelated to
+a read-only tree. [cli-reference](../cli-reference.md#matching-a-read-only-refusal-in-a-log)
+has the two shapes verbatim and which commands produce which.
 
 What each site does with it depends on what the write *was*:
 

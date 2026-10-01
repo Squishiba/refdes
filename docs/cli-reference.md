@@ -53,6 +53,46 @@ what it could not write, or refuses:
 `--no-write` needs none of this: it never attempts the write, so it is
 unaffected by whether the tree would have taken it.
 
+### Matching a read-only refusal in a log
+
+**Match on `(read-only tree?)`.** It is the one string every read-only
+refusal above carries, whichever of the two shapes it arrives in, and it is
+the only part of the message that never varies:
+
+```
+# commands that print diagnostics of their own: one line per refused file
+WARNING items/bounds/thermal.yaml:1 — could not write this file (read-only tree?); run with --no-write to silence this
+
+# commands that print none: one summary line naming the files
+(load could not write this file (read-only tree?) -- .refdes/schema.json, items/bounds/thermal.yaml, items/decisions/dec.md, items/log.yaml (+3 more); run with --no-write to silence this)
+```
+
+The split is deliberate, and worth knowing which side of it a command is on
+before writing a filter. A command that reports (`check`, `build`, `index`,
+`revision`/`release`) prints one line per refused file and no summary. A
+command that prints only its own output (`ls`, `id`, `fetch`, `audit`,
+`former-ids propose`, and the `history` commands) has nowhere to put a
+per-file diagnostic, so it names the files once in a parenthesised summary
+instead. A filter should therefore not assume *which* shape it will see —
+match on the shared sentence, not on the prefix — because a command can be on
+either side, and `stub-tests`, which reports its own `build` diagnostics
+*after* announcing the load, currently prints both.
+
+Both shapes are the same sentence, `could not write this file (read-only
+tree?)`, followed by what the refusal cost and how to silence it — so a filter
+written for the longer `could not write this file (read-only tree?)` catches
+both shapes too, and is the more precise choice if you only care about the
+load-time writes (key minting, link expansion, `.refdes/schema.json`). The
+refusals in the table that name a *specific destination* the user asked for
+(`error: cannot write .refdes/baselines/rev-b.yaml (read-only tree?) -- …`)
+put the path first and so do not contain that longer string; they do all
+contain `(read-only tree?)`, which is why that is the substring to write
+against. `build`'s refusal for the site directory is the one exception: it
+reports the operating system's own reason instead, because that write can be
+refused for reasons that have nothing to do with a read-only tree (a file
+sitting at the `site.out` path is refused as `File exists`), so the marker
+would be a claim refdes cannot make there.
+
 The full rationale, and what an explicit write (`revise apply`, `keys adopt`)
 does instead, is in [keys §2](design/keys.md#a-tree-that-will-not-take-the-write).
 
@@ -109,6 +149,9 @@ If the site's own output directory is the thing that will not take the write,
 `build` refuses instead — there is no partial site worth printing — and exits
 `2` naming the directory. Point `-o/--out` somewhere writable, or make the tree
 writable.
+
+A log filter for either shape is in
+[matching a read-only refusal](#matching-a-read-only-refusal-in-a-log) above.
 
 
 ---

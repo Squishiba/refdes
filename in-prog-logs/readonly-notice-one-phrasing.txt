@@ -1,0 +1,124 @@
+# readonly-notice-one-phrasing — make the read-only notice one greppable string
+
+Task: user-sim run 3, finding **N2**. A refused write on a read-only tree is
+announced in two different sentences, so a CI log filter written against one
+misses the other.
+
+Starting point, from the code (not memory):
+
+- `src/refdes/model.py:696` — `READ_ONLY_REFUSAL = "could not write this file
+  (read-only tree?)"`, and `read_only_refusal(consequence)` (model.py:699)
+  appends `-- <consequence>` then `; run with --no-write to silence this`.
+  PR #132 (`7c20d55`) centralised this so per-file refusals have one string.
+- Per-file call sites, all already on the constant: `schema_json.py:384`,
+  `revise.py:735` (`_refuse_unwritable`), `seal.py:263`, `boards.py:270`,
+  `lifecycle.py:461`.
+- The odd one out: `cli._load_blocked_notice` (`src/refdes/cli.py:114`, body at
+  141-144) had its **own literal**:
+  `(load could not write {files} -- read-only tree? run with --no-write to silence this)`.
+
+## Survey of the other refusal wordings
+
+Run: `grep -rn "read-only tree" src/refdes/*.py`, plus each command actually
+invoked against a `chmod -R a-w` copy of a real project (`.scratch/`).
+
+| Site | Text today | Carries `(read-only tree?)`? |
+|---|---|---|
+| per-file diagnostic | `could not write this file (read-only tree?) …` | yes |
+| load summary (`cli.py`) | `(load could not write X -- read-only tree? …)` | yes, but nothing else in common |
+| `revision`/`release` baseline (`cli.py:526`) | `error: cannot write {rel} (read-only tree?) -- …` | **yes** |
+| `history` store (`history.py:279`) | `error: cannot write {rel} (read-only tree?) -- …` | **yes** |
+| `revise`/`calc-rewrite` carry-forward (`revise.py:1777`, `1839`) | `cannot write {rel} (read-only tree?) -- …` (in `Refused`) | **yes** |
+| `build`'s site dir (`cli.py:357`) | `error: cannot write the site to {dir} ({exc.strerror}) -- …` | **no** |
+
+So the answer to "do the `error: cannot write …` lines share the substring?" is
+**yes** — all four already carry `(read-only tree?)`. Nothing to change there,
+and I verified each by running the command, not by reading the f-string.
+
+### Why `build`'s site refusal is left without the marker
+
+I checked whether adding `(read-only tree?)` there is honest. It is not: that
+write also fails when the `site.out` path is occupied by a regular file.
+Verified — `_scratch/sitecollide/_site` is a file:
+
+```
+error: cannot write the site to …/_site (File exists) -- nothing was rendered. …
+```
+
+A `(read-only tree?)` marker on that line would be a claim refdes cannot make,
+and it already prints the OS's real reason, which is more useful than a guess.
+Listed here rather than changed.
+
+## Decisions
+
+1. **The shared substring is `(read-only tree?)`.** From the table: it is the
+   one string *every* read-only refusal already carries, including the four
+   `error: cannot write …` sites that never use the per-file sentence. A CI
+   author can match it and it will not rot. The full
+   `could not write this file (read-only tree?)` is the *stronger* filter and
+   now matches both load-time shapes byte for byte — documented as such, and
+   the right choice if you only care about load-time writes.
+2. The summary line is rebuilt from `model.read_only_refusal(what)`, so its stem
+   is the constant by construction and cannot drift again. One line of change:
+
+   ```python
+   return f"(load {model.read_only_refusal(what)})"
+   ```
+
+3. The `error: cannot write …` refusals keep their own sentences deliberately,
+   beyond already sharing the marker: `read_only_refusal()`'s fixed
+   `; run with --no-write to silence this` tail is *wrong* for them.
+   `history capture` already refuses under `--no-write`, so telling the user to
+   run it that way is a non-remedy; they say "Make the tree writable and run it
+   again" instead. Forcing the shared sentence on them would replace a correct
+   instruction with an incorrect one.
+
+## Verification
+
+- Reproduced N2 on a real read-only tree (`.scratch/n2-fresh-ro`,
+  `.scratch/n2-many-ro`), before and after. Before: the two forms shared only
+  `read-only tree?`. After: both contain `model.READ_ONLY_REFUSAL` byte for
+  byte.
+- The new test was run against **main's `cli.py`** (`git show main:…`, then
+  restored from `.scratch/cli.py.new` — no stash, per AGENTS.md) and fails
+  there for the right reason: `assert 'could not write this file (read-only
+  tree?)' in '(load could not write items/r.yaml -- read-only tree? …)'`.
+- Full suite: **2985 passed, 2 skipped**.
+- `ruff check src/refdes/cli.py tests/test_load_time_writes.py` → all checks
+  passed, same as main's copies of those same two files. (One real fix along
+  the way: the new `model` import belonged on the existing `from . import …`
+  line, not as a separate statement — ruff's `I001` caught it.)
+
+### One correction I had to make to my own docs
+
+I first wrote that neither shape ever appears twice in one run, and listed
+`stub-tests` among the summary-only commands. Running it showed it prints
+**both**: `stub-tests` calls `_announce_load_writes()` and then runs
+`build_mod.build(…)`, whose diagnostics print afterwards. I confirmed this is
+pre-existing by re-running against main's `cli.py` (also 1 summary line). Fixed
+the doc to say so plainly, and the test docstring now names the exception, so
+the new test's "the split is untouched" claim is not overstating.
+
+Command→shape, measured rather than inferred (`grep -c` of each form's marker,
+`n2-many-ro`): `check`/`build`/`index` → per-file only; `ls`/`id`/`fetch`/
+`audit` → summary only; `stub-tests` → both.
+
+## Files
+
+- `src/refdes/cli.py` — `_load_blocked_notice` body + the `model` import
+- `tests/test_load_time_writes.py` — 2 pinned strings updated, 1 new test
+- `docs/cli-reference.md` — new "Matching a read-only refusal in a log"
+  section under the exit-code/unwritable-destination table, plus a pointer
+  from `build`'s read-only paragraph
+- `docs/design/keys.md` — §"A tree that will not take the write" said "One
+  sentence covers every site", which was not true of the summary line and is
+  not true of the destination refusals; now says what is actually shared
+- `changelog.d/readonly-notice-one-sentence.changed.md` — `changed`, not
+  `fixed`: existing behaviour changed, non-breaking, and the text a filter may
+  match is what moved
+
+## Status: finished.
+
+Scratch trees left in `.scratch/` as AGENTS.md requires. Read-only copies are
+`chmod -R a-w`; run `chmod -R u+w .scratch/n2-ro .scratch/n2-fresh-ro
+.scratch/n2-many-ro .scratch/stamp-ro` if the worktree ever needs cleaning.
