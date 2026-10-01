@@ -1348,7 +1348,7 @@ and a browser editor. Loads exactly one project and prints a launch URL.
 |---|---|
 | `--no-open` | Print the launch URL but do not open a browser |
 | `--port PORT` | Bind this exact `127.0.0.1` port instead of an ephemeral one. A port something else already holds is a refusal — `error: cannot listen on 127.0.0.1:<port>: Address already in use …`, exit `2` — never a silent fallback to some other port. `PORT` is 1–65535; anything else is a usage error and exit `2`. Below 1024 it needs elevated privileges |
-| `--token-file PATH` | Write this launch's URL — which carries the launch token — to `PATH`, so a script reads the credential from a file instead of scraping stdout. Owner-only (`0600`), never written through a symlink, removed when `serve` stops cleanly |
+| `--token-file PATH` | Write this launch's URL — which carries the launch token — to `PATH`, so a script reads the credential from a file instead of scraping stdout. Written atomically, owner-only (`0600`), never written through a symlink, and only ever over a previous launch file of its own — anything else at that path is a refusal and exit `2`. Removed when `serve` stops cleanly |
 
 ```bash
 refdes serve
@@ -1385,19 +1385,32 @@ refdes serve --no-open --port 8731 --token-file /tmp/refdes-launch.txt
   first `_`, and the 403 that follows looks like an auth bug.
 
   The file is a **bearer credential** — whoever can read it can read and edit
-  the project for as long as this launch lives — so it is created `0600`, and
-  the mode is set on the descriptor, which tightens a pre-existing file that was
-  world-readable instead of leaving it that way. A symlink at `PATH` is refused
-  (exit `2`), never followed. On Windows the mode bits are advisory and the file
-  inherits the directory's ACLs, so put it somewhere only your own account can
-  read. Choose a path outside the project tree: a token file in the repo is a
-  secret waiting to be committed, and `--no-write` does not gate this write
-  because it is not project state.
+  the project for as long as this launch lives — so it lands `0600` whatever it
+  is written over. The bytes go to a temp file in the same directory, created
+  `0600`, and are renamed onto `PATH` in one step: a script polling for the file
+  never catches it empty or half-written, and a pre-existing world-readable file
+  is tightened rather than left that way. On Windows the mode bits are advisory
+  and the file inherits the directory's ACLs, so put it somewhere only your own
+  account can read.
 
-  `serve` removes the file when it stops on Ctrl+C. A hard kill leaves it behind
-  holding a token that authenticates nothing — the next launch mints a new one —
-  and a later `--token-file` at the same path truncates and rewrites it rather
-  than refusing to start.
+  Two things at that path are refused — one line on stderr, exit `2`, no launch,
+  and the path left exactly as it was. A **symlink**: never followed, and since
+  the bytes arrive by rename, even a race can only replace the link itself, never
+  write through it into its target. And **any file that is not already a refdes
+  launch file**: a file holding exactly one launch URL is this tool's own and may
+  be rewritten; anything else — a project file, an empty file, a directory — is
+  not, and `--token-file refdes-project.yaml` should cost you a launch, not a
+  project file. That rule is also what makes re-launching cheap after a hard
+  kill: the file is still there holding a token that authenticates nothing, and
+  the next launch recognises it as its own and rewrites it rather than refusing
+  to start.
+
+  Choose a path outside the project tree: a token file in the repo is a secret
+  waiting to be committed, and `--no-write` does not gate this write because it
+  is not project state.
+
+  `serve` removes the file when it stops on Ctrl+C. A hard kill cannot, which is
+  the stale file above.
 
   Persisting the launch token is a deliberate exception, granted per launch to
   the person who asked for the flag: `serve` writes the token nowhere unless

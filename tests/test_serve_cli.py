@@ -100,6 +100,10 @@ def _wait_for_file(path, timeout: float = 60.0, differs_from: str | None = None)
     """The token file appears once the listener is up; poll for it, then return
     its text. Never touches stdout -- that is the point of the flag.
 
+    A *complete* line is what it waits for. `serve` writes the file atomically,
+    so a reader should never see half a URL, and a helper that accepted a
+    partial read would be papering over exactly that bug instead of catching it.
+
     `differs_from` is for the relaunch-over-a-stale-file case: the path already
     exists holding the dead launch's text, so existing is not yet news.
     """
@@ -108,10 +112,12 @@ def _wait_for_file(path, timeout: float = 60.0, differs_from: str | None = None)
         if os.path.exists(path):
             with open(path, encoding="utf-8") as fh:
                 text = fh.read()
-            if text != differs_from:
+            if text.endswith("\n") and text != differs_from:
                 return text
         time.sleep(0.05)
-    raise AssertionError(f"--token-file {path} never held anything but {differs_from!r}")
+    if differs_from is None:
+        raise AssertionError(f"--token-file {path} never held a complete line")
+    raise AssertionError(f"--token-file {path} still holds the stale {differs_from!r}")
 
 
 def test_port_flag_binds_exactly_the_port_asked_for(tmp_path):
@@ -193,6 +199,15 @@ def test_token_file_holds_a_working_credential(tmp_path):
         proc.wait(timeout=30)
 
 
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="this is the Ctrl+C path, and Popen.send_signal(SIGINT) raises "
+    "'Unsupported signal: 2' on Windows (CI run 36686276948). Nothing in this "
+    "harness has a Windows equivalent -- every other test here stops serve with "
+    "terminate(), which is a hard kill and is the crash case the next test "
+    "covers -- so the clean-stop promise goes unverified on Windows rather than "
+    "faked",
+)
 def test_token_file_is_removed_when_serve_stops(tmp_path):
     token_file = str(tmp_path / "launch-url.txt")
     proc = _start(make_project(tmp_path), "--token-file", token_file)
@@ -220,7 +235,22 @@ def test_a_stale_token_file_from_a_crash_is_rewritten_not_refused(tmp_path):
         second.wait(timeout=30)
 
 
-@pytest.mark.skipif(os.name == "nt", reason="symlinks and O_NOFOLLOW are POSIX")
+def test_token_file_refuses_to_overwrite_a_file_it_did_not_write(tmp_path):
+    """A mistyped or tab-completed `--token-file` must cost a refusal, not the
+    file: `serve` does not start, and the file is left byte for byte."""
+    config = make_project(tmp_path)
+    with open(config, encoding="utf-8") as fh:
+        original = fh.read()
+    proc = _start(config, "--token-file", config)
+    _out, err = proc.communicate(timeout=60)
+    assert proc.returncode == 2
+    assert "already exists and is not a refdes serve launch file" in err
+    assert "Traceback" not in err
+    with open(config, encoding="utf-8") as fh:
+        assert fh.read() == original
+
+
+@pytest.mark.skipif(os.name == "nt", reason="a symlink at that path is a POSIX case here")
 def test_token_file_refuses_to_write_through_a_symlink(tmp_path):
     victim = tmp_path / "victim.txt"
     victim.write_text("do not overwrite me\n", encoding="utf-8")

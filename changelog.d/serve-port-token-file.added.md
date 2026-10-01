@@ -21,13 +21,20 @@
   the trap finding F8 names, where the token's urlsafe-base64 alphabet (43
   characters of `A-Za-z0-9-_`) is silently truncated by a `[0-9a-zA-Z-]+` regex
   and the resulting 403 reads like an auth bug rather than a scraping bug. The
-  file is a bearer credential and is treated as one: created `0600` with the
-  mode set on the descriptor, so a pre-existing world-readable file at that path
-  is tightened rather than kept; `O_NOFOLLOW`, so a symlink there is refused
-  with exit `2` instead of written through; removed when `serve` stops on
-  Ctrl+C, because the token dies with its launch. A hard kill leaves the file
-  behind holding a token that authenticates nothing, and a later `--token-file`
-  at the same path truncates and rewrites it rather than refusing to start.
+  file is a bearer credential and is treated as one: the bytes go to a temp
+  file in the same directory and are renamed onto `PATH` in one step, so a
+  script polling for the file never catches it empty or half-written, and it
+  lands `0600` from the temp's own mode, so a pre-existing world-readable file
+  at that path is tightened rather than kept; a symlink there is refused with
+  exit `2` and never written through (the bytes arrive by rename, so even a
+  race can only replace the link itself); and a file at that path that is
+  *not* already a refdes launch file — a project file, an empty file, a
+  directory — is refused with exit `2` and left byte for byte, so a mistyped or
+  tab-completed path costs a launch rather than data. That last rule is what
+  keeps re-launching cheap: a hard kill leaves the file behind holding a token
+  that authenticates nothing, and a stale launch file is exactly one of the
+  files a later `--token-file` rewrites rather than refusing. The file is
+  removed when `serve` stops on Ctrl+C, because the token dies with its launch.
   Putting it inside the project tree is your call and a bad one — `--no-write`
   does not gate this write, because it is not project state.
 - Persisting the launch token is what `docs/design/browser-editor.md` (Security)
@@ -41,4 +48,11 @@
   it shipped — and `tests/test_serve_cli.py` drives the real process to pin the
   fixed port, the busy-port exit `2`, the file's `0600` mode, a token read from
   the file working against `/api/revision` where a tokenless request gets 403,
-  the symlink refusal, and the file's removal on a clean stop.
+  the symlink refusal, a foreign file at that path refused with the project
+  file left byte-identical, a stale launch file rewritten, and the file's
+  removal on a clean stop; `tests/test_serve_security.py` pins the write itself
+  — over a looser launch file, with no `os.fchmod` at all (it does not exist on
+  Windows before 3.13, and calling it unguarded there raised `AttributeError`
+  and killed the launch with a traceback, Windows CI run 36686276948),
+  whole-or-not-at-all with no temp file left behind, and a short or stalled
+  `os.write` refusing rather than publishing half a URL.

@@ -160,3 +160,84 @@ Status: finished. Implementation, docs, tests, changelog fragment, and live
 verification of both flags complete. Committed as one commit staged by explicit
 paths, pushed, and PR'd against main:
 https://github.com/Squishiba/refdes/pull/116
+
+======================================================================
+Round 2: review fixes on PR #116 (commit 0bbd690 was already pushed)
+======================================================================
+
+The first commit landed; the reviewer asked for four fixes. A previous worker
+wrote them but ran out of context before committing, and a second worker died
+when its backend went down, so the work sat uncommitted in
+src/refdes/serve/server.py, tests/test_serve_cli.py and
+tests/test_serve_security.py. This round reviewed that diff rather than
+restarting it, and the review of the four points found them all present and
+correct:
+
+1. Windows `AttributeError`: `os.fchmod` is called only under
+   `hasattr(os, "fchmod")`; `test_the_launch_file_is_written_even_without_fchmod`
+   deletes the attribute and asserts the file still lands (run on Linux on
+   purpose, so the regression cannot come back unnoticed on a Linux-only run).
+2. The SIGINT test: the `skipif` is on `test_token_file_is_removed_when_serve_stops`
+   -- the right one, it is the only test here that sends a signal -- and its
+   reason says why (Popen.send_signal(SIGINT) raises "Unsupported signal: 2" on
+   Windows) and says what is given up instead.
+3. Atomic write: `tempfile.mkstemp` in the target directory plus `os.replace`.
+   `_wait_for_file` already waited for `text.endswith("\n")`, i.e. a complete
+   line, which is the property that makes "lands whole or not at all" testable.
+4. The clobber fix: `_is_refdes_launch_file()` gates the overwrite, and
+   `test_the_launch_file_is_owner_only_even_over_a_looser_one` does seed a stale
+   *launch URL* (the old `"stale\n"` would now be refused, which is the point).
+   Byte-identity of a refused file is asserted at both levels: the unit test
+   reads the content back, the CLI test compares `refdes-project.yaml` before
+   and after a real launch attempt.
+
+What I changed on top of that (found by reading the finished `write_launch_file`):
+
+- A short or stalled `os.write` used to land a truncated URL on the path, which
+  contradicts the "whole or not at all" claim the atomic write exists to keep.
+  The descriptor is now drained in a loop, and a `write` that reports zero bytes
+  fails the launch rather than publishing an empty credential. Two tests:
+  `test_a_short_write_is_drained_before_the_rename`,
+  `test_a_write_that_makes_no_progress_is_a_refusal_not_an_empty_file`.
+- A directory at `--token-file` got the generic "it already exists and is not a
+  refdes serve launch file ... or delete that one first", which is advice to
+  delete a directory. It now has its own message ("it is a directory"); the
+  isdir check sits after the islink one because isdir follows links.
+- The "never clobbers" docstring bullet stated a guarantee the code cannot make
+  in full: the check is a pre-check, and a writer that swaps a different file in
+  between the check and the rename would be clobbered. Said so, with why that
+  buys an attacker nothing (it already needs write access to that directory).
+- `_wait_for_file`'s AssertionError had lost the `differs_from` detail the
+  previous worker had put in it; both cases are now distinguishable again.
+
+Docs and changelog followed the behaviour rather than the other way round:
+docs/cli-reference.md's `--token-file` row and its bearer-credential paragraph
+(atomic write, 0600 from the temp's own mode, symlink and foreign-file
+refusals, the stale-launch-file case as the reason the rule is not
+unfriendly), and changelog.d/serve-port-token-file.added.md -- which still said
+"a later --token-file at the same path truncates and rewrites it" and described
+`O_NOFOLLOW` and "the mode set on the descriptor", none of which is how it
+works now. Neither `CHANGELOG.md` nor any release mentions `--token-file`, so
+the unreleased fragment was amended rather than a `.fixed.md` added.
+
+Verified by running, not only by tests (all against the real CLI, in
+.scratch/live/, script left there as serve_live.py):
+
+- `--token-file` at an unrelated existing file: exit 2, stdout empty, one
+  `error: cannot write --token-file ...: it already exists and is not a refdes
+  serve launch file ...` line, and the file's sha256 *and* mode identical
+  before and after (21c2f156..., 0664 both times). No `.refdes-launch-*.tmp`
+  left in the directory.
+- `--token-file` at a directory: exit 2, `error: ... it is a directory`.
+- `--token-file` at a symlink: exit 2, `error: ... it is a symlink`, the link
+  still a link afterwards and its target's content unchanged.
+- A hard-killed launch left its file behind; the next launch on the same path
+  rewrote it (bytes differ), the file came back 0600, the token read *only*
+  from the file is 43 chars of the urlsafe-base64 alphabet, `GET
+  /api/revision` with it returns 200 and without it 403, and SIGINT exits 0
+  with the file removed.
+
+Still not verified: the Windows path itself -- the `fchmod` guard is exercised
+by deleting the attribute on Linux, but whether `os.fchmod` on Windows 3.13+
+does something other than work is not something this session can observe. The
+Windows CI run is the check.

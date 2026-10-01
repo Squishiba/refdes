@@ -82,14 +82,157 @@ def test_a_busy_pinned_port_is_a_startup_error_not_a_traceback(tmp_path):
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX permission bits")
 def test_the_launch_file_is_owner_only_even_over_a_looser_one(tmp_path):
-    """`--token-file` is a bearer credential on disk, so the mode is set on the
-    descriptor: a pre-existing 0644 file is tightened, not kept."""
+    """`--token-file` is a bearer credential on disk, so its mode is 0600
+    whoever it lands on top of: a pre-existing 0644 **launch** file -- the stale
+    one a hard-killed serve left behind, the only thing this flag overwrites --
+    comes back 0600, not 0644."""
     path = tmp_path / "launch-url.txt"
-    path.write_text("stale\n", encoding="utf-8")
+    path.write_text("http://127.0.0.1:1/?token=stalestalestalestalestale\n", encoding="utf-8")
     os.chmod(str(path), 0o644)
     write_launch_file(str(path), "http://127.0.0.1:1/?token=x")
     assert stat.S_IMODE(os.stat(str(path)).st_mode) == 0o600
     assert path.read_text(encoding="utf-8") == "http://127.0.0.1:1/?token=x\n"
+
+
+def test_the_launch_file_is_written_even_without_fchmod(tmp_path, monkeypatch):
+    """Windows has no `os.fchmod` before Python 3.13, and calling it unguarded
+    there raised `AttributeError` after the file already existed -- an empty
+    token file and a traceback (Windows CI run 36686276948). `tempfile.mkstemp`
+    creates 0600 on its own, so the `fchmod` is optional and its absence must be
+    too. Asserted here rather than on a Windows runner so a Linux-only run
+    cannot regress it."""
+    monkeypatch.delattr("os.fchmod", raising=False)
+    path = tmp_path / "launch-url.txt"
+    write_launch_file(str(path), "http://127.0.0.1:1/?token=x")
+    assert path.read_text(encoding="utf-8") == "http://127.0.0.1:1/?token=x\n"
+
+
+def test_the_launch_file_lands_whole_or_not_at_all(tmp_path):
+    """The write goes to a temp in the same directory and is renamed on, so the
+    path never exists holding a partial line and no temp is left behind."""
+    path = tmp_path / "launch-url.txt"
+    write_launch_file(str(path), "http://127.0.0.1:1/?token=x")
+    assert [p.name for p in tmp_path.iterdir()] == ["launch-url.txt"]
+
+
+def test_a_failed_write_leaves_no_temp_file_behind(tmp_path, monkeypatch):
+    """`mkstemp` has to be undone when the write onto it fails -- otherwise every
+    ENOSPC, or a disk full mid-launch, leaves a `.refdes-launch-*.tmp` in the
+    directory of the file `--token-file` refused to write. Only the launch file's
+    own fd fails here, so pytest's own writes are untouched."""
+    path = tmp_path / "launch-url.txt"
+    real_mkstemp, real_write = tempfile.mkstemp, os.write
+    ours: list[int] = []
+
+    def recording_mkstemp(*args, **kwargs):
+        fd, tmp = real_mkstemp(*args, **kwargs)
+        ours.append(fd)
+        return fd, tmp
+
+    def failing_write(fd, data):
+        if fd in ours:
+            raise OSError(28, "No space left on device")
+        return real_write(fd, data)
+
+    monkeypatch.setattr(tempfile, "mkstemp", recording_mkstemp)
+    monkeypatch.setattr(os, "write", failing_write)
+    with pytest.raises(ServeStartupError) as excinfo:
+        write_launch_file(str(path), "http://127.0.0.1:1/?token=x")
+    assert "No space left on device" in str(excinfo.value)
+    assert not path.exists()
+    assert [p.name for p in tmp_path.iterdir()] == []
+
+
+def test_a_short_write_is_drained_before_the_rename(tmp_path, monkeypatch):
+    """`os.write` is allowed to write fewer bytes than asked -- a signal, a disk
+    filling up -- and a launch URL landed half-written is a credential no client
+    can use, so the descriptor is drained before the rename makes it visible."""
+    path = tmp_path / "launch-url.txt"
+    real_write, real_mkstemp = os.write, tempfile.mkstemp
+    ours: list[int] = []
+
+    def recording_mkstemp(*args, **kwargs):
+        fd, tmp = real_mkstemp(*args, **kwargs)
+        ours.append(fd)
+        return fd, tmp
+
+    def truncating_write(fd, data):
+        return real_write(fd, data[:10]) if fd in ours else real_write(fd, data)
+
+    monkeypatch.setattr(tempfile, "mkstemp", recording_mkstemp)
+    monkeypatch.setattr(os, "write", truncating_write)
+    write_launch_file(str(path), "http://127.0.0.1:1/?token=x")
+    assert path.read_text(encoding="utf-8") == "http://127.0.0.1:1/?token=x\n"
+    assert [p.name for p in tmp_path.iterdir()] == ["launch-url.txt"]
+
+
+def test_a_write_that_makes_no_progress_is_a_refusal_not_an_empty_file(
+    tmp_path, monkeypatch
+):
+    """The drain loop's other end: a `write` that reports zero bytes must fail
+    the launch, not spin, and not publish an empty credential."""
+    path = tmp_path / "launch-url.txt"
+    real_write, real_mkstemp = os.write, tempfile.mkstemp
+    ours: list[int] = []
+
+    def recording_mkstemp(*args, **kwargs):
+        fd, tmp = real_mkstemp(*args, **kwargs)
+        ours.append(fd)
+        return fd, tmp
+
+    def no_progress_write(fd, data):
+        return 0 if fd in ours else real_write(fd, data)
+
+    monkeypatch.setattr(tempfile, "mkstemp", recording_mkstemp)
+    monkeypatch.setattr(os, "write", no_progress_write)
+    with pytest.raises(ServeStartupError) as excinfo:
+        write_launch_file(str(path), "http://127.0.0.1:1/?token=x")
+    assert "bytes written" in str(excinfo.value)
+    assert not path.exists()
+    assert [p.name for p in tmp_path.iterdir()] == []
+
+
+@pytest.mark.skipif(os.name == "nt", reason="symlinks are POSIX here")
+def test_the_launch_file_is_never_written_through_a_symlink(tmp_path):
+    victim = tmp_path / "victim.txt"
+    victim.write_text("do not overwrite me\n", encoding="utf-8")
+    link = tmp_path / "launch-url.txt"
+    os.symlink(str(victim), str(link))
+    with pytest.raises(ServeStartupError) as excinfo:
+        write_launch_file(str(link), "http://127.0.0.1:1/?token=x")
+    assert "symlink" in str(excinfo.value)
+    assert victim.read_text(encoding="utf-8") == "do not overwrite me\n"
+    assert os.readlink(str(link)) == str(victim)  # refused, not followed
+
+
+def test_the_launch_file_refuses_a_file_it_did_not_write(tmp_path):
+    """`--token-file refdes-project.yaml` -- a mistype, a tab-completion slip --
+    must cost a refusal, not a project file. Only a file that is already a
+    refdes launch file may be overwritten."""
+    path = tmp_path / "refdes-project.yaml"
+    original = "site:\n  title: do not lose me\n"
+    path.write_text(original, encoding="utf-8")
+    with pytest.raises(ServeStartupError) as excinfo:
+        write_launch_file(str(path), "http://127.0.0.1:1/?token=x")
+    assert "already exists and is not a refdes serve launch file" in str(excinfo.value)
+    assert path.read_text(encoding="utf-8") == original
+
+    # an empty file is not a launch file either: nothing is silently adopted
+    empty = tmp_path / "empty.txt"
+    empty.write_text("", encoding="utf-8")
+    with pytest.raises(ServeStartupError):
+        write_launch_file(str(empty), "http://127.0.0.1:1/?token=x")
+    assert empty.read_text(encoding="utf-8") == ""
+
+    # a directory gets its own message: "delete that one first" is not advice
+    # to give about a directory
+    as_dir = tmp_path / "a-directory"
+    as_dir.mkdir()
+    with pytest.raises(ServeStartupError) as excinfo:
+        write_launch_file(str(as_dir), "http://127.0.0.1:1/?token=x")
+    assert "it is a directory" in str(excinfo.value)
+    assert as_dir.is_dir()
+
 
 
 # ------------------------------------------------------------------- host
