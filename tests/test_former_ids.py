@@ -136,6 +136,65 @@ def test_former_ids_resolve_bare_reference_when_it_fits_the_bare_pattern(tmp_pat
     assert "(formerly REQ-050)" in html
 
 
+def test_former_id_prose_link_text_is_the_current_id_not_the_old_one(tmp_path):
+    """The visible text is the *current* id; the marker names the former one.
+
+    docs/ids.md ("a reader following the old id needs to see it landed
+    somewhere else") is the requirement. Rendering the reference's own text
+    gave "REQ-050 (formerly REQ-050)" -- self-contradictory, and with the
+    destination named nowhere on the page.
+    """
+    write_project_config(tmp_path, FORMER_IDS_SCHEMA)
+    items = tmp_path / "items"
+    items.mkdir()
+    (items / "r.yaml").write_text(
+        "defaults: { type: requirement }\n"
+        "items:\n  - id: REQ-001\n    text: Renumbered.\n    former_ids: [REQ-050]\n",
+        encoding="utf-8",
+    )
+    (items / "dec.md").write_text(
+        "---\nid: DEC-001\ntype: decision\n---\n\nSee REQ-050 for context.\n",
+        encoding="utf-8",
+    )
+    project = _former_ids_build(tmp_path)
+    assert not project.errors
+    html = project.item_by_id("DEC-001").body_html
+    assert (
+        '<a class="ref ref-former" href="req-001.html" data-ref="REQ-001">REQ-001</a>'
+        '<span class="ref-former-marker" title="REQ-001 was formerly REQ-050">'
+        "(formerly REQ-050)</span>"
+    ) in html
+    # ...and specifically not the self-contradictory rendering.
+    assert ">REQ-050</a>" not in html
+    assert "REQ-050 (formerly REQ-050)" not in html
+
+
+def test_former_id_prose_link_keeps_an_explicit_label_as_its_text(tmp_path):
+    """`[[old|label]]`: the label is the author's own words, so it stays the
+    link text -- only the marker's former-id naming is added to it."""
+    write_project_config(tmp_path, FORMER_IDS_SCHEMA)
+    items = tmp_path / "items"
+    items.mkdir()
+    (items / "r.yaml").write_text(
+        "defaults: { type: requirement }\n"
+        "items:\n  - id: REQ-001\n    text: Renumbered.\n    former_ids: [REQ-050]\n",
+        encoding="utf-8",
+    )
+    (items / "dec.md").write_text(
+        "---\nid: DEC-001\ntype: decision\n---\n\nSee [[REQ-050|the rail spec]].\n",
+        encoding="utf-8",
+    )
+    project = _former_ids_build(tmp_path)
+    assert not project.errors
+    html = project.item_by_id("DEC-001").body_html
+    assert (
+        '<a class="ref ref-former" href="req-001.html" data-ref="REQ-001">'
+        "the rail spec</a>"
+        '<span class="ref-former-marker" title="REQ-001 was formerly REQ-050">'
+        "(formerly REQ-050)</span>"
+    ) in html
+
+
 def test_former_ids_shaped_like_a_legacy_underscore_id_only_link_explicitly(tmp_path):
     """`BARE_REF_RE` requires a `-<digits>` suffix, so an underscore-style former
     id like the CAN_00 example in finding 12 can never bare-autolink -- must
