@@ -643,13 +643,20 @@ never appears there rather than showing up empty.
 Each citation line is `<state>  <pin>  cited by <items>`. **`state`** is what
 verification found — `ok`, `unpinned`, `cache_missing`, `hash_mismatch` or
 `missing` (see [citing a datasheet](markdown.md#citing-a-datasheet) for what
-each costs). **`pin`** says what the lockfile holds for that path: `no pin`
-(never fetched, so nothing is pinned), `hash-only` (pinned by `sha256`, no
-local copy — the default, since datasheets are generally copyrighted) or
-`kept` (pinned, with the bytes kept at `.refdes/copies/<sha256><ext>`). The
-two columns are independent facts about the same pin, so they never
-contradict each other: an unpinned citation has no hash to be `hash-only`
-about, and says `no pin`.
+each costs). **`pin`** says how that path is pinned *and* whether its bytes are
+here now: `no pin` (never fetched, so nothing is pinned), `hash-only` (pinned
+by `sha256`, no local copy — the default, since datasheets are generally
+copyrighted), `kept` (pinned, with the bytes kept at
+`.refdes/copies/<sha256><ext>`) or `no copy` (the lockfile says
+`kept_copy: true`, but the kept bytes are gone from `.refdes/copies/` — the
+same fact the state column reports as `cache_missing`; re-run
+`refdes fetch --path <path>` to put them back). The two columns are
+independent facts about the same pin, so they never contradict each other: an
+unpinned citation has no hash to be `hash-only` about and says `no pin`, and a
+citation whose kept copy is gone says `no copy` rather than claiming `kept`.
+
+A `hash_mismatch` row reads `kept`: the blob is there, and the state column is
+what says its bytes are wrong.
 
 An import declared with a `version:` reads `pinned to 2026.3`; one declared
 without one reads `unpinned`, and its items still count toward the

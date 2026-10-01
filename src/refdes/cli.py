@@ -999,15 +999,35 @@ def cmd_audit(args) -> int:
         for path, statuses in grouped.items():
             state = statuses[0].state
             # The second column describes the pin, so it has to agree with the
-            # first. "hash-only" means pinned-by-hash-without-a-kept-copy
-            # (docs/markdown.md "Pinning vs. keeping a copy"), and an unpinned
-            # citation has no hash at all -- `record is None` short-circuits
-            # before kept_copy is ever read (citations.py:841-851) -- so
-            # printing `unpinned  hash-only` was not merely opaque, it was
-            # wrong (user-sim run 2, "Lower severity" list). Pinned rows keep
-            # their existing words; only the row that lied changes.
+            # first, and every word here is about what is on disk *now*, not
+            # only about what the lockfile claims. Two rows used to get that
+            # wrong by reading the lockfile alone:
+            #
+            # `unpinned  hash-only` -- "hash-only" means
+            # pinned-by-hash-without-a-kept-copy (docs/markdown.md "Pinning vs.
+            # keeping a copy") and an unpinned citation has no hash at all:
+            # `record is None` short-circuits before kept_copy is ever read
+            # (citations.py:981-992). Opaque, and wrong (user-sim run 2,
+            # "Lower severity" list).
+            #
+            # `cache_missing  kept` -- here the lockfile genuinely does say
+            # `kept_copy: true`, but the bytes it points at are not on disk
+            # (citations.py:995-1001 sets the state precisely because
+            # `kept_copy_path` is not a file), so `kept` told a user the kept
+            # copy was there. It is not; `no copy` says so on the same line.
+            #
+            # The state column is deliberately not touched: the release gate's
+            # `missing_kept_copies` rule filters on
+            # `state == "cache_missing"` (lifecycle.py:577-585), so rewording
+            # it would change what blocks a release.
+            #
+            # `hash_mismatch` keeps `kept`: the blob *is* there, and that is
+            # what this column says -- the state column is what says its bytes
+            # are wrong. The two agree there.
             if state == "unpinned":
                 pin = "no pin"
+            elif state == "cache_missing":
+                pin = "no copy"
             elif any(s.kept_copy for s in statuses):
                 pin = "kept"
             else:
