@@ -379,11 +379,38 @@ sub-table, and the changelog fragment.
 
 Full suite after the fix: **2896 passed, 2 skipped** (both pre-existing).
 
-### 11. Status: finished
+### 11. Rebase onto `origin/main`
 
-All of it done: code, tests (each verified failing against main's `src/`),
-docs, changelog fragment, full suite green, ruff scoped to the touched files
-with no unrelated finding silenced.
+`git fetch origin && git rebase origin/main`, no stash. Ten commits had landed,
+including #130 (8d12680) on `src/refdes/revise.py` and `src/refdes/model.py`.
+
+One conflict, `tests/test_load_time_writes.py` — and not a real one: #130
+appended its own test section where this branch had appended a different one,
+so the two sides are independent additions to the same file. Resolved by
+keeping both (this branch's first, then #130's). Everything else auto-merged.
+
+Verified #130's own change survived the rebase rather than assuming it:
+`src/refdes/revise.py` still has the `_duplicates` unpacking at two
+`md_front_matter_blocks` call sites and the `project.duplicate_key_files`
+withholding (lines 765, 833, 909), and both sections of the conflicted test
+file are present and passing (57 tests in that file).
+
+Full suite on the rebased branch: **2948 passed, 2 skipped** (both
+pre-existing; the count grew from 2896 because of #130 and the other commits
+main had gained). `gh pr checks 132 --watch`: **ubuntu-latest pass 4m39s,
+ubuntu-latest / py3.13 pass 4m59s, windows-latest pass 7m5s** — all three green,
+Windows being the one that exercises the `os.name == "nt"` skips on every
+read-only test here.
+
+Re-ran the review's scenario on the rebased branch: same refusal, same exit 1,
+same untouched tree.
+
+### 12. Status: finished
+
+All of it done: code, tests (each verified failing against the pre-fix `src/`),
+docs, changelog fragment, full suite green on a rebased branch, ruff scoped to
+the touched files with no unrelated finding silenced, PR checks green on all
+three jobs.
 
 
 
