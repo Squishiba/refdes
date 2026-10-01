@@ -40,7 +40,8 @@ verifies, log addresses, requirements refines) — the same shape PR #122 used.
 `10 items, 0 errors, 2 warnings`, and leaves **no `.refdes/` directory at
 all** and zero `key:` lines in `items/`.
 
-Status: IN PROGRESS. F4.1 done (verified, docs corrected, fragment written).
+Status: IN PROGRESS. F4.1 and F2.1 done (both verified by running the real CLI
+before and after). F3.3 next.
 
 ==========================================================================
 ## F4.1 — the id-reuse overclaim in docs/design/keys.md §8
@@ -153,3 +154,149 @@ is enough. That is exactly the condition the docs omitted.
 No message, diagnostic or behaviour changed for F4.1 — docs and the changelog
 fragment only (`changelog.d/id-reuse-guarantee-condition.fixed.md`).
 `python -m pytest tests/test_docs_examples.py -q -p no:randomly` → 6 passed.
+
+==========================================================================
+## F2.1 — the duplicate-key remedy did not say which copy
+
+### Where the message lives
+
+`keys.validate()` (src/refdes/keys.py:148), the Layer 2 uniqueness check, at
+src/refdes/keys.py:187-195. One `project.error(...)`, reported per extra
+holder, naming both items with `file:line`.
+
+### BEFORE — .scratch/f21 (base, keyed, no baseline), REQ-PWR-001 copy-pasted to
+### REQ-PWR-005 with `key: n1vvcc55pmf` left in place
+
+    $ refdes --no-write check
+    ERROR   items/requirements.yaml:20 [REQ-PWR-005] — key 'n1vvcc55pmf' on REQ-PWR-005 (local items/requirements.yaml:20) is already used by REQ-PWR-001 (local items/requirements.yaml:7). A key is unique by construction; two items sharing one means a line was duplicated. Delete the key from one of them and rebuild — it will be re-minted.
+    WARNING items/decisions/dec-pwr-001.md:2 [DEC-PWR-001] — satisfies references 'REQ-PWR-001@n1vvcc55pmf', but that key is REQ-PWR-005 and REQ-PWR-001 is a different live item. Refusing to refresh the label until you confirm which was meant.
+    WARNING items/log.yaml:7 [LOG-A-001] — addresses ... same
+    WARNING items/requirements.yaml:16 [REQ-PWR-004] — refines ... same
+    WARNING items/tests.yaml:7 [TST-PWR-001] — verifies ... same
+    WARNING <project> — 3 item(s) with no coverage — see coverage.html
+    WARNING <project> — 1 requirement(s) satisfied but not verified — see coverage.html
+    11 items, 1 errors, 6 warnings
+    [exit=1]
+
+### The wrong side of that coin flip is a green build (.scratch/f21w)
+
+Deleted the key from the **original** REQ-PWR-001, as the sentence invites:
+
+    $ refdes check
+    (minted 1 key(s) while loading)
+    WARNING items/decisions/dec-pwr-001.md:2 [DEC-PWR-001] — satisfies references 'REQ-PWR-001@n1vvcc55pmf', but that key is REQ-PWR-005 and REQ-PWR-001 is a different live item. ...
+    WARNING items/log.yaml:7, items/requirements.yaml:16, items/tests.yaml:7 — same
+    WARNING <project> — 3 item(s) with no coverage — see coverage.html
+    WARNING <project> — 1 requirement(s) satisfied but not verified — see coverage.html
+    11 items, 0 errors, 6 warnings
+    [exit=0]
+
+and from the built `items.json`:
+
+    REQ-PWR-001 19cxr9cdhz4   backlinks: {}
+    REQ-PWR-005 n1vvcc55pmf   backlinks: {"satisfied_by": ["DEC-PWR-001"], "addressed_by": ["LOG-A-001"],
+                                          "refined_by": ["REQ-PWR-004"], "verified_by": ["TST-PWR-001"]}
+
+The copy took all four. Taking the project the rest of the way (one added test
+to cover the three loose requirements) stamps a release over it:
+
+    $ refdes release rel-1
+    12 items, 0 errors, 5 warnings
+    release 'rel-1' stamped: 12 items, all gates passed.
+      .refdes/baselines/rel-1.yaml
+    [exit=0]
+
+(The gate rules are docs/lifecycle.md's eight; none of them treats a crossed
+reference as blocking. `release` refuses first on `uncovered_requirements
+BND-PWR-001, REQ-PWR-001, REQ-PWR-002` until the extra test is added, then
+passes.)
+
+### What signal is actually available — checked, not assumed
+
+1. **A baseline, when one exists** (.scratch/f21b: `revision rev-a` stamped
+   *before* the duplication, then the same duplicate). `refdes audit` prints:
+
+       Since last revision (rev-a, 2026-10-01T06:47:09Z):
+         changed   1   REQ-PWR-005
+         relabelled 1
+           REQ-PWR-001 -> REQ-PWR-005   (zt2p9eft0t7)
+
+   The baseline records the key under **REQ-PWR-001**, so REQ-PWR-001 is the
+   original. The baseline file itself says so directly —
+   `.refdes/baselines/rev-a.yaml` carries
+   `REQ-PWR-001: {hash: ..., key: zt2p9eft0t7, ...}`. Note the message must
+   be worded as "recorded under the original's display id", because audit's
+   arrow points the *other* way (`old -> new`) and is easy to misread.
+   With no baseline (.scratch/f21) `audit` prints "(none stamped yet -- project
+   is in draft)" — nothing to read.
+2. **Git.** .scratch/f21g, committed the keyed project, then committed the
+   copy-paste, key `kv1jc78vvby`:
+
+       $ git log -S'key: kv1jc78vvby' --oneline --reverse
+       f77402a import project (keys minted)
+       0168dc1 copy REQ-PWR-001 to REQ-PWR-005
+       $ git show f77402a:items/requirements.yaml | grep -A1 'key: kv1jc78vvby'
+         - key: kv1jc78vvby
+           id: REQ-PWR-001
+
+   Oldest-first puts the original first, and that commit's file names it. This
+   is what the message tells the author to run.
+
+### AFTER
+
+    $ refdes --no-write check   # .scratch/f21, and identically .scratch/f21b
+    ERROR   items/requirements.yaml:20 [REQ-PWR-005] — key 'n1vvcc55pmf' on REQ-PWR-005 (local items/requirements.yaml:20) is already used by REQ-PWR-001 (local items/requirements.yaml:7). A key is unique by construction; two items sharing one means a line was duplicated. Keep the key on the original: the item that was there first, which is the one existing references and recorded history mean, so the copy is normally the newer item. `git log -S'key: <KEY>' --oneline --reverse` names the oldest commit that wrote the key, and a baseline, seal file or membership manifest that records the key records it under the original's display id (`refdes audit` shows the stamp). Delete the key from the copy and rebuild — a fresh one is minted for it. Deleting it from the original instead leaves every inbound reference pointing at the copy, and the build passes anyway.
+    WARNING items/decisions/dec-pwr-001.md:2 [DEC-PWR-001] — satisfies references ... (unchanged)
+    11 items, 1 errors, 6 warnings
+    [exit=1]
+
+Identical apart from the remedy. Same error, same severity, same file:line,
+same exit code, same four crossed-reference warnings. **No detection logic was
+added** — the branch, the loop and everything it reads are untouched; only the
+`project.error(...)` string grew. In particular I did *not* wire
+`_key_evidence_sources` in to compute which item a baseline recorded the key
+under, even though it is right there: that would be new detection, and the
+finding says wording only. The message names the signal instead.
+
+### Followed the new advice end to end (.scratch/f21h)
+
+Deleted the copy's key — which in a list file means dropping the `key:` value
+and letting `id:` become the entry's first field, otherwise the `- ` marker
+goes with it — then rebuilt:
+
+    $ refdes check
+    (minted 1 key(s) while loading)
+    WARNING <project> — 3 item(s) with no coverage — see coverage.html
+    WARNING <project> — 1 requirement(s) satisfied but not verified — see coverage.html
+    11 items, 0 errors, 2 warnings
+    [exit=0]
+
+REQ-PWR-005 comes back as `key: yg64b8vdp6s`, and all four references still
+read `REQ-PWR-001@n1vvcc55pmf` — the original's key, unchanged. Full recovery.
+
+### Files
+
+- src/refdes/keys.py — the Layer 2 message only.
+- tests/test_keys.py:452 — the pin on the old sentence replaced by four pins
+  on the new clauses, plus `assert "one of them" not in message` so the
+  ambiguous phrasing cannot come back. Grepped the whole `tests/` tree for the
+  old wording (`one of them`, `will be re-minted`): this was the only pin.
+- docs/troubleshooting.md — the same diagnostic's `**Remedy:**` said "delete
+  the `key:` line from one of the items", the identical gap in prose; it now
+  carries the same two ways to tell, and names the release-stamping trap.
+- docs/design/keys.md §6 Layer 2 — quotes the shipped message; updated, plus a
+  paragraph on why the message cannot pick a side (load order is position in
+  the file tree, not authorship).
+- changelog.d/duplicate-key-which-one.fixed.md
+
+### Out of scope, found while testing, NOT fixed
+
+I deleted the `  - key: <KEY>` line from the copy and left the rest of the
+entry in place; in a list file that removes the entry's `- ` marker as well, so
+the entry's remaining fields silently become the *previous* item's fields.
+YAML then keeps the last of two `id:` keys with no diagnostic at all
+(.scratch/dupid: a hand-merged entry with two `id:` lines loads as 10 items,
+`0 errors` for the item itself, and the only trace is the dangling reference
+that the vanished id leaves behind). That is a separate robustness gap in the
+loader/write-back, not a wording problem, and fixing it would be an identity
+behaviour change — recorded here and left alone.

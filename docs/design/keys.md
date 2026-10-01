@@ -902,13 +902,31 @@ baseline:
 ERROR   items/io/requirements.yaml:18 [REQ-IO-AI-004] — key 'k7f3m2q9x4a' is
         already used by REQ-IO-AI-001 (items/io/requirements.yaml:12). A key
         is unique by construction; two items sharing one means a line was
-        duplicated. Delete the key from one of them and rebuild — it will be
-        re-minted.
+        duplicated. Keep the key on the original: the item that was there
+        first, which is the one existing references and recorded history mean,
+        so the copy is normally the newer item. `git log -S'key: <KEY>'
+        --oneline --reverse` names the oldest commit that wrote the key, and a
+        baseline, seal file or membership manifest that records the key records
+        it under the original's display id (`refdes audit` shows the stamp).
+        Delete the key from the copy and rebuild — a fresh one is minted for it.
+        Deleting it from the original instead leaves every inbound reference
+        pointing at the copy, and the build passes anyway.
 ```
 
 This is the mechanism that makes §1's collision probability an annoyance
 rather than a hazard. It also catches the most likely real-world duplication
 cause: copy-pasting an item block and editing the visible fields.
+
+The last sentence is load-bearing and was added after the wording was tested:
+the two items are indistinguishable to the loader, so "delete the key from one
+of them" is a coin flip, and the wrong side of it is not a build failure. A
+composite reference resolves on the key, which the *last* item in load order
+owns, so taking the key away from the original moves every inbound reference
+to the copy and leaves `0 errors`, exit 0 — with a release gate that will then
+stamp a baseline over the mis-pointed references. The message therefore names
+the original's definition rather than picking a side: load order is position in
+the file tree, not authorship, so no side is knowable from the project alone.
+Verified, `in-prog-logs/identity-remedy-wording.txt` §F2.1.
 
 ### Layer 3 — resolution
 

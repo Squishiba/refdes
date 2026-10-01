@@ -187,8 +187,17 @@ def validate(project: Project) -> None:
         project.error(
             f"key {item.key!r} on {item_name} ({item_loc}) is already used by "
             f"{owner_name} ({owner_loc}). A key is unique by construction; two "
-            "items sharing one means a line was duplicated. Delete the key "
-            "from one of them and rebuild — it will be re-minted.",
+            "items sharing one means a line was duplicated. Keep the key on "
+            "the original: the item that was there first, which is the one "
+            "existing references and recorded history mean, so the copy is "
+            "normally the newer item. `git log -S'key: <KEY>' --oneline "
+            "--reverse` names the oldest commit that wrote the key, and a "
+            "baseline, seal file or membership manifest that records the key "
+            "records it under the original's display id (`refdes audit` "
+            "shows the stamp). Delete the key from the copy and rebuild — a "
+            "fresh one is minted for it. Deleting it from the original "
+            "instead leaves every inbound reference pointing at the copy, "
+            "and the build passes anyway.",
             file=item.source_file,
             line=item.source_line,
             item_id=item.id or None,

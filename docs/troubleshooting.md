@@ -121,8 +121,23 @@ by hand.
 **`key 'k7f3m2q9x4a' on REQ-PWR-004 (local items/requirements/power.yaml:12) is already used by REQ-PWR-007 (local items/requirements/power.yaml:19)`**
 Two items claim the same surrogate key, and a key is unique by construction. A
 key line got duplicated: copy-paste, a merge conflict, a botched edit.
-**Remedy:** delete the `key:` line from one of the items and rebuild — it will be
-re-minted with a fresh key.
+**Remedy:** keep the key on the *original* — the item that was there first, which
+is the one existing references and recorded history mean, so the copy is
+normally the newer item. Two ways to tell, either is enough:
+
+```bash
+git log -S'key: k7f3m2q9x4a' --oneline --reverse   # the oldest commit that wrote the key is the original's
+```
+
+…or, if the key appears in a [baseline](lifecycle.md), a seal file or a
+membership manifest, whichever of the two display ids it is recorded under is
+the original — `refdes audit` shows the stamp and the id it recorded.
+
+Then delete the `key:` line from the copy (leaving its `id:` as the entry's
+first field) and rebuild: a fresh key is minted for it. Deleting the key from
+the *original* instead is the trap — every inbound reference moves to the copy,
+`refdes check` reports `0 errors` and exits 0, and a release will stamp a
+baseline over the mis-pointed references.
 
 **`key changed since baseline 'rev-b': was 'k7f3m2q9x4a', now 'm9n2b5v8c1w'. A key never changes legitimately.`**
 An item's surrogate key no longer matches what the latest baseline recorded, so
