@@ -300,7 +300,18 @@ def cmd_check(args) -> int:
     # The whole project still parses and resolves links regardless of --board/
     # --workspace -- only what gets reported below is narrowed.
     build_mod.build(project, seal_write=False, reseal=False)
-    drift = citations_mod.refresh(project) if args.refresh else []
+    if args.allow_unreachable and not args.refresh:
+        print(
+            f"note: {citations_mod.ALLOW_UNREACHABLE_FLAG} without --refresh has "
+            "nothing to allow -- no pinned citation is re-fetched, so none of them "
+            "can be unreachable.",
+            file=sys.stderr,
+        )
+    drift = (
+        citations_mod.refresh(project, allow_unreachable=args.allow_unreachable)
+        if args.refresh
+        else []
+    )
     status = _report(project, verbose=args.verbose, board=args.board, workspace=args.workspace)
     if drift:
         print(f"\n{len(drift)} citation(s) drifted from their pinned hash:")
@@ -631,6 +642,12 @@ def cmd_ls(args) -> int:
     did REQ-PWR-001 go?" has to be answerable by the command a person reaches
     for. Without this, the only answer was to read the whole `refdes audit`
     output (finding F3.2, in-prog-logs/keys-identity-recovery.txt).
+
+    The listing carries a workspace column -- but only on a project that
+    declares `workspaces:`, so a project without one sees the same bytes it
+    saw before this column existed. Without it the `--workspace` filter below
+    was the only way to find out that an item belonged to a workspace at all,
+    which made the flag undiscoverable from the listing it filters.
     """
     project, _stale = _load(args, require_ids=False)
     _announce_load_writes(project)
@@ -686,10 +703,21 @@ def cmd_ls(args) -> int:
     id_w = max(len(i.id) for i, _ in rows)
     type_w = max(len(i.type) for i, _ in rows)
     board_w = max((len(i.board) for i, _ in rows), default=0)
+    # Workspaces get a column under the same condition boards do, for the same
+    # reason: `workspaces.resolve` is a no-op without a `workspaces:` registry,
+    # so a project that declares none has nothing to put in the column and
+    # keeps byte-identical output (workspaces.py's module docstring promises
+    # exactly that, and the board column above is the precedent).
+    # `item.workspace` is the resolved value -- the same one `--workspace`
+    # filters on -- and an item in no workspace has it "", printed as blank
+    # padding rather than a placeholder, since "" is not a name `--workspace`
+    # will ever match.
+    ws_w = max((len(i.workspace) for i, _ in rows), default=0) if project.workspaces else 0
     for item, retired in rows:
         board_col = f"{item.board:<{board_w}}  " if board_w else ""
+        ws_col = f"{item.workspace:<{ws_w}}  " if ws_w else ""
         mark = f" (formerly {', '.join(retired)})" if retired else ""
-        print(f"{item.id:<{id_w}}  {item.type:<{type_w}}  {board_col}{item.title}{mark}")
+        print(f"{item.id:<{id_w}}  {item.type:<{type_w}}  {ws_col}{board_col}{item.title}{mark}")
     for old_id, holders in sorted(reused.items()):
         _print_reuse_note(old_id, holders)
     return 1 if load_errors else 0
@@ -825,6 +853,10 @@ def cmd_fetch(args) -> int:
         for warning in r.source_warnings:
             print(f"WARNING  {warning}", file=sys.stderr)
         for warning in r.page_warnings:
+            print(f"WARNING  {warning}", file=sys.stderr)
+        for warning in r.size_warnings:
+            # A big download is not a failed one: the pin landed, and this line
+            # is the whole of the consequence, so it must not reach `failed`.
             print(f"WARNING  {warning}", file=sys.stderr)
         for source_error in r.source_errors:
             failed += 1
@@ -1939,7 +1971,22 @@ def main(argv: list[str] | None = None) -> int:
         "--refresh",
         action="store_true",
         help="also re-fetch every pinned citation and report drift (network; "
-        "writes nothing)",
+        "writes nothing). A pinned citation whose bytes cannot be obtained -- "
+        "network down, DNS failure, connection refused, timeout, or an HTTP "
+        "error status -- fails the run, because drift was not verified for it; "
+        f"see {citations_mod.ALLOW_UNREACHABLE_FLAG}",
+    )
+    p_check.add_argument(
+        citations_mod.ALLOW_UNREACHABLE_FLAG,
+        dest="allow_unreachable",
+        action="store_true",
+        help="with --refresh, downgrade every citation that could not be "
+        "re-fetched to a warning, so the exit code reflects only real findings "
+        "-- drift, and real project errors. What you give up: the guarantee "
+        "that --refresh reached every pinned source. Whatever could not be "
+        "fetched is left unverified, and a datasheet deleted at the vendor "
+        "passes exactly as a laptop with no network does. Without --refresh "
+        "this does nothing.",
     )
     p_check.add_argument(
         "--board",
@@ -2001,7 +2048,22 @@ def main(argv: list[str] | None = None) -> int:
     p_index.set_defaults(func=cmd_index)
 
     p_ls = sub.add_parser(
-        "ls", help="list existing items: id, type, board, title -- filterable"
+        "ls",
+        help="list existing items: id, type, [workspace,] board, title -- filterable",
+        description="A filterable, human-readable listing of existing items, as "
+        "aligned text: id, type, workspace, board, title -- the workspace column "
+        "only on a project that declares workspaces:, so the --workspace filter "
+        "below is discoverable from the listing it filters. Workspace comes "
+        "before board because it groups it one level up. An item in no "
+        "workspace leaves that column blank, which is also how it behaves when "
+        "you filter: no name passed to --workspace will ever match it. A "
+        "project with no workspaces: registry has no workspace for any item, so "
+        "it gets no column and byte-identical output. Every filter combines as "
+        "a plain AND, and an unknown --type/--board/--workspace name is "
+        "answered with 'no items match' (exit 0), the way a query command "
+        "answers a typo rather than with a registry error. An items file that "
+        "fails to parse is printed to stderr and exits 1 with the listing "
+        "intact.",
     )
     p_ls.add_argument(
         "query", nargs="*",

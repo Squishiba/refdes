@@ -212,9 +212,12 @@ _HEADER = (
 )
 
 
-def _load_memberships(data: object) -> Memberships:
+def _load_memberships(data: object, path: str, project: Project) -> Memberships:
     if not isinstance(data, Mapping):
         return {}
+    for record_id, value in data.items():
+        if isinstance(value, Mapping) and value.get("id"):
+            keys_mod.report_storage_key(project, record_id, path)
     return {
         str(record_id): dict(value) if isinstance(value, Mapping) else str(value)
         for record_id, value in data.items()
@@ -234,8 +237,8 @@ def load_manifest(project: Project) -> Manifest:
     with open(path, "r", encoding="utf-8") as fh:
         data = yaml_safe_load(fh) or {}
     return {
-        "boards": _load_memberships(data.get("boards")),
-        "workspaces": _load_memberships(data.get("workspaces")),
+        "boards": _load_memberships(data.get("boards"), path, project),
+        "workspaces": _load_memberships(data.get("workspaces"), path, project),
     }
 
 

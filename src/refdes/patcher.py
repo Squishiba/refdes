@@ -1765,12 +1765,12 @@ def _expected_projection(entry: Any, plan: PatchPlan, op: Any) -> Any:
 def _yaml_projection(text: str) -> list[Any]:
     """The semantic shape of every item, for the before/after comparison.
 
-    Constructed with the plain SafeLoader rather than parse.py's line-tagging
-    one, so `__line__` bookkeeping cannot make two identical items look
-    different merely because the edit shifted them down a line.
+    Constructed with parse.py's plain, key-preserving loader rather than its
+    line-tagging one, so `__line__` bookkeeping cannot make two identical
+    items look different merely because the edit shifted them down a line.
     """
     try:
-        raw = yaml.safe_load(text)
+        raw = parse_mod.yaml_safe_load(text)
     except yaml.YAMLError as exc:
         raise _LocateError(f"invalid YAML: {_first_line(exc)}", _mark_line(exc)) from exc
     if not isinstance(raw, dict) or not isinstance(raw.get("items"), list):

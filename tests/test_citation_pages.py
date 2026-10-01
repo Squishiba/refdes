@@ -27,6 +27,7 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -38,7 +39,7 @@ from pypdf import PdfWriter
 from refdes import build as build_mod
 from refdes import citations as citations_mod
 from refdes import cli as cli_mod
-from refdes import parse, render
+from refdes import docs_url, parse, render
 from refdes.schema import load_project
 
 PAGE_SCHEMA = """\
@@ -131,6 +132,8 @@ def _messages(project):
 
 BAD_PAGES = ["0", "-1", "eight", "xiv", "1.5", "2-4", "  ", "", "9 9"]
 
+RULE = "is not a page number -- page: must be a positive integer, counted from 1"
+
 
 @pytest.mark.parametrize("page", BAD_PAGES)
 def test_a_page_that_is_not_a_positive_integer_is_a_declaration_error(tmp_path, page):
@@ -143,10 +146,24 @@ def test_a_page_that_is_not_a_positive_integer_is_a_declaration_error(tmp_path, 
     assert [str(e) for e in project.errors] == [
         (
             f"ERROR   items/cmp.yaml:4 [CMP-001] — datasheets[0]: page: {page!r} "
-            f"is not a page number -- page: must be a positive integer, counted "
-            f"from 1"
+            f"{RULE}.{_expected_remedy(page)}"
+            f" See {docs_url.CITATION_PAGE_DOCS}."
         )
     ]
+
+
+def _expected_remedy(page: str) -> str:
+    """The remedy sentence `_page_remedy` picks for a refused value, written out
+    rather than imported: a test that called the function it is testing would
+    pass whatever that function returned, including nothing."""
+    if re.fullmatch(r"\d+\s*[-\u2010\u2013\u2014]\s*\d+", page.strip()):
+        return " One entry names one page, so a range is one entry per page for the same path."
+    if page.strip() and not any(ch.isdigit() for ch in page):
+        return (
+            " A printed page number is not a page index: page: counts the"
+            " PDF's own sheets from 1, the same number the rendered link opens."
+        )
+    return ""
 
 
 @pytest.mark.parametrize("page", BAD_PAGES)
@@ -156,6 +173,95 @@ def test_a_malformed_page_fails_check(tmp_path, page, capsys):
     captured = capsys.readouterr()
     assert f"page: {page!r} is not a page number" in captured.out + captured.err
     assert "1 items, 1 errors, 0 warnings" in captured.out
+
+
+# --------------------------------------------------- the remedy (F2)
+
+
+@pytest.mark.parametrize(
+    "page,remedy",
+    [
+        ("2-4", "a range is one entry per page"),
+        ("2 – 4", "a range is one entry per page"),
+        ("xiv", "counts the PDF's own sheets from 1"),
+        ("eight", "counts the PDF's own sheets from 1"),
+    ],
+)
+def test_a_refused_page_says_what_to_write_instead(tmp_path, page, remedy):
+    """F2 of `in-prog-logs/user-sim-release-gate-run4.md`: this is the only
+    diagnostic in the page-check delta that stopped at naming the rule, and it
+    is the delta's only breaking change -- a project with `page: "14-15"` that
+    passed yesterday now fails with nothing to act on. The two shapes named here
+    are the ones where the rule is not a remedy on its own, because the author
+    believes they have cited something: a span, and a printed page number (a
+    book's front matter is numbered in roman numerals, which is why `xiv` is the
+    common one)."""
+    project = _build(_project(tmp_path, _page_item(page)))
+    assert len(project.errors) == 1, _messages(project)
+    message = project.errors[0].message
+    assert remedy in message, message
+    # The published docs, never a repo-relative path (docs_url.py's rule: the
+    # wheel ships no docs/*.md).
+    assert docs_url.CITATION_PAGE_DOCS in message
+    assert "docs/troubleshooting.md" not in message
+
+
+@pytest.mark.parametrize("page", ["0", "-1", "1.5", "9 9", ""])
+def test_a_page_the_rule_already_answers_gets_no_filler_sentence(tmp_path, page):
+    """This fires once per bad `page:`, so a remedy that restates the rule back
+    at the user is noise on the shapes the rule already covers. The docs pointer
+    is still there for all of them."""
+    project = _build(_project(tmp_path, _page_item(page)))
+    assert len(project.errors) == 1, _messages(project)
+    message = project.errors[0].message
+    assert message == (
+        f"datasheets[0]: page: {page!r} {RULE}."
+        f" See {docs_url.CITATION_PAGE_DOCS}."
+    ), message
+
+
+def test_a_span_is_cited_as_one_entry_per_page(tmp_path):
+    """The remedy names a shape, so the shape has to work. One entry per page for
+    the same path builds clean and renders one row per page, each with its own
+    `#page=` fragment -- and `section:` is the other answer someone reaches for,
+    which is one page, not a span (the next test)."""
+    root = _project(
+        tmp_path,
+        _item(
+            'path: docs/manual.pdf\n        page: "2"',
+            'path: docs/manual.pdf\n        page: "4"',
+        ),
+    )
+    _fetch(root)
+    project = _build(root)
+    assert not _messages(project), _messages(project)
+    html = (Path(render.render_site(project)) / "cmp-001.html").read_text(
+        encoding="utf-8"
+    )
+    assert "#page=2" in html and "#page=4" in html
+
+
+def test_an_outline_title_resolves_to_one_page_not_a_span(tmp_path):
+    """Why `section:` is not the remedy for a range: an 8-page PDF whose outline
+    entry sits on sheet 3 resolves to `3`, and there is no shape of `section:`
+    that says 'sheets 3 to 5'. A section title is the citation for a heading that
+    moves between revisions, which is a different problem."""
+    writer = PdfWriter()
+    for _ in range(8):
+        writer.add_blank_page(200, 200)
+    writer.add_outline_item("Thermal Information", 2)  # 0-based: sheet 3
+    buf = io.BytesIO()
+    writer.write(buf)
+
+    root = _project(
+        tmp_path,
+        _item('path: docs/manual.pdf\n        section: Thermal Information'),
+    )
+    (root / "docs" / "manual.pdf").write_bytes(buf.getvalue())
+    _fetch(root)
+    project = _build(root)
+    assert not _messages(project), _messages(project)
+    assert _record(root)["sections"] == {"Thermal Information": 3}
 
 
 def test_an_unquoted_integer_page_is_accepted_as_the_number_it_is(tmp_path):
