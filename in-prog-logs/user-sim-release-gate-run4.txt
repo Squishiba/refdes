@@ -1,0 +1,148 @@
+user-simulation release gate, run 4 — progress log
+================================================
+
+Scope: the delta since run 3's merge (e2ca13e), 17 commits.
+Method: documented surfaces only (docs/, --help, real CLI, real HTTP),
+re-running the original scenario rather than reading the fix.
+
+Rules I am holding myself to (from the brief + AGENTS.md):
+  - no changes under src/, tests/, docs/
+  - never run refdes from the worktree root; all projects under .scratch/run4/
+  - cp -r a pristine project per scenario; find | sha256sum before and after
+  - no git in the sweeps
+  - kill serve only by its own PID
+  - read-only scenarios: chmod -R a-w a scratch copy, chmod -R u+w after
+
+Setup notes:
+  - `refdes` on PATH is a broken editable install -> .scratch/refdes wrapper
+  - reported version at HEAD is refdes 0.5.0
+
+Log of progress, appended as I go.
+
+--- progress ---
+
+Setup done. Wrapper at .scratch/refdes (PYTHONPATH=<worktree>/src). Reported
+version refdes 0.5.0.
+
+Projects under .scratch/run4/:
+  pristine  the literal getting-started.md walkthrough (red: P_dens violates)
+  green     pristine with the bound loosened to <= 0.95 W/in^2 (green)
+  fresh     green minus _site, .refdes/log-seal.yaml, .refdes/ids.yaml
+            (green, never built here -- so the seal write is a REAL write)
+Helpers: .scratch/mkpristine.sh (cp -r, drops .git), .scratch/hash.sh
+(find | sort | xargs sha256sum, no git), .scratch/ro.sh <mode> -- <cmd...>
+  with modes tree | items | refdesdir | site.
+
+DONE: run-3 re-tests
+  N1 (read-only traceback in build/revision/release): FIXED. All three degrade
+    or refuse in four chmod layouts, zero tracebacks. Verbatim in the report.
+  N1 sweep wider: found TWO commands still traceback on a read-only tree --
+    `stub-tests` (and it leaves a PARTIAL write on disk, no summary line) and
+    `revise apply`. Contradicts docs/cli-reference.md:41-42's blanket claim.
+    -> new finding F1 (medium).
+  N2 (two phrasings): the SENTENCE is now one string, as #139 claims. Only the
+    file-name position differs (before vs after the clause). Confirmed by
+    grepping a whole read-only sweep: 6 distinct refusal lines, all carry
+    `(read-only tree?)`, 0 tracebacks, 0 occurrences of docs/cli-reference.md.
+  CI-filter claim (cli-reference.md:56-97): holds. `(read-only tree?)` is in
+    every refusal line. The site's own refusal is the documented exception.
+
+NOTES for the report:
+  - N1's suggested wording ("WARNING ... could not record append-only seals")
+    was NOT what shipped; what shipped is an ERROR naming the file and saying
+    the entries are NOT sealed, exit 1. That is better than what was asked.
+  - Could not reproduce the documented `refused:` carry-forward shape for
+    revise (3 attempts). Recording as not-confirmed, not as a defect.
+
+DONE: rest of run-3 re-tests
+  N4 (SIGTERM leaves the token file) -- FIXED by #127. SIGTERM: process exits,
+    token file gone. SIGINT: same, but ONLY with `set -m` in the driving
+    shell; without job control bash sets SIGINT to SIG_IGN for `cmd &`, so
+    `kill -INT` is a no-op and the file stays. That is a shell artefact, not a
+    refdes bug -- worth remembering so run 5 does not file it. kill -9 leaves
+    the file, which cli-reference.md:1534 documents.
+  N5 (no workspace column in ls) -- STILL OPEN. Plain `ls` in a project with
+    two declared workspaces shows no workspace at all; `index --compact` still
+    carries it. Not in this delta, not claimed as regressed.
+  N6 ([unboarded] + bare key in audit's reseal section) -- FIXED by #128. Now
+    `LOG-001 <ts> edit` / `item key z87bd2m9jq2` plus a one-line explanation of
+    why the key is there.
+  CI-filter claim: verified. See report.
+
+DONE: #134 two serve instances saving one item -- WORKS. 3/3 fresh-project
+  trials: both instances read the same file_revision, A saves 200, B gets 409
+  with a unified diff and no write; on-disk value is A's; `check` clean.
+  Gotcha worth recording: `expected_revision` is the item's `edit.file_revision`,
+  NOT /api/revision's project `revision`. Sending the project revision gets a
+  409 that *reads* like a real conflict (it names the two digests, so the
+  diagnosis is there). Omitting it gives a clean 400 naming file_revision.
+
+DONE: the new surfaces
+  #130 duplicate mapping key -- WORKS. Realistic lost `- ` merge on a 3-item
+    list file: 3 hard errors naming the file, both line numbers, the key, and
+    what was lost; the reporting file is left byte-identical. RESIDUE (low):
+    the *other* file's label is still silently refreshed while the merge
+    exists (REQ-PWR-002@k -> REQ-PWR-003@k), and the tool only notices after
+    the file is repaired. See report.
+    Config files are deliberately NOT covered (a second `site:` block in
+    refdes-project.yaml still silently replaces the first, exit 0) -- that is
+    documented as deliberate in the changelog fragment, not a finding.
+  #129a revise unknown section + ids: pointer -- WORKS. `ids:` refuses with
+    exit 2, lists the five accepted sections, and adds the single-item-rename
+    pointer only when `ids` is among the unknowns. --dry-run refuses the same.
+    A mixed file (valid prefixes: + mystery:) refuses instead of half-applying.
+  #129b dangling bare `checks: against:` -- WORKS, same text as the structured
+    -link twin, and following the remedy recovers.
+  #126 dangling bare link remedy + troubleshooting.md's hand-rename advice --
+    WORKS. The page's 4-step trace reproduces exactly, its
+    `2 items, 0 errors, 1 warnings` line matches, and its claim that
+    `former_ids:` does not reach a structured link is true.
+    RESIDUE (trivial): that same sample block omits the
+    `WARNING <project> -- 2 item(s) with no coverage` line a literal run prints.
+  #137 page: -- WORKS in both halves. Declaration: 0/-1/eight/xiv/1.5/2-4/p. 4/iv
+    all refused with the same sentence, exit 1. Range: `page: "99"` on an
+    8-page doc is silent until `refdes fetch`, which records `page_count: 8`
+    and warns at the fetch and at every later check; `--require-citations`
+    escalates.
+  #138 corrupt citations.yaml -- WORKS, 8 shapes tried, every one a named
+    diagnostic with a remedy, fetch leaves the file byte-identical, audit
+    exits 1.
+  #133/#136 init .gitignore -- WORKS. Fresh repo and nested-in-a-bigger-repo
+    both, `git check-ignore -v` per path, `.refdes/ids.yaml` still NOT ignored
+    (correct). Idempotent, appends to an existing file, skips a path an
+    existing pattern covers. RESIDUE (low): getting-started.md says "four
+    files" and then "add those three lines".
+  #127 serve SIGTERM -- FIXED.
+  #134 concurrent serve saves -- WORKS, 3/3.
+  getting-started.md followed literally -- every sample block matches; only
+    the §1 four-vs-three count and the §7 sample-block omission above.
+
+DONE: upgrade path (e2ca13e src -> current main)
+  Built a whole project with run 3's refdes (init/id/fetch/build/revision), then
+  ran main against it. Exactly ONE new failure: `page: "2-4"` ->
+  `citations[0]: page: '2-4' is not a page number -- page: must be a positive
+  integer, counted from 1`, exit 1. That is the documented breaking change.
+  Everything else upgrades silently: old lockfile with no page_count: is
+  accepted and left alone (fetch says "skipped", audit says "ok hash-only"),
+  baseline/seal/ledger all read without complaint, and check/build/release/
+  audit/ls/index/fetch/stub-tests/former-ids/history-capture all pass.
+  => F2: that one message is the ONLY new diagnostic in the whole delta with no
+  remedy and no docs URL, and it is the only breaking change an upgrading
+  project meets. What replaces a range (two citation entries for one path --
+  verified accepted) is documented nowhere.
+
+DONE: getting-started.md literally -- every fenced block reproduces byte for
+  byte, every prose claim I tested is true. Two drifts: the four-vs-three
+  .gitignore count (F4) and a missing coverage WARNING in troubleshooting.md's
+  hand-rename sample block (F5).
+
+DONE: read-only sweep widened past the report's finding list -- this is how F1
+  was found, and it is the second time a read-only gap has come from widening
+  the command list rather than from re-reading one. Carried into run 5.
+
+FINISHED. Report at in-prog-logs/user-sim-release-gate-run4.md.
+Findings: F1 medium (stub-tests + revise apply still traceback on a read-only
+destination; stub-tests leaves a partial write and no summary line; falsifies
+docs/cli-reference.md:41-42 and the #132 fragment's own claim), F2 low, F3 low,
+F4 low, F5 trivial. N1-N4 and N6 fixed; N5 still open (unchanged, not
+regressed). No changes under src/, tests/ or docs/.
