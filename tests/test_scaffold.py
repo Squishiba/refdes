@@ -202,8 +202,16 @@ def test_init_refdes_outputs_are_ignored_by_git(tmp_path):
     (proj / ".refdes" / "copies").mkdir(parents=True)
     (proj / ".refdes" / "copies" / "deadbeef.pdf").write_bytes(b"%PDF-1.7\n")
     (proj / ".refdes" / "ids.yaml").write_text("next: 1\n", encoding="utf-8")
+    # The coordination file one `refdes serve` save leaves behind. It is
+    # created empty, so without an entry for it a project that saved once shows
+    # an untracked `.refdes/serve-write.lock` in `git status`.
+    (proj / ".refdes" / "serve-write.lock").write_bytes(b"")
 
-    for ignored in (".refdes/copies/deadbeef.pdf", ".refdes/schema.json"):
+    for ignored in (
+        ".refdes/copies/deadbeef.pdf",
+        ".refdes/schema.json",
+        ".refdes/serve-write.lock",
+    ):
         probe = subprocess.run(
             [git, "-C", str(proj), "check-ignore", "-v", ignored],
             capture_output=True,
@@ -223,11 +231,16 @@ def test_init_refdes_outputs_are_ignored_by_git(tmp_path):
 
 
 def test_init_gitignore_holds_when_the_project_is_one_directory_of_a_repo(tmp_path):
-    """The same two files, checked in the layout a refdes project nested inside
+    """The same three files, checked in the layout a refdes project nested inside
     a larger repository lands in. The patterns carry no leading slash but do
     contain one away from their end, so git reads them relative to the directory
     holding the `.gitignore` -- which is what makes one spelling right for both
-    layouts. Verified with `git check-ignore -v` in both."""
+    layouts. Verified with `git check-ignore -v` in both.
+
+    One path per `check-ignore` call on purpose: given several, git exits 0 if
+    *any* of them is ignored, so a batch would report success for the two paths
+    that were already covered and say nothing about a third that was not.
+    """
     git = shutil.which("git")
     if git is None:
         pytest.skip("git is not on PATH")
@@ -239,24 +252,19 @@ def test_init_gitignore_holds_when_the_project_is_one_directory_of_a_repo(tmp_pa
     (proj / ".refdes" / "copies").mkdir(parents=True)
     (proj / ".refdes" / "copies" / "deadbeef.pdf").write_bytes(b"%PDF-1.7\n")
 
-    probe = subprocess.run(
-        [
-            git,
-            "-C",
-            str(repo),
-            "check-ignore",
-            "-v",
-            "hardware/board-a/.refdes/copies/deadbeef.pdf",
-            "hardware/board-a/.refdes/schema.json",
-        ],
-        capture_output=True,
-        text=True,
-    )
-    assert probe.returncode == 0, probe.stdout + probe.stderr
-    # and it is this project's own .gitignore doing it, at the project's depth
-    assert probe.stdout.splitlines()[0].startswith(
-        "hardware/board-a/.gitignore:"
-    )
+    for rel in (
+        "hardware/board-a/.refdes/copies/deadbeef.pdf",
+        "hardware/board-a/.refdes/schema.json",
+        "hardware/board-a/.refdes/serve-write.lock",
+    ):
+        probe = subprocess.run(
+            [git, "-C", str(repo), "check-ignore", "-v", rel],
+            capture_output=True,
+            text=True,
+        )
+        assert probe.returncode == 0, f"git does not ignore {rel}"
+        # and it is this project's own .gitignore doing it, at the project's depth
+        assert probe.stdout.startswith("hardware/board-a/.gitignore:"), probe.stdout
 
 
 def test_init_ignores_the_files_not_the_surrounding_directories(tmp_path):
@@ -270,6 +278,7 @@ def test_init_ignores_the_files_not_the_surrounding_directories(tmp_path):
         ".vscode/settings.json",
         ".refdes/copies/",
         ".refdes/schema.json",
+        ".refdes/serve-write.lock",
     ]
 
 
@@ -283,6 +292,9 @@ def test_init_keeps_an_existing_gitignore_and_adds_the_entry_once(tmp_path):
     # ours is not appended beside it
     assert text.count(".refdes/copies/") == 1
     assert ".refdes/schema.json" in text.splitlines()
+    # the missing ones, each stated exactly once
+    assert text.count(".refdes/schema.json") == 1
+    assert text.count(".refdes/serve-write.lock") == 1
 
 
 def test_init_appends_with_the_existing_gitignore_line_ending(tmp_path):
@@ -314,6 +326,12 @@ def test_init_appends_with_the_existing_gitignore_line_ending(tmp_path):
         (".refdes/", ".refdes/schema.json"),
         ("**/.refdes/", ".refdes/schema.json"),
         ("!.refdes/schema.json", ".refdes/schema.json"),
+        (".refdes/serve-write.lock", ".refdes/serve-write.lock"),
+        ("/.refdes/serve-write.lock", ".refdes/serve-write.lock"),
+        ("**/.refdes/serve-write.lock", ".refdes/serve-write.lock"),
+        (".refdes/", ".refdes/serve-write.lock"),
+        ("**/.refdes/", ".refdes/serve-write.lock"),
+        ("!.refdes/serve-write.lock", ".refdes/serve-write.lock"),
     ],
 )
 def test_init_adds_no_block_for_a_pattern_the_project_already_addressed(
@@ -329,9 +347,11 @@ def test_init_adds_no_block_for_a_pattern_the_project_already_addressed(
 
 
 def test_init_leaves_a_gitignore_that_addresses_everything_untouched(tmp_path):
-    """All three already stated: nothing to append, so the file is byte-for-byte
+    """All four already stated: nothing to append, so the file is byte-for-byte
     what the author had."""
-    before = ".refdes/copies/\n.refdes/schema.json\n.vscode/settings.json\n"
+    before = (
+        ".refdes/copies/\n.refdes/schema.json\n.refdes/serve-write.lock\n.vscode/settings.json\n"
+    )
     (tmp_path / ".gitignore").write_text(before, encoding="utf-8")
     scaffold_mod.init(str(tmp_path))
     assert (tmp_path / ".gitignore").read_text(encoding="utf-8") == before
@@ -340,13 +360,37 @@ def test_init_leaves_a_gitignore_that_addresses_everything_untouched(tmp_path):
 def test_init_appends_nothing_on_a_second_init(tmp_path):
     """`init` refuses to overwrite an existing config, so a second run is what a
     re-init after deleting the config looks like -- and the append must not
-    duplicate itself."""
+    duplicate itself, for the lock file's block as much as for any other."""
     scaffold_mod.init(str(tmp_path))
     after_first = (tmp_path / ".gitignore").read_text(encoding="utf-8")
+    assert after_first.count(".refdes/serve-write.lock") == 1
     os.remove(tmp_path / "refdes-project.yaml")
     os.remove(tmp_path / ".vscode" / "settings.json")
     scaffold_mod.init(str(tmp_path))
     assert (tmp_path / ".gitignore").read_text(encoding="utf-8") == after_first
+
+
+def test_init_explains_the_serve_write_lock_it_ignores(tmp_path):
+    """The block says why the file is not worth committing, because that is the
+    whole decision: a per-machine coordination file with no content in it, and
+    nothing in it a commit could carry to another clone. The comment is the
+    contiguous run of `#` lines directly above its own pattern, so a reader who
+    deletes the line knows which one it explained."""
+    scaffold_mod.init(str(tmp_path))
+    lines = [
+        line for line in (tmp_path / ".gitignore").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    at = lines.index(".refdes/serve-write.lock")
+    above = lines[:at]
+    start = len(above)
+    while start and above[start - 1].startswith("#"):
+        start -= 1
+    comment = "\n".join(above[start:])
+
+    assert comment.startswith("# Written by `refdes init`.")
+    assert "refdes serve" in comment
+    assert "Empty and per-machine" in comment
 
 
 def test_init_adds_the_entry_for_an_unrelated_similar_pattern(tmp_path):
@@ -368,6 +412,7 @@ def test_init_writes_no_vscode_entry_when_it_wrote_no_vscode_settings(tmp_path):
     assert _gitignore_patterns(tmp_path / ".gitignore") == [
         ".refdes/copies/",
         ".refdes/schema.json",
+        ".refdes/serve-write.lock",
     ]
 
 
@@ -436,7 +481,7 @@ def test_cli_announces_the_vscode_settings_file_it_wrote(tmp_path, monkeypatch, 
         ),
         (
             "wrote .gitignore (.vscode/settings.json, .refdes/copies/, "
-            ".refdes/schema.json -- not yours to commit)"
+            ".refdes/schema.json, .refdes/serve-write.lock -- not yours to commit)"
         ),
     ]
     # the line says why the file is not worth committing, because that is the
@@ -452,7 +497,7 @@ def test_cli_announces_only_the_patterns_init_actually_added(tmp_path, monkeypat
     (there is no third file to announce then)."""
     monkeypatch.chdir(tmp_path)
     (tmp_path / ".gitignore").write_text(
-        ".refdes/copies/\n.refdes/schema.json\n", encoding="utf-8"
+        ".refdes/copies/\n.refdes/schema.json\n.refdes/serve-write.lock\n", encoding="utf-8"
     )
     assert cli_mod.main(["init"]) == 0
     out = capsys.readouterr().out

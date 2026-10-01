@@ -50,15 +50,18 @@ def _vscode_settings_text(target_dir: str) -> str:
     return json.dumps(settings, indent=2) + "\n"
 
 
-# What `init` makes the project's .gitignore ignore: one entry per file it
-# writes or leaves behind that must not be committed, each stated the way this
-# repo's own .gitignore states its reasoning -- the path named, the reason in a
-# comment above it, the surrounding directory left alone. `.vscode/` as a whole
-# must NOT be ignored (a project's `tasks.json`/`extensions.json` are shareable
-# -- this repo commits its own) and neither must `.refdes/`, which holds the
-# project's own record: the ID ledger, the citation lockfile, seals and board
-# manifests all belong in git. So the patterns name the one file or the one
-# subdirectory.
+# What `init` makes the project's .gitignore ignore: one entry per file that
+# must not be committed, each stated the way this repo's own .gitignore states
+# its reasoning -- the path named, the reason in a comment above it, the
+# surrounding directory left alone. `init` writes one of them itself, and the
+# rest are left behind by other commands (`build`, `check`, `fetch`, `serve`) in
+# a project that has already been created -- which is why they are all wanted on
+# every `init`, including one that wrote no editor settings. `.vscode/` as a
+# whole must NOT be ignored (a project's `tasks.json`/`extensions.json` are
+# shareable -- this repo commits its own) and neither must `.refdes/`, which
+# holds the project's own record: the ID ledger, the citation lockfile, seals
+# and board manifests all belong in git. So the patterns name the one file or
+# the one subdirectory.
 #
 # No leading slash on any pattern, deliberately. Every one of them contains a
 # slash away from its end, so git reads it as relative to the directory holding
@@ -137,11 +140,27 @@ _SCHEMA_JSON_GITIGNORE = _GitignoreEntry(
     ),
 )
 
-# The two `.refdes/` entries do not depend on anything else `init` does: those
-# files are written by `build`, `check`, `fetch` and friends whatever happened
+_SERVE_WRITE_LOCK_GITIGNORE = _GitignoreEntry(
+    pattern=".refdes/serve-write.lock",
+    covers=_covers(".refdes/serve-write.lock", ".refdes"),
+    block=(
+        "# Written by `refdes init`. The write lock `refdes serve` takes so two\n"
+        "# instances of it cannot save over each other. Empty and per-machine:\n"
+        "# deleting it costs nothing while no `serve` is running -- the next save\n"
+        "# makes it again.\n"
+        ".refdes/serve-write.lock\n"
+    ),
+)
+
+# The `.refdes/` entries do not depend on anything else `init` does: those
+# files are written by `build`, `check`, `fetch` and `serve` whatever happened
 # here, so their ignore is written on every init. The `.vscode` entry is only
 # wanted when `init` actually wrote that file (see `_write_vscode_settings`).
-_REFDES_GITIGNORE = (_COPIES_GITIGNORE, _SCHEMA_JSON_GITIGNORE)
+_REFDES_GITIGNORE = (
+    _COPIES_GITIGNORE,
+    _SCHEMA_JSON_GITIGNORE,
+    _SERVE_WRITE_LOCK_GITIGNORE,
+)
 
 
 def _gitignore_addresses(text: str, entry: _GitignoreEntry) -> bool:
