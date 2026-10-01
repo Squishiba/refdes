@@ -1,0 +1,178 @@
+# getting-started-sample-output — re-sync docs/getting-started.md's sample output
+
+Task: finding N3 from `in-prog-logs/user-sim-release-gate-run3.md` (§3 N3, §5
+run-4 bullet 3). `docs/getting-started.md`'s sample command-output blocks must
+be exactly what a newcomer's terminal prints; the BUG 1 load-time-write notice
+(`changelog.d/load-writes-everywhere.fixed.md`) broke two of them. Scope: check
+*every* block, fix output blocks + prose that directly describes them, add one
+short explanatory sentence with a link to an existing docs page, add a
+changelog.d fragment.
+
+Branch: `getting-started-sample-output`, branched from `59e3554`.
+The `refdes` on PATH is a broken editable install; every command below went
+through the wrapper `.scratch/refdes` (`PYTHONPATH=<worktree>/src python -m
+refdes.cli "$@"`).
+
+## Status
+
+- [x] Read AGENTS.md, the N3 finding, docs/getting-started.md in full
+- [x] grep tests/ for a getting-started output pin
+- [x] Walk the tutorial literally in a fresh git repo under .scratch/
+- [x] Diff every sample-output block
+- [x] Fix the doc
+- [x] changelog.d fragment
+- [x] commit / push / PR
+
+## Test pin check (task item 3)
+
+`grep -rn "getting.started\|getting_started" tests/` returns exactly one hit:
+
+    tests/test_config_unknown_keys.py:606:    assert docs.nav_order[:2] == ["index", "getting-started"]
+
+That asserts the *docs site's* nav order in
+`docs-site/refdes-project.yaml` — that `getting-started` is the second page in
+`docs/index.md`'s nav. It reads no sample-output block and never invokes the
+CLI against a tutorial-shaped project, so no test pins the getting-started
+output. Per the task instructions I did not add one in this PR.
+
+## Command sequence actually run
+
+Wrapper (same artefact run 3 recorded):
+
+    cat > .scratch/refdes <<'EOF'
+    #!/bin/bash
+    exec env PYTHONPATH="$PWD/src" python -m refdes.cli "$@"
+    EOF
+    chmod +x .scratch/refdes
+
+Scratch project: `.scratch/gs/` — `mkdir -p`, `git init` (a real user's first
+step; the tutorial assumes a fresh folder and the seal/baseline writes want a
+real tree), then the tutorial's commands in order.
+
+    mkdir -p .scratch/gs && cd .scratch/gs && git init -q
+    /path/to/.scratch/refdes init                      # §1
+    cat refdes-project.yaml                            # §1 sample block
+    mkdir -p items/requirements items/bounds items/decisions
+    # §2 power.yaml written verbatim from the doc
+    /path/to/.scratch/refdes id                        # §2 sample block
+    # §3 thermal.yaml written verbatim
+    # §4 refdes new decision > items/decisions/dec-pwr-001-regulator.md, then
+    #    the front matter edited to the doc's version
+    /path/to/.scratch/refdes build                      # §5 sample block
+    # §6 power.yaml test, §7 items/log/board.yaml — no output blocks
+    /path/to/.scratch/refdes build                      # re-check after §6/§7
+
+Both streams captured separately for the commands whose doc block mixes them
+(`build`: doc says errors → stderr, rest → stdout), so the comparison is
+per-stream and not a terminal-interleave guess.
+
+## Mismatches found (before)
+
+Every fenced block in `docs/getting-started.md`, classified. Nine blocks are
+*inputs* a reader types or pastes (the four yaml input files, the decision
+markdown, the `refdes-schema.yaml` overlay, and the install/`init`/`id`/
+`new decision`/`build` command blocks); five are things a terminal prints. All
+fourteen were checked; the five output ones are below. Re-run mechanically by
+`.scratch/verify.py`, which extracts the doc's own blocks by fence line,
+builds `.scratch/gs2/` from them, runs the tutorial's commands in order and
+diffs per stream.
+
+| § | Block | Verdict before the fix |
+|---|---|---|
+| 1 | the generated `refdes-project.yaml` | **matches** — byte-identical to a fresh `refdes init` (`standard: hardware@3`, `version: 3`, `presets: []`, `width: 3`, `ledger: .refdes/ids.yaml`). Run 3's §5 asked for this check specifically; it needed no change. |
+| 1 | the folder listing (`my-board/` …) | **MISMATCH** — `init` now writes a third file, `.gitignore`, so the listing was missing a line. |
+| 2 | `refdes id` output | **MISMATCH** — actual prints `(minted 2 key(s) while loading)` as the first line; the block did not have it. (N3.) Everything else in the block matched character for character, including both `(items/requirements/power.yaml:9)` / `:13` line numbers. |
+| 5 | `refdes build` output | **MISMATCH** — actual prints `(minted 2 key(s) and rewrote 3 reference(s) while loading)` as the first line. (N3.) The other four lines matched, and the ERROR line is byte-identical (`0.2366 W/in² vs <= 0.15 W/in^2`, micro sign and all). |
+
+Per-stream detail for §5, since the doc's block interleaves two streams: stdout
+is exactly
+
+    (minted 2 key(s) and rewrote 3 reference(s) while loading)
+    WARNING <project> — 2 item(s) with no coverage — see coverage.html
+    4 items, 1 errors, 1 warnings
+    site written to <project>/_site
+
+and stderr is exactly the `ERROR` line plus
+`build completed with errors (use --keep-going to exit 0)`. Exit 1. The doc
+places the stderr lines first in the block, which is a legal interleave and is
+what the page's own sentence about the two streams allows.
+
+Also checked, and *not* output blocks but load-bearing claims in the same walk,
+all confirmed by running them:
+
+- §1 `refdes --version` → `refdes 0.5.0`, exit 0; `-V` the same.
+- §1 the two `init` lines it does not show: `wrote .vscode/settings.json
+  (gitignored -- the yaml.schemas path in it names one checkout)` and
+  `standard: hardware@3`. The page already covers both in prose; it shows no
+  `init` output block, so there was nothing to sync.
+- §2 the ids really are written into `power.yaml` (`id:` plus `key:`).
+- §4 `refdes new decision` prints a starter with the schema's fields, and its
+  `status:` choices list includes `superseded`, which §7 depends on.
+- §5 "nobody typed 0.2366" — the build computed it; §6 and §7 leave the same
+  ERROR standing (`6 items, 1 errors, 1 warnings` after both are added).
+- §7 all three claims: a passing `DEC-PWR-002` with `supersedes: [DEC-PWR-001]`
+  plus `DEC-PWR-001: status: superseded` still leaves
+  `P_dens violates BND-THM-001` as an error; the page's overlay verbatim gives
+  `INFO items/decisions/dec-pwr-001-regulator.md:2 [DEC-PWR-001] — P_dens
+  violates …` under `refdes check -v`, exit 0; dropping `default:` refuses to
+  load with `configuration error: types.decision.check_severity does not cover
+  status 'proposed'. Add it, or add default: <level>.` exit 2. `component`
+  really does ship a mapping (`src/refdes/standards/hardware/v3/base.yaml:259`,
+  `check_severity: { candidate: info, selected: error, rejected: info,
+  obsolete: info }`), and an unmapped `accepted` decision still fails.
+
+## Changes made
+
+`docs/getting-started.md`, three output/fact fixes and one added sentence:
+
+1. §1 folder listing gains `.gitignore`.
+2. §1 the sentence about `.vscode/settings.json` now also says `init` writes a
+   `.gitignore` line for it and why (the schema path names one checkout).
+   Kept the existing link to
+   `standard-library.md#editor-support-json-schema-emission`, which is where
+   that reasoning already lives (`docs/standard-library.md:328`).
+3. §2 block gains `(minted 2 key(s) while loading)`; a three-sentence
+   paragraph after the existing "The IDs are now written…" one explains it and
+   links to `ids.md#surrogate-keys` — the page that already defines surrogate
+   keys (`docs/ids.md:135-146`), chosen with grep over `docs/`, and in the
+   site's nav order (`docs-site/refdes-project.yaml`).
+4. §5 block gains `(minted 2 key(s) and rewrote 3 reference(s) while loading)`.
+
+No other prose touched. `changelog.d/getting-started-sample-output.fixed.md`
+added.
+
+## Mismatches after
+
+`.scratch/verify.py`, re-run against the edited page: **0 mismatches** —
+§1 project yaml, §2 `id` stdout (stderr empty), §5 `build` stdout and stderr
+all MATCH.
+
+## Not fixed, and why
+
+- §5's `site written to /path/to/my-board/_site` is a placeholder path, not a
+  literal capture. Left alone deliberately — it is the page telling the reader
+  where their own project lands, and no real absolute path belongs in it.
+- The notice is on stdout for both `id` and `build` (on stderr only for
+  `index`, per `changelog.d/load-writes-everywhere.fixed.md`). The §5 block
+  therefore shows the notice above the `WARNING`, inside the stdout group; a
+  terminal that buffers the streams differently may interleave it elsewhere,
+  which the page's existing sentence about streams already covers.
+- Nothing else in the page is wrong as far as the walkthrough reaches. See the
+  §7 list above — every claim checked out.
+
+## Verification
+
+- `.scratch/verify.py` against the edited page: 0 mismatches.
+- `PYTHONPATH=$PWD/src python -m pytest tests/ -q` → **2884 passed, 2 skipped**
+  (213s). The one getting-started-adjacent assertion,
+  `tests/test_config_unknown_keys.py:606`, passes.
+- No `ruff` run: this change touches two markdown files and one txt log, no
+  Python.
+
+## Scratch inventory (left in place, gitignored)
+
+`.scratch/refdes` (wrapper), `.scratch/verify.py` (the block-diff harness),
+`.scratch/gs/` (first literal walkthrough, by hand),
+`.scratch/gs2/` (the same walkthrough rebuilt from the *edited* doc's own
+blocks), `.scratch/gs7/` + `.scratch/gs8/` (§7 escape-hatch and overlay
+checks), and the captured streams `gs-*.out` / `gs-*.err`.
