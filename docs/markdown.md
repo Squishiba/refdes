@@ -530,6 +530,16 @@ pinned citation to a scratch buffer, compares hashes, and reports which items
 cite anything that drifted upstream — writing nothing, exiting nonzero on
 drift.
 
+It also exits nonzero when a pinned citation **could not be re-fetched** — no
+network, DNS failure, connection refused, a timeout, or an HTTP error status from
+the origin. That is not drift (no bytes arrived, so there is nothing to compare
+the pin against) but it is a check that did not happen, and a drift guard that
+passes through an outage, or through a datasheet the vendor has deleted, is not
+guarding anything. The run says which citations went unverified and why;
+`--allow-unreachable` downgrades those to warnings when you would rather know
+without failing (a laptop on a train), and drift findings still exit nonzero.
+See [`check --refresh`](cli-reference.md#refdes-check).
+
 An item's citations get their own table on its page instead of showing up in
 the generic field table, and every citation in the project is listed once,
 grouped by path, on `references.html` (and `references-<board>.html` per

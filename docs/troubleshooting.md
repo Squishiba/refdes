@@ -533,6 +533,32 @@ past it. Every other command reports the same problem as an ordinary error and
 exits `1`; none of them reports your citations as unpinned, because it did not
 read the file.
 
+**`<project> — could not refresh https://…: <urlopen error [Errno 111] Connection
+refused>` from `refdes check --refresh`**
+One pinned citation could not be re-fetched, so no comparison was made for it and
+the run **exits 1**. It is not drift — drift is a finding, this is a check that
+did not happen — and the wording of the second line says which of the two you are
+looking at: `N pinned citation(s) could not be refreshed, so upstream drift was
+NOT verified`. What to do depends on the cause, and the two are not the same
+problem:
+
+- **The origin is gone or the network is down** (connection refused, DNS failure,
+  timeout, TLS failure). Wait, or run it somewhere with network. Passing
+  `--allow-unreachable` says out loud that you accept an unverified source and
+  want the exit code to reflect only real findings — which is the right choice on
+  a laptop and the wrong one in a drift guard, because a deleted datasheet then
+  passes exactly as a dead network does.
+- **The origin answered, and the answer is an error** (`HTTP Error 404`, `500`).
+  A 404 on a datasheet that was once pinned almost always means the vendor moved
+  or withdrew the file: re-point the citation and `refdes fetch --path <url>`, or
+  retire it. The same shape appears for `refdes fetch`, which also reports it as a
+  failed citation rather than a changed one.
+
+A partially reachable project reports each unreachable url separately and still
+checks and reports every url that answered, so the summary line's error count is
+the number of citations to re-check, not the number of citations in the project.
+See [`check --refresh`](cli-reference.md#refdes-check).
+
 ## Output
 
 **The site looks unstyled.**

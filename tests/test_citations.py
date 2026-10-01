@@ -638,7 +638,10 @@ def test_refresh_writes_nothing(citation_project):
     assert citations_mod.load_lockfile(project)["https://example.com/ds.pdf"]["sha256"] == sha_old
 
 
-def test_refresh_warns_on_fetch_failure_not_drift(citation_project):
+def test_refresh_reports_fetch_failure_as_error_not_drift(citation_project):
+    """F4: no bytes arrived, so there is no drift -- but a drift scan that
+    checked nothing has not passed, so an unreachable source is an error and
+    the exit code must move."""
     _write_citation_lockfile(
         citation_project,
         {"https://example.com/ds.pdf": {"sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "fetched": "2026-01-01T00:00:00Z", "kept_copy": False}},
@@ -651,7 +654,55 @@ def test_refresh_warns_on_fetch_failure_not_drift(citation_project):
     parse.load_items(project)
     drift = citations_mod.refresh(project, fetcher=bad_fetcher)
     assert drift == []
+    assert any("could not refresh" in d.message for d in project.errors)
+    # The message has to say what was given up and where to find the flag --
+    # an error that names no remedy sends the user to the docs mid-incident.
+    summary = " ".join(d.message for d in project.errors)
+    assert "NOT verified" in summary
+    assert citations_mod.ALLOW_UNREACHABLE_FLAG in summary
+
+
+def test_refresh_allow_unreachable_downgrades_to_warning(citation_project):
+    _write_citation_lockfile(
+        citation_project,
+        {"https://example.com/ds.pdf": {"sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "fetched": "2026-01-01T00:00:00Z", "kept_copy": False}},
+    )
+
+    def bad_fetcher(url):
+        raise OSError("timeout")
+
+    project = load_project(config_path=str(citation_project / "refdes-project.yaml"))
+    parse.load_items(project)
+    drift = citations_mod.refresh(project, fetcher=bad_fetcher, allow_unreachable=True)
+    assert drift == []
+    assert not project.errors
     assert any("could not refresh" in d.message for d in project.warnings)
+
+
+def test_refresh_http_error_status_is_unreachable_not_drift(citation_project):
+    """A 404 is the same class as a dead socket: no bytes, so nothing to
+    compare. Plain `fetch` also fails on one (exit 1), which is the consistency
+    that keeps 4xx out of the drift list."""
+    import urllib.error
+
+    _write_citation_lockfile(
+        citation_project,
+        {
+            "https://example.com/ds.pdf": {
+                "sha256": "a" * 64,
+                "fetched": "2026-01-01T00:00:00Z",
+                "kept_copy": False,
+            }
+        },
+    )
+
+    def gone(url):
+        raise urllib.error.HTTPError(url, 404, "Not Found", {}, None)
+
+    project = load_project(config_path=str(citation_project / "refdes-project.yaml"))
+    parse.load_items(project)
+    assert citations_mod.refresh(project, fetcher=gone) == []
+    assert any("HTTP Error 404" in d.message for d in project.errors)
 
 
 # ------------------------------------------------------------------------- cli
@@ -721,6 +772,155 @@ def test_cli_check_without_refresh_never_touches_the_network(citation_project, m
     monkeypatch.setattr(citations_mod, "fetch_bytes", boom)
     # An unpinned citation is only a warning, so plain `check` still exits 0.
     assert cli_mod.main(["-c", str(citation_project / "refdes-project.yaml"), "check"]) == 0
+
+
+# ------------------------------------------------- check --refresh: unreachable
+#
+# F4 from in-prog-logs/remote-fetch-exercise.md: `check --refresh` used to print
+# one WARNING and exit 0 when a pinned source could not be fetched, so a CI
+# drift guard went green through an outage, and green on a datasheet the vendor
+# had deleted. The network is simulated with an injected fetcher -- no real host,
+# no real socket.
+
+
+def _pin(root, pins):
+    """Write one lockfile record per url -- `refresh` reads a single file, so a
+    two-citation project has to be pinned in one call, not two."""
+    _write_citation_lockfile(
+        root,
+        {
+            url: {"sha256": sha, "fetched": "2026-01-01T00:00:00Z", "kept_copy": False}
+            for url, sha in pins.items()
+        },
+    )
+
+
+def _two_url_project(tmp_path):
+    """CMP-001 cites a url nothing can reach, CMP-002 cites one that answers."""
+    write_project_config(tmp_path, CITATION_SCHEMA)
+    items = tmp_path / "items"
+    items.mkdir()
+    (items / "cmp.yaml").write_text(
+        "defaults:\n  type: component\nitems:\n"
+        "  - id: CMP-001\n    title: dead origin\n    datasheets:\n"
+        "      - path: https://example.com/dead.pdf\n        rev: C\n"
+        "  - id: CMP-002\n    title: live origin\n    datasheets:\n"
+        "      - path: https://example.com/live.pdf\n        rev: C\n",
+        encoding="utf-8",
+    )
+    return tmp_path
+
+
+def _dead_then_live(live_bytes):
+    """A fetcher that refuses the dead url and serves `live_bytes` for the rest."""
+
+    def fetcher(url, timeout=30.0):
+        if url.endswith("dead.pdf"):
+            raise OSError("[Errno 111] Connection refused")
+        return live_bytes
+
+    return fetcher
+
+
+def test_cli_check_refresh_unreachable_fails_and_names_the_flag(tmp_path, monkeypatch, capsys):
+    root = _two_url_project(tmp_path)
+    _pin(
+        root,
+        {
+            "https://example.com/dead.pdf": "a" * 64,
+            "https://example.com/live.pdf": hashlib.sha256(b"live").hexdigest(),
+        },
+    )
+    monkeypatch.setattr(citations_mod, "fetch_bytes", _dead_then_live(b"live"))
+    code = cli_mod.main(["-c", str(root / "refdes-project.yaml"), "check", "--refresh"])
+    captured = capsys.readouterr()
+    assert code == 1
+    combined = captured.out + captured.err
+    # the failure says which url, why, and that drift went unverified
+    assert "https://example.com/dead.pdf" in combined
+    assert "Connection refused" in combined
+    assert "NOT verified" in combined
+    # ...and the remedy is on the same screen as the failure
+    assert citations_mod.ALLOW_UNREACHABLE_FLAG in combined
+
+
+def test_cli_check_refresh_allow_unreachable_warns_and_exits_zero(tmp_path, monkeypatch, capsys):
+    root = _two_url_project(tmp_path)
+    _pin(
+        root,
+        {
+            "https://example.com/dead.pdf": "a" * 64,
+            "https://example.com/live.pdf": hashlib.sha256(b"live").hexdigest(),
+        },
+    )
+    monkeypatch.setattr(citations_mod, "fetch_bytes", _dead_then_live(b"live"))
+    code = cli_mod.main(
+        ["-c", str(root / "refdes-project.yaml"), "check", "--refresh", "--allow-unreachable"]
+    )
+    captured = capsys.readouterr()
+    combined = captured.out + captured.err
+    assert code == 0
+    assert "could not refresh https://example.com/dead.pdf" in combined
+    assert "0 errors" in combined
+    # the warning still says what went unverified, and how to get the strict run
+    assert "NOT verified" in combined
+    assert citations_mod.ALLOW_UNREACHABLE_FLAG in combined
+
+
+def test_cli_check_refresh_partial_outage_still_checks_the_reachable_ones(
+    tmp_path, monkeypatch, capsys
+):
+    """One origin down, one fine: the fine one is still fetched, compared and
+    reported -- the failure of one url must not blind the scan to the rest."""
+    root = _two_url_project(tmp_path)
+    _pin(
+        root,
+        {
+            "https://example.com/dead.pdf": "a" * 64,
+            "https://example.com/live.pdf": hashlib.sha256(b"what was pinned").hexdigest(),
+        },
+    )
+    monkeypatch.setattr(citations_mod, "fetch_bytes", _dead_then_live(b"upstream moved"))
+    code = cli_mod.main(["-c", str(root / "refdes-project.yaml"), "check", "--refresh"])
+    captured = capsys.readouterr()
+    combined = captured.out + captured.err
+    assert code == 1
+    # the reachable citation's drift is found and reported in its own right
+    assert "1 citation(s) drifted" in combined
+    assert "https://example.com/live.pdf" in combined
+    assert "cited by  CMP-002" in combined
+
+
+def test_cli_check_refresh_drift_still_fails_with_allow_unreachable(tmp_path, monkeypatch, capsys):
+    """The bypass flag gives up the reachability guarantee, never the drift
+    finding -- otherwise it would be a way to turn `check --refresh` off."""
+    root = _two_url_project(tmp_path)
+    _pin(
+        root,
+        {
+            "https://example.com/dead.pdf": "a" * 64,
+            "https://example.com/live.pdf": hashlib.sha256(b"what was pinned").hexdigest(),
+        },
+    )
+    monkeypatch.setattr(citations_mod, "fetch_bytes", _dead_then_live(b"upstream moved"))
+    code = cli_mod.main(
+        ["-c", str(root / "refdes-project.yaml"), "check", "--refresh", "--allow-unreachable"]
+    )
+    captured = capsys.readouterr()
+    combined = captured.out + captured.err
+    assert code == 1
+    assert "1 citation(s) drifted" in combined
+    assert "could not refresh https://example.com/dead.pdf" in combined
+
+
+def test_cli_check_allow_unreachable_without_refresh_says_it_does_nothing(citation_project, capsys):
+    # No --refresh, so no citation is re-fetched and there is nothing to allow;
+    # the note stops the flag reading as a stricter check that quietly passed.
+    code = cli_mod.main(
+        ["-c", str(citation_project / "refdes-project.yaml"), "check", "--allow-unreachable"]
+    )
+    assert code == 0
+    assert "nothing to allow" in capsys.readouterr().err
 
 
 def test_cli_build_require_citations_promotes_to_error(citation_project, capsys):

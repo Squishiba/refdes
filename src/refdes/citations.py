@@ -2429,15 +2429,39 @@ class DriftEntry:
     citers: list[str] = field(default_factory=list)
 
 
-def refresh(project: Project, fetcher=None) -> list[DriftEntry]:
+# Owned here and read by cli.py when it registers the flag, so the name in the
+# diagnostics and the name on the command line cannot drift apart. A failure
+# message that names a flag which does not exist is worse than no hint at all.
+ALLOW_UNREACHABLE_FLAG = "--allow-unreachable"
+
+
+def refresh(project: Project, fetcher=None, allow_unreachable: bool = False) -> list[DriftEntry]:
     """Re-fetch every pinned citation to a scratch buffer and compare hashes.
 
     Read-only: writes nothing, pins nothing, copies nothing. Only reachable via
     `refdes check --refresh`, so a plain `build` or `check` never touches the
-    network. A url that fails to fetch is reported as a warning, not drift --
-    drift means the bytes changed, not that the network did. Local paths are
-    skipped: verify() already compares them against the live file on every
-    build, so there is no second upstream to ask.
+    network. Local paths are skipped: verify() already compares them against the
+    live file on every build, so there is no second upstream to ask.
+
+    A url whose bytes could not be obtained is *not* drift -- drift means the
+    bytes changed, and no bytes arrived -- so it never appears in the returned
+    list. What happens to it instead is the whole point of `allow_unreachable`:
+    by default each such url is an **error**, because a drift scan that silently
+    scanned nothing is exactly the failure a CI guard must not have (in an
+    outage, or when the vendor has deleted the datasheet). `allow_unreachable`
+    downgrades them to warnings, which is what a laptop on a train wants.
+
+    "Could not be obtained" is deliberately everything the fetcher can raise --
+    DNS failure, connection refused, timeout, and the HTTP error statuses
+    `urlopen` raises for (`HTTPError`). A redirect is not in that set: `fetch_bytes`
+    follows 3xx inside `urlopen`, so a hop that lands on a 200 is an ordinary
+    successful fetch compared on its final bytes, exactly as `fetch_all` pins it.
+    A hop that ends in an error status, exceeds urllib's redirect cap, or loops
+    raises like any other unreachable url does.
+
+    A partial outage is not special-cased: every url is attempted, the ones that
+    answered are compared as usual, and the unreachable ones are reported
+    separately so the run says how much was and was not verified.
 
     `fetcher` defaults to the module-level `fetch_bytes` at call time, the same
     way `fetch_all` does -- see its docstring.
@@ -2454,6 +2478,7 @@ def refresh(project: Project, fetcher=None) -> list[DriftEntry]:
         citers[spec.path].append(item.id)
 
     drift: list[DriftEntry] = []
+    unreachable: list[str] = []
     for target in sorted(citers):
         try:
             kind = classify(project.root, target)[0]
@@ -2467,7 +2492,15 @@ def refresh(project: Project, fetcher=None) -> list[DriftEntry]:
         try:
             data = fetcher(target)
         except Exception as exc:  # noqa: BLE001
-            project.warn(f"could not refresh {target}: {exc}")
+            unreachable.append(target)
+            if allow_unreachable:
+                project.warn(f"could not refresh {target}: {exc}")
+            else:
+                project.error(
+                    f"could not refresh {target}: {exc} -- upstream drift was NOT "
+                    f"verified for this citation (no bytes arrived, so there is "
+                    f"nothing to compare the pin against)"
+                )
             continue
         upstream_sha256 = hashlib.sha256(data).hexdigest()
         pinned_sha256 = str(record.get("sha256") or "")
@@ -2479,5 +2512,28 @@ def refresh(project: Project, fetcher=None) -> list[DriftEntry]:
                     upstream_sha256=upstream_sha256,
                     citers=sorted(set(citers[target])),
                 )
+            )
+    if unreachable:
+        # One summary line naming the escape hatch, so the per-url lines above
+        # are read as "the run failed because it could not check these" rather
+        # than as N unrelated flakes -- and so the remedy is on the same screen
+        # as the failure.
+        n = len(unreachable)
+        plural = "s" if n != 1 else ""
+        if allow_unreachable:
+            project.warn(
+                f"{n} pinned citation{plural} could not be refreshed, so upstream "
+                f"drift was NOT verified for {('them' if n != 1 else 'it')} -- "
+                f"drop {ALLOW_UNREACHABLE_FLAG} to fail the run on this instead"
+            )
+        else:
+            project.error(
+                f"{n} pinned citation{plural} could not be refreshed, so upstream "
+                f"drift was NOT verified for {('them' if n != 1 else 'it')} -- the "
+                f"run cannot claim to have checked {('them' if n != 1 else 'it')}. "
+                f"Fix the network or the urls, or pass {ALLOW_UNREACHABLE_FLAG} to "
+                f"treat an unreachable source as a warning and let the exit code "
+                f"reflect only real findings (you then get no guarantee that every "
+                f"pinned source was checked at all)"
             )
     return drift

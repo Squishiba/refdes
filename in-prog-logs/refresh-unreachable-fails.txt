@@ -1,0 +1,286 @@
+# refresh-unreachable-fails — task log
+
+Branch: `refresh-unreachable-fails` (from main 70d1efe).
+Working title: make an unreachable pinned citation fail `check --refresh`, with an
+explicit bypass flag.
+
+## 0. Read first
+
+- `in-prog-logs/remote-fetch-exercise.md` §7 F4 (lines 808-845): a network
+  failure during `check --refresh` is a WARNING with exit 0, and
+  `docs/cli-reference.md:128-143` claims "Exits non-zero on drift, same as on
+  any other error" — which is not what happens.
+- §6 (lines 597-628): every *documented* exit code in the `docs/cli-reference.md`
+  table verified correct; a network failure is the one thing not covered, and a
+  failed plain `fetch` is exit 1, "the same shape run 3 recorded ... this is the
+  first run to put a network failure on code 1".
+- Current code: `citations.refresh()` (`src/refdes/citations.py:2432-2483`) wraps
+  the fetch in `except Exception` and calls `project.warn(f"could not refresh
+  {target}: {exc}")`, then `continue`s. `cmd_check`
+  (`src/refdes/cli.py:303-313`) only sets `status = 1` for the drift block, so
+  the warning path is invisible to the exit code.
+
+## 1. Repro on main (recorded before touching anything)
+
+Servers: `.scratch/origin.py` (a 60-line `http.server` on 127.0.0.1, modes
+`serve` / `serve404` / `redirect`). Project builder: `.scratch/mkproj.sh`.
+A citation with **no** lockfile record is skipped by `refresh()` entirely
+(`record is None -> continue`, citations.py:2465-2466) and is only an `info`
+under plain `check`, so the repro pins both URLs by hand.
+
+Dead origin = closed port 48921 (connection refused), live origin = 54751.
+
+    $ bash .scratch/mkproj.sh .scratch/proj 48921 54751
+    dead pinned sha256: 52a8a870f7b092ccf001654c76765922424358f2399a804530d464c87f8747f7
+
+    $ refdes check
+    (minted 2 key(s) while loading)
+    2 items, 0 errors, 0 warnings
+    exit 0
+
+    $ refdes check --refresh
+    WARNING <project> — could not refresh http://127.0.0.1:48921/a.pdf: <urlopen error [Errno 111] Connection refused>
+    2 items, 0 errors, 1 warnings
+    exit 0
+
+F4 confirmed: the live citation *was* fetched and compared (no drift), and the
+dead one produced exactly one WARNING line and a zero exit. A CI drift guard
+reading the exit code passes.
+
+### Status/redirect probe on main (`.scratch/mkproj_status.sh`, ports 57801=404, 57802=302→54751)
+
+    $ refdes check --refresh
+    WARNING <project> — could not refresh http://127.0.0.1:57801/b.pdf: HTTP Error 404: Not Found
+    2 items, 0 errors, 1 warnings
+
+    1 citation(s) drifted from their pinned hash:
+      http://127.0.0.1:57802/b.pdf
+        pinned    8873172307f055e26a6cc7d079a759a7e2b1d05775030bee70d84c53e4201f7c
+        upstream  69d2287b0294f2536bb03269a09961a9566e6129d705d9c108256da075e4f353
+        cited by  CMP-002
+    exit 1
+
+    $ refdes fetch --update            # same two URLs
+    FAILED  http://127.0.0.1:57801/b.pdf  HTTP Error 404: Not Found
+    fetched  http://127.0.0.1:57802/b.pdf  sha256=69d2287b0294...  hash-only
+    2 citation(s) processed, 1 failed
+    exit 1
+
+Three facts that settle the classification question (§3):
+a. an HTTP error status already lands in the *same* bucket as connection
+   refused — the `except Exception` at citations.py:2469 — and is reported as
+   "could not refresh", never as drift;
+b. plain `fetch` treats it as a hard **failure** (exit 1), not as a changed
+   document;
+c. a 302 is followed inside `fetch_bytes`' `urlopen`
+   (`src/refdes/citations.py:949-954`) before any hashing, so the redirect case
+   is indistinguishable from a direct 200 and is compared/pinned on the final
+   bytes — in `refresh` and in `fetch` alike.
+## 2. The decision, and why the flag is named that
+
+Flag: **`check --allow-unreachable`** (`citations.ALLOW_UNREACHABLE_FLAG`, read by
+`cli.py` when it registers the argument, so the string in the diagnostic and the
+string on the command line cannot drift apart).
+
+Naming checked against the other `check` flags (`--refresh`, `--board`,
+`--workspace`, `--verbose`) and against `build`'s (`--keep-going`,
+`--require-citations`): all lowercase, no abbreviation, either a report filter or
+a named posture. Candidates rejected:
+
+- `--strict-refresh` — the shape the exercise itself proposed (F4, "a better fix
+  is an `--strict-refresh` that escalates unreachable to an error, opt-in for
+  CI"). It is wrong now: the escalation is the *default*, and the flag is the way
+  back out. Naming it "strict" would also imply the un-flagged run is lax, when
+  the un-flagged run is the one that fails.
+- `--ignore-unreachable` — true-ish, but `--ignore` reads as "do not report",
+  and this reports either way, as a warning.
+- `--refresh-best-effort` — vaguer about what is given up, and `--refresh` is
+  already required for it to mean anything.
+
+`--allow-unreachable` says the one thing the flag does, and its `--help` spends
+its second sentence on what you give up, which is the half that matters.
+
+## 3. Classification: HTTP error statuses and redirects (the judgement call)
+
+**Decision: an HTTP error status is "unreachable", not a finding. A redirect is
+neither — it is not visible to the refresh path at all.**
+
+Justification, all three points verified on main before the change (§1):
+
+1. *That is the bucket it is already in.* `refresh()` wraps the fetch in
+   `except Exception` and reports "could not refresh", so a `404` and a refused
+   socket have always produced the same diagnostic
+   (`citations.py:2469` pre-change; reproduced in §1's status probe). Promoting
+   4xx/5xx to a *finding* would be a second, larger change — a new class of
+   "finding" that no severity table, `audit` state, or `build
+   --require-citations` counterpart knows about — and the brief says not to
+   change classification beyond what this decision needs. Keeping 4xx/5xx as
+   unreachable means the exit code changes for them (0 → 1, or 0 with the flag),
+   which is exactly the change the maintainer asked for, and nothing else does.
+
+2. *It is what plain `fetch` already does, so this is the consistent choice.*
+   `fetch --update` against the same 404 printed `FAILED … HTTP Error 404` and
+   exited **1** (§1). A deleted datasheet is a failed fetch in the one command
+   that fetches for a living; it should not be a quiet success in the one that
+   only compares. After this change both exit 1 on a 404, and both are silenced
+   the same way — for `fetch` by not running it, for `--refresh` by
+   `--allow-unreachable`. Conversely, calling a 404 *drift* would be new
+   territory: drift means bytes arrived and differ, which is precisely what the
+   pre-existing docstring said and why.
+
+3. *Redirects cannot be classified differently without inventing new
+   behaviour.* `fetch_bytes` is one `urlopen` call
+   (`citations.py:1635-1640` on current main; the exercise quotes 949-954, from
+   before the file grew), and `urlopen` follows 3xx itself. By the time the
+   fetcher returns, a 302 that landed on a 200 is indistinguishable from a
+   direct 200, and its final bytes are what gets hashed and compared — the same
+   bytes `fetch_all` pins. So a working redirect already behaves correctly
+   (§1's probe: it compared and reported drift, exit 1), and a redirect that
+   ends in an error status, exceeds urllib's redirect cap, or loops raises
+   `HTTPError`/`TooManyRedirects` and lands in the unreachable bucket with
+   everything else. **No redirect-specific diagnostic was added**: the refresh
+   path never sees the hop, `fetch` never reports one, and inventing a "redirected
+   to" note here would be a new feature, not a fix.
+
+## 4. After the change (repro output)
+
+    $ refdes check --refresh
+    ERROR   <project> — could not refresh http://127.0.0.1:48921/a.pdf: <urlopen error [Errno 111] Connection refused> -- upstream drift was NOT verified for this citation (no bytes arrived, so there is nothing to compare the pin against)
+    ERROR   <project> — 1 pinned citation could not be refreshed, so upstream drift was NOT verified for it -- the run cannot claim to have checked it. Fix the network or the urls, or pass --allow-unreachable to treat an unreachable source as a warning and let the exit code reflect only real findings (you then get no guarantee that every pinned source was checked at all)
+    2 items, 2 errors, 0 warnings
+    exit 1
+
+    $ refdes check --refresh --allow-unreachable
+    WARNING <project> — could not refresh http://127.0.0.1:48921/a.pdf: <urlopen error [Errno 111] Connection refused>
+    WARNING <project> — 1 pinned citation could not be refreshed, so upstream drift was NOT verified for it -- drop --allow-unreachable to fail the run on this instead
+    2 items, 0 errors, 2 warnings
+    exit 0
+
+    $ refdes check --allow-unreachable          # no --refresh
+    note: --allow-unreachable without --refresh has nothing to allow -- no pinned citation is re-fetched, so none of them can be unreachable.
+    2 items, 0 errors, 0 warnings
+    exit 0
+
+    # stale live pin + dead url, both modes: the drift block is identical
+    $ refdes check --refresh                  -> 2 errors + "1 citation(s) drifted"      exit 1
+    $ refdes check --refresh --allow-unreachable -> 2 warnings + "1 citation(s) drifted"   exit 1
+
+    # 404 + working redirect, strict and bypassed
+    $ refdes check --refresh -> ERROR could not refresh …: HTTP Error 404 (exit 1)
+    $ refdes check --refresh --allow-unreachable -> WARNING could not refresh …: HTTP Error 404 (exit 0, with the page-count warning from the repro's fake PDF)
+
+`--board nope` still shows the project-level diagnostics with `--refresh`: they
+are not attributable to an item, so the report filter does not hide them
+(consistent with how `--board` already treats project-level warnings).
+
+## 5. Implementation shape
+
+- `citations.refresh(project, fetcher=None, allow_unreachable=False)`. The
+  unreachable branch keeps today's per-url message verbatim on the bypass path
+  (so anything grepping for `could not refresh <url>` still works) and adds the
+  "NOT verified" tail plus a one-line summary on the strict path. The summary
+  names the flag, because an error with no remedy sends the user to the docs
+  mid-incident. It is emitted through `project.error`/`project.warn` rather than
+  printed directly, so it gets the `ERROR`/`WARNING <project> — ` prefix, lands
+  on stderr, and is counted in the `N items, N errors, N warnings` line — which
+  is what makes a CI filter looking for `ERROR` see this failure at all (F4's
+  complaint).
+- `cli.cmd_check` passes the flag through, and prints the no-op note when
+  `--allow-unreachable` arrives without `--refresh` — the same shape as
+  `build`'s existing `--no-write -- --reseal` note (`cli.py:332`).
+- Drift handling is untouched: same block, same `status = 1`.
+
+## 6. Tests
+
+`tests/test_citations.py`, all with an injected fetcher — no real host, no
+socket.
+
+- `test_refresh_reports_fetch_failure_as_error_not_drift` (rewritten from
+  `test_refresh_warns_on_fetch_failure_not_drift`, which asserted the old
+  behaviour) — error, not warning; message carries `NOT verified` and the flag.
+- `test_refresh_allow_unreachable_downgrades_to_warning` — same input, warning,
+  no errors.
+- `test_refresh_http_error_status_is_unreachable_not_drift` — a 404 raised as
+  `HTTPError` is unreachable, not drift.
+- `test_cli_check_refresh_unreachable_fails_and_names_the_flag` — exit 1; output
+  names the url, the reason, `NOT verified`, and the flag.
+- `test_cli_check_refresh_allow_unreachable_warns_and_exits_zero` — exit 0, a
+  warning that still says what went unverified and how to get the strict run.
+- `test_cli_check_refresh_partial_outage_still_checks_the_reachable_ones` — one
+  dead, one moved upstream: the drift block names the live citation and its
+  citer, exit 1.
+- `test_cli_check_refresh_drift_still_fails_with_allow_unreachable` — bypass on,
+  real drift still exit 1. The flag must not be a way to switch the scan off.
+- `test_cli_check_allow_unreachable_without_refresh_says_it_does_nothing` — exit
+  0, `nothing to allow` on stderr.
+
+Full suite: **3164 passed, 2 skipped** (`PYTHONPATH=src python -m pytest -q`).
+
+### Sabotage check
+
+`src/refdes/citations.py` and `src/refdes/cli.py` were copied to `.scratch/`,
+restored to `HEAD` with `git checkout --` (no stash: another session may be
+working in this repo), the new tests run, and my copies put back.
+
+    FAILED tests/test_citations.py::test_refresh_reports_fetch_failure_as_error_not_drift
+    FAILED tests/test_citations.py::test_refresh_allow_unreachable_downgrades_to_warning
+    FAILED tests/test_citations.py::test_refresh_http_error_status_is_unreachable_not_drift
+    FAILED tests/test_citations.py::test_cli_check_refresh_unreachable_fails_and_names_the_flag
+    FAILED tests/test_citations.py::test_cli_check_refresh_allow_unreachable_warns_and_exits_zero
+    FAILED tests/test_citations.py::test_cli_check_refresh_drift_still_fails_with_allow_unreachable
+    FAILED tests/test_citations.py::test_cli_check_allow_unreachable_without_refresh_says_it_does_nothing
+    7 failed, 9 passed, 74 deselected
+
+The three bypass-flag tests fail on main because `--allow-unreachable` does not
+exist there (argparse `unrecognized arguments`, exit 2). The one new test that
+**passes** against main is
+`test_cli_check_refresh_partial_outage_still_checks_the_reachable_ones` — main
+already checks the reachable citations in a partial outage, which is exactly the
+behaviour that must not regress when the unreachable ones start failing the run.
+Left in place as a guard.
+
+## 7. Docs and changelog
+
+- `docs/cli-reference.md`: the `check` option table (new row, and `--refresh`'s
+  row now says it fails the run), the drift section (real captured failure and
+  bypass output, what you give up, partial outages, redirect/status rule), and
+  the exit-code preamble at the top — a script branching on `1` now needs to know
+  that code can mean "nothing was checked".
+- `docs/markdown.md` (citing a datasheet), `docs/troubleshooting.md` (new
+  diagnostic entry, splitting network failure from a 404, with the remedy for
+  each). Both pages grep-verified as the only other places discussing
+  `--refresh`.
+- `changelog.d/check-refresh-unreachable.breaking.md`.
+
+**Breaking, deliberately.** `changelog.d/README.md`: *breaking — existing
+projects must change*. A workflow running `refdes check --refresh` now fails
+where it passed, and it must be changed *by a person* — accept the new exit code
+or pass `--allow-unreachable`. `changed` would be a lie (a green CI job that
+went red is not a behaviour tweak), and `fixed` would hide that from anyone
+upgrading. The precedent is `citation-page-checked.breaking.md`, which called the
+one new failure an upgrading project meets breaking for the same reason.
+
+## 8. Ruff
+
+Scoped per AGENTS.md to the three touched files, `--select E501,F,B,SIM,I,UP`,
+compared against the same check on `HEAD`'s versions of those files:
+
+- `src/refdes/citations.py`: 7 findings before, 7 after.
+- `src/refdes/cli.py`: 5 before, 5 after.
+- `tests/test_citations.py`: 34 before, 35 after. The one addition is an
+  `E501` at 174 chars on a `_write_citation_lockfile` record line — the exact
+  shape of the four already in this file (every other lockfile record literal in
+  it is written that way), so it is left consistent with its neighbours rather
+  than being the one that wraps.
+
+`ruff check .` is not clean on this repo (~99 pre-existing findings) and was not
+attempted as a gate.
+
+## 9. Status
+
+Done: behaviour, flag, help text, tests, sabotage check, full suite, docs,
+changelog fragment. Temporary repro scripts and probe output are in `.scratch/`
+(`origin.py`, `mkproj.sh`, `mkproj_status.sh`, `proj/`, `proj_status/`,
+`citations.py.mine`, `cli.py.mine`, `ruffbase/`) and stay there per AGENTS.md.
+Local origins are still running on 127.0.0.1:54751, 57801 and 57802; they are
+throwaway `http.server` processes from this session.
