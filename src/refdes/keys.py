@@ -158,17 +158,34 @@ def malformed_key_message(key: str, *, context: str = "") -> str | None:
     return message
 
 
-def require_storage_key(value: object, path: str) -> None:
+class StorageKeyError(ValueError):
+    """A stored key was already changed by YAML before refdes read it."""
+
+
+def require_storage_key(value: object) -> None:
     """Refuse YAML-ambiguous stored keys whose spelling is already corrupted."""
     key = value if isinstance(value, str) else str(value)
     if isinstance(value, str) and yaml_plain_scalar_is_string(value):
         return
     problem = malformed_key_message(key)
     if problem is not None:
-        raise ValueError(
-            f"{path}: {problem} If YAML already converted an unquoted key and "
+        raise StorageKeyError(
+            f"{problem} If YAML already converted an unquoted key and "
             "rewrote this file, its original spelling cannot be recovered here."
         )
+
+
+def report_storage_key(project: Project, value: object, path: str) -> bool:
+    """Report a keyed state error once, with a project-relative file path."""
+    try:
+        require_storage_key(value)
+    except StorageKeyError as exc:
+        rel = os.path.relpath(path, project.root).replace(os.sep, "/")
+        message = str(exc)
+        if not any(d.file == rel and d.message == message for d in project.errors):
+            project.error(message, file=rel)
+        return False
+    return True
 
 
 def validate(project: Project) -> None:

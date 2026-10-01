@@ -147,10 +147,10 @@ def _load_seal_data(project: Project, board: str = "") -> dict:
         raise ValueError(f"{path}: seal file must be a mapping")
     for record_id, value in (data.get("sealed") or {}).items():
         if isinstance(value, Mapping) and value.get("id"):
-            keys_mod.require_storage_key(record_id, path)
+            keys_mod.report_storage_key(project, record_id, path)
     for event in data.get("reseals", []):
         if isinstance(event, dict) and event.get("key"):
-            keys_mod.require_storage_key(event["key"], path)
+            keys_mod.report_storage_key(project, event["key"], path)
     events = data.get("reseals", [])
     if not isinstance(events, list) or any(
         not isinstance(event, dict)

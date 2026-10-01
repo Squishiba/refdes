@@ -182,14 +182,14 @@ def _same_baseline_items(stored: dict[str, dict], current: dict[str, dict]) -> b
     return len(matched_records) == len(stored)
 
 
-def _load_baseline_file(path: str) -> Baseline:
+def _load_baseline_file(path: str, project: Project) -> Baseline:
     with open(path, "r", encoding="utf-8") as fh:
         data = yaml_safe_load(fh) or {}
     for record_id, entry in (data.get("items") or {}).items():
         if "key" in entry:
-            keys_mod.require_storage_key(entry["key"], path)
+            keys_mod.report_storage_key(project, entry["key"], path)
         elif "id" in entry:
-            keys_mod.require_storage_key(record_id, path)
+            keys_mod.report_storage_key(project, record_id, path)
     gate = data.get("gate")
     standard = data.get("standard")
     return Baseline(
@@ -208,7 +208,7 @@ def load_baseline(project: Project, name: str) -> Baseline | None:
     path = baseline_path(project, name)
     if not os.path.isfile(path):
         return None
-    return _load_baseline_file(path)
+    return _load_baseline_file(path, project)
 
 
 def list_baselines(project: Project) -> list[Baseline]:
@@ -222,7 +222,7 @@ def list_baselines(project: Project) -> list[Baseline]:
     out = []
     for name in sorted(os.listdir(d)):
         if name.endswith(".yaml"):
-            out.append(_load_baseline_file(os.path.join(d, name)))
+            out.append(_load_baseline_file(os.path.join(d, name), project))
     return out
 
 
