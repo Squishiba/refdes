@@ -1,0 +1,611 @@
+Concurrent editing against `refdes serve`
+=========================================
+
+Area 4 of `in-prog-logs/user-sim-release-gate-run2.md`'s "Areas neither run has
+covered". Investigation only: **nothing under `src/`, `tests/` or `docs/` was
+changed.** Every harness script, fixture project and probe output lives under
+`.scratch/concurrent/` (gitignored). `refdes 0.5.0`, `hardware@3`, this
+worktree, `PYTHONPATH=<worktree>/src python -m refdes.cli ...`.
+
+
+Summary
+-------
+
+| # | Scenario | Outcome | Class | Author's work lost? |
+|---|----------|---------|-------|----------------------|
+| 1a | Hand edit of the item's file between read and save | **409 conflict**, disk byte-identical, diff shown | ok | no |
+| 1b | `refdes check` on a keyless project between read and save (mints keys, expands links — run-2 BUG 1) | **409 conflict**, disk byte-identical | ok, but see F7 | no |
+| 1c | CLI write to a *different* file between read and save | **200 applied** to the target file | ok (per-file revision, by design) | no |
+| 1d | Outside edit leaves the project unparseable | **422 refused** with `no item 'DEC-001' in this project` | misleading (F6) | no |
+| 2a | B saves after A saved, sequentially, two instances | **409 conflict** 5/5 runs; A's bytes intact | ok | no |
+| 2b | A and B save the same item at the same instant, two instances, 1,800-item project | **both HTTP 200 `applied`**, only one edit on disk — **4/4 trials** | **bug (F1)** | **yes** |
+| 2c | Same race but one instance (the "two browser tabs" case) | exactly one 200 + one 409 | ok | no |
+| 2d | Same instant race, two instances, 6-item project | **both 422 refused** on a shared temp-file name — 6/6 trials | misleading (F3) | both authors lose the edit; nothing corrupt |
+| 3a | Edit landing during `refdes build` (1,800 items) | **200 applied**, `_site/` coherent, page shows the pre-edit title — 5/5 runs | ok | no |
+| 3b | `refdes build` (key-mint rewrite) racing the save, 1,800 items | **200 applied**, then the build's write silently reverted the edit — **5/7 delays**; the reverse (editor reverts the mint) at 1/7 | **bug (F2)** | **yes, silently** |
+| 3c | `refdes revise` racing the save, 6-item project | 200 applied and survived, or 409; 0 losses in 18 timed runs | ok (window too narrow here) | no |
+| 3d | Does `serve` write `_site/`? | no: 24 files byte-identical after 3 edits + 2 preview fetches; preview lives in `/tmp/refdes-preview-*` | ok | n/a |
+| 4a | Item's file deleted underneath | **422 refused**, no write; GET already 404s | ok | no |
+| 4b | File renamed, bytes identical | **200 applied**, written to the *new* path | ok (see note) | no |
+| 4c | File renamed *and* edited | **409 conflict** naming the new path, real diff | ok | no |
+| 4d | Item moved to a different file | **409 conflict** with `current_text: null`, `diff: ""` | misleading (F4) | no |
+| 4e | File truncated to empty | **422 refused**, no write | ok | no |
+
+Findings, in severity order:
+
+- **F1 — bug.** Two `serve` instances saving one item simultaneously both
+  return `200 applied`; one edit vanishes. 4/4 trials. `s2b_simultaneous.py big`.
+- **F2 — bug (data loss).** A CLI write that is *still in flight* when the
+  editor checks is invisible to the editor's revision check, so the editor
+  reports success and is then overwritten (or overwrites the CLI). 5/7 timed
+  runs with `refdes build`. `s3c_mint_race.py`, timelines in `s3e_timeline.py`.
+- **F3 — misleading.** The editor's staging temp file is named per *path*, not
+  per process (`edit.py:786`), so two instances writing the same file collide:
+  6/6 trials returned two internal-sounding 422s and neither edit landed.
+  `s2b_simultaneous.py small`.
+- **F4 — misleading.** A same-file/different-item conflict returns a 409 whose
+  `diff` contains only the author's own draft, so the conflict screen
+  ("Keep mine" force-overwrites) never shows what would be lost.
+  `s2_conflict_body.py`.
+- **F5 — misleading.** When the item's span can no longer be planned against,
+  the 409 body is byte-identical in shape to an ordinary conflict with
+  `current_text: null, diff: ""`, although `edit.py:660-661` says "the conflict
+  says so". `s4_deleted_renamed.py` case `moved_item`.
+- **F6 — misleading.** An unparseable project yields `no item 'DEC-001' in this
+  project` rather than the parse failure. `s1_cli_write.py` case 1d.
+- **F7 — minor.** The served model lags an outside write by 1.98–2.21 s at the
+  1.0 s poll interval (debounce needs two identical signatures,
+  `state.py:305-311`), and a GET inside that window hands back the stale
+  per-file revision, so an immediate retry conflicts again.
+- **F8 — minor.** Every `message`/`describe` in a save response embeds the
+  server's absolute path, while the sibling `path` field is deliberately
+  project-relativised (`api.py:516-522`). The stated anti-leak intent is
+  defeated by its own neighbours.
+- **F9 — doc/impl.** The design says a mutation verifies "the complete
+  revision" (`docs/design/browser-editor.md:817-822`, `:888`); the code
+  compares one file's sha256. Defensible (the delta gate re-loads the project
+  at `edit.py:391`), but the doc overstates it and "the UI shows which files
+  changed" is not implemented anywhere.
+
+
+The surface, as verified
+------------------------
+
+Read: `src/refdes/serve/server.py`, `api.py`, `state.py`, `edit.py`,
+`preview.py`, `tests/serve_support.py`, `docs/design/browser-editor.md`
+("Validation, conflicts, and transactions"), `docs/cli-reference.md:1353-1400`.
+Everything below was confirmed by running it, not read off the source alone.
+
+- **Save route:** `POST /api/item/<ref>/edit` — dispatched at `api.py:45-49`,
+  handled by `_apply_edit` at `api.py:457-568`. Payload:
+  `{"op": "set_field"|"set_body"|"add_link"|"remove_link", ..., "expected_revision": "<sha256>"}`
+  (`api.py:471-501`; `pin` is accepted only on `set_body`, `api.py:502-506`).
+- **Required headers:** `X-Refdes-Token` (reads *and* writes,
+  `server.py:510`), `Origin` equal to the server's own origin
+  (`server.py:514`), `Content-Type: application/json`, a `Content-Length`
+  under 1 MiB (`server.py:516-537`). The in-process harness
+  (`.scratch/concurrent/harness.py`) reads the token off `app.token`
+  (`server.py:277`) rather than scraping stdout, exactly as
+  `tests/serve_support.py:301-400` does.
+- **The concurrency check is a per-file content hash, not a revision counter and
+  not an mtime:** `edit.file_revision()` = `sha256` of the file's bytes, `""`
+  if missing (`edit.py:246-254`), compared against the request's
+  `expected_revision` under the process write lock at `edit.py:342-344`. The
+  client is handed that same value as `edit.file_revision` by
+  `api.edit_state` (`api.py:162-165`, `api.py:219`). The *project*-level
+  revision (`GET /api/revision`, `api.py:41-42`, `state.revision_info`
+  `state.py:279-288`) is a hash over all semantic inputs
+  (`state.py:124-126`) and is only used for polling/staleness — it is not part
+  of the save check.
+- **Status mapping** (`api.py:524-568`): Applied 200, Conflict 409 with
+  `current_text` + unified diff, Invalid 422, Refused 422, malformed request
+  400.
+- **Write:** same-directory temp file, fsync, `os.replace`, then a re-read that
+  restores the original bytes if they disagree (`edit.py:780-815`). So a reader
+  never sees a torn file — confirmed in every build-race run below.
+- **Locking:** `write_lock_for` is a module-global keyed by project root, i.e.
+  per *process* (`edit.py:228-243`). It is the only thing that serialises
+  saves, and two `serve` processes do not share it.
+- **Polling:** `Poller` (`state.py:291-319`) at a 1.0 s interval
+  (`server.py:274`; `cli.py:338` passes no override), debounced so a change is
+  acted on only after two consecutive identical `(mtime_ns, size)` signatures,
+  then confirmed by content hash. The browser UI polls `/api/revision` every
+  2 s and banners "The files changed since this page was loaded"
+  (`src/refdes/serve/static/app.js:96-99`, `:106-127`).
+- **Preview:** rendered into `tempfile.mkdtemp(prefix="refdes-preview-")` with
+  `project.out_dir` redirected to a fresh generation directory
+  (`preview.py:57-91`); swept on rebuild, `rmtree`'d on close (`preview.py:120-123`).
+
+Harness scripts (all in `.scratch/concurrent/`):
+
+| Script | What it does |
+|---|---|
+| `harness.py` | fixture project, in-process `EditorApp`, HTTP client, tree hashing |
+| `serve_proc.py` | one `serve` instance in its own process; prints `{"port","token"}` |
+| `s0_smoke.py` | sanity: read an item, save, confirm on disk |
+| `s1_cli_write.py` | scenario 1a/1b/1c/1d |
+| `s1b_timing.py` | scenario 1b catch-up latency + recovery, 1e unrelated broken file, 1d follow-up |
+| `s2_two_serve.py` | scenario 2a: two processes, sequential saves, poll latency |
+| `s2_conflict_body.py` | what a 409 body is built from (fresh disk or stale model) |
+| `s2b_simultaneous.py` | scenario 2b/2d: barrier-synchronised simultaneous saves |
+| `s2c_one_instance.py` | scenario 2c control: one instance, two tabs |
+| `gen_big.py` | 1,800-item fixture (900 REQ / 450 DEC / 450 TST) in 8 files |
+| `s3_build_race.py` | scenario 3a: edit mid-`build`, `_site/` coherence |
+| `s3b_clocks.py` | the two clocks the race depends on |
+| `s3c_mint_race.py` | scenario 3b: delay sweep against `refdes build`'s key-mint write |
+| `s3d_revise_race.py` | scenario 3c: same sweep against `refdes revise` |
+| `s3e_timeline.py` | 4 ms polling of the item file to get the exact interleaving |
+| `s3f_site.py` | scenario 3d: does `serve` ever write `_site/` |
+| `s4_deleted_renamed.py` | scenario 4a–4e |
+
+
+Scenario 1 — a CLI write between the editor's read and its save
+----------------------------------------------------------------
+
+`python .scratch/concurrent/s1_cli_write.py`, project built by
+`harness.make_project()` (6 items, keys minted by one `refdes check`), `serve`
+started in-process with a 0.5 s poll interval.
+
+**1a — hand edit of the same file.** `GET /api/item/DEC-001` →
+`edit.file_revision = 319b0a8d0925…`; append `  # a comment someone added in
+vim` to `items/decs.yaml`; save with the stale revision:
+
+```
+HTTP 409
+{"kind":"conflict","ok":false,
+ "message":"conflict: <abs path>/items/decs.yaml changed since this edit was
+            planned (expected 319b0a8d0925, found 02c01c351399)",
+ "path":"items/decs.yaml",
+ "expected_revision":"319b0a8d…","current_revision":"02c01c35…",
+ "current_text":"Use the buck regulator.",
+ "diff":"--- items/decs.yaml (on disk)\n+++ items/decs.yaml (your edit)\n@@ -2,7 +2,7 @@\n items:\n   - key: kq8xdgxmm8v\n     id: DEC-001\n-    title: Use the buck regulator.\n+    title: Title written by the editor.\n…"}
+```
+
+File bytes before and after the save: **identical** (the vim comment is still
+the last line). **ok.**
+
+**1b — `refdes check` on a keyless project.** Same fixture *without* the mint
+step, so `serve` sees provisional handles (`~items/decs.yaml:3`). Between the
+GET and the save:
+
+```
+$ refdes -c refdes-project.yaml check
+(minted 6 key(s) and rewrote 3 reference(s) while loading)
+6 items, 0 errors, 0 warnings        exit 0
+```
+
+`items/decs.yaml` gained a `key:` line per item and its `satisfies:` links
+became composites — i.e. run-2's BUG 1 (`in-prog-logs/user-sim-release-gate-run2.md:29-122`).
+The stale save:
+
+```
+HTTP 409  {"kind":"conflict", … "current_text":"Use the buck regulator.",
+          "diff":"…-    title: Use the buck regulator.\n+    title: Title written by the editor.…"}
+```
+
+Disk bytes unchanged. **ok** — the check held against a rewriting CLI command,
+which is the headline promise of `browser-editor.md:819-822`.
+
+`python .scratch/concurrent/s1b_timing.py` adds the latency and the recovery:
+the served per-file revision caught up **2.21 s** after the CLI write at the
+1.0 s poll interval; the stale save still conflicted; a save carrying the
+caught-up revision then returned `200 applied`. Project `serial` went 1 → 2.
+
+Two things worth noting:
+
+- Immediately after the CLI write, `GET /api/item/DEC-001` still returned the
+  *old* `edit.file_revision` and an unmoved project `revision` — the model had
+  not been rebuilt yet. A client that trusted the GET and retried immediately
+  got a second 409 it could not explain. Recovering takes one poll cycle
+  (F7).
+- The conflict message does not say *who* moved the file. In the common case —
+  the author never touched `items/decs.yaml`, a tool they ran in a terminal
+  did — "changed since this edit was planned" with a diff that only shows the
+  author's own draft is all they get (see F4 for the same gap in a
+  same-file conflict).
+
+**1c — CLI write to a different file.** With `items/reqs.yaml` hand-edited
+outside, saving `DEC-001` in `items/decs.yaml` returned `200 applied` and only
+`decs.yaml` changed. **ok**, and by design: the proof is per item file
+(`api.py:153-157` says so explicitly — "a revision per item rather than one for
+the whole project"). The delta gate still judges the candidate against the
+*current* tree (`edit.py:391` loads the whole project fresh), so a
+cross-file interaction cannot slip through unvalidated. The design text still
+says "the complete revision" (F9).
+
+**1d — outside edit leaves the project unparseable.** `items/decs.yaml`
+replaced with `defaults: { type: decision, board: board-a\nitems: [\n`:
+
+```
+HTTP 422  {"kind":"refused","ok":false,
+           "message":"refused: no item 'DEC-001' in this project",
+           "reason":"no item 'DEC-001' in this project","path":null}
+```
+
+Disk unchanged — nothing was written, so nothing was lost. But the reason is
+wrong: the item and the file both still exist; the project stopped parsing
+(`_load_before` uses the tolerant `loader.load_tree`, `edit.py:301`, so
+`_find_item` simply misses). `/api/revision` 2.5 s later reported
+`{"serial":2,"stale":false,"load_error":null}` — the server does not consider
+the tree broken — while `GET /api/item/DEC-001` was 404 and `GET /api/item/REQ-001`
+was still 200. **misleading** (F6): an author who typos a YAML bracket is told
+their item does not exist, and the banner that would explain it
+("The project no longer loads") never fires.
+
+**1e — an *unrelated* file is broken.** `items/tests.yaml` truncated to invalid
+YAML, then a save to `DEC-001`: `200 applied`, `decs.yaml` changed, and
+`load_error` stayed `null` while `check` on the same tree reports the parse
+error. So the editor will happily save one item while another file is corrupt —
+by design (that is the whole point of the delta rule,
+`browser-editor.md:"Diagnostic gate"`), and the broken file was not modified.
+Not a finding.
+
+
+Scenario 2 — two `serve` instances over one project
+----------------------------------------------------
+
+Two real processes, each an `EditorApp` (`serve_proc.py`, driven from
+`EditorApp` exactly as `cli.py:338` does), one shared project, distinct
+ephemeral ports and tokens.
+
+**2a — sequential: B loads, A saves, B saves with stale state.**
+`python .scratch/concurrent/s2_two_serve.py 5`. Both instances started on the
+same project and agreed on the per-file revision. Then:
+
+```
+A save -> HTTP 200 applied: yaml-item DEC-001: set_field title …
+B GET immediately after A's save: title = Use the buck regulator.   <- B's model is stale
+B save with pre-A state -> HTTP 409 {"kind":"conflict", … "(expected 78536ab8b82f, found eaa59bc120ad)"}
+A's write survived: True
+file bytes changed by B: False
+B /api/revision moved after 2.00s: serial=2 stale=False
+B GET after catch-up: title = A's title
+B save with caught-up revision -> HTTP 200 applied
+```
+
+**5 runs: 5 conflicts, 0 lost updates.** B's poller noticed A's write after
+**1.978–2.019 s** (5 runs, poll interval 1.0 s), which matches the debounce in
+`state.py:305-311` (two consecutive identical signatures ⇒ ~2 ticks). B's
+browser would additionally have shown "The files changed since this page was
+loaded" within one 2 s UI poll. **ok.**
+
+**2b — simultaneous saves to the same item: the bug.**
+`python .scratch/concurrent/s2b_simultaneous.py big`. Two instances, two
+threads released by a `threading.Barrier`, both saving `DEC-0001` against the
+revision each had read, in the 1,800-item project:
+
+```
+trial 0: A [200,"applied",2.253s]  B [200,"applied",2.563s]  on_disk: "A wins 0"
+trial 1: A [200,"applied",2.020s]  B [200,"applied",2.122s]  on_disk: "A wins 1"
+trial 2: A [200,"applied",2.117s]  B [200,"applied",2.033s]  on_disk: "B wins 2"
+trial 3: A [200,"applied",2.120s]  B [200,"applied",2.064s]  on_disk: "B wins 3"
+
+big: 4 trials, both-200 trials: 4/4
+```
+
+**Both saves were told they were written. One of them was not.** The file bytes
+hold one title; the other author's edit is gone with no conflict, no warning,
+and no error anywhere.
+
+Why the check does not help: the revision is verified once at `edit.py:342`,
+then the request spends the candidate load and the delta gate
+(`edit.py:391-420`) before writing at `edit.py:422`. `s3e_timeline.py` measures
+that gap directly by polling the file every 4 ms on this project: request at
+t=0.601 s, bytes on disk change at t=0.993 s ⇒ **~0.39 s between the check and
+the write** (the remaining ~1.5 s of the response is the post-save
+`state.refresh()` at `api.py:528`). Two requests that both check inside the
+first half-second and write inside the second half both pass. The lock that
+would prevent it, `write_lock_for`, is keyed per project root in a
+module-global dict (`edit.py:228-243`) — two processes, two locks.
+
+**2c — the control, and it passes.** `python .scratch/concurrent/s2c_one_instance.py`
+— identical barrier, identical revisions, but both POSTs to **one** instance:
+
+```
+[small project, ONE instance] tab1: [409,"conflict"]  tab2: [200,"applied"]  on disk: "tab two wins"
+[big project,   ONE instance] tab1: [200,"applied"]  tab2: [409,"conflict"]  on disk: "tab one wins"
+```
+
+Exactly one winner, one conflict, nothing lost — the in-process lock makes the
+second request's check happen after the first one's write. So the design's
+"this catches another browser tab" (`browser-editor.md:819-822`) is true for
+tabs and false across instances, and nothing in the code or docs says the
+protection stops at the process boundary. `edit.py:232-236` says the opposite
+of what a reader would hope:
+
+> "The design's posture is that the lock stops *this* server from interleaving
+> saves; cross-process protection is the content revision"
+
+— but the content revision is a point-in-time check, not a lock.
+
+**2d — the same race on a small project fails loudly instead.**
+`python .scratch/concurrent/s2b_simultaneous.py small` (6-item project, where
+the whole save takes ~20 ms so both requests are inside `_atomic_replace`
+together):
+
+```
+trial 0: A [422,"refused","refused: the bytes on disk after the write are not the bytes planned;
+                       <abs>/items/decs.yaml was restored"]
+         B [422,"refused","refused: the write failed ([Errno 2] No such file or directory:
+                       '<abs>/items/.decs.yaml.refdes-tmp' -> '<abs>/items/decs.yaml');
+                       <abs>/items/decs.yaml still holds its original bytes"]
+… 6/6 trials the same pair of messages, on_disk unchanged.
+```
+
+Nothing is corrupted and nothing half-written — the post-write verification at
+`edit.py:806-815` caught the interference and restored. But **both authors lose
+their edit**, and one of the two messages is a raw filesystem error caused by
+the *other* process: `_atomic_replace` stages into
+`.<basename>.refdes-tmp` (`edit.py:786`), a name derived only from the target
+path, so the two instances share one staging file and one process's
+`os.replace(tmp, path)` pulls it out from under the other. **misleading** (F3):
+the reported cause is "the write failed", not "another process was writing this
+file".
+
+Reachable by inspection, **not** reproduced here: `edit.py:806-815` restores
+`original` over whatever is at `path` when the re-read disagrees. If A's
+`os.replace` lands, then B's, then A's re-read, A rewrites the pre-race bytes
+over B's successful write while B has already been told `200 applied`. The
+window is microseconds wide, which is why 10 trials produced the two-422
+outcome rather than this one.
+
+**2e — what a 409 body is built from.** `s2_conflict_body.py`: A edits DEC-001,
+B (stale) edits **DEC-002**, same file:
+
+```
+HTTP 409 {"current_text":"Unsettled boot approach.",
+          "diff":"…\n   id: DEC-002\n-    title: Unsettled boot approach.\n+    title: B's title\n…"}
+```
+
+The body is built from fresh disk (`_conflict` re-reads and re-plans,
+`edit.py:663-685`) — good. But the external change was to *DEC-001*, and
+nothing in the response says so: `current_text` is DEC-002's own unchanged
+text and the diff shows only the author's draft. The conflict screen
+(`static/editor.js:294-315`) renders "The file changed on disk" plus that diff
+and offers **Keep mine**, which re-saves with `payload.current_revision` — a
+force-overwrite in which the author has not been shown what they are about to
+discard. `browser-editor.md:831-832` promises "The UI shows which files
+changed"; no field in the response identifies them. **misleading** (F4).
+
+
+Scenario 3 — an edit landing during a `build`
+-----------------------------------------------
+
+Fixture: `gen_big.py`, 1,800 items in 8 files. Untimed `refdes build` on it:
+**4.4 s** (and **8.1–8.4 s** once the preview render is competing for CPU).
+`s3b_clocks.py` measures the two clocks the races depend on: `build`'s
+key-mint write lands **2.37 s** after the process starts; one API save on the
+same project completes in **1.99 s**.
+
+**3a — an edit mid-build.** `python .scratch/concurrent/s3_build_race.py`, five
+runs with the save issued 0.4 s / 1.5 s / 3.0 s / 0.3 s / 2.2 s into the build,
+`_site/` deleted first so the build had to write it from scratch:
+
+```
+save -> HTTP 200 {"kind":"applied","ok":true, …}
+build exit: 0 | 1800 items, 0 errors, 1 warnings | site written to …/_site
+source on disk now: ['    title: Decision 0001 about the rail, revised mid-build.']
+coherence: {"html_count":1817,"broken_link_count":0,"truncated_html":[],"items.json":"parses"}
+page: dec-0001.html  contains OLD title: True | contains NEW title: False  (OLD×3, NEW×0)
+rebuild after the race -> exit 0
+```
+
+**5/5 runs: no torn state, no failure, `_site/` coherent** — 1,817 HTML files,
+zero broken internal links, no truncated document, `items.json` parses, and a
+plain rebuild afterwards is clean. In every run the built page shows the
+*pre-edit* title, because `refdes build` reads the whole project at the start
+of its load and renders from that snapshot; the built site is a consistent
+snapshot of the project as of the build's read. That is the expected outcome
+and the right one. The atomic write (`edit.py:780-815`) is why no run ever saw
+a half-written file: a reader gets the old bytes or the new bytes.
+
+**3b — the write-write race: the second bug.**
+`python .scratch/concurrent/s3c_mint_race.py` on a *keyless* 1,800-item
+project, sweeping the delay between "build started" and "save requested":
+
+```
+delay=0.2  HTTP 200 applied  cli_exit 0  editor_edit_on_disk: false  cli_mint_on_disk: true
+delay=0.6  HTTP 200 applied  cli_exit 0  editor_edit_on_disk: false  cli_mint_on_disk: true
+delay=1.0  HTTP 200 applied  cli_exit 0  editor_edit_on_disk: false  cli_mint_on_disk: true
+delay=1.4  HTTP 200 applied  cli_exit 0  editor_edit_on_disk: false  cli_mint_on_disk: true
+delay=1.8  HTTP 200 applied  cli_exit 0  editor_edit_on_disk: false  cli_mint_on_disk: true
+delay=2.2  HTTP 200 applied  cli_exit 0  editor_edit_on_disk: true   cli_mint_on_disk: false
+delay=2.6  HTTP 409 conflict cli_exit 0  editor_edit_on_disk: false  cli_mint_on_disk: true
+
+silent-loss runs (HTTP 200 but the edit is not on disk): 5/7
+```
+
+Five of seven runs told the author `applied` and then destroyed the edit.
+`python .scratch/concurrent/s3e_timeline.py` pins the interleaving by polling
+the file every 4 ms:
+
+```
+delay 0.6: 0.000 old_titlenokeys → 0.993 editor_titlenokeys → 2.359 old_titlekeys   (final: old_titlekeys)
+delay 1.4: 0.000 old_titlenokeys → 1.729 editor_titlenokeys → 2.295 old_titlekeys   (final: old_titlekeys)
+delay 2.2: 0.000 old_titlenokeys → 2.356 old_titlekeys → 2.652 editor_titlenokeys   (final: editor_titlenokeys)
+```
+
+Read those three lines as one story:
+
+1. The editor's revision check passed, because at check time nothing had
+   written the file yet. The editor wrote its bytes (HTTP 200).
+2. `refdes build` then wrote `items/decs0.yaml` with the text it had read
+   *seconds* earlier during its load, as part of the key-minting pass every
+   writable load performs (`keys.mint_missing` → `revise.write_rewrites_verified`
+   → `write_rewrites` → `textio.write_text(path, rewrite.after)`,
+   `keys.py:714-743`, `revise.py:636-656`). `FileRewrite` carries the `before`
+   text it was computed from (`revise.py:628-634`) and `write_rewrites` never
+   compares it with what is on disk now. The old title is back.
+3. At delay 2.2 the order reverses and the loss goes the other way: the build's
+   mint lands at 2.356, the editor's save — planned against its own pre-mint
+   read — lands at 2.652 and **reverts the minted keys**, so one file in the
+   project is left keyless while the other seven are not. The editor reported
+   200 for that too.
+
+This is run-2's BUG 1 (`refdes check`'s help text denying that it writes)
+turning into data loss: because *every* command that loads the project rewrites
+item files, and because the editor's proof is a point-in-time read, a
+`refdes build` (or `check`, or `ls`, or `index`) in another terminal can
+destroy an editor save that was already acknowledged — and vice versa.
+
+`browser-editor.md:819-822` says the content hash "catches … a CLI write".
+It catches a CLI write that has *already landed*. A CLI write still in flight
+is invisible, and no amount of hashing at the start of the request changes
+that.
+
+The same race with `refdes revise` on the 6-item project
+(`python .scratch/concurrent/s3d_revise_race.py`, 18 timed runs over delays
+0.15–0.32 s): **3 conflicts, 15 applied-and-survived, 0 losses.**
+On a small project the CLI's read→write window and the editor's check→write
+window are both ~0.1 s and they mostly do not overlap; the window where they do
+is real but too narrow to hit reliably. The mechanism is the same; the
+1,800-item project is where it bites, because both windows scale with the
+project.
+
+**3d — does `serve` write `_site/`?** `python .scratch/concurrent/s3f_site.py`,
+with `_site/` fully built first (24 files):
+
+```
+_site/ files before: 24
+edits: [200, 200, 200] | preview page: 200 | preview index: 200
+preview directory: /tmp/refdes-preview-12drom2l
+preview dir under tempfile.gettempdir(): True
+_site/ files after : 24
+_site/ byte-identical after 3 API edits + 2 preview fetches: True
+any temp files left in the project: []
+```
+
+**ok** — the promise in `docs/cli-reference.md:1376` and
+`preview.py:1-8` holds. The preview renders into
+`tempfile.mkdtemp(prefix="refdes-preview-")` with `project.out_dir` redirected
+at `preview.py:77-91`, into a fresh generation directory per rebuild so a
+request never sees a half-written site (`preview.py:80-91`), and the root is
+removed on shutdown (`preview.py:120-123`).
+
+
+Scenario 4 — the item's file deleted or renamed underneath
+---------------------------------------------------------
+
+`python .scratch/concurrent/s4_deleted_renamed.py`, one fresh project per case,
+each with a 2.5 s wait so the poller has rebuilt before the save.
+
+**4a — file deleted.** `GET /api/item/DEC-001` → `404 {"error":"no item matches
+'DEC-001'"}`; `GET /api/revision` → `{"serial":2,"stale":false,"load_error":null}`.
+The stale save:
+
+```
+HTTP 422 {"kind":"refused","ok":false,
+          "message":"refused: no item 'DEC-001' in this project",
+          "reason":"no item 'DEC-001' in this project","path":null}
+```
+
+Nothing written, old path gone. **ok** — and in practice the UI would not have
+offered the form, since the GET already 404s. The refusal cannot distinguish
+"you deleted the file" from "the file stopped parsing" (F6), which is the only
+reason this is not simply "ok".
+
+**4b — file renamed, bytes identical** (`items/decs.yaml` →
+`items/decisions.yaml`):
+
+```
+HTTP 200 {"kind":"applied","ok":true,
+          "message":"applied: yaml-item DEC-001: set_field title at <abs>/items/decisions.yaml:5 …",
+          "path":"items/decisions.yaml",
+          "revision":"817782f8a24d…"}
+new path now: … id: DEC-001 / title: Title written after the file moved. …
+```
+
+The save landed in the *new* file. The form's content proof still holds
+(identical bytes), the item resolves freshly at apply time
+(`_item_path(before, item)`, `edit.py:338`), and the response's `path` and
+`message` name the new file. **ok**, and arguably the correct behaviour — the
+alternative (refusing) would punish an author for someone else's `git mv`. The
+only gap is that nothing says "this file moved since you opened the form".
+
+**4c — renamed *and* edited:**
+
+```
+HTTP 409 {"kind":"conflict", "path":"items/decisions.yaml",
+          "current_text":"Use the buck regulator, v2.",
+          "diff":"--- items/decisions.yaml (on disk)\n+++ items/decisions.yaml (your edit)\n@@ …\n-    title: Use the buck regulat…"}
+```
+
+**ok** — real diff, against the real current bytes, naming the file that
+actually holds the item now.
+
+**4d — item moved into a different file.** The item's file was deleted and its
+entries appended to `items/reqs.yaml`; the save came back:
+
+```
+HTTP 409 {"kind":"conflict","path":"items/reqs.yaml",
+          "current_text":null,"diff":"",
+          "message":"conflict: <abs>/items/reqs.yaml changed since this edit was planned …"}
+```
+
+The conflict names a file the author never edited, and offers no
+`current_text` and no diff — the shape of an ordinary conflict, with nothing
+in it to act on. `_conflict`'s own comment (`edit.py:660-661`) says "When the
+current text cannot even be planned against (the item is gone, its span is now
+ambiguous), **the conflict says so** instead of inventing a diff"; the HTTP body
+does not say so, it just has two null fields (`edit.py:666-671`). The conflict
+screen then renders `(no diff available)` (`static/editor.js:300`) and still
+offers Keep mine / Keep theirs / Copy my draft. **misleading** (F5).
+
+**4e — file truncated to empty.** `HTTP 422 refused: no item 'DEC-001' in this
+project`, no write, other items unaffected. **ok.**
+
+
+Where this leaves the design's promises
+---------------------------------------
+
+| Promise | Where | Verdict |
+|---|---|---|
+| "File content is the conflict proof: this catches another browser tab, VS Code, a CLI write, a checkout/reset" | `browser-editor.md:819-822` | holds for anything that has *already written*; does not hold for a write still in flight (F1, F2), nor across two `serve` processes (F1) |
+| "A content mismatch returns a conflict, never a last-write-wins save" | `browser-editor.md:830` | holds for the *check*; the write window after the check is last-write-wins (F1, F2) |
+| "The UI shows which files changed" | `browser-editor.md:831-832` | not implemented — no response field names what moved (F4) |
+| "Before a mutation … recomputes those hashes, and requires an exact match" / "verify the complete revision" | `browser-editor.md:817-822`, `:888` | one file's sha256, not the project revision (F9) |
+| "Keep mine (overwrite, having seen exactly what is lost)" | `browser-editor.md:805-808` | the "seen exactly what is lost" half does not hold for a same-file conflict (F4) |
+| "The preview never touches `_site/`" | `cli-reference.md:1376` | held, verified with `_site/` populated (3d) |
+| Atomic replacement, readers never see a torn file | `browser-editor.md` transaction model | held in every run here |
+
+Suggested fixes, smallest first (not implemented — this is an investigation):
+
+1. **Close the editor's own window** (F1): re-verify `file_revision(path)`
+   immediately before `_atomic_replace` (`edit.py:422`) and treat a mismatch as
+   a `Conflict` rather than writing. It costs one `sha256` of one file.
+2. **Give the staging file a per-process name** (F3):
+   `.<basename>.<pid>.refdes-tmp` at `edit.py:786`, and make the
+   post-write restore at `edit.py:806-815` conditional on the file still holding
+   *this process's* bytes before putting the originals back.
+3. **Close the CLI window** (F2): in `write_rewrites` (`revise.py:636-656`),
+   skip and warn when `textio.read_text(path) != rewrite.before` — one
+   comparison, and it fixes `keys.mint_missing`, the four `links.py`
+   expansion sites, and `revise.apply` at the same time. Pair it with run-2's
+   BUG 1 fix (report the writes, or make the reporting commands load with
+   `write=False`), because on a keyless project *every* command is a writer.
+4. **Say what moved** (F4, F5): add the changed-file list and the changed
+   spans to the 409 body, and make the "cannot plan against" case carry its own
+   `kind`/message instead of two null fields.
+5. **Docs** (F6, F9): align `browser-editor.md:817-822`/`:888` with the
+   per-file check and the process-scoped lock, and make the refusal for an
+   unloadable tree name the parse failure.
+
+Not covered / caveats
+---------------------
+
+- Timing-dependent results were run several times and the counts are above
+  (2a 5/5, 2b 4/4, 2d 6/6, 3a 5/5, 3b 5/7 delays with 1 run each — the delay
+  sweep, not repeats; 3c 18 runs). The 3b percentages are per-delay
+  single runs on a 1,800-item project; the *direction* of the race is
+  deterministic (F2), the exact delay at which it starts winning is not.
+- The dangerous restore at `edit.py:806-815` (a 200 that is later undone by the
+  other process's restore) is reachable by inspection; **not reproduced**.
+- Only `set_field` was exercised for the write path. `set_body`,
+  `add_link`/`remove_link` and the `pin` accept go through the same check and
+  the same `_atomic_replace`, so the mechanism carries, but the composite-link
+  and `.refdes/citations.yaml` second write were not raced.
+- Creation (`POST /api/items/create`) was not raced; it writes a new file and
+  `.refdes/ids.yaml`, which is a different transaction shape.
+- Browser behaviour was read from `static/*.js`, not exercised in a browser
+  (no browser tool used, per instructions). All HTTP was driven directly.
+- Linux only; a single filesystem; no network.
