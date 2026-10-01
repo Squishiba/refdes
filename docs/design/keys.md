@@ -415,6 +415,46 @@ Who needs it:
 - **A `git bisect`** or any automated pass over historical commits, where
   minting keys into old trees would be actively wrong
 
+### A tree that will not take the write
+
+`--no-write` is the *chosen* read-only posture. A read-only checkout is the
+*imposed* one, and it reaches further down than the load: `build` also writes
+the append-only seal file and the membership manifest, `revision`/`release`
+write a baseline, and `build` renders the site. A filesystem that refuses any
+of those must not produce a traceback — a traceback names a bug in the tool
+and says nothing about the only thing that is actually wrong, which is a
+permission bit.
+
+One sentence covers every site, so a CI log filter written against it does not
+miss half the refusals (`refdes.model.read_only_refusal` is the single
+spelling; run-3's N2 is the report that asked for it):
+
+```
+could not write this file (read-only tree?); run with --no-write to silence this
+```
+
+What each site does with it depends on what the write *was*:
+
+| The write | Shape | Why |
+|---|---|---|
+| key minting, link expansion, `.refdes/schema.json` | warning per file; the command continues | Incidental to the command asked for. The command still answers its own question. |
+| the seal file, the membership manifest | **error** per file; the command continues and exits `1` | `build` is the command that seals. An entry with no seal has no append-only protection at all, so reporting a clean build over one would claim protection nobody wrote. |
+| `.refdes/baselines/<name>.yaml` | refusal naming the file; exit `2` | `revision`/`release` exist to write that one file. A stamp that did not happen must not read as one that did. |
+| the rendered site | refusal naming the directory; exit `2` | The site is `build`'s own output. There is no partial "site written to …" worth printing. |
+| a baseline's stored-hash format rewrite | warning naming the file; the command continues and exits `0` | A file that already holds a correct baseline, being reformatted. `audit` and `former-ids propose` compute their comparison in memory, so the diff they print is right either way. |
+| the `.refdes/history/` store | refusal naming the file; exit `1` | `history capture`/`redact`/`migrate-seals` are capture commands: a snapshot that was not taken must not read as one that was. They already refuse under `--no-write`, so this is the same refusal arriving from the other direction. |
+| a seal hash or baseline entry carried forward (`revise`, `calc-rewrite`, `standard upgrade`) | refusal naming the file; **exit 1**, and the whole operation is rolled back | An explicit write, so no tolerance -- and the asymmetry is not cosmetic. The carried hash is the only record that the rename was not an edit to a sealed entry or a stamped baseline. Without it the next `build` reports a deliberate, refdes-performed change as an append-only violation. |
+| any other explicit write (`keys adopt`, `keys restore`) | raises, as before | The tolerance belongs to writes nobody asked for. |
+
+The site render is deliberately independent of the seal write, which is why
+the first case can continue: nothing in the rendered pages reads
+`.refdes/log-seal.yaml`.
+
+`audit` and `former-ids propose` print a bespoke report rather than project
+diagnostics, so a refusal they hit partway through that report has no
+diagnostic channel to travel down. They name the file themselves instead,
+after the notice their load printed at the start.
+
 ### An item with no key yet
 
 **Keyless items stay fully usable.** They parse, validate, get a page, count

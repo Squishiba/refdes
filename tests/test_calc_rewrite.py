@@ -370,6 +370,56 @@ def test_prose_and_references_never_touched(calc_project):
     assert "Reference: {{P}}" in text
 
 
+def test_calc_rewrite_refuses_a_baseline_it_cannot_carry_forward(calc_project):
+    """The same transaction as `refdes revise`, on a tree whose `.refdes/` is
+    read-only.
+
+    The baseline is the only record that this rewrite was not an edit to the
+    stamped content; without the carried hash the next `build` reports the
+    rewritten calc as changed since the baseline, which is a finding about
+    something the user did deliberately and refdes itself performed. So the
+    run refuses naming the file, claims nothing was carried forward, and
+    leaves the retired spelling in place rather than rewriting calc source it
+    cannot record the consequences of.
+    """
+    root = calc_project
+    project = _load(root)
+    assert lifecycle.stamp(project, kind="revision", name="rev-a").status == "stamped"
+    baseline = root / ".refdes" / "baselines" / "rev-a.yaml"
+    baseline_before = baseline.read_text(encoding="utf-8")
+    item_before = (root / "items" / "dec.md").read_text(encoding="utf-8")
+
+    _chmod_refdes(root)
+    try:
+        result = calc_rewrite.apply(str(root))
+    finally:
+        _chmod_refdes(root, writable=True)
+
+    assert result.ok is False
+    assert any(".refdes/baselines/rev-a.yaml" in e for e in result.errors), result.errors
+    assert any("read-only tree?" in e for e in result.errors), result.errors
+    assert result.baselines_updated == []
+    assert baseline.read_text(encoding="utf-8") == baseline_before
+    assert (root / "items" / "dec.md").read_text(encoding="utf-8") == item_before
+
+
+def _chmod_refdes(root, writable: bool = False) -> None:
+    """Flip write permission over `<root>/.refdes` only -- files included, and
+    every directory under it: a read-only *directory* still permits writing
+    through to the files inside it, so both bits matter. Always restored by
+    the caller, or pytest cannot clean the temporary directory up."""
+    import os
+
+    mode_file, mode_dir = (0o644, 0o755) if writable else (0o444, 0o555)
+    refdes = root / ".refdes"
+    for dirpath, dirnames, filenames in os.walk(refdes):
+        for name in filenames:
+            os.chmod(os.path.join(dirpath, name), mode_file)
+        for name in dirnames:
+            os.chmod(os.path.join(dirpath, name), mode_dir)
+    os.chmod(refdes, mode_dir)
+
+
 def test_comment_text_survives_byte_for_byte(calc_project):
     items = calc_project / "items"
     text = (items / "dec.md").read_text(encoding="utf-8")

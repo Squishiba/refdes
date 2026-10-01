@@ -25,7 +25,7 @@ from dataclasses import dataclass, field
 import yaml
 
 from . import keys as keys_mod
-from . import textio
+from . import model, textio
 from .ids import split_id
 from .model import Item, Project
 from .parse import yaml_safe_load
@@ -249,10 +249,32 @@ def format_manifest(project: Project, manifest: Manifest) -> str:
     return _HEADER + yaml.safe_dump(payload, sort_keys=True, default_flow_style=False)
 
 
-def save_manifest(project: Project, manifest: Manifest) -> None:
+def save_manifest(project: Project, manifest: Manifest) -> bool:
+    """Persist the manifest. Returns whether it landed -- see `save_seals`
+    for why a refused write is a diagnostic rather than an exception.
+
+    Same severity as the seal write and for the same reason: `build` is the
+    command that records membership, and an unrecorded board or workspace
+    move means the *next* build reports the same move as new again. Nothing
+    is lost that the item files do not already say; what is lost is the
+    record that it was deliberate.
+    """
     path = manifest_path(project)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    textio.write_text(path, format_manifest(project, manifest))
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        textio.write_text(path, format_manifest(project, manifest))
+    except OSError:
+        rel = os.path.relpath(path, project.root).replace("\\", "/")
+        project.load_writes.blocked.append(rel)
+        project.error(
+            model.read_only_refusal(
+                "board and workspace membership was NOT recorded, so an "
+                "accepted move will be reported again on the next build"
+            ),
+            file=rel,
+        )
+        return False
+    return True
 
 
 def _membership_parts(

@@ -20,6 +20,7 @@ import os
 from typing import Any
 
 from . import diagram
+from . import model
 from . import textio
 from .model import ON_CHANGE_MODES, FieldSpec, ItemType, Project
 
@@ -380,8 +381,7 @@ def write_schema(project: Project, write: bool = True) -> bool:
         # set is matched against `item.source_file`, both "/"-form.
         project.load_writes.blocked.append(SCHEMA_REL_DISPLAY)
         project.warn(
-            "could not write this file (read-only tree?); run with --no-write "
-            "to silence this",
+            model.read_only_refusal(),
             file=SCHEMA_REL_DISPLAY,
         )
     return was_stale

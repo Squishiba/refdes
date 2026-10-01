@@ -35,6 +35,27 @@ only code a diagnostic gets. Treat any non-zero as failure unless you have
 read the specific command's section. `refdes ls --board nosuchboard` is the one
 command that reports a name nobody declared as `no items match` and exits `0`.
 
+One more case the table above does not cover, because it is about a
+*destination* rather than a name: a file or directory the filesystem will not
+accept. That is a condition of the filesystem, not of the project, so no
+command in that state prints a Python traceback — each either degrades and says
+what it could not write, or refuses:
+
+| What is not writable | Command | What it does |
+|---|---|---|
+| `.refdes/` (seal file, membership manifest, `schema.json`) | `build`, `revision`, `release` | An error naming the file and what was therefore not recorded, and **exit 1**. The site is still rendered if its own directory is writable. |
+| the `site.out` directory | `build` | Refuses: `error: cannot write the site to <dir> …`, **exit 2**. There is no partial "site written to" to print. |
+| `.refdes/baselines/<name>.yaml` | `revision`, `release` | Refuses: `error: cannot write .refdes/baselines/<name>.yaml …`, **exit 2**. A stamp that did not happen is never reported as one that did. |
+| a baseline's stored-hash format rewrite | `audit`, `former-ids propose` | Names the file and carries on, **exit 0**. A baseline already on disk holds correct content; only its format lags the current hash definition, and the diff is computed in memory either way. |
+| the `.refdes/history/` store | `history capture`, `history redact`, `history migrate-seals` | Refuses: `error: cannot write .refdes/history/… (read-only tree?) -- nothing was captured`, **exit 1**. A snapshot that was not taken is never announced as one that was. |
+| a seal hash or baseline entry carried forward | `revise`, `calc-rewrite`, `standard upgrade` | `refused:` naming the file, **exit 1**, and the whole operation is rolled back. The carried hash is the only record that the rename was not an edit to a sealed entry or a stamped baseline. |
+
+`--no-write` needs none of this: it never attempts the write, so it is
+unaffected by whether the tree would have taken it.
+
+The full rationale, and what an explicit write (`revise apply`, `keys adopt`)
+does instead, is in [keys §2](design/keys.md#a-tree-that-will-not-take-the-write).
+
 ---
 
 ## `refdes build`
@@ -72,9 +93,23 @@ build" banner on every page. This is different from `id`/`revise`/
 whole point of running `build` is the rendered site, so a dry-run that wrote
 no HTML would be useless for "let me see what this looks like without
 committing to it yet."
+`--keep-going` is for local iteration when you want to look at the site despite
+a failing check. Do not use it in CI — it defeats the point.
 
-`--keep-going` is for local iteration when you want to look at the site despite a
-failing check. Do not use it in CI — it defeats the point.
+On a read-only checkout, `build` still renders the site and still runs every
+check; what it cannot do is record anything under `.refdes/`. Each refused
+write is named, and the run exits `1` rather than reporting a clean build over
+entries it did not seal:
+
+```
+ERROR   .refdes/log-seal.yaml — could not write this file (read-only tree?) -- the entries in it are NOT sealed, so they have no append-only protection until a build can write this file; run with --no-write to silence this
+```
+
+If the site's own output directory is the thing that will not take the write,
+`build` refuses instead — there is no partial site worth printing — and exits
+`2` naming the directory. Point `-o/--out` somewhere writable, or make the tree
+writable.
+
 
 ---
 
@@ -201,6 +236,18 @@ the release in the [design log](design-log.md#after-a-release) — printed,
 never auto-written. See [lifecycle](lifecycle.md) for the full readiness
 gate, the baseline file's shape, `stamped_by`, and the diff `refdes audit`
 surfaces against it.
+
+`revision` and `release` both exist to write one file, so if the filesystem
+will not take it they refuse rather than degrade: the run exits `2` naming
+the path, and never prints the word "stamped".
+
+```
+error: cannot write .refdes/baselines/rev-b.yaml (read-only tree?) -- revision 'rev-b' was not stamped. Make the tree writable and run it again, or run it with --no-write to see what it would stamp.
+```
+
+Nothing is written in that case, so re-running against a writable tree stamps
+for real — a refused stamp is not a partial one. Every other check still ran
+and is still reported: the refusal is about the destination, not the project.
 
 ---
 

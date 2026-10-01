@@ -120,8 +120,16 @@ _EVENT_HEADER = (
 
 class HistoryError(Exception):
     """Any history-store fault: malformed record, version refusal, digest
-    mismatch, or a duplicate edge. Loud by design — the store never skips a
-    bad record silently."""
+    mismatch, a duplicate edge, or a store the filesystem will not accept.
+    Loud by design — the store never skips a bad record silently, and it never
+    reports a capture that did not happen as one that did.
+
+    A refused write arrives here rather than as a raw `OSError` because every
+    caller already handles this one exception by printing `error: <exc>` and
+    exiting non-zero (docs/design/keys.md §2, "a tree that will not take the
+    write") — routing the refusal through the existing channel is what keeps
+    `refdes history capture` off a traceback on a read-only checkout.
+    """
 
 
 # --------------------------------------------------------------- digest layer
@@ -246,13 +254,31 @@ def save_object(root: str, item: Item) -> tuple[str, str]:
                 "in its filename; refusing to overwrite it"
             )
         return digest, path
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    # Content-addressed and immutable: this file is written once and never
-    # rewritten, so its bytes must be the same whoever captured it. A
-    # text-mode write made them CRLF on Windows and LF on Linux for identical
-    # content.
-    textio.write_text(path, text)
+    _write_store_file(root, path, text)
     return digest, path
+
+
+def _write_store_file(root: str, path: str, text: str) -> None:
+    """Write one history-store file, or refuse with the path named.
+
+    Content-addressed and immutable: these files are written once and never
+    rewritten, so their bytes must be the same whoever captured them. A
+    text-mode write made them CRLF on Windows and LF on Linux for identical
+    content.
+
+    `root` is passed rather than derived from the process's working directory:
+    every command may be run with `-c` from anywhere, and the refusal names the
+    project-relative, "/"-spelled path every other message in the tool uses.
+    """
+    rel = os.path.relpath(path, root).replace("\\", "/")
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        textio.write_text(path, text)
+    except OSError as exc:
+        raise HistoryError(
+            f"cannot write {rel} (read-only tree?) -- nothing was captured. "
+            "Make the tree writable and run it again."
+        ) from exc
 
 
 def _check_format(data: object, where: str) -> None:
@@ -364,8 +390,7 @@ def append_event(
                 f"{existing.get('object')!r}; refusing to re-point it at {object_digest!r}"
             )
         return path
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    textio.write_text(path, _format_yaml(payload, _EVENT_HEADER))
+    _write_store_file(root, path, _format_yaml(payload, _EVENT_HEADER))
     return path
 
 

@@ -265,6 +265,13 @@ def test_base_history_survives_lazy_migration_and_undeclared_board(sealed_board_
 
 
 def test_failed_seal_replacement_keeps_old_hash_and_history(sealed_board_project, monkeypatch):
+    """The atomicity half of `save_seals`: a write that dies partway leaves
+    the previous hashes and the reseal history exactly as they were.
+
+    The failure is now reported rather than raised (`save_seals` returns
+    whether the seals landed, and `verify` leaves an error diagnostic naming
+    the file), so this asserts the report as well as the untouched bytes.
+    """
     root = sealed_board_project
     project = _load(root, seal_write=True)
     path = Path(seal.seal_path(project, "board-a"))
@@ -275,8 +282,10 @@ def test_failed_seal_replacement_keeps_old_hash_and_history(sealed_board_project
         raise OSError("simulated replacement failure")
 
     monkeypatch.setattr(seal.os, "replace", fail_replace)
-    with pytest.raises(OSError, match="simulated replacement failure"):
-        _load(root, seal_write=True, reseal="board-a")
+    failed = _load(root, seal_write=True, reseal="board-a")
+    assert any(
+        "read-only tree?" in str(d) for d in failed.errors
+    ), "a refused seal write must leave an error naming the condition"
     assert path.read_bytes() == before
     assert seal.load_reseals(project, "board-a") == []
 

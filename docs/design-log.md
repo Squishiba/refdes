@@ -107,6 +107,19 @@ in CI. `refdes build` seals anything new it finds — which means an entry that
 has never been through a build is not passing an append-only check: it has no
 seal to pass or fail, and editing it fails nothing.
 
+Which is why a build that *could not* seal says so. On a read-only checkout the
+site still renders and every check still runs, but the entries stay unsealed and
+the run says which file it could not write rather than reporting a clean build:
+
+```
+ERROR   .refdes/log-seal.yaml — could not write this file (read-only tree?) -- the entries in it are NOT sealed, so they have no append-only protection until a build can write this file; run with --no-write to silence this
+```
+
+That is an error, and `refdes build` exits `1` for it, because "these entries
+have append-only protection" and "these entries have none" have to read
+differently. See [keys §2](design/keys.md#a-tree-that-will-not-take-the-write)
+for the whole read-only story.
+
 ### Adopting boards on a project that already has `.refdes/log-seal.yaml`
 
 Nothing to migrate by hand. An entry sealed before `boards:` existed stays

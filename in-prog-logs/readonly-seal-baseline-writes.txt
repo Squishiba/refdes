@@ -1,0 +1,416 @@
+# readonly-seal-baseline-writes — task log
+
+Fixing run-3 finding **N1** (`in-prog-logs/user-sim-release-gate-run3.md` §3 N1):
+`build`, `revision` and `release` still die with a raw `PermissionError`
+traceback when a destination isn't writable. Goal: no command prints a raw
+traceback because a destination isn't writable; each either degrades with an
+honest diagnostic or refuses with the file named.
+
+Branch: `readonly-seal-baseline-writes`, off current main (`59e3554`).
+
+## Ground rules being followed
+
+- `PYTHONPATH=src python -m refdes.cli ...` (the `refdes` on PATH is a broken
+  editable install pointing at another worktree).
+- Tests: `PYTHONPATH=src python -m pytest -q`.
+- Temp files in `.scratch/` only; nothing outside this worktree.
+- `git add -- <paths>` only, never `-A`/`.`; never `git stash`.
+- ruff scoped to touched files/rules.
+
+## Progress
+
+### 1. Read the report and the code (done)
+
+Relevant code, verified by reading this worktree's `main`:
+
+- Load-time refusal mechanism (the wording/mechanism to reuse):
+  - `src/refdes/schema_json.py:368-386` — `write_schema` catches `OSError`,
+    appends the display path to `project.load_writes.blocked`, and calls
+    `project.warn("could not write this file (read-only tree?); run with
+    --no-write to silence this", file=...)`.
+  - `src/refdes/revise.py:659-669` — `_refuse_unwritable`, same wording.
+  - `src/refdes/cli.py:114-139` — `_load_blocked_notice`, the parenthesised
+    summary-line variant used only by commands that print no diagnostics.
+  - `docs/design/keys.md` §2 is the doc that explains the rule.
+- The three uncaught sites (all read, none wrapped):
+  - `src/refdes/seal.py:199-223` `save_seals` → `os.makedirs` + temp file +
+    `os.replace`. Called from `seal.verify` (`seal.py:451-467`).
+  - `src/refdes/lifecycle.py:257-262` `_save_baseline_file` → `os.makedirs` +
+    `textio.write_text`. Called from `lifecycle.stamp` (`lifecycle.py:734`),
+    reached from `cli._run_stamp` (`cli.py:426`).
+  - `src/refdes/render.py:863-871` `render_site` → `os.makedirs(out_dir)` then
+    writes pages; reached from `cli.cmd_build` (`cli.py:323`).
+- Exit-code table: `docs/cli-reference.md:13` (`0`/`1`/`2`) plus the
+  nine-row table at `:20-30`.
+
+### 2. Reproduced all of them on this worktree's main (`59e3554`)
+
+Scratch project `.scratch/ro/pg` (3 items: an active requirement covered by a
+passing test, one append-only log entry; `standard: {base: hardware, version: 3}`),
+run as `PYTHONPATH=<this worktree>/src python -m refdes.cli …` from
+`.scratch/ro/`:
+
+| shape | command | what main printed |
+|---|---|---|
+| whole tree `chmod -R a-w` | `build` | `PermissionError` out of `seal.py`'s `tempfile.NamedTemporaryFile` (the `.refdes` temp file), traceback, exit 1, **before any output** |
+| whole tree | `revision r1` | `PermissionError` out of `textio.write_text` on `.refdes/baselines/r1.yaml`, exit 1 |
+| whole tree | `release rel-b` | same, `.refdes/baselines/rel-b.yaml`, exit 1 |
+| already sealed, then `a-w` | `build` | `PermissionError` out of `render.py:_write_html` on `_site/index.html`, exit 1 |
+| whole tree + `site.out: /tmp/…` writable | `build` | `PermissionError` on `.refdes` anyway — the report's CI shape, confirmed |
+
+**A fourth site the report did not name**, found while sweeping: a project with
+a `boards:` registry dies in `boards.save_manifest` (`.refdes/boards.yaml`),
+same traceback, same exit 1 — reproduced at `.scratch/ro/rbmm3`. It is reached
+from the same `build(project, seal_write=...)` call as the seal file, so it is
+the same bug in the same command and I fixed it in the same shape; the report
+only missed it because its fixture had no `boards:` block.
+
+Also checked and left alone: `check`, `ls`, `audit`, `index`, `fetch`,
+`history capture`, `former-ids propose` — all already degrade (run-2's fix).
+
+### 3. What I changed
+
+One shared sentence, so there is still only one phrasing (run-3 N2):
+
+- `model.py` — `READ_ONLY_REFUSAL` / `read_only_refusal(consequence="")`, the
+  stem plus what the refused write was for. Both existing spellings
+  (`schema_json.write_schema`, `revise._refuse_unwritable`) now call it and
+  produce **byte-identical** text to before (`read_only_refusal()` with no
+  argument is exactly the old string).
+- `seal.py` — `save_seals` returns `bool`; an `OSError` becomes an **error**
+  diagnostic naming the file and saying the entries are `NOT sealed`. Error,
+  not warning: `build` is the command that seals, and an unsealed entry has no
+  append-only protection at all (`refdes check --help` says so).
+- `boards.py` — `save_manifest` same shape, same severity, naming
+  `.refdes/boards.yaml`.
+- `lifecycle.py` — new `BaselineUnwritable(OSError)` carrying the display path,
+  raised by `_save_baseline_file`. Three callers, three shapes:
+  - `stamp()` → new `StampOutcome(status="unwritable", refusal=<rel>)`;
+  - `migrate_hash_format()` → warning + keeps its report (the comparison it
+    feeds is computed in memory and is still correct; this is what took `audit`
+    down);
+  - `revise`/`calc-rewrite`/`standard upgrade` → propagate unchanged, which is
+    the existing `test_an_explicit_write_still_raises_on_a_read_only_tree`
+    contract.
+- `cli.py` — `_run_stamp` turns `unwritable` into a one-line `error: cannot
+  write <file> (read-only tree?) -- <kind> '<name>' was not stamped…` and exit
+  **2**; `cmd_build` wraps `render_site` and refuses with `error: cannot write
+  the site to <dir> …`, exit **2**, printing the diagnostics gathered first.
+
+Exit-code choices, against `docs/cli-reference.md`:
+
+- `build` on a refused seal / manifest → **1** (`errors found`): it is reported
+  through the ordinary `ERROR <file> — …` diagnostic channel, and the table says
+  that channel only gets `1`.
+- `build` on an unwritable site dir, `revision`/`release` on an unwritable
+  baseline → **2** (`configuration error`, the same code the `--no-write`
+  refusal uses): nothing is wrong with the project, the command refused to do
+  the thing it was asked to do. Needs a table row — done.
+
+`--no-write` is unchanged and pinned by a new test: it never reaches the write.
+
+### 4. Tests
+
+Added to `tests/test_load_time_writes.py`, same shapes and skip guards as the
+existing read-only tests (POSIX-only `skipif`, `try/finally` around every
+`_chmod_tree`, so pytest can still clean up):
+
+- `test_build_refuses_a_read_only_tree_instead_of_crashing` (whole tree; both
+  refusals in one run, distinguished)
+- `test_build_renders_the_site_when_only_refdes_is_read_only` (`site.out`
+  outside the project — the CI shape)
+- `test_revision_refuses_a_read_only_tree_instead_of_crashing`
+- `test_release_refuses_a_read_only_tree_instead_of_crashing`
+- `test_a_refused_stamp_leaves_no_baseline_for_a_later_run_to_mistake` (the
+  refusal is only worth something if the retry stamps for real)
+- `test_no_write_stamps_nothing_on_a_read_only_tree_too[revision|release]`
+- `test_build_reports_a_refused_board_manifest_too`
+
+Changed `tests/test_reseal_audit.py::test_failed_seal_replacement_keeps_old_hash_and_history`:
+it pinned `pytest.raises(OSError)` on a failed seal replacement. The atomicity
+property it exists for is unchanged (the file's bytes and its reseal history are
+still asserted untouched); only the reporting shape moved, so it now asserts the
+error diagnostic instead of the exception.
+
+### 5. Each new test verified to FAIL against main's code
+
+`git diff -- src/ > .scratch/src-change.patch`, `git checkout -- src/`,
+run the tests, `git apply` the patch back. No stash (AGENTS.md), backup copy at
+`.scratch/src-backup/`.
+
+```
+PYTHONPATH=src python -m pytest -q tests/test_load_time_writes.py -p no:randomly \
+  -k "build_refuses_a_read_only or build_renders_the_site_when_only or
+      revision_refuses_a_read_only or release_refuses_a_read_only or
+      refused_stamp_leaves_no or no_write_stamps_nothing or refused_board_manifest"
+-> 6 failed, 2 passed, 45 deselected
+```
+
+- 6 fail, each on the raw `PermissionError` main raises, exactly the bug:
+  `test_build_refuses_a_read_only_tree` and
+  `test_a_refused_stamp_leaves_no_baseline_for_a_later_run_to_mistake`,
+  `test_revision_refuses…`, `test_release_refuses…` → `PermissionError … '.refdes'`;
+  `test_build_renders_the_site_when_only_refdes_is_read_only` and
+  `test_build_reports_a_refused_board_manifest_too` →
+  `PermissionError … '.refdes/.log-seal-XXXX.tmp'`.
+- The 2 that pass on main are the `--no-write` ones, which is correct and the
+  point: `--no-write` behaviour must not change.
+- `tests/test_reseal_audit.py::test_failed_seal_replacement_keeps_old_hash_and_history`
+  also fails on main once reworded (`OSError: simulated replacement failure`
+  propagates where the new assertion expects a diagnostic) — same reason.
+
+`src/` restored, patch reapplied; `tests/test_load_time_writes.py` +
+`tests/test_reseal_audit.py` → 67 passed.
+
+### 6. The audit half, found while verifying the fix
+
+`migrate_hash_format` is reached from `audit` and `former-ids propose` too (they
+diff against a baseline), and on a read-only tree with an older-format baseline
+`audit` was exiting 1 with a traceback out of the same `_save_baseline_file`.
+It now warns and keeps its report — the comparison is computed in memory, so the
+diff is right either way.
+
+That exposed a second problem: `audit` and `former-ids propose` print a
+bespoke report, not project diagnostics, so a refusal hit partway through has
+no diagnostic channel to travel down. `cli._print_late_refusals` (with
+`_load_blocked_notice(project, since=...)`) re-announces anything refused after
+the command's own load notice, once per file — `audit` diffs the latest
+revision *and* the latest release, which are routinely the same file, and the
+second copy of the sentence was noise. Verified live:
+
+```
+$ chmod -R a-w <project>   # baseline predates the current hash format
+$ refdes audit
+(load could not write .refdes/schema.json -- read-only tree? run with --no-write to silence this)
+...
+(load could not write .refdes/baselines/rel-a.yaml -- read-only tree? run with --no-write to silence this)
+3 items audited (3 local)      # exit 0
+```
+
+Pinned by `test_audit_names_a_baseline_it_could_not_rewrite`, verified failing
+on main the same way (revert `src/`, run, reapply: `1 failed, 53 deselected`,
+the traceback out of `diff_against`).
+
+### 7. Swept every command rather than trusting the report's list
+
+The report named three. I ran all of them on a read-only tree (`.scratch/ro`,
+`chmod -R a-w` recursive over files *and* directories — a read-only directory
+still permits writing through to the files inside it, which is why the first
+pass of this sweep missed two cases):
+
+| command | on main | now |
+|---|---|---|
+| `check`, `ls`, `index`, `audit`, `id`, `fetch`, `stub-tests`, `schema`, `keys restore`, `new`, `former-ids propose` | degrade or refuse cleanly | unchanged |
+| `build`, `revision`, `release` | traceback | fixed here |
+| `history capture` | **traceback** — found by this sweep, not by the report | fixed here |
+| `history migrate-seals` (with a legacy seal file present) | **traceback**, same site | fixed here |
+| `history redact --confirm` | no write attempted (nothing matched) | unchanged |
+| `serve` | not reachable — renders into its own temp dir, not `site.out` | — |
+
+`history capture`/`migrate-seals` write `.refdes/history/objects/` and
+`/events/`, which nothing else in this task touches. They **already** refuse
+under `--no-write` (`_refuse_no_write`, exit 2), so a refused filesystem is the
+same refusal arriving from the other direction — and it now rides the
+`HistoryError` channel every caller in `cli.py` already prints as
+`error: <exc>` (exit 1). `history._write_store_file` is the new single choke
+point; it takes `root` explicitly rather than deriving it from the process's
+cwd, because every command may be run with `-c` from anywhere and the message
+has to name the project-relative path.
+
+This is scope I added past the task's three commands, and I am flagging it
+rather than burying it: the goal statement was "no command prints a traceback
+because a destination isn't writable", and a sweep is how that gets checked
+rather than assumed. Pinned by
+`test_history_capture_refuses_a_read_only_tree_instead_of_crashing`, verified
+failing on main (revert `src/`, run, reapply: `1 failed, 54 deselected`, the
+traceback out of `history.save_object`).
+
+### 8. Verification
+
+- Full suite: `PYTHONPATH=src python -m pytest -q -p no:randomly` →
+  **2894 passed, 2 skipped** (the 2 skips are pre-existing). Run after every
+  src edit, last one after the `history` change.
+- Docs-example tests (`tests/test_docs_examples.py` and the rest) pass; the new
+  example blocks were pasted from real runs.
+- ruff, scoped to the nine files I touched, `--select I,F,E9,E501`:
+  - `I/F/E9`: clean except `I001` in `revise.py`, `schema_json.py` and
+    `history.py`, all three **pre-existing on `HEAD`** (verified with
+    `git show HEAD:<file> | ruff check --select I001`). The codebase spells
+    one-import-per-line; my additions match that, so I left them rather than
+    reformatting lines I did not otherwise touch.
+  - `E501`: no new line over 100 characters (checked over the whole diff);
+    the 14 hits are all pre-existing lines in the files I edited.
+  - No unrelated finding touched.
+- `--no-write` re-checked by hand on a read-only tree: `revision` prints
+  `not stamped (--no-write): would stamp 3 items to .refdes/baselines/r1.yaml`,
+  exit 0 — byte-identical to a writable tree's `--no-write` run.
+
+### 8. Docs and changelog
+
+- `docs/cli-reference.md` — a new sub-table in the exit-code section for "a
+  destination that will not take the write" (this *is* a new case, so a row
+  was warranted); a read-only paragraph under `## refdes build`; one under
+  `## refdes release` (which `revision` shares).
+- `docs/design/keys.md` §2 — a new `### A tree that will not take the write`
+  with the per-write table and the "one sentence, one spelling" rationale. This
+  is where `--no-write` is defined, so it is where the imposed counterpart
+  belongs.
+- `docs/design-log.md` §Append-only — the seal promise now says what a build
+  that *could not* seal prints, since that is the case where "these entries
+  have append-only protection" and "these have none" must read differently.
+- `docs/lifecycle.md` §Edge cases — the refused-stamp shape next to the other
+  "nothing was written" cases.
+- `changelog.d/readonly-seal-baseline-writes.fixed.md` — `<slug>.<category>.md`
+  per `changelog.d/README.md`.
+
+### 9. Deliberately left alone
+
+- **`--keep-going`.** `build --keep-going` still exits 0 over a refused seal
+  write. That is what the flag says it does, and changing it would be a
+  behaviour change to a documented flag rather than part of this fix. The
+  diagnostic still prints.
+- **Explicit writes.** `revise apply`, `calc-rewrite`, `keys adopt`,
+  `keys restore` still raise on a read-only tree. That is pinned by
+  `test_an_explicit_write_still_raises_on_a_read_only_tree` and is the right
+  answer: the tolerance belongs to writes nobody asked for. (Those commands do
+  still print a traceback for the refusal; turning a raise into an `error:`
+  line is a separate change across a set of commands this task did not scope,
+  and it would touch the very test that pins the current contract.)
+- **`serve`.** Not reachable from a read-only checkout — it renders into its
+  own temp dir, not `site.out`.
+- **N2's two-phrasing complaint.** Fixed as a side effect (there is now one
+  function producing the sentence), but the parenthesised summary variant and
+  the per-file variant are still two shapes by design — that is N2's own call,
+  not this task's.
+- **`docs/index.md` nav.** No new page; no nav edit needed.
+
+### 10. Review of PR #132 (finding 1): `revise` reported a seal update that
+###     never happened
+
+The reviewer was right about the mechanism. I had made `save_seals` return a
+bool instead of raising, and `revise._carry_forward_seals` ignored the return
+and appended the board to `updated` regardless — so a seal file the filesystem
+refused was reported as carried forward. My own `save_seals` docstring and the
+PR body both claimed `revise` "gets the same tolerance"; both were wrong.
+
+One correction to the review's prediction, since it changes what the test has
+to assert. The predicted symptom was a quiet false success. What actually
+happened on my branch was a *different* traceback, from `revise.py:899`
+(`_restore_seal_files`) via `_rollback` — reproduced at `.scratch/rvbug/probe.py`
+against both trees:
+
+| | main | this branch, pre-fix |
+|---|---|---|
+| where it died | `save_seals` (raised) | `_restore_seal_files` (in rollback) |
+| tree left behind | item renamed, seal stale | item renamed, seal stale |
+
+So it was still a raw traceback, just from a second site, and the tree was
+still left half-rewritten. The defect is the same one the reviewer identified
+— the ignored return — and it is now fixed at the source rather than papered
+over.
+
+**Fixes (`src/refdes/revise.py`, `src/refdes/calc_rewrite.py`):**
+
+- New `revise.Refused`, carrying one message. Both carry-forwards raise it
+  instead of continuing: `_carry_forward_seals` checks `save_seals`'s return
+  before touching `updated`, and `_rewrite_baseline_file` translates
+  `lifecycle.BaselineUnwritable` into the same shape.
+- `apply()` and `calc_rewrite.apply()` catch it, **roll the whole transaction
+  back**, and return `ok=False` with the message — so no board is ever claimed
+  as carried forward and the project is not left renamed with stale seals.
+- `_restore_seal_files` now compares before writing. This is what made the
+  rollback itself crash: it rewrote a file this run had not changed, which is
+  a second refused write in the same run. A rollback exists because something
+  changed; a file that did not change is already correct on disk.
+
+**Verified against the reviewer's scenario** (items/ writable, `.refdes/`
+read-only, a sealed entry whose hash `revise` carries):
+
+```
+$ refdes revise mapping.yaml
+refused:
+  cannot write .refdes/log-seal.yaml (read-only tree?) -- the renamed entries' seals were not carried forward, and the next build would report every one of them as modified since it was sealed. Make the tree writable and run it again.
+  rolled back.
+[exit 1]
+```
+
+And the tree afterwards is untouched: `summary:` still `summary:`, the schema
+overlay un-bumped, the seal file byte-identical, and `refdes check` still clean
+with no `seal_violations`.
+
+**Checked the other two callers the reviewer named, as asked:**
+- `apply_standard_upgrade` → `apply()`, so it inherits the fix. Verified live
+  at `.scratch/su-ro`: `refused: cannot write .refdes/baselines/rev-a.yaml …`
+  exit 1, `BND-THM` not present in the tree afterwards (rolled back).
+- `calc_rewrite.apply` → same engine, so it needed the matching `except`
+  (added). Verified live at `.scratch/cr3`: refuses naming the baseline,
+  exit 1, retired spelling still in the file.
+- Every `save_seals`/`save_manifest` caller in `src/`, listed exhaustively:
+  `seal.verify` (×3, the `build` path — degrades by design), `boards.verify`
+  (the `build` path — degrades by design), `revise._carry_forward_seals` (now
+  raises). No third shape.
+
+**One thing the review surfaced that I had not: the rollback's scope.** The
+transaction restores the item files, the seal files and `config_path`. That is
+correct — `mutate_config` exists only for `standard upgrade`'s
+`standard.version` bump, which writes `config_path` and nothing else (the only
+production caller, `revise.py:1890`). My first draft of the test used a
+`mutate_config` hook editing `refdes-schema.yaml`, which no rollback has ever
+owned, so the test asserted something the contract never promised. The test
+now restores its own hook's file in its own `finally`, the way it already
+restores the permissions, and says why in a comment.
+
+**Tests** (both verified to fail against this branch's pre-fix `src/`, by
+`git checkout -- src/`, run, reapply):
+
+- `tests/test_revise.py::test_revise_refuses_a_seal_it_cannot_carry_forward` —
+  pre-fix: `PermissionError` out of `textio.write_text` in the rollback.
+  Post-fix: `ok is False`, the seal file named in `result.errors`,
+  `seals_updated == []`, seal bytes unchanged, item file unchanged, and the
+  project still builds clean with no `seal_violations`.
+- `tests/test_calc_rewrite.py::test_calc_rewrite_refuses_a_baseline_it_cannot_carry_forward`
+  — pre-fix: fails. Post-fix: `ok is False`, baseline file named,
+  `baselines_updated == []`, baseline and calc source both unchanged.
+
+Docs updated to match the new behaviour: `docs/design/keys.md`'s per-write
+table (the "explicit writes still raise" row is now specifically `keys adopt` /
+`keys restore`, with the carry-forward row added), `docs/cli-reference.md`'s
+sub-table, and the changelog fragment.
+
+Full suite after the fix: **2896 passed, 2 skipped** (both pre-existing).
+
+### 11. Rebase onto `origin/main`
+
+`git fetch origin && git rebase origin/main`, no stash. Ten commits had landed,
+including #130 (8d12680) on `src/refdes/revise.py` and `src/refdes/model.py`.
+
+One conflict, `tests/test_load_time_writes.py` — and not a real one: #130
+appended its own test section where this branch had appended a different one,
+so the two sides are independent additions to the same file. Resolved by
+keeping both (this branch's first, then #130's). Everything else auto-merged.
+
+Verified #130's own change survived the rebase rather than assuming it:
+`src/refdes/revise.py` still has the `_duplicates` unpacking at two
+`md_front_matter_blocks` call sites and the `project.duplicate_key_files`
+withholding (lines 765, 833, 909), and both sections of the conflicted test
+file are present and passing (57 tests in that file).
+
+Full suite on the rebased branch: **2948 passed, 2 skipped** (both
+pre-existing; the count grew from 2896 because of #130 and the other commits
+main had gained). `gh pr checks 132 --watch`: **ubuntu-latest pass 4m39s,
+ubuntu-latest / py3.13 pass 4m59s, windows-latest pass 7m5s** — all three green,
+Windows being the one that exercises the `os.name == "nt"` skips on every
+read-only test here.
+
+Re-ran the review's scenario on the rebased branch: same refusal, same exit 1,
+same untouched tree.
+
+### 12. Status: finished
+
+All of it done: code, tests (each verified failing against the pre-fix `src/`),
+docs, changelog fragment, full suite green on a rebased branch, ruff scoped to
+the touched files with no unrelated finding silenced, PR checks green on all
+three jobs.
+
+
+

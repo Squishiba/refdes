@@ -30,7 +30,7 @@ import yaml
 
 from . import build as build_mod
 from . import keys as keys_mod
-from . import textio
+from . import model, textio
 from .model import INFO, RELEASE_GATE_DEFAULTS, Item, Project, SchemaError
 from .parse import yaml_safe_load
 
@@ -254,11 +254,41 @@ def format_baseline(data: dict) -> str:
     return out
 
 
+class BaselineUnwritable(OSError):
+    """The baseline file could not be written (a read-only checkout, a
+    read-only bind mount -- a condition of the filesystem, not of the
+    project). Carries the project-relative path so the caller can name the
+    file it refused to write.
+
+    Its own type rather than a bare `OSError` because the three callers want
+    three different shapes and none of them is "print a traceback":
+    `stamp()` refuses outright (a stamp that did not happen must not read as
+    one that did), `migrate_hash_format()` degrades to a warning (the
+    comparison it feeds is computed in memory and is still correct), and
+    `refdes revise`/`calc-rewrite`/`standard upgrade` propagate it to their
+    own handlers unchanged.
+    """
+
+    def __init__(self, rel: str, cause: OSError) -> None:
+        super().__init__(f"{rel}: {cause.strerror or cause}")
+        self.rel = rel
+        self.cause = cause
+
+
 def _save_baseline_file(project: Project, data: dict) -> str:
-    """Persist ``format_baseline``'s source-reviewable baseline shape."""
+    """Persist ``format_baseline``'s source-reviewable baseline shape.
+
+    Raises `BaselineUnwritable` rather than letting the raw `OSError` out,
+    so every caller above this line reports a refusal in the house style
+    instead of a traceback.
+    """
     path = baseline_path(project, data["name"])
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    textio.write_text(path, format_baseline(data))
+    rel = os.path.relpath(path, project.root).replace("\\", "/")
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        textio.write_text(path, format_baseline(data))
+    except OSError as exc:
+        raise BaselineUnwritable(rel, exc) from exc
     return path
 
 
@@ -411,7 +441,31 @@ def migrate_hash_format(project: Project, baseline: Baseline, write: bool = True
         if baseline.gate is not None:
             data["gate"] = baseline.gate
         data["items"] = dict(sorted(baseline.items.items()))
-        _save_baseline_file(project, data)
+        try:
+            _save_baseline_file(project, data)
+        except BaselineUnwritable as exc:
+            # A migration is a rewrite of a file that already holds a correct
+            # baseline -- the entries above were carried in memory and the
+            # comparison this feeds is computed from them, so nothing is lost
+            # but the on-disk format bump, which the next writable command
+            # rediscovers. Warn and keep the report; refusing here would take
+            # `audit` and `former-ids propose` down over a rewrite neither of
+            # them needs in order to answer its question.
+            #
+            # Once per file, not once per call: `audit` diffs the latest
+            # revision *and* the latest release, which are routinely the same
+            # file, and the second warning would be the same sentence twice.
+            if exc.rel not in project.load_writes.blocked:
+                project.load_writes.blocked.append(exc.rel)
+                project.warn(
+                    model.read_only_refusal(
+                        "this baseline keeps its older stored-hash format on "
+                        "disk; the comparison below is unaffected"
+                    ),
+                    file=exc.rel,
+                    line=1,
+                )
+            return report
         report.changed = True
 
     return report
@@ -631,13 +685,18 @@ def evaluate_gate(project: Project, kind: str) -> list[GateRuleResult]:
 class StampOutcome:
     kind: str
     name: str
-    status: str  # "stamped" | "unchanged" | "conflict" | "gate_failed"
+    status: str  # "stamped" | "unchanged" | "conflict" | "gate_failed" | "unwritable"
     path: str = ""
     item_count: int = 0
     stamped_at: str = ""
     stamped_by: str = ""
     gate_results: list[GateRuleResult] = field(default_factory=list)
     conflict_detail: str = ""
+    # Project-relative baseline path, set only for status="unwritable": the
+    # file the filesystem would not accept. The CLI turns it into a refusal
+    # naming the file; nothing was stamped, so there is no `stamped_at` to
+    # report either.
+    refusal: str = ""
     # Older-format entries the existing baseline carries that the hash-format
     # migration could not verify (migrate_hash_format's `uncomparable`). The
     # stamp path never silently drops or silently re-stamps them: they keep
@@ -731,7 +790,20 @@ def stamp(project: Project, kind: str, name: str, write: bool = True) -> StampOu
             path=baseline_path(project, name), item_count=len(items_map),
             stamped_at=stamped_at, stamped_by=stamped_by, gate_results=gate_results,
         )
-    path = _save_baseline_file(project, data)
+    try:
+        path = _save_baseline_file(project, data)
+    except BaselineUnwritable as exc:
+        # Not a degraded outcome: `revision`/`release` exist to write this
+        # one file, and the whole value of the command is that a stamp which
+        # happened is durable and named. A stamp that did not happen reported
+        # as one that did is the exact failure this refuses to commit -- so
+        # the caller is told the path and refuses rather than printing
+        # "stamped".
+        return StampOutcome(
+            kind=kind, name=name, status="unwritable",
+            path=baseline_path(project, name), item_count=len(items_map),
+            gate_results=gate_results, refusal=exc.rel,
+        )
     return StampOutcome(
         kind=kind, name=name, status="stamped", path=path, item_count=len(items_map),
         stamped_at=stamped_at, stamped_by=stamped_by, gate_results=gate_results,

@@ -761,6 +761,84 @@ def test_revise_carries_seal_hash_forward(log_project):
     assert project2.seal_violations == []
 
 
+def test_revise_refuses_a_seal_it_cannot_carry_forward(log_project):
+    """The same rename, on a tree whose `items/` is writable and whose
+    `.refdes/` is not.
+
+    This is an explicit write the user asked for, so it does not get the
+    tolerance `build` gets, and the asymmetry is not cosmetic. The carried
+    hash is the *only* record that the rename was not an edit to a sealed
+    entry: without it, the next `build` reports every entry this operation
+    just rewrote as "modified since it was sealed" -- an append-only ERROR
+    about something the user did deliberately and refdes itself performed.
+
+    So the run must refuse naming the seal file, exit non-zero, claim no
+    board as carried forward, and leave the tree exactly as it found it.
+    The rollback matters as much as the refusal: a renamed item with a stale
+    seal is the failure being prevented, so a "refused" that still renamed
+    things would have committed it on the way out.
+    """
+    root = log_project
+    project = load_project(config_path=str(root / "refdes-project.yaml"))
+    parse.load_items(project)
+    build_mod.build(project, seal_write=True)
+    assert not project.errors
+    seal_file = root / ".refdes" / "log-seal.yaml"
+    sealed_before = seal_file.read_text(encoding="utf-8")
+    item_before = (root / "items" / "log.yaml").read_text(encoding="utf-8")
+
+    # The transaction's rollback restores the item files, the seal files, and
+    # `config_path` -- the last because `mutate_config` is documented and
+    # used only for `standard upgrade`'s own `standard.version` bump, which
+    # writes that one file. `_bump_summary_field_to_note` stands in for "the
+    # accompanying schema edit" and edits `refdes-schema.yaml`, which no
+    # rollback has ever owned, so this test undoes its own -- the same way it
+    # restores the permissions below.
+    schema_file = root / "refdes-schema.yaml"
+    schema_before = schema_file.read_text(encoding="utf-8")
+
+    _chmod_tree_refdes(root)
+    try:
+        mapping = revise.Mapping(fields={"log": {"summary": "note"}})
+        result = revise.apply(
+            str(root), mapping, mutate_config=_bump_summary_field_to_note
+        )
+    finally:
+        _chmod_tree_refdes(root, writable=True)
+        schema_file.write_text(schema_before, encoding="utf-8")
+
+    assert result.ok is False
+    assert any(".refdes/log-seal.yaml" in e for e in result.errors), result.errors
+    assert any("read-only tree?" in e for e in result.errors), result.errors
+    # Never the claim that reads as a carry-forward that happened.
+    assert result.seals_updated == []
+    assert seal_file.read_text(encoding="utf-8") == sealed_before
+    # Rolled back: the item was not renamed, so nothing downstream of this
+    # operation can see a rename that was not recorded anywhere.
+    assert (root / "items" / "log.yaml").read_text(encoding="utf-8") == item_before
+    # And the project is still the clean build it was before the attempt.
+    project2 = load_project(config_path=str(root / "refdes-project.yaml"))
+    parse.load_items(project2)
+    build_mod.build(project2, seal_write=False, reseal=False, accept_board_move=False)
+    assert not project2.errors
+    assert project2.seal_violations == []
+
+
+def _chmod_tree_refdes(root, writable: bool = False) -> None:
+    """Flip write permission over `<root>/.refdes` only -- files included, and
+    every directory under it: a read-only *directory* still permits writing
+    through to the files inside it, so both bits matter. Always restored by
+    the caller, or pytest cannot clean the temporary directory up."""
+    mode_file, mode_dir = (0o644, 0o755) if writable else (0o444, 0o555)
+    refdes = root / ".refdes"
+    for dirpath, dirnames, filenames in os.walk(refdes):
+        for name in filenames:
+            os.chmod(os.path.join(dirpath, name), mode_file)
+        for name in dirnames:
+            os.chmod(os.path.join(dirpath, name), mode_dir)
+    os.chmod(refdes, mode_dir)
+
+
 def test_plain_revise_ignores_a_baselines_missing_standard_field(label_project):
     """Plain revise (no standard_transition -- there's no chain, so no
     ambiguity about which baseline started where) matches purely by hash:

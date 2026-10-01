@@ -694,3 +694,369 @@ def test_the_duplicate_key_run_makes_no_key_claim_it_cannot_keep(tmp_path, capsy
     assert [item["id"] for item in payload["items"]] == ["REQ-001", "REQ-003"]
     assert [item["key"] for item in payload["items"]] == [None, None]
     assert (tmp_path / "items" / "r.yaml").read_text(encoding="utf-8") == MERGED_ITEMS
+
+
+# ------------------- writes that are the command's own job (run-3 N1)
+#
+# In-prog-logs/user-sim-release-gate-run3.md §3 N1: run 2's BUG 2 fix covered
+# the two *load-time* sites, and `build`/`revision`/`release` write further
+# down -- the append-only seal file, `.refdes/baselines/<name>.yaml`, and the
+# rendered site under `site.out`. Each died with a raw PermissionError
+# traceback, before any output, exit 1 -- indistinguishable from a broken
+# project. Same three shapes as the tests above, one command at a time.
+
+STAMP_SCHEMA = (
+    "site: { title: T, out: _site }\n"
+    "link_types:\n"
+    "  verifies: { inverse: verified_by, label: Verifies }\n"
+    "types:\n"
+    "  requirement:\n"
+    "    prefix: REQ\n"
+    "    coverable: true\n"
+    "    fields:\n"
+    "      title: { type: text, required: true }\n"
+    "      status: { type: enum, choices: [draft, active], default: active }\n"
+    "  test:\n"
+    "    prefix: TST\n"
+    "    verifying_statuses: [passing]\n"
+    "    fields:\n"
+    "      title: { type: text, required: true }\n"
+    "      status: { type: enum, choices: [planned, passing], default: planned }\n"
+    "    links:\n"
+    "      verifies: [requirement]\n"
+    "  log:\n"
+    "    prefix: LOG\n"
+    "    append_only: true\n"
+    "    fields:\n"
+    "      title: { type: text, required: true }\n"
+)
+
+STAMP_ITEMS = (
+    "defaults: { type: requirement }\n"
+    "items:\n"
+    "  - id: REQ-001\n    title: Covered requirement.\n"
+)
+
+STAMP_TEST = (
+    "defaults: { type: test }\n"
+    "items:\n"
+    "  - id: TST-001\n    title: Verifies it.\n    status: passing\n"
+    "    verifies: [REQ-001]\n"
+)
+
+
+def _stamp_project(tmp_path, out: str = "_site") -> str:
+    """A project that is green for every command below, with one append-only
+    entry so `build` has a seal to write and nothing else to complain about.
+
+    `release` runs its whole gate *before* it reaches the baseline write --
+    that is the order `stamp()` uses -- so the fixture has to be releasable
+    or the test would be asserting on a gate failure: hence the active
+    requirement, the passing test that covers it, and no citations.
+    """
+    write_project_config(
+        tmp_path, STAMP_SCHEMA.replace("out: _site", f"out: {out}")
+    )
+    items = tmp_path / "items"
+    items.mkdir()
+    (items / "r.yaml").write_text(STAMP_ITEMS, encoding="utf-8")
+    (items / "t.yaml").write_text(STAMP_TEST, encoding="utf-8")
+    (items / "log.yaml").write_text(
+        "defaults: { type: log }\nitems:\n  - id: LOG-001\n    title: An entry.\n",
+        encoding="utf-8",
+    )
+    return str(tmp_path / "refdes-project.yaml")
+
+
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="needs POSIX permission bits: Windows maps 0o444 to the read-only "
+    "attribute, which refuses an overwrite but not a new file, so the "
+    "fresh-checkout half of each shape cannot be produced there",
+)
+def test_build_refuses_a_read_only_tree_instead_of_crashing(tmp_path, capsys):
+    """The whole tree read-only, on a project `build` would otherwise seal.
+
+    Two writes are refused here and they are refused differently, because
+    they are different in kind. The seal file degrades: `build` has a site to
+    render afterwards, so the entries go unsealed *and say so* -- an error
+    naming the file, which is what makes the run exit non-zero and stops it
+    reading as a successful seal (`refdes check --help` is explicit that an
+    unbuilt entry has no append-only protection at all). The site output is
+    `build`'s own product, the one thing the command is for, so there is
+    nothing to degrade to: refuse, name the path, exit 2.
+    """
+    cfg = _stamp_project(tmp_path)
+    log_before = (tmp_path / "items" / "log.yaml").read_text(encoding="utf-8")
+    _chmod_tree(tmp_path, False)
+    try:
+        code = cli_mod.main(["-c", cfg, "build"])
+    finally:
+        _chmod_tree(tmp_path, True)
+
+    captured = capsys.readouterr()
+    out = captured.out + captured.err
+    assert "Traceback" not in out
+    # The seal half: named, error-level, and honest about what it cost.
+    assert ".refdes/log-seal.yaml" in out
+    assert "are NOT sealed" in out
+    assert "read-only tree?" in out
+    # The render half: a refusal naming the destination.
+    assert "error: cannot write the site to" in out
+    assert "_site" in out
+    assert "site written to" not in out
+    # 2, not 1: nothing is wrong with the project (see
+    # docs/cli-reference.md's exit-code table).
+    assert code == 2
+    assert not (tmp_path / ".refdes" / "log-seal.yaml").exists()
+    assert (tmp_path / "items" / "log.yaml").read_text(encoding="utf-8") == log_before
+
+
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="needs POSIX directory permission bits; see the test above",
+)
+def test_build_renders_the_site_when_only_refdes_is_read_only(tmp_path, capsys):
+    """The other half of the same condition: `items/` and the site output are
+    writable, only `.refdes/` is not. This is the shape a CI checkout
+    actually has when the site goes somewhere else, and it is the one where
+    the two refusals must not be confused -- the render succeeds and says so,
+    the seal does not and says that too.
+
+    `site.out` points outside the project entirely, so the assertion that the
+    site really landed is about a directory the read-only tree does not own.
+    """
+    site = tmp_path / "site-out"
+    site.mkdir()
+    cfg = _stamp_project(tmp_path, out=str(site))
+    refdes = tmp_path / ".refdes"
+    _chmod_tree(tmp_path / "items", True)
+    refdes.mkdir()
+    _chmod_tree(refdes, False)
+    try:
+        code = cli_mod.main(["-c", cfg, "build"])
+    finally:
+        _chmod_tree(refdes, True)
+
+    captured = capsys.readouterr()
+    out = captured.out + captured.err
+    assert "Traceback" not in out
+    assert ".refdes/log-seal.yaml" in out and "are NOT sealed" in out
+    assert f"site written to {site}" in out
+    assert "error: cannot write the site to" not in out
+    # Errors found (1), not a refusal: the render is what the command was
+    # asked for and it happened.
+    assert code == 1
+    assert (site / "index.html").is_file()
+    assert not (refdes / "log-seal.yaml").exists()
+
+
+def _stamp_command_refuses_read_only(tmp_path, capsys, argv, rel: str) -> int:
+    """`revision`/`release` on a read-only tree: refuse, name the file, and
+    never print the word that would read as a stamp that happened."""
+    cfg = _stamp_project(tmp_path)
+    _chmod_tree(tmp_path, False)
+    try:
+        code = cli_mod.main(["-c", cfg, *argv])
+    finally:
+        _chmod_tree(tmp_path, True)
+
+    captured = capsys.readouterr()
+    out = captured.out + captured.err
+    assert "Traceback" not in out
+    assert f"error: cannot write {rel}" in out
+    assert "read-only tree?" in out
+    assert "was not stamped" in out
+    assert "stamped:" not in out
+    assert not (tmp_path / rel).exists()
+    return code
+
+
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="needs POSIX directory permission bits; see the test above",
+)
+def test_revision_refuses_a_read_only_tree_instead_of_crashing(tmp_path, capsys):
+    assert _stamp_command_refuses_read_only(
+        tmp_path, capsys, ["revision", "rev-a"], ".refdes/baselines/rev-a.yaml"
+    ) == 2
+
+
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="needs POSIX directory permission bits; see the test above",
+)
+def test_release_refuses_a_read_only_tree_instead_of_crashing(tmp_path, capsys):
+    assert _stamp_command_refuses_read_only(
+        tmp_path, capsys, ["release", "rel-a"], ".refdes/baselines/rel-a.yaml"
+    ) == 2
+
+
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="needs POSIX directory permission bits; see the test above",
+)
+def test_a_refused_stamp_leaves_no_baseline_for_a_later_run_to_mistake(
+    tmp_path, capsys
+):
+    """The refusal is only worth anything if the next run behaves as though
+    nothing was stamped. Making the tree writable again and re-running must
+    stamp for real -- an empty or half-written file here would turn into a
+    'conflict' or a bogus 'unchanged' on the retry, which is the failure a
+    silently-truncated write causes."""
+    cfg = _stamp_project(tmp_path)
+    _chmod_tree(tmp_path, False)
+    try:
+        assert cli_mod.main(["-c", cfg, "revision", "rev-a"]) == 2
+    finally:
+        _chmod_tree(tmp_path, True)
+    capsys.readouterr()
+
+    assert cli_mod.main(["-c", cfg, "revision", "rev-a"]) == 0
+    assert "stamped:" in capsys.readouterr().out
+    assert (tmp_path / ".refdes" / "baselines" / "rev-a.yaml").is_file()
+
+
+@pytest.mark.parametrize("argv", [["revision", "rev-a"], ["release", "rel-a"]])
+def test_no_write_stamps_nothing_on_a_read_only_tree_too(tmp_path, capsys, argv):
+    """`--no-write` is unchanged by any of this: it never reaches the write,
+    so it reports what it would stamp and exits 0 whether or not the tree
+    would have taken it."""
+    cfg = _stamp_project(tmp_path)
+    _chmod_tree(tmp_path, False)
+    try:
+        code = cli_mod.main(["--no-write", "-c", cfg, *argv])
+    finally:
+        _chmod_tree(tmp_path, True)
+
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "not stamped (--no-write): would stamp" in out
+    assert "cannot write" not in out
+    assert not (tmp_path / ".refdes" / "baselines").exists()
+
+
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="needs POSIX directory permission bits; see the test above",
+)
+def test_build_reports_a_refused_board_manifest_too(tmp_path, capsys):
+    """The fourth `.refdes/` write `build` makes, which the report did not
+    name because it only bites a project with a `boards:` registry: the
+    membership manifest. Reproduced on main the same way as the seal file --
+    `PermissionError` out of `boards.save_manifest`, exit 1, before any
+    output.
+
+    Same severity for the same reason: an unrecorded membership means the
+    *next* build reports a board move that was already accepted as new again,
+    so the run is not a clean build and must not say it is.
+    """
+    site = tmp_path / "site-out"
+    site.mkdir()
+    cfg = _stamp_project(tmp_path, out=str(site))
+    with open(cfg, "a", encoding="utf-8") as fh:
+        fh.write('boards:\n  power:\n    label: "Board A"\n')
+    # The manifest is only written when membership changed, so at least one
+    # item has to resolve onto the registered board.
+    board_items = tmp_path / "items" / "power"
+    board_items.mkdir()
+    (board_items / "r.yaml").write_text(STAMP_ITEMS, encoding="utf-8")
+    (tmp_path / "items" / "r.yaml").unlink()
+    (board_items / "t.yaml").write_text(STAMP_TEST, encoding="utf-8")
+    (tmp_path / "items" / "t.yaml").unlink()
+    refdes = tmp_path / ".refdes"
+    refdes.mkdir()
+    _chmod_tree(refdes, False)
+    try:
+        code = cli_mod.main(["-c", cfg, "build"])
+    finally:
+        _chmod_tree(refdes, True)
+
+    captured = capsys.readouterr()
+    out = captured.out + captured.err
+    assert "Traceback" not in out
+    assert ".refdes/boards.yaml" in out
+    assert "membership was NOT recorded" in out
+    assert "read-only tree?" in out
+    assert code == 1
+    assert (site / "index.html").is_file()
+
+
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="needs POSIX directory permission bits; see the test above",
+)
+def test_audit_names_a_baseline_it_could_not_rewrite(tmp_path, capsys):
+    """`audit` diffs against a baseline and prints no diagnostics of its own,
+    so a write it could not make has no channel to travel down -- the one
+    refusal in the tool that would have been silently dropped. It names the
+    file instead, and still answers its own question: the comparison is
+    computed in memory, so the diff below the notice is correct.
+
+    Needs a baseline older than the current hash definition, since that is
+    the only write `audit` attempts.
+    """
+    cfg = _stamp_project(tmp_path)
+    assert cli_mod.main(["-c", cfg, "revision", "rev-a"]) == 0
+    capsys.readouterr()
+    baseline = tmp_path / ".refdes" / "baselines" / "rev-a.yaml"
+    baseline.write_text(
+        re.sub(r", hash_format: \d+", "", baseline.read_text(encoding="utf-8")),
+        encoding="utf-8",
+    )
+    _chmod_tree(tmp_path / ".refdes", False)
+    try:
+        code = cli_mod.main(["-c", cfg, "audit"])
+    finally:
+        _chmod_tree(tmp_path / ".refdes", True)
+
+    out = capsys.readouterr().out
+    assert "Traceback" not in out
+    assert "load could not write .refdes/baselines/rev-a.yaml" in out
+    # Once per file, not once per comparison -- `audit` diffs the latest
+    # revision and the latest release, which are the same file here.
+    assert out.count(".refdes/baselines/rev-a.yaml") == 1
+    assert "3 items audited" in out
+    assert code == 0
+
+
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="needs POSIX directory permission bits; see the test above",
+)
+def test_history_capture_refuses_a_read_only_tree_instead_of_crashing(
+    tmp_path, capsys
+):
+    """A fourth command with a `.refdes/` write of its own, found by sweeping
+    every command rather than by reading the report: `history capture`.
+
+    It refuses under `--no-write` already, so this is not a `--no-write`
+    question -- it is the same goal statement ("no command prints a traceback
+    because a destination isn't writable") in a command this task did not name.
+    The refusal rides the existing `HistoryError` channel every caller already
+    prints as `error: <exc>`.
+
+    The content-addressed filename in the message is asserted by prefix, not
+    spelled out: the digest is a function of the item's content and would make
+    this test a change-detector for unrelated edits.
+    """
+    cfg = _stamp_project(tmp_path)
+    # The load mints keys, so this needs a writable tree first -- the point is
+    # the *capture's* write, not the load's.
+    assert cli_mod.main(["-c", cfg, "check"]) == 0
+    capsys.readouterr()
+    _chmod_tree(tmp_path, False)
+    try:
+        code = cli_mod.main(["-c", cfg, "history", "capture", "REQ-001"])
+    finally:
+        _chmod_tree(tmp_path, True)
+
+    captured = capsys.readouterr()
+    out = captured.out + captured.err
+    assert "Traceback" not in out
+    assert "error: cannot write .refdes/history/objects/" in out
+    assert "read-only tree?" in out
+    assert "nothing was captured" in out
+    assert "captured REQ-001" not in out
+    assert code == 1
+    assert not (tmp_path / ".refdes" / "history").exists()

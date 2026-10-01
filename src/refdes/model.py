@@ -686,6 +686,28 @@ class BlockedChain:
     stale: bool
 
 
+#: The stem of the one sentence this codebase reports a refused write with.
+#: Every site that tries a write and is stopped by the filesystem says it the
+#: same way -- the load-time pair (`schema_json.write_schema`,
+#: `revise._refuse_unwritable`) and the deeper build-time ones
+#: (`seal.verify`, `boards.verify`) alike -- because a CI log filter is written
+#: against the string, and two spellings of one condition is how a user grepping
+#: for one misses the other (user-sim run 3, finding N2).
+READ_ONLY_REFUSAL = "could not write this file (read-only tree?)"
+
+
+def read_only_refusal(consequence: str = "") -> str:
+    """`READ_ONLY_REFUSAL`, plus what the refused write was for.
+
+    `consequence` is what the caller knows that this sentence does not: which
+    record did not land, and what is therefore unprotected. Kept as a separate
+    argument rather than baked into the stem so that a site with nothing to add
+    gets the load-time wording byte for byte.
+    """
+    stem = READ_ONLY_REFUSAL if not consequence else f"{READ_ONLY_REFUSAL} -- {consequence}"
+    return f"{stem}; run with --no-write to silence this"
+
+
 @dataclass
 class LoadWrites:
     """What this run's own load wrote into the source tree, as a side effect
