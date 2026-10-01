@@ -2,7 +2,8 @@
 
 Local-only is a boundary, not permission to skip checks:
 
-* the server binds IPv4 `127.0.0.1` on an ephemeral port only;
+* the server binds IPv4 `127.0.0.1` only -- never a host argument -- on an
+  ephemeral port by default, or the one `serve --port` asked for;
 * every request's `Host` must be exactly `127.0.0.1:<port>` or
   `localhost:<port>` (blocks DNS rebinding that reaches loopback);
 * a per-launch token of 256 random bits gates reads *and* writes -- `/api/`

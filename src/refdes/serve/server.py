@@ -19,11 +19,14 @@ are found by segment-checked lookup below fixed roots only.
 
 from __future__ import annotations
 
+import errno
 import html as html_mod
 import json
 import mimetypes
 import os
 import re
+import stat
+import tempfile
 import threading
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -264,6 +267,169 @@ class _Server(ThreadingHTTPServer):
     app: EditorApp
 
 
+class ServeStartupError(RuntimeError):
+    """`refdes serve` could not start as asked: the `--port` it was given is not
+    free, or its `--token-file` cannot be written. `cmd_serve` turns it into one
+    `error:` line and exit 2 -- a startup refusal is a usage problem, not a
+    project error, and never a traceback."""
+
+
+def _bind_failure_message(port: int, exc: OSError) -> str:
+    """One line naming the port, why it could not be bound, and what to do.
+
+    `allow_reuse_address` stays `False` (see `_Server`), so a port a launch gave
+    up moments ago can still report busy while its accepted sockets finish
+    closing. Saying that beats letting `Address already in use` read as a crash.
+    """
+    reason = exc.strerror or str(exc)
+    if exc.errno == errno.EACCES:
+        reason = f"{reason} (ports below 1024 need elevated privileges)"
+    elif exc.errno == errno.EADDRINUSE:
+        reason = (
+            f"{reason} -- something else holds it, or a launch that stopped a "
+            "moment ago still has sockets closing on it"
+        )
+    return (
+        f"cannot listen on {security.LOOPBACK_ADDRESS}:{port}: {reason}; "
+        "choose another --port, or drop --port to get an ephemeral one"
+    )
+
+
+# A launch file's entire content: the URL, one line, newline-terminated. The
+# read is capped because a 40 MB file sitting at that path is precisely what
+# --token-file must neither slurp nor overwrite.
+_LAUNCH_FILE_CAP = 256
+_LAUNCH_FILE_CONTENT_RE = re.compile(
+    r"http://127\.0\.0\.1:\d{1,5}/\?token=[A-Za-z0-9_-]{16,}\n"
+)
+
+
+def _is_refdes_launch_file(path: str) -> bool:
+    """True if `path` is a regular file holding exactly one launch URL.
+
+    That is the only thing `--token-file` will overwrite: the stale file a
+    hard-killed launch left behind, yes; a project file reached by a mistype or
+    a tab-completion slip, no. `lstat` plus a capped read, so neither a symlink
+    nor a fifo can hang it or balloon it.
+    """
+    try:
+        if not stat.S_ISREG(os.lstat(path).st_mode):
+            return False
+        fd = os.open(path, os.O_RDONLY)
+    except OSError:
+        return False
+    try:
+        data = os.read(fd, _LAUNCH_FILE_CAP + 1)
+    except OSError:
+        return False
+    finally:
+        os.close(fd)
+    if len(data) > _LAUNCH_FILE_CAP:
+        return False
+    return _LAUNCH_FILE_CONTENT_RE.fullmatch(data.decode("utf-8", "replace")) is not None
+
+
+def _unlink_quietly(path: str) -> None:
+    try:
+        os.unlink(path)
+    except OSError:
+        pass
+
+
+def write_launch_file(path: str, url: str) -> None:
+    """Write this launch's URL to `path` for scripted clients (`--token-file`).
+
+    The file holds the whole launch URL, not the bare token: the URL carries the
+    port too, so it works with an ephemeral port as well as a pinned one, and it
+    is exactly the string `editors/vscode/serveClient.js` `parseLaunchUrl()`
+    already parses -- one format, one parser.
+
+    Three properties, because this is a bearer credential written to a path that
+    is easy to mistype:
+
+    * **Never clobbers.** An existing path is overwritten only when it is
+      already a refdes launch file. Anything else is a refusal and `serve`
+      does not start -- `--token-file refdes-project.yaml` loses nothing. That
+      is a pre-check, not a lock: a writer that swaps a different file in
+      inside the window between the check and the rename would be clobbered --
+      but it already needs write access to that directory, which is the same
+      access that lets it read the token, so the window buys an attacker
+      nothing it did not have.
+    * **Never follows a symlink.** Refused before anything is created; and
+      because the bytes land via `os.replace`, the worst a race could do is
+      replace the link itself, never write through it into its target.
+    * **Atomic.** Written to a temp file in the same directory, drained to the
+      last byte, then renamed onto `path`, so a reader never sees an empty or
+      half-written credential. Every failure path unlinks that temp, so a
+      refusal leaves nothing but the file it refused to touch; only a kill
+      inside the write window can leave a `.refdes-launch-*.tmp` behind, and it
+      holds at most a partial URL.
+
+    `tempfile.mkstemp` creates the temp 0600 on every platform, and the mode
+    survives the rename, so a pre-existing looser file is tightened all the
+    same. The `fchmod` is belt-and-braces and guarded: `os.fchmod` does not
+    exist on Windows before 3.13, and calling it unguarded there raised
+    `AttributeError` -- not an `OSError`, so nothing caught it -- and the launch
+    died with a traceback after the file had already been created empty (Windows
+    CI run 36686276948). Windows mode bits are advisory anyway: the file
+    inherits the directory's ACLs, which is why the docs say where to put it.
+    """
+    if os.path.islink(path):
+        raise ServeStartupError(f"cannot write --token-file {path}: it is a symlink")
+    if os.path.isdir(path):
+        # Checked ahead of the generic refusal, and after the symlink one because
+        # isdir follows links: "choose another path, or delete that one first" is
+        # not advice to give about a directory.
+        raise ServeStartupError(f"cannot write --token-file {path}: it is a directory")
+    if os.path.lexists(path) and not _is_refdes_launch_file(path):
+        raise ServeStartupError(
+            f"cannot write --token-file {path}: it already exists and is not a "
+            "refdes serve launch file, so it will not be overwritten -- choose "
+            "another path, or delete that one first"
+        )
+    try:
+        fd, tmp = tempfile.mkstemp(
+            dir=os.path.dirname(os.path.abspath(path)),
+            prefix=".refdes-launch-",
+            suffix=".tmp",
+        )
+    except OSError as exc:
+        raise ServeStartupError(
+            f"cannot write --token-file {path}: {exc.strerror or exc}"
+        ) from exc
+    payload = f"{url}\n".encode("utf-8")
+    try:
+        try:
+            if hasattr(os, "fchmod"):
+                os.fchmod(fd, 0o600)
+            # `os.write` is allowed to write short -- a signal, a disk filling
+            # up -- and a short write would land a malformed URL on `path`
+            # under the "whole or not at all" promise, so drain the descriptor
+            # to the last byte before the rename.
+            written = 0
+            while written < len(payload):
+                count = os.write(fd, payload[written:])
+                if count <= 0:
+                    raise OSError(f"only {written} of {len(payload)} bytes written")
+                written += count
+        finally:
+            os.close(fd)
+    except OSError as exc:
+        # The temp is ours and the rename never happened, so it goes: a failed
+        # launch must not litter the directory of a file it refused to write.
+        _unlink_quietly(tmp)
+        raise ServeStartupError(
+            f"cannot write --token-file {path}: {exc.strerror or exc}"
+        ) from exc
+    try:
+        os.replace(tmp, path)
+    except OSError as exc:
+        _unlink_quietly(tmp)
+        raise ServeStartupError(
+            f"cannot write --token-file {path}: {exc.strerror or exc}"
+        ) from exc
+
+
 class EditorApp:
     """One project, one process: the loaded state, the preview, the listener."""
 
@@ -273,20 +439,34 @@ class EditorApp:
         temp_dir: str | None = None,
         poll_interval: float = 1.0,
         read_only: bool = False,
+        port: int = 0,
+        token_file: str | None = None,
     ):
         self.token = security.new_token()
         self.read_only = read_only
+        # Set only once the file exists, so a failed launch never unlinks a path
+        # it did not create (--token-file pointing at something precious).
+        self.token_file: str | None = None
         self.preview = PreviewManager(temp_dir)
         try:
             self.state = ProjectState(config_path, self.preview)
             self.state.load()
-            # IPv4 loopback only, ephemeral port (0): never a host argument.
-            self.httpd = _Server((security.LOOPBACK_ADDRESS, 0), _Handler)
+            # IPv4 loopback only: never a host argument. Port 0 is the OS's
+            # ephemeral choice, the default and the long-standing behaviour;
+            # `port` pins the one `--port` asked for (F8).
+            try:
+                self.httpd = _Server((security.LOOPBACK_ADDRESS, port), _Handler)
+            except OSError as exc:
+                raise ServeStartupError(_bind_failure_message(port, exc)) from exc
+            self.port: int = self.httpd.server_address[1]
+            if token_file is not None:
+                write_launch_file(token_file, self.launch_url)
+                self.token_file = token_file
         except BaseException:
+            self._remove_token_file()
             self.preview.close()
             raise
         self.httpd.app = self
-        self.port: int = self.httpd.server_address[1]
         self.poller = Poller(self.state, interval=poll_interval)
         self._thread: threading.Thread | None = None
 
@@ -312,6 +492,20 @@ class EditorApp:
             self._thread.join(timeout=5)
         self.httpd.server_close()
         self.preview.close()
+        self._remove_token_file()
+
+    def _remove_token_file(self) -> None:
+        """The token dies with its launch, so the file that carried it goes too.
+
+        A hard kill leaves it behind holding a token that authenticates nothing
+        (the next launch mints a new one), and `write_launch_file` rewrites a
+        file it recognises as its own, so a stale file never blocks re-launching
+        on the same path -- anything else at that path is a refusal instead.
+        """
+        if self.token_file is None:
+            return
+        path, self.token_file = self.token_file, None
+        _unlink_quietly(path)  # already gone, or not ours to remove
 
 
 class _Handler(BaseHTTPRequestHandler):

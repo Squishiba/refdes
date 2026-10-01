@@ -424,3 +424,15 @@ def snapshot_tree(root) -> dict[str, str]:
 def path_of(url: str) -> str:
     parts = urlsplit(url)
     return parts.path + (("?" + parts.query) if parts.query else "")
+
+
+def free_port() -> int:
+    """An unused loopback port, from the OS, released for `serve --port` to claim.
+
+    Every such helper races -- anything can take the port in between -- and what
+    losing here produces is the busy-port error the tests assert, so a flake is
+    loud rather than a pass on the wrong port.
+    """
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.bind(("127.0.0.1", 0))
+        return probe.getsockname()[1]

@@ -1358,21 +1358,74 @@ and a browser editor. Loads exactly one project and prints a launch URL.
 | Option | Effect |
 |---|---|
 | `--no-open` | Print the launch URL but do not open a browser |
+| `--port PORT` | Bind this exact `127.0.0.1` port instead of an ephemeral one. A port something else already holds is a refusal — `error: cannot listen on 127.0.0.1:<port>: Address already in use …`, exit `2` — never a silent fallback to some other port. `PORT` is 1–65535; anything else is a usage error and exit `2`. Below 1024 it needs elevated privileges |
+| `--token-file PATH` | Write this launch's URL — which carries the launch token — to `PATH`, so a script reads the credential from a file instead of scraping stdout. Written atomically, owner-only (`0600`), never written through a symlink, and only ever over a previous launch file of its own — anything else at that path is a refusal and exit `2`. Removed when `serve` stops cleanly |
 
 ```bash
 refdes serve
 refdes serve --no-open
+refdes serve --no-open --port 8731 --token-file /tmp/refdes-launch.txt
 ```
 
-- **Loopback only.** It binds `127.0.0.1` on an ephemeral port — there is no
-  `--host` and no remote mode. A request whose `Host` is anything but
-  `127.0.0.1:<port>` or `localhost:<port>` is refused.
+- **Loopback only.** It binds `127.0.0.1` — there is no `--host` and no remote
+  mode — on an ephemeral port, or the one `--port` names. A request whose `Host`
+  is anything but `127.0.0.1:<port>` or `localhost:<port>` is refused.
 - **A launch token gates everything.** The printed URL carries a random,
   per-launch token. Opening it sets a `SameSite=Strict` session cookie and
   redirects to the token-free `/preview/`; every `/api/` call — reads too —
   must send the token in an `X-Refdes-Token` header, and every write must also
   come from the server's own `Origin`. Keep the URL out of screenshots and
   shared terminals.
+- **Driving it from a script: `--port` and `--token-file`.** Both exist so
+  nothing has to parse the line `serve` prints.
+
+  ```bash
+  refdes serve --no-open --port 8731 --token-file /tmp/refdes-launch.txt &
+  until [ -s /tmp/refdes-launch.txt ]; do sleep 0.1; done
+  token=$(sed 's/.*token=//' /tmp/refdes-launch.txt)
+  curl -H "X-Refdes-Token: $token" http://127.0.0.1:8731/api/revision
+  ```
+
+  The file holds exactly the launch URL — one line, newline-terminated, the same
+  string the stdout line carries — not the bare token. The URL carries the port
+  too, so it is enough on its own even when you did not pass `--port`, and it is
+  the one shape the VS Code adapter's launch-URL parser already reads. Take the
+  token from its `?token=` part; it is urlsafe base64, 43 characters from
+  `A-Za-z0-9-_`. The `-` and `_` are the reason to read the file rather than
+  pattern-match a terminal: a `[0-9a-zA-Z-]+` scrape silently truncates at the
+  first `_`, and the 403 that follows looks like an auth bug.
+
+  The file is a **bearer credential** — whoever can read it can read and edit
+  the project for as long as this launch lives — so it lands `0600` whatever it
+  is written over. The bytes go to a temp file in the same directory, created
+  `0600`, and are renamed onto `PATH` in one step: a script polling for the file
+  never catches it empty or half-written, and a pre-existing world-readable file
+  is tightened rather than left that way. On Windows the mode bits are advisory
+  and the file inherits the directory's ACLs, so put it somewhere only your own
+  account can read.
+
+  Two things at that path are refused — one line on stderr, exit `2`, no launch,
+  and the path left exactly as it was. A **symlink**: never followed, and since
+  the bytes arrive by rename, even a race can only replace the link itself, never
+  write through it into its target. And **any file that is not already a refdes
+  launch file**: a file holding exactly one launch URL is this tool's own and may
+  be rewritten; anything else — a project file, an empty file, a directory — is
+  not, and `--token-file refdes-project.yaml` should cost you a launch, not a
+  project file. That rule is also what makes re-launching cheap after a hard
+  kill: the file is still there holding a token that authenticates nothing, and
+  the next launch recognises it as its own and rewrites it rather than refusing
+  to start.
+
+  Choose a path outside the project tree: a token file in the repo is a secret
+  waiting to be committed, and `--no-write` does not gate this write because it
+  is not project state.
+
+  `serve` removes the file when it stops on Ctrl+C. A hard kill cannot, which is
+  the stale file above.
+
+  Persisting the launch token is a deliberate exception, granted per launch to
+  the person who asked for the flag: `serve` writes the token nowhere unless
+  `--token-file` is given.
 - **The preview never touches `_site/`.** It is rendered into a directory under
   your OS temp directory, removed on Ctrl+C and pruned on a later launch if a
   crash left it behind. An "Editor" / "Edit this item" toolbar is added to the
