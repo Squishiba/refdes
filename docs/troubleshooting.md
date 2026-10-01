@@ -224,9 +224,10 @@ key was ever involved:
   `former_ids:` resolves *prose* references; a structured link still needs a
   live display id or key. Verified: recording `former_ids: [REQ-PWR-001]` onto
   the renamed item leaves this error exactly as it was.
-- `refdes revise` — maps `types:`/`fields:`/`links:`/`prefixes:`, not individual
-  ids, so it cannot rename a single item. It is the tool for a prefix-wide
-  rename, and it expands bare references *first* so they follow.
+- `refdes revise` — maps `types:`/`fields:`/`links:`/`prefixes:`/`citation_keys:`,
+  not individual ids, so it cannot rename a single item. It is the tool for a
+  prefix-wide rename, and it expands bare references *first* so they follow. An
+  `ids:` mapping handed to it is refused by name, with that pointed at here.
 
 **Remedy:** write the item's new display id into the reference. The next
 writable load expands it to `NEW-ID@key` and the build is clean.
@@ -341,6 +342,15 @@ Name mismatch, or the calc line that defines it failed — fix that error first.
 
 **`check against BND-THM-001, which declares no limit`**
 The target needs a `limit` field.
+
+**`check against 'BND-PWR-404', which does not exist`**
+The same three explanations as a dangling `satisfies`/`refines` above — typo,
+deleted item, or an item renamed while this `against:` was still bare — and the
+same remedy. `against:` names a target exactly as a structured link does: a
+`DISPLAY-ID@key` composite follows a rename, a bare one does not, and one
+writable `refdes check` is what makes it a composite. Write the item's new
+display id into `against:` and the next writable load expands it to
+`NEW-ID@key`.
 
 **`P_dens violates BND-THM-001: worst case 0.2366 W/in² vs <= 0.15 W/in^2`**
 Not a tool problem. The design does not meet the bound. Change the design,

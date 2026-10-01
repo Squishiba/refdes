@@ -299,6 +299,46 @@ def test_unknown_key_in_against_reports_layer3_no_display_id_fallback(tmp_path):
     assert "The label is not used as a fallback" in message
 
 
+def test_dangling_bare_against_names_the_remedy_a_hand_rename_needs(tmp_path):
+    """`against:` is the `checks:` counterpart of a structured link target --
+    same expansion, same refresh-on-rename rule, same resolve_link_target --
+    so the bare half of "resolves to nothing" owes it the same remedy. Before
+    this it emitted only `check against 'X', which does not exist`, which is a
+    dead end in exactly the case the structured-link message was fixed for: the
+    bound was renamed by hand while this `against:` was still bare, so it
+    carries no key to follow the rename, and none of `keys restore` (no key was
+    lost), `former-ids` (prose only) or `revise` (no single-item rename) reach
+    it. Verified by running the CLI: writing `BND-PWR-404` into `against:`
+    expands to `BND-PWR-404@key` and builds clean.
+
+    Same three pins as the structured-link twin in test_keys_links.py, plus one
+    more: the wording has to be about the `against:` entry rather than about a
+    "reference", because `against:` is a field entry inside `checks:`, not a
+    `links:` reference.
+    """
+    root = _checks_project(
+        tmp_path,
+        _ONE_BOUND,
+        "id: DEC-001\ntype: decision\ntitle: Uses the bound.\n"
+        "checks:\n  - value: I_total\n    against: BND-404\n",
+    )
+    project = _built(root)
+
+    assert len(project.errors) == 1
+    message = project.errors[0].message
+    assert message.startswith("check against 'BND-404', which does not exist")
+    assert "a typo, a deleted item, or an item renamed" in message
+    assert "write the item's new id here" in message
+    assert "docs/troubleshooting.md" not in message
+    assert "https://squishiba.github.io/refdes/troubleshooting.html#links" in message
+    # About the `against:`, not about a `links:` reference.
+    assert "`against:` was still bare" in message
+    # One or two sentences: the full stop that ends the message is the one
+    # before "See", so a second one would mean the prose grew back. This fires
+    # on every typo, so it has to stay short.
+    assert message.count(". ") <= 1
+
+
 # ----------------------------------------------------- evaluation through a composite
 
 

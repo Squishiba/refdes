@@ -747,8 +747,8 @@ also an exit 1 with the config left at the version it had.
 ## `refdes revise <mapping-file>`
 
 Rewrite project-local vocabulary — type names, field names (scoped per
-type), link verb names, id prefixes — across every item file in one
-operation, from a hand-written mapping:
+type), link verb names, id prefixes, citation-entry key names — across every
+item file in one operation, from a hand-written mapping:
 
 ```yaml
 # rename.yaml
@@ -761,7 +761,12 @@ links:
   refines: narrows
 prefixes:
   CON: BND
+citation_keys:     # renamed inside every citations-typed field's entries
+  url: path
 ```
+
+Those five sections are the whole vocabulary. **Any other top-level section is
+refused**, not ignored — see below.
 
 For a bundled standard's own version upgrade, use `refdes standard upgrade
 --to N` instead (above) — it needs no hand-written mapping. `revise` is
@@ -824,6 +829,23 @@ A mapping that doesn't apply to this project at all is not an error — it
 prints `nothing to do -- mapping doesn't apply to this project` and exits 0.
 On success, a rename that moved a stamped baseline's entries forward says so
 on a `baselines carried forward: rev-a` line.
+
+A mapping file with an **unrecognised top-level section** is a different thing
+from one that doesn't apply, and is refused before any project load, with the
+accepted sections listed and exit 2 — the same treatment as an unreadable file
+above. Ignoring it instead used to make `ids:` a silent no-op:
+
+```
+$ refdes revise rename.yaml
+error: rename.yaml: unknown top-level section 'ids'. A mapping file may have types:, fields:, links:, prefixes: or citation_keys:, and an unrecognised section is refused rather than ignored. To rename a single item, edit its `id:` by hand instead, after a writable `refdes check` has expanded references to composite form so they follow the rename -- see https://squishiba.github.io/refdes/troubleshooting.html#links.
+```
+
+`revise` has no single-item rename — it renames ids only as part of a
+`prefixes:` rename — and a file whose only section was `ids:` used to print
+`nothing to do -- mapping doesn't apply to this project` and exit 0 having
+renamed nothing. A file mixing a recognised section with an unrecognised one
+was worse: the recognised half was applied and the rest dropped without a word.
+Both now stop. `--dry-run` refuses identically.
 
 **A type or required-field rename cannot be done with `refdes revise` alone.**
 The rename only touches item files, never `refdes-schema.yaml`'s own
