@@ -64,7 +64,7 @@ def test_missing_kept_copies_rule(lifecycle_project, tmp_path):
     (root / ".refdes" / "citations.yaml").write_text(
         "citations:\n"
         "  https://example.com/datasheet.pdf:\n"
-        "    sha256: deadbeef\n"
+        "    sha256: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n"
         "    fetched: '2026-01-01T00:00:00Z'\n"
         "    kept_copy: true\n",
         encoding="utf-8",

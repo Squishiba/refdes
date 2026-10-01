@@ -92,6 +92,12 @@ def test_audit_reports_load_errors_and_exits_nonzero(tmp_path, capsys):
     assert "invalid YAML" in captured.err
     assert "items audited" in captured.out
     assert "1 items audited (1 local)" in captured.out
+    # Once. `audit` prints load errors after the load, and then prints the
+    # project-wide build diagnostics too (a file with no item id, which no
+    # section of the report can speak for) -- and a load error is still in
+    # `project.errors` at that point, so a list built without excluding them
+    # says every one of them twice.
+    assert captured.err.count("invalid YAML") == 1, captured.err
 
 
 def test_former_ids_propose_reports_load_errors(tmp_path, capsys):

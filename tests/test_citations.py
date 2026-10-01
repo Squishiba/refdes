@@ -197,7 +197,7 @@ def test_legacy_vendored_lockfile_key_is_an_error(citation_project):
         citation_project,
         {
             "https://example.com/ds.pdf": {
-                "sha256": "abc123",
+                "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                 "fetched": "2026-01-01T00:00:00Z",
                 "vendored": True,
             }
@@ -253,7 +253,7 @@ def test_hash_only_citation_is_ok_with_no_local_file_needed(citation_project):
     )
     _write_citation_lockfile(
         citation_project,
-        {"https://example.com/ds.pdf": {"sha256": "abc123", "fetched": "2026-01-01T00:00:00Z", "kept_copy": False}},
+        {"https://example.com/ds.pdf": {"sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "fetched": "2026-01-01T00:00:00Z", "kept_copy": False}},
     )
     project = _cite_build(citation_project)
     status = project.item_by_id("CMP-001").citations[0]
@@ -307,7 +307,7 @@ def test_cache_missing_and_hash_mismatch_are_unaffected_by_publish_datasheets(ci
     concern from whether the kept copy is trustworthy."""
     _write_citation_lockfile(
         citation_project,
-        {"https://example.com/ds.pdf": {"sha256": "deadbeef", "fetched": "2026-01-01T00:00:00Z", "kept_copy": True}},
+        {"https://example.com/ds.pdf": {"sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "fetched": "2026-01-01T00:00:00Z", "kept_copy": True}},
     )
     _enable_publish_datasheets(citation_project)
     project = _cite_build(citation_project)
@@ -319,7 +319,7 @@ def test_cache_missing_and_hash_mismatch_are_unaffected_by_publish_datasheets(ci
 def test_kept_copy_citation_cache_missing_when_blob_absent(citation_project):
     _write_citation_lockfile(
         citation_project,
-        {"https://example.com/ds.pdf": {"sha256": "deadbeef", "fetched": "2026-01-01T00:00:00Z", "kept_copy": True}},
+        {"https://example.com/ds.pdf": {"sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "fetched": "2026-01-01T00:00:00Z", "kept_copy": True}},
     )
     project = _cite_build(citation_project)
     status = project.item_by_id("CMP-001").citations[0]
@@ -379,7 +379,7 @@ def test_items_json_citations_hash_only_pinned_not_kept(citation_project):
     )
     _write_citation_lockfile(
         citation_project,
-        {"https://example.com/ds.pdf": {"sha256": "abc123", "fetched": "2026-01-01T00:00:00Z", "kept_copy": False}},
+        {"https://example.com/ds.pdf": {"sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "fetched": "2026-01-01T00:00:00Z", "kept_copy": False}},
     )
     project = _cite_build(citation_project)
     payload = render.items_json(project)
@@ -387,7 +387,7 @@ def test_items_json_citations_hash_only_pinned_not_kept(citation_project):
     assert status["state"] == "ok"
     assert status["pinned"] is True
     assert status["kept_copy"] is False
-    assert status["sha256"] == "abc123"
+    assert status["sha256"] == "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     assert status["fetched"] == "2026-01-01T00:00:00Z"
     assert status["local_path"] == ""
 
@@ -413,7 +413,7 @@ def test_items_json_citations_kept_copy(citation_project):
 def test_items_json_citations_cache_missing(citation_project):
     _write_citation_lockfile(
         citation_project,
-        {"https://example.com/ds.pdf": {"sha256": "deadbeef", "fetched": "2026-01-01T00:00:00Z", "kept_copy": True}},
+        {"https://example.com/ds.pdf": {"sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "fetched": "2026-01-01T00:00:00Z", "kept_copy": True}},
     )
     project = _cite_build(citation_project)
     payload = render.items_json(project)
@@ -421,7 +421,7 @@ def test_items_json_citations_cache_missing(citation_project):
     assert status["state"] == "cache_missing"
     assert status["pinned"] is True
     assert status["kept_copy"] is True
-    assert status["sha256"] == "deadbeef"
+    assert status["sha256"] == "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
     assert status["local_path"] == ""
 
 
@@ -486,7 +486,7 @@ def test_content_hash_unaffected_by_lockfile_changes(citation_project):
 
     _write_citation_lockfile(
         citation_project,
-        {"https://example.com/ds.pdf": {"sha256": "abc", "fetched": "2026-01-01T00:00:00Z", "kept_copy": False}},
+        {"https://example.com/ds.pdf": {"sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "fetched": "2026-01-01T00:00:00Z", "kept_copy": False}},
     )
     project2 = _cite_build(citation_project)
     hash2 = project2.item_by_id("CMP-001").content_hash
@@ -641,7 +641,7 @@ def test_refresh_writes_nothing(citation_project):
 def test_refresh_warns_on_fetch_failure_not_drift(citation_project):
     _write_citation_lockfile(
         citation_project,
-        {"https://example.com/ds.pdf": {"sha256": "abc", "fetched": "2026-01-01T00:00:00Z", "kept_copy": False}},
+        {"https://example.com/ds.pdf": {"sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "fetched": "2026-01-01T00:00:00Z", "kept_copy": False}},
     )
 
     def bad_fetcher(url):

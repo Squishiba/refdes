@@ -431,6 +431,64 @@ An ID collision across projects. Give each project its own prefix namespace.
 **`... has type 'interface', which this project's schema does not declare`**
 A warning. The item renders unvalidated. Add the type to your schema to silence it.
 
+## Citations
+
+**`.refdes/citations.yaml:N — unresolved merge conflict: '<<<<<<< HEAD' on line N`**
+Two branches both ran `refdes fetch` into this committed file and the merge was
+never finished by hand. Each side's `sha256` values are of bytes fetched on a
+different day, so neither side is wrong — which is what makes picking one
+silently risky. Take one with `git checkout --ours .refdes/citations.yaml` (or
+`--theirs`) and commit, or edit the file by hand. `refdes fetch --update`
+afterwards regenerates every entry, which re-downloads each cited document:
+refdes sends no conditional request, so re-pinning is never free.
+
+**`.refdes/citations.yaml:N — is not valid YAML: …`**
+The file does not parse. It is written only by `refdes fetch` and its own header
+says never to hand-edit it, so `git checkout -- .refdes/citations.yaml` is
+almost always the whole fix.
+
+**`.refdes/citations.yaml:N — citations: is a list, not a mapping of cited path
+to that path's record`**
+The shape a bad merge resolution leaves: one side's block pasted under the
+other's, or a hand edit that dropped the `path: record` nesting. Every key is a
+URL or a project-relative file; every value is what `refdes fetch` pinned for it.
+
+**`.refdes/citations.yaml:N — the entry for '…' has sha256 …, which is not a
+64-character lowercase hex digest`**
+`refdes fetch` records exactly a `hashlib.sha256().hexdigest()` and never edits
+it afterwards, so this line was changed by hand or resolved wrongly in a merge.
+Note the two shapes that look identical and are not: a *wrong but well-formed*
+digest is not reported here at all — nothing offline can tell it from a correct
+one, which is what `refdes check --refresh` is for. Only a digest that could not
+have come out of a fetch is an error. (An all-digit digest unquoted reads as an
+integer, which is one of these; `refdes fetch` quotes those itself.)
+
+**`.refdes/citations.yaml:N — the entry for '…' has no sha256`**
+A record missing a field `refdes fetch` always writes. Restore the file, or write
+the record out again.
+
+**`.refdes/citations.yaml:N — duplicate key '…' in one mapping (lines N and M)`**
+YAML resolves a repeated key to the *last* one and says nothing, so this is the
+one shape here that loses a pin **silently**: the file reads as though only one
+of the two records was ever pinned, and nothing downstream can notice, because
+loading is where the repeat is lost. `refdes fetch` rewrites the whole file from
+the mapping it loaded, so the record that lost would simply never be written
+back. It is also the shape a bad merge leaves when two branches each pinned the
+same document and the resolution pasted both blocks in. Take one block, by hand
+or with `git checkout`, and keep the one you mean. (Two identical blocks report
+"nothing is lost here" instead — a repeat is still a mistake, but the message
+does not claim a record was lost when it was not.)
+
+**`error: .refdes/citations.yaml:N — …` from `refdes fetch`**
+`fetch` refuses on a lockfile it cannot read and leaves it **byte-identical**.
+That is deliberate: `fetch` rewrites the whole lockfile from the records it
+just fetched, so going ahead on one it could not parse would replace every pin
+it could not read with a fresh one — and nothing in the tree would say so
+afterwards. Fix the file (or delete it, and re-pin) rather than trying to fetch
+past it. Every other command reports the same problem as an ordinary error and
+exits `1`; none of them reports your citations as unpinned, because it did not
+read the file.
+
 ## Output
 
 **The site looks unstyled.**

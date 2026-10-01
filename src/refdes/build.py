@@ -1202,7 +1202,8 @@ def _run_item_calcs(project: Project, item, by_key: dict[str, Item]) -> None:
     one references has already been evaluated (or failed) before it runs."""
     records = getattr(project, "_source_lock", None)
     if records is None:
-        records = project._source_lock = citations_mod.load_lockfile(project)
+        records, _problem = citations_mod.read_lockfile(project)
+        project._source_lock = records
     source_resolved: dict[tuple[str, str], tuple[str, str | None]] = {}
     item._source_uses = []
     env: dict[str, calc.Value] = {
@@ -1356,7 +1357,7 @@ def run_calcs(project: Project) -> None:
     outside the cycle gets one note naming the upstream failure rather than
     N restatements of it."""
     by_key = _key_index(project)
-    project._source_lock = citations_mod.load_lockfile(project)
+    project._source_lock, _problem = citations_mod.read_lockfile(project)
     # Identity -> "visiting" (on the current DFS path) or "done" (env ready
     # or failed). Items are unhashable-by-value here, so id() is the key.
     state: dict[int, str] = {}

@@ -1,0 +1,185 @@
+# malformed-lockfile-diagnostic — progress log
+
+Task: F5 from `in-prog-logs/remote-fetch-exercise.md`. A malformed
+`.refdes/citations.yaml` gives a raw `ValueError` traceback out of `fetch` and
+`check`. Make every corruption shape give a diagnostic instead, named by file
+(and line where available), refusing to overwrite a corrupt lockfile with a
+`fetch` that cannot read the pins it would lose.
+
+Branch `malformed-lockfile-diagnostic` off current main (`ae95a29`). Wrapper for
+every CLI run below:
+
+    PYTHONPATH=/home/jorb/.paseo/worktrees/16msma8v/malformed-lockfile-diagnostic/src \
+      python -m refdes.cli ...
+
+(the `refdes` on PATH is a broken editable install pointing at another worktree.)
+
+## Where the readers are (grepped `src/refdes/`)
+
+`citations.load_lockfile()` (`src/refdes/citations.py:414`) is the single reader.
+Call sites:
+
+- `src/refdes/citations.py:669`  — `verify()` (check/build/release gates)
+- `src/refdes/citations.py:1009` — a `source()` value lookup
+- `src/refdes/citations.py:1353` — `fetch_all()`
+- `src/refdes/citations.py:1566` — `check --refresh` drift scan
+- `src/refdes/build.py:1181`, `src/refdes/build.py:1335` — `run_calcs`, which is
+  why plain `check`/`build`/`audit` traceback too (they all call `build()`)
+- `src/refdes/serve/sources.py:93` — the editor's source listing
+- `src/refdes/serve/edit.py:538` — the editor's accept-pins diff
+
+`load_lockfile` is `dict(data.get("citations") or {})` — anything that is not a
+mapping is handed straight to `dict()`, which is the F5 traceback.
+
+## Progress
+
+- [x] Read AGENTS.md, read the whole of `remote-fetch-exercise.md` (F5 is §7
+      lines 847-887; nothing else in the report covers `.refdes/citations.yaml`
+      corruption beyond §7's F5 and §9's note that the editor's accept path is a
+      second writer whose formatting must keep agreeing with `lockfile_text`).
+- [x] Reproduced F5 exactly. `.scratch/lf/demo` (a fresh `init` project plus one
+      component with one remote citation), lockfile replaced with
+      `citations:` holding a list. Both `check` and `fetch` traceback with
+      `ValueError: dictionary update sequence element #0 has length 26; 2 is
+      required` at `src/refdes/citations.py:420`, exit 1.- [x] Surveyed every shape against every command, on main and again after the fix:
+      `.scratch/lf/survey.py` (SHAPES x COMMANDS, one fresh copy of the project per
+      pair so a mutation is attributed to the command that made it), output in
+      `.scratch/lf/survey-main.txt` and `.scratch/lf/survey-fixed.txt`.
+
+      On main: every structural shape tracebacks from every command; every
+      field-level shape is *silently accepted*, and `fetch --update` rewrites the
+      file from what it read -- so the pins it could not see are gone.
+
+      After: 20 shapes x 10 commands, `tracebacking commands: []`,
+      `mutating commands: []`. Exit codes: check, check --refresh, build,
+      audit, fetch, fetch --update, revision, release all 1; index and ls 0
+      (index carries the message in its JSON `diagnostics`; ls never reads the
+      lockfile and never reported citations before either).
+
+- [x] Verified the claim that makes `fetch`'s remedy honest: `fetch --update` on a
+      *valid* lockfile re-downloads every document -- refdes sends no conditional
+      request. Counting origin at `.scratch/lf/srv/origin.py`, access log
+      `.scratch/lf/srv/access.log`. Deleting the lockfile and running plain
+      `fetch` re-downloads too. So "re-pinning costs a re-download" is true and
+      every remedy says so rather than pretending `git checkout` is the only way.
+
+- [x] Verified `audit`/`ls` exit 0 on *main* for an unrelated build-time citation
+      error (a kept-blob whose bytes do not match its hash), so exit 0 for
+      build-time citation errors is existing behaviour, not something this change
+      introduces.
+
+- [x] Split the reader in two, because the writers and the readers need opposite
+      answers from a broken file:
+      - `load_lockfile(project)` -- strict, raises `citations.LockfileError`.
+        Used by every writer: `citations.fetch_all`, `cli.cmd_fetch`, and
+        `serve/edit._accept_pins` (which returns `(None, str(exc))`, so the
+        editor refuses the edit instead of rewriting a lockfile it could not
+        read). A missing file is still `{}`: this project has pinned nothing,
+        which is ordinary.
+      - `read_lockfile(project)` -- returns `(records, problem)`, reports one
+        ERROR diagnostic naming `.refdes/citations.yaml` and the line, memoized on
+        `project._lockfile_reported` so a build that reads the file twice says it
+        once, and returns `{}`. Used by `verify()`, `refresh()`,
+        `_extract_source_values`, `build.run_calcs`, and `serve/sources._lockfile`
+        (which raises `SourceRefusal`).
+
+      The `{}` a reader returns must not read downstream as "every citation is
+      unpinned" -- that would turn one unreadable file into a page of invented
+      errors -- so the no-cascade behaviour is asserted directly.
+
+- [x] Validated record shape: required `sha256` (64 lowercase hex str),
+      `fetched` (non-empty str), `kept_copy` (bool); optional `bytes` (int,
+      not bool), `sections` (mapping), `sections_sha256` (64 hex), `values`
+      (mapping). A pre-rename `vendored:` record is exempted from the
+      `kept_copy` requirement so `legacy_notices` still reports it by its own
+      key's name -- found by test_serve_pdf/test_citations, which pinned the
+      older wording.
+
+- [x] Exit code: 1 for check/build/fetch. `fetch` matches its three other
+      refusals; exit 2 is reserved for configuration errors and `--no-write`.
+      `build --keep-going` exits 0 per its documented "Exit 0 even when there are
+      errors" and still prints the error -- pinned in a test as the one path where
+      a corrupt lockfile does not change the code.
+
+- [x] Added the shape the F5 survey did not name but that loses a pin with *no*
+      word at all: a repeated key. YAML resolves a repeated key to the last one
+      and says nothing, so two sound records for one cited path read as one, and
+      `fetch` rewrites from the loaded mapping -- the loser is dropped forever
+      with nothing in the tree to notice. `_duplicate_key()` walks the *composed*
+      node tree (loading is where the repeat is lost), reports the first repeat in
+      any mapping with both lines, and says whether anything is actually lost
+      (`_node_equal`, structural, with a visited set and a depth bound: an alias
+      can make a node its own ancestor, and a report that hangs on a corrupt file
+      is F5 wearing a different hat). Two occurrences on one line read "twice on
+      line N" rather than "(lines N and N)", the way parse.py words the same shape
+      in item front matter.
+
+- [x] `audit` was printing nothing at all for a corrupt lockfile, and exiting 0:
+      its sections speak by omission, so with `verify()` populating no
+      `item.citations` the "Citations:" section simply did not appear. An audit
+      that silently drops a section it cannot produce is what an audit exists to
+      prevent, so `cmd_audit` now prints diagnostics with no `item_id` (a
+      project-wide file, which no section can speak for) to stderr and exits 1,
+      by the same rule it already followed for load errors. Item-level errors are
+      untouched -- `check` reports those.
+
+- [x] Two deliberate behaviour changes to existing tests, both about the probe
+      tests that existed to prove the old behaviour:
+      - `tests/test_yaml_loaders.py::test_real_loaders_keep_main_malformed_yaml_behavior`
+        asserted `citations.load_lockfile` raises `yaml.YAMLError` -- that *is* F5.
+        Now asserts `citations.LockfileError` naming the file.
+      - `tests/test_serve_edit.py::test_a_project_that_will_not_build_is_refused_as_the_project`
+        wrote an unreadable lockfile and asserted `Refused` "the project did not
+        load". The lockfile no longer breaks `build()`, so the edit is applied and
+        the diagnostic travels with it; the invariant it was protecting (a refusal
+        must not blame the edit for the project's own state) is still covered by
+        the sibling deferral test, with a build that genuinely raises. Renamed to
+        `test_an_unreadable_lockfile_blocks_an_unrelated_edit_with_its_own_words`
+        and now also asserts the file stays byte-identical.
+
+- [x] Fixture hashes. Strict `sha256` validation is exactly what catches a
+      hand-edited digest, and the suite's fixtures used `deadbeef`/`abc123`. Fixed
+      to 64-hex constants in `tests/helpers.py`, `tests/test_lifecycle.py`,
+      `tests/test_no_write.py`, `tests/test_citations.py`,
+      `tests/test_serve_pdf_sources.py` (one record also needed `fetched` and
+      `kept_copy`, which the reader now requires).
+
+- [x] `tests/test_lockfile_corruption.py`: 124 tests. Four properties per shape at
+      both readers F5 names (no traceback; names the file and the line; exit 1;
+      byte-identical), no network (`fetch_bytes` monkeypatched, and a shape whose
+      whole point is that fetch must not run is asserted not to reach it), plus the
+      merge remedy, once-per-run, no unpinned cascade, duplicate-key specifics,
+      audit/index, `--keep-going`, a sound lockfile round-tripping through
+      `lockfile_text` with no false positive, an absent lockfile not being
+      corruption, and `load_lockfile` raising where `read_lockfile` reports.
+
+- [x] Confirmed the new tests fail on main's code before passing on mine
+      (73 failed, 21 passed; `.scratch/backup/new-tests-on-main.txt`), so they
+      are testing the fix rather than restating it.
+
+- [x] Docs: `docs/troubleshooting.md` gains a `## Citations` section (the file
+      already catalogues `.refdes/ids.yaml`, `.refdes/log-seal.yaml`,
+      `.refdes/schema.json`), with one entry per message shape and the "what is
+      lost vs. what it costs" distinction kept; `docs/cli-reference.md` documents
+      the fourth `fetch` refusal and the per-command exit codes. Every message
+      quoted in the docs was copied from a real run
+      (`.scratch/lf/msgs.py` prints all 20), not from memory.
+
+- [x] Full suite 3034 passed, 2 skipped. `ruff check` on the files touched,
+      `--select F,E9`: clean. `--select I` reports two findings, both in
+      `src/refdes/build.py` and `tests/test_no_write.py`; checked against
+      `git show HEAD:` copies of both and they are pre-existing on main, so left
+      alone per AGENTS.md ("don't try to silence unrelated pre-existing findings").
+
+- [x] Not done / left for a later pass: `refdes ls` still says nothing about a
+      corrupt lockfile. It never read the lockfile and never reported citations,
+      so nothing is silently dropped there -- but a one-line "cannot report pins:
+      <reason>" under the listing would be a reasonable follow-up.
+- [x] Caught one self-inflicted bug in the audit change before it left: a load
+      error is still in `project.errors` after `build()`, so filtering on
+      `item_id is None` alone printed every load error twice. Verified by running
+      it (2 ERROR lines), fixed by excluding the ones already reported, and
+      pinned in `tests/test_cli_load_errors.py::test_audit_reports_load_errors_and_exits_nonzero`.
+      Also caught a `NameError` traceback out of `_duplicate_key` mid-edit --
+      the same bug class F5 is, which is the argument for running the shape survey
+      rather than trusting the unit tests.

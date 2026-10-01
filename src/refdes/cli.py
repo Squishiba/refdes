@@ -715,12 +715,26 @@ def cmd_fetch(args) -> int:
         )
     project, _stale = _load(args, require_ids=False)
     _announce_load_writes(project)
+    # Read the lockfile before anything else, and refuse on one that cannot be
+    # read. `fetch` is a writer of this file: it rewrites the whole lockfile
+    # from the records it fetched, so going ahead on a lockfile it could not
+    # parse would replace every pin it could not read with a fresh one --
+    # turning a merge nobody has finished resolving into a merge nobody has, with
+    # the losing side's provenance gone and nothing in the tree to say so. The
+    # file is left byte-identical, which is the point: a lockfile a person has
+    # to fix by hand must survive every attempt to run the tool that would help.
+    # Exit 1, the code this command's other three refusals use: this is the
+    # project's state being unusable, not a configuration error of the kind the
+    # exit-2 rows name.
+    try:
+        records = citations_mod.load_lockfile(project)
+    except citations_mod.LockfileError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
     # Pre-rename `vendor:`-era artifacts are not read by anything any more --
     # say so here too, not just at build/check time, so `refdes fetch` cannot
     # look clean while the project's old copies and lockfile keys sit stranded.
-    for _severity, message in citations_mod.legacy_notices(
-        project, citations_mod.load_lockfile(project)
-    ):
+    for _severity, message in citations_mod.legacy_notices(project, records):
         print(f"warning: {message}", file=sys.stderr)
     # A file that fails to parse is a load error, not a fetch failure -- but
     # it is still a failure: every citation in that file was never loaded,
@@ -830,6 +844,23 @@ def cmd_audit(args) -> int:
     for d in load_errors:
         print(str(d), file=sys.stderr)
     build_mod.build(project)
+    # The same rule as the load errors above, one step later, and over the ones
+    # the build just added -- the load errors are still in `project.errors`, so
+    # leaving them out of this list is what keeps them from being printed twice.
+    # A diagnostic with no `item_id` is about a project-wide file rather than an
+    # item, so no section of this report can speak for it -- and this report's
+    # sections speak by omission: with an unreadable `.refdes/citations.yaml`,
+    # `verify()` populates no `item.citations`, so the "Citations:" section below
+    # would print nothing at all rather than print a pin it does not have. An
+    # audit that silently drops a section it could not produce is the thing an
+    # audit exists to prevent, so say so and fail, exactly as for a file that did
+    # not load. Item-level errors are left alone: `refdes check` reports those,
+    # and this report's own sections can partly speak for them.
+    project_wide = [
+        d for d in project.errors if d.item_id is None and d not in load_errors
+    ]
+    for d in project_wide:
+        print(str(d), file=sys.stderr)
     historical_key_infos = keys_mod.audit_historical_baselines(project)
 
     print("Schema fields not tracked as 'invalidate':")
@@ -1046,7 +1077,7 @@ def cmd_audit(args) -> int:
 
     print(f"\n{len(project.items)} items audited "
           f"({len(project.local_items)} local)")
-    return 1 if load_errors else 0
+    return 1 if (load_errors or project_wide) else 0
 
 
 def cmd_init(args) -> int:

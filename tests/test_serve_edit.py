@@ -20,6 +20,7 @@ from conftest import write_project_config
 from helpers import _build_at
 
 from refdes import build as build_mod
+from refdes import citations as citations_mod
 from refdes.patcher import SetBody, SetField
 from refdes.serve import edit as edit_mod
 from refdes.serve.edit import Applied, Conflict, EditRequest, Invalid, Refused
@@ -508,28 +509,32 @@ def test_a_candidate_with_an_error_builds_the_before_snapshot_too(project_root, 
     assert len(builds) == 2, f"expected the candidate and the before build, got {builds}"
 
 
-def test_a_project_that_will_not_build_is_refused_as_the_project(project_root):
-    """A half-written `.refdes/citations.yaml` breaks `build()` and nothing in
-    the parse, so it used to fail in the eager before load and be refused as
-    "the project did not load". Now the before build happens after the
-    candidate load, and without the check in `_apply_locked` the refusal would
-    blame the edit for the project's own broken state -- the one word "edited"
-    is the difference between telling the author to fix their lockfile and
-    telling them to fix their sentence."""
+def test_an_unreadable_lockfile_blocks_an_unrelated_edit_with_its_own_words(project_root):
+    """A half-written `.refdes/citations.yaml` used to break `build()` itself --
+    a raw `ValueError` out of `load_lockfile`, finding F5 in
+    `in-prog-logs/remote-fetch-exercise.md` -- and the edit was then refused as
+    "the project did not load", which is the wrong sentence: nothing about this
+    item's text depends on the lockfile, and refusing it hid the real problem
+    behind a message about the edit.
+
+    It is an ordinary project error now, so it does not block an unrelated edit
+    (the invariant itself is still asserted by the deferral test below, with a
+    build that genuinely raises), the author is told about it in the same
+    response, and the file only they can fix is left byte-identical.
+    """
     path = target(project_root)
     (project_root / ".refdes").mkdir(exist_ok=True)
-    (project_root / ".refdes" / "citations.yaml").write_text(
-        "citations: [ this is not : valid yaml\n", encoding="utf-8"
-    )
+    lock = project_root / ".refdes" / "citations.yaml"
+    lock.write_text("citations: [ this is not : valid yaml\n", encoding="utf-8")
+    before = lock.read_bytes()
 
     result = edit_mod.apply_edit(
         str(project_root), req(("REQ-001", SetField("text", "The rail shall supply 5 V."), path))
     )
 
-    assert isinstance(result, Refused), result.message
-    assert "the project did not load" in result.message, result.message
-    assert "the edited project" not in result.message, result.message
-    assert read(path) == REQS
+    assert isinstance(result, Applied), result.message
+    assert any(citations_mod.LOCKFILE in d.message for d in result.diagnostics), result.diagnostics
+    assert lock.read_bytes() == before, "the editor rewrote a lockfile it could not read"
 
 
 def test_a_deferred_build_that_raises_is_a_refusal_not_an_exception(project_root, monkeypatch):
