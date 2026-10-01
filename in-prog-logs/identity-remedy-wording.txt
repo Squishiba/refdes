@@ -1,0 +1,155 @@
+Task: fix the *wording* of three findings from
+in-prog-logs/keys-identity-recovery.txt (PR #122) — F4.1 (docs overclaim),
+F2.1 (duplicate-key remedy doesn't say which copy), F3.3 (bare reference
+orphaned by a hand rename has no named remedy).
+
+Hard rule honoured throughout: **no identity behaviour changed.** Nothing that
+mints, matches, restores, refuses or hashes was touched. If a fix appeared to
+need a behaviour change, it was written up instead of done.
+
+Worktree: /home/jorb/.paseo/worktrees/16msma8v/identity-remedy-wording
+Branch:   identity-remedy-wording (from main @ 1d50242)
+
+The `refdes` on PATH is a broken editable install pointing at another
+worktree, so every command in this log actually ran through
+
+    python .scratch/r.py <project-dir> <refdes args...>
+
+a 12-line harness doing sys.path.insert(0, <this worktree>/src),
+os.chdir(<project-dir>), then refdes.cli.main(args). `[exit=N]` is main()'s
+return code. Everything below labelled `$ refdes ...` is shorthand for that.
+
+Scratch projects live in .scratch/ (gitignored). `.scratch/mkbase.py` writes a
+10-item hardware@3 project into any directory *without* loading it, so the
+caller decides when the first writable load happens:
+
+    items/requirements.yaml  REQ-PWR-001..004 (004 refines 001)
+    items/bounds.yaml        BND-PWR-001, BND-PWR-002 (limits)
+    items/decisions/dec-pwr-001.md
+                             DEC-PWR-001 satisfies [001,003],
+                             constrained_by [BND-PWR-001, BND-PWR-002],
+                             checks: [{value: ripple_mV, against: BND-PWR-002}]
+                             + a ```calc block defining ripple_mV
+    items/tests.yaml         TST-PWR-001 verifies [REQ-PWR-001, BND-PWR-002]
+                             TST-PWR-002 verifies [REQ-PWR-004]
+    items/log.yaml           LOG-A-001 addresses [REQ-PWR-001]
+
+Four inbound references point at REQ-PWR-001 (decisions satisfies, tests
+verifies, log addresses, requirements refines) — the same shape PR #122 used.
+`refdes --no-write check` on the fresh template is
+`10 items, 0 errors, 2 warnings`, and leaves **no `.refdes/` directory at
+all** and zero `key:` lines in `items/`.
+
+Status: IN PROGRESS. F4.1 done (verified, docs corrected, fragment written).
+
+==========================================================================
+## F4.1 — the id-reuse overclaim in docs/design/keys.md §8
+
+### What the doc said
+
+docs/design/keys.md:1200-1203 (pre-fix), §8 "What remains of the display id…",
+under "**The part keys make automatic.**":
+
+    Reuse used to risk an old *internal* reference silently resolving to a
+    different item. Under keys, internal references carry keys and cannot be
+    captured by a reused display id. That risk is gone entirely.
+
+### Reproduced it myself, not from the report
+
+.scratch/base (written by `.scratch/mkbase.py`, never loaded) has **no
+`.refdes/` directory at all**, zero `key:` lines, and four references to
+REQ-PWR-001 all still bare:
+
+    items/requirements.yaml:15    refines: [REQ-PWR-001]
+    items/tests.yaml:10           verifies: [REQ-PWR-001, BND-PWR-002]
+    items/decisions/dec-pwr-001.md:7  satisfies: [REQ-PWR-001, REQ-PWR-003]
+    items/log.yaml:10             addresses: [REQ-PWR-001]
+
+`$ refdes --no-write check` on that tree: `10 items, 0 errors, 2 warnings`,
+and no `.refdes/` afterwards — `--no-write` writes neither keys nor
+composites, so the bare state is reachable on any real checkout that has only
+ever been loaded read-only.
+
+.scratch/f41 = that project with REQ-PWR-001's body replaced by an unrelated
+one ("The enclosure shall survive a 2 m drop onto concrete") — the delete and
+re-create of F4.1, in a single edit.
+
+    $ refdes check
+    (minted 10 key(s) and rewrote 10 reference(s) while loading)
+    WARNING <project> — 2 item(s) with no coverage — see coverage.html
+    WARNING <project> — 1 requirement(s) satisfied but not verified — see coverage.html
+    10 items, 0 errors, 2 warnings
+    [exit=0]
+
+    $ refdes build
+    10 items, 0 errors, 2 warnings
+    site written to .../.scratch/f41/_site
+    [exit=0]
+
+Where the links point afterwards, from the built `items.json`:
+
+    REQ-PWR-001 dqhejxvk8c8 The enclosure shall survive a 2 m drop onto concrete.
+      backlinks: {"satisfied_by": ["DEC-PWR-001"], "addressed_by": ["LOG-A-001"],
+                  "refined_by": ["REQ-PWR-004"], "verified_by": ["TST-PWR-001"]}
+
+and the four source references now read, all of them pointing at the
+**enclosure** requirement's freshly minted key:
+
+    requirements.yaml:19  refines:   [REQ-PWR-001@dqhejxvk8c8]
+    tests.yaml:11         verifies:  [REQ-PWR-001@dqhejxvk8c8, BND-PWR-002@vzhgj1zm2yb]
+    dec-pwr-001.md:8      satisfies: [REQ-PWR-001@dqhejxvk8c8, REQ-PWR-003@z0yabfedq3s]
+    log.yaml:11           addresses: [REQ-PWR-001@dqhejxvk8c8]
+
+**All four silently re-attached. `0 errors`, exit 0.** The claim is false as
+written.
+
+### The contrast that pins down when the guarantee *does* hold
+
+.scratch/f41b: the same project, but writable-loaded **once first** (`refdes
+check`, so every reference is a composite), and *then* the same delete and
+re-create — the original entry removed with its key, an unrelated REQ-PWR-001
+appended with no key:
+
+    $ refdes --no-write check
+    ERROR   items/decisions/dec-pwr-001.md:2 [DEC-PWR-001] — satisfies points at key '3bmhb21v2p6' (labelled REQ-PWR-001), which no item declares. A live item labelled REQ-PWR-001 declares no key. Its key may have been lost, or the label may now name a different item. The label is not used as a fallback. Check git history to confirm identity. If it is the same item, run `refdes keys restore REQ-PWR-001@3bmhb21v2p6 --dry-run`, then repeat without --dry-run to restore the original key.
+    ERROR   items/log.yaml:7 [LOG-A-001] — addresses ... same
+    ERROR   items/requirements.yaml:13 [REQ-PWR-004] — refines ... same
+    ERROR   items/tests.yaml:7 [TST-PWR-001] — verifies ... same
+    10 items, 4 errors, 2 warnings
+    [exit=1]
+
+So the guarantee is real, and it is **conditional on the references carrying
+keys**, which the first *writable* load is what gives them. One `refdes check`
+is enough. That is exactly the condition the docs omitted.
+
+### Fixes
+
+1. **docs/design/keys.md §8** — "That risk is gone entirely" is now "gone
+   **once the references carry keys**", with the condition spelled out (first
+   writable load; `--no-write` suppresses minting and expansion; the bare
+   window and its silent 0-error outcome), and a pointer to the verification.
+2. **docs/ids.md:132-133** — "Closing this fully needs identity that survives
+   an id being retyped, which is what surrogate keys provide" claimed full
+   closure. Now says "with one condition, described under Surrogate keys" and
+   says what it is.
+3. **docs/ids.md:141** — the surrogate-keys bullet already said "a reference
+   that is still bare resolves by display id", which is true but left the
+   consequence unstated. Added a paragraph: "still bare" is the state of every
+   reference in a never-writable-loaded project, a bare reference does *not*
+   survive an id being reused (verified symptom quoted), and after one
+   writable load each reference reports `points at key ... which no item
+   declares` instead.
+
+### Checked and left alone
+
+- **docs/troubleshooting.md** — its `## Surrogate keys` section documents each
+  diagnostic and its remedy; it never claims a reused id cannot capture a
+  reference. Grepped for `reuse|reused|reissue|capture`: the only hits are the
+  `formerly:` / renumbering prose at lines 298-300. No overclaim to correct.
+- **docs/links.md** — the composite-form section (lines 34-68) describes
+  expansion mechanics and already says plainly that `--no-write` leaves bare
+  references bare. It makes no claim about id reuse. No overclaim to correct.
+
+No message, diagnostic or behaviour changed for F4.1 — docs and the changelog
+fragment only (`changelog.d/id-reuse-guarantee-condition.fixed.md`).
+`python -m pytest tests/test_docs_examples.py -q -p no:randomly` → 6 passed.

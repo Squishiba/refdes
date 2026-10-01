@@ -1199,8 +1199,19 @@ make part of it automatic and part of it not.
 
 **The part keys make automatic.** Reuse used to risk an old *internal*
 reference silently resolving to a different item. Under keys, internal
-references carry keys and cannot be captured by a reused display id. That
-risk is gone entirely.
+references carry keys and cannot be captured by a reused display id. That risk
+is gone **once the references carry keys** — and that is a state the project
+reaches on its first *writable* load, because that is what writes the keys and
+the `DISPLAY-ID@key` composites. It is not gone before then. A reference still
+in bare form resolves by display id, so on a project that has never been
+writable-loaded (`--no-write` suppresses both minting and expansion) deleting
+an item and re-creating another under the same display id re-attaches every
+still-bare reference to the new item, silently: no error, no warning, exit 0.
+Verified, `in-prog-logs/identity-remedy-wording.txt` §F4.1. The window is
+narrow — one writable load closes it, and the composite case then behaves as
+the §6 Layer 3 diagnostics describe — but it is real, so nothing before that
+load may rely on the guarantee. The same window is why `docs/ids.md` says a
+bare reference "resolves by display id" rather than promising otherwise.
 
 **The part keys do not touch.** An *external* citation — a schematic sheet,
 a test report, an email saying "per REQ-PWR-005" — resolves by display id or
