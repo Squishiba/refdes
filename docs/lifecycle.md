@@ -355,3 +355,18 @@ condition — deletion is routinely intentional (retirement, a merge, a
 superseded decision removed outright) and there's no reliable machine
 signal to tell that apart from an accident. A gate rule with a high
 false-positive rate is worse than no rule at all.
+
+**A tree that will not take the write.** Both commands exist to write one
+file, so a destination the filesystem refuses is a refusal rather than
+something to report around: exit `2`, the file named, and no line reading
+"stamped".
+
+```
+error: cannot write .refdes/baselines/rev-b.yaml (read-only tree?) -- revision 'rev-b' was not stamped. Make the tree writable and run it again, or run it with --no-write to see what it would stamp.
+```
+
+Nothing is written, so nothing partial is left for the next run to misread —
+re-running against a writable tree stamps for real. Every check before the
+write still ran and is still reported: a refused stamp is about the
+destination, not the project. (`--no-write` needs none of this; it never
+attempts the write.) See [keys §2](design/keys.md#a-tree-that-will-not-take-the-write).

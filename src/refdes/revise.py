@@ -38,7 +38,7 @@ from . import build as build_mod
 from . import docs_url as docs_url_mod
 from . import ids as ids_mod
 from . import keys as keys_mod
-from . import lifecycle, parse
+from . import lifecycle, model, parse
 from . import links as links_mod
 from . import seal as seal_mod
 from . import standards as standards_mod
@@ -715,8 +715,7 @@ def _refuse_unwritable(project, rewrite: FileRewrite) -> None:
     `file=`, the message says what happened and what to do about it."""
     project.load_writes.blocked.append(rewrite.rel)
     project.warn(
-        "could not write this file (read-only tree?); run with --no-write to "
-        "silence this",
+        model.read_only_refusal(),
         file=rewrite.rel,
         line=1,
     )

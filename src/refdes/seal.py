@@ -28,6 +28,7 @@ from datetime import datetime, timezone
 import yaml
 
 from . import keys as keys_mod
+from . import model
 from .model import Item, Project
 from .parse import yaml_safe_load
 
@@ -198,29 +199,69 @@ def format_seals(seals: Seals, reseals: list[dict] | None = None) -> str:
 
 def save_seals(
     project: Project, seals: Seals, board: str = "", *, events: list[dict] | None = None
-) -> None:
-    """Replace active seals and append events together; never erase history."""
+) -> bool:
+    """Replace active seals and append events together; never erase history.
+
+    Returns whether the seals landed. A read-only tree -- a frozen CI
+    checkout, a read-only bind mount -- is a condition of the filesystem and
+    not of the project, so the refusal is reported through the ordinary
+    diagnostic channel (`_record_seal_write`) rather than raised: `build` has
+    a site to render afterwards, and a diagnostic both names the file and
+    keeps the non-zero exit the caller already owes for an unsealed entry.
+    An explicit seal write the user asked for (`refdes revise`) goes through
+    the same function and gets the same tolerance, which is correct there
+    too: `revise` reports its own plan and the file it could not update.
+    """
     path = seal_path(project, board)
     history = load_reseals(project, board) + (events or [])
     payload = format_seals(seals, history)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    # A failed write must leave both the old hash and its history intact.
-    temporary = None
     try:
-        with tempfile.NamedTemporaryFile(
-            mode="w", encoding="utf-8", newline="", dir=os.path.dirname(path),
-            prefix=".log-seal-", suffix=".tmp", delete=False,
-        ) as fh:
-            temporary = fh.name
-            fh.write(payload)
-            fh.flush()
-            os.fsync(fh.fileno())
-        if os.path.exists(path):
-            os.chmod(temporary, os.stat(path).st_mode & 0o777)
-        os.replace(temporary, path)
-    finally:
-        if temporary is not None and os.path.exists(temporary):
-            os.unlink(temporary)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        # A failed write must leave both the old hash and its history intact.
+        temporary = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w", encoding="utf-8", newline="", dir=os.path.dirname(path),
+                prefix=".log-seal-", suffix=".tmp", delete=False,
+            ) as fh:
+                temporary = fh.name
+                fh.write(payload)
+                fh.flush()
+                os.fsync(fh.fileno())
+            if os.path.exists(path):
+                os.chmod(temporary, os.stat(path).st_mode & 0o777)
+            os.replace(temporary, path)
+        finally:
+            if temporary is not None and os.path.exists(temporary):
+                os.unlink(temporary)
+    except OSError:
+        return _record_seal_write(project, path)
+    return True
+
+
+def _record_seal_write(project: Project, path: str) -> bool:
+    """One seal file the filesystem would not accept. Always False.
+
+    `build` is the command that seals, so this is an *error*, not the
+    load-time warning `schema_json`/`revise` use for a file it merely
+    refreshed: an entry that is not sealed has no append-only protection at
+    all (`refdes check --help` says so outright, and docs/design-log.md §
+    Append-only is where that promise lives), and a build that reported
+    success over it would be claiming the protection it did not write. The
+    site render still happens and still says what it rendered -- it does not
+    read the seal file -- so the diagnostic, not an abort, is what carries
+    the failure; `_report()` turns the error into exit 1.
+    """
+    rel = os.path.relpath(path, project.root).replace("\\", "/")
+    project.load_writes.blocked.append(rel)
+    project.error(
+        model.read_only_refusal(
+            "the entries in it are NOT sealed, so they have no append-only "
+            "protection until a build can write this file"
+        ),
+        file=rel,
+    )
+    return False
 
 
 def _reseal_event(

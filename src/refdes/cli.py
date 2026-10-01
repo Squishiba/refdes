@@ -111,7 +111,7 @@ def _load_write_notice(project: Project) -> str | None:
 _BLOCKED_NAMED = 4
 
 
-def _load_blocked_notice(project: Project) -> str | None:
+def _load_blocked_notice(project: Project, since: int = 0) -> str | None:
     """The other half of the same honesty: files this load tried to write and
     the filesystem refused (docs/design/keys.md §2). None when nothing was
     refused, so a writable run -- and every `--no-write` run -- prints nothing
@@ -122,8 +122,13 @@ def _load_blocked_notice(project: Project) -> str | None:
     naming each refused file already reaches the user through `project.warn`,
     and saying it twice in one run is noise that teaches people to skim past
     the line that matters.
+
+    `since` names how much of the list was already announced, for the command
+    that announces up front and can hit a further refusal later in its own
+    body (`audit` reformatting a baseline's stored-hash format partway through
+    its report, long after the notice went out).
     """
-    blocked = project.load_writes.blocked
+    blocked = project.load_writes.blocked[since:]
     if not blocked:
         return None
     if len(blocked) <= _BLOCKED_NAMED:
@@ -163,6 +168,20 @@ def _announce_load_writes(
         refusal = _load_blocked_notice(project)
         if refusal:
             print(refusal, file=out)
+
+
+def _print_late_refusals(project: Project, announced: int) -> None:
+    """Name writes refused *after* the command already printed its load notice.
+
+    For the two commands that print a bespoke report rather than project
+    diagnostics (`audit`, `former-ids propose`), a refusal that happens in the
+    middle of that report has no diagnostic channel to travel down, and the
+    notice printed at load time cannot know about it yet. Nothing to print on
+    a writable run, which is every run that does not need this.
+    """
+    late = _load_blocked_notice(project, since=announced)
+    if late:
+        print(late)
 
 
 def _visible(
@@ -320,7 +339,27 @@ def cmd_build(args) -> int:
         accept_board_move=args.accept_board_move,
         require_citations=args.require_citations,
     )
-    out_dir = render_mod.render_site(project, draft=args.dry_run)
+    try:
+        out_dir = render_mod.render_site(project, draft=args.dry_run)
+    except OSError as exc:
+        # The site is build's own output -- the one thing this command is for
+        # -- so a destination that will not take it is a refusal rather than
+        # something to degrade past: there is no partial "site written to ..."
+        # worth printing and no summary that would not read as a build that
+        # happened. Same exit code as the `--no-write` refusal (2), for the
+        # same reason: nothing is wrong with the project. The diagnostics
+        # gathered before the render are still printed, because a seal or
+        # manifest write refused a moment ago is exactly what the user needs
+        # alongside this.
+        _report(project, verbose=args.verbose)
+        target = os.path.join(project.root, project.out_dir)
+        print(
+            f"error: cannot write the site to {target} ({exc.strerror or exc}) -- "
+            "nothing was rendered. Point -o/--out at a writable directory, or "
+            "make this one writable.",
+            file=sys.stderr,
+        )
+        return 2
     status = _report(project, verbose=args.verbose)
     print(f"site written to {out_dir}" + (" (dry run, not sealed)" if args.dry_run else ""))
     if status and not args.keep_going:
@@ -471,6 +510,20 @@ def _run_stamp(args, kind: str) -> int:
             "nothing to stamp."
         )
         return 0
+
+    if outcome.status == "unwritable":
+        # Exit 2, the refusal code, not 1: nothing is wrong with the project
+        # -- every gate passed -- so this is a usage refusal of the same kind
+        # as the `--no-write` one (`_refuse_no_write`), not the "errors found"
+        # code. Naming the file is the whole point: the user asked for a stamp
+        # and has to be told which path would have held it.
+        print(
+            f"\nerror: cannot write {outcome.refusal} (read-only tree?) -- "
+            f"{kind} {args.name!r} was not stamped. Make the tree writable and "
+            "run it again, or run it with --no-write to see what it would stamp.",
+            file=sys.stderr,
+        )
+        return 2
 
     if outcome.status == "would_stamp":
         # --no-write: every check passed, nothing was written.
@@ -761,6 +814,13 @@ def cmd_audit(args) -> int:
     """Suppression is allowed; invisible suppression is not."""
     project, _stale = _load(args, require_ids=False)
     _announce_load_writes(project)
+    # `audit` prints no project diagnostics of its own -- its whole output is
+    # the report below -- so a write refused partway through that report (the
+    # baseline hash-format rewrite, which only happens once a baseline is
+    # older than the current hash definition) has no other way to reach the
+    # user. Re-announce from here on at the end, or it would be the one
+    # refusal in the tool that nobody is told about.
+    announced = len(project.load_writes.blocked)
     # An audit of a project whose files didn't all load is an incomplete
     # audit, and silence about that is exactly what an audit exists to
     # prevent. The report still comes out for what did load; the run fails.
@@ -979,6 +1039,8 @@ def cmd_audit(args) -> int:
         print("\nFormer IDs:")
         for old_id, new_id in sorted(project.former_ids.items()):
             print(f"  {old_id:<14} -> {new_id}")
+
+    _print_late_refusals(project, announced)
 
     print(f"\n{len(project.items)} items audited "
           f"({len(project.local_items)} local)")
@@ -1416,6 +1478,7 @@ def cmd_former_ids_propose(args) -> int:
         )
     project, _stale = _load(args, require_ids=False)
     _announce_load_writes(project)
+    announced = len(project.load_writes.blocked)
     # A file that never parsed was never searched for candidates either, so
     # both of this command's quiet answers -- "no candidates" and a --confirm
     # run that finds errors -- have to say so rather than pass for clean.
@@ -1430,6 +1493,12 @@ def cmd_former_ids_propose(args) -> int:
     except former_ids_mod.ProposeError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
+    # `propose` compares against a baseline, which is where a stored-hash
+    # format rewrite can be refused. This command prints candidates and
+    # nothing else -- no diagnostics channel for it to arrive through -- so
+    # the refusal is announced here, from the point the notice above was
+    # printed rather than from the start of the list.
+    _print_late_refusals(project, announced)
 
     if not candidates:
         if load_errors:
