@@ -416,7 +416,7 @@ key:
 
 | `state` | Meaning |
 |---|---|
-| `"ok"` | Resolved — hash on file, and kept locally if `keep_copy: true` was declared |
+| `"ok"` | Pinned, and nothing left to check offline. A local or kept citation's sha256 was compared against the bytes on disk; a `hash-only` remote one has no bytes here to compare — its sha256 is recorded, not verified, until `refdes check --refresh` re-downloads and compares it |
 | `"unpinned"` | No lockfile entry yet — `refdes fetch` has not run for this path |
 | `"cache_missing"` | Pinned and kept, but the local blob is gone |
 | `"hash_mismatch"` | Kept blob's hash no longer matches the pinned sha256 (always an error), or a cited local file changed since it was pinned (warning, error with `--require-citations`) |
@@ -428,7 +428,9 @@ are pinned and correct but whose *page* is not — a `page:` the document does n
 have, or one that was never checked. `detail` is where that says so, and it is
 rendered in the citations table's Detail column, exactly as a `section:` that
 resolved to nothing is. Read both fields; `state == "ok"` alone is the claim
-that the sha256 is right, which is true and is not the whole sentence.
+that the recorded sha256 is the right one, which is not the whole sentence — and
+for a `hash-only` remote citation it is a claim about the lockfile, not about
+today's upstream, since only `refdes check --refresh` can make it the latter.
 
 `pinned` is `state != "unpinned"` — the one field to check "is this dependency
 tree fully pinned for a release" without enumerating `state` values yourself.

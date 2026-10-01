@@ -85,9 +85,21 @@ def copies_dir(project: Project) -> str:
     return os.path.join(project.root, COPIES_DIR)
 
 
-def kept_copy_path(project: Project, sha256: str, path: str) -> str:
+def kept_copy_relpath(sha256: str, path: str) -> str:
+    """`kept_copy_path` in the one spelling a user-facing message may use.
+
+    Project-relative and `/`-spelled, because a citation diagnostic that
+    carried the server's own directory would differ between two machines for
+    no reason -- see `tests/test_citation_path_hygiene.py`. `kept_copy_path`
+    joins this onto the project root rather than the other way round, so the
+    path a message names and the path the bytes land in cannot drift apart.
+    """
     ext = os.path.splitext(urlparse(path).path)[1]
-    return os.path.join(copies_dir(project), f"{sha256}{ext}")
+    return f"{COPIES_DIR}/{sha256}{ext}"
+
+
+def kept_copy_path(project: Project, sha256: str, path: str) -> str:
+    return os.path.join(project.root, kept_copy_relpath(sha256, path))
 
 
 def legacy_notices(project: Project, records: dict[str, dict]) -> list[tuple[str, str]]:
@@ -1632,6 +1644,58 @@ def _resolve_local(project, item, spec, canon, record, status, unpinned_severity
 # ------------------------------------------------------------------------ fetch
 
 
+# The one size a fetched citation is warned about, in bytes. A datasheet is
+# allowed to be enormous -- some vendor PDFs are -- so this is a warning and
+# not a cap: the download still succeeds, the pin still lands, and the exit
+# code is the one a small fetch would have produced. Refusing a size is a
+# judgement about somebody's document, and it is not one this constant gets to
+# make.
+#
+# Deliberately not a content-type check either: a citation may legitimately
+# point at something that is not a PDF, so what the bytes *are* is the author's
+# call, and a diagnostic here would be advice about a decision already made.
+#
+# Measured on the bytes actually received, never on the `Content-Length`
+# header, and the reason is that the received length *is* the length of the
+# pin: it is what gets hashed, what the lockfile's `bytes:` records, and what a
+# kept copy is written from. A header is not that number, in either direction --
+# both halves of that are measured over a real socket in
+# `tests/test_fetch_size_warning.py::test_a_chunked_response_with_no_content_length_still_warns`
+# (a chunked response carries no `Content-Length` at all and its body still
+# arrives whole, so a header-driven warning would go silent for exactly the
+# streaming transfer a big datasheet tends to be), and by hand against a
+# hand-rolled local origin for the rest: a header that *overstates* makes
+# `resp.read()` raise `IncompleteRead` before any warning could be printed, and
+# one that *understates* truncates the body to its own claim, so the pin is
+# small and the warning says so. The honest consequence, documented in
+# `docs/cli-reference.md`, is that there is no pre-download cap either -- a
+# large body is read into memory before this fires. The point is that the
+# author is told, not that the disk is protected.
+FETCH_SIZE_WARN_BYTES = 100 << 20
+
+
+def _size_label(size: int) -> str:
+    """`size` as MB to one decimal -- the unit the threshold is quoted in."""
+    return f"{size / (1 << 20):.1f} MB"
+
+
+def large_fetch_message(canon: str, size: int, kept: str | None) -> str:
+    """The warning for a remote citation fetched past `FETCH_SIZE_WARN_BYTES`.
+
+    Names all three things an author needs to act on it: which citation, how
+    big it actually turned out to be, and where the bytes went -- the kept
+    copy's project-relative path, or the fact that there isn't one. `kept` is
+    `kept_copy_relpath` or `None`; it is never composed here from an absolute
+    path, per `tests/test_citation_path_hygiene.py`.
+    """
+    where = f"kept at {kept}" if kept else "no local copy kept (hash-only)"
+    return (
+        f"{canon}: fetched {size} bytes ({_size_label(size)}), over the "
+        f"{_size_label(FETCH_SIZE_WARN_BYTES)} a fetch is warned at -- pinned "
+        f"anyway, {where}"
+    )
+
+
 def fetch_bytes(url: str, timeout: float = 30.0) -> bytes:
     import urllib.request
 
@@ -1677,6 +1741,12 @@ class FetchResult:
     # back over it, but the citation is named either at fetch time and at every
     # `check`/`build` after it.
     page_warnings: list[str] = field(default_factory=list)
+    # Set when this fetch's bytes were over `FETCH_SIZE_WARN_BYTES`: one line
+    # naming the citation, its size and where the copy went. A warning and
+    # never a failure, for the reason the constant's own comment gives -- a
+    # big datasheet is a legitimate thing to have cited, and the author is told
+    # rather than stopped.
+    size_warnings: list[str] = field(default_factory=list)
     # How many pages the pinned document has, when a citation here names a
     # `page:` and pypdf could count them. Recorded in the lockfile so a later
     # `check` can range-check a page without opening the PDF.
@@ -2350,6 +2420,21 @@ def fetch_all(
             with open(kept_copy_path(project, digest, canon), "wb") as fh:
                 fh.write(data)
 
+        # The size warning is measured on what arrived, and is only about a
+        # remote citation: a local path was already sitting on the author's own
+        # disk, so nothing was downloaded and nothing is duplicated by pinning
+        # it. Built here rather than at the read above because the kept copy's
+        # path does not exist until the line above has run, and naming where
+        # the bytes went is half of what makes the warning actionable.
+        oversize = (
+            large_fetch_message(
+                canon, len(data),
+                kept_copy_relpath(digest, canon) if want_keep_copy else None,
+            )
+            if kind == "remote" and len(data) > FETCH_SIZE_WARN_BYTES
+            else ""
+        )
+
         # `previous` is what turns "no title matches" into "the section you
         # cited no longer exists in the new revision (was page N)" on --update.
         previous = records.get(canon)
@@ -2380,6 +2465,7 @@ def fetch_all(
             kept_copy=want_keep_copy,
             sections=resolved,
             section_errors=[_section_failure(canon, f, sections) for f in failures],
+            size_warnings=[oversize] if oversize else [],
         )
         # The page count, for the same reason and with the same scope argument as
         # the sections above: these are the bytes being pinned, so every cited
@@ -2429,15 +2515,39 @@ class DriftEntry:
     citers: list[str] = field(default_factory=list)
 
 
-def refresh(project: Project, fetcher=None) -> list[DriftEntry]:
+# Owned here and read by cli.py when it registers the flag, so the name in the
+# diagnostics and the name on the command line cannot drift apart. A failure
+# message that names a flag which does not exist is worse than no hint at all.
+ALLOW_UNREACHABLE_FLAG = "--allow-unreachable"
+
+
+def refresh(project: Project, fetcher=None, allow_unreachable: bool = False) -> list[DriftEntry]:
     """Re-fetch every pinned citation to a scratch buffer and compare hashes.
 
     Read-only: writes nothing, pins nothing, copies nothing. Only reachable via
     `refdes check --refresh`, so a plain `build` or `check` never touches the
-    network. A url that fails to fetch is reported as a warning, not drift --
-    drift means the bytes changed, not that the network did. Local paths are
-    skipped: verify() already compares them against the live file on every
-    build, so there is no second upstream to ask.
+    network. Local paths are skipped: verify() already compares them against the
+    live file on every build, so there is no second upstream to ask.
+
+    A url whose bytes could not be obtained is *not* drift -- drift means the
+    bytes changed, and no bytes arrived -- so it never appears in the returned
+    list. What happens to it instead is the whole point of `allow_unreachable`:
+    by default each such url is an **error**, because a drift scan that silently
+    scanned nothing is exactly the failure a CI guard must not have (in an
+    outage, or when the vendor has deleted the datasheet). `allow_unreachable`
+    downgrades them to warnings, which is what a laptop on a train wants.
+
+    "Could not be obtained" is deliberately everything the fetcher can raise --
+    DNS failure, connection refused, timeout, and the HTTP error statuses
+    `urlopen` raises for (`HTTPError`). A redirect is not in that set: `fetch_bytes`
+    follows 3xx inside `urlopen`, so a hop that lands on a 200 is an ordinary
+    successful fetch compared on its final bytes, exactly as `fetch_all` pins it.
+    A hop that ends in an error status, exceeds urllib's redirect cap, or loops
+    raises like any other unreachable url does.
+
+    A partial outage is not special-cased: every url is attempted, the ones that
+    answered are compared as usual, and the unreachable ones are reported
+    separately so the run says how much was and was not verified.
 
     `fetcher` defaults to the module-level `fetch_bytes` at call time, the same
     way `fetch_all` does -- see its docstring.
@@ -2454,6 +2564,7 @@ def refresh(project: Project, fetcher=None) -> list[DriftEntry]:
         citers[spec.path].append(item.id)
 
     drift: list[DriftEntry] = []
+    unreachable: list[str] = []
     for target in sorted(citers):
         try:
             kind = classify(project.root, target)[0]
@@ -2467,7 +2578,15 @@ def refresh(project: Project, fetcher=None) -> list[DriftEntry]:
         try:
             data = fetcher(target)
         except Exception as exc:  # noqa: BLE001
-            project.warn(f"could not refresh {target}: {exc}")
+            unreachable.append(target)
+            if allow_unreachable:
+                project.warn(f"could not refresh {target}: {exc}")
+            else:
+                project.error(
+                    f"could not refresh {target}: {exc} -- upstream drift was NOT "
+                    f"verified for this citation (no bytes arrived, so there is "
+                    f"nothing to compare the pin against)"
+                )
             continue
         upstream_sha256 = hashlib.sha256(data).hexdigest()
         pinned_sha256 = str(record.get("sha256") or "")
@@ -2479,5 +2598,28 @@ def refresh(project: Project, fetcher=None) -> list[DriftEntry]:
                     upstream_sha256=upstream_sha256,
                     citers=sorted(set(citers[target])),
                 )
+            )
+    if unreachable:
+        # One summary line naming the escape hatch, so the per-url lines above
+        # are read as "the run failed because it could not check these" rather
+        # than as N unrelated flakes -- and so the remedy is on the same screen
+        # as the failure.
+        n = len(unreachable)
+        plural = "s" if n != 1 else ""
+        if allow_unreachable:
+            project.warn(
+                f"{n} pinned citation{plural} could not be refreshed, so upstream "
+                f"drift was NOT verified for {('them' if n != 1 else 'it')} -- "
+                f"drop {ALLOW_UNREACHABLE_FLAG} to fail the run on this instead"
+            )
+        else:
+            project.error(
+                f"{n} pinned citation{plural} could not be refreshed, so upstream "
+                f"drift was NOT verified for {('them' if n != 1 else 'it')} -- the "
+                f"run cannot claim to have checked {('them' if n != 1 else 'it')}. "
+                f"Fix the network or the urls, or pass {ALLOW_UNREACHABLE_FLAG} to "
+                f"treat an unreachable source as a warning and let the exit code "
+                f"reflect only real findings (you then get no guarantee that every "
+                f"pinned source was checked at all)"
             )
     return drift

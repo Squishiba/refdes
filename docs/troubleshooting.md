@@ -224,6 +224,19 @@ multiple `DISPLAY-ID@ORIGINAL-KEY` arguments if several keys were lost. The
 command validates the proposed project before writing; see
 [`keys restore`](cli-reference.md#refdes-keys-restore) for refusals.
 
+`keys restore` also refuses when the baseline remembers the key and that record
+does not describe the item you are putting it on — the shape you get when the
+original item was deleted and an unrelated one was created under its display id:
+
+`refusing to move key 'k7f3m2q9x4a' onto REQ-PWR-002: baseline 'rev-a' records that key under 'REQ-PWR-002' with different content -- title: ...; content hash: ... . ... If this really is the item that key belonged to -- the same item, edited since that baseline was stamped -- pass --force. If it is not, give the item a new display id so it is not mistaken for the old one; a fresh key is minted for it then.`
+
+Read that as the question the display id cannot answer for you, answered by the
+record: *is this the same item?* **Remedy:** if it is the same item, edited since
+the stamp, rerun with `--force`. If it is genuinely a different item, give it a
+new display `id:` (then the dangling references should be removed or re-pointed,
+not restored). The command volunteers nothing beyond what is in the message, so
+git history is still the first thing to check.
+
 An **imported** target is the one case `keys restore` cannot reach, and the
 report says so by ending differently — no command, and a note about the
 reference itself:
@@ -300,8 +313,12 @@ references follow the rename on their own:
 ```
 $ refdes check
 (rewrote 1 reference(s) while loading)
+WARNING <project> — 2 item(s) with no coverage — see coverage.html
 2 items, 0 errors, 1 warnings
 ```
+
+(The coverage warning is the two-item project's own, not part of the rename: it
+is here because the block is what the command prints, in full.)
 
 Recording the retired id as `former_ids:` for external citations is a separate
 step, and a prefix-wide rename is what
@@ -433,6 +450,30 @@ A warning. The item renders unvalidated. Add the type to your schema to silence 
 
 ## Citations
 
+**`items/….md:N — citations[0]: page: '2-4' is not a page number -- page: must
+be a positive integer, counted from 1.`**
+`page:` is one page of the *PDF*, counted from 1 — the same number the rendered
+`#page=` fragment opens — so a value that is not one is a declaration error
+(refused at load, before any file is opened, at the same severity as a
+malformed `section:`). Two of the shapes are not typos the author can see,
+because they believe they have cited something:
+
+- **A range** (`2-4`, `2 – 4`). One citation entry names one page, so a span has
+  no representation: cite the pages you mean as one entry per page on the same
+  `path:`, and each gets its own row and its own `#page=` link. `section:` is
+  *not* the alternative — a section title resolves to the one page its heading
+  starts on; it is the citation for a heading that moves between revisions.
+- **A printed page number** (`xiv`, `iv`, `eight`). A book's front matter is
+  numbered in roman numerals, which is where `xiv` usually comes from, and a
+  datasheet's own printed page number is a different number from the PDF's.
+  Count the PDF's own sheets from 1.
+
+The rest (`0`, `-1`, `1.5`, `9 9`) say what to do in the sentence itself, so
+those messages carry no remedy of their own. This is also the one *breaking*
+change in the `page:` delta: a `page:` that used to pass now fails, and it is
+the only new failure an upgrading project meets. See
+[citing a datasheet](markdown.md#citing-a-datasheet).
+
 **`.refdes/citations.yaml:N — unresolved merge conflict: '<<<<<<< HEAD' on line N`**
 Two branches both ran `refdes fetch` into this committed file and the merge was
 never finished by hand. Each side's `sha256` values are of bytes fetched on a
@@ -504,6 +545,32 @@ afterwards. Fix the file (or delete it, and re-pin) rather than trying to fetch
 past it. Every other command reports the same problem as an ordinary error and
 exits `1`; none of them reports your citations as unpinned, because it did not
 read the file.
+
+**`<project> — could not refresh https://…: <urlopen error [Errno 111] Connection
+refused>` from `refdes check --refresh`**
+One pinned citation could not be re-fetched, so no comparison was made for it and
+the run **exits 1**. It is not drift — drift is a finding, this is a check that
+did not happen — and the wording of the second line says which of the two you are
+looking at: `N pinned citation(s) could not be refreshed, so upstream drift was
+NOT verified`. What to do depends on the cause, and the two are not the same
+problem:
+
+- **The origin is gone or the network is down** (connection refused, DNS failure,
+  timeout, TLS failure). Wait, or run it somewhere with network. Passing
+  `--allow-unreachable` says out loud that you accept an unverified source and
+  want the exit code to reflect only real findings — which is the right choice on
+  a laptop and the wrong one in a drift guard, because a deleted datasheet then
+  passes exactly as a dead network does.
+- **The origin answered, and the answer is an error** (`HTTP Error 404`, `500`).
+  A 404 on a datasheet that was once pinned almost always means the vendor moved
+  or withdrew the file: re-point the citation and `refdes fetch --path <url>`, or
+  retire it. The same shape appears for `refdes fetch`, which also reports it as a
+  failed citation rather than a changed one.
+
+A partially reachable project reports each unreachable url separately and still
+checks and reports every url that answered, so the summary line's error count is
+the number of citations to re-check, not the number of citations in the project.
+See [`check --refresh`](cli-reference.md#refdes-check).
 
 ## Output
 

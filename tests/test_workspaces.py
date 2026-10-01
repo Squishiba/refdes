@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 
 import pytest
 import yaml
@@ -521,6 +522,128 @@ def test_ls_unknown_workspace_matches_nothing_rather_than_erroring(workspace_pro
     )
     assert status == 0
     assert "no items match" in capsys.readouterr().out
+
+
+# ------------------------------------------------- the ls workspace column (N5)
+
+
+def _steady_state_ls(capsys, cfg, *args):
+    """`ls`'s output on a project whose keys already exist.
+
+    The first load of a fresh project mints surrogate keys and says so, and that
+    notice is line one of stdout -- these tests match the listing exactly, so
+    they read the run after it. The notice is real and wanted (load-writes
+    reporting); a test about column layout is not where it belongs.
+    """
+    cli_mod.main(["-c", cfg, "ls", *args])
+    capsys.readouterr()
+    cli_mod.main(["-c", cfg, "ls", *args])
+    return capsys.readouterr().out
+
+
+def test_ls_shows_a_workspace_column_when_the_project_declares_workspaces(
+    workspace_project, capsys
+):
+    """N5: `--workspace` could filter but nothing in the plain listing said a
+    workspace existed or where an item's came from, so the flag was
+    undiscoverable from the listing it filters. Exact lines, not a substring --
+    a bare "product-a" in out would pass just as well with the column in the
+    wrong place, or twice.
+
+    Column order is workspace then board, mirroring the two groupings' real
+    relationship (a workspace groups boards one level up, docs/workspaces.md)
+    and the order the filters are documented in.
+    """
+    out = _steady_state_ls(capsys, str(workspace_project / "refdes-project.yaml"))
+    assert out.splitlines() == [
+        "DEC-A-001     decision     product-a  board-a  Uses the shared platform.",
+        "DEC-A-002     decision     product-a  board-a  Stays within product-a.",
+        "DEC-B-001     decision     product-b  board-b  Secretly depends on product A.",
+        "REQ-A-001     requirement  product-a  board-a  Product A's own requirement.",
+        # platform's folder has no second segment that is a registered board, so
+        # REQ-PLAT-001 has no board -- and an absent board is blank padding, the
+        # same treatment it gets in the board column's own place today.
+        "REQ-PLAT-001  requirement  platform            Shared platform requirement.",
+    ]
+
+
+def test_ls_omits_the_workspace_column_entirely_without_a_workspaces_registry(
+    board_project, capsys
+):
+    """The byte-for-byte guarantee. `workspaces.resolve` is a no-op with no
+    `workspaces:` registry, so no item can have a workspace and a column of
+    blanks would be pure noise -- this project's listing must be exactly what
+    it was before the column existed, including the widths and the blank where
+    an item has no board."""
+    out = _steady_state_ls(capsys, str(board_project / "refdes-project.yaml"))
+    assert out.splitlines() == [
+        "REQ-A-001      requirement  board-a  On board A by its folder.",
+        "REQ-B-001      requirement  board-b  On board B by its folder.",
+        "REQ-S-001      requirement           In an unregistered folder, no board.",
+        "REQ-S-002      requirement  board-a  Overridden onto board-a despite living in shared/.",
+        "REQ-WRONG-001  requirement  board-b  On board B but its own id prefix has no 'B' token.",
+    ]
+
+
+def test_ls_shows_an_item_in_no_workspace_as_a_blank_and_never_matches_it(
+    workspace_project, capsys
+):
+    """What the column shows for an item in no workspace has to agree with what
+    `--workspace` does with it. `item.workspace` is "" for such an item and
+    cmd_ls filters on `if args.workspace and item.workspace != args.workspace`
+    -- so every real name excludes it, and `--workspace ''` is a falsy flag that
+    filters nothing at all and lists the whole project. There is no name to type
+    for "no workspace", which is why the column is blank padding rather than a
+    placeholder: a marker there would name something `--workspace` cannot be
+    asked for."""
+    # The fixture's schema declares requirement and decision only, so this is a
+    # requirement -- and it sits directly in items/, outside every workspace
+    # folder, which is how an item ends up in no workspace under
+    # `item_layout: workspace`.
+    (workspace_project / "items" / "can.md").write_text(
+        "---\nid: REQ-CAN-001\ntype: requirement\n"
+        "text: The CAN bus shall carry 1 Mbit/s.\n---\n",
+        encoding="utf-8",
+    )
+    cfg = str(workspace_project / "refdes-project.yaml")
+
+    # Filtered to just that item it is the whole listing, and no row in it has a
+    # workspace, so there is no column to leave blank -- the same suppression
+    # the board column already does (a row where nothing has a board prints no
+    # board column), which is what keeps a stray space out of the title.
+    assert _steady_state_ls(capsys, cfg, "--file", "items/can.md") == (
+        "REQ-CAN-001  requirement  The CAN bus shall carry 1 Mbit/s.\n"
+    )
+
+    # In the full listing it is a row like any other: the workspace column is
+    # blank padding of the full column width, so the title still starts in the
+    # one place it starts everywhere else.
+    rows = {
+        line.split()[0]: line
+        for line in _steady_state_ls(capsys, cfg).splitlines()
+    }
+    assert rows["REQ-CAN-001"] == (
+        "REQ-CAN-001   requirement                      The CAN bus shall carry 1 Mbit/s."
+    )
+
+    # Every declared workspace excludes it, and an empty --workspace is a no-op
+    # that lists everything rather than selecting the no-workspace items.
+    for name in ("platform", "product-a", "product-b"):
+        assert "REQ-CAN-001" not in _steady_state_ls(capsys, cfg, "--workspace", name)
+    listed = _steady_state_ls(capsys, cfg, "--workspace", "")
+    assert "REQ-CAN-001" in listed and "REQ-PLAT-001" in listed
+
+
+def test_ls_help_says_the_workspace_column_is_conditional(capsys):
+    """The column exists only on a project that declares `workspaces:`, so the
+    help that advertises it has to say so -- otherwise "where's the workspace
+    column?" is the next question, and the answer ("your project declares no
+    workspaces:") is nowhere near `ls --help`."""
+    with pytest.raises(SystemExit) as excinfo:
+        cli_mod.main(["ls", "--help"])
+    assert excinfo.value.code == 0
+    help_text = re.sub(r"\s+", " ", capsys.readouterr().out)
+    assert "the workspace column only on a project that declares workspaces:" in help_text
 
 
 def test_workspace_pages_render_with_nested_board_groups(workspace_project):
