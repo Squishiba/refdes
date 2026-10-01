@@ -323,11 +323,13 @@ would blank the editor on every save.
 
 ## `refdes ls`
 
-List existing items as aligned text: id, type, board, title. `index`'s
-CLI-native counterpart — the same underlying data, filterable and readable
-without piping it through something else. For anyone not using the VS Code
-extension: a quick check over SSH, a scripted query, or deciding what to
-reference while reviewing a PR diff.
+List existing items as aligned text: id, type, workspace, board, title —
+`index`'s CLI-native counterpart, the same underlying data, filterable and
+readable without piping it through something else. For anyone not using the
+VS Code extension: a quick check over SSH, a scripted query, or deciding what
+to reference while reviewing a PR diff. The workspace column appears only on a
+project that declares `workspaces:`, so a project without one gets the columns
+it has always got.
 
 | Option | Effect |
 |---|---|
@@ -353,6 +355,28 @@ complete answer.
 
 The board column is omitted entirely when the project has no `boards:`
 registry, matching every other place board is conditionally shown.
+
+The workspace column is the same arrangement, one level up: `workspaces:` is
+opt-in, and with no registry no item has a workspace at all
+(`workspaces.resolve()` is a no-op without one), so the column would be a
+column of blanks. Where it does appear it sits *before* the board column,
+mirroring the relationship between the two — a workspace groups boards.
+
+```console
+$ refdes ls            # a project that declares workspaces:, some rows
+BND-A-001     bound        product-b  board-b  Product A input current.
+BND-CAN-001   bound                            CAN bitrate.
+REQ-PLAT-001  requirement  platform            The platform shall run from 9 V to 36 V.
+```
+
+An item in **no** workspace — here `BND-CAN-001`, sitting directly in
+`items/`, outside every workspace folder — leaves that column blank rather than
+naming its absence, exactly as an item with no board leaves the board column
+blank, and that is also what `--workspace` does with it: every real name
+excludes it, and there is no name to type for "no workspace" (`--workspace ''`
+is an empty flag value, not a wildcard — it filters nothing and lists
+everything). If a filter narrows the listing to rows that all have no
+workspace, the column is dropped for the same reason the board column is.
 
 Every filter here combines as a plain AND, and `--workspace` is no exception —
 boards and workspaces are independent groupings (one level apart, per
