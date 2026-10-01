@@ -1,0 +1,1 @@
+- Concurrent saves through separate `refdes serve` instances now serialize the final file revision check and write. A stale save receives a conflict instead of reporting success and overwriting another save; staging files also have unique names so concurrent writers do not collide on a shared temp file.
