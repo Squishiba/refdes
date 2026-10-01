@@ -452,3 +452,67 @@ correction above).
 - An `ids:` mapping handed to `refdes revise` is silently ignored
   ("nothing to do -- mapping doesn't apply to this project", exit 0). Wording
   at best; not this task.
+
+==========================================================================
+## Wrap-up
+
+Status: FINISHED. All three findings fixed, wording only, one commit each.
+
+| # | Finding | What changed | Files |
+|---|---------|--------------|-------|
+| F4.1 | `docs/design/keys.md` §8's "that risk is gone entirely" | Restated with the condition: the guarantee starts when the references carry keys, i.e. on the first **writable** load. Same claim in `docs/ids.md` (two places) corrected to match | docs/design/keys.md, docs/ids.md |
+| F2.1 | Layer 2 duplicate-key remedy "Delete the key from one of them" | Names the original's definition and two ways to find it; names the trap of taking it the other way | src/refdes/keys.py, tests/test_keys.py, docs/troubleshooting.md, docs/design/keys.md |
+| F3.3 | bare link dangling on a hand rename, no remedy | Names the remedy, the two commands that do not apply, and the published docs page | src/refdes/build.py, src/refdes/docs_url.py, tests/test_keys_links.py, docs/troubleshooting.md |
+
+**No identity behaviour changed.** Nothing that mints, matches, restores,
+refuses or hashes was touched. Specifically:
+
+- `keys.validate()`'s duplicate-key branch: the `if owner is None` test, the
+  `by_key` loop, both location strings and the `project.error(...)` call are
+  byte-identical; only the message string grew. Same for
+  `build.resolve_links`' dangling-target branch: still `resolve_link_target(...)
+  is None`, still one error per target, same severity, file, line and item id.
+- No new lookups were added. `_key_evidence_sources`, `deleted_key_records`,
+  `lifecycle.list_baselines` and friends are *named* in the duplicate-key
+  message as things the reader can go and read; none of them is called from
+  the new text. Both conditional fixes the report suggested — calling
+  `validate_former_ids` before `resolve_links` so `project.former_ids` is
+  populated at resolution time, and consulting the baseline in the duplicate
+  branch — would be behaviour changes, so both were declined and recorded.
+- Exit codes, diagnostic counts and the diagnostics themselves are unchanged in
+  every scenario run above: F2.1 is still `11 items, 1 errors, 6 warnings`,
+  F3.3 still `10 items, 1 errors, 2 warnings`.
+
+### Verification
+
+- Full suite: `python -m pytest tests/ -q -p no:randomly` → **2883 passed,
+  2 skipped** (214 s), after all three commits' changes are in the tree.
+- `ruff check` on the five files I touched: `keys.py`, `docs_url.py`,
+  `test_keys.py`, `test_keys_links.py` all clean; `build.py` has one
+  pre-existing `I001` (import block ordering around
+  `from . import calc, dates, history as history_mod, imports, seal`) which I
+  confirmed is also present at HEAD — left alone, per AGENTS.md.
+- Every message was reproduced through the real CLI before and after; both
+  texts are quoted above verbatim, as are the exit codes.
+
+### Scratch
+
+All in `.scratch/` (gitignored, left in place): `r.py` (the runner),
+`mkbase.py` (the 10-item template), `base`, `f41`, `f41b`, `f21`, `f21b`,
+`f21g`, `f21h`, `f21w`, `f33`, `f33a`-`f33g`, `dupid`.
+
+### Left for someone else
+
+1. `checks: against:`'s dangling target (src/refdes/build.py:1441) has the same
+   dead end as F3.3 and would take the same wording.
+2. An `ids:` mapping given to `refdes revise` is silently ignored
+   (`nothing to do -- mapping doesn't apply to this project`, exit 0).
+3. A YAML mapping with two `id:` keys keeps the last one with no diagnostic of
+   its own, so one item silently disappears from the model (.scratch/dupid) —
+   found while testing the F2.1 remedy; the only trace is the dangling
+   reference the vanished id leaves behind.
+4. PR #122's F4.2 (`keys restore` moves a deleted item's key onto a different
+   item even when a baseline records that key under a different title and
+   hash) and F6.1 (a never-adopted seal cannot remember a key, so a sealed
+   entry's lost key is re-minted with zero diagnostics) are untouched here,
+   as scoped. Both need a comparison or a report added, not a rewording.
