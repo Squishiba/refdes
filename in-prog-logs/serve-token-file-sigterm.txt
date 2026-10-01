@@ -1,0 +1,144 @@
+Task: finding N4 from in-prog-logs/user-sim-release-gate-run3.md -- make SIGTERM a
+clean stop for `refdes serve`, so `--token-file` is removed by `kill $pid` the
+same way Ctrl+C removes it.
+
+Status: finished (2026-10-01) — implemented, tested, full suite green; PR opened.
+
+What N4 says (read from the report, section N4)
+------------------------------------------------
+`--token-file` exists for scripted use, and the ordinary scripted stop is
+`kill $pid` = SIGTERM. `--help` promised the file is "removed when serve stops
+cleanly"; the stdout line said "removed on Ctrl+C". Only SIGINT removed it.
+Severity low: nothing is lost (the stale file is a valid launch file, rewritten
+by the next launch, and its token authenticates nothing once the launch is
+gone) -- it is a hygiene issue.
+
+Where the code is
+-----------------
+- src/refdes/serve/server.py:336 `write_launch_file` (the atomic write, the
+  symlink/foreign-file refusals, the 0600 mode), `EditorApp._remove_token_file`
+  (server.py:497) called from `EditorApp.stop()` (server.py:488) and from the
+  `except BaseException` in `EditorApp.__init__`.
+- src/refdes/cli.py:344 `cmd_serve`: `app.serve_forever()` inside
+  `try/except KeyboardInterrupt/finally: app.stop()`. That is the *only* stop
+  path, and KeyboardInterrupt is raised only by SIGINT -- so nothing in the
+  process handled SIGTERM. Found via `git log --oneline -- src/refdes/serve`
+  (81c9a5e / PR #116 added --port and --token-file).
+- Help text for the flag: src/refdes/cli.py:1657. Stdout line: cli.py:366.
+- Docs: docs/cli-reference.md:1362 (flag table row), :1423 (the Ctrl+C
+  sentence), :1430 (preview temp dir "removed on Ctrl+C").
+
+Plan
+----
+1. server.py: a `sigterm_stops_cleanly()` context manager that installs a
+   SIGTERM handler for exactly the launch's lifetime and removes it on exit.
+   The handler raises KeyboardInterrupt so the existing
+   `except KeyboardInterrupt` -> `finally: app.stop()` path does the work: one
+   shutdown path, one exit code, one cleanup, nothing new to keep in step.
+2. Guard the install on SIGTERM actually being deliverable (not Windows --
+   see below).
+3. cli.py: wrap the `serve_forever()` call; fix the --help text and the stdout
+   line to say what removes the file.
+4. docs/cli-reference.md prose.
+5. tests/test_serve_cli.py: a subprocess test that SIGTERMs and asserts the
+   file is gone and the exit is 0; verify it fails against main's code.
+6. changelog.d fragment, ruff scoped to touched files, full pytest.
+
+Windows (checked in the docs, not just recalled)
+-----------------------------------------------
+`signal.SIGTERM` exists on Windows and `signal.signal(SIGTERM, handler)`
+succeeds there, but nothing delivers it: `Popen.terminate()`,
+`taskkill` and `os.kill(pid, SIGTERM)` all call TerminateProcess, which no
+handler intercepts, so a Windows launch cannot clean up after a terminate --
+which is exactly why the existing SIGINT test
+(tests/test_serve_cli.py:202) is skipped on nt. So the handler is installed only
+where it can run, and the new test is skipped on nt with that reason.
+
+What I changed
+--------------
+1. src/refdes/serve/server.py -- new `sigterm_is_deliverable()` (a predicate,
+   False on Windows) and `sigterm_stops_cleanly()`, a context manager that
+   registers a SIGTERM handler on entry and puts the previous disposition back
+   on exit. The handler raises `KeyboardInterrupt`, so the stop unwinds into the
+   `except KeyboardInterrupt` `cmd_serve` already had -> one shutdown path, one
+   exit code, no second copy of the teardown ordering. A second SIGTERM while
+   teardown is running restores SIG_DFL and re-raises the signal rather than
+   raising inside `app.stop()` (which would turn a clean stop into a traceback).
+   Registration failures (`ValueError` off the main thread, `OSError` where
+   signals are unsupported) fall through to serving without the guarantee
+   rather than refusing to run.
+   `write_launch_file` is untouched: same temp-file + rename, same symlink and
+   foreign-file refusals, same 0600. Nothing about the file's security
+   properties moved.
+2. src/refdes/cli.py `cmd_serve` -- the `with sigterm_stops_cleanly():` wraps
+   `serve_forever()` *and* `app.stop()` (deliberately: a signal landing during
+   teardown is still caught). Help text for `--token-file` and both stdout lines
+   now say Ctrl+C *or* SIGTERM (`kill $pid`), and that a hard kill cannot be
+   caught.
+3. docs/cli-reference.md -- the flag table row, the "removes the file when it
+   stops on Ctrl+C" paragraph (now: two clean stops, plus the Windows paragraph
+   saying why there is no catchable SIGTERM there), and the preview-temp-dir
+   "removed on Ctrl+C" line.
+4. tests/test_serve_cli.py -- `test_token_file_is_removed_when_serve_stops_on_sigterm`
+   (subprocess, waits for the file via the existing `_wait_for_file`, sends
+   SIGTERM, asserts exit 0 and the file gone; skipped on nt with the
+   TerminateProcess reason, matching the existing SIGINT skip at :202) and
+   `test_the_sigterm_handler_lives_only_as_long_as_the_launch` (in-process: the
+   disposition is handed back on exit, and installed while running).
+5. changelog.d/serve-token-file-sigterm.fixed.md.
+
+Verification
+------------
+- Reproduced N4 on main's code before touching anything. `git checkout HEAD --
+  src/refdes/cli.py src/refdes/serve/server.py` (copies kept in .scratch/, no
+  stash -- AGENTS.md), then the new subprocess test:
+
+      FAILED tests/test_serve_cli.py::test_token_file_is_removed_when_serve_stops_on_sigterm
+      AssertionError: a SIGTERM stop was not clean: -15
+
+  and .scratch/probe_sigterm.py against the same reverted tree:
+
+      file before TERM: True
+      exit code: -15
+      file after TERM: True
+      content: http://127.0.0.1:59955/?token=DOQ4gGzx...
+
+  i.e. main both dies on the signal and leaves the file. With my change restored,
+  the same probe prints `exit code: 0` / `file after TERM: False`.
+  (To run the test against main's tree at all, the new module-level import of
+  `sigterm_stops_cleanly` has to be neutralised too -- otherwise collection
+  fails on the missing name; done temporarily, then restored from .scratch/.)
+- New tests: 12 passed in tests/test_serve_cli.py.
+- Full suite: `PYTHONPATH=src python -m pytest -q` -> 2886 passed, 2 skipped
+  (the 2 skips are pre-existing).
+- ruff, scoped to the three touched files per AGENTS.md:
+  `ruff check src/refdes/serve/server.py src/refdes/cli.py tests/test_serve_cli.py
+  --select E9,F` and `--select I` -> All checks passed. `--select ARG,RUF100`
+  shows one *pre-existing* RUF100 (a `noqa: BLE001` at server.py:625, a line I
+  did not touch) -- left alone on purpose.
+- `--help` and the stdout lines read correctly (checked by running them).
+
+Windows, precisely
+-----------------
+`signal.SIGTERM` exists on Windows and `signal.signal(SIGTERM, handler)` succeeds
+there, but no handler can run for it: `Popen.terminate()`, `taskkill` and
+`os.kill(pid, SIGTERM)` all end in TerminateProcess. So no handler is installed
+on nt at all (`sigterm_is_deliverable()` is False there and the context manager
+yields straight through), a Windows `serve` stopped that way leaves the token
+file behind exactly as a hard kill does -- and the next launch rewrites it, the
+pre-existing behaviour -- and the new test is skipped there. Nothing on Windows
+changes shape: same help text, same stdout, same refusals, same 0600 (the file's
+own fchmod guard is untouched).
+
+Notes / judgement calls
+-----------------------
+- SIGTERM is made a clean stop for *every* `serve` launch, not only one with
+  `--token-file`: the preview temp directory and the poller are cleaned up the
+  same way, and "kill me politely" should mean the same thing either way. The
+  token file is what the finding is about; the rest is the same code path.
+- The signal-handler tests are POSIX-run, so the "installed / handed back"
+  in-process test runs on Windows too and asserts only that the disposition is
+  unchanged there.
+- Left in .scratch/: probe_sigterm.py, probe_twice.py (two SIGTERMs back to back
+  -> exit 0, no traceback), and the .new copies of the files reverted for the
+  main-code check.

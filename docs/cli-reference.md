@@ -1359,7 +1359,7 @@ and a browser editor. Loads exactly one project and prints a launch URL.
 |---|---|
 | `--no-open` | Print the launch URL but do not open a browser |
 | `--port PORT` | Bind this exact `127.0.0.1` port instead of an ephemeral one. A port something else already holds is a refusal — `error: cannot listen on 127.0.0.1:<port>: Address already in use …`, exit `2` — never a silent fallback to some other port. `PORT` is 1–65535; anything else is a usage error and exit `2`. Below 1024 it needs elevated privileges |
-| `--token-file PATH` | Write this launch's URL — which carries the launch token — to `PATH`, so a script reads the credential from a file instead of scraping stdout. Written atomically, owner-only (`0600`), never written through a symlink, and only ever over a previous launch file of its own — anything else at that path is a refusal and exit `2`. Removed when `serve` stops cleanly |
+| `--token-file PATH` | Write this launch's URL — which carries the launch token — to `PATH`, so a script reads the credential from a file instead of scraping stdout. Written atomically, owner-only (`0600`), never written through a symlink, and only ever over a previous launch file of its own — anything else at that path is a refusal and exit `2`. Removed when `serve` stops cleanly — on Ctrl+C or on a `SIGTERM` (`kill $pid`); only a hard kill (`kill -9`) leaves it behind |
 
 ```bash
 refdes serve
@@ -1420,16 +1420,27 @@ refdes serve --no-open --port 8731 --token-file /tmp/refdes-launch.txt
   waiting to be committed, and `--no-write` does not gate this write because it
   is not project state.
 
-  `serve` removes the file when it stops on Ctrl+C. A hard kill cannot, which is
+  `serve` removes the file when it stops cleanly, and there are two clean stops:
+  Ctrl+C, and a `SIGTERM` — which is what `kill $pid` sends, and therefore what
+  the script above needs. The `SIGTERM` handler is installed for that launch only
+  and takes the same path a Ctrl+C does, so a scripted stop exits `0` and leaves
+  no credential behind. `kill -9` cannot be caught and cannot remove it, which is
   the stale file above.
+
+  On Windows there is no such thing as a catchable `SIGTERM` to send: `terminate()`
+  in Python, `taskkill`, and anything else that stops a process there end in
+  `TerminateProcess`, which no handler intercepts. So a Windows `serve` stopped
+  that way leaves the file behind, exactly like a hard kill, and the next launch
+  rewrites it.
 
   Persisting the launch token is a deliberate exception, granted per launch to
   the person who asked for the flag: `serve` writes the token nowhere unless
   `--token-file` is given.
 - **The preview never touches `_site/`.** It is rendered into a directory under
-  your OS temp directory, removed on Ctrl+C and pruned on a later launch if a
-  crash left it behind. An "Editor" / "Edit this item" toolbar is added to the
-  *HTTP response* only; a `_site/` you publish never contains it.
+  your OS temp directory, removed on a clean stop (Ctrl+C or `SIGTERM`) and pruned
+  on a later launch if a crash left it behind. An "Editor" / "Edit this item"
+  toolbar is added to the *HTTP response* only; a `_site/` you publish never
+  contains it.
 - **The preview is a workbench (thread workbench, `docs/design/thread-workbench.md`).**
   Served item pages carry author decorations the published site never shows —
   the item's own build diagnostics in a panel, image provenance (resolved

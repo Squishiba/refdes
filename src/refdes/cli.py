@@ -347,7 +347,7 @@ def _serve_port_arg(text: str) -> int:
 def cmd_serve(args) -> int:
     """`refdes serve`: the loopback-only browser editor and rendered preview
     (docs/design/browser-editor.md). One project, one process."""
-    from .serve.server import EditorApp, ServeStartupError
+    from .serve.server import EditorApp, ServeStartupError, sigterm_stops_cleanly
 
     try:
         app = EditorApp(
@@ -365,22 +365,32 @@ def cmd_serve(args) -> int:
     print(f"refdes serve: {app.launch_url}", flush=True)
     if app.token_file:
         print(
-            f"Launch URL written to {app.token_file} (owner-only, removed on Ctrl+C);"
-            " it is a credential.",
+            f"Launch URL written to {app.token_file} (owner-only, removed when this "
+            "stops cleanly -- Ctrl+C or SIGTERM); it is a credential.",
             flush=True,
         )
     print("Listening on 127.0.0.1 only. The token in that URL is this launch's key;")
-    print("keep it out of screenshots and shared terminals. Ctrl+C to stop.", flush=True)
+    print(
+        "keep it out of screenshots and shared terminals. Ctrl+C to stop; a SIGTERM "
+        "(`kill $pid`) stops it just as cleanly.",
+        flush=True,
+    )
     if not args.no_open:
         import webbrowser
 
         webbrowser.open(app.launch_url)
-    try:
-        app.serve_forever()
-    except KeyboardInterrupt:
-        pass
-    finally:
-        app.stop()
+    # The SIGTERM handler is installed for this launch only, and only where
+    # SIGTERM is deliverable at all (see `sigterm_stops_cleanly`): a scripted
+    # `kill $pid` takes the very path a Ctrl+C takes, so the launch credential
+    # goes with it. `stop()` is inside the `with` on purpose -- a signal that
+    # lands during teardown is still caught.
+    with sigterm_stops_cleanly():
+        try:
+            app.serve_forever()
+        except KeyboardInterrupt:
+            pass
+        finally:
+            app.stop()
     return 0
 
 
@@ -1658,7 +1668,9 @@ def main(argv: list[str] | None = None) -> int:
         metavar="PATH",
         help="write this launch's URL (which carries the launch token) to PATH "
         "with owner-only permissions, so a script reads the credential instead "
-        "of scraping stdout; removed when serve stops cleanly",
+        "of scraping stdout; removed when serve stops cleanly -- on Ctrl+C or "
+        "on a SIGTERM (kill $pid), not on a hard kill (kill -9), which cannot "
+        "be caught",
     )
     p_serve.set_defaults(func=cmd_serve)
 

@@ -19,12 +19,14 @@ are found by segment-checked lookup below fixed roots only.
 
 from __future__ import annotations
 
+import contextlib
 import errno
 import html as html_mod
 import json
 import mimetypes
 import os
 import re
+import signal
 import stat
 import tempfile
 import threading
@@ -506,6 +508,70 @@ class EditorApp:
             return
         path, self.token_file = self.token_file, None
         _unlink_quietly(path)  # already gone, or not ours to remove
+
+
+def sigterm_is_deliverable() -> bool:
+    """Whether SIGTERM can be caught on this platform.
+
+    On POSIX, `kill $pid` raises it in the target and Python runs the handler
+    between bytecodes. On Windows `signal.SIGTERM` exists and registering a
+    handler for it succeeds, but nothing ever delivers it: `Popen.terminate()`,
+    `taskkill` and `os.kill(pid, SIGTERM)` all go straight to `TerminateProcess`,
+    which no handler can intercept. Registering one there would be a handler
+    that provably cannot run, so it is not registered.
+    """
+    return os.name != "nt"
+
+
+@contextlib.contextmanager
+def sigterm_stops_cleanly():
+    """Make SIGTERM stop this launch cleanly, for exactly as long as it lives.
+
+    `--token-file` is written for scripted use, and the ordinary scripted stop is
+    `kill $pid` -- SIGTERM -- which used to be the one signal nothing handled, so
+    the launch credential stayed on disk after every scripted run while `--help`
+    said it was "removed when serve stops cleanly".
+
+    The handler raises `KeyboardInterrupt` rather than calling `app.stop()`
+    itself: the main thread is parked in the selector poll inside
+    `serve_forever()`, so the exception lands there and unwinds into the
+    `except KeyboardInterrupt` `cmd_serve` already has. One shutdown path, one
+    exit code, one cleanup, and no second copy of the teardown ordering to keep
+    in step. It is not installed at import -- it is installed here, and taken
+    back out on the way out, so nothing else in the process ever sees it.
+    """
+    if not (hasattr(signal, "SIGTERM") and sigterm_is_deliverable()):
+        yield
+        return
+    stopping = False
+
+    def handler(_signum, _frame):
+        nonlocal stopping
+        if stopping:
+            # A second SIGTERM while the first stop is still running: the
+            # teardown is already underway, so hand it back to the default
+            # action rather than raising inside `app.stop()` and turning a clean
+            # stop into a traceback.
+            signal.signal(signal.SIGTERM, signal.SIG_DFL)
+            os.kill(os.getpid(), signal.SIGTERM)
+            return
+        stopping = True
+        raise KeyboardInterrupt
+
+    try:
+        previous = signal.signal(signal.SIGTERM, handler)
+    except (OSError, ValueError):
+        # Not the main thread (`ValueError`), or no signal support here
+        # (`OSError`): serve without the guarantee rather than refusing to run.
+        yield
+        return
+    try:
+        yield
+    finally:
+        try:
+            signal.signal(signal.SIGTERM, previous)
+        except (OSError, ValueError):
+            pass
 
 
 class _Handler(BaseHTTPRequestHandler):
