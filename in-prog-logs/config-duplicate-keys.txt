@@ -1,0 +1,455 @@
+Task: duplicate mapping keys in *config* files should be an error, the way
+PR #130 made them an error in item files. A second `site:` block in
+`refdes-project.yaml` silently replaced the first; YAML's last-wins rule hid
+it completely.
+
+Worktree: /home/jorb/.paseo/worktrees/16msma8v/config-duplicate-keys
+Branch:   config-duplicate-keys (from main @ 70d1efe)
+
+The `refdes` on PATH is a broken editable install pointing at another
+worktree, so every command below actually ran through
+
+    PYTHONPATH=<this worktree>/src python -m refdes.cli ...
+
+`[exit=N]` is that command's own exit code. Scratch projects are in
+`.scratch/` (gitignored, left in place). Note the worktree was a commit
+behind `main` when I started (`b068f96` vs `main` @ `70d1efe`); rebased
+onto `main` before doing anything, since the tree was clean.
+
+Status: FINISHED. One branch, tests / changelog / docs included.
+
+==========================================================================
+## 1. Reproduced on main first, verbatim
+
+Base: `.scratch/cfgA` -- `refdes init`, then a hand-written
+`items/power/requirements.yaml` with two requirements. On main:
+
+    $ refdes --no-write check
+    WARNING <project> — 2 item(s) with no coverage — see coverage.html
+    2 items, 0 errors, 1 warnings
+    [exit=0]
+
+### 1a. `.scratch/cfgB` -- two `site:` blocks, top level
+
+`refdes-project.yaml` with `site:` at line 1 and a second `site:` block at
+line 6 carrying a different `title:` and `out:`:
+
+    $ refdes --no-write check
+    WARNING <project> — 2 item(s) with no coverage — see coverage.html
+    2 items, 0 errors, 1 warnings
+    [exit=0]
+
+And which one survived, straight off the model:
+
+    $ python -c "from refdes.schema import load_project; print(load_project(start='.').title)"
+    Second Title
+
+The first block is simply gone. Nothing anywhere says so, on any command,
+at any verbosity.
+
+### 1b. `.scratch/cfgC` -- two `sigfigs:` lines and two `draft_items:` rules
+
+    $ refdes --no-write check
+    WARNING <project> — 2 item(s) with no coverage — see coverage.html
+    2 items, 0 errors, 1 warnings
+    [exit=0]
+
+`release_gate.draft_items` is a *nested* repeat (the two `draft_items:`
+lines each open their own rule mapping), and `sigfigs: 4` / `sigfigs: 6` is
+the top-level shape. Both silent.
+
+### 1c. `.scratch/cfgD` -- `refdes-schema.yaml`, `source:` twice in a field map
+
+    $ refdes --no-write check
+    WARNING <project> — 2 item(s) with no coverage — see coverage.html
+    2 items, 0 errors, 1 warnings
+    [exit=0]
+
+(While setting this probe up I first wrote the second `source:` with a
+`target_type:` key, which is not a field-spec key -- that produced
+`configuration error: ... target_type is not valid` on main. Proved to me
+that config errors do carry real content, just not line numbers.)
+
+### 1d. `.scratch/cfgE` -- a repeat inside one named block, and a flow mapping
+
+`site:` with two `title:` lines, plus `id: {width: 3, width: 4}`:
+
+    $ refdes --no-write check
+    WARNING <project> — 2 item(s) with no coverage — see coverage.html
+    2 items, 0 errors, 1 warnings
+    [exit=0]
+
+==========================================================================
+## 2. Scope: every YAML file refdes loads, and what I did about each
+
+`grep -rn "yaml.safe_load|yaml\.load|YAML(|ruamel" src/refdes/` plus
+`grep -rn yaml_safe_load src/refdes/` gives the whole set. There are two
+loader families and the config files are in the *other* one from item
+files -- the same split `in-prog-logs/yaml-duplicate-keys.txt` §2 recorded
+for PR #130.
+
+**In scope, changed (hand-authored config):**
+
+| file | read by | change |
+|---|---|---|
+| `refdes-project.yaml` | `schema.load_project` (schema.py) | refused |
+| `refdes-schema.yaml` | `schema._load_schema_overlay` (schema.py) | refused |
+| a `revise` mapping file | `revise.load_mapping` (revise.py) | refused |
+| `refdes-project.yaml`, for a preset edit | `scaffold.add_preset` / `remove_preset` | refused |
+
+The `scaffold` one is not in the brief's list and I added it deliberately:
+it is the same file, and it is the only path that *writes* the config
+without going through `load_project` (`add_preset` reads the file to span-edit
+`standard.presets: [...]` and never loads the project). A config with two
+`presets:` lines would have had the preset appended to the first while the
+loader resolved the second -- so it was the one command where a silent
+repeat would have *written* the ambiguity down. Test
+`test_add_preset_refuses_a_config_it_could_not_read` pins it, including that
+nothing was written.
+
+`revise.load_mapping` is in because it is hand-authored YAML refdes loads and
+already reports as a `SchemaError` (exit 2, `configuration error:`). A repeat
+there is worse than a repeat in a config block: a rename mapping's whole job
+is to say which old name becomes which new one, so two `REQ:` lines under
+`prefixes:` drop one rename and apply the other.
+
+**Out of scope, deliberately, with the reason:**
+
+- **Everything under `.refdes/`** -- the id ledger, boards manifest, seals,
+  baselines, history objects/events, `keys-adopted.yaml`, the citations
+  lockfile. The brief says so, and it is also the right call: these are
+  refdes's own output, so a repeat is a refdes bug rather than an authoring
+  slip, and hardening them is a much wider question (seal hashes, baseline
+  diffs and `audit` all read those files, and each would need its own
+  decision about what a repeat means). Noted in the changelog fragment so the
+  boundary is on the record.
+- **The bundled standard** (`standards._read_yaml`, reading
+  `standards/hardware/v3/base.yaml`, its `migration.yaml` and its presets).
+  Shipped with the package, not hand-authored per project -- and
+  `configcheck.py`'s own module docstring already states that principle
+  ("Both check *project-authored* input only"), which I extended rather than
+  contradicted.
+- **`pages/*.md` front matter** (`pages._read_page`). Real hand-authored YAML
+  refdes loads, and a repeat there *is* silent -- but it is page content, not
+  a config file, and its whole diagnostic family is deliberately soft: an
+  unparseable page front matter is a `project.warn` ("invalid page
+  front-matter: ...", pages.py) that leaves the page rendering without its
+  metadata, not a hard error that stops the load. Promoting it would be a
+  separate decision about that family. `in-prog-logs/yaml-duplicate-keys.txt`
+  §5 listed it as a follow-up; it is still one, and I am not quietly folding
+  it in here.
+- **`patcher.py`'s `yaml.safe_load` calls** (lines ~824, ~1456, ~1510,
+  ~1773). One is a round-trip check of an emitted value, one is a
+  before/after *projection* of item text for the revert comparison, and the
+  docstring there says it uses the plain loader on purpose so `__line__`
+  bookkeeping cannot make two identical items look different. Not config.
+- **`revise.py`'s two `parse.yaml_safe_load` re-reads** (lines ~780, ~923) and
+  `serve/edit.py`'s (`yaml_safe_load` on an existing item list file to decide
+  whether an append can preserve every existing byte). All item files, all
+  already #130's territory.
+
+==========================================================================
+## 3. The fix: one detector, one message
+
+### 3a. Detection -- `parse.py`, reusing #130's `_duplicate_keys`
+
+`_duplicate_keys` was already the right detector and needed no change. What
+was missing was a *loader* that runs it without #130's `__line__` tagging,
+because `configcheck` walks every key of every block and would report the
+bookkeeping key as an unknown setting in all of them.
+
+- `_collect_duplicates(loader, node)` -- the collect-onto-the-instance half of
+  #130's `_construct_mapping`, extracted so both loaders share it verbatim.
+- `_DupSafeLoader` / `_PurePythonDupLoader` +
+  `_construct_mapping_dupes` -- same `_duplicate_keys` walk, **no** `__line__`.
+- `yaml_safe_load_checked(stream)` -> `(data, records)` -- the config-facing
+  `yaml_safe_load`, with `yaml_safe_load`'s C-then-pure-Python retry so a
+  syntax error keeps its byte-identical diagnostic.
+- `_as_text(stream)` -- extracted from `yaml_safe_load`, shared by both.
+
+So there is one detector, and the two loader families cannot disagree about
+what a repeat is. `<<:` merge keys are still read before `flatten_mapping`
+(inherited from `_duplicate_keys` itself), pinned by
+`test_a_merge_key_is_not_a_repeat`.
+
+### 3b. Reporting -- `configcheck.py`, following the existing path
+
+`check_duplicate_keys(records, source)` raises
+`SchemaError(f"{source}: {message}")` -- the same `SchemaError` every other
+config problem raises, so it lands on the path that already exists:
+`cli.main` (cli.py:2346) prints `configuration error: <msg>` and returns 2.
+No new diagnostic family, no new exit code, no new handler.
+
+Placement is deliberate and is the answer to the brief's "how a hard config
+error stops the load":
+
+- `schema.load_project`: immediately after the file is parsed, **before** the
+  legacy-`refdes.yaml` check and before `_validate_settings`. Every check
+  below it would otherwise be judging a mapping the file does not contain.
+- `schema._load_schema_overlay`: immediately after the overlay is parsed,
+  before its own `SCHEMA_KEYS` check.
+- both are `check`ed before any item is parsed and before anything is
+  written, since `loader.load_tree` calls `load_project` first.
+
+Message shape, reused rather than rewritten: `_report_duplicate_keys`'s body
+is now built by `parse._duplicate_key_message(record, remedy, context, extra)`,
+with the two shared pieces pulled out as `_duplicate_outcome` (which value is
+lost / that nothing is lost / the value is too long to quote) and
+`_duplicate_where` (`(lines N and M)` / `, twice on line N`). The item-file
+call site passes its `context` and its `; an 'id:' lost this way is a whole
+item, not a field` clause; the config call site passes neither, so the two
+messages cannot drift into telling different stories about the same document.
+
+Config-specific bits that are genuinely different, and why:
+
+- **Remedy.** The item-file one leads with a list entry that lost its `- `
+  marker, which is a shape only items have. The config one is
+  "Usually a hand-merge or a copied block left two spellings of one setting:
+  keep the one you meant and delete the other." A test asserts the item-file
+  remedy is *not* in the config message.
+- **Every repeat in one error.** `configcheck.keys` already had the rule --
+  "a block with two typos is one read of an error, not one per `refdes
+  check`" -- so all repeats are named in the one `SchemaError`: the first
+  written out in full (remedy + docs pointer), the rest after `Also: ...`
+  in the compact form.
+- **Docs pointer.** `docs_url.ITEMS_FIELDS_DOCS`, because the new
+  troubleshooting entry sits in that same `## Items and fields` section (the
+  retired-`refdes.yaml` config error is already there too). Anchor verified
+  with `pages._slugify("Items and fields") == "items-and-fields"`, not
+  guessed.
+
+==========================================================================
+## 4. The wrinkle: line numbers on a config error
+
+The brief was right that config errors carry none -- verified by running
+it, on a `sit:` typo against a clean config (.scratch/cfgH):
+
+    configuration error: refdes-project.yaml: unknown setting 'sit'. Did you
+    mean 'site'?
+    [exit=2]
+
+No line anywhere, and `schema._validate_settings` is untouched by this diff
+(`git diff src/refdes/schema.py` is only the two read sites and the import),
+so this is main's behaviour too. But the brief is also right that this one
+should carry lines, because the diagnosis of a repeat *is* two line numbers and
+nothing else is useful about it. So `DuplicateKey.first_line` / `second_line`
+reach the message through the shared builder, and the message reads:
+
+    configuration error: refdes-project.yaml: duplicate key 'site' in one
+    mapping (lines 1 and 6) -- YAML keeps the last, so the value on line 1 is
+    lost. Usually a hand-merge or a copied block left two spellings of one
+    setting: keep the one you meant and delete the other. See
+    https://squishiba.github.io/refdes/troubleshooting.html#items-and-fields.
+
+Lines are the real file lines: `load_project` parses the whole file, so no
+slice offset is needed (unlike #130's Markdown front-matter path, which does
+`_shift_duplicates`). Nothing else about the config family changed -- no other
+config error grew a line, and the `file:` prefix every config message already
+carries is unchanged.
+
+==========================================================================
+## 5. After: the same five scratch projects, this branch's code
+
+    .scratch/cfgB  (two site: blocks, top level)
+    configuration error: refdes-project.yaml: duplicate key 'site' in one mapping (lines 1 and 6) -- YAML keeps the last, so the value on line 1 is lost. Usually a hand-merge or a copied block left two spellings of one setting: keep the one you meant and delete the other. See https://squishiba.github.io/refdes/troubleshooting.html#items-and-fields.
+    [exit=2]
+
+    .scratch/cfgC  (sigfigs: twice + two release_gate rules), all three named:
+    configuration error: refdes-project.yaml: duplicate key 'sigfigs' in one mapping (lines 15 and 16) -- YAML keeps the last, so '4' is dropped for '6'. ... Also: duplicate key 'draft_items' in one mapping (lines 19 and 20) -- YAML keeps the last, so the value on line 19 is lost.
+    [exit=2]
+
+    .scratch/cfgD  (refdes-schema.yaml, source: twice)
+    configuration error: refdes-schema.yaml: duplicate key 'source' in one mapping (lines 4 and 7) -- YAML keeps the last, so the value on line 4 is lost. ...
+    [exit=2]
+
+    .scratch/cfgE  (two title: in site:, and id: {width: 3, width: 4})
+    configuration error: refdes-project.yaml: duplicate key 'id' in one mapping (lines 7 and 14) -- ... Also: duplicate key 'title' in one mapping (lines 2 and 3) -- YAML keeps the last, so 'New Project — Design Reference' is dropped for 'Typo — Design Reference'. Also: duplicate key 'width' in one mapping, twice on line 7 -- YAML keeps the last, so '3' is dropped for '4'.
+    [exit=2]
+
+    .scratch/cfgG  (two presets: lines inside standard:, via `standard add-preset`)
+    configuration error: refdes-project.yaml: duplicate key 'presets' in one mapping (lines 8 and 9) -- YAML keeps the last, so the value on line 8 is lost. ...
+    [exit=2]
+
+    .scratch/cfgA  (clean) -- unchanged:
+    WARNING <project> — 2 item(s) with no coverage — see coverage.html
+    2 items, 0 errors, 1 warnings
+    [exit=0]
+
+Note the ordering in cfgE: the top-level `id` repeat is reported first, then
+the two nested ones, because the outer mapping's constructor runs before it
+recurses. Depth-first, outermost-first. That is the order the document reads
+in and I left it.
+
+Also checked: `refdes --no-write check` on this repo itself is unchanged apart
+from the pre-existing `P_dens violates BND-THM-001` bound failure in the
+sample project.
+
+==========================================================================
+## 6. Tests
+
+New: `tests/test_config_duplicate_keys.py`, 20 tests.
+
+- top-level repeat (two `site:` blocks): file, both lines, the loss, the
+  config remedy, and that the *item*-file remedy is absent
+- reported before anything else in the same file (ordering)
+- every repeat in one error; a key written three times names 2-and-4 then
+  4-and-6
+- nested: two `release:` lines in a `release_gate:` rule mapping; two
+  `title:` lines inside one `site:`; `id: {width: 3, width: 4}` reporting
+  `twice on line 1` and not `(lines 1 and 1)`
+- a repeat that agrees with itself claims no loss
+- `<<:` is not a repeat (a legal merge into a second type's `fields:`)
+- `refdes-schema.yaml`: a `types:` block declared twice; a `source:` twice
+  inside a field map; the overlay repeat reported before its own key check
+- `revise.load_mapping` with two `REQ:` lines under `prefixes:`
+- `scaffold.add_preset` refusing a config with two `presets:` lines, and
+  asserting the file was not written
+- controls: a clean config (title, width, and **no** `__line__` leaking into
+  the settings -- the reason the config loader had to be a new class), a clean
+  multi-namespace overlay, this repo's own two configs, the `COVERAGE_SCHEMA`
+  fixture, the `COVERAGE_ITEMS` fixture through `parse.load_items`, and a
+  syntax error still winning over a repeat
+
+Modified: `tests/test_config_unknown_keys.py` -- **and this is the one thing
+that surprised me, so it gets its own paragraph.** Its `_write` helper
+*appended* the per-test `site:`/`id:`/`history:`/`units:` block to a
+`MIN_SETTINGS` that already declared all four, so 13 of its tests were
+describing a config with four duplicate keys -- which is precisely the silent
+last-wins this change removes. On main those tests passed *because* the
+duplicate was resolved silently; once the repeat is an error they all failed
+with the duplicate-key message instead of the unknown-key message they are
+about. So the fixture now substitutes the block rather than appending it
+(`_settings_with`). The tests' intent is unchanged -- they still assert
+`site.titel is not valid` and friends -- and the file's own docstring is left
+alone because its claims are still true.
+
+### Every new test that asserts the new behaviour FAILS on main's code
+
+Backed the five modified `src/` files and the one modified test up to
+`.scratch/backup/`, `git checkout --` them (no stash, per AGENTS.md), ran, and
+restored:
+
+    $ PYTHONPATH=src python -m pytest tests/test_config_duplicate_keys.py -q -p no:randomly
+    13 failed, 7 passed in 0.18s
+
+The 13 failures are exactly the behavioural tests. Two of them are worth
+quoting, because the failure text is the bug:
+
+- `test_a_second_top_level_block_is_a_configuration_error` --
+  `DID NOT RAISE` (main loads the file and keeps the second `site:`).
+- `test_add_preset_refuses_a_config_it_could_not_read` --
+  `AssertionError: preset 'design-debate' is already selected`, i.e. main
+  read the *second* `presets:` line, decided the preset was there, and
+  refused for the wrong reason.
+
+The 7 that pass are the controls, and they are supposed to: they pin
+behaviour that must not change (a clean config loads, a merge key is not a
+repeat, a syntax error wins, the repo's own configs load, the fixtures are
+clean). Two of them also fail on main *without* this change having been made --
+`test_a_clean_config_loads_exactly_as_before` and
+`test_a_clean_overlay_still_loads` -- because on main there is no repeat to
+report at all, which is the control working.
+
+I also ran `tests/test_config_unknown_keys.py` against main's code with its
+original fixture: `55 passed`, confirming the 13 failures above were caused by
+this change and not by my edit to the fixture.
+
+### Full suite
+
+    $ PYTHONPATH=src python -m pytest tests/ -q -p no:randomly
+    3177 passed, 2 skipped in 224.13s (3:44)
+    $ PYTHONPATH=src python -m pytest tests/ -q          # random order
+    3177 passed, 2 skipped in 227.77s (3:47)
+
+3157 before the new file, 3177 after -- the 20 new tests, no regressions.
+
+### ruff, scoped (AGENTS.md)
+
+Every touched file, its finding *codes* compared against the same file at
+`HEAD` (line numbers stripped, sets compared):
+
+    src/refdes/parse.py                  identical set   clean at HEAD, clean now
+    src/refdes/configcheck.py           identical set   clean at HEAD, clean now
+    src/refdes/schema.py                 identical set   5 findings, pre-existing
+    src/refdes/scaffold.py               identical set   clean at HEAD, clean now
+    src/refdes/revise.py                 identical set   12 findings, pre-existing
+    tests/test_config_duplicate_keys.py  clean
+    tests/test_config_unknown_keys.py    clean
+
+One finding did appear mid-work and was fixed rather than shipped: adding
+`from . import configcheck` to `scaffold.py` broke the `I001` import-sort
+(caught by exactly this diff). Nothing unrelated silenced.
+
+==========================================================================
+## 7. Decisions I made that a reviewer might want to overrule
+
+1. **`scaffold.add_preset`/`remove_preset` are in scope.** Beyond the brief's
+   list. Reasoning in §2: it is the same file, and it is the one path that
+   writes the config without loading it.
+2. **`revise` mapping files are in scope.** They are hand-authored YAML refdes
+   loads, already in the `SchemaError` family, and a repeat there drops a
+   rename rather than a setting.
+3. **`pages/*.md` front matter is out.** Reasoning in §2 -- it is page
+   content, and its family is a warning by design. This is the one exclusion
+   where a maintainer might reasonably disagree, so it is stated rather than
+   buried.
+4. **All repeats in one error, first one in full.** Followed
+   `configcheck.keys`' existing rule rather than #130's one-error-per-repeat,
+   because a `SchemaError` can only carry one message -- #130 can accumulate
+   because `project.error` appends to a list.
+5. **`breaking` changelog category.** `changelog.d/README.md` defines it as
+   "existing projects must change". A config carrying a repeat that loaded
+   yesterday now fails to load on every command, which is that by definition;
+   the same reasoning as its sibling `duplicate-mapping-key.breaking.md` and
+   `config-split-two-files.breaking.md`. Folding it into `fixed` would hide
+   that, which is why the brief said to read the definition and decide.
+
+==========================================================================
+## 8. Files
+
+- `src/refdes/parse.py` -- `_collect_duplicates`, `_base_constructor`,
+  `_DupSafeLoader`, `_PurePythonDupLoader`, `_construct_mapping_dupes`,
+  `_as_text`, `yaml_safe_load_checked`, `_duplicate_outcome`,
+  `_duplicate_where`, `_duplicate_key_message`; `_construct_mapping` and
+  `_report_duplicate_keys` refactored onto the shared pieces.
+- `src/refdes/configcheck.py` -- `check_duplicate_keys`,
+  `duplicate_keys_error`, `_CONFIG_DUPLICATE_REMEDY`; module docstring.
+- `src/refdes/schema.py` -- both config read sites use the checked loader;
+  imports.
+- `src/refdes/scaffold.py` -- `_read_settings` (returns `(mapping, raw text)`,
+  because the preset edit is a comment-preserving span edit of the text, never
+  a re-serialization).
+- `src/refdes/revise.py` -- `load_mapping`.
+- `docs/troubleshooting.md` -- the new entry, immediately after #130's, in the
+  same `## Items and fields` section (which is why `ITEMS_FIELDS_DOCS` is the
+  right pointer for it).
+- `changelog.d/config-duplicate-key.breaking.md`
+- `tests/test_config_duplicate_keys.py` (new),
+  `tests/test_config_unknown_keys.py` (fixture only)
+
+### Scratch (all in `.scratch/`, gitignored, left in place)
+
+`cfgA` (the clean 2-item base), `cfgB` (two `site:` blocks), `cfgC`
+(`sigfigs:` twice + two `release_gate` rules), `cfgD` (`refdes-schema.yaml`,
+`source:` twice), `cfgE` (two `title:` in `site:` + a flow-mapping repeat),
+`cfgF`/`cfgG` (the `revise` and `standard add-preset` probes),
+`backup/` (the six files saved for the main-code run in §6), `head_base.py`
+(the ruff baseline scratch).
+
+==========================================================================
+## 9. Found while working, NOT fixed
+
+1. **`configcheck` still has no line numbers, anywhere else.** Deliberate and
+   in scope for the brief to carve out ("even if other config errors still lack
+   lines"), but worth naming: `site.titel is not valid` would be much better as
+   `site.titel is not valid (line 2)`, and the machinery to do it is now one
+   `__line__` away. Deliberately not done here because it is a second,
+   independent change across a dozen call sites.
+2. **`pages/*.md` front matter repeats are still silent** (§2, §7.3).
+3. **A duplicate in `.refdes/` state is still silent** (§2) -- and that is
+   where the consequence is most expensive, since a repeat in a seal file or
+   the citations lockfile changes what a build is compared against.
+4. **`refdes-project.yaml` written by `refdes standard add-preset` /
+   `remove-preset` is never checked after the write.** The span edit cannot
+   introduce a repeat, so this is a non-issue in practice; noted only so
+   nobody reads the refusal as a general post-write verification.

@@ -23,6 +23,13 @@ reads a block it has not validated. `validate_overlay` checks the three
 namespaces of `refdes-schema.yaml` in the shape `standards.resolve_schema`
 consumes them.
 
+`check_duplicate_keys` is the third, and the earliest: a key the file spells
+twice. YAML resolves that silently by keeping the last value, so a second
+`site:` block replaces the first with nothing anywhere saying so -- the same
+class of silent loss PR #130 made an error for item files, one diagnostic
+family over. It reuses that change's detector (`parse._duplicate_keys`) and its
+message rather than growing a second one.
+
 Both check *project-authored* input only. The bundled standard and its presets
 flow through the same parsing loop but are not checked here, so a bundle
 shipped by a newer refdes can still carry a key an older parser ignores.
@@ -34,8 +41,10 @@ import difflib
 from typing import Any
 
 from . import docs_url as docs_url_mod
+from . import parse as parse_mod
 from . import theme as theme_mod
 from .model import ON_CHANGE_MODES, SchemaError
+from .parse import DuplicateKey
 
 # What a field's `type:` may be. Derived from the one mapping of declared field
 # types (schema_json._FIELD_TYPE_MAP, which `refdes new` and
@@ -109,6 +118,59 @@ def _got(value: Any) -> str:
     """A value as it appears in a diagnostic, shortened when it is a whole mapping."""
     text = repr(value)
     return text if len(text) <= 60 else text[:57] + "..."
+
+
+# The one-line fix for a key a config file spells twice. The item-file twin of
+# this remedy leads with a list entry that lost its `- ` marker, which is a
+# shape only items have; here the shape is a block or a setting written twice,
+# which is what a bad hand-merge or an appended copy leaves behind.
+_CONFIG_DUPLICATE_REMEDY = (
+    "Usually a hand-merge or a copied block left two spellings of one setting: "
+    "keep the one you meant and delete the other."
+)
+
+
+def _duplicate_keys_error(records: list[DuplicateKey], source: str) -> SchemaError:
+    """The configuration error for a key a config file spells twice.
+
+    A `SchemaError`, so it stops the load the way every other config problem
+    does -- `cli.main` prints `configuration error: <this>` and exits 2, before
+    a single item is parsed and before anything is written. That is the whole
+    point: in a config file a repeat is resolved by the time the loader reads
+    the mapping, and the block it drops is a whole setting (`site:`, `standard:`,
+    an `id:` block) rather than one field.
+
+    The line of *each* occurrence is in the message even though no other config
+    error carries a line. `parse._duplicate_key_message` is the item-file
+    message verbatim -- same detector, same wording, same two line numbers --
+    so the same document reads the same way whichever loader read it.
+
+    Every repeat in the file is named in the one error (`keys()`'s rule: one
+    read of an error, not one per `refdes check`), with the first one written
+    out in full and the rest after it.
+    """
+    first, rest = records[0], records[1:]
+    message = parse_mod._duplicate_key_message(first, _CONFIG_DUPLICATE_REMEDY)
+    for record in rest:
+        message += (
+            " Also: duplicate key "
+            f"{record.key!r} in one mapping{parse_mod._duplicate_where(record)}"
+            f" -- YAML keeps the last, so "
+            f"{parse_mod._duplicate_outcome(record)}."
+        )
+    return SchemaError(f"{source}: {message}")
+
+
+def check_duplicate_keys(records: list[DuplicateKey], source: str) -> None:
+    """Raise on a repeated mapping key in a hand-authored config file, or return.
+
+    Called from the two places a config file is read, before anything reads the
+    mapping it produced: a repeat means the value the loader went on to use is
+    not the one the author wrote first, so every validation below it is judging
+    a mapping the file does not contain.
+    """
+    if records:
+        raise _duplicate_keys_error(records, source)
 
 
 class BlockChecker:

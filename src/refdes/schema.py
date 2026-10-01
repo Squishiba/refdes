@@ -13,6 +13,7 @@ import os
 from typing import Any
 
 from . import calc, dates, standards, theme as theme_mod
+from . import configcheck
 from .configcheck import EQUATION_KEYS, BlockChecker, validate_overlay, validate_settings
 from .model import (
     BASELINE_IDENTITIES,
@@ -31,7 +32,7 @@ from .model import (
     SchemaError,
     WorkspaceSpec,
 )
-from .parse import yaml_safe_load
+from .parse import yaml_safe_load_checked
 
 # The project marker: every project setting lives here, and finding this file
 # is what makes a directory a refdes project.
@@ -247,7 +248,12 @@ def _load_schema_overlay(root: str) -> dict[str, Any]:
     if not os.path.isfile(path):
         return {}
     with open(path, "r", encoding="utf-8") as fh:
-        raw = yaml_safe_load(fh) or {}
+        loaded, duplicates = yaml_safe_load_checked(fh)
+    raw = loaded or {}
+    # Before the key check below, and before anything reads the mapping: a
+    # second `types:` block replaces the first, and the error the author would
+    # get for a *missing* type is a long way from the two lines that caused it.
+    configcheck.check_duplicate_keys(duplicates, SCHEMA_NAME)
     if not isinstance(raw, dict):
         raise SchemaError(f"{SCHEMA_NAME}: must be a mapping of schema key to value")
     for key in raw:
@@ -516,7 +522,13 @@ def load_project(config_path: str | None = None, start: str = ".") -> Project:
     if os.path.basename(os.path.abspath(path)) == LEGACY_CONFIG_NAME:
         raise _legacy_config_error()
     with open(path, "r", encoding="utf-8") as fh:
-        raw: dict[str, Any] = yaml_safe_load(fh) or {}
+        loaded, duplicates = yaml_safe_load_checked(fh)
+    raw: dict[str, Any] = loaded or {}
+    # The very first thing said about this file, before the legacy-config check
+    # and before any setting is read: a key spelled twice has already been
+    # resolved by the time the loader got here, so every check below is judging
+    # a mapping the file does not contain.
+    configcheck.check_duplicate_keys(duplicates, PROJECT_SETTINGS_NAME)
     if not isinstance(raw, dict):
         raise _settings_error("must be a mapping of setting name to value")
 

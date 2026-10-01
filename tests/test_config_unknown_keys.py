@@ -63,12 +63,44 @@ ITEM = (
 )
 
 
+def _top_level_keys(text: str) -> set[str]:
+    """The keys `text` declares at column 0 -- the blocks it would replace."""
+    return {
+        line.split(":", 1)[0]
+        for line in text.splitlines()
+        if line and not line[0].isspace()
+    }
+
+
+def _settings_with(settings: str) -> str:
+    """MIN_SETTINGS with `settings`' blocks substituted in, not appended.
+
+    Appending used to work because a repeated `site:` was silently resolved by
+    YAML's last-wins rule -- which is the bug this file's sibling change fixed,
+    so appending a second `site:` is now itself a configuration error. Replace
+    the block instead: a test that means to describe `site:` should have only
+    one `site:` in the file, which is what it was accidentally testing all
+    along.
+    """
+    replaced = _top_level_keys(settings)
+    if not replaced:
+        return MIN_SETTINGS + settings
+    kept: list[str] = []
+    skipping = False
+    for line in MIN_SETTINGS.splitlines():
+        if line and not line[0].isspace():
+            skipping = line.split(":", 1)[0] in replaced
+        if not skipping:
+            kept.append(line)
+    return "\n".join(kept) + "\n" + settings
+
+
 def _write(tmp_path, settings="", schema=MIN_SCHEMA, item=ITEM):
     """Write the two config files directly rather than through
     `write_project_config`: which file a key lives in is the thing under test
     here, and the split helper would route it either way."""
     (tmp_path / "refdes-project.yaml").write_text(
-        MIN_SETTINGS + settings, encoding="utf-8"
+        _settings_with(settings), encoding="utf-8"
     )
     if schema is not None:
         (tmp_path / "refdes-schema.yaml").write_text(schema, encoding="utf-8")

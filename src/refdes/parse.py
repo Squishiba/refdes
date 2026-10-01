@@ -194,20 +194,33 @@ class _PurePythonLineLoader(_PurePythonLoaderBase):
     """Always pure-Python SafeLoader for byte-identical YAML error diagnostics."""
 
 
-def _construct_mapping(loader, node: yaml.MappingNode) -> dict:
-    base = loader.__class__.__bases__[0] if loader.__class__.__bases__ else type(loader)
+def _collect_duplicates(loader, node: yaml.MappingNode) -> None:
+    """Record this mapping's repeated keys on the loader instance.
+
+    Collected rather than raised: the caller still wants the rest of the file
+    parsed (every other duplicate in it reported too), and PyYAML's own
+    last-wins result is what the remaining diagnostics are correctly judged
+    against. The one caller that cannot proceed either way is a config file,
+    which raises once it has the whole list.
+    """
     duplicates = _duplicate_keys(node)
-    if duplicates:
-        # Collected on the loader instance rather than raised: the caller
-        # still wants the rest of the file parsed (every other duplicate in
-        # it reported too), and PyYAML's own last-wins result is what the
-        # remaining diagnostics are correctly judged against.
-        collected = getattr(loader, "duplicate_keys", None)
-        if collected is None:
-            collected = []
-            loader.duplicate_keys = collected
-        collected.extend(duplicates)
-    mapping = base.construct_mapping(loader, node, deep=True)
+    if not duplicates:
+        return
+    collected = getattr(loader, "duplicate_keys", None)
+    if collected is None:
+        collected = []
+        loader.duplicate_keys = collected
+    collected.extend(duplicates)
+
+
+def _base_constructor(loader):
+    """The mapping constructor this loader's subclass overrode, to call it."""
+    return loader.__class__.__bases__[0] if loader.__class__.__bases__ else type(loader)
+
+
+def _construct_mapping(loader, node: yaml.MappingNode) -> dict:
+    _collect_duplicates(loader, node)
+    mapping = _base_constructor(loader).construct_mapping(loader, node, deep=True)
     mapping["__line__"] = node.start_mark.line + 1
     return mapping
 
@@ -220,22 +233,79 @@ _PurePythonLineLoader.add_constructor(
 )
 
 
+class _DupSafeLoader(_SafeLoaderClass):
+    """SafeLoader that records a repeated mapping key, and nothing else.
+
+    `_LineLoader`'s `__line__` tagging is exactly what a config file must not
+    have: `configcheck` walks every key of every block and would report the
+    bookkeeping key as an unknown setting. Same detector, same records, no tag.
+    """
+
+
+class _PurePythonDupLoader(_PurePythonLoaderBase):
+    """Always pure-Python twin of `_DupSafeLoader`, for the retry below."""
+
+
+def _construct_mapping_dupes(loader, node: yaml.MappingNode) -> dict:
+    _collect_duplicates(loader, node)
+    return _base_constructor(loader).construct_mapping(loader, node, deep=True)
+
+
+_DupSafeLoader.add_constructor(
+    yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, _construct_mapping_dupes
+)
+_PurePythonDupLoader.add_constructor(
+    yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, _construct_mapping_dupes
+)
+
+
+def _as_text(stream_or_text) -> str:
+    """A stream handle's text, or the text itself; bytes decoded as UTF-8."""
+    if hasattr(stream_or_text, "read"):
+        text = stream_or_text.read()
+        if isinstance(text, bytes):
+            text = text.decode("utf-8")
+        return text
+    return stream_or_text
+
+
 def yaml_safe_load(stream_or_text) -> Any:
     """Load YAML with libyaml when available; same resolver/semantics as SafeLoader.
     On any YAML parse error, retry with the pure-Python loader and raise the
     pure-Python exception so diagnostics stay byte-identical to the pre-C-loader
     behaviour (libyaml's exception messages and caret placement differ).
     Stream handles are read to text first so the retry can use the same content."""
-    if hasattr(stream_or_text, "read"):
-        text = stream_or_text.read()
-        if isinstance(text, bytes):
-            text = text.decode("utf-8")
-    else:
-        text = stream_or_text
+    text = _as_text(stream_or_text)
     try:
         return yaml.load(text, Loader=_SafeLoaderClass)
     except yaml.YAMLError:
         return yaml.load(text, Loader=_PurePythonLoaderBase)
+
+
+def yaml_safe_load_checked(stream_or_text) -> tuple[Any, list[DuplicateKey]]:
+    """`yaml_safe_load`, plus every mapping key this document spelled twice.
+
+    For the config files, which are hand-authored YAML where a repeat is as
+    silent as it is in an item file and, for a `site:` or a `standard:` block,
+    loses a whole setting rather than one field. The same `_duplicate_keys`
+    walk the item-file loaders run, and the same `_load_line_marked` shape, so
+    there is one detector rather than two that could disagree about what a
+    repeat is.
+
+    A document with a *syntax* error still raises YAMLError and reports only
+    that: PyYAML fails before it reaches the later mappings, exactly as it does
+    for an item file. Fix the syntax first; the repeat is still there.
+    """
+    text = _as_text(stream_or_text)
+    try:
+        return _load_line_marked(text, _DupSafeLoader)
+    except yaml.YAMLError:
+        # Same byte-identical-diagnostic guarantee as `yaml_safe_load`: the
+        # retry raises the pure-Python exception, so the second return value
+        # is never reached on this path.
+        return yaml.load(text, Loader=_PurePythonDupLoader), []
+
+
 def _strip_lines(obj: Any) -> Any:
     """Remove the __line__ bookkeeping key from nested structures."""
     if isinstance(obj, dict):
@@ -375,6 +445,62 @@ def _entry_item_id(entry: dict[str, Any]) -> str | None:
     return None
 
 
+def _duplicate_outcome(record: DuplicateKey) -> str:
+    """What the repeat costs, as one clause -- shared by the item-file and the
+    config diagnostic so the two cannot drift into telling different stories
+    about the same document.
+
+    Two rules, both about never claiming a loss that did not happen: a repeat
+    whose two values are identical says so, and a value too long to quote (a
+    `body:` sentence) is named by its line rather than pasted.
+    """
+    if record.first_value is None or record.second_value is None:
+        # Not both values are short scalars (see _scalar_text), so quoting
+        # either would bury the message.
+        return f"the value on line {record.first_line} is lost"
+    if record.first_value == record.second_value:
+        # Nothing is lost, and saying otherwise would be the one wrong thing
+        # in a message whose job is to be believed. A repeat that agrees with
+        # itself is still a mistake -- one of the two lines was not meant to
+        # be there.
+        return (
+            f"both lines read {record.second_value!r}, so nothing is lost "
+            f"here, but a mapping may only carry one of them"
+        )
+    return f"{record.first_value!r} is dropped for {record.second_value!r}"
+
+
+def _duplicate_where(record: DuplicateKey) -> str:
+    """The line of each occurrence, or the one line both sit on.
+
+    A single-line flow mapping puts both occurrences on one line, and
+    "(lines 3 and 3)" reads like a bug in the diagnostic rather than in the
+    file.
+    """
+    if record.first_line == record.second_line:
+        return f", twice on line {record.first_line}"
+    return f" (lines {record.first_line} and {record.second_line})"
+
+
+def _duplicate_key_message(
+    record: DuplicateKey, remedy: str, context: str = "", extra: str = ""
+) -> str:
+    """`duplicate key 'x' in one mapping (lines N and M) -- ...`, the one shape.
+
+    `context` and `extra` are the two per-file additions: `context` sits inside
+    the first clause (` (in this file's defaults:, ...)`) because that is where
+    the item-file report puts it, and `extra` is a trailing clause about the
+    key itself (`; an 'id:' lost this way is a whole item, not a field`). Both
+    default to nothing, which is the config diagnostic's case.
+    """
+    return (
+        f"duplicate key {record.key!r} in one mapping{context}"
+        f"{_duplicate_where(record)} -- YAML keeps the last, so "
+        f"{_duplicate_outcome(record)}{extra}. {remedy} See "
+        f"{docs_url_mod.ITEMS_FIELDS_DOCS}."
+    )
+
+
 def _report_duplicate_keys(
     project: Project,
     rel: str,
@@ -386,48 +512,23 @@ def _report_duplicate_keys(
     """One hard error per repeated key, and the file joins the do-not-rewrite set.
 
     An error, not a warning: the repeat is already resolved by the time
-    anything reads the file, so the value on the earlier line is gone from
-    the model and -- for an `id:` -- so is the item it named. Nothing else in
-    the file says so; the only other trace is whatever reference the vanished
+    anything reads the file, so the value on the earlier line is gone from the
+    model and -- for an `id:` -- so is the item it named. Nothing else in the
+    file says so; the only other trace is whatever reference the vanished
     id left dangling somewhere else. `project.duplicate_key_files` is what
     stops the rest of the load from normalising the evidence away before the
     author has seen it.
     """
     for record in records:
-        if record.first_value is None or record.second_value is None:
-            # Not both values are short scalars (see _scalar_text), so
-            # quoting either would bury the message.
-            outcome = f"the value on line {record.first_line} is lost"
-        elif record.first_value == record.second_value:
-            # Nothing is lost, and saying otherwise would be the one wrong
-            # thing in a message whose job is to be believed. A repeat that
-            # agrees with itself is still a mistake -- one of the two lines
-            # was not meant to be there.
-            outcome = (
-                f"both lines read {record.second_value!r}, so nothing is lost "
-                f"here, but a mapping may only carry one of them"
-            )
-        else:
-            outcome = (
-                f"{record.first_value!r} is dropped for {record.second_value!r}"
-            )
-        lost_item = (
-            "; an 'id:' lost this way is a whole item, not a field"
-            if record.key == "id"
-            else ""
-        )
-        # A single-line flow mapping puts both occurrences on one line, and
-        # "(lines 3 and 3)" reads like a bug in the diagnostic rather than in
-        # the file.
-        where = (
-            f", twice on line {record.first_line}"
-            if record.first_line == record.second_line
-            else f" (lines {record.first_line} and {record.second_line})"
-        )
         project.error(
-            f"duplicate key {record.key!r} in one mapping{context}{where} -- "
-            f"YAML keeps the last, so {outcome}{lost_item}. {remedy} See "
-            f"{docs_url_mod.ITEMS_FIELDS_DOCS}.",
+            _duplicate_key_message(
+                record,
+                remedy,
+                context,
+                "; an 'id:' lost this way is a whole item, not a field"
+                if record.key == "id"
+                else "",
+            ),
             file=rel, line=record.second_line, item_id=item_id,
         )
     if records:

@@ -72,6 +72,34 @@ two lines, if the entry was a copy rather than a merge). Until it is fixed, that
 file is left exactly as written — no key is minted into it and no reference is
 rewritten, so the shape you have to fix is still there to look at.
 
+**`refdes-project.yaml: duplicate key 'site' in one mapping (lines 1 and 14) -- YAML keeps the last, ...`**
+The same rule in a config file, and here what a repeat costs is a whole block
+rather than one field. A second `site:` block silently replaced the first — exit
+0, no diagnostic, and the project rendered under the title nobody remembered
+deleting. `refdes-schema.yaml` is covered the same way, where a `types:` block
+written twice takes every field the first block declared out of the merged
+schema. The message is the item-file one above, unchanged, and it carries the
+line of *each* occurrence — the only configuration error that does, because a
+repeat is the one config problem whose whole diagnosis is two line numbers:
+
+```
+configuration error: refdes-project.yaml: duplicate key 'site' in one mapping
+(lines 1 and 14) -- YAML keeps the last, so the value on line 1 is lost. Usually
+a hand-merge or a copied block left two spellings of one setting: keep the one
+you meant and delete the other. See ...
+```
+
+Nested repeats count too — two `title:` lines inside one `site:` block, two
+`presets:` lines inside `standard:` — and every repeat in the file is named in
+the one error. A `revise` mapping file gets the same check: there a repeat drops
+one of the two renames the file asked for and applies the other, which is worse
+than dropping both.
+**Remedy:** delete one of the two blocks (or merge what both were setting into
+the one you keep). Until it is fixed, no command loads the project at all — this
+is a configuration error, exit 2, before a single item is parsed — and the
+commands that write the config (`refdes standard add-preset`) refuse too, rather
+than appending to a block the loader is not reading.
+
 **`unknown field 'sorce' on requirement -- did you mean the field 'source'?`**
 A build error. The key is close enough to a declared field that a typo is the
 only reading, and a misspelled name means the value never reached the field —

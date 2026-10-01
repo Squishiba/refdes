@@ -35,6 +35,7 @@ from typing import Any, Callable
 import yaml
 
 from . import build as build_mod
+from . import configcheck
 from . import docs_url as docs_url_mod
 from . import ids as ids_mod
 from . import keys as keys_mod
@@ -44,7 +45,7 @@ from . import seal as seal_mod
 from . import standards as standards_mod
 from . import textio
 from .model import CHECK_VIOLATION, Item, Project, SchemaError
-from .parse import yaml_safe_load
+from .parse import yaml_safe_load_checked
 from .schema import load_project
 
 # -------------------------------------------------------------------- mapping
@@ -212,7 +213,7 @@ def load_mapping(path: str) -> Mapping:
     """
     try:
         with open(path, "r", encoding="utf-8") as fh:
-            raw = yaml_safe_load(fh) or {}
+            loaded, duplicates = yaml_safe_load_checked(fh)
     except OSError:
         raise SchemaError(f"no such mapping file: {path}") from None
     except yaml.YAMLError as exc:
@@ -220,7 +221,12 @@ def load_mapping(path: str) -> Mapping:
         # location, collapse it to a single line so this stays a one-line error.
         detail = " ".join(str(exc).split())
         raise SchemaError(f"mapping file could not be parsed: {path}: {detail}") from None
-    return mapping_from_dict(raw, path)
+    # A key spelled twice, before the mapping is built from it: this is the same
+    # silent last-wins loss a config file has, and a rename mapping's whole job
+    # is to say which old name becomes which new one -- so a repeat here drops
+    # one of the two renames and applies the other without a word.
+    configcheck.check_duplicate_keys(duplicates, path)
+    return mapping_from_dict(loaded or {}, path)
 
 
 # ----------------------------------------------------------------- ambiguity
