@@ -1,0 +1,122 @@
+pdf-picker-exercise — progress log
+=================================
+
+Task: exercise citations into real PDFs as a user, report only. Deliverable
+in-prog-logs/pdf-picker-exercise.md. No changes under src/, tests/ or docs/.
+Branch pdf-picker-exercise, branched from main at 8d12680, refdes 0.5.0.
+Model: Space Bunny.
+
+STATUS: finished. Report written, both files about to be committed, then
+pushed and a PR opened against main.
+
+--------------------------------------------------------------------------------
+Method notes / difficulties, in the order I hit them
+--------------------------------------------------------------------------------
+
+1. No PDF-writing library exists in this environment. reportlab, pymupdf and
+   pdfminer all fail to import; only pypdf 6.19.0 is present, and it is a
+   reader. Per the brief I did not pip-install anything. So I wrote the PDF
+   bytes by hand (.scratch/pdffix/make_pdf.py): a content stream per page with
+   one BT/Tm/Tj per text line, plus a real /Outlines tree with First/Last/
+   Count/Next/Prev so the nesting is genuine rather than asserted. Verified
+   every fixture with pypdf before using it (outline walk, destination pages,
+   extract_text output). ~18 fixtures: 8-page with a min/typ/max table and a
+   nested outline, image-only pages, no-outline, garbage, truncated,
+   bad-outline, text-changed, sections-moved, row-relabelled, row-duplicated,
+   section-gone, document-shortened, whitespace-in-outline-titles, 33 MiB,
+   span-cap, candidate-cap, prose-only, numeric-grammar probes, non-ASCII
+   digits.
+
+   Difficulty worth recording: my first outline builder emitted /Prev
+   twice per node and pypdf printed "Multiple definitions in dictionary" and
+   only the first root entry came back. Fixed by computing Prev/Next from the
+   sibling list's index rather than by a wrong comparison. Good reminder that
+   "I wrote the file" is not "the file is right" — hence verifying every
+   fixture with a reader first.
+
+2. The refdes on PATH is a broken editable install pointing at another
+   worktree. Everything went through .scratch/refdes, a two-line wrapper
+   running PYTHONPATH=<this worktree>/src python -m refdes.cli. Same for a
+   .scratch/refdes-nopdf variant used for the pypdf-missing simulation.
+
+3. The pypdf-missing simulation needed two attempts. A pypdf.py on PYTHONPATH
+   that raises ImportError is NOT sufficient: the reader's availability probe
+   is importlib.util.find_spec, not import (src/refdes/sources.py:1165), so
+   find_spec still succeeds and the pdf reader registers normally. The
+   faithful simulation is a sitecustomize.py that makes find_spec("pypdf")
+   return None *and* import pypdf raise ModuleNotFoundError. I did both and
+   report both, because the first one's behaviour is itself interesting: the
+   CLI surfaces the same install hint either way, but the picker's file list
+   only goes empty (the documented "offers no PDFs") under the real gate.
+
+4. Tooling constraints I worked within, all from the brief: no browser tools
+   (the picker was driven entirely through its HTTP API, and its served
+   JavaScript was read to confirm the panel's no-pre-selection / no-default-
+   unit contract); every serve started with --no-open, an explicit free port
+   and --token-file; each stopped by its own recorded PID. I never used pkill
+   or a pattern kill. One serve on 8743 hit "Address already in use" because
+   an earlier instance of mine was still shutting down; I found its PID via
+   ss -ltnp for that specific port and killed that, then moved to a new port.
+   All 13 of my serve instances and the local http.server are stopped.
+
+5. I did write one file into the wrong place early on: a `refdes init` run
+   from the worktree root, which refused (the marker exists) and wrote
+   nothing. Later, a serve run in a scratch dir produced a .refdes/
+   citations.yaml at the repo root — that one was real, and I removed it
+   (git status is clean; the file was never tracked). Worth recording because
+   it is exactly the mistake run 3 flagged in its own process note: run refdes
+   from a copy of a project, never from the checkout.
+
+6. Scenario coverage actually achieved, vs the brief's six items: all six.
+   (1) page/section pins that resolve and that don't, including page past the
+   end, nonexistent title, and three near-miss classes (case, whitespace,
+   numbering prefix); (2) text-layer extraction against known page text plus
+   an image-only page, and a page with text but no digits; (3) the pypdf
+   fallback, both shims, on fetch, check, build and the picker's HTTP surface;
+   (4) --require-citations against a page-but-no-rev citation plus all six
+   rows of the severity table; (5) the picker over HTTP, including a pick and
+   what got written back; (6) a PDF whose text changed between pins with an
+   existing page-pinned citation.
+
+Findings, ranked, in the report: P1 (medium) page: is never validated — page
+99 / page 0 / page "eight" all pass check, build, build --require-citations
+and audit, and publish #page=99 / #page=0 / #page=eight; the check already
+exists in the picker (src/refdes/sources.py:811) and is simply not on the pin
+path, and a re-pin that shortens the document to 4 pages leaves a page-6 pin
+green. P2 (low) the "closest outline titles" hint is empty for truncated
+titles because difflib's 0.6 default cutoff misses prefixes, and mis-ranks
+'Regulatory Information'. P3 (low) a missing local file at fetch time reports
+a raw FileNotFoundError with an absolute path and no citing item id, unlike
+check's correct message. P4 (low) one source() re-location message embeds an
+absolute server path in a user-facing CLI warning; the HTTP surface is clean.
+
+Answer to run 3's open question (--require-citations with a page but no rev):
+inert, and consistent with the docs — rev is optional everywhere it is
+documented, the severity table has no row for it, and the only two consumers
+in the tree are two templates that print it. Recorded so the next gate does
+not re-ask.
+
+Biggest thing I was unsure about, and how I settled it: whether P1 is a
+defect or the documented posture. docs/markdown.md:333 does say page: is
+"a number you looked up by hand and re-check every revision", which reads like
+an honest disclaimer. I settled on medium rather than high because that
+sentence exists — but the same page then argues the principle out loud for
+section: ("a page number from another revision is a wrong link, not a near
+miss") and gives the authored page: none of that protection, and the severity
+table has no row for it. The four-page re-pin case is what convinced me it is
+a real gap rather than a deliberate omission: fetch --update re-hashed the
+file, could see it was now four pages, and published a link to page 6.
+
+Not tested, and said so in the report: a real vendor datasheet over the
+internet (remote went through a local http.server — real HTTP, no TLS, no
+redirects, no ETag/Last-Modified); pypdf older than 6.19 (only 6.19 installed
+and I installed nothing, so the version-floor refusal is unread not fired); a
+genuinely scanned 300dpi raster; a real browser's rendering of the page view;
+the --no-write picker path and sealed/imported accept refusals; Windows and
+macOS; multi-page-per-row and rotated-page layouts; concurrency against serve.
+
+Files written: in-prog-logs/pdf-picker-exercise.md (the report) and this log.
+Everything else is under .scratch/ (gitignored, left in place): pdffix/ (the
+PDF generator and fixtures), run/ (~50 scenario projects), shim_nopdf/, www/,
+the two wrapper scripts, the serve token files and logs, and the probe
+outputs (page2.json, app.js, sourcepicker.js, edit.html).
