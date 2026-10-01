@@ -1,0 +1,169 @@
+# audit-reseal-cosmetics — N6 from user-sim-release-gate-run3
+
+Task: the two cosmetic leaks in `refdes audit`'s "Accepted append-only reseals
+(durable history)" section. Presentation only — the seal file is untouched.
+
+Status: done (see "finished" at the bottom).
+
+## Reproduced first
+
+`.scratch/n6/repro.sh` builds a one-entry log project, `build` (which seals),
+edits the sealed entry, `build --reseal`, `audit` — once with no `boards:`
+registry, once with `board-a` declared and the entry inside `items/board-a/`.
+Both shapes printed exactly what N6 reported:
+
+```
+Accepted append-only reseals (durable history):
+  LOG-001 [unboarded] 2026-10-01T07:18:10.238349+00:00 edit
+    key asa4qnjjfwn
+    was bbd8918b67302127, now 4d7a3a3ca144faa1
+```
+
+and, boarded:
+
+```
+  LOG-001 [board-a] 2026-10-01T07:18:11.562333+00:00 edit
+    key 8d2k2pcyxs2
+```
+
+Notes on getting there: `refdes build` has no `--seal` flag (checked with
+`build --help`) — sealing happens on any non-dry-run build. And a project with
+a declared board but the entry sitting directly in `items/` is still
+unboarded (the build warns: "no board: it sits directly in items/"), which is
+why the boarded repro puts the file in `items/board-a/`.
+
+## Leak 1 — `[unboarded]`
+
+Verified against the rest of `cmd_audit` (`src/refdes/cli.py`) rather than
+taken from the report's word:
+
+- "Board moves since the manifest was last written": `f"  {item_id:<14} {old}
+  -> {new or '(none)'}"` — the board is a bare value in the row; `(none)`
+  names the *destination of a move*, not an entry's own board.
+- "Parts": `print(f"  {'':<14} — {label}: {', '.join(usage.boards)}")` — the
+  line only exists when there are boards.
+- "Imported projects", "Workspace moves": same shape.
+- In diagnostics a board is bracketed as a qualifier (`WARNING
+  items/board-a/log.yaml:3 [LOG-001] — …`), which is why the reseal row's
+  bracket form is kept for a *present* board — but nothing anywhere names the
+  absence of a board.
+
+So: drop the group entirely when there is no board, keep `[board-a]` when
+there is. Both verified by rerunning `repro.sh`.
+
+## Leak 2 — the key: KEPT, labelled
+
+Decision: keep it. Reasoning, and the scenarios actually run:
+
+1. `.scratch/n6/rename.sh` — reseal, then a keyed rename (LOG-A-001 ->
+   LOG-A-002, key preserved), then reseal again. The section prints:
+
+   ```
+     LOG-A-001 [board-a] … edit
+       item key 48ve0znnhgh
+     LOG-A-002 [board-a] … edit
+       item key 48ve0znnhgh
+   ```
+
+   The row's id is the label *as it stood when the event happened*, so one
+   item's history is split across two ids and the key is the only field that
+   says they are the same item. That is exactly the hint N6 gave ("telling
+   apart two reseals of a renamed item"). Dropping it would leave a reader
+   with two rows that look like two entries.
+
+2. It is already a user-facing value, not an internal placeholder: it is the
+   argument `refdes keys restore DISPLAY-ID@KEY` takes
+   (`docs/cli-reference.md` §`refdes keys restore`, `docs/troubleshooting.md`
+   recipe), and `audit` already prints keys for relabelled items in its own
+   baseline diff (`_print_baseline_diff`, `cli.py:746`).
+
+3. `docs/design-log.md` states the seal event holds "the item label and key
+   (when available)". A report that drops it is a lossy view of a record that
+   deliberately keeps identity.
+
+Counter-argument weighed and rejected: in the common case (no rename) the key
+is noise — the label plus the `was`/`now` chain already tell the story. But
+"deliberately kept" costs one labelled line, and the alternative is a section
+of durable history that cannot follow an item through its own renumbering.
+
+Changed form: `key <k>` -> `item key <k>`, plus one gloss printed once, under
+the list, only when some event carries a key — the same explanatory-subline
+pattern the "Ledger entries with no live item" section already uses:
+
+```
+  (the key is the item's own surrogate key: it does not change when
+   the item is renamed, where the id above is the label as it stood)
+```
+
+After:
+
+```
+Accepted append-only reseals (durable history):
+  LOG-001 2026-10-01T07:20:20.308649+00:00 edit
+    item key j05rka9vfnc
+    was bbd8918b67302127, now 4d7a3a3ca144faa1
+  (the key is the item's own surrogate key: it does not change when
+   the item is renamed, where the id above is the label as it stood)
+```
+
+…and with a declared board, unchanged except the `item key` label:
+
+```
+Accepted append-only reseals (durable history):
+  LOG-001 [board-a] 2026-10-01T07:20:21.629074+00:00 edit
+    item key 7mp4z2hp39c
+    was bbd8918b67302127, now 4d7a3a3ca144faa1
+  (the key is the item's own surrogate key: it does not change when
+   the item is renamed, where the id above is the label as it stood)
+```
+
+The seal file is byte-identical before and after — checked by
+`.scratch/n6/rename.sh`'s dump of `.refdes/log-seal-board-a.yaml`: same two
+events, same fields.
+
+## A scenario that turned out not to need the key
+
+`.scratch/n6/reuse.sh` — remove a sealed entry with `--reseal`, then create a
+*different* item re-typed at the same id. That does not produce two events
+under one label: the new item mints a fresh key, is therefore unsealed, and
+records no reseal event at all. So "label reuse" is not a case the key has to
+cover here. Recorded because it was the reason I expected to drop the line.
+
+## Tests
+
+- `tests/test_reseal_audit.py`:
+  - `test_audit_omits_an_absent_board_instead_of_naming_it` — new. New
+    `sealed_flat_project` fixture (no `boards:`) in `conftest.py`, config
+    constant `SEALED_FLAT_CONFIG` in `tests/helpers.py`. Pins the whole row
+    exactly and asserts `unboarded` appears nowhere in the output.
+  - `test_audit_labels_the_surrogate_key_rather_than_bare_printing_it` —
+    new. The rename scenario above; pins `item key <k>` twice and the gloss.
+  - `test_audit_shows_the_board_when_there_is_one` — new. Pins the boarded
+    row exactly, so the board's disappearance can't regress silently.
+  - The pre-existing `assert "LOG-A-001 [board-a]" in accepted`
+    (`test_reseal_is_durable_and_audit_visible`) still passes unchanged — the
+    bracket form for a present board did not change.
+- Confirmed the two new behavioural tests FAIL against main's `cli.py`:
+  temporarily restored `git show main:src/refdes/cli.py`, ran
+  `pytest -q tests/test_reseal_audit.py` -> `2 failed, 15 passed`
+  (`assert 0 == 2` on `item key`; the no-board row mismatch), then put my
+  `cli.py` back. `git diff --stat` afterwards confirmed the file restored.
+  `test_audit_shows_the_board_when_there_is_one` passes on both, which is the
+  point of it.
+
+## Docs
+
+- `docs/design-log.md` — the one doc that shows this section's output
+  (grep for "reseal" across `docs/`; `cli-reference.md` only shows the
+  `(none)` case, which does not change). Sample updated, plus a short
+  paragraph on the board bracket and on why the key is there.
+- `changelog.d/audit-reseal-row-cosmetics.fixed.md`.
+
+## Not done / left alone
+
+- `ruff check .` is not a gate here (AGENTS.md); scoped to the touched files.
+- The `[unboarded]` word still appears in prose in `docs/design-log.md`… no —
+  it does not; the only remaining hits in `src/` are gone. Checked:
+  `grep -rn unboarded src/` returns nothing for cli.py.
+
+## Finished: yes

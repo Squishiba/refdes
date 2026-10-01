@@ -173,6 +173,22 @@ types:
       summary: { type: text, required: true }
 """
 
+# The same shape with no `boards:` registry at all -- the case where `audit`'s
+# reseal section used to print `[unboarded]`.
+SEALED_FLAT_CONFIG = """\
+site:
+  title: "Seal test"
+  out: _site
+id:
+  width: 3
+types:
+  log:
+    prefix: LOG
+    append_only: true
+    fields:
+      summary: { type: text, required: true }
+"""
+
 
 CHECK_SEVERITY_SCHEMA = """\
 site: {title: "Check Severity Test", out: _site}

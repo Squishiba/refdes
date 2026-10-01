@@ -155,10 +155,20 @@ Append-only entries edited after sealing:
   (none)
 
 Accepted append-only reseals (durable history):
-  LOG-001 [unboarded] 2026-09-28T05:54:27.345055+00:00 edit
-    key kqkm6e6dv9c
+  LOG-001 2026-09-28T05:54:27.345055+00:00 edit
+    item key kqkm6e6dv9c
     was 4d34265af98c51b2, now 71059aef2108bb46
+  (the key is the item's own surrogate key: it does not change when
+   the item is renamed, where the id above is the label as it stood)
 ```
+
+The board is shown bracketed after the id when the entry has one
+(`LOG-A-001 [power] …`) and left out entirely when it has none — the same way
+every other section of the `audit` report treats an absent board. The id on a
+row is the label as it stood when the event happened, so a
+[renumbering](ids.md#renumbering-former-ids) splits one entry's history across
+two ids; the key is what ties them back together, and it is also the half of
+`refdes keys restore ID@KEY` that proves which item you mean.
 
 Repeated reseals append events, including edits that restore older content.
 Deliberate removals accepted by `--reseal` also retain the removed hash and

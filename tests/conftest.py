@@ -28,6 +28,7 @@ from helpers import (
     LIFECYCLE_SCHEMA,
     REPO,
     SEALED_BOARD_CONFIG,
+    SEALED_FLAT_CONFIG,
 )
 
 
@@ -202,6 +203,19 @@ def sealed_board_project(tmp_path):
     (tmp_path / "items" / "log.yaml").write_text(
         "defaults: { type: log, prefix: LOG-X }\n"
         "items:\n  - id: LOG-X-001\n    summary: first entry\n",
+        encoding="utf-8",
+    )
+    return tmp_path
+@pytest.fixture
+def sealed_flat_project(tmp_path):
+    """One unboarded append-only entry in a project with no `boards:`."""
+    write_project_config(tmp_path, SEALED_FLAT_CONFIG)
+
+    items = tmp_path / "items"
+    items.mkdir(parents=True)
+    (items / "log.yaml").write_text(
+        "defaults: { type: log, prefix: LOG }\n"
+        "items:\n  - id: LOG-001\n    summary: first entry\n",
         encoding="utf-8",
     )
     return tmp_path

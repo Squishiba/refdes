@@ -67,6 +67,70 @@ def test_reseal_is_durable_and_audit_visible(sealed_board_project, capsys, adopt
     assert Path(seal.seal_path(fresh, "board-a")).read_bytes() == before
 
 
+def test_audit_shows_the_board_when_there_is_one(sealed_board_project, capsys):
+    """A declared board stays; only the placeholder for an absent one went."""
+    root = sealed_board_project
+    _load(root, seal_write=True)
+    _edit(root)
+    edited = _load(root, seal_write=True, reseal="board-a")
+    event = seal.load_reseals(edited, "board-a")[0]
+    capsys.readouterr()
+    assert cli.main(["-c", str(root / "refdes-project.yaml"), "audit"]) == 0
+    accepted = capsys.readouterr().out.split(
+        "Accepted append-only reseals (durable history):", 1
+    )[1]
+    row = next(line for line in accepted.splitlines() if line.startswith("  LOG-A-001"))
+    assert row == f"  LOG-A-001 [board-a] {event['occurred_at']} {event['action']}"
+
+
+def test_audit_omits_an_absent_board_instead_of_naming_it(sealed_flat_project, capsys):
+    """A project with no `boards:` registry at all gets no board group in the
+    row, and no word standing in for one -- every other section of the report
+    leaves an absent board out the same way."""
+    root = sealed_flat_project
+    assert _load(root).boards == {}
+    _load(root, seal_write=True)
+    path = root / "items" / "log.yaml"
+    path.write_text(
+        path.read_text(encoding="utf-8").replace("first entry", "edited entry"),
+        encoding="utf-8",
+    )
+    edited = _load(root, seal_write=True, reseal=seal.RESEAL_ALL)
+    event = seal.load_reseals(edited)[0]
+    capsys.readouterr()
+    assert cli.main(["-c", str(root / "refdes-project.yaml"), "audit"]) == 0
+    output = capsys.readouterr().out
+    accepted = output.split("Accepted append-only reseals (durable history):", 1)[1]
+    row = next(line for line in accepted.splitlines() if line.startswith("  LOG-001"))
+    assert row == f"  LOG-001 {event['occurred_at']} {event['action']}"
+    assert "unboarded" not in output
+
+
+def test_audit_labels_the_surrogate_key_rather_than_bare_printing_it(
+    sealed_board_project, capsys
+):
+    """The key is load-bearing here -- a rename splits one item's history
+    across two ids -- so it stays, as a named field, and says what it is."""
+    root = sealed_board_project
+    _load(root, seal_write=True)
+    assert cli.main(["-c", str(root / "refdes-project.yaml"), "keys", "adopt"]) == 0
+    _edit(root)
+    _load(root, seal_write=True, reseal="board-a")
+    _edit(root, old="LOG-A-001", new="LOG-A-002")
+    renamed = _load(root, seal_write=True)
+    _edit(root, old="edited entry", new="edited again")
+    renamed = _load(root, seal_write=True, reseal="board-a")
+    key = renamed.item_by_id("LOG-A-002").key
+    capsys.readouterr()
+    assert cli.main(["-c", str(root / "refdes-project.yaml"), "audit"]) == 0
+    accepted = capsys.readouterr().out.split(
+        "Accepted append-only reseals (durable history):", 1
+    )[1]
+    assert accepted.count(f"    item key {key}") == 2
+    assert "LOG-A-001 [board-a]" in accepted and "LOG-A-002 [board-a]" in accepted
+    assert "surrogate key" in accepted
+
+
 def test_repeated_edits_and_reverts_append_without_erasing_events(sealed_board_project):
     root = sealed_board_project
     first = _load(root, seal_write=True)

@@ -799,13 +799,26 @@ def cmd_audit(args) -> int:
     history = seal_mod.reseal_history(project)
     if history:
         for board, event in history:
-            print(
-                f"  {event['id']} [{board or 'unboarded'}] {event['occurred_at']} "
-                f"{event['action']}"
-            )
+            # An absent board is left out, the way every other section of
+            # this report leaves it out ("Board moves ...", "— board: ...")
+            # -- none of them name the absence. A declared board still
+            # shows, in the bracketed qualifier form a diagnostic uses for a
+            # scope.
+            where = f" [{board}]" if board else ""
+            print(f"  {event['id']}{where} {event['occurred_at']} {event['action']}")
             if event.get("key"):
-                print(f"    key {event['key']}")
+                print(f"    item key {event['key']}")
             print(f"    was {event['old_hash']}, now {event['new_hash'] or '(removed)'}")
+        # The key earns its line: the event's id is the label as it stood when
+        # the event happened, so a rename splits one item's history across two
+        # ids and the key is the only field that ties them back together. It is
+        # a user-facing value elsewhere (`refdes keys restore ID@KEY`,
+        # `audit`'s own relabelled lines), so it is labelled rather than dropped.
+        if any(event.get("key") for _board, event in history):
+            print(
+                "  (the key is the item's own surrogate key: it does not change when\n"
+                "   the item is renamed, where the id above is the label as it stood)"
+            )
     else:
         print("  (none)")
 
