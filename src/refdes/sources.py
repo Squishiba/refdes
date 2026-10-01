@@ -251,7 +251,12 @@ class CsvReader:
                 [f"{label}: not valid UTF-8 ({exc.reason} at byte {exc.start})"]
             ) from exc
         except OSError as exc:
-            raise SourceExtractionError([f"{label}: cannot read file: {exc}"]) from exc
+            # `_cannot_read`, not `str(exc)`: this was the one reader in the
+            # file that composed the error's own text, which undoes the `label`
+            # above -- see that helper's docstring. Reachable from the browser
+            # too, through the editor's accept path, whose problems go back to
+            # the client.
+            raise _cannot_read(label, exc) from exc
 
         problems: list[str] = []
         key_col = _header_column(header, "key", label, header_line, problems)
