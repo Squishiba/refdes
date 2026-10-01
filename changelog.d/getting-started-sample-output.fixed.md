@@ -14,5 +14,4 @@
   same pass: §1's folder listing gained the `.gitignore` that `init` now writes
   to keep its machine-specific `.vscode/settings.json` out of commits, and the
   sentence describing that file says so; §1's generated `refdes-project.yaml`
-  block was already byte-identical to a fresh `init` and is unchanged. Nothing
-  to do.
+  block was already byte-identical to a fresh `init` and is unchanged.
