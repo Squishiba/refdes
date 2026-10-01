@@ -277,6 +277,74 @@ def _norm(title: str) -> str:
     return " ".join((title or "").split())
 
 
+def page_number(text: str) -> int | None:
+    """`text` as a page of a document, or None.
+
+    A page a link can open is a positive integer and nothing else, and this is
+    the one place that says so. It was written for the editor picker's page
+    box (it is still `serve/sources._page_number`, under that name) and it is now
+    also what the loader accepts: two page grammars in one tree is how `page: 0`
+    comes to mean page 1 in the browser and an error in the terminal, and a
+    document's printed page labels (`"xiv"`) are not a page index the rendered
+    `#page=` fragment could carry anyway.
+    """
+    stripped = (text or "").strip()
+    if not stripped.isascii() or not stripped.isdigit():
+        return None
+    value = int(stripped)
+    return value if value >= 1 else None
+
+
+def _pdf_reader(data: bytes):
+    """pypdf's reader over one document's bytes, or SectionError.
+
+    The one place a PDF is opened from bytes, for both questions asked of it
+    here -- its outline (`outline_titles`) and how many pages it has
+    (`page_count`) -- so the missing-extra and unreadable-file wording cannot
+    drift between them.
+    """
+    PdfReader = _import_pypdf()
+    try:
+        return PdfReader(io.BytesIO(data))
+    except Exception as exc:  # pypdf raises many types here, none of them ours
+        raise SectionError(
+            "", f"pypdf could not read the PDF: {exc}", KIND_UNREADABLE
+        ) from exc
+
+
+def page_count(data: bytes) -> int:
+    """How many pages the document these bytes hold has.
+
+    A fact about the bytes, so it is read where the bytes are -- `refdes fetch`,
+    which pins them -- and recorded in the lockfile next to the sha256. That is
+    what lets a later `check` compare a cited `page:` against the real page count
+    without opening a PDF, and it is also why the count is about the *pinned*
+    revision: the site links `assets/citations/<sha256>.pdf`, so the count that
+    matters is the one for those bytes and no other.
+
+    Bytes pypdf cannot open raise SectionError(kind=unreadable) with pypdf's own
+    message; a missing extra raises SectionError(kind=missing_extra) with the
+    install hint. Neither is a document with zero pages, and neither is ever
+    recorded as a count.
+    """
+    try:
+        return len(_pdf_reader(data).pages)
+    except SectionError:
+        raise
+    except Exception as exc:  # pypdf parses the page tree lazily; anything can come out
+        raise SectionError(
+            "", f"pypdf could not read the PDF: {exc}", KIND_UNREADABLE
+        ) from exc
+
+
+def page_out_of_range(canon: str, page: int, count: int) -> str:
+    """The sentence for a cited `page:` the pinned document does not have.
+
+    `sources.page_absent_message` builds it, so the picker refusing a read and a
+    build refusing to publish a dead fragment say the same thing."""
+    return sources_mod.page_absent_message(canon, page, count)
+
+
 def _destination_page(reader, entry):
     """The 1-based page an outline entry points at, or None when it has no
     usable destination. An entry that cannot be resolved is left out of the
@@ -296,9 +364,8 @@ def outline_titles(data: bytes) -> list[tuple[str, int]]:
     own case, never as "section not found". A PDF pypdf cannot open raises
     SectionError(kind=unreadable) carrying pypdf's own message.
     """
-    PdfReader = _import_pypdf()
+    reader = _pdf_reader(data)
     try:
-        reader = PdfReader(io.BytesIO(data))
         outline = reader.outline
     except Exception as exc:  # pypdf raises many types here, none of them ours
         raise SectionError(
@@ -435,9 +502,10 @@ def lockfile_text(records: dict[str, dict]) -> str:
     header = (
         "# Refdes citation lockfile. Computed provenance for each cited path --\n"
         "# sha256, fetch timestamp, kept-copy flag, resolved sections and the\n"
-        "# sha256 those sections were read out of -- keyed by the citation's\n"
-        "# path (URL or project-relative file). Written only by\n"
-        "# `refdes fetch`.\n"
+        "# sha256 those sections were read out of, and the pinned document's page\n"
+        "# count (or, when pypdf was not available to count it, why there is no\n"
+        "# count) -- keyed by the citation's path (URL or project-relative\n"
+        "# file). Written only by `refdes fetch`.\n"
         "# Never hand-edit the sha256.\n"
     )
     return header + yaml.safe_dump(
@@ -485,7 +553,13 @@ def item_specs(project: Project, item: Item) -> list[CitationSpec]:
                     index=index,
                     path=str(entry["path"]),
                     rev=str(entry.get("rev") or ""),
-                    page=str(entry.get("page") or ""),
+                    # `is None`, not `or ""`: `page: 0` is a page number and
+                    # not the absence of one, and reading it as absent would
+                    # make `page: 0` render as no page at all -- the one shape
+                    # that looked deliberate. It is refused at load either way
+                    # (see `build.validate_items`), but nothing below should
+                    # quietly turn a wrong value into a missing one.
+                    page=("" if entry.get("page") is None else str(entry["page"])),
                     section=str(entry.get("section") or ""),
                     part_number=str(entry.get("part_number") or ""),
                     keep_copy=bool(entry.get("keep_copy", False)),
@@ -660,8 +734,12 @@ def verify(project: Project, require: bool = False) -> None:
                                 through in CI
       local file missing    -- ERROR always: a cited file that isn't there is
                                 not a routine state
-      local file changed    -- warning naming every citer (review the change,
-                                then re-pin), or error with `require` (CI)
+      local file changed    -- warning naming every cacher (review the change,
+                                 then re-pin), or error with `require` (CI)
+      page: past the end,   -- warning naming the citer, or error with
+      or never checked          `require` (CI). `refdes fetch` counts the pinned
+                                 document's pages and records the count, so this
+                                 reads the lockfile and never opens a PDF
       inconsistent keep_copy:    -- warning, always (not promoted by `require`;
       across citers of a       it is a hygiene note about the declaration, not
       shared url                a missing artifact)
@@ -686,6 +764,7 @@ def verify(project: Project, require: bool = False) -> None:
             severity, unpinned_severity, changed_local,
         )
         _apply_section(project, item, spec, record, status, severity)
+        _apply_page(project, item, spec, record, status, severity)
         item.citations.append(status)
 
     source_drift = _source_drift(project, changed_local)
@@ -823,6 +902,64 @@ def _apply_section(project, item, spec, record, status, severity) -> None:
             f"used for the link -- fix one or the other",
             file=item.source_file, line=item.source_line, item_id=item.id,
         )
+
+
+def _apply_page(project, item, spec, record, status, severity) -> None:
+    """Check an authored `page:` against the pinned document's page count.
+
+    Reads the lockfile only -- a build never opens a PDF, and never will for
+    this: `refdes fetch` counted the pages while it had the bytes and recorded
+    the count next to the sha256 they belong to, which is what makes this check
+    possible without giving up the hermetic promise.
+
+    Three outcomes, and which one applies is decided by what the lockfile knows,
+    not by how bad the number looks:
+
+    - **The record is not usable** -- no lockfile entry, an unpinned or missing
+      or tampered local file, a hash-only remote path whose count was never
+      established. Every one of those is already reported by `_resolve` with the
+      command that fixes it, so this says nothing: two complaints about one
+      citation, one of them about bytes that are not the ones being linked, is
+      noise an author has to read past.
+    - **The count is known and the page is past it**: reported, in the picker's
+      own words, with the same severity a `section:` that resolves to nothing
+      gets -- a warning naming the citer, escalated by `--require-citations`.
+    - **The count is known not to exist**, because `refdes fetch` pinned these
+      bytes without pypdf to count them. Reported too, with the reason the pin
+      recorded, in that sentence's own grammar.
+
+    A record with neither `page_count` nor `page_count_error` claims nothing
+    about its pages -- a hand-written lockfile, or one written before any of
+    this -- and is left alone. That is not leniency: every project has to run
+    `refdes fetch` before `check` can pass it, and that run records the count.
+    Reporting the gap in the meantime would warn about a lockfile rather than
+    about a citation.
+    """
+    if not spec.page or status.state != "ok":
+        return
+    page = page_number(spec.page)
+    if page is None:
+        return  # a load-time declaration error already reported it, with file:line
+    count = (record or {}).get("page_count")
+    if not isinstance(count, int) or count < 1:
+        why = str((record or {}).get("page_count_error") or "")
+        if not why:
+            return  # no count was ever claimed for these bytes
+        status.detail = (
+            f"the page numbers cited for {spec.path} are not checked: the "
+            f"lockfile records no page count for this document because {why} -- "
+            f"run 'refdes fetch --update --path {spec.path}' to establish it"
+        )
+        severity(
+            status.detail, file=item.source_file, line=item.source_line, item_id=item.id
+        )
+        return
+    if page <= count:
+        return
+    status.detail = page_out_of_range(spec.path, page, count)
+    severity(
+        status.detail, file=item.source_file, line=item.source_line, item_id=item.id
+    )
 
 
 def _resolve(project, item, spec, record, severity, unpinned_severity, changed_local) -> CitationStatus:
@@ -984,6 +1121,17 @@ class FetchResult:
     source_changes: list[str] = field(default_factory=list)
     source_warnings: list[str] = field(default_factory=list)
     source_notes: list[str] = field(default_factory=list)
+    # One line per cited `page:` this fetch could not confirm against the bytes
+    # it pinned, for the same reason `section_errors` is separate from `error`:
+    # the pin succeeded, and a warning (not a failure) is the honest severity
+    # because the number is the author's own decision -- the pin is not rolled
+    # back over it, but the citation is named either at fetch time and at every
+    # `check`/`build` after it.
+    page_warnings: list[str] = field(default_factory=list)
+    # How many pages the pinned document has, when a citation here names a
+    # `page:` and pypdf could count them. Recorded in the lockfile so a later
+    # `check` can range-check a page without opening the PDF.
+    pages: int | None = None
 
 
 def _extract_source_values(
@@ -1295,6 +1443,49 @@ def _section_failure(canon: str, err: SectionError, sections: dict[str, list[str
     return f"{canon}: {what}: {err}"
 
 
+def _check_pages(
+    canon: str, count: int, pages: dict[str, list[str]], result: FetchResult
+) -> None:
+    """One warning per cited `page:` the pinned document does not have.
+
+    The sentence is `sources.page_absent_message`'s, the one the editor picker
+    already refuses with, so "page 99 is not in this document -- it has 8
+    page(s)" means the same thing wherever it is read."""
+    for page_text, ids in sorted(pages.items()):
+        page = page_number(page_text)
+        if page is None or page <= count:
+            continue
+        who = ", ".join(sorted(set(ids)))
+        result.page_warnings.append(
+            f"{page_out_of_range(canon, page, count)} (cited by {who})"
+        )
+
+
+def _page_count_for_pin(canon: str, data: bytes) -> tuple[int | None, str]:
+    """`(count, "")` when this document's pages can be counted, else
+    `(None, why they cannot)`.
+
+    Only a PDF has pages, so a `page:` on any other cited file is not this
+    function's business: `(None, "")`, which records nothing and reports nothing
+    -- "not applicable" is not "we tried and could not". A PDF whose pages
+    cannot be counted -- no extra installed, bytes pypdf cannot open -- answers
+    with the reason, which is a clause both call sites read: the fetch that
+    pinned these bytes prints it as the warning it is, and the lockfile keeps it
+    so a later `check` can say the same thing without having the bytes."""
+    if os.path.splitext(canon)[1].lower() not in sources_mod.PdfReader.extensions:
+        return None, ""
+    try:
+        return page_count(data), ""
+    except SectionError as exc:
+        # The extra's own hint for a missing import, pypdf's own words for bytes
+        # it cannot open -- neither of which is a count of zero.
+        return None, (
+            f"counting a document's pages {PDF_EXTRA_HINT}"
+            if exc.kind == "missing_extra"
+            else f"counting a document's pages failed: {exc}"
+        )
+
+
 def fetch_all(
     project: Project,
     item_id: str | None = None,
@@ -1350,6 +1541,25 @@ def fetch_all(
             continue  # a refused path is validation's to report, not ours
         all_sections[canon][spec.section].append(item.id)
 
+    # {canonical path: {page as written: [citing item ids]}} -- the same
+    # argument, for the number the author typed: re-pinning a path replaces the
+    # page count every `page:` here is checked against, so a `--item A` re-pin
+    # that shortened the document has to notice B's page too. A `page:` that is
+    # not a page number at all is not collected -- that is a load-time
+    # declaration error, and reporting it again from fetch would be the same
+    # complaint twice.
+    all_pages: dict[str, dict[str, list[str]]] = defaultdict(
+        lambda: defaultdict(list)
+    )
+    for item, spec in collect(project):
+        if page_number(spec.page) is None:
+            continue
+        try:
+            _kind, canon = classify(project.root, spec.path)
+        except CitationError:
+            continue  # a refused path is validation's to report, not ours
+        all_pages[canon][spec.page].append(item.id)
+
     records = load_lockfile(project)
     results: list[FetchResult] = []
     changed = False
@@ -1382,6 +1592,10 @@ def fetch_all(
         sections = {
             section: sorted(set(ids))
             for section, ids in sorted(all_sections.get(canon, {}).items())
+        }
+        pages = {
+            page: sorted(set(ids))
+            for page, ids in sorted(all_pages.get(canon, {}).items())
         }
         if kind == "local" and want_keep_copy:
             raise CitationError(
@@ -1447,6 +1661,25 @@ def fetch_all(
             else:
                 existing.pop("sections", None)
                 existing.pop("sections_sha256", None)
+            # The page count is a derived value like a resolved section: it is
+            # recorded for the pages actually cited and dropped with the last
+            # one, so a path nobody gives a `page:` any more stops growing a
+            # lockfile key. It is checked here rather than left to `check`
+            # alone because the recorded count is right there -- a `page:`
+            # edited since the last fetch is the commonest way a wrong page gets
+            # written, and fetch is the command the author just ran. A record
+            # with neither key claims no count (a hand-written or older
+            # lockfile), and there is nothing here to check it against: the
+            # first `refdes fetch` records one, and `check` says so until then.
+            counted = existing.get("page_count")
+            stale = [k for k in ("page_count", "page_count_error") if k in existing]
+            if not pages and stale:
+                for key in stale:
+                    existing.pop(key)
+                changed = True
+            elif isinstance(counted, int) and pages:
+                result.pages = counted
+                _check_pages(canon, counted, pages, result)
             results.append(result)
             continue
 
@@ -1524,6 +1757,29 @@ def fetch_all(
             sections=resolved,
             section_errors=[_section_failure(canon, f, sections) for f in failures],
         )
+        # The page count, for the same reason and with the same scope argument as
+        # the sections above: these are the bytes being pinned, so every cited
+        # page is checked against them -- including the pages of items this run
+        # did not ask about. Recorded only for a path that cites a page, and
+        # recorded against this sha256 with nothing carried over from the old
+        # record, so a later `check` can compare a page to a count that is
+        # certainly about the bytes the site links.
+        if pages:
+            counted, why = _page_count_for_pin(canon, data)
+            if counted is not None:
+                record["page_count"] = counted
+                result.pages = counted
+                _check_pages(canon, counted, pages, result)
+            elif why:
+                # The pages could not be counted, so they are not checked --
+                # which is a different fact from "this document has no pages",
+                # and the reason is kept so a later `check` can say it without
+                # having the bytes.
+                result.page_warnings.append(
+                    f"{canon}: the pages could not be counted to check the page "
+                    f"numbers cited here -- {why}"
+                )
+                record["page_count_error"] = why
         if new_values:
             record["values"] = new_values
             _diff_source_values(

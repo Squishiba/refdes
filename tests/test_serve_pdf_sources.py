@@ -436,8 +436,12 @@ def test_a_section_whose_page_is_unusable_says_why_and_opens_page_one(tmp_path):
         finally:
             app.stop()
 
-    # A `page:` that is not a number is a real citation the rendered link can
-    # carry, and not something a page index can open.
+    # A `page:` that is not a number is now refused at load -- `build` calls it
+    # a declaration error (tests/test_citation_pages.py) -- but the picker still
+    # has to cope with a project carrying one, because serve does not load
+    # through that validation and an author can hand-edit an item. It opens page
+    # 1 and says the citation names no page it can open, rather than guessing
+    # at what "xiv" meant.
     root = make_root(tmp_path / "roman")
     (root / "items" / "decisions.yaml").write_text(
         "defaults: { type: decision }\n"

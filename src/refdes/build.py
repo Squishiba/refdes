@@ -313,6 +313,30 @@ def validate_items(project: Project) -> None:
                                 f"local file is already local",
                             )
                             continue
+                        if entry.get("page") is not None:
+                            # A page is a positive integer or it is not a page
+                            # the rendered `#page=` fragment can open, so this is
+                            # a declaration error like `section:` above and not
+                            # something to discover at build time. The grammar is
+                            # the editor picker's own
+                            # (`citations.page_number`, still
+                            # `serve/sources._page_number`): `page: 0` used to
+                            # publish `#page=0`, which most viewers read as page
+                            # 1 and none of them as page 0. Whether the number is
+                            # one this particular document has is a different
+                            # question, asked against the page count in
+                            # `citations._apply_page`.
+                            page = entry["page"]
+                            if not isinstance(page, (str, int)) or isinstance(
+                                page, bool
+                            ) or citations_mod.page_number(str(page)) is None:
+                                _field_error(
+                                    project, item, fname,
+                                    f"{fname}[{index}]: page: {page!r} is not a "
+                                    f"page number -- page: must be a positive "
+                                    f"integer, counted from 1",
+                                )
+                                continue
                         if "section" in entry:
                             section = entry["section"]
                             if not isinstance(section, str) or not section.strip():

@@ -763,6 +763,8 @@ def cmd_fetch(args) -> int:
             print(f"         source: {note}")
         for warning in r.source_warnings:
             print(f"WARNING  {warning}", file=sys.stderr)
+        for warning in r.page_warnings:
+            print(f"WARNING  {warning}", file=sys.stderr)
         for source_error in r.source_errors:
             failed += 1
             print(f"FAILED  {source_error}", file=sys.stderr)

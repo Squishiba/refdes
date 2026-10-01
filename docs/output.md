@@ -423,6 +423,13 @@ key:
 | `"missing"` | A cited local file does not exist (always an error) |
 | `"invalid"` | The `path:` itself is refused (escapes the project, drive letter, backslash, …) — validation already reported it with `file:line`; the citation is skipped, not resolved |
 
+`state` is about the **bytes**, so it stays `"ok"` for a citation whose bytes
+are pinned and correct but whose *page* is not — a `page:` the document does not
+have, or one that was never checked. `detail` is where that says so, and it is
+rendered in the citations table's Detail column, exactly as a `section:` that
+resolved to nothing is. Read both fields; `state == "ok"` alone is the claim
+that the sha256 is right, which is true and is not the whole sentence.
+
 `pinned` is `state != "unpinned"` — the one field to check "is this dependency
 tree fully pinned for a release" without enumerating `state` values yourself.
 `kept_copy` and `sha256` distinguish hash-only pins (`kept_copy: false`, `sha256`

@@ -525,6 +525,22 @@ def _header_column(header, name, label, line, problems) -> int:
 MAX_PDF_BYTES = 32 << 20
 MAX_PAGE_SPANS = 1000
 MAX_PAGE_CANDIDATES = 200
+
+
+def page_absent_message(name: str, page: int, count: int) -> str:
+    """One sentence for a page number this document does not have.
+
+    Two surfaces need it and they must not word it differently: this reader,
+    refusing a read the editor asked for, and `citations`' range check at
+    `refdes fetch`/`check` time for an authored `page:` (`page_out_of_range`).
+    The count is in the sentence on purpose -- "page 99 is not in this document"
+    alone sends the reader back to the PDF to work out what went wrong.
+    """
+    return (
+        f"{name}: page {page} is not in this document -- it has {count} page(s)"
+    )
+
+
 # A run's advance width is not something pypdf reports (its visitor hands over
 # the text, the two matrices and the font size, and no glyph widths), so a token
 # and run width is *estimated* from the character count at a nominal half-em per
@@ -807,10 +823,7 @@ class PdfReader:
         with _open_pdf(path, name, max_bytes) as document:
             count = len(document.pages)
             if page > count:
-                raise SourceExtractionError([
-                    f"{name}: page {page} is not in this document -- it has "
-                    f"{count} page(s)"
-                ])
+                raise SourceExtractionError([page_absent_message(name, page, count)])
             return _pdf_page_listing(
                 document.pages[page - 1], page, count, name, max_spans, max_candidates,
             )

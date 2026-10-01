@@ -1,0 +1,441 @@
+validate-citation-page — progress log
+===================================
+
+Task: fix P1 of in-prog-logs/pdf-picker-exercise.md — a citation's `page:` is
+never validated, so `page: "99"` on an 8-page PDF, `page: "0"` and
+`page: "eight"` all pass check/build/build --require-citations, report `ok` in
+`audit`, and publish `#page=99` into the site. The sharpest case is a re-pin to
+a shorter revision.
+Branch validate-citation-page, branched from main at d0f11d7, refdes 0.5.0.
+Model: Space Bunny.
+
+STATUS: in progress.
+
+--------------------------------------------------------------------------------
+0. What I verified before designing anything
+--------------------------------------------------------------------------------
+
+- pypdf 6.19.0 **is** installed in this environment (`python -c "import pypdf"`),
+  and `tests/test_citation_sections.py` already writes its fixtures with
+  `pypdf.PdfWriter`. So the "hand-written PDFs" workaround from the previous
+  worker (`in-prog-logs/pdf-picker-exercise.txt` item 1) is not needed here: I
+  reuse the existing `make_pdf()` pattern from `tests/test_citation_sections.py`
+  rather than inventing a second PDF generator.
+- The check the report says already exists is real: `sources.PdfReader.
+  page_candidates` builds `f"{name}: page {page} is not in this document -- it
+  has {count} page(s)"` (src/refdes/sources.py:809-812), and the same endpoint
+  rejects `page=0` / `page=abc` with `page must be a positive integer`
+  (src/refdes/serve/api.py:383). `serve/sources.py:311-321` holds that grammar
+  as `_page_number`.
+- Where citations are declared-validated: `build.validate_items`, the
+  `fspec.type == "citations"` branch (src/refdes/build.py:254-347). That is the
+  load-time path, and it needs no file, so it is where the shape check goes.
+- Where a citation is resolved against the lockfile at build/check time:
+  `citations.verify()` -> `_resolve` -> `_apply_section` (src/refdes/
+  citations.py:646-825).
+- Where fetch has the bytes: `citations.fetch_all`, the re-pin branch
+  (src/refdes/citations.py:1453+) — `data` is in hand, hashed at 1463.
+
+**Legitimate forms of `page:` (checked, because the grammar decision depends on
+it).** Grepped every `page: "` in docs/ and src/: `docs/markdown.md:301`,
+`docs/vocabulary.md:554`, `docs/design/backlog.md:738` — all three are
+`page: "14"` / `page: "22"` / `page: "7"`, i.e. a plain positive integer, always
+quoted. Nothing in the tree documents a range, a roman numeral or a page label:
+`grep -rniE "roman|xiv|page label|page range" docs/ src/ tests/` returns only
+the picker's own comment about `page: "xiv"` and the test that pins it
+(tests/test_serve_pdf_sources.py:439-455). The JSON Schema types it as a bare
+`{"type": "string"}` (src/refdes/schema_json.py:88), which is why `page: eight`
+is schema-valid today. So the documented form is exactly what the picker's
+parser accepts: strip, ASCII digits, `>= 1`.
+
+**A conflict I had to resolve, and how.** `serve/sources.py:311-321` documents
+`page: "xiv"` as "a real citation the rendered link can carry", and
+`tests/test_serve_pdf_sources.py:439` asserts that a `page: "xiv"` citation
+loads and the picker opens page 1 with a `detail` saying so. If I make
+non-numeric `page:` a load error (which the brief asks for, and which is what
+the docs actually describe), that test's premise becomes false. I am changing
+that test rather than leaving a page grammar the tree holds in two versions:
+the picker keeps its graceful degradation (it must still cope with a
+hand-edited or stale lockfile), but the declaration itself is refused, exactly
+as `section: must be a non-empty string` already is.
+
+--------------------------------------------------------------------------------
+1. The shape of the fix
+--------------------------------------------------------------------------------
+
+**One page grammar, one sentence, one page count.** Three things the tree
+already had are now shared instead of copied:
+
+- `citations.page_number(text)` — the picker's `_page_number`, moved to
+  `citations.py` and aliased back in `serve/sources.py` as
+  `_page_number = citations_mod.page_number` (an alias, not a wrapper, so it
+  cannot drift back into a second spelling; a test asserts the identity).
+  `serve/api.py`'s inline `?page=` test now calls it too, rather than spelling
+  `isascii() and isdigit() and >= 1` a third time.
+- `sources.page_absent_message(name, page, count)` — the picker's own
+  "page 99 is not in this document -- it has 8 page(s)", extracted so the
+  fetch-time warning and the check-time warning are the *same sentence* rather
+  than two that drift.
+- `citations.page_count(data)` — next to `outline_titles(data)`, both over
+  `_pdf_reader(data)` so the missing-extra and unreadable-file wording cannot
+  differ between the two questions asked of a document.
+
+**Shape — an error at load** (`build.validate_items`, beside the `keep_copy:`
+and `section:` checks, because it needs no file):
+
+```
+ERROR   items/cmp.yaml:4 [CMP-001] — datasheets[1]: page: '0' is not a page
+        number -- page: must be a positive integer, counted from 1
+```
+
+An *unquoted* `page: 4` is a YAML int and is accepted as the number it says —
+the JSON Schema types it as a string but nothing enforces that, and refusing it
+would be refusing a typo-free line for its quoting. `bool` is excluded
+explicitly, since `True` is an `int` in Python and would otherwise read as
+`1`. I also fixed `item_specs`' `str(entry.get("page") or "")`, which turned
+`page: 0` into *no page at all* rather than page 0 — the one malformed shape
+that looked deliberate.
+
+**Range — a page count in the lockfile.** The decision the brief asked for:
+
+> *find out whether the lockfile could or should record the page count at pin
+> time so later `check`s don't need to re-open the PDF*
+
+It should and does. `refdes fetch` already opens the PDF for `section:` and it
+already downloads the bytes for *every* citation including hash-only remote
+ones, so counting the pages costs one `len(reader.pages)` on bytes already in
+hand, and the count goes into the record next to the sha256 it belongs to:
+
+```yaml
+citations:
+  docs/ds-main.pdf:
+    bytes: 10393
+    fetched: '2026-10-01T09:48:04Z'
+    kept_copy: false
+    page_count: 8
+    sha256: b595f7bdb5a8...
+```
+
+Why this and not "open the local PDF during check": `check`/`build` must stay
+hermetic and offline (`docs/markdown.md:348-350`,
+`docs/cli-reference.md:352-353`), and `refdes[pdf]` is an *optional extra* — a
+`check` that started importing pypdf would behave differently on a machine
+that has it than on one that doesn't, for a check that has nothing to do with
+PDF reading. With the count in the lockfile the range check is pure YAML, runs
+with pypdf entirely absent, and costs nothing. A test asserts exactly that
+(`test_check_never_opens_the_pdf_to_range_check_a_page`: `page_count` and
+`outline_titles` are both booby-trapped to raise and `pypdf` is knocked out of
+`sys.modules`, and the warning still appears).
+
+Two more consequences of recording it, both deliberate:
+
+- **It is a fact about the pinned sha, not about the file on disk.** The site
+  link is `assets/citations/<sha256>.pdf`, so the count that matters is the one
+  for the published bytes — which is also the count for a hash-only remote
+  citation whose bytes are no longer on this machine at all. Hence
+  `test_a_remote_hash_only_citation_records_its_page_count_too`.
+- **It is recorded only for paths that cite a page**, and dropped again when the
+  last `page:` for a path goes away, the same rule a resolved section follows
+  ("a section that stopped being cited stops being recorded"). Otherwise every
+  existing project's lockfile would grow a key on upgrade for citations that
+  asked for nothing.
+
+--------------------------------------------------------------------------------
+2. The one design change I had to make mid-way, and why
+--------------------------------------------------------------------------------
+
+My first cut treated "no `page_count` in the record" as "these pages were never
+checked" and warned about it at `check` time. The existing suite caught it
+immediately: `tests/test_citation_sections.py::test_page_and_section_disagreement_warns_and_page_wins`
+hand-writes a lockfile record (no `page_count`), cites `page: "9"` on a four-page
+PDF, and got a second warning it did not expect.
+
+That failure is the real design constraint, and it generalises: **a lockfile
+with no `page_count` key does not mean "the pages are unchecked"** — it means
+"nobody has claimed anything about the pages", which is true of every lockfile
+written by hand and every lockfile written before this change. Treating absence
+as a defect would warn about a *lockfile* rather than about a citation, and
+would fire once per page-pinned datasheet in every existing project until
+someone happened to re-fetch.
+
+So absence is silent, and the two known ways the count can fail to be
+established each record *why*, in one key:
+
+```yaml
+    page_count_error: 'counting a document''s pages needs the optional PDF extra:
+      pip install refdes[pdf]'
+```
+
+`page_count` (an int) and `page_count_error` (a clause) are mutually exclusive,
+both are recorded only for a path that cites a page, both are written fresh
+with the record (nothing carried across a sha change), and both are dropped
+when the last page goes. A record with neither claims nothing and is left
+alone; every project has to run `refdes fetch` before `check` can pass it, and
+that run establishes the count. That is the whole argument, and it is one
+sentence in `citations._apply_page`'s docstring.
+
+--------------------------------------------------------------------------------
+3. Severity, and how --require-citations interacts
+--------------------------------------------------------------------------------
+
+The brief says to match how a `section:` that fails to resolve is treated *in
+that docs table*, so I did, and the two new soft rows read exactly like the
+`section:` row they sit under:
+
+| condition | `check` | `build --require-citations` |
+|---|---|---|
+| `page:` not a positive integer | **error, always** (declaration) | error, exit 1 |
+| `page:` past the end of the pinned document | warning, per citer | error, exit 1 |
+| `page:` never checked (no count recorded, with the reason) | warning, per citer | error, exit 1 |
+
+`--require-citations` escalates both soft rows and promotes neither hard one,
+which is the table's existing rule (it exists in `citations.verify` as the
+`severity = project.error if require else project.warn` argument every
+`_apply_*` already takes).
+
+**Why a warning at `refdes fetch` and not a `FAILED`.** The `section:`
+precedent is `FAILED` + nonzero exit, and I deliberately did not copy it,
+because the two failures are not the same kind of thing: a failed `section:`
+lookup means a *value was dropped* from the record, so the citation is left with
+no page at all and `check` reports it as unresolved; a `page:` out of range
+leaves the pin and the citation exactly as the author wrote them, and rolling
+back a successful pin over a number the author typed would be refusing the
+fetch rather than the citation. The pin is the part that succeeded. A second,
+practical reason: a datasheet's *printed* page number and its PDF page index
+routinely differ by a page, so an off-by-one here is a plausible human reading
+rather than a nonsense value — which is exactly what a gate (not a hard stop)
+is for. `refdes fetch` prints `WARNING  <path>: page 99 is not in this document
+-- it has 8 page(s) (cited by CMP-001)` and exits 0.
+
+**`state` stays `"ok"`, deliberately.** The report noted (P1) that
+`docs/output.md`'s `state: "ok"` — "Resolved — hash on file" — is "literally
+true and materially misleading here". It is still literally true: the hash *is*
+fine. Adding a state value would have meant the state table, both templates, and
+`docs/output.md` growing a "the bytes are fine but the page is wrong" case that
+no other citation state is about — and `section:` does exactly the same thing
+today (wrong page, `state` stays `ok`, the problem goes in `detail`, and the
+Detail column renders it). I kept the existing contract and *documented it* in
+`docs/output.md`: "`state == "ok"` alone is the claim that the sha256 is right,
+which is true and is not the whole sentence."
+
+**A citation whose bytes are not the pinned ones is not range-checked.** If a
+local file changed since its pin, `_resolve` has already reported that with the
+exact command to fix it, and the recorded count describes bytes the site is not
+linking to. Warning "page 99 is not in this document -- it has 8 page(s)" about
+a file that now has two pages would be describing a document nobody links.
+`test_a_local_file_that_changed_is_reported_as_changed_not_out_of_range` pins
+that: exactly one warning, the changed-file one.
+
+`audit` is unchanged and deliberately so: it prints `state`, the pin column and
+the citers, and has never printed `detail` for *any* citation problem (an
+unresolved `section:` does not show there either). Adding it for `page:` alone
+would be a new inconsistency.
+
+--------------------------------------------------------------------------------
+4. The pypdf-missing path
+--------------------------------------------------------------------------------
+
+The same fallback `section:` documents, at the same moment, in the same words —
+`PDF_EXTRA_HINT` is the shared constant, not a second sentence:
+
+- at the pin, a `WARNING`, because the pin genuinely succeeded:
+  `WARNING  docs/ds-main.pdf: the pages could not be counted to check the page
+  numbers cited here -- counting a document's pages needs the optional PDF
+  extra: pip install refdes[pdf]`
+- in the lockfile, `page_count_error:` with the same clause, so the fact
+  survives
+- at `check`, the `section:` row's severity, naming the reason and the command:
+  `WARNING items/cmp.yaml:4 [CMP-001] — the page numbers cited for
+  docs/ds-main.pdf are not checked: the lockfile records no page count for this
+  document because counting a document's pages needs the optional PDF extra:
+  pip install refdes[pdf] -- run 'refdes fetch --update --path docs/manual.pdf'
+  to establish it`
+- and it escalates under `build --require-citations`.
+
+Two fallbacks stay distinguishable, which is the point
+(`test_without_the_extra_a_section_citation_still_fails_loudly`): a `section:`
+that could not be resolved is a `FAILED` and a nonzero exit (a value was lost),
+while a `page:` that could not be *checked* is a warning (no value was lost; the
+number is the author's and was not recorded as verified either way).
+
+Unreadable bytes get the same treatment with pypdf's own words —
+`counting a document's pages failed: pypdf could not read the PDF: startxref not
+found` — and, like `section:`, never a traceback.
+
+One asymmetry worth recording: a plain `refdes fetch` on an **already-pinned**
+path does not re-count pages. The recorded count is right there, so it *is*
+used to check the pages (`_check_pages` runs in the skip path too — that is the
+commonest way a wrong page gets written: an author edits `page:` and runs
+fetch), but a path whose record carries no count at all is not nagged about
+there. Reporting a non-attempt on every routine re-run would be noise about the
+lockfile, and `check` is where the "not checked" row lives.
+
+--------------------------------------------------------------------------------
+5. Tests, and the "does it fail on main" evidence
+--------------------------------------------------------------------------------
+
+New file `tests/test_citation_pages.py`, 36 tests, built on the same fixture
+shape as `tests/test_citation_sections.py` (pypdf 6.19.0 *is* installed here and
+`PdfWriter` is already the house fixture builder, so no hand-written PDF bytes
+were needed — the previous worker's `.scratch/pdffix/make_pdf.py` approach was
+not required). Coverage: the nine malformed shapes at load and through
+`refdes check`; an unquoted int accepted; the grammar shared with the picker
+(asserted by identity, plus a table); out-of-range at `check` / `build
+--require-citations` / the CLI; per-citer reporting; the fetch-time warning;
+the four-page re-pin; `--item`-scoped re-pin still checking the other item's
+page; an in-range page rendering `#page=4` and reporting nothing; check never
+opening the PDF; a remote hash-only citation; the lockfile-hygiene rules; a
+non-PDF citation; a changed local file; the missing extra at fetch, in the
+lockfile and at check; and the unreadable-PDF shape.
+
+Reverting `src/` (copied to `.scratch/fix-backup/` first — **no stash**, per
+AGENTS.md) and running the new file against main's code:
+
+```
+$ git checkout -- src/refdes/{citations,sources,build,cli}.py src/refdes/serve/{api,sources}.py
+$ PYTHONPATH=src python -m pytest tests/test_citation_pages.py -q
+...
+E       AssertionError: assert [] == ['WARNING ite...as 8 page(s)']
+E         Right contains one more item: 'WARNING items/cmp.yaml:4 [CMP-001] — docs/manual.pdf: page 99 is not in this document -- it has 8 page(s)'
+33 failed, 3 passed in 0.69s
+```
+
+Three pass on main by design, and I am recording which, because a test that
+passes before and after is a guard against over-firing rather than a test of
+the new behaviour: `test_a_page_the_document_does_have_is_never_reported`,
+`test_the_page_count_is_recorded_only_while_a_page_is_cited`,
+`test_a_local_file_that_changed_is_reported_as_changed_not_out_of_range` (its
+single-warning assertion already holds on main, since main reports only the
+changed-file warning). The rest fail with real assertion diffs — e.g.
+`AttributeError: 'FetchResult' object has no attribute 'page_warnings'` where
+the test reads a field the fix adds, and the empty-warnings diff above for the
+behavioural ones.
+
+Reproducing P1 end-to-end against main's code, same project, four citations on
+one 8-page PDF (`page: "99"`, `"0"`, `"eight"`, `"6"`), then the file replaced
+by a 4-page revision and `fetch --update`:
+
+```
+### BEFORE (main)
+$ refdes fetch
+(minted 1 key(s) while loading)
+fetched  docs/ds-main.pdf  sha256=8f5443a56224...  hash-only
+1 citation(s) processed, 0 failed                                    exit=0
+$ refdes check
+1 items, 0 errors, 0 warnings                                        exit=0
+$ refdes build --require-citations
+1 items, 0 errors, 0 warnings                                        exit=0
+$ cp docs/ds-short.pdf docs/ds-main.pdf && refdes fetch --update --path docs/ds-main.pdf
+fetched  docs/ds-main.pdf  sha256=1a3261aded17...  hash-only
+1 citation(s) processed, 0 failed                                    exit=0
+$ refdes check                 -> 1 items, 0 errors, 0 warnings      exit=0
+$ refdes build --require-citations                                   exit=0
+$ grep -o '#page=[a-z0-9]*' _site/cmp-001.html | sort -u
+#page=0
+#page=6
+#page=99
+#page=eight
+```
+
+and with the fix:
+
+```
+### AFTER
+$ refdes fetch
+WARNING  docs/ds-main.pdf: page 99 is not in this document -- it has 8 page(s) (cited by CMP-001)
+(minted 1 key(s) while loading)
+fetched  docs/ds-main.pdf  sha256=8f5443a56224...  hash-only
+1 citation(s) processed, 0 failed                                    exit=0
+$ refdes check
+ERROR   items/cmp.yaml:4 [CMP-001] — datasheets[1]: page: '0' is not a page number -- page: must be a positive integer, counted from 1
+ERROR   items/cmp.yaml:4 [CMP-001] — datasheets[2]: page: 'eight' is not a page number -- page: must be a positive integer, counted from 1
+WARNING items/cmp.yaml:4 [CMP-001] — docs/ds-main.pdf: page 99 is not in this document -- it has 8 page(s)
+1 items, 2 errors, 1 warnings                                        exit=1
+$ refdes build --require-citations
+ERROR   ... page: '0' is not a page number ...
+ERROR   ... page: 'eight' is not a page number ...
+ERROR   items/cmp.yaml:4 [CMP-001] — docs/ds-main.pdf: page 99 is not in this document -- it has 8 page(s)
+1 items, 3 errors, 0 warnings                                        exit=1
+
+$ cp docs/ds-short.pdf docs/ds-main.pdf && refdes fetch --update --path docs/ds-main.pdf
+WARNING  docs/ds-main.pdf: page 6 is not in this document -- it has 4 page(s) (cited by CMP-001)
+WARNING  docs/ds-main.pdf: page 99 is not in this document -- it has 4 page(s) (cited by CMP-001)
+fetched  docs/ds-main.pdf  sha256=1a3261aded17...  hash-only
+1 citation(s) processed, 0 failed                                    exit=0
+```
+
+and the missing extra (driven through the same `-c` wrapper with `sys.modules
+['pypdf'] = None`, which is the faithful way to exercise the real
+`citations._import_pypdf` gate):
+
+```
+$ refdes fetch --update --path docs/ds-main.pdf
+WARNING  docs/ds-main.pdf: the pages could not be counted to check the page numbers cited here -- counting a document's pages needs the optional PDF extra: pip install refdes[pdf]
+fetched  docs/ds-main.pdf  sha256=1a3261aded17...  hash-only
+1 citation(s) processed, 0 failed                                    exit=0
+```
+
+Fixture projects for both runs are in `.scratch/demo/` and `.scratch/demo-main/`
+(gitignored, left in place).
+
+--------------------------------------------------------------------------------
+6. Everything else, briefly
+--------------------------------------------------------------------------------
+
+- **Full suite**: `PYTHONPATH=src python -m pytest -q` → **2962 passed, 2
+  skipped** (the 2 skips are pre-existing; they skip on main too).
+- **ruff, scoped to the touched files** (AGENTS.md: `ruff check .` has ~99
+  pre-existing findings and is not a gate; the installed 0.16.9 default set is
+  broader than `pyproject.toml` assumes — the repo actually has 262 today).
+  Baselines taken with `git show HEAD:<file> | ruff check --stdin-filename`:
+  - `src/refdes/citations.py` 5 findings before, the **same 5** after
+    (ISC004 ×2, RUF100 `S310`, UP017, S112 — all pre-existing, untouched).
+    One finding I *did* introduce and then removed: my new `except Exception`
+    in `page_count` carried a `# noqa: BLE001` copied from the neighbouring
+    `_destination_page`, and ruff flagged it as an unused directive because it
+    does not fire on a handler that re-raises into a specific exception.
+    Verified by re-running with the directive removed (clean) before removing it
+    for good.
+  - `src/refdes/sources.py` 9 before, **8** after — one fewer, because
+    `page_absent_message` replaced the multi-line implicit concatenation the
+    old inline `raise` used.
+  - `src/refdes/build.py` 1 before, 1 after: the pre-existing `I001` import
+    sort (I added no import there; left alone per AGENTS.md).
+  - `src/refdes/cli.py`, `src/refdes/serve/api.py`,
+    `src/refdes/serve/sources.py`: clean before and after.
+  - `tests/test_serve_pdf_sources.py` (comment-only edit): the same 3 findings
+    before and after.
+  - `tests/test_citation_pages.py`: **clean**. Its first draft had 9 ISC004s
+    (unparenthesized implicit concatenation inside list literals); since its
+    sibling `tests/test_citation_sections.py` is clean, I parenthesised them
+    rather than adding nine findings to the suite.
+- **Docs**: `docs/markdown.md` gains three rows in the verification table (one
+  hard, two soft) and a "A hand-read page is checked, too." subsection next to
+  the `sections_sha256` paragraph — including the explicit warning that
+  `page:` is the *PDF's* page index and a datasheet's printed page number is a
+  different number, which is what an off-by-one here looks like.
+  `docs/cli-reference.md`'s `refdes fetch` section and its writes table gain the
+  page count; `docs/output.md` gains the `state`-vs-`detail` paragraph.
+- **Changelog**: `changelog.d/citation-page-checked.fixed.md` (`.fixed.md`, per
+  `changelog.d/README.md`'s `<slug>.<category>.md`).
+
+Deliberately out of scope, and left alone:
+- `src/refdes/schema_json.py:88` still types `page` as a bare
+  `{"type": "string"}`, so an editor's schema completion still calls
+  `page: eight` valid. refdes itself now refuses it, which is the gate that
+  matters, and changing the emitted JSON Schema would touch `docs/` schema
+  pages and the schema-comparison tests for no behaviour change.
+- P2, P3 and P4 of the report (the `difflib` cutoff on truncated outline titles,
+  the `FileNotFoundError` at fetch time, the absolute path in a `source()`
+  re-location message). Different findings, different files.
+- `audit` (see §3) and the fact that `build` still writes the site when it
+  reports errors — so on a *failed* build a malformed `page:` still renders as
+  `#page=0` / `#page=eight` in the written HTML. The gate is the exit code, and
+  this is pre-existing refdes behaviour for every error, but it is the honest
+  boundary of what this fix does: nothing about a failing build's output.
+
+--------------------------------------------------------------------------------
+STATUS: finished. Full suite green, 36 new tests, docs and changelog updated,
+scoped ruff no worse than baseline on every touched file. Ready to commit, push
+and open the PR.
+Model: Space Bunny.
