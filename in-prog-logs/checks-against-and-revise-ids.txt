@@ -1,0 +1,257 @@
+Task: the two items PR #126's log (in-prog-logs/identity-remedy-wording.txt,
+"Left for someone else") left behind:
+
+  1. `checks: against:`'s dangling target (src/refdes/build.py:1441) had the
+     same bare-symptom dead end as the structured-link message #126 fixed.
+  2. An `ids:` mapping handed to `refdes revise` was silently ignored
+     ("nothing to do -- mapping doesn't apply to this project", exit 0).
+
+Worktree: /home/jorb/.paseo/worktrees/16msma8v/checks-against-and-revise-ids
+Branch:   checks-against-and-revise-ids (from main @ d54cfd4)
+
+The `refdes` on PATH is a broken editable install pointing at another
+worktree, so every command ran through
+
+    bash .scratch/r.sh <project-dir> <refdes args...>
+
+which cds to a scratch project and runs `PYTHONPATH=<this worktree>/src
+python -m refdes.cli`. `[exit=N]` is main()'s return code. Everything below
+labelled `$ refdes ...` is shorthand for that.
+
+`.scratch/mkbase.py` writes a 10-item hardware@3 project into any directory
+*without loading it*, so the caller decides when the first writable load
+happens:
+
+    items/requirements.yaml  REQ-PWR-001..004 (004 refines 001)
+    items/bounds.yaml        BND-PWR-001, BND-PWR-002 (limits)
+    items/decisions/dec-pwr-001.md
+                             DEC-PWR-001 satisfies [001,003],
+                             constrained_by [BND-PWR-001, BND-PWR-002],
+                             checks: [{value: ripple_mV, against: BND-PWR-002}]
+                             + a ```calc block defining ripple_mV
+    items/tests.yaml         TST-PWR-001 verifies [REQ-PWR-001, BND-PWR-002]
+                             TST-PWR-002 verifies [REQ-PWR-004]
+    items/log.yaml           LOG-A-001 addresses [REQ-PWR-001]
+
+`$ refdes --no-write check` on the fresh template is `10 items, 0 errors, 2
+warnings`, and leaves **no `.refdes/` directory at all** and every reference
+still bare.
+
+Status: DONE. Two commits, one per fix, wording/behaviour-scoped as briefed.
+Wrote the log incrementally as I went; this is the wrap-up.
+
+==========================================================================
+## Commit 1 — `checks: against:`'s dangling target gets the same remedy
+
+### Reproduced the bare symptom (.scratch/ca1)
+
+`base` -> `refdes check` (minted 10 keys, rewrote 10 references) -> hand-edit
+`id: BND-PWR-002` to `id: BND-PWR-404` in items/bounds.yaml and hand-revert
+the check's `against:` to bare `BND-PWR-002`:
+
+    $ refdes --no-write check
+    ERROR   items/decisions/dec-pwr-001.md:2 [DEC-PWR-001] — check against 'BND-PWR-002', which does not exist
+    WARNING <project> — 2 item(s) with no coverage — see coverage.html
+    WARNING <project> — 1 requirement(s) satisfied but not verified — see coverage.html
+    10 items, 1 errors, 2 warnings
+    [exit=1]
+
+### The premise checked, not assumed: is `checks: against:` composite-expanded
+### on a writable load, the way a structured link is?
+
+Yes. Same load, immediately after:
+
+    (minted 10 key(s) and rewrote 10 reference(s) while loading)
+    items/decisions/dec-pwr-001.md:11    against: BND-PWR-002@zpz26k78dd3
+
+so the remedy reasoning applies unchanged. Two further probes, both by running
+the CLI:
+
+- **A composite `against:` follows a hand rename** (.scratch/ca2): rename
+  `BND-PWR-002` -> `BND-PWR-404` and leave the composite in place —
+  `(rewrote 3 reference(s) while loading)`,
+  `against: BND-PWR-404@5cjk356m0ke`, `0 errors`, exit 0. Identical to the
+  structured-link trace in #126's log §"Hand-renaming an item is safe". The
+  only variable is bare-vs-composite at rename time, for `against:` exactly as
+  for a link.
+- **The remedy works end to end** (.scratch/ca1a): write `BND-PWR-404` into the
+  bare `against:` — `(rewrote 3 reference(s) while loading)`,
+  `against: BND-PWR-404@zpz26k78dd3`, `0 errors`, exit 0. The composite lands
+  on the new id carrying the item's real key, unchanged from before the
+  rename.
+
+### AFTER
+
+    $ refdes --no-write check
+    ERROR   items/decisions/dec-pwr-001.md:2 [DEC-PWR-001] — check against 'BND-PWR-002', which does not exist -- a typo, a deleted item, or an item renamed while this `against:` was still bare, and a bare `against:` cannot follow a rename: write the item's new id here. See https://squishiba.github.io/refdes/troubleshooting.html#links.
+    WARNING <project> — 2 item(s) with no coverage — see coverage.html
+    WARNING <project> — 1 requirement(s) satisfied but not verified — see coverage.html
+    10 items, 1 errors, 2 warnings
+    [exit=1]
+
+Same error, same severity, same file:line, same counts, same exit code as
+BEFORE. Only the message grew.
+
+### What changed
+
+- **src/refdes/build.py** — factored the bare half of "resolves to nothing"
+  into `_dangling_bare_message(pointer, target_id, noun)` (new, right after
+  `_unknown_key_message`, which is already the shared home for the *key* half
+  of this same diagnostic for the same two callers). `resolve_links` calls it
+  with `noun="reference"`, `run_checks` with `noun="`against:`"`. That is
+  deliberate: the two texts must not drift, and the *one* difference between
+  them is which thing in the file carries the bare text — a `links:`
+  reference is a link, `against:` is a field entry inside `checks:`
+  (links.py:815 says so in as many words), so "this reference was still bare"
+  would read as if the message were about the wrong half of the file.
+  - `resolve_links`' own message string is **byte-identical** to the one on
+    main, because `noun="reference"` reproduces it exactly. Re-verified by
+    running the structured-link shape after the change (.scratch/ca4), not just
+    by reading: same text, `10 items, 1 errors, 2 warnings`, exit 1.
+  - `run_checks` keeps its two branches exactly as they were; only the `else`
+    branch's string is now the helper's. The `@`-in-target branch still goes to
+    `_unknown_key_message` first, untouched. Nothing about *detection* moved:
+    `run_checks` still branches on `target is None` alone, and nothing in the
+    message is computed from the project — the typo / deleted / renamed cases
+    share one text rather than the rename case being singled out, the same
+    unconditional choice #126's structured-link fix made and the same reason
+    (`project.former_ids` is `{}` at resolution time by design).
+- **docs/troubleshooting.md** — the `## Checks` section had entries for
+  `check refers to 'P_dens', which no calc block defines` and `check against
+  BND-THM-001, which declares no limit`, but **nothing** for
+  `check against 'X', which does not exist` — grepped the file before writing.
+  Added that entry, three sentences, cross-reusing the rename case already
+  explained in `## Links` rather than repeating it.
+- **tests/test_checks_keys.py** — `test_dangling_bare_against_names_the_remedy_a_hand_rename_needs`
+  (new, next to the other Layer 1/3 message pins). Same three pins as its
+  structured-link twin in test_keys_links.py — the URL, `docs/troubleshooting.md`
+  not in the message, `message.count(". ") <= 1` — plus two the twin doesn't
+  need: the text must be about the `against:` entry rather than a
+  "reference", and it must actually lead with the three ordinary
+  explanations (which is the assertion that fails against main).
+- **changelog.d/dangling-bare-against-remedy.fixed.md**
+
+### Test fails against main's code (confirmed, not assumed)
+
+`src/refdes/build.py` reverted to HEAD, both dangling-target tests run, then
+restored:
+
+    === new test against main's build.py ===
+    >       assert "a typo, a deleted item, or an item renamed" in message
+    E       assert 'a typo, a deleted item, or an item renamed' in
+                "check against 'BND-404', which does not exist"
+    1 failed, 1 passed in 0.21s
+    === restored; both pass again ===
+    2 passed in 0.06s
+
+(the passing one is the pre-existing structured-link pin, which main satisfies
+by definition — the point is the *new* one fails, and only on the missing
+remedy).
+
+==========================================================================
+## Commit 2 — `refdes revise` silently ignores an `ids:` mapping
+
+### Reproduced
+
+.scratch/rv1 is a clean `base` with keys minted (one writable load), handed a
+mapping file holding an `ids:` section:
+
+    ids:
+      REQ-PWR-001: REQ-PWR-011
+
+    $ refdes revise rename.yaml
+    nothing to do -- mapping doesn't apply to this project
+    [exit=0]
+
+Nothing was renamed and exit 0 says the mapping was fine. That is the worst
+shape a silent no-op can take: a user who thought `revise` could rename one
+item is told the file didn't apply, not that the section wasn't read.
+
+### What `revise` actually accepts, and where the gap is
+
+- `refdes revise --help`: "path to a YAML file with types:/fields:/links:/prefixes:
+  renames" — which is already **four** of the five sections, and it omits
+  `citation_keys:` (revise.py:74, documented in `mapping_from_dict`'s own
+  docstring at revise.py:123, used by the bundled standard's own
+  `migration.yaml`). So the help is wrong on its own terms before mine is
+  considered.
+- `mapping_from_dict` (revise.py:110-146) reads exactly five keys —
+  `types`, `fields`, `links`, `prefixes`, `citation_keys` — via `.get(...)`
+  with no check for anything else. That is the whole gap: an unknown
+  top-level section is dropped on the floor, and if it is the *only* section
+  then `Mapping.is_empty()` (revise.py:76) is True and the caller prints
+  "nothing to do".
+
+Read all five keys at revise.py:134-142 and the SchemaError shape at
+revise.py:131-132.
+
+### The refusal
+
+Same message-adding shape as commit 1, same place in the file: one check in
+`mapping_from_dict`, so it fires on **both** front doors and on
+`--dry-run` for free (verified below — `load_mapping` is reached before
+anything else looks at the Mapping).
+
+Accepted sections are named in the error, and `ids:` gets the one pointer the
+brief asked for: single-item renames are done by editing `id:` by hand, after a
+writable load has given the reference a key, which is Troubleshooting's
+`### Hand-renaming an item is safe — get one writable load in first` section
+(added by #126). Verified both halves by running them, not inferred:
+
+- a hand-edited `id:` with composite references follows the rename on the next
+  load, `0 errors`, exit 0 (.scratch/rv2, the #126 trace);
+- while still bare, it dangles — which is why the pointer says "after a
+  writable load" and not just "edit `id:` by hand".
+
+### Exit code
+
+docs/cli-reference.md's exit-code table: exit 2 is "bad input" — the same
+class `load_mapping`'s own docstring calls a bad mapping file, and the same one
+a missing/unparseable mapping file already gets (revise.py:149-170 raising
+SchemaError into `cmd_revise`'s handler). So the refusal is a `SchemaError`,
+which is what makes it exit 2 and stay the single exit for the whole
+module. Read the table rather than guessing the number.
+
+### --dry-run
+
+`revise rename.yaml --dry-run` on the same file gets the same refusal, same
+message, exit 2 — recorded below.
+
+### Files
+
+- src/refdes/revise.py — the check in `mapping_from_dict`, plus
+  `refdes revise --help`'s missing `citation_keys:` in cli.py (verified by
+  running `--help` before and after).
+- tests/test_revise.py — refusal for an unknown section, the `ids:` pointer,
+  and exit code 2 via `cli.main`. Confirmed failing against main's code.
+- docs/cli-reference.md — the revise section now says an unknown top-level
+  section is refused rather than ignored, and lists all five accepted
+  sections.
+- changelog.d/revise-unknown-section.fixed.md
+
+### Scratch (all gitignored, left in place)
+
+`r.sh` (the runner), `mkbase.py` (the 10-item template), `base`, `ca1`-`ca4`
+(commit 1's shapes), `rv1`-`rv2` (commit 2's), `build.py.new` (the temporarily
+reverted-away source, kept so the failure could be re-checked without
+re-deriving it).
+
+==========================================================================
+## Wrap-up
+
+Status: FINISHED. Two commits, one per fix, pushed to
+`checks-against-and-revise-ids`.
+
+| # | Fix | What changed | Files |
+|---|-----|--------------|-------|
+| 1 | `checks: against:`'s dangling target had the bare-symptom dead end #126 removed from structured links | Same remedy, same `DANGLING_LINK_DOCS` URL, from one shared helper worded about the `against:` entry; Troubleshooting's `## Checks` gains the missing entry | src/refdes/build.py, docs/troubleshooting.md, tests/test_checks_keys.py |
+| 2 | `revise` silently ignored an `ids:` (or any unknown top-level) mapping section, exit 0 | Refused in `mapping_from_dict` with the accepted sections listed and the `ids:` pointer; exit 2, `--dry-run` included; `revise --help` and cli-reference.md corrected | src/refdes/revise.py, src/refdes/cli.py, docs/cli-reference.md, tests/test_revise.py |
+
+**Verification**
+
+- Full suite run before each commit (results recorded in the git log message
+  of that commit).
+- Every new message reproduced through the real CLI before and after, quoted
+  above verbatim, exit codes included.
+- `ruff check` scoped to the touched files per AGENTS.md; findings recorded
+  below rather than assumed.

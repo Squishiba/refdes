@@ -533,6 +533,35 @@ def _unknown_key_message(project: Project, pointer: str, target_id: str) -> str:
     )
 
 
+def _dangling_bare_message(pointer: str, target_id: str, noun: str) -> str:
+    """The bare-display-id half of "resolves to nothing" -- a structured link
+    (`resolve_links`) or a `checks: against:` entry (`run_checks`).
+
+    Shared, not duplicated, for the same reason as _unknown_key_message: both
+    name a target the same way and resolve it through resolve_link_target, so
+    the three ordinary explanations and the one remedy that apply are the
+    same three and the same one. `noun` is what the caller calls the thing
+    carrying the bare text -- "reference" for a structured link, "`against:`"
+    for a `checks:` entry -- so the message reads about the right half of the
+    file.
+
+    Nothing here is computed from the project: the typo, deleted-item and
+    renamed-while-bare cases share one text rather than the rename case being
+    detected, because `project.former_ids` is empty at resolution time by
+    design (validate_former_ids has not run) so a conditional version would
+    need a new lookup -- a behaviour change, not a rewording. Kept to two
+    sentences because this fires on every typo: the long form, which commands
+    do *not* apply and why a hand rename is safe once a writable load has run,
+    is troubleshooting.md's `## Links`, which is where the URL points.
+    """
+    return (
+        f"{pointer} {target_id!r}, which does not exist -- a typo, a deleted "
+        f"item, or an item renamed while this {noun} was still bare, and a "
+        f"bare {noun} cannot follow a rename: write the item's new id here. "
+        f"See {docs_url_mod.DANGLING_LINK_DOCS}."
+    )
+
+
 def _expand_subtypes(project: Project, names) -> set[str]:
     """`names` plus every type that extends one of them -- the ALLOW-side
     reading of a type-name list (docs/design/extends.md §3): a subtype stands
@@ -581,12 +610,8 @@ def resolve_links(project: Project) -> None:
                     if "@" in target_id or bare_key:
                         message = _unknown_key_message(project, f"{link_name} points at", target_id)
                     else:
-                        message = (
-                            f"{link_name} points at {target_id!r}, which does not "
-                            "exist -- a typo, a deleted item, or an item renamed "
-                            "while this reference was still bare, and a bare "
-                            "reference cannot follow a rename: write the item's "
-                            f"new id here. See {docs_url_mod.DANGLING_LINK_DOCS}."
+                        message = _dangling_bare_message(
+                            f"{link_name} points at", target_id, "reference"
                         )
                     project.error(
                         message,
@@ -1432,7 +1457,9 @@ def run_checks(project: Project) -> None:
                     message = _unknown_key_message(project, "check against", target_id)
                 else:
                     result.detail = f"{target_id} does not exist"
-                    message = f"check against {target_id!r}, which does not exist"
+                    message = _dangling_bare_message(
+                        "check against", target_id, "`against:`"
+                    )
                 project.error(
                     message,
                     file=item.source_file, line=item.source_line, item_id=item.id,
