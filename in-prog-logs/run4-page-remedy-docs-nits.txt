@@ -191,3 +191,19 @@ duplicate-key diagnostic not covering repointed references) are out of this
 task's scope and untouched. Nothing under `src/`, `tests/` or `docs/` was
 changed for them; `git status` before each commit showed only the files listed
 above.
+
+## Finished
+
+PR: https://github.com/Squishiba/refdes/pull/145 (against `main`, branch
+`run4-page-remedy-docs-nits`). Three commits, one per finding:
+
+- `ae724bd` fix(citations): a malformed page: says what to write instead (F2)
+- `5a32021` docs(getting-started): count init's .gitignore once, not twice (F4)
+- `16e3646` docs(troubleshooting): the hand-rename sample shows every line check
+  prints (F5)
+
+Final state: full suite 3157 passed / 2 skipped; ruff clean on the two files I
+created findings in, `build.py` byte-identical in finding-shape to main's;
+working tree clean; nothing written outside this worktree; all scratch material
+left in `.scratch/` (`f2/`, `f4a/`–`f4c/`, `f5/`, `dscheck/`, `build_main.py`,
+`test_citation_pages_main.py`, `build.py.f2`, `docs_url.py.f2`).
