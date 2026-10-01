@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 
+import pytest
 import yaml
 from conftest import write_project_config
 
@@ -134,6 +135,53 @@ def test_mint_produces_eleven_lowercase_crockford_characters_with_a_valid_check_
         assert key == key.lower()
         assert all(ch in keys_mod.ALPHABET for ch in key)
         assert _damm_valid(key)
+
+
+def test_mint_retries_yaml_ambiguous_candidates(monkeypatch):
+    candidates = ("0x7cea52300", "84008808238", "k7f3m2q9x4a")
+    draws = iter(bytes(_KEYS_IDX[ch] for ch in key[:10]) for key in candidates)
+    monkeypatch.setattr(keys_mod.secrets, "token_bytes", lambda size: next(draws))
+    assert all(keys_mod.check_char(key[:10]) == key[-1] for key in candidates)
+    assert keys_mod.mint() == candidates[-1]
+
+
+def test_yaml_ambiguous_existing_keys_keep_their_spelling(tmp_path):
+    """Item declarations and machine state map keys must retain old mints."""
+    from refdes.parse import _LineLoader, _load_line_marked, _PurePythonLineLoader, yaml_safe_load
+
+    keys = ("0x7cea52300", "84008808238")
+    root = _keys_project(
+        tmp_path,
+        "items:\n"
+        + "".join(
+            f"  - id: REQ-00{i}\n    type: requirement\n    text: Item {i}\n    key: {key}\n"
+            for i, key in enumerate(keys, 1)
+        ),
+    )
+    source = (root / "items" / "r.yaml").read_text(encoding="utf-8")
+    for loader in (_LineLoader, _PurePythonLineLoader):
+        loaded, _ = _load_line_marked(source, loader)
+        assert [entry["key"] for entry in loaded["items"]] == list(keys)
+    project = load_project(config_path=str(root / "refdes-project.yaml"))
+    parse.load_items(project)
+    assert [project.item_by_id(f"REQ-00{i}").key for i in (1, 2)] == list(keys)
+    for key in keys:
+        state = yaml_safe_load(f"sealed:\n  {key}: {{id: REQ-001, hash: abc}}\n")
+        assert state["sealed"][key]["hash"] == "abc"
+        assert yaml_safe_load(f"key: {key}\n")["key"] == key
+        baseline = lifecycle.format_baseline(
+            {"name": "rev-a", "items": {key: {"id": "REQ-001"}}}
+        )
+        assert f'  "{key}":' in baseline
+        assert yaml_safe_load(baseline)["items"][key]["id"] == "REQ-001"
+    assert yaml_safe_load("number: 84008808238\n")["number"] == 84008808238
+
+
+def test_reserialized_hex_key_in_baseline_is_reported(tmp_path):
+    path = tmp_path / "baseline.yaml"
+    path.write_text("items:\n  33531699968: {id: REQ-001, hash: abc}\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="original spelling cannot be recovered"):
+        lifecycle._load_baseline_file(str(path))
 
 
 def test_mint_never_produces_an_uppercase_start_bare_ref_could_match():

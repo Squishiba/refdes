@@ -55,11 +55,10 @@ import uuid
 from datetime import datetime, timezone
 from typing import NamedTuple
 
-from . import seal as seal_mod
-
 import yaml
 
 from . import keys as keys_mod
+from . import seal as seal_mod
 from . import textio
 from .model import Item
 from .parse import yaml_safe_load
@@ -243,6 +242,8 @@ def save_object(root: str, item: Item) -> tuple[str, str]:
         with open(path, "r", encoding="utf-8") as fh:
             existing = yaml_safe_load(fh)
         _check_format(existing, path)
+        if existing.get("key"):
+            keys_mod.require_storage_key(existing["key"], path)
         core = {
             k: existing[k]
             for k in ("history_format", "type", "fields", "links", "body")
@@ -309,6 +310,8 @@ def load_object(root: str, digest: str) -> dict[str, object]:
     with open(path, "r", encoding="utf-8") as fh:
         data = yaml_safe_load(fh)
     _check_format(data, path)
+    if data.get("key"):
+        keys_mod.require_storage_key(data["key"], path)
     data = dict(data)
     core = {k: data[k] for k in ("history_format", "type", "fields", "links", "body") if k in data}
     missing = {"history_format", "type", "fields", "links", "body"} - set(core)
@@ -384,6 +387,9 @@ def append_event(
         if not isinstance(existing, dict):
             raise HistoryError(f"{path}: existing event is not a YAML mapping")
         _check_format(existing, path)
+        for field in ("item_key", "successor_key"):
+            if existing.get(field):
+                keys_mod.require_storage_key(existing[field], path)
         if (existing.get("object") or "") != object_digest:
             raise HistoryError(
                 f"{path}: this edge was already captured against object "
@@ -415,6 +421,9 @@ def load_events(root: str) -> list[dict[str, object]]:
         with open(path, "r", encoding="utf-8") as fh:
             data = yaml_safe_load(fh)
         _check_format(data, path)
+        for field in ("item_key", "successor_key"):
+            if data.get(field):
+                keys_mod.require_storage_key(data[field], path)
         if data.get("kind") not in EVENT_KINDS:
             raise HistoryError(f"{path}: unknown event kind {data.get('kind')!r}")
         required = ("id", "kind", "item_key")
