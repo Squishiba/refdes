@@ -258,6 +258,28 @@ skip, which is exactly how the mapping gets lost in the first place.
 reference](cli-reference.md#refdes-former-ids-propose) -- and writes nothing
 until you confirm which ones to accept.
 
+## Looking an item up by a retired id
+
+The retired id is what the world outside this project keeps using, so every
+place that answers "what is REQ-PWR-001?" answers it:
+
+```bash
+refdes ls REQ-PWR-001
+NEED-PWR-001  need  The 3V3 rail shall supply 1.2 A continuous. (formerly REQ-PWR-001)
+```
+
+`ls`'s free text reaches `former_ids:` under the same substring and case rules
+as ids, titles and `tags:`, and the row says where the old id went rather than
+leaving you to infer it. See [`refdes ls`](cli-reference.md#refdes-ls). In the
+built site the item's own page lists its former ids under the title, and every
+hover preview card for it carries a *formerly known as* row
+([links](links.md#hover-previews)); the VS Code hover says the same.
+
+If a retired id has since been reused by a different item, the live item wins
+the id outright -- `refdes ls` lists *it*, and names the item still recording
+the old one under the table, because that combination is a build error
+(`refdes check` reports it) and the two cannot both be right.
+
 ## Planning ahead for multiple boards
 
 If there is any chance of a second board, put a board token in the prefix now:

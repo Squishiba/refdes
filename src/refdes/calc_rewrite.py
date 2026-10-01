@@ -46,6 +46,7 @@ from .revise import (
     _carry_forward_seals,
     _line_diff_report,
     _load_and_validate,
+    _refuse_item_write,
     _restore_seal_files,
     carry_forward_baselines,
     restore_rewrites,
@@ -241,12 +242,20 @@ def apply(project_root: str, dry_run: bool = False) -> CalcRewriteResult:
         item.id: build_mod.calc_hash_for(item) for item in project_before.local_items
     }
 
-    write_rewrites(rewrites)
     original_seals = _capture_seal_files(project_before)
 
     def _rollback() -> None:
         restore_rewrites(rewrites)
         _restore_seal_files(original_seals)
+
+    # Same refusal as `revise.apply`'s, on the same `write_rewrites` call --
+    # this engine and that one are the same transaction, so a read-only
+    # `items/` must read the same way here.
+    try:
+        write_rewrites(rewrites, on_error=_refuse_item_write)
+    except Refused as exc:
+        _rollback()
+        return CalcRewriteResult(ok=False, errors=[str(exc), "rolled back."])
 
     try:
         project_after = _load_and_validate(config_path)

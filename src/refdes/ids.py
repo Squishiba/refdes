@@ -17,7 +17,7 @@ from collections import defaultdict
 import yaml
 
 from . import textio
-from .model import Item, Project, provisional_handle
+from .model import Item, Project, destination_refusal, provisional_handle
 from .parse import FENCE_RE, yaml_safe_load
 
 ID_RE = re.compile(r"^([A-Z][A-Z0-9]*(?:-[A-Z0-9]+)*)-(\d+)$")
@@ -621,7 +621,26 @@ def allocate(project: Project, dry_run: bool = False) -> list[tuple[Item, str]]:
                     continue
                 lines = updated
 
-        textio.write_text(path, source.render(lines))
+        try:
+            textio.write_text(path, source.render(lines))
+        except OSError:
+            # The filesystem's refusal, not a shape this command could not
+            # write: nothing in this file was touched (the whole render is one
+            # write, and it raised), so every id this file was going to take
+            # is refused with it -- same as the `None`-from-insert case above,
+            # which refuses for the same reason and the same reason's worth:
+            # an id that is not on disk must not be allocated.
+            for item, _new_id in entries:
+                project.error(
+                    destination_refusal(
+                        rel,
+                        "no id in this file was written back, so none of them "
+                        "were allocated and their numbers stay free. Make the "
+                        "tree writable and run it again.",
+                    ),
+                    file=rel, line=item.source_line,
+                )
+                failed.add(id(item))
 
     written = [(item, new_id) for item, new_id in assignments if id(item) not in failed]
 
@@ -638,8 +657,34 @@ def allocate(project: Project, dry_run: bool = False) -> list[tuple[Item, str]]:
     for _item, new_id in written:
         parsed = split_id(new_id)
         if parsed:
-            burned[parsed[0]] = max(int(burned.get(parsed[0], 0)), parsed[1])
-    save_ledger(project, ledger)
+            burned[parsed[0]] = max(int(burned.get(parsed[0], 0)), int(parsed[1]))
+    # The ledger is what makes "never reused" true, so a refusal to record it
+    # is a refusal, not a warning -- but there is nothing left to roll back by
+    # the time it is written: the ids are already in their source files, and
+    # the burned high-water they imply is recoverable from them on the next
+    # `high_water()` pass. So the report says exactly that, and the run exits
+    # non-zero on `project.errors` -- claiming "allocated" and exiting 0 with
+    # no record of it is the one thing this command must not do. Two wordings
+    # because the two states are not the same claim: with ids on disk the
+    # ledger is the only thing missing, without them nothing was allocated at
+    # all and the ledger is merely stale.
+    try:
+        save_ledger(project, ledger)
+    except OSError:
+        project.error(
+            destination_refusal(
+                project.id_ledger,
+                (
+                    "the id(s) above are on disk, but the ledger that stops a "
+                    "deleted item's number being handed out again was not "
+                    "updated. Make .refdes/ writable and run it again."
+                    if written
+                    else "nothing was allocated, and the ledger is unchanged "
+                    "because of it. Make .refdes/ writable before allocating "
+                    "any id."
+                ),
+            )
+        )
 
     for item, new_id in written:
         item.id = new_id

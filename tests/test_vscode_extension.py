@@ -214,3 +214,33 @@ def test_no_direct_item_file_writes_in_extension_source():
         + ". Every mutation goes through POST /api/item/<ref>/edit with a "
         "freshly-read expected_revision, or it does not happen (§3.5, §6 Q5)"
     )
+
+
+def test_hover_shows_former_ids_and_the_item_view_returns_them():
+    """A renamed item's retired ids reach the hover, so someone reading a
+    schematic or a commit message that still cites the old one sees where it
+    went without leaving the editor (finding F3.2).
+
+    Two sides pinned together, the same posture as the coverage/check/
+    diagnostics facts above: `GET /api/item/<ref>` has to return the list, and
+    the hover has to read it off the view. The index row already carries
+    `former_ids` (`render.items_json`), so the fallback keeps the hover honest
+    when no `refdes serve` is running.
+    """
+    source = _read(EXTENSION_JS)
+    view_body = _item_view_body()
+
+    assert '"former_ids"' in view_body, (
+        "src/refdes/serve/api.py _item_view no longer returns 'former_ids', so a "
+        "hover served from the live snapshot cannot name the retired ids"
+    )
+    assert re.search(r"view\.former_ids", source), (
+        "editors/vscode/extension.js no longer reads former_ids off the item view"
+    )
+    assert re.search(r"formerly known as", source), (
+        "editors/vscode/extension.js no longer says 'formerly known as' in the hover"
+    )
+    assert re.search(r"item\.former_ids", source), (
+        "editors/vscode/extension.js no longer falls back to the index row's "
+        "former_ids, so the fact disappears when no refdes serve is running"
+    )
