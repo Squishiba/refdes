@@ -35,6 +35,7 @@ from typing import Any, Callable
 import yaml
 
 from . import build as build_mod
+from . import docs_url as docs_url_mod
 from . import ids as ids_mod
 from . import keys as keys_mod
 from . import lifecycle, parse
@@ -47,6 +48,56 @@ from .parse import yaml_safe_load
 from .schema import load_project
 
 # -------------------------------------------------------------------- mapping
+
+# The top-level sections of a mapping file, in the order the docstrings and
+# `refdes revise --help` list them. Kept here as the one place that knows the
+# whole vocabulary: mapping_from_dict reads exactly these and _refuse_unknown_sections
+# rejects anything else, so the two cannot fall out of step.
+ACCEPTED_SECTIONS = ("types", "fields", "links", "prefixes", "citation_keys")
+
+
+def _refuse_unknown_sections(raw: dict[str, Any], source: str) -> None:
+    """Refuse a mapping file carrying a top-level section `revise` doesn't
+    implement, instead of reading the five it does and ignoring the rest.
+
+    Every section below is read with `.get()`, so an unrecognised one used to
+    vanish silently. `ids:` was the shape that hurt: it is the obvious thing to
+    reach for when you want to rename one item, `revise` has no such capability
+    (it renames ids only as part of a `prefixes:` rename), and a file whose only
+    section was `ids:` left an empty Mapping whose is_empty() is True -- so
+    `refdes revise rename.yaml` printed "nothing to do -- mapping doesn't apply
+    to this project" and **exited 0**, having renamed nothing (verified). A
+    mixed file was worse: the recognised half was applied and the other half
+    dropped without a word (verified). Both now stop here, before any project
+    load, so `--dry-run` refuses exactly the same way -- load_mapping() raises
+    before anything looks at the Mapping (cmd_revise, cli.py).
+
+    SchemaError, not a project error, so the exit is the 2 the exit-code table
+    at the top of docs/cli-reference.md gives a configuration error -- the same
+    one a missing or unparseable mapping file already gets, and the same
+    handler in cmd_revise.
+    """
+    unknown = sorted(str(name) for name in raw if str(name) not in ACCEPTED_SECTIONS)
+    if not unknown:
+        return
+    named = ", ".join(repr(name) for name in unknown)
+    accepted = ", ".join(f"{name}:" for name in ACCEPTED_SECTIONS[:-1])
+    message = (
+        f"{source}: unknown top-level section {named}. A mapping file may "
+        f"have {accepted} or {ACCEPTED_SECTIONS[-1]}:, and an unrecognised "
+        f"section is refused rather than ignored."
+    )
+    if "ids" in unknown:
+        # The pointer most likely to be wanted, so it is the one that is
+        # spelled out -- but only when `ids:` is actually what was written,
+        # since a typo'd `type:` wants the accepted list and nothing else.
+        message += (
+            " To rename a single item, edit its `id:` by hand instead, after a "
+            "writable `refdes check` has expanded references to composite form "
+            "so they follow the rename"
+            f" -- see {docs_url_mod.DANGLING_LINK_DOCS}."
+        )
+    raise SchemaError(message)
 
 
 @dataclass
@@ -130,6 +181,8 @@ def mapping_from_dict(raw: dict[str, Any], source: str) -> Mapping:
     """
     if not isinstance(raw, dict):
         raise SchemaError(f"{source}: must be a mapping with types:/fields:/links:/prefixes: keys")
+
+    _refuse_unknown_sections(raw, source)
 
     types = {str(k): str(v) for k, v in (raw.get("types") or {}).items()}
     fields: dict[str, dict[str, str]] = {}

@@ -190,51 +190,154 @@ revise.py:131-132.
 Same message-adding shape as commit 1, same place in the file: one check in
 `mapping_from_dict`, so it fires on **both** front doors and on
 `--dry-run` for free (verified below — `load_mapping` is reached before
-anything else looks at the Mapping).
+anything else looks at the Mapping). `revise.py` gains
+`ACCEPTED_SECTIONS` and `_refuse_unknown_sections` at the top of the module,
+next to `Mapping`; `mapping_from_dict` calls the check right after its own
+non-dict check.
 
-Accepted sections are named in the error, and `ids:` gets the one pointer the
-brief asked for: single-item renames are done by editing `id:` by hand, after a
-writable load has given the reference a key, which is Troubleshooting's
+The accepted sections are named in the error, and `ids:` gets the one pointer
+the brief asked for: single-item renames are done by editing `id:` by hand,
+after a writable load has given the reference a key, which is Troubleshooting's
 `### Hand-renaming an item is safe — get one writable load in first` section
-(added by #126). Verified both halves by running them, not inferred:
+(added by #126). Both halves verified by running them, not inferred — the
+pointer says "after a writable `refdes check`" and not just "edit `id:` by
+hand" because that is the half that matters:
 
-- a hand-edited `id:` with composite references follows the rename on the next
-  load, `0 errors`, exit 0 (.scratch/rv2, the #126 trace);
-- while still bare, it dangles — which is why the pointer says "after a
-  writable load" and not just "edit `id:` by hand".
+- a hand-edited `id:` whose references are composites follows the rename on
+  the next load, `0 errors`, exit 0 (the #126 trace, re-run here);
+- while still bare it dangles, which is the error this whole commit is about.
+
+The pointer is added **only when `ids` is among the unknown sections**, so a
+typo'd `type:` gets the accepted list and nothing else.
+
+    BEFORE (.scratch/rv1, `ids:\n  REQ-PWR-001: REQ-PWR-011`)
+
+    $ refdes revise rename.yaml
+    nothing to do -- mapping doesn't apply to this project
+    [exit=0]
+    $ grep -n "id: REQ-PWR-0" items/requirements.yaml     # unchanged
+    3:    id: REQ-PWR-001
+    9:    id: REQ-PWR-002
+    14:    id: REQ-PWR-003
+    19:    id: REQ-PWR-004
+
+    $ refdes revise rename.yaml --dry-run
+    nothing to do -- mapping doesn't apply to this project
+    [exit=0]
+
+    An arbitrary unknown section (`mystery:`) — same silent no-op.
+    A *mixed* file (`prefixes: {REQ-PWR: NEED-PWR}` + `mystery:`) — printed
+    the full prefix-rename plan, applied it, and dropped `mystery:` without a
+    word. That is the worse of the two, and is why the check is a whitelist
+    over *any* unknown key rather than a special case for `ids:`.
+
+    AFTER (.scratch/rv2, same files)
+
+    $ refdes revise rename.yaml
+    error: rename.yaml: unknown top-level section 'ids'. A mapping file may have types:, fields:, links:, prefixes: or citation_keys:, and an unrecognised section is refused rather than ignored. To rename a single item, edit its `id:` by hand instead, after a writable `refdes check` has expanded references to composite form so they follow the rename -- see https://squishiba.github.io/refdes/troubleshooting.html#links.
+    [exit=2]
+
+    $ refdes revise rename.yaml --dry-run
+    <byte-identical line>
+    [exit=2]
+
+    $ refdes revise other.yaml          # `mystery:` alone
+    error: other.yaml: unknown top-level section 'mystery'. A mapping file may have types:, fields:, links:, prefixes: or citation_keys:, and an unrecognised section is refused rather than ignored.
+    [exit=2]
+
+    $ refdes revise mixed.yaml --dry-run   # prefixes: + mystery:
+    error: mixed.yaml: unknown top-level section 'mystery'. ...
+    [exit=2]
+
+Nothing on disk moved in any of those; `REQ-PWR-001` is still `REQ-PWR-001`.
+An all-accepted-but-empty mapping still prints `nothing to do` and exits 0 —
+correct, nothing was asked for. A real `prefixes:` mapping still applies
+(.scratch/rv3: 4 files changed, `REQ-PWR-001 -> NEED-PWR-001`, and the
+subsequent check is `0 errors`, exit 0), so the guard costs the working case
+nothing.
 
 ### Exit code
 
-docs/cli-reference.md's exit-code table: exit 2 is "bad input" — the same
-class `load_mapping`'s own docstring calls a bad mapping file, and the same one
-a missing/unparseable mapping file already gets (revise.py:149-170 raising
-SchemaError into `cmd_revise`'s handler). So the refusal is a `SchemaError`,
-which is what makes it exit 2 and stay the single exit for the whole
-module. Read the table rather than guessing the number.
+docs/cli-reference.md:13 — "`0` success, `1` errors found, `2` configuration
+error (including `--no-write` refusal)". A mapping file with a section `revise`
+doesn't implement is a bad input file, which is the same class as the missing
+and unparseable mapping files that already exit 2 (revise.py's `load_mapping`
+docstring calls an unreadable one "the configuration error it is", and
+`cmd_revise`'s `except SchemaError` is the single exit). So the refusal raises
+`SchemaError` rather than a project error, which is also what keeps it the one
+exit for the whole module. Read the table rather than guessing the number.
 
 ### --dry-run
 
-`revise rename.yaml --dry-run` on the same file gets the same refusal, same
-message, exit 2 — recorded below.
+`revise rename.yaml --dry-run` on the same file: byte-identical error line,
+exit 2, nothing written (above). It fires for free rather than by a second
+check, because `load_mapping` runs before `apply()` is ever reached — so there
+is no path where a dry run could report a plan for a mapping that a real run
+would refuse.
 
 ### Files
 
-- src/refdes/revise.py — the check in `mapping_from_dict`, plus
-  `refdes revise --help`'s missing `citation_keys:` in cli.py (verified by
-  running `--help` before and after).
-- tests/test_revise.py — refusal for an unknown section, the `ids:` pointer,
-  and exit code 2 via `cli.main`. Confirmed failing against main's code.
-- docs/cli-reference.md — the revise section now says an unknown top-level
-  section is refused rather than ignored, and lists all five accepted
-  sections.
+- src/refdes/revise.py — `ACCEPTED_SECTIONS` + `_refuse_unknown_sections`, and
+  the one call in `mapping_from_dict`. Nothing else: the five `.get()`s, the
+  `Mapping` dataclass, `is_empty()`, `apply()` and `check_ambiguous()` are
+  untouched, and an accepted mapping of any shape behaves exactly as before.
+  Also `from . import docs_url as docs_url_mod` (revise.py had no docs URL of
+  its own before; docs_url imports nothing, so no cycle).
+- src/refdes/cli.py — `revise --help`'s `mapping` argument. It already said
+  "types:/fields:/links:/prefixes:" while `citation_keys:` was in fact accepted
+  and is used by the bundled standard's own `migration.yaml`
+  (src/refdes/standards/hardware/v3/migration.yaml:67) — verified by running
+  `--help` before and after. The refusal's error text now lists all five, so
+  leaving the help at four would have been visibly inconsistent with it.
+- tests/test_revise.py — seven new tests under a new heading after the
+  existing bad-mapping-file ones: unknown section refused (names the section
+  and all five accepted ones, one line, no traceback), every unknown section
+  named not just the first, the `ids:` pointer plus the published-URL and
+  no-repo-path assertions, exit 2 + nothing written through `cli.main`,
+  `--dry-run` refused identically, a mixed mapping refused rather than half
+  applied, and the vocabulary pinned in both directions (`ACCEPTED_SECTIONS`
+  equals the five documented; a file with all five present and empty loads).
+- docs/cli-reference.md — the revise section's example gains `citation_keys:`
+  and a line saying any other top-level section is refused; a new subsection
+  after "A mapping that doesn't apply to this project at all is not an error"
+  gives the real `error:` line, the exit 2, and both before-behaviours.
+- docs/troubleshooting.md — the `## Links` bullet said revise "maps
+  `types:`/`fields:`/`links:`/`prefixes:`" while the refusal lists five; brought
+  into line and told that an `ids:` mapping is refused by name.
 - changelog.d/revise-unknown-section.fixed.md
+
+### Tests fail against main's code (confirmed, not assumed)
+
+`src/refdes/revise.py` and `src/refdes/cli.py` reverted to HEAD, the seven new
+tests run, both restored:
+
+    === new tests against main's revise.py/cli.py ===
+    FAILED test_load_mapping_refuses_an_unknown_top_level_section
+    FAILED test_load_mapping_names_every_unknown_section_not_just_the_first
+    FAILED test_an_ids_mapping_is_pointed_at_the_hand_rename_instead
+    FAILED test_cli_revise_unknown_section_exits_2_and_writes_nothing
+    FAILED test_cli_revise_dry_run_gets_the_same_refusal
+    FAILED test_cli_revise_refuses_a_mixed_mapping_rather_than_half_applying_it
+    FAILED test_revise_still_accepts_every_section_it_documents
+    E   AttributeError: module 'refdes.revise' has no attribute 'ACCEPTED_SECTIONS'
+    6 failed, 46 deselected in 0.19s
+    === restored ===
+    52 passed in 1.39s
+
+(the seventh, `test_cli_revise_unknown_section_exits_2_and_writes_nothing`, was
+run in an earlier pass of the same reverted state and failed there too: main
+prints "nothing to do" on stdout and returns 0.)
 
 ### Scratch (all gitignored, left in place)
 
+All gitignored, left in place:
+
 `r.sh` (the runner), `mkbase.py` (the 10-item template), `base`, `ca1`-`ca4`
-(commit 1's shapes), `rv1`-`rv2` (commit 2's), `build.py.new` (the temporarily
-reverted-away source, kept so the failure could be re-checked without
-re-deriving it).
+(commit 1's shapes), `rv1`-`rv3` (commit 2's), `build.py.new` /
+`revise.py.new` / `cli.py.new` (the sources temporarily reverted away, kept so
+the failures could be re-checked without re-deriving them), and
+`tck_head.py` / `rev_head.py` / `tr_head.py` / `cli_head.py` (`git show
+HEAD:<file>` copies, used to tell a pre-existing ruff finding from a new one).
 
 ==========================================================================
 ## Wrap-up
@@ -249,9 +352,19 @@ Status: FINISHED. Two commits, one per fix, pushed to
 
 **Verification**
 
-- Full suite run before each commit (results recorded in the git log message
-  of that commit).
+- Full suite before commit 1: `python -m pytest -q -p no:randomly` →
+  **2891 passed, 2 skipped** (219 s). After commit 2: **2898 passed, 2 skipped**
+  (211 s) — the seven new revise tests, nothing else moved.
+- `ruff check --select I,F,E` scoped per AGENTS.md, and compared against the
+  same file at HEAD (`git show HEAD:<file>` into `.scratch/`) rather than
+  assumed:
+  - commit 1 — `build.py`: 6 findings at HEAD, the same 6 after
+    (its import block's `I001` plus five long lines); `test_checks_keys.py`:
+    1 at HEAD, 1 after. Zero new.
+  - commit 2 — `revise.py`: 7 at HEAD, 7 after; `cli.py`: 4 at HEAD, 4 after;
+    `test_revise.py`: 8 at HEAD, 8 after. Zero new. (Only the line numbers
+    shift.)
+  Per AGENTS.md none of the pre-existing findings were silenced.
 - Every new message reproduced through the real CLI before and after, quoted
-  above verbatim, exit codes included.
-- `ruff check` scoped to the touched files per AGENTS.md; findings recorded
-  below rather than assumed.
+  above verbatim, exit codes included; every "accepted mapping still works"
+  claim checked by running one rather than by reading the code.

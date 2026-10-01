@@ -2042,7 +2042,10 @@ def main(argv: list[str] | None = None) -> int:
     )
     p_revise.add_argument(
         "mapping",
-        help="path to a YAML file with types:/fields:/links:/prefixes: renames",
+        help=(
+            "path to a YAML file with types:/fields:/links:/prefixes:/"
+            "citation_keys: renames -- any other top-level section is refused"
+        ),
     )
     p_revise.add_argument(
         "--dry-run", action="store_true", help="show what would change without writing"

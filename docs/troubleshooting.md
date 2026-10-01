@@ -224,9 +224,10 @@ key was ever involved:
   `former_ids:` resolves *prose* references; a structured link still needs a
   live display id or key. Verified: recording `former_ids: [REQ-PWR-001]` onto
   the renamed item leaves this error exactly as it was.
-- `refdes revise` — maps `types:`/`fields:`/`links:`/`prefixes:`, not individual
-  ids, so it cannot rename a single item. It is the tool for a prefix-wide
-  rename, and it expands bare references *first* so they follow.
+- `refdes revise` — maps `types:`/`fields:`/`links:`/`prefixes:`/`citation_keys:`,
+  not individual ids, so it cannot rename a single item. It is the tool for a
+  prefix-wide rename, and it expands bare references *first* so they follow. An
+  `ids:` mapping handed to it is refused by name, with that pointed at here.
 
 **Remedy:** write the item's new display id into the reference. The next
 writable load expands it to `NEW-ID@key` and the build is clean.

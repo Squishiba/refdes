@@ -497,6 +497,130 @@ def test_cli_revise_a_bad_mapping_file_writes_nothing(tmp_path, capsys):
     assert path.read_bytes() == before
 
 
+# ------------------------------------- an unknown top-level section is a config error
+
+
+def _revise_project_with_mapping(tmp_path, mapping_text):
+    """A tiny project plus a mapping file beside it, for the refusals below."""
+    write_project_config(tmp_path, REVISE_SCHEMA)
+    items = tmp_path / "items"
+    items.mkdir()
+    path = items / "i.yaml"
+    path.write_text(
+        "defaults: { type: bound, prefix: BND }\n"
+        "items:\n  - id: BND-001\n    text: t\n    limit: \"<= 1 W\"\n",
+        encoding="utf-8",
+    )
+    mapping = tmp_path / "rename.yaml"
+    mapping.write_text(mapping_text, encoding="utf-8")
+    return path, str(mapping)
+
+
+def test_load_mapping_refuses_an_unknown_top_level_section(tmp_path):
+    """Every section mapping_from_dict reads is `.get()`-ed, so anything else
+    used to vanish -- and if it was the only section, `revise` printed
+    "nothing to do -- mapping doesn't apply to this project" and exited 0 having
+    renamed nothing. Refused instead, naming the section and the accepted ones.
+    """
+    _, mapping = _revise_project_with_mapping(tmp_path, "mystery:\n  foo: bar\n")
+    with pytest.raises(SchemaError) as exc:
+        revise.load_mapping(mapping)
+    message = str(exc.value)
+    assert message.startswith(f"{mapping}: unknown top-level section 'mystery'")
+    for section in ("types:", "fields:", "links:", "prefixes:", "citation_keys:"):
+        assert section in message
+    # One line, no traceback -- the module's one-line-error convention.
+    assert "\n" not in message
+
+
+def test_load_mapping_names_every_unknown_section_not_just_the_first(tmp_path):
+    _, mapping = _revise_project_with_mapping(tmp_path, "ids: {}\nrenames: {}\n")
+    with pytest.raises(SchemaError) as exc:
+        revise.load_mapping(mapping)
+    message = str(exc.value)
+    assert "'ids', 'renames'" in message
+
+
+def test_an_ids_mapping_is_pointed_at_the_hand_rename_instead(tmp_path):
+    """`ids:` is the section someone reaches for when they want to rename one
+    item, and `revise` has no such capability -- it renames ids only as part
+    of a `prefixes:` rename. So the refusal has to say what to do instead:
+    edit `id:` by hand, after a writable load has given the references keys to
+    follow the rename with.
+    """
+    _, mapping = _revise_project_with_mapping(tmp_path, "ids:\n  BND-001: BND-404\n")
+    with pytest.raises(SchemaError, match="edit its `id:` by hand") as exc:
+        revise.load_mapping(mapping)
+    # The published page, not a repo-relative path that resolves only inside a
+    # checkout of this repo (docs_url's own reason for existing).
+    assert "https://squishiba.github.io/refdes/troubleshooting.html#links" in str(exc.value)
+    assert "docs/troubleshooting.md" not in str(exc.value)
+
+
+def test_cli_revise_unknown_section_exits_2_and_writes_nothing(tmp_path, capsys):
+    """Exit 2, the configuration-error class docs/cli-reference.md's exit-code
+    table gives a bad input file -- the same one a missing mapping file gets,
+    through the same handler in cmd_revise. And nothing on disk moves: the
+    refusal is before any project load, so no key is minted and no reference
+    expanded."""
+    path, mapping = _revise_project_with_mapping(tmp_path, "ids:\n  BND-001: BND-404\n")
+    before = path.read_bytes()
+    config = str(tmp_path / "refdes-project.yaml")
+
+    assert cli_mod.main(["-c", config, "revise", mapping]) == 2
+    err = capsys.readouterr().err
+    assert "unknown top-level section 'ids'" in err
+    assert "nothing to do" not in capsys.readouterr().out
+    assert "Traceback" not in err
+    assert len([ln for ln in err.splitlines() if ln.strip()]) == 1
+    assert path.read_bytes() == before
+
+
+def test_cli_revise_dry_run_gets_the_same_refusal(tmp_path, capsys):
+    """`--dry-run` reports the plan instead of applying it, which is exactly
+    what makes a silent no-op there the more expensive mistake: the user reads
+    "nothing to do" as the plan. load_mapping() raises before anything looks at
+    the Mapping, so both paths refuse identically."""
+    path, mapping = _revise_project_with_mapping(tmp_path, "ids:\n  BND-001: BND-404\n")
+    before = path.read_bytes()
+    config = str(tmp_path / "refdes-project.yaml")
+
+    assert cli_mod.main(["-c", config, "revise", mapping, "--dry-run"]) == 2
+    captured = capsys.readouterr()
+    assert "unknown top-level section 'ids'" in captured.err
+    assert "nothing to do" not in captured.out
+    assert path.read_bytes() == before
+
+
+def test_cli_revise_refuses_a_mixed_mapping_rather_than_half_applying_it(tmp_path, capsys):
+    """The worse half of the old behaviour: a file with one recognised section
+    and one unrecognised one did the recognised half and dropped the rest
+    without a word. Both have to be refused now."""
+    path, mapping = _revise_project_with_mapping(
+        tmp_path, "prefixes:\n  BND: LIM\nmystery:\n  foo: bar\n"
+    )
+    before = path.read_bytes()
+    config = str(tmp_path / "refdes-project.yaml")
+
+    assert cli_mod.main(["-c", config, "revise", mapping, "--dry-run"]) == 2
+    capsys.readouterr()
+    assert path.read_bytes() == before
+
+
+def test_revise_still_accepts_every_section_it_documents(tmp_path, capsys):
+    """The guard is a whitelist, so pin the whole vocabulary in both
+    directions: the five sections the docs and `revise --help` name load, and
+    nothing else does."""
+    assert revise.ACCEPTED_SECTIONS == (
+        "types", "fields", "links", "prefixes", "citation_keys",
+    )
+    _, mapping = _revise_project_with_mapping(
+        tmp_path,
+        "types: {}\nfields: {}\nlinks: {}\nprefixes: {}\ncitation_keys: {}\n",
+    )
+    assert revise.load_mapping(mapping).is_empty()  # present but empty, not refused
+
+
 def _label_schema(tmp_path) -> None:
     write_project_config(
         tmp_path,
