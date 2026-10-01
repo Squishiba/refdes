@@ -309,18 +309,14 @@ def _cited_pdf(
     return target, spec.path, spec, record
 
 
-def _page_number(text: str) -> int | None:
-    """`text` as a page number, or None.
-
-    A page this can open is a positive integer, and nothing else: `page: "xiv"`
-    is a real citation the rendered link can carry and a page index cannot, so
-    it is reported as such rather than being read as zero.
-    """
-    stripped = (text or "").strip()
-    if not stripped.isascii() or not stripped.isdigit():
-        return None
-    value = int(stripped)
-    return value if value >= 1 else None
+# The picker's page grammar, which is the loader's: the same
+# `citations.page_number` `build` accepts a `page:` against. Aliased rather than
+# wrapped so it cannot drift back into a second spelling -- the picker must not
+# open a page the build would have refused to publish, and the build must not
+# refuse a page the picker happily opened. What the name used to say is now the
+# shared function's: a page this can open is a positive integer, and a
+# document's printed page labels (`"xiv"`) are not one.
+_page_number = citations_mod.page_number
 
 
 def _cited_page(spec, record: dict) -> tuple[int | None, str, str]:
@@ -338,6 +334,10 @@ def _cited_page(spec, record: dict) -> tuple[int | None, str, str]:
     Both the page and the section are the author's to have written, so a value
     that names no openable page is reported in the citation's own terms and the
     picker opens page 1 -- never page 0, and never a guess at what "xiv" meant.
+    `page:` values that are not page numbers are refused at load
+    (`build.validate_items`), so this is the second line of defence: it holds
+    for a project serve has not validated, and for one an author edited by
+    hand.
     """
     detail = ""
     page = _page_number(spec.page)

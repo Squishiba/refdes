@@ -11,6 +11,7 @@ import os
 import posixpath
 import urllib.parse
 
+from .. import citations as citations_mod
 from ..model import (
     CHECK_VIOLATION,
     NON_SCALAR_FIELD_TYPES,
@@ -380,9 +381,12 @@ def _source_page(app, ref: str, query: dict[str, list[str]]) -> tuple[int, dict]
     if not path:
         return 400, {"error": "path is required: ?path=<a citation path this item declares>"}
     page = (query.get("page") or [""])[0].strip()
-    if page and not (page.isascii() and page.isdigit() and int(page) >= 1):
+    if page and citations_mod.page_number(page) is None:
         # A page is a positive integer or it is not a page this can open, and
-        # saying so here is cheaper than opening a document to find out.
+        # saying so here is cheaper than opening a document to find out. The
+        # test is `citations.page_number` -- the same one that decides whether a
+        # `page:` is a declaration error at load, so `?page=0` means the same
+        # thing here as `page: 0` does there.
         return 400, {"error": "page must be a positive integer: ?page=<a page number>"}
     try:
         return 200, sources_mod.page_payload(project, item, path, page)

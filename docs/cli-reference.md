@@ -363,6 +363,14 @@ outline is read once, at fetch time, and the page it points at is recorded in
 the lockfile. This is the only part of refdes that reads a PDF, and it needs
 the optional extra — `pip install refdes[pdf]`.
 
+An authored `page:` is checked here too, because this is where the bytes are:
+the document's page count is recorded in the lockfile (`page_count:`, or
+`page_count_error:` when the pages could not be counted) and every cited `page:`
+for the path is compared against it, so a re-pin that shortened the document
+cannot carry a page that stopped existing into the next build. A page that is
+not in the document is a `WARNING` line here and a warning at every later
+`check`/`build` — the pin still lands, and the pin is not what is wrong.
+
 A local file cited by a calc [`source("path", "key")`](math.md#reading-a-value-from-a-source-file)
 line also has each used key extracted and pinned under its lockfile record
 (`values:`), atomically with the file hash: if any key cannot be read, the old
@@ -1532,7 +1540,7 @@ python -m http.server -d _site 8000
 | `.refdes/log-seal.yaml` | **yes** | Append-only seals for log entries with no board (the only file used at all when the project has no `boards:` registry) |
 | `.refdes/log-seal-<board>.yaml` | **yes** | Append-only seals for one registered board's own log entries |
 | `.refdes/boards.yaml` | **yes** | Board and workspace drift manifest; the `workspaces:` section only appears for a project that has declared `workspaces:` |
-| `.refdes/citations.yaml` | **yes** | Citation lockfile (sha256, fetch time, kept-copy flag); written only by `refdes fetch` |
+| `.refdes/citations.yaml` | **yes** | Citation lockfile (sha256, fetch time, kept-copy flag, resolved sections, the pinned document's page count); written only by `refdes fetch` |
 | `.refdes/baselines/<name>.yaml` | **yes** | One file per `refdes revision`/`refdes release` stamp. Not rewritten by any ordinary command; `refdes revise`, `refdes calc-rewrite` and `refdes standard upgrade` do edit it, to carry an item's content hash across a rename or a spelling-only rewrite |
 | `.refdes/keys-adopted.yaml` | **yes** | Adoption marker written once by `refdes keys adopt`; its presence is what makes future stamps, seals and membership manifests use key-keyed storage |
 | `.refdes/schema.json` | **no, gitignored** | The project's merged JSON Schema, for editor completion; rewritten by every command that loads the project. `refdes init` puts it in the project's `.gitignore` |

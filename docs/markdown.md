@@ -395,6 +395,50 @@ if both are present and the resolved page differs, `build` warns naming both and
 **`page:` wins** — an explicit page is a decision, a resolved title is an
 inference.
 
+**A hand-read page is checked, too.** `page:` is yours to write and
+`section:`'s page is yours to accept, but neither is exempt from being a fact
+about a document:
+
+- **The shape is a declaration error.** A `page:` that is not a positive
+  integer — `0`, `-1`, `eight`, `xiv`, `1.5`, `2-4` — is refused at load with
+  the same severity as a malformed `section:`, and with no file consulted,
+  because no document is needed to know that `#page=eight` is not a page. It is
+  the same grammar the editor's picker opens pages with, deliberately: one
+  grammar, so the browser can never open a page the build would have refused to
+  publish. Quote it as the examples here do (`page: "14"`); an unquoted
+  `page: 4` is an int in YAML and is read as the number it says, but the schema
+  types it as a string.
+- **The range is checked against the pinned document.** `refdes fetch` counts
+  the pages of the bytes it is pinning and records that count in the lockfile
+  next to the sha256, and it checks every cited `page:` for that path against it
+  while it still has the document open — including the pages belonging to items
+  outside the run's `--item`/`--path` scope, for the same reason a re-pin
+  re-resolves every section. So `page: "6"` pinned against an eight-page
+  datasheet and re-pinned against the four-page revision that replaced it is
+  reported at the re-pin, naming the page and the count:
+  `docs/ds-main.pdf: page 6 is not in this document -- it has 4 page(s)`. Every
+  later `check` and `build` reports the same thing from the lockfile, so the
+  dead `#page=6` cannot be published quietly. Builds still never open a PDF —
+  they read the count the way they read a resolved section, and the check costs
+  nothing at all.
+- **An unchecked page is not a checked one.** Counting a document's pages needs
+  the optional extra, so a citation pinned without `refdes[pdf]` installed gets
+  no count, and that is recorded as `page_count_error:` rather than left
+  ambiguous. `check` then reports the page numbers as *not checked*, with the
+  reason and the command that establishes them. That is the same shape as a
+  `section:` fetched without the extra: a soft row that
+  `refdes build --require-citations` escalates, never a hard failure of its own.
+- **A lockfile that claims no count is left alone.** A hand-written record, or
+  one written before any of this, has no `page_count:` and no
+  `page_count_error:` — it says nothing about its pages, so nothing is checked
+  against it. Every project has to run `refdes fetch` before `check` can pass
+  it, and that run records the count.
+
+`page:` means the page of the *PDF*, counted from 1 — the same number the
+rendered `#page=` fragment opens. A datasheet's own printed page number is a
+different number, and citing it is what an off-by-one here looks like; if it
+moves between revisions, `section:` is the citation that survives that.
+
 `id` is optional, exactly like a figure's `id=` — give a citation one and
 `[[cite:tps62913-ds]]` anywhere in prose (or `[[cite:tps62913-ds|the
 datasheet]]` for custom text) links straight to **that citation's row** on
@@ -445,6 +489,9 @@ warnings at `check` and never fail it:
 | A cited local file doesn't exist | **error, always** |
 | A cited local file changed since it was pinned | warning naming every citer (error with `refdes build --require-citations`) |
 | A `section:` with no resolved page in the lockfile — never fetched, or fetched without `refdes[pdf]` installed | warning naming every citer (error with `refdes build --require-citations`) |
+| A `page:` the pinned document does not have — `page: "99"` on an eight-page datasheet, or a page that stopped existing when a revision got shorter | warning naming the citer (error with `refdes build --require-citations`) |
+| A `page:` that was never checked against the document — pinned without `refdes[pdf]` installed, so no page count was recorded | warning naming the citer (error with `refdes build --require-citations`) |
+| A `page:` that is not a positive integer — `0`, `-1`, `eight`, `xiv`, `1.5` | **error, always** — a declaration error, and no file is needed to see it |
 
 The hash-mismatch case is never soft-failed — a corrupted or tampered local
 cache is not something `--require-citations` or its absence should decide.
