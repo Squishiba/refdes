@@ -167,5 +167,5 @@ cosmetic gain. No doc quotes the line verbatim (grepped), so nothing else moves.
   (a fresh `init` for eyeballing the generated `.gitignore` and the announcement),
   `.scratch/ruffbase/` (HEAD's two files, for the ruff baseline).
 
-Status: implementation, docs, tests, changelog fragment and verification all
-done. Commit, push and PR pending.
+Status: FINISHED. Committed `cabc803` on `serve-lock-gitignore`, pushed, and
+opened https://github.com/Squishiba/refdes/pull/136 against main.
