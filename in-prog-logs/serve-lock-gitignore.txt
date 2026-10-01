@@ -1,0 +1,171 @@
+Task: `refdes init` gitignores `.refdes/serve-write.lock`; docs for the lock file.
+Status: in progress.
+Branch serve-lock-gitignore off current main (623e112 = #134 the serve write lock,
+2d39fc6 = #133 the init .gitignore entries). Clean `git status` at start. No
+`git stash` used anywhere in this task.
+
+## Reading done
+- AGENTS.md.
+- `git show --stat 623e112` (#134) and `2d39fc6` (#133).
+- `src/refdes/serve/edit.py` `_disk_write_lock` (edit.py:259-287) and its one
+  caller, `_apply_locked` at edit.py:457-469.
+- `src/refdes/scaffold.py`: `_GitignoreEntry` (scaffold.py:74-81), `_covers`
+  (84-100), the three existing entries (103-138), `_REFDES_GITIGNORE` (144),
+  `_gitignore_addresses` (147), `_ensure_gitignore_entries` (172),
+  `added_gitignore_patterns` (203), `init` (354-358).
+- `src/refdes/cli.py` `cmd_init` (1001-1044), specifically the
+  `wrote .gitignore (...)` announcement at cli.py:1030-1031.
+- docs/cli-reference.md: `refdes init` section 562-570, `refdes serve` section
+  1380-1493, "Files the tool writes" table 1529-1552.
+- docs/getting-started.md 74-82, docs/markdown.md 429-430,
+  docs/standard-library.md 299-300/331.
+- `tests/test_scaffold.py` gitignore tests (145-474), added/extended by #133.
+- `changelog.d/README.md` (slug.category.md convention) and the #133/#134
+  fragments for the house style.
+
+## Verified by running, not by reading: when the lock file appears
+Scratch project `.scratch/lockprobe` (`refdes init` + `refdes new requirement`
++ `refdes id`), served with
+`python -m refdes.cli serve --no-open --port 8791 --token-file .../launch.txt`,
+stopped with `kill $!`.
+
+1. After `refdes init` + `refdes check`: `.refdes/` holds `schema.json` only.
+2. `serve` started: `.refdes/` still `schema.json` only. **No lock at startup.**
+3. `GET /api/revision` and `GET /api/item/REQ-001`: still no lock.
+4. One `POST /api/item/REQ-001/edit` (`set_field status=active`, HTTP 200
+   `applied`): `.refdes/serve-write.lock` appears, 0 bytes.
+5. A stale-revision `Conflict` and a gate-blocked `Invalid` (bad enum) both
+   returned before the file was touched -- neither created it. The lock is
+   taken at edit.py:458, after the gate, so only a save that is actually
+   about to be written reaches it.
+6. Deleting the file and doing a *create* (`POST /api/items/create`, HTTP 200
+   `created`): it did **not** come back. `create_item` takes only the
+   in-process `write_lock_for` (edit.py:946-954); `_disk_write_lock` is called
+   from `_apply_locked` alone. So the lock file belongs to the *edit save*
+   path. Deleting it and then saving again did bring it back.
+   (Worth flagging as an F2-adjacent follow-up -- a create is still not
+   serialized across processes. Not this task's fix.)
+
+So the doc claim to write is "the first save", scoped to an edit -- not "the
+first launch" and not "any write".
+
+## The repo's own .gitignore
+`git show 623e112 -- .gitignore` added `**/.refdes/serve-write.lock` (the
+`**/` so a second refdes project in this repo, docs-site/, is covered too). No
+change needed there.
+
+## Tests to extend
+- `test_init_ignores_the_files_not_the_surrounding_directories` (exact set)
+- `test_init_refdes_outputs_are_ignored_by_git` (git check-ignore)
+- `test_init_gitignore_holds_when_the_project_is_one_directory_of_a_repo`
+- `test_init_leaves_a_gitignore_that_addresses_everything_untouched`
+- `test_init_appends_nothing_on_a_second_init` (idempotence)
+- `test_init_writes_no_vscode_entry_when_it_wrote_no_vscode_settings`
+- the `covering`/`pattern` parametrize list
+- `test_cli_announces_the_vscode_settings_file_it_wrote` (announcement line)
+
+## Tests: baseline failure record (per the task, confirmed before the fix)
+Wrote the test changes first, with `scaffold.py` untouched, and ran
+`python -m pytest tests/test_scaffold.py -q`: **8 failed, 65 passed**.
+
+- test_init_refdes_outputs_are_ignored_by_git (lock not ignored by git)
+- test_init_gitignore_holds_when_the_project_is_one_directory_of_a_repo
+- test_init_ignores_the_files_not_the_surrounding_directories
+- test_init_keeps_an_existing_gitignore_and_adds_the_entry_once
+- test_init_appends_nothing_on_a_second_init (idempotence)
+- test_init_explains_the_serve_write_lock_it_ignores (new test)
+- test_init_writes_no_vscode_entry_when_it_wrote_no_vscode_settings
+- test_cli_announces_the_vscode_settings_file_it_wrote
+
+No revert/restore dance was needed: the tests were simply written before the
+source change, so "main's code" is what the run above exercised.
+
+### One test was passing vacuously, and that was a real finding
+`test_init_gitignore_holds_when_the_project_is_one_directory_of_a_repo` passed
+*before* the fix, with the lock path in its list. `git check-ignore -v a b c`
+exits 0 if **any** of the paths is ignored -- so the two already-covered paths
+were vouching for the third. It now probes one path per call, and it fails
+without the fix like the rest. The batch form is noted in the test's docstring
+so nobody re-introduces it. (Worth remembering for any other multi-path
+`check-ignore` in the suite; I only fixed the one I was touching.)
+
+The five new `covering`/`pattern` parametrize cases pass before the fix too,
+necessarily: the coverage check has nothing to say about a file that is not
+being written yet. They are regression guards for the entry, not baseline
+failures.
+
+## Implementation
+- `scaffold.py`: new `_SERVE_WRITE_LOCK_GITIGNORE` after `_SCHEMA_JSON_GITIGNORE`,
+  appended to `_REFDES_GITIGNORE` (so it is written on every `init`, like the
+  other two `.refdes/` entries -- `serve` writes it whatever happened to
+  `.vscode/`). The block: "The write lock `refdes serve` takes so two instances
+  of it cannot save over each other. Empty and per-machine: deleting it costs
+  nothing while no `serve` is running -- the next save makes it again."
+  Verified output in `.scratch/initprobe/.gitignore` (widest line 72 chars, the
+  same as the existing blocks).
+- Widened the header comment's framing: it said "one entry per file it writes
+  or leaves behind", which was true for the first three and is not for this one
+  -- nothing `init` does writes the lock file. It now says the entries are for
+  files other commands (`build`, `check`, `fetch`, `serve`) leave behind too.
+- Also updated the "The two `.refdes/` entries..." comment to "The `.refdes/`
+  entries" and named `serve` among the writers.
+
+## The init announcement line -- measured, left alone
+`wrote .gitignore (.vscode/settings.json, .refdes/copies/,
+.refdes/schema.json, .refdes/serve-write.lock -- not yours to commit)` is 154
+characters; it was 128 with three patterns. It reads right -- it is a factual
+list of what was just added, every item unambiguous, and the "not yours to
+commit" clause still governs all of them (the lock file genuinely is not
+yours to commit). It already exceeded any plausible terminal width at three
+patterns, so the shape was never width-driven. I did not add wrapping: that
+would change the output contract and the exact-line assertions for a
+cosmetic gain. No doc quotes the line verbatim (grepped), so nothing else moves.
+
+## Docs
+- `docs/cli-reference.md`
+  - `refdes init` section: the `.gitignore` covers list now names four.
+  - `refdes serve` section: new bullet after "Loading writes nothing" -- the
+    first save leaves `.refdes/serve-write.lock` behind, it is how a save is
+    serialized against another `serve`, it is empty and per-machine, and it
+    appears on the first *save*, not at startup and not for reads. The
+    "Loading writes nothing" bullet itself is left exactly as it was: it is a
+    claim about loading, and the probe confirmed loading writes nothing.
+  - "Files the tool writes": new row between `.refdes/copies/` and
+    `.refdes/history/`, "**no, gitignored**".
+  - The existing-project sentence: "the two gitignored paths" / "add the two
+    lines by hand" -> three, with the lock named.
+- `docs/getting-started.md`: "three files" -> "four", the lock named with a
+  one-clause reason and a link to the `serve` section, "those two lines" ->
+  "those three".
+- Left alone on purpose:
+  - `docs/markdown.md:429` and `docs/standard-library.md:299` say "add *it* by
+    hand" about `.refdes/copies/` and `.refdes/schema.json` specifically. The
+    lock file is a third thing with a third reason; splicing it in would break
+    each sentence's focus. The complete list lives in cli-reference.md's table
+    and in getting-started.md, both updated.
+  - `docs/design/browser-editor.md` -- a design record, not a behavior claim.
+    Its `.gitignore:19-34` citation is about the *transaction journal*, which is
+    still unimplemented, and the lock is the mechanism that shipped instead.
+    Not this task's edit.
+  - The repo's own `.gitignore` already had `**/.refdes/serve-write.lock` from
+    #134.
+
+## Verification
+- `python -m pytest tests/test_scaffold.py -q`: 73 passed.
+- Full suite `PYTHONPATH=src python -m pytest -q`: **2936 passed, 2 skipped in
+  219.87s**. (2938 collected; 6 of them are the ones this change adds.)
+- ruff, scoped per AGENTS.md to the touched files:
+  - `ruff check src/refdes/scaffold.py tests/test_scaffold.py --select I,F,E`
+    -> All checks passed. `--select E501` -> All checks passed.
+  - Full default ruleset on those two files: 8 findings, the *same 8 rule/line
+    kinds* as `HEAD`'s version of the same two files (SIM115 x3, PLW1510 x5,
+    all pre-existing patterns in this test file). Net zero introduced; the one
+    PLW1510 I added is a `subprocess.run` in the file's own established style.
+  - `git diff --check` clean.
+- Scratch left in place per AGENTS.md: `.scratch/lockprobe/` (the served
+  project, its `serve.log`, the items created by the probe), `.scratch/initprobe/`
+  (a fresh `init` for eyeballing the generated `.gitignore` and the announcement),
+  `.scratch/ruffbase/` (HEAD's two files, for the ruff baseline).
+
+Status: implementation, docs, tests, changelog fragment and verification all
+done. Commit, push and PR pending.
