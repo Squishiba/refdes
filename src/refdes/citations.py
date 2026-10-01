@@ -397,6 +397,48 @@ def outline_titles(data: bytes) -> list[tuple[str, int]]:
     return out
 
 
+def _outline_hints(want: str, titles: list[str], limit: int = 5) -> list[str]:
+    """The outline titles worth naming when `section` matched none of them.
+
+    `want` and `titles` are already normalised (`_norm`); this only decides
+    which ones to show and in what order. Ranking, strongest first, so the
+    hint is explainable rather than a similarity score the author cannot
+    reproduce:
+
+    1. the same title differing only in case;
+    2. one is a prefix of the other -- a heading retyped part-way (`Therma`
+       for `Thermal Information`), or one the author wrote without the
+       numbering the outline carries (`8 Application and Implementation`);
+    3. one contains the other -- `Regulatory Information` against an outline
+       that calls it `Regulatory`;
+    4. difflib at its default 0.6 cutoff, which is what a plain typo is.
+
+    2 and 3 are the near-misses the 0.6 cutoff is silent about, because a
+    prefix of a long string scores below it (`Electrical` against
+    `Electrical Characteristics` is 0.556). Within a tier the closest ratio
+    comes first and equal ratios keep outline order, so the same outline
+    always prints the same hint.
+    """
+    folded_want = want.casefold()
+    ranked: list[tuple[int, float, int, str]] = []
+    for index, title in enumerate(titles):
+        folded = title.casefold()
+        ratio = difflib.SequenceMatcher(None, want, title).ratio()
+        if folded == folded_want:
+            tier = 0
+        elif folded and (folded.startswith(folded_want) or folded_want.startswith(folded)):
+            tier = 1
+        elif folded and (folded in folded_want or folded_want in folded):
+            tier = 2
+        elif ratio >= 0.6:
+            tier = 3
+        else:
+            continue
+        ranked.append((tier, -ratio, index, title))
+    ranked.sort()
+    return [title for _tier, _ratio, _index, title in ranked[:limit]]
+
+
 def match_outline_title(titles: list[tuple[str, int]], section: str) -> int:
     """The page one `section:` string resolves to, or SectionError.
 
@@ -415,7 +457,7 @@ def match_outline_title(titles: list[tuple[str, int]], section: str) -> int:
         )
     if matches:
         return matches[0]
-    hints = difflib.get_close_matches(want, [_norm(t) for t, _p in titles], n=5)
+    hints = _outline_hints(want, [_norm(t) for t, _p in titles])
     hint = f"; closest outline titles: {', '.join(repr(h) for h in hints)}" if hints else ""
     raise SectionError(
         section, f"no outline entry titled {section!r}{hint}", KIND_NO_MATCH

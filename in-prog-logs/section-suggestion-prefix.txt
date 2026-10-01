@@ -1,0 +1,188 @@
+section-suggestion-prefix — P2 of in-prog-logs/pdf-picker-exercise.md
+===================================================================
+
+Task: the `section:` "closest outline titles" hint was empty for the most likely
+near-miss (a truncated title) and could rank a wrong entry first. Fix the hint
+only; matching stays exact and case-sensitive per docs/markdown.md:354-356.
+
+Branch `section-suggestion-prefix`, branched from main @ 15bfd69. Tree was clean
+at start (`git status --porcelain` empty); no stash was used at any point.
+
+--- What I verified first (per AGENTS.md: run the thing) ---
+
+* Where the hint lives: `src/refdes/citations.py:418`, inside
+  `match_outline_title`, reached only from the `KIND_NO_MATCH` branch after the
+  exact `_norm(title) == want` comparison and the ambiguity refusal both fail.
+  `_norm` (citations.py:273) is strip + collapse-internal-whitespace,
+  case-SENSITIVE on purpose (its docstring).
+* The documented promise: `docs/markdown.md:367` — "no outline entry titled
+  '…', plus the closest titles it did find". `docs/markdown.md:354-356` says
+  matching is exact and case-sensitive and "nothing is fuzzy". So the hint is
+  the only thing in scope.
+* The `refdes` on PATH is a broken editable install, as the brief said; every
+  command went through `PYTHONPATH=src python -m refdes.cli`.
+
+--- Reproducing P2 before touching anything ---
+
+`.scratch/p2_repro.py` builds a real 8-page PDF whose outline is the report's
+ds-main.pdf outline (§0 of the report: Features / Electrical Characteristics ->
+Thermal Information / Mechanical Data / Application and Implementation ->
+Layout Guidelines / Ordering Information / Regulatory) and runs a real
+`refdes fetch` per mistaken `section:`, printing the FAILED line's tail. It
+reuses `tests/test_citation_sections.py:make_pdf`'s shape and
+`conftest.write_project_config` (a `types:` block in refdes-project.yaml is a
+hard error on main — my first attempt got exit 2 for exactly that, which is
+conforming to the config-split rule in AGENTS.md).
+
+`.scratch/p2_before.txt` — the report's exact block, reproduced character for
+character: `Therma`, `Electrical`, `Ordering` get NO hint; `Mechanical` gets
+`'Mechanical Data'`; `Regulatory Information` gets `'Thermal Information'`
+FIRST.
+
+Ratios recomputed directly rather than quoted from the report
+(`SequenceMatcher(None, a, b).ratio()`):
+
+    'Therma' vs 'Thermal Information'                  0.480
+    'Electrical' vs 'Electrical Characteristics'       0.556
+    'Ordering' vs 'Ordering Information'               0.571
+    'Mechanical' vs 'Mechanical Data'                  0.800
+    'Regulatory Information' vs 'Thermal Information'  0.683
+    'Regulatory Information' vs 'Regulatory'           0.625
+
+so the cutoff is the cause of the three empty hints and the 0.683 > 0.625
+comparison is the cause of the wrong first suggestion. The report's 0.556 and
+0.571 numbers are right; I have now also measured 'Therma' at 0.480.
+
+--- The change ---
+
+`src/refdes/citations.py`: new `_outline_hints(want, titles, limit=5)`, and the
+KIND_NO_MATCH branch calls it instead of `difflib.get_close_matches(...)`.
+Ranking, in tiers, so the hint is explainable rather than a score the author
+cannot reproduce:
+
+    0  same title, differing only in case (casefold equal)
+    1  one is a prefix of the other      -- truncated title, or the outline's
+                                           `8 ` numbering the citation dropped
+    2  one contains the other            -- 'Regulatory Information' vs 'Regulatory'
+    3  difflib ratio >= 0.6              -- a plain typo, unchanged from today
+
+Within a tier: ratio descending, then outline order (so ties are stable and the
+same outline always prints the same hint). Capped at 5, as before. Tier 1/2
+guard against an empty title so a blank outline entry can't prefix-match
+everything at ratio 0.
+
+`.scratch/p2_after.txt` — after: `Therma` -> 'Thermal Information',
+`Electrical` -> 'Electrical Characteristics', `Ordering` -> 'Ordering
+Information', `Regulatory Information` -> 'Regulatory' first. Everything the
+report already got right still comes out the same.
+
+Deliberately unchanged:
+* Resolution. `match_outline_title` still compares `_norm(title) == want`
+  case-sensitively and refuses ambiguity; the hint is computed strictly after
+  both of those, and nothing in it is ever resolved for the author. The new
+  test asserts this structurally: every one of its 15 cases is inside
+  `pytest.raises`, so a fuzzy match that started *resolving* would fail the test
+  rather than pass it.
+* The hint still prints the normalised title (as `get_close_matches` did), not
+  the raw stored one — a title stored with an embedded tab/newline
+  (ds-ws.pdf's case) stays printable in a one-line diagnostic.
+* Nothing else. I checked whether this helper is shared with the other
+  diagnostics: it is not. Every other "did you mean" in the tree is its own
+  inline `difflib.get_close_matches` at its own cutoff — `parse.py:314`
+  (field names), `parse.py:822-823` (link/field names), `schema.py:119/197/386/403`
+  and `configcheck.py:165` (setting/type names), `sources.py:280` (source keys),
+  `cli.py:282/291/324/1172` (board/type names), `blocks.py:85`, `theme.py:358`,
+  `scaffold.py:357/550`, `standards.py:430/613`, `build.py:232`. Introducing a
+  shared helper would have changed all of them at once with no evidence any of
+  them wants it; the change is scoped to the section hint, which is what the
+  report's finding is about. citations.py:418 was the only difflib call in
+  citations.py, so the import stays used.
+
+--- Tests ---
+
+`tests/test_citation_sections.py`, added after the existing
+`test_no_matching_title_names_it_and_offers_closest_titles` (which is the
+CLI-level test of the same message and still passes unchanged):
+
+* `test_the_closest_title_hint_names_the_entry_the_author_meant` — a
+  parametrised table of (section, expected first suggestion) over the report's
+  8-entry outline: the four truncation classes ('Therma', 'Electrical',
+  'Ordering', 'Mechanical'), the two one-char truncations that already worked
+  (kept as regression cover), the numbering prefix on the cited side
+  ('4. Application and Implementation') and on the outline side ('8
+  Application and Implementation', the shape in
+  in-prog-logs/remote-fetch-exercise.md:509), case, case+whitespace,
+  whitespace-only-after-collapse, two plain typos, and the report's
+  'Regulatory Information'. 15 cases.
+* `test_the_hint_still_names_at_most_five_titles` — 12 similar titles, one
+  probe, at most 5 named, so the bound survives.
+
+The table calls `match_outline_title` on the titles directly rather than
+building a PDF per case: the hint is a pure function of the outline, and eight
+file writes would test the same arithmetic more slowly. The existing
+`_project`/`_fetch` test already covers that the hint reaches the real CLI
+message.
+
+CONFIRMED FAILING ON MAIN FIRST. Saved my file to `.scratch/citations.p2.py`,
+put HEAD's version back with `git show HEAD:src/refdes/citations.py >
+src/refdes/citations.py`, ran the file, restored with `cp` (no stash):
+
+    5 failed, 36 passed
+    FAILED ...hint_names_the_entry_the_author_meant[Therma-Thermal Information]
+    FAILED ...hint_names_the_entry_the_author_meant[Electrical-Electrical Characteristics]
+    FAILED ...hint_names_the_entry_the_author_meant[Ordering-Ordering Information]
+    FAILED ...hint_names_the_entry_the_author_meant[Regulatory Information-Regulatory]
+    FAILED test_the_hint_still_names_at_most_five_titles
+
+The three truncation failures are `assert 1 == 2` — main emits no hint at all,
+so the split finds no `"; closest outline titles: "`. The Regulatory one is the
+literal `- 'Regulatory' / + 'Thermal Information'`. The other 10 cases pass on
+main too; they are kept deliberately as cover for the classes that already
+worked. Recorded in `.scratch/p2_main_fail.txt`.
+
+--- Gates ---
+
+* `PYTHONPATH=src python -m pytest -q` — 3135 passed, 2 skipped (3m46s).
+* `ruff check --select E9,F src/refdes/citations.py tests/test_citation_sections.py`
+  — the gate CI actually runs (.github/workflows/tests.yml:52) — clean.
+* `ruff check src/refdes/citations.py tests/test_citation_sections.py` — 5
+  findings, all pre-existing (BLE001 x2, UP017, S112, and one E501 in the test
+  file at what is now line 690, which was HEAD's line 618). Confirmed by running
+  ruff on `git show HEAD:` copies of both files: the same 5, same rules, only
+  the line numbers shifted. Per AGENTS.md I did not go near the other ~99.
+* `ruff format --check` is not a gate here and not clean on main either: the
+  installed ruff disagrees with the committed formatting across both files
+  wholesale. I checked that none of its hunks land on my new lines
+  (citations.py 400-437, the test file 403-474).
+* `python docs-site/gen_examples.py --check` — up to date. `refdes build` in
+  `docs-site/` — exit 0, 4 pre-existing `vocabulary.md` warnings, unrelated.
+
+--- Docs and changelog ---
+
+* `docs/markdown.md`, one paragraph after the failure table: the closest titles
+  are a hint and the closest one is never resolved for you, matching stays exact
+  and case-sensitive; they are ranked case -> prefix -> substring -> spelling,
+  so a same-length near-miss cannot outrank an exact wording apart from case; at
+  most five. This is a claim about user-visible behaviour and it is load-bearing
+  for not reading the improved hint as resolution going fuzzy, so it is worth
+  the paragraph. (First attempt landed the paragraph *inside* the table and split
+  it in two; fixed before committing.)
+* `changelog.d/section-closest-title-hint.fixed.md`, following
+  changelog.d/README.md's `<slug>.<category>.md` convention.
+
+--- Status ---
+
+FINISHED. Scoped to one code path, one test table, one docs paragraph, one
+changelog fragment. Remaining findings from the report (P1 `page:` validation,
+P3 the raw FileNotFoundError, P4 the absolute path in a re-location message) are
+untouched and out of this task's scope.
+
+--- Scratch left behind (all in .scratch/, gitignored) ---
+
+p2_repro.py           the repro driver; `python .scratch/p2_repro.py` prints both
+p2_before.txt         main's hint for all 11 report cases
+p2_after.txt          this branch's hint for the same 11
+citations.p2.py       my citations.py, used for the main-fails-first swap
+p2_main_fail.txt      the 5 failures against HEAD
+p2run/                the throwaway project the repro drives
+headver/              HEAD's two files, for the ruff pre-existing comparison

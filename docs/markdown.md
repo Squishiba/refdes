@@ -371,6 +371,15 @@ nonzero — naming the path, the section, and every item that cites it — when:
 | `--update`, and the title is gone from the new revision | `the section you cited no longer exists in the new revision (was page N)` |
 | the local file moved since it was pinned, and `--update` was not given | `the file on disk changed since it was pinned; run 'refdes fetch --update --path …'` |
 
+The "closest titles" are a hint and nothing else: the closest one is never
+resolved for you, and matching stays exact and case-sensitive. They are ranked
+by how the mistake is most likely to have been made — the same title in a
+different case, then one that is a prefix of the other (`Therma` for `Thermal
+Information`, or a citation that omits the outline's `8` numbering), then one
+contained in the other, and only then by spelling similarity — so a near-miss
+of the same length cannot outrank an exact wording apart from case. At most
+five are named.
+
 A failed lookup does not undo the pin — the fetch succeeded, the lookup didn't.
 A section that fails to resolve is dropped from the lockfile rather than left
 pointing at a page the new bytes may not have.

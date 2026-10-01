@@ -401,6 +401,78 @@ items:
     assert "CMP-001" in message
 
 
+# The outline of the datasheet in in-prog-logs/pdf-picker-exercise.md §0, which
+# is where finding P2 was driven from. Pages are irrelevant to the hint, which is
+# why these cases call `match_outline_title` on the titles alone: a PDF per case
+# would test the same arithmetic through eight file writes.
+DATASHEET_OUTLINE = [
+    ("Features", 1),
+    ("Electrical Characteristics", 2),
+    ("Thermal Information", 3),
+    ("Mechanical Data", 4),
+    ("Application and Implementation", 5),
+    ("Layout Guidelines", 6),
+    ("Ordering Information", 7),
+    ("Regulatory", 8),
+]
+
+
+@pytest.mark.parametrize(
+    ("section", "closest"),
+    [
+        # A heading retyped part-way. difflib's default 0.6 cutoff is silent on
+        # a prefix of a long title -- `Electrical` against `Electrical
+        # Characteristics` is 0.556 -- so these three got no hint at all.
+        ("Therma", "Thermal Information"),
+        ("Electrical", "Electrical Characteristics"),
+        ("Ordering", "Ordering Information"),
+        ("Mechanical", "Mechanical Data"),
+        ("Thermal Informatio", "Thermal Information"),
+        ("Application and Implementatio", "Application and Implementation"),
+        # The numbering, either way round: the PDF-picker report drove
+        # `4. Application and Implementation` against this outline, and
+        # remote-fetch-exercise.md:509 has a real TI outline's
+        # `8 Application and Implementation`.
+        ("4. Application and Implementation", "Application and Implementation"),
+        ("8 Application and Implementation", "Application and Implementation"),
+        # Case and whitespace. `_norm` collapses whitespace, so the hint has
+        # to fold case as well to have anything to match on.
+        ("application and implementation", "Application and Implementation"),
+        (" electrical characteristics ", "Electrical Characteristics"),
+        ("thermal   information", "Thermal Information"),
+        # A plain typo, which is what the difflib tier is for.
+        ("Application and Implmentation", "Application and Implementation"),
+        ("Layout Guideline", "Layout Guidelines"),
+        # The other half of P2: the right entry was in the list, second,
+        # behind a wrong one (0.683 for 'Thermal Information' beat 0.625 for
+        # 'Regulatory').
+        ("Regulatory Information", "Regulatory"),
+    ],
+)
+def test_the_closest_title_hint_names_the_entry_the_author_meant(section, closest):
+    """The hint ranks a case-insensitive match, a prefix, and a substring
+    ahead of difflib. `pytest.raises` is also the assertion that this stays a
+    hint: resolution itself is exact and case-sensitive, so none of these
+    near-misses may resolve to a page."""
+    with pytest.raises(citations_mod.SectionError) as excinfo:
+        citations_mod.match_outline_title(DATASHEET_OUTLINE, section)
+    message = str(excinfo.value)
+    assert f"no outline entry titled {section!r}" in message
+    hints = message.split("; closest outline titles: ", 1)
+    assert len(hints) == 2, message
+    assert hints[1].split(", ", 1)[0] == repr(closest)
+
+
+def test_the_hint_still_names_at_most_five_titles():
+    """The bound the hint has always had, so a large outline cannot turn a
+    one-line FAILED into a paragraph."""
+    outline = [(f"Thermal Information {i}", i) for i in range(1, 13)]
+    with pytest.raises(citations_mod.SectionError) as excinfo:
+        citations_mod.match_outline_title(outline, "Therm")
+    hints = str(excinfo.value).split("; closest outline titles: ", 1)[1]
+    assert len(hints.split(", ")) == 5
+
+
 def test_ambiguous_title_lists_every_page_and_picks_none(tmp_path):
     """(c) Two entries with the same title is the document refusing to be
     resolved by title -- taking the first would be a guessed page."""
