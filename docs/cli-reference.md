@@ -474,18 +474,26 @@ derive it from `1`/`2` alone.
 A fourth refusal is a `.refdes/citations.yaml` that cannot be read as a
 lockfile — unresolved merge markers, invalid YAML, a `citations:` that is not a
 mapping, a key that appears twice, a record that is not a pin record, a `sha256`
-that is not a 64-character hex digest. The file is committed and hand-mergeable,
-so the realistic way to get one is two branches both running `refdes fetch` and
-the merge being resolved badly. `refdes fetch` refuses and **leaves the file
-byte-identical**: it writes this file whole, from the records it fetched, so a
-lockfile it could not read is one it must not overwrite — every pin it cannot see
-would be replaced by a fresh one, with nothing left in the tree to say so. The
-refusal names the file, the line where the shape gives one, and the way out; it
-exits `1`, the code this command's other refusals use.
+that is not a 64-character hex digest, a `page_count:` that is not a number, or
+a record carrying both `page_count:` and `page_count_error:` (they are opposites:
+a count, and the reason there is none). The file is committed and
+hand-mergeable, so the realistic way to get one is two branches both running
+`refdes fetch` and the merge being resolved badly. `refdes fetch` refuses and
+**leaves the file byte-identical**: it writes this file whole, from the records
+it fetched, so a lockfile it could not read is one it must not overwrite — every
+pin it cannot see would be replaced by a fresh one, with nothing left in the tree
+to say so. The refusal names the file, the line where the shape gives one, and
+the way out; it exits `1`, the code this command's other refusals use.
+
+Every field `refdes fetch` writes is accepted, and only fields it writes are
+checked: `page_count:` may be `0`, because that is what a document pypdf opens
+and finds no pages in is recorded as, and a record carrying neither
+`page_count:` nor `page_count_error:` is sound — it claims nothing about its
+pages, and the first `refdes fetch` establishes the count.
 
 Every other command reports the same problem as an ordinary project error.
 `check` and `build` exit `1` for it like any other error (`build --keep-going`
-keeps its documented "exit 0 even when there are errors", and still prints the
+keeps its documented "Exit 0 even when there are errors", and still prints the
 error); `revision` and `release` exit `1`; `audit` prints it on stderr and
 exits `1`, because the report's own "Citations:" section cannot be produced
 without the file and a silently missing section is what an audit exists to

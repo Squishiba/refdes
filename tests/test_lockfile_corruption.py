@@ -25,14 +25,36 @@ Three properties per shape, at both readers named in the finding:
 
 from __future__ import annotations
 
+import io
 import json
 import os
+import sys
+from pathlib import Path
 
 import pytest
+import yaml
 from conftest import write_project_config
+from pypdf import PdfWriter
 
 from refdes import citations as citations_mod
 from refdes import cli as cli_mod
+from refdes import parse
+from refdes.schema import load_project
+
+def _pdf(pages: int = 8) -> bytes:
+    """`pages` blank pages as real PDF bytes -- the count is all this needs.
+
+    The page-count tests below cite a *local* PDF, because a fetch of a remote
+    one is the one thing this file must never do. `PROJECT` is the schema they
+    need unchanged: a `citations` field is a `citations` field, and the only
+    difference is the path being local."""
+    writer = PdfWriter()
+    for _ in range(pages):
+        writer.add_blank_page(200, 200)
+    buf = io.BytesIO()
+    writer.write(buf)
+    return buf.getvalue()
+
 
 PROJECT = """\
 site: { title: Lockfile Corruption, out: _site }
@@ -493,6 +515,144 @@ def test_index_carries_the_lockfile_error_in_its_own_diagnostics(project, capsys
     payload = json.loads(capsys.readouterr().out)
     messages = [d["message"] for d in payload["diagnostics"]]
     assert any(citations_mod.LOCKFILE in m for m in messages), messages
+
+
+# ------------------------------------------------- the page-count pair (#137)
+
+
+def _page_cited_project(tmp_path, pdf: bytes) -> Path:
+    """A project citing a *local* PDF with a `page:`, so a fetch pins it without
+    touching the network."""
+    write_project_config(tmp_path, PROJECT)
+    (tmp_path / "items").mkdir()
+    (tmp_path / "items" / "cmp.yaml").write_text(
+        "defaults: { type: component }\n"
+        "items:\n"
+        "  - id: CMP-001\n"
+        "    title: Regulator\n"
+        "    citations:\n"
+        '      - path: docs/manual.pdf\n        page: "4"\n',
+        encoding="utf-8",
+    )
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "manual.pdf").write_bytes(pdf)
+    return tmp_path
+
+
+def _fetch_locally(root):
+    """`fetch_all` with a fetcher that refuses: this project is all local."""
+    project = load_project(config_path=str(root / "refdes-project.yaml"))
+    parse.load_items(project)
+    citations_mod.fetch_all(
+        project, fetcher=lambda url: pytest.fail(f"a local citation hit the network: {url}")
+    )
+    with open(_lockfile(root), encoding="utf-8") as fh:
+        return yaml.safe_load(fh)["citations"]
+
+
+def test_a_freshly_fetched_page_count_validates_clean(tmp_path):
+    """The contract between this file's validator and #137's writer, and the
+    one that matters most: a lockfile `refdes fetch` has just written must not be
+    reported as malformed by the reader that fetch itself uses. `page_count:` is
+    written only for a cited path someone gave a `page:` to, and is read back by
+    `_apply_page`, so a validator that did not know the key would make every
+    freshly pinned page-citing project fail its own `check`.
+
+    What this pins is that the key is *tolerated as sound*; the test below pins
+    that it is *known* (a wrong type in the same key is a diagnostic), because
+    tolerating an unknown key is what an unknown-key check would still pass."""
+    root = _page_cited_project(tmp_path, _pdf(pages=8))
+    record = _fetch_locally(root)["docs/manual.pdf"]
+    assert record["page_count"] == 8
+    assert citations_mod.PAGE_COUNT_ERROR_KEY not in record
+
+    assert cli_mod.main(["-c", str(root / "refdes-project.yaml"), "check"]) == 0
+
+
+def test_a_zero_page_document_still_validates_clean(tmp_path):
+    """`page_count(data)` is `len(reader.pages)`, so a document pypdf opens and
+    finds no pages in is recorded as `page_count: 0`. A validator that demanded a
+    positive count would report `refdes fetch`'s own output as malformed, which
+    is the one thing this change must not be able to do. (`_apply_page` reads a
+    count below 1 as no count; that is its business and is not contradicted.)"""
+    root = _page_cited_project(tmp_path, _pdf(pages=0))
+    record = _fetch_locally(root)["docs/manual.pdf"]
+    assert record["page_count"] == 0
+
+    assert cli_mod.main(["-c", str(root / "refdes-project.yaml"), "check"]) == 0
+
+
+def test_a_freshly_fetched_page_count_error_validates_clean(tmp_path, monkeypatch):
+    """The same round trip without the optional extra installed: the pin lands
+    with `page_count_error:` where a count would be, and that is a sound record
+    too -- `check` reports the page numbers as *not checked*, which is a warning
+    about a citation, not a malformed lockfile."""
+    monkeypatch.setitem(sys.modules, "pypdf", None)
+    root = _page_cited_project(tmp_path, _pdf(pages=8))
+    record = _fetch_locally(root)["docs/manual.pdf"]
+    assert citations_mod.PAGE_COUNT_KEY not in record
+    assert record["page_count_error"] == (
+        f"counting a document's pages {citations_mod.PDF_EXTRA_HINT}"
+    )
+
+    monkeypatch.undo()
+    assert cli_mod.main(["-c", str(root / "refdes-project.yaml"), "check"]) == 0
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        pytest.param({"page_count": 8, "page_count_error": "no extra"}, id="both"),
+        pytest.param({"page_count": "eight"}, id="count-not-a-number"),
+        pytest.param({"page_count": True}, id="count-is-a-bool"),
+        pytest.param({"page_count_error": ""}, id="error-empty"),
+        pytest.param({"page_count_error": 4}, id="error-not-a-string"),
+    ],
+)
+def test_a_malformed_page_count_pair_is_a_diagnostic(project, capsys, extra):
+    """The other half: shapes `fetch` cannot write, which are still worth
+    saying. A count that is not a number reads as *no count* to `_apply_page`, so
+    it silently drops the very check the count exists for -- and a record with
+    both carries a reason that no reader will ever reach again, because the count
+    is preferred."""
+    record = {
+        "sha256": SHA,
+        "fetched": "2026-01-01T00:00:00Z",
+        "kept_copy": False,
+        "bytes": 509,
+    }
+    record.update(extra)
+    with open(_lockfile(project), "w", encoding="utf-8") as fh:
+        fh.write(citations_mod.lockfile_text({CITE: record}))
+
+    assert cli_mod.main(["-c", str(project / "refdes-project.yaml"), "check"]) == 1
+    err = capsys.readouterr().err
+    assert f"ERROR   {citations_mod.LOCKFILE}:" in err, err
+    assert "Traceback" not in err
+    assert any(
+        word in err
+        for word in (
+            "has both page_count and page_count_error",
+            "which is not a whole number of pages",
+            "which is not the reason the pages could not be counted",
+        )
+    ), err
+
+
+def test_a_lockfile_with_neither_page_key_still_validates(project):
+    """A record with neither key claims nothing about its pages -- a
+    hand-written one, or one written before page counting existed -- and every
+    project has to fetch before `check` can pass it, which is what establishes
+    the count. Requiring either key would report the tool's own older lockfiles
+    as malformed, which is the failure mode this whole change is about."""
+    with open(_lockfile(project), encoding="utf-8") as fh:
+        record = yaml.safe_load(fh)["citations"]
+    assert all(
+        citations_mod.PAGE_COUNT_KEY not in one
+        and citations_mod.PAGE_COUNT_ERROR_KEY not in one
+        for one in record.values()
+    ), record
+    assert cli_mod.main(["-c", str(project / "refdes-project.yaml"), "check"]) == 0
 
 
 def test_load_lockfile_raises_where_read_lockfile_reports(project):

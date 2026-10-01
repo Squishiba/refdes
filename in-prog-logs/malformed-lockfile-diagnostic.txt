@@ -183,3 +183,70 @@ mapping is handed straight to `dict()`, which is the F5 traceback.
       Also caught a `NameError` traceback out of `_duplicate_key` mid-edit --
       the same bug class F5 is, which is the argument for running the shape survey
       rather than trusting the unit tests.
+
+## Rebase onto #137 (23a435c), which landed while this was open
+
+`origin/main` moved: #137 added the page check, and `src/refdes/citations.py`
+conflicted. The textual conflict was one hunk (both sides add text above
+`records = load_lockfile(project)`); the real work was the one the merge could
+not do for me.
+
+**#137 added two keys to lockfile records**, `page_count:` (int) and
+`page_count_error:` (str), written by `fetch_all` in one `if`/`elif` so exactly
+one is ever present, and only for a cited path some item gives a `page:` to. Read
+with `git show 23a435c -- src/refdes/citations.py`: the only record keys it writes
+are those two (`record["page_count"] = counted`, `record["page_count_error"] =
+why`); nothing else about the record changed. Its two new `status.detail` strings
+are on `CitationStatus`, not on the record, so the validator never sees them --
+and they are reported with `item_id=item.id`, which keeps them out of the
+`audit` project-wide filter this branch added.
+
+What this branch's validator now knows:
+
+- both keys are **optional**: a record with neither claims nothing about its
+  pages (hand-written, or written before #137), and every project has to fetch
+  before `check` can pass it. Requiring either would report the tool's own older
+  lockfiles as malformed -- which is precisely the failure this whole change
+  exists to prevent, pointed the other way.
+- `page_count` must be an `int` and not a `bool`. **Type only, no range**:
+  `page_count(data)` is `len(reader.pages)`, so `fetch` really does write
+  `page_count: 0` for a document pypdf opens and finds no pages in. Verified by
+  running a fetch of a zero-page PDF and reading the record back. A validator
+  demanding a positive count would report `fetch`'s own output as malformed.
+  (`_apply_page` reads a count below 1 as no count; that is #137's business and
+  is not contradicted here.)
+- `page_count_error` must be a non-empty string.
+- **Both at once is refused**, cheaply, and for a reason worth stating: a count
+  and the reason there is none are opposites, `_apply_page` prefers the count and
+  never reaches the reason, so a stale reason beside a good count would be a
+  claim no reader could ever show again.
+
+Both key names are now module constants (`PAGE_COUNT_KEY`,
+`PAGE_COUNT_ERROR_KEY`) and #137's six literal uses point at them, so the writer
+and the validator cannot drift -- which is the failure mode this whole change is
+about, one indirection away.
+
+Interaction with #137's re-pin page check: none to resolve, and the order is
+right. `cmd_fetch` reads the lockfile before calling `fetch_all` at all, so a
+corrupt lockfile costs a refusal and never a re-pin that could not be written
+back; `fetch_all`'s own strict `load_lockfile` is the second guard, and it now
+carries a comment saying so. `verify()` reads the lockfile through
+`read_lockfile`, so a corrupt one gives `_apply_page` an empty record, which
+takes its "no count was ever claimed" path rather than inventing a page problem.
+
+Tests: the two round trips the merge could have broken (a fresh fetch of a local
+PDF records `page_count: 8` / `page_count: 0` / `page_count_error:` and `check`
+exits 0), a test that a record with neither key is still sound, and five
+malformed-pair shapes. Note what the round trip can and cannot catch: it pins
+that the keys are *tolerated as sound*, which is what would break if the
+validator ever grew an unknown-key check; the "is known" half is pinned by the
+malformed cases, since a wrong type in the same key is a diagnostic.
+
+Survey re-run on the rebased code: 24 shapes x 10 commands, no tracebacks, and no
+corrupt shape mutated by any command. `check` exits 1 for all 21 corrupt shapes
+and 0 for exactly the three sound page-count ones -- where `fetch` legitimately
+re-pins and drops the now-stale keys, because #137 records the count only for
+pages actually cited. The survey's tally separates those three as SOUND rather
+than counting them as failures.
+
+Full suite 3117 passed, 2 skipped. `ruff check --select E9,F src tests` clean.

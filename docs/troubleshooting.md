@@ -467,6 +467,22 @@ integer, which is one of these; `refdes fetch` quotes those itself.)
 A record missing a field `refdes fetch` always writes. Restore the file, or write
 the record out again.
 
+**`.refdes/citations.yaml:N — the entry for '…' has page_count 'eight'`**
+`refdes fetch` records a whole number of pages, counted from the bytes it was
+pinning. A count that is not a number reads as *no count* to the page check, so
+it drops that check silently rather than failing: the same reason the two shapes
+that look alike are told apart above. `page_count: 0` is not this error — that is
+what a document with no pages in it is recorded as. A record with no
+`page_count:` and no `page_count_error:` is not this error either: it claims
+nothing about its pages (see [citing a datasheet](markdown.md#citing-a-datasheet))
+and the next `refdes fetch` records the count.
+
+**`.refdes/citations.yaml:N — the entry for '…' has both page_count and page_count_error`**
+Those are opposites — a count, and the reason there is none — and `refdes fetch`
+writes one or the other, never both. Keep the one that is true of these bytes;
+the other is a leftover from a merge, and the count wins on every read, so a
+stale reason beside it would never be shown to anyone again.
+
 **`.refdes/citations.yaml:N — duplicate key '…' in one mapping (lines N and M)`**
 YAML resolves a repeated key to the *last* one and says nothing, so this is the
 one shape here that loses a pin **silently**: the file reads as though only one

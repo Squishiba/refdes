@@ -815,6 +815,12 @@ def _record_problem(cited: object, record: object) -> str | None:
         )
     counted = record.get(PAGE_COUNT_KEY)
     if counted is not None and (isinstance(counted, bool) or not isinstance(counted, int)):
+        # Type only, and no range: `page_count(data)` is `len(reader.pages)`, so
+        # `fetch` really does record `page_count: 0` for a document pypdf opens
+        # and finds no pages in. Demanding a positive count here would report
+        # `fetch`'s own output as malformed -- the one failure this validator
+        # must not be able to cause. (`_apply_page` reads a count below 1 as no
+        # count, which is its own business and is not contradicted here.)
         return (
             f"the entry for {cited!r} has {PAGE_COUNT_KEY} {counted!r}, which is not a whole "
             f"number of pages -- it is the count `refdes fetch` took of the bytes it was "
