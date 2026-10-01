@@ -25,8 +25,18 @@
   either — they refuse with the store file named, which is the same refusal
   they already gave under `--no-write` arriving from the other direction.
 
+  `refdes revise`, `calc-rewrite` and `standard upgrade` refuse too, naming the
+  file, exiting `1`, and rolling the whole operation back. The seal hash or
+  baseline entry they carry forward is the only record that a rename was not an
+  edit to a sealed entry or a stamped baseline — so a rewrite that could not
+  record it must not be left standing, reporting a carry-forward that never
+  happened.
+
   All of it says the same thing in the same words as the load-time warning that
   was already there (`could not write this file (read-only tree?); run with
   --no-write to silence this`), so one filter catches every case.
   `--no-write` is unaffected: it never attempts the write, so it behaves the
   same whether or not the tree would have taken it.
+
+  `keys adopt` and `keys restore` still raise on a read-only tree, which is the
+  long-standing contract: the tolerance belongs to writes nobody asked for.

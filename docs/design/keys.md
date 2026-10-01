@@ -443,7 +443,8 @@ What each site does with it depends on what the write *was*:
 | the rendered site | refusal naming the directory; exit `2` | The site is `build`'s own output. There is no partial "site written to …" worth printing. |
 | a baseline's stored-hash format rewrite | warning naming the file; the command continues and exits `0` | A file that already holds a correct baseline, being reformatted. `audit` and `former-ids propose` compute their comparison in memory, so the diff they print is right either way. |
 | the `.refdes/history/` store | refusal naming the file; exit `1` | `history capture`/`redact`/`migrate-seals` are capture commands: a snapshot that was not taken must not read as one that was. They already refuse under `--no-write`, so this is the same refusal arriving from the other direction. |
-| an explicit write (`revise apply`, `calc-rewrite`, `keys adopt`, `keys restore`) | raises, as before | The tolerance belongs to writes nobody asked for. |
+| a seal hash or baseline entry carried forward (`revise`, `calc-rewrite`, `standard upgrade`) | refusal naming the file; **exit 1**, and the whole operation is rolled back | An explicit write, so no tolerance -- and the asymmetry is not cosmetic. The carried hash is the only record that the rename was not an edit to a sealed entry or a stamped baseline. Without it the next `build` reports a deliberate, refdes-performed change as an append-only violation. |
+| any other explicit write (`keys adopt`, `keys restore`) | raises, as before | The tolerance belongs to writes nobody asked for. |
 
 The site render is deliberately independent of the seal write, which is why
 the first case can continue: nothing in the rendered pages reads

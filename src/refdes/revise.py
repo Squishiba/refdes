@@ -686,6 +686,23 @@ class FileRewrite:
     existed: bool = True
 
 
+class Refused(Exception):
+    """A `.refdes/` record this operation had to rewrite and could not.
+
+    Distinct from `RevisionResult.ok=False`, which is a refusal decided
+    *before* anything was written ("this rename would break the project"), and
+    from a load-time warning, which is a write nobody asked for. This is the
+    third thing: the rewrite itself succeeded and one of its consequences --
+    carrying a seal hash or a baseline entry forward -- could not be recorded,
+    so the operation cannot be allowed to stand. The caller rolls the whole
+    transaction back and reports `str(exc)` as the reason.
+
+    `calc_rewrite` reuses this exception, since it is the same transaction
+    with the same carry-forward step (`refdes calc-rewrite` and
+    `refdes standard upgrade` both run this engine too).
+    """
+
+
 def write_rewrites(
     rewrites: list[FileRewrite], on_error=None
 ) -> list[FileRewrite]:
@@ -970,7 +987,19 @@ def _capture_seal_files(project: Project) -> dict[str, str]:
 
 
 def _restore_seal_files(original: dict[str, str]) -> None:
+    """Put back only the seal files that actually changed.
+
+    Comparing before writing is not an optimisation here, it is what lets a
+    rollback finish on a tree that has already refused one write: the whole
+    reason a rollback exists is that this run changed something, and a file
+    this run did *not* change is already correct on disk. Writing it back
+    anyway would re-attempt a write the filesystem has just refused -- which
+    is how a refusal during `_carry_forward_seals` used to surface as a
+    `PermissionError` out of the rollback rather than as the refusal it was.
+    """
     for path, value in original.items():
+        if os.path.isfile(path) and textio.read_text(path) == value:
+            continue
         textio.write_text(path, value)
 
 
@@ -1488,7 +1517,15 @@ def apply(
                 FileRewrite(path=path, rel=rel, before=before, after=now)
             )
 
-    seals_updated = _carry_forward_seals(project_before, old_hashes, new_hashes)
+    try:
+        seals_updated = _carry_forward_seals(project_before, old_hashes, new_hashes)
+    except Refused as exc:
+        # The rewrite itself landed but its consequence could not be recorded.
+        # Roll the whole transaction back so the project is not left renamed
+        # with stale seals, and refuse naming the file -- never a report that
+        # the seals were carried forward.
+        _rollback()
+        return RevisionResult(ok=False, errors=[str(exc), "rolled back."])
 
     try:
         project_after = _load_and_validate(config_path)
@@ -1505,9 +1542,13 @@ def apply(
             + [str(d) for d in after_blocking],
         )
 
-    baselines_updated, baselines_skipped = _carry_forward_baselines(
-        project_before, old_hashes, new_hashes, standard_transition
-    )
+    try:
+        baselines_updated, baselines_skipped = _carry_forward_baselines(
+            project_before, old_hashes, new_hashes, standard_transition
+        )
+    except Refused as exc:
+        _rollback()
+        return RevisionResult(ok=False, errors=[str(exc), "rolled back."])
 
     changed_files = sorted(
         {r.rel for r in ensure_rewrites} | {r.rel for r in rewrites} | {r.rel for r in refresh_rewrites}
@@ -1701,7 +1742,6 @@ def _carry_forward_baselines(
             updated.append(baseline.name)
     return updated, skipped
 
-
 # Public alias: calc_rewrite.py reuses this engine (hash matching, entry
 # swap, file rewrite) rather than duplicating it.
 carry_forward_baselines = _carry_forward_baselines
@@ -1710,6 +1750,14 @@ carry_forward_baselines = _carry_forward_baselines
 def _rewrite_baseline_file(
     project: Project, baseline: lifecycle.Baseline, new_items: dict, standard: dict | None = None
 ) -> None:
+    """Persist one carried-forward baseline, or refuse naming the file.
+
+    `lifecycle._save_baseline_file` already raises `BaselineUnwritable` rather
+    than letting a raw `OSError` out; this translates it into the one shape
+    both callers of this engine handle, so a read-only `.refdes/` reads as a
+    refusal with the path in it rather than as either a raw traceback or --
+    worse -- a baseline reported as carried forward when it was not.
+    """
     data: dict[str, Any] = {
         "kind": baseline.kind,
         "name": baseline.name,
@@ -1722,7 +1770,15 @@ def _rewrite_baseline_file(
     if baseline.gate is not None:
         data["gate"] = baseline.gate
     data["items"] = dict(sorted(new_items.items()))
-    lifecycle._save_baseline_file(project, data)
+    try:
+        lifecycle._save_baseline_file(project, data)
+    except lifecycle.BaselineUnwritable as exc:
+        raise Refused(
+            f"cannot write {exc.rel} (read-only tree?) -- this baseline was not "
+            "carried forward, so the next build or diff would report every "
+            "entry this rename touched as changed. Make the tree writable and "
+            "run it again."
+        ) from exc
 
 
 def _carry_forward_seals(
@@ -1736,6 +1792,17 @@ def _carry_forward_seals(
     its stamp-time display label, and a legacy display-id-keyed entry keeps
     its stamp-time key for the same reason (docs/design/keys.md §4 -- the
     id-remapping half of this function is gone).
+
+    Raises `revise.Refused` for a seal file the filesystem will not accept,
+    rather than reporting the board as updated anyway. This is an explicit
+    write the user asked for, so it does not get `build`'s tolerance -- and
+    the asymmetry is not cosmetic. The seal file is the *only* record that
+    the rename was not an edit to a sealed entry: without the carried hash,
+    the next `build` calls every entry this operation just rewrote
+    "modified since it was sealed", which is an append-only ERROR about
+    something the user did deliberately and which refdes itself performed.
+    So the refusal is raised before `updated` is touched, the caller rolls
+    the whole operation back, and no board is ever claimed as carried.
     """
     updated: list[str] = []
     live_keys = {item.key for item in project.local_items if item.key}
@@ -1761,7 +1828,19 @@ def _carry_forward_seals(
             if new_value != value:
                 changed = True
         if changed:
-            seal_mod.save_seals(project, new_seals, board)
+            if not seal_mod.save_seals(project, new_seals, board):
+                # `save_seals` has already recorded the refusal as a project
+                # diagnostic; this command prints its own plan rather than
+                # diagnostics, so the refusal is re-raised as the one shape
+                # every caller here handles (`RevisionResult.errors`) with the
+                # file named.
+                rel = os.path.relpath(path, project.root).replace("\\", "/")
+                raise Refused(
+                    f"cannot write {rel} (read-only tree?) -- the renamed "
+                    "entries' seals were not carried forward, and the next "
+                    "build would report every one of them as modified since "
+                    "it was sealed. Make the tree writable and run it again."
+                )
             updated.append(board or "(base)")
     return updated
 

@@ -48,6 +48,7 @@ what it could not write, or refuses:
 | `.refdes/baselines/<name>.yaml` | `revision`, `release` | Refuses: `error: cannot write .refdes/baselines/<name>.yaml …`, **exit 2**. A stamp that did not happen is never reported as one that did. |
 | a baseline's stored-hash format rewrite | `audit`, `former-ids propose` | Names the file and carries on, **exit 0**. A baseline already on disk holds correct content; only its format lags the current hash definition, and the diff is computed in memory either way. |
 | the `.refdes/history/` store | `history capture`, `history redact`, `history migrate-seals` | Refuses: `error: cannot write .refdes/history/… (read-only tree?) -- nothing was captured`, **exit 1**. A snapshot that was not taken is never announced as one that was. |
+| a seal hash or baseline entry carried forward | `revise`, `calc-rewrite`, `standard upgrade` | `refused:` naming the file, **exit 1**, and the whole operation is rolled back. The carried hash is the only record that the rename was not an edit to a sealed entry or a stamped baseline. |
 
 `--no-write` needs none of this: it never attempts the write, so it is
 unaffected by whether the tree would have taken it.

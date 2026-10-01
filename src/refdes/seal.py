@@ -204,13 +204,18 @@ def save_seals(
 
     Returns whether the seals landed. A read-only tree -- a frozen CI
     checkout, a read-only bind mount -- is a condition of the filesystem and
-    not of the project, so the refusal is reported through the ordinary
-    diagnostic channel (`_record_seal_write`) rather than raised: `build` has
-    a site to render afterwards, and a diagnostic both names the file and
-    keeps the non-zero exit the caller already owes for an unsealed entry.
-    An explicit seal write the user asked for (`refdes revise`) goes through
-    the same function and gets the same tolerance, which is correct there
-    too: `revise` reports its own plan and the file it could not update.
+    not of the project, so the refusal is recorded as a diagnostic naming the
+    file rather than raised, and the *caller* decides what it means:
+
+    - `build` (via `verify`) goes on and exits non-zero on the error, because
+      a site render is still owed to the user and the entries being unsealed
+      is a finding about the project, not an aborted command.
+    - An explicit write the user asked for -- `refdes revise`, which carries
+      a renamed entry's seal hash forward -- must NOT go on. That hash is the
+      only record that the rename was not an edit to a sealed entry, so
+      losing it makes the next `build` report a deliberate rename as an
+      append-only violation. `revise._carry_forward_seals` checks this
+      return value and refuses, naming the file.
     """
     path = seal_path(project, board)
     history = load_reseals(project, board) + (events or [])

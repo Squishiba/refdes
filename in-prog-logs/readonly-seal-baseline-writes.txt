@@ -284,7 +284,102 @@ traceback out of `history.save_object`).
   not this task's.
 - **`docs/index.md` nav.** No new page; no nav edit needed.
 
-### 10. Status: finished
+### 10. Review of PR #132 (finding 1): `revise` reported a seal update that
+###     never happened
+
+The reviewer was right about the mechanism. I had made `save_seals` return a
+bool instead of raising, and `revise._carry_forward_seals` ignored the return
+and appended the board to `updated` regardless — so a seal file the filesystem
+refused was reported as carried forward. My own `save_seals` docstring and the
+PR body both claimed `revise` "gets the same tolerance"; both were wrong.
+
+One correction to the review's prediction, since it changes what the test has
+to assert. The predicted symptom was a quiet false success. What actually
+happened on my branch was a *different* traceback, from `revise.py:899`
+(`_restore_seal_files`) via `_rollback` — reproduced at `.scratch/rvbug/probe.py`
+against both trees:
+
+| | main | this branch, pre-fix |
+|---|---|---|
+| where it died | `save_seals` (raised) | `_restore_seal_files` (in rollback) |
+| tree left behind | item renamed, seal stale | item renamed, seal stale |
+
+So it was still a raw traceback, just from a second site, and the tree was
+still left half-rewritten. The defect is the same one the reviewer identified
+— the ignored return — and it is now fixed at the source rather than papered
+over.
+
+**Fixes (`src/refdes/revise.py`, `src/refdes/calc_rewrite.py`):**
+
+- New `revise.Refused`, carrying one message. Both carry-forwards raise it
+  instead of continuing: `_carry_forward_seals` checks `save_seals`'s return
+  before touching `updated`, and `_rewrite_baseline_file` translates
+  `lifecycle.BaselineUnwritable` into the same shape.
+- `apply()` and `calc_rewrite.apply()` catch it, **roll the whole transaction
+  back**, and return `ok=False` with the message — so no board is ever claimed
+  as carried forward and the project is not left renamed with stale seals.
+- `_restore_seal_files` now compares before writing. This is what made the
+  rollback itself crash: it rewrote a file this run had not changed, which is
+  a second refused write in the same run. A rollback exists because something
+  changed; a file that did not change is already correct on disk.
+
+**Verified against the reviewer's scenario** (items/ writable, `.refdes/`
+read-only, a sealed entry whose hash `revise` carries):
+
+```
+$ refdes revise mapping.yaml
+refused:
+  cannot write .refdes/log-seal.yaml (read-only tree?) -- the renamed entries' seals were not carried forward, and the next build would report every one of them as modified since it was sealed. Make the tree writable and run it again.
+  rolled back.
+[exit 1]
+```
+
+And the tree afterwards is untouched: `summary:` still `summary:`, the schema
+overlay un-bumped, the seal file byte-identical, and `refdes check` still clean
+with no `seal_violations`.
+
+**Checked the other two callers the reviewer named, as asked:**
+- `apply_standard_upgrade` → `apply()`, so it inherits the fix. Verified live
+  at `.scratch/su-ro`: `refused: cannot write .refdes/baselines/rev-a.yaml …`
+  exit 1, `BND-THM` not present in the tree afterwards (rolled back).
+- `calc_rewrite.apply` → same engine, so it needed the matching `except`
+  (added). Verified live at `.scratch/cr3`: refuses naming the baseline,
+  exit 1, retired spelling still in the file.
+- Every `save_seals`/`save_manifest` caller in `src/`, listed exhaustively:
+  `seal.verify` (×3, the `build` path — degrades by design), `boards.verify`
+  (the `build` path — degrades by design), `revise._carry_forward_seals` (now
+  raises). No third shape.
+
+**One thing the review surfaced that I had not: the rollback's scope.** The
+transaction restores the item files, the seal files and `config_path`. That is
+correct — `mutate_config` exists only for `standard upgrade`'s
+`standard.version` bump, which writes `config_path` and nothing else (the only
+production caller, `revise.py:1890`). My first draft of the test used a
+`mutate_config` hook editing `refdes-schema.yaml`, which no rollback has ever
+owned, so the test asserted something the contract never promised. The test
+now restores its own hook's file in its own `finally`, the way it already
+restores the permissions, and says why in a comment.
+
+**Tests** (both verified to fail against this branch's pre-fix `src/`, by
+`git checkout -- src/`, run, reapply):
+
+- `tests/test_revise.py::test_revise_refuses_a_seal_it_cannot_carry_forward` —
+  pre-fix: `PermissionError` out of `textio.write_text` in the rollback.
+  Post-fix: `ok is False`, the seal file named in `result.errors`,
+  `seals_updated == []`, seal bytes unchanged, item file unchanged, and the
+  project still builds clean with no `seal_violations`.
+- `tests/test_calc_rewrite.py::test_calc_rewrite_refuses_a_baseline_it_cannot_carry_forward`
+  — pre-fix: fails. Post-fix: `ok is False`, baseline file named,
+  `baselines_updated == []`, baseline and calc source both unchanged.
+
+Docs updated to match the new behaviour: `docs/design/keys.md`'s per-write
+table (the "explicit writes still raise" row is now specifically `keys adopt` /
+`keys restore`, with the carry-forward row added), `docs/cli-reference.md`'s
+sub-table, and the changelog fragment.
+
+Full suite after the fix: **2896 passed, 2 skipped** (both pre-existing).
+
+### 11. Status: finished
 
 All of it done: code, tests (each verified failing against main's `src/`),
 docs, changelog fragment, full suite green, ruff scoped to the touched files

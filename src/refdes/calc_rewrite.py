@@ -40,6 +40,7 @@ from . import textio
 from .model import RETIRED_UNIT_SPELLING, Item, Project
 from .revise import (
     FileRewrite,
+    Refused,
     _blocking_errors,
     _capture_seal_files,
     _carry_forward_seals,
@@ -281,14 +282,22 @@ def apply(project_root: str, dry_run: bool = False) -> CalcRewriteResult:
         item.id: build_mod.calc_hash_for(item) for item in project_after.local_items
     }
 
-    seals_updated = _carry_forward_seals(project_before, old_hashes, new_hashes)
-    baselines_updated, _skipped = carry_forward_baselines(
-        project_before,
-        old_hashes,
-        new_hashes,
-        old_calc_hashes=old_calc_hashes,
-        new_calc_hashes=new_calc_hashes,
-    )
+    # Same transaction, same carry-forward step, same refusal -- see
+    # `revise.Refused`. Rolling back here matters for the same reason: a
+    # rewritten item with a seal that was not carried forward is an
+    # append-only ERROR on the next build, about an edit this tool made.
+    try:
+        seals_updated = _carry_forward_seals(project_before, old_hashes, new_hashes)
+        baselines_updated, _skipped = carry_forward_baselines(
+            project_before,
+            old_hashes,
+            new_hashes,
+            old_calc_hashes=old_calc_hashes,
+            new_calc_hashes=new_calc_hashes,
+        )
+    except Refused as exc:
+        _rollback()
+        return CalcRewriteResult(ok=False, errors=[str(exc), "rolled back."])
 
     line_changes: list[str] = []
     for rw in rewrites:
