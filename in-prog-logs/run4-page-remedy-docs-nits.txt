@@ -115,5 +115,41 @@ reports `I001` and 6 `E501`, and main's `build.py` reports the identical set
 pre-existing, none introduced here. One `ISC004` my new test tripped is fixed.
 Full suite: **3157 passed, 2 skipped**.
 
+## F4 — done (docs only)
+
+Three `refdes init` runs in `.scratch/`, reading the `.gitignore` each one
+produced:
+
+- **No pre-existing `.gitignore`** → `wrote .gitignore (.vscode/settings.json,
+  .refdes/copies/, .refdes/schema.json, .refdes/serve-write.lock -- not yours to
+  commit)`, and the file holds exactly those four patterns, one per line, each
+  under its own comment block. **Four**, so the page's "four" was right.
+- **Pre-existing file already covering `.refdes/copies/`** → `wrote .gitignore
+  (.vscode/settings.json, .refdes/schema.json, .refdes/serve-write.lock -- not
+  yours to commit)`. Three lines added, and `build/` (a line `init` does not own)
+  left undisturbed.
+- **Pre-existing file already covering all four** → no `.gitignore` line in the
+  output at all and the file byte-for-byte unchanged.
+
+So `init` writes four, minus whatever the file already covers. The page's
+"four files" was right and its "add those three lines" was the wrong antecedent:
+the list it points back at is the four. Now:
+
+> …: add those same four lines yourself, one per line — except any one your file
+> already covers, which `init` would not add a second line for either.
+
+"four paths" rather than "four files" while I was there — `.refdes/copies/` is a
+directory, and the count sentence is the one a reader is most likely to check
+against `init`'s own output, which calls them patterns.
+
+Checked and deliberately **not** changed:
+`docs/cli-reference.md:1704-1707` also says "three", but its antecedent is the
+table of the three `.refdes/` paths three lines above it and it names all three
+explicitly, so it reads unambiguously. F4 is about `getting-started.md:74-85`.
+
+Renders correctly (rebuilt the docs site in `.scratch/dscheck`).
+Fragment: `changelog.d/docs-init-gitignore-count.fixed.md`.
+
+
 Changelog: `changelog.d/citation-page-remedy.fixed.md` (the F2 change is
 user-visible message text plus docs, not a behaviour change, so `fixed`).
