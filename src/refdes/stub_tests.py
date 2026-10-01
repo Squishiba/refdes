@@ -18,7 +18,30 @@ from __future__ import annotations
 import os
 
 from . import textio
-from .model import Item, Project, SchemaError
+from .model import Item, Project, SchemaError, destination_refusal
+
+
+class Refused(Exception):
+    """One or more of this command's own stub files could not be written.
+
+    Distinct from `SchemaError` (nothing to generate at all, decided before
+    anything is touched) and from the load-time refusals `cli._load()` already
+    handles: this is a write the user asked for that the filesystem declined,
+    so it carries `(read-only tree?)` in the `revise.Refused` /
+    `history.HistoryError` shape and `cmd_stub_tests` exits 1.
+
+    Carries `written` as well as `errors` because this command's files are
+    independent of each other -- one `stub-tests.md` per (workspace, board),
+    each holding only stubs for the items in its own scope -- and because a stub
+    becomes the author's the moment it is written (see `generate`'s docstring),
+    so the ones that landed are not taken back. The report therefore names both
+    halves: what was refused, and what is on disk.
+    """
+
+    def __init__(self, errors: list[str], written: list[tuple[str, list[str]]]) -> None:
+        super().__init__("; ".join(errors))
+        self.errors = errors
+        self.written = written
 
 
 def _verifier_types(project: Project) -> list[str]:
@@ -87,6 +110,13 @@ def generate(
     it: a prior run's stubs are the author's the moment they're written, so
     a later run must never touch them, only add newly-eligible ones after
     them in the same file.
+
+    Raises `Refused` if the filesystem would not take one of the files. Not
+    rolled back, and not all-or-nothing, because these files do not depend on
+    each other and a written stub is the author's from the moment it exists --
+    so the ones that land stay, the ones that do not are named, and re-running
+    after the tree is writable picks up exactly the missed ones (deduplication
+    is by declared links, so a stub already on disk is never re-emitted).
     """
     verifier_types = _verifier_types(project)
     if not verifier_types:
@@ -123,6 +153,7 @@ def generate(
         groups.setdefault((item.workspace, item.board), []).append(item)
 
     written: list[tuple[str, list[str]]] = []
+    refused: list[str] = []
     for (workspace, board), items in sorted(groups.items()):
         parts = ["items"]
         if workspace:
@@ -132,6 +163,7 @@ def generate(
             bspec = project.boards.get(board)
             parts.append(bspec.path_segment if bspec else board)
         target = os.path.join(project.root, *parts, "stub-tests.md")
+        rel = os.path.relpath(target, project.root).replace("\\", "/")
 
         # The ending the appended block should wear: the file's own, if it
         # exists, and LF if it does not. `open(..., "a", encoding="utf-8")` in
@@ -157,19 +189,46 @@ def generate(
         text = "".join(blocks) + "---" + eol
 
         if not dry_run:
-            os.makedirs(os.path.dirname(target), exist_ok=True)
-            prefix = ""
-            if os.path.isfile(target) and os.path.getsize(target) > 0:
-                with open(target, "rb") as fh:
-                    fh.seek(-1, os.SEEK_END)
-                    if fh.read(1) != b"\n":
-                        prefix = eol
-            # Binary append: the block already carries its own terminators, and
-            # text mode would translate them a second time.
-            with open(target, "ab") as fh:
-                fh.write((prefix + text).encode("utf-8"))
+            # One refusal names one file and moves on to the next: the files
+            # are independent, and stopping at the first one would leave the
+            # rest unwritten for no reason -- the same posture
+            # `revise.write_rewrites`'s `on_error` hook takes, except that
+            # here the command keeps its own partial result instead of
+            # rolling it back. Both the `makedirs` and the append are inside
+            # the guard: a read-only `items/gamma/` refuses at the first and
+            # the open-for-append, and a read-only *file* refuses at the
+            # second, and neither is a traceback.
+            try:
+                os.makedirs(os.path.dirname(target), exist_ok=True)
+                prefix = ""
+                if os.path.isfile(target) and os.path.getsize(target) > 0:
+                    with open(target, "rb") as fh:
+                        fh.seek(-1, os.SEEK_END)
+                        if fh.read(1) != b"\n":
+                            prefix = eol
+                # Binary append: the block already carries its own terminators,
+                # and text mode would translate them a second time.
+                with open(target, "ab") as fh:
+                    fh.write((prefix + text).encode("utf-8"))
+            except OSError:
+                refused.append(
+                    destination_refusal(
+                        rel,
+                        "no stub was written for "
+                        f"{', '.join(item.id for item in items)} in this file."
+                        + (
+                            " Make the tree writable and run it again; the "
+                            "stubs that did land are not re-emitted."
+                            if written
+                            else " Make the tree writable and run it again."
+                        ),
+                    )
+                )
+                continue
 
-        rel = os.path.relpath(target, project.root).replace("\\", "/")
         written.append((rel, [i.id for i in items]))
+
+    if refused:
+        raise Refused(refused, written)
 
     return written

@@ -60,6 +60,7 @@ from . import seal as seal_mod
 import yaml
 
 from . import keys as keys_mod
+from . import model
 from . import textio
 from .model import Item
 from .parse import yaml_safe_load
@@ -276,8 +277,10 @@ def _write_store_file(root: str, path: str, text: str) -> None:
         textio.write_text(path, text)
     except OSError as exc:
         raise HistoryError(
-            f"cannot write {rel} (read-only tree?) -- nothing was captured. "
-            "Make the tree writable and run it again."
+            model.destination_refusal(
+                rel,
+                "nothing was captured. Make the tree writable and run it again.",
+            )
         ) from exc
 
 

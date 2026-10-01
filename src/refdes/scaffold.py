@@ -15,9 +15,23 @@ from . import build as build_mod
 from . import parse as parse_mod
 from . import standards, textio
 from .build import _format_required_when
-from .model import ItemType, SchemaError
+from .model import ItemType, SchemaError, destination_refusal
 from .parse import yaml_safe_load
 from .schema import load_project
+
+
+class Refused(Exception):
+    """A `refdes-project.yaml` this command had to rewrite and could not.
+
+    Distinct from the `SchemaError`s these two preset commands raise for a
+    bad request (an unknown preset, one not selected): those are decided
+    before anything is touched and mean "you named the wrong thing", while
+    this is the write the user asked for that the filesystem declined. It
+    carries `(read-only tree?)` in the destination-naming shape
+    (`model.destination_refusal`) and exits 2, the code both commands already
+    use for "your config is not what you asked for it to be" -- see
+    docs/cli-reference.md.
+    """
 
 
 def _vscode_schema_path(target_dir: str) -> str:
@@ -558,7 +572,16 @@ def add_preset(project_root: str, preset_name: str) -> None:
         raise SchemaError(f"preset {preset_name!r} is already selected")
 
     new_text = _edit_presets_list(raw_text, lambda lst: lst + [preset_name])
-    textio.write_text(config_path, new_text)
+    try:
+        textio.write_text(config_path, new_text)
+    except OSError as exc:
+        raise Refused(
+            destination_refusal(
+                "refdes-project.yaml",
+                f"so {preset_name!r} was not added and standard.presets: is "
+                "exactly as it was. Make the tree writable and run it again.",
+            )
+        ) from exc
 
 
 def remove_preset(project_root: str, preset_name: str) -> list:
@@ -588,8 +611,22 @@ def remove_preset(project_root: str, preset_name: str) -> list:
 
     # Simulate the removal via a scratch copy in the same directory, so the
     # report reflects the post-removal state before the real file is touched.
+    # Outside the try, deliberately: a refusal here means the copy was never
+    # written, so the `finally` has nothing to clean up and must not be
+    # reached -- and nothing has been changed either way, so the same refusal
+    # answers for both this write and the real one below.
     scratch_path = config_path + ".scratch"
-    textio.write_text(scratch_path, new_text)
+    try:
+        textio.write_text(scratch_path, new_text)
+    except OSError as exc:
+        raise Refused(
+            destination_refusal(
+                "refdes-project.yaml",
+                f"so {preset_name!r} is still selected, and the check of what "
+                "its removal would break never ran. Nothing changed. Make the "
+                "tree writable and run it again.",
+            )
+        ) from exc
     try:
         project = load_project(config_path=scratch_path)
         parse_mod.load_items(project, require_ids=False)
@@ -598,6 +635,17 @@ def remove_preset(project_root: str, preset_name: str) -> list:
     finally:
         os.remove(scratch_path)
 
-    textio.write_text(config_path, new_text)
+    # Last, so the scratch copy is already gone when this is refused and the
+    # refusal leaves no litter behind.
+    try:
+        textio.write_text(config_path, new_text)
+    except OSError as exc:
+        raise Refused(
+            destination_refusal(
+                "refdes-project.yaml",
+                f"so {preset_name!r} is still selected. Nothing changed. Make "
+                "the tree writable and run it again.",
+            )
+        ) from exc
 
     return diagnostics

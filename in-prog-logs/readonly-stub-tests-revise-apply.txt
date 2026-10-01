@@ -1,0 +1,436 @@
+F1: stub-tests and revise apply print raw PermissionError tracebacks
+====================================================================
+
+Task: fix F1 from `in-prog-logs/user-sim-release-gate-run4.md` §5 following the
+conventions PR #132 (7c20d55) set, then sweep every subcommand in
+`refdes --help` against read-only trees and record the matrix.
+
+Status: **done.** Six commands refuse instead of tracebacking; 0 tracebacks in a
+52-row sweep; 14 new tests (13 fail against main); full suite 3160 passed /
+2 skipped; docs narrowed in both directions; changelog fragment added. See §8.
+
+
+## 1. Reading #132 first (what conventions it actually set)
+
+Verified against `git show --stat 7c20d55` and the files it touched.
+
+- `model.READ_ONLY_REFUSAL = "could not write this file (read-only tree?)"`
+  plus `model.read_only_refusal(consequence="")`, which appends
+  `" -- <consequence>; run with --no-write to silence this"` (src/refdes/model.py:696-708).
+  The docstring says it exists so "a CI log filter is written against the
+  string, and two spellings of one condition is how a user grepping for one
+  misses the other (user-sim run 3, finding N2)".
+- Two shapes, per `docs/cli-reference.md:41-97`:
+  - *destination-naming* refusals put the path first:
+    `error: cannot write <path> (read-only tree?) -- <what was lost>`, exit 2
+    (revision/release) or exit 1 (history, revise).
+  - the load-time shape is the per-file warning / parenthesised summary.
+- `revise.Refused` (src/refdes/revise.py:689) is the explicit-write refusal:
+  `_carry_forward_seals` / `_rewrite_baseline_file` raise it, `apply()` and
+  `calc_rewrite.apply()` catch it, `_rollback()` the whole transaction, and
+  return `ok=False` naming the file + "rolled back." — `revise` exit 1.
+- #132's own words: "Explicit writes (`revise apply`, `calc-rewrite`, `keys
+  adopt`, `keys restore`) still raise, which is what
+  `test_an_explicit_write_still_raises_on_a_read_only_tree` pins and is the
+  right answer: the tolerance belongs to writes nobody asked for." — so
+  #132 documented the raise and F1 is that the doc/claim over-claims. The fix
+  must narrow the *claim*, not invert the principle.
+
+
+## 2. Reproduced on main (branch base b068f96), before any change
+
+All commands through `PYTHONPATH=src python -m refdes.cli` from a scratch copy
+(never from the worktree root). Harness: `.scratch/mkfull.sh` (builds five
+projects, so each command has a *real* write to attempt), `.scratch/ro2.sh`
+(one chmod layout + one command), `.scratch/sweep.sh` (the matrix).
+
+- `stub-tests`, whole tree read-only — traceback, exit 1, and **no** summary
+  line. Reproduced the report's `items/gamma/` shape too: two of three
+  `stub-tests.md` files created, the third refused, `find` confirms the split.
+- `revise mapping.yaml`, `items/` read-only — traceback at
+  `src/refdes/revise.py:1422` -> `write_rewrites` -> `textio.write_text`,
+  `PermissionError: ... items/alpha/requirements.yaml`. Same on a whole-tree
+  read-only copy and with a single item file `chmod a-w`.
+- `calc-rewrite` with a real retired `P : W = ...` calc line and `items/`
+  read-only — traceback at `src/refdes/calc_rewrite.py:244`, same
+  `write_rewrites` call.
+- `standard upgrade --to 3` from a hardware@2 project with `items/`
+  read-only — traceback, same `write_rewrites` call reached through
+  `revise.apply()`.
+- **`refdes id`, not in the report.** With one pending item (a file with no
+  `id:`) and `items/` read-only: traceback at `src/refdes/ids.py:611`
+  `textio.write_text`. Same shape, same class.
+- **`standard add-preset`, not in the report.** Traceback at
+  `src/refdes/scaffold.py:561`. And `standard remove-preset` (with the preset
+  actually selected) twice: `scaffold.py:592` (its throwaway
+  `refdes-project.yaml.scratch`) and `scaffold.py:601` (the real config write).
+
+So six commands, not two. All six are the same class: an **explicit write the
+user asked for** whose only guard was "the filesystem will take it".
+
+
+## 3. The sweep — every subcommand in `refdes --help`, both layouts
+
+Run BEFORE the fix, against `.scratch/full/{p-main,p-pend,p-calc,p-v2,p-preset}`.
+Layouts: `tree` = whole tree `chmod -R a-w`; `items` = `items/` +
+`refdes-project.yaml` read-only with `.refdes/` writable (the #132 layout);
+plus `refdes` (`.refdes/` only), `gamma` (one board's dir only) and `file`
+(one item file only) for the partial shapes.
+
+| command | project | layout | exit | traceback | carries `(read-only tree?)` |
+|---|---|---|---|---|---|
+| `build` | p-main | tree | 2 | no | yes |
+| `build` | p-main | items | 0 | no | no |
+| `check` | p-main | tree | 0 | no | yes |
+| `check` | p-main | items | 0 | no | no |
+| `index` | p-main | tree | 0 | no | yes |
+| `index` | p-main | items | 0 | no | no |
+| `ls` | p-main | tree | 0 | no | yes |
+| `ls` | p-main | items | 0 | no | no |
+| `audit` | p-main | tree | 0 | no | yes |
+| `audit` | p-main | items | 0 | no | no |
+| `schema` | p-main | tree | 0 | no | no |
+| `schema` | p-main | items | 0 | no | no |
+| `new decision` | p-main | tree | 0 | no | no |
+| `new decision` | p-main | items | 0 | no | no |
+| **`id`** | p-pend | tree | 1 | **YES** | yes |
+| **`id`** | p-pend | items | 1 | **YES** | yes |
+| `revision rev-a` | p-main | tree | 2 | no | yes |
+| `revision rev-a` | p-main | items | 0 | no | no |
+| `release rel-a` | p-main | tree | 1 | no | yes |
+| `release rel-a` | p-main | items | 1 | no | no |
+| **`stub-tests`** | p-main | tree | 1 | **YES** | yes |
+| **`stub-tests`** | p-main | items | 1 | **YES** | no |
+| **`stub-tests`** | p-main | gamma | 1 | **YES** | no |
+| **`revise mapping.yaml`** | p-main | tree | 1 | **YES** | no |
+| **`revise mapping.yaml`** | p-main | items | 1 | **YES** | no |
+| **`revise mapping.yaml`** | p-main | file | 1 | **YES** | no |
+| `revise mapping.yaml` | p-main | refdes | 0 | no | no |
+| `calc-rewrite` | p-main | tree | 0 | no | no |
+| **`calc-rewrite`** | p-calc | tree | 1 | **YES** | no |
+| **`calc-rewrite`** | p-calc | items | 1 | **YES** | no |
+| `calc-rewrite` | p-calc | refdes | 0 | no | no |
+| **`standard upgrade --to 3`** | p-v2 | tree | 1 | **YES** | no |
+| **`standard upgrade --to 3`** | p-v2 | items | 1 | **YES** | no |
+| `standard upgrade --to 3` | p-v2 | refdes | 0 | no | no |
+| **`standard add-preset design-debate`** | p-main | tree | 1 | **YES** | no |
+| **`standard add-preset design-debate`** | p-main | items | 1 | **YES** | no |
+| `standard remove-preset design-debate` | p-preset | tree | 2 | no | no |
+| `standard remove-preset design-debate` | p-preset | items | 2 | no | no |
+| `standard remove-preset design-debate` | p-preset | refdes | 0 | no | no |
+| **`standard remove-preset design-debate`** | p-preset | tree | 1 | **YES** | no |
+| **`standard remove-preset design-debate`** | p-preset | items | 1 | **YES** | no |
+| `keys adopt` | p-main | tree | 1 | no | no |
+| `keys adopt` | p-main | items | 0 | no | no |
+| `keys adopt` | p-main | refdes | 1 | no | no |
+| `keys restore REQ-a-PWR-001@abc123` | p-main | tree | 1 | no | no |
+| `keys restore REQ-a-PWR-001@abc123` | p-main | items | 1 | no | no |
+| `history capture REQ-a-PWR-001` | p-main | tree | 1 | no | yes |
+| `history capture REQ-a-PWR-001` | p-main | items | 0 | no | no |
+| `history capture REQ-a-PWR-001` | p-main | refdes | 1 | no | yes |
+| `history migrate-seals` | p-main | tree | 0 | no | yes |
+| `history migrate-seals` | p-main | items | 0 | no | no |
+| `history migrate-seals --capture-current` | p-main | tree | 0 | no | yes |
+| `former-ids propose` | p-main | tree | 1 | no | yes |
+| `former-ids propose` | p-main | items | 1 | no | no |
+| `former-ids propose --confirm REQ-x:REQ-y` | p-main | tree | 1 | no | yes |
+| `former-ids propose --confirm REQ-x:REQ-y` | p-main | items | 1 | no | no |
+| `fetch` | p-main | tree | 0 | no | yes |
+| `fetch` | p-main | items | 0 | no | no |
+| `init` | p-main | tree | 2 | no | no |
+| `init` | p-main | items | 2 | no | no |
+| `build --reseal` | p-main | tree | 2 | no | yes |
+| `build --reseal` | p-main | items | 0 | no | no |
+
+Notes on the non-traceback rows worth recording:
+
+- `standard remove-preset` only reaches its writes when the preset is actually
+  selected, hence the second `p-preset` project. On `p-main` it is a
+  configuration error (`is not currently selected`) and never touches disk.
+- `keys adopt`/`keys restore` print `refused:` with the OS's own errno and no
+  traceback, exit 1 — the shape keys.md documents for them. They do **not**
+  carry `(read-only tree?)`, so a CI filter misses them; that is pre-existing
+  and documented behaviour, listed in §6, not changed here.
+- `schema`, `new`, `ls`, `index`, `fetch`, `init` on `items`-only read-only
+  print nothing about it, correctly: they have no write of their own there.
+- `release rel-a` exits 1 on both layouts for an unrelated reason (its
+  readiness gate fails on a project with no test coverage), not a refusal.
+
+Six commands traceback. All six are one class, all six get the same treatment.
+
+
+## 4. Picking the work back up after the crash
+
+The previous session died with uncommitted work in five files. Reviewed each
+diff rather than taking it:
+
+- `model.py`, `history.py`, `calc_rewrite.py` — **kept as-is.**
+  `model.destination_refusal()` is the second stem, and it is the right shape:
+  the load-time sentence has nowhere to name a destination, but a write
+  somebody asked for has to say *which file* would have held it. `history.py`
+  switched its existing message over to it, byte-identical output (verified by
+  diffing the string the function produces against the one that was there).
+- `revise.py` — **kept, and found incomplete in a way that mattered.** See
+  §4.1: the fix it added was correct but the rollback around it was not, and
+  the gap only shows on a whole-tree read-only copy.
+- `stub_tests.py` — **empty file.** `git checkout --` restored it, then the
+  change was re-derived. The crash truncated the file mid-write; the intent is
+  recoverable from §3's `gamma` row and from the report F1 filed.
+
+### 4.1 The defect the crashed session's own fix exposed
+
+With `revise.py`'s diff applied, `revise` still tracebacked on the `tree`
+layout, and the traceback was the interesting kind — the refusal came back out
+of its *own rollback*:
+
+```
+refdes.revise.Refused: cannot write items/alpha/requirements.yaml (read-only tree?) -- ...
+During handling of the above exception, another exception occurred:
+  File "src/refdes/revise.py", line 1474, in _rollback
+    textio.write_text(config_path, config_before)
+PermissionError: [Errno 13] Permission denied: '.../refdes-project.yaml'
+```
+
+Three unconditional writes in the rollback path, each re-attempting a write the
+filesystem had just refused, each on a tree that is read-only by definition:
+
+- `restore_rewrites` wrote every rewrite back, including files this run never
+  changed. Fixed by comparing before writing — the same property
+  `_restore_seal_files` already documented and already relied on. The crashed
+  session had added this one.
+- `_rollback`'s `textio.write_text(config_path, config_before)` did not.
+  `standard upgrade` *does* bump the pin, so the rollback has to put it back —
+  but plain `revise` never wrote the config at all, and on a read-only tree
+  that unconditional write is a `PermissionError` for nothing. Same
+  compare-before-write fix. **This is the one the crashed session was missing,
+  and it is what made `tree` still traceback.**
+- `_restore_seal_files` already compares. Left alone.
+
+### 4.2 The shape each of the six takes, and why
+
+Same class, six different answers — because what each command *is* differs, and
+a single rule would be wrong for at least four of them. Recorded here because
+the reasoning is not visible in the diff:
+
+| command | refusal | exit | why that and not another |
+|---|---|---|---|
+| `revise`, `calc-rewrite`, `standard upgrade` | `refused:` naming the file, whole transaction rolled back | 1 | The rename lands in some files and not others otherwise, which is not a rename. Rollback has to be defined *before* the first write for exactly this reason. |
+| `stub-tests` | `refused:` naming **each** file refused; what landed stays and is reported | 1 | Its files are independent (one per workspace/board, holding only their own scope's stubs) and a written stub is the author's from the moment it exists — `generate()`'s own docstring says a later run "must never touch them". Rolling back would delete the author's work to satisfy a symmetry nothing needs. Recovery is sound: dedup is by declared link, so a re-run after `chmod` picks up exactly the missed stubs. Pinned by a test. |
+| `id` | `project.error()` per refused file; nothing allocated for it | 1 | `allocate()` already had this rule for an id it could not *place* (`insert_into_list` returning None). The filesystem's refusal is the same fact about the same write, so it gets the same treatment rather than a second one. Two sites: the write-back and the ledger, and the ledger needs **different words** because by the time it is written the ids are already on disk and there is nothing to roll back. |
+| `standard add-preset`, `remove-preset` | `error: cannot write refdes-project.yaml (read-only tree?) -- …` | **2** | Not 1: exit 2 is the code these two *already* use for "your config is not what you asked for it to be" (unknown preset → 2, not selected → 2, pinned by `tests/test_exit_codes.py`). A read-only config is one more way to arrive at that same place, and changing the code would break callers branching on it. |
+
+
+## 5. Before / after, on a read-only copy
+
+Both runs from `.scratch/sweep.sh` against the same five projects
+(`.scratch/full/`), whole matrix in `.scratch/sweep-after.txt`. Layouts: `tree`
+= whole tree `chmod -R a-w`; `items` = `items/` + `refdes-project.yaml`
+read-only, `.refdes/` writable; `gamma` = one board's directory;
+`file` = one item file; `refdes` = `.refdes/` only.
+
+| command | layout | before | after |
+|---|---|---|---|
+| `id` | tree | **exit 1, TRACEBACK** | exit 1, `cannot write items/alpha/new.md (read-only tree?)` |
+| `id` | items | **exit 1, TRACEBACK** | exit 1, same |
+| `stub-tests` | tree | **exit 1, TRACEBACK**, no summary | exit 1, three files named |
+| `stub-tests` | items | **exit 1, TRACEBACK**, no summary | exit 1, same |
+| `stub-tests` | gamma | **exit 1, TRACEBACK**, partial write | exit 1, refused file named + what landed reported |
+| `revise mapping.yaml` | tree | **exit 1, TRACEBACK** | exit 1, `refused:` + `rolled back.` |
+| `revise mapping.yaml` | items | **exit 1, TRACEBACK** | exit 1, same |
+| `revise mapping.yaml` | file | exit 1, refused | exit 1, refused (already worked) |
+| `calc-rewrite` (p-calc) | tree | **exit 1, TRACEBACK** | exit 1, refused + rolled back |
+| `calc-rewrite` (p-calc) | items | **exit 1, TRACEBACK** | exit 1, same |
+| `standard upgrade --to 3` | tree | **exit 1, TRACEBACK** | exit 1, refused + rolled back |
+| `standard upgrade --to 3` | items | **exit 1, TRACEBACK** | exit 1, same |
+| `standard add-preset design-debate` | tree | **exit 1, TRACEBACK** | **exit 2**, `error: cannot write refdes-project.yaml (read-only tree?)` |
+| `standard add-preset design-debate` | items | **exit 1, TRACEBACK** | exit 2, same |
+| `standard remove-preset design-debate` (p-preset) | tree | **exit 1, TRACEBACK** | **exit 2**, refused |
+| `standard remove-preset design-debate` (p-preset) | items | **exit 1, TRACEBACK** | exit 2, same |
+
+Verbatim, one per command (`bash .scratch/ro2.sh .scratch/full/<proj> <chmod targets> <cmd>`):
+
+```
+### ro(items,refdes-project.yaml): revise mapping.yaml
+refused:
+  cannot write items/alpha/requirements.yaml (read-only tree?) -- no item file was rewritten and no hash was carried forward, so the tree is exactly as it was found. Make the tree writable and run it again.
+  rolled back.
+[exit=1]
+
+### ro(items,refdes-project.yaml): calc-rewrite
+refused:
+  cannot write items/alpha/dec.md (read-only tree?) -- no item file was rewritten ...
+  rolled back.
+[exit=1]
+
+### ro(items,refdes-project.yaml): standard upgrade --to 3
+v2 -> v3:
+refused:
+  cannot write items/req.md (read-only tree?) -- no item file was rewritten ...
+  rolled back.
+[exit=1]
+
+### ro(items,refdes-project.yaml): id
+ERROR   items/alpha/new.md:2 — cannot write items/alpha/new.md (read-only tree?) -- no id in this file was written back, so none of them were allocated and their numbers stay free. Make the tree writable and run it again.
+allocated 0 id(s)
+[exit=1]
+
+### ro(.refdes): id
+ERROR   <project> — cannot write .refdes/ids.yaml (read-only tree?) -- the id(s) above are on disk, but the ledger that stops a deleted item's number being handed out again was not updated. Make .refdes/ writable and run it again.
+allocated TST-001  (items/alpha/new.md:2) Pending test
+allocated 1 id(s)
+[exit=1]
+
+### ro(items,refdes-project.yaml): standard add-preset design-debate
+error: cannot write refdes-project.yaml (read-only tree?) -- so 'design-debate' was not added and standard.presets: is exactly as it was. Make the tree writable and run it again.
+[exit=2]
+
+### ro(items,refdes-project.yaml): standard remove-preset design-debate
+error: cannot write refdes-project.yaml (read-only tree?) -- so 'design-debate' is still selected. Nothing changed. Make the tree writable and run it again.
+[exit=2]
+```
+
+`stub-tests`, partial shape (`items/gamma/` read-only, the rest writable) —
+the report's sharper case, two of three files landing:
+
+```
+### boardgamma: stub-tests
+refused:
+  cannot write items/gamma/stub-tests.md (read-only tree?) -- no stub was written for REQ-g-PWR-001, REQ-g-PWR-002 in this file. Make the tree writable and run it again; the stubs that did land are not re-emitted.
+wrote 3 stub(s) to items/alpha/stub-tests.md: BND-THM-001, REQ-a-PWR-001, REQ-a-PWR-002
+wrote 2 stub(s) to items/beta/stub-tests.md: REQ-b-PWR-001, REQ-b-PWR-002
+wrote 5 stub test(s) across 2 file(s)
+Run 'refdes id' to allocate ids for the new items.
+[exit=1]
+--- stubs on disk:
+items/alpha/stub-tests.md
+items/beta/stub-tests.md
+```
+
+Whole matrix after: **0 rows with `tb=YES`, out of 52.** Every row that has a
+write of its own to attempt now carries `(read-only tree?)`. Full sweep file:
+`.scratch/sweep-after.txt`; harness left in `.scratch/` (`sweep.sh`, `ro2.sh`,
+`partial.sh`, `mkfull.sh`).
+
+Restoring permissions afterwards was necessary and is recorded here because
+`.scratch/` must stay deletable: the harness's `chmod -R a-w` runs *inside*
+`$W/.scratch/sw-XXXXXX` copies, so a crashed run can leave `sw-*` directories
+mode `555` and `find .scratch -type d -not -writable` turns them up. Fixed
+with `chmod -R u+w .scratch` and the stale copies removed; the sources stay.
+
+
+## 6. Tests
+
+`tests/test_readonly_explicit_writes.py`, 14 tests, one group per command.
+Chmod-based, so each carries `needs_posix_bits`, which skips on Windows and
+as root — the same skip and the same reason as
+`tests/test_citation_path_hygiene.py:135-139` (root ignores the bit, and
+`chmod a-w` does not stop Windows from writing, so the condition cannot be
+produced at all there).
+
+Beyond "does not traceback", the tests pin the things that were easy to get
+subtly wrong:
+
+- `restore_rewrites` / `_rollback` compare before writing — asserted by the
+  whole-tree `revise` and `standard upgrade` tests, which are the only shapes
+  that reach the rollback's own writes. A regression here is invisible to the
+  `items/`-only shape.
+- `stub-tests` keeps what landed, names what did not, prints both, and a
+  **re-run after the tree is writable emits no duplicate** — the last one is
+  the property the whole partial-write design rests on, and it is a separate
+  test because nothing else fails if it breaks.
+- `id` names both halves separately, and `allocated 0 id(s)` with an empty
+  `allocated:` list in the ledger (a number that was never allocated must not
+  be burned).
+- `standard remove-preset` has **two** read-only shapes — the config file
+  (the simulation copy is refused, nothing changed) and a writable directory
+  (the copy is written and deleted, the real write is refused). Same message,
+  different code paths, both tested; the second also asserts no `.scratch`
+  litter.
+- `test_keys_adopt_still_reports_the_operating_system_s_own_reason` pins the
+  *documented exception*: `keys adopt` still reports the `OSError`'s errno and
+  does **not** carry `(read-only tree?)`. Injected rather than chmod'd, so it
+  runs everywhere. It exists so that a future change which adds the marker to
+  those two commands fails a test, and the docs get corrected rather than left
+  claiming a filter catches them.
+
+### 6.1 Sabotage check
+
+`src/` reverted to `HEAD` (`git checkout -- src/refdes/`, after copying the
+fixed tree to `.scratch/src-fixed/` — **no stash**, per AGENTS.md), new tests
+run, tree restored from `.scratch/src-fixed/`:
+
+```
+13 failed, 1 passed
+```
+
+The 13 are every test covering a fixed command. The one that passes is
+`test_keys_adopt_still_reports_the_operating_system_s_own_reason`, which
+asserts **pre-existing** behaviour on purpose — it is the documentation guard,
+not a test of the fix. Nothing else in the file passes against main, so no test
+here is vacuous.
+
+Full suite after restoring: **3160 passed, 2 skipped** (up from 3146 + 2 on
+main — the 14 new tests; the 2 skips are the pre-existing ones).
+
+Ruff, scoped per AGENTS.md to the touched files and the rules that matter
+(`--select E9,F63,F7,F82,F401,I`): 3 findings, all `I001` import-order in
+`calc_rewrite.py:30`, `history.py:48`, `revise.py:28` — verified pre-existing by
+running the same check against `git show HEAD:<file>` copies of all three. Not
+touched, per AGENTS.md's "don't silence unrelated pre-existing findings".
+
+
+## 7. Docs narrowed, not inverted
+
+F1's third point was that the docs contradict each other, and the crashed
+session's log had already worked out the right response: **narrow the claim,
+don't invert the principle.** The tolerance still belongs to writes nobody
+asked for; what was false was the blanket "no command prints a traceback"
+without the command list.
+
+- `docs/cli-reference.md` — the destination table gains four rows (the revise
+  engine's item files, `id`'s write-back and ledger, `stub-tests`, and the two
+  preset commands); `keys adopt`/`keys restore` become an explicit row saying
+  their message does *not* carry the marker; and "Match on `(read-only tree?)`
+  — it is the one string every read-only refusal carries" becomes "almost every
+  … (the two exceptions are called out below)", since `build`'s site-directory
+  refusal was already the third exception and the text was over-claiming by one
+  and by `keys`.
+- `docs/design/keys.md` §2 — the "any other explicit write (`keys adopt`,
+  `keys restore`) | raises, as before" row is the one F1 called out as reading
+  as the complete list of raising commands. Replaced with rows for all six, and
+  the `keys` row now says what it actually does (refuses, exit 1, OS's own
+  reason) instead of "raises".
+- `revise.write_rewrites_verified`'s docstring claimed "Explicit write commands
+  (`revise apply`, `calc-rewrite`, `keys adopt`, `keys restore`) call
+  `write_rewrites` directly and keep raising" — false for the first two since
+  this change. Rewritten to name the two hooks and why they differ.
+- `revise.write_rewrites`'s own docstring said `on_error` left None means "every
+  explicit write command". Also false now; it names which two still leave it
+  None.
+
+Changelog fragment: `changelog.d/readonly-explicit-write-refusals.fixed.md`,
+per `changelog.d/README.md` (kebab slug + category, `- ` bullets, no headings).
+The existing `readonly-seal-baseline-writes.fixed.md` (from #132) says "no
+command prints a traceback because a destination isn't writable", which F1
+quotes as one of the two false claims — left alone, because it was true of what
+#132 changed and this fragment is the one that makes it true of everything. Noted
+here rather than silently rewritten, since rewriting another PR's fragment to
+match a later change is not obviously the right call.
+
+## 8. Status
+
+**Done.** All six commands refuse, no tracebacks anywhere in a 52-row sweep,
+14 new tests (13 of which fail against main), full suite green at 3160 passed /
+2 skipped, docs narrowed in both directions, changelog fragment added.
+
+Not done, deliberately, and for the next session rather than this one:
+
+- `keys adopt` / `keys restore` still report the OS's errno without
+  `(read-only tree?)`. Pre-existing, documented in both files now, and pinned by
+  a test — but a CI filter on that marker still misses them. Making them carry
+  it is a one-line change to each call site if someone decides the marker should
+  be universal; it is not a bug fix, it is a decision about the marker.
+- The `release rel-a` exit-1 rows in the sweep are its readiness gate failing on
+  a project with no test coverage, not a refusal. Unrelated to F1, noted so
+  nobody reads the matrix row as one.
+

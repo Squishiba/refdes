@@ -1210,7 +1210,11 @@ def _standard_project_root(args) -> str:
 def cmd_standard_add_preset(args) -> int:
     if args.no_write:
         return _refuse_no_write("standard add-preset", "refdes-project.yaml")
-    scaffold_mod.add_preset(_standard_project_root(args), args.name)
+    try:
+        scaffold_mod.add_preset(_standard_project_root(args), args.name)
+    except scaffold_mod.Refused as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
     print(f"added preset {args.name!r} to standard.presets:")
     return 0
 
@@ -1218,7 +1222,14 @@ def cmd_standard_add_preset(args) -> int:
 def cmd_standard_remove_preset(args) -> int:
     if args.no_write:
         return _refuse_no_write("standard remove-preset", "refdes-project.yaml")
-    diagnostics = scaffold_mod.remove_preset(_standard_project_root(args), args.name)
+    try:
+        diagnostics = scaffold_mod.remove_preset(_standard_project_root(args), args.name)
+    except scaffold_mod.Refused as exc:
+        # Refused before any of the diagnostics above would have been
+        # reported -- the simulation copy never got written, so there is
+        # nothing to report and the config is untouched.
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
     for d in diagnostics:
         stream = sys.stderr if d.level == "error" else sys.stdout
         print(str(d), file=stream)
@@ -1507,7 +1518,24 @@ def cmd_stub_tests(args) -> int:
     build_mod.build(project, seal_write=False, reseal=False)
     if project.errors:
         return _report(project)
-    written = stub_tests_mod.generate(project, verifier_type=args.type, dry_run=args.dry_run)
+    try:
+        written = stub_tests_mod.generate(project, verifier_type=args.type, dry_run=args.dry_run)
+    except stub_tests_mod.Refused as exc:
+        # Some files landed and some did not, so both halves are reported: the
+        # stubs that are on disk (and the reminder that gives them ids), then
+        # the refusal naming each file the filesystem would not take. Exit 1 --
+        # a run that left work undone is not a clean run, and the files it did
+        # write are a checklist to finish, not a result to bank.
+        for path, ids in exc.written:
+            print(f"wrote {len(ids)} stub(s) to {path}: {', '.join(ids)}")
+        total = sum(len(ids) for _path, ids in exc.written)
+        if total:
+            print(f"wrote {total} stub test(s) across {len(exc.written)} file(s)")
+            print("Run 'refdes id' to allocate ids for the new items.")
+        print("refused:", file=sys.stderr)
+        for e in exc.errors:
+            print(f"  {e}", file=sys.stderr)
+        return 1
     if not written:
         print("no coverable item is missing a verifying test")
         return 0
