@@ -179,7 +179,7 @@ An **imported** target is the one case `keys restore` cannot reach, and the
 report says so by ending differently — no command, and a note about the
 reference itself:
 
-`If it is the same item, restore its original key upstream. This composite reference was written into your file by refdes on a load, not typed by hand — see docs/multi-board.md.`
+`If it is the same item, restore its original key upstream. This composite reference was written into your file by refdes on a load, not typed by hand — see https://squishiba.github.io/refdes/multi-board.html.`
 
 Nothing hand-edited that composite: the load that expanded a bare link you did
 write is what turned it into `DISPLAY-ID@key`, which is why the error can name a

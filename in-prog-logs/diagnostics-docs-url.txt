@@ -1,0 +1,332 @@
+Task: user-facing diagnostics point at repo-relative docs paths a wheel install
+doesn't have. Worktree: /home/jorb/.paseo/worktrees/16msma8v/diagnostics-docs-url
+Branch: (see git log below). Started from a clean tree (`git status` empty at
+0a287de); a previous worker left nothing behind.
+
+Running notes follow, newest section last.
+
+
+## 1. Grepping for user-facing `docs/...` strings (not comments/docstrings)
+
+`rg` is not installed in this environment, so I tokenized with a scratch script
+(`.scratch/find_doc_strings.py`, a `tokenize` pass that drops comments and
+flags docstrings) rather than eyeballing grep hits. Every candidate below was
+then read in context.
+
+User-facing (printed / returned to a browser) string literals naming a
+repo-relative docs path:
+
+| file:line | literal | kind of pointer |
+|---|---|---|
+| `src/refdes/build.py:527` | `"load, not typed by hand — see docs/multi-board.md."` | help pointer |
+| `src/refdes/keys.py:773` | `"them. Run without --no-write, or see docs/design/keys.md."` | help pointer |
+| `src/refdes/links.py:526` | `"or see docs/design/keys.md."` | help pointer |
+| `src/refdes/links.py:963` | `"or see docs/design/keys.md."` | help pointer |
+| `src/refdes/links.py:1157` | `"or see docs/design/keys.md."` | help pointer |
+| `src/refdes/configcheck.py:102` | `BOARDS_DOC = "docs/multi-board.md"` | help pointer |
+| `src/refdes/configcheck.py:103` | `WORKSPACES_DOC = "docs/workspaces.md"` | help pointer |
+| `src/refdes/cli.py:1668` | `"'--no-write' skips them entirely (docs/design/keys.md §2)."` | help pointer, in `refdes check --help` |
+
+Considered and **deliberately left alone**, with reasons:
+
+- `src/refdes/cli.py:797` — `refdes audit` prints "see finding 10 part 2,
+  docs/design/keys.md." "finding 10 part 2" is issue #6's finding numbering, a
+  repo-internal artifact with no meaning outside a checkout. Swapping the path
+  for a URL would leave a dangling repo-only reference in a *user-facing*
+  message, which is strictly worse than the repo-relative path it replaces.
+  This is a developer citation, like the comments the task told me to keep.
+- `src/refdes/serve/upload.py:91, 494, 534, 570, 590` — real user-facing
+  strings (HTTP refusal bodies shown in the browser editor), but each citation
+  is design *rationale* ("... — one misconfiguration away from executing
+  (docs/design/editor-image-upload.md §6)"), not a place to go for help. A URL
+  spliced into the middle of that prose is longer and reads worse, and the §N
+  section numbers have no HTML-anchor equivalent to translate. Out of scope for
+  "point the reader at where to fix it"; noted here so the decision is on the
+  record rather than an oversight.
+- `src/refdes/lifecycle.py:45` and `src/refdes/history.py:109` — `# docs/lifecycle.md.`
+  and `# item at capture time (docs/design/living-notes.md §3).` are comments
+  *written into generated files* (a stamped baseline, a captured log file).
+  They are file contents, not diagnostics printed at the user, and a comment
+  inside a committed YAML artifact is read by whoever opens that file in the
+  project it lives in.
+- Everything else the grep surfaced is a module/class/function docstring or a
+  `#` comment — developer-facing, left verbatim per the task.
+
+## 2. The URL mapping (verified, not assumed)
+
+`.github/workflows/docs.yml` runs `refdes build` in `docs-site/` and uploads
+`docs-site/../_docs` — i.e. the repo-root `_docs/`, which `.gitignore` keeps
+out of the tree. `docs-site/refdes-project.yaml` sets `site.out: ../_docs` and
+`site.pages: ../docs`, so **every** `.md` under `docs/` is a page in that build.
+
+I ran the build locally (from `docs-site/`, with
+`PYTHONPATH=<worktree>/src python -m refdes.cli build`) and listed
+`_docs/**/*.html` to see the real filenames rather than guess them. Two things
+came out of that:
+
+- A top-level `docs/<page>.md` renders to `<page>.html`, matching the existing
+  `DOCS_URL` use in `cmd_init` (`{DOCS_URL}/parts.html#...`).
+- **`docs/design/*.md` are published too, but flattened**: `docs/design/keys.md`
+  becomes `design-keys.html`, not `design/keys.html`. They also appear in the
+  rendered nav (`_docs/index.html` links `design-keys.html` and 25 siblings),
+  because `site.nav:`'s own comment says "Anything not listed falls in after
+  these, alphabetically."
+
+So a `docs/design/keys.md` URL *would* resolve — `design-keys.html` exists in
+the build. I still did not use it, for two reasons: it is a design doc aimed at
+contributors, not the user docs a person chasing a lost key wants, and the task
+says to point at the nearest *published user-facing* page for the same topic.
+
+Page chosen for the four `docs/design/keys.md` pointers:
+**`troubleshooting.html#surrogate-keys`** (`docs_url.SURROGATE_KEYS_DOCS`). That
+page's own nav has a top-level `## Surrogate keys` section — verified as
+`id="surrogate-keys"` in `_docs/troubleshooting.html` — and it is the page the
+docs already cross-link to for exactly this material (`docs/multi-board.md`
+points readers at `troubleshooting.md#surrogate-keys` for the imported-lost-key
+case). It covers composite form, `refdes keys restore`, and the "why is a
+composite I never typed failing" question, which is what all four messages are
+answering.
+
+Pages for the other two, direct 1:1 mappings, both verified present in the
+build: `_docs/multi-board.html` and `_docs/workspaces.html`.
+
+Anchor scheme, confirmed against the one URL already in the tree: heading text
+lowercased, non-alphanumerics collapsed to `-` — `### Candidate parts: the
+recommended layout` becomes `id="candidate-parts-the-recommended-layout"`, which
+is exactly the fragment `cmd_init` uses. Backticks around a heading (`## \`refdes
+keys restore\``) become plain hyphens: `id="refdes-keys-restore"`.
+
+Verification of all three URLs, twice over. `.scratch/verify_docs_urls.py` builds
+`docs-site/` and then, for each constant, asserts (a) the `.html` is in `_docs/`,
+(b) the fragment, if any, is a real `id=` in that page, and (c) the page is
+`href`-linked from the rendered nav on `index.html` so it is reachable rather
+than merely present. It runs `parts.html#candidate-parts-the-recommended-layout`
+as a control on the anchor scheme. Result: no failures. Against the **live**
+site: `curl` gives HTTP 200 for `troubleshooting.html`, `multi-board.html` and
+`workspaces.html`, and the deployed `troubleshooting.html` really does carry
+`id="surrogate-keys"`.
+
+Note `pyproject.toml`'s `[project.urls] Documentation` is the same base URL, so
+`DOCS_URL` has a second, independent source of truth agreeing with it.
+
+
+## 4. Where DOCS_URL lives now
+
+New `src/refdes/docs_url.py`: the base URL, its comment (moved there whole), and
+one named constant per page the diagnostics point at, so the page-to-URL mapping
+is in one file rather than spelled out at each call site.
+`build.py`, `keys.py`, `links.py` and `configcheck.py` each `from . import docs_url
+as docs_url_mod`; none of them imports `cli`, so there is no cycle. `cli` imports
+it and does `DOCS_URL = docs_url_mod.DOCS_URL`, so `from refdes.cli import
+DOCS_URL` keeps working for `cmd_init` and for anything else importing it.
+
+Verified by importing each of `refdes.build`, `refdes.keys`, `refdes.links`,
+`refdes.configcheck`, `refdes.docs_url`, `refdes.cli` standalone in a fresh
+interpreter (a cycle would blow up on the first of them), and by asserting
+`cli.DOCS_URL is docs_url.DOCS_URL`.
+
+Note on naming: the log above first wrote the constant name as `DOCS_SURROGATE_KEYS`;
+the shipped name is `SURROGATE_KEYS_DOCS`, matching `MULTI_BOARD_DOCS` /
+`WORKSPACES_DOCS` so the three read as one set.
+
+
+## 5. Every changed message, and how it was reproduced
+
+All reproduced by running the CLI as a subprocess
+(`.scratch/repro_imported_lost_key.py`, `.scratch/repro_other_messages.py`), not
+by calling the formatter. Verbatim output after the change:
+
+**(a) `build.py`, imported lost key** — the end-to-end scenario from
+`tests/test_keys_restore.py::test_external_lost_key_diagnostic_names_the_composite_as_tool_written`:
+upstream artifact with a key, a bare `refines` in the downstream author's own
+file, one ordinary writable `check` expanding it in place, upstream key then
+regenerated. Second `check` exits 1:
+
+```
+ERROR   items/source.yaml:3 [REQ-002] — refines points at key 'a88wf8r7ej2' (labelled REQ-IMP-001), which no item declares. A live item labelled REQ-IMP-001 declares key '8syfpfr9qkm'. Its key may have been lost and regenerated, or the label may now name a different item. The label is not used as a fallback. Check git history to confirm identity. If it is the same item, restore its original key upstream. This composite reference was written into your file by refdes on a load, not typed by hand — see https://squishiba.github.io/refdes/multi-board.html.
+```
+
+Before, the same run ended `… not typed by hand — see docs/multi-board.md.` The
+diagnostic reporter does not wrap, so the URL stays on the one line.
+
+**(b) `configcheck`, `boards:`** — exit 2, `refdes check`:
+
+```
+configuration error: refdes-project.yaml: boards.main.root is not valid -- a boards: entry takes conforms_to, includes, label, path, token. See https://squishiba.github.io/refdes/multi-board.html.
+```
+
+**(c) `configcheck`, `workspaces:`** — exit 2:
+
+```
+configuration error: refdes-project.yaml: workspaces.hw.members is not valid -- a workspaces: entry takes label, path, shared. See https://squishiba.github.io/refdes/workspaces.html.
+```
+
+**(d) `keys._report_missing`** — virgin project, `--no-write check -v` (info
+lines are hidden without `-v`, which cost me one false start):
+
+```
+INFO    <project> — 2 items have no key yet; the next writable command will mint them. Run without --no-write, or see https://squishiba.github.io/refdes/troubleshooting.html#surrogate-keys.
+```
+
+**(e) `links._report_missing` / `_report_missing_checks` /
+`_report_missing_calc_refs`** — one project, all three at once. Note the warm-up
+these need: a bare target cannot be expanded while it carries no key, and
+`--no-write` mints none, so my first attempt printed nothing but the keys line.
+A writable `check` first (mints keys, expands all three sites), then stripping
+`@<11 chars>` back off by hand leaves the targets keyed and the references bare,
+which is the state those three messages are about. `--no-write check -v`:
+
+```
+INFO    <project> — 2 link references have not been expanded to the composite form yet; the next writable command will expand them. Run without --no-write, or see https://squishiba.github.io/refdes/troubleshooting.html#surrogate-keys.
+INFO    <project> — 1 check reference has not been expanded to the composite form yet; the next writable command will expand them. Run without --no-write, or see https://squishiba.github.io/refdes/troubleshooting.html#surrogate-keys.
+INFO    <project> — 1 calc reference has not been expanded to the composite form yet; the next writable command will expand them. Run without --no-write, or see https://squishiba.github.io/refdes/troubleshooting.html#surrogate-keys.
+```
+
+Getting (e)'s `checks:` line at all also needed the block form
+`checks:\n  - value: I\n    against: BND-001\n`. The flow-mapping form
+`checks: [{value: I, against: BND-001}]` in an item's own front matter did not
+expand — I did not chase down why, and it is unrelated to this change.
+
+**(f) `refdes check --help`** — description ends:
+
+```
+completion schema. Those are reported as they happen, and '--no-write' skips
+them entirely
+(https://squishiba.github.io/refdes/troubleshooting.html#surrogate-keys).
+```
+
+Every one of these outputs contains no `docs/` path; the repro scripts assert
+that where they can.
+
+After the change, a fresh tokenize pass over `src/refdes/` finds seven remaining
+`docs/`-bearing non-docstring literals, all in the "considered and left alone"
+list in section 1: `cli.py:796`, `history.py:109`, `lifecycle.py:45`, and the five
+`serve/upload.py` ones. Nothing that is a help pointer survives.
+
+
+## 6. Tests, docs, checks
+
+Tests updated for exact-equality pins: `tests/test_config_unknown_keys.py`
+(three assertions, including the `message.endswith(...)` one) and
+`tests/test_keys_restore.py` (three). I swept the whole `tests/` tree rather
+than just those two files — grepping for the message text, for `docs/multi-board`,
+`docs/workspaces`, `design/keys.md` and the `--no-write` phrasing — and the only
+other hits are in docstrings/comments. `tests/test_keys.py`'s
+`assert "2 items have no key yet" in info[0].message` pins only the prefix,
+which did not change, so it was left alone.
+
+Docs quoting a changed message: `docs/troubleshooting.md:182`,
+`docs/multi-board.md:337-344` (both quote the imported-lost-key error verbatim),
+and `docs/design/keys.md:415-419`, which quotes the `keys._report_missing` line.
+Those three were the only verbatim quotes — I checked with a grep for each
+message's distinctive text across `docs/` and `CHANGELOG.md`.
+
+Full suite: `python -m pytest tests/ -q -p no:randomly` → **2861 passed, 2
+skipped**. Run again after the doc edits, same result.
+
+Ruff, scoped to the files I touched (`docs_url.py` new; `cli.py`, `build.py`,
+`keys.py`, `links.py`, `configcheck.py`, `test_config_unknown_keys.py`,
+`test_keys_restore.py`): 2 × `I001` in `build.py`/`links.py` and 4 × `RUF059` in
+`test_keys_restore.py` — I checked each of those against the same files at `HEAD`
+and every one is pre-existing (they are about `from . import calc, dates, history
+as history_mod, imports, seal` and `from . import textio` lines I never touched,
+and unused unpacked variables in fixtures I never touched). Per AGENTS.md I left
+them; silencing them would be unrelated churn. `ruff check src/refdes/docs_url.py`
+is clean.
+
+Also ran what the docs CI runs: `python docs-site/gen_examples.py --check` →
+`docs/schema-reference.md is up to date. docs/vocabulary.md is up to date.`
+
+
+## Status
+
+Commit 1 done: diagnostics point at published URLs, `DOCS_URL` relocated to
+`docs_url.py`, tests and the three quoting docs updated, full suite green, ruff
+adds nothing new.
+
+
+## 7. Commit 2: the stale "Imports have no key to expand into" bullet
+
+`docs/design/keys.md:115-119`, in the "What §3/§5 turned out to need beyond the
+spec" list, claimed: *"A link to an item from another, imported project can never
+be composite-expanded, because `imports.py`'s payload doesn't carry a `key` field
+today."* Both halves of that are false. Verified before editing anything.
+
+**Static, the two ends of the contract:**
+- export: `src/refdes/render.py:641` — `"key": item.key or None,` in the
+  `items.json` entry, nullable and always-present on purpose.
+- import: `src/refdes/imports.py:64-65` reads `raw.get("key")`, `:67` validates it
+  through `keys.malformed_key_message`, `:96` carries it into the `Item`, and
+  `:118-122` indexes the item by that key
+  (`project.add_item(item, item.key or provisional_handle(item))`) rather than by a
+  provisional handle — with a comment at `:118` saying exactly that.
+
+**Observable, two real projects driven through the CLI**
+(`.scratch/verify_imports_key_claim.py`, subprocess `refdes build` then
+`refdes check`):
+
+- upstream `refdes build` writes `_site/items.json` whose `REQ-PWR-001` entry has
+  `key: x4pd6a4yy8v`;
+- a downstream project importing that artifact, holding a bare
+  `refines: [REQ-PWR-001]`, runs one plain `refdes check` — exit 0, reporting
+  `(minted 1 key(s) and rewrote 1 reference(s) while loading)` — and afterwards
+  the downstream author's own file reads
+  `refines: [REQ-PWR-001@x4pd6a4yy8v]`, the key half being the *upstream* key.
+
+Two things I got wrong on the way there, so the log records them: `interface` is
+not a hardware@3 type (it was hardware@2 — `refdes schema` on the throwaway
+project and `src/refdes/standards/hardware/v3/base.yaml` both give the seven
+types: requirement, bound, decision, test, component, group, log), and the
+downstream config has to point at the upstream project's *built* artifact
+(`../<proj>/_site/items.json`), not at a path I invented.
+
+The correction follows the convention the neighbouring `checks:` bullet already
+uses (`:83`, "**Closed 2026-09-14**"): the original bullet stays as the record of
+the defect as found, and a `**Closed 2026-10-01**` paragraph underneath states the
+implemented state with `file:line` citations and points at §8's "A bonus: imports"
+(`docs/design/keys.md:1225`) for the long form and the collision rules. The doc's
+own implementation-status paragraph at `:17` never listed this as open, so it
+needed no edit.
+
+**Changelog fragment: none, deliberately.** `changelog.d/README.md` asks for one
+per change that "deserves a changelog entry". The behaviour this corrects is
+already covered by a pending fragment, `changelog.d/import-keys.added.md` ("Imported
+`items.json` artifacts now carry surrogate keys, so cross-project links freeze to
+`DISPLAY-ID@key`, …"). This commit changes no behaviour at all — it corrects a
+sentence in a design doc that contradicted both that fragment and §8 of the same
+file — so a second fragment would restate an entry that already exists. A grep of
+`docs/`, `src/` and `tests/` for the bullet's wording found no other place making
+the same claim, so nothing else needed correcting.
+
+Full suite after commit 2: 2861 passed, 2 skipped. `docs-site` still builds
+(`0 items, 0 errors, 4 warnings` — the same four pre-existing warnings as before
+my changes), and I confirmed the corrected bullet renders: `_docs/design-keys.html`
+contains `Closed 2026-10-01`, `render.py:641`, `imports.py:64-65` and the
+`REQ-PWR-001@` example.
+
+
+## Final state
+
+Two commits on `diagnostics-docs-url`, both verified by running, both against a
+full green suite. Nothing left undone.
+
+
+
+
+## 3. Reproducing the build.py diagnostic before changing it
+
+`.scratch/repro_imported_lost_key.py` builds the same shape as
+`tests/test_keys_restore.py::test_external_lost_key_diagnostic_names_the_composite_as_tool_written`
+in a throwaway project (upstream artifact with a key → a bare `refines` in the
+downstream author's own file → one ordinary writable `refdes check` expands it
+in place → upstream key regenerated) and prints the real output. The first
+`check` exits 0 and leaves `refines: [REQ-IMP-001@52d8eg0pbv6]` in the
+downstream file; the second exits 1 with, verbatim (one unwrapped line — the
+diagnostic reporter does not wrap, so a URL substitution stays on one line):
+
+```
+ERROR   items/source.yaml:3 [REQ-002] — refines points at key '52d8eg0pbv6' (labelled REQ-IMP-001), which no item declares. A live item labelled REQ-IMP-001 declares key '8fy928edftm'. Its key may have been lost and regenerated, or the label may now name a different item. The label is not used as a fallback. Check git history to confirm identity. If it is the same item, restore its original key upstream. This composite reference was written into your file by refdes on a load, not typed by hand — see docs/multi-board.md.
+```
+
+That is the line the change has to improve, reproduced before the edit so the
+"after" has something to be compared against.

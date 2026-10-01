@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING
 
 from . import chains as chains_mod
 from . import dates
+from . import docs_url as docs_url_mod
 from . import history as history_mod
 from . import keys as keys_mod
 from . import parse as parse_mod
@@ -523,7 +524,7 @@ def _report_missing(project: Project, count: int) -> None:
     project.info(
         f"{count} link {noun} not been expanded to the composite form yet; "
         "the next writable command will expand them. Run without --no-write, "
-        "or see docs/design/keys.md."
+        f"or see {docs_url_mod.SURROGATE_KEYS_DOCS}."
     )
 
 
@@ -960,7 +961,7 @@ def _report_missing_checks(project: Project, count: int) -> None:
     project.info(
         f"{count} check {noun} not been expanded to the composite form yet; "
         "the next writable command will expand them. Run without --no-write, "
-        "or see docs/design/keys.md."
+        f"or see {docs_url_mod.SURROGATE_KEYS_DOCS}."
     )
 
 
@@ -1154,5 +1155,5 @@ def _report_missing_calc_refs(project: Project, count: int) -> None:
     project.info(
         f"{count} calc {noun} not been expanded to the composite form yet; "
         "the next writable command will expand them. Run without --no-write, "
-        "or see docs/design/keys.md."
+        f"or see {docs_url_mod.SURROGATE_KEYS_DOCS}."
     )

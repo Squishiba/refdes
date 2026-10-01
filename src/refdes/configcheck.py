@@ -33,6 +33,7 @@ from __future__ import annotations
 import difflib
 from typing import Any
 
+from . import docs_url as docs_url_mod
 from . import theme as theme_mod
 from .model import ON_CHANGE_MODES, SchemaError
 
@@ -98,9 +99,10 @@ EQUATION_KEYS = frozenset({"params", "expr", "note"})
 # is docs/multi-board.md, and `workspaces:` is its own page -- multi-board.md
 # mentions workspaces twice but only ever as a link onward, and never names a
 # key of the block. Two pointers, not one, because a doc pointer is only worth
-# having if the page it names actually documents the block.
-BOARDS_DOC = "docs/multi-board.md"
-WORKSPACES_DOC = "docs/workspaces.md"
+# having if the page it names actually documents the block. Published URLs
+# rather than repo-relative paths, because the wheel ships no .md files.
+BOARDS_DOC = docs_url_mod.MULTI_BOARD_DOCS
+WORKSPACES_DOC = docs_url_mod.WORKSPACES_DOCS
 
 
 def _got(value: Any) -> str:

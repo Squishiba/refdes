@@ -259,7 +259,7 @@ def test_board_unknown_key_points_at_the_multi_board_doc(tmp_path):
     _write(tmp_path, "boards:\n  main:\n    root: something\n")
     message = _error(tmp_path)
     assert "boards.main.root is not valid" in message, message
-    assert "See docs/multi-board.md." in message, message
+    assert "See https://squishiba.github.io/refdes/multi-board.html." in message, message
 
 
 def test_workspace_unknown_key_points_at_the_workspaces_doc(tmp_path):
@@ -269,7 +269,7 @@ def test_workspace_unknown_key_points_at_the_workspaces_doc(tmp_path):
     _write(tmp_path, "item_layout: workspace\nworkspaces:\n  hw:\n    members: [a]\n")
     message = _error(tmp_path)
     assert "workspaces.hw.members is not valid" in message, message
-    assert "See docs/workspaces.md." in message, message
+    assert "See https://squishiba.github.io/refdes/workspaces.html." in message, message
     assert "multi-board" not in message, message
 
 
@@ -279,7 +279,9 @@ def test_the_pointer_survives_the_also_unknown_clause(tmp_path):
     _write(tmp_path, "boards:\n  main:\n    rot: a\n    labl: b\n")
     message = _error(tmp_path)
     assert "Also unknown:" in message, message
-    assert message.endswith("See docs/multi-board.md."), message
+    assert message.endswith(
+        "See https://squishiba.github.io/refdes/multi-board.html."
+    ), message
 
 
 def test_other_blocks_get_no_doc_pointer(tmp_path):

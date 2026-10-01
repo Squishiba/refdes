@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING
 
 import yaml
 
+from . import docs_url as docs_url_mod
 from . import ids as ids_mod
 from . import textio
 from .model import Diagnostic, Item, Project
@@ -770,5 +771,5 @@ def _report_missing(project: Project, count: int) -> None:
     noun = "item has" if count == 1 else "items have"
     project.info(
         f"{count} {noun} no key yet; the next writable command will mint "
-        "them. Run without --no-write, or see docs/design/keys.md."
+        f"them. Run without --no-write, or see {docs_url_mod.SURROGATE_KEYS_DOCS}."
     )

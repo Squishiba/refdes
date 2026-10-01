@@ -118,6 +118,31 @@ check is gone.
   here -- closing it means extending the cross-project export/import
   contract, a separate change with its own collision considerations.
 
+  **Closed 2026-10-01.** The premise is gone: the payload does carry a key,
+  on both ends of the contract. `render._items_json` exports it as a
+  nullable, always-present field -- `render.py:641`, `"key": item.key or
+  None` -- and `imports._absorb` reads it back at `imports.py:64-65`,
+  validates it with `keys.malformed_key_message` (`imports.py:67`), carries
+  it into the `Item` it builds (`imports.py:96`), and indexes the imported
+  item by that key rather than by a provisional handle
+  (`imports.py:118-122`). An artifact with no `key` field at all is still
+  accepted, on its provisional handle, which is what keeps older artifacts
+  readable.
+
+  So the separate change this bullet called for has already landed, and the
+  consequence it said could not happen does happen: an ordinary **writable**
+  load in the downstream project expands a bare cross-project link to
+  `DISPLAY-ID@key` *in the downstream author's own file*. Verified
+  end-to-end through the CLI, two real projects: an upstream `refdes build`
+  writes `_site/items.json` with `key: x4pd6a4yy8v` for `REQ-PWR-001`; a
+  downstream project importing it and holding a bare `refines: [REQ-PWR-001]`
+  gets `(minted 1 key(s) and rewrote 1 reference(s) while loading)` and
+  `refines: [REQ-PWR-001@x4pd6a4yy8v]` on disk afterwards -- the composite's
+  key half is the upstream key, not a downstream one. §8's "A bonus: imports"
+  is the long-form version of this, including the collision rules (keys are
+  unique across the local project *and* every imported artifact; display ids
+  still have to be unique across every project you import).
+
 ---
 
 ### Why this is the root fix
@@ -415,7 +440,8 @@ Reporting: one project-level `info` line, not one per item —
 
 ```
 INFO    <project> — 12 item(s) have no key yet; the next writable command will
-        mint them. Run without --no-write, or see docs/design/keys.md.
+        mint them. Run without --no-write, or see
+        https://squishiba.github.io/refdes/troubleshooting.html#surrogate-keys.
 ```
 
 `info`, not `warning`, because under `--no-write` it is the expected and
