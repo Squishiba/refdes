@@ -60,7 +60,16 @@ def _write_malformed(path: Path) -> None:
 
 
 def test_real_loaders_keep_main_malformed_yaml_behavior(tmp_path):
-    """Clean-main probe: every loader raised YAMLError, except is_adopted=False."""
+    """Clean-main probe: every loader raised YAMLError, except is_adopted=False.
+
+    One exception, and it is the point rather than an accident: the citation
+    lockfile now raises `citations.LockfileError`, which wraps the YAMLError in
+    a message naming the file and the line. A raw YAMLError out of
+    `load_lockfile` was finding F5 in
+    `in-prog-logs/remote-fetch-exercise.md` -- a traceback out of `fetch` and
+    `check` for a committed, hand-mergeable file. See
+    `tests/test_lockfile_corruption.py` for what each shape says now.
+    """
     write_project_config(tmp_path, COVERAGE_SCHEMA)
     project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
 
@@ -77,8 +86,10 @@ def test_real_loaders_keep_main_malformed_yaml_behavior(tmp_path):
         ids.load_ledger(project)
 
     _write_malformed(Path(citations.lockfile_path(project)))
-    with pytest.raises(yaml.YAMLError):
+    with pytest.raises(citations.LockfileError) as lockfile_error:
         citations.load_lockfile(project)
+    assert citations.LOCKFILE in str(lockfile_error.value)
+    assert "is not valid YAML" in str(lockfile_error.value)
 
     _write_malformed(Path(lifecycle.baseline_path(project, "probe")))
     with pytest.raises(yaml.YAMLError):

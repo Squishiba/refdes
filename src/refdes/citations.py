@@ -44,6 +44,7 @@ import hashlib
 import io
 import os
 import posixpath
+import re
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -58,7 +59,7 @@ from . import calc as calc_mod
 from . import sources as sources_mod
 from . import textio
 from .model import CitationSpec, CitationStatus, Item, PartUsage, Project
-from .parse import yaml_safe_load
+from .parse import _yaml_error_report, yaml_safe_load
 
 LOCKFILE = ".refdes/citations.yaml"
 COPIES_DIR = ".refdes/copies"
@@ -477,14 +478,506 @@ def resolve_sections(
 
 # --------------------------------------------------------------------- lockfile
 
+# What `fetch_all` writes for every citation it pins, minus the optional
+# blocks (`sections`/`sections_sha256`, `values` for a calc source, and the
+# page-count pair below). The first three are required of a record because each
+# one is a fact nothing else in the file can supply: the pin itself, when it was
+# taken, and whether the bytes were kept. `bytes` is written too but only ever
+# displayed, so a record without it is stale rather than unreadable.
+_LOCKFILE_REQUIRED = ("sha256", "fetched", "kept_copy")
+
+# The page count of the pinned bytes, or why there is none. Written only for a
+# cited path some item gives a `page:` to, and written by `fetch_all` as
+# `record["page_count"] = counted` / `record["page_count_error"] = why` in one
+# `if`/`elif`, so exactly one of the two is ever present. Spelled out here
+# because `_record_problem` has to name both -- it is what rejects a record
+# carrying both, and a count that is not a number reads as no count at all.
+PAGE_COUNT_KEY = "page_count"
+PAGE_COUNT_ERROR_KEY = "page_count_error"
+
+# A sha256 as `hashlib.sha256().hexdigest()` writes it: lowercase hex, always
+# 64 characters. `lockfile_text` quotes an all-digit one so YAML reads it back
+# as a string, so a record whose sha256 arrived as an int or a short string did
+# not come out of `refdes fetch`.
+_SHA256_RE = re.compile(r"\A[0-9a-f]{64}\Z")
+
+# git's three conflict markers, at column 0 exactly as git writes them (checked
+# there rather than anywhere in the line, so an indented block scalar in some
+# record's `values` cannot be mistaken for one).
+_MERGE_MARKERS = ("<<<<<<<", "=======", ">>>>>>>")
+
+
+class LockfileError(Exception):
+    """`.refdes/citations.yaml` is present but is not readable as a lockfile.
+
+    Carries `message` (the sentence, without the file name -- a diagnostic puts
+    the file and line in its own columns) and `line` where the shape gives one.
+    `str(exc)` is the whole thing with both, which is what a caller refusing
+    the file prints.
+
+    Raised rather than returned as `{}` because those two states are not the
+    same and must not be confused: no lockfile means this project has pinned
+    nothing, which is ordinary; an unreadable one means every pin in it is
+    unknown, which is the whole provenance record gone. A reader that swallowed
+    this would report each citation `unpinned` -- a confident false statement
+    from a file it never read -- and `refdes fetch` would overwrite the pins
+    along with it.
+    """
+
+    def __init__(self, message: str, line: int | None = None):
+        super().__init__(message)
+        self.message = message
+        self.line = line
+
+    def __str__(self) -> str:
+        where = f"{LOCKFILE}:{self.line}" if self.line else LOCKFILE
+        return f"{where}: {self.message}"
+
+
+def _yaml_kind(value: object) -> str:
+    """How to name what a YAML node turned out to be, in a message about it."""
+    if value is None:
+        return "nothing"
+    if isinstance(value, bool):
+        return "a boolean"
+    if isinstance(value, int):
+        return "an integer"
+    if isinstance(value, float):
+        return "a number"
+    if isinstance(value, str):
+        return "a string"
+    if isinstance(value, list):
+        return "a list"
+    return f"a {type(value).__name__}"
+
+
+def _restore_remedy(what: str) -> str:
+    """The second half of every lockfile message: what to do, and what it costs.
+
+    `what` is the shape's own answer (rewrite the record, rewrite the block),
+    and the two facts after it are the same for all of them. The file is
+    committed (`docs/cli-reference.md`, "Files the tool writes"), so `git
+    checkout` puts the pins back exactly as they were; re-pinning instead
+    downloads every cited document again, because a pin is only ever a hash of
+    bytes just fetched and refdes sends no conditional request to avoid that.
+    """
+    return (
+        f"{what}, or restore it as committed with `git checkout -- {LOCKFILE}` "
+        f"-- re-pinning it downloads every cited document again"
+    )
+
+
+_MERGE_REMEDY = (
+    "Two branches both ran `refdes fetch` into this committed file and the "
+    "merge was never finished by hand: each side's hashes are of bytes fetched "
+    "on a different day, so neither is wrong and taking the wrong one is "
+    "silent. `git checkout --ours " + LOCKFILE + "` (or `--theirs`) takes one "
+    "side, and `refdes fetch --update` afterwards regenerates every entry, "
+    "re-downloading each cited document"
+)
+
+
+def _conflict_marker(text: str) -> tuple[int, str] | None:
+    """`(line, marker)` for the first unresolved-merge marker, or None.
+
+    Checked before parsing, not after: a file carrying `<<<<<<< HEAD` does not
+    reliably fail to parse at all, and where it does PyYAML reports the
+    failure a line or two below the marker and calls it a mapping problem --
+    which sends whoever reads the diagnostic to the wrong line of a merge that
+    is one `git checkout` from being over. Two branches that both ran `refdes
+    fetch` produce exactly this, in the one file both branches are expected to
+    have written.
+    """
+    for number, line in enumerate(text.split("\n"), start=1):
+        if line.startswith(("<<<<<<<", ">>>>>>>")) or line.rstrip() == "=======":
+            return number, line.strip()
+    return None
+
+
+def _key_line(text: str, *keys: str) -> int | None:
+    """The line the value at `keys` starts on, or None if the text has no such key.
+
+    A second parse, and only ever on the error path: the loader that reports the
+    problem (`yaml_safe_load`) builds plain dicts and throws the marks away,
+    while the message has to name a line the reader can go and look at. That is
+    worth one extra parse of a file already known to be broken.
+    """
+    try:
+        node = yaml.compose(text, Loader=yaml.SafeLoader)
+    except yaml.YAMLError:
+        return None
+    for key in keys:
+        if not isinstance(node, yaml.MappingNode):
+            return None
+        for key_node, value_node in node.value:
+            if getattr(key_node, "value", None) == key:
+                node = value_node
+                break
+        else:
+            return None
+    return node.start_mark.line + 1
+
+
+def _duplicate_key(text: str) -> tuple[str, int, int, bool] | None:
+    """`(key, first_line, second_line, whether anything is lost)` for the first
+    repeated key in any mapping, or None.
+
+    Walked over the composed node tree rather than the loaded mapping, because
+    loading is exactly where the repeat is lost: YAML resolves a mapping with a
+    repeated key to the *last* one and says nothing, so two records for one
+    cited path read as though only one was ever pinned. Nothing downstream can
+    notice that, `refdes fetch` included -- it rewrites the file from the mapping
+    it loaded, so the record that lost would simply not be written back, and
+    there is no second file to diff against. This is the shape a bad merge
+    leaves when two branches each pinned the same URL and the resolution pasted
+    both blocks in, so it is reported like the merge it almost always is.
+
+    `_key_line` already pays for one extra parse of a file known to be broken;
+    this reuses the same `compose` call it makes.
+    """
+    try:
+        node = yaml.compose(text, Loader=yaml.SafeLoader)
+    except yaml.YAMLError:
+        # Already reported, more accurately, by the parse above.
+        return None
+    if node is None:
+        return None
+
+    # An alias can make a node its own ancestor (`&a {b: *a}`), so the walk
+    # carries the nodes it has been through rather than trusting the composed
+    # tree to be a tree.
+    seen: set[int] = set()
+
+    def walk(current: object) -> tuple[str, int, int, str] | None:
+        if isinstance(current, yaml.MappingNode):
+            if id(current) in seen:
+                return None
+            seen.add(id(current))
+            firsts: dict[str, tuple[int, object]] = {}
+            for key_node, value_node in current.value:
+                key = getattr(key_node, "value", None)
+                if not isinstance(key, str):
+                    continue
+                line = key_node.start_mark.line + 1
+                if key not in firsts:
+                    firsts[key] = (line, value_node)
+                    continue
+                # Whether anything is lost needs the two values compared, and a
+                # repeat that agrees with itself is still a mistake -- but
+                # reporting that as a dropped record when it is a dropped copy of
+                # the same one would be the one wrong thing in a message whose job
+                # is to be believed (parse.py says the same about item front
+                # matter). Only the fact is returned; the wording is the
+                # caller's, which is where the lines are in hand too.
+                first_line, first_node = firsts[key]
+                return key, first_line, line, not _node_equal(first_node, value_node)
+            for _, value_node in current.value:
+                found = walk(value_node)
+                if found is not None:
+                    return found
+        elif isinstance(current, yaml.SequenceNode):
+            if id(current) in seen:
+                return None
+            seen.add(id(current))
+            for child in current.value:
+                found = walk(child)
+                if found is not None:
+                    return found
+        return None
+
+    return walk(node)
+
+
+def _node_equal(left: object, right: object, depth: int = 0) -> bool:
+    """Whether two composed nodes are the same value, structurally.
+
+    Compared here rather than by re-serializing both nodes and comparing the
+    text: this runs on a file already known to be corrupt, and a comparison that
+    can raise on the malformed input would be a worse outcome than the duplicate
+    report it feeds. `depth` stops a mutually recursive pair of aliases
+    (`&a [*a]` against `&b [*b]`) from recursing forever -- two documents that
+    differ only by anchor *names* are the same value here, which is the reading
+    that matches what the loader does with them.
+    """
+    if depth > 64:
+        return True
+    if isinstance(left, yaml.ScalarNode) and isinstance(right, yaml.ScalarNode):
+        return left.tag == right.tag and left.value == right.value
+    if isinstance(left, yaml.SequenceNode) and isinstance(right, yaml.SequenceNode):
+        return len(left.value) == len(right.value) and all(
+            _node_equal(one, other, depth + 1)
+            for one, other in zip(left.value, right.value)
+        )
+    if isinstance(left, yaml.MappingNode) and isinstance(right, yaml.MappingNode):
+        if len(left.value) != len(right.value):
+            return False
+        return all(
+            _node_equal(lkey, rkey, depth + 1) and _node_equal(lval, rval, depth + 1)
+            for (lkey, lval), (rkey, rval) in zip(left.value, right.value)
+        )
+    return False
+
+
+def _record_problem(cited: object, record: object) -> str | None:
+    """Why one `citations:` entry is not a pin record, or None when it is."""
+    if not isinstance(record, dict):
+        return (
+            f"the entry for {_yaml_kind(cited) if not isinstance(cited, str) else repr(cited)} "
+            f"is {_yaml_kind(record)}, not a mapping of the fields `refdes fetch` writes "
+            f"({', '.join(_LOCKFILE_REQUIRED)}, and optionally bytes, sections, "
+            f"{PAGE_COUNT_KEY}, {PAGE_COUNT_ERROR_KEY}, values)"
+        )
+    # A pre-rename record carries `vendored:` where `kept_copy:` now is, and
+    # is missing the new spelling entirely. Exempt here so `legacy_notices`
+    # still gets to report it -- by the old key's name and the rename's, which
+    # says more than "no kept_copy" ever could -- rather than this check
+    # answering first with the wrong half of it.
+    required = [
+        name
+        for name in _LOCKFILE_REQUIRED
+        if name not in record and not (
+            name == "kept_copy" and LEGACY_LOCKFILE_KEY in record
+        )
+    ]
+    if required:
+        return (
+            f"the entry for {cited!r} has no {', '.join(required)} -- every record `refdes "
+            f"fetch` writes carries all three, and each is a fact nothing else in the file "
+            f"can supply (the pin, when it was taken, whether the bytes were kept)"
+        )
+    sha = record["sha256"]
+    if not isinstance(sha, str) or not _SHA256_RE.match(sha):
+        return (
+            f"the entry for {cited!r} has sha256 {sha!r}, which is not a 64-character "
+            f"lowercase hex digest. `refdes fetch` records exactly that and never edits "
+            f"it afterwards, so this line was changed by hand or resolved wrongly in a "
+            f"merge"
+        )
+    fetched = record["fetched"]
+    if not isinstance(fetched, str) or not fetched.strip():
+        return (
+            f"the entry for {cited!r} has fetched {fetched!r}, which is not the timestamp "
+            f"`refdes fetch` wrote when it took the pin"
+        )
+    kept = record.get("kept_copy")
+    if kept is not None and not isinstance(kept, bool):
+        return (
+            f"the entry for {cited!r} has kept_copy: {kept!r}, which is neither true nor "
+            f"false. It is read as a flag: a value that is merely non-empty would claim "
+            f"the bytes are kept when they are not"
+        )
+    size = record.get("bytes")
+    if size is not None and (isinstance(size, bool) or not isinstance(size, int)):
+        return (
+            f"the entry for {cited!r} has bytes: {size!r}, which is not a whole number of "
+            f"bytes -- it is the size `refdes fetch` measured, not a field it re-reads"
+        )
+    sections = record.get("sections")
+    if sections is not None and not isinstance(sections, dict):
+        return (
+            f"the entry for {cited!r} has sections: {_yaml_kind(sections)}, not a mapping of "
+            f"section name to the page it resolved to"
+        )
+    sections_sha = record.get("sections_sha256")
+    if sections_sha is not None and (
+        not isinstance(sections_sha, str) or not _SHA256_RE.match(sections_sha)
+    ):
+        return (
+            f"the entry for {cited!r} has sections_sha256 {sections_sha!r}, which is not a "
+            f"64-character lowercase hex digest -- it names the bytes its sections were "
+            f"read out of, and a page read from different bytes is not the page"
+        )
+    values = record.get("values")
+    if values is not None and not isinstance(values, dict):
+        return (
+            f"the entry for {cited!r} has values: {_yaml_kind(values)}, not a mapping of "
+            f"source key to what was read for it"
+        )
+    # The pair `fetch_all` writes when a citation names a `page:` and the pinned
+    # bytes have a countable page count: the count, or -- when pypdf was not
+    # there to count them -- why there is none. Mutually exclusive there (`if
+    # counted is not None: ... elif why:`), so a record carrying both is not one
+    # the tool wrote: `_apply_page` reads the count and never looks at the
+    # reason, so a stale `page_count_error:` beside a good count would be a claim
+    # nobody could ever see again.
+    #
+    # Both are optional, deliberately: a record with neither says nothing about
+    # its pages -- a hand-written one, or one written before page counting
+    # existed -- and every project has to fetch before check can pass it, which
+    # is what establishes the count. Requiring either would report the tool's own
+    # older lockfiles as malformed.
+    if PAGE_COUNT_KEY in record and PAGE_COUNT_ERROR_KEY in record:
+        return (
+            f"the entry for {cited!r} has both {PAGE_COUNT_KEY} and "
+            f"{PAGE_COUNT_ERROR_KEY}, and only one of them can be true of these bytes: a "
+            f"count and a reason there is no count are opposites, and a check reads the "
+            f"count and never reaches the reason. `refdes fetch` writes one or the other"
+        )
+    counted = record.get(PAGE_COUNT_KEY)
+    if counted is not None and (isinstance(counted, bool) or not isinstance(counted, int)):
+        # Type only, and no range: `page_count(data)` is `len(reader.pages)`, so
+        # `fetch` really does record `page_count: 0` for a document pypdf opens
+        # and finds no pages in. Demanding a positive count here would report
+        # `fetch`'s own output as malformed -- the one failure this validator
+        # must not be able to cause. (`_apply_page` reads a count below 1 as no
+        # count, which is its own business and is not contradicted here.)
+        return (
+            f"the entry for {cited!r} has {PAGE_COUNT_KEY} {counted!r}, which is not a whole "
+            f"number of pages -- it is the count `refdes fetch` took of the bytes it was "
+            f"pinning, and a count that is not a number reads as no count at all, which "
+            f"silently drops the page check that count exists for"
+        )
+    why = record.get(PAGE_COUNT_ERROR_KEY)
+    if why is not None and (not isinstance(why, str) or not why.strip()):
+        return (
+            f"the entry for {cited!r} has {PAGE_COUNT_ERROR_KEY} {why!r}, which is not the "
+            f"reason the pages could not be counted. `refdes fetch` records that sentence "
+            f"when it pins a document whose pages it could not count, and `check` reports it "
+            f"back as the reason the page numbers are not checked"
+        )
+    return None
+
 
 def load_lockfile(project: Project) -> dict[str, dict]:
+    """The lockfile's records, keyed by cited path. Raises LockfileError.
+
+    A file that is not there is `{}` -- an ordinary project that has pinned
+    nothing. A file that is there and cannot be read as a lockfile is
+    `LockfileError`, carrying one sentence that names the file, the line where
+    the shape gives one, what is wrong, and what to do about it.
+
+    Refusing is the point. This file is committed and hand-mergeable
+    (`docs/cli-reference.md`: "Files the tool writes" says commit it), so the
+    realistic way to get a broken one is two branches both running `refdes
+    fetch` and the merge being resolved badly -- and every shape below is what
+    that leaves behind. Each one used to be a raw traceback out of `fetch` and
+    every command that builds, because the shape was handed straight to
+    `dict()`; each one is now a diagnostic a person can act on, and none of
+    them is allowed to become `{}`.
+    """
     path = lockfile_path(project)
     if not os.path.isfile(path):
         return {}
     with open(path, "r", encoding="utf-8") as fh:
-        data = yaml_safe_load(fh) or {}
-    return dict(data.get("citations") or {})
+        text = fh.read()
+
+    conflict = _conflict_marker(text)
+    if conflict is not None:
+        conflict_line, marker = conflict
+        raise LockfileError(
+            f"unresolved merge conflict: {marker!r} on line {conflict_line}. "
+            f"{_MERGE_REMEDY}.",
+            line=conflict_line,
+        )
+
+    try:
+        data = yaml_safe_load(text) or {}
+    except yaml.YAMLError as exc:
+        # The same one-line report every other YAML file in the project gets,
+        # from the same helper, so a lockfile reads like an item file does.
+        message, line = _yaml_error_report(exc, text.split("\n"), offset=0)
+        raise LockfileError(
+            f"is not valid YAML: {message}. "
+            + _restore_remedy("Rewrite that line by hand"),
+            line=line,
+        ) from None
+
+    duplicate = _duplicate_key(text)
+    if duplicate is not None:
+        key, first, second, lost = duplicate
+        # A single-line flow mapping puts both occurrences on one line, and
+        # "(lines 1 and 1)" reads like a bug in the diagnostic rather than in the
+        # file -- parse.py words the same shape the same way in item front matter.
+        where = (
+            f", twice on line {second}"
+            if first == second
+            else f" (lines {first} and {second})"
+        )
+        dropped = (
+            f"one of the two on line {second} is dropped for the other"
+            if first == second
+            else f"the block on line {first} is dropped for the one on line {second}"
+        )
+        why = (
+            f"YAML keeps the last, so {dropped}, and the file no longer says which "
+            f"of them was the pin. `refdes fetch` rewrites this whole file from the "
+            f"mapping it loads, so the dropped one would go with nothing left to say "
+            f"so."
+            if lost
+            else "YAML keeps the last, and both blocks read the same, so nothing is "
+            "lost here -- but a mapping may only carry one of them, and `refdes fetch` "
+            "would go on rewriting this file without ever noticing."
+        )
+        raise LockfileError(
+            f"duplicate key {key!r} in one mapping{where} -- {why} "
+            + _restore_remedy("Rewrite the mapping so each key appears once"),
+            line=second,
+        )
+
+    if not isinstance(data, dict):
+        raise LockfileError(
+            f"is {_yaml_kind(data)}, not a mapping with one `citations:` key -- the whole "
+            f"document is the wrong shape. " + _restore_remedy("Rewrite it by hand"),
+            line=1,
+        )
+    records = data.get("citations")
+    if records is None:
+        return {}
+    if not isinstance(records, dict):
+        raise LockfileError(
+            f"`citations:` is {_yaml_kind(records)}, not a mapping of cited path to that "
+            f"path's record -- each key is a URL or a project-relative file, each value "
+            f"the pin `refdes fetch` took for it. "
+            + _restore_remedy("Rewrite that block by hand"),
+            line=_key_line(text, "citations"),
+        )
+    out: dict[str, dict] = {}
+    for cited, record in records.items():
+        problem = _record_problem(cited, record)
+        if problem is not None:
+            raise LockfileError(
+                f"{problem}. " + _restore_remedy("Rewrite that record by hand"),
+                # The record's own line, not the block's: a lockfile holds one
+                # record per cited document, so the block's line names every
+                # one of them and the record's names this one.
+                line=_key_line(text, "citations", str(cited)),
+            )
+        out[cited] = record
+    return out
+
+
+def read_lockfile(project: Project) -> tuple[dict[str, dict], LockfileError | None]:
+    """`(records, problem)` -- the lockfile, or the problem with it, never both,
+    with the problem also reported once as an ERROR diagnostic on `project`.
+
+    For every reader that goes on to say something *else* about the project.
+    With the pins unreadable there is nothing to check a citation against, so
+    each of them returns rather than reporting every citation `unpinned` -- a
+    confident false statement, derived from a file that was never read, in
+    enough volume to bury the one diagnostic that matters. Not fatal: the rest
+    of the build still runs and still reports what else is wrong with the tree.
+
+    Reported here rather than by each caller so that the several readers one
+    run goes through (`build` reads the lockfile for calc `source()` values and
+    again for `verify`; `check --refresh` reads it a third time) say it once.
+    Guarded on the project for that reason -- the diagnostic channel has no
+    dedupe of its own, and a build that named the same corrupt file three times
+    would read as three problems with one cause.
+
+    The write path does not come through here. `refdes fetch` and the editor's
+    accept-pins operation are the two writers of this file, and both take
+    `load_lockfile` directly, because a lockfile neither could read is a
+    lockfile neither may overwrite: `fetch` would write a fresh record for what
+    it just fetched and drop every pin it could not read, which is the one
+    outcome this file exists to prevent.
+    """
+    try:
+        return load_lockfile(project), None
+    except LockfileError as exc:
+        if not getattr(project, "_lockfile_reported", False):
+            project._lockfile_reported = True
+            project.error(exc.message, file=LOCKFILE, line=exc.line)
+        return {}, exc
 
 
 def lockfile_text(records: dict[str, dict]) -> str:
@@ -744,7 +1237,14 @@ def verify(project: Project, require: bool = False) -> None:
       across citers of a       it is a hygiene note about the declaration, not
       shared url                a missing artifact)
     """
-    records = load_lockfile(project)
+    records, lockfile_problem = read_lockfile(project)
+    if lockfile_problem is not None:
+        # Reported already, by `read_lockfile`. Declining here is the point:
+        # with the pins unreadable there is nothing to check a citation
+        # against, and continuing would report every one of them `unpinned` --
+        # a claim about a file that was never read, in enough volume to bury
+        # the one line that says so.
+        return
     for severity, message in legacy_notices(project, records):
         (project.error if severity == "error" else project.warn)(message)
 
@@ -940,9 +1440,9 @@ def _apply_page(project, item, spec, record, status, severity) -> None:
     page = page_number(spec.page)
     if page is None:
         return  # a load-time declaration error already reported it, with file:line
-    count = (record or {}).get("page_count")
+    count = (record or {}).get(PAGE_COUNT_KEY)
     if not isinstance(count, int) or count < 1:
-        why = str((record or {}).get("page_count_error") or "")
+        why = str((record or {}).get(PAGE_COUNT_ERROR_KEY) or "")
         if not why:
             return  # no count was ever claimed for these bytes
         status.detail = (
@@ -1154,7 +1654,13 @@ def _extract_source_values(
     """
     reader = sources_mod.reader_for(canon)
     if values is None:
-        values = (load_lockfile(project).get(canon) or {}).get("values") or {}
+        # Read leniently, like every other reader: this is a fallback for a
+        # caller that had no values to hand, and a lockfile this project
+        # cannot read has already been reported as an error by whoever read it
+        # first. Not reaching for `{}` silently -- that is the distinction
+        # `read_lockfile` exists to keep.
+        records, _problem = read_lockfile(project)
+        values = (records.get(canon) or {}).get("values") or {}
     requests = []
     for key in sorted(keys):
         anchor = (anchors or {}).get(key)
@@ -1560,6 +2066,12 @@ def fetch_all(
             continue  # a refused path is validation's to report, not ours
         all_pages[canon][spec.page].append(item.id)
 
+    # Strictly `load_lockfile`, not `read_lockfile`: this is the writer, and a
+    # lockfile it cannot read is a lockfile it must not overwrite. The
+    # `LockfileError` propagates to `cmd_fetch`, which refuses -- see
+    # `read_lockfile` for why the two are separate. Read before any of the work
+    # above has an effect, so a corrupt lockfile costs a refusal and not a
+    # re-pin that then cannot be written back.
     records = load_lockfile(project)
     results: list[FetchResult] = []
     changed = False
@@ -1671,8 +2183,8 @@ def fetch_all(
             # with neither key claims no count (a hand-written or older
             # lockfile), and there is nothing here to check it against: the
             # first `refdes fetch` records one, and `check` says so until then.
-            counted = existing.get("page_count")
-            stale = [k for k in ("page_count", "page_count_error") if k in existing]
+            counted = existing.get(PAGE_COUNT_KEY)
+            stale = [k for k in (PAGE_COUNT_KEY, PAGE_COUNT_ERROR_KEY) if k in existing]
             if not pages and stale:
                 for key in stale:
                     existing.pop(key)
@@ -1767,7 +2279,7 @@ def fetch_all(
         if pages:
             counted, why = _page_count_for_pin(canon, data)
             if counted is not None:
-                record["page_count"] = counted
+                record[PAGE_COUNT_KEY] = counted
                 result.pages = counted
                 _check_pages(canon, counted, pages, result)
             elif why:
@@ -1779,7 +2291,7 @@ def fetch_all(
                     f"{canon}: the pages could not be counted to check the page "
                     f"numbers cited here -- {why}"
                 )
-                record["page_count_error"] = why
+                record[PAGE_COUNT_ERROR_KEY] = why
         if new_values:
             record["values"] = new_values
             _diff_source_values(
@@ -1819,7 +2331,12 @@ def refresh(project: Project, fetcher=None) -> list[DriftEntry]:
     way `fetch_all` does -- see its docstring.
     """
     fetcher = fetcher or fetch_bytes
-    records = load_lockfile(project)
+    records, lockfile_problem = read_lockfile(project)
+    if lockfile_problem is not None:
+        # Already reported. Drift is a statement about how a pin compares to
+        # today's bytes; with no readable pin there is nothing to compare, and
+        # reporting no drift would be the loudest possible way to say nothing.
+        return []
     citers: dict[str, list[str]] = defaultdict(list)
     for item, spec in collect(project):
         citers[spec.path].append(item.id)

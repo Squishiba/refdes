@@ -87,10 +87,18 @@ def _lockfile(project: Project) -> dict[str, dict]:
     """The citation lockfile, read only. `build` keeps its parsed copy on the
     project, so a request does not re-read a file the loaded model already
     holds -- and never writes one, which is Slice B's job and not this one's.
+
+    A lockfile that cannot be read is a `SourceRefusal` carrying the reason,
+    which is this module's own vocabulary for "this read is not answerable" and
+    becomes a 422 the panel renders. Not an empty mapping: the picker would then
+    list every citation as unpinned, which is a claim about a file nobody read.
     """
     records = getattr(project, "_source_lock", None)
-    if records is None:
-        records = citations_mod.load_lockfile(project)
+    if records is not None:
+        return records
+    records, problem = citations_mod.read_lockfile(project)
+    if problem is not None:
+        raise SourceRefusal(str(problem))
     return records
 
 

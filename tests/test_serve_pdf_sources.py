@@ -928,6 +928,8 @@ def test_pdf_proposal_composes_server_side_and_shows_pin_for_the_authors_key(tmp
     )
     add_lock(root, {"datasheets/sheet.pdf": {
         "sha256": hashlib.sha256(PDF).hexdigest(),
+        "fetched": "2026-01-01T00:00:00Z",
+        "kept_copy": False,
         "values": {"typical": {"reader": "pdf", "value": "3.25"}},
     }})
     app = start(root)

@@ -579,7 +579,17 @@ def _accept_pins(
     # Fresh from disk, not the snapshot's copy: under this lock, the file is the
     # state, and a pin written by a fetch since the snapshot was built belongs
     # in what we write back.
-    records = citations_mod.load_lockfile(before)
+    #
+    # Strictly `load_lockfile`, and a LockfileError becomes this function's
+    # ordinary refusal reason rather than an exception: this is the second
+    # writer of the lockfile (step 3 of the sequence below), and it writes the
+    # file whole from the records it read. A lockfile it could not read would
+    # come back with one record -- the key being accepted -- and every other
+    # pin in the project silently gone. Refusing leaves both files untouched.
+    try:
+        records = citations_mod.load_lockfile(before)
+    except citations_mod.LockfileError as exc:
+        return None, str(exc)
     anchors = {}
     digests = {}
     for plan in plans:
