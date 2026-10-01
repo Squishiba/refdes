@@ -433,6 +433,30 @@ A warning. The item renders unvalidated. Add the type to your schema to silence 
 
 ## Citations
 
+**`items/….md:N — citations[0]: page: '2-4' is not a page number -- page: must
+be a positive integer, counted from 1.`**
+`page:` is one page of the *PDF*, counted from 1 — the same number the rendered
+`#page=` fragment opens — so a value that is not one is a declaration error
+(refused at load, before any file is opened, at the same severity as a
+malformed `section:`). Two of the shapes are not typos the author can see,
+because they believe they have cited something:
+
+- **A range** (`2-4`, `2 – 4`). One citation entry names one page, so a span has
+  no representation: cite the pages you mean as one entry per page on the same
+  `path:`, and each gets its own row and its own `#page=` link. `section:` is
+  *not* the alternative — a section title resolves to the one page its heading
+  starts on; it is the citation for a heading that moves between revisions.
+- **A printed page number** (`xiv`, `iv`, `eight`). A book's front matter is
+  numbered in roman numerals, which is where `xiv` usually comes from, and a
+  datasheet's own printed page number is a different number from the PDF's.
+  Count the PDF's own sheets from 1.
+
+The rest (`0`, `-1`, `1.5`, `9 9`) say what to do in the sentence itself, so
+those messages carry no remedy of their own. This is also the one *breaking*
+change in the `page:` delta: a `page:` that used to pass now fails, and it is
+the only new failure an upgrading project meets. See
+[citing a datasheet](markdown.md#citing-a-datasheet).
+
 **`.refdes/citations.yaml:N — unresolved merge conflict: '<<<<<<< HEAD' on line N`**
 Two branches both ran `refdes fetch` into this committed file and the merge was
 never finished by hand. Each side's `sha256` values are of bytes fetched on a

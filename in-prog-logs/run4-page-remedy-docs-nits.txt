@@ -1,0 +1,119 @@
+# run4-page-remedy-docs-nits — F2, F4, F5 from the run-4 user-sim report
+
+Worktree: branch `run4-page-remedy-docs-nits` off current main (`b068f96`).
+Scope: three findings from `in-prog-logs/user-sim-release-gate-run4.md` §5, one
+commit each.
+
+## Pre-work verification (F2)
+
+Run in `.scratch/f2` (`refdes init` + `hardware@3`, a component with a
+`citations:` field — confirmed via `refdes schema`, whose `component__entry`
+carries the `citations` array; there is no other type with one).
+
+1. **Two citation entries for one path, one per page, are accepted.** Own
+   reproduction, not the report's:
+
+   ```yaml
+   citations:
+     - path: docs/manual.pdf
+       page: "2"
+     - path: docs/manual.pdf
+       page: "4"
+   ```
+
+   `fetch` → `fetched docs/manual.pdf sha256=8f5443a56224... hash-only`,
+   exit 0. `check` → `1 items, 0 errors, 0 warnings`, exit 0. `build` renders
+   **two rows** in the item's citations table, `#page=2` and `#page=4`, and
+   `references.html` lists the path once with `CMP-001` twice under "Cited by".
+   So the two-entry shape is real and the render is not a duplicate-row bug.
+
+2. **`section:` is *not* the better answer for a span.** Built an 8-page PDF
+   with a real outline (two entries, on sheets 2 and 4) and cited
+   `section: Thermal Information` on a local path. `fetch` printed
+   `section 'Thermal Information' -> page 2` — one entry resolves to exactly
+   one page. There is no range form of `section:`; naming a heading gives the
+   sheet it starts on, not a span. So the two-entry-per-page shape is the
+   answer for a range, and `section:` is the answer for a *heading that moves
+   between revisions* (which `docs/markdown.md:446-449` already says), not for
+   a span.
+
+3. **The roman-numeral / front-matter case does have a documented answer.**
+   `docs/markdown.md:446-449`: "`page:` means the page of the *PDF*, counted from
+   1 — the same number the rendered `#page=` fragment opens. A datasheet's own
+   printed page number is a different number". A book's front matter is
+   numbered in roman numerals, so a roman numeral is the signature of someone
+   citing a printed page label; the fix is the PDF's own sheet, counted from 1.
+
+Message design decided: keep the existing rule sentence verbatim, add **one**
+remedy sentence, then `See <url>.` — two sentences plus the pointer, so it
+still reads short. The remedy sentence is chosen by the *shape* of the refused
+value, because the rule alone is not a remedy for the two shapes where someone
+believes they really have cited something (a range, a printed page number) and
+is a complete answer for the rest (`0`, `-1`, `1.5`, `9 9`). So:
+
+- a range-looking value → one entry per page
+- a value with no digits at all (`eight`, `xiv`, `iv`) → count the PDF's own
+  pages; one wording covers both a word and a printed page number
+- anything else → rule + `See <url>.`, no filler
+
+Status: F2 implemented, verified, committed.
+
+## F2 — done
+
+Message, final form, each shape verified by a literal `refdes check` in
+`.scratch/f2`:
+
+```
+page: '2-4' is not a page number -- page: must be a positive integer, counted from 1. One entry names one page, so a range is one entry per page for the same path. See https://squishiba.github.io/refdes/troubleshooting.html#citations.
+page: 'xiv' is not a page number -- page: must be a positive integer, counted from 1. A printed page number is not a page index: page: counts the PDF's own sheets from 1, the same number the rendered link opens. See https://squishiba.github.io/refdes/troubleshooting.html#citations.
+page: '0'  is not a page number -- page: must be a positive integer, counted from 1. See https://squishiba.github.io/refdes/troubleshooting.html#citations.
+```
+
+Rule sentence unchanged, one remedy sentence, `See <url>.` — two sentences plus
+the pointer. The remedy is chosen by the shape of the refused value (a
+`\d+ - \d+` range, including the en/em dashes; a value with no digits at all;
+anything else gets nothing because the rule already answers it).
+
+The URL: new `docs_url.CITATION_PAGE_DOCS`. Anchor checked two ways — against
+`pages._slugify` ("Citations" → `citations`) and against a real build of the
+docs site in `.scratch/dscheck`, whose rendered `troubleshooting.html` carries
+`<h2 id="citations">`. Same anchor, so no guessing.
+
+**New test confirmed to FAIL against main's code first.** Reverted only
+`src/refdes/build.py` and `src/refdes/docs_url.py` to `git show HEAD:` (no
+stash; copies of my versions kept in `.scratch/build.py.f2` /
+`.scratch/docs_url.py.f2` and restored immediately after), ran
+`pytest tests/test_citation_pages.py -k "refused_page_says or rule_already_answers
+or declaration_error or span_is_cited or outline_title_resolves"`:
+**18 failed, 2 passed** — 9 `declaration_error` params, 4
+`refused_page_says_what_to_write_instead`, 5 `rule_already_answers_gets_no_filler_sentence`
+(several with `AttributeError: module 'refdes.docs_url' has no attribute
+'CITATION_PAGE_DOCS'`, which is the expected shape when the constant is the
+thing under test). The 2 that passed are the two that only assert the *shape* of
+the answer (the two-entry build, the outline title's single page) — main already
+had that behaviour, so they are supposed to pass both before and after; they
+exist to keep the remedy honest, not to detect the change. Restored, and
+`tests/test_citation_pages.py` is 47 passed.
+
+The old text was pinned in exactly one test
+(`tests/test_citation_pages.py:143-149`, the full-message equality) — updated,
+and it now composes the expected string from a `RULE` constant plus a
+`_expected_remedy()` written out longhand rather than imported, so the test
+cannot pass by calling the function it is testing.
+
+Docs: `docs/markdown.md`'s "A hand-read page is checked, too" bullet gains the
+two shapes with the one-entry-per-page YAML, and the `page:`-not-a-positive-
+integer row of the severity table now lists `2-4` (it listed every other refused
+shape). `docs/troubleshooting.md`'s `## Citations` section gains the error, its
+remedy, and the note that it is the one breaking change. Both render correctly
+(checked in the built `_site`).
+
+Ruff, scoped per AGENTS.md: `src/refdes/docs_url.py` and
+`tests/test_citation_pages.py` are clean on the default rule set. `build.py`
+reports `I001` and 6 `E501`, and main's `build.py` reports the identical set
+(compared rule-for-rule against `git show HEAD:src/refdes/build.py`) — all
+pre-existing, none introduced here. One `ISC004` my new test tripped is fixed.
+Full suite: **3157 passed, 2 skipped**.
+
+Changelog: `changelog.d/citation-page-remedy.fixed.md` (the F2 change is
+user-visible message text plus docs, not a behaviour change, so `fixed`).
