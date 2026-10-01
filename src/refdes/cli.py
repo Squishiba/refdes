@@ -783,6 +783,10 @@ def cmd_fetch(args) -> int:
             print(f"WARNING  {warning}", file=sys.stderr)
         for warning in r.page_warnings:
             print(f"WARNING  {warning}", file=sys.stderr)
+        for warning in r.size_warnings:
+            # A big download is not a failed one: the pin landed, and this line
+            # is the whole of the consequence, so it must not reach `failed`.
+            print(f"WARNING  {warning}", file=sys.stderr)
         for source_error in r.source_errors:
             failed += 1
             print(f"FAILED  {source_error}", file=sys.stderr)

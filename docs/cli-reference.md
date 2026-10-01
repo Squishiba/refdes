@@ -448,6 +448,36 @@ one works with the network down. `build` and `check` never do this themselves
 | `--path PATH` | Fetch only this cited path (url or project-relative file) |
 | `--update` | Re-fetch even if already pinned |
 
+**Size and timeouts.** A datasheet is allowed to be enormous, so there is no
+size cap here: nothing refuses a download for being large, and a fetch over
+**100 MB** prints one `WARNING` line naming the citation, the size it turned out
+to be, and where the bytes went (the kept copy's `.refdes/copies/<sha256><ext>`
+path, or that no copy was kept). The pin still lands, the summary still says
+`0 failed`, and the exit code is the one a small fetch would have produced.
+
+```
+WARNING  https://example.com/ds.pdf: fetched 120000000 bytes (114.4 MB), over the 100.0 MB a fetch is warned at -- pinned anyway, kept at .refdes/copies/9f2c1a4b8e0d5f6a.pdf
+```
+
+That size is measured on the bytes actually received, never on the
+`Content-Length` header, because the received length is the length of the *pin* —
+what was hashed, what `bytes:` records, and what a kept copy was written from. A
+header is not that number: a chunked response carries no `Content-Length` at
+all, and a server chooses that freely, so a header-driven warning would go
+silent for exactly the streaming transfer a large datasheet tends to be. The
+other consequence is worth stating plainly: there is no pre-download cap either,
+so a large body is read into memory before the warning appears. The point is
+that you are told, not that your disk is protected. There is also no
+content-type check: what a citation's bytes *are* is your decision, since a
+citation may legitimately point at something that is not a PDF.
+
+Each request has a 30-second socket timeout (`fetch_bytes`'s default), which
+bounds each blocking operation — the connection attempt, and each read — rather
+than the transfer as a whole, so a very slow transfer can take longer than 30
+seconds in total. This is a `refdes fetch` behaviour: `refdes check --refresh`
+downloads too, but it pins nothing and keeps no copy, so it has no size warning
+to give.
+
 A citation's `section:` is resolved here and nowhere else: the PDF's own
 outline is read once, at fetch time, and the page it points at is recorded in
 the lockfile. This is the only part of refdes that reads a PDF, and it needs
@@ -682,11 +712,13 @@ never appears there rather than showing up empty.
 Each citation line is `<state>  <pin>  cited by <items>`. **`state`** is what
 verification found — `ok`, `unpinned`, `cache_missing`, `hash_mismatch` or
 `missing` (see [citing a datasheet](markdown.md#citing-a-datasheet) for what
-each costs). **`pin`** says how that path is pinned *and* whether its bytes are
-here now: `no pin` (never fetched, so nothing is pinned), `hash-only` (pinned
-by `sha256`, no local copy — the default, since datasheets are generally
-copyrighted), `kept` (pinned, with the bytes kept at
-`.refdes/copies/<sha256><ext>`) or `no copy` (the lockfile says
+each costs). On a `hash-only` row, `ok` means the pin is recorded and there are
+no bytes here that could contradict it: a wrong sha256 for one is found by
+`refdes check --refresh` and by nothing offline. **`pin`** says how that path is
+pinned *and* whether its bytes are here now: `no pin` (never fetched, so
+nothing is pinned), `hash-only` (pinned by `sha256`, no local copy — the
+default, since datasheets are generally copyrighted), `kept` (pinned, with the
+bytes kept at `.refdes/copies/<sha256><ext>`) or `no copy` (the lockfile says
 `kept_copy: true`, but the kept bytes are gone from `.refdes/copies/` — the
 same fact the state column reports as `cache_missing`; re-run
 `refdes fetch --path <path>` to put them back). The two columns are

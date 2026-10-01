@@ -1,0 +1,158 @@
+# fetch-size-warn-audit-wording
+
+Two small citation changes from `in-prog-logs/remote-fetch-exercise.md` §7:
+
+- **F3** (low-medium): `fetch` has no size cap and says nothing about a large
+  download. Decision: *warn*, never cap or refuse -- datasheets are genuinely
+  big. Threshold 100 MB, in one named constant. Exit code unchanged. No
+  content-type check (explicitly not wanted).
+- **F2** (medium): `audit`/`state` wording "hash on file" overstates a
+  hash-only remote pin, which nothing offline can verify. Reword to say the
+  hash is recorded but not verified offline, pointing at `check --refresh`.
+
+## Findings read first
+
+- F2 at `in-prog-logs/remote-fetch-exercise.md:714-765`. Transcript:
+  `audit` prints `ok hash-only` for a citation whose recorded sha256 is wrong;
+  only `check --refresh` (exit 1) notices. The offline silence is by design.
+  Finding point 1 is the wording: `docs/output.md` defines `ok` as
+  "Resolved — hash on file, and kept locally if `keep_copy: true` was
+  declared", which is not true of a hash-only remote pin. Fix shape (a) in the
+  report proposed a new `unverifiable` state; the maintainer's decision for
+  this task is the wording change only, kept short.
+- F3 at `in-prog-logs/remote-fetch-exercise.md:767-805`. `fetch_bytes`
+  (`src/refdes/citations.py:1635`) is one `urlopen` + one `resp.read()`, no
+  `Content-Length` inspection, no cap, no content-type check. The exercise
+  pinned a 26 MiB octet-stream in 0.49 s with no warning. The report's fix
+  shape proposed a hard cap + streamed abort + a content-type warning; the
+  maintainer overrode all three: warn, don't cap, no content-type check.
+
+## Verified before writing anything
+
+- `grep -rn "hash on file" src/ tests/ docs/` → one hit, `docs/output.md:419`.
+  Nothing in `src/` or `tests/` pins the old text. The audit *command* prints
+  only the state/pin/citers columns (`src/refdes/cli.py:1062-1077`); the prose
+  that overstates is the `state` table in `docs/output.md` and the sentence
+  under it, plus the `state` gloss in `docs/cli-reference.md`'s audit section.
+- Fetch warning plumbing: `FetchResult` (`src/refdes/citations.py:1649+`)
+  already carries `page_warnings` / `source_warnings` / `section_errors` lists
+  that `cmd_fetch` prints as `WARNING  ...` on stderr without touching the exit
+  code (`src/refdes/cli.py:770-800`). A new `size_warnings` list follows that
+  existing shape rather than inventing a second one.
+- Kept-copy path: `kept_copy_path()` returns an *absolute* path, and
+  `tests/test_citation_path_hygiene.py` forbids any absolute path in a
+  citation diagnostic. The warning therefore has to carry a project-relative,
+  `/`-spelled location, so `kept_copy_path` is refactored to build from one
+  relative spelling instead of the message composing its own.
+
+## Decisions
+
+- **Fires on the bytes actually received, not on `Content-Length`.** The
+  received length is the length of the *pin* — what was hashed, what `bytes:`
+  records, what a kept copy was written from. I first wrote the justification as
+  "an understated header would walk a large download past the warning" and
+  checked it against a hand-rolled origin (`.scratch/fetch_bytes_probe.py`,
+  gitignored, left in place) rather than shipping it. That claim is **wrong**:
+  a header that understates truncates the body to its own claim, so the pin is
+  small and the warning is right anyway. What is true, all measured:
+  - `/chunked` (no `Content-Length`, body intact) → 200 bytes received. A
+    header-keyed warning would go silent for exactly the streaming transfer a
+    big datasheet tends to be. This half is now a test over a real socket.
+  - `/overstated` (`Content-Length: 999999`, 100 bytes sent) → `IncompleteRead`
+    from `resp.read()`, so the fetch fails with the server's own error before
+    any warning could print.
+  - `/understated` (`Content-Length: 10`, 200 bytes sent) → 10 bytes received.
+- **Remote only.** A local citation is already on the author's disk; nothing is
+  downloaded and nothing is duplicated. The surprise this warns about is a
+  network download (and its optional second copy under `.refdes/copies/`).
+- `refdes check --refresh` is *not* covered: it is documented as read-only
+  drift detection that pins and copies nothing, so the "where the copy went"
+  half has nothing to name. Stated in the docs rather than left implied.
+- **F3 does not get a row in `docs/markdown.md`'s verification severity
+  table**, though the report asked for one. That table is about what every
+  `build` and `check` reports; this warning is a `fetch` line that does not
+  persist to a later run, so a row there would describe a diagnostic that does
+  not exist. The fetch section of `docs/cli-reference.md` is the page that
+  covers the command.
+- **The `ok` row was not the only overstatement.** The sentence under the table
+  read "`state == "ok"` alone is the claim that the sha256 is right", the same
+  claim in the reader's own words; fixing the table alone would have left it
+  standing. `docs/cli-reference.md`'s audit section glosses `state` as "what
+  verification found", which is the second place the claim lives, so it got the
+  same one-sentence correction. No new `audit` state: the release gate filters
+  on `state == "cache_missing"` (`lifecycle.py`), and the maintainer asked for
+  wording.
+
+## What landed
+
+- `src/refdes/citations.py`
+  - `FETCH_SIZE_WARN_BYTES = 100 << 20`, with the reasoning (including the
+    measured HTTP behaviour) in the comment above it.
+  - `large_fetch_message(canon, size, kept)` + `_size_label`.
+  - `FetchResult.size_warnings`, filled in `fetch_all` after the kept copy is
+    written (the path does not exist before that) and only for `kind == "remote"`.
+  - `kept_copy_path` refactored onto a new `kept_copy_relpath`, so the location
+    a message prints and the location the bytes land in are one string.
+- `src/refdes/cli.py`: `cmd_fetch` prints `size_warnings` as `WARNING` on
+  stderr, and deliberately does not touch `failed`, so the exit code is
+  unchanged.
+- `docs/cli-reference.md`: a "Size and timeouts" paragraph in the `fetch`
+  section (threshold, sample warning, why the received size, the no-cap
+  consequence, no content-type check, the 30 s per-operation socket timeout —
+  which no docs page mentioned — and the `check --refresh` boundary), plus the
+  audit `state` gloss.
+- `docs/output.md`: the `ok` row and the sentence under it.
+- `changelog.d/fetch-size-warning.added.md`,
+  `changelog.d/audit-hash-only-wording.fixed.md`.
+
+## Tests
+
+`tests/test_fetch_size_warning.py` (9) — threshold pinned at 100 MB; the
+message's own text at real magnitudes; the warning fires and names the
+citation; the hash-only half says no copy was kept; the kept half names
+`.refdes/copies/<sha>.pdf` and that file is really there; the pin lands and the
+exit code is 0; silence under the threshold, anchored to the same project
+warning one byte later so the absence cannot be bought by lowering the
+threshold; a local citation is not warned about; and a real chunked response
+with no `Content-Length` still warns, over a real socket through the real
+`fetch_bytes`.
+
+`tests/test_audit_hash_only_wording.py` (5) — the old sentence is gone from
+both pages, the new one says "recorded, not verified", says why, names
+`refdes check --refresh`, and the audit reference says the same thing.
+
+## Sabotage check (recorded, not asserted)
+
+`git checkout b068f96 -- <the 4 changed files>` (base is this branch's parent),
+new tests run against main's code: **14 failed**, then `git apply` of a saved
+patch restored the tree byte-identically (md5 of `git diff` matched before and
+after, twice). No `git stash` at any point. Every new test fails on base —
+including the absence test, which fails on the `AttributeError` from
+monkeypatching a constant that does not exist there, and which is *also* now
+paired with the firing half so it cannot pass for the wrong reason later.
+
+## Full suite / lint
+
+- `PYTHONPATH=src python -m pytest -q` → **3160 passed, 2 skipped** (235 s).
+- `ruff check` on the four touched/added files → the same 5 findings as the
+  base versions of `citations.py`/`cli.py` (ISC004 ×2, RUF100, S112, UP017 —
+  all pre-existing, none in code I added), and **both new test files clean
+  under the full default rule set**. `ruff check .` is not a green gate in this
+  repo (see AGENTS.md); no unrelated finding was silenced.
+
+## Scratch (`.scratch/`, gitignored, left in place)
+
+- `fetch_bytes_probe.py` — the four-header-shape probe behind the
+  `Content-Length` decision.
+- `fetch_demo.py` — the real `refdes fetch` against a loopback
+  `http.server` with the threshold patched to 1 byte; the docs sample is
+  copied from what it printed.
+- `sabotage/` — the before/during/after diffs and the base copies of the two
+  source files.
+
+## Status: finished
+
+Both changes are in, tested, sabotage-checked, documented and changelogged.
+Nothing left outstanding; the two things a reviewer may want to overrule are
+the remote-only scope and the `check --refresh` boundary, both stated plainly
+in the docs rather than left implicit.
