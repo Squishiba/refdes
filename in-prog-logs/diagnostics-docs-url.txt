@@ -240,11 +240,76 @@ Also ran what the docs CI runs: `python docs-site/gen_examples.py --check` →
 
 ## Status
 
-Commit 1 (this change) done: diagnostics point at published URLs, `DOCS_URL`
-relocated to `docs_url.py`, tests and the three quoting docs updated, full suite
-green, ruff adds nothing new.
+Commit 1 done: diagnostics point at published URLs, `DOCS_URL` relocated to
+`docs_url.py`, tests and the three quoting docs updated, full suite green, ruff
+adds nothing new.
 
-Commit 2 (the stale `docs/design/keys.md` bullet) done — see below.
+
+## 7. Commit 2: the stale "Imports have no key to expand into" bullet
+
+`docs/design/keys.md:115-119`, in the "What §3/§5 turned out to need beyond the
+spec" list, claimed: *"A link to an item from another, imported project can never
+be composite-expanded, because `imports.py`'s payload doesn't carry a `key` field
+today."* Both halves of that are false. Verified before editing anything.
+
+**Static, the two ends of the contract:**
+- export: `src/refdes/render.py:641` — `"key": item.key or None,` in the
+  `items.json` entry, nullable and always-present on purpose.
+- import: `src/refdes/imports.py:64-65` reads `raw.get("key")`, `:67` validates it
+  through `keys.malformed_key_message`, `:96` carries it into the `Item`, and
+  `:118-122` indexes the item by that key
+  (`project.add_item(item, item.key or provisional_handle(item))`) rather than by a
+  provisional handle — with a comment at `:118` saying exactly that.
+
+**Observable, two real projects driven through the CLI**
+(`.scratch/verify_imports_key_claim.py`, subprocess `refdes build` then
+`refdes check`):
+
+- upstream `refdes build` writes `_site/items.json` whose `REQ-PWR-001` entry has
+  `key: x4pd6a4yy8v`;
+- a downstream project importing that artifact, holding a bare
+  `refines: [REQ-PWR-001]`, runs one plain `refdes check` — exit 0, reporting
+  `(minted 1 key(s) and rewrote 1 reference(s) while loading)` — and afterwards
+  the downstream author's own file reads
+  `refines: [REQ-PWR-001@x4pd6a4yy8v]`, the key half being the *upstream* key.
+
+Two things I got wrong on the way there, so the log records them: `interface` is
+not a hardware@3 type (it was hardware@2 — `refdes schema` on the throwaway
+project and `src/refdes/standards/hardware/v3/base.yaml` both give the seven
+types: requirement, bound, decision, test, component, group, log), and the
+downstream config has to point at the upstream project's *built* artifact
+(`../<proj>/_site/items.json`), not at a path I invented.
+
+The correction follows the convention the neighbouring `checks:` bullet already
+uses (`:83`, "**Closed 2026-09-14**"): the original bullet stays as the record of
+the defect as found, and a `**Closed 2026-10-01**` paragraph underneath states the
+implemented state with `file:line` citations and points at §8's "A bonus: imports"
+(`docs/design/keys.md:1225`) for the long form and the collision rules. The doc's
+own implementation-status paragraph at `:17` never listed this as open, so it
+needed no edit.
+
+**Changelog fragment: none, deliberately.** `changelog.d/README.md` asks for one
+per change that "deserves a changelog entry". The behaviour this corrects is
+already covered by a pending fragment, `changelog.d/import-keys.added.md` ("Imported
+`items.json` artifacts now carry surrogate keys, so cross-project links freeze to
+`DISPLAY-ID@key`, …"). This commit changes no behaviour at all — it corrects a
+sentence in a design doc that contradicted both that fragment and §8 of the same
+file — so a second fragment would restate an entry that already exists. A grep of
+`docs/`, `src/` and `tests/` for the bullet's wording found no other place making
+the same claim, so nothing else needed correcting.
+
+Full suite after commit 2: 2861 passed, 2 skipped. `docs-site` still builds
+(`0 items, 0 errors, 4 warnings` — the same four pre-existing warnings as before
+my changes), and I confirmed the corrected bullet renders: `_docs/design-keys.html`
+contains `Closed 2026-10-01`, `render.py:641`, `imports.py:64-65` and the
+`REQ-PWR-001@` example.
+
+
+## Final state
+
+Two commits on `diagnostics-docs-url`, both verified by running, both against a
+full green suite. Nothing left undone.
+
 
 
 
