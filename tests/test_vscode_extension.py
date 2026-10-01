@@ -24,6 +24,10 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
+import subprocess
+
+import pytest
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 VSCODE_DIR = os.path.join(REPO_ROOT, "editors", "vscode")
@@ -244,3 +248,123 @@ def test_hover_shows_former_ids_and_the_item_view_returns_them():
         "editors/vscode/extension.js no longer falls back to the index row's "
         "former_ids, so the fact disappears when no refdes serve is running"
     )
+
+
+def _provide_completion_items_body(source: str) -> str:
+    """The brace-balanced body of `completionProvider.provideCompletionItems`.
+
+    Not a non-greedy regex like `_find_root_body` above: this method's body
+    has its own nested `if`/`{}` blocks, so a lazy `.*?\\}` would stop at the
+    first one of those rather than the method's own closing brace.
+    """
+    marker = "provideCompletionItems(document, position) {"
+    start = source.find(marker)
+    assert start != -1, (
+        "editors/vscode/extension.js no longer defines "
+        "completionProvider.provideCompletionItems"
+    )
+    i = start + len(marker)
+    depth = 1
+    while depth > 0:
+        if source[i] == "{":
+            depth += 1
+        elif source[i] == "}":
+            depth -= 1
+        i += 1
+    return source[start + len(marker) : i - 1]
+
+
+def test_id_completion_sets_an_explicit_range_and_insert_text():
+    """A completion over a hyphenated id must replace exactly what was
+    already typed, not whatever VS Code infers from its own default word
+    range (reported directly from a real authoring session: finishing a
+    completion over a partly-typed id duplicated the already-typed prefix
+    instead of completing it).
+
+    VS Code's default word pattern does not treat `-` as part of a word, so
+    an id like `LOG-MAIN-001` is several "words" to it. Left unset, the
+    range VS Code infers and replaces is only the run of characters since the
+    last hyphen -- accepting a completion for `LOG-MAIN-001` while
+    `LOG-MAIN-0` was already typed replaced only the trailing `0`, inserting
+    the full id after it (`LOG-MAIN-LOG-MAIN-001`). The same default-range
+    guess is also what VS Code filters the open list against as more is
+    typed, so once past the last hyphen it kept narrowing against only that
+    trailing fragment and entries that should still have matched stopped
+    appearing. One cause, and the fix below for both: give VS Code the real
+    range.
+    """
+    source = _read(EXTENSION_JS)
+    id_branch = _provide_completion_items_body(source)
+    id_branch = id_branch[id_branch.index("Otherwise offer item IDs") :]
+    assert re.search(r"\bc\.range\s*=\s*range\b", id_branch), (
+        "the id-completion branch no longer sets an explicit range on each "
+        "CompletionItem -- see this test's docstring for what breaks without it"
+    )
+    assert re.search(r"\bc\.insertText\s*=\s*item\.id\b", id_branch), (
+        "the id-completion branch no longer sets insertText explicitly, so it "
+        "falls back to the label with nothing for the explicit range above to "
+        "pair with"
+    )
+
+
+NODE = shutil.which("node")
+
+
+@pytest.mark.skipif(NODE is None, reason="no node on PATH to execute the extracted logic")
+def test_id_completion_range_covers_the_whole_typed_id():
+    """Executes the trigger regex and range math lifted verbatim from the
+    source -- not a hand-copied duplicate the source could drift away from
+    unnoticed -- against partially-typed ids, including the one that exposed
+    the bug: typing `LOG-MAIN-0` stopped matching `LOG-MAIN-001`/`-002`.
+    """
+    source = _read(EXTENSION_JS)
+    id_branch = _provide_completion_items_body(source)
+    id_branch = id_branch[id_branch.index("Otherwise offer item IDs") :]
+
+    trigger_expr = re.search(r"const trigger =\s*\n(.*?);\n", id_branch, re.DOTALL)
+    assert trigger_expr, "could not find the trigger expression to extract"
+    range_stmt = re.search(
+        r"const typed = trigger\[1\];\s*\n(.*?)\n\s*\n", id_branch, re.DOTALL
+    )
+    assert range_stmt, "could not find the range computation to extract"
+
+    cases = ["something REQ-PWR-00", "LOG-MAIN-0", "[[LOG-MA", "[["]
+    script = f"""
+const vscode = {{ Range: class {{
+  constructor(sl, sc, el, ec) {{
+    this.start = {{ line: sl, character: sc }};
+    this.end = {{ line: el, character: ec }};
+  }}
+}} }};
+const cases = {json.dumps(cases)};
+const results = [];
+for (const before of cases) {{
+  const position = {{ line: 0, character: before.length }};
+  const trigger =
+    {trigger_expr.group(1).strip()};
+  if (!trigger) {{ results.push({{ before, covers: null }}); continue; }}
+  const typed = trigger[1];
+  {range_stmt.group(1).strip()}
+  results.push({{
+    before,
+    covers: before.slice(range.start.character, range.end.character),
+  }});
+}}
+console.log(JSON.stringify(results));
+"""
+    proc = subprocess.run(
+        [NODE, "-e", script], capture_output=True, text=True, timeout=10, check=False
+    )
+    assert proc.returncode == 0, proc.stderr
+    results = {r["before"]: r["covers"] for r in json.loads(proc.stdout)}
+
+    assert results["LOG-MAIN-0"] == "LOG-MAIN-0", (
+        "the computed replace range no longer covers the whole typed id -- "
+        f"got {results['LOG-MAIN-0']!r}. Accepting a completion would insert "
+        "the full id on top of only part of what was typed, and VS Code's "
+        "incremental filtering would narrow against only that leftover part"
+    )
+    assert results["something REQ-PWR-00"] == "REQ-PWR-00"
+    # The `[[` form's range must not swallow the brackets themselves.
+    assert results["[[LOG-MA"] == "LOG-MA"
+    assert results["[["] == ""
