@@ -17,6 +17,8 @@ import time
 import pytest
 from serve_support import free_port, make_project, path_of
 
+from refdes.serve.server import sigterm_is_deliverable, sigterm_stops_cleanly
+
 SRC = os.path.join(os.path.dirname(__file__), "..", "src")
 
 
@@ -216,6 +218,47 @@ def test_token_file_is_removed_when_serve_stops(tmp_path):
     proc.wait(timeout=60)
     assert proc.returncode == 0
     assert not os.path.exists(token_file), "a dead launch's credential outlived it"
+
+
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="there is no catchable SIGTERM to send on Windows: terminate(), "
+    "taskkill and os.kill(pid, SIGTERM) all end in TerminateProcess, which no "
+    "handler intercepts, so this would assert the hard-kill case (the one below) "
+    "rather than the clean stop. Windows gets no SIGTERM path to test",
+)
+def test_token_file_is_removed_when_serve_stops_on_sigterm(tmp_path):
+    """N4 (in-prog-logs/user-sim-release-gate-run3.md): `--token-file` is written
+    for scripted use, and the ordinary scripted stop is `kill $pid` -- SIGTERM --
+    which used to leave the credential on disk while --help said the file was
+    "removed when serve stops cleanly". Ctrl+C already removed it; this is that
+    promise for the signal a script actually sends."""
+    token_file = str(tmp_path / "launch-url.txt")
+    proc = _start(make_project(tmp_path), "--token-file", token_file)
+    try:
+        _wait_for_file(token_file)
+        proc.send_signal(signal.SIGTERM)  # `kill $pid`, the scripted stop
+        proc.wait(timeout=60)
+        assert proc.returncode == 0, f"a SIGTERM stop was not clean: {proc.returncode}"
+        assert not os.path.exists(token_file), (
+            "kill $pid left a dead launch's credential on disk"
+        )
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait(timeout=30)
+
+
+def test_the_sigterm_handler_lives_only_as_long_as_the_launch():
+    """Not installed at import -- nothing else in the process inherits it -- and
+    handed back on the way out, so a second `serve` in the same process (and any
+    library use of this module) sees the disposition it had."""
+    before = signal.getsignal(signal.SIGTERM)
+    with sigterm_stops_cleanly():
+        inside = signal.getsignal(signal.SIGTERM)
+    assert signal.getsignal(signal.SIGTERM) is before, "the handler outlived the launch"
+    if sigterm_is_deliverable():
+        assert inside is not before, "no handler was installed while serve was running"
 
 
 def test_a_stale_token_file_from_a_crash_is_rewritten_not_refused(tmp_path):
