@@ -417,6 +417,27 @@ about a document:
   publish. Quote it as the examples here do (`page: "14"`); an unquoted
   `page: 4` is an int in YAML and is read as the number it says, but the schema
   types it as a string.
+  **One entry names one page**, so the two shapes the rule is not a remedy for
+  on its own each have a shape of their own. A **range** has no representation:
+  cite the pages you mean as one entry per page, on the same `path:`, and each
+  one gets its own row and its own `#page=` link —
+
+  ```yaml
+  - path: docs/ds-main.pdf
+    page: "2"
+  - path: docs/ds-main.pdf
+    page: "3"
+  - path: docs/ds-main.pdf
+    page: "4"
+  ```
+
+  `section:` is *not* the answer for a span: a section title resolves to the one
+  page its heading starts on. It is the answer for a heading that moves between
+  revisions, which is a different problem. A **printed page number** — a book's
+  front matter is numbered in roman numerals, which is where `xiv` usually comes
+  from — is not a page number at all: `page:` counts the PDF's own sheets from
+  1, the same number the rendered `#page=` fragment opens. See
+  [troubleshooting](troubleshooting.md#citations).
 - **The range is checked against the pinned document.** `refdes fetch` counts
   the pages of the bytes it is pinning and records that count in the lockfile
   next to the sha256, and it checks every cited `page:` for that path against it
@@ -500,7 +521,7 @@ warnings at `check` and never fail it:
 | A `section:` with no resolved page in the lockfile — never fetched, or fetched without `refdes[pdf]` installed | warning naming every citer (error with `refdes build --require-citations`) |
 | A `page:` the pinned document does not have — `page: "99"` on an eight-page datasheet, or a page that stopped existing when a revision got shorter | warning naming the citer (error with `refdes build --require-citations`) |
 | A `page:` that was never checked against the document — pinned without `refdes[pdf]` installed, so no page count was recorded | warning naming the citer (error with `refdes build --require-citations`) |
-| A `page:` that is not a positive integer — `0`, `-1`, `eight`, `xiv`, `1.5` | **error, always** — a declaration error, and no file is needed to see it |
+| A `page:` that is not a positive integer — `0`, `-1`, `eight`, `xiv`, `1.5`, `2-4` | **error, always** — a declaration error, and no file is needed to see it |
 
 The hash-mismatch case is never soft-failed — a corrupted or tampered local
 cache is not something `--require-citations` or its absence should decide.

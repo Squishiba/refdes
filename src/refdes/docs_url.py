@@ -50,3 +50,12 @@ DANGLING_LINK_DOCS = f"{DOCS_URL}/troubleshooting.html#links"
 # heading -- slug checked against `pages._slugify`, the function that
 # generates the anchors, rather than guessed.
 ITEMS_FIELDS_DOCS = f"{DOCS_URL}/troubleshooting.html#items-and-fields"
+
+# The user docs for a `page:` that is not a page number -- the one breaking
+# declaration error in the page-`#fragment` delta, and the one diagnostic of it
+# with no remedy of its own. What to write instead is a citation question
+# rather than an items-and-fields one (a range is one entry per page; a printed
+# page number is not the PDF's own sheet), so it points at troubleshooting.md's
+# own `## Citations` heading rather than reusing ITEMS_FIELDS_DOCS -- slug
+# checked against `pages._slugify` the same way.
+CITATION_PAGE_DOCS = f"{DOCS_URL}/troubleshooting.html#citations"

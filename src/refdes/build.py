@@ -167,6 +167,51 @@ def _format_required_when(condition: dict[str, object]) -> str:
     return " and ".join(clauses)
 
 
+def _page_remedy(value: object) -> str:
+    """The one sentence that says what to write instead, for the two shapes of
+    a refused `page:` where the rule alone leaves the user stuck.
+
+    Finding F2 of `in-prog-logs/user-sim-release-gate-run4.md`: this is the
+    only diagnostic in the page-`#fragment` delta that stops at naming the rule,
+    and it is the only *breaking* change in it, so it is the first thing an
+    upgrading project meets. Two of the refused shapes are not typos the reader
+    can see -- someone who wrote `2-4` or `xiv` believes they have cited
+    something, and needs to be told the shape that citation takes instead:
+
+    - A **range** has no representation. One entry names one page, so a span is
+      one entry per page for the same path (verified: two entries for one
+      `path:`, one page each, build clean). Not `section:` -- a section title
+      resolves to the single page it starts on, which is the answer for a
+      heading that moves between revisions, not for a span.
+    - A **printed page number** -- a book's front matter is numbered in roman
+      numerals, which is why `xiv` is the common one -- is not a page index.
+      The rendered `#page=N` fragment opens the PDF's own sheet, counted from
+      1 (docs/markdown.md, `## Citing a section by name`). A value with no
+      digits at all is a word or a printed label, never a number that could be
+      counted, and one wording covers both.
+
+    Every other refused shape (`0`, `-1`, `1.5`, `9 9`, an empty string) *is*
+    fully answered by the rule, so it gets no sentence here: this fires once per
+    bad `page:`, and a remedy that restates the rule back at the user is noise
+    on the shapes the rule already covers.
+    """
+    text = str(value).strip()
+    if not text:
+        return ""
+    if re.fullmatch(r"\d+\s*[-\u2010\u2013\u2014]\s*\d+", text):
+        return (
+            " One entry names one page, so a range is one entry per page for"
+            " the same path."
+        )
+    if not any(ch.isdigit() for ch in text):
+        return (
+            " A printed page number is not a page index: page: counts the"
+            " PDF's own sheets from 1, the same number the rendered link"
+            " opens."
+        )
+    return ""
+
+
 def _field_error(project: Project, item: Item, fname: str, message: str) -> None:
     """Finding 6: a `defaults:` block is merged into every item in its file
     unconditionally, regardless of whether the item overrode `type:` to
@@ -334,7 +379,9 @@ def validate_items(project: Project) -> None:
                                     project, item, fname,
                                     f"{fname}[{index}]: page: {page!r} is not a "
                                     f"page number -- page: must be a positive "
-                                    f"integer, counted from 1",
+                                    f"integer, counted from 1."
+                                    f"{_page_remedy(page)}"
+                                    f" See {docs_url_mod.CITATION_PAGE_DOCS}.",
                                 )
                                 continue
                         if "section" in entry:
