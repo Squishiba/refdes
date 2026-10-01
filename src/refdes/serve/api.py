@@ -251,6 +251,7 @@ def _item_view(app, ref: str) -> tuple[int, dict]:
         "inherited_fields": sorted(item.inherited_fields),
         "external": item.external,
         "origin": item.origin,
+        "former_ids": list(item.former_ids),
         "append_only": bool(spec.append_only) if spec else False,
         "sealed": is_sealed(project, item),
         "links": {

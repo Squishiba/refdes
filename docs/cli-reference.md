@@ -384,7 +384,7 @@ it has always got.
 | `--workspace WORKSPACE` | Only items in this [workspace](workspaces.md) |
 | `--file PATH` | Only items declared in this source file |
 | `--tag TEXT` | Only items with a tag containing this text |
-| `QUERY ...` (positional, optional) | Free text, matched against the item's id, its title and `tags:`, case-insensitive. Zero or more words; the whole quoted string is the query, as in `refdes ls "current limit"` or `refdes ls req-sys-0` |
+| `QUERY ...` (positional, optional) | Free text, matched against the item's id, its title, `tags:` and `former_ids:`, case-insensitive. Zero or more words; the whole quoted string is the query, as in `refdes ls "current limit"` or `refdes ls req-sys-0` |
 
 ```bash
 refdes ls
@@ -393,6 +393,7 @@ refdes ls --workspace product-a
 refdes ls --file items/common/power.yaml
 refdes ls "current limit"
 refdes ls --tag "current limit"
+refdes ls REQ-PWR-001
 ```
 
 An items file that fails to parse is printed to stderr and `ls` exits 1 — the
@@ -446,6 +447,28 @@ case rules are identical to the title and tag matching — there is no
 exact-id-only mode. The query someone types immediately after `refdes id`
 prints a fresh id is that id, and before this `ls` answered it with
 "no items match".
+
+So is `former_ids:`, under the same substring and case rules, because a
+retired id is exactly as real as a live one to whoever still has it — a
+schematic, a review note, a commit message. The row leads with the current id
+and names the retired one, so the listing says where the old id went instead
+of leaving it to be inferred:
+
+```bash
+refdes ls REQ-PWR-001
+NEED-PWR-001  need  The 3V3 rail shall supply 1.2 A continuous. (formerly REQ-PWR-001)
+```
+
+The marker appears only where the query actually met one of the item's former
+ids, so `refdes ls` and `refdes ls NEED-PWR-001` print the same rows they
+always did. See [renumbering](ids.md#looking-an-item-up-by-a-retired-id).
+
+If a retired id has been reused by a different live item, the live item wins
+it — it is the item that id names today — so it is the row `ls` prints, and
+the item still recording the old one is named in a note under the table. That
+combination is a build error (`refdes check` says so: `former_ids:` may only
+name retired ids), so the note points at the command that reports it rather
+than pretending both rows are fine.
 
 **`lint_own_tags: true`** in `refdes-project.yaml` (default off) warns on an
 item whose `tags:` are entirely inherited from its file's `defaults:` — as
@@ -1165,7 +1188,10 @@ and were not rewritten (a rename never edits prose):
 Fix each one by hand, or — usually better — record the old id once as a
 [`former_ids:`](ids.md#renumbering-former-ids) entry on the renamed item, and
 every mention of it resolves again, marked "(formerly CON-THM-001)", with no
-historical sentence edited at all.
+historical sentence edited at all. The recorded id also becomes findable on
+purpose: [`refdes ls`](#refdes-ls) takes it, the item's own page lists it, and
+its hover preview card carries it — see [looking an item up by a retired
+id](ids.md#looking-an-item-up-by-a-retired-id).
 
 Every affected item's content hash is carried forward, id by id, in every
 stamped baseline **and** every seal file (`.refdes/log-seal*.yaml`) — not

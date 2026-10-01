@@ -411,6 +411,12 @@ types:
     preview: [status, limit, rationale]
 ```
 
+A target that carries [`former_ids:`](ids.md#renumbering-former-ids) also gets
+a **formerly known as** row, so hovering the reference to a renamed item says
+what it used to be called without leaving the page. The renamed item's own
+page lists the same ids, and [`refdes ls`](cli-reference.md#refdes-ls) finds
+the item by its retired id.
+
 Previews are generated at build time and inlined into the page. There are no
 network calls. Without JavaScript they degrade to ordinary working links. They are
 keyboard-accessible (focus to show, Escape to dismiss) and tap-to-open on touch

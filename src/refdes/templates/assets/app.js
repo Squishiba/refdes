@@ -34,16 +34,23 @@
     } else if (p.check === "pass") {
       state = '<span class="pill pill-pass">checks pass</span>';
     }
-    var rows = p.fields
-      .map(function (f) {
-        return "<dt>" + esc(f.name) + "</dt><dd>" + esc(f.value) + "</dd>";
-      })
-      .join("");
+    var rows = p.fields.map(function (f) {
+      return "<dt>" + esc(f.name) + "</dt><dd>" + esc(f.value) + "</dd>";
+    });
+    // A retired id is how this item is still named in the citations that
+    // outlived the rename, and a reader who has only that id needs to see it
+    // here -- hover is where they look. Rendered as a field row rather than a
+    // new element so the card needs no stylesheet rule of its own.
+    if (p.former_ids && p.former_ids.length) {
+      rows.push(
+        "<dt>formerly known as</dt><dd>" + esc(p.former_ids.join(", ")) + "</dd>"
+      );
+    }
     return (
       '<div class="pv-head"><span class="type-badge">' + esc(p.type) + "</span>" +
       '<span class="pv-id">' + esc(p.id) + "</span>" + state + "</div>" +
       '<div class="pv-title">' + esc(p.title) + "</div>" +
-      (rows ? "<dl>" + rows + "</dl>" : "")
+      (rows.length ? "<dl>" + rows.join("") + "</dl>" : "")
     );
   }
 

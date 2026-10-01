@@ -70,7 +70,9 @@ support](https://github.com/Squishiba/refdes/blob/main/docs/standard-library.md#
 for the full story.
 
 **Hover.** Hover any ID for its type, title, key fields, coverage stage, and any
-failing checks. When a live snapshot is connected (see [Live snapshot](#live-snapshot)),
+failing checks. An item that was [renumbered](https://github.com/Squishiba/refdes/blob/main/docs/ids.md#renumbering-former-ids)
+also says *formerly known as …*, so hovering the id you have from a schematic
+or a commit message tells you which item it is now. When a live snapshot is connected (see [Live snapshot](#live-snapshot)),
 the hover also carries the three facts only a snapshot has — coverage stage, check
 state, and the diagnostics attributed to that item — under a *From `refdes serve`*
 heading.
