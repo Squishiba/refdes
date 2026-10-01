@@ -1,0 +1,246 @@
+# N5 — a workspace column in `refdes ls`, only when the project declares `workspaces:`
+
+Branch `ls-workspace-column`, branched from main at `b068f96`.
+
+Task, from `in-prog-logs/user-sim-release-gate-run3.md` §3 N5: `ls` shows
+id / type / board / title, so in a project with `workspaces:` declared nothing
+in the plain listing says a workspace exists or where an item's workspace came
+from. Decision (maintainer): add the column **only when** `workspaces:` is
+declared; a project without it sees byte-identical output to today.
+
+## Ground rules I'm working under
+
+- Run the CLI as
+  `PYTHONPATH=<worktree>/src python -m refdes.cli ...` (the `refdes` on PATH is
+  a broken editable install pointing at another worktree).
+- Tests: `PYTHONPATH=src python -m pytest -q`.
+- Never `git stash` (other sessions work this checkout); scratch under
+  `.scratch/`, left there; `git add -- <paths>` only.
+
+## How an item's workspace is determined
+
+`workspaces.resolve(project)` (`src/refdes/workspaces.py:45`) assigns
+`item.workspace` with the precedence *item `workspace:` override > file
+`defaults:` > path under `item_layout: workspace`* — deliberately the same
+precedence `boards.resolve()` uses for `item.board`, and for the same reason:
+`item.workspace_hint` already encodes item-vs-file-defaults by the time
+`parse.py` is done. Everything downstream reads the resolved attribute:
+`cmd_ls` filters on it directly (`src/refdes/cli.py:646`), as do
+`render._in_scope` and the cross-workspace lint.
+
+So the column reads `item.workspace` — the same value `--workspace` filters on.
+No re-derivation. The whole function is a no-op when `project.workspaces` is
+empty (workspaces.py:57-58), which is why gating on `project.workspaces` is
+exactly the same condition under which any item can have a workspace at all.
+
+## What `--workspace` treats an item in no workspace as
+
+Correction to what I first wrote in this log: I had guessed that
+`--workspace ''` selects items in no workspace. **It does not** — I ran it.
+`cmd_ls` guards with `if args.workspace and item.workspace != args.workspace`
+(cli.py:646), and `""` is falsy, so `--workspace ''` skips the filter entirely
+and lists the whole project. So:
+
+- `item.workspace` is `""` for an item in no workspace;
+- every non-empty `--workspace NAME` excludes it, and every name it accepts is
+  a real registered workspace;
+- there is no flag spelling for "only the items in no workspace".
+
+**Decision: blank padding**, the same treatment an absent board gets today
+(`board_col = f"{item.board:<{board_w}}  " if board_w else ""`, cli.py:667) —
+omission, never a placeholder like `[unworkspace]`. A marker would name
+something `--workspace` cannot be asked for, which is exactly the
+inconsistency to avoid.
+
+## Other `ls` output modes / machine-readable consumers
+
+- `cmd_ls` has exactly one output mode: aligned text to stdout. No `--json`,
+  no `--compact`, no `--format`; the subparser takes only the five filters plus
+  the positional query.
+- The VS Code extension does **not** call `ls`. `editors/vscode/extension.js`
+  is "a thin client over `refdes index`" (its own line 4) and over
+  `refdes serve`; the commands it shells out to are `index`, `build`, `check`,
+  `id` (README.md:94-96, extension.js:742). Nothing there parses `ls` output.
+- `index --compact` already exports a per-item `workspace`, already additively
+  and already gated on `project.workspaces` (`render.items_json`,
+  `src/refdes/render.py:647-648`, registry at 582-586). So the
+  machine-readable surface already has this field; nothing to add there and
+  nothing to break.
+- Conclusion: the text listing is the only surface this touches, and the
+  guarantee that matters is the maintainer's — unchanged bytes for a project
+  with no `workspaces:`.
+
+## Reproduced on main, before any change
+
+Project: `.scratch/lscol/` — three registered workspaces (`platform`,
+`product-a`, `product-b`), `item_layout: workspace`, boards `board-a` /
+`board-b`, seven items, plus one item in no workspace at all
+(`items/can-bitrate.md`, sitting directly in `items/`, outside every workspace
+folder) so the blank-column case is real rather than hypothetical.
+(Captions: `types`/`link_types` had to move to `refdes-schema.yaml` — a
+`types:` in `refdes-project.yaml` is a hard error, exit 2, and the first
+attempt at this config failed exactly that way.)
+
+```
+$ PYTHONPATH=src python3 -m refdes.cli -c .scratch/lscol/refdes-project.yaml ls
+BND-A-001     bound        board-b  Product A input current.
+BND-CAN-001   bound                 CAN bitrate.
+DEC-A-001     decision     board-a  Regulator sized for product A.
+DEC-A-002     decision     board-a  Wide-temp part chosen for product A.
+REQ-A-001     requirement  board-a  Product A shall run from 9 V to 36 V.
+REQ-A-002     requirement  board-a  Product A shall survive -40 C to 85 C.
+REQ-PLAT-001  requirement           The platform shall run from 9 V to 36 V.
+```
+
+(`BND-CAN-001` has no board either; `REQ-PLAT-001` has no board because
+`platform/shared`'s second segment is not a registered board. Two different
+absences, both blank, before anything changed.)
+
+Control project with no `workspaces:` — the refdes repo itself, which
+explicitly declares none (`refdes-project.yaml:83` "This project declares no
+workspaces:, so 'flat' is the only sensible value"). 22 items, captured
+verbatim to `.scratch/lscol/before-repo.txt`, re-diffed after the change:
+identical.
+
+## The change
+
+`src/refdes/cli.py`, `cmd_ls` printing block, plus the docstring and the `ls`
+subparser's `help=`/`description=`:
+
+```python
+ws_w = max((len(i.workspace) for i in rows), default=0) if project.workspaces else 0
+for item in rows:
+    board_col = f"{item.board:<{board_w}}  " if board_w else ""
+    ws_col = f"{item.workspace:<{ws_w}}  " if ws_w else ""
+    print(f"{item.id:<{id_w}}  {item.type:<{type_w}}  {ws_col}{board_col}{item.title}")
+```
+
+Column order is **workspace, then board**: a workspace groups boards one level
+up (docs/workspaces.md), the rendered nav nests them that way, and it is the
+order the filters are documented in. Width is padded over the filtered rows,
+so filtering to `--workspace platform` re-pads — the same way `--board` already
+behaves.
+
+Gating on `project.workspaces` rather than on `ws_w` alone: with no registry
+`workspaces.resolve` is a no-op, so no local item can have a workspace
+(`workspaces.py:57-58`) and `ws_w` would be 0 anyway. The explicit condition
+states the promise instead of resting on an invariant in another module.
+`ws_w == 0` in a project that *does* declare workspaces (e.g. `ls --file` on a
+file whose only item is in no workspace) still drops the column, matching the
+board column's `if board_w else ""`.
+
+## After
+
+```
+$ PYTHONPATH=src python3 -m refdes.cli -c .scratch/lscol/refdes-project.yaml ls
+BND-A-001     bound        product-b  board-b  Product A input current.
+BND-CAN-001   bound                            CAN bitrate.
+DEC-A-001     decision     product-a  board-a  Regulator sized for product A.
+DEC-A-002     decision     product-a  board-a  Wide-temp part chosen for product A.
+REQ-A-001     requirement  product-a  board-a  Product A shall run from 9 V to 36 V.
+REQ-A-002     requirement  product-a  board-a  Product A shall survive -40 C to 85 C.
+REQ-PLAT-001  requirement  platform            The platform shall run from 9 V to 36 V.
+```
+
+`ls --workspace platform` → `REQ-PLAT-001  requirement  platform  The platform
+shall run from 9 V to 36 V.` (column dropped, board column too — nothing in
+that one row has a board, same rule as before).
+`ls --file items/can-bitrate.md` → `BND-CAN-001  bound  CAN bitrate.`
+
+No-workspaces control: `diff .scratch/lscol/before-repo.txt
+.scratch/lscol/after-repo.txt` → no differences, and `git status` shows the
+repo's own `items/` untouched (run with `--no-write`).
+
+## Tests (`tests/test_workspaces.py`, four new)
+
+- `test_ls_shows_a_workspace_column_when_the_project_declares_workspaces` —
+  the exact five lines, not a substring, so a column in the wrong place or a
+  duplicated one fails.
+- `test_ls_omits_the_workspace_column_entirely_without_a_workspaces_registry` —
+  the byte-for-byte guarantee, asserted as five exact lines on the existing
+  `board_project` fixture (which has no `workspaces:` and does have an item
+  with no board, so it pins the blank padding too).
+- `test_ls_shows_an_item_in_no_workspace_as_a_blank_and_never_matches_it` —
+  writes an item directly in `items/`, asserts the blank column at full width,
+  and that no `--workspace` name selects it while `--workspace ''` selects
+  everything (the correction above, pinned).
+- `test_ls_help_says_the_workspace_column_is_conditional` — argparse wraps
+  help text, so the assertion collapses whitespace first.
+
+All four match the listing on the *second* run of a fresh project, via a
+`_steady_state_ls` helper: the first load mints keys and announces it, and that
+notice is line one of stdout. The notice is real and wanted; a column-layout
+test is not where it belongs.
+
+## Sabotage check
+
+Reverted only `src/refdes/cli.py` to main's version with
+`git apply -R .scratch/lscol/cli-column.patch` (no stash — other sessions work
+this checkout), ran the four, then re-applied:
+
+| test | against main's `cmd_ls` |
+|---|---|
+| shows a workspace column when declared | **fails** — no workspace column in the expected lines |
+| omits the column without a registry | **passes** — correct: it pins behaviour main already has; it is the regression guard, not a new-behaviour test |
+| shows an item in no workspace as a blank | **fails** — REQ-CAN-001 not in the listing's shape |
+| help says the column is conditional | **fails** — no such sentence in `ls --help` |
+
+Three of four are new-behaviour tests and all three fail without the change;
+the fourth is the guarantee test and is *supposed* to pass on main, since its
+whole claim is "a project with no `workspaces:` is untouched" — a test that
+failed there would mean the guarantee was already broken. Recorded here rather
+than glossed over as 4/4.
+
+## Full suite
+
+`PYTHONPATH=src python3 -m pytest -q` → **3150 passed, 2 skipped** in 229s.
+
+## Ruff, scoped
+
+`ruff check src/refdes/cli.py` → clean.
+`ruff check tests/test_workspaces.py` → 2 findings, both `SIM115`, both
+pre-existing (`open(...)` without a context manager at what are now lines 121
+and 289) — confirmed by running ruff over `git show
+HEAD:tests/test_workspaces.py` dumped to `.scratch/`, which reports the same 2.
+Left alone, per AGENTS.md.
+
+## Docs
+
+- `docs/cli-reference.md`, `## refdes ls`: the column list, the conditional
+  gate, a real `console` block (three verbatim lines of the `.scratch` run
+  above — real bytes, not re-padded), and the no-workspace paragraph.
+- `docs/workspaces.md`, under "Reviewing one workspace", a new "### Seeing
+  where an item sits without filtering" subsection — this is the page that
+  shows `ls` output for a workspaces project, and its sample block is real
+  output from the `.scratch` project (five of its seven lines, unaltered, so
+  the padding shown is the padding printed).
+- `docs/cli-reference.md`'s `--workspace` paragraph already stated that a
+  project with no registry matches nothing; still true, left alone.
+- `docs/design/vocabulary-review.md:275` quotes the old `ls` help string
+  verbatim, but in a table whose line numbers are stale throughout (`:1227`,
+  `:1306`, …) — a snapshot of an older `cli.py`, not live reference. Left
+  alone rather than half-updating a dated table. Same for
+  `docs/design/backlog.md:192`, a dated record of what finding 9 shipped.
+- No new page, so `docs/index.md`'s nav is untouched.
+
+## Changelog
+
+`changelog.d/ls-workspace-column.added.md`, per `changelog.d/README.md`
+(`<slug>.<category>.md`, `- ` bullets, no headings): what changed, the
+no-registry guarantee, the blank-column decision, and the note that `refdes
+index` already exported the field.
+
+## Status
+
+- [x] read N5, `workspaces.py`, `cmd_ls`
+- [x] decide the no-workspace rendering; keep it consistent with `--workspace`
+- [x] check the other output modes and the VS Code consumer
+- [x] reproduce on main in `.scratch/`
+- [x] implement the column
+- [x] tests: column present, unchanged without `workspaces:`, no-workspace item
+- [x] sabotage-check the new tests against main's code
+- [x] full suite
+- [x] docs: `docs/cli-reference.md` ls section, `docs/workspaces.md`
+- [x] changelog fragment
+- [x] ruff scoped to touched files
+- [ ] commit, push, PR

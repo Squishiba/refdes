@@ -216,3 +216,28 @@ project still parses and every link still resolves — a decision in one
 workspace that (legitimately) satisfies a shared requirement still checks
 correctly — only what gets *printed* is narrowed to that workspace's own
 items.
+
+### Seeing where an item sits without filtering
+
+A project that declares `workspaces:` gets a workspace column in `ls`, one
+level above the board column, so the flag is discoverable from the listing it
+filters:
+
+```console
+$ refdes ls     # a project that declares workspaces:, some rows
+BND-A-001     bound        product-b  board-b  Product A input current.
+BND-CAN-001   bound                            CAN bitrate.
+DEC-A-001     decision     product-a  board-a  Regulator sized for product A.
+REQ-A-002     requirement  product-a  board-a  Product A shall survive -40 C to 85 C.
+REQ-PLAT-001  requirement  platform            The platform shall run from 9 V to 36 V.
+```
+
+An item in no workspace — here one sitting directly in `items/`, outside every
+workspace folder — leaves that column blank rather than naming its absence, the
+same way an item with no board leaves the board column blank. No
+`--workspace` value selects it either; the column shows the resolved
+workspace, and blank is not a name you can pass to the filter.
+
+With no `workspaces:` block there is no column at all, and `ls` prints exactly
+what it printed before: `workspaces:` being opt-in is a promise that an
+unadopted project is untouched.

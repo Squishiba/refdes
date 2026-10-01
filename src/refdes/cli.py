@@ -624,6 +624,12 @@ def cmd_ls(args) -> int:
     place; the search has to actually reach it for that to matter. The id is
     in the haystack too, because the natural query right after `refdes id`
     prints one is the id itself.
+
+    The listing carries a workspace column -- but only on a project that
+    declares `workspaces:`, so a project without one sees the same bytes it
+    saw before this column existed. Without it the `--workspace` filter below
+    was the only way to find out that an item belonged to a workspace at all,
+    which made the flag undiscoverable from the listing it filters.
     """
     project, _stale = _load(args, require_ids=False)
     _announce_load_writes(project)
@@ -663,9 +669,20 @@ def cmd_ls(args) -> int:
     id_w = max(len(i.id) for i in rows)
     type_w = max(len(i.type) for i in rows)
     board_w = max((len(i.board) for i in rows), default=0)
+    # Workspaces get a column under the same condition boards do, for the same
+    # reason: `workspaces.resolve` is a no-op without a `workspaces:` registry,
+    # so a project that declares none has nothing to put in the column and
+    # keeps byte-identical output (workspaces.py's module docstring promises
+    # exactly that, and the board column above is the precedent).
+    # `item.workspace` is the resolved value -- the same one `--workspace`
+    # filters on -- and an item in no workspace has it "", printed as blank
+    # padding rather than a placeholder, since "" is not a name `--workspace`
+    # will ever match.
+    ws_w = max((len(i.workspace) for i in rows), default=0) if project.workspaces else 0
     for item in rows:
         board_col = f"{item.board:<{board_w}}  " if board_w else ""
-        print(f"{item.id:<{id_w}}  {item.type:<{type_w}}  {board_col}{item.title}")
+        ws_col = f"{item.workspace:<{ws_w}}  " if ws_w else ""
+        print(f"{item.id:<{id_w}}  {item.type:<{type_w}}  {ws_col}{board_col}{item.title}")
     return 1 if load_errors else 0
 
 
@@ -1958,7 +1975,22 @@ def main(argv: list[str] | None = None) -> int:
     p_index.set_defaults(func=cmd_index)
 
     p_ls = sub.add_parser(
-        "ls", help="list existing items: id, type, board, title -- filterable"
+        "ls",
+        help="list existing items: id, type, [workspace,] board, title -- filterable",
+        description="A filterable, human-readable listing of existing items, as "
+        "aligned text: id, type, workspace, board, title -- the workspace column "
+        "only on a project that declares workspaces:, so the --workspace filter "
+        "below is discoverable from the listing it filters. Workspace comes "
+        "before board because it groups it one level up. An item in no "
+        "workspace leaves that column blank, which is also how it behaves when "
+        "you filter: no name passed to --workspace will ever match it. A "
+        "project with no workspaces: registry has no workspace for any item, so "
+        "it gets no column and byte-identical output. Every filter combines as "
+        "a plain AND, and an unknown --type/--board/--workspace name is "
+        "answered with 'no items match' (exit 0), the way a query command "
+        "answers a typo rather than with a registry error. An items file that "
+        "fails to parse is printed to stderr and exits 1 with the listing "
+        "intact.",
     )
     p_ls.add_argument(
         "query", nargs="*",
