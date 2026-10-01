@@ -1382,6 +1382,7 @@ multiple `DISPLAY-ID@ORIGINAL-KEY` arguments to repair several items together.
 | Flag | Meaning |
 |---|---|
 | `--dry-run` | Fully validate the proposed restoration and report the key changes and files without writing |
+| `--force` | Restore even when the most recent baseline recording the key shows different content than the item it is being moved onto — for the same item, edited since that baseline was stamped |
 
 Global `--no-write` also selects the dry run. Successful restoration exits 0;
 a refused restoration exits 1. A repeat with already-restored keys reports
@@ -1396,8 +1397,34 @@ failure restores the original file bytes.
 It refuses malformed keys, keys owned by another local or imported item,
 unknown or imported target items, ambiguous source edits, and replacement keys
 already recorded in any baseline, seal, membership manifest, or captured-history
-event. Discarding a recorded replacement key would orphan that history. The
-proposed project must have no structural build errors: include all lost keys
+event. Discarding a recorded replacement key would orphan that history. It also
+refuses a restore whose target the recorded history does not describe: when the
+most recent baseline recording the key shows a **different title or a different
+content hash** than the item the key is being moved onto, the move would hand
+every reference that names the key to an unrelated item while leaving a clean
+build, so it is refused and names both sides —
+
+```text
+refused:
+  refusing to move key 'k7f3m2q9x4a' onto REQ-PWR-002: baseline 'rev-a' records
+  that key under 'REQ-PWR-002' with different content -- title: baseline 'Rail
+  current', now 'Enclosure drop'; content hash: baseline 'c7926b17234d6180',
+  now 'edaa81a32f696859'. Restoring it would re-point every reference that names
+  the key at this item and leave a passing build. If this really is the item that
+  key belonged to -- the same item, edited since that baseline was stamped --
+  pass --force. If it is not, give the item a new display id so it is not
+  mistaken for the old one; a fresh key is minted for it then.
+```
+
+The comparison uses the same hashing the baseline was stamped with, and an
+item's own key and display id are not part of its content hash, so restoring
+the *same* item's key never trips it. `--force` overrides this one refusal —
+it overrides nothing else the command refuses. Where no baseline records the
+key at all (no baselines, a pre-keys entry with no identity evidence, or a
+baseline that never filed it), there is nothing to compare and the restore
+behaves as it always has.
+
+The proposed project must have no structural build errors: include all lost keys
 in one command and fix
 unrelated errors first. An evaluated check that violates a bound is allowed,
 following the existing transaction policy. This recovery is implemented by
