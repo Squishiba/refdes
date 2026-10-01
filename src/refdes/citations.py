@@ -1322,7 +1322,14 @@ def _source_drift(project: Project, changed_local: dict[str, list[str]]) -> dict
     out: dict[str, str] = {}
     for canon, keys in sorted(used.items()):
         try:
-            now = _extract_source_values(project, canon, {k: [] for k in keys})
+            # `label=canon`, not the reader's default: the default is
+            # `path.as_posix()` -- the server's own directory -- and this string
+            # is stored on the calc line and rendered into the item page, so it
+            # reaches `/preview/` over `refdes serve` and `_site/` on a plain
+            # build (`sources.CsvReader.extract`, sources.py:245).
+            now = _extract_source_values(
+                project, canon, {k: [] for k in keys}, label=canon,
+            )
             failure = ""
         except sources_mod.SourceExtractionError as exc:
             now, failure = {}, "; ".join(exc.problems)
@@ -1643,10 +1650,14 @@ def _extract_source_values(
     entries -- or SourceExtractionError. Nothing is written here: the caller
     replaces the path's record only if this returns.
 
-    `label` is what the reader calls the file in its problems. `fetch` leaves it
-    unset and prints a real path to a terminal; a caller answering a browser
-    passes the project-relative name, because the root it read the bytes from is
-    not information to hand out (`editor-source-picker.md` §6).
+    `label` is what the reader calls the file in its problems, and every caller
+    in this module passes it: the reader's default is `path.as_posix()`, the
+    absolute path it was handed, and a problem string is not somewhere that
+    belongs (`editor-source-picker.md` §6, and `sources._cannot_read` for what
+    undoing it from the other side takes). These problems are printed as
+    `FAILED` lines by `fetch`, stored on the calc line by `_source_drift` and
+    rendered into the item page, so a caller that omits the label leaks the
+    server's own directory to a terminal and to `/preview/`.
 
     PDF requests take their confirmed anchors from `values` (the old record,
     or the fresh on-disk lockfile when omitted). Accept can add server-derived
@@ -1754,7 +1765,12 @@ def _refresh_pinned_sources(
             )
         return False
     try:
-        new_values = _extract_source_values(project, canon, keys, values=values)
+        # `label=canon` for the same reason as `_source_drift` above: these
+        # problems are printed as `FAILED` lines, so the reader must name the
+        # file by the path the author wrote, never by the one it was handed.
+        new_values = _extract_source_values(
+            project, canon, keys, label=canon, values=values,
+        )
     except sources_mod.SourceExtractionError as exc:
         result.source_errors.extend(
             f"{p} (source key extraction; the record is unchanged)" for p in exc.problems
@@ -1936,6 +1952,32 @@ def _section_bytes(project, kind, canon, record):
     return data, ""
 
 
+def _local_read_failure(
+    canon: str, exc: Exception, citers: list[str], source_citers: dict[str, list[str]],
+) -> str:
+    """A cited local file `fetch` could not open, in `check`'s words and naming
+    every item that wanted it.
+
+    The two halves are not decoration. `check` already reports this exact
+    condition as `cited local file <canon> does not exist`
+    (`_resolve_local`), so a project that gets one message from `fetch` and the
+    other from `check` reads as two different problems; and a fetch failure
+    with no item id on it is a failure an author has to locate by hand. The
+    `source()` users of the file are named too: they are why the file is cited
+    even when no `citations:` entry spells a key out of it.
+
+    `reason` is `exc.strerror`, never `str(exc)`: `sources._cannot_read`'s
+    docstring says why in one line ("`str(OSError)` interpolates the filename
+    it was raised on"), and `errno` covers the rare OSErrors that carry none.
+    """
+    who = sorted(set(citers) | {i for group in source_citers.values() for i in group})
+    cited_by = f" (cited by {', '.join(who)})" if who else ""
+    if isinstance(exc, FileNotFoundError):
+        return f"cited local file {canon!r} does not exist{cited_by}"
+    reason = getattr(exc, "strerror", None) or f"OS error {getattr(exc, 'errno', None)}"
+    return f"cited local file {canon!r} cannot be read: {reason}{cited_by}"
+
+
 def _section_failure(canon: str, err: SectionError, sections: dict[str, list[str]]) -> str:
     """One fetch-time section failure, naming the path, the section(s) and the
     citing item ids -- the three things an author needs to act on it."""
@@ -2027,6 +2069,20 @@ def fetch_all(
     wants_keep_copy: dict[str, bool] = defaultdict(bool)
     for item, spec in entries:
         wants_keep_copy[spec.path] = wants_keep_copy[spec.path] or spec.keep_copy
+
+    # {canonical path: [citing item ids]} -- every citation in the project, for
+    # the same reason as the two below: a failure has to say whose citation it
+    # is, and the ids of the two above only cover a citation that names a
+    # section or a page. A bare `path:` entry -- the commonest local citation of
+    # all -- is in neither, and it is exactly the one that fails to open.
+    cited_by: dict[str, list[str]] = defaultdict(list)
+    for item, spec in collect(project):
+        try:
+            _kind, canon = classify(project.root, spec.path)
+        except CitationError:
+            continue  # a refused path is validation's to report, not ours
+        if item.id not in cited_by[canon]:
+            cited_by[canon].append(item.id)
 
     # {canonical path: {section as written: [citing item ids]}} -- what each
     # path's outline has to be asked for, and whom to tell when the answer
@@ -2202,7 +2258,21 @@ def fetch_all(
             else:
                 data = fetcher(canon)
         except Exception as exc:  # noqa: BLE001 -- surfaced per-path, not fatal
-            results.append(FetchResult(path=canon, error=str(exc)))
+            # A local read that fails is reported in `check`'s own words, with
+            # the citing ids: `str(OSError)` interpolates the absolute path this
+            # open() was handed, so composing it here would put the server's own
+            # directory on a line that is otherwise project-relative, and would
+            # leave the author with a failure naming no item of theirs. Both are
+            # what `_resolve_local` already gets right for the same condition
+            # (citations.py:1039); this is the fetch half of that one sentence.
+            results.append(FetchResult(
+                path=canon,
+                error=(
+                    _local_read_failure(canon, exc, cited_by[canon], source_keys[canon])
+                    if kind == "local"
+                    else str(exc)
+                ),
+            ))
             continue
 
         digest = hashlib.sha256(data).hexdigest()
@@ -2215,7 +2285,7 @@ def fetch_all(
         if kind == "local" and keys_here:
             try:
                 new_values = _extract_source_values(
-                    project, canon, keys_here,
+                    project, canon, keys_here, label=canon,
                     values=(records.get(canon) or {}).get("values") or {},
                 )
             except sources_mod.SourceExtractionError as exc:

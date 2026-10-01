@@ -1,0 +1,297 @@
+# citation-absolute-path-leaks — findings P3 and P4
+
+Task: fix the two absolute-path leaks in `in-prog-logs/pdf-picker-exercise.md`
+(P3: `refdes fetch`'s missing-local-file line; P4: the `source()` re-location
+message), sweep `src/refdes/citations.py`, `src/refdes/sources.py` and
+`src/refdes/serve/sources.py` for the same class, and say explicitly whether
+P4 can reach an HTTP client.
+
+Branch: `citation-absolute-path-leaks`, branched from main (`23a435c`).
+
+**Status: finished.** All 11 new tests pass; full suite green (2995 passed,
+2 skipped); ruff on the touched files shows the same findings as before the
+change (no new ones).
+
+## Ground rules followed
+
+- No `git stash`. Working tree was clean at start (`git status` → "nothing to
+  commit"); `git log --oneline -5` showed main's tip as `23a435c`, so nothing
+  below is stacked on another session's work.
+- CLI run as `PYTHONPATH=src python -m refdes.cli ...` (the `refdes` on PATH is
+  a broken editable install pointing at another worktree).
+- Probes in `.scratch/` (gitignored, left in place).
+- `serve` was started with `--no-open`, an explicit port and `--token-file`, and
+  stopped by its own PID only (`kill 1971211`, `kill 1912236`). No `pkill`,
+  no pattern kill.
+
+## Baseline: both reproduce on unmodified main
+
+`.scratch/repro_p3.py` (P3 + P4) and `.scratch/repro_p4_render.py` (P4's
+rendered half), run with `PYTHONPATH=src:tests python`.
+
+### P3 — `refdes fetch` on a missing local citation
+
+```
+FAILED  datasheets/nope.pdf  [Errno 2] No such file or directory: '/home/jorb/.paseo/worktrees/16msma8v/citation-absolute-path-leaks/.scratch/p3/datasheets/nope.pdf'
+(minted 1 key(s) while loading)
+1 citation(s) processed, 1 failed
+exit=1
+```
+
+`check` on the same project, immediately afterwards, says it correctly:
+
+```
+ERROR   items/cmp.yaml:4 [CMP-PWR-001] — cited local file 'datasheets/nope.pdf' does not exist
+```
+
+So the condition is detected; only `fetch`'s report of it is wrong. The raw
+`FileNotFoundError` text carries (a) the absolute path and (b) no citing item
+id — while every other `FAILED` line names its citers.
+
+### P4 — the `source()` re-location message
+
+```
+WARNING <project> — SOURCE FILE CHANGED: 'analysis/budget.csv' no longer matches its pin, but the build is still using the LOCKED values, not the file -- 'rail_load': locked 1.85, but the file can no longer supply it (/home/jorb/.../p4/analysis/budget.csv: no row has the key 'rail_load') [used by DEC-001]. Review the change, then accept it with: refdes fetch --update --path analysis/budget.csv
+```
+
+## Does P4 reach an HTTP client? **YES.** The report's "over HTTP that promise
+holds" is wrong, and this is the load-bearing finding of the task.
+
+`in-prog-logs/pdf-picker-exercise.md:315` says "Over HTTP that promise holds —
+I checked every response I got from a changed-file project for `/home/jorb`
+and the item payload and the sources list were both clean."
+
+Those two surfaces *are* clean, and I verified why rather than taking it on
+trust:
+
+- The only `serve`-side caller of the reader, `citations.stage_source_pins`
+  (`citations.py:1356`), already passes `label=canon`, so the accept path never
+  composed an absolute path.
+- `grep -rn "resolve_citations" src/` → no hits; `citations.verify` is the entry
+  point and `serve` does not call it directly.
+- `grep -rn "\.warnings\|\.errors" src/refdes/serve/*.py` → **empty**. The
+  diagnostic lists are not serialised into any API response at all.
+
+**But the rendered preview carries it.** `citations._source_drift`
+(`citations.py:801-852`) runs on every build and stores its sentence on the
+calc line (`citations.py:845`, `line.source_drift`), which `build.py:2120-2122`
+renders into the item page:
+
+```python
+if line.source_drift:
+    ... f'<span class="calc-source-drift">&#9888; {_esc(line.source_drift)}</span>'
+```
+
+`refdes serve`'s `PreviewManager.render` (`src/refdes/serve/preview.py:77-92`)
+calls `render_site(project, draft=True)` — the same renderer — and serves the
+result at `/preview/<item>.html`.
+
+**Measured.** `refdes serve --no-open --port 18731 --token-file …` against
+`.scratch/p4-serve`, then an authenticated `GET /preview/dec-001.html` →
+**HTTP 200**, body containing:
+
+```html
+<span class="calc-source-drift">&#9888; analysis/budget.csv changed: &#39;rail_load&#39; locked 1.85, but the file can no longer supply it (/home/jorb/.paseo/worktrees/16msma8v/citation-absolute-path-leaks/.scratch/p4-serve/analysis/budget.csv: no row has the key &#39;rail_load&#39;) -- accept with: refdes fetch --update --path analysis/budget.csv
+```
+
+`grep -c "/home/jorb"` on that response: **1**. The same string is on
+`/preview/document.html`. A plain `refdes build` writes it into `_site/`
+identically (`.scratch/repro_p4_render.py`: 2 pages carry
+`calc-source-drift`), so it also lands in anything published to a static host.
+
+Severity, stated precisely: `/preview/` is behind the launch token, so this is
+not an *unauthenticated* leak — a token holder (the author, or anyone handed
+the launch URL) reads the server's absolute path and project-root layout. The
+`shown()` posture both picker design docs promise is "project-relative paths
+only" (`docs/design/editor-source-picker.md:350`,
+`docs/design/editor-pdf-picker.md:389`), and it did not hold here. It also
+leaks into a published static site, where there is no token at all.
+
+After the fix, the same request returns the same drift message with
+`analysis/budget.csv` and `grep -c "/home/jorb"` → **0**.
+
+## The sweep (the three named files only)
+
+`grep -n "str(exc)\|strerror\|{exc}\|exc)" src/refdes/citations.py` and the
+equivalent over the other two. Each site read and judged:
+
+| site | verdict |
+|---|---|
+| `citations.py:1692` `FetchResult(path=canon, error=str(exc))` | **P3** — the local branch's `str(FileNotFoundError)` interpolates the absolute path. Fixed. |
+| `citations.py:825` `_extract_source_values(project, canon, …)` in `_source_drift` | **P4** — no `label=`, so the reader defaults to `path.as_posix()`. Fixed. |
+| `citations.py:1705` the same call in `fetch_all`'s first-pin path | **P4, second instance** — the `fetch --update` FAILED line. Fixed. |
+| `citations.py:1251` the same call in `_refresh_pinned_sources` | **P4, third instance**, found in the sweep; the report did not name it. Fixed. |
+| `sources.py:254` `SourceExtractionError([f"{label}: cannot read file: {exc}"])` | **Found in the sweep.** The CSV reader's own open-failure branch composed `str(exc)` where every *other* reader in that file calls `_cannot_read`, which is the house helper whose docstring is the whole argument. With a `label` passed, the leak was the error's own text; with none, the path appeared twice. Fixed. |
+| `citations.py:1589` `error=str(exc)` on `CitationError` from `classify` | `CitationError` is refdes' own and already spells project-relative paths. No leak; left alone. |
+| `citations.py:1485` `f"counting a document's pages failed: {exc}"` | `exc` is a refdes `SectionError`, not an `OSError`. No leak; left alone. |
+| `citations.py:311,336,372,394` `f"pypdf could not read the PDF: {exc}"` | pypdf's own words about bytes; no path (confirmed by the report's `ds-garbage.pdf` lines). Left alone. |
+| `citations.py:473-474` `failures.append(exc)` | collects `SectionError`s, printed by `_section_failure`. No leak. |
+| `citations.py:973` `status.detail = str(exc)` | `CitationError` from `classify`. No leak. |
+| `citations.py:1841` `project.warn(f"could not refresh {target}: {exc}")` | Reached only when `kind == "remote"`; `target` is the cited URL and `exc` comes from `fetcher(target)`, so there is no local path in it. No leak — I first wrote this up as a leak and corrected it after reading the guard. |
+| `sources.py:424-434` `_cannot_read` | Already correct, and its docstring is the house precedent for all of the above. Left alone. |
+| `sources.py:295` `f"{label}:{line}: key {key!r}: {exc}"` | `ValueError` from `parse_decimal`, not an `OSError`. No leak. |
+| `sources.py` other `SourceExtractionError` sites | Every one composes `label`; no path variable. |
+| `serve/sources.py` | **No `str(exc)` and no absolute-path variable anywhere.** Line 472 already uses `exc.strerror`; every reader call passes `label=canon`; `sources.py`'s `_cannot_read` already covers its own two `OSError` sites. Nothing to fix. |
+
+### Listed, not fixed (outside the three files)
+
+- The rest of `src/refdes/` (`model.py`, `cli.py`, `build.py`, `serve/*.py`) was
+  **not** swept — out of the named scope for this task. A repo-wide grep for
+  `str(exc)` on an `OSError` and for `project.root` interpolated into a message
+  is the obvious follow-up; not attempted here so this change stays scoped.
+
+## The changes
+
+`src/refdes/citations.py`
+- `fetch_all` now collects `{canonical path: [citing item ids]}` over every
+  citation in the project (`cited_by`). The two maps already there cover only
+  citations that name a `section:` or a `page:`, and a bare `path:` entry — the
+  commonest local citation of all, and the one in the P3 repro — is in neither.
+- The local-read `except` in `fetch_all` composes a new
+  `_local_read_failure(canon, exc, cited_by[canon], source_keys[canon])` instead
+  of `str(exc)`. It reuses `check`'s sentence (`cited local file '…' does not
+  exist`, `_resolve_local`, citations.py:1039), falls back to
+  `cited local file '…' cannot be read: <strerror>` for any other `OSError`, and
+  appends `(cited by …)` for every citing item **and** every `source()` user of
+  the file. Placed next to `_section_failure`, which is the same shape of
+  message. A remote fetch failure is untouched (`str(exc)` there names a URL).
+- All three `_extract_source_values` call sites in this module now pass
+  `label=canon` (citations.py:825, 1251, 1705).
+- `_extract_source_values`' docstring rewritten: it used to *document* the leaky
+  contract ("`fetch` leaves it unset and prints a real path to a terminal"), and
+  now says every caller passes it and why the default is not a fallback.
+
+`src/refdes/sources.py`
+- `CsvReader.extract`'s `OSError` branch calls the file's own `_cannot_read`
+  instead of composing `str(exc)`.
+
+No behaviour changed beyond the message text: same conditions detected, same
+remedies named, same exit codes, same severities.
+
+## Tests
+
+New file `tests/test_citation_path_hygiene.py` (11 tests). Every one asserts
+the *absence* of the project root as well as the presence of the label —
+asserting only the positive half would pass on a message carrying both, which
+is what was being fixed.
+
+- P3: `test_fetch_reports_a_missing_local_file_the_way_check_does`,
+  `test_the_fetch_line_names_every_citer_of_the_missing_file`,
+  `test_fetch_and_check_word_the_same_condition_identically`,
+  `test_an_unreadable_local_citation_is_also_named_by_its_label`.
+- P4: `test_the_changed_source_warning_names_the_project_relative_path_only`,
+  `test_the_drift_stored_on_the_calc_line_carries_no_absolute_path`,
+  `test_the_preview_page_carries_no_project_root` (a real `EditorApp` over a
+  real socket, `/preview/dec-001.html` and `/preview/document.html`),
+  `test_fetch_reports_an_unextractable_source_by_its_label`,
+  `test_the_refresh_failure_line_names_the_project_relative_path_only`.
+- Sweep: `test_the_csv_readers_own_open_failure_does_not_undo_the_label`,
+  `test_the_serve_side_reader_surface_is_project_relative` (already clean;
+  pinned so a dropped `label=` at a `serve/sources.py` call site fails).
+
+### Confirmed failing against main's code first
+
+Run against the unmodified `src/`, before any of the fixes (and with the two
+mechanical bugs in my own first draft of the test file — a `project.items[0]`
+indexing a dict, and an inverted "unlabelled" assertion — already corrected, so
+this is the state a reader would get from main plus a working test file):
+
+```
+$ PYTHONPATH=src python -m pytest tests/test_citation_path_hygiene.py -q
+FAILED tests/test_citation_path_hygiene.py::test_fetch_reports_a_missing_local_file_the_way_check_does
+FAILED tests/test_citation_path_hygiene.py::test_the_fetch_line_names_every_citer_of_the_missing_file
+FAILED tests/test_citation_path_hygiene.py::test_fetch_and_check_word_the_same_condition_identically
+FAILED tests/test_citation_path_hygiene.py::test_an_unreadable_local_citation_is_also_named_by_its_label
+FAILED tests/test_citation_path_hygiene.py::test_the_changed_source_warning_names_the_project_relative_path_only
+FAILED tests/test_citation_path_hygiene.py::test_the_drift_stored_on_the_calc_line_carries_no_absolute_path
+FAILED tests/test_citation_path_hygiene.py::test_the_preview_page_carries_no_project_root
+FAILED tests/test_citation_path_hygiene.py::test_fetch_reports_an_unextractable_source_by_its_label
+FAILED tests/test_citation_path_hygiene.py::test_the_refresh_failure_line_names_the_project_relative_path_only
+FAILED tests/test_citation_path_hygiene.py::test_the_csv_readers_own_open_failure_does_not_undo_the_label
+10 failed, 1 passed in 0.58s
+```
+
+The one that passed is
+`test_the_serve_side_reader_surface_is_project_relative` — the `serve` reader
+surface, which was already clean. That is the point of the test: it pins the
+half of the report's HTTP check that was right, so the sweep cannot be read as
+"everything leaked".
+
+After the fixes:
+
+```
+$ PYTHONPATH=src python -m pytest tests/test_citation_path_hygiene.py -q
+...........                                                              [100%]
+11 passed in 0.54s
+```
+
+Full suite:
+
+```
+$ PYTHONPATH=src python -m pytest -q
+2995 passed, 2 skipped in 221.06s (0:03:41)
+```
+
+## Before / after, for the PR
+
+P3 (`refdes fetch`, missing local citation):
+
+```
+- FAILED  datasheets/nope.pdf  [Errno 2] No such file or directory: '/home/jorb/.paseo/worktrees/16msma8v/citation-absolute-path-leaks/.scratch/p3/datasheets/nope.pdf'
++ FAILED  datasheets/nope.pdf  cited local file 'datasheets/nope.pdf' does not exist (cited by CMP-PWR-001)
+```
+
+P4 (`refdes check`, `SOURCE FILE CHANGED`):
+
+```
+- … but the file can no longer supply it (/home/jorb/.paseo/worktrees/16msma8v/citation-absolute-path-leaks/.scratch/p4/analysis/budget.csv: no row has the key 'rail_load') [used by DEC-001].
++ … but the file can no longer supply it (analysis/budget.csv: no row has the key 'rail_load') [used by DEC-001].
+```
+
+P4, `refdes fetch --update`:
+
+```
+- FAILED  /home/jorb/.paseo/worktrees/16msma8v/citation-absolute-path-leaks/.scratch/p4/analysis/budget.csv: no row has the key 'rail_load' (the existing record for analysis/budget.csv is unchanged)
++ FAILED  analysis/budget.csv: no row has the key 'rail_load' (the existing record for analysis/budget.csv is unchanged)
+```
+
+P4, third instance (plain `refdes fetch` after a new `source()` line for a key
+the pinned file lacks):
+
+```
+- FAILED  /home/jorb/.paseo/worktrees/16msma8v/citation-absolute-path-leaks/.scratch/refresh/analysis/budget.csv: no row has the key 'not_a_key' (source key extraction; the record is unchanged)
++ FAILED  analysis/budget.csv: no row has the key 'not_a_key' (source key extraction; the record is unchanged)
+```
+
+P4 over HTTP, `GET /preview/dec-001.html`:
+
+```
+- HTTP 200, grep -c "/home/jorb" → 1
++ HTTP 200, grep -c "/home/jorb" → 0
+```
+
+## Other housekeeping
+
+- Changelog fragment: `changelog.d/citation-message-absolute-paths.fixed.md`
+  (`<slug>.<category>.md` per `changelog.d/README.md`).
+- ruff scoped to the touched files, per `AGENTS.md` (`ruff check .` does not
+  pass clean and is not a gate). Baseline vs. after, same rule set
+  (`--select I,F,E,W,B,SIM,UP`):
+  - `src/refdes/citations.py`: 5 findings before, 5 after (2× E501, UP017,
+    UP015, B007) — unchanged.
+  - `src/refdes/sources.py`: 2 findings before, 2 after (2× UP015) —
+    unchanged.
+  - `tests/test_citation_path_hygiene.py`: 0 after fixing what it started with
+    (I001, W292). `ruff check --fix` on the new test file only; nothing
+    pre-existing was silenced.
+
+## Files
+
+Changed: `src/refdes/citations.py`, `src/refdes/sources.py`,
+`tests/test_citation_path_hygiene.py` (new),
+`changelog.d/citation-message-absolute-paths.fixed.md` (new),
+`in-prog-logs/citation-absolute-path-leaks.txt` (new).
+
+Left in `.scratch/`: `repro_p3.py`, `repro_p4_render.py`, `repro_refresh.py`,
+`p3/`, `p4/`, `p4-render/`, `p4-serve/`, `after-*.html`, the serve logs and
+token-file remnants.
