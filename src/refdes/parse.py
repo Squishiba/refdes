@@ -13,10 +13,11 @@ from __future__ import annotations
 import difflib
 import os
 import re
-from typing import Any
+from typing import Any, NamedTuple
 
 import yaml
 
+from . import docs_url as docs_url_mod
 from .model import (
     NON_SCALAR_FIELD_TYPES,
     ON_CHANGE_MODES,
@@ -90,6 +91,100 @@ _SafeLoaderClass = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
 # Always-pure-Python loader for byte-identical YAML error diagnostics.
 _PurePythonLoaderBase = yaml.SafeLoader
 
+# A scalar value long enough that quoting it in a diagnostic would bury the
+# diagnostic. Duplicate-key records keep short values so a message can name
+# the id on each side of a lost one; a long one (a `body:` sentence) is
+# reported as "the value on line N" instead.
+_MAX_ECHOED_VALUE = 40
+
+
+class DuplicateKey(NamedTuple):
+    """One key written twice in one mapping of an item file.
+
+    YAML's own answer to a repeated key is the last value, silently: nothing
+    in the document, in PyYAML, or in this loader would otherwise say a word.
+    That is survivable for a value and not survivable for an `id:`, where the
+    earlier one takes an item out of the model with no diagnostic of its own --
+    the usual cause being a list entry whose opening `- key:` line was deleted
+    along with its `- ` marker, so the entry's remaining fields merge into the
+    entry above it.
+
+    Lines are 1-indexed within the text that was parsed; the callers that
+    parse a slice (a Markdown front-matter block) shift them to file lines
+    before reporting. `mapping_line` is where the mapping holding the repeat
+    starts, which is how a list file recognizes the entry it belongs to
+    (a list entry's `__line__` is its own mapping's start) and how a
+    `defaults:` block is told apart from an item.
+    """
+
+    key: str
+    first_line: int
+    second_line: int
+    mapping_line: int
+    first_value: str | None
+    second_value: str | None
+
+
+def _scalar_text(node: yaml.Node) -> str | None:
+    """A short scalar node's text, or None for a composite or a long value."""
+    if not isinstance(node, yaml.ScalarNode):
+        return None
+    return node.value if len(node.value) <= _MAX_ECHOED_VALUE else None
+
+
+def _duplicate_keys(node: yaml.MappingNode) -> list[DuplicateKey]:
+    """Every key written twice in `node`, one record per repeat after the first.
+
+    Each repeat is paired with the occurrence immediately before it rather
+    than with the first one, so a key written three times names every line
+    exactly once (`2 and 4`, then `4 and 6`) and the values in each message are
+    the two YAML actually weighed against each other.
+
+    Read off the composed node, before `SafeConstructor.flatten_mapping`
+    rewrites merge keys (`<<:`) into the entry -- a mapping that merges an
+    anchor alongside its own keys is not a duplicate, and checking the
+    flattened list would call it one. An explicit `? key` node is skipped: it is
+    not a name an author writes twice by accident, and a diagnostic could not
+    render it as one.
+    """
+    last_seen: dict[str, tuple[int, str | None]] = {}
+    found: list[DuplicateKey] = []
+    for key_node, value_node in node.value:
+        if not isinstance(key_node, yaml.ScalarNode):
+            continue
+        line = key_node.start_mark.line + 1
+        value = _scalar_text(value_node)
+        if key_node.value in last_seen:
+            earlier_line, earlier_value = last_seen[key_node.value]
+            found.append(
+                DuplicateKey(
+                    key=key_node.value,
+                    first_line=earlier_line,
+                    second_line=line,
+                    mapping_line=node.start_mark.line + 1,
+                    first_value=earlier_value,
+                    second_value=value,
+                )
+            )
+        last_seen[key_node.value] = (line, value)
+    return found
+
+
+def _load_line_marked(text: str, loader_class) -> tuple[Any, list[DuplicateKey]]:
+    """Load `text` and hand back the duplicate-key records found on the way.
+
+    Instantiates the loader itself rather than going through `yaml.load()`,
+    which is the only way to read back what `_construct_mapping` collected
+    while it walked the document. The second return value is the same list
+    object the loader accumulated, so a document with no duplicate in it
+    yields an empty one.
+    """
+    loader = loader_class(text)
+    try:
+        return loader.get_single_data(), getattr(loader, "duplicate_keys", [])
+    finally:
+        loader.dispose()
+
 
 class _LineLoader(_SafeLoaderClass):
     """SafeLoader (C when libyaml installed, else pure-Python) that tags each mapping with line."""
@@ -101,6 +196,17 @@ class _PurePythonLineLoader(_PurePythonLoaderBase):
 
 def _construct_mapping(loader, node: yaml.MappingNode) -> dict:
     base = loader.__class__.__bases__[0] if loader.__class__.__bases__ else type(loader)
+    duplicates = _duplicate_keys(node)
+    if duplicates:
+        # Collected on the loader instance rather than raised: the caller
+        # still wants the rest of the file parsed (every other duplicate in
+        # it reported too), and PyYAML's own last-wins result is what the
+        # remaining diagnostics are correctly judged against.
+        collected = getattr(loader, "duplicate_keys", None)
+        if collected is None:
+            collected = []
+            loader.duplicate_keys = collected
+        collected.extend(duplicates)
     mapping = base.construct_mapping(loader, node, deep=True)
     mapping["__line__"] = node.start_mark.line + 1
     return mapping
@@ -214,6 +320,139 @@ def _only_key(mapping: dict[str, Any], key: str) -> bool:
     -- the same shape test that already distinguished a `defaults:`-only
     block from an item, generalized so `section:` markers use it too."""
     return {k for k in mapping if k != "__line__"} == {key}
+
+
+# The two shapes a duplicate takes, and the one-line fix for each. A list file
+# has a way to lose an entry's `- ` marker that a Markdown file does not, and
+# that is the shape worth leading with: it is what the F2.1 remedy's own
+# "drop the `key:` value and let `id:` open the entry" advice produces, and
+# nothing else about the file looks wrong afterwards.
+_LIST_MERGE_REMEDY = (
+    "Usually a list entry's opening '- key:' line lost its '- ' with it, which "
+    "merges that entry's remaining fields into the entry above: put the '- ' "
+    "back on its own line. Otherwise delete one of the two lines."
+)
+_MARKDOWN_MERGE_REMEDY = (
+    "Usually a hand-merge or a partial delete left two copies of one key in a "
+    "single item's front matter: delete one of the two lines."
+)
+
+
+def _duplicate_entry_id(
+    entries: list[Any], defaults_line: int | None, record: DuplicateKey
+) -> tuple[str | None, str]:
+    """Whose mapping a duplicate sits in: (item id, context) for the message.
+
+    An entry's own `__line__` is the start line of the mapping the entry *is*,
+    so a repeat among the entry's top-level keys names the item exactly. A
+    repeat further down -- inside `history:`, say -- belongs to the entry that
+    contains it, found by the last entry starting at or before it. A `defaults:`
+    block is named for what it is, since a value lost there is inherited by
+    every item in the file. Anything else (a repeat in the file's own
+    top-level mapping) has no item to name.
+    """
+    starts = {
+        entry["__line__"]: entry
+        for entry in entries
+        if isinstance(entry, dict) and isinstance(entry.get("__line__"), int)
+    }
+    if record.mapping_line in starts:
+        return _entry_item_id(starts[record.mapping_line]), ""
+    if defaults_line is not None and record.mapping_line == defaults_line:
+        return None, " (in this file's defaults:, so every item here inherited it)"
+    enclosing = [start for start in starts if start <= record.first_line]
+    if enclosing:
+        return _entry_item_id(starts[max(enclosing)]), ""
+    return None, ""
+
+
+def _entry_item_id(entry: dict[str, Any]) -> str | None:
+    """The display id a parsed entry kept -- YAML's last-wins answer, which is
+    the id every other diagnostic about this entry is attached to."""
+    item_id = entry.get("id")
+    if isinstance(item_id, str) and item_id:
+        return item_id
+    return None
+
+
+def _report_duplicate_keys(
+    project: Project,
+    rel: str,
+    records: list[DuplicateKey],
+    remedy: str,
+    item_id: str | None = None,
+    context: str = "",
+) -> None:
+    """One hard error per repeated key, and the file joins the do-not-rewrite set.
+
+    An error, not a warning: the repeat is already resolved by the time
+    anything reads the file, so the value on the earlier line is gone from
+    the model and -- for an `id:` -- so is the item it named. Nothing else in
+    the file says so; the only other trace is whatever reference the vanished
+    id left dangling somewhere else. `project.duplicate_key_files` is what
+    stops the rest of the load from normalising the evidence away before the
+    author has seen it.
+    """
+    for record in records:
+        if record.first_value is None or record.second_value is None:
+            # Not both values are short scalars (see _scalar_text), so
+            # quoting either would bury the message.
+            outcome = f"the value on line {record.first_line} is lost"
+        elif record.first_value == record.second_value:
+            # Nothing is lost, and saying otherwise would be the one wrong
+            # thing in a message whose job is to be believed. A repeat that
+            # agrees with itself is still a mistake -- one of the two lines
+            # was not meant to be there.
+            outcome = (
+                f"both lines read {record.second_value!r}, so nothing is lost "
+                f"here, but a mapping may only carry one of them"
+            )
+        else:
+            outcome = (
+                f"{record.first_value!r} is dropped for {record.second_value!r}"
+            )
+        lost_item = (
+            "; an 'id:' lost this way is a whole item, not a field"
+            if record.key == "id"
+            else ""
+        )
+        # A single-line flow mapping puts both occurrences on one line, and
+        # "(lines 3 and 3)" reads like a bug in the diagnostic rather than in
+        # the file.
+        where = (
+            f", twice on line {record.first_line}"
+            if record.first_line == record.second_line
+            else f" (lines {record.first_line} and {record.second_line})"
+        )
+        project.error(
+            f"duplicate key {record.key!r} in one mapping{context}{where} -- "
+            f"YAML keeps the last, so {outcome}{lost_item}. {remedy} See "
+            f"{docs_url_mod.ITEMS_FIELDS_DOCS}.",
+            file=rel, line=record.second_line, item_id=item_id,
+        )
+    if records:
+        project.duplicate_key_files.add(rel)
+
+
+def _shift_duplicates(
+    records: list[DuplicateKey], offset: int
+) -> list[DuplicateKey]:
+    """Re-base records parsed from a slice onto the file's own line numbers.
+
+    A Markdown front-matter block is handed to the YAML parser on its own, so
+    every mark it produces is relative to the block; `offset` is how many file
+    lines precede it.
+    """
+    if not offset:
+        return records
+    return [
+        record._replace(
+            first_line=record.first_line + offset,
+            second_line=record.second_line + offset,
+            mapping_line=record.mapping_line + offset,
+        )
+        for record in records
+    ]
 
 
 def _resolve_section_marker(
@@ -633,18 +872,25 @@ def _build_item(
             )
 
     return item
-def _yaml_mapping(text: str) -> dict | None:
-    """Parse `text` as YAML, returning it only if it is a mapping (empty -> {})."""
+def _yaml_mapping(text: str) -> tuple[dict | None, list[DuplicateKey]]:
+    """Parse `text` as YAML: the mapping (empty -> {}), plus any duplicate keys.
+
+    The second element is what `_construct_mapping` collected while building
+    it, with lines relative to `text` -- `md_front_matter_blocks` re-bases
+    them onto the file before they are reported.
+    """
     try:
-        parsed = yaml.load(text, Loader=_LineLoader)
+        parsed, duplicates = _load_line_marked(text, _LineLoader)
     except yaml.YAMLError:
-        parsed = yaml.load(text, Loader=_PurePythonLineLoader)
+        parsed, duplicates = _load_line_marked(text, _PurePythonLineLoader)
     if parsed is None:
-        return {}
-    return parsed if isinstance(parsed, dict) else None
+        return {}, duplicates
+    return (parsed, duplicates) if isinstance(parsed, dict) else (None, duplicates)
 
 
-def md_front_matter_blocks(lines: list[str]) -> tuple[list[tuple[int, int, dict]], list[tuple[str, int]]]:
+def md_front_matter_blocks(
+    lines: list[str],
+) -> tuple[list[tuple[int, int, dict]], list[tuple[str, int]], dict[int, list[DuplicateKey]]]:
     """Split Markdown lines into front-matter blocks: (open_i, close_i, parsed).
 
     The single splitter shared by parse_markdown_file (which builds items
@@ -652,25 +898,31 @@ def md_front_matter_blocks(lines: list[str]) -> tuple[list[tuple[int, int, dict]
     can never disagree about where an item's front matter is. A fence only
     opens a new item when the line right after it looks like a YAML key and a
     closing fence follows; otherwise it stays a literal horizontal rule in
-    the previous item's body. Returns (blocks, errors) with errors as
-    (message, line) pairs for the caller to report; an empty blocks list
-    means no usable front matter at all (the conditions that abort parsing).
+    the previous item's body. Returns (blocks, errors, duplicates) with errors
+    as (message, line) pairs for the caller to report and duplicates keyed by
+    the block's `open_i` -- each record's lines already shifted onto the
+    file's own numbering, since a block is parsed as text of its own. An empty
+    blocks list means no usable front matter at all (the conditions that abort
+    parsing).
     """
     blocks: list[tuple[int, int, dict]] = []
     errors: list[tuple[str, int]] = []
+    duplicates: dict[int, list[DuplicateKey]] = {}
     fence_idx = [i for i, line in enumerate(lines) if FENCE_RE.match(line)]
     if len(fence_idx) < 2 or fence_idx[0] != 0:
-        return [], [("no YAML front-matter (file must start with '---')", 1)]
+        return [], [("no YAML front-matter (file must start with '---')", 1)], duplicates
 
     close0 = fence_idx[1]
     head_text = "\n".join(lines[1:close0])
     try:
-        parsed0 = _yaml_mapping(head_text)
+        parsed0, dups0 = _yaml_mapping(head_text)
     except yaml.YAMLError as exc:
         message, err_line = _yaml_error_report(exc, lines, offset=1)
-        return [], [(f"invalid YAML front-matter: {message}", err_line)]
+        return [], [(f"invalid YAML front-matter: {message}", err_line)], duplicates
     if parsed0 is None:
-        return [], [("front-matter must be a mapping", 1)]
+        return [], [("front-matter must be a mapping", 1)], duplicates
+    if dups0:
+        duplicates[0] = _shift_duplicates(dups0, 1)
     blocks.append((0, close0, parsed0))
 
     # Every remaining fence is independently a candidate to open the next item,
@@ -684,7 +936,7 @@ def md_front_matter_blocks(lines: list[str]) -> tuple[list[tuple[int, int, dict]
         if not KEY_LINE_RE.match(next_line):
             continue
         try:
-            parsed = _yaml_mapping("\n".join(lines[open_i + 1 : close_i]))
+            parsed, dups = _yaml_mapping("\n".join(lines[open_i + 1 : close_i]))
         except yaml.YAMLError as exc:
             message, err_line = _yaml_error_report(exc, lines, offset=open_i + 1)
             errors.append((f"invalid YAML front-matter: {message}", err_line))
@@ -692,8 +944,10 @@ def md_front_matter_blocks(lines: list[str]) -> tuple[list[tuple[int, int, dict]
         if parsed is None:
             errors.append(("front-matter must be a mapping", open_i + 2))
             continue
+        if dups:
+            duplicates[open_i] = _shift_duplicates(dups, open_i + 1)
         blocks.append((open_i, close_i, parsed))
-    return blocks, errors
+    return blocks, errors, duplicates
 
 
 def _warn_dead_defaults_status(
@@ -785,9 +1039,32 @@ def parse_markdown_file(project: Project, path: str) -> list[Item]:
     text = read_source(project, path)
     lines = text.split("\n")
 
-    blocks, errors = md_front_matter_blocks(lines)
+    blocks, errors, duplicates = md_front_matter_blocks(lines)
     for message, err_line in errors:
         project.error(message, file=rel, line=err_line)
+    for open_i, records in duplicates.items():
+        # Judged per block, because the block is what a repeat is a repeat
+        # *of*: a `defaults:` or `section:` block is named for what it is
+        # rather than as an item, and everything else names the id that block
+        # kept. Reported before the items are built -- the values are already
+        # resolved by now, which is the whole reason this is an error.
+        parsed = next((b[2] for b in blocks if b[0] == open_i), {})
+        if _only_key(parsed, "defaults"):
+            _report_duplicate_keys(
+                project, rel, records, _MARKDOWN_MERGE_REMEDY,
+                context=" (in this file's defaults:, so every item here "
+                        "inherited it)",
+            )
+        elif _only_key(parsed, "section"):
+            _report_duplicate_keys(
+                project, rel, records, _MARKDOWN_MERGE_REMEDY,
+                context=" (in a section: block, not an item)",
+            )
+        else:
+            _report_duplicate_keys(
+                project, rel, records, _MARKDOWN_MERGE_REMEDY,
+                item_id=_entry_item_id(parsed),
+            )
     if not blocks:
         return []
 
@@ -868,11 +1145,11 @@ def parse_list_file(project: Project, path: str) -> list[Item]:
     rel = _relpath(project, path)
     text = read_source(project, path)
     try:
-        raw = yaml.load(text, Loader=_LineLoader) or {}
+        raw, duplicates = _load_line_marked(text, _LineLoader) or ({}, [])
     except yaml.YAMLError as exc:
         exc_py = None
         try:
-            yaml.load(text, Loader=_PurePythonLineLoader) or {}
+            _load_line_marked(text, _PurePythonLineLoader)
         except yaml.YAMLError as exc_py_inner:
             exc_py = exc_py_inner
         message, err_line = _yaml_error_report(
@@ -882,6 +1159,11 @@ def parse_list_file(project: Project, path: str) -> list[Item]:
         return []
 
     if not isinstance(raw, dict) or "items" not in raw:
+        # A repeat in the file's own top-level mapping (`items:` twice, say)
+        # is still a repeat: report it before bailing on the shape check, so
+        # the diagnostic that explains the file is not the shape error.
+        if duplicates:
+            _report_duplicate_keys(project, rel, duplicates, _LIST_MERGE_REMEDY)
         project.error("list file must be a mapping with an 'items:' key", file=rel, line=1)
         return []
 
@@ -893,8 +1175,18 @@ def parse_list_file(project: Project, path: str) -> list[Item]:
     out: list[Item] = []
     entries = raw.get("items") or []
     if not isinstance(entries, list):
+        if duplicates:
+            _report_duplicate_keys(project, rel, duplicates, _LIST_MERGE_REMEDY)
         project.error("'items:' must be a list", file=rel, line=1)
         return []
+
+    if duplicates:
+        for record in duplicates:
+            item_id, context = _duplicate_entry_id(entries, defaults_line, record)
+            _report_duplicate_keys(
+                project, rel, [record], _LIST_MERGE_REMEDY,
+                item_id=item_id, context=context,
+            )
 
     # `- section: <type>` (finding 6): a marker entry, not an item -- asserts
     # the type for every entry after it until the next section or end of

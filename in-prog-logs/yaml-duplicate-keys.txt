@@ -1,0 +1,443 @@
+Task: a duplicated mapping key in an item file silently drops data --
+`duplicate key ... in one mapping` is now a hard error, and a file that
+reports one is no longer rewritten by the load.
+
+Worktree: /home/jorb/.paseo/worktrees/16msma8v/yaml-duplicate-keys
+Branch:   yaml-duplicate-keys (from main @ d54cfd4)
+
+The `refdes` on PATH is a broken editable install pointing at another
+worktree, so every command below actually ran through
+
+    PYTHONPATH=<this worktree>/src python -m refdes.cli ...
+
+`[exit=N]` is that command's own exit code. Scratch projects are in
+`.scratch/` (gitignored, left in place).
+
+Status: FINISHED. One commit, tests and docs included.
+
+==========================================================================
+## 1. Reproduced it, and it is worse than the report says
+
+Base: `.scratch/dup` -- `refdes init`, then two hand-written files.
+`items/requirements.yaml` is a list file of three requirements (REQ-PWR-001
+..003, entry 3 carrying `refines: [REQ-PWR-002]`) and `items/tests.yaml` is a
+test verifying REQ-PWR-002. `refdes --no-write check` on it:
+
+    WARNING <project> — 2 item(s) with no coverage — see coverage.html
+    4 items, 0 errors, 1 warnings
+    [exit=0]
+
+### 1a. Bare references (.scratch/dupA) -- an item vanishes, the only trace is a dangling link
+
+Deleted the `  - ` that opens the third entry (so `id: REQ-PWR-003` and its
+fields became part of entry 2's mapping). Nothing else:
+
+    $ refdes --no-write check
+    ERROR   items/requirements.yaml:12 [REQ-PWR-003] — refines points at 'REQ-PWR-002', which does not exist -- a typo, a deleted item, or an item renamed while this reference was still bare, ...
+    ERROR   items/tests.yaml:7 [TST-PWR-001] — verifies points at 'REQ-PWR-002', which does not exist -- ...
+    WARNING <project> — 2 item(s) with no coverage — see coverage.html
+    3 items, 2 errors, 1 warnings
+    [exit=1]
+
+`4 items` became `3 items`: REQ-PWR-002 is gone, and no diagnostic mentions
+it. This is the shape the finding describes.
+
+### 1b. The keyed shape (.scratch/dupB) -- a GREEN build, and a corrupted tree
+
+This is the F2.1 remedy's own suggestion: it tells you to delete the
+`  - key: <KEY>` line, "otherwise the `- ` marker goes with it". So: a
+writable load first (keys minted, references expanded), then `sed -i '17d'`
+on `items/requirements.yaml`, which removes exactly that line.
+
+BEFORE, on main's code:
+
+    $ refdes --no-write check
+    WARNING <project> — 1 item(s) with no coverage — see coverage.html
+    3 items, 0 errors, 1 warnings
+    [exit=0]
+
+No error at all. REQ-PWR-002 is gone, and its `key:` line (`mxmyj98dagm`) is
+now the *merged* entry's, so every reference that named REQ-PWR-002 resolves
+onto REQ-PWR-003. Worse, a **writable** run then rewrote the references to
+say so, permanently:
+
+    $ refdes check
+    (rewrote 2 reference(s) while loading)
+    3 items, 0 errors, 1 warnings
+    [exit=0]
+
+    items/requirements.yaml:19:    refines: [REQ-PWR-003@mxmyj98dagm]     <- was REQ-PWR-002@mxmyj98dagm
+    items/tests.yaml:11:           verifies: [REQ-PWR-003@mxmyj98dagm]    <- was REQ-PWR-002@mxmyj98dagm
+
+No crossed-reference warning either: `links._planned_target` only warns when
+the stale label names a *different live item*, and REQ-PWR-002 no longer is
+one. This is precisely the trap PR #126's F2.1 log describes from the other
+side ("the wrong side of that coin flip is a green build"), reached without
+any duplicate key at all. A `refdes release` here would stamp a baseline over
+it.
+
+==========================================================================
+## 2. How refdes parses YAML
+
+`grep -rn "safe_load|yaml\.load|YAML\(|ruamel" src/refdes/` gives exactly two
+loaders, and they are **not** shared:
+
+| loader | who uses it |
+|---|---|
+| `parse._LineLoader` (CSafeLoader when libyaml is installed -- it is) | **item files only**: `parse._yaml_mapping` (a Markdown front-matter block, parsed as a slice) and `parse_list_file` (a whole list file) |
+| `parse.yaml_safe_load` (plain SafeLoader, no `__line__` bookkeeping) | `schema.load_project` (`refdes-project.yaml`), `schema._load_schema_overlay` (`refdes-schema.yaml`), `standards._read_yaml` (the bundled standard), `boards.load_manifest`, `citations.load_lockfile`, `history` (4 call sites: objects, events, ledger), `ids.load_ledger`, `keys.is_adopted`, `lifecycle._load_baseline_file`, `seal._load_seal_data`, `pages._read_page`, `revise.load_mapping` + its two item-file re-reads, `scaffold.add_preset`/`remove_preset`, `serve/edit` |
+
+So the brief's premise ("if the loader is shared with config files") turns out
+to be **false**: extending the check to config files is an independent change,
+not a side effect of this one. That is the main input to the scope decision in
+§5.
+
+Separately: `revise._flow_rename_field_value` (revise.py:364) already had a
+narrow duplicate-key guard -- "flow mapping contains 'prefix:' more than once"
+-- but it is a *text* scan that only exists to stop `refdes revise` guessing
+which entry to rewrite. It never reached the loader, so nothing else in refdes
+knew. §6 covers what happened to it.
+
+==========================================================================
+## 3. The fix
+
+### Detection, in the loader that already walks every mapping
+
+`parse._construct_mapping` already visits every mapping node of an item file
+(it tags each with `__line__`). It now also asks
+`parse._duplicate_keys(node)`, which reads the composed node's key/value pairs
+and records each repeat after the first as a `DuplicateKey(key, first_line,
+second_line, mapping_line, first_value, second_value)`. The records are
+collected on the loader *instance*; `_load_line_marked(text, loader_class)`
+instantiates the loader itself (instead of calling `yaml.load`) so the caller
+can read them back. No second parse, and both loaders behave identically
+(checked: the C loader and the pure-Python one produce the same records on the
+same text).
+
+Two deliberate details:
+
+- **Before `flatten_mapping`.** The scan reads the raw node, so a mapping that
+  merges an anchor with `<<:` alongside its own keys is not a false positive.
+  Anchors are undocumented for item files (grepped `docs/`), so this is a guard
+  against a wrong answer, not a feature. Pinned by
+  `test_a_repeat_in_a_merge_key_is_not_a_repeat`.
+- **Paired with the previous occurrence, not the first.** Three `id:` lines
+  report `2 and 4` then `4 and 6`, so every line is named exactly once and
+  each message's two values are the two YAML actually weighed.
+
+### Reporting
+
+`parse._report_duplicate_keys` emits one `project.error(...)` per repeated key
+(rendering like every other item error: `ERROR file:line [ID] — ...`), at the
+**repeat** -- the same choice `load_items`'s `duplicate id` error makes, which
+reports at the second definition and names the first. It names the file, the
+line of each occurrence, the key, the item id when one is known, and gives a
+one-line remedy. Per file:
+
+- a list file's entry is found exactly (an entry's `__line__` *is* the start
+  line of the mapping the entry is, so a repeat among an entry's own top-level
+  keys names the item precisely); a repeat in a nested mapping falls back to
+  the entry that contains it; a repeat in `defaults:` says so, because a value
+  lost there is inherited by every item in the file; a repeat in the file's own
+  top-level mapping names no item.
+- a Markdown front-matter block is reported against the block's own id, with
+  `defaults:`/`section:` blocks named for what they are, and the Markdown
+  remedy (there is no `- ` marker to lose in a `.md` file).
+
+`md_front_matter_blocks` now returns `(blocks, errors, duplicates)`, with each
+record's lines already shifted onto the file's numbering (a block is parsed as
+text of its own). Four call sites adapted: `patcher._load_markdown`,
+`serve/edit`, `revise` x2, plus one test.
+
+The message, verbatim from a real run (.scratch/dupA3, the merged entry):
+
+    ERROR   items/requirements.yaml:17 [REQ-PWR-003] — duplicate key 'id' in one mapping (lines 14 and 17) -- YAML keeps the last, so 'REQ-PWR-002' is dropped for 'REQ-PWR-003'; an 'id:' lost this way is a whole item, not a field. Usually a list entry's opening '- key:' line lost its '- ' with it, which merges that entry's remaining fields into the entry above: put the '- ' back on its own line. Otherwise delete one of the two lines. See https://squishiba.github.io/refdes/troubleshooting.html#items-and-fields.
+    ERROR   items/requirements.yaml:18 [REQ-PWR-003] — duplicate key 'body' in one mapping (lines 15 and 18) -- YAML keeps the last, so the value on line 15 is lost. Usually a list entry's opening '- key:' line lost its '- ' with it, which merges that entry's remaining fields into the entry above: put the '- ' back on its own line. Otherwise delete one of the two lines. See https://squishiba.github.io/refdes/troubleshooting.html#items-and-fields.
+    ERROR   items/requirements.yaml:13 [REQ-PWR-003] — refines points at 'REQ-PWR-002', which does not exist -- ...
+    ERROR   items/tests.yaml:7 [TST-PWR-001] — verifies points at 'REQ-PWR-002', which does not exist -- ...
+    WARNING <project> — 2 item(s) with no coverage — see coverage.html
+    3 items, 4 errors, 1 warnings
+    [exit=1]
+
+Three wording rules I held to, from the F2.1/F3.3 review rounds:
+
+- never claim a loss that did not happen: a repeat whose two values are
+  identical says `both lines read 'x', so nothing is lost here, but a mapping
+  may only carry one of them`; a value too long to quote (a `body:` sentence)
+  says `the value on line N is lost` rather than quoting 400 characters.
+- the `- key:`/`- ` shape leads the remedy, because that is the shape the
+  F2.1 remedy *produces* -- and it is the one the reader has never seen a
+  diagnostic for.
+- a published docs URL (`docs_url.ITEMS_FIELDS_DOCS`, anchor
+  `troubleshooting.html#items-and-fields`, slug checked against
+  `pages._slugify`), never a repo-relative path.
+
+Not reported, and checked rather than assumed: a repeat in a file that also has
+a YAML *syntax* error still reports only the syntax error, because PyYAML
+fails before it reaches the later mapping. Fix the syntax first; the repeat is
+still there.
+
+==========================================================================
+## 4. Write-back: the file that errors is left byte-identical
+
+`load_tree` mints keys, expands bare links/checks/calc refs and freezes
+`follows:` on every writable load, and all five of those writes funnel through
+one guard: `revise.write_rewrites_verified`. That is where the withholding
+lives -- a rewrite whose `rel` is in `project.duplicate_key_files` is dropped
+before it reaches the filesystem and handed back as *refused*, so each caller's
+in-memory model matches the bytes on disk (the mechanism `keys.mint_missing`
+already had for a read-only tree). `Project.duplicate_key_files` is a new
+field on `Project`.
+
+Verified on .scratch/dupB3 (the keyed shape, references still reading
+`REQ-PWR-002@mxmyj98dagm`):
+
+    $ md5sum items/*.yaml
+    53f8a19988a203e1d5ebb371ca0c5c39  items/requirements.yaml
+    fc270bd19e502e11cd4f4967ade86ff2  items/tests.yaml
+    $ refdes check
+    ERROR   items/requirements.yaml:17 [REQ-PWR-003] — duplicate key 'id' ...
+    ERROR   items/requirements.yaml:18 [REQ-PWR-003] — duplicate key 'body' ...
+    3 items, 2 errors, 1 warnings
+    [exit=1]
+    $ md5sum items/*.yaml
+    53f8a19988a203e1d5ebb371ca0c5c39  items/requirements.yaml     <- byte-identical
+    fc270bd19e502e11cd4f4967ade86ff2  items/tests.yaml            <- byte-identical
+
+`refdes index --compact` on a merged file whose entries have no `key:` yet --
+the shape of `test_the_duplicate_key_run_makes_no_key_claim_it_cannot_keep` --
+publishes `key: null` for both entries in that file, rather than a key that
+exists only in that process. (On dupB3 above, both entries already carry a
+`key:` line in the file, so the model reports the keys it read; what matters
+there is the md5, which does not move.)
+
+### The residual, stated rather than hidden
+
+Withholding is **per file**, and a *clean* file elsewhere in the project is
+still normalised -- including a reference that points into the corrupt file.
+On dupB3's pre-fix tree, `items/tests.yaml` was rewritten from
+`REQ-PWR-002@mxmyj98dagm` to `REQ-PWR-003@mxmyj98dagm`: the key resolves (it
+is on the merged entry) and the stale display half is refreshed silently,
+because `links._planned_target` only warns when the old label names a
+*different live item* and REQ-PWR-002 is not live any more. After the fix that
+rewrite still happens in that one shape.
+
+I left it. The reasons, checked rather than assumed:
+
+- the run is red (the duplicate is an error), so nothing is stamped;
+- it is self-healing: put the `- ` back, and the key belongs to REQ-PWR-002
+  again, so the next writable load refreshes the label back;
+- stopping it properly means deciding, per planned rewrite, whether a *target*
+  lives in a corrupt file -- the plan is per file (`links.py` builds one
+  `FileRewrite` per path) and the four call sites would each need target-level
+  plumbing. That is a bigger change than this fix, and it is not what the
+  finding asks for.
+
+The alternative -- withhold every load-time write in a project that has any
+duplicate-keyed file -- is a three-line change and I rejected it: it is a
+blanket refusal to write anything because of one bad file, which is a wider
+behaviour change than "a file that errors is left byte-identical" and harder to
+justify to a user whose other 400 files are fine.
+
+### The other write commands, each run
+
+- `refdes revise apply`, `refdes keys adopt`, `refdes keys restore`,
+  `refdes calc-rewrite`: **refuse before writing anything** -- they gate on
+  `_blocking_errors` (revise.py:952), and a duplicate key is an error. Verified
+  for `keys adopt`, which prints `refused: project has existing build errors --
+  fix those first` followed by the two errors, exit 1, no file touched.
+- `refdes id`: **still writes** (.scratch/dupid -- a pending item in a clean
+  file, a second pending item appended to the corrupt one). It prints the load
+  errors, allocates both ids, and exits 1. The insertion is anchored to the
+  pending item's own `source_line`, so it landed on the right entry and the
+  merged entry was untouched. Pre-existing behaviour for "load errors and
+  pending items" (see §7 for the one wart around it); I did not change it.
+
+==========================================================================
+## 5. Config files: the decision, and the evidence behind it
+
+**Decision: item files only.** `refdes-project.yaml` and `refdes-schema.yaml`
+are not touched by this change.
+
+Duplicate keys there are equally silent -- verified, not assumed:
+
+- `.scratch/dupcfg`: `site:` written twice in `refdes-project.yaml`, the second
+  with a different `title:` and `out:`. `refdes --no-write check`:
+  `4 items, 0 errors, 1 warnings`, exit 0. The first `site:` is simply gone.
+- `.scratch/cfg_schema`: `requirement:` written twice in a `refdes-schema.yaml`
+  overlay. The second block wins silently, and the fallout is that every
+  requirement in the project then reports `missing required field 'body'`.
+
+Why not here:
+
+1. **Different loaders, so this is a separate change, not a freebie** (§2).
+   Extending it means touching `schema.load_project` and
+   `schema._load_schema_overlay`, which is where `configcheck`/`SchemaError`
+   live.
+2. **A different diagnostic family, which cannot do what this one does.** A
+   config problem is `configuration error: refdes-project.yaml: unknown setting
+   'sit'. Did you mean 'site'?` -- exit 2, and **no line number at all**
+   (verified). The brief asks for the line of *each* occurrence, so the config
+   family would first have to grow line numbers. That is a second diagnostic
+   family with its own message shape, its own tests, and its own review.
+3. **It would be a breaking change for projects that are fine today.** A config
+   that loads now would stop loading, for every command. The repo has a
+   `*.breaking.md` category for that; folding it into a bug fix hides it.
+4. **Machine-written `.refdes/*.yaml` shares `yaml_safe_load` and stays out of
+   it by the brief's own instruction.** Seal files, baselines, the id ledger,
+   the membership manifest, history objects, `keys-adopted.yaml`, the citations
+   lockfile and the bundled standard are all refdes's own output: a duplicate
+   there is a refdes bug, not an authoring slip, and hardening them is a much
+   wider piece of work (seal hashes, baseline diffs and `audit` all read those
+   files and would each need a decision about what a repeat means).
+
+**Follow-ups worth someone's time, with the evidence to start from:**
+
+- `refdes-project.yaml` / `refdes-schema.yaml`: same rule, reported as
+  `configuration error` (exit 2), which needs `SchemaError` to carry a line
+  first. `.scratch/dupcfg`, `.scratch/cfg_schema`.
+- `pages/*.md` front matter (`pages._read_page`, `yaml_safe_load`) and
+  `revise` mapping files (`revise.load_mapping`, hand-written YAML) are the
+  other two hand-authored files refdes reads; both are the same class.
+- The load guard: `write_rewrites_verified` now refuses a rewrite of a file
+  whose parse reported a duplicate key, so a *future* config-level rule would
+  not need any write-side change for the same class of problem.
+
+==========================================================================
+## 6. Tests
+
+`tests/test_parse.py`, new section "duplicate keys in a mapping" (11 tests):
+two `id:` lines (names both lines, the key, the surviving id, the file, the
+error's own line, the published URL and the no-repo-path rule); two `body:`
+lines; a clean list file + a clean `.md` file as the control; **the merged-entry
+shape from §1**, asserting both repeats, the dropped id, the vanished item, and
+that the dangling reference is still reported on top; a key written three
+times (every line named once); a repeat in a nested mapping; a repeat in
+`defaults:` (reported as such, no item named); a one-line flow mapping
+(`twice on line 2`); a repeat that agrees with itself (no false loss claim);
+a repeat in Markdown front matter (file-relative lines, the Markdown remedy);
+`<<:` not treated as a repeat.
+
+`tests/test_load_time_writes.py`, 2 tests: a real writable `refdes check` over
+the merged shape leaves the corrupt file **byte-identical** and no `key:`
+minted into it, while the clean file in the same project is still normalised
+and the run still announces what it wrote; `refdes index` publishes no key for
+the withheld file.
+
+`tests/test_revise_flow_style.py`: `test_duplicate_key_in_flow_mapping_refuses`
+now pins the *load-time* refusal (revise declines because the project does not
+load), and a new `test_flow_mapping_duplicate_key_is_refused_by_the_text_pass`
+calls `revise._flow_rename_field_value` directly so the surviving text-scan
+branch keeps its coverage. That branch is now unreachable through
+`revise.apply` -- the loader always reports first -- but it is a text scan and
+must not depend on a load having happened, so it stays.
+
+### Every new test FAILS on main's code
+
+Confirmed by backing the five modified `src/` files up to `.scratch/backup/`,
+`git checkout --` them (no stash, per AGENTS.md), running, and restoring:
+
+    $ PYTHONPATH=src python -m pytest tests/test_parse.py tests/test_load_time_writes.py tests/test_revise_flow_style.py -q -p no:randomly
+    15 failed, 76 passed
+
+- 13 of the 14 new tests fail, plus both adapted ones
+  (`test_front_matter_defaults_block_...` fails only on the 3-tuple signature;
+  `test_duplicate_key_in_flow_mapping_refuses` fails because it now expects the
+  load error).
+- `test_a_clean_file_reports_no_duplicate_key_error` and
+  `test_a_repeat_in_a_merge_key_is_not_a_repeat` fail on main with
+  `AttributeError: 'Project' object has no attribute 'duplicate_key_files'` --
+  they are controls (nothing regresses; a `<<:` merge is not a repeat) and they
+  touch the new field.
+- The one new test that passes on main is
+  `test_flow_mapping_duplicate_key_is_refused_by_the_text_pass`, which pins
+  behaviour that already existed and is being kept.
+
+### Full suite
+
+    $ PYTHONPATH=src python -m pytest tests/ -q -p no:randomly
+    2904 passed, 2 skipped in 211.36s (3:31)
+    $ PYTHONPATH=src python -m pytest tests/ -q          # random order
+    2904 passed, 2 skipped in 215.81s (3:35)
+
+**Fixtures with accidental duplicate keys: none.** The suite was green on the
+first full run, which surprised me, so I checked the repo's own YAML directly
+with the same node walk, over `items/`, `pages/`, `src/refdes/standards/`,
+`editors/`, `docs-site/` and the two config files:
+
+    scanned 25 yaml file(s); 0 duplicate key(s)
+
+The only duplicate in the tree is the deliberate one in
+`tests/test_revise_flow_style.py` (`{id: BND-001, prefix: BND, prefix: BND,
+text: Hello}`), whose test is updated rather than the fixture.
+
+Also checked: `refdes --no-write check` on this repo itself is unchanged apart
+from the pre-existing `P_dens violates BND-THM-001` bound failure in the
+sample project.
+
+### ruff, scoped
+
+`ruff check` on every file I touched, diffed against the same file at HEAD
+(rule set and line numbers stripped, sets compared):
+
+    src/refdes/model.py            (identical set)   3x UP037, pre-existing
+    src/refdes/revise.py           (identical set)   5 findings, pre-existing
+    src/refdes/patcher.py          (identical set)   5 findings, pre-existing
+    src/refdes/serve/edit.py       (identical set)   1 finding, pre-existing
+    src/refdes/parse.py            (identical set)   clean at HEAD, clean now
+    tests/test_parse.py            clean
+    tests/test_load_time_writes.py clean
+    tests/test_revise_flow_style.py clean
+
+No new findings, and nothing unrelated silenced (AGENTS.md).
+
+==========================================================================
+## 7. Found while testing, NOT fixed
+
+1. **`refdes id` prints its load errors twice** when the project has both load
+   errors and pending items: `cli.cmd_id` prints `project.errors` (cli.py:630)
+   to report what did not load, then prints them again after allocating
+   (cli.py:652). Pre-existing -- both loops are untouched by this change, and
+   any error type triggers it. My change just gives it two more errors to
+   print twice (.scratch/dupid). A one-line `seen` guard, but it is a
+   different finding.
+2. **A clean file's reference into a corrupt file is still refreshed** (§4's
+   residual). Self-healing, red run, needs target-level plumbing to fix.
+3. **`links.py:1441`'s `check against 'X', which does not exist`** still has no
+   remedy (PR #126's "left for someone else" item 1). Same shape as F3.3,
+   different diagnostic; still untouched.
+
+==========================================================================
+## 8. Files
+
+- `src/refdes/parse.py` -- `DuplicateKey`, `_duplicate_keys`,
+  `_scalar_text`, `_load_line_marked`, `_report_duplicate_keys`,
+  `_duplicate_entry_id`, `_entry_item_id`, `_shift_duplicates`, the two remedy
+  strings, the hook in `_construct_mapping`, and the two call sites
+  (`parse_markdown_file`, `parse_list_file`).
+- `src/refdes/model.py` -- `Project.duplicate_key_files`.
+- `src/refdes/revise.py` -- `write_rewrites_verified` withholds those files;
+  two `md_front_matter_blocks` arity adaptations.
+- `src/refdes/docs_url.py` -- `ITEMS_FIELDS_DOCS`.
+- `src/refdes/patcher.py`, `src/refdes/serve/edit.py` -- arity adaptation only.
+- `docs/troubleshooting.md` -- the `## Items and fields` entry, with the YAML
+  example and the "left exactly as written" note.
+- `changelog.d/duplicate-mapping-key.breaking.md` -- `breaking`, not `fixed`:
+  a project carrying a duplicate key must change something, exactly like
+  `scalar-field-typo-error.breaking.md` (whose build also started failing).
+- `tests/test_parse.py`, `tests/test_load_time_writes.py`,
+  `tests/test_revise_flow_style.py`.
+
+### Scratch (all in `.scratch/`, gitignored, left in place)
+
+`dup` (the clean 4-item base), `dupA`/`dupA2`/`dupA3` (merged, bare refs),
+`dupB`/`dupB2`/`dupB3` (merged after a keyed load), `dupcfg`/`dupcfg2`/
+`dupcfg3`/`cfg_schema` (the config probes of §5), `dupid` (`refdes id` on a
+corrupt project), `dupkeys` (`keys adopt` refusing), `backup/` (the five src
+files saved for the main-code run in §6).
+
+### Bonus, checked because it was free
+
+The browser editor's read-only candidate path (`loader.load_readonly` with a
+`source_overlay`) reports the duplicate too, so a candidate edit that merges
+two entries is refused **before** it is saved rather than after.
