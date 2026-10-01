@@ -781,6 +781,31 @@ def test_cli_audit_never_calls_an_unpinned_citation_hash_only(citation_project, 
     assert line == "unpinned no pin cited by CMP-001"
 
 
+def test_cli_audit_never_calls_a_missing_kept_copy_kept(citation_project, capsys):
+    """`cache_missing  kept` was a self-contradiction on one line, and the
+    sentence docs/cli-reference.md makes about these two columns says they
+    never contradict each other. `kept` is this project's word for *pinned
+    with the bytes kept at .refdes/copies/<sha256><ext>* -- and the bytes are
+    not there. The lockfile still says `kept_copy: true`, which is why the
+    word has to come from the state, not from the flag.
+    (remote-fetch-exercise.md F7.)
+    """
+    _write_citation_lockfile(
+        citation_project,
+        {
+            "https://example.com/ds.pdf": {
+                "sha256": hashlib.sha256(b"datasheet bytes").hexdigest(),
+                "fetched": "2026-01-01T00:00:00Z",
+                "kept_copy": True,
+            }
+        },
+    )
+    # deliberately no blob: .refdes/copies/<sha>.pdf deleted after the fetch
+
+    line = _audit_citation_line(citation_project, capsys)
+    assert line == "cache_missing no copy cited by CMP-001"
+
+
 @pytest.mark.parametrize(
     "kept_copy, blob, expected",
     [(False, False, "hash-only"), (True, True, "kept")],

@@ -1,0 +1,200 @@
+audit-kept-vs-cache-missing — F7: `audit` prints `pin: kept` beside `cache_missing`
+
+Task (from in-prog-logs/remote-fetch-exercise.md §7 F7): the audit citation row
+pairs the state word `cache_missing` with the pin word `kept`, and
+docs/cli-reference.md says the two columns "never contradict each other".
+Reproduce, then decide which side lies.
+
+Status: finished. The **code** was wrong; docs/cli-reference.md's "never
+contradict each other" promise is kept and its pin-word list gained one entry.
+
+## 1. Reproduction (verbatim, main's code)
+
+Real end-to-end fetch over a local `python -m http.server` bound to 127.0.0.1
+(root = `.scratch/f7-repro/serve`, port 8978; server pid in
+`.scratch/f7-repro/server.pid`, killed by pid only). Project in
+`.scratch/f7-repro/proj`, `refdes-project.yaml` written by hand to match
+`docs/getting-started.md:42-52` (hardware@3), one component citing
+`http://127.0.0.1:8978/tps62913.pdf` with `keep_copy: true`.
+
+```
+$ refdes fetch
+fetched  http://127.0.0.1:8978/tps62913.pdf  sha256=6a6db659fcda...  kept
+1 citation(s) processed, 0 failed
+exit 0
+
+$ rm .refdes/copies/*.pdf
+$ refdes audit            # Citations section only, `cat -A` to show the padding
+Citations:$
+  http://127.0.0.1:8978/tps62913.pdf$
+    cache_missing  kept       cited by CMP-PWR-001$
+exit 0
+```
+
+So F7 reproduces exactly, on main, in this worktree: `state` is right
+(`cache_missing`), `pin` says `kept` although the bytes are gone.
+
+The rest of the chain is also as the report says, for the record:
+
+```
+$ refdes check
+WARNING items/cmp.yaml:4 [CMP-PWR-001] — local copy of http://127.0.0.1:8978/tps62913.pdf is missing at .refdes/copies/6a6db659fcda...pdf
+1 items, 0 errors, 1 warnings
+exit 0
+
+$ refdes release rel-a
+  pass     draft_items
+  pass     unpinned_citations
+  FAIL     missing_kept_copies  CMP-PWR-001
+  ...
+exit 1
+```
+
+## 2. The two doc lines at issue
+
+docs/cli-reference.md:604-611 (the Citations-section paragraph), verbatim:
+
+> Each citation line is `<state>  <pin>  cited by <items>`. **`state`** is what
+> verification found — `ok`, `unpinned`, `cache_missing`, `hash_mismatch` or
+> `missing` (see [citing a datasheet](markdown.md#citing-a-datasheet) for what
+> each costs). **`pin`** says what the lockfile holds for that path: `no pin`
+> (never fetched, so nothing is pinned), `hash-only` (pinned by `sha256`, no
+> local copy — the default, since datasheets are generally copyrighted) or
+> `kept` (pinned, with the bytes kept at `.refdes/copies/<sha256><ext>`). The
+> two columns are independent facts about the same pin, so they never
+> contradict each other: an unpinned citation has no hash to be `hash-only`
+> about, and says `no pin`.
+
+## 3. Where each column comes from
+
+- state: `citations._resolve` (src/refdes/citations.py:995-1001) sets
+  `state = "cache_missing"` when the lockfile says `kept_copy: true` but
+  `kept_copy_path(...)` is not a file, and returns. That is the only place
+  `cache_missing` is ever set.
+- pin: `cli.cmd_audit` (src/refdes/cli.py:992-1006) — `if state == "unpinned":
+  pin = "no pin"`, `elif any(s.kept_copy for s in statuses): pin = "kept"`,
+  `else: "hash-only"`. The `kept` branch reads only the lockfile flag
+  (`CitationStatus.kept_copy`, set at citations.py:992 from
+  `record.get("kept_copy")`), never the filesystem.
+- release gate: `lifecycle._rule_missing_kept_copies` (src/refdes/lifecycle.py:577)
+  filters `status.state == "cache_missing"` — the state column's data, not the
+  pin column's. So changing the pin word cannot touch it.
+
+## 4. Which side is wrong — the code
+
+The docs' claim is the *more* useful of the two, and the cheaper fix: one
+`elif` in `cmd_audit`. Rewriting the doc instead would mean blessing a line
+where the tool says a kept copy is kept and it is not — and the report is
+right that a user reads that sentence and relies on it. So the pin column is
+what changed.
+
+`kept` is defined everywhere else in this project as *the bytes are kept at
+`.refdes/copies/<sha256><ext>`* — docs/markdown.md:471-478, docs/output.md's
+`kept_copy` table, `refdes fetch`'s own `kept` line (cli.py:755), which means
+the write actually happened. Printing it when the file is not there makes the
+word mean two things, and the wrong one is the one a release depends on.
+
+Neither of the existing pin words fits, and that is the reason a fourth is
+needed rather than a reuse:
+
+- `hash-only` means *pinned by sha256 with no kept copy* — a mode the author
+  chose and the lockfile records honestly (`kept_copy: false`). Here the
+  lockfile says `kept_copy: true`. Printing `hash-only` would hide the fact
+  that this project's decision was to keep the bytes and the bytes are gone,
+  which is precisely the thing the release gate blocks on.
+- `no pin` means nothing is pinned, no hash at all. Flatly false here.
+
+So: `state == "cache_missing"` → pin reads `no copy`. One line now tells the
+whole truth (`cache_missing  no copy  cited by CMP-PWR-001`) instead of needing
+the docs to explain which of the two columns to believe.
+
+**State column untouched, deliberately.** `missing_kept_copies` filters
+`status.state == "cache_missing"` (lifecycle.py:577-585) — a different datum
+from the pin word, so the change cannot reach it, but that is exactly the kind
+of thing to pin with a test rather than reason about (below). Verified live too
+(§5).
+
+**`hash_mismatch  kept` left alone on purpose.** The blob *is* on disk there;
+`kept` is true of it, and the state column is what says its bytes are wrong.
+The two agree, so there is nothing to fix. Same reasoning would not apply to
+`cache_missing`, where the file is absent.
+
+## 5. After, same repro project
+
+```
+$ refdes audit
+Citations:
+  http://127.0.0.1:8978/tps62913.pdf
+    cache_missing  no copy    cited by CMP-PWR-001
+exit 0
+
+$ refdes release rel-a
+  pass     draft_items
+  pass     unpinned_citations
+  FAIL     missing_kept_copies  CMP-PWR-001     <- unchanged
+  ...
+exit 1
+```
+
+## 6. Tests
+
+- `tests/test_citations.py::test_cli_audit_never_calls_a_missing_kept_copy_kept`
+  — the reproduction, as a unit test: lockfile with `kept_copy: true`, no blob,
+  asserting the line field-wise via the existing `_audit_citation_line` helper
+  (which joins on whitespace, so it is about the words, not the padding).
+- `tests/test_lifecycle.py::test_missing_kept_copies_still_reads_the_state_word_not_the_pin_word`
+  — pins the gate rule. It asserts `state == "cache_missing"` and
+  `kept_copy is True` together (the exact combination the pin word is now
+  derived from), then that `lifecycle.stamp(..., kind="release")` is
+  `gate_failed` with `missing_kept_copies` FAIL naming CMP-001. The existing
+  `test_missing_kept_copies_rule` was refactored onto a shared
+  `_pin_kept_copy_without_blob` helper; its assertions are unchanged.
+
+**The new test fails against main's code, confirmed by reverting.** `cp`ed the
+edited `cli.py` to `.scratch/cli.py.fixed`, restored main's version with
+`git show HEAD:src/refdes/cli.py > src/refdes/cli.py`, ran the two tests:
+
+```
+E  AssertionError: assert 'cache_missin...ed by CMP-001' == 'cache_missin...ed by CMP-001'
+E    - cache_missing no copy cited by CMP-001
+E    + cache_missing kept cited by CMP-001
+FAILED tests/test_citations.py::test_cli_audit_never_calls_a_missing_kept_copy_kept
+1 failed, 1 passed
+```
+
+The lifecycle test passes on main's code too, which is the point — it is the
+behaviour-preservation pin, not a repro. Restored from `.scratch/cli.py.fixed`
+immediately; `git diff --stat` confirmed the edit came back. No stash used
+anywhere in this task (AGENTS.md).
+
+Full suite: `PYTHONPATH=src python -m pytest -q` → **2986 passed, 2 skipped**
+(221 s).
+
+## 7. Docs and lint
+
+- `docs/cli-reference.md:600-619` rewritten: the pin column is now "how that
+  path is pinned *and* whether its bytes are here now", lists `no copy` with
+  the `refdes fetch --path` remedy, and the "never contradict each other"
+  sentence keeps its promise with the second case named. Added a line saying
+  `hash_mismatch` reads `kept` on purpose, so the next reader doesn't file it
+  as the same bug.
+- The audit sample block at cli-reference.md:551 (`unpinned  no pin`) is
+  unaffected — that row's words did not change.
+- Changelog fragment `changelog.d/audit-cache-missing-no-copy.fixed.md`, named
+  per changelog.d/README.md (`<slug>.<category>.md`, `.fixed.md` for a bug fix).
+- ruff, scoped per AGENTS.md: `ruff check src/refdes/cli.py tests/test_citations.py
+  tests/test_lifecycle.py --select I,E9,F` → All checks passed. The default rule
+  set reports 13 findings in `tests/test_citations.py`, all pre-existing: the
+  same 13 come out of main's version of that file (`git show main:tests/
+  test_citations.py | ruff check --stdin-filename tests/test_citations.py -`),
+  so nothing was added by this change and nothing unrelated was silenced.
+
+## 8. Not done / follow-ups
+
+- Nothing else reads the audit pin column: `git grep -n "hash-only" -- src`
+  shows the only other producer is `refdes fetch`'s own summary line
+  (cli.py:755), which prints after a real write and is fine.
+- The same "lockfile says kept, disk says otherwise" shape in the *site*'s
+  citations table is not touched here; the prior fragment
+  (`audit-unpinned-not-hash-only.fixed.md`) already noted the site's Copy
+  column as a separate surface.

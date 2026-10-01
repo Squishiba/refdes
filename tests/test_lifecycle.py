@@ -58,8 +58,9 @@ def test_unpinned_citations_rule(lifecycle_project):
     assert results["unpinned_citations"].offenders == ["CMP-001"]
 
 
-def test_missing_kept_copies_rule(lifecycle_project, tmp_path):
-    root = lifecycle_project
+def _pin_kept_copy_without_blob(root) -> None:
+    """The state the `audit` pin-column fix must not disturb: a lockfile that
+    says `kept_copy: true` with no bytes behind it."""
     (root / ".refdes").mkdir(exist_ok=True)
     (root / ".refdes" / "citations.yaml").write_text(
         "citations:\n"
@@ -69,11 +70,37 @@ def test_missing_kept_copies_rule(lifecycle_project, tmp_path):
         "    kept_copy: true\n",
         encoding="utf-8",
     )
+
+
+def test_missing_kept_copies_rule(lifecycle_project, tmp_path):
+    root = lifecycle_project
+    _pin_kept_copy_without_blob(root)
     project = _lc_build(root)
     results = {r.name: r for r in lifecycle.evaluate_gate(project, "release")}
     assert results["missing_kept_copies"].offenders == ["CMP-001"]
     # not simultaneously flagged as unpinned -- it IS pinned, just missing the blob
     assert results["unpinned_citations"].offenders == []
+
+
+def test_missing_kept_copies_still_reads_the_state_word_not_the_pin_word(lifecycle_project):
+    """Pinned so a reworded `audit` citation row can't quietly stop blocking a
+    release. The rule filters on `status.state == "cache_missing"`
+    (lifecycle.py:577-585) and never looks at the pin column, which `audit`
+    now renders as `no copy` for exactly this state -- so the gate must still
+    FAIL, and still name the item. See tests/test_citations.py's
+    `test_cli_audit_never_calls_a_missing_kept_copy_kept` for the other half.
+    """
+    root = lifecycle_project
+    _pin_kept_copy_without_blob(root)
+    project = _lc_build(root)
+    status = project.item_by_id("CMP-001").citations[0]
+    assert status.state == "cache_missing"
+    assert status.kept_copy is True  # the lockfile flag the rule must ignore
+    outcome = lifecycle.stamp(project, kind="release", name="rel-a")
+    assert outcome.status == "gate_failed"
+    rule = next(r for r in outcome.gate_results if r.name == "missing_kept_copies")
+    assert rule.status == "FAIL"
+    assert rule.offenders == ["CMP-001"]
 
 
 def test_unaccepted_board_moves_rule_reads_project_board_moves(lifecycle_project):
