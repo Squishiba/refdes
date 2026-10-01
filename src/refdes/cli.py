@@ -16,7 +16,7 @@ from . import citations as citations_mod
 from . import diagram as diagram_mod
 from . import docs_url as docs_url_mod
 from . import former_ids as former_ids_mod
-from . import get_version, standards, textio
+from . import get_version, model, standards, textio
 from . import history as history_mod
 from . import ids as ids_mod
 from . import key_restore as key_restore_mod
@@ -127,6 +127,13 @@ def _load_blocked_notice(project: Project, since: int = 0) -> str | None:
     that announces up front and can hit a further refusal later in its own
     body (`audit` reformatting a baseline's stored-hash format partway through
     its report, long after the notice went out).
+
+    The sentence is `model.read_only_refusal()` with the file list as its
+    consequence, so the summary carries `model.READ_ONLY_REFUSAL` byte for
+    byte. It used to spell its own near-copy of that sentence, and a CI log
+    filter written against the per-file warning missed every command that has
+    no per-file warning to print (user-sim run 3, finding N2). Two spellings
+    of one condition is exactly what the single constant exists to prevent.
     """
     blocked = project.load_writes.blocked[since:]
     if not blocked:
@@ -138,10 +145,7 @@ def _load_blocked_notice(project: Project, since: int = 0) -> str | None:
             ", ".join(blocked[:_BLOCKED_NAMED])
             + f" (+{len(blocked) - _BLOCKED_NAMED} more)"
         )
-    return (
-        f"(load could not write {what} -- read-only tree? run with --no-write "
-        "to silence this)"
-    )
+    return f"(load {model.read_only_refusal(what)})"
 
 
 def _announce_load_writes(

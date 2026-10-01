@@ -32,7 +32,7 @@ from conftest import write_project_config
 
 from refdes import build as build_mod
 from refdes import cli as cli_mod
-from refdes import ids, keys, parse, revise
+from refdes import ids, keys, model, parse, revise
 from refdes.schema import load_project
 
 FLOW_SCHEMA = (
@@ -580,9 +580,58 @@ def test_commands_without_diagnostics_still_name_the_refusal(tmp_path, capsys):
     finally:
         _chmod_tree(tmp_path / "items", True)
 
-    assert "(load could not write items/r.yaml -- read-only tree?" in ls.out
+    assert "(load could not write this file (read-only tree?) -- items/r.yaml" in ls.out
     assert "(load could not write" not in check.out
     assert check.out.count("could not write this file") == 1
+
+
+def test_both_refusal_shapes_carry_the_one_sentence(tmp_path, capsys):
+    """N2, the CI-filter half: a read-only refusal used to be spelled twice.
+
+    `model.read_only_refusal()` is the one sentence, but only the *per-file*
+    diagnostics said it. A command with no diagnostics of its own -- `ls` here
+    -- fell back to a summary line with its own near-copy of the wording
+    ("load could not write X -- read-only tree? run with --no-write to silence
+    this"), so a log filter written against the constant caught `check` and
+    `build` and silently missed `ls`, `index`, `audit`, `history` and every
+    other command that names the refused files in a summary instead.
+
+    Both forms must contain `model.READ_ONLY_REFUSAL` itself -- not merely a
+    paraphrase, and not merely a shared keyword -- so the filter a CI author
+    writes against the documented sentence cannot go stale on one of the two
+    shapes. The deliberate split is untouched: `ls` names the files in its
+    summary instead of per-file, `check` says it per file and not in a
+    summary, and each says it exactly once. (`stub-tests` is a pre-existing
+    exception that does both, because it runs `build` after announcing the
+    load; that is not this test's subject, and it is unchanged here.)
+    """
+    cfg = _id_project(tmp_path)
+    _chmod_tree(tmp_path / "items", False)
+    try:
+        assert cli_mod.main(["-c", cfg, "ls"]) == 0
+        ls = capsys.readouterr()
+        assert cli_mod.main(["-c", cfg, "check"]) == 0
+        check = capsys.readouterr()
+    finally:
+        _chmod_tree(tmp_path / "items", True)
+
+    # The summary names the file as the sentence's consequence, so the whole
+    # stem is intact and the list follows it.
+    assert model.READ_ONLY_REFUSAL in ls.out
+    assert model.READ_ONLY_REFUSAL in check.out
+    assert ls.out.count(model.READ_ONLY_REFUSAL) == 1
+    # And the split still holds: `check` says it once per file and never in
+    # the summary form; `ls` says it once, in the summary form only.
+    assert "(load " not in check.out
+    assert check.out.count(model.READ_ONLY_REFUSAL) == 1
+    assert ls.out.count("could not write this file") == 1
+    assert "items/r.yaml" in ls.out and "items/r.yaml" in check.out
+    # Built from the constant, so the tail the constant appends is there too --
+    # a hand-written near-copy of the sentence is exactly what this replaced.
+    assert ls.out.splitlines()[0] == (
+        f"(load {model.READ_ONLY_REFUSAL} -- items/r.yaml"
+        "; run with --no-write to silence this)"
+    )
 
 
 def test_check_does_not_call_a_refused_schema_refresh_refreshed(tmp_path, capsys):
@@ -1012,7 +1061,7 @@ def test_audit_names_a_baseline_it_could_not_rewrite(tmp_path, capsys):
 
     out = capsys.readouterr().out
     assert "Traceback" not in out
-    assert "load could not write .refdes/baselines/rev-a.yaml" in out
+    assert "could not write this file (read-only tree?) -- .refdes/baselines/rev-a.yaml" in out
     # Once per file, not once per comparison -- `audit` diffs the latest
     # revision and the latest release, which are the same file here.
     assert out.count(".refdes/baselines/rev-a.yaml") == 1
