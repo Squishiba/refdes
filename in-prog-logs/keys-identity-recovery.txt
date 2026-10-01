@@ -1,0 +1,1131 @@
+Task: area 6 of in-prog-logs/user-sim-release-gate-run2.md — exercise
+`keys adopt` / `keys restore` / `revise` / `former-ids` as RECOVERY tools by
+deliberately breaking item identity and repairing it.
+
+Hard rule honoured throughout: nothing under src/ was changed. No tests and no
+docs were changed either. The deliverable is this report plus the PR.
+
+Status: FINISHED. All six scenarios run; the summary table is immediately
+below. Seven findings — F2.1, F3.1, F3.2, F3.3, F4.1, F4.2, F6.1 — all
+classified **gap** or **misleading**, none **bug**, plus two cosmetic notes
+(N1.1, N1.2). Scenarios 1 and 5 are clean. Nothing under src/ was changed.
+
+--------------------------------------------------------------------------
+## Summary
+
+| # | Scenario | What was broken | What the tools said | Recovered? | Findings |
+|---|---|---|---|---|---|
+| 1 | Lost `key:` on a linked item | deleted `key:` from REQ-PWR-001, target of 4 inbound composites | 4 x Layer 3 errors naming the lost key + the exact `keys restore` command; with a baseline, Layer 4 adds `key deleted since baseline` and **mints nothing** | **Yes, fully**, via `keys restore DISPLAY-ID@ORIGINAL-KEY`, byte-identical to pre-break | none (2 cosmetic notes: N1.1 duplicated sentence at two severities, N1.2 stdout/stderr interleaving) |
+| 2 | Duplicated key | copy-pasted REQ-PWR-001 to REQ-PWR-005 keeping `key: rxeaq94t7wh` | Layer 2 error naming both items with file:line, plus 4 independent crossed-reference warnings | **Yes**, by deleting the copy's `key:` and rebuilding (re-minted) | **F2.1 gap** — the remedy "Delete the key from one of them" doesn't say which; taking it on the original yields `0 errors, exit 0` and a stamped release with all 4 references silently re-pointed at the copy |
+| 3 | Display-id rename | `revise` prefix rename REQ-PWR->NEED-PWR, 4 requirements | dry run shows the whole run incl. composite display halves; run refreshes every inbound composite, seals and baselines untouched | **Yes**, on the tool's own path | **F3.1 misleading** — prose former-id renders as "REQ-PWR-001 (formerly REQ-PWR-001)", self-contradictory. **F3.2 gap** — no command resolves a retired id: `ls REQ-PWR-001` says "no items match", the item page never mentions its own former ids. **F3.3 gap** — a *bare* reference orphaned by a hand rename errors with no named remedy; `keys restore`/`revise`/`former-ids` all irrelevant there |
+| 4 | Id reuse after deletion | deleted REQ-PWR-001, created an unrelated item with the same display id | 4 x Layer 3 errors + Layer 4 `key deleted since baseline`; new item's page claims everything dashed | **Yes — the documented guarantee holds**: no link ever re-attaches once references carry keys | **F4.1 misleading** — "that risk is gone entirely" (keys.md §8) is untrue on a project that has never been writable-loaded: all 4 bare references silently re-attach, `0 errors, exit 0`, release stamps. **F4.2 misleading** — `keys restore` accepts moving a deleted item's key onto a different item even when a baseline records that key under a *different title and hash*; only `audit`'s `changed 1` line notices, and a release erases it |
+| 5 | Never-adopted -> `keys adopt` | wrote the project with no keys, no composite refs | full plan, `--dry-run` verified inert, real run mints 10 / expands 9 links + 1 check | **Yes, and nothing semantic changed** | none — `items.json` byte-identical, every hash preserved, `items/` sources untouched, and a structural comparison of a never-keyed project against an adopted one reports `identical: True` |
+| 6 | Sealed log entry, lost `key:` | deleted `key:` from sealed LOG-A-001 | with a key-keyed record: `key deleted` error naming the seal file, **nothing minted**, no seal error | **Yes, fully**, and the seal file comes out byte-identical — never tripped, rewritten, or resealed | **F6.1 gap** — in a *never-adopted* project the seal is `id -> hash` and remembers no key, so the loss is re-minted with **zero diagnostics** on the one item type whose identity is load-bearing history |
+
+Severity, worst first:
+
+- **F4.2** (`keys restore` moves identity onto the wrong item, undetected) and
+  **F2.1** (the documented repair for a duplicated key can silently mis-point
+  every reference to the copy) are the two that produce a *green* build and a
+  *stamped release baseline* over wrong data. Both are one-line-ish changes to
+  a refusal path that already loads the evidence.
+- **F4.1** (bare-reference capture before first writable load) needs an
+  unadopted, never-loaded project; real, but narrow.
+- **F6.1** (no seal evidence pre-adoption) is a reporting gap in the one
+  configuration adoption exists to move away from.
+- **F3.1/F3.2/F3.3** are cosmetic and lookup-quality issues, not correctness.
+
+What held up under every scenario, verified by running it: the Layer 3/4
+diagnostics are specific, name both candidates when identity is in doubt, and
+name the exact command that repairs the problem; `keys restore` is
+transactional, idempotent, refuses malformed keys / keys owned by another item
+/ unknown ids, and never rewrites a reference; a rename never invalidates a
+seal; `revise` carries nothing forward it does not have to; and no tool ever
+lets a duplicate key through silently.
+
+Findings are classified as **bug**, **misleading**, or **gap** in the
+per-scenario sections. None of the six is classified **bug** — every
+divergence from the documentation is either a documentation claim that is too
+strong (misleading) or a case no tool covers (gap). Scenario 1 and scenario 5
+are clean.
+
+--------------------------------------------------------------------------
+## Setup (shared by every scenario)
+
+Worktree: /home/jorb/.paseo/worktrees/16msma8v/identity-recovery-exercise
+Branch:   identity-recovery-exercise (from main @ 0a287de)
+
+The `refdes` on PATH is a broken editable install pointing at another
+worktree, so every command in this log actually ran through
+
+    python .scratch/r.py <project-dir> <refdes args...>
+
+which is a 12-line harness that does sys.path.insert(0, <this worktree>/src),
+os.chdir(<project-dir>) and calls refdes.cli.main(args). `[exit=N]` is printed
+by the harness; it is the return code of main(). Everything below labelled
+`$ refdes ...` is shorthand for that.
+
+Scratch projects live in .scratch/ (gitignored). Template: .scratch/mkbase.py
+writes the same small project into any directory:
+
+    items/requirements.yaml  REQ-PWR-001..004 (004 refines 001)
+    items/bounds.yaml        BND-PWR-001, BND-PWR-002 (limits)
+    items/decisions.md       DEC-PWR-001 satisfies [001,003],
+                             constrained_by [BND-PWR-001, BND-PWR-002],
+                             checks: [{value: eff, against: BND-PWR-002}]
+                             + a ```calc block defining eff
+    items/tests.yaml         TST-PWR-001 verifies [REQ-PWR-001, BND-PWR-002]
+                             TST-PWR-002 verifies [REQ-PWR-004]
+    items/log.yaml           LOG-A-001 addresses [REQ-PWR-001]
+
+standard: hardware@3, id.width 3, no boards: registry, no imports.
+
+First writable load of the template (python .scratch/r.py .scratch/base check):
+
+    (minted 10 key(s) and rewrote 10 reference(s) while loading)
+    WARNING <project> — 3 item(s) with no coverage — see coverage.html
+    WARNING <project> — 1 requirement(s) satisfied but not verified — see coverage.html
+    10 items, 0 errors, 2 warnings
+    [exit=0]
+
+That left .scratch/base in the state every scenario is copied from: every item
+keyed, every structured reference and the `checks: against:` expanded to
+DISPLAY-ID@key. Keys in the template project (so the log can quote them):
+
+    REQ-PWR-001 rxeaq94t7wh      BND-PWR-001 vw3etjtf9dc
+    REQ-PWR-002 e1n7zjmc9jy      BND-PWR-002 dp8n94ecq5b
+    REQ-PWR-003 2vbhzqfxtaf      DEC-PWR-001 bz9es0cbzk5
+    REQ-PWR-004 t2cjcdjk0qf      TST-PWR-001 sj83819z3py
+    LOG-A-001   5x1b3zkh0vg      TST-PWR-002 2hp3g4d0jms
+
+Note for later: a fresh project with no `boards:` registry and no stamped
+baseline has NO .refdes/ids.yaml and NO .refdes/boards.yaml — only
+schema.json. That matters for scenario 1, because per docs/design/keys.md
+§6 Layer 4 the minting guard consults "the latest baseline, the key-keyed
+seal files, the key-keyed membership manifest" and in this project none of
+those exist.
+
+--------------------------------------------------------------------------
+## Scenario 1 — lost `key:` line on an item other items link to
+
+Project: .scratch/s1a (no baseline, no membership manifest) and
+.scratch/s1b (same project + a stamped baseline `rev-a`).
+Break: delete the `key: rxeaq94t7wh` line from REQ-PWR-001, which is the
+target of four inbound composites (DEC-PWR-001 satisfies, TST-PWR-001
+verifies, LOG-A-001 addresses, REQ-PWR-004 refines) — the shape a bad merge
+or a formatter leaves behind.
+
+### 1a — nothing anywhere remembers the key
+
+`refdes --no-write check` (the honest view of the broken state):
+
+    ERROR   items/decisions.md:2 [DEC-PWR-001] — satisfies points at key 'rxeaq94t7wh' (labelled REQ-PWR-001), which no item declares. A live item labelled REQ-PWR-001 declares no key. Its key may have been lost, or the label may now name a different item. The label is not used as a fallback. Check git history to confirm identity. If it is the same item, run `refdes keys restore REQ-PWR-001@rxeaq94t7wh --dry-run`, then repeat without --dry-run to restore the original key.
+    ERROR   items/log.yaml:6 [LOG-A-001] — addresses points at key 'rxeaq94t7wh' ...
+    ERROR   items/requirements.yaml:18 [REQ-PWR-004] — refines points at key 'rxeaq94t7wh' ...
+    ERROR   items/tests.yaml:6 [TST-PWR-001] — verifies points at key 'rxeaq94t7wh' ...
+    WARNING <project> — 4 item(s) with no coverage — see coverage.html
+    WARNING <project> — 1 requirement(s) satisfied but not verified — see coverage.html
+    10 items, 4 errors, 2 warnings
+    [exit=1]
+
+One error per inbound reference, each naming the lost key, the label, the
+reason the label is not a fallback, and the exact two commands that repair
+it. This is the F4-style diagnostic quality the design asked for (§6 Layer
+3, "Recovery decision, 2026-09-28") and it holds up here.
+
+`refdes check` (writable) on the same broken tree:
+
+    ERROR   ... four identical errors, except: "A live item labelled REQ-PWR-001 declares key 'bz7xvxc3rxf'. Its key may have been lost and regenerated, or the label may now name a different item."
+    (minted 1 key(s) while loading)
+    WARNING <project> — 4 item(s) with no coverage — see coverage.html
+    WARNING <project> — 1 requirement(s) satisfied but not verified — see coverage.html
+    10 items, 4 errors, 2 warnings
+    [exit=1]
+
+So with no baseline, no seal and no membership manifest in the project, the
+minting guard (keys.md §6 Layer 4, decision 2026-09-15) has nothing to
+consult and a fresh key IS minted. That is the documented behaviour ("An
+item with no key and no record anywhere is still minted silently") and the
+diagnostic then says so honestly — "may have been lost and regenerated".
+Recovery is still fully possible because the original key survives in the
+four inbound composites.
+
+`refdes keys restore REQ-PWR-001@rxeaq94t7wh --dry-run`:
+
+    would restore REQ-PWR-001: bz7xvxc3rxf -> rxeaq94t7wh
+    files would change:
+      items/requirements.yaml
+    Review the diff before committing.
+    [exit=0]
+
+`refdes keys restore REQ-PWR-001@rxeaq94t7wh`:
+
+    restored REQ-PWR-001: bz7xvxc3rxf -> rxeaq94t7wh
+    changed files:
+      items/requirements.yaml
+    Review the diff before committing.
+    [exit=0]
+
+`refdes check` afterwards: `10 items, 0 errors, 2 warnings` — byte-identical
+diagnostic set to the pre-break baseline, and requirements.yaml is back to
+exactly the pre-break bytes (`key: rxeaq94t7wh` re-inserted as the entry's
+first field, where minting originally put it). All four inbound composites
+resolve again; no reference was rewritten.
+
+### 1b — a stamped baseline remembers the key
+
+`refdes revision rev-a` first, then the same deletion.
+
+`refdes --no-write check` (and plain `refdes check` — output identical):
+
+    ERROR   items/requirements.yaml:7 [REQ-PWR-001] — key deleted since baseline 'rev-a': was 'rxeaq94t7wh', now no key is declared. The old key is recorded for REQ-PWR-001 in baseline 'rev-a'. A key never disappears legitimately: every reference and every baseline entry pointing at 'rxeaq94t7wh', and this item's history, now dangle. Add the field `key: rxeaq94t7wh` back to the item that starts at items/requirements.yaml:7 (alongside its id:). Or, if this really is a new, different item, give it a new display id so it is not mistaken for the old one -- a fresh key will then be minted for it.
+    ERROR   items/decisions.md:2 [DEC-PWR-001] — satisfies points at key 'rxeaq94t7wh' ...  (x4, as in 1a)
+    WARNING items/requirements.yaml:7 [REQ-PWR-001] — key deleted since baseline 'rev-a': ... (same text as the ERROR above)
+    10 items, 5 errors, 3 warnings
+    [exit=1]
+
+The minting guard works: the writable `check` did NOT mint (no "(minted 1
+key(s) while loading)" line, and the file still shows REQ-PWR-001 with no
+`key:` afterwards). Evidence preserved, exactly as §6 Layer 4 requires.
+
+`refdes keys restore REQ-PWR-001@rxeaq94t7wh --dry-run` then the real run:
+
+    would restore REQ-PWR-001: (no key) -> rxeaq94t7wh
+    restored REQ-PWR-001: (no key) -> rxeaq94t7wh
+
+`refdes check` afterwards: `10 items, 0 errors, 2 warnings`. Fully restored.
+
+### Refusal paths checked on s1b (all exit 1, all as documented)
+
+    keys restore REQ-PWR-001@rxeaq94t7wh   (already restored)
+        nothing to do -- original keys already declared            [exit=0]
+    keys restore REQ-PWR-001@rxeaq4t7wh   (10 chars)
+        refused:
+          key 'rxeaq4t7wh' is malformed: expected exactly 11 characters. ...
+    keys restore REQ-PWR-001@e1n7zjmc9jy  (REQ-PWR-002's key)
+        refused:
+          key 'e1n7zjmc9jy' is already declared by REQ-PWR-002
+    keys restore REQ-PWR-099@rxeaq94t7wh
+        refused:
+          'REQ-PWR-099' must name exactly one local item
+    keys restore REQ-PWR-001
+        refused:
+          'REQ-PWR-001': expected DISPLAY-ID@ORIGINAL-KEY
+
+### Scenario 1 verdict: WORKS AS DOCUMENTED. Recovery is complete.
+
+Notes (not bugs):
+- N1.1 The same "key deleted since baseline" sentence is reported twice, once
+  as ERROR (Layer 4 lint) and once as WARNING (load-time minting-skip
+  warning). keys.md §6 Layer 4 asks for exactly that pair, so it is by
+  design — but the two lines are word-for-word identical, so a user sees one
+  sentence at two severities and has to work out they are one event. A
+  shorter warning ("not minting a replacement key; see the error above")
+  would say the only extra thing the warning adds.
+- N1.2 In 1a the "(minted 1 key(s) while loading)" line printed AFTER the
+  four errors, even though minting happens during load, before them. The
+  errors go to stderr and that line to stdout, so the interleaving is an
+  artefact of stream buffering. It reads as though the mint happened after
+  the diagnosis, which is the opposite of what made the diagnosis change
+  ("declares key 'bz7xvxc3rxf'"). Cosmetic, but it is the kind of ordering
+  that makes someone doubt the message.
+
+--------------------------------------------------------------------------
+## Scenario 2 — duplicated key (copy-paste kept the original's `key:`)
+
+Project: .scratch/s2dup (and s2dup2 / s2dup3 for the ordering variants),
+each a copy of .scratch/base with one item appended. The break is the one
+docs/troubleshooting.md's "Surrogate keys" section names: "A key line got
+duplicated: copy-paste, a merge conflict, a botched edit" — REQ-PWR-001
+copy-pasted to make REQ-PWR-005 with `key: rxeaq94t7wh` left in place and the
+visible fields edited.
+
+### 2a — what check and build say
+
+`refdes --no-write check` in .scratch/s2dup:
+
+    ERROR   items/requirements.yaml:24 [REQ-PWR-005] — key 'rxeaq94t7wh' on REQ-PWR-005 (local items/requirements.yaml:24) is already used by REQ-PWR-001 (local items/requirements.yaml:7). A key is unique by construction; two items sharing one means a line was duplicated. Delete the key from one of them and rebuild — it will be re-minted.
+    WARNING items/decisions.md:2 [DEC-PWR-001] — satisfies references 'REQ-PWR-001@rxeaq94t7wh', but that key is REQ-PWR-005 and REQ-PWR-001 is a different live item. Refusing to refresh the label until you confirm which was meant.
+    WARNING items/log.yaml:6 [LOG-A-001] — addresses ... same shape
+    WARNING items/requirements.yaml:19 [REQ-PWR-004] — refines ... same shape
+    WARNING items/tests.yaml:6 [TST-PWR-001] — verifies ... same shape
+    WARNING <project> — 4 item(s) with no coverage — see coverage.html
+    WARNING <project> — 1 requirement(s) satisfied but not verified — see coverage.html
+    11 items, 1 errors, 6 warnings
+    [exit=1]
+
+One hard error from Layer 2 (src/refdes/keys.py:186, reached from
+keys.validate(), which the loader runs before anything else), naming both
+items with file:line, and the four §3 case-2 crossed-reference warnings
+(src/refdes/links.py:354, in `_planned_target`) firing independently and
+correctly — those four are the useful part, because they say which item the
+key actually resolves to *right now*.
+
+`refdes build` (writable) prints the same error plus
+`build completed with errors (use --keep-going to exit 0)`, exit 1, and
+still writes `_site/`. Nothing was minted or rewritten in the source tree —
+no `(minted N key(s) ...)` line — so the broken state is not further
+disturbed.
+
+### 2b — which copy "wins" before you fix it
+
+`_key_index` (src/refdes/build.py:425-437) is a plain dict comprehension
+over `project.items`, so the **last item in load order** owns the key and
+resolves every inbound reference. Load order is sorted-path order, so the
+winner is *position in the file tree*, not which item is the original.
+Confirmed three ways, reading `backlinks` out of the built `items.json`:
+
+    variant                                    item holding all 4 inbound refs
+    duplicate appended after the original       REQ-PWR-005   (.scratch/s2dup)
+    duplicate inserted before the original      REQ-PWR-001   (.scratch/s2dup2)
+    duplicate in a later-sorting file          REQ-PWR-005   (.scratch/s2dup3,
+                                                  items/zzz-extra.yaml)
+
+So the answer to "which copy wins anything" is: whichever loads last, and
+that is not a stable property of either item. The rendered page confirms the
+graph really moves — `_site/dec-pwr-001.html` in .scratch/s2dup reads
+"Satisfies REQ-PWR-005, REQ-PWR-003" where it should read REQ-PWR-001.
+
+### 2c — recovery, both ways
+
+Documented remedy, applied to the copy (the right call — .scratch/s2fix):
+delete `key:` from REQ-PWR-005, run `refdes check`:
+
+    (minted 1 key(s) while loading)
+    11 items, 0 errors, 2 warnings
+    [exit=0]
+
+REQ-PWR-005 comes back as `key: 1kcjmtsxzee`, all four references re-resolve
+to REQ-PWR-001, the rendered page reads "Satisfies REQ-PWR-001, REQ-PWR-003"
+again, and the only remaining warnings are the two pre-break coverage ones.
+**Fully recovered, and byte-for-byte the pre-break state plus the new item.**
+
+Tooling on a duplicate, all as documented:
+
+    keys restore REQ-PWR-001@rxeaq94t7wh --dry-run
+        would refuse:
+          key 'rxeaq94t7wh' is already declared by REQ-PWR-005        [exit=1]
+    keys adopt --dry-run
+        would refuse:
+          project has existing build errors -- fix those first
+          ERROR   ... key 'rxeaq94t7wh' on REQ-PWR-005 ... already used by REQ-PWR-001 ...
+    revision rev-a
+        same single ERROR, exit 1, and **no baseline file written** — the
+        stamp is refused rather than recording the collision
+    former-ids propose
+        error: no baseline stamped yet ...                               [exit=1]
+
+`keys restore` correctly refuses: it cannot know which of the two items is
+the original, and restoring the original's key while the copy still holds it
+is exactly the collision it exists to prevent. Recovery is a two-step
+hand-edit then rebuild.
+
+### 2d — the wrong repair is a clean green build (F2.1, gap)
+
+The remedy text says "Delete the key from one of them and rebuild" without
+saying *which*. Taking it literally on the wrong item — deleting the key
+from the **original** REQ-PWR-001 instead of the copy, .scratch/s2wrong:
+
+    $ refdes check
+    (minted 1 key(s) while loading)
+    WARNING items/decisions.md:2 [DEC-PWR-001] — satisfies references 'REQ-PWR-001@rxeaq94t7wh', but that key is REQ-PWR-005 and REQ-PWR-001 is a different live item. Refusing to refresh the label until you confirm which was meant.
+    WARNING items/log.yaml:6 [LOG-A-001] — addresses ... same
+    WARNING items/requirements.yaml:19 [REQ-PWR-004] — refines ... same
+    WARNING items/tests.yaml:6 [TST-PWR-001] — verifies ... same
+    WARNING <project> — 4 item(s) with no coverage — see coverage.html
+    WARNING <project> — 1 requirement(s) satisfied but not verified — see coverage.html
+    11 items, 0 errors, 6 warnings
+    [exit=0]
+
+Zero errors, exit 0, and the copy now holds **all four** inbound references
+while the real REQ-PWR-001 has none (`backlinks` in items.json confirms
+`REQ-PWR-001 z1jnvaycwfm {}` vs `REQ-PWR-005 rxeaq94t7wh {satisfied_by:
+[DEC-PWR-001], addressed_by: [LOG-A-001], refined_by: [REQ-PWR-004],
+verified_by: [TST-PWR-001]}`). Nothing else in the toolset recovers it —
+`keys restore REQ-PWR-001@rxeaq94t7wh` refuses ("already declared by
+REQ-PWR-005"), `former-ids propose` has nothing to compare against, and
+`audit` prints "(none)" for every section including baselines.
+
+The four warnings are the only signal, and nothing escalates them. Taking
+the project the rest of the way to a release (.scratch/s2rel: add one test
+covering the two loose requirements) gets a **stamped release baseline over
+the mis-pointed references**:
+
+    $ refdes release rel-1
+    12 items, 0 errors, 4 warnings
+    release 'rel-1' stamped: 12 items, all gates passed.
+      .refdes/baselines/rel-1.yaml
+    [exit=0]
+
+after which `refdes audit` reports "changed 0 / added 0 / removed 0 /
+relabelled 0 (12 unchanged)" — the mis-pointing is now part of the
+recorded baseline.
+
+Classification: **gap**, not bug. docs/design/keys.md §3 case 2 asks for
+exactly a warning here, and the warning is correct and names both items.
+What is missing is that (a) the Layer 2 error's remedy, "Delete the key
+from one of them", doesn't say which one, and there is no tool that can;
+(b) no gate rule (docs/lifecycle.md's eight: draft_items,
+unpinned_citations, missing_kept_copies, uncovered_requirements,
+unverified_requirements, info_check_failures, unaccepted_board_moves,
+unaccepted_workspace_moves) treats a crossed reference as blocking, so the
+one diagnostic that identifies this failure class is a warning that a
+release happily stamps over. Severity is low in the common case (the copy is
+usually spotted and fixed while the error is on screen) and high in the case
+it is designed for — a bad merge nobody was watching.
+
+Suggested fix directions, in the order I would try them: have the Layer 2
+error name the *later-loading* item as the likely copy ("REQ-PWR-005 loads
+after REQ-PWR-001 and currently owns every reference to 'rxeaq94t7wh'"), and
+give `release` a rule (or make the crossed-reference diagnostic an error
+when the resolved target's display id differs from the reference's own
+display half) so the gate cannot stamp over it.
+
+### Scenario 2 verdict: RECOVERED with the documented one-line remedy. One
+### gap: the wrong recipient of that remedy produces a passing build.
+
+--------------------------------------------------------------------------
+## Scenario 3 — display-id rename with inbound links, via `refdes revise`
+
+Two shapes, both with a stamped baseline so `relabelled` is observable.
+
+### 3a — prefix rename (`REQ-PWR:` -> `NEED-PWR:`), the tool's own path
+
+Project: .scratch/s3, mapping file `.scratch/s3/rename.yaml`:
+
+    prefixes:
+      REQ-PWR: NEED-PWR
+
+`refdes revision rev-a` first (10 items, 2 warnings, exit 0), then
+`refdes revise rename.yaml --dry-run`:
+
+    would change 4 file(s):
+      items/decisions.md
+      items/log.yaml
+      items/requirements.yaml
+      items/tests.yaml
+
+    10 line(s) the real run would first mint/expand to composite form (keys + references), before the rename itself:
+      items/decisions.md:7  satisfies: [REQ-PWR-001@rxeaq94t7wh, REQ-PWR-003@2vbhzqfxtaf] -> satisfies: [NEED-PWR-001@rxeaq94t7wh, NEED-PWR-003@2vbhzqfxtaf]
+      items/log.yaml:10  addresses: [REQ-PWR-001@rxeaq94t7wh] -> addresses: [NEED-PWR-001@rxeaq94t7wh]
+      items/requirements.yaml:3  prefix: REQ-PWR -> prefix: NEED-PWR
+      items/requirements.yaml:8  id: REQ-PWR-001 -> id: NEED-PWR-001
+      items/requirements.yaml:12  id: REQ-PWR-002 -> id: NEED-PWR-002
+      items/requirements.yaml:16  id: REQ-PWR-003 -> id: NEED-PWR-003
+      items/requirements.yaml:20  id: REQ-PWR-004 -> id: NEED-PWR-004
+      items/requirements.yaml:22  refines: [REQ-PWR-001@rxeaq94t7wh] -> refines: [NEED-PWR-001@rxeaq94t7wh]
+      items/tests.yaml:10  verifies: [REQ-PWR-001@rxeaq94t7wh, BND-PWR-002@dp8n94ecq5b] -> verifies: [NEED-PWR-001@rxeaq94t7wh, BND-PWR-002@dp8n94ecq5b]
+      items/tests.yaml:16  verifies: [REQ-PWR-004@t2cjcdjk0qf] -> verifies: [NEED-PWR-004@t2cjcdjk0qf]
+    [exit=0]
+
+The dry run shows the whole run in one pass, composite display halves
+included, exactly as docs/cli-reference.md describes. The real run:
+
+    $ refdes revise rename.yaml
+    changed 4 file(s):
+      items/decisions.md
+      items/log.yaml
+      items/requirements.yaml
+      items/tests.yaml
+    id changes:
+      REQ-PWR-001 -> NEED-PWR-001
+      REQ-PWR-002 -> NEED-PWR-002
+      REQ-PWR-003 -> NEED-PWR-003
+      REQ-PWR-004 -> NEED-PWR-004
+    [exit=0]
+
+`refdes check`: `10 items, 0 errors, 2 warnings` — the same two
+pre-rename coverage warnings, nothing new.
+
+**Do bare and composite inbound references both still resolve?** Yes, and
+the composite display halves refresh:
+
+| inbound reference | before | after |
+|---|---|---|
+| `items/decisions.md:7 satisfies` | `[REQ-PWR-001@rxeaq94t7wh, REQ-PWR-003@2vbhzqfxtaf]` | `[NEED-PWR-001@rxeaq94t7wh, NEED-PWR-003@2vbhzqfxtaf]` |
+| `items/log.yaml:10 addresses` | `[REQ-PWR-001@rxeaq94t7wh]` | `[NEED-PWR-001@rxeaq94t7wh]` |
+| `items/requirements.yaml:22 refines` | `[REQ-PWR-001@rxeaq94t7wh]` | `[NEED-PWR-001@rxeaq94t7wh]` |
+| `items/tests.yaml:10 verifies` | `[REQ-PWR-001@rxeaq94t7wh, BND-PWR-002@dp8n94ecq5b]` | `[NEED-PWR-001@rxeaq94t7wh, BND-PWR-002@dp8n94ecq5b]` |
+| `items/tests.yaml:16 verifies` | `[REQ-PWR-004@t2cjcdjk0qf]` | `[NEED-PWR-004@t2cjcdjk0qf]` |
+| `items/decisions.md:10 checks[0].against` | `BND-PWR-002@dp8n94ecq5b` | unchanged (BND prefix not renamed) |
+
+Keys are untouched everywhere (`rxeaq94t7wh` still on NEED-PWR-001), which
+is the whole point. Cross-checks:
+
+- `refdes audit` diff against rev-a: `changed 0 / added 0 / removed 0 /
+  relabelled 4`, each with the proving key —
+  `REQ-PWR-001 -> NEED-PWR-001 (rxeaq94t7wh)` etc. So the rename is
+  recognised as the same item, not a removal plus an addition, and **no
+  content hash was carried forward** — nothing needed carrying, because the
+  hash is computed over keys and the keys didn't move. `revise`'s run also
+  printed no `baselines carried forward:` line, correctly: `.refdes/
+  baselines/rev-a.yaml` still records the old ids (its file mtime is the
+  stamp's, unchanged by the rename) and still matches every live item.
+- `refdes ls` lists the four NEED-PWR ids.
+- A **sealed log entry survives the rename untouched**. .scratch/s3k is the
+  same rename over a project that had been built first (so `.refdes/
+  log-seal.yaml` exists with `LOG-A-001: 374398724332c536`). The rename
+  rewrote `addresses: [REQ-PWR-001@rxeaq94t7wh]` inside the sealed entry,
+  the hash stayed `374398724332c536` before and after (confirmed in the
+  built `items.json`), and the following `refdes build` is clean, exit 0.
+  This is §5's "the display half is not hashed" paying off directly.
+
+### 3b — what `former-ids` records, and looking the old id up afterwards
+
+`refdes former-ids propose` on .scratch/s3:
+
+    4 candidate former-id mapping(s):
+      REQ-PWR-001 (requirement 'The 3V3 rail shall supply 1.2 A continuous.') -> NEED-PWR-001 ('The 3V3 rail shall supply 1.2 A continuous.')  exact match (surrogate key)
+      REQ-PWR-002 ...
+      REQ-PWR-003 ...
+      REQ-PWR-004 ...
+
+    Nothing written. Re-run with --confirm OLD_ID[,OLD_ID...] to record the ones you accept as former_ids:.
+    [exit=0]
+
+All four come back `exact match (surrogate key)` — no confidence score,
+because `diff.relabelled` already paired old id, new id and the key that
+proves they are the same item (former_ids.py:125-145). Nothing is written
+without `--confirm`.
+
+    $ refdes former-ids propose --confirm REQ-PWR-001,REQ-PWR-004
+    ... 4 candidate ... (list reprinted)
+    wrote former_ids: [REQ-PWR-001] to NEED-PWR-001 (items/requirements.yaml)
+    wrote former_ids: [REQ-PWR-004] to NEED-PWR-004 (items/requirements.yaml)
+    [exit=0]
+
+Both written as `former_ids: [...]` lines in the source file. Re-running
+`propose` afterwards offers only the two still-unconfirmed pairs
+(REQ-PWR-002, REQ-PWR-003) — already-resolved ids drop out
+(former_ids.py:128 `if old_id in project.former_ids: continue`), so the
+command is idempotent in the useful sense.
+
+**Can you look up the old id afterwards?** Partly. This is the one place in
+this scenario where the answer is "no", and it is a real usability gap:
+
+| lookup | result |
+|---|---|
+| `refdes audit` | **yes** — a `Former IDs:` section lists `REQ-PWR-001 -> NEED-PWR-001`, `REQ-PWR-004 -> NEED-PWR-004` |
+| `refdes ls REQ-PWR-001` | **no** — `no items match`, exit 0 |
+| `refdes ls rxeaq94t7wh` (the key) | **no** — `no items match`, exit 0 |
+| `refdes ls NEED-PWR-001` | yes |
+| built `items.json` | yes — `"former_ids": ["REQ-PWR-001"]` |
+| built item page `_site/need-pwr-001.html` | **no** — the string `REQ-PWR-001` does not appear on the page at all; the page does not list its own former ids |
+| `references.html`, `tree.html` | **no** — old id absent |
+| prose mention `REQ-PWR-001` in another item's body | **yes** — resolves to NEED-PWR-001 and renders `REQ-PWR-001 (formerly REQ-PWR-001)` |
+
+That last row is worth its own note (F3.1, **misleading**). The prose path
+works — build.py:2266-2281 checks `project.former_ids` when a display id
+fails to resolve, and emits the link plus a `(formerly X)` marker. But the
+rendered text is the reference's own text (`REQ-PWR-001`, the *old* id)
+followed by a marker repeating that same old id, so a reader sees
+"REQ-PWR-001 (formerly REQ-PWR-001)" — literally self-contradictory. The
+marker is doing its documented job (finding 12: never silently redirect a
+reader following an old id), and the link href and title attribute are both
+correct (`title="NEED-PWR-001 was formerly REQ-PWR-001"`), so the
+information is there in the HTML. But the visible text should be the *new*
+id plus the marker, e.g. "NEED-PWR-001 (formerly REQ-PWR-001)". docs/ids.md:233
+describes the marker as covering the `CAN_00` -> `REQ-CAN-001` case where
+the old id genuinely looks alien, which is the case where the current output
+reads fine; for an old id of the same shape as the new one it reads as a
+tool bug. `build.py:2276` `text = label or target_id` is where the choice is
+made — using `owner.id` when there is no explicit `[[...]]` label would fix
+it. Note this only reaches an item whose `former_ids` was recorded; a
+neighbouring item with no `former_ids:` (REQ-PWR-002 here) does **not** link
+at all — `REQ-PWR-002` in prose stayed plain, unlinked text with no warning,
+which is the documented bare-autolink rule (docs/ids.md:236) but does mean
+prose lookups depend on per-item confirmations.
+
+So the practical answer to "can you look up the old id afterwards": only
+`refdes audit` and the built `items.json` will tell you, neither `refdes ls`
+nor the rendered page will, and only prose references resolve at all. Given
+that the whole design premise is "the display id is revisable and the old one
+keeps appearing in external citations", `ls` being unable to find an item by
+a retired id is the finding (F3.2, **gap**): `ls`'s query is documented as
+"free text, matched against id, title and tags" (`refdes ls --help`), and
+`former_ids` entries are neither, so there is no command that answers "where
+did REQ-PWR-001 go?" except reading the whole `audit` output.
+
+### 3c — the hand-edit path, and where bare references still hurt
+
+Renaming one item by hand works too. .scratch/s3e: `id: BND-PWR-001` ->
+`id: BND-THERM-001` in bounds.yaml, with rev-a stamped first:
+
+    $ refdes check
+    (rewrote 1 reference(s) while loading)
+    WARNING items/bounds.yaml:7 [BND-THERM-001] — id 'BND-THERM-001' does not match this item's prefix 'BND-PWR' (from defaults:)
+    10 items, 0 errors, 3 warnings
+    [exit=0]
+
+The one inbound composite in decisions.md refreshed
+(`constrained_by: [BND-THERM-001@vw3etjtf9dc, ...]`), the prefix mismatch
+warns, `former-ids propose` offers the pair as an exact key match, and
+`audit` shows `relabelled 1  BND-PWR-001 -> BND-THERM-001 (vw3etjtf9dc)`.
+All fine.
+
+**But a reference still in bare form at rename time is orphaned, and no
+recovery tool reaches it.** This is the one shape in scenario 3 that does not
+fully recover. .scratch/s3g: TST-PWR-001's `verifies:` is hand-reverted to
+bare `[REQ-PWR-001, BND-PWR-002]`, baseline stamped, then REQ-PWR-001 renamed
+to REQ-PWR-011 by hand:
+
+    $ refdes check
+    ERROR   items/tests.yaml:6 [TST-PWR-001] — verifies points at 'REQ-PWR-001', which does not exist
+    (rewrote 4 reference(s) while loading)
+    10 items, 1 errors, 2 warnings
+    [exit=1]
+
+The other four references (all composites) refreshed fine; the bare one
+cannot, because there was no key in it to carry across. `refdes revise`
+would have handled this correctly — its dry run on the same tree (.scratch/
+s3h) shows the bare reference expanded to composite *before* the rename, in
+the same transaction — so the gap is specifically "hand rename while a bare
+reference exists".
+
+Does `former_ids` help? No, and this is worth stating precisely because the
+docs invite the assumption. After
+`refdes former-ids propose --confirm REQ-PWR-001` (which writes
+`former_ids: [REQ-PWR-001]` onto REQ-PWR-011), the same error persists:
+
+    ERROR   items/tests.yaml:6 [TST-PWR-001] — verifies points at 'REQ-PWR-001', which does not exist
+
+Correct by design — `resolve_link_target` has no `former_ids` fallback
+(build.py:467-470, stated explicitly in its own docstring), and
+`project.former_ids` is not even populated at resolution time (it's filled by
+`validate_former_ids`, build.py:401-412, which runs at build.py:2915 after
+`resolve_links`; I confirmed with a direct load that `project.former_ids` is
+`{}` at that point). The remedy is one hand edit — retype the reference as the
+new id — after which the next writable load expands it to
+`REQ-PWR-011@rxeaq94t7wh` and the build is clean, exit 0. Verified.
+
+Classification: **gap** (F3.3), low severity but a real dead end in the
+recovery-toolchain sense. The error message is accurate — "points at
+'REQ-PWR-001', which does not exist" is true — and docs/ids.md:141 does say
+"a reference that is still bare resolves by display id", so the behaviour is
+documented. What is missing is that the *remedy* is not: the message offers
+nothing, and the three tools an author would reach for (`keys restore`,
+`revise`, `former-ids`) each refuse or are irrelevant, because by the time a
+bare reference dangles the key was never involved. A one-clause addition
+("REQ-PWR-011 has former_ids: [REQ-PWR-001] — a structured link must name a
+live id or key; prose references resolve through former_ids") at
+build.py:583, or simply running `validate_former_ids` before
+`resolve_links`, would close it. Note that `former_ids` *does* correctly
+prevent the §3 case-2 crossed-reference warning in a multi-hop rename:
+.scratch/s3i renames REQ-PWR-001 -> 011 -> 055 with a hand-stale composite
+still reading `REQ-PWR-001@rxeaq94t7wh`, and because REQ-PWR-001 is in the
+item's `former_ids`, `_planned_target` refreshes silently to
+`REQ-PWR-055@rxeaq94t7wh` (links.py:353 `old_display not in
+resolved.former_ids`) with no warning. That branch works as designed.
+
+### Scenario 3 verdict: WORKS AS DOCUMENTED on the tool's own rename path.
+### Three findings, all in the recovery/lookup layer rather than the rename:
+### a self-contradictory former-id marker (misleading), no way to look an
+### old id up in `ls` or on the page (gap), and a bare reference orphaned by
+### a hand rename with no named remedy (gap).
+
+--------------------------------------------------------------------------
+## Scenario 4 — id reuse after deletion
+
+Project: .scratch/s4 (baseline `rev-a` stamped first), .scratch/s4b (same
+break, no baseline), plus bare-reference variants .scratch/s4c/s4m/s4d.
+Break: delete REQ-PWR-001 (the target of four inbound composites), then add a
+*different* item — "The enclosure shall survive a 2 m drop onto concrete" —
+under the same display id `REQ-PWR-001`.
+
+### 4a — does any link silently re-attach to the new item?
+
+**With composite references: no, and it is loud.** .scratch/s4, `--no-write
+check`:
+
+    ERROR   items/requirements.yaml:7 [REQ-PWR-001] — key deleted since baseline 'rev-a': was 'rxeaq94t7wh', now no key is declared. The old key is recorded for REQ-PWR-001 in baseline 'rev-a'. A key never disappears legitimately: every reference and every baseline entry pointing at 'rxeaq94t7wh', and this item's history, now dangle. Add the field `key: rxeaq94t7wh` back to the item that starts at items/requirements.yaml:7 (alongside its id:). Or, if this really is a new, different item, give it a new display id so it is not mistaken for the old one -- a fresh key will then be minted for it.
+    ERROR   items/decisions.md:2 [DEC-PWR-001] — satisfies points at key 'rxeaq94t7wh' (labelled REQ-PWR-001), which no item declares. A live item labelled REQ-PWR-001 declares no key. Its key may have been lost, or the label may now name a different item. ...
+    ERROR   items/log.yaml:6 [LOG-A-001] — addresses ... same
+    ERROR   items/requirements.yaml:18 [REQ-PWR-004] — refines ... same
+    ERROR   items/tests.yaml:6 [TST-PWR-001] — verifies ... same
+    WARNING items/requirements.yaml:7 [REQ-PWR-001] — key deleted since baseline 'rev-a': ... (the load-time minting-skip warning again)
+    10 items, 5 errors, 3 warnings
+    [exit=1]
+
+Every one of the four inbound references errors, and the Layer-4 error is
+present because the baseline remembers the old key — exactly the situation
+docs/design/keys.md §6 Layer 4 exists for, and the "the label may now name a
+different item" clause in the §6 Layer 3 message is literally the case being
+described. `refdes build` writes `_site/` and exits 1; the new item's page
+(`_site/req-pwr-001.html`) reads "addressed — claimed — satisfied —
+verified —" with every claim dashed, and DEC-PWR-001's page shows
+"Satisfies REQ-PWR-003" alone. Nothing attached. **The documented guarantee
+holds**: an internal reference cannot be captured by a reused display id,
+because it resolves on the key.
+
+Without a baseline (.scratch/s4b) the guarantee still holds, just with one
+diagnostic fewer: a fresh key is minted for the new item
+(`8jk5tdzpef1`), the four references still dangle (4 errors, exit 1), and the
+new item's page still shows every claim dashed. The §6 Layer 3 message is
+the *better* one here — it names both facts:
+`A live item labelled REQ-PWR-001 declares key '8jk5tdzpef1'. Its key may
+have been lost and regenerated, or the label may now name a different item.`
+
+### 4b — F4.1 (misleading): the same break with a *bare* reference, where
+### nothing re-attaches either, but nothing says so either
+
+.scratch/s4m: baseline stamped, one inbound reference hand-reverted to bare
+(`verifies: [REQ-PWR-001, BND-PWR-002@dp8n94ecq5b]`), then delete +
+re-create REQ-PWR-001. The load **re-expands** the bare reference back to the
+composite `REQ-PWR-001@rxeaq94t7wh` (the file after the run shows exactly
+that), and then all four references dangle as in 4a. So even a
+bare-at-the-time-of-deletion reference is protected — because the expansion
+happens in the same load, before resolution. 5 errors, exit 1. Fine.
+
+But .scratch/s4c — no baseline, and *all four* references bare, in a project
+whose `requirements.yaml` no longer contains the original at all:
+
+    $ refdes check
+    (minted 1 key(s) and rewrote 4 reference(s) while loading)
+    10 items, 0 errors, 2 warnings
+    [exit=0]
+
+and afterwards the files read:
+
+    items/decisions.md:7     satisfies: [REQ-PWR-001@8jk5tdzpef1, REQ-PWR-003@2vbhzqfxtaf]
+    items/log.yaml:10        addresses: [REQ-PWR-001@8jk5tdzpef1]
+    items/requirements.yaml:22  refines: [REQ-PWR-001@8jk5tdzpef1]
+    items/tests.yaml:10      verifies: [REQ-PWR-001@8jk5tdzpef1, BND-PWR-002@dp8n94ecq5b]
+
+**All four references silently re-attached to the brand-new enclosure
+requirement**, and `items.json` shows the new item holding
+`satisfied_by: [DEC-PWR-001], addressed_by: [LOG-A-001], refined_by:
+[REQ-PWR-004], verified_by: [TST-PWR-001]`. Zero errors, zero warnings beyond
+the two pre-existing coverage ones. The rendered prose link agrees:
+`<a class="ref" href="req-pwr-001.html" data-ref="REQ-PWR-001">REQ-PWR-001</a>`,
+pointing at the enclosure page.
+
+Now, is this a bug? Two honest answers:
+
+1. Mechanically it is documented: docs/ids.md:141 — "a reference that is
+   still bare resolves by display id" — and the expansion is the tool doing
+   what it always does. The scenario requires the break to have no baseline
+   *and* every reference to still be bare, which in practice means the
+   delete-and-retype happened before the tool had ever writable-loaded those
+   references. A realistic path exists: a project under `--no-write` in CI, or
+   a fresh checkout where the very first thing an author does is the
+   delete-and-retype.
+2. What makes it a finding is that §8 of docs/design/keys.md states the
+   guarantee in absolute terms — "**The part keys make automatic.** Reuse
+   used to risk an old *internal* reference silently resolving to a different
+   item. Under keys, internal references carry keys and cannot be captured by
+   a reused display id. **That risk is gone entirely.**" — and it is not gone
+   entirely; it is gone once the references have been expanded, and it is
+   fully present on a project that has never been writable-loaded. The
+   guarantee is conditional on a load having happened, and neither the design
+   doc nor docs/ids.md says so.
+
+Classification: **misleading** (F4.1). Not a resolution bug — nothing about
+key resolution is wrong — but a documented absolute that has a
+load-order-dependent hole, and the hole is exactly the "silently becomes a
+lie" outcome the design claims to have eliminated. Fix direction is cheap and
+belongs in the expansion path rather than in resolution: `links.plan_expansion`
+already knows both the display id and, via `project.item_by_id`, the live
+item; a check like "the display id I am about to expand was recorded in a
+baseline or seal under a different key" would turn the silent capture into the
+§3 case-2 warning that already exists for composites.
+
+### 4c — F4.2 (misleading): `keys restore` will happily move a deleted
+### item's identity onto a brand-new item, with no warning at all
+
+This is the sharpest finding in the scenario, because it is the *documented
+remedy* that performs the dangerous thing.
+
+.scratch/s4b has no baseline: delete the original REQ-PWR-001, add the new
+one (fresh key `8jk5tdzpef1`), and then run the command the Layer 3 error
+itself recommends:
+
+    $ refdes keys restore REQ-PWR-001@rxeaq94t7wh --dry-run
+    would restore REQ-PWR-001: 8jk5tdzpef1 -> rxeaq94t7wh
+    files would change:
+      items/requirements.yaml
+    [exit=0]
+
+It is happy to do it for real, and afterwards every one of the four inbound
+references resolves to the **enclosure** requirement:
+`REQ-PWR-001 rxeaq94t7wh back= {satisfied_by: [DEC-PWR-001], addressed_by:
+[LOG-A-001], refined_by: [REQ-PWR-004], verified_by: [TST-PWR-001]}`, the new
+item's page claims `verified TST-PWR-001 / satisfied DEC-PWR-001 / addressed
+LOG-A-001`, and `refdes check` is `0 errors, exit 0`.
+
+The baseline case is worse because it *looks* protected. .scratch/s4g has
+`rev-a` stamped, and the same command is still accepted:
+
+    $ refdes keys restore REQ-PWR-001@rxeaq94t7wh --dry-run
+    would restore REQ-PWR-001: (no key) -> rxeaq94t7wh
+    [exit=0]
+
+Why the guard at key_restore.py:76 does not fire: it only checks
+`_recorded_current_key(project, item)` — i.e. whether the item's **current**
+key is recorded in history. Here the new item had *no* key, so
+`_recorded_current_key` returns `None` immediately (key_restore.py:27-28) and
+the "would orphan that history" refusal never runs. The key being *restored*
+is recorded in history, attributed to display id `REQ-PWR-001` — and
+`key_restore.apply` never asks whether the item now holding that display id is
+the item the record describes. The evidence is right there:
+
+    live REQ-PWR-001 title:              The enclosure shall survive a 2 m drop onto concrete.
+    baseline rev-a records for that key: The 3V3 rail shall supply 1.2 A continuous.
+    baseline rev-a recorded hash:        c5955bc89dfaec3d
+
+(obtained by loading the project read-only and reading
+`lifecycle.load_baseline` / `keys.baseline_identity`). The titles differ, the
+hashes differ, and `keys restore` reports neither.
+
+The only trace afterwards is `refdes audit`'s diff against `rev-a`
+(`changed 1 REQ-PWR-001`) — a *changed* item, not an error, not in `check`'s
+output at all. And it disappears completely the moment a release is stamped:
+.scratch/s4j is s4g plus a test to satisfy coverage, and
+
+    $ refdes release rel-y
+    11 items, 0 errors, 0 warnings
+    release 'rel-y' stamped: 11 items, all gates passed.
+    [exit=0]
+
+`refdes audit` afterwards reports "Older baseline keys no current item
+declares: (none)" and "changed 0 / removed 0 / relabelled 0" against the most
+recent stamp. The enclosure requirement is now the recorded owner of the
+deleted power requirement's identity, and `rev-a` is the only file in the
+project that says otherwise.
+
+Classification: **misleading** (F4.2). The docs are careful — the
+`keys restore` page says "Check git history first: a matching display id
+alone cannot prove that a live item is the original item", and
+key_restore.py's own module docstring says "A display label cannot prove
+continuity: the caller supplies the original key after checking history". So
+the human check is the contract, deliberately. What makes it a finding rather
+than working-as-documented is that the refusal machinery already exists and
+already loads every baseline, seal, manifest and captured-history event in
+the project (`_recorded_current_key`, key_restore.py:25-44) — the one extra
+comparison needed (does the record for this *key* describe an item whose
+title/type/hash matches the live one?) is not made, and no warning is printed
+when the evidence disagrees. `docs/troubleshooting.md`'s remedy text is
+"check git history to confirm identity. If it is the same item, run `refdes
+keys restore ...`" — correct, but the tool that just told you to check git
+history holds the answer and doesn't volunteer it.
+
+### 4d — other reuse shapes, all as documented
+
+- **Ledger**: `refdes id` allocates REQ-PWR-005 into `.refdes/ids.yaml`
+  (`burned: REQ-PWR: 5`). Hand-deleting the item and hand-typing a *new*
+  REQ-PWR-005 (.scratch/s4i) is accepted silently, and `audit`'s "Ledger
+  entries with no live item and no former_ids: explaining them" reports
+  `(none)` — because a live item does hold REQ-PWR-005. This is docs/ids.md's
+  own documented gap ("nothing stops `id: REQ-PWR-003` from being typed by
+  hand after the item that originally held it was deleted ... issue #6,
+  finding 10 part 2"), and it explicitly says closing it "needs identity that
+  survives an id being retyped, which is what surrogate keys provide" — which
+  is F4.1's hole seen from the ledger's side. Not a new finding.
+- **Ledger high-water mark still advances**: after the reuse, `refdes id`
+  would allocate REQ-PWR-006, not collide. Unchanged behaviour.
+- **`checks: against:` behaves identically to a link.** .scratch/s4k deletes
+  and re-creates BND-PWR-002 (the target of DEC-PWR-001's
+  `checks[0].against`) with an unrelated limit. The `against:` reference gets
+  its own error, worded for the field: `check against key 'dp8n94ecq5b'
+  (labelled BND-PWR-002), which no item declares. ...` — the shared
+  `build._unknown_key_message` doing its job for the third caller.
+- **Deletion alone** (without reuse) is clean: .scratch/s4's intermediate
+  state is 4 errors, all §6 Layer 3, and `keys restore` fully reverses it
+  (scenario 1).
+
+### Scenario 4 verdict: THE DOCUMENTED GUARANTEE HOLDS for every composite
+### reference — no link ever silently re-attaches once the references carry
+### keys, and the build says so loudly. Two findings, both about the
+### condition the guarantee is stated without: F4.1, a load-order hole that
+### makes "that risk is gone entirely" untrue on a never-writable-loaded
+### project; F4.2, `keys restore` accepting a restore onto a different item
+### even when a baseline records the key under a different title and hash.
+
+--------------------------------------------------------------------------
+## Scenario 5 — never-adopted project -> `keys adopt`
+
+Two projects, both written by `.scratch/mkbase.py` with no `key:` line and
+every reference bare, so adoption has real work to do.
+
+### 5a — `.scratch/s5d`: nothing keyed at all, nothing to rebase
+
+    $ refdes keys adopt --dry-run
+    would mint 10 key(s)
+    would expand 9 link reference(s) to composite form
+    would expand 1 check reference(s) to composite form
+    would freeze 0 follows reference(s) at their thread tips
+    files that would change:
+      items/decisions.md
+      items/log.yaml
+      items/requirements.yaml
+      items/tests.yaml
+      items/bounds.yaml
+      .refdes/keys-adopted.yaml
+    [exit=0]
+
+Dry run verified inert: `diff -r` of the whole `.refdes/` tree against a
+pre-copy reported IDENTICAL, and the `items/` files still contained zero
+`key:` lines. The real run mints 10, expands 9 links + 1 check, writes
+`.refdes/keys-adopted.yaml` (`adopted: true / format: 1`), and nothing else.
+
+### 5b — `.scratch/s5b`/`.scratch/s5c`: a fully-populated never-adopted project
+
+This is the interesting case, so s5c adds everything adoption has to rebase:
+a `boards:` registry with items under `items/power/` (so a membership
+manifest exists), a stamped baseline `rev-a`, a built-and-sealed
+`.refdes/log-seal.yaml`, and a captured-history event. All in **legacy**
+storage: baseline keyed by display id with `key:` inside each entry, seal
+`LOG-A-001: b020b9bb8e4b3f89`, manifest `REQ-PWR-001: power`.
+
+    $ refdes keys adopt --dry-run
+    would mint 0 key(s)
+    would expand 0 link reference(s) to composite form
+    would expand 1 check reference(s) to composite form
+    would freeze 0 follows reference(s) at their thread tips
+    baselines would be rebased:
+      rev-a (10/10 entries carried)
+    seals would be rebased:
+      .refdes/log-seal.yaml (1/1 entries carried)
+    membership manifests would be rebased:
+      .refdes/boards.yaml (8/8 entries carried)
+    files that would change:
+      .refdes/baselines/rev-a.yaml
+      .refdes/log-seal.yaml
+      .refdes/boards.yaml
+      .refdes/keys-adopted.yaml
+    [exit=0]
+
+("would expand 1 check reference(s)" is the last `checks[0].against:` not yet
+composite; the `items/` file list is absent because expansion under
+`--dry-run` is simulated, not written.)
+
+The real run:
+
+    minted 0 key(s)
+    expanded 0 link reference(s) to composite form
+    expanded 1 check reference(s) to composite form
+    froze 0 follows reference(s) at their thread tips
+    baselines rebased:
+      rev-a (10/10 entries carried)
+    seals rebased:
+      .refdes/log-seal.yaml (1/1 entries carried)
+    membership manifests rebased:
+      .refdes/boards.yaml (8/8 entries carried)
+    changed files:
+      .refdes/baselines/rev-a.yaml
+      .refdes/log-seal.yaml
+      .refdes/boards.yaml
+      .refdes/keys-adopted.yaml
+    [exit=0]
+
+**Nothing under `items/` changed except the one `against:` expansion**:
+
+    items/power/requirements.yaml  identical
+    items/power/bounds.yaml        identical
+    items/power/tests.yaml         identical
+    items/decisions.md             identical
+    items/log.yaml                 identical
+    refdes-project.yaml            identical
+    .refdes/history/               identical (event store untouched)
+
+The three rebased files changed shape exactly as §5 specifies, and every
+hash survived:
+
+- baseline: keyed by surrogate, `id:` moved inside the entry, `key:` dropped:
+  `BND-PWR-001: {hash: 373f3597ff715cf7, ..., key: ytzhgpck1r1, verdict: active}`
+  -> `ytzhgpck1r1: {hash: 373f3597ff715cf7, ..., verdict: active, id: BND-PWR-001}`.
+  All ten hashes byte-identical.
+- seal: `LOG-A-001: b020b9bb8e4b3f89` ->
+  `qqvn5a0967p: {hash: b020b9bb8e4b3f89, hash_format: 5, id: LOG-A-001}`.
+- manifest: `REQ-PWR-001: power` -> `eq0danacq3h: {board: power, id: REQ-PWR-001}`.
+
+### 5c — programmatic check that nothing changed semantically
+
+Two independent checks, because "same links and same coverage" deserves more
+than reading a diff.
+
+**(i) `items.json` byte-identical.** I snapshotted `_site/items.json` before
+adoption and after (`cmp`): identical, byte for byte — 10 items, same keys,
+same `links`, same `coverage`, same 4 `diagnostics`, same `next_ids`,
+`boards`, `types`, `title`, `version`. The keys were already there (this
+project had been writable-loaded), so adoption's promise is that it changes
+storage *around* the identity, never the identity itself.
+
+**(ii) A structural comparison of two *different* projects**, `.scratch/s5f`
+(never keyed) against `.scratch/s5d` (adopted), via `.scratch/semcheck.py`:
+load both read-only, and compare errors, warnings, and per item the type,
+board, **`resolved_links`** (the always-bare, always-current display ids that
+every graph consumer reads — not raw `links`), all non-`key` fields,
+`former_ids`, `backlinks`, and the whole `coverage` map. Composite spelling
+is normalised out, so a link's *stored form* can never pass for a semantic
+difference:
+
+    $ python .scratch/semcheck.py .scratch/s5f .scratch/s5d
+    identical: True
+
+Also identical for s5b vs s5c (before/after adoption of the populated
+project). One methodological note for whoever repeats this: `resolve_links`
+*appends* to `resolved_links`/`backlinks` without clearing them
+(build.py:610-611), so calling `build()` on a project that
+`loader.load_readonly` already built yields doubled edges. That is an artifact
+of the probe, not of `refdes` — no CLI path builds the same `Project` twice —
+but it is worth knowing before writing a check like this.
+
+Idempotent, as documented: a second `refdes keys adopt` prints
+`nothing to do -- project already adopted`, exit 0.
+
+### Scenario 5 verdict: WORKS AS DOCUMENTED, no findings. Adoption changed
+### nothing semantic: items.json byte-identical, items/ sources untouched
+### apart from the one pending `against:` expansion, every hash preserved,
+### and a full structural comparison of a never-keyed project against an
+### adopted one shows zero difference.
+
+--------------------------------------------------------------------------
+## Scenario 6 — a sealed log entry whose key is lost
+
+Three shapes, because the answer depends entirely on whether anything in the
+project records that entry's key.
+
+### 6a — adopted project, key-keyed seal, no baseline: caught, not minted, repairable
+
+Project: .scratch/s5c (adopted, `rev-a` + root `log-seal.yaml` + membership
+manifest). Copied to .scratch/s6b and .scratch/s6c; in both the `key: qqvn5a0967p`
+line is deleted from LOG-A-001. s6c additionally has `.refdes/baselines/`
+deleted, so the **seal is the only key record** — the minimal case for "can the
+seal catch this?"
+
+    $ refdes --no-write check
+    ERROR   items/log.yaml:6 [LOG-A-001] — key deleted: was 'qqvn5a0967p', now no key is declared. The old key is recorded for LOG-A-001 in seal file '.refdes/log-seal.yaml'. A key never disappears legitimately: every reference and every baseline entry pointing at 'qqvn5a0967p', and this item's history, now dangle. Add the field `key: qqvn5a0967p` back to the item that starts at items/log.yaml:6 (alongside its id:). Or, if this really is a new, different item, give it a new display id so it is not mistaken for the old one -- a fresh key will then be minted for it.
+    10 items, 1 errors, 5 warnings
+    [exit=1]
+
+The `key deleted` head drops "since baseline 'rev-a'" because there is no
+baseline — `deleted_key_message` builds the head from
+`record.source.startswith("baseline ")` (keys.py:476) and names
+`seal file '.refdes/log-seal.yaml'` instead. That is the §6 Layer 4 decision
+working exactly as specified: the key-keyed seal is listed as evidence
+alongside the baseline and the manifest (`keys._key_evidence_sources`,
+keys.py:401-438), and it is enough on its own.
+
+**The writable load does not mint.** `refdes check` on the same tree prints the
+same ERROR plus the load-time WARNING, exit 1, and `items/log.yaml` still has
+**no `key:` line** afterwards — the evidence is preserved, not papered over.
+The seal file is byte-identical before and after (`diff` reports no change).
+The seal verifier correctly stays out of the way: no "edited after sealing"
+error, no second report of the same event.
+
+**`keys restore` repairs it without tripping the seal:**
+
+    $ refdes keys restore LOG-A-001@qqvn5a0967p --dry-run
+    would restore LOG-A-001: (no key) -> qqvn5a0967p
+    files would change:
+      items/log.yaml
+    [exit=0]
+
+    $ refdes keys restore LOG-A-001@qqvn5a0967p
+    restored LOG-A-001: (no key) -> qqvn5a0967p
+    changed files:
+      items/log.yaml
+    [exit=0]
+
+    $ refdes check
+    10 items, 0 errors, 4 warnings
+    [exit=0]
+
+    $ refdes build
+    10 items, 0 errors, 4 warnings
+    site written to ...
+    [exit=0]
+
+`.refdes/log-seal.yaml` is **byte-identical to its pre-break state** after
+the whole repair — verified by `diff` against the s5c copy. The seal was
+never rewritten, never resealed, never tripped: the content hash was correct
+throughout, because the item's own key is deliberately not hashed
+(docs/design/keys.md §5, "The item's own key is not hashed"). **Full recovery,
+no seal damage.** That is the design working end to end.
+
+### 6b — the same, with a baseline present (.scratch/s6b)
+
+Identical outcome with one wording difference: the head is
+`key deleted since baseline 'rev-a': was 'qqvn5a0967p' ...` and the baseline
+is named as the record — baseline is first in precedence, so it wins the
+"which record do I name" question (keys.py:415-424, `records.setdefault`).
+`keys restore` again restores cleanly and `check` returns to 0 errors. Nothing
+to add.
+
+### 6c — board-scoped seal (.scratch/s6d)
+
+Same project with `decisions.md` and `log.yaml` moved under `items/power/`,
+so the seal is `.refdes/log-seal-power.yaml` and the stale root
+`log-seal.yaml` is emptied. The diagnostic names the right file:
+
+    ERROR   items/power/log.yaml:6 [LOG-A-001] — key deleted: was 'qqvn5a0967p', now no key is declared. The old key is recorded for LOG-A-001 in seal file '.refdes/log-seal-power.yaml'. ...
+
+`_key_evidence_sources` iterates `sorted({""} | set(project.boards))`
+(keys.py:426) so the per-board seal is found. `keys restore` repairs it,
+`check` is clean. **Works.**
+
+### 6d — F6.1 (gap): a *never-adopted* project has a seal that cannot
+### remember a key, so the loss is silent and the seal is never consulted
+
+.scratch/s6e: fresh `mkbase` project, built once (so LOG-A-001 is sealed), then
+the `key:` line deleted. The seal is in the **legacy** shape —
+`sealed: {LOG-A-001: ef83985633707238}` — a display id and a hash, no key. So:
+
+    $ refdes --no-write check
+    WARNING <project> — 3 item(s) with no coverage — see coverage.html
+    WARNING <project> — 1 requirement(s) satisfied but not verified — see coverage.html
+    10 items, 0 errors, 2 warnings
+    [exit=0]
+
+    $ refdes check
+    10 items, 0 errors, 2 warnings
+    [exit=0]
+
+**Nothing is reported at all.** A sealed, append-only log entry — the one item
+type whose whole purpose is to be immutable evidence — silently acquires a
+brand-new identity `pn3d075spvb`, and the only trace anywhere is the
+`(minted 1 key(s) while loading)` line on the run that did it. The seal file
+is unchanged (`LOG-A-001: ef83985633707238`), because the key is not hashed
+and the content did not change; `refdes audit` reports `(none)` for
+"Append-only entries edited after sealing", `(none)` for older-baseline keys,
+and no project baseline exists at all.
+
+The design is aware of the shape of this hole and states the precondition
+precisely — §2: "an item whose display id is recorded **with** a key in the
+latest baseline, a key-keyed seal, or the key-keyed membership manifest is
+not a keyless item waiting to be filled in"; §6 Layer 4's minting guard
+"consults every record that remembers an item's key". A **legacy** seal
+remembers a hash, not a key, so it is not one of those records, and
+"an item with no key and no record anywhere is still minted silently, exactly
+as before" applies. Every clause of the spec is satisfied. What is missing is
+that this is exactly the case where the loss is *most* worth reporting — the
+item is sealed, so its identity is load-bearing history — and the only
+available signal that a seal file exists in the legacy shape is
+`.refdes/keys-adopted.yaml` being absent, which is a project-wide fact rather
+than an item-level one.
+
+Note the asymmetry that makes this worth fixing rather than merely noting: in
+the *same* project, if LOG-A-001 had a `refines:`-style inbound reference, or
+if a baseline existed, the loss would be caught (scenario 1a showed the
+no-record-anywhere case for a referenced item still errors on the four
+dangling references). Here there are no inbound references to a log entry and
+no baseline, so the loss is completely silent. `keys adopt` is the fix and it
+is one command away — but nothing says so.
+
+Classification: **gap** (F6.1). Suggested fix direction, in order of
+intrusion: (a) have the legacy-shape seal verifier emit the `key deleted`
+report it structurally cannot produce today by comparing the sealed id's live
+key against the seal's recorded hash only where the item is keyless — i.e.
+extend `_key_evidence_sources` to treat a legacy seal entry as evidence that
+*a key existed* even though it cannot say which one, and word the diagnostic
+accordingly ("this entry was sealed before adoption, so its original key is
+not recorded anywhere; restore it from git"); (b) as a stopgap, make
+`refdes check` warn when a sealed item has no key in a project with no
+`.refdes/keys-adopted.yaml`. Either keeps the minting guard exactly as
+specified and only adds reporting.
+
+### Scenario 6 verdict: FULLY RECOVERABLE wherever a key-keyed record
+### exists — the seal is never tripped, never rewritten, and never resealed
+### across a `keys restore`. One gap (F6.1): in a never-adopted project the
+### seal file cannot remember a key at all, so a sealed entry's lost key is
+### re-minted with zero diagnostics.
