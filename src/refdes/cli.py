@@ -300,7 +300,18 @@ def cmd_check(args) -> int:
     # The whole project still parses and resolves links regardless of --board/
     # --workspace -- only what gets reported below is narrowed.
     build_mod.build(project, seal_write=False, reseal=False)
-    drift = citations_mod.refresh(project) if args.refresh else []
+    if args.allow_unreachable and not args.refresh:
+        print(
+            f"note: {citations_mod.ALLOW_UNREACHABLE_FLAG} without --refresh has "
+            "nothing to allow -- no pinned citation is re-fetched, so none of them "
+            "can be unreachable.",
+            file=sys.stderr,
+        )
+    drift = (
+        citations_mod.refresh(project, allow_unreachable=args.allow_unreachable)
+        if args.refresh
+        else []
+    )
     status = _report(project, verbose=args.verbose, board=args.board, workspace=args.workspace)
     if drift:
         print(f"\n{len(drift)} citation(s) drifted from their pinned hash:")
@@ -1917,7 +1928,22 @@ def main(argv: list[str] | None = None) -> int:
         "--refresh",
         action="store_true",
         help="also re-fetch every pinned citation and report drift (network; "
-        "writes nothing)",
+        "writes nothing). A pinned citation whose bytes cannot be obtained -- "
+        "network down, DNS failure, connection refused, timeout, or an HTTP "
+        "error status -- fails the run, because drift was not verified for it; "
+        f"see {citations_mod.ALLOW_UNREACHABLE_FLAG}",
+    )
+    p_check.add_argument(
+        citations_mod.ALLOW_UNREACHABLE_FLAG,
+        dest="allow_unreachable",
+        action="store_true",
+        help="with --refresh, downgrade every citation that could not be "
+        "re-fetched to a warning, so the exit code reflects only real findings "
+        "-- drift, and real project errors. What you give up: the guarantee "
+        "that --refresh reached every pinned source. Whatever could not be "
+        "fetched is left unverified, and a datasheet deleted at the vendor "
+        "passes exactly as a laptop with no network does. Without --refresh "
+        "this does nothing.",
     )
     p_check.add_argument(
         "--board",

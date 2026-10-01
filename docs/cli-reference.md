@@ -35,6 +35,16 @@ only code a diagnostic gets. Treat any non-zero as failure unless you have
 read the specific command's section. `refdes ls --board nosuchboard` is the one
 command that reports a name nobody declared as `no items match` and exits `0`.
 
+One case is about the outside world rather than the project, and a script
+branching on `1` should know it exists: `check --refresh` exits `1` both when it
+found drift **and** when a pinned citation could not be re-fetched, so on a
+network outage a drift guard fails rather than passing unchecked. The two are
+told apart by the diagnostics — `could not refresh …` and `could not be
+refreshed, so upstream drift was NOT verified` mean nothing was checked, while
+`N citation(s) drifted` means everything that answered was compared and differs —
+and `--allow-unreachable` puts the first kind on the exit-code-0 side
+deliberately. See [`check`](#refdes-check).
+
 One more case the table above does not cover, because it is about a
 *destination* rather than a name: a file or directory the filesystem will not
 accept. That is a condition of the filesystem, not of the project, so no
@@ -184,7 +194,8 @@ Errors go to stderr, warnings to stdout. Every diagnostic leads with
 
 | Option | Effect |
 |---|---|
-| `--refresh` | Also re-fetch every pinned [citation](markdown.md#citing-a-datasheet) and report drift (network; writes nothing) |
+| `--refresh` | Also re-fetch every pinned [citation](markdown.md#citing-a-datasheet) and report drift (network; writes nothing). A pinned citation whose bytes cannot be obtained **fails the run** — see below |
+| `--allow-unreachable` | With `--refresh`, report a citation that could not be re-fetched as a warning instead, so the exit code reflects only real findings |
 | `--board NAME` | Only report diagnostics for one [board](multi-board.md)'s own items |
 | `--workspace NAME` | Only report diagnostics for one [workspace](workspaces.md)'s own items |
 | `-v`, `--verbose` | Also show info-level diagnostics |
@@ -218,7 +229,42 @@ refdes check --refresh
     cited by  CMP-PWR-001
 ```
 
-Exits non-zero on drift, same as on any other error.
+Exits non-zero on drift, same as on any other error — **and** on a pinned
+citation that could not be re-fetched at all. Drift means the bytes changed; an
+unreachable source means no bytes arrived, so there is nothing to compare the pin
+against, and a scan that checked nothing must not report success. That covers the
+network being down and the vendor having deleted the datasheet, which are
+indistinguishable from `check`'s side:
+
+```
+ERROR   <project> — could not refresh https://www.ti.com/lit/ds/symlink/tps62913.pdf: <urlopen error [Errno 111] Connection refused> -- upstream drift was NOT verified for this citation (no bytes arrived, so there is nothing to compare the pin against)
+ERROR   <project> — 1 pinned citation could not be refreshed, so upstream drift was NOT verified for it -- the run cannot claim to have checked it. Fix the network or the urls, or pass --allow-unreachable to treat an unreachable source as a warning and let the exit code reflect only real findings (you then get no guarantee that every pinned source was checked at all)
+```
+
+A partially reachable project is not an exception: every url is attempted, the
+ones that answered are compared and reported as usual, and the unreachable ones
+fail the run on their own count. Drift in a reachable citation still exits
+non-zero regardless.
+
+`--allow-unreachable` is the deliberate way to give that up — for a laptop on a
+train, where the network failing is not information about the design:
+
+```bash
+refdes check --refresh --allow-unreachable
+```
+
+```
+WARNING <project> — could not refresh https://www.ti.com/lit/ds/symlink/tps62913.pdf: <urlopen error [Errno 111] Connection refused>
+WARNING <project> — 1 pinned citation could not be refreshed, so upstream drift was NOT verified for it -- drop --allow-unreachable to fail the run on this instead
+2 items, 0 errors, 2 warnings
+```
+
+What you give up is the guarantee that `--refresh` reached every pinned source:
+whatever could not be fetched stays unverified, and a datasheet deleted at the
+vendor passes exactly as a dead network does. Drift findings and real project
+errors still exit non-zero — the flag changes the severity of "could not check",
+never the verdict on "checked, and it differs". Without `--refresh` it does
+nothing and says so.
 
 ---
 
