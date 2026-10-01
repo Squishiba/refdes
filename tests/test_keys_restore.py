@@ -229,6 +229,148 @@ def test_recorded_replacement_key_cannot_be_discarded_even_in_older_baseline(tmp
     assert _snapshot(tmp_path) == before
 
 
+def _stamp_recording_the_original_key(tmp_path, config, path, original, current, name="rev-a"):
+    """Put `original` on the target, stamp `name`, and return the stamped entry.
+
+    The stamp goes through the CLI so the baseline carries a real content hash
+    -- the comparison the restore guard makes is only as good as the record.
+    """
+    textio.write_text(str(path), textio.read_text(str(path)).replace(current, original))
+    assert cli.main(["-c", config, "revision", name]) == 0
+    baseline = lifecycle.load_baseline(loader.load_readonly(config), name)
+    entry = next(e for e in baseline.items.values() if e.get("key") == original)
+    return entry
+
+
+def _reuse_display_id(root, *, declared_key=None):
+    """Delete the target item and put an unrelated one under its display id.
+
+    The reuse is the whole hazard: the display label the caller supplies still
+    matches, and a matching label proves nothing about identity (keys.md §3).
+    """
+    lines = ["---", "id: REQ-001"]
+    if declared_key:
+        lines.append(f"key: {declared_key}")
+    lines += ["type: requirement", "title: Enclosure drop", "---", "A 2 m drop, onto concrete."]
+    (root / "items/target.md").write_text("\n".join(lines) + "\n")
+
+
+@pytest.mark.parametrize("dry_run", [False, True])
+@pytest.mark.parametrize("declared_key", [None, "k7f3m2q9x4a"])
+def test_baseline_record_of_different_content_refuses_the_restore(
+    tmp_path, dry_run, declared_key
+):
+    """F4.2: the deleted item's display id, reused by an unrelated item.
+
+    The baseline remembers what the key belonged to -- a different title and a
+    different content hash -- and the display id the caller supplies still
+    matches, so nothing but that record can tell the two items apart.
+    Restoring onto the new one hands it every reference that names the key and
+    leaves a passing build, so it is refused. `declared_key` covers the new
+    item carrying a key of its own (the minting guard left it keyless in the
+    other shape); either way it is recorded nowhere, so `_recorded_current_key`
+    has nothing to say and this guard is the only one standing.
+    """
+    config, path, original, current = _fixture(tmp_path)
+    entry = _stamp_recording_the_original_key(tmp_path, config, path, original, current)
+    _reuse_display_id(tmp_path, declared_key=declared_key)
+    live = loader.load_readonly(config)
+    build.compute_hashes(live)
+    assert live.item_by_id("REQ-001").content_hash != entry["hash"]
+
+    before = _snapshot(tmp_path)
+    result = key_restore.apply(str(tmp_path), [f"REQ-001@{original}"], dry_run=dry_run)
+    assert not result.ok
+    message = result.errors[0]
+    assert f"refusing to move key {original!r} onto REQ-001" in message
+    assert "baseline 'rev-a' records that key under 'REQ-001' with different content" in message
+    assert "title: baseline 'Target', now 'Enclosure drop'" in message
+    assert f"content hash: baseline {entry['hash']!r}, now {live.item_by_id('REQ-001').content_hash!r}" in message
+    assert "--force" in message
+    assert _snapshot(tmp_path) == before
+
+
+def test_force_overrides_the_baseline_content_refusal(tmp_path, capsys):
+    config, path, original, current = _fixture(tmp_path)
+    _stamp_recording_the_original_key(tmp_path, config, path, original, current)
+    _reuse_display_id(tmp_path)
+    target = f"REQ-001@{original}"
+
+    assert cli.main(["-c", config, "keys", "restore", target]) == 1
+    assert "--force" in capsys.readouterr().err
+    assert cli.main(["-c", config, "keys", "restore", target, "--force"]) == 0
+    assert "restored REQ-001" in capsys.readouterr().out
+
+    restored = loader.load_readonly(config)
+    assert not restored.errors
+    assert restored.item_by_id("REQ-001").key == original
+    assert restored.item_by_id("REQ-002").resolved_links["refines"] == ["REQ-001"]
+
+
+def test_genuine_restore_of_the_same_item_passes_the_baseline_comparison(tmp_path):
+    """The ordinary case: the key line is gone and nothing else moved.
+
+    An item's own key and display id are not part of its content hash, so the
+    baseline's recorded title and hash still describe the item and the restore
+    is not asked for an override.
+    """
+    config, path, original, current = _fixture(tmp_path)
+    _stamp_recording_the_original_key(tmp_path, config, path, original, current)
+    text = textio.read_text(str(path))
+    textio.write_text(str(path), "".join(l for l in text.splitlines(keepends=True) if not l.startswith("key:")))
+
+    result = key_restore.apply(str(tmp_path), [f"REQ-001@{original}"])
+    assert result.ok, result.errors
+    restored = loader.load_readonly(config)
+    assert not restored.errors
+    assert restored.item_by_id("REQ-001").key == original
+    assert restored.item_by_id("REQ-002").resolved_links["refines"] == ["REQ-001"]
+
+
+def test_same_item_edited_since_the_baseline_needs_force(tmp_path):
+    """The override's other half: content that legitimately moved.
+
+    Same item, same key lost, but an `invalidate` field was edited after the
+    stamp, so the baseline's record no longer describes what it holds. Refused
+    -- with --force named as the way through -- because nothing else can tell
+    that case from a reused display id.
+    """
+    config, path, original, current = _fixture(tmp_path)
+    _stamp_recording_the_original_key(tmp_path, config, path, original, current)
+    text = textio.read_text(str(path))
+    kept = "".join(l for l in text.splitlines(keepends=True) if not l.startswith("key:"))
+    textio.write_text(str(path), kept.replace("title: Target", "title: Target, revised"))
+
+    result = key_restore.apply(str(tmp_path), [f"REQ-001@{original}"])
+    assert not result.ok
+    assert "title: baseline 'Target', now 'Target, revised'" in result.errors[0]
+    assert "pass --force" in result.errors[0]
+    assert key_restore.apply(str(tmp_path), [f"REQ-001@{original}"], force=True).ok
+
+
+@pytest.mark.parametrize("stamped", [False, True])
+def test_restore_is_unchanged_when_no_baseline_records_the_key(tmp_path, stamped):
+    """No record of the key means nothing to compare against, so today stands.
+
+    With `stamped`, the baseline exists and even records REQ-001 -- but the
+    entry carries no key, the pre-keys shape with no identity evidence in it,
+    which is what `baseline_identity` returns None for.
+    """
+    config, _path, original, _current = _fixture(tmp_path, missing=True)
+    if stamped:
+        source = tmp_path / "items/source.yaml"
+        clean = source.read_text().replace(f"    refines: [REQ-001@{original}]\n", "")
+        project = loader.load_readonly(config, overlay={str(source): clean})
+        assert not project.errors
+        assert lifecycle.stamp(project, kind="revision", name="rev-a").status == "stamped"
+
+    result = key_restore.apply(str(tmp_path), [f"REQ-001@{original}"])
+    assert result.ok, result.errors
+    restored = loader.load_readonly(config)
+    assert not restored.errors
+    assert restored.item_by_id("REQ-001").key == original
+
+
 @pytest.mark.parametrize("phase", ["write", "validation", "no_write"])
 def test_transaction_rolls_back_on_failure(tmp_path, monkeypatch, phase):
     _config, _path, original, _current = _fixture(tmp_path)

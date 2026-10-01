@@ -1,0 +1,398 @@
+Task: F4.2 of `in-prog-logs/keys-identity-recovery.txt` — `refdes keys
+restore` moves a deleted item's surrogate key onto a *different* item that has
+since taken over the display id, and the build passes. The maintainer's
+decision: refuse when the most recent baseline that recorded the key shows
+different content for it than the item the key is being moved onto, with
+`--force` as the override, and unchanged behaviour when no baseline recorded
+the key.
+
+Status: FINISHED. Guard implemented in `key_restore._baseline_content_conflict`,
+`--force` added, six new tests, docs and a changelog fragment updated. Both
+variants re-run after the fix; the refusal fires on the baseline case and the
+no-baseline case is byte-identical to main apart from its freshly minted keys.
+
+Branch: keys-restore-baseline-guard (from main @ b068f96).
+Everything runs through `PYTHONPATH=src python -m refdes.cli` (the `refdes` on
+PATH is a broken editable install pointing at another worktree). Scratch
+projects and scripts live in `.scratch/`.
+
+Scratch files: `mkproj.py` (template), `f42.py` (baseline variant, project
+`.scratch/s4g`), `f42b.py` (no-baseline variant, `.scratch/s4b`), `f42c.py`
+(genuine recovery, `.scratch/s1b`), `sabotage.txt` (main's code against the
+new tests), `backup/` (the two touched source files, kept for the
+revert/restore step). Recorded runs: `f42-before.txt`, `f42b-before.txt`,
+`f42-after.txt`, `f42b-after.txt`, `f42c-after.txt`.
+
+--------------------------------------------------------------------------
+
+## What the code does today
+
+`src/refdes/key_restore.py`:
+
+- `_recorded_current_key` (lines 25-44) already walks *every* baseline, seal
+  file, membership manifest and captured-history event, but only to answer one
+  question: is the item's **current** key recorded anywhere? That guards the
+  opposite direction -- "don't discard a replacement key that history points
+  at".
+- `apply` (line 75-81) consults it only when `item.key != key`, and only about
+  the key being *replaced*.
+- Nothing anywhere asks about the key being *restored*: whether the record for
+  that key describes the item now holding the display id.
+
+So the F4.2 shape falls through both guards. `_recorded_current_key` returns
+`None` immediately when the target item has no key (`if not item.key:
+return None`, lines 27-28), which is exactly the new-item case.
+
+## What a baseline stores (read, not assumed)
+
+`lifecycle._items_map` (src/refdes/lifecycle.py:333-336) writes per entry:
+
+    {"hash": item.content_hash, "type": item.type, "title": item.title,
+     "hash_format": build_mod.HASH_FORMAT}
+
+plus `key:` in the legacy (display-id-keyed) shape, or `id:` inside the entry
+in the adopted (key-keyed) shape. `keys.baseline_identity(record_id, entry)`
+reads either shape and returns `(key, display id)` or None for a pre-keys entry
+with no identity evidence at all.
+
+So a baseline records **title and content hash**, both directly comparable to
+the live item — and `keys.hash_in_format(item, project, format)` is the one
+shared reconstruction of "what this item's hash was under the format the record
+was written with" (`src/refdes/keys.py:259-277`, used by
+`lifecycle.migrate_hash_format`, `seal._matches_sealed_hash` and
+`keys.plan_surrogate_storage`). That is the comparison to use, so a genuine
+restore of the same item still matches.
+
+Two facts that make the comparison sound:
+
+- An item's **own key and display id are not in its content hash**
+  (`build.compute_hashes`'s docstring, src/refdes/build.py:1995-2008), so
+  restoring a key onto the item it belonged to leaves its hash untouched.
+- `hash_in_format` returns `item.content_hash` for the current format, and
+  `load_readonly` does not compute hashes — `adopt.py:218` calls
+  `build.compute_hashes(project)` before comparing stored hashes, and so must
+  this.
+
+--------------------------------------------------------------------------
+
+## Reproduction on main's code (`.scratch/`, recorded verbatim)
+
+Scratch template `.scratch/mkproj.py` writes the same 10-item project
+`in-prog-logs/keys-identity-recovery.txt` describes (hardware@3, `id.width 3`,
+REQ-PWR-001..004 / BND-PWR-001..002 / DEC-PWR-001 / TST-PWR-001..002 /
+LOG-A-001, four inbound composites onto REQ-PWR-001: `satisfies`,
+`addresses`, `refines`, `verifies`). Its first writable load matches that log
+exactly:
+
+    $ refdes check
+    (minted 10 key(s) and rewrote 10 reference(s) while loading)
+    WARNING <project> — 2 item(s) with no coverage — see coverage.html
+    WARNING <project> — 1 requirement(s) satisfied but not verified — see coverage.html
+    10 items, 0 errors, 2 warnings
+    [exit=0]
+
+`.scratch/f42.py` then runs the scenario (baseline variant, recorded in
+`.scratch/f42-before.txt`); `.scratch/f42b.py` runs the no-baseline variant
+(`.scratch/f42b-before.txt`).
+
+### Variant A — baseline `rev-a` stamped first (`.scratch/s4g`)
+
+Stamp, delete REQ-PWR-001, add an unrelated REQ-PWR-001 ("The enclosure shall
+survive a 2 m drop onto concrete."), then `check`:
+
+    ERROR   items/requirements.yaml:17 [REQ-PWR-001] — key deleted since baseline 'rev-a': was 'mp6zepp65yt', now no key is declared. ...
+    ERROR   items/decisions.md:2 [DEC-PWR-001] — satisfies points at key 'mp6zepp65yt' (labelled REQ-PWR-001), which no item declares. A live item labelled REQ-PWR-001 declares no key. ... If it is the same item, run `refdes keys restore REQ-PWR-001@mp6zepp65yt --dry-run` ...
+    (x3 more, one per inbound reference)
+    10 items, 5 errors, 3 warnings
+    [exit=1]
+
+The tool that names the remedy is the one that then performs the dangerous
+thing — the exact command the Layer-3 error recommends is accepted:
+
+    $ refdes keys restore REQ-PWR-001@mp6zepp65yt --dry-run
+    would restore REQ-PWR-001: (no key) -> mp6zepp65yt
+    files would change:
+      items/requirements.yaml
+    Review the diff before committing.
+    [exit=0]
+
+    $ refdes keys restore REQ-PWR-001@mp6zepp65yt
+    restored REQ-PWR-001: (no key) -> mp6zepp65yt
+    changed files:
+      items/requirements.yaml
+    Review the diff before committing.
+    [exit=0]
+
+    $ refdes check
+    WARNING <project> — 2 item(s) with no coverage — see coverage.html
+    WARNING <project> — 1 requirement(s) satisfied but not verified — see coverage.html
+    10 items, 0 errors, 2 warnings
+    [exit=0]
+
+**F4.2 reproduced**: the deleted power requirement's identity now sits on the
+enclosure requirement, all four references resolve to it, and the build is
+green. The only trace left anywhere is `refdes audit`'s diff:
+
+    $ refdes audit
+    ...
+    Since last revision (rev-a, 2026-10-01T14:29:34Z):
+      changed   1   REQ-PWR-001
+      added     0
+      removed   0
+      relabelled 0
+      (9 unchanged)
+
+A *changed* item, not an error, not in `check`'s output at all.
+
+The evidence the refusal needs is in the baseline file the whole time:
+
+    .refdes/baselines/rev-a.yaml
+      REQ-PWR-001: {hash: c7926b17234d6180, type: requirement, title: Rail current,
+      hash_format: 5, key: mp6zepp65yt, verdict: active}
+
+    items/requirements.yaml (live)
+      - id: REQ-PWR-001
+        title: Enclosure drop
+        body: The enclosure shall survive a 2 m drop onto concrete.
+        key: mp6zepp65yt
+
+Different title, different content hash, same display id — and `keys restore`
+compares neither.
+
+### Variant B — no baseline recorded the key (`.scratch/s4b`)
+
+Same break with no stamp. A writable `check` mints a fresh key for the new
+item and the four references dangle (4 errors, exit 1); restoring the old key
+then still succeeds, which is the behaviour the maintainer's decision says must
+not change:
+
+    $ refdes keys restore REQ-PWR-001@cctfzzfavba
+    restored REQ-PWR-001: s1rn98bybkq -> cctfzzfavba
+    changed files:
+      items/requirements.yaml
+    Review the diff before committing.
+    [exit=0]
+
+    $ refdes check
+    10 items, 0 errors, 2 warnings
+    [exit=0]
+
+(Nothing records the old key, so there is nothing to compare against — this is
+the "behave exactly as today" case.)
+
+--------------------------------------------------------------------------
+
+## The fix
+
+`src/refdes/key_restore.py`, one guard plus the plumbing to reach it:
+
+- `_baseline_recording(project, key)` — `(baseline name, recorded display id,
+  entry)` for the most recent baseline that filed `key`, or None. Both baseline
+  shapes go through the one shared `keys.baseline_identity`, so the legacy
+  display-id-keyed entry and the adopted key-keyed entry are found identically;
+  `stamped_at` picks the most recent, `name` breaks a tie deterministically.
+- `_baseline_content_conflict(project, item, key)` — compares the two signals a
+  baseline entry records, `title` and `hash`, against the live item, and returns
+  the refusal text if either disagrees. The hash goes through
+  `keys.hash_in_format(item, project, recorded_format)`, the single shared
+  reconstruction of "what this item's hash was under the recorded format", which
+  is what makes a genuine restore of the same item match whatever format wrote
+  the record. Absent or unusable signals are skipped rather than guessed at:
+  `hash_in_format` returns None for a format this build cannot reconstruct, and
+  an entry with neither signal is not a disagreement.
+- `apply(..., force: bool = False)` — the guard sits in the same `if item.key !=
+  key` branch as the existing recorded-current-key refusal, after it, so the
+  pre-existing "would orphan that history" message and its tests are untouched.
+  `--force` skips only this guard.
+- `build_mod.compute_hashes(project)` after the load: `load_readonly` does not
+  compute content hashes, and `hash_in_format` returns `item.content_hash` for
+  the current format. `keys adopt` does the same before it compares stored
+  hashes.
+- `cli.py`: `--force` flag, help text, and the parser description now lists this
+  refusal among the others.
+
+Why the *most recent* baseline that recorded the key, rather than the most
+recent baseline: a later stamp may not mention the key at all (the item was
+gone, or re-issued under a new key), and the newest record that actually
+carries identity evidence for it is the one that describes it.
+
+Why refuse on either signal, not both: the title is what a human reads and the
+hash is what proves, and they fail independently — a title can be absent from a
+record while the hash is there, and vice versa.
+
+Why `--force` is a real override rather than a nudge: the other case that
+produces a content difference is legitimate — the same item, edited after the
+stamp — and nothing in the project can tell that from a reused display id. The
+refusal says so, and the changelog fragment notes that `--force` overrides this
+one refusal and nothing else.
+
+### After the fix — variant A (`.scratch/f42-after.txt`)
+
+    $ refdes keys restore REQ-PWR-001@t2yqtr6m8ey --dry-run
+    would refuse:
+      refusing to move key 't2yqtr6m8ey' onto REQ-PWR-001: baseline 'rev-a' records that key under 'REQ-PWR-001' with different content -- title: baseline 'Rail current', now 'Enclosure drop'; content hash: baseline 'c7926b17234d6180', now 'edaa81a32f696859'. Restoring it would re-point every reference that names the key at this item and leave a passing build. If this really is the item that key belonged to -- the same item, edited since that baseline was stamped -- pass --force. If it is not, give the item a new display id so it is not mistaken for the old one; a fresh key is minted for it then.
+    [exit=1]
+
+    $ refdes keys restore REQ-PWR-001@t2yqtr6m8ey
+    refused:
+      (same text)
+    [exit=1]
+
+Nothing was written; the project is still 5 errors, and the four references
+still dangle, which is the correct state — the item under that display id is
+not the one the key belonged to.
+
+The override does what it says, which is why it is documented as a real one:
+
+    $ refdes keys restore REQ-PWR-001@t2yqtr6m8ey --dry-run --force
+    would restore REQ-PWR-001: (no key) -> t2yqtr6m8ey
+    files would change:
+      items/requirements.yaml
+    Review the diff before committing.
+    [exit=0]
+
+    $ refdes keys restore REQ-PWR-001@t2yqtr6m8ey --force
+    restored REQ-PWR-001: (no key) -> t2yqtr6m8ey
+    changed files:
+      items/requirements.yaml
+    Review the diff before committing.
+    [exit=0]
+
+    $ refdes check
+    10 items, 0 errors, 2 warnings
+    [exit=0]
+
+`--force` reproduces main's old outcome exactly, including the
+`audit` `changed 1 REQ-PWR-001` line — so the override is complete, and a user
+who means it has the old behaviour back on one flag.
+
+### After the fix — variant B, no baseline (`.scratch/f42b-after.txt`)
+
+`diff` of the before and after runs, with minted keys masked, is empty apart
+from the comment line: no baseline records the key, so nothing compares and the
+restore proceeds exactly as before.
+
+    $ refdes keys restore REQ-PWR-001@<old key>
+    restored REQ-PWR-001: <new> -> <old key>
+    [exit=0]
+
+### After the fix — genuine recovery (`.scratch/f42c-after.txt`)
+
+`revision rev-a`, then only the `key:` line dropped from REQ-PWR-001 (nothing
+else touched): the same five errors as the F4.2 scenario, and the restore is
+accepted with no override asked for and none needed.
+
+    $ refdes keys restore REQ-PWR-001@1x468vtax31
+    restored REQ-PWR-001: (no key) -> 1x468vtax31
+    changed files:
+      items/requirements.yaml
+    Review the diff before committing.
+    [exit=0]
+
+    $ refdes check
+    10 items, 0 errors, 2 warnings
+    [exit=0]
+
+    $ refdes audit
+    Since last revision (rev-a, ...):
+      changed   0
+      added     0
+      removed   0
+      relabelled 0
+      (10 unchanged)
+
+`(10 unchanged)` is the content-hash proof that restoring a key moved no
+content — the same property the guard relies on to let this case through.
+
+--------------------------------------------------------------------------
+
+## Tests
+
+Six new tests in `tests/test_keys_restore.py` (38 in the file, all passing):
+
+| test | what it holds |
+|---|---|
+| `test_baseline_record_of_different_content_refuses_the_restore` | the refusal: names the key, the baseline, the recorded display id, both differing signals with the recorded and live values, and `--force`; nothing written. Parametrized over `dry_run` and over whether the unrelated item declares a key of its own (the minting guard normally leaves it keyless, so both shapes occur) |
+| `test_force_overrides_the_baseline_content_refusal` | `--force` end to end through the CLI: refused without it, accepted with it, and the restored key makes the inbound composite resolve again |
+| `test_genuine_restore_of_the_same_item_passes_the_baseline_comparison` | the ordinary recovery against a stamped baseline still succeeds — no override asked for |
+| `test_same_item_edited_since_the_baseline_needs_force` | the legitimate-difference case: refused, `--force` named in the message, `--force` then accepted |
+| `test_restore_is_unchanged_when_no_baseline_records_the_key` | no comparison available, today's behaviour stands. Parametrized: no baselines at all, and a baseline that records REQ-001 with no key in the entry (the pre-keys shape `baseline_identity` returns None for) |
+
+The stamps go through `cli.main(["-c", ..., "revision", name])` rather than a
+hand-built project, so the recorded content hashes are real — a comparison
+against a `hash: ""` would prove nothing.
+
+### Sabotage check
+
+`src/refdes/key_restore.py` and `src/refdes/cli.py` were copied to
+`.scratch/backup/`, reverted with `git checkout --` (no stash, per AGENTS.md),
+and the new tests run against main's code (`.scratch/sabotage.txt`):
+
+    FAILED tests/test_keys_restore.py::test_baseline_record_of_different_content_refuses_the_restore[None-False]
+    FAILED tests/test_keys_restore.py::test_baseline_record_of_different_content_refuses_the_restore[None-True]
+    FAILED tests/test_keys_restore.py::test_baseline_record_of_different_content_refuses_the_restore[k7f3m2q9x4a-False]
+    FAILED tests/test_keys_restore.py::test_baseline_record_of_different_content_refuses_the_restore[k7f3m2q9x4a-True]
+    FAILED tests/test_keys_restore.py::test_force_overrides_the_baseline_content_refusal
+    FAILED tests/test_keys_restore.py::test_same_item_edited_since_the_baseline_needs_force
+    6 failed, 3 passed, 29 deselected in 0.44s
+
+The failure is the finding itself: main's code returns
+`RestorationResult(ok=True, ...)` for the reuse. The three that pass are the
+two "unchanged behaviour" tests and the genuine-restore test — they are
+supposed to pass on main, and that they do is what makes them a control rather
+than a copy of the refusal test. The two source files were then restored from
+`.scratch/backup/` (`git status` confirmed all three files modified again, and
+the file's 38 tests pass).
+
+### Full suite
+
+    $ PYTHONPATH=src python -m pytest -q
+    3155 passed, 2 skipped in 224.28s (0:03:44)
+
+### ruff, scoped to the touched files (AGENTS.md: the repo baseline is not clean)
+
+    $ ruff check src/refdes/key_restore.py src/refdes/cli.py tests/test_keys_restore.py --select F,E9,I
+    All checks passed!
+
+`key_restore.py` under a broader `--select F,E9,I,UP,B,SIM,RUF` reports the
+same two findings as HEAD's copy (`RUF100`, the pre-existing
+`# noqa: BLE001` directives) and no others — checked by running the same rule
+set against `git show HEAD:src/refdes/key_restore.py`. The test file reports 10
+findings under the broader set, every one of them at a line below 232 — i.e. in
+a pre-existing test — and none in the six added here.
+
+--------------------------------------------------------------------------
+
+## Docs and changelog
+
+- `docs/design/keys.md` §6 Layer 3: a dated decision after the existing
+  `keys restore` paragraph, with the shipped refusal quoted, why both signals
+  are compared, why the hash comparison uses the recorded format, why a genuine
+  restore still matches, and why no record means no refusal. §8's guarantee gets
+  a closing paragraph pointing at it.
+- `docs/cli-reference.md`, `## refdes keys restore`: `--force` in the flag
+  table, the refusal in the prose with the full message, and the
+  same-item/no-record behaviour stated.
+- `docs/troubleshooting.md`, the unknown-key section: what the new refusal
+  means, read as the question the display id cannot answer, and the remedy for
+  each of its two answers.
+- `changelog.d/keys-restore-baseline-content-guard.fixed.md`, two bullets: the
+  refusal (with the message and why a same-item restore is untouched) and
+  `--force` (which overrides that one refusal and nothing else).
+
+## Things worth flagging
+
+- The guard reads *every* baseline's *every* entry on each restore, the same
+  walk `_recorded_current_key` already does. A project with many baselines and
+  many items pays it twice; if that ever shows up in a profile, both could take
+  one index built by `_baseline_indexes` (`src/refdes/lifecycle.py:108`). Not
+  done here — it is not a demonstrated problem.
+- The refusal compares `Item.title`, which is a derived property (first
+  non-empty of `title`/`text`/`summary`/`name`, else the body, truncated at 90
+  characters). The baseline records the same property, so the two are directly
+  comparable, including the truncation.
+- A refusal is possible in a case that is not F4.2 at all: an item whose
+  `invalidate` content legitimately changed after the stamp, whose key was then
+  lost. `--force` is the answer, and the message names it. That trade is the
+  maintainer's decision, not mine; it is one flag away from either answer.
+

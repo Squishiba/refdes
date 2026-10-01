@@ -55,11 +55,10 @@ import uuid
 from datetime import datetime, timezone
 from typing import NamedTuple
 
-from . import seal as seal_mod
-
 import yaml
 
 from . import keys as keys_mod
+from . import seal as seal_mod
 from . import textio
 from .model import Item
 from .parse import yaml_safe_load
@@ -130,6 +129,23 @@ class HistoryError(Exception):
     write") — routing the refusal through the existing channel is what keeps
     `refdes history capture` off a traceback on a read-only checkout.
     """
+
+
+class HistoryKeyError(HistoryError):
+    """An ambiguous key in a history file, with its project-relative path."""
+
+    def __init__(self, file: str, message: str):
+        self.file = file
+        self.message = message
+        super().__init__(f"{file}: {message}")
+
+
+def _require_history_key(value: object, root: str, path: str) -> None:
+    try:
+        keys_mod.require_storage_key(value)
+    except keys_mod.StorageKeyError as exc:
+        rel = os.path.relpath(path, root).replace(os.sep, "/")
+        raise HistoryKeyError(rel, str(exc)) from exc
 
 
 # --------------------------------------------------------------- digest layer
@@ -243,6 +259,8 @@ def save_object(root: str, item: Item) -> tuple[str, str]:
         with open(path, "r", encoding="utf-8") as fh:
             existing = yaml_safe_load(fh)
         _check_format(existing, path)
+        if existing.get("key"):
+            _require_history_key(existing["key"], root, path)
         core = {
             k: existing[k]
             for k in ("history_format", "type", "fields", "links", "body")
@@ -309,6 +327,8 @@ def load_object(root: str, digest: str) -> dict[str, object]:
     with open(path, "r", encoding="utf-8") as fh:
         data = yaml_safe_load(fh)
     _check_format(data, path)
+    if data.get("key"):
+        _require_history_key(data["key"], root, path)
     data = dict(data)
     core = {k: data[k] for k in ("history_format", "type", "fields", "links", "body") if k in data}
     missing = {"history_format", "type", "fields", "links", "body"} - set(core)
@@ -384,6 +404,9 @@ def append_event(
         if not isinstance(existing, dict):
             raise HistoryError(f"{path}: existing event is not a YAML mapping")
         _check_format(existing, path)
+        for field in ("item_key", "successor_key"):
+            if existing.get(field):
+                _require_history_key(existing[field], root, path)
         if (existing.get("object") or "") != object_digest:
             raise HistoryError(
                 f"{path}: this edge was already captured against object "
@@ -415,6 +438,9 @@ def load_events(root: str) -> list[dict[str, object]]:
         with open(path, "r", encoding="utf-8") as fh:
             data = yaml_safe_load(fh)
         _check_format(data, path)
+        for field in ("item_key", "successor_key"):
+            if data.get(field):
+                _require_history_key(data[field], root, path)
         if data.get("kind") not in EVENT_KINDS:
             raise HistoryError(f"{path}: unknown event kind {data.get('kind')!r}")
         required = ("id", "kind", "item_key")

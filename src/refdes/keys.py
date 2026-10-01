@@ -106,13 +106,26 @@ def check_char(data: str) -> str:
     return ALPHABET[interim]
 
 
+def yaml_plain_scalar_is_string(value: str) -> bool:
+    """Whether both PyYAML safe loaders preserve an unquoted scalar."""
+    return all(
+        yaml.load(value, Loader=loader) == value
+        for loader in (getattr(yaml, "CSafeLoader", yaml.SafeLoader), yaml.SafeLoader)
+    )
+
+
 def mint() -> str:
     """A fresh 11-character key: 10 random data characters plus a check
     character. `secrets`, not `random` -- not because an adversary matters,
     but so no seeded generator can make two projects mint the same sequence,
     and it costs nothing (docs/design/keys.md §1)."""
-    data = "".join(ALPHABET[b % 32] for b in secrets.token_bytes(DATA_LEN))
-    return data + check_char(data)
+    while True:
+        data = "".join(ALPHABET[b % 32] for b in secrets.token_bytes(DATA_LEN))
+        candidate = data + check_char(data)
+        # Check against PyYAML's unmodified implicit resolver, not refdes's
+        # recovery loader, which intentionally preserves older ambiguous keys.
+        if yaml_plain_scalar_is_string(candidate):
+            return candidate
 
 
 def malformed_key_message(key: str, *, context: str = "") -> str | None:
@@ -143,6 +156,36 @@ def malformed_key_message(key: str, *, context: str = "") -> str | None:
     if expected is not None:
         message += f" (Expected check character {expected!r}.)"
     return message
+
+
+class StorageKeyError(ValueError):
+    """A stored key was already changed by YAML before refdes read it."""
+
+
+def require_storage_key(value: object) -> None:
+    """Refuse YAML-ambiguous stored keys whose spelling is already corrupted."""
+    key = value if isinstance(value, str) else str(value)
+    if isinstance(value, str) and yaml_plain_scalar_is_string(value):
+        return
+    problem = malformed_key_message(key)
+    if problem is not None:
+        raise StorageKeyError(
+            f"{problem} If YAML already converted an unquoted key and "
+            "rewrote this file, its original spelling cannot be recovered here."
+        )
+
+
+def report_storage_key(project: Project, value: object, path: str) -> bool:
+    """Report a keyed state error once, with a project-relative file path."""
+    try:
+        require_storage_key(value)
+    except StorageKeyError as exc:
+        rel = os.path.relpath(path, project.root).replace(os.sep, "/")
+        message = str(exc)
+        if not any(d.file == rel and d.message == message for d in project.errors):
+            project.error(message, file=rel)
+        return False
+    return True
 
 
 def validate(project: Project) -> None:

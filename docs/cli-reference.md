@@ -35,6 +35,16 @@ only code a diagnostic gets. Treat any non-zero as failure unless you have
 read the specific command's section. `refdes ls --board nosuchboard` is the one
 command that reports a name nobody declared as `no items match` and exits `0`.
 
+One case is about the outside world rather than the project, and a script
+branching on `1` should know it exists: `check --refresh` exits `1` both when it
+found drift **and** when a pinned citation could not be re-fetched, so on a
+network outage a drift guard fails rather than passing unchecked. The two are
+told apart by the diagnostics — `could not refresh …` and `could not be
+refreshed, so upstream drift was NOT verified` mean nothing was checked, while
+`N citation(s) drifted` means everything that answered was compared and differs —
+and `--allow-unreachable` puts the first kind on the exit-code-0 side
+deliberately. See [`check`](#refdes-check).
+
 One more case the table above does not cover, because it is about a
 *destination* rather than a name: a file or directory the filesystem will not
 accept. That is a condition of the filesystem, not of the project, so no
@@ -184,7 +194,8 @@ Errors go to stderr, warnings to stdout. Every diagnostic leads with
 
 | Option | Effect |
 |---|---|
-| `--refresh` | Also re-fetch every pinned [citation](markdown.md#citing-a-datasheet) and report drift (network; writes nothing) |
+| `--refresh` | Also re-fetch every pinned [citation](markdown.md#citing-a-datasheet) and report drift (network; writes nothing). A pinned citation whose bytes cannot be obtained **fails the run** — see below |
+| `--allow-unreachable` | With `--refresh`, report a citation that could not be re-fetched as a warning instead, so the exit code reflects only real findings |
 | `--board NAME` | Only report diagnostics for one [board](multi-board.md)'s own items |
 | `--workspace NAME` | Only report diagnostics for one [workspace](workspaces.md)'s own items |
 | `-v`, `--verbose` | Also show info-level diagnostics |
@@ -218,7 +229,42 @@ refdes check --refresh
     cited by  CMP-PWR-001
 ```
 
-Exits non-zero on drift, same as on any other error.
+Exits non-zero on drift, same as on any other error — **and** on a pinned
+citation that could not be re-fetched at all. Drift means the bytes changed; an
+unreachable source means no bytes arrived, so there is nothing to compare the pin
+against, and a scan that checked nothing must not report success. That covers the
+network being down and the vendor having deleted the datasheet, which are
+indistinguishable from `check`'s side:
+
+```
+ERROR   <project> — could not refresh https://www.ti.com/lit/ds/symlink/tps62913.pdf: <urlopen error [Errno 111] Connection refused> -- upstream drift was NOT verified for this citation (no bytes arrived, so there is nothing to compare the pin against)
+ERROR   <project> — 1 pinned citation could not be refreshed, so upstream drift was NOT verified for it -- the run cannot claim to have checked it. Fix the network or the urls, or pass --allow-unreachable to treat an unreachable source as a warning and let the exit code reflect only real findings (you then get no guarantee that every pinned source was checked at all)
+```
+
+A partially reachable project is not an exception: every url is attempted, the
+ones that answered are compared and reported as usual, and the unreachable ones
+fail the run on their own count. Drift in a reachable citation still exits
+non-zero regardless.
+
+`--allow-unreachable` is the deliberate way to give that up — for a laptop on a
+train, where the network failing is not information about the design:
+
+```bash
+refdes check --refresh --allow-unreachable
+```
+
+```
+WARNING <project> — could not refresh https://www.ti.com/lit/ds/symlink/tps62913.pdf: <urlopen error [Errno 111] Connection refused>
+WARNING <project> — 1 pinned citation could not be refreshed, so upstream drift was NOT verified for it -- drop --allow-unreachable to fail the run on this instead
+2 items, 0 errors, 2 warnings
+```
+
+What you give up is the guarantee that `--refresh` reached every pinned source:
+whatever could not be fetched stays unverified, and a datasheet deleted at the
+vendor passes exactly as a dead network does. Drift findings and real project
+errors still exit non-zero — the flag changes the severity of "could not check",
+never the verdict on "checked, and it differs". Without `--refresh` it does
+nothing and says so.
 
 ---
 
@@ -323,11 +369,13 @@ would blank the editor on every save.
 
 ## `refdes ls`
 
-List existing items as aligned text: id, type, board, title. `index`'s
-CLI-native counterpart — the same underlying data, filterable and readable
-without piping it through something else. For anyone not using the VS Code
-extension: a quick check over SSH, a scripted query, or deciding what to
-reference while reviewing a PR diff.
+List existing items as aligned text: id, type, workspace, board, title —
+`index`'s CLI-native counterpart, the same underlying data, filterable and
+readable without piping it through something else. For anyone not using the
+VS Code extension: a quick check over SSH, a scripted query, or deciding what
+to reference while reviewing a PR diff. The workspace column appears only on a
+project that declares `workspaces:`, so a project without one gets the columns
+it has always got.
 
 | Option | Effect |
 |---|---|
@@ -353,6 +401,28 @@ complete answer.
 
 The board column is omitted entirely when the project has no `boards:`
 registry, matching every other place board is conditionally shown.
+
+The workspace column is the same arrangement, one level up: `workspaces:` is
+opt-in, and with no registry no item has a workspace at all
+(`workspaces.resolve()` is a no-op without one), so the column would be a
+column of blanks. Where it does appear it sits *before* the board column,
+mirroring the relationship between the two — a workspace groups boards.
+
+```console
+$ refdes ls            # a project that declares workspaces:, some rows
+BND-A-001     bound        product-b  board-b  Product A input current.
+BND-CAN-001   bound                            CAN bitrate.
+REQ-PLAT-001  requirement  platform            The platform shall run from 9 V to 36 V.
+```
+
+An item in **no** workspace — here `BND-CAN-001`, sitting directly in
+`items/`, outside every workspace folder — leaves that column blank rather than
+naming its absence, exactly as an item with no board leaves the board column
+blank, and that is also what `--workspace` does with it: every real name
+excludes it, and there is no name to type for "no workspace" (`--workspace ''`
+is an empty flag value, not a wildcard — it filters nothing and lists
+everything). If a filter narrows the listing to rows that all have no
+workspace, the column is dropped for the same reason the board column is.
 
 Every filter here combines as a plain AND, and `--workspace` is no exception —
 boards and workspaces are independent groupings (one level apart, per
@@ -447,6 +517,36 @@ one works with the network down. `build` and `check` never do this themselves
 | `--item ID` | Fetch only this item's citations |
 | `--path PATH` | Fetch only this cited path (url or project-relative file) |
 | `--update` | Re-fetch even if already pinned |
+
+**Size and timeouts.** A datasheet is allowed to be enormous, so there is no
+size cap here: nothing refuses a download for being large, and a fetch over
+**100 MB** prints one `WARNING` line naming the citation, the size it turned out
+to be, and where the bytes went (the kept copy's `.refdes/copies/<sha256><ext>`
+path, or that no copy was kept). The pin still lands, the summary still says
+`0 failed`, and the exit code is the one a small fetch would have produced.
+
+```
+WARNING  https://example.com/ds.pdf: fetched 120000000 bytes (114.4 MB), over the 100.0 MB a fetch is warned at -- pinned anyway, kept at .refdes/copies/9f2c1a4b8e0d5f6a.pdf
+```
+
+That size is measured on the bytes actually received, never on the
+`Content-Length` header, because the received length is the length of the *pin* —
+what was hashed, what `bytes:` records, and what a kept copy was written from. A
+header is not that number: a chunked response carries no `Content-Length` at
+all, and a server chooses that freely, so a header-driven warning would go
+silent for exactly the streaming transfer a large datasheet tends to be. The
+other consequence is worth stating plainly: there is no pre-download cap either,
+so a large body is read into memory before the warning appears. The point is
+that you are told, not that your disk is protected. There is also no
+content-type check: what a citation's bytes *are* is your decision, since a
+citation may legitimately point at something that is not a PDF.
+
+Each request has a 30-second socket timeout (`fetch_bytes`'s default), which
+bounds each blocking operation — the connection attempt, and each read — rather
+than the transfer as a whole, so a very slow transfer can take longer than 30
+seconds in total. This is a `refdes fetch` behaviour: `refdes check --refresh`
+downloads too, but it pins nothing and keeps no copy, so it has no size warning
+to give.
 
 A citation's `section:` is resolved here and nowhere else: the PDF's own
 outline is read once, at fetch time, and the page it points at is recorded in
@@ -682,11 +782,13 @@ never appears there rather than showing up empty.
 Each citation line is `<state>  <pin>  cited by <items>`. **`state`** is what
 verification found — `ok`, `unpinned`, `cache_missing`, `hash_mismatch` or
 `missing` (see [citing a datasheet](markdown.md#citing-a-datasheet) for what
-each costs). **`pin`** says how that path is pinned *and* whether its bytes are
-here now: `no pin` (never fetched, so nothing is pinned), `hash-only` (pinned
-by `sha256`, no local copy — the default, since datasheets are generally
-copyrighted), `kept` (pinned, with the bytes kept at
-`.refdes/copies/<sha256><ext>`) or `no copy` (the lockfile says
+each costs). On a `hash-only` row, `ok` means the pin is recorded and there are
+no bytes here that could contradict it: a wrong sha256 for one is found by
+`refdes check --refresh` and by nothing offline. **`pin`** says how that path is
+pinned *and* whether its bytes are here now: `no pin` (never fetched, so
+nothing is pinned), `hash-only` (pinned by `sha256`, no local copy — the
+default, since datasheets are generally copyrighted), `kept` (pinned, with the
+bytes kept at `.refdes/copies/<sha256><ext>`) or `no copy` (the lockfile says
 `kept_copy: true`, but the kept bytes are gone from `.refdes/copies/` — the
 same fact the state column reports as `cache_missing`; re-run
 `refdes fetch --path <path>` to put them back). The two columns are
@@ -1382,6 +1484,7 @@ multiple `DISPLAY-ID@ORIGINAL-KEY` arguments to repair several items together.
 | Flag | Meaning |
 |---|---|
 | `--dry-run` | Fully validate the proposed restoration and report the key changes and files without writing |
+| `--force` | Restore even when the most recent baseline recording the key shows different content than the item it is being moved onto — for the same item, edited since that baseline was stamped |
 
 Global `--no-write` also selects the dry run. Successful restoration exits 0;
 a refused restoration exits 1. A repeat with already-restored keys reports
@@ -1396,8 +1499,34 @@ failure restores the original file bytes.
 It refuses malformed keys, keys owned by another local or imported item,
 unknown or imported target items, ambiguous source edits, and replacement keys
 already recorded in any baseline, seal, membership manifest, or captured-history
-event. Discarding a recorded replacement key would orphan that history. The
-proposed project must have no structural build errors: include all lost keys
+event. Discarding a recorded replacement key would orphan that history. It also
+refuses a restore whose target the recorded history does not describe: when the
+most recent baseline recording the key shows a **different title or a different
+content hash** than the item the key is being moved onto, the move would hand
+every reference that names the key to an unrelated item while leaving a clean
+build, so it is refused and names both sides —
+
+```text
+refused:
+  refusing to move key 'k7f3m2q9x4a' onto REQ-PWR-002: baseline 'rev-a' records
+  that key under 'REQ-PWR-002' with different content -- title: baseline 'Rail
+  current', now 'Enclosure drop'; content hash: baseline 'c7926b17234d6180',
+  now 'edaa81a32f696859'. Restoring it would re-point every reference that names
+  the key at this item and leave a passing build. If this really is the item that
+  key belonged to -- the same item, edited since that baseline was stamped --
+  pass --force. If it is not, give the item a new display id so it is not
+  mistaken for the old one; a fresh key is minted for it then.
+```
+
+The comparison uses the same hashing the baseline was stamped with, and an
+item's own key and display id are not part of its content hash, so restoring
+the *same* item's key never trips it. `--force` overrides this one refusal —
+it overrides nothing else the command refuses. Where no baseline records the
+key at all (no baselines, a pre-keys entry with no identity evidence, or a
+baseline that never filed it), there is nothing to compare and the restore
+behaves as it always has.
+
+The proposed project must have no structural build errors: include all lost keys
 in one command and fix
 unrelated errors first. An evaluated check that violates a bound is allowed,
 following the existing transaction policy. This recovery is implemented by

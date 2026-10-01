@@ -19,6 +19,7 @@ git, reads `.git/config`, or touches the object database.
 from __future__ import annotations
 
 import getpass
+import json
 import os
 import re
 import subprocess
@@ -181,9 +182,14 @@ def _same_baseline_items(stored: dict[str, dict], current: dict[str, dict]) -> b
     return len(matched_records) == len(stored)
 
 
-def _load_baseline_file(path: str) -> Baseline:
+def _load_baseline_file(path: str, project: Project) -> Baseline:
     with open(path, "r", encoding="utf-8") as fh:
         data = yaml_safe_load(fh) or {}
+    for record_id, entry in (data.get("items") or {}).items():
+        if "key" in entry:
+            keys_mod.report_storage_key(project, entry["key"], path)
+        elif "id" in entry:
+            keys_mod.report_storage_key(project, record_id, path)
     gate = data.get("gate")
     standard = data.get("standard")
     return Baseline(
@@ -202,7 +208,7 @@ def load_baseline(project: Project, name: str) -> Baseline | None:
     path = baseline_path(project, name)
     if not os.path.isfile(path):
         return None
-    return _load_baseline_file(path)
+    return _load_baseline_file(path, project)
 
 
 def list_baselines(project: Project) -> list[Baseline]:
@@ -216,7 +222,7 @@ def list_baselines(project: Project) -> list[Baseline]:
     out = []
     for name in sorted(os.listdir(d)):
         if name.endswith(".yaml"):
-            out.append(_load_baseline_file(os.path.join(d, name)))
+            out.append(_load_baseline_file(os.path.join(d, name), project))
     return out
 
 
@@ -250,7 +256,13 @@ def format_baseline(data: dict) -> str:
         line = yaml.safe_dump(
             entry, default_flow_style=True, sort_keys=False, allow_unicode=True
         ).strip()
-        out += f"  {item_id}: {line}\n"
+        # Unlike the entry, this map key is formatted by hand. Quote older
+        # YAML-ambiguous surrogate keys when the baseline is rewritten.
+        label = (
+            item_id if keys_mod.yaml_plain_scalar_is_string(item_id)
+            else json.dumps(item_id)
+        )
+        out += f"  {label}: {line}\n"
     return out
 
 

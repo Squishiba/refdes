@@ -3,6 +3,12 @@
 Unlike adoption, this transaction only edits supplied items' key fields. A
 display label cannot prove continuity: the caller supplies the original key
 after checking history. Full validation must succeed with that identity.
+
+Where a stamped baseline remembers the key, it also says what the key
+belonged to, and that record outranks the label: restoring a key onto an item
+the record does not describe is refused (`_baseline_content_conflict`) rather
+than accepted, because the move silently re-points every reference that names
+the key while leaving a clean build. `--force` is the override.
 """
 
 from __future__ import annotations
@@ -11,6 +17,7 @@ import os
 from dataclasses import dataclass, field
 
 from . import adopt, boards, history, keys, lifecycle, loader, patcher, revise, schema, seal, textio
+from . import build as build_mod
 from .model import Item, Project, SchemaError
 
 
@@ -44,10 +51,103 @@ def _recorded_current_key(project: Project, item: Item) -> str | None:
     return None
 
 
-def apply(project_root: str, targets: list[str], dry_run: bool = False) -> RestorationResult:
+def _baseline_recording(project: Project, key: str) -> tuple[str, str, dict] | None:
+    """(baseline name, display id recorded under, entry) for the most recent
+    baseline that filed ``key``, or None when no baseline remembers it.
+
+    A pre-keys entry carries no identity evidence at all (`baseline_identity`
+    returns None for it), so a key only stamped before surrogate keys existed
+    is not found here -- and a project with no baselines is not either. Both
+    leave nothing to compare a restore against, which is why the caller falls
+    back to today's behaviour rather than refusing on no evidence.
+
+    Both baseline shapes are read through the one shared `baseline_identity`,
+    so the legacy display-id-keyed entry (surrogate in `key`) and the adopted
+    key-keyed entry (display id in `id`) are found the same way.
+    """
+    found: list[tuple[str, str, str, dict]] = []
+    for baseline in lifecycle.list_baselines(project):
+        for record_id, entry in baseline.items.items():
+            identity = keys.baseline_identity(record_id, entry)
+            if identity is not None and identity[0] == key:
+                found.append((baseline.stamped_at, baseline.name, identity[1], entry))
+    if not found:
+        return None
+    _, name, display_id, entry = max(found, key=lambda row: (row[0], row[1]))
+    return name, display_id, entry
+
+
+def _baseline_content_conflict(project: Project, item: Item, key: str) -> str | None:
+    """Refuse moving a recorded key onto an item its record does not describe.
+
+    A matching display id proves nothing (docs/design/keys.md §3, §8): after a
+    deletion the same id can name a different item, and the restore is then the
+    thing that hands the old item's identity -- and every reference that names
+    it -- to that new item, with a clean build afterwards. A baseline that
+    filed this key also filed the title and content hash the key belonged to,
+    so it can answer exactly the question the display id cannot.
+
+    Both recorded signals are compared, and either one disagreeing refuses:
+    the title is what a human reads, the hash is what proves. The hash is
+    compared with `keys.hash_in_format`, the single shared reconstruction of
+    "what this item's hash was under the recorded format", so a genuine
+    restore of the same item matches whatever format stamped the record
+    (an item's own key and display id are not in its content hash -- see
+    `build.compute_hashes`). A record that carries neither signal, or a hash
+    whose recorded format this build cannot reconstruct, leaves the remaining
+    signal to decide on its own; no comparable signal at all is not a
+    disagreement.
+    """
+    recording = _baseline_recording(project, key)
+    if recording is None:
+        return None
+    baseline_name, recorded_id, entry = recording
+
+    differences = []
+    recorded_title = entry.get("title")
+    if isinstance(recorded_title, str) and recorded_title and item.title != recorded_title:
+        differences.append(f"title: baseline {recorded_title!r}, now {item.title!r}")
+    recorded_hash = entry.get("hash")
+    if isinstance(recorded_hash, str) and recorded_hash:
+        try:
+            recorded_format = int(entry.get("hash_format", 1))
+        except (TypeError, ValueError):
+            recorded_format = -1
+        current_hash = keys.hash_in_format(item, project, recorded_format)
+        if current_hash and current_hash != recorded_hash:
+            differences.append(
+                f"content hash: baseline {recorded_hash!r}, now {current_hash!r}"
+            )
+    if not differences:
+        return None
+
+    return (
+        f"refusing to move key {key!r} onto {item.id}: baseline {baseline_name!r} "
+        f"records that key under {recorded_id!r} with different content -- "
+        + "; ".join(differences)
+        + ". Restoring it would re-point every reference that names the key at "
+        "this item and leave a passing build. If this really is the item that "
+        "key belonged to -- the same item, edited since that baseline was "
+        "stamped -- pass --force. If it is not, give the item a new display id "
+        "so it is not mistaken for the old one; a fresh key is minted for it "
+        "then."
+    )
+
+
+def apply(
+    project_root: str,
+    targets: list[str],
+    dry_run: bool = False,
+    force: bool = False,
+) -> RestorationResult:
     config_path = os.path.join(project_root, schema.PROJECT_SETTINGS_NAME)
     try:
         project = loader.load_readonly(config_path)
+        # `keys.hash_in_format` compares a stored baseline hash against
+        # `item.content_hash` for the current format, and `load_readonly` does
+        # not compute hashes. `keys adopt` does the same before it compares
+        # stored hashes.
+        build_mod.compute_hashes(project)
         selected = []
         seen_ids: set[str] = set()
         seen_keys: set[str] = set()
@@ -79,6 +179,10 @@ def apply(project_root: str, targets: list[str], dry_run: bool = False) -> Resto
                         f"{display}'s current key {item.key!r} is recorded in {record}; "
                         "restoring another key would orphan that history"
                     )
+                if not force:
+                    conflict = _baseline_content_conflict(project, item, key)
+                    if conflict:
+                        raise ValueError(conflict)
             selected.append((item, key))
 
         originals: dict[str, str] = {}

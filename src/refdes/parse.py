@@ -91,6 +91,48 @@ _SafeLoaderClass = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
 # Always-pure-Python loader for byte-identical YAML error diagnostics.
 _PurePythonLoaderBase = yaml.SafeLoader
 
+# Older mints could produce a plain scalar that YAML 1.1 resolves as an int.
+# Retag only key fields and mapping keys, before conversion loses their source
+# spelling. Length/alphabet only: malformed keys must reach the validator.
+_SURROGATE_SCALAR_RE = re.compile(r"[0123456789abcdefghjkmnpqrstvwxyz]{11}\Z")
+_SURROGATE_VALUE_FIELDS = {"key", "item_key", "successor_key"}
+
+
+def _preserve_surrogate_scalars(node: yaml.MappingNode) -> None:
+    for key_node, value_node in node.value:
+        if isinstance(key_node, yaml.ScalarNode):
+            if key_node.style in (None, "") and _SURROGATE_SCALAR_RE.fullmatch(key_node.value):
+                key_node.tag = yaml.resolver.BaseResolver.DEFAULT_SCALAR_TAG
+            if (
+                key_node.value in _SURROGATE_VALUE_FIELDS
+                and isinstance(value_node, yaml.ScalarNode)
+                and value_node.style in (None, "")
+                and _SURROGATE_SCALAR_RE.fullmatch(value_node.value)
+            ):
+                value_node.tag = yaml.resolver.BaseResolver.DEFAULT_SCALAR_TAG
+
+
+class _KeySafeLoader(_SafeLoaderClass):
+    pass
+
+
+class _PurePythonKeySafeLoader(_PurePythonLoaderBase):
+    pass
+
+
+def _construct_key_mapping(loader, node: yaml.MappingNode) -> dict:
+    _preserve_surrogate_scalars(node)
+    base = loader.__class__.__bases__[0]
+    return base.construct_mapping(loader, node)
+
+
+_KeySafeLoader.add_constructor(
+    yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, _construct_key_mapping
+)
+_PurePythonKeySafeLoader.add_constructor(
+    yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, _construct_key_mapping
+)
+
 # A scalar value long enough that quoting it in a diagnostic would bury the
 # diagnostic. Duplicate-key records keep short values so a message can name
 # the id on each side of a lost one; a long one (a `body:` sentence) is
@@ -186,11 +228,11 @@ def _load_line_marked(text: str, loader_class) -> tuple[Any, list[DuplicateKey]]
         loader.dispose()
 
 
-class _LineLoader(_SafeLoaderClass):
+class _LineLoader(_KeySafeLoader):
     """SafeLoader (C when libyaml installed, else pure-Python) that tags each mapping with line."""
 
 
-class _PurePythonLineLoader(_PurePythonLoaderBase):
+class _PurePythonLineLoader(_PurePythonKeySafeLoader):
     """Always pure-Python SafeLoader for byte-identical YAML error diagnostics."""
 
 
@@ -219,6 +261,7 @@ def _base_constructor(loader):
 
 
 def _construct_mapping(loader, node: yaml.MappingNode) -> dict:
+    _preserve_surrogate_scalars(node)
     _collect_duplicates(loader, node)
     mapping = _base_constructor(loader).construct_mapping(loader, node, deep=True)
     mapping["__line__"] = node.start_mark.line + 1
@@ -277,9 +320,9 @@ def yaml_safe_load(stream_or_text) -> Any:
     Stream handles are read to text first so the retry can use the same content."""
     text = _as_text(stream_or_text)
     try:
-        return yaml.load(text, Loader=_SafeLoaderClass)
+        return yaml.load(text, Loader=_KeySafeLoader)
     except yaml.YAMLError:
-        return yaml.load(text, Loader=_PurePythonLoaderBase)
+        return yaml.load(text, Loader=_PurePythonKeySafeLoader)
 
 
 def yaml_safe_load_checked(stream_or_text) -> tuple[Any, list[DuplicateKey]]:
