@@ -621,10 +621,30 @@ const completionProvider = {
       before.match(/\b([A-Z][A-Z0-9]*-[A-Z0-9\-]*)$/);
     if (!trigger) return null;
 
+    // The already-typed id text (everything the capture group matched, which
+    // for the `[[` form excludes the brackets themselves) -- and the range it
+    // occupies on this line, computed from it rather than left to VS Code's
+    // default word range. An id has hyphens in it, and VS Code's default word
+    // pattern does not treat `-` as part of a word: left unset, the replace
+    // range it infers is only the run of characters since the last hyphen,
+    // so accepting a completion for "LOG-MAIN-0" inserted the full id *after*
+    // "LOG-MAIN-", doubling the prefix, and typing further narrowed the
+    // in-place filter against that same trailing fragment instead of the
+    // whole typed id, so entries that should still match stopped appearing.
+    // An explicit range fixes both: the edit replaces exactly what was typed,
+    // and VS Code's incremental filtering is keyed off that range's contents.
+    const typed = trigger[1];
+    const range = new vscode.Range(
+      position.line, position.character - typed.length,
+      position.line, position.character
+    );
+
     return (index.data.items || []).map((item) => {
       const c = new vscode.CompletionItem(item.id, vscode.CompletionItemKind.Reference);
       c.detail = item.title;
       c.documentation = itemMarkdown(item);
+      c.range = range;
+      c.insertText = item.id;
       // Finding 8: narrow by the file an item lives in, or its board, not
       // just the id and title -- "power" matches an item declared in
       // power.yaml even before its id is remembered. Both are already in

@@ -1,0 +1,91 @@
+Task: fix a live bug Jared reported in the VS Code extension's id completion.
+
+## Report (verbatim shape, generalized -- no project-specific content)
+
+"when it 'suggests' one of the item ID's as I'm filling in one I'm
+referencing, it doesn't actually auto-complete what I'm writing; it'll fill
+in the entire id regardless of how much I already wrote. And additionally
+when writing out said ID, once I get past a certain point in writing it, the
+suggestions start to not make sense -- e.g. I'll be writing LOG-MAIN-0 and
+all of the LOG-MAIN entries will just not be suggested."
+
+## Diagnosis
+
+editors/vscode/extension.js, completionProvider.provideCompletionItems,
+the id-completion branch (after `[[` or a bare `PREFIX-...` typed inline):
+it constructed each vscode.CompletionItem with only a label (= item.id) and
+set neither `.range` nor `.insertText`.
+
+With both left unset, VS Code falls back to:
+  - insertText = the label (the full id)
+  - range = whatever VS Code's own default "word" at the cursor is, using
+    its default word pattern -- which does NOT include `-`.
+
+An id like LOG-MAIN-001 is therefore several "words" to VS Code's default
+pattern, split on every hyphen. Two consequences, both reported, both from
+the same cause:
+
+1. Accepting a completion replaced only the trailing run since the last
+   hyphen (e.g. just "0" in "LOG-MAIN-0") and inserted the FULL id there,
+   producing "LOG-MAIN-LOG-MAIN-001" -- the "fills in the entire id
+   regardless of how much I already wrote" symptom.
+2. VS Code's incremental filtering of the still-open suggestion list, with
+   no explicit range to key off, narrows against that same default-word
+   fragment as you keep typing -- so once past the last hyphen it kept
+   filtering against only the trailing piece, and entries that should still
+   match (LOG-MAIN-001, -002) stopped appearing -- the "past a certain
+   point... start to not make sense" symptom.
+
+## Verification before fixing
+
+Confirmed the regex/range math in isolation with a throwaway Node script in
+.scratch/probe_completion.js before touching source (no vscode module
+needed -- pure regex+arithmetic): for "LOG-MAIN-0", the intended fix's
+replace range computes to cover "LOG-MAIN-0" exactly, not just "0". Also
+checked the `[[` form and the empty-prefix form don't swallow the brackets.
+
+## Fix
+
+src/refdes -- no, this is editors/vscode/extension.js only. In the
+id-completion branch: compute `typed = trigger[1]` (the already-typed id
+text the trigger regex captured -- for the `[[` form this already excludes
+the brackets) and an explicit `range = new vscode.Range(line, character -
+typed.length, line, character)`. Set `c.range = range` and `c.insertText =
+item.id` on every returned CompletionItem. filterText is untouched.
+
+## Tests
+
+tests/test_vscode_extension.py (no JS test harness in this repo; following
+its own stated convention of driving the source as text from pytest):
+
+1. test_id_completion_sets_an_explicit_range_and_insert_text -- textual:
+   `c.range = range` and `c.insertText = item.id` both present within the
+   id-completion branch specifically (bounded by a new brace-balanced
+   extractor, _provide_completion_items_body, since a lazy regex like the
+   existing _find_root_body's would stop at the first nested `}`).
+
+2. test_id_completion_range_covers_the_whole_typed_id -- behavioral, not
+   just textual: extracts the real trigger regex and range-construction
+   statement VERBATIM from the source via regex (not a hand-copied
+   duplicate that could silently drift), splices them into a tiny Node
+   script with a one-class vscode.Range stub, and runs it over several
+   partially-typed strings including "LOG-MAIN-0" (the reported case),
+   asserting the computed range's covered text equals the whole typed id.
+   Skipped if `node` isn't on PATH (shutil.which guard, same posture as the
+   chmod-based skips in test_citation_path_hygiene.py).
+
+Sabotage check: copied both new tests onto a clean checkout of origin/main
+(before this fix) and ran them -- both failed, with real, legible messages
+(not a crash): the first on the missing `c.range = range` assertion, the
+second on "could not find the range computation to extract" (the range
+statement genuinely isn't there on unfixed main, so extraction correctly
+fails loudly rather than silently passing). Restored the scratch checkout
+afterward.
+
+Full suite: pending (background run in progress as this log is written);
+will record the final count before opening the PR.
+
+## Status
+
+Source fix done, tests added and sabotage-verified, changelog fragment
+written. Opening PR once the full suite confirms green.
