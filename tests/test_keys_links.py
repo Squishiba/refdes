@@ -114,15 +114,21 @@ def test_resolve_link_target_unknown_key_does_not_fall_back_to_display_text(tmp_
 
 def test_dangling_bare_link_names_the_remedy_a_hand_rename_needs(tmp_path):
     """F3.3: a bare reference orphaned by a hand-edited `id:` used to be a
-    dead end -- the message said only "which does not exist", and the three
-    tools an author reaches for (`keys restore`, `revise`, `former-ids`)
-    each refuse or are irrelevant, because by the time a bare reference
-    dangles no key was ever involved.
+    dead end -- the message said only "which does not exist", and the tools an
+    author reaches for (`keys restore`, `revise`, `former-ids`) each refuse or
+    are irrelevant, because by the time a bare reference dangles no key was ever
+    involved.
 
-    Pinned here so the remedy cannot quietly regress to a bare restatement
-    of the symptom, and so the two claims that make it *actionable* stay
-    claims this suite checks: the published URL, and the statement that
-    `former_ids:` does not reach a structured link.
+    Kept short on purpose. This fires for every typo, which is the common case,
+    so it leads with the three ordinary explanations and spends one clause on
+    the rename remedy; the long form -- which commands do *not* apply, and why a
+    hand rename is safe once a writable load has run -- is
+    troubleshooting.md's `## Links` section, which is where the message's URL
+    points.
+
+    Pinned here so the remedy cannot regress to a bare restatement of the
+    symptom, and so the URL stays the published one rather than a
+    repo-relative path.
     """
     root = _links_project(
         tmp_path,
@@ -138,12 +144,14 @@ def test_dangling_bare_link_names_the_remedy_a_hand_rename_needs(tmp_path):
 
     assert len(project.errors) == 1
     message = project.errors[0].message
-    assert message.startswith("refines points at 'REQ-404', which does not exist.")
-    assert "write the item's new display id here" in message
-    assert "`refdes revise`" in message
-    assert "former_ids:` resolves prose references only" in message
+    assert message.startswith("refines points at 'REQ-404', which does not exist")
+    assert "a typo, a deleted item, or an item renamed" in message
+    assert "write the item's new id here" in message
     assert "docs/troubleshooting.md" not in message
     assert "https://squishiba.github.io/refdes/troubleshooting.html#links" in message
+    # One or two sentences: the full stop that ends the message is the one
+    # before "See", so a second one would mean the prose grew back.
+    assert message.count(". ") <= 1
 
 
 def test_hash_is_neutral_to_renaming_a_linked_items_display_id(tmp_path):

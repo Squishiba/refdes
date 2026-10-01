@@ -8,11 +8,13 @@
   to the copy and leaves `0 errors`, exit 0 — verified, along with a release
   then stamping a baseline over the mis-pointed references. The message now
   names the original's definition (the item that was there first, which is what
-  existing references and recorded history mean) and two ways to find it:
-  `git log -S'key: <KEY>' --oneline --reverse`, and whichever of the two
-  display ids a baseline, seal file or membership manifest records the key
-  under (`refdes audit` shows the stamp). `docs/troubleshooting.md`'s remedy
-  for the same diagnostic was changed the same way, and `docs/design/keys.md`
-  §6 Layer 2 now quotes the shipped message and explains why the message
-  cannot pick a side. Message and docs only: no detection logic added, and the
-  check, its severity, its file/line and its exit code are unchanged.
+  existing references and recorded history mean), a copy-pasteable way to find
+  it with the real key interpolated —
+  `git log -S'key: k7f3m2q9x4a' --oneline --reverse` — and the second signal,
+  that a baseline, seal or membership manifest records the key under the
+  original's id. `docs/troubleshooting.md`'s remedy for the same diagnostic was
+  changed the same way, and `docs/design/keys.md` §6 Layer 2 now quotes the
+  shipped message, explains why the message cannot pick a side, and records the
+  `refdes audit` evidence the trimmed message no longer spells out. Message and
+  docs only: no detection logic added, and the check, its severity, its
+  file/line and its exit code are unchanged.

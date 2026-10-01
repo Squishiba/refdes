@@ -5,9 +5,14 @@
   apply — `keys restore` has no lost key to restore, and `former_ids:`
   resolves prose references only, never a structured link (verified: recording
   `former_ids: [REQ-PWR-001]` onto the renamed item leaves the error exactly
-  as it was). The message now says to write the item's new display id into the
-  reference, notes that a prefix-wide rename is what `refdes revise` is for
-  because it expands bare references before it renames, and points at the
-  Troubleshooting page's `## Links` section via the published docs URL rather
-  than a repo-relative path. That section's entry for the diagnostic gained the
-  same remedy, with the three commands that do not apply and why.
+  as it was). The message now leads with the three ordinary explanations — a
+  typo, a deleted item, or a hand rename — and spends one clause on the
+  remedy: write the item's new id into the reference. It stays one or two
+  sentences, because it fires for every typo; the long form (which commands
+  do *not* apply, and why a hand rename is safe once a writable load has run)
+  is in Troubleshooting's `## Links` section, which the message links by its
+  published URL rather than a repo-relative path. That section also corrects a
+  self-contradiction: hand-editing an item's `id:` is not what breaks
+  references. What breaks them is hand-editing an `id:` while a reference to
+  it is still bare, so run any `refdes check` *without* `--no-write` before
+  renaming and the references follow on their own.

@@ -902,15 +902,13 @@ baseline:
 ERROR   items/io/requirements.yaml:18 [REQ-IO-AI-004] — key 'k7f3m2q9x4a' is
         already used by REQ-IO-AI-001 (items/io/requirements.yaml:12). A key
         is unique by construction; two items sharing one means a line was
-        duplicated. Keep the key on the original: the item that was there
-        first, which is the one existing references and recorded history mean,
-        so the copy is normally the newer item. `git log -S'key: <KEY>'
-        --oneline --reverse` names the oldest commit that wrote the key, and a
-        baseline, seal file or membership manifest that records the key records
-        it under the original's display id (`refdes audit` shows the stamp).
-        Delete the key from the copy and rebuild — a fresh one is minted for it.
-        Deleting it from the original instead leaves every inbound reference
-        pointing at the copy, and the build passes anyway.
+        duplicated. Keep the key on the original -- the item that was there
+        first, which is what existing references and recorded history mean;
+        `git log -S'key: k7f3m2q9x4a' --oneline --reverse` names the oldest
+        commit that wrote it, and a baseline, seal or membership manifest
+        records it under the original's id. Delete the key from the copy and
+        rebuild; taking it from the original instead leaves every inbound
+        reference pointing at the copy, and the build passes.
 ```
 
 This is the mechanism that makes §1's collision probability an annoyance
@@ -926,7 +924,14 @@ to the copy and leaves `0 errors`, exit 0 — with a release gate that will then
 stamp a baseline over the mis-pointed references. The message therefore names
 the original's definition rather than picking a side: load order is position in
 the file tree, not authorship, so no side is knowable from the project alone.
-Verified, `in-prog-logs/identity-remedy-wording.txt` §F2.1.
+Both ways it offers to *find* the original were run, not assumed —
+`git log -S'key: <the key>' --oneline --reverse` puts the original's commit
+first, and `refdes audit` against a stamp taken before the duplication prints
+the id the record was filed under (`REQ-001 -> REQ-005 (k7f3m2q9x4a)`; the
+baseline file itself carries `REQ-001: {..., key: k7f3m2q9x4a}`). Note the
+message has to be worded as "under the original's id", because audit's arrow
+points the other way. Verified, `in-prog-logs/identity-remedy-wording.txt`
+§F2.1.
 
 ### Layer 3 — resolution
 

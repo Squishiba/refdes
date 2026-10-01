@@ -224,18 +224,41 @@ key was ever involved:
   `former_ids:` resolves *prose* references; a structured link still needs a
   live display id or key. Verified: recording `former_ids: [REQ-PWR-001]` onto
   the renamed item leaves this error exactly as it was.
-- `refdes revise` — the right tool for a prefix-wide rename, and it expands
-  bare references *first*, so they follow the rename. It maps
-  `types:`/`fields:`/`links:`/`prefixes:`, not individual ids, so it cannot
-  rename a single item.
+- `refdes revise` — maps `types:`/`fields:`/`links:`/`prefixes:`, not individual
+  ids, so it cannot rename a single item. It is the tool for a prefix-wide
+  rename, and it expands bare references *first* so they follow.
 
 **Remedy:** write the item's new display id into the reference. The next
-writable load expands it to `NEW-ID@key` and the build is clean. (And next
-time, rename with `refdes revise` rather than editing `id:` — it expands bare
-references first, so they follow the rename. Recording the retired id as
-`former_ids:` for external citations is a separate step:
-[`refdes former-ids propose --confirm`](cli-reference.md#refdes-former-ids-propose),
-which needs a stamped baseline.)
+writable load expands it to `NEW-ID@key` and the build is clean.
+
+### Hand-renaming an item is safe — get one writable load in first
+
+A hand edit of an item's `id:` is **not** what breaks references. What breaks
+them is hand-editing an `id:` while a reference to it is still bare, which
+means no writable load has run since you wrote that reference — `--no-write`
+suppresses both key minting and expansion, so a project checked only under
+`--no-write` is in exactly that state.
+
+So run any `refdes check` **without** `--no-write` before you rename, and the
+references follow the rename on their own:
+
+```yaml
+# written:            refines: [REQ-001]
+# after refdes check  refines: [REQ-001@51rkcxhdsfc]
+# hand-edit the target: id: REQ-001 -> id: REQ-009
+# after refdes check  refines: [REQ-009@51rkcxhdsfc]   <- followed, key unchanged
+```
+
+```
+$ refdes check
+(rewrote 1 reference(s) while loading)
+2 items, 0 errors, 1 warnings
+```
+
+Recording the retired id as `former_ids:` for external citations is a separate
+step, and a prefix-wide rename is what
+[`refdes revise`](cli-reference.md#refdes-revise-mapping-file) is for —
+see [renumbering](ids.md#renumbering-former-ids).
 
 **`constrained_by may point at bound, but REQ-PWR-002 is a requirement`**
 Wrong link type. `constrained_by` is reserved for the limit-bearing case —

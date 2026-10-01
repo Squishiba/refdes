@@ -583,16 +583,10 @@ def resolve_links(project: Project) -> None:
                     else:
                         message = (
                             f"{link_name} points at {target_id!r}, which does not "
-                            "exist. If that item was renamed by hand, this "
-                            "reference is still bare, so it carries no key to "
-                            "follow the rename: write the item's new display id "
-                            "here. A prefix-wide rename is what `refdes revise` is "
-                            "for -- it expands bare references first, so they "
-                            "follow the rename. Neither `refdes keys restore` nor "
-                            "`refdes former-ids` reaches a structured link; "
-                            "`former_ids:` resolves prose references only. "
-                            "Otherwise this is a typo or a deleted item. See "
-                            f"{docs_url_mod.DANGLING_LINK_DOCS}."
+                            "exist -- a typo, a deleted item, or an item renamed "
+                            "while this reference was still bare, and a bare "
+                            "reference cannot follow a rename: write the item's "
+                            f"new id here. See {docs_url_mod.DANGLING_LINK_DOCS}."
                         )
                     project.error(
                         message,

@@ -516,3 +516,115 @@ All in `.scratch/` (gitignored, left in place): `r.py` (the runner),
    hash) and F6.1 (a never-adopted seal cannot remember a key, so a sealed
    entry's lost key is re-minted with zero diagnostics) are untouched here,
    as scoped. Both need a comparison or a report added, not a rewording.
+
+==========================================================================
+## Review round — three changes after review of PR #126
+
+### 1. `docs/troubleshooting.md` `## Links` contradicted itself
+
+It said `refdes revise` "cannot rename a single item" and then ended with "next
+time, rename with `refdes revise` rather than editing `id:`". Both halves
+cannot stand. The reviewer is right about which lesson is the right one, and I
+had the evidence to check it — I just drew the wrong conclusion from the
+narrower shape I happened to construct.
+
+**A hand rename is safe. Re-verified both halves.**
+
+.scratch/hr, the reviewer's minimal project (two requirements, `refines:
+[REQ-001]`, nothing loaded yet — no `.refdes/`, the reference bare):
+
+    $ refdes --no-write check
+    2 items, 0 errors, 1 warnings            [.refdes/ still absent]
+
+Step 1, one writable load, which is what gives the reference a key:
+
+    $ refdes check
+    (minted 2 key(s) and rewrote 1 reference(s) while loading)
+    2 items, 0 errors, 1 warnings
+
+    items/requirements.yaml:7   - key: 51rkcxhdsfc
+    items/requirements.yaml:8     id: REQ-001
+    items/requirements.yaml:13    refines: [REQ-001@51rkcxhdsfc]
+
+Step 2, hand-edit the target's `id: REQ-001` -> `id: REQ-009`, then check:
+
+    $ refdes check
+    (rewrote 1 reference(s) while loading)
+    2 items, 0 errors, 1 warnings
+
+    items/requirements.yaml:8     id: REQ-009
+    items/requirements.yaml:13    refines: [REQ-009@51rkcxhdsfc]
+
+**The reference followed the rename, the key did not move, `0 errors`, exit 0.**
+Exactly as the reviewer described.
+
+And the dangling case, same tree with the reference reverted to bare first
+(.scratch/hr2) — so the only variable is bare-vs-composite at rename time:
+
+    ERROR   items/requirements.yaml:10 [REQ-002] — refines points at 'REQ-001', which does not exist ...
+    2 items, 1 errors, 1 warnings
+    [exit=1]
+
+So the lesson is not "don't hand-edit `id:`". It is: **a bare reference cannot
+follow a rename, and a reference is bare until a writable load expands it**, so
+run any `refdes check` *without* `--no-write` before renaming. `--no-write`
+suppresses minting and expansion, which is exactly how a project ends up with
+nothing but bare references. `refdes revise` is now mentioned only where it
+applies, a prefix-wide rename.
+
+Wrote it as a new `### Hand-renaming an item is safe — get one writable load in
+first` subsection under `## Links`, with the three-step yaml trace and the
+`(rewrote 1 reference(s) while loading)` / `0 errors` output. Checked the two
+anchors it links (`cli-reference.md#refdes-revise-mapping-file`,
+`ids.md#renumbering-former-ids`) against `pages._slugify`, the function that
+generates them, rather than guessing.
+
+### 2. The `resolve_links` message led with the rare case and ran long
+
+It fired for every typo — the common case — and ran to ~70 words with the hand
+rename first and "a typo or a deleted item" last. Trimmed to two sentences that
+lead with the ordinary three and spend one clause on the remedy; the long form
+(which commands do *not* apply, and the §1 lesson above) stays in the
+`## Links` section the message already points at.
+
+    BEFORE
+    refines points at 'REQ-001', which does not exist. If that item was renamed by hand, this reference is still bare, so it carries no key to follow the rename: write the item's new display id here. A prefix-wide rename is what `refdes revise` is for -- it expands bare references first, so they follow the rename. Neither `refdes keys restore` nor `refdes former-ids` reaches a structured link; `former_ids:` resolves prose references only. Otherwise this is a typo or a deleted item. See https://squishiba.github.io/refdes/troubleshooting.html#links.
+
+    AFTER
+    refines points at 'REQ-001', which does not exist -- a typo, a deleted item, or an item renamed while this reference was still bare, and a bare reference cannot follow a rename: write the item's new id here. See https://squishiba.github.io/refdes/troubleshooting.html#links.
+
+Same error, severity, file:line, count and exit code; `2 items, 1 errors, 1
+warnings`, exit 1. `tests/test_keys_links.py` drops the pins on prose the
+message no longer carries (`refdes revise`, the `former_ids:` sentence, "new
+display id") and gains `assert message.count(". ") <= 1` so the prose cannot
+grow back unnoticed. The URL assertion and the no-repo-path assertion stay.
+
+### 3. The duplicate-key message printed a literal `<KEY>`
+
+The key was right there as `item.key`. Interpolated, so the command is
+copy-pasteable, and trimmed (the `(`refdes audit` shows the stamp)` parenthetical
+was the least load-bearing clause; `keys.md` §6 Layer 2 now carries that
+evidence in prose instead, along with the arrow-direction caveat).
+
+    BEFORE
+    ... Keep the key on the original: the item that was there first, which is the one existing references and recorded history mean, so the copy is normally the newer item. `git log -S'key: <KEY>' --oneline --reverse` names the oldest commit that wrote the key, and a baseline, seal file or membership manifest that records the key records it under the original's display id (`refdes audit` shows the stamp). Delete the key from the copy and rebuild — a fresh one is minted for it. Deleting it from the original instead leaves every inbound reference pointing at the copy, and the build passes anyway.
+
+    AFTER
+    ... Keep the key on the original -- the item that was there first, which is what existing references and recorded history mean; `git log -S'key: n1vvcc55pmf' --oneline --reverse` names the oldest commit that wrote it, and a baseline, seal or membership manifest records it under the original's id. Delete the key from the copy and rebuild; taking it from the original instead leaves every inbound reference pointing at the copy, and the build passes.
+
+The "which one is the original" guidance and the warning about taking it from
+the original both survive. Copied the interpolated command straight out of a
+live run and ran it in a git checkout of the same tree: it names the original's
+commit first, and `git show <that>:items/requirements.yaml` names REQ-PWR-001.
+`tests/test_keys.py` pins the real key, plus `assert "<KEY>" not in message` so
+the placeholder cannot come back. `docs/design/keys.md` §6 Layer 2 quotes the
+shipped message, reflowed to this block's width and using the example key that
+block already used (`k7f3m2q9x4a`).
+
+Changelog fragments for both messages were updated to describe the shipped text
+rather than the first draft of it.
+
+Behaviour: still nothing. All three are wording; the F2.1 branch, the
+`resolve_links` branch and every diagnostic's severity, file, line and exit
+code are unchanged, and the two scratch shapes that produce each message still
+report exactly the same counts.
