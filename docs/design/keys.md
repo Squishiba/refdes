@@ -1022,6 +1022,48 @@ failure.
 It never rebases history or changes references. Imported items are repaired
 upstream. Ordinary editor field edits remain unable to change `key:`.
 
+**Decision, 2026-10-01 (F4.2):** the human check is the contract, but where the
+project holds better evidence than git does, the transaction uses it. A
+baseline entry that filed a key also filed the `title` and content `hash` the
+key belonged to, so the most recent baseline recording the key can answer the
+one question the display label cannot: *is the item now holding this display
+id the item that key belonged to?* Restoration refuses when it says no --
+either recorded signal disagreeing is enough (`key_restore._baseline_content_conflict`):
+
+```
+refused:
+  refusing to move key 'mp6zepp65yt' onto REQ-PWR-001: baseline 'rev-a'
+  records that key under 'REQ-PWR-001' with different content -- title:
+  baseline 'Rail current', now 'Enclosure drop'; content hash: baseline
+  'c7926b17234d6180', now 'edaa81a32f696859'. Restoring it would re-point
+  every reference that names the key at this item and leave a passing build.
+  If this really is the item that key belonged to -- the same item, edited
+  since that baseline was stamped -- pass --force. If it is not, give the
+  item a new display id so it is not mistaken for the old one; a fresh key
+  is minted for it then.
+```
+
+Without this, §8's guarantee had a hole at the one command that *performs* the
+reuse: delete REQ-PWR-001, create an unrelated item under the same id, run the
+command the Layer 3 diagnostic above recommends, and every one of the old
+references re-attaches to the new item with `0 errors`, exit 0 -- the only
+trace being `audit`'s `changed 1` line, which the next release erases. Both
+signals are compared because they fail independently: the title is what a
+human reads, the hash is what proves. The hash is compared through
+`keys.hash_in_format`, so the record is read in the format it was stamped in
+and a genuine restore of the *same* item matches -- an item's own key and
+display id are not part of its content hash (§5), so restoring a key onto the
+item it belonged to moves no hash. `--force` overrides this one refusal,
+because the other case that produces a content difference is legitimate: the
+same item, edited since that baseline was stamped.
+
+No baseline recording the key leaves nothing to compare, and restoration
+behaves exactly as before. That covers a project with no baselines, a key
+stamped before keys existed (a pre-keys entry carries no identity evidence --
+`baseline_identity` returns None for it), and a baseline that simply never
+filed this key. The refusal rests on a record, never on the absence of one.
+Verified in `in-prog-logs/keys-restore-baseline-guard.txt`.
+
 Adoption's existing gate stays in place: a composite's label is not proof
 that adoption can attach its old key to the current item. Automatic repair
 by label would reintroduce the very display-id reuse ambiguity this design
@@ -1291,6 +1333,12 @@ narrow — one writable load closes it, and the composite case then behaves as
 the §6 Layer 3 diagnostics describe — but it is real, so nothing before that
 load may rely on the guarantee. The same window is why `docs/ids.md` says a
 bare reference "resolves by display id" rather than promising otherwise.
+
+Once the references carry keys, the remaining way to move one onto an
+unrelated item is to *say so*: `refdes keys restore` with the old key and the
+reused display id. That is now refused whenever a baseline recording the key
+shows different content (§6 Layer 3, decision 2026-10-01), so the guarantee
+above has no sanctioned hole left in it.
 
 **The part keys do not touch.** An *external* citation — a schematic sheet,
 a test report, an email saying "per REQ-PWR-005" — resolves by display id or

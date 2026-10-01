@@ -224,6 +224,19 @@ multiple `DISPLAY-ID@ORIGINAL-KEY` arguments if several keys were lost. The
 command validates the proposed project before writing; see
 [`keys restore`](cli-reference.md#refdes-keys-restore) for refusals.
 
+`keys restore` also refuses when the baseline remembers the key and that record
+does not describe the item you are putting it on — the shape you get when the
+original item was deleted and an unrelated one was created under its display id:
+
+`refusing to move key 'k7f3m2q9x4a' onto REQ-PWR-002: baseline 'rev-a' records that key under 'REQ-PWR-002' with different content -- title: ...; content hash: ... . ... If this really is the item that key belonged to -- the same item, edited since that baseline was stamped -- pass --force. If it is not, give the item a new display id so it is not mistaken for the old one; a fresh key is minted for it then.`
+
+Read that as the question the display id cannot answer for you, answered by the
+record: *is this the same item?* **Remedy:** if it is the same item, edited since
+the stamp, rerun with `--force`. If it is genuinely a different item, give it a
+new display `id:` (then the dangling references should be removed or re-pointed,
+not restored). The command volunteers nothing beyond what is in the message, so
+git history is still the first thing to check.
+
 An **imported** target is the one case `keys restore` cannot reach, and the
 report says so by ending differently — no command, and a note about the
 reference itself:

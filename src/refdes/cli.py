@@ -1410,7 +1410,7 @@ def cmd_standard_upgrade(args) -> int:
 def cmd_keys_restore(args) -> int:
     dry_run = args.dry_run or args.no_write
     result = key_restore_mod.apply(
-        _standard_project_root(args), args.targets, dry_run=dry_run
+        _standard_project_root(args), args.targets, dry_run=dry_run, force=args.force
     )
     if not result.ok:
         print("would refuse:" if dry_run else "refused:", file=sys.stderr)
@@ -2222,12 +2222,23 @@ def main(argv: list[str] | None = None) -> int:
         "supply DISPLAY-ID@ORIGINAL-KEY for every lost or regenerated key. "
         "Validate the proposed project before writing and reload afterwards; "
         "any failure restores the original files. References and history are "
-        "not rewritten. Refuses keys already owned by another item or current "
-        "keys recorded in history. Supply multiple targets to repair them together.",
+        "not rewritten. Refuses keys already owned by another item, current "
+        "keys recorded in history, and -- where a baseline records the key "
+        "under a different title or content hash than the item it is being "
+        "moved onto -- that restore too, since it would hand the old item's "
+        "references to an unrelated one; --force overrides that one refusal. "
+        "Supply multiple targets to repair them together.",
     )
     p_keys_restore.add_argument("targets", nargs="+", metavar="DISPLAY-ID@ORIGINAL-KEY")
     p_keys_restore.add_argument(
         "--dry-run", action="store_true", help="validate the complete plan without writing"
+    )
+    p_keys_restore.add_argument(
+        "--force",
+        action="store_true",
+        help="restore even when the most recent baseline recording the key "
+        "shows different content than the item it is being moved onto -- for "
+        "the same item edited since the baseline was stamped",
     )
     p_keys_restore.set_defaults(func=cmd_keys_restore)
 
