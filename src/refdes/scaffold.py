@@ -15,9 +15,10 @@ from . import build as build_mod
 from . import parse as parse_mod
 from . import standards, textio
 from .build import _format_required_when
+from .configcheck import check_duplicate_keys
 from .model import ItemType, SchemaError, destination_refusal
-from .parse import yaml_safe_load
-from .schema import load_project
+from .parse import yaml_safe_load_checked
+from .schema import PROJECT_SETTINGS_NAME, load_project
 
 
 class Refused(Exception):
@@ -529,6 +530,26 @@ def _edit_presets_list(raw_text: str, mutate) -> str:
     return raw_text[: match.start()] + new_span + raw_text[match.end() :]
 
 
+def _read_settings(config_path: str) -> tuple[dict[str, Any], str]:
+    """`refdes-project.yaml` as `(mapping, raw text)`, refusing a repeated key.
+
+    The same rule `load_project` applies, and through the same detector: a
+    repeat here would mean `_edit_presets_list` appended a preset to the text of
+    a `presets:` the loader is not even reading, so the write would land in a
+    block this project does not resolve. The loader is not on this path --
+    `add_preset`/`remove_preset` read the file to edit a span of it -- so
+    without this the one command that *writes* the config would be the one
+    command that never said the config was ambiguous.
+
+    The raw text comes back alongside the mapping because the edit is a
+    comment-preserving span edit of it, never a re-serialization.
+    """
+    raw_text = textio.read_text(config_path)
+    loaded, duplicates = yaml_safe_load_checked(raw_text)
+    check_duplicate_keys(duplicates, PROJECT_SETTINGS_NAME)
+    return loaded or {}, raw_text
+
+
 def _read_standard_cfg(raw: dict[str, Any]) -> dict[str, Any]:
     standard_cfg = raw.get("standard")
     if not isinstance(standard_cfg, dict):
@@ -545,15 +566,14 @@ def add_preset(project_root: str, preset_name: str) -> None:
     append it to `standard.presets:`. On the next load its types, links,
     and sets simply join the merged schema -- no migration step, no
     re-running init (docs/design/standard-library.md §8)."""
-    config_path = os.path.join(project_root, "refdes-project.yaml")
+    config_path = os.path.join(project_root, PROJECT_SETTINGS_NAME)
     # textio both ways. The read was text mode, so a CRLF config arrived here
     # already folded to LF, and the write was text mode, so the platform
     # translated it again -- adding one preset to an LF config rewrote the
     # whole file to CRLF on Windows, and adding one to a CRLF config rewrote it
     # to LF on Linux. `_edit_presets_list` is a comment-preserving span edit on
     # the raw text precisely so nothing outside `presets: [...]` moves.
-    raw_text = textio.read_text(config_path)
-    raw = yaml_safe_load(raw_text) or {}
+    raw, raw_text = _read_settings(config_path)
     standard_cfg = _read_standard_cfg(raw)
 
     base, version = standard_cfg.get("base"), standard_cfg.get("version")
@@ -596,9 +616,8 @@ def remove_preset(project_root: str, preset_name: str) -> list:
     this command's whole job is to surface the consequence, not to block an
     author who has already decided to accept it.
     """
-    config_path = os.path.join(project_root, "refdes-project.yaml")
-    raw_text = textio.read_text(config_path)
-    raw = yaml_safe_load(raw_text) or {}
+    config_path = os.path.join(project_root, PROJECT_SETTINGS_NAME)
+    raw, raw_text = _read_settings(config_path)
     standard_cfg = _read_standard_cfg(raw)
     current = standard_cfg.get("presets") or []
     if preset_name not in current:
