@@ -132,6 +132,11 @@ def test_fetch_and_check_word_the_same_condition_identically(tmp_path, capsys):
     hasattr(os, "geteuid") and os.geteuid() == 0,
     reason="a root checkout can read a mode-000 file, so it cannot fail",
 )
+@pytest.mark.skipif(
+    os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0),
+    reason="needs POSIX permission bits: chmod 0o000 does not stop Windows (or root) "
+    "from opening the file, so the unreadable case cannot be produced that way",
+)
 def test_an_unreadable_local_citation_is_also_named_by_its_label(tmp_path, capsys):
     """Not only the missing file. One `except` handled every `OSError` the open
     could raise, so one substitution covers the rest: the message carries the
@@ -343,7 +348,11 @@ def test_the_serve_side_reader_surface_is_project_relative(tmp_path):
         project, project.item_by_id("CMP-PWR-001"), "analysis/budget.csv"
     )
     assert payload["entries"] == []
-    assert payload["problems"] == [
-        "analysis/budget.csv: cannot read file: No such file or directory"
-    ], payload["problems"]
+    # The OS's own reason follows the label, and its wording is the platform's
+    # ("No such file or directory" on POSIX, "The system cannot find the path
+    # specified" on Windows), so only the project-relative half is pinned.
+    assert len(payload["problems"]) == 1, payload["problems"]
+    assert payload["problems"][0].startswith(
+        "analysis/budget.csv: cannot read file: "
+    ), payload["problems"]
     _assert_no_root(repr(payload), tmp_path, "serve sources payload")
