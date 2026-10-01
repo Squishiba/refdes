@@ -210,8 +210,32 @@ reference. Minting another key cannot restore the old identity, and
 ## Links
 
 **`satisfies points at 'REQ-PWR-009', which does not exist`**
-Typo, deleted item, or a failed import. Check the import errors first — they
-cascade.
+Typo, deleted item, a failed import, or an item renamed by hand. Check the
+import errors first — they cascade.
+
+The rename case is the one with no obvious next step, because the reference is
+still **bare**. A `DISPLAY-ID@key` composite follows a renamed item (the key
+half is the identity); a bare reference resolves by display id, so nothing
+carries it across — and by then none of the recovery commands apply, because no
+key was ever involved:
+
+- `refdes keys restore` — nothing was lost but a label.
+- `refdes former-ids` / `former_ids:` — **does not reach a structured link.**
+  `former_ids:` resolves *prose* references; a structured link still needs a
+  live display id or key. Verified: recording `former_ids: [REQ-PWR-001]` onto
+  the renamed item leaves this error exactly as it was.
+- `refdes revise` — the right tool for a prefix-wide rename, and it expands
+  bare references *first*, so they follow the rename. It maps
+  `types:`/`fields:`/`links:`/`prefixes:`, not individual ids, so it cannot
+  rename a single item.
+
+**Remedy:** write the item's new display id into the reference. The next
+writable load expands it to `NEW-ID@key` and the build is clean. (And next
+time, rename with `refdes revise` rather than editing `id:` — it expands bare
+references first, so they follow the rename. Recording the retired id as
+`former_ids:` for external citations is a separate step:
+[`refdes former-ids propose --confirm`](cli-reference.md#refdes-former-ids-propose),
+which needs a stamped baseline.)
 
 **`constrained_by may point at bound, but REQ-PWR-002 is a requirement`**
 Wrong link type. `constrained_by` is reserved for the limit-bearing case —

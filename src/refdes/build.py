@@ -581,7 +581,19 @@ def resolve_links(project: Project) -> None:
                     if "@" in target_id or bare_key:
                         message = _unknown_key_message(project, f"{link_name} points at", target_id)
                     else:
-                        message = f"{link_name} points at {target_id!r}, which does not exist"
+                        message = (
+                            f"{link_name} points at {target_id!r}, which does not "
+                            "exist. If that item was renamed by hand, this "
+                            "reference is still bare, so it carries no key to "
+                            "follow the rename: write the item's new display id "
+                            "here. A prefix-wide rename is what `refdes revise` is "
+                            "for -- it expands bare references first, so they "
+                            "follow the rename. Neither `refdes keys restore` nor "
+                            "`refdes former-ids` reaches a structured link; "
+                            "`former_ids:` resolves prose references only. "
+                            "Otherwise this is a typo or a deleted item. See "
+                            f"{docs_url_mod.DANGLING_LINK_DOCS}."
+                        )
                     project.error(
                         message,
                         file=item.source_file,

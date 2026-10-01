@@ -300,3 +300,155 @@ YAML then keeps the last of two `id:` keys with no diagnostic at all
 that the vanished id leaves behind). That is a separate robustness gap in the
 loader/write-back, not a wording problem, and fixing it would be an identity
 behaviour change — recorded here and left alone.
+
+==========================================================================
+## F3.3 — a bare reference orphaned by a hand rename had no named remedy
+
+### Where the message lives
+
+`build.resolve_links`, src/refdes/build.py:584 (pre-fix), the bare-target
+branch of the `target is None` case. One `project.error(...)` per dangling
+target.
+
+### The shape (.scratch/f33)
+
+base -> `refdes check` (everything keyed and expanded) -> hand-edit
+`id: REQ-PWR-001` to `id: REQ-PWR-011` in items/requirements.yaml, and
+hand-revert TST-PWR-001's `verifies:` to bare `[REQ-PWR-001, BND-PWR-002]`.
+
+### BEFORE
+
+    $ refdes --no-write check
+    ERROR   items/tests.yaml:7 [TST-PWR-001] — verifies points at 'REQ-PWR-001', which does not exist
+    WARNING <project> — 2 item(s) with no coverage — see coverage.html
+    WARNING <project> — 2 requirement(s) satisfied but not verified — see coverage.html
+    10 items, 1 errors, 2 warnings
+    [exit=1]
+
+Symptom only. The other three inbound references are composites and refreshed
+fine; only the bare one dangles.
+
+### Every recovery command checked, none of them is the answer
+
+- **`refdes keys restore`** — no lost key exists. Nothing to restore; there is
+  no key in the picture at this point at all.
+- **`refdes former-ids propose`** (.scratch/f33, no baseline yet):
+  `error: no baseline stamped yet -- nothing to compare against. Run 'refdes revision <name>' first.` [exit=1]
+- **`refdes former-ids propose --confirm`** (.scratch/f33e, baseline stamped
+  *before* the break so propose can run): it proposes the pair as an exact key
+  match and writes the line —
+
+      1 candidate former-id mapping(s):
+        REQ-PWR-001 (requirement 'The 3V3 rail shall supply 1.2 A continuous.') -> REQ-PWR-011 ('The 3V3 rail shall supply 1.2 A continuous.')  exact match (surrogate key)
+      wrote former_ids: [REQ-PWR-001] to REQ-PWR-011 (items/requirements.yaml)
+
+  — and the error is unchanged:
+
+      ERROR   items/tests.yaml:7 [TST-PWR-001] — verifies points at 'REQ-PWR-001', which does not exist
+      10 items, 1 errors, 2 warnings
+      [exit=1]
+
+  `former_ids:` resolves prose references only; a structured link needs a live
+  id or key. Correct by design, and the reason this is a dead end.
+- **`refdes revise`** — only worth mentioning with its real reach. Two probes:
+  a `prefixes: {REQ-PWR: NEED-PWR}` mapping over the broken tree is the fix,
+  because `revise` expands the bare reference *before* it renames (.scratch/f33c):
+
+      items/tests.yaml:11  verifies: [REQ-PWR-001, BND-PWR-002] -> verifies: [NEED-PWR-001@9akfesk8hr1, BND-PWR-002@kpycn6vmqq0]
+
+  and an `ids: {REQ-PWR-001: REQ-PWR-011}` mapping is silently a no-op
+  (.scratch/f33f):
+
+      $ refdes revise rename.yaml --dry-run
+      nothing to do -- mapping doesn't apply to this project
+      [exit=0]
+
+  because `revise`'s mapping vocabulary is types:/fields:/links:/prefixes:
+  (`refdes revise --help`; revise.py:132). It renames ids only as part of a
+  prefix rename, so **the message must not tell the reader to rename a single
+  item with it.**
+
+  Also verified, because I was about to write the opposite in the docs:
+  **`revise` does not record `former_ids:`.** After a real `revise rename.yaml`
+  run (.scratch/f33g) `grep former_ids items/*.yaml` finds nothing, and
+  `former-ids propose` then reports `no baseline stamped yet`. Recording the
+  retired id is a separate `former-ids propose --confirm` step. (The task
+  brief's phrasing "rename with `refdes revise`, which records the former id"
+  is wrong on that half; the message and docs here say what is true.)
+
+### Remedy A — retype the reference (this is what the message tells you to do)
+
+.scratch/f33a: `verifies: [REQ-PWR-001, BND-PWR-002]` -> `[REQ-PWR-011, BND-PWR-002]`
+
+    $ refdes check
+    (rewrote 5 reference(s) while loading)
+    WARNING <project> — 2 item(s) with no coverage — see coverage.html
+    WARNING <project> — 1 requirement(s) satisfied but not verified — see coverage.html
+    10 items, 0 errors, 2 warnings
+    [exit=0]
+
+and the file ends up holding the composite, on the *new* id and the item's real
+key:
+
+    verifies: [REQ-PWR-011@9akfesk8hr1, BND-PWR-002@kpycn6vmqq0]
+
+Verified, so the message names this first.
+
+### AFTER
+
+    $ refdes --no-write check   # .scratch/f33
+    ERROR   items/tests.yaml:7 [TST-PWR-001] — verifies points at 'REQ-PWR-001', which does not exist. If that item was renamed by hand, this reference is still bare, so it carries no key to follow the rename: write the item's new display id here. A prefix-wide rename is what `refdes revise` is for -- it expands bare references first, so they follow the rename. Neither `refdes keys restore` nor `refdes former-ids` reaches a structured link; `former_ids:` resolves prose references only. Otherwise this is a typo or a deleted item. See https://squishiba.github.io/refdes/troubleshooting.html#links.
+    WARNING <project> — 2 item(s) with no coverage — see coverage.html
+    WARNING <project> — 2 requirement(s) satisfied but not verified — see coverage.html
+    10 items, 1 errors, 2 warnings
+    [exit=1]
+
+Same error, same severity, same file:line, same count, same exit code. The
+remedy is unconditional — **no detection was added**: `resolve_links` still
+asks only `resolve_link_target(...) is None`, and nothing in the message is
+computed from the project. That matters here, because the *conditional*
+version of this fix (the report's own suggestion — "REQ-PWR-011 has
+former_ids: [...]" appended at this line) would require running
+`validate_former_ids` before `resolve_links`, since `project.former_ids` is
+`{}` at resolution time by design. That is a behaviour change and was not
+done; the message instead covers the typo/deleted/renamed cases in one text and
+lets the reader match its own situation.
+
+### The doc pointer
+
+`docs_url.DANGLING_LINK_DOCS` added to src/refdes/docs_url.py —
+`https://squishiba.github.io/refdes/troubleshooting.html#links`, the anchor for
+troubleshooting.md's own `## Links` heading. Not a repo-relative `docs/...`
+path, per #121. That section's entry for the diagnostic gained the same
+remedy, plus the three commands that do not apply and why, and it now links
+`refdes former-ids propose --confirm` for the separate former-id step (with the
+correction above).
+
+### Files
+
+- src/refdes/docs_url.py — one new constant.
+- src/refdes/build.py — the bare-target message only.
+- tests/test_keys_links.py — new pin: the message starts with the old
+  sentence, and carries the remedy, the `refdes revise` mention, the
+  `former_ids:`-is-prose-only statement, and the published URL, with
+  `assert "docs/troubleshooting.md" not in message` guarding against a
+  regression to a repo-relative path. Nothing else in `tests/` pinned this
+  message; tests/test_revise.py:1037 quotes it inside a test *docstring*
+  (the symptom half), which is still true as a prefix.
+- docs/troubleshooting.md — the `## Links` entry.
+- changelog.d/dangling-bare-link-remedy.fixed.md
+
+### Out of scope, found, NOT fixed
+
+- `checks: against:` has the identical dead end one branch away:
+  src/refdes/build.py:1441 still emits bare
+  `check against 'BND-PWR-404', which does not exist` with no remedy. Same
+  shape, same fix, but it is a different diagnostic than the finding names, so
+  it is left alone and recorded here.
+- The prose-reference warning at build.py:2296
+  (`reference to 'X', which does not exist`) is correctly different: it is a
+  warning, it consults `project.former_ids` first (build.py:2285), and prose
+  references are exactly what `former_ids:` is for. Untouched.
+- An `ids:` mapping handed to `refdes revise` is silently ignored
+  ("nothing to do -- mapping doesn't apply to this project", exit 0). Wording
+  at best; not this task.
