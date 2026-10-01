@@ -17,6 +17,7 @@ from . import boards as boards_mod
 from . import calc, dates, history as history_mod, imports, seal
 from . import chains as chains_mod
 from . import citations as citations_mod
+from . import docs_url as docs_url_mod
 from . import ids as ids_mod
 from . import keys as keys_mod
 from . import nav as nav_mod
@@ -524,7 +525,7 @@ def _unknown_key_message(project: Project, pointer: str, target_id: str) -> str:
         return message + (
             "If it is the same item, restore its original key upstream. This "
             "composite reference was written into your file by refdes on a "
-            "load, not typed by hand — see docs/multi-board.md."
+            f"load, not typed by hand — see {docs_url_mod.MULTI_BOARD_DOCS}."
         )
     return message + (
         f"If it is the same item, run `refdes keys restore {label}@{key} "

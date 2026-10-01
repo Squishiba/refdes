@@ -14,6 +14,7 @@ from . import build as build_mod
 from . import calc_rewrite as calc_rewrite_mod
 from . import citations as citations_mod
 from . import diagram as diagram_mod
+from . import docs_url as docs_url_mod
 from . import former_ids as former_ids_mod
 from . import get_version, standards
 from . import history as history_mod
@@ -32,14 +33,12 @@ from .model import INVALIDATE, Project
 from .schema import SchemaError, load_project
 
 # Where the docs actually are for someone who installed refdes from a wheel.
-# A repo-relative "docs/parts.md" resolves only inside a git checkout of this
-# repo, and the wheel ships no .md files at all (packages.find is scoped to
-# src/, package-data carries only templates/standards/serve-static), so such a
-# path names a file that does not exist for the person reading it -- in the
-# brand-new project `refdes init` just created for them. The published Pages
-# site is the one form of the reference that resolves everywhere; .github/
-# workflows/docs.yml deploys docs-site/ to it on every push to main.
-DOCS_URL = "https://squishiba.github.io/refdes"
+# Re-exported from docs_url, which carries the comment that has to travel with
+# it -- build/keys/links/configcheck print diagnostics that point at a page and
+# cannot import this module back (it imports all of them). Every other
+# user-facing pointer to a page goes through docs_url too, so the mapping from
+# page to URL lives in one file.
+DOCS_URL = docs_url_mod.DOCS_URL
 
 
 def _fix_console() -> None:
@@ -1665,7 +1664,8 @@ def main(argv: list[str] | None = None) -> int:
         "items that lack one, bare link references normalised to "
         "'DISPLAY-ID@key' composites, and '.refdes/schema.json', the gitignored "
         "editor-completion schema. Those are reported as they happen, and "
-        "'--no-write' skips them entirely (docs/design/keys.md §2).",
+        "'--no-write' skips them entirely "
+        f"({docs_url_mod.SURROGATE_KEYS_DOCS}).",
     )
     p_check.add_argument(
         "--refresh",

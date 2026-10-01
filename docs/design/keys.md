@@ -415,7 +415,8 @@ Reporting: one project-level `info` line, not one per item —
 
 ```
 INFO    <project> — 12 item(s) have no key yet; the next writable command will
-        mint them. Run without --no-write, or see docs/design/keys.md.
+        mint them. Run without --no-write, or see
+        https://squishiba.github.io/refdes/troubleshooting.html#surrogate-keys.
 ```
 
 `info`, not `warning`, because under `--no-write` it is the expected and

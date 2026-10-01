@@ -340,7 +340,7 @@ ERROR items/decisions/pins.md:2 [DEC-A-001] — constrained_by points at key
       labelled IFC-CAN-001 declares key '71vt2cfhfrh'. ... If it is the same
       item, restore its original key upstream. This composite reference was
       written into your file by refdes on a load, not typed by hand — see
-      docs/multi-board.md.
+      https://squishiba.github.io/refdes/multi-board.html.
 ```
 
 The remedy is upstream, not here: restore the original key in the upstream

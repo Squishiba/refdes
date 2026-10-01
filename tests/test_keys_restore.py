@@ -408,7 +408,7 @@ def test_imported_key_ownership_and_upstream_diagnostic(tmp_path):
     # the message has to say so -- see the end-to-end test below for the same
     # text arriving through the CLI.
     assert "written into your file by refdes on a load, not typed by hand" in message
-    assert "see docs/multi-board.md" in message
+    assert "see https://squishiba.github.io/refdes/multi-board.html" in message
 
 
 def test_external_lost_key_diagnostic_names_the_composite_as_tool_written(tmp_path, capsys):
@@ -470,14 +470,14 @@ def test_external_lost_key_diagnostic_names_the_composite_as_tool_written(tmp_pa
     reported = captured.out + captured.err
     assert f"key {original!r} (labelled REQ-IMP-001), which no item declares" in reported
     assert "written into your file by refdes on a load, not typed by hand" in reported
-    assert "see docs/multi-board.md" in reported
+    assert "see https://squishiba.github.io/refdes/multi-board.html" in reported
     assert "refdes keys restore" not in reported
 
     # The local branch keeps its own ending and stays free of the import clause.
     project = loader.load_readonly(str(config))
     local = build._unknown_key_message(project, "refines points at", f"REQ-002@{keys.mint()}")
     assert "refdes keys restore REQ-002@" in local
-    assert "docs/multi-board.md" not in local
+    assert "multi-board.html" not in local
 
 
 def test_intervening_source_edit_is_preserved(tmp_path, monkeypatch):
