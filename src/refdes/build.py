@@ -2982,6 +2982,9 @@ def warn_edited_after_captured(project: Project) -> None:
     declines, the build proceeds."""
     try:
         findings = history_mod.edited_after_captured(project)
+    except history_mod.HistoryKeyError as exc:
+        project.error(exc.message, file=exc.file)
+        return
     except (history_mod.HistoryError, OSError) as exc:
         project.warn(
             f"edited-after-captured was not checked: the history store "

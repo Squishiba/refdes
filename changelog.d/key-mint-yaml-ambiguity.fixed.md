@@ -1,0 +1,1 @@
+- Keep surrogate keys as strings when reading older unquoted YAML files, including item declarations and key-indexed state, and avoid minting keys YAML would reinterpret.

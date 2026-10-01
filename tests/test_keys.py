@@ -5,13 +5,19 @@ Split out of the original monolithic tests/test_refdes.py.
 
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
 from copy import deepcopy
+from pathlib import Path
 
+import pytest
 import yaml
 from conftest import write_project_config
 
 from refdes import build as build_mod
 from refdes import cli as cli_mod
+from refdes import history as history_mod
 from refdes import keys as keys_mod
 from refdes import lifecycle, parse, render
 from refdes.schema import load_project
@@ -134,6 +140,165 @@ def test_mint_produces_eleven_lowercase_crockford_characters_with_a_valid_check_
         assert key == key.lower()
         assert all(ch in keys_mod.ALPHABET for ch in key)
         assert _damm_valid(key)
+
+
+def test_mint_retries_yaml_ambiguous_candidates(monkeypatch):
+    candidates = ("0x7cea52300", "84008808238", "k7f3m2q9x4a")
+    draws = iter(bytes(_KEYS_IDX[ch] for ch in key[:10]) for key in candidates)
+    monkeypatch.setattr(keys_mod.secrets, "token_bytes", lambda size: next(draws))
+    assert all(keys_mod.check_char(key[:10]) == key[-1] for key in candidates)
+    assert keys_mod.mint() == candidates[-1]
+
+
+def test_yaml_ambiguous_existing_keys_keep_their_spelling(tmp_path):
+    """Item declarations and machine state map keys must retain old mints."""
+    from refdes.parse import _LineLoader, _load_line_marked, _PurePythonLineLoader, yaml_safe_load
+
+    keys = ("0x7cea52300", "84008808238")
+    root = _keys_project(
+        tmp_path,
+        "items:\n"
+        + "".join(
+            f"  - id: REQ-00{i}\n    type: requirement\n    text: Item {i}\n    key: {key}\n"
+            for i, key in enumerate(keys, 1)
+        ),
+    )
+    source = (root / "items" / "r.yaml").read_text(encoding="utf-8")
+    for loader in (_LineLoader, _PurePythonLineLoader):
+        loaded, _ = _load_line_marked(source, loader)
+        assert [entry["key"] for entry in loaded["items"]] == list(keys)
+    project = load_project(config_path=str(root / "refdes-project.yaml"))
+    parse.load_items(project)
+    assert [project.item_by_id(f"REQ-00{i}").key for i in (1, 2)] == list(keys)
+    for key in keys:
+        state = yaml_safe_load(f"sealed:\n  {key}: {{id: REQ-001, hash: abc}}\n")
+        assert state["sealed"][key]["hash"] == "abc"
+        assert yaml_safe_load(f"key: {key}\n")["key"] == key
+        baseline = lifecycle.format_baseline(
+            {"name": "rev-a", "items": {key: {"id": "REQ-001"}}}
+        )
+        assert f'  "{key}":' in baseline
+        assert yaml_safe_load(baseline)["items"][key]["id"] == "REQ-001"
+    assert yaml_safe_load("number: 84008808238\n")["number"] == 84008808238
+
+
+def _key_cli(root, *args):
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(Path(__file__).resolve().parents[1] / "src")
+    return subprocess.run(
+        [sys.executable, "-m", "refdes.cli", "-c", str(root / "refdes-project.yaml"), *args],
+        cwd=root, env=env, capture_output=True, text=True, check=False,
+    )
+
+
+def _assert_storage_cli_error(root, relative_path, *args):
+    result = _key_cli(root, *args)
+    output = result.stdout + result.stderr
+    assert result.returncode != 0
+    assert "Traceback" not in output
+    assert relative_path in output
+    assert not any(str(root) in line for line in output.splitlines() if "malformed" in line)
+    assert "original spelling cannot be recovered" in output
+
+
+@pytest.mark.parametrize("command", ["check", "audit", "build"])
+def test_reserialized_hex_key_in_baseline_is_cli_error(tmp_path, command):
+    key = "0x7cea52300"
+    root = _keys_project(
+        tmp_path,
+        "defaults: { type: requirement }\n"
+        f"items:\n  - id: REQ-001\n    key: {key}\n    text: Same item.\n",
+    )
+    _stamp_keyed_baseline(root, "rev-a")
+    path = root / ".refdes" / "baselines" / "rev-a.yaml"
+    original = path.read_text(encoding="utf-8")
+    path.write_text(
+        original.replace(f"'{key}'", "33531699968").replace(f'"{key}"', "33531699968"),
+        encoding="utf-8",
+    )
+    _assert_storage_cli_error(root, ".refdes/baselines/rev-a.yaml", "--no-write", command)
+
+
+@pytest.mark.parametrize("command", ["check", "build"])
+def test_reserialized_hex_key_in_seal_is_cli_error(tmp_path, command):
+    root = _keys_project(
+        tmp_path,
+        "defaults: { type: requirement }\n"
+        "items:\n  - id: REQ-001\n    key: 0x7cea52300\n    text: Same item.\n",
+    )
+    state = root / ".refdes"
+    state.mkdir()
+    (state / "log-seal.yaml").write_text(
+        "sealed:\n  33531699968: {id: REQ-001, hash: abc}\n", encoding="utf-8"
+    )
+    _assert_storage_cli_error(root, ".refdes/log-seal.yaml", "--no-write", command)
+
+
+def test_reserialized_reseal_key_is_cli_error(tmp_path):
+    root = _keys_project(
+        tmp_path,
+        "defaults: { type: requirement }\n"
+        "items:\n  - id: REQ-001\n    key: 0x7cea52300\n    text: Same item.\n",
+    )
+    state = root / ".refdes"
+    state.mkdir()
+    (state / "log-seal.yaml").write_text(
+        "sealed: {}\nreseals:\n"
+        "  - {id: REQ-001, key: 33531699968, action: edit, old_hash: abc, "
+        "new_hash: def, occurred_at: '2026-01-01'}\n",
+        encoding="utf-8",
+    )
+    _assert_storage_cli_error(root, ".refdes/log-seal.yaml", "--no-write", "check")
+
+
+def test_reserialized_manifest_key_is_cli_error(tmp_path):
+    root = _keys_project(
+        tmp_path,
+        "defaults: { type: requirement }\n"
+        "items:\n  - id: REQ-001\n    key: 0x7cea52300\n    text: Same item.\n",
+    )
+    config = root / "refdes-project.yaml"
+    config.write_text(
+        config.read_text(encoding="utf-8") + "boards:\n  board-a: {label: Board A}\n",
+        encoding="utf-8",
+    )
+    state = root / ".refdes"
+    state.mkdir()
+    (state / "boards.yaml").write_text(
+        "boards:\n  33531699968: {id: REQ-001, board: board-a}\n",
+        encoding="utf-8",
+    )
+    _assert_storage_cli_error(root, ".refdes/boards.yaml", "--no-write", "check")
+
+
+def test_reserialized_history_object_key_is_cli_error(tmp_path):
+    root = _keys_project(
+        tmp_path,
+        "defaults: { type: requirement }\n"
+        "items:\n  - id: REQ-001\n    key: 0x7cea52300\n    text: Same item.\n",
+    )
+    project = load_project(config_path=str(root / "refdes-project.yaml"))
+    parse.load_items(project)
+    _digest, path = history_mod.save_object(root, project.item_by_id("REQ-001"))
+    object_file = Path(path)
+    text = object_file.read_text(encoding="utf-8")
+    object_file.write_text(text.replace("'0x7cea52300'", "33531699968"), encoding="utf-8")
+    rel = object_file.relative_to(root).as_posix()
+    _assert_storage_cli_error(root, rel, "history", "capture", "REQ-001")
+
+
+def test_reserialized_history_event_key_is_cli_error(tmp_path):
+    root = _keys_project(
+        tmp_path,
+        "defaults: { type: requirement }\n"
+        "items:\n  - id: REQ-001\n    key: 0x7cea52300\n    text: Same item.\n",
+    )
+    path = history_mod.append_event(root, "captured", "0x7cea52300", "a" * 64)
+    event_file = Path(path)
+    text = event_file.read_text(encoding="utf-8")
+    event_file.write_text(text.replace("'0x7cea52300'", "33531699968"), encoding="utf-8")
+    rel = event_file.relative_to(root).as_posix()
+    _assert_storage_cli_error(root, rel, "--no-write", "check")
 
 
 def test_mint_never_produces_an_uppercase_start_bare_ref_could_match():
