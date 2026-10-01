@@ -72,8 +72,10 @@ yourself go in an optional `refdes-schema.yaml` beside this file — that one
 holds only `types:`, `link_types:`, and `sets:`.
 
 `init` also writes `.vscode/settings.json`, wiring up field/link completion for
-`items/**/*.yaml` files if you're using VS Code — see [editor
-support](standard-library.md#editor-support-json-schema-emission).
+`items/**/*.yaml` files if you're using VS Code, and a `.gitignore` line to keep
+it out of your commits — the schema path in it names one checkout, so a
+committed copy would hand every other clone a schema that resolves to nothing.
+See [editor support](standard-library.md#editor-support-json-schema-emission).
 
 `items/` is not created for you. Make it, and any folders under it, yourself:
 
@@ -81,6 +83,7 @@ support](standard-library.md#editor-support-json-schema-emission).
 my-board/
   refdes-project.yaml
   .vscode/settings.json
+  .gitignore
   items/
 ```
 
@@ -117,12 +120,19 @@ refdes id
 ```
 
 ```
+(minted 2 key(s) while loading)
 allocated REQ-PWR-001  (items/requirements/power.yaml:9) The unit shall operate from an input supply of 9 V to 36 V.
 allocated REQ-PWR-002  (items/requirements/power.yaml:13) The 3V3 rail shall supply 1.2 A continuous.
 allocated 2 id(s)
 ```
 
 The IDs are now written into your file. They will never change. See [IDs](ids.md).
+
+The first line is not noise: loading the project also wrote a `key:` into each
+of the two items — a **surrogate key**, the one identifier that stays with an
+item even if you rename its `id:` later on (see [surrogate
+keys](ids.md#surrogate-keys)). It appears once; a project that already has
+keys prints no such line.
 
 ## 3. Add a bound with a real limit
 
@@ -215,6 +225,7 @@ refdes build
 ```
 
 ```
+(minted 2 key(s) and rewrote 3 reference(s) while loading)
 ERROR   items/decisions/dec-pwr-001-regulator.md:2 [DEC-PWR-001] — P_dens violates BND-THM-001: worst case 0.2366 W/in² vs <= 0.15 W/in^2
 WARNING <project> — 2 item(s) with no coverage — see coverage.html
 4 items, 1 errors, 1 warnings
