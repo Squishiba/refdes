@@ -153,3 +153,41 @@ Fragment: `changelog.d/docs-init-gitignore-count.fixed.md`.
 
 Changelog: `changelog.d/citation-page-remedy.fixed.md` (the F2 change is
 user-visible message text plus docs, not a behaviour change, so `fixed`).
+
+## F5 — done (docs only)
+
+Reproduced the block's own trace in `.scratch/f5`, from `refdes init`:
+
+- two `requirement` items, `REQ-001` and `REQ-002`, with `refines: [REQ-001]`;
+- first `refdes check`: `(minted 2 key(s) and rewrote 1 reference(s) while
+  loading)` — the reference expands to `REQ-001@qmxb1nwh4d7`;
+- hand-edit the target's `id:` to `REQ-009` (sed, nothing else);
+- second `refdes check`, verbatim:
+
+  ```
+  (rewrote 1 reference(s) while loading)
+  WARNING <project> — 2 item(s) with no coverage — see coverage.html
+  2 items, 0 errors, 1 warnings
+  [exit=0]
+  ```
+
+  and the file afterwards reads `refines: [REQ-009@qmxb1nwh4d7]` — the label
+  followed, the key unchanged, which is what the page claims.
+
+So the report's F5 is right: the page's block had lines 1 and 3 and not line 2.
+The count line already matched character for character and still does; the added
+line is the two-item project's own coverage warning, so I added one sentence
+saying it is not part of the rename — otherwise the next reader hunts for a
+third cause. Rebuilt the docs site: the block renders as written, and the
+`<project>` placeholder is the same convention `cli-reference.md:176`,
+`coverage.md:153` and `getting-started.md:238` already use for that warning.
+
+Fragment: `changelog.d/docs-hand-rename-sample-output.fixed.md`.
+
+## Not done, deliberately
+
+F1 (the `stub-tests` / `revise apply` read-only tracebacks) and F3 (the
+duplicate-key diagnostic not covering repointed references) are out of this
+task's scope and untouched. Nothing under `src/`, `tests/` or `docs/` was
+changed for them; `git status` before each commit showed only the files listed
+above.

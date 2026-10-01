@@ -300,8 +300,12 @@ references follow the rename on their own:
 ```
 $ refdes check
 (rewrote 1 reference(s) while loading)
+WARNING <project> — 2 item(s) with no coverage — see coverage.html
 2 items, 0 errors, 1 warnings
 ```
+
+(The coverage warning is the two-item project's own, not part of the rename: it
+is here because the block is what the command prints, in full.)
 
 Recording the retired id as `former_ids:` for external citations is a separate
 step, and a prefix-wide rename is what
