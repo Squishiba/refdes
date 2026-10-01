@@ -2269,10 +2269,15 @@ def _linkify(
             if former_owner_id is not None:
                 # Resolves, but never silently -- a reader following an old id
                 # must see it landed somewhere else, not be quietly redirected
-                # (finding 12).
+                # (finding 12). So the visible text is the *current* id and the
+                # marker names the former one: text = old id would render
+                # "REQ-PWR-001 (formerly REQ-PWR-001)", a self-contradiction,
+                # and would leave the reader with no statement anywhere of
+                # where the old id went. An explicit `[[old|label]]` still
+                # shows the author's label -- that text is theirs, not an id.
                 owner = project.item_by_id(former_owner_id)
                 anchor = field_anchor(owner, field, fragment_ref) or ""
-                text = label or target_id
+                text = label or owner.id
                 return (
                     f'<a class="ref ref-former" href="{owner.slug}.html{anchor}" '
                     f'data-ref="{owner.id}">{text}</a>'

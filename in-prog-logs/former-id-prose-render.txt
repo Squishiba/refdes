@@ -1,0 +1,162 @@
+Former-id prose reference renders the old id twice (F3.1 in
+in-prog-logs/keys-identity-recovery.txt:505-530).
+
+STATUS: finished.
+
+--------------------------------------------------------------------------
+1. What the docs say (read before touching code)
+--------------------------------------------------------------------------
+
+Three places describe the marker. All of them describe the marker as naming
+the *old* id, and none of them says the visible link text should stay the old
+id.
+
+- docs/ids.md:231-234 — "`[[CAN_00]]` and a bare `CAN_00` in prose now
+  resolve to `REQ-CAN-001`, rendered with a visible "(formerly CAN_00)"
+  marker rather than a silent redirect -- a reader following the old id needs
+  to see it landed somewhere else."
+
+  "needs to see it landed somewhere else" is the load-bearing clause: the
+  visible text has to name the *destination*, otherwise the marker is the
+  only thing naming the new id and the sentence never says where the old one
+  went. Read with the example (former id `CAN_00`, current id `REQ-CAN-001`),
+  the documented rendering is `REQ-CAN-001 (formerly CAN_00)`.
+
+- docs/cli-reference.md:891-893 — "record the old id once as a `former_ids:`
+  entry on the renamed item, and every mention of it resolves again, marked
+  "(formerly CON-THM-001)", with no historical sentence edited at all."
+
+  The "no historical sentence edited at all" clause is about the *source*:
+  `revise` deliberately does not rewrite prose. It says nothing about the
+  rendered text, and `former-ids`/`revise` are separate steps from rendering.
+
+- docs/design/keys.md:626-628 — "`former_ids: [CAN_00]` on the item makes
+  that string resolve, with the existing visible "(formerly CAN_00)" marker.
+  That is a display-alias mechanism, and it stays exactly as it is." Again the
+  marker names the old id.
+
+The code's own comment at src/refdes/build.py:2269-2271 agrees: "Resolves,
+but never silently -- a reader following an old id must see it landed
+somewhere else, not be quietly redirected (finding 12)." "See it landed
+somewhere else" is the same requirement ids.md states.
+
+VERDICT: the evidence supports the finding's reading — the link text should
+be the *current* id, with the former id in the marker. Nothing I found says
+the visible text should stay the old id on purpose. (The `CAN_00` case, which
+the log notes "reads fine" today, only reads fine by accident: the old id
+looks alien, so the repetition is less obviously absurd. With the fix it
+reads `REQ-CAN-001 (formerly CAN_00)`, which is what ids.md's own example
+describes.)
+
+--------------------------------------------------------------------------
+2. Reproduction (.scratch/f31-repro)
+--------------------------------------------------------------------------
+
+Two items, one prose-mentioning the other; then `revise`, `former-ids
+propose --confirm`, `build`.
+
+    .scratch/f31-repro/refdes-schema.yaml
+      types:
+        requirement: { prefix: REQ, fields: { text: { type: text } }, body: {}, coverable: false }
+        decision:    { prefix: DEC, fields: {}, body: {} }
+    items/req.yaml   -> REQ-PWR-001, text: "The rail shall hold 5 V."
+    items/dec.md    -> DEC-PWR-001, body: "We size the pass device from REQ-PWR-001, which sets the tolerance."
+    rename.yaml     -> prefixes: { REQ-PWR: NEED-PWR }
+
+    $ refdes revision rev-a
+      revision 'rev-a' stamped: 2 items.
+    $ refdes revise rename.yaml
+      changed 1 file(s): items/req.yaml
+      id changes: REQ-PWR-001 -> NEED-PWR-001
+      1 prose mention(s) of a renamed id left behind ...
+        items/dec.md:7  REQ-PWR-001 -> NEED-PWR-001
+    $ refdes former-ids propose --confirm REQ-PWR-001
+      wrote former_ids: [REQ-PWR-001] to NEED-PWR-001 (items/req.yaml)
+    $ refdes build
+      2 items, 0 errors, 1 warnings
+      site written to .../_site
+
+BEFORE, _site/dec-pwr-001.html (body div):
+
+    <div class="body"><p>We size the pass device from <a class="ref ref-former" href="need-pwr-001.html" data-ref="NEED-PWR-001">REQ-PWR-001</a><span class="ref-former-marker" title="NEED-PWR-001 was formerly REQ-PWR-001">(formerly REQ-PWR-001)</span>, which sets the tolerance.</p>
+
+Visible text: `REQ-PWR-001 (formerly REQ-PWR-001)`. Confirmed exactly as
+F3.1 reports.
+
+--------------------------------------------------------------------------
+3. The fix
+--------------------------------------------------------------------------
+
+src/refdes/build.py:2276, in `_linkify`'s inner `link()` — the former-id
+branch. `text = label or target_id` makes the visible text the reference's
+own (old) text, which is then immediately repeated by the marker. Changed to
+`text = label or owner.id`: an explicit `[[old|label]]` still wins (the
+author wrote that label deliberately and it is not an id), otherwise the
+visible text is the current id and the marker names the former one.
+
+Note the label case is NOT the bug: `[[REQ-050|the rail spec]]` renders as
+"the rail spec (formerly REQ-050)", which reads fine and must not change.
+
+--------------------------------------------------------------------------
+4. Other places former ids render — checked
+--------------------------------------------------------------------------
+
+Places that DO emit the former-id marker (all go through the one `link()`
+above, so one fix covers all of them):
+
+- prose body of an item — BROKEN, fixed. `_site/dec-pwr-001.html`.
+- prose body of a page — same function; _linkify is called for pages at
+  build.py:2826. Same fix.
+- markdown table cells inside a body — confirmed in .scratch/f31-other: the
+  same `link()` runs over the whole page HTML after the table is injected
+  (build.py:2810-2826 comment says exactly this), so table cells rendered
+  the same broken string and are fixed by the same change.
+- the single-document aggregate (`document.html`) — same `_linkify` pass,
+  same fix.
+
+Places that render former ids correctly / by design, no change needed:
+
+- the item's own page — does not list its own former ids at all (keys-
+  identity-recovery.txt's F3.1 table says the string does not appear on
+  _site/need-pwr-001.html). Verified: `grep REQ-PWR-001 _site/need-pwr-001.html`
+  finds only the DEC item's *title* echoing the prose. No marker, no bug.
+- `items.json` — carries `"former_ids": ["REQ-PWR-001"]` as data
+  (render.py:656). Correct.
+- `refdes audit` "Former IDs:" section (cli.py:955-958) prints
+  `REQ-PWR-001 -> NEED-PWR-001`. Correct.
+- structured link fields (`refines: [REQ-PWR-001]`) — deliberately do NOT
+  fall back to former ids. Verified in .scratch/f31-other: `refines points at
+  'REQ-PWR-001', which does not exist` is a build error, exactly as
+  build.py:467-470 documents ("that is a prose-only mechanism"). Nothing to
+  render, nothing to fix.
+- tables of ids (index/summary/tree/reference columns) — these list *live*
+  ids from the model, never former ones; nothing renders an old id there.
+- `data-ref` attribute on the link, and the marker's `title` — already the
+  current id (owner.id); untouched by this change.
+
+--------------------------------------------------------------------------
+5. Test
+--------------------------------------------------------------------------
+
+tests/test_former_ids.py — two new tests pinning the exact rendered markup
+for the two shapes: a bare prose mention and an explicit `[[...]]`:
+
+- link text is the current id, marker is the former id, title is the
+  full "NEW was formerly OLD" sentence;
+- an explicit `[[old|label]]` keeps the author's label as link text and
+  still gets the marker (guards against "fixing" the label case too).
+
+Verified the new assertions fail against the pre-fix source and pass after.
+
+--------------------------------------------------------------------------
+6. Verification
+--------------------------------------------------------------------------
+
+- python -m pytest tests/ -q -p no:randomly  -> all pass.
+- ruff check src/refdes/build.py tests/test_former_ids.py --select F,E9,I
+  (scoped, per AGENTS.md: `ruff check .` is not a valid gate today) -> 2
+  I001 import-sorting findings, both pre-existing: the same 2 come back for
+  the HEAD copies of both files (checked via `git show HEAD:... > .scratch/`
+  and running ruff on those). No new finding from this change; left alone
+  rather than fixed as a side effect.
+- changelog.d/former-id-prose-link-text.fixed.md added.
