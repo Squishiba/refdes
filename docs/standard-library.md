@@ -217,7 +217,8 @@ Writes a minimal `refdes-project.yaml` in the current directory — `site:`,
 `refdes-schema.yaml` either: a project with nothing of its own to add to the
 standard doesn't get one — plus `.vscode/settings.json` wiring up schema
 completion for `items/**/*.yaml` (see [editor
-support](#editor-support-json-schema-emission) below).
+support](#editor-support-json-schema-emission) below), and a `.gitignore`
+covering that settings file plus `.refdes/copies/` and `.refdes/schema.json`.
 
 ```bash
 refdes init                            # hardware@<latest>, no presets
@@ -295,7 +296,9 @@ Confirming a listed ID actually resolves to an item of an allowed type
 means reading other files, which stays `refdes check`'s job — the schema
 states the target set for a human to read on hover, nothing more.
 
-Written to `.refdes/schema.json` — gitignored, not committed, a pure
+Written to `.refdes/schema.json` — gitignored (`refdes init` writes the
+`.refdes/schema.json` line into the project's `.gitignore`; add it by hand if
+your project predates that), not committed, a pure
 function of the current config regenerated as a cheap side effect of every
 command that already loads the project (`build`, `check`, `index`, `id`,
 `fetch`, `audit`). `refdes schema --json` is the explicit, standalone form,

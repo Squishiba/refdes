@@ -177,18 +177,100 @@ def test_init_vscode_settings_is_ignored_by_git(tmp_path):
     assert ".vscode" not in status.stdout
 
 
-def test_init_ignores_the_file_not_the_whole_vscode_directory(tmp_path):
-    """`.vscode/tasks.json` and friends are shareable -- this repo commits its
-    own -- so the entry names one file. A directory-wide ignore would forbid
-    committing anything else a project wants in `.vscode/`."""
-    scaffold_mod.init(str(tmp_path))
-    gitignore = (tmp_path / ".gitignore").read_text(encoding="utf-8")
-    patterns = [
+def _gitignore_patterns(path) -> list[str]:
+    text = path.read_text(encoding="utf-8")
+    return [
         line.strip()
-        for line in gitignore.splitlines()
+        for line in text.splitlines()
         if line.strip() and not line.strip().startswith("#")
     ]
-    assert patterns == [".vscode/settings.json"]
+
+
+def test_init_refdes_outputs_are_ignored_by_git(tmp_path):
+    """F1 (remote-fetch-exercise.md §7): the docs promised `.refdes/copies/`
+    and `.refdes/schema.json` were gitignored in three places and nothing in the
+    product made them so -- `git add -A` in a fresh `init` project staged a 6 MB
+    datasheet and a generated 1696-line schema. The claim in git's own terms
+    rather than as a substring of a file: the `.refdes/` files a project is told
+    to commit are still committable."""
+    git = shutil.which("git")
+    if git is None:
+        pytest.skip("git is not on PATH")
+    proj = tmp_path / "proj"
+    scaffold_mod.init(str(proj))
+    subprocess.run([git, "init", "-q", str(proj)], check=True)
+    (proj / ".refdes" / "copies").mkdir(parents=True)
+    (proj / ".refdes" / "copies" / "deadbeef.pdf").write_bytes(b"%PDF-1.7\n")
+    (proj / ".refdes" / "ids.yaml").write_text("next: 1\n", encoding="utf-8")
+
+    for ignored in (".refdes/copies/deadbeef.pdf", ".refdes/schema.json"):
+        probe = subprocess.run(
+            [git, "-C", str(proj), "check-ignore", "-v", ignored],
+            capture_output=True,
+            text=True,
+        )
+        # `check-ignore -v` prints "<source>:<line>:<pattern>\t<pathname>"
+        assert probe.returncode == 0, f"git does not ignore {ignored}"
+        assert probe.stdout.split("\t")[1].strip() == ignored, probe.stdout
+
+    # ...and the project's own record is still committable
+    keep = subprocess.run(
+        [git, "-C", str(proj), "check-ignore", ".refdes/ids.yaml"],
+        capture_output=True,
+        text=True,
+    )
+    assert keep.returncode == 1, "init's .gitignore entries swallowed .refdes/ids.yaml"
+
+
+def test_init_gitignore_holds_when_the_project_is_one_directory_of_a_repo(tmp_path):
+    """The same two files, checked in the layout a refdes project nested inside
+    a larger repository lands in. The patterns carry no leading slash but do
+    contain one away from their end, so git reads them relative to the directory
+    holding the `.gitignore` -- which is what makes one spelling right for both
+    layouts. Verified with `git check-ignore -v` in both."""
+    git = shutil.which("git")
+    if git is None:
+        pytest.skip("git is not on PATH")
+    repo = tmp_path / "repo"
+    proj = repo / "hardware" / "board-a"
+    proj.mkdir(parents=True)
+    subprocess.run([git, "init", "-q", str(repo)], check=True)
+    scaffold_mod.init(str(proj))
+    (proj / ".refdes" / "copies").mkdir(parents=True)
+    (proj / ".refdes" / "copies" / "deadbeef.pdf").write_bytes(b"%PDF-1.7\n")
+
+    probe = subprocess.run(
+        [
+            git,
+            "-C",
+            str(repo),
+            "check-ignore",
+            "-v",
+            "hardware/board-a/.refdes/copies/deadbeef.pdf",
+            "hardware/board-a/.refdes/schema.json",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert probe.returncode == 0, probe.stdout + probe.stderr
+    # and it is this project's own .gitignore doing it, at the project's depth
+    assert probe.stdout.splitlines()[0].startswith(
+        "hardware/board-a/.gitignore:"
+    )
+
+
+def test_init_ignores_the_files_not_the_surrounding_directories(tmp_path):
+    """The exact set of patterns, which is the whole claim: each names one file
+    or one subdirectory, never `.vscode/` or `.refdes/` as a whole. Both
+    hold committable things -- this repo commits its own `.vscode/` and needs
+    `.refdes/ids.yaml` and `.refdes/citations.yaml` in git, or two branches hand
+    out the same ID or re-pin a datasheet without anyone noticing."""
+    scaffold_mod.init(str(tmp_path))
+    assert _gitignore_patterns(tmp_path / ".gitignore") == [
+        ".vscode/settings.json",
+        ".refdes/copies/",
+        ".refdes/schema.json",
+    ]
 
 
 def test_init_keeps_an_existing_gitignore_and_adds_the_entry_once(tmp_path):
@@ -197,6 +279,10 @@ def test_init_keeps_an_existing_gitignore_and_adds_the_entry_once(tmp_path):
     text = (tmp_path / ".gitignore").read_text(encoding="utf-8")
     assert text.startswith("_site/\n.refdes/copies/\n")
     assert text.count(".vscode/settings.json") == 1
+    # the project's own `.refdes/copies/` line is a position already taken, so
+    # ours is not appended beside it
+    assert text.count(".refdes/copies/") == 1
+    assert ".refdes/schema.json" in text.splitlines()
 
 
 def test_init_appends_with_the_existing_gitignore_line_ending(tmp_path):
@@ -208,42 +294,81 @@ def test_init_appends_with_the_existing_gitignore_line_ending(tmp_path):
 
 
 @pytest.mark.parametrize(
-    "covering",
+    ("covering", "pattern"),
     [
-        ".vscode/settings.json",
-        "/.vscode/settings.json",
-        "**/.vscode/settings.json",
-        ".vscode",
-        ".vscode/",
-        "/.vscode/",
-        "**/.vscode/",
+        (".vscode/settings.json", ".vscode/settings.json"),
+        ("/.vscode/settings.json", ".vscode/settings.json"),
+        ("**/.vscode/settings.json", ".vscode/settings.json"),
+        (".vscode", ".vscode/settings.json"),
+        (".vscode/", ".vscode/settings.json"),
+        ("/.vscode/", ".vscode/settings.json"),
+        ("**/.vscode/", ".vscode/settings.json"),
         # an explicit negation is also the project having already decided:
         # git takes the last match, so appending ours would out-rank it
-        "!.vscode/settings.json",
+        ("!.vscode/settings.json", ".vscode/settings.json"),
+        (".refdes/copies/", ".refdes/copies/"),
+        ("/.refdes/copies/", ".refdes/copies/"),
+        ("**/.refdes/copies/", ".refdes/copies/"),
+        (".refdes", ".refdes/copies/"),
+        (".refdes/", ".refdes/copies/"),
+        (".refdes/", ".refdes/schema.json"),
+        ("**/.refdes/", ".refdes/schema.json"),
+        ("!.refdes/schema.json", ".refdes/schema.json"),
     ],
 )
-def test_init_leaves_a_gitignore_that_already_addresses_it_untouched(tmp_path, covering):
+def test_init_adds_no_block_for_a_pattern_the_project_already_addressed(
+    tmp_path, covering, pattern
+):
     (tmp_path / ".gitignore").write_text(f"{covering}\n", encoding="utf-8")
     scaffold_mod.init(str(tmp_path))
-    assert (tmp_path / ".gitignore").read_text(encoding="utf-8") == f"{covering}\n"
+    patterns = _gitignore_patterns(tmp_path / ".gitignore")
+    # no second line for a position already taken -- and when `covering` spells
+    # it the same way, no duplicate of the project's own line either
+    assert patterns.count(pattern) == (1 if covering == pattern else 0)
+    assert patterns[0] == covering, "the project's own line moved or was rewritten"
+
+
+def test_init_leaves_a_gitignore_that_addresses_everything_untouched(tmp_path):
+    """All three already stated: nothing to append, so the file is byte-for-byte
+    what the author had."""
+    before = ".refdes/copies/\n.refdes/schema.json\n.vscode/settings.json\n"
+    (tmp_path / ".gitignore").write_text(before, encoding="utf-8")
+    scaffold_mod.init(str(tmp_path))
+    assert (tmp_path / ".gitignore").read_text(encoding="utf-8") == before
+
+
+def test_init_appends_nothing_on_a_second_init(tmp_path):
+    """`init` refuses to overwrite an existing config, so a second run is what a
+    re-init after deleting the config looks like -- and the append must not
+    duplicate itself."""
+    scaffold_mod.init(str(tmp_path))
+    after_first = (tmp_path / ".gitignore").read_text(encoding="utf-8")
+    os.remove(tmp_path / "refdes-project.yaml")
+    os.remove(tmp_path / ".vscode" / "settings.json")
+    scaffold_mod.init(str(tmp_path))
+    assert (tmp_path / ".gitignore").read_text(encoding="utf-8") == after_first
 
 
 def test_init_adds_the_entry_for_an_unrelated_similar_pattern(tmp_path):
     """Guards the coverage check against matching on substring rather than
     on a whole pattern line."""
-    (tmp_path / ".gitignore").write_text(".vscodeignore\n", encoding="utf-8")
+    (tmp_path / ".gitignore").write_text(".vscodeignore\n.refdescopies/\n", encoding="utf-8")
     scaffold_mod.init(str(tmp_path))
-    assert ".vscode/settings.json" in (
-        tmp_path / ".gitignore"
-    ).read_text(encoding="utf-8").splitlines()
+    assert ".vscode/settings.json" in _gitignore_patterns(tmp_path / ".gitignore")
+    assert ".refdes/copies/" in _gitignore_patterns(tmp_path / ".gitignore")
 
 
-def test_init_writes_no_gitignore_entry_when_it_wrote_no_vscode_settings(tmp_path):
-    """The entry exists because `init` wrote a machine-specific file. With
-    nothing written there is nothing of ours to ignore."""
+def test_init_writes_no_vscode_entry_when_it_wrote_no_vscode_settings(tmp_path):
+    """That entry exists because `init` wrote a machine-specific file. With
+    nothing written there is nothing of ours to ignore -- but the `.refdes/`
+    entries are wanted either way, since `build`/`check`/`fetch` write those
+    files whatever happened here."""
     scaffold_mod.init(str(tmp_path), write_vscode_settings=False)
     assert not (tmp_path / ".vscode").exists()
-    assert not (tmp_path / ".gitignore").exists()
+    assert _gitignore_patterns(tmp_path / ".gitignore") == [
+        ".refdes/copies/",
+        ".refdes/schema.json",
+    ]
 
 
 def test_cli_notes_an_existing_vscode_settings_file_instead_of_skipping_silently(
@@ -274,8 +399,12 @@ def test_cli_notes_an_existing_vscode_settings_file_instead_of_skipping_silently
     # preserving merge is a parser rather than a patch, and a merge would
     # write a machine-specific path into a file the author may already track.
     assert (tmp_path / ".vscode" / "settings.json").read_text(encoding="utf-8") == before
-    # and nothing of ours was written, so no .gitignore entry either
-    assert not (tmp_path / ".gitignore").exists()
+    # and no .gitignore entry for that file, since init did not write it. The
+    # `.refdes/` entries are still there: those files exist whatever happened
+    # to the editor settings.
+    assert ".vscode/settings.json" not in _gitignore_patterns(
+        tmp_path / ".gitignore"
+    )
 
 
 def test_cli_prints_no_skip_note_when_it_wrote_the_settings_file(tmp_path, monkeypatch, capsys):
@@ -285,11 +414,14 @@ def test_cli_prints_no_skip_note_when_it_wrote_the_settings_file(tmp_path, monke
 
 
 def test_cli_announces_the_vscode_settings_file_it_wrote(tmp_path, monkeypatch, capsys):
-    """`init` writes two files and used to name one of them (user-sim run 2,
+    """`init` writes three things and used to name one of them (user-sim run 2,
     "Lower severity" list): `.vscode/settings.json` appeared with no word about
     it, so the only way to learn schema completion had just been wired up -- or
     that a machine-specific file had just been added to the tree -- was to list
-    the directory. The skip is announced (BUG 3); the write has to be too.
+    the directory. The skip is announced (BUG 3); the write has to be too. And
+    the `.gitignore` is the third thing, so it is announced by what it now
+    ignores -- not by the act of writing it, which would be a lie when a
+    project's own `.gitignore` already covered the path.
     """
     monkeypatch.chdir(tmp_path)
     assert cli_mod.main(["init"]) == 0
@@ -298,13 +430,48 @@ def test_cli_announces_the_vscode_settings_file_it_wrote(tmp_path, monkeypatch, 
     assert (tmp_path / ".vscode" / "settings.json").is_file()
     assert [line for line in out.splitlines() if line.startswith("wrote ")] == [
         "wrote refdes-project.yaml",
-        "wrote .vscode/settings.json (gitignored -- the yaml.schemas path in it "
-        "names one checkout)",
+        (
+            "wrote .vscode/settings.json (gitignored -- the yaml.schemas path in it "
+            "names one checkout)"
+        ),
+        (
+            "wrote .gitignore (.vscode/settings.json, .refdes/copies/, "
+            ".refdes/schema.json -- not yours to commit)"
+        ),
     ]
     # the line says why the file is not worth committing, because that is the
     # other surprise it leaves behind: init also put it in .gitignore
     assert "gitignored" in out
     assert (tmp_path / ".gitignore").is_file()
+
+
+def test_cli_announces_only_the_patterns_init_actually_added(tmp_path, monkeypatch, capsys):
+    """The announcement follows what changed, not what init would have liked to
+    write: a project that already ignored `.refdes/copies/` gets no line for it,
+    and one whose `.gitignore` already covers everything gets no line at all
+    (there is no third file to announce then)."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".gitignore").write_text(
+        ".refdes/copies/\n.refdes/schema.json\n", encoding="utf-8"
+    )
+    assert cli_mod.main(["init"]) == 0
+    out = capsys.readouterr().out
+    assert [line for line in out.splitlines() if "wrote .gitignore" in line] == [
+        "wrote .gitignore (.vscode/settings.json -- not yours to commit)"
+    ]
+
+
+def test_cli_prints_no_gitignore_line_when_everything_was_already_ignored(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".gitignore").write_text(
+        ".refdes/\n.vscode/\n", encoding="utf-8"
+    )
+    assert cli_mod.main(["init"]) == 0
+    out = capsys.readouterr().out
+    assert ".gitignore" not in out
+    assert (tmp_path / ".gitignore").read_text(encoding="utf-8") == ".refdes/\n.vscode/\n"
 
 
 def test_docs_show_the_absolute_schema_path_init_actually_emits():
