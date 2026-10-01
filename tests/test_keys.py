@@ -469,7 +469,17 @@ def test_corruption_lint_rejects_a_duplicate_key_across_two_items(tmp_path):
     assert "REQ-002" in message
     assert "items/r.yaml:" in message
     assert "items/s.yaml:" in message
-    assert "Delete the key from one of them and rebuild — it will be re-minted." in message
+    # The remedy has to say *which* of the two keeps the key (F2.1):
+    # deleting the original's instead leaves every inbound reference
+    # pointing at the copy and the build passes. The git command is
+    # interpolated with the real key, so it is copy-pasteable.
+    assert "Keep the key on the original" in message
+    assert "git log -S'key: k7f3m2q9x4a' --oneline --reverse" in message
+    assert "Delete the key from the copy and rebuild" in message
+    assert "leaves every inbound reference pointing at the copy" in message
+    assert "<KEY>" not in message
+    assert "one of them" not in message
+
 
 
 def test_corruption_lint_rejects_an_undeclared_key_without_display_id_fallback(tmp_path):

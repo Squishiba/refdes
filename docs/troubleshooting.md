@@ -121,8 +121,23 @@ by hand.
 **`key 'k7f3m2q9x4a' on REQ-PWR-004 (local items/requirements/power.yaml:12) is already used by REQ-PWR-007 (local items/requirements/power.yaml:19)`**
 Two items claim the same surrogate key, and a key is unique by construction. A
 key line got duplicated: copy-paste, a merge conflict, a botched edit.
-**Remedy:** delete the `key:` line from one of the items and rebuild — it will be
-re-minted with a fresh key.
+**Remedy:** keep the key on the *original* — the item that was there first, which
+is the one existing references and recorded history mean, so the copy is
+normally the newer item. Two ways to tell, either is enough:
+
+```bash
+git log -S'key: k7f3m2q9x4a' --oneline --reverse   # the oldest commit that wrote the key is the original's
+```
+
+…or, if the key appears in a [baseline](lifecycle.md), a seal file or a
+membership manifest, whichever of the two display ids it is recorded under is
+the original — `refdes audit` shows the stamp and the id it recorded.
+
+Then delete the `key:` line from the copy (leaving its `id:` as the entry's
+first field) and rebuild: a fresh key is minted for it. Deleting the key from
+the *original* instead is the trap — every inbound reference moves to the copy,
+`refdes check` reports `0 errors` and exits 0, and a release will stamp a
+baseline over the mis-pointed references.
 
 **`key changed since baseline 'rev-b': was 'k7f3m2q9x4a', now 'm9n2b5v8c1w'. A key never changes legitimately.`**
 An item's surrogate key no longer matches what the latest baseline recorded, so
@@ -195,8 +210,26 @@ reference. Minting another key cannot restore the old identity, and
 ## Links
 
 **`satisfies points at 'REQ-PWR-009', which does not exist`**
-Typo, deleted item, or a failed import. Check the import errors first — they
-cascade.
+Typo, deleted item, a failed import, or an item renamed by hand. Check the
+import errors first — they cascade.
+
+The rename case is the one with no obvious next step, because the reference is
+still **bare**. A `DISPLAY-ID@key` composite follows a renamed item (the key
+half is the identity); a bare reference resolves by display id, so nothing
+carries it across — and by then none of the recovery commands apply, because no
+key was ever involved:
+
+- `refdes keys restore` — nothing was lost but a label.
+- `refdes former-ids` / `former_ids:` — **does not reach a structured link.**
+  `former_ids:` resolves *prose* references; a structured link still needs a
+  live display id or key. Verified: recording `former_ids: [REQ-PWR-001]` onto
+  the renamed item leaves this error exactly as it was.
+- `refdes revise` — maps `types:`/`fields:`/`links:`/`prefixes:`, not individual
+  ids, so it cannot rename a single item. It is the tool for a prefix-wide
+  rename, and it expands bare references *first* so they follow.
+
+**Remedy:** write the item's new display id into the reference. The next
+writable load expands it to `NEW-ID@key` and the build is clean.
 
 **`constrained_by may point at bound, but REQ-PWR-002 is a requirement`**
 Wrong link type. `constrained_by` is reserved for the limit-bearing case —
@@ -210,6 +243,35 @@ also reaches `bound`) or `governed_by`/`refines` (requirement) — see
 Bare IDs only link when they resolve. A near miss like `REQ-PWR-2` instead of
 `REQ-PWR-002` silently stays plain text — use `[[REQ-PWR-002]]`, which warns when
 unresolved.
+
+### Hand-renaming an item is safe — get one writable load in first
+
+A hand edit of an item's `id:` is **not** what breaks references. What breaks
+them is hand-editing an `id:` while a reference to it is still bare, which
+means no writable load has run since you wrote that reference — `--no-write`
+suppresses both key minting and expansion, so a project checked only under
+`--no-write` is in exactly that state.
+
+So run any `refdes check` **without** `--no-write` before you rename, and the
+references follow the rename on their own:
+
+```yaml
+# written:            refines: [REQ-001]
+# after refdes check  refines: [REQ-001@51rkcxhdsfc]
+# hand-edit the target: id: REQ-001 -> id: REQ-009
+# after refdes check  refines: [REQ-009@51rkcxhdsfc]   <- followed, key unchanged
+```
+
+```
+$ refdes check
+(rewrote 1 reference(s) while loading)
+2 items, 0 errors, 1 warnings
+```
+
+Recording the retired id as `former_ids:` for external citations is a separate
+step, and a prefix-wide rename is what
+[`refdes revise`](cli-reference.md#refdes-revise-mapping-file) is for —
+see [renumbering](ids.md#renumbering-former-ids).
 
 ## Math
 

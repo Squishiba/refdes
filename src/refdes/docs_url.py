@@ -36,3 +36,9 @@ WORKSPACES_DOCS = f"{DOCS_URL}/workspaces.html"
 # that used to cite the contributor-facing docs/design/keys.md. The anchor is
 # troubleshooting.md's own `## Surrogate keys` heading.
 SURROGATE_KEYS_DOCS = f"{DOCS_URL}/troubleshooting.html#surrogate-keys"
+
+# The user docs for a structured reference that resolves to nothing: the
+# `<link verb> points at 'X', which does not exist` family, and what to do
+# when the item was renamed by hand. troubleshooting.md's own `## Links`
+# heading.
+DANGLING_LINK_DOCS = f"{DOCS_URL}/troubleshooting.html#links"

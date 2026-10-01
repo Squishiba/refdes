@@ -902,13 +902,36 @@ baseline:
 ERROR   items/io/requirements.yaml:18 [REQ-IO-AI-004] — key 'k7f3m2q9x4a' is
         already used by REQ-IO-AI-001 (items/io/requirements.yaml:12). A key
         is unique by construction; two items sharing one means a line was
-        duplicated. Delete the key from one of them and rebuild — it will be
-        re-minted.
+        duplicated. Keep the key on the original -- the item that was there
+        first, which is what existing references and recorded history mean;
+        `git log -S'key: k7f3m2q9x4a' --oneline --reverse` names the oldest
+        commit that wrote it, and a baseline, seal or membership manifest
+        records it under the original's id. Delete the key from the copy and
+        rebuild; taking it from the original instead leaves every inbound
+        reference pointing at the copy, and the build passes.
 ```
 
 This is the mechanism that makes §1's collision probability an annoyance
 rather than a hazard. It also catches the most likely real-world duplication
 cause: copy-pasting an item block and editing the visible fields.
+
+The last sentence is load-bearing and was added after the wording was tested:
+the two items are indistinguishable to the loader, so "delete the key from one
+of them" is a coin flip, and the wrong side of it is not a build failure. A
+composite reference resolves on the key, which the *last* item in load order
+owns, so taking the key away from the original moves every inbound reference
+to the copy and leaves `0 errors`, exit 0 — with a release gate that will then
+stamp a baseline over the mis-pointed references. The message therefore names
+the original's definition rather than picking a side: load order is position in
+the file tree, not authorship, so no side is knowable from the project alone.
+Both ways it offers to *find* the original were run, not assumed —
+`git log -S'key: <the key>' --oneline --reverse` puts the original's commit
+first, and `refdes audit` against a stamp taken before the duplication prints
+the id the record was filed under (`REQ-001 -> REQ-005 (k7f3m2q9x4a)`; the
+baseline file itself carries `REQ-001: {..., key: k7f3m2q9x4a}`). Note the
+message has to be worded as "under the original's id", because audit's arrow
+points the other way. Verified, `in-prog-logs/identity-remedy-wording.txt`
+§F2.1.
 
 ### Layer 3 — resolution
 
@@ -1199,8 +1222,19 @@ make part of it automatic and part of it not.
 
 **The part keys make automatic.** Reuse used to risk an old *internal*
 reference silently resolving to a different item. Under keys, internal
-references carry keys and cannot be captured by a reused display id. That
-risk is gone entirely.
+references carry keys and cannot be captured by a reused display id. That risk
+is gone **once the references carry keys** — and that is a state the project
+reaches on its first *writable* load, because that is what writes the keys and
+the `DISPLAY-ID@key` composites. It is not gone before then. A reference still
+in bare form resolves by display id, so on a project that has never been
+writable-loaded (`--no-write` suppresses both minting and expansion) deleting
+an item and re-creating another under the same display id re-attaches every
+still-bare reference to the new item, silently: no error, no warning, exit 0.
+Verified, `in-prog-logs/identity-remedy-wording.txt` §F4.1. The window is
+narrow — one writable load closes it, and the composite case then behaves as
+the §6 Layer 3 diagnostics describe — but it is real, so nothing before that
+load may rely on the guarantee. The same window is why `docs/ids.md` says a
+bare reference "resolves by display id" rather than promising otherwise.
 
 **The part keys do not touch.** An *external* citation — a schematic sheet,
 a test report, an email saying "per REQ-PWR-005" — resolves by display id or

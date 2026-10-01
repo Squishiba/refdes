@@ -130,7 +130,10 @@ nothing left over anywhere says which one happened. `refdes audit` reports
 which catches the moment right after a deletion, before any retyping — but
 not a delete-and-retype done in the same edit, which closes that window
 before anything ever looks. Closing this fully needs identity that survives
-an id being retyped, which is what surrogate keys provide.
+an id being retyped, which is what surrogate keys provide — with one
+condition, described under [Surrogate keys](#surrogate-keys): a reference
+that is still *bare* resolves by display id, so a reused id captures the
+project's bare references until the first writable load expands them.
 
 ## Surrogate keys
 
@@ -139,6 +142,8 @@ A **surrogate key** is an opaque, immutable 11-character identifier (e.g. `k7f3m
 Surrogate keys close that gap:
 
 - **Structured links and `checks: against:`** resolve by key once the reference carries one: in a `DISPLAY-ID@key` composite the key half decides the target, and only the label is refreshed. When a target is renamed, the link still points at the same item because the key hasn't changed. The tool rewrites bare references to `DISPLAY-ID@key` composites and refreshes the display half automatically on the next writable load; a reference that is still bare resolves by display id.
+
+  "Still bare" is a real state, not a theoretical one: it is every reference in a project that has never had a **writable** load, because `--no-write` suppresses both minting and expansion. A bare reference therefore does *not* survive an id being reused — delete `REQ-PWR-003` and create an unrelated item under that id on a never-writable-loaded project and every bare reference to it re-attaches to the new item, silently (`0 errors`, exit 0). Once a writable load has run, references carry keys and a reused id captures nothing: each one reports `points at key '...' which no item declares` instead. One `refdes check` is enough to reach that state.
 - **Baselines and seals** are keyed by surrogate key after adoption (before it, by display id, with a baseline entry carrying its own key inside). A renamed item is recognised as the same item across baselines either way — reported as `relabelled`, not `removed` + `added`.
 - **Board/workspace membership** follows the key, so moving and renaming an item in the same change still warns correctly.
 - **Duplicate and corruption detection** — the tool validates key format (Crockford base32 with a Damm check character) and uniqueness on every build.

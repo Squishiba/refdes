@@ -581,7 +581,13 @@ def resolve_links(project: Project) -> None:
                     if "@" in target_id or bare_key:
                         message = _unknown_key_message(project, f"{link_name} points at", target_id)
                     else:
-                        message = f"{link_name} points at {target_id!r}, which does not exist"
+                        message = (
+                            f"{link_name} points at {target_id!r}, which does not "
+                            "exist -- a typo, a deleted item, or an item renamed "
+                            "while this reference was still bare, and a bare "
+                            "reference cannot follow a rename: write the item's "
+                            f"new id here. See {docs_url_mod.DANGLING_LINK_DOCS}."
+                        )
                     project.error(
                         message,
                         file=item.source_file,

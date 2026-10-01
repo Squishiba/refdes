@@ -1,0 +1,630 @@
+Task: fix the *wording* of three findings from
+in-prog-logs/keys-identity-recovery.txt (PR #122) — F4.1 (docs overclaim),
+F2.1 (duplicate-key remedy doesn't say which copy), F3.3 (bare reference
+orphaned by a hand rename has no named remedy).
+
+Hard rule honoured throughout: **no identity behaviour changed.** Nothing that
+mints, matches, restores, refuses or hashes was touched. If a fix appeared to
+need a behaviour change, it was written up instead of done.
+
+Worktree: /home/jorb/.paseo/worktrees/16msma8v/identity-remedy-wording
+Branch:   identity-remedy-wording (from main @ 1d50242)
+
+The `refdes` on PATH is a broken editable install pointing at another
+worktree, so every command in this log actually ran through
+
+    python .scratch/r.py <project-dir> <refdes args...>
+
+a 12-line harness doing sys.path.insert(0, <this worktree>/src),
+os.chdir(<project-dir>), then refdes.cli.main(args). `[exit=N]` is main()'s
+return code. Everything below labelled `$ refdes ...` is shorthand for that.
+
+Scratch projects live in .scratch/ (gitignored). `.scratch/mkbase.py` writes a
+10-item hardware@3 project into any directory *without* loading it, so the
+caller decides when the first writable load happens:
+
+    items/requirements.yaml  REQ-PWR-001..004 (004 refines 001)
+    items/bounds.yaml        BND-PWR-001, BND-PWR-002 (limits)
+    items/decisions/dec-pwr-001.md
+                             DEC-PWR-001 satisfies [001,003],
+                             constrained_by [BND-PWR-001, BND-PWR-002],
+                             checks: [{value: ripple_mV, against: BND-PWR-002}]
+                             + a ```calc block defining ripple_mV
+    items/tests.yaml         TST-PWR-001 verifies [REQ-PWR-001, BND-PWR-002]
+                             TST-PWR-002 verifies [REQ-PWR-004]
+    items/log.yaml           LOG-A-001 addresses [REQ-PWR-001]
+
+Four inbound references point at REQ-PWR-001 (decisions satisfies, tests
+verifies, log addresses, requirements refines) — the same shape PR #122 used.
+`refdes --no-write check` on the fresh template is
+`10 items, 0 errors, 2 warnings`, and leaves **no `.refdes/` directory at
+all** and zero `key:` lines in `items/`.
+
+Status: IN PROGRESS. F4.1 and F2.1 done (both verified by running the real CLI
+before and after). F3.3 next.
+
+==========================================================================
+## F4.1 — the id-reuse overclaim in docs/design/keys.md §8
+
+### What the doc said
+
+docs/design/keys.md:1200-1203 (pre-fix), §8 "What remains of the display id…",
+under "**The part keys make automatic.**":
+
+    Reuse used to risk an old *internal* reference silently resolving to a
+    different item. Under keys, internal references carry keys and cannot be
+    captured by a reused display id. That risk is gone entirely.
+
+### Reproduced it myself, not from the report
+
+.scratch/base (written by `.scratch/mkbase.py`, never loaded) has **no
+`.refdes/` directory at all**, zero `key:` lines, and four references to
+REQ-PWR-001 all still bare:
+
+    items/requirements.yaml:15    refines: [REQ-PWR-001]
+    items/tests.yaml:10           verifies: [REQ-PWR-001, BND-PWR-002]
+    items/decisions/dec-pwr-001.md:7  satisfies: [REQ-PWR-001, REQ-PWR-003]
+    items/log.yaml:10             addresses: [REQ-PWR-001]
+
+`$ refdes --no-write check` on that tree: `10 items, 0 errors, 2 warnings`,
+and no `.refdes/` afterwards — `--no-write` writes neither keys nor
+composites, so the bare state is reachable on any real checkout that has only
+ever been loaded read-only.
+
+.scratch/f41 = that project with REQ-PWR-001's body replaced by an unrelated
+one ("The enclosure shall survive a 2 m drop onto concrete") — the delete and
+re-create of F4.1, in a single edit.
+
+    $ refdes check
+    (minted 10 key(s) and rewrote 10 reference(s) while loading)
+    WARNING <project> — 2 item(s) with no coverage — see coverage.html
+    WARNING <project> — 1 requirement(s) satisfied but not verified — see coverage.html
+    10 items, 0 errors, 2 warnings
+    [exit=0]
+
+    $ refdes build
+    10 items, 0 errors, 2 warnings
+    site written to .../.scratch/f41/_site
+    [exit=0]
+
+Where the links point afterwards, from the built `items.json`:
+
+    REQ-PWR-001 dqhejxvk8c8 The enclosure shall survive a 2 m drop onto concrete.
+      backlinks: {"satisfied_by": ["DEC-PWR-001"], "addressed_by": ["LOG-A-001"],
+                  "refined_by": ["REQ-PWR-004"], "verified_by": ["TST-PWR-001"]}
+
+and the four source references now read, all of them pointing at the
+**enclosure** requirement's freshly minted key:
+
+    requirements.yaml:19  refines:   [REQ-PWR-001@dqhejxvk8c8]
+    tests.yaml:11         verifies:  [REQ-PWR-001@dqhejxvk8c8, BND-PWR-002@vzhgj1zm2yb]
+    dec-pwr-001.md:8      satisfies: [REQ-PWR-001@dqhejxvk8c8, REQ-PWR-003@z0yabfedq3s]
+    log.yaml:11           addresses: [REQ-PWR-001@dqhejxvk8c8]
+
+**All four silently re-attached. `0 errors`, exit 0.** The claim is false as
+written.
+
+### The contrast that pins down when the guarantee *does* hold
+
+.scratch/f41b: the same project, but writable-loaded **once first** (`refdes
+check`, so every reference is a composite), and *then* the same delete and
+re-create — the original entry removed with its key, an unrelated REQ-PWR-001
+appended with no key:
+
+    $ refdes --no-write check
+    ERROR   items/decisions/dec-pwr-001.md:2 [DEC-PWR-001] — satisfies points at key '3bmhb21v2p6' (labelled REQ-PWR-001), which no item declares. A live item labelled REQ-PWR-001 declares no key. Its key may have been lost, or the label may now name a different item. The label is not used as a fallback. Check git history to confirm identity. If it is the same item, run `refdes keys restore REQ-PWR-001@3bmhb21v2p6 --dry-run`, then repeat without --dry-run to restore the original key.
+    ERROR   items/log.yaml:7 [LOG-A-001] — addresses ... same
+    ERROR   items/requirements.yaml:13 [REQ-PWR-004] — refines ... same
+    ERROR   items/tests.yaml:7 [TST-PWR-001] — verifies ... same
+    10 items, 4 errors, 2 warnings
+    [exit=1]
+
+So the guarantee is real, and it is **conditional on the references carrying
+keys**, which the first *writable* load is what gives them. One `refdes check`
+is enough. That is exactly the condition the docs omitted.
+
+### Fixes
+
+1. **docs/design/keys.md §8** — "That risk is gone entirely" is now "gone
+   **once the references carry keys**", with the condition spelled out (first
+   writable load; `--no-write` suppresses minting and expansion; the bare
+   window and its silent 0-error outcome), and a pointer to the verification.
+2. **docs/ids.md:132-133** — "Closing this fully needs identity that survives
+   an id being retyped, which is what surrogate keys provide" claimed full
+   closure. Now says "with one condition, described under Surrogate keys" and
+   says what it is.
+3. **docs/ids.md:141** — the surrogate-keys bullet already said "a reference
+   that is still bare resolves by display id", which is true but left the
+   consequence unstated. Added a paragraph: "still bare" is the state of every
+   reference in a never-writable-loaded project, a bare reference does *not*
+   survive an id being reused (verified symptom quoted), and after one
+   writable load each reference reports `points at key ... which no item
+   declares` instead.
+
+### Checked and left alone
+
+- **docs/troubleshooting.md** — its `## Surrogate keys` section documents each
+  diagnostic and its remedy; it never claims a reused id cannot capture a
+  reference. Grepped for `reuse|reused|reissue|capture`: the only hits are the
+  `formerly:` / renumbering prose at lines 298-300. No overclaim to correct.
+- **docs/links.md** — the composite-form section (lines 34-68) describes
+  expansion mechanics and already says plainly that `--no-write` leaves bare
+  references bare. It makes no claim about id reuse. No overclaim to correct.
+
+No message, diagnostic or behaviour changed for F4.1 — docs and the changelog
+fragment only (`changelog.d/id-reuse-guarantee-condition.fixed.md`).
+`python -m pytest tests/test_docs_examples.py -q -p no:randomly` → 6 passed.
+
+==========================================================================
+## F2.1 — the duplicate-key remedy did not say which copy
+
+### Where the message lives
+
+`keys.validate()` (src/refdes/keys.py:148), the Layer 2 uniqueness check, at
+src/refdes/keys.py:187-195. One `project.error(...)`, reported per extra
+holder, naming both items with `file:line`.
+
+### BEFORE — .scratch/f21 (base, keyed, no baseline), REQ-PWR-001 copy-pasted to
+### REQ-PWR-005 with `key: n1vvcc55pmf` left in place
+
+    $ refdes --no-write check
+    ERROR   items/requirements.yaml:20 [REQ-PWR-005] — key 'n1vvcc55pmf' on REQ-PWR-005 (local items/requirements.yaml:20) is already used by REQ-PWR-001 (local items/requirements.yaml:7). A key is unique by construction; two items sharing one means a line was duplicated. Delete the key from one of them and rebuild — it will be re-minted.
+    WARNING items/decisions/dec-pwr-001.md:2 [DEC-PWR-001] — satisfies references 'REQ-PWR-001@n1vvcc55pmf', but that key is REQ-PWR-005 and REQ-PWR-001 is a different live item. Refusing to refresh the label until you confirm which was meant.
+    WARNING items/log.yaml:7 [LOG-A-001] — addresses ... same
+    WARNING items/requirements.yaml:16 [REQ-PWR-004] — refines ... same
+    WARNING items/tests.yaml:7 [TST-PWR-001] — verifies ... same
+    WARNING <project> — 3 item(s) with no coverage — see coverage.html
+    WARNING <project> — 1 requirement(s) satisfied but not verified — see coverage.html
+    11 items, 1 errors, 6 warnings
+    [exit=1]
+
+### The wrong side of that coin flip is a green build (.scratch/f21w)
+
+Deleted the key from the **original** REQ-PWR-001, as the sentence invites:
+
+    $ refdes check
+    (minted 1 key(s) while loading)
+    WARNING items/decisions/dec-pwr-001.md:2 [DEC-PWR-001] — satisfies references 'REQ-PWR-001@n1vvcc55pmf', but that key is REQ-PWR-005 and REQ-PWR-001 is a different live item. ...
+    WARNING items/log.yaml:7, items/requirements.yaml:16, items/tests.yaml:7 — same
+    WARNING <project> — 3 item(s) with no coverage — see coverage.html
+    WARNING <project> — 1 requirement(s) satisfied but not verified — see coverage.html
+    11 items, 0 errors, 6 warnings
+    [exit=0]
+
+and from the built `items.json`:
+
+    REQ-PWR-001 19cxr9cdhz4   backlinks: {}
+    REQ-PWR-005 n1vvcc55pmf   backlinks: {"satisfied_by": ["DEC-PWR-001"], "addressed_by": ["LOG-A-001"],
+                                          "refined_by": ["REQ-PWR-004"], "verified_by": ["TST-PWR-001"]}
+
+The copy took all four. Taking the project the rest of the way (one added test
+to cover the three loose requirements) stamps a release over it:
+
+    $ refdes release rel-1
+    12 items, 0 errors, 5 warnings
+    release 'rel-1' stamped: 12 items, all gates passed.
+      .refdes/baselines/rel-1.yaml
+    [exit=0]
+
+(The gate rules are docs/lifecycle.md's eight; none of them treats a crossed
+reference as blocking. `release` refuses first on `uncovered_requirements
+BND-PWR-001, REQ-PWR-001, REQ-PWR-002` until the extra test is added, then
+passes.)
+
+### What signal is actually available — checked, not assumed
+
+1. **A baseline, when one exists** (.scratch/f21b: `revision rev-a` stamped
+   *before* the duplication, then the same duplicate). `refdes audit` prints:
+
+       Since last revision (rev-a, 2026-10-01T06:47:09Z):
+         changed   1   REQ-PWR-005
+         relabelled 1
+           REQ-PWR-001 -> REQ-PWR-005   (zt2p9eft0t7)
+
+   The baseline records the key under **REQ-PWR-001**, so REQ-PWR-001 is the
+   original. The baseline file itself says so directly —
+   `.refdes/baselines/rev-a.yaml` carries
+   `REQ-PWR-001: {hash: ..., key: zt2p9eft0t7, ...}`. Note the message must
+   be worded as "recorded under the original's display id", because audit's
+   arrow points the *other* way (`old -> new`) and is easy to misread.
+   With no baseline (.scratch/f21) `audit` prints "(none stamped yet -- project
+   is in draft)" — nothing to read.
+2. **Git.** .scratch/f21g, committed the keyed project, then committed the
+   copy-paste, key `kv1jc78vvby`:
+
+       $ git log -S'key: kv1jc78vvby' --oneline --reverse
+       f77402a import project (keys minted)
+       0168dc1 copy REQ-PWR-001 to REQ-PWR-005
+       $ git show f77402a:items/requirements.yaml | grep -A1 'key: kv1jc78vvby'
+         - key: kv1jc78vvby
+           id: REQ-PWR-001
+
+   Oldest-first puts the original first, and that commit's file names it. This
+   is what the message tells the author to run.
+
+### AFTER
+
+    $ refdes --no-write check   # .scratch/f21, and identically .scratch/f21b
+    ERROR   items/requirements.yaml:20 [REQ-PWR-005] — key 'n1vvcc55pmf' on REQ-PWR-005 (local items/requirements.yaml:20) is already used by REQ-PWR-001 (local items/requirements.yaml:7). A key is unique by construction; two items sharing one means a line was duplicated. Keep the key on the original: the item that was there first, which is the one existing references and recorded history mean, so the copy is normally the newer item. `git log -S'key: <KEY>' --oneline --reverse` names the oldest commit that wrote the key, and a baseline, seal file or membership manifest that records the key records it under the original's display id (`refdes audit` shows the stamp). Delete the key from the copy and rebuild — a fresh one is minted for it. Deleting it from the original instead leaves every inbound reference pointing at the copy, and the build passes anyway.
+    WARNING items/decisions/dec-pwr-001.md:2 [DEC-PWR-001] — satisfies references ... (unchanged)
+    11 items, 1 errors, 6 warnings
+    [exit=1]
+
+Identical apart from the remedy. Same error, same severity, same file:line,
+same exit code, same four crossed-reference warnings. **No detection logic was
+added** — the branch, the loop and everything it reads are untouched; only the
+`project.error(...)` string grew. In particular I did *not* wire
+`_key_evidence_sources` in to compute which item a baseline recorded the key
+under, even though it is right there: that would be new detection, and the
+finding says wording only. The message names the signal instead.
+
+### Followed the new advice end to end (.scratch/f21h)
+
+Deleted the copy's key — which in a list file means dropping the `key:` value
+and letting `id:` become the entry's first field, otherwise the `- ` marker
+goes with it — then rebuilt:
+
+    $ refdes check
+    (minted 1 key(s) while loading)
+    WARNING <project> — 3 item(s) with no coverage — see coverage.html
+    WARNING <project> — 1 requirement(s) satisfied but not verified — see coverage.html
+    11 items, 0 errors, 2 warnings
+    [exit=0]
+
+REQ-PWR-005 comes back as `key: yg64b8vdp6s`, and all four references still
+read `REQ-PWR-001@n1vvcc55pmf` — the original's key, unchanged. Full recovery.
+
+### Files
+
+- src/refdes/keys.py — the Layer 2 message only.
+- tests/test_keys.py:452 — the pin on the old sentence replaced by four pins
+  on the new clauses, plus `assert "one of them" not in message` so the
+  ambiguous phrasing cannot come back. Grepped the whole `tests/` tree for the
+  old wording (`one of them`, `will be re-minted`): this was the only pin.
+- docs/troubleshooting.md — the same diagnostic's `**Remedy:**` said "delete
+  the `key:` line from one of the items", the identical gap in prose; it now
+  carries the same two ways to tell, and names the release-stamping trap.
+- docs/design/keys.md §6 Layer 2 — quotes the shipped message; updated, plus a
+  paragraph on why the message cannot pick a side (load order is position in
+  the file tree, not authorship).
+- changelog.d/duplicate-key-which-one.fixed.md
+
+### Out of scope, found while testing, NOT fixed
+
+I deleted the `  - key: <KEY>` line from the copy and left the rest of the
+entry in place; in a list file that removes the entry's `- ` marker as well, so
+the entry's remaining fields silently become the *previous* item's fields.
+YAML then keeps the last of two `id:` keys with no diagnostic at all
+(.scratch/dupid: a hand-merged entry with two `id:` lines loads as 10 items,
+`0 errors` for the item itself, and the only trace is the dangling reference
+that the vanished id leaves behind). That is a separate robustness gap in the
+loader/write-back, not a wording problem, and fixing it would be an identity
+behaviour change — recorded here and left alone.
+
+==========================================================================
+## F3.3 — a bare reference orphaned by a hand rename had no named remedy
+
+### Where the message lives
+
+`build.resolve_links`, src/refdes/build.py:584 (pre-fix), the bare-target
+branch of the `target is None` case. One `project.error(...)` per dangling
+target.
+
+### The shape (.scratch/f33)
+
+base -> `refdes check` (everything keyed and expanded) -> hand-edit
+`id: REQ-PWR-001` to `id: REQ-PWR-011` in items/requirements.yaml, and
+hand-revert TST-PWR-001's `verifies:` to bare `[REQ-PWR-001, BND-PWR-002]`.
+
+### BEFORE
+
+    $ refdes --no-write check
+    ERROR   items/tests.yaml:7 [TST-PWR-001] — verifies points at 'REQ-PWR-001', which does not exist
+    WARNING <project> — 2 item(s) with no coverage — see coverage.html
+    WARNING <project> — 2 requirement(s) satisfied but not verified — see coverage.html
+    10 items, 1 errors, 2 warnings
+    [exit=1]
+
+Symptom only. The other three inbound references are composites and refreshed
+fine; only the bare one dangles.
+
+### Every recovery command checked, none of them is the answer
+
+- **`refdes keys restore`** — no lost key exists. Nothing to restore; there is
+  no key in the picture at this point at all.
+- **`refdes former-ids propose`** (.scratch/f33, no baseline yet):
+  `error: no baseline stamped yet -- nothing to compare against. Run 'refdes revision <name>' first.` [exit=1]
+- **`refdes former-ids propose --confirm`** (.scratch/f33e, baseline stamped
+  *before* the break so propose can run): it proposes the pair as an exact key
+  match and writes the line —
+
+      1 candidate former-id mapping(s):
+        REQ-PWR-001 (requirement 'The 3V3 rail shall supply 1.2 A continuous.') -> REQ-PWR-011 ('The 3V3 rail shall supply 1.2 A continuous.')  exact match (surrogate key)
+      wrote former_ids: [REQ-PWR-001] to REQ-PWR-011 (items/requirements.yaml)
+
+  — and the error is unchanged:
+
+      ERROR   items/tests.yaml:7 [TST-PWR-001] — verifies points at 'REQ-PWR-001', which does not exist
+      10 items, 1 errors, 2 warnings
+      [exit=1]
+
+  `former_ids:` resolves prose references only; a structured link needs a live
+  id or key. Correct by design, and the reason this is a dead end.
+- **`refdes revise`** — only worth mentioning with its real reach. Two probes:
+  a `prefixes: {REQ-PWR: NEED-PWR}` mapping over the broken tree is the fix,
+  because `revise` expands the bare reference *before* it renames (.scratch/f33c):
+
+      items/tests.yaml:11  verifies: [REQ-PWR-001, BND-PWR-002] -> verifies: [NEED-PWR-001@9akfesk8hr1, BND-PWR-002@kpycn6vmqq0]
+
+  and an `ids: {REQ-PWR-001: REQ-PWR-011}` mapping is silently a no-op
+  (.scratch/f33f):
+
+      $ refdes revise rename.yaml --dry-run
+      nothing to do -- mapping doesn't apply to this project
+      [exit=0]
+
+  because `revise`'s mapping vocabulary is types:/fields:/links:/prefixes:
+  (`refdes revise --help`; revise.py:132). It renames ids only as part of a
+  prefix rename, so **the message must not tell the reader to rename a single
+  item with it.**
+
+  Also verified, because I was about to write the opposite in the docs:
+  **`revise` does not record `former_ids:`.** After a real `revise rename.yaml`
+  run (.scratch/f33g) `grep former_ids items/*.yaml` finds nothing, and
+  `former-ids propose` then reports `no baseline stamped yet`. Recording the
+  retired id is a separate `former-ids propose --confirm` step. (The task
+  brief's phrasing "rename with `refdes revise`, which records the former id"
+  is wrong on that half; the message and docs here say what is true.)
+
+### Remedy A — retype the reference (this is what the message tells you to do)
+
+.scratch/f33a: `verifies: [REQ-PWR-001, BND-PWR-002]` -> `[REQ-PWR-011, BND-PWR-002]`
+
+    $ refdes check
+    (rewrote 5 reference(s) while loading)
+    WARNING <project> — 2 item(s) with no coverage — see coverage.html
+    WARNING <project> — 1 requirement(s) satisfied but not verified — see coverage.html
+    10 items, 0 errors, 2 warnings
+    [exit=0]
+
+and the file ends up holding the composite, on the *new* id and the item's real
+key:
+
+    verifies: [REQ-PWR-011@9akfesk8hr1, BND-PWR-002@kpycn6vmqq0]
+
+Verified, so the message names this first.
+
+### AFTER
+
+    $ refdes --no-write check   # .scratch/f33
+    ERROR   items/tests.yaml:7 [TST-PWR-001] — verifies points at 'REQ-PWR-001', which does not exist. If that item was renamed by hand, this reference is still bare, so it carries no key to follow the rename: write the item's new display id here. A prefix-wide rename is what `refdes revise` is for -- it expands bare references first, so they follow the rename. Neither `refdes keys restore` nor `refdes former-ids` reaches a structured link; `former_ids:` resolves prose references only. Otherwise this is a typo or a deleted item. See https://squishiba.github.io/refdes/troubleshooting.html#links.
+    WARNING <project> — 2 item(s) with no coverage — see coverage.html
+    WARNING <project> — 2 requirement(s) satisfied but not verified — see coverage.html
+    10 items, 1 errors, 2 warnings
+    [exit=1]
+
+Same error, same severity, same file:line, same count, same exit code. The
+remedy is unconditional — **no detection was added**: `resolve_links` still
+asks only `resolve_link_target(...) is None`, and nothing in the message is
+computed from the project. That matters here, because the *conditional*
+version of this fix (the report's own suggestion — "REQ-PWR-011 has
+former_ids: [...]" appended at this line) would require running
+`validate_former_ids` before `resolve_links`, since `project.former_ids` is
+`{}` at resolution time by design. That is a behaviour change and was not
+done; the message instead covers the typo/deleted/renamed cases in one text and
+lets the reader match its own situation.
+
+### The doc pointer
+
+`docs_url.DANGLING_LINK_DOCS` added to src/refdes/docs_url.py —
+`https://squishiba.github.io/refdes/troubleshooting.html#links`, the anchor for
+troubleshooting.md's own `## Links` heading. Not a repo-relative `docs/...`
+path, per #121. That section's entry for the diagnostic gained the same
+remedy, plus the three commands that do not apply and why, and it now links
+`refdes former-ids propose --confirm` for the separate former-id step (with the
+correction above).
+
+### Files
+
+- src/refdes/docs_url.py — one new constant.
+- src/refdes/build.py — the bare-target message only.
+- tests/test_keys_links.py — new pin: the message starts with the old
+  sentence, and carries the remedy, the `refdes revise` mention, the
+  `former_ids:`-is-prose-only statement, and the published URL, with
+  `assert "docs/troubleshooting.md" not in message` guarding against a
+  regression to a repo-relative path. Nothing else in `tests/` pinned this
+  message; tests/test_revise.py:1037 quotes it inside a test *docstring*
+  (the symptom half), which is still true as a prefix.
+- docs/troubleshooting.md — the `## Links` entry.
+- changelog.d/dangling-bare-link-remedy.fixed.md
+
+### Out of scope, found, NOT fixed
+
+- `checks: against:` has the identical dead end one branch away:
+  src/refdes/build.py:1441 still emits bare
+  `check against 'BND-PWR-404', which does not exist` with no remedy. Same
+  shape, same fix, but it is a different diagnostic than the finding names, so
+  it is left alone and recorded here.
+- The prose-reference warning at build.py:2296
+  (`reference to 'X', which does not exist`) is correctly different: it is a
+  warning, it consults `project.former_ids` first (build.py:2285), and prose
+  references are exactly what `former_ids:` is for. Untouched.
+- An `ids:` mapping handed to `refdes revise` is silently ignored
+  ("nothing to do -- mapping doesn't apply to this project", exit 0). Wording
+  at best; not this task.
+
+==========================================================================
+## Wrap-up
+
+Status: FINISHED. All three findings fixed, wording only, one commit each.
+
+| # | Finding | What changed | Files |
+|---|---------|--------------|-------|
+| F4.1 | `docs/design/keys.md` §8's "that risk is gone entirely" | Restated with the condition: the guarantee starts when the references carry keys, i.e. on the first **writable** load. Same claim in `docs/ids.md` (two places) corrected to match | docs/design/keys.md, docs/ids.md |
+| F2.1 | Layer 2 duplicate-key remedy "Delete the key from one of them" | Names the original's definition and two ways to find it; names the trap of taking it the other way | src/refdes/keys.py, tests/test_keys.py, docs/troubleshooting.md, docs/design/keys.md |
+| F3.3 | bare link dangling on a hand rename, no remedy | Names the remedy, the two commands that do not apply, and the published docs page | src/refdes/build.py, src/refdes/docs_url.py, tests/test_keys_links.py, docs/troubleshooting.md |
+
+**No identity behaviour changed.** Nothing that mints, matches, restores,
+refuses or hashes was touched. Specifically:
+
+- `keys.validate()`'s duplicate-key branch: the `if owner is None` test, the
+  `by_key` loop, both location strings and the `project.error(...)` call are
+  byte-identical; only the message string grew. Same for
+  `build.resolve_links`' dangling-target branch: still `resolve_link_target(...)
+  is None`, still one error per target, same severity, file, line and item id.
+- No new lookups were added. `_key_evidence_sources`, `deleted_key_records`,
+  `lifecycle.list_baselines` and friends are *named* in the duplicate-key
+  message as things the reader can go and read; none of them is called from
+  the new text. Both conditional fixes the report suggested — calling
+  `validate_former_ids` before `resolve_links` so `project.former_ids` is
+  populated at resolution time, and consulting the baseline in the duplicate
+  branch — would be behaviour changes, so both were declined and recorded.
+- Exit codes, diagnostic counts and the diagnostics themselves are unchanged in
+  every scenario run above: F2.1 is still `11 items, 1 errors, 6 warnings`,
+  F3.3 still `10 items, 1 errors, 2 warnings`.
+
+### Verification
+
+- Full suite: `python -m pytest tests/ -q -p no:randomly` → **2883 passed,
+  2 skipped** (214 s), after all three commits' changes are in the tree.
+- `ruff check` on the five files I touched: `keys.py`, `docs_url.py`,
+  `test_keys.py`, `test_keys_links.py` all clean; `build.py` has one
+  pre-existing `I001` (import block ordering around
+  `from . import calc, dates, history as history_mod, imports, seal`) which I
+  confirmed is also present at HEAD — left alone, per AGENTS.md.
+- Every message was reproduced through the real CLI before and after; both
+  texts are quoted above verbatim, as are the exit codes.
+
+### Scratch
+
+All in `.scratch/` (gitignored, left in place): `r.py` (the runner),
+`mkbase.py` (the 10-item template), `base`, `f41`, `f41b`, `f21`, `f21b`,
+`f21g`, `f21h`, `f21w`, `f33`, `f33a`-`f33g`, `dupid`.
+
+### Left for someone else
+
+1. `checks: against:`'s dangling target (src/refdes/build.py:1441) has the same
+   dead end as F3.3 and would take the same wording.
+2. An `ids:` mapping given to `refdes revise` is silently ignored
+   (`nothing to do -- mapping doesn't apply to this project`, exit 0).
+3. A YAML mapping with two `id:` keys keeps the last one with no diagnostic of
+   its own, so one item silently disappears from the model (.scratch/dupid) —
+   found while testing the F2.1 remedy; the only trace is the dangling
+   reference the vanished id leaves behind.
+4. PR #122's F4.2 (`keys restore` moves a deleted item's key onto a different
+   item even when a baseline records that key under a different title and
+   hash) and F6.1 (a never-adopted seal cannot remember a key, so a sealed
+   entry's lost key is re-minted with zero diagnostics) are untouched here,
+   as scoped. Both need a comparison or a report added, not a rewording.
+
+==========================================================================
+## Review round — three changes after review of PR #126
+
+### 1. `docs/troubleshooting.md` `## Links` contradicted itself
+
+It said `refdes revise` "cannot rename a single item" and then ended with "next
+time, rename with `refdes revise` rather than editing `id:`". Both halves
+cannot stand. The reviewer is right about which lesson is the right one, and I
+had the evidence to check it — I just drew the wrong conclusion from the
+narrower shape I happened to construct.
+
+**A hand rename is safe. Re-verified both halves.**
+
+.scratch/hr, the reviewer's minimal project (two requirements, `refines:
+[REQ-001]`, nothing loaded yet — no `.refdes/`, the reference bare):
+
+    $ refdes --no-write check
+    2 items, 0 errors, 1 warnings            [.refdes/ still absent]
+
+Step 1, one writable load, which is what gives the reference a key:
+
+    $ refdes check
+    (minted 2 key(s) and rewrote 1 reference(s) while loading)
+    2 items, 0 errors, 1 warnings
+
+    items/requirements.yaml:7   - key: 51rkcxhdsfc
+    items/requirements.yaml:8     id: REQ-001
+    items/requirements.yaml:13    refines: [REQ-001@51rkcxhdsfc]
+
+Step 2, hand-edit the target's `id: REQ-001` -> `id: REQ-009`, then check:
+
+    $ refdes check
+    (rewrote 1 reference(s) while loading)
+    2 items, 0 errors, 1 warnings
+
+    items/requirements.yaml:8     id: REQ-009
+    items/requirements.yaml:13    refines: [REQ-009@51rkcxhdsfc]
+
+**The reference followed the rename, the key did not move, `0 errors`, exit 0.**
+Exactly as the reviewer described.
+
+And the dangling case, same tree with the reference reverted to bare first
+(.scratch/hr2) — so the only variable is bare-vs-composite at rename time:
+
+    ERROR   items/requirements.yaml:10 [REQ-002] — refines points at 'REQ-001', which does not exist ...
+    2 items, 1 errors, 1 warnings
+    [exit=1]
+
+So the lesson is not "don't hand-edit `id:`". It is: **a bare reference cannot
+follow a rename, and a reference is bare until a writable load expands it**, so
+run any `refdes check` *without* `--no-write` before renaming. `--no-write`
+suppresses minting and expansion, which is exactly how a project ends up with
+nothing but bare references. `refdes revise` is now mentioned only where it
+applies, a prefix-wide rename.
+
+Wrote it as a new `### Hand-renaming an item is safe — get one writable load in
+first` subsection under `## Links`, with the three-step yaml trace and the
+`(rewrote 1 reference(s) while loading)` / `0 errors` output. Checked the two
+anchors it links (`cli-reference.md#refdes-revise-mapping-file`,
+`ids.md#renumbering-former-ids`) against `pages._slugify`, the function that
+generates them, rather than guessing.
+
+### 2. The `resolve_links` message led with the rare case and ran long
+
+It fired for every typo — the common case — and ran to ~70 words with the hand
+rename first and "a typo or a deleted item" last. Trimmed to two sentences that
+lead with the ordinary three and spend one clause on the remedy; the long form
+(which commands do *not* apply, and the §1 lesson above) stays in the
+`## Links` section the message already points at.
+
+    BEFORE
+    refines points at 'REQ-001', which does not exist. If that item was renamed by hand, this reference is still bare, so it carries no key to follow the rename: write the item's new display id here. A prefix-wide rename is what `refdes revise` is for -- it expands bare references first, so they follow the rename. Neither `refdes keys restore` nor `refdes former-ids` reaches a structured link; `former_ids:` resolves prose references only. Otherwise this is a typo or a deleted item. See https://squishiba.github.io/refdes/troubleshooting.html#links.
+
+    AFTER
+    refines points at 'REQ-001', which does not exist -- a typo, a deleted item, or an item renamed while this reference was still bare, and a bare reference cannot follow a rename: write the item's new id here. See https://squishiba.github.io/refdes/troubleshooting.html#links.
+
+Same error, severity, file:line, count and exit code; `2 items, 1 errors, 1
+warnings`, exit 1. `tests/test_keys_links.py` drops the pins on prose the
+message no longer carries (`refdes revise`, the `former_ids:` sentence, "new
+display id") and gains `assert message.count(". ") <= 1` so the prose cannot
+grow back unnoticed. The URL assertion and the no-repo-path assertion stay.
+
+### 3. The duplicate-key message printed a literal `<KEY>`
+
+The key was right there as `item.key`. Interpolated, so the command is
+copy-pasteable, and trimmed (the `(`refdes audit` shows the stamp)` parenthetical
+was the least load-bearing clause; `keys.md` §6 Layer 2 now carries that
+evidence in prose instead, along with the arrow-direction caveat).
+
+    BEFORE
+    ... Keep the key on the original: the item that was there first, which is the one existing references and recorded history mean, so the copy is normally the newer item. `git log -S'key: <KEY>' --oneline --reverse` names the oldest commit that wrote the key, and a baseline, seal file or membership manifest that records the key records it under the original's display id (`refdes audit` shows the stamp). Delete the key from the copy and rebuild — a fresh one is minted for it. Deleting it from the original instead leaves every inbound reference pointing at the copy, and the build passes anyway.
+
+    AFTER
+    ... Keep the key on the original -- the item that was there first, which is what existing references and recorded history mean; `git log -S'key: n1vvcc55pmf' --oneline --reverse` names the oldest commit that wrote it, and a baseline, seal or membership manifest records it under the original's id. Delete the key from the copy and rebuild; taking it from the original instead leaves every inbound reference pointing at the copy, and the build passes.
+
+The "which one is the original" guidance and the warning about taking it from
+the original both survive. Copied the interpolated command straight out of a
+live run and ran it in a git checkout of the same tree: it names the original's
+commit first, and `git show <that>:items/requirements.yaml` names REQ-PWR-001.
+`tests/test_keys.py` pins the real key, plus `assert "<KEY>" not in message` so
+the placeholder cannot come back. `docs/design/keys.md` §6 Layer 2 quotes the
+shipped message, reflowed to this block's width and using the example key that
+block already used (`k7f3m2q9x4a`).
+
+Changelog fragments for both messages were updated to describe the shipped text
+rather than the first draft of it.
+
+Behaviour: still nothing. All three are wording; the F2.1 branch, the
+`resolve_links` branch and every diagnostic's severity, file, line and exit
+code are unchanged, and the two scratch shapes that produce each message still
+report exactly the same counts.
