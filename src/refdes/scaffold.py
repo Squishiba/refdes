@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import os
 import re
+from dataclasses import dataclass
 from typing import Any
 
 from . import build as build_mod
@@ -42,81 +43,170 @@ def _vscode_settings_text(target_dir: str) -> str:
 
     The cost of that correctness is that the file names one machine, which is
     why writing it also puts it in `.gitignore` (see
-    `_ensure_vscode_settings_gitignored`) and why an existing one is never
-    silently skipped (see `vscode_settings_note`).
+    `_ensure_gitignore_entries`) and why an existing one is never silently
+    skipped (see `vscode_settings_note`).
     """
     settings = {"yaml.schemas": {_vscode_schema_path(target_dir): ["items/**/*.yaml"]}}
     return json.dumps(settings, indent=2) + "\n"
 
 
-# The block `init` appends to the project's .gitignore, written the way this
-# repo's own .gitignore states its reasoning: the per-machine file named, the
-# reason in a comment above it, the surrounding directory left alone -- a
-# project's `.vscode/extensions.json` or `tasks.json` are shareable and worth
-# committing, which is exactly why `.vscode/` as a whole must NOT be ignored.
-_VSCODE_GITIGNORE_BLOCK = (
-    "# Written by `refdes init`. The yaml.schemas path in this file is an\n"
-    "# absolute path into one checkout, so a committed copy hands every other\n"
-    "# clone a schema that resolves to nothing -- silently, in both tools.\n"
-    "# Editor settings you mean to share belong in a file you write yourself.\n"
-    ".vscode/settings.json\n"
+# What `init` makes the project's .gitignore ignore: one entry per file it
+# writes or leaves behind that must not be committed, each stated the way this
+# repo's own .gitignore states its reasoning -- the path named, the reason in a
+# comment above it, the surrounding directory left alone. `.vscode/` as a whole
+# must NOT be ignored (a project's `tasks.json`/`extensions.json` are shareable
+# -- this repo commits its own) and neither must `.refdes/`, which holds the
+# project's own record: the ID ledger, the citation lockfile, seals and board
+# manifests all belong in git. So the patterns name the one file or the one
+# subdirectory.
+#
+# No leading slash on any pattern, deliberately. Every one of them contains a
+# slash away from its end, so git reads it as relative to the directory holding
+# the `.gitignore` (gitignore(5): "if there is a separator at the beginning or
+# middle of the pattern, then the pattern is relative to the directory level of
+# the particular .gitignore file itself"). That is what a `.gitignore` `init`
+# writes at the project root needs whether the project IS the repository root
+# or one subdirectory of a larger repository -- verified with `git
+# check-ignore -v` in both layouts. A leading `/` would anchor it the same way
+# but would also read as a claim about a repository root we may not be in.
+
+
+@dataclass(frozen=True)
+class _GitignoreEntry:
+    """One ignore pattern `init` ensures, with the comment block above it and
+    the patterns that already cover it."""
+
+    pattern: str
+    covers: frozenset[str]
+    block: str
+
+
+def _covers(pattern: str, *whole_dirs: str) -> frozenset[str]:
+    """The patterns that already state a position on `pattern`, in all the
+    forms git accepts for the same intent.
+
+    `whole_dirs` are directories whose own ignore covers everything inside
+    them, so a project that ignores `.refdes/` has already said its piece about
+    a file in there.
+
+    A small literal set on purpose rather than a walk of git's pattern
+    language: `init` runs in directories that are not git repositories at all,
+    so this cannot ask git what it thinks.
+    """
+    forms = {pattern, "/" + pattern, "**/" + pattern}
+    for directory in whole_dirs:
+        for spelling in (directory, directory + "/"):
+            forms |= {spelling, "/" + spelling, "**/" + spelling}
+    return frozenset(forms)
+
+
+_VSCODE_SETTINGS_GITIGNORE = _GitignoreEntry(
+    pattern=".vscode/settings.json",
+    covers=_covers(".vscode/settings.json", ".vscode"),
+    block=(
+        "# Written by `refdes init`. The yaml.schemas path in this file is an\n"
+        "# absolute path into one checkout, so a committed copy hands every other\n"
+        "# clone a schema that resolves to nothing -- silently, in both tools.\n"
+        "# Editor settings you mean to share belong in a file you write yourself.\n"
+        ".vscode/settings.json\n"
+    ),
 )
 
-# Patterns that already cover `.vscode/settings.json`, so appending our own
-# would be noise. A small literal set on purpose rather than git's pattern
-# language: `init` runs in directories that are not git repositories at all,
-# so this cannot ask git what it thinks.
-_GITIGNORE_COVERS_VSCODE_SETTINGS = frozenset(
-    {
-        ".vscode/settings.json",
-        "/.vscode/settings.json",
-        "**/.vscode/settings.json",
-        ".vscode",
-        ".vscode/",
-        "/.vscode/",
-        "**/.vscode/",
-    }
+_COPIES_GITIGNORE = _GitignoreEntry(
+    pattern=".refdes/copies/",
+    covers=_covers(".refdes/copies/", ".refdes"),
+    block=(
+        "# Written by `refdes init`. Kept local copies of datasheet bytes, one\n"
+        "# per citation with `keep_copy: true`, and manufacturer datasheets are\n"
+        "# generally copyrighted -- re-fetch them rather than commit them. The\n"
+        "# rest of `.refdes/` is this project's own record (the ID ledger, the\n"
+        "# citation lockfile, seals) and does belong in git, which is why this\n"
+        "# names the one directory rather than `.refdes/` as a whole.\n"
+        ".refdes/copies/\n"
+    ),
 )
 
+_SCHEMA_JSON_GITIGNORE = _GitignoreEntry(
+    pattern=".refdes/schema.json",
+    covers=_covers(".refdes/schema.json", ".refdes"),
+    block=(
+        "# Written by `refdes init`. The merged JSON Schema is regenerated by\n"
+        "# every command that loads the project, so a committed copy can only\n"
+        "# ever disagree with the project config -- silently, in the editor.\n"
+        ".refdes/schema.json\n"
+    ),
+)
 
-def _gitignore_addresses_vscode_settings(text: str) -> bool:
+# The two `.refdes/` entries do not depend on anything else `init` does: those
+# files are written by `build`, `check`, `fetch` and friends whatever happened
+# here, so their ignore is written on every init. The `.vscode` entry is only
+# wanted when `init` actually wrote that file (see `_write_vscode_settings`).
+_REFDES_GITIGNORE = (_COPIES_GITIGNORE, _SCHEMA_JSON_GITIGNORE)
+
+
+def _gitignore_addresses(text: str, entry: _GitignoreEntry) -> bool:
     """Whether some pattern in `text` already states the project's position on
-    `.vscode/settings.json` -- an ignore pattern or an explicit `!` negation.
+    `entry.pattern` -- an ignore pattern or an explicit `!` negation.
 
-    A negation counts: whoever wrote `!.vscode/settings.json` means to track
-    that file, and git takes the *last* matching pattern, so appending ours
-    would quietly out-rank a deliberate choice. Comments and blank lines do
-    not."""
+    A negation counts: whoever wrote `!` + that pattern means to track the file,
+    and git takes the *last* matching pattern, so appending ours would quietly
+    out-rank a deliberate choice. Comments and blank lines do not."""
     for line in text.splitlines():
         stripped = line.strip()
         if not stripped or stripped.startswith("#"):
             continue
-        if stripped.lstrip("!") in _GITIGNORE_COVERS_VSCODE_SETTINGS:
+        if stripped.lstrip("!") in entry.covers:
             return True
     return False
 
 
-def _ensure_vscode_settings_gitignored(target_dir: str) -> None:
-    """Make sure the project's `.gitignore` ignores `.vscode/settings.json`,
+def _gitignore_patterns(text: str) -> list[str]:
+    """The ignore patterns (not comments) written in `text`, in order."""
+    return [
+        line.strip()
+        for line in text.splitlines()
+        if line.strip() and not line.strip().startswith("#")
+    ]
+
+
+def _ensure_gitignore_entries(target_dir: str, entries: list[_GitignoreEntry]) -> None:
+    """Make sure the project's `.gitignore` ignores each entry's path,
     creating `.gitignore` when the project has none.
 
     Append-only and idempotent: `.gitignore` is hand-authored and hand-commented
-    like refdes-project.yaml, so nothing outside the appended block moves, and
-    when some existing pattern already covers the file nothing is written at
-    all. Appended block takes the file's own line ending (textio's
+    like refdes-project.yaml, so nothing outside the appended blocks moves, and
+    when some existing pattern already covers a path nothing is written for that
+    path at all. Each block takes the file's own line ending (textio's
     `append_ending` rule), so a CRLF gitignore does not grow an LF island.
     """
     path = os.path.join(target_dir, ".gitignore")
     if not os.path.isfile(path):
-        textio.write_text(path, _VSCODE_GITIGNORE_BLOCK)
+        textio.write_text(path, _joined_blocks(entries, textio.LF))
         return
     existing = textio.read_text(path)
-    if _gitignore_addresses_vscode_settings(existing):
+    missing = [entry for entry in entries if not _gitignore_addresses(existing, entry)]
+    if not missing:
         return
     ending = textio.append_ending(existing)
     gap = ending if existing.strip() else ""
-    block = _VSCODE_GITIGNORE_BLOCK.replace("\n", ending)
-    textio.write_text(path, existing + gap + block)
+    textio.write_text(path, existing + gap + _joined_blocks(missing, ending))
+
+
+def _joined_blocks(entries: list[_GitignoreEntry], ending: str) -> str:
+    """The comment blocks of `entries`, one blank line apart, on `ending`'s line
+    endings."""
+    parts = [entries[0].block.replace("\n", ending)]
+    parts += [ending + entry.block.replace("\n", ending) for entry in entries[1:]]
+    return "".join(parts)
+
+
+def added_gitignore_patterns(before: str | None, after: str) -> list[str]:
+    """Which ignore patterns a `.gitignore` write added, given its text before
+    (`None` when there was no file) and after. Pure, so `cmd_init` can announce
+    exactly what appeared without `init` having to report anything -- and an
+    announcement that stays true when `init` appended nothing."""
+    prior = set(_gitignore_patterns(before)) if before is not None else set()
+    return [p for p in _gitignore_patterns(after) if p not in prior]
 
 
 def _write_vscode_settings(target_dir: str) -> bool:
@@ -130,7 +220,9 @@ def _write_vscode_settings(target_dir: str) -> bool:
     machine-specific absolute path inside it is `init`'s responsibility, and
     so the only case that gets the `.gitignore` entry. A settings file that
     was already there may already be tracked, where a gitignore line would do
-    nothing but promise.
+    nothing but promise. (The `.refdes/` entries are wanted either way -- see
+    `_ensure_gitignore_entries` -- which is why this return value no longer
+    decides whether `.gitignore` gets written at all.)
     """
     settings_path = os.path.join(target_dir, ".vscode", "settings.json")
     if os.path.isfile(settings_path):
@@ -202,17 +294,24 @@ def init(
     "latest": resolved here, once, to the concrete integer the installed
     tool currently ships as newest.
 
-    Also writes `.vscode/settings.json` for schema completion, and -- because
-    the schema path in it is absolute and machine-specific -- makes sure the
-    project's `.gitignore` covers that file. An existing `.vscode/settings.json`
-    is left exactly as it is and no gitignore entry is added for it.
+    Also writes `.vscode/settings.json` for schema completion, and makes sure
+    the project's `.gitignore` covers the three files that must not be
+    committed: `.vscode/settings.json` (the schema path in it is absolute and
+    machine-specific), `.refdes/copies/` (kept datasheet bytes, generally
+    copyrighted) and `.refdes/schema.json` (regenerated by every command that
+    loads the project). The last two were a promise the docs made three times
+    with nothing behind it -- `git add -A` in a fresh `init` project staged a
+    6 MB datasheet and a 1696-line generated schema. An existing
+    `.vscode/settings.json` is left exactly as it is and no gitignore entry is
+    added for it.
 
     Both outcomes are announced by the caller, which is the only printer here:
     `cmd_init` asks `vscode_settings_exists` before calling this and prints
     `wrote .vscode/settings.json` when init wrote it and `vscode_settings_note`
     when it did not, so neither the write nor the skip is silent. The return
     value stays the config path alone -- this function reports nothing about
-    the second file.
+    the second file, and `cmd_init` diffs `.gitignore` itself for the third
+    (`added_gitignore_patterns`).
 
     Returns the path written. Raises SchemaError if refdes-project.yaml already
     exists at the target, or if `presets` is given with `standard=None`
@@ -247,8 +346,16 @@ def init(
     with open(config_path, "w", encoding="utf-8") as fh:
         fh.write(_init_yaml(standard, version, presets))
 
+    # The `.refdes/` entries always: those files are written by `build`,
+    # `check`, `fetch` and the rest whatever happened with the editor files, so
+    # a project that skipped schema completion is exactly the one still holding
+    # a multi-megabyte datasheet copy. The `.vscode` entry only when we wrote
+    # that file ourselves.
+    wanted: list[_GitignoreEntry] = []
     if write_vscode_settings and _write_vscode_settings(target_dir):
-        _ensure_vscode_settings_gitignored(target_dir)
+        wanted.append(_VSCODE_SETTINGS_GITIGNORE)
+    wanted += _REFDES_GITIGNORE
+    _ensure_gitignore_entries(target_dir, wanted)
 
     return config_path
 

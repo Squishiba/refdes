@@ -562,7 +562,12 @@ without one reads `unpinned`, and its items still count toward the
 ## `refdes init`
 
 Write a minimal `refdes-project.yaml` in the current directory, plus
-`.vscode/settings.json`. See [the standard library](standard-library.md#refdes-init).
+`.vscode/settings.json` and a `.gitignore`. See [the standard
+library](standard-library.md#refdes-init).
+
+The `.gitignore` covers `.vscode/settings.json`, `.refdes/copies/` and
+`.refdes/schema.json` — appended to whatever was already there, never
+rewritten, and skipped for a path an existing pattern already covers.
 
 | Option | Effect |
 |---|---|
@@ -1530,8 +1535,8 @@ python -m http.server -d _site 8000
 | `.refdes/citations.yaml` | **yes** | Citation lockfile (sha256, fetch time, kept-copy flag); written only by `refdes fetch` |
 | `.refdes/baselines/<name>.yaml` | **yes** | One file per `refdes revision`/`refdes release` stamp. Not rewritten by any ordinary command; `refdes revise`, `refdes calc-rewrite` and `refdes standard upgrade` do edit it, to carry an item's content hash across a rename or a spelling-only rewrite |
 | `.refdes/keys-adopted.yaml` | **yes** | Adoption marker written once by `refdes keys adopt`; its presence is what makes future stamps, seals and membership manifests use key-keyed storage |
-| `.refdes/schema.json` | **no, gitignored** | The project's merged JSON Schema, for editor completion; rewritten by every command that loads the project |
-| `.refdes/copies/` | **no, gitignored** | Kept local copies of datasheet bytes, content-addressed by sha256; written only by `refdes fetch --path ...` for a remote citation with `keep_copy: true` |
+| `.refdes/schema.json` | **no, gitignored** | The project's merged JSON Schema, for editor completion; rewritten by every command that loads the project. `refdes init` puts it in the project's `.gitignore` |
+| `.refdes/copies/` | **no, gitignored** | Kept local copies of datasheet bytes, content-addressed by sha256; written only by `refdes fetch --path ...` for a remote citation with `keep_copy: true`. `refdes init` puts it in the project's `.gitignore` |
 | `.refdes/history/` | **yes** | Captured-history store: content-addressed snapshot objects and derived-id events; written by the `follows:` capture and by `refdes history capture`/`redact`/`migrate-seals` |
 | `_site/` | no | Generated output |
 
@@ -1539,3 +1544,9 @@ Source files are also rewritten by `refdes id`, which inserts allocated IDs in
 place. `.refdes/citations.yaml` and `.refdes/copies/` are the only things
 `refdes fetch` writes — `build` and `check` (without `--refresh`) never touch
 either.
+
+`refdes init` is what puts the two gitignored paths above into a project's
+`.gitignore` (with `.vscode/settings.json`), and it is the only thing that does.
+A project created before that was the case keeps whatever `.gitignore` it had, so
+add the two lines by hand: `.refdes/copies/` and `.refdes/schema.json`, one per
+line.

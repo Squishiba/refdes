@@ -426,8 +426,9 @@ local copies, so they stay completely offline.
 **Pinning vs. keeping a copy.** Every fetched citation is pinned: its sha256 and
 fetch time are recorded in `.refdes/citations.yaml`, keyed by path, and
 committed. `keep_copy: true` additionally keeps a local copy of the bytes,
-content-addressed at `.refdes/copies/<sha256><ext>` — gitignored, not git
-LFS, not committed. `keep_copy:` defaults to `false` on purpose: manufacturer
+content-addressed at `.refdes/copies/<sha256><ext>` — gitignored (`refdes init`
+writes the `.refdes/copies/` line into the project's `.gitignore`; add it by
+hand if your project predates that), not git LFS, not committed. `keep_copy:` defaults to `false` on purpose: manufacturer
 datasheets are generally copyrighted, so "pinned but not kept" (hash-only)
 is a complete mode on its own, not a fallback. Citing the same remote path with
 inconsistent `keep_copy:` flags across items is a warning.

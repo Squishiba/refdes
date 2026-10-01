@@ -1,0 +1,176 @@
+# init: gitignore `.refdes/copies/` and `.refdes/schema.json` too (F1)
+
+Source: `in-prog-logs/remote-fetch-exercise.md` §7 F1. Docs promise three
+times that `.refdes/copies/` and `.refdes/schema.json` are gitignored; the
+only `.gitignore` writer in the product was
+`scaffold._ensure_vscode_settings_gitignored` (`src/refdes/scaffold.py:99`),
+which addressed exactly one path. Reproduced end to end in F1: a fresh init
+project stages a 6 MB datasheet copy and a generated schema.
+
+## Status: finished (implementation + docs + tests + changelog fragment)
+
+## Verified baseline (this worktree, not memory)
+
+- `refdes init`'s stdout (run via `PYTHONPATH=src python -m refdes.cli init`):
+  `wrote .vscode/settings.json (gitignored -- the yaml.schemas path in it names
+  one checkout)` — `src/refdes/cli.py:1011` on main.
+- This repo's own `.gitignore:27` `.refdes/copies/` and `:34`
+  `**/.refdes/schema.json` — which is why the gap survived; the refdes repo is
+  not protected by `init`'s output.
+- Doc claims: `docs/cli-reference.md:1533-1534`, `docs/markdown.md:429`,
+  `docs/standard-library.md:298`.
+- `docs/getting-started.md:75` covered only `.vscode/settings.json`.
+- Tests pinning the old text: `tests/test_scaffold.py:191`
+  (`patterns == [".vscode/settings.json"]`), `:195-199` (existing
+  `.refdes/copies/` line), `:244-246` (no `.gitignore` at all under
+  `write_vscode_settings=False`), `:278` and `:299-303`. All five updated by
+  design, not incidentally.
+
+## What changed
+
+`src/refdes/scaffold.py`
+
+- `_GitignoreEntry` (frozen dataclass) + `_covers()`; the old
+  `_VSCODE_GITIGNORE_BLOCK` / `_GITIGNORE_COVERS_VSCODE_SETTINGS` /
+  `_gitignore_addresses_vscode_settings` / `_ensure_vscode_settings_gitignored`
+  are replaced by three entry objects and
+  `_ensure_gitignore_entries(target_dir, entries)`. **Renamed**, because
+  `_ensure_vscode_settings_gitignored` no longer describes what it does.
+- One mechanism, extended: same append-only/idempotent/`append_ending` logic,
+  now over a list of entries, appending only the ones an existing pattern does
+  not already cover. Negations (`!.refdes/schema.json`) still count as the
+  project having decided.
+- `_gitignore_patterns()` (module-private) plus the pure
+  `added_gitignore_patterns(before, after)`, so `cmd_init` can announce what
+  appeared without `init`'s return value changing (it stays the config path —
+  ~30 call sites in `tests/test_scaffold.py` rely on that).
+
+`src/refdes/cli.py`
+
+- `cmd_init` reads `.gitignore` before and after and prints
+  `wrote .gitignore (<patterns> -- not yours to commit)`, and nothing at all
+  when init added nothing.
+
+`docs/`
+
+- `cli-reference.md`: the two table rows now say `refdes init` puts them in the
+  project's `.gitignore`; one sentence after the table tells an existing project
+  to add `.refdes/copies/` and `.refdes/schema.json` by hand; the `## refdes
+  init` section states the three paths the `.gitignore` covers.
+- `markdown.md`, `standard-library.md`: the "gitignored" claims say `refdes
+  init` writes the line and to add it by hand if the project predates that.
+- `getting-started.md` §1: the `.gitignore` sentence (just updated by #125) now
+  names all three files and the add-by-hand case. The folder listing at §1
+  needed no change — `.gitignore` is already listed.
+- No new page: `docs/index.md`'s nav already covers this under init.
+
+## Pattern choice — checked, not assumed
+
+No leading `/`. Each pattern contains a slash away from its end, so
+gitignore(5) resolves it relative to the directory holding the `.gitignore`
+— which is what a `.gitignore` `init` writes at the project root needs in both
+layouts. Verified with `git check-ignore -v` in a scratch repo
+(`.scratch/pattern-check`, `.scratch/roundtrip`), both for a project at a repo
+root and one at `repo/hardware/board-a`:
+
+```
+.gitignore:13:.refdes/copies/      .refdes/copies/x.pdf
+.gitignore:18:.refdes/schema.json  .refdes/schema.json
+nested/proj/.gitignore:18:.refdes/schema.json  nested/proj/.refdes/schema.json
+```
+
+and `.refdes/ids.yaml` still NOT ignored in both, `.vscode/tasks.json` still
+not ignored, and `nested/.refdes/copies/b.pdf` (a *different* project inside the
+same repo) NOT ignored — which is right: each project ignores its own.
+
+Also verified end to end: after `init` + `refdes check` in both layouts,
+`git add -A` stages `.gitignore`, `.refdes/ids.yaml` and `refdes-project.yaml`
+only. No datasheet copy, no `schema.json`.
+
+## Tests
+
+`tests/test_scaffold.py`. New/updated, all in the existing git-precedent style
+(`test_init_vscode_settings_is_ignored_by_git` already used `git check-ignore`
+and skipped when git is absent — no new dependency):
+
+- `test_init_refdes_outputs_are_ignored_by_git` — the F1 claim in git's own
+  terms, including that `.refdes/ids.yaml` stays committable.
+- `test_init_gitignore_holds_when_the_project_is_one_directory_of_a_repo` — the
+  nested layout, asserting it is *that project's* `.gitignore` doing it.
+- `test_init_ignores_the_files_not_the_surrounding_directories` (was
+  `..._the_whole_vscode_directory`, pinned `== [".vscode/settings.json"]`) —
+  now the exact three-pattern list.
+- `test_init_keeps_an_existing_gitignore_and_adds_the_entry_once` — extended to
+  a project that already had `.refdes/copies/`.
+- `test_init_adds_no_block_for_a_pattern_the_project_already_addressed` — the
+  old parametrized coverage test, re-pointed at all three patterns (15 cases:
+  bare/`/`-anchored/`**` forms, whole-directory forms, `!` negations).
+- `test_init_leaves_a_gitignore_that_addresses_everything_untouched` (new) and
+  `test_init_appends_nothing_on_a_second_init` (new).
+- `test_init_writes_no_vscode_entry_when_it_wrote_no_vscode_settings` (renamed
+  from `..._no_gitignore_entry...`): `.refdes/` entries are wanted regardless of
+  the editor files, so the assertion is now the two-pattern list without
+  `.vscode/settings.json`.
+- `test_cli_announces_the_vscode_settings_file_it_wrote` — third `wrote ` line.
+- `test_cli_announces_only_the_patterns_init_actually_added` and
+  `test_cli_prints_no_gitignore_line_when_everything_was_already_ignored`
+  (new).
+- `test_cli_notes_an_existing_vscode_settings_file...` — the "no `.gitignore`
+  entry" assertion became "no `.vscode/settings.json` entry".
+
+**Confirmed failing against main's code** (`git checkout -- src/refdes/
+scaffold.py src/refdes/cli.py`, run, restore — the copies of my versions are
+at `.scratch/scaffold.py.mine` / `.scratch/cli.py.mine`):
+
+```
+9 failed, 57 passed in 0.57s
+FAILED test_init_refdes_outputs_are_ignored_by_git
+FAILED test_init_gitignore_holds_when_the_project_is_one_directory_of_a_repo
+FAILED test_init_ignores_the_files_not_the_surrounding_directories
+FAILED test_init_keeps_an_existing_gitignore_and_adds_the_entry_once
+FAILED test_init_adds_the_entry_for_an_unrelated_similar_pattern
+FAILED test_init_writes_no_vscode_entry_when_it_wrote_no_vscode_settings
+FAILED test_cli_notes_an_existing_vscode_settings_file_instead_of_skipping_silently
+FAILED test_cli_announces_the_vscode_settings_file_it_wrote
+FAILED test_cli_announces_only_the_patterns_init_actually_added
+```
+
+After restoring: `66 passed` in `tests/test_scaffold.py`. Full suite:
+**2926 passed, 2 skipped** (`PYTHONPATH=src python -m pytest -q -p
+no:cacheprovider`, 216s).
+
+`test_init_appends_nothing_on_a_second_init` and
+`test_init_leaves_a_gitignore_that_addresses_everything_untouched` pass against
+main too — they characterise idempotency, which main already had for its one
+pattern. Recorded so the "9 failed" is not over-read.
+
+## Ruff
+
+Scoped to touched files, per AGENTS.md. `src/refdes/scaffold.py` and
+`src/refdes/cli.py`: clean. `tests/test_scaffold.py`: 8 findings, all
+pre-existing rule/style (3 `SIM115` at 56/77/84, 2 `PLW1510` at 164/172) or
+matching the file's existing `subprocess.run` shape without `check=` (3
+`PLW1510` in my new tests, same as the existing `check-ignore` tests at
+164/172). Baseline comparison: `git show HEAD:tests/test_scaffold.py` into
+`.scratch/base/` under `--select SIM115,PLW1510,ISC004,I001` gives 6 findings,
+of which one `ISC004` I fixed by parenthesising while editing that block. I did
+not touch the pre-existing ones — not my scope, and AGENTS.md says don't
+silence unrelated findings as a side effect.
+
+## Difficulties
+
+- The CLI announcement could have come from `init`'s return value, but ~30
+  tests and the module's documented contract pin that to the config path. Read
+  `.gitignore` before/after in `cmd_init` instead and diff it with a pure
+  helper; that also makes "wrote" honest — a project whose `.gitignore` already
+  covered everything gets no line rather than a line claiming a write that did
+  not happen.
+- Deciding whether the `.refdes/` entries should depend on
+  `write_vscode_settings` was the one real judgement call. They should not:
+  `build`/`check`/`fetch` create those files regardless of what happened to the
+  editor settings. That changed one test's premise (it asserted *no*
+  `.gitignore` at all), which is why it is renamed and its docstring rewritten
+  rather than quietly deleted.
+
+Scratch left in `.scratch/` per AGENTS.md: `pattern-check/`, `roundtrip/`,
+`fresh/`, `existing/`, `final/`, `base/`, `scaffold.py.mine`, `cli.py.mine`.
