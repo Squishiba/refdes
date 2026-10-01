@@ -264,6 +264,16 @@ function itemMarkdown(item, view) {
   md.appendMarkdown(`**${item.id}** — ${typeInfo.label || item.type}\n\n`);
   md.appendMarkdown(`${item.title}\n\n`);
 
+  // A retired id is what this item is still called in the schematics, review
+  // notes and commit messages a renumbering left behind, and someone reading
+  // one of those hovers the id they have. The snapshot's copy wins when there
+  // is one, so a hover never shows two different answers for one item — the
+  // same rule the coverage stage below follows.
+  const former = (view && view.former_ids) || item.former_ids;
+  if (former && former.length) {
+    md.appendMarkdown(`_formerly known as ${former.join(", ")}_\n\n`);
+  }
+
   const preview = ["status", "limit", "date", "author", "part_number"];
   const rows = [];
   for (const key of preview) {

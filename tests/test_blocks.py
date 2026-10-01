@@ -328,13 +328,14 @@ def test_ls_free_text_matches_a_partial_lowercased_id(blocks_project, capsys):
 
 
 def test_ls_help_says_free_text_matches_ids(capsys):
-    """The help text must not claim title-and-tags-only now that ids match."""
+    """The help text must not claim title-and-tags-only now that ids match --
+    and it has to go on naming the retired ids too (F3.2)."""
     with pytest.raises(SystemExit) as excinfo:
         cli_mod.main(["ls", "--help"])
     assert excinfo.value.code == 0
     # argparse wraps help text at the terminal width, so match across the
     # wrap rather than assuming the phrase lands on one line.
-    assert re.search(r"id,\s+title\s+and\s+tags", capsys.readouterr().out)
+    assert re.search(r"id,\s+title,\s+tags:\s+and\s+former_ids:", capsys.readouterr().out)
 
 
 def test_ls_filters_by_source_file(blocks_project, capsys):

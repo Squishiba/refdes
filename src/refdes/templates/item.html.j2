@@ -12,6 +12,18 @@
   {% if item.external %}<span class="pill pill-external">imported from {{ item.origin }}</span>{% endif %}
   {% if spec.append_only %}<span class="pill pill-sealed">append-only</span>{% endif %}
 </div>
+{# A renamed item's own former ids, on its own page (finding F3.2). A citation
+   in a schematic, a review note, or a commit message still naming the retired
+   id is the whole reason `former_ids:` exists, and this is the page a reader
+   arrives at when they follow that id -- so it says here where the old id went
+   instead of leaving them to grep the item files. Existing CSS classes only
+   (`.small .muted`): tests/test_style_tokens.py pins the stylesheet's set of
+   selectors, so a new class would fail the token tests rather than land. #}
+{% if item.former_ids %}
+<p class="small muted">formerly known as
+  {%- for old_id in item.former_ids %} <code>{{ old_id }}</code>{% if not loop.last %},{% endif %}{% endfor -%}
+</p>
+{% endif %}
 <p class="item-title">{{ item.title }}</p>
 
 {% if item.external %}

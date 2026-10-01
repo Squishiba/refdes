@@ -29,7 +29,7 @@ from . import scaffold as scaffold_mod
 from . import schema_json as schema_json_mod
 from . import seal as seal_mod
 from . import stub_tests as stub_tests_mod
-from .model import INVALIDATE, Project
+from .model import INVALIDATE, Item, Project
 from .schema import SchemaError, load_project
 
 # Where the docs actually are for someone who installed refdes from a wheel.
@@ -618,12 +618,19 @@ def cmd_ls(args) -> int:
     Code extension: a quick check over SSH, a scripted query, or reviewing
     a PR diff and deciding what to reference.
 
-    Free-text matches id, title *and* `tags:` -- tags: is `on_change: ignore`
-    (freely re-tagged without invalidating anything downstream), which is
-    what makes it the right place to invest in findability in the first
-    place; the search has to actually reach it for that to matter. The id is
-    in the haystack too, because the natural query right after `refdes id`
-    prints one is the id itself.
+    Free-text matches id, title, `tags:` *and* `former_ids:` -- tags: is
+    `on_change: ignore` (freely re-tagged without invalidating anything
+    downstream), which is what makes it the right place to invest in
+    findability in the first place; the search has to actually reach it for
+    that to matter. The id is in the haystack too, because the natural query
+    right after `refdes id` prints one is the id itself.
+
+    `former_ids:` earns its place in the haystack for the same reason: the
+    premise of a recorded former id is that the retired one keeps turning up in
+    external citations (schematics, review notes, commit messages), and "where
+    did REQ-PWR-001 go?" has to be answerable by the command a person reaches
+    for. Without this, the only answer was to read the whole `refdes audit`
+    output (finding F3.2, in-prog-logs/keys-identity-recovery.txt).
     """
     project, _stale = _load(args, require_ids=False)
     _announce_load_writes(project)
@@ -637,7 +644,11 @@ def cmd_ls(args) -> int:
     query = " ".join(args.query).strip().lower()
     file_filter = args.file.replace("\\", "/") if args.file else None
 
-    rows = []
+    rows: list[tuple[Item, list[str]]] = []
+    # A retired id that some item still records as live: {retired id: holders}.
+    # Kept aside rather than shown as a hit, because a live item wins the id
+    # outright -- see the note printed under the table.
+    reused: dict[str, list[str]] = {}
     for item in sorted(project.local_items, key=lambda i: i.id):
         if args.type and item.type != args.type:
             continue
@@ -650,23 +661,55 @@ def cmd_ls(args) -> int:
         tags = _item_tags(item)
         if args.tag and not any(args.tag.lower() in t.lower() for t in tags):
             continue
+        # Matched former ids, under exactly the substring/case rule the rest of
+        # the query uses. Read off the item rather than `project.former_ids`,
+        # which by design omits any entry that collides with a live id
+        # (ids.collect_former_ids) -- and this row has to still *see* that
+        # entry in order to report the reuse below.
+        named = [old for old in item.former_ids if query and query in old.lower()]
+        retired = [old for old in named if project.item_by_id(old) is None]
+        for old in named:
+            if old not in retired:
+                reused.setdefault(old, []).append(item.id)
         if query:
             haystack = " ".join([item.id, item.title, *tags]).lower()
-            if query not in haystack:
+            if query not in haystack and not retired:
                 continue
-        rows.append(item)
+        rows.append((item, retired))
 
     if not rows:
         print("no items match")
+        for old_id, holders in sorted(reused.items()):
+            _print_reuse_note(old_id, holders)
         return 1 if load_errors else 0
 
-    id_w = max(len(i.id) for i in rows)
-    type_w = max(len(i.type) for i in rows)
-    board_w = max((len(i.board) for i in rows), default=0)
-    for item in rows:
+    id_w = max(len(i.id) for i, _ in rows)
+    type_w = max(len(i.type) for i, _ in rows)
+    board_w = max((len(i.board) for i, _ in rows), default=0)
+    for item, retired in rows:
         board_col = f"{item.board:<{board_w}}  " if board_w else ""
-        print(f"{item.id:<{id_w}}  {item.type:<{type_w}}  {board_col}{item.title}")
+        mark = f" (formerly {', '.join(retired)})" if retired else ""
+        print(f"{item.id:<{id_w}}  {item.type:<{type_w}}  {board_col}{item.title}{mark}")
+    for old_id, holders in sorted(reused.items()):
+        _print_reuse_note(old_id, holders)
     return 1 if load_errors else 0
+
+
+def _print_reuse_note(retired_id: str, holders: list[str]) -> None:
+    """Say who still records a live id as a former one, and what to do.
+
+    A former id that has been reused is a build error (`former_ids:` may only
+    name retired ids, ids.collect_former_ids), so the live item is what the
+    listing answers with and the former holder is named here instead of being
+    listed as though the query had found it. Without this the listing would
+    silently read as though the retired id had simply never existed.
+    """
+    print(
+        f"\nnote: {retired_id} is a live item's id again, so that item is "
+        f"listed above; {', '.join(sorted(holders))} still records it as a "
+        "former id, which 'refdes check' reports as an error -- former_ids: "
+        "may only name retired ids."
+    )
 
 
 def cmd_id(args) -> int:
@@ -1962,7 +2005,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     p_ls.add_argument(
         "query", nargs="*",
-        help="free text, matched against id, title and tags: (case-insensitive)",
+        help="free text, matched against id, title, tags: and former_ids: "
+        "(case-insensitive)",
     )
     p_ls.add_argument("--type", help="only items of this type")
     p_ls.add_argument("--board", help="only items on this board")

@@ -5,6 +5,9 @@ Split out of the original monolithic tests/test_refdes.py.
 
 from __future__ import annotations
 
+import re
+from pathlib import Path
+
 import pytest
 from conftest import write_project_config
 
@@ -550,3 +553,173 @@ def test_cli_former_ids_propose_shows_candidates_then_writes_on_confirm(tmp_path
     out = capsys.readouterr().out
     assert "wrote former_ids: [REQ-001] to REQ-002" in out
     assert "former_ids: [REQ-001]" in (root / "items" / "r.yaml").read_text(encoding="utf-8")
+
+
+# ------------------------------- looking a retired id up (finding F3.2, scenario 3)
+#
+# Before this, a renamed item was findable by `refdes audit` and by the built
+# items.json and by nothing else: `refdes ls REQ-PWR-001` answered "no items
+# match" and the item's own page never named the id it used to have -- so
+# "where did REQ-PWR-001 go?" had no cheap answer anywhere. See
+# in-prog-logs/keys-identity-recovery.txt scenario 3 (F3.2).
+
+LOOKUP_SCHEMA = (
+    "site: { title: T, out: _site }\n"
+    "types:\n"
+    "  requirement: { prefix: REQ, fields: { text: { type: text } } }\n"
+    "  decision: { prefix: DEC, fields: {}, body: {} }\n"
+)
+
+
+def _lookup_project(tmp_path, items_yaml="defaults: { type: requirement }\n"
+                                          "items:\n"
+                                          "  - id: REQ-001\n"
+                                          "    text: Renumbered.\n"
+                                          "    former_ids: [REQ-050]\n"
+                                          "  - id: REQ-002\n"
+                                          "    text: Untouched.\n"):
+    return _former_ids_project_with(LOOKUP_SCHEMA, items_yaml, tmp_path)
+
+
+def _former_ids_project_with(schema, items_yaml, tmp_path):
+    write_project_config(tmp_path, schema)
+    items = tmp_path / "items"
+    items.mkdir()
+    (items / "r.yaml").write_text(items_yaml, encoding="utf-8")
+    return tmp_path
+
+
+def test_ls_finds_an_item_by_a_retired_id_and_marks_it(tmp_path, capsys):
+    root = _lookup_project(tmp_path)
+    status = cli_mod.main(["-c", str(root / "refdes-project.yaml"), "ls", "REQ-050"])
+    assert status == 0
+    out = capsys.readouterr().out
+    # The current id leads, and the retired one is named -- the listing has to
+    # say *where the old id went*, not just that something matches.
+    assert "REQ-001" in out
+    assert "(formerly REQ-050)" in out
+    assert "REQ-002" not in out
+    assert "no items match" not in out
+
+
+def test_ls_retired_id_match_uses_the_same_substring_and_case_rules(tmp_path, capsys):
+    """The same query that finds a live id finds a retired one: a person
+    typing `req-050` or half of it after reading it in a commit message gets
+    the same answer, not a second spelling to remember."""
+    root = _lookup_project(tmp_path)
+    assert cli_mod.main(["-c", str(root / "refdes-project.yaml"), "ls", "req-050"]) == 0
+    assert "REQ-001" in capsys.readouterr().out
+    assert cli_mod.main(["-c", str(root / "refdes-project.yaml"), "ls", "q-05"]) == 0
+    assert "REQ-001" in capsys.readouterr().out
+
+
+def test_ls_listing_is_unchanged_for_a_query_that_names_no_former_id(tmp_path, capsys):
+    """Existing matching keeps working exactly as it did, and the marker is
+    not sprayed over every row: it appears only where the query met a former
+    id."""
+    root = _lookup_project(tmp_path)
+    assert cli_mod.main(["-c", str(root / "refdes-project.yaml"), "ls", "REQ-001"]) == 0
+    out = capsys.readouterr().out
+    assert "(formerly" not in out
+    assert cli_mod.main(["-c", str(root / "refdes-project.yaml"), "ls"]) == 0
+    out = capsys.readouterr().out
+    assert "(formerly" not in out
+    assert "REQ-001" in out and "REQ-002" in out
+
+
+def test_ls_reports_every_retired_id_the_item_carries(tmp_path, capsys):
+    root = _lookup_project(
+        tmp_path,
+        "defaults: { type: requirement }\n"
+        "items:\n"
+        "  - id: REQ-001\n"
+        "    text: Twice renumbered.\n"
+        "    former_ids: [REQ-050, REQ-060]\n",
+    )
+    assert cli_mod.main(["-c", str(root / "refdes-project.yaml"), "ls", "REQ-0"]) == 0
+    out = capsys.readouterr().out
+    assert "(formerly REQ-050, REQ-060)" in out
+
+
+def test_ls_a_reused_retired_id_resolves_to_the_live_item_that_holds_it_now(tmp_path, capsys):
+    """A retired id reused by a new item is the live item's id, so the live
+    item is what the listing answers with -- and the former holder is named
+    under the table rather than listed as though the query had found it."""
+    root = _lookup_project(
+        tmp_path,
+        "defaults: { type: requirement }\n"
+        "items:\n"
+        "  - id: REQ-001\n"
+        "    text: Renumbered.\n"
+        "    former_ids: [REQ-050]\n"
+        "  - id: REQ-050\n"
+        "    text: Minted the retired id back.\n",
+    )
+    status = cli_mod.main(["-c", str(root / "refdes-project.yaml"), "ls", "REQ-050"])
+    out = capsys.readouterr().out
+    assert status == 0
+    assert "REQ-050" in out  # the live item, listed as itself...
+    assert "Minted the retired id back." in out
+    # ...the former holder named in the note, not as a hit, and the reason.
+    assert "REQ-001" in out  # the note, which is where it appears
+    note = [line for line in out.splitlines() if line.startswith("note:")]
+    assert len(note) == 1
+    assert "REQ-050 is a live item's id again" in note[0]
+    assert "REQ-001" in note[0]
+    # The former holder must not also read as a row the query matched.
+    row = [line for line in out.splitlines() if line.startswith("REQ-001 ")]
+    assert row == []
+
+
+def test_ls_unknown_query_still_says_no_items_match(tmp_path, capsys):
+    root = _lookup_project(tmp_path)
+    assert cli_mod.main(["-c", str(root / "refdes-project.yaml"), "ls", "no-such-thing"]) == 0
+    assert "no items match" in capsys.readouterr().out
+
+
+def test_ls_help_says_the_query_reaches_former_ids(capsys):
+    with pytest.raises(SystemExit) as excinfo:
+        cli_mod.main(["ls", "--help"])
+    assert excinfo.value.code == 0
+    assert re.search(r"former_ids:", capsys.readouterr().out)
+
+
+def test_the_item_page_names_its_own_former_ids(tmp_path):
+    root = _lookup_project(tmp_path)
+    project = _former_ids_build(root)
+    out = Path(render.render_site(project))
+    html = (out / "req-001.html").read_text(encoding="utf-8")
+    assert "formerly known as" in html
+    assert "REQ-050" in html
+    # And an item that never renamed does not claim to have one.
+    assert "formerly known as" not in (out / "req-002.html").read_text(encoding="utf-8")
+
+
+def test_the_hover_preview_card_carries_the_item_former_ids(tmp_path):
+    """The payload is what app.js builds the card from, so this is the card's
+    data: `former_ids` present on a renamed item, absent (not empty) on one
+    that has none, so a project that records no renames keeps byte-identical
+    preview data."""
+    root = _lookup_project(tmp_path)
+    project = _former_ids_build(root)
+    previews = render.preview_payload(project)
+    assert previews["REQ-001"]["former_ids"] == ["REQ-050"]
+    assert "former_ids" not in previews["REQ-002"]
+
+
+def test_the_hover_card_renders_a_formerly_known_as_row():
+    """No JS harness here (tests/test_vscode_extension.py says so for the
+    extension), so this pins the card builder's own text: a former-id row is
+    added to the card's field list, which is what styles it -- adding a
+    stylesheet selector instead would fail tests/test_style_tokens.py."""
+    app_js = (
+        Path(__file__).resolve().parents[1]
+        / "src"
+        / "refdes"
+        / "templates"
+        / "assets"
+        / "app.js"
+    ).read_text(encoding="utf-8")
+    assert "formerly known as" in app_js
+    assert re.search(r"p\.former_ids", app_js)
+    assert "rows.push(" in app_js

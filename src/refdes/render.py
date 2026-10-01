@@ -532,6 +532,11 @@ def preview_payload(project: Project) -> dict:
             "href": f"{item.slug}.html",
             "fields": fields,
             "check": _check_state(item),
+            # Present only when the item has some, the same "absent key, not
+            # null" convention `items_json` uses for the boards registry: a
+            # project that records no former ids keeps byte-identical
+            # preview data. app.js renders it as a "formerly known as" row.
+            **({"former_ids": list(item.former_ids)} if item.former_ids else {}),
         }
     return out
 

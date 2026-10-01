@@ -7,6 +7,7 @@ the new routes."""
 from __future__ import annotations
 
 import pytest
+from conftest import write_project_config
 from serve_support import Client, make_filter_project, make_project
 
 from refdes.serve.server import EditorApp
@@ -331,6 +332,48 @@ def test_item_view_seal_state(served):
     assert item["append_only"] is True
     # a read-only load never seals: the fixture has no seal record
     assert item["sealed"] is False
+
+
+def test_item_view_returns_former_ids(tmp_path):
+    """`GET /api/item/<ref>` is what the VS Code hover reads, so a renamed
+    item's retired ids have to be in the payload -- the hover says "formerly
+    known as ..." from it, and the same list is what the browser editor's item
+    view renders.
+
+    A project of its own rather than the shared fixture: a `former_ids:`
+    entry burns an id into the ledger, which the filtering tests share.
+    """
+    write_project_config(
+        tmp_path,
+        "site: { title: T, out: _site }\n"
+        "id: { width: 3 }\n"
+        "types:\n"
+        "  requirement: { prefix: REQ, coverable: true, "
+        "fields: { text: { type: text, required: true } } }\n",
+    )
+    items = tmp_path / "items"
+    items.mkdir()
+    (items / "reqs.yaml").write_text(
+        "defaults: { type: requirement }\n"
+        "items:\n"
+        "  - id: REQ-001\n"
+        "    text: The rail shall supply 3.3 V.\n"
+        "    former_ids: [REQ-900]\n"
+        "  - id: REQ-002\n"
+        "    text: Never renamed.\n",
+        encoding="utf-8",
+    )
+    app = EditorApp(str(tmp_path / "refdes-project.yaml"), poll_interval=60)
+    app.start()
+    try:
+        client = Client(app)
+        status, renamed = client.api_get("/api/item/REQ-001")
+        assert status == 200
+        assert renamed["former_ids"] == ["REQ-900"]
+        _status, plain = client.api_get("/api/item/REQ-002")
+        assert plain["former_ids"] == []
+    finally:
+        app.stop()
 
 
 def test_item_view_addressed_by_the_row_handle(served):
