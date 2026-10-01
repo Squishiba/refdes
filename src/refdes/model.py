@@ -695,6 +695,20 @@ class BlockedChain:
 #: for one misses the other (user-sim run 3, finding N2).
 READ_ONLY_REFUSAL = "could not write this file (read-only tree?)"
 
+#: The stem of the *other* shape, for a write the user explicitly asked for
+#: (a baseline stamp, a history snapshot, a carried-forward seal, an id
+#: write-back, an item-file rewrite). Those name the destination first and then
+#: say what the refused write was for, because the user has to be told which
+#: path would have held the thing they asked for -- `cli`'s stamp refusal,
+#: `history._store_refusal`, `revise`'s two `Refused` sites.
+#:
+#: It is a separate stem from `READ_ONLY_REFUSAL` rather than a variant of it
+#: because the two arrive in genuinely different places (a per-file diagnostic
+#: vs. a command's own refusal line), but both carry `(read-only tree?)`, and
+#: that is the substring a CI filter matches on -- see
+#: docs/cli-reference.md#matching-a-read-only-refusal-in-a-log.
+DESTINATION_REFUSAL = "cannot write {path} (read-only tree?)"
+
 
 def read_only_refusal(consequence: str = "") -> str:
     """`READ_ONLY_REFUSAL`, plus what the refused write was for.
@@ -706,6 +720,16 @@ def read_only_refusal(consequence: str = "") -> str:
     """
     stem = READ_ONLY_REFUSAL if not consequence else f"{READ_ONLY_REFUSAL} -- {consequence}"
     return f"{stem}; run with --no-write to silence this"
+
+
+def destination_refusal(path: str, consequence: str) -> str:
+    """`DESTINATION_REFUSAL` for `path`, plus what the refused write was for.
+
+    The explicit-write counterpart to `read_only_refusal`: a load nobody asked
+    for degrades, but a write somebody did ask for either happened or did not,
+    and the report has to name the file that would have held it.
+    """
+    return f"{DESTINATION_REFUSAL.format(path=path)} -- {consequence}"
 
 
 @dataclass

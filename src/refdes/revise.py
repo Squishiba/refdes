@@ -710,9 +710,13 @@ def write_rewrites(
 
     `on_error`, when given, is called as `on_error(rewrite, exc)` for each file
     whose write raised `OSError`; that file is skipped rather than aborting the
-    rest, and every file that did not land is returned. Left None -- every
-    explicit write command -- the first refusal propagates, which is the right
-    answer when the user asked for the write."""
+    rest, and every file that did not land is returned. Two hooks, both
+    explicit about why they differ, because the two cases are not the same
+    kind of thing: `_refuse_unwritable` warns and lets the run continue (a
+    load-time normalisation the author never asked for), while
+    `_refuse_item_write` raises (the rename itself, which the caller rolls
+    back). Left None -- `keys adopt` and `keys restore`, which catch the
+    propagation themselves -- the first refusal propagates unchanged."""
     failed: list[FileRewrite] = []
     for rewrite in rewrites:
         try:
@@ -738,12 +742,49 @@ def _refuse_unwritable(project, rewrite: FileRewrite) -> None:
     )
 
 
+def _refuse_item_write(rewrite: FileRewrite, exc: OSError) -> None:
+    """`on_error` for an explicit write command's *own* rewrites: refuse,
+    naming the file.
+
+    `write_rewrites`'s hook is shaped for the load-time case, where a refusal
+    is one warning and the rest of the files still get written. There is no
+    such thing here -- this is the rename itself, and the caller rolls the
+    whole transaction back -- so this raises instead of returning, and the
+    `Refused` it raises is the one every caller of this engine already
+    handles (`revise.apply`, `calc_rewrite.apply`, and through them
+    `standard upgrade`).
+
+    Kept separate from `_refuse_unwritable` above, which must not raise: that
+    one is a load nobody asked for, and a warning the author did not earn.
+    """
+    raise Refused(
+        model.destination_refusal(
+            rewrite.rel,
+            "no item file was rewritten and no hash was carried forward, so "
+            "the tree is exactly as it was found. Make the tree writable and "
+            "run it again.",
+        )
+    ) from exc
+
+
 def restore_rewrites(rewrites: list[FileRewrite]) -> None:
-    """Restore every computed set member, including removing new files."""
+    """Restore every computed set member, including removing new files.
+
+    Comparing before writing is what lets a rollback finish on a tree that has
+    just refused a write -- the same property `_restore_seal_files` documents,
+    and for the same reason. A rollback exists because this run changed
+    something; a file this run did not change is already correct on disk, and
+    writing it back anyway re-attempts the write the filesystem just refused.
+    Without the compare, the refusal an item-file write now raises came back
+    out of the rollback as a `PermissionError` traceback -- the refusal wearing
+    the shape of the bug it replaced.
+    """
     for rewrite in rewrites:
         if not rewrite.existed:
             if os.path.isfile(rewrite.path):
                 os.remove(rewrite.path)
+            continue
+        if os.path.isfile(rewrite.path) and textio.read_text(rewrite.path) == rewrite.before:
             continue
         textio.write_text(rewrite.path, rewrite.before)
 
@@ -807,9 +848,13 @@ def write_rewrites_verified(project, rewrites: list[FileRewrite]) -> set[str]:
     the run's own summary from claiming a write that never landed, and what
     lets `refdes check`'s `.refdes/schema.json` trip-wire say "not refreshed"
     instead of "refreshed". Explicit write commands (`revise apply`,
-    `calc-rewrite`, `keys adopt`, `keys restore`) call `write_rewrites`
-    directly and keep raising: there the user asked for the write, so a
-    refusal is a failure, not a warning.
+    `calc-rewrite`, and `standard upgrade` through them) pass
+    `_refuse_item_write` instead and refuse rather than raise: the user asked
+    for the write, so it is a failure and not a warning -- but a *reportable*
+    one, carrying `(read-only tree?)` and the file that would have held it,
+    with the whole transaction rolled back. `keys adopt` and `keys restore`
+    keep letting the first refusal propagate, and catch it at their own
+    `except Exception` to report; that remains deliberate.
 
     A file whose parse reported a duplicate mapping key is not rewritten at
     all, for a different reason than any of the above: a `key:` inserted and
@@ -1419,8 +1464,13 @@ def apply(
             ok=True, dry_run=True, changed_files=sorted(changed), expansions=expansions
         )
 
-    write_rewrites(rewrites)
-
+    # Captured, and the rollback defined, *before* the item files are written
+    # rather than after: the write itself is a write the filesystem can refuse
+    # (a read-only `items/`, a single `chmod a-w` item file), and a rollback
+    # that only exists for the refusals discovered further down cannot answer
+    # for this one. `_capture_seal_files` and the config read are both reads of
+    # files nothing above has touched, so taking them a few lines earlier
+    # describes the same "before" state.
     original_seals = _capture_seal_files(project_before)
     config_before = textio.read_text(config_path)
 
@@ -1429,7 +1479,31 @@ def apply(
         restore_rewrites(rewrites)
         restore_rewrites(ensure_rewrites)
         _restore_seal_files(original_seals)
-        textio.write_text(config_path, config_before)
+        # Compared before writing, for the reason `_restore_seal_files` gives
+        # and the same reason it needs it here: this rollback exists because the
+        # item-file write above was refused, so on a read-only tree the config
+        # is *also* unwritable and writing it back anyway re-attempts the
+        # refusal -- the `Refused` came back out of its own rollback as a
+        # `PermissionError` traceback, wearing the shape of the bug it
+        # replaced. Plain `revise` never wrote the config at all, so there is
+        # nothing to put back; `standard upgrade` bumped it, so its rollback
+        # has to.
+        if (
+            os.path.isfile(config_path)
+            and textio.read_text(config_path) != config_before
+        ):
+            textio.write_text(config_path, config_before)
+
+    # The rename's own file rewrites. Refused rather than tolerated: this is the
+    # operation, not a side effect of it, and a rename that lands in some files
+    # and not others is not a rename -- so the same `Refused` the carry-forward
+    # raises, the same rollback, and the same report. `revise apply`,
+    # `calc-rewrite` and `standard upgrade` all reach this line.
+    try:
+        write_rewrites(rewrites, on_error=_refuse_item_write)
+    except Refused as exc:
+        _rollback()
+        return RevisionResult(ok=False, errors=[str(exc), "rolled back."])
 
     if mutate_config is not None:
         mutate_config(config_path)
