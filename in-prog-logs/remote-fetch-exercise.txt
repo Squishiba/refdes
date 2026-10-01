@@ -1,0 +1,94 @@
+Progress log — remote-fetch-exercise
+===================================
+
+Task: exercise `refdes fetch` against real remote URLs as a user, report only.
+Deliverable: in-prog-logs/remote-fetch-exercise.md. Status: FINISHED.
+
+Approach
+--------
+Read AGENTS.md first, then keys-identity-recovery.md and
+user-sim-release-gate-run3.md for the expected report shape (run 3 is the
+closest sibling — same "documented surfaces only, real HTTP, no src/tests/docs
+changes" brief). Learned the fetch surface from docs/markdown.md "citing a
+datasheet", docs/cli-reference.md's `refdes fetch` section + exit-code table,
+and `refdes fetch --help`. Never touched src/, tests/ or docs/.
+
+Setup
+-----
+- `.scratch/rd` wrapper (`PYTHONPATH=<worktree>/src python -m refdes.cli`),
+  because the `refdes` on PATH is a broken editable install pointing at another
+  worktree. Same artefact run 3 recorded; not counted as a finding.
+- `.scratch/rf/rf-pristine` — a `refdes init` project plus one component with
+  one remote citation. Every scenario is `rm -rf <name> && cp -r rf-pristine
+  <name>`, then run from inside it. No `git` inside any test project, refdes
+  never run from the worktree root (run 3 §5 process note).
+- `.scratch/rf/srv/origin.py` — a throwaway http.server on 127.0.0.1:8931 with
+  routes for /a.pdf, /redir (301), /redir2 (302), /gone.pdf (404), /page.html
+  (text/html), /big.bin (26 MiB, opt-in), /slow.pdf (trickled body), plus
+  `files/hide-a` and `files/allow-big` flag files. Used for every failure shape
+  that needed a controllable origin, so no external host took a synthetic
+  request. Four more one-off origins on 8932-8936 for ETag/Last-Modified,
+  stall, redirect loop, mid-body disconnect, chunked encoding. All stopped at
+  the end (`pkill`, verified with pgrep — the first pkill attempt hit the 120s
+  bash timeout because pkill matched its own shell, so I killed by PID).
+
+Scenarios run (each reproduced at least twice)
+----------------------------------------------
+1. Pin a real ti.com datasheet (tps62913.pdf). Recorded sha256/bytes/fetched/
+   kept_copy; cross-checked the sha against run 3 §0's incidental note — same
+   hash, same byte count, three weeks apart. Idempotency: three plain re-fetches,
+   `diff` clean, 0.37s, access log shows zero requests.
+2. Redirects: local 302->301->200 chain, real http->https ti.com 302, infinite
+   302 loop, 404 on a redirect target after pinning. 404 on never-pinned (two
+   real ti.com symlinks, one deliberately-nonexistent part) and 404 on
+   previously-pinned (local origin, hide-a flag).
+3. Changed content, two ways: (a) hand-edited the recorded sha256 in the
+   lockfile, for both a hash-only and a keep_copy citation — this is the brief's
+   simulation, and it turned out to be the source of F2; (b) genuinely changed
+   the origin's bytes and re-pinned with --update.
+4. Keep-copy: successful keep, deleted copy (warning -> error -> cache_missing
+   -> release gate), keep_copy flipped true->false, inconsistent keep_copy
+   across two items, blob truncated (hash_mismatch, "error, always").
+5. Failure shapes: DNS (.invalid), connection refused (127.0.0.1:9), socket
+   timeout (30.4s hard stall, and a 40.4s trickle that *succeeds*), non-PDF
+   content type, 26 MiB file, chunked encoding, mid-body IncompleteRead.
+   Did NOT push past 26 MiB, per the brief — checked the code path instead and
+   reported that rather than filling the disk.
+6. Exit codes: every row of docs/cli-reference.md:16-31 that names fetch, plus
+   --no-write in both positions, plus check --require-citations and
+   build --refresh. All matched.
+
+Findings: 7 numbered + 3 recorded-once, ranked. Medium: F1 (nothing gitignores
+.refdes/copies/ or .refdes/schema.json in an init'd project — verified by
+actually staging them with git add -A in a throwaway repo), F2 (a wrong pinned
+hash on a hash-only citation is invisible to check/build/audit/--require-citations;
+only check --refresh catches it). Low: F3 (no size cap, no content-type check),
+F4 (network failure under --refresh is a warning + exit 0, contradicting
+"same as on any other error"), F5 (malformed lockfile -> ValueError traceback),
+F6 (superseded kept copies never pruned), F7 (audit prints pin:kept next to
+state:cache_missing, which the docs say cannot happen), F8 (three small ones).
+
+Difficulties / notes for whoever picks this up
+----------------------------------------------
+- Two Bash calls hit the 120s tool timeout, both from pkill/grep patterns
+  matching their own process. Killed servers by PID instead.
+- `git check-ignore` needs a real repo, so F1 required a throwaway `git init`
+  inside a test project. I did that in exactly one project (.scratch/rf/rgi)
+  deliberately, with nothing of value in it, and never ran any other git command
+  in a test project. Flagging it because run 3 §5 explicitly warns about this.
+- F2 required care in wording: the offline silence is *by design* (docs say
+  verification is offline; a hash-only pin has nothing local to check). The
+  finding is that `audit`'s `ok` overstates it and the severity table's
+  "error, always" row reads more generally than it behaves. Wrote it up that way
+  rather than as "the tool failed to detect a corrupted lockfile".
+- Could not reach: a non-PDF used in a rendered site; >26 MiB; real CDN
+  conditional-request semantics; the missing-pypdf `section:` row; a duplicate
+  outline title; Windows/macOS; serve's source-picker accept path (the second
+  writer of the lockfile — noted in §9 because F5 and F6 both touch that file).
+- No changes under src/, tests/ or docs/. Verified with `git status --short`
+  (clean apart from the two new in-prog-logs files).
+
+Next step for a maintainer, if useful: F1 is the only finding with teeth and
+its fix shape is two more literals in the existing append-only
+`_ensure_vscode_settings_gitignored` helper (src/refdes/scaffold.py:99) plus one
+more line in `init`'s output. F5 is four lines in `load_lockfile`.
