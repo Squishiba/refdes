@@ -503,7 +503,7 @@ def _load_markdown(text: str, eol: str) -> _File:
     # the spans themselves are built from the raw lines, keeping every mark
     # valid against the original text on CRLF files.
     scan_lines = [ln[:-1] if ln.endswith("\r") else ln for ln in lines]
-    blocks, errors = parse_mod.md_front_matter_blocks(scan_lines)
+    blocks, errors, _duplicates = parse_mod.md_front_matter_blocks(scan_lines)
     if errors:
         message, line = errors[0]
         raise _LocateError(message, line)

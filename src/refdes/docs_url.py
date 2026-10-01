@@ -42,3 +42,11 @@ SURROGATE_KEYS_DOCS = f"{DOCS_URL}/troubleshooting.html#surrogate-keys"
 # when the item was renamed by hand. troubleshooting.md's own `## Links`
 # heading.
 DANGLING_LINK_DOCS = f"{DOCS_URL}/troubleshooting.html#links"
+
+# The user docs for how one item file is read: the `duplicate key ... in one
+# mapping` family (a repeated key, which YAML resolves by keeping the last
+# value, and the shape that causes it), among the rest of that section's
+# per-message catalogue. troubleshooting.md's own `## Items and fields`
+# heading -- slug checked against `pages._slugify`, the function that
+# generates the anchors, rather than guessed.
+ITEMS_FIELDS_DOCS = f"{DOCS_URL}/troubleshooting.html#items-and-fields"

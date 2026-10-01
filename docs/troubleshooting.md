@@ -38,6 +38,40 @@ A [multi-item markdown file](authoring.md#several-items-in-one-file) reads every
 blocks failing to parse — the line number points inside it. Until it parses, that
 item is not in the project at all.
 
+**`duplicate key 'id' in one mapping (lines 14 and 17) -- YAML keeps the last, ...`**
+One mapping spells the same key twice. YAML resolves that silently by keeping the
+last value, so the value on the earlier line is already gone by the time anything
+reads the file — and when the repeated key is `id:`, the item the earlier one
+named is not in the model at all, with no diagnostic of its own. The message names
+the file, the line of *each* occurrence, the key, and the id the entry ended up
+with (`'REQ-PWR-002' is dropped for 'REQ-PWR-003'`). The commonest cause is a list
+entry that lost its `- ` marker:
+
+```yaml
+items:
+  - key: mxmyj98dagm
+    id: REQ-PWR-002
+    body: The 3V3 rail shall supply 1.2 A continuous.
+
+    id: REQ-PWR-003
+    body: Converter efficiency shall exceed 90 % at half load.
+```
+
+REQ-PWR-003's own opening `  - key: <key>` line was deleted, taking the `- `
+with it, so its fields merged into the entry above: one mapping, two `id:`
+lines, and REQ-PWR-002 gone from the project. The same thing happens to any two
+keys an entry shares — two `body:` lines lose the first body from every rendered
+page.
+
+A repeat inside a `defaults:` block is reported as such, since a value lost there
+is inherited by every item in the file. A one-line flow mapping reports both
+occurrences as `twice on line 3`, and a key written three times reports each line
+once.
+**Remedy:** put the `- ` back on its own line above `id:` (or delete one of the
+two lines, if the entry was a copy rather than a merge). Until it is fixed, that
+file is left exactly as written — no key is minted into it and no reference is
+rewritten, so the shape you have to fix is still there to look at.
+
 **`unknown field 'sorce' on requirement -- did you mean the field 'source'?`**
 A build error. The key is close enough to a declared field that a typo is the
 only reading, and a misspelled name means the value never reached the field —

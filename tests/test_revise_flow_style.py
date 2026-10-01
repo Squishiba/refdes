@@ -326,7 +326,16 @@ def test_multiline_flow_mapping_type_rename_refuses_not_silent(tmp_path):
 
 def test_duplicate_key_in_flow_mapping_refuses(tmp_path):
     """`{prefix: BND, prefix: BND}` -- YAML last-wins makes any rewrite a
-    guess about which entry was meant; refuse naming the line."""
+    guess about which entry was meant, so nothing is rewritten and the file is
+    left byte-identical.
+
+    The refusal used to come from revise's own flow-mapping pass, which sees
+    the text and not the parse. It now comes from the load, earlier and with
+    more to say (`parse._duplicate_keys`): the project does not load, so
+    revise declines to rewrite anything at all. revise's own text pass is
+    still there and is still unit-tested below -- it is a text scan and must
+    not depend on the loader having run first.
+    """
     before = (
         "defaults:\n  type: bound\n"
         "items:\n  - {id: BND-001, prefix: BND, prefix: BND, text: Hello}\n"
@@ -336,9 +345,25 @@ def test_duplicate_key_in_flow_mapping_refuses(tmp_path):
         str(tmp_path), revise.Mapping(prefixes={"BND": "LIM"})
     )
     assert not result.ok
-    assert any("more than once" in e for e in result.errors), result.errors
+    assert any("duplicate key 'prefix'" in e for e in result.errors), result.errors
+    assert any("twice on line 4" in e for e in result.errors), result.errors
     assert any("items/i.yaml" in e for e in result.errors), result.errors
     assert path.read_text(encoding="utf-8") == before
+
+
+def test_flow_mapping_duplicate_key_is_refused_by_the_text_pass():
+    """revise's own flow-mapping guard, exercised directly.
+
+    It reads the line, not the document, so it holds even where no load has
+    happened: `refdes revise` is handed a file path and a mapping, and a
+    duplicated key inside `{...}` is a guess it refuses to make either way.
+    """
+    line = "  - {id: BND-001, prefix: BND, prefix: LIM}\n"
+    new_line, error = revise._flow_rename_field_value(
+        line, "prefix", lambda name: {"BND": "LIM"}.get(name)
+    )
+    assert new_line == line
+    assert error is not None and "more than once" in error
 
 
 def test_quoted_flow_type_value_renamed(tmp_path):

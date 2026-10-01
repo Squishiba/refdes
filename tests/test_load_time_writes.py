@@ -626,3 +626,71 @@ def test_an_explicit_write_still_raises_on_a_read_only_tree(tmp_path):
             revise.write_rewrites([rewrite])
     finally:
         _chmod_tree(path, True)
+
+
+# ------------------- a file with a duplicate key is not rewritten (step 4)
+
+# A list entry whose opening `- key:` line was deleted takes the `- ` marker
+# with it, so its fields merge into the entry above and the file now holds two
+# `id:` lines. This is the file the parse reports (tests/test_parse.py), and
+# this is what the rest of the load must NOT do to it: mint the missing
+# `key:` line back into the entry (moving the very lines the author has to
+# read) and, worse, freeze a live reference in *another* file onto the item
+# that swallowed the vanished one. Both happened before the parse reported the
+# repeat, in the same load that discovered it.
+MERGED_ITEMS = (
+    "defaults: { type: requirement }\n"
+    "items:\n"
+    "  - id: REQ-001\n"
+    "    text: First.\n"
+    "  - id: REQ-002\n"
+    "    text: Second.\n"
+    "    refines: [REQ-001]\n"
+    "    id: REQ-003\n"
+    "    text: Third.\n"
+)
+
+
+def test_a_file_with_a_duplicate_key_is_left_byte_identical(tmp_path, capsys):
+    """The merged-entry shape, through a real writable `refdes check`."""
+    cfg = _id_project(tmp_path, MERGED_ITEMS)
+    merged = tmp_path / "items" / "r.yaml"
+    before = merged.read_text(encoding="utf-8")
+    other = tmp_path / "items" / "s.yaml"
+    other.write_text(
+        "defaults: { type: requirement }\n"
+        "items:\n"
+        "  - id: REQ-004\n"
+        "    text: Points at the entry that swallowed REQ-002.\n"
+        "    refines: [REQ-002]\n",
+        encoding="utf-8",
+    )
+
+    assert cli_mod.main(["-c", cfg, "check"]) == 1
+    captured = capsys.readouterr()
+    # `check` streams errors to stderr and the summary to stdout.
+    assert "duplicate key 'id' in one mapping (lines 5 and 8)" in captured.err
+    # No `key:` line was minted into the file that could not be trusted to say
+    # which entry it belongs to -- so the file is byte-identical.
+    assert merged.read_text(encoding="utf-8") == before
+    assert "key:" not in merged.read_text(encoding="utf-8")
+    # The clean file is still normalised, and the run says so: the withholding
+    # is per file, not a blanket refusal to write anything. Its `refines:`
+    # target no longer exists, so it stays bare -- there is no key to name.
+    assert "(minted 1 key(s) while loading)" in captured.out
+    assert "key:" in other.read_text(encoding="utf-8")
+    assert "refines: [REQ-002]" in other.read_text(encoding="utf-8")
+
+
+def test_the_duplicate_key_run_makes_no_key_claim_it_cannot_keep(tmp_path, capsys):
+    """`--no-write`'s rule -- a key is only durable once persisted -- applied
+    to a key that was never offered: both entries in the merged file publish no
+    key, rather than a key that exists only in this process. Withholding is per
+    file, not per item: a `key:` line cannot be inserted into a mapping whose
+    `- ` marker is missing without guessing which entry it belongs to."""
+    cfg = _id_project(tmp_path, MERGED_ITEMS)
+    assert cli_mod.main(["-c", cfg, "index", "--compact"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert [item["id"] for item in payload["items"]] == ["REQ-001", "REQ-003"]
+    assert [item["key"] for item in payload["items"]] == [None, None]
+    assert (tmp_path / "items" / "r.yaml").read_text(encoding="utf-8") == MERGED_ITEMS

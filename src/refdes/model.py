@@ -785,6 +785,14 @@ class Project:
     # before anything is written (docs/design/browser-editor.md, Slice 0).
     # Empty for every ordinary command.
     source_overlay: dict[str, str] = field(default_factory=dict)
+    # Project-relative paths of the item files whose parse reported a duplicate
+    # mapping key -- `parse._report_duplicate_keys` fills this in, and
+    # `revise.write_rewrites_verified` refuses to rewrite anything in these
+    # files, so the evidence (and the hand edit that caused it) survives the
+    # load instead of being normalised away by key minting and link expansion.
+    # Empty for every project whose sources parse cleanly, which is every
+    # ordinary one.
+    duplicate_key_files: set[str] = field(default_factory=set)
     coverage: dict[str, Coverage] = field(default_factory=dict)
     # Per-(item, board) coverage for the members of the groups named in a
     # board's `conforms_to:` -- {(item_id, board_name): Coverage}. Stays empty

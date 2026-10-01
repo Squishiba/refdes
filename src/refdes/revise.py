@@ -693,7 +693,7 @@ def _parse_item_count(rel: str, text: str) -> int | None:
             # Same splitter parse_markdown_file uses, so body prose behind a
             # `---` thematic break is never mistaken for front matter and
             # multi-item files judge the way they load.
-            blocks, errors = parse.md_front_matter_blocks(lines)
+            blocks, errors, _duplicates = parse.md_front_matter_blocks(lines)
             if errors or not blocks:
                 return None
             return sum(
@@ -742,11 +742,31 @@ def write_rewrites_verified(project, rewrites: list[FileRewrite]) -> set[str]:
     directly and keep raising: there the user asked for the write, so a
     refusal is a failure, not a warning.
 
+    A file whose parse reported a duplicate mapping key is not rewritten at
+    all, for a different reason than any of the above: a `key:` inserted and
+    a composite written into it would move the very lines the author has to
+    look at, and in the common shape (a lost `- ` marker) would freeze live
+    references onto the item that swallowed the other one -- destroying the
+    evidence of the merge in the same load that discovered it. The parse
+    error is the only diagnostic; the file is handed back as refused, so the
+    in-memory model matches the bytes on disk.
+
     Returns the project-relative paths of the files the filesystem refused, so
     each caller can leave its in-memory model matching the tree it could not
     change -- see `keys.mint_missing()`. Empty in the ordinary case."""
     if not rewrites:
         return set()
+    # Withheld, not failed: these never reach the filesystem, so they must not
+    # travel the `on_error` path (a warning the author did not earn) nor the
+    # count comparison below (nothing was written to compare).
+    duplicate_keyed = {
+        rewrite.rel for rewrite in rewrites
+        if rewrite.rel in project.duplicate_key_files
+    }
+    if duplicate_keyed:
+        rewrites = [r for r in rewrites if r.rel not in duplicate_keyed]
+        if not rewrites:
+            return duplicate_keyed
     failed = write_rewrites(
         rewrites,
         on_error=lambda rewrite, exc: _refuse_unwritable(project, rewrite),
@@ -770,7 +790,7 @@ def write_rewrites_verified(project, rewrites: list[FileRewrite]) -> set[str]:
             file=rewrite.rel,
             line=1,
         )
-    return {rewrite.rel for rewrite in failed}
+    return {rewrite.rel for rewrite in failed} | duplicate_keyed
 
 
 def _stale_mapped_names(rel: str, text: str, mapping: Mapping) -> list[str]:
@@ -817,7 +837,9 @@ def _stale_mapped_names(rel: str, text: str, mapping: Mapping) -> list[str]:
 
     try:
         if rel.endswith(".md"):
-            blocks, errors = parse.md_front_matter_blocks(text.replace("\r\n", "\n").split("\n"))
+            blocks, errors, _duplicates = parse.md_front_matter_blocks(
+                text.replace("\r\n", "\n").split("\n")
+            )
             if errors:
                 return []
             for open_i, _close, parsed in blocks:
