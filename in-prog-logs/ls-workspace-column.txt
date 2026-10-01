@@ -243,4 +243,20 @@ index` already exported the field.
 - [x] docs: `docs/cli-reference.md` ls section, `docs/workspaces.md`
 - [x] changelog fragment
 - [x] ruff scoped to touched files
-- [ ] commit, push, PR
+- [x] commit, push, PR — https://github.com/Squishiba/refdes/pull/148
+
+## Finished
+
+Commit `6c7777e` on `ls-workspace-column`, one commit, six files
+(`src/refdes/cli.py`, `tests/test_workspaces.py`, `docs/cli-reference.md`,
+`docs/workspaces.md`, `changelog.d/ls-workspace-column.added.md`, this log).
+PR #148 against main: https://github.com/Squishiba/refdes/pull/148
+
+Everything verified here was run, not recalled; the "before" listing in this
+log came off main's `cmd_ls` and the "after" off the changed one, in the same
+`.scratch/lscol/` project, and the no-workspaces control is this repo's own
+`refdes ls` diffed before and after. The one thing I could not verify by
+running is the one claim left in the design docs: `docs/design/vocabulary-review.md`'s
+quoted `ls` help string is now out of date, and I left it that way on purpose
+— it is a dated snapshot table whose line numbers are stale throughout, and
+half-updating it would have been worse than leaving it.
