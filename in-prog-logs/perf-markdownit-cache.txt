@@ -1,0 +1,175 @@
+Task: perf-markdownit-cache — re-verify the "one MarkdownIt per item" finding on
+current main, fix it if it is still there, gate on a byte-identical site diff,
+and add a regression test.
+
+## Re-verification (the headline: the fix is ALREADY on main)
+
+The prompt pointed at `in-prog-logs/refdes-optimization-planning.txt`. That file
+does not exist on main or in any branch/worktree of this checkout
+(`git log --all -S "markdown_it" -- in-prog-logs` finds nothing; the only
+planning-era artifact left is the implementation log below). What it was
+describing IS landed:
+
+- `git log --oneline --all -i --grep=markdown` → `0dcd02c perf(build): reuse one
+  markdown-it parser per thread (#78)`, dated 2026-09-28, three days before HEAD
+  (`81dbd08`, 2026-10-01). Merged, on main, not a stray branch.
+- Implementation log: `in-prog-logs/perf-cache-markdown-parser.md` (committed with
+  that PR). Changelog fragment `changelog.d/markdown-parser-cache.changed.md` is
+  still pending in changelog.d/, i.e. the change is unreleased but implemented.
+- Code shape today, `src/refdes/build.py`: exactly ONE `MarkdownIt(` literal in
+  all of `src/` (grep over `src/` → build.py:1946), inside `_markdown_parser()`,
+  which caches in a module-level `threading.local()` (`_MD_LOCAL`, build.py:1931).
+  All three former construction sites — `_image_inputs_hash_value` (the per-item
+  one, 1602 constructions for 1600 items), `render_bodies`, `render_pages` — now
+  call that factory (build.py:1972, 2872, 2913).
+
+So there is no per-item construction to fix. Confirmed empirically rather than by
+reading alone: instrumented `build.MarkdownIt` with a counting subclass and ran a
+full `build.build()` and a full `loader.load_readonly()` over a 1600-item corpus:
+**1 construction per build, 0 per load** (the thread-local is already warm). The
+original bug's signature was 1602.
+
+## What is actually missing: the regression test
+
+PR #78 shipped build.py + changelog + log only — `git show --stat 0dcd02c` lists
+three files, no test. `grep -rn "_markdown_parser\|MarkdownIt" tests/` → zero
+hits. Nothing in the suite would notice if someone reintroduced a per-item
+`MarkdownIt(...)`, and the perf it bought is invisible to every other test. That
+is the remaining, real part of this task, so that is what I implemented.
+
+## Corpus and harness (rebuilt, .scratch/ is per-worktree and was empty here)
+
+- `.scratch/mkperfproj.py N ROOT` — synthetic corpus per the old description:
+  `refdes-project.yaml` with `standard: {base: hardware, version: 3}`, id width 4,
+  N `requirement` items in one YAML list file, item i `refines:` item i-1 as a
+  composite `REQ-PWR-NNNN@key` (keys from `keys.mint()`, so they are Damm-valid),
+  no boards/workspaces/equations. Bodies cycle through plain prose, a GFM table
+  (every 5th), a resolved item-relative image + a URL-scheme image (every 7th),
+  and a code-fenced image + strikethrough (every 11th) so the markdown pass and
+  the image-hash pass both see real work. Builds clean: 1 project-level warning
+  ("100 item(s) with no coverage"), no errors.
+- `.scratch/bench.py ROOT --reps K --site` — best-of-K for `build.build()` (model
+  build, load excluded), `loader.load_readonly`, `render.render_site`, plus the
+  MarkdownIt construction count.
+- `.scratch/golden.py ROOT MANIFEST OUTDIR` — sha256 of every file under the
+  rendered site incl. `items.json`, plus per-item `content_hash` and
+  `_image_inputs_hash_value` contribution (not in site output), plus diagnostics.
+
+## Correctness gate: byte-identical, held on the first try
+
+Ran golden.py on the pristine tree (cached), then temporarily sabotaged
+`_image_inputs_hash_value` back to a per-item `MarkdownIt(...)` and ran it again,
+on both the N=100 and N=1600 corpora. Compared with
+`git --no-pager diff --no-index` (no `diff`/`cmp` in this shell's whitelist):
+
+- `.scratch/perf1600/_siteA` vs `_siteB` — 1611 files each, incl. `items.json`:
+  no differences (exit 0).
+- `.scratch/perf100/_siteA` vs `_siteB` — no differences.
+- The manifests (sha256 of every site file + per-item `content_hash` +
+  `_image_inputs_hash_value` contribution + all diagnostics): identical for both
+  corpora. So the cached parser and the per-item parser agree on rendered HTML,
+  on which images a body counts, and on every content hash. Held first try, no
+  fix needed — as it should be, since markdown-it's `parse`/`render` build a
+  fresh `StateCore` and `env` per call.
+
+The corpus builds clean: 1 project-level warning ("N item(s) with no coverage"),
+zero errors, before and after.
+
+## Timing (this machine, best-of-3 per run, two independent runs per state, N=1600)
+
+| phase | per-item construction (the original bug) | one cached parser (current main) | delta |
+|---|---|---|---|
+| `build.build()` model build | 551.7 / 553.4 ms | 343.3 / 343.8 / 350.9 ms | **-37.8%** (208 ms, 0.130 ms/item) |
+| `loader.load_readonly` | 668.4 / 671.3 ms | 437.2 / 437.2 / 442.5 ms | -34.6% |
+| `render.render_site` (the save) | 1771.6 / 1773.3 ms | 1638.4 / 1773.2 / 1775.5 ms | ~0, inside noise |
+| MarkdownIt constructions per build | 1601 | 1 | |
+| MarkdownIt constructions per load | 1600 | 0 (cache already warm) | |
+| N=100 model build | 34.9 ms | 22.2 ms | -36.4% (101 → 1 constructions) |
+
+So the finding holds on today's main, but two of the prompt's numbers need
+correcting:
+
+- The saving is **~37% of model build**, not the ~45% the planning pass predicted
+  nor the -59% PR #78 measured on its machine. Absolute numbers here are ~1.7x
+  PR #78's (551.7 ms sabotaged vs its 320 ms sabotaged-equivalent), so this box
+  is slower and the parser's share is smaller — treat machine absolutes as noise,
+  the ratio as the finding.
+- **The "save 1186 → ~880 ms" prediction does not hold.** `render_site` is
+  ~1.7 s here either way; the save phase is Jinja2 template rendering plus file
+  IO, and the parser was never in it more than once. If someone is still carrying
+  that number as a to-do, the save is a different (and bigger, 1.7 s vs 0.34 s)
+  target than the parser was.
+
+## Test added
+
+`tests/test_markdown_parser_cache.py`, 5 tests, no timing assertions:
+
+1. `test_a_build_constructs_one_markdown_parser_not_one_per_item` — patches
+   `build.MarkdownIt` with a counting subclass and asserts a 12-item build
+   constructs exactly 1. This is the test that would have caught the bug.
+2. `test_the_hash_pass_and_the_render_pass_share_one_instance` — `compute_hashes`
+   then `render_bodies`/`render_pages` must not construct a second one, and
+   `_markdown_parser()` must keep handing back the same object. Pins the property
+   the factory's docstring calls load-bearing (hash pass and render pass seeing
+   the same image set), which is the part a "just cache it locally per function"
+   refactor would break while still passing test 1.
+3. `test_a_build_does_not_reconfigure_the_shared_parser` — `md.options` and the
+   core/block/inline rule chains before and after a build must match, and
+   `html`/`linkify` must still be False. Sharing a mutable object is only safe
+   while nothing calls `configure`/`enable`/`disable`/`use`; this is the tripwire.
+4. `test_each_thread_gets_its_own_parser` — three threads get three instances,
+   repeat calls in one thread get one. Pins the `threading.local` decision (a bare
+   module global would pass 1-3 and fail this).
+5. `test_the_shared_parser_renders_what_the_per_item_one_did` — the config itself
+   through the shared instance: GFM table renders, `<s>` does not appear, the
+   resolved and URL-scheme images both emit `<img>` (2 total), the code-fenced one
+   stays literal text.
+
+Gotcha worth recording: the cache is thread-local and outlives a test, so a count
+taken with a warm cache is 0 and passes any "not too many parsers" assertion
+vacuously — including against the sabotaged code. Every counting test therefore
+resets `build._MD_LOCAL.markdown_it = None` through `monkeypatch` first
+(`_cold_cache`). That is the one thing about this test that could have silently
+been worthless.
+
+Sabotage check, run for real: with `_image_inputs_hash_value` reverted to a
+literal per-item `MarkdownIt(...)`, tests 1 and 2 fail (12 constructions for 12
+items, with the message naming `_markdown_parser`), tests 3-5 still pass — the
+correct split, since 3-5 describe behavior the bug never changed. Fix restored via
+`git checkout -- src/refdes/build.py`; `git status` shows build.py clean, and
+`grep -c "md = _markdown_parser()" src/refdes/build.py` is back to 3.
+
+## Changelog fragment: deliberately not added
+
+`changelog.d/markdown-parser-cache.changed.md` is already sitting in changelog.d/
+(pending, unreleased) and says exactly what this change does. `release.py` folds
+every fragment in the directory into `[Unreleased]`, so a second perf fragment
+from me would print the same bullet twice. This branch's own diff is a test file
+and a log, which per changelog.d/README.md ("Each change that deserves a
+changelog entry gets one fragment") is not a changelog-worthy change. Flagging it
+here rather than silently skipping step 7.
+
+## Suite
+
+`ruff check tests/test_markdown_parser_cache.py --select I,F` clean; `git diff
+--check` clean. Targeted: `pytest tests/test_markdown_parser_cache.py
+tests/test_image_hash.py tests/test_build.py` → 50 passed. Full suite:
+**3,255 passed, 2 skipped** (233.92 s) — 3,250 before this file, which adds 5.
+No source file changed, so nothing else could have broken.
+
+Correction, kept in the record because I got it wrong once: the first draft of
+this log and of the commit message claimed "3,046 passed, 2 skipped (215.68 s)",
+written while the suite was still running in the background. The real number from
+the job's own output is 3,255 passed, 2 skipped in 233.92 s. AGENTS.md's whole
+point is to run the tool instead of recalling the number; I didn't, and it cost a
+`--force-with-lease` to fix.
+
+## Status
+
+Complete, with a different shape than the prompt expected: **the perf fix was
+already on main** (PR #78, merged 2026-09-28, three days before HEAD), so there
+was no fix to write. What was missing — and what this branch adds — is the
+regression test PR #78 never shipped, plus a fresh measurement that confirms the
+finding (~37% of model build at N=1600 on this box) and corrects two of the
+planning pass's numbers (the 45% share, and the save-phase prediction).
+Delivered: `tests/test_markdown_parser_cache.py`, this log, PR against main.
