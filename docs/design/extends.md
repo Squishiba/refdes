@@ -77,7 +77,7 @@ The `extends:` key names an existing type (from base, a preset, or the project
 overlay). The child type declares only its **delta**: fields to add, links to
 add/override, and scalar overrides (`prefix`, `label`, `plural`, `preview`,
 `coverable`, `coverable_statuses`, `satisfying_statuses`, `verifying_statuses`,
-`check_severity`, `append_only`, `status` enum choices).
+`check_severity`, `append_only`, `sealing`, `status` enum choices).
 
 ### 2.2 What is inherited
 
@@ -94,6 +94,7 @@ add/override, and scalar overrides (`prefix`, `label`, `plural`, `preview`,
 | `verifying_statuses` | **yes** (child may override) | |
 | `check_severity` | **yes** (child may override) | |
 | `append_only` | **yes** (child may NOT turn off if parent has `true` — Liskov) | Error if child sets `append_only: false` when parent has `true` |
+| `sealing` | **yes** (child may NOT lift the build lock — Liskov) | Error if child sets `sealing: history` when the parent is `append_only: true` and its own `sealing` is `build` (the default); the build-time lock is the stronger guarantee. A child may restate `build`, or inherit/restate `history` from a history-backed parent. Enforced in `standards._apply_parent` (living-notes plan §H5) |
 | `status` enum `choices`/`default` | **yes** (child may override) | Child overrides *replace* the whole enum definition, not extend |
 | `prefix` | **no** (error if missing) | Identity-affecting; child must declare |
 | `label` | **no** (error if missing) | Child must declare |

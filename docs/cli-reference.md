@@ -717,6 +717,9 @@ Item-level overrides:
 Append-only entries edited after sealing:
   (none)
 
+Entries edited after captured:
+  (none)
+
 Accepted append-only reseals (durable history):
   (none)
 

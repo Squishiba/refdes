@@ -122,3 +122,27 @@ Open / not done
   preserved, but the file's bytes (e.g. an old header) change. Only possible
   in a project with two append-only types on different policies sharing a
   board.
+
+Review round 1 (Qwen's doc-accuracy pass on PR #157) -- FINISHED
+----------------------------------------------------------------
+Docs-only; no source changes. Five fixes:
+1. "Never rewritten" was overstated in design-log.md and the changelog
+   fragment: a seal file shared with a type still on `sealing: build` is
+   re-serialized whole when that type writes (records intact, bytes such as
+   an old header can change). Reproduced in .scratch/probe_mixed.py before
+   writing the caveat (bytes changed, header changed, LOG records identical).
+2. schema-reference.md's `sealing` row implied every edit warns; it now says
+   only captured entries warn, uncaptured ones get no diagnostic.
+3. cli-reference.md's audit sample now shows the "Entries edited after
+   captured" section, in the order real `audit --no-write` prints it.
+4. docs/design/extends.md: `sealing` added to the delta list and the
+   inheritance table (Liskov rule). All four parent/child combinations
+   checked in .scratch/probe_extends.py.
+5. Retired-calc-spelling side effect documented in design-log.md and the
+   changelog. Probed first (.scratch/probe_retired.py): build-sealed -> a
+   warning and calc-rewrite refuses the entry; history -> a
+   retired_unit_spelling ERROR, and calc-rewrite now rewrites the entry,
+   clearing it with the seal file untouched. So the note names the remedy
+   too. Corrected the function cited: _run_item_calcs (build.py:1245), not
+   run_calcs.
+Full suite after: 3279 passed, 2 skipped.
