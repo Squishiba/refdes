@@ -322,6 +322,7 @@ types:
 | `label` | title-cased name | Display name |
 | `plural` | title-cased `label` + `s` | Display name for a collection of this type; required alongside `label` under `extends` |
 | `append_only` | `false` | Seal items of this type after first build |
+| `sealing` | `build` | What backs an `append_only` type: `build` (sealed at first build; an edit is a build error) or `history` (never sealed; an edit is an "edited after captured" warning, and existing seal files are read as legacy-seal markers). `history` requires `append_only: true`. See [the design log](design-log.md#history-backed-types-sealing-history) |
 | `preview` | `[]` | Fields shown in hover previews and index columns |
 | `fields` | `{}` | Legal fields |
 | `extends` | not set | The one type this specializes; the type then writes only its delta. See [`extends`](#extends) |
@@ -369,14 +370,15 @@ A type may name one parent and declare only what differs
 (`docs/design/extends.md`). It inherits `fields:`, `links:` (merged by key --
 an override replaces the whole field definition or target list), `body:`,
 `preview:`, `coverable:`, `coverable_statuses:`, `satisfying_statuses:`,
-`verifying_statuses:`, `check_severity:` and `append_only:`. It never inherits
+`verifying_statuses:`, `check_severity:`, `append_only:` and `sealing:`. It never inherits
 `prefix:`, `label:`, `plural:` (declaring all three is required) or `doc:`.
 
 A subtype is accepted anywhere a link's target list names its parent -- no
 per-link marker. That holds one way only: a list naming the subtype still
 refuses the parent. Inheritance is one level: extending a type that itself
 extends is a load error, as are extending a set, making a parent-required field
-optional, and turning `append_only` off under an append-only parent.
+optional, turning `append_only` off under an append-only parent, and declaring
+`sealing: history` under an append-only parent that keeps the default `build`.
 
 The one-level rule is easy to trip on a project pinned to **hardware@3**, where
 `bound` is itself a subtype: `bound` is `extends: requirement`, so the example

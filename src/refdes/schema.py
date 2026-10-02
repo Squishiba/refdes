@@ -22,6 +22,9 @@ from .model import (
     ITEM_LAYOUTS,
     ON_CHANGE_MODES,
     RELEASE_GATE_DEFAULTS,
+    SEALING_BUILD,
+    SEALING_HISTORY,
+    SEALING_MODES,
     WARNING,
     BoardSpec,
     FieldSpec,
@@ -659,6 +662,19 @@ def load_project(config_path: str | None = None, start: str = ".") -> Project:
 
         check_severity = _parse_check_severity(tname, tspec, fields)
 
+        sealing = tspec.get("sealing", SEALING_BUILD)
+        if sealing not in SEALING_MODES:
+            raise SchemaError(
+                f"types.{tname}.sealing must be one of {', '.join(SEALING_MODES)}, "
+                f"got {sealing!r}"
+            )
+        if sealing == SEALING_HISTORY and not tspec.get("append_only", False):
+            raise SchemaError(
+                f"types.{tname}.sealing is {SEALING_HISTORY!r}, but {tname} is not "
+                "append_only: sealing only says what backs an append-only type's "
+                "guarantee, so it needs append_only: true"
+            )
+
         coverable_raw = tspec.get("coverable")
         coverable = None if coverable_raw is None else bool(coverable_raw)
 
@@ -682,6 +698,7 @@ def load_project(config_path: str | None = None, start: str = ".") -> Project:
             body_on_change=body_on_change,
             body_required=body_required,
             append_only=bool(tspec.get("append_only", False)),
+            sealing=sealing,
             satisfying_statuses=satisfying_statuses,
             check_severity=check_severity,
             coverable=coverable,

@@ -194,6 +194,54 @@ cannot be reconstructed from the current seal file.
 Overriding is allowed. Overriding invisibly is not — the same principle that
 governs [change tracking](change-tracking.md).
 
+### History-backed types (`sealing: history`)
+
+Everything above is the default, `sealing: build`, and it is what the bundled
+standard's `log` uses — including this project's own. A type can instead declare
+`sealing: history` (a project opts its `log` in with an overlay in
+`refdes-schema.yaml`):
+
+```yaml
+types:
+  log:
+    sealing: history
+```
+
+The entries stay append-only in the authoring sense — a correction is still a
+new entry that `amends` the old one — but nothing is sealed any more:
+
+- A build seals none of the type's entries, and an edit to one is **not** a
+  build error. If the entry was captured into `.refdes/history/` (a
+  `follows:` successor froze an edge to it, or `refdes history capture`), the
+  edit is the warning `LOG-001: edited after captured -- ...` under both
+  `check` and `build`; exit codes are unchanged.
+- A bare `follows:` on an entry a seal file already mentions freezes and is
+  captured like any other, instead of being left bare with "already sealed".
+- Seal files that already exist are kept and read as **legacy-seal markers** —
+  recorded hash only; original content was not captured — and `build`,
+  `check`, `--reseal` and `revise` never rewrite or delete them. (`refdes keys
+  adopt`, an explicit one-time migration, still re-keys them like any seal
+  file.) Deleting an entry one of them mentions is a warning
+  naming the record and the seal file, not an error:
+  `LOG-A-001 has a legacy seal record in .refdes/log-seal-board-a.yaml (key
+  5wh2j90t4hg) but is no longer in the project. ...`. Restore the entry from
+  version control if the removal was not deliberate — the record cannot bring
+  it back. A key that changed under such a record is still an error, as it is
+  for a sealed entry: a key never changes legitimately.
+- `refdes build --reseal` is accepted and says it has nothing to do:
+  `--reseal: sealing no longer applies to the 'log' type; nothing was
+  rewritten. ...`. It captures nothing.
+- `refdes audit` still lists such an entry under "Append-only entries edited
+  after sealing" when it no longer matches its legacy record (marked
+  `(legacy seal: recorded hash only; original content was not captured)`), and
+  lists captured entries that changed under "Entries edited after captured".
+
+`refdes history migrate-seals` writes one `legacy-seal` event per seal record
+into the history store; it is independent of the switch and leaves the seal
+files untouched either way. A `sealing: history` type must be `append_only:
+true`, and a subtype cannot declare it under a parent that keeps the build-time
+lock. (Verified against `src/refdes/seal.py` and `tests/test_history_seal.py`.)
+
 ### What sealing can and cannot do
 
 It **detects** an edit; it cannot **prevent** one. Anybody can open the YAML file.

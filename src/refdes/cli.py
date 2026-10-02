@@ -973,9 +973,32 @@ def cmd_audit(args) -> int:
     resealed = seal_mod.resealed_ids(project)
     if resealed:
         for entry_id in resealed:
-            print(f"  {entry_id}")
+            # A history-backed type's seal record is a legacy-seal marker, not
+            # a lock (living-notes plan §H5): still reported, and said so.
+            item = project.item_by_id(entry_id)
+            legacy = item is not None and seal_mod.history_backed(project, item.type)
+            note = (
+                "  (legacy seal: recorded hash only; original content was not captured)"
+                if legacy else ""
+            )
+            print(f"  {entry_id}{note}")
     else:
         print("  (none)")
+
+    # The sibling section §H5 adds: the history-backed replacement for the
+    # one above. The same finding `check`/`build` warn about, read-only.
+    print("\nEntries edited after captured:")
+    try:
+        edited = history_mod.edited_after_captured(project)
+    except (history_mod.HistoryError, OSError) as exc:
+        print(f"  (not checked: the history store could not be read -- {exc})")
+    else:
+        if edited:
+            for finding in edited:
+                label = finding.item.id or finding.item.key
+                print(f"  {label}  ({finding.event['kind']} event {finding.event['id']})")
+        else:
+            print("  (none)")
 
     print("\nAccepted append-only reseals (durable history):")
     history = seal_mod.reseal_history(project)
@@ -1948,7 +1971,8 @@ def main(argv: list[str] | None = None) -> int:
         help="accept edits/removals of sealed append-only entries (persisted in "
         "the seal file and shown in `audit`); "
         "bare, this accepts every board's edits, or name one board to scope it, "
-        "e.g. --reseal power",
+        "e.g. --reseal power. A `sealing: history` type has nothing to reseal "
+        "and is left untouched",
     )
     p_build.add_argument(
         "--accept-board-move",

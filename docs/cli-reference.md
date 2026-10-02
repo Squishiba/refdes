@@ -124,7 +124,7 @@ Validate, evaluate, and render the site plus `items.json`.
 |---|---|
 | `-o`, `--out DIR` | Output directory, overriding `site.out` |
 | `--keep-going` | Exit 0 even when there are errors |
-| `--reseal [BOARD]` | Accept edits to sealed append-only entries. Bare, accepts every board's; name one board to scope it, e.g. `--reseal power` |
+| `--reseal [BOARD]` | Accept edits to sealed append-only entries. Bare, accepts every board's; name one board to scope it, e.g. `--reseal power`. A `sealing: history` type has nothing to reseal: the flag is accepted, warns `sealing no longer applies to the '<type>' type; nothing was rewritten`, and rewrites nothing |
 | `--accept-board-move` | Accept a recorded [board](multi-board.md) or [workspace](workspaces.md) change for an item |
 | `--require-citations` | Promote the unpinned-citation (info) and missing-cache-blob (warning) [citation](markdown.md#citing-a-datasheet) diagnostics to errors |
 | `--dry-run` | Render the site without sealing |
