@@ -413,8 +413,13 @@ def test_load_events_empty_and_sorted(root):
     assert ids == sorted([os.path.basename(e1)[: -len(".yaml")], os.path.basename(e2)[: -len(".yaml")]])
 
 
-def test_store_directory_is_not_created_without_a_write(root):
+def test_store_directory_is_not_created_without_a_write(root, tmp_path_factory, monkeypatch):
     # H1 writes nothing until asked: an untouched project has no history dir.
+    # HISTORY_DIR is relative, so the cwd check also catches a write that
+    # lands beside the caller instead of in the project -- run from an empty
+    # directory, since this repository's own root now holds a real store.
+    elsewhere = tmp_path_factory.mktemp("cwd")
+    monkeypatch.chdir(elsewhere)
     _project(root, {"a.yaml": "items:\n  - {id: NOTE-A-001, type: note, title: T, body: b}\n"})
     build_mod.build(load_project(config_path=str(root / "refdes-project.yaml")))
     assert not os.path.exists(history.HISTORY_DIR)

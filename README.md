@@ -221,23 +221,27 @@ That `board: board-a` is the `log` type's own hand-typed field, not the
 always wins, so a `log` entry stays plain-text-tagged rather than board-scoped
 until that field is retired in favor of the reserved key.
 
-Entries are **sealed on first build**. Editing one afterwards fails the build:
+Entries are append-only: corrections are appended, exactly as in a paper
+notebook where you strike through and initial rather than erase. Under the
+bundled `hardware@3` standard the log is backed by **captured history**: an
+edit is never a build error, and once an entry has been captured
+(`refdes history capture LOG-A-003`), editing it is reported on every
+`check` and `build`:
 
 ```
-ERROR  LOG-A-003 is append-only and has been modified since it was sealed.
-       Append a new entry with `amends: [LOG-A-003]` instead, or run with
-       --reseal if the edit is deliberate.
+WARNING items/board-a/log.yaml:47 [LOG-A-003] — LOG-A-003: edited after captured
+        -- current semantic content differs from the snapshot in captured event
+        1fa0259e-1c70-52ff-8fef-37ad1b96180b
 ```
 
-Deleting one fails the same way, for the same reason — a page torn out of the
-notebook is worse than one written over.
+A project on `hardware@1`/`hardware@2`, or one that sets `sealing: build` for
+`log`, **seals** entries on first build instead: editing or deleting one then
+fails the build, and `--reseal` accepts a deliberate override, reported by
+`refdes audit` so it is always visible. See
+[the design log](docs/design-log.md#append-only).
 
-Corrections are appended, exactly as in a paper notebook where you strike through
-and initial rather than erase. `--reseal` exists for deliberate overrides and is
-reported by `refdes audit`, so an override is always visible.
-
-This cannot *prevent* an edit — no file-based tool can. It detects one, which is
-what actually matters.
+Neither can *prevent* an edit — no file-based tool can. Both detect one (a
+history-backed entry once it has been captured), which is what actually matters.
 
 ## Coverage
 

@@ -879,13 +879,13 @@
    "body_on_change": "invalidate",
    "body_required": false,
    "append_only": true,
-   "sealing": "build",
+   "sealing": "history",
    "satisfying_statuses": null,
    "check_severity": "error",
    "coverable": null,
    "coverable_statuses": null,
    "verifying_statuses": null,
-   "doc": "A dated entry in the design log \u2014 work done, questions raised, corrections. Entries are append-only: each is sealed on the first build where it has no errors, and after that editing it is a build error \u2014 corrections are new entries with amends."
+   "doc": "A dated entry in the design log \u2014 work done, questions raised, corrections. Entries are append-only: a correction is a new entry with amends, never a rewrite of the old one. Editing an entry is not a build error: once it has been captured into the project's history (refdes history capture), an edit is reported as edited after captured, a warning."
   }
  },
  "link_types": {

@@ -70,8 +70,18 @@ sample project does exactly this; see
 
 ## Append-only
 
-Entries are **sealed on first build**. The hash of each is recorded in
-`.refdes/log-seal.yaml` — or, once a project registers `boards:` *and* an entry
+What enforces "append-only" is the type's `sealing:` setting. The bundled
+`hardware@3` standard's `log` — this project's own included — is
+**`sealing: history`**: nothing is sealed, and an edit is never a build error;
+see [history-backed types](#history-backed-types-sealing-history) below.
+The sealing, seal files and `--reseal` described from here to that section
+are **`sealing: build`** (only [corrections](#corrections) apply to both): the
+build-time hash lock, which is still the default for every other append-only
+type, what `log` itself uses under `hardware@1` and `hardware@2`, and what a
+`hardware@3` project gets back for its `log` by opting out (below).
+
+With `sealing: build`, entries are **sealed on first build**. The hash of each
+is recorded in `.refdes/log-seal.yaml` — or, once a project registers `boards:` *and* an entry
 actually resolves onto one (the reserved `board:` override, not a same-named
 plain field like the one this schema's own `log` type declares above),
 `.refdes/log-seal-<board>.yaml` instead. Editing a sealed entry afterwards
@@ -196,15 +206,17 @@ governs [change tracking](change-tracking.md).
 
 ### History-backed types (`sealing: history`)
 
-Everything above is the default, `sealing: build`, and it is what the bundled
-standard's `log` uses — including this project's own. A type can instead declare
-`sealing: history` (a project opts its `log` in with an overlay in
-`refdes-schema.yaml`):
+This section applies to the bundled `hardware@3` `log`, which declares
+`sealing: history`, and to any type a project declares that way itself. Every other append-only type
+keeps the engine default, `sealing: build` — everything above — as does `log`
+under `hardware@1` and `hardware@2`. A `hardware@3` project that wants the
+build-time lock back for its log says so with an overlay in
+`refdes-schema.yaml`:
 
 ```yaml
 types:
   log:
-    sealing: history
+    sealing: build
 ```
 
 The entries stay append-only in the authoring sense — a correction is still a
@@ -212,7 +224,8 @@ new entry that `amends` the old one — but nothing is sealed any more:
 
 - A build seals none of the type's entries, and an edit to one is **not** a
   build error. If the entry was captured into `.refdes/history/` (a
-  `follows:` successor froze an edge to it, or `refdes history capture`), the
+  `follows:` successor froze an edge to it — not yet possible under
+  `hardware@3`, which declares no `follows:` — or `refdes history capture`), the
   edit is the warning `LOG-001: edited after captured -- ...` under both
   `check` and `build`; exit codes are unchanged. An entry that was never
   captured has no snapshot to compare against, so editing it produces **no
@@ -254,18 +267,24 @@ new entry that `amends` the old one — but nothing is sealed any more:
   entry, a `calc` line using a retired unit spelling is only a warning, because
   fixing it would mean resealing (and `refdes calc-rewrite` refuses to touch a
   sealed entry). A history-backed entry is not sealed, so neither exception
-  applies: the moment a type switches to `sealing: history`, any such line in
-  an existing entry is a `retired_unit_spelling` build **error**.
+  applies: the moment a type switches to `sealing: history` — for the bundled
+  `log`, the moment a project pinned to `hardware@3` picks up the refdes
+  version that made it the default — any such line in an existing entry is a
+  `retired_unit_spelling` build **error**.
   `refdes calc-rewrite` now rewrites those entries too, which clears it (the
   legacy seal file is not touched; a captured entry then reads as edited after
-  captured). Run it, or fix the line by hand, when opting a type in.
+  captured). Run it, or fix the line by hand, when a type switches.
 
 `refdes history migrate-seals` writes one `legacy-seal` event per seal record
 into the history store; it is independent of the switch and leaves the seal
-files untouched either way. A `sealing: history` type must be `append_only:
-true`, and a subtype cannot declare it under a parent that keeps the build-time
-lock. (Verified against `src/refdes/seal.py` and `tests/test_history_seal.py`;
-the retired-spelling behaviour against `src/refdes/build.py`'s `_run_item_calcs` and
+files untouched either way. This repository has run it: its six entries'
+records in `.refdes/log-seal-board-a.yaml` have markers in
+`.refdes/history/events/`, and the seal file itself is unchanged.
+
+A `sealing: history` type must be `append_only: true`, and a subtype cannot
+declare it under a parent that keeps the build-time lock. (Verified against
+`src/refdes/seal.py` and `tests/test_history_seal.py`; the retired-spelling
+behaviour against `src/refdes/build.py`'s `_run_item_calcs` and
 `src/refdes/calc_rewrite.py`, both of which read `seal.is_sealed`.)
 
 ### What sealing can and cannot do

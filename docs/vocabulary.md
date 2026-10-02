@@ -179,7 +179,7 @@ items:
 
 ### `log`
 
-A dated entry in the design log — work done, questions raised, corrections. Entries are append-only: each is sealed on the first build where it has no errors, and after that editing it is a build error — corrections are new entries with amends.
+A dated entry in the design log — work done, questions raised, corrections. Entries are append-only: a correction is a new entry with amends, never a rewrite of the old one. Editing an entry is not a build error: once it has been captured into the project's history (refdes history capture), an edit is reported as edited after captured, a warning.
 
 - **Id prefix:** `LOG`
 - **Pointed at by:** `amends` from `log`

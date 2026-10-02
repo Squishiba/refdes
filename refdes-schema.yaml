@@ -16,8 +16,10 @@
 # reserved `board:` override -- a type's own field always wins -- so that key
 # scopes nothing on a log entry; the entries are board-scoped by living in
 # items/board-a/, like everything else. Retiring the field would be tidier
-# still, but it would change every entry's content hash, and log entries are
-# sealed append-only.
+# still, but it would change every entry's content hash: the log is no longer
+# sealed (hardware@3's log is `sealing: history`), but every entry would then
+# differ from its legacy seal record in .refdes/log-seal-board-a.yaml, which
+# `refdes audit` reports.
 # Everything else about `log` comes from the standard unchanged.
 types:
   log:

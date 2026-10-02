@@ -137,7 +137,10 @@ refdes build --reseal power
 refdes build --dry-run
 ```
 
-Build also **seals** any new [log entries](design-log.md) it finds. Seals are
+Build also **seals** any new entry of a `sealing: build` append-only type it
+finds — not the bundled `hardware@3` `log`, which is
+[history-backed](design-log.md#history-backed-types-sealing-history) and never
+sealed (`--reseal` then says it has nothing to do). Seals are
 stored per board — `.refdes/log-seal-<board>.yaml` for a registered board's own
 entries, `.refdes/log-seal.yaml` for entries with no board (the only file used
 at all when the project has no `boards:` registry). `--reseal <board>` only

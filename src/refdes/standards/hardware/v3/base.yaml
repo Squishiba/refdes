@@ -287,11 +287,15 @@ types:
     body: { on_change: log }
 
   log:
-    doc: "A dated entry in the design log — work done, questions raised, corrections. Entries are append-only: each is sealed on the first build where it has no errors, and after that editing it is a build error — corrections are new entries with amends."
+    doc: "A dated entry in the design log — work done, questions raised, corrections. Entries are append-only: a correction is a new entry with amends, never a rewrite of the old one. Editing an entry is not a build error: once it has been captured into the project's history (refdes history capture), an edit is reported as edited after captured, a warning."
     prefix: LOG
     label: Log entry
     plural: Log entries
     append_only: true
+    # Backed by captured history, not the build-time hash lock (living-notes
+    # plan §H5). Seal files from before this keep being read as legacy-seal
+    # markers. Every other type keeps the engine default, `sealing: build`.
+    sealing: history
     preview: [date, author, summary]
     fields:
       date:    { type: date, required: true, on_change: invalidate, doc: "When this entry was written. Required — an undated log entry cannot be ordered in time." }

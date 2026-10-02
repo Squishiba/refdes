@@ -18,7 +18,8 @@ defaults:
   # six "no board" warnings on a project that looked otherwise clean.
   #
   # The field stays because retiring it would change every entry's content
-  # hash, and these are sealed append-only entries. See
+  # hash, and every entry would then differ from its legacy seal record in
+  # .refdes/log-seal-board-a.yaml (reported by `refdes audit`). See
   # docs/design-log.md#board-is-a-plain-field-here-not-the-reserved-override.
   board: board-a
   author: J. Bin

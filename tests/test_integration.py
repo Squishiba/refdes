@@ -13,7 +13,7 @@ from conftest import write_project_config
 from helpers import CHECK_SEVERITY_SCHEMA, REPO, _build_at, _check_severity_project, _project
 
 from refdes import build as build_mod
-from refdes import seal
+from refdes import history, parse, seal
 from refdes.schema import SchemaError, load_project
 
 # -------------------------------------------------------------------- integration
@@ -202,23 +202,57 @@ def test_outstanding_work_is_aggregated_into_summary_lines():
     assert not any(d.item_id == "REQ-PWR-001" for d in project.warnings)  # verified
 
 
-def test_log_entries_are_sealed_and_edits_are_caught():
+def _diagnostics_for(project, item_id):
+    return [d for d in project.errors + project.warnings if d.item_id == item_id]
+
+
+def test_an_edit_to_an_uncaptured_log_entry_is_no_diagnostic_at_all():
+    """hardware@3's `log` is `sealing: history` (living-notes plan §H5): this
+    repo's LOG-A-* entries are no longer sealed -- `.refdes/log-seal-board-a.yaml`
+    is read only as legacy-seal markers -- so an edit is never a build error.
+    LOG-A-003 was never captured into `.refdes/history/`, so there is no
+    snapshot to compare against and the edit produces nothing at all."""
     project = _project()
+    assert project.types["log"].sealing == "history"
     entry = project.item_by_id("LOG-A-003")
-    # This repo's committed seal file predates the hash-format change
-    # (docs/design/keys.md §5, link targets hashed as resolved keys), and
-    # _project() never mints keys, so the seal's stored hash and
-    # entry.content_hash are no longer expected to be byte-identical
-    # strings -- verify()'s hash-format-aware comparison (seal.py's
-    # _matches_sealed_hash) is what actually answers "is this unedited",
-    # which is what this assertion means to check.
-    seal.verify(project, write=False, reseal=False)
-    assert "LOG-A-003" not in project.seal_violations
+    assert not seal.is_sealed(project, entry)
+    assert _diagnostics_for(project, "LOG-A-003") == []
 
     entry.fields["summary"] = "edited after the fact"
     build_mod.compute_hashes(project)
+    build_mod.warn_edited_after_captured(project)
     seal.verify(project, write=False, reseal=False)
-    assert "LOG-A-003" in project.seal_violations
+    assert "LOG-A-003" not in project.seal_violations
+    assert _diagnostics_for(project, "LOG-A-003") == []
+
+
+def test_an_edit_to_a_captured_log_entry_is_the_edited_after_captured_warning(tmp_path):
+    """The same edit once LOG-A-003 has been captured (`refdes history
+    capture`, the only capture moment hardware@3 offers until it declares
+    `follows:`) is H3's warning -- still never an error. Run on a copy of this
+    repo's project so the capture never writes into the real tree."""
+    for name in ("refdes-project.yaml", "refdes-schema.yaml"):
+        shutil.copy(os.path.join(REPO, name), tmp_path / name)
+    for name in ("items", ".refdes"):
+        shutil.copytree(
+            os.path.join(REPO, name), tmp_path / name,
+            ignore=shutil.ignore_patterns("history", "copies"),
+        )
+    project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
+    parse.load_items(project)
+    entry = project.item_by_id("LOG-A-003")
+    assert not seal.is_sealed(project, entry)
+    history.capture(str(tmp_path), entry)
+
+    # The whole read-only build, not its pieces: it resolves boards, so the
+    # legacy seal in .refdes/log-seal-board-a.yaml is the one consulted.
+    entry.fields["summary"] = "edited after the fact"
+    build_mod.build(project)
+    assert "LOG-A-003" not in project.seal_violations
+    assert not [d for d in project.errors if d.item_id == "LOG-A-003"]
+    warnings = [d.message for d in project.warnings if d.item_id == "LOG-A-003"]
+    assert len(warnings) == 1
+    assert warnings[0].startswith("LOG-A-003: edited after captured")
 
 
 def test_log_amendments_are_links_not_edits():

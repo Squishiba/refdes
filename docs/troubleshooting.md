@@ -437,6 +437,12 @@ change the bound, or record in the [design log](design-log.md) that you know.
 
 ## The design log
 
+The two sealed-entry errors below come only from a `sealing: build` type —
+`log` under `hardware@1`/`hardware@2`, or a project that sets it. The bundled
+`hardware@3` `log` is
+[history-backed](design-log.md#history-backed-types-sealing-history) and
+reports the warnings after them instead.
+
 **`LOG-A-003 is append-only and has been modified since it was sealed`**
 Working as designed. Append a new entry with `amends: [LOG-A-003]`. If the edit is
 genuinely deliberate, `refdes build --reseal` — it is recorded in
@@ -449,6 +455,18 @@ that `amends` it, or — if the removal really is deliberate — `refdes build
 --reseal`, which drops the orphaned seal. If the item was renumbered rather
 than removed, record the old id in its replacement's
 [`former_ids:`](ids.md#renumbering-former-ids) and this stops firing.
+
+**`LOG-A-003: edited after captured -- current semantic content differs from
+the snapshot in captured event <id>`**
+A warning, never an error: the entry was captured into `.refdes/history/` and
+has been edited since. If the edit was a correction, revert it and append an
+entry that `amends` this one; otherwise there is nothing to do.
+
+**`LOG-A-001 has a legacy seal record in .refdes/log-seal-board-a.yaml ... but
+is no longer in the project`**
+A warning, never an error: an entry that a seal file from before
+history-backing mentions was deleted. The record holds a hash only, so restore
+the entry from version control if the removal was not deliberate.
 
 **Every log entry reports as modified after a rebase or line-ending change.**
 The hash covers content, with whitespace normalised, so this should not happen from
