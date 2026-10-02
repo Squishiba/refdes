@@ -1,0 +1,10 @@
+# Refdes captured-history event. The id is derived from
+# (kind, item_key, successor_key), so replaying the same edge is a
+# no-op. occurred_at is display metadata only: never ordered, compared,
+# or gated on.
+history_format: 1
+id: b2533f42-d5f1-506d-a36c-5a66418d95d0
+item_key: wkq630vejxq
+kind: legacy-seal
+reason: legacy seal for LOG-A-002 in .refdes/log-seal-board-a.yaml; recorded hash
+  9b41adf3396a5191 (hash_format 2); original content was not captured

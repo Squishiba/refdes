@@ -637,20 +637,23 @@ def test_a_subtype_cannot_lift_the_build_lock(tmp_path):
     assert "types.entry.sealing is 'history', but 'log' is append_only" in message
 
 
-def test_the_bundled_log_stays_build_sealed_and_a_project_overlay_opts_in(tmp_path):
-    """hardware@3's `log` keeps the build lock (Q1's default: nothing written
-    before H5 changes behaviour -- this repo's own seals and
-    tests/test_integration.py rely on it); a project opts in with an overlay."""
+def test_the_bundled_log_is_history_backed_and_a_project_overlay_can_opt_out(tmp_path):
+    """hardware@3's `log` declares `sealing: history`; every other type keeps
+    the engine default, `build`. A project that wants the old build-time lock
+    back for its log says so with an overlay."""
     write_project_config(tmp_path, "site: { title: T, out: _site }\nstandard: { base: hardware, version: 3 }\n")
     project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
     assert project.types["log"].append_only is True
-    assert project.types["log"].sealing == "build"
+    assert project.types["log"].sealing == "history"
+    assert {
+        name for name, spec in project.types.items() if spec.sealing != "build"
+    } == {"log"}
 
     write_project_config(
         tmp_path,
         "site: { title: T, out: _site }\nstandard: { base: hardware, version: 3 }\n"
-        "types:\n  log:\n    sealing: history\n",
+        "types:\n  log:\n    sealing: build\n",
     )
     project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
     assert project.types["log"].append_only is True
-    assert project.types["log"].sealing == "history"
+    assert project.types["log"].sealing == "build"

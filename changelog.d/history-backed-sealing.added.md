@@ -1,8 +1,11 @@
 - **`sealing: history` — an append-only type backed by captured history
   instead of the build-time lock** (living-notes plan Phase H5). A type-level
-  key, `sealing: build | history`, defaulting to `build`: every existing
-  project, and the bundled `hardware@3` `log`, keep sealing exactly as before.
-  On a `sealing: history` type, a build seals nothing; an edit is never a
+  key, `sealing: build | history`. The bundled `hardware@3` `log` declares
+  `history`, so a `hardware@3` project's log entries are no longer sealed (a
+  project can opt its log back into the lock with `types: log: sealing:
+  build` in `refdes-schema.yaml`); `build` stays the default for every other
+  type, and `hardware@1`/`hardware@2` are untouched. On a `sealing: history`
+  type, a build seals nothing; an edit is never a
   build error (a captured entry gets the `edited after captured` warning; an
   entry never captured gets no diagnostic at all);
   a bare `follows:` on an entry a seal file already mentions freezes and is
@@ -20,7 +23,8 @@
   entries edited after sealing" as legacy seals and gains an "Entries edited
   after captured" section. `sealing: history` requires `append_only: true`, and
   a subtype cannot declare it under a parent that keeps the build lock.
-  Opting a type in has one surprising side effect: a retired calc unit
+  Switching a type to `history` -- including picking up this default for
+  `log` -- has one surprising side effect: a retired calc unit
   spelling inside an existing (formerly sealed) entry, which was only a
   warning because the entry could not be fixed without resealing, becomes a
   `retired_unit_spelling` build error -- and `refdes calc-rewrite`,

@@ -100,7 +100,9 @@ requirement on another still checks correctly — it just only *reports*
 board-a's own diagnostics, so a team can review their own board without
 someone else's unrelated warning in the way. See [CLI reference](cli-reference.md).
 
-**Seals are per board too.** An append-only [log entry](design-log.md)'s seal
+**Seals are per board too.** A sealed append-only entry's seal (a
+`sealing: build` type — not the bundled `hardware@3` `log`, which is
+[history-backed](design-log.md#history-backed-types-sealing-history))
 lives in `.refdes/log-seal-<board>.yaml` once it resolves onto a board — items
 with no board keep using `.refdes/log-seal.yaml`, same as before boards
 existed. `refdes build --reseal board-a` accepts an edit only to board-a's own

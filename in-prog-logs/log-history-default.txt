@@ -1,0 +1,115 @@
+log-history-default -- hardware@3's bundled `log` defaults to `sealing: history`
+==============================================================================
+
+Follow-up to PR #157 (living-notes H5, merged as 3edb68b). Jared's decision:
+flip the bundled log to history-backed once threads is the expectation.
+Agent: Claude Opus 5.5 (Claude Code), branch log-history-default.
+
+Status: FINISHED (PR opened against main, not merged).
+
+Setup
+-----
+- `git checkout main` is impossible in this worktree: main is checked out by
+  the main checkout at /home/jorb/work/refdes, which I did not touch. Did the
+  equivalent instead: `git fetch origin` + `git checkout -b
+  log-history-default origin/main` at 3edb68b (the squash-merged H5).
+
+Baseline (before any change)
+----------------------------
+- `check` / `check -v` / `build` on this repo: exit 1, the one pre-existing
+  DEC-PWR-001 / BND-THM-001 error, 2 warnings, no retired-spelling
+  diagnostics. Seal file hashes recorded.
+
+What changed
+------------
+- base.yaml: `log` gains `sealing: history`. Its `doc:` said entries are
+  "sealed on the first build ... editing it is a build error" -- false after
+  the flip, and it ships to users (vocabulary page, editor hovers), so it was
+  rewritten without the word "sealed" for the new state. It names only
+  `refdes history capture` as the capture moment: hardware@3 declares no
+  `follows:` yet (threads 4a adds it), so a follows capture is impossible
+  under the bundled standard today.
+- Oracle fixtures: exactly two lines each, both in log's row (`sealing`
+  build -> history, and `doc`). Verified mechanically: every other type
+  identical, link_types identical, fixture == live resolved dump, log the
+  only history-backed type.
+- docs/vocabulary.md: regenerated (docs-site/gen_examples.py); one line, log's
+  definition.
+- tests/test_integration.py: the build-sealed test is replaced by two:
+  - test_an_edit_to_an_uncaptured_log_entry_is_no_diagnostic_at_all (the
+    real repo project, in-memory edit as before);
+  - test_an_edit_to_a_captured_log_entry_is_the_edited_after_captured_warning
+    (a tmp_path copy of the repo's config/items/.refdes, so the capture never
+    writes into the real tree; runs the full read-only build).
+  Sabotage (remove `sealing: history` from base.yaml): both fail, plus the
+  schema test and both oracles. First draft of the captured test did NOT fail
+  under sabotage -- it called seal.verify without resolving boards, so it
+  looked in the empty base seal file. Fixed by running the full build; also
+  confirmed its build-level assertion alone catches the lock
+  (seal_violations == ['LOG-A-003']).
+- tests/test_history_seal.py: the H5 test pinning the bundled log as build
+  becomes test_the_bundled_log_is_history_backed_and_a_project_overlay_can_opt_out
+  (log is the only non-build hardware@3 type; `types: log: sealing: build`
+  restores the lock).
+- This repo's real state: ran `refdes history migrate-seals` for real -> six
+  legacy-seal markers in .refdes/history/events/ (no objects, no
+  occurred_at), committed. Second run: "0 written, 6 already present".
+  .refdes/log-seal-board-a.yaml and .refdes/log-seal.yaml byte-identical
+  throughout. check/build output identical to baseline (same single
+  DEC-PWR-001 error; --keep-going exit 0); audit's sealing and captured
+  sections both (none).
+- Retired-calc side effect (point 6): nothing. No LOG-A-* entry has a calc
+  block (the only "calc" hits are prose), no retired_unit_spelling
+  diagnostic before or after, and `refdes calc-rewrite --dry-run` reports
+  "nothing to rewrite -- no old-spelling calc lines found".
+
+Docs: every statement the flip made false
+-----------------------------------------
+Grepped rather than patched from memory. Fixed:
+- changelog.d/history-backed-sealing.added.md: lead rewritten (log declares
+  history, opt-out overlay, build default for other types, v1/v2 untouched);
+  the side-effect sentence now includes picking up this default.
+- CHANGELOG.md [Unreleased] hardware@3 Breaking entry: "Five" -> "Six"
+  changes, item 6 added (this is the authoritative v2->v3 difference list),
+  plus "Part 6 needs no migration".
+- docs/design-log.md: "## Append-only" gains a lead saying sealing: decides
+  enforcement, the bundled log is history-backed, and the sealing text that
+  follows is `sealing: build` (corrections apply to both); the H5 subsection's
+  opening now says log declares history and shows the opt-out overlay; the
+  capture bullet notes hardware@3 has no follows: yet; the retired-calc
+  bullet covers picking up the default; the migrate-seals paragraph says
+  this repo has run it.
+- README.md: the LOG-A-003 "fails the build" example replaced with the real
+  edited-after-captured warning (generated on a scratch copy, not written
+  from memory), plus the build-sealed alternative.
+- docs/cli-reference.md: "Build also seals any new log entries" scoped to
+  `sealing: build` types.
+- docs/troubleshooting.md: the two sealed-entry errors are scoped to
+  `sealing: build`; entries added for the two warnings a hardware@3 log user
+  sees (texts match seal.py / build.py).
+- docs/multi-board.md: per-board seals scoped to sealing: build types.
+- refdes-schema.yaml and items/board-a/log.yaml comments: "these are sealed
+  append-only entries" was false; the rationale for keeping the `board` field
+  is restated truthfully (retiring it would make all six entries differ from
+  their legacy seal records, which audit reports -- verified on a scratch
+  copy). The items/ comment is in the defaults header, outside any item:
+  audit and check confirm no content hash moved.
+- Left alone: docs/design/** (dated design records), the "board is a plain
+  field" section of design-log.md (its sealed clause is conditional, still
+  true for build-sealed projects), markdown.md/math.md mentions of "sealed
+  entries" (generic, still true for build-sealed types).
+
+One test broken by committing the markers (not by the flip)
+-----------------------------------------------------------
+- tests/test_history.py::test_store_directory_is_not_created_without_a_write
+  asserted `not os.path.exists(history.HISTORY_DIR)` -- a RELATIVE path, so
+  it checked pytest's cwd, i.e. this repo's root, which now legitimately
+  holds .refdes/history/. Kept the check's intent (catch a write landing
+  beside the caller instead of in the project) by chdir-ing to an empty tmp
+  dir first. Sabotage: making build() create HISTORY_DIR relative to cwd
+  fails the test; the sabotage write landed in the tmp cwd, not this repo.
+
+Verification
+------------
+- Full suite: 3280 passed, 2 skipped.
+- ruff: the three edited test files have no findings beyond main's.

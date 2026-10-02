@@ -24,7 +24,7 @@ and this project uses [Semantic Versioning](https://semver.org/).
   -- first at line 12, again at line 21. ... rename one of them, e.g. 'x' ->
   'x_2'.` A name reused across *different* items is unaffected -- scope
   still resets per item, unchanged from before.
-- **The bundled standard moves to `hardware@3`.** Five changes, arriving
+- **The bundled standard moves to `hardware@3`.** Six changes, arriving
   together because none was ever published on its own:
     1. A new link verb, `governed_by` (inverse `governs`), authored on
        `requirement`, targeting `[requirement, bound]` -- "this specific
@@ -73,6 +73,16 @@ and this project uses [Semantic Versioning](https://semver.org/).
        so can never be edited to point forward at a decision written after
        it; `recorded_by:` lets the decision itself point back at the entry
        that recorded it. Purely additive.
+    6. `log` declares `sealing: history` (living-notes plan Phase H5; see
+       the `sealing: history` entry under Added): a log entry is no longer
+       sealed, and editing one is no longer a build error -- a captured
+       entry gets the `edited after captured` warning instead, an
+       uncaptured one nothing. Existing `.refdes/log-seal*.yaml` files keep
+       being read as legacy-seal markers. A project that wants the old lock
+       back for its log writes `types: log: sealing: build` in
+       `refdes-schema.yaml`. One case turns *stricter*: a retired calc unit
+       spelling inside a formerly sealed entry was a warning and is now a
+       build error, which `refdes calc-rewrite` can now fix.
 
   `refdes init` pins `version: 3` from now on. `refdes new <type>` now hints
   at `body:` after the closing fence -- it's reserved, not a schema field,
@@ -87,7 +97,9 @@ and this project uses [Semantic Versioning](https://semver.org/).
   back) rather than silently overwriting or orphaning content on any item
   that already has body content of its own -- merge the two by hand first,
   then upgrade. Parts 1, 2, and 5 need no migration; all three are purely
-  additive.
+  additive. Part 6 needs none either: `refdes history migrate-seals`
+  records the legacy seals in `.refdes/history/` if you want them there,
+  and changes nothing about how the build treats them.
 
 ### Added
 
