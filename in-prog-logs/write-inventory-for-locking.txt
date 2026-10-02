@@ -1,0 +1,232 @@
+WRITE INVENTORY FOR LOCKING — refdes
+===================================
+
+Scope: every file refdes writes into a project it operates on, found by
+grepping `write_text`/`write_bytes`/`open(...,"w"/"a"...)`/`os.replace`/
+`shutil.copy*`/`mkstemp`/`NamedTemporaryFile` across `src/refdes/` plus a
+read of the call chains that invoke them. Each entry names the long pole
+writers with file:line citations, the realistic concurrency, and the real
+cost of a lost update. Organized worst-first. No locking design is
+proposed — the implementation is a separate (Codex) task.
+
+Legend:
+  COST      — what a lost update / torn write actually costs
+  RACE      — who could write concurrently in practice
+  PROTECT   — existing protection, if any
+
+
+======================================================================
+TIER A — corruption breaks everything downstream, no lock, non-atomic
+======================================================================
+
+1. Item source files (`items/**/*.md` and any item `source_file`)
+   - Writers: every load's key-minting write-back
+     (`keys.mint_missing` -> `revise.write_rewrites_verified`,
+     `keys.py:764-798`, `revise.py:834`), link/check/calc-ref expansion and
+     follows freeze (`links.py:501/770/933/1132` ->
+     `write_rewrites_verified`, `revise.py:728-741` plain
+     `textio.write_text(rewrite.path, ...)`), id write-back
+     (`ids.py:625`), `keys adopt`/`keys restore` (`adopt.py:333`,
+     `key_restore.py:238`), `calc reassign` rewrite (`calc_rewrite.py:255`),
+     standard upgrade (`revise.py:1509`), `refdes revise` (`revise.py:730`,
+     rollback `revise.py:795`).
+   - RACE: high. *Every* writable CLI command loads the project, and load
+     itself mints keys + expands links (`loader.py:98-141`), so `refdes
+     check` racing `refdes build` rewrites the same item files. A serve
+     instance editing one item while a CLI runs is the canonical mixed
+     race. Two CLI invocations in parallel is realistic in scripts.
+   - PROTECT: CLI path has none — `revise.py:730` and `ids.py:625` are
+     plain `textio.write_text` (whole-file rewrite, no temp/rename). Serve
+     path is protected (see §M): per-project flock `serve/edit.py:260-291`
+     on `.refdes/serve-write.lock`, temp+`os.replace` at
+     `serve/edit.py:848-854`, re-read verify and `_restore` at
+     `serve/edit.py:860-884`.
+   - COST: worst in the inventory. A torn write or a lost update on an
+     item file corrupts it — every subsequent command (load, build,
+     check, serve) then fails to parse it, and the edit itself is data
+     loss (no journal).
+
+2. `.refdes/ids.yaml` — the ID ledger
+   - Writers: `ids.save_ledger` (`ids.py:127-139`, plain
+     `textio.write_text` at `ids.py:139`), called from `reserve_id`
+     (`ids.py:285-298`) on every id reservation and from `allocate`
+     (`ids.py:672`). CLI `new` (`cli.py:1240-1255` path), `revise`,
+     serve edit creation (`serve/edit.py:1088` -> `ids.reserve_id`).
+   - RACE: high — two `refdes new`s, or a serve edit racing any CLI,
+     both reserve against a stale read of the same ledger.
+   - PROTECT: none. Whole-file rewrite, no lock.
+   - COST: lost reservation = duplicate ids or reused burned prefixes;
+     a NaN-value or torn YAML breaks `load`-adjacent tooling that reads
+     the ledger. Silent unless inspected — duplicate display ids poison
+     links/keys downstream.
+
+3. `.refdes/keys-adopted.yaml` — adoption marker
+   - Writers: `keys adopt` appends a FileRewrite for the marker and
+     writes via `revise.write_rewrites` (`adopt.py:300-333`,
+     `keys.ADOPTION_MARKER` at `keys.py:32`, path helper `keys.py:658`).
+   - RACE: low realism (adoption is one-shot per project), but a race
+     with a concurrent `keys adopt`/`build` is the same class.
+   - PROTECT: none.
+   - COST: re-running `keys adopt` against a lost marker re-adopts
+     already-adopted keys — visible in git, recoverable, medium cost.
+
+======================================================================
+TIER B — silent record loss, or one-run-to-rebuild breakage
+======================================================================
+
+4. `.refdes/log-seal.yaml` + `.refdes/log-seal-<board>.yaml` (seals)
+   - Writers: `seal.save_seals` (`seal.py:206-246`), atomic
+     NamedTemporaryFile + fsync + `os.replace` (`seal.py:234-244`).
+     Called from `build` (seal_write path), `migrate-seals`, legacy-seal
+     markers (`cli.py:1846`), `history capture` seal markers.
+   - RACE: two `refdes build`s, or a serve-triggered reseal (`--reseal`)
+     racing a CLI build.
+   - PROTECT: atomic-but-unlocked. `os.replace` means no torn file, but
+     last-writer-wins on the whole file.
+   - COST: silent loss of a recorded reseal/board move — the *record*
+     that a move was deliberate is gone, so the next build re-reports the
+     same move as new (`boards.py` comment, ~line 258). The audit trail
+     is what's at stake, not data.
+
+5. `.refdes/boards.yaml` — board/workspace membership manifest
+   - Writers: `boards.save_manifest` (`boards.py:255-268`, plain
+     `textio.write_text`, called at `boards.py:607` from build's
+     accept-board-move path).
+   - RACE: same as §4.
+   - PROTECT: none.
+   - COST: silent — an accepted board/workspace move is not recorded;
+     next build reports it again as a new move. No corruption.
+
+6. Citations lockfile + kept copies
+   - Lockfile: `citations.save_lockfile` (`citations.py:1063-1069`),
+     whole-file `textio.write_text`, written by `refdes fetch`
+     (`cli.py:785-794`) and by serve-edit pin acceptance
+     (`serve/edit.py:491-634`, `_LockfileWrite`, which stages and
+     atomically replaces via `_atomic_create`/replace at
+     `edit.py:621-629`).
+   - Kept copies: `citations.py:2415-2425` (`open(...,"wb")` at
+     `citations.py:2420`), content-addressed under the citations dir.
+   - RACE: `fetch` racing another `fetch`, or serve pin-acceptance
+     racing a CLI fetch — realistic.
+   - PROTECT: none at lockfile level on the CLI path; serve path
+     atomically replaces but takes no lock that a CLI honors.
+   - COST: lost pins revert a *deliberate* pinning decision; the next
+     fetch silently re-resolves the citation — a provenance regression,
+     invisible unless someone diffs the lockfile.
+
+7. Project config `refdes-project.yaml`
+   - Writers: standard upgrade (`revise.py:1962`, `revise.py:1978`),
+     `refdes init` (`scaffold.py:380`, plain `open(...,"w")`), presets/
+     scratch writes (`scaffold.py:596`, `scaffold.py:639`, `scaffold.py:660`),
+     rollback path `revise.py:1501`.
+   - RACE: two config-mutating commands, or upgrade racing anything
+     that reads config.
+   - PROTECT: none (`revise.py:1962` is a plain write_text; note the
+     code comment at `revise.py:1943` explaining why it must not use
+     text-mode `open` directly, but that's encoding, not locking).
+   - COST: a lost upgrade/migration edit is silent, and the next command
+     runs against the *old* standard version — wrong schema, confusing
+     errors, or a half-migrated project. Highest "wasted run" cost after
+     §1-2.
+
+8. History store `.refdes/history/` (objects, events, blobs)
+   - Writers: `history._write_store_file` (`history.py:280-295`) for
+     object files, `history.append_event` (`history.py:365-389`,
+     event yaml per event), redaction blob restore (`history.py:870-874`),
+     migrate-seals markers (`cli.py:1846` area).
+   - RACE: two `history capture`s on the same project, or a redaction
+     racing a capture.
+   - PROTECT: none. Objects are content-addressed and idempotent, so
+     object files are low-risk; **events** are append-style
+     (`events/<event-id>.yaml`, one file per event id) — a lost event
+     is a lost audit record, and redaction's whole-store consistency
+     depends on the event arriving.
+   - COST: lost capture/redaction records = audit trail gaps. Medium
+     severity: visible only if someone inspects history.
+
+======================================================================
+TIER C — self-healing or low-realism, but currently unprotected
+======================================================================
+
+9. `.refdes/schema.json`
+   - Writers: `schema_json.write_schema` (`schema_json.py:334-368`,
+     `textio.write_text` at `schema_json.py:368`), regenerated on every
+     writable load (`loader.py:89-92`). Gitignored, rebuilt whenever the
+     schema changes.
+   - RACE: any writable load racing another load/build.
+   - PROTECT: none, but the comment at `schema_json.py:370-374` notes
+     nothing downstream reads it during a CLI run.
+   - COST: a torn file is invisible on the next load — rewritten. Only
+     external consumers (editors reading schema.json directly) could
+     observe a torn copy. Self-healing.
+
+10. Baselines (`.refdes/baseline-*.yaml`)
+    - Writers: `lifecycle._save_baseline_file` (`lifecycle.py:290-301`,
+      `textio.write_text` at `lifecycle.py:301`), on baseline
+      create/adopt and the adopt-rewrite path (`adopt.py:228-240` via
+      revise.FileRewrite).
+    - RACE: two baseline writes of the same name, or adopt racing a
+      baseline command.
+    - PROTECT: none.
+    - COST: low-medium. One baseline artifact lost; project otherwise
+      fine. Same-name overwrite is the only real failure mode.
+
+11. Generation scratch / write-lock-adjacent files written by serve
+    - `.refdes/serve-write.lock` itself is opened append-mode and
+      flock'd (`serve/edit.py:267-290`) — the *mechanism*, not a data
+      file.
+    - Preview marker: `serve/preview.py:70-71` (`open(...,"w")`), pid
+      marker, overwritten per preview launch; last wins, low cost.
+    - Token launch file: `serve/server.py:393-427` — atomic mkstemp +
+      chmod + os.replace, and refuses to overwrite a non-refdes file.
+      Good pattern; no lock needed (single publisher per launch).
+
+======================================================================
+TIER D — generated output / scaffold artifacts (regenerable)
+======================================================================
+
+12. Build output under the site out-dir (`_site/` by default)
+    - Writers: `build.py` site render (many `open(...,"w")` across
+      pages/items/assets), `render.py:830` (theme CSS), `render.py:847`
+      (manifest), `render.py:864` (pages), `render.py:1286` (items.json),
+      asset copies `render.py:785/811/1007/1291`,
+      `calc_rewrite.py:343-346` output copy tree.
+    - RACE: two builds of the same out-dir, or a build racing `serve`
+      that serves that dir.
+    - PROTECT: none. Output directory is transient/regenerable.
+    - COST: a partial or stale deploy dir is embarrassing, not
+      corrupting — `refdes build` again fixes it. Lowest tier.
+
+13. Scaffold/init-created project files
+    - `scaffold.py:218`/`226` (overtitle blocks), `scaffold.py:265`
+      (vscode settings), `scaffold.py:380` (`refdes-project.yaml` on
+      init), `scaffold.py:396` scratch, `scaffold.py:639` (scratch),
+      `scaffold.py:660`, `stub_tests.py:211` (`open(...,"ab")` append).
+    - RACE: essentially none in practice (init is one-shot; overtitle is
+      a CLI flag edit).
+    - PROTECT: none.
+    - COST: low — a lost overtitle block or a stub-tests append interleave;
+      rerun fixes.
+
+======================================================================
+ALREADY PROTECTED (for reference — do not lock these)
+======================================================================
+
+- Serve item-edit write path: per-project `fcntl.flock`/`msvcrt` lock at
+  `serve/edit.py:260-291` on `.refdes/serve-write.lock`; temp write +
+  fsync + `os.replace` at `serve/edit.py:848-854`; post-write re-read
+  verify and `_restore` at `serve/edit.py:860-884`; atomic-create for
+  new items at `serve/edit.py:1470-1510` (`edit.py:1088`).
+- Serve token/launch file: `serve/server.py:393-427` (mkstemp + fsync +
+  `os.replace`, refuses foreign overwrites).
+- Seals: atomic temp+replace at `seal.py:234-246` — atomic but
+  *unlocked* (see §4).
+- History blob redaction restore: restores then re-raises on failure
+  (`history.py:861-876`) — no lock.
+
+Cross-cutting note: the CLI load path (`loader.py:98-141`) is where most
+unprotected project-tree writes originate, and it runs on *every*
+writable command. Any future lock must therefore cover the load-implied
+writes (key minting, link/check/calc expansion, follows freeze, schema
+regen) and not just the explicit write commands, or the lock will be
+bypassed by the most common race of all.
