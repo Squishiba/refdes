@@ -648,6 +648,9 @@ def plan_follows_freeze(
         if not bare:
             continue
         spec = project.types.get(item.type)
+        # Build-sealed types only: `is_sealed` is always False for a
+        # `sealing: history` type (living-notes plan §H5), whose bare edge
+        # freezes normally and is captured below like any other.
         if spec and spec.append_only and seal_mod.is_sealed(project, item):
             if id(item) not in sealed_warned:
                 project.warn(

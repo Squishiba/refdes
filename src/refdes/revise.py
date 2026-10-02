@@ -1896,6 +1896,11 @@ def _carry_forward_seals(
         new_seals = dict(seals)
         for old_id, old_hash in old_hashes.items():
             item = project.item_by_id(old_id)
+            # A history-backed type's seal record is a legacy-seal marker:
+            # read, never rewritten (living-notes plan §H5), and with no lock
+            # left for a stale hash to trip, there is nothing to carry.
+            if item is not None and seal_mod.history_backed(project, item.type):
+                continue
             found = seal_mod._find_seal(new_seals, item, live_keys)
             if found is None:
                 continue

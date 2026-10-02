@@ -1,0 +1,148 @@
+Living notes Phase H5 -- sealing becomes history-backed; legacy-seal markers
+=========================================================================
+
+Spec: docs/design/living-notes-plan.md "Phase H5" (+ Q1/Q2 decisions).
+Agent: Claude Opus 5.5 (Claude Code), branch living-notes-h5-sealing.
+
+Status: FINISHED (PR opened against main, not merged).
+
+Findings before writing code
+----------------------------
+- The plan's acceptance list contradicts itself for this repo:
+  tests/test_integration.py::test_log_entries_are_sealed_and_edits_are_caught
+  runs against THIS repo's own project (helpers._project()), pinned to
+  hardware@3, and asserts an edit to LOG-A-003 is a seal violation. If
+  hardware@3's `log` declared `sealing: history`, that test would fail, and it
+  must stay unmodified. So the bundled standard keeps `log` at the default
+  `sealing: build` (Q1's conservative default), and history-backing is opt-in
+  per type (`sealing: history`, e.g. via the project's refdes-schema.yaml
+  overlay). The plan's "delete LOG-A-001 -> warning, exit 0" sabotage holds
+  for a history-backed copy of this repo (run in .scratch/repo-h5 with an
+  overlay), not for the repo as committed -- as committed, it stays today's
+  error, which is what the integration test pins.
+- Baseline (unmodified HEAD 80a5465): `python -m refdes.cli build` on a clean
+  copy of this repo already exits 1 -- one ERROR, DEC-PWR-001's P_dens check
+  against BND-THM-001, unrelated to sealing. "Build exits 0" is not true on
+  main today; the honest check is "output identical to main, no seal errors"
+  (and `--keep-going` exits 0).
+- `python -m refdes` has no __main__; use `python -m refdes.cli`. The venv's
+  editable install points at a different worktree, so PYTHONPATH=src.
+- tests/test_seal.py has 20 tests today, not 15 as the plan says.
+- All plan line numbers had drifted; everything was found by function name.
+
+What was done
+-------------
+- model.py: SEALING_BUILD / SEALING_HISTORY / SEALING_MODES; ItemType.sealing
+  (default "build").
+- schema.py: parses `sealing:`; unknown value -> SchemaError; `history` on a
+  non-append_only type -> SchemaError.
+- configcheck.py: `sealing` accepted as a types: key, value validated.
+- standards.py: Liskov guard -- a subtype may not declare `sealing: history`
+  under an append-only parent that keeps the build lock (mirrors the existing
+  append_only guard). Overlaying the type itself is how a project opts in.
+- seal.py:
+  - history_backed(); append_only_items()/_boards_in_play() take an optional
+    sealing filter; verify() only seals/hash-checks/reseals/migrates
+    build-sealed types.
+  - is_sealed() is False for history-backed types. This one predicate is what
+    links.plan_follows_freeze's refusal, serve/edit.py, serve/upload.py,
+    serve/api.py and calc_rewrite/build's retired-unit leniency all read, so
+    they all agree: a history-backed entry is not locked anywhere.
+  - _verify_history_backed(): read-only. `--reseal` prints the Q2 message
+    once per history-backed type; a legacy seal record naming the entry under
+    a different key is still an ERROR (key corruption is not an edit).
+  - _report_deleted(): an orphan record is classified by display-id prefix
+    (falls back to all append-only types); only when every candidate type is
+    history-backed is it a WARNING naming the record, key and seal file --
+    any doubt keeps today's error. Never dropped by --reseal. And a board's
+    seal file is now only re-saved under --reseal when a record was actually
+    dropped (before, any orphan in scope re-saved it -- harmless for
+    build-only projects since every orphan was dropped, but it would have
+    rewritten a legacy file whose orphans were all history-backed).
+- links.py: comment only; refusal logic and warning text unchanged.
+- revise.py: _carry_forward_seals skips history-backed entries. NOT in the
+  plan's file list, but it is a seal-file writer, and H5 promises legacy
+  files are never rewritten; with no lock left there is nothing to carry.
+- cli.py audit: history-backed rows in "Append-only entries edited after
+  sealing" get "(legacy seal: recorded hash only; original content was not
+  captured)"; new sibling section "Entries edited after captured:". --reseal
+  help text mentions history-backed types.
+- base.yaml: untouched (log stays append_only, sealing defaults to build).
+- tests/fixtures/hardware3_*resolved.json: the oracle dumps every ItemType
+  field, so each type gained `"sealing": "build"` -- added mechanically,
+  verified to be the only change; it also pins that no hardware@3 type is
+  history-backed.
+- Docs: design-log.md "History-backed types" subsection; schema-reference.md
+  row + extends notes; cli-reference.md --reseal row. Changelog fragment
+  changelog.d/history-backed-sealing.added.md.
+
+Verification
+------------
+- Full suite: 3279 passed, 2 skipped. test_seal.py and test_integration.py
+  unmodified (git diff --quiet).
+- tests/test_history_seal.py: 24 tests. Against main's source, 19 fail (the
+  4 build-sealed parity tests pass there, as they should) -- on main the
+  `sealing:` key itself is rejected.
+- Sabotage of the implementation, each piece reverted in turn:
+  is_sealed policy -> decisive test fails; verify filters (both) -> 10 fail;
+  orphan classification False/True -> deletion / build-error tests fail;
+  dropped-flag -> deletion test fails (fixture ages the seal header to the old
+  text this repo's real file carries, so any rewrite changes bytes);
+  key-change check -> corruption test fails; reseal notice -> reseal test
+  fails; revise guard -> revise test fails. Each verify filter alone is
+  masked by the other (they are redundant guards).
+- This repo: build output identical to main's (same single DEC-PWR-001 error,
+  exit 1; --keep-going exit 0); both seal files byte-identical.
+  `history migrate-seals` wrote six legacy-seal markers, seal file untouched;
+  build after is identical. The markers were moved to
+  .scratch/repo-migrate-seals-history (not committed -- migration over the
+  real .refdes/ is a landing-time action, as H4's log also said).
+- Repo sabotage (scratch copy, log opted in via overlay): delete LOG-A-001 ->
+  WARNING naming .refdes/log-seal-board-a.yaml and key 5wh2j90t4hg; error
+  count stays at the one pre-existing error; build --reseal prints the Q2
+  message and the seal file is byte-identical; restored -> back to baseline.
+  As committed (build-sealed), the same deletion is still the ERROR.
+- v2 project, main vs this branch, build/check/edit/--reseal: command output
+  identical; whole tree byte-identical except the reseal event's wall-clock
+  occurred_at.
+- ruff: no new findings in touched src files vs main; new test file clean.
+- Vocabulary (P5): grepped every added line for "seal"; new user-facing
+  strings use "sealing"/"legacy seal" only for the old mechanism and
+  "captured"/"edited after captured" for the new state.
+
+Open / not done
+---------------
+- `refdes keys adopt` still re-keys legacy seal files of history-backed types
+  (explicit one-time identity migration). Left as is; flagged in the PR.
+- The items.json/index payload exposes append_only but not sealing; site
+  changes were out of scope.
+- In a board file holding both build-sealed and history-backed records, a
+  write that the build-sealed side legitimately needs (a new seal, a hash
+  upgrade) re-serializes the whole file; the history-backed records' data is
+  preserved, but the file's bytes (e.g. an old header) change. Only possible
+  in a project with two append-only types on different policies sharing a
+  board.
+
+Review round 1 (Qwen's doc-accuracy pass on PR #157) -- FINISHED
+----------------------------------------------------------------
+Docs-only; no source changes. Five fixes:
+1. "Never rewritten" was overstated in design-log.md and the changelog
+   fragment: a seal file shared with a type still on `sealing: build` is
+   re-serialized whole when that type writes (records intact, bytes such as
+   an old header can change). Reproduced in .scratch/probe_mixed.py before
+   writing the caveat (bytes changed, header changed, LOG records identical).
+2. schema-reference.md's `sealing` row implied every edit warns; it now says
+   only captured entries warn, uncaptured ones get no diagnostic.
+3. cli-reference.md's audit sample now shows the "Entries edited after
+   captured" section, in the order real `audit --no-write` prints it.
+4. docs/design/extends.md: `sealing` added to the delta list and the
+   inheritance table (Liskov rule). All four parent/child combinations
+   checked in .scratch/probe_extends.py.
+5. Retired-calc-spelling side effect documented in design-log.md and the
+   changelog. Probed first (.scratch/probe_retired.py): build-sealed -> a
+   warning and calc-rewrite refuses the entry; history -> a
+   retired_unit_spelling ERROR, and calc-rewrite now rewrites the entry,
+   clearing it with the seal file untouched. So the note names the remedy
+   too. Corrected the function cited: _run_item_calcs (build.py:1245), not
+   run_calcs.
+Full suite after: 3279 passed, 2 skipped.

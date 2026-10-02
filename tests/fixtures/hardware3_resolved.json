@@ -110,6 +110,7 @@
    "body_on_change": "invalidate",
    "body_required": true,
    "append_only": false,
+   "sealing": "build",
    "satisfying_statuses": null,
    "check_severity": "error",
    "coverable": true,
@@ -240,6 +241,7 @@
    "body_on_change": "invalidate",
    "body_required": true,
    "append_only": false,
+   "sealing": "build",
    "satisfying_statuses": null,
    "check_severity": "error",
    "coverable": true,
@@ -415,6 +417,7 @@
    "body_on_change": "invalidate",
    "body_required": false,
    "append_only": false,
+   "sealing": "build",
    "satisfying_statuses": [
     "accepted"
    ],
@@ -522,6 +525,7 @@
    "body_on_change": "invalidate",
    "body_required": false,
    "append_only": false,
+   "sealing": "build",
    "satisfying_statuses": null,
    "check_severity": "error",
    "coverable": null,
@@ -691,6 +695,7 @@
    "body_on_change": "invalidate",
    "body_required": false,
    "append_only": false,
+   "sealing": "build",
    "satisfying_statuses": [
     "selected"
    ],
@@ -779,6 +784,7 @@
    "body_on_change": "log",
    "body_required": false,
    "append_only": false,
+   "sealing": "build",
    "satisfying_statuses": null,
    "check_severity": "error",
    "coverable": false,
@@ -873,6 +879,7 @@
    "body_on_change": "invalidate",
    "body_required": false,
    "append_only": true,
+   "sealing": "build",
    "satisfying_statuses": null,
    "check_severity": "error",
    "coverable": null,

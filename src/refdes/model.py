@@ -28,6 +28,13 @@ WARNING = "warning"  # visible by default; worth a look
 INFO = "info"        # default-hidden; the normal state of an incomplete project
 DIAGNOSTIC_LEVELS = (ERROR, WARNING, INFO)
 
+# What backs an append-only type's guarantee (`ItemType.sealing`, living-notes
+# plan §H5). "sealed" names only the build-time lock and its legacy-seal
+# markers; the history-backed state is "captured" (vocabulary review P5).
+SEALING_BUILD = "build"      # the build-time hash lock: an edit is a build error
+SEALING_HISTORY = "history"  # captured history: an edit is a warning, never an error
+SEALING_MODES = (SEALING_BUILD, SEALING_HISTORY)
+
 # `Diagnostic.code` values. A check that ran and produced a violating result
 # is a finding *about the design*, not a defect in the document -- the tool
 # working, not failing -- and it is a state a real project sits in for weeks.
@@ -245,6 +252,12 @@ class ItemType:
     # body required there either).
     body_required: bool = False
     append_only: bool = False  # sealed after first build; corrections go in new entries
+    # What backs an append-only type's guarantee (living-notes plan §H5, Q1):
+    # SEALING_BUILD (the default) is the build-time hash lock -- an edit is a
+    # build error. SEALING_HISTORY drops that lock: an edit is the history
+    # store's "edited after captured" warning, and existing seal files are read
+    # only as legacy-seal markers. Meaningful only on an append_only type.
+    sealing: str = SEALING_BUILD
     # Which `status` values count as "settled" when this type satisfies a
     # requirement or constraint. None means unconfigured: every link counts, same
     # as before this existed, so existing projects see no behavior change.

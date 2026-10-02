@@ -20,7 +20,7 @@ import difflib
 import os
 from typing import Any
 
-from .model import SchemaError
+from .model import SEALING_BUILD, SEALING_HISTORY, SchemaError
 from .parse import yaml_safe_load
 
 _STANDARDS_ROOT = os.path.join(os.path.dirname(__file__), "standards")
@@ -648,6 +648,20 @@ def _apply_parent(
             f"types.{tname}.append_only is false, but {parent_name!r} is "
             "append_only: a subtype cannot lift the append-only guarantee it "
             "would be substituted under"
+        )
+    # The same guard, one notch down: the build-time lock is the stronger
+    # guarantee, so a subtype of a build-locked append-only type may not trade
+    # it for history-backed capture (living-notes plan §H5). An overlay of the
+    # type itself is how a project opts a type in, not a subtype.
+    if (
+        parent.get("append_only") is True
+        and parent.get("sealing", SEALING_BUILD) == SEALING_BUILD
+        and child.get("sealing") == SEALING_HISTORY
+    ):
+        raise SchemaError(
+            f"types.{tname}.sealing is {SEALING_HISTORY!r}, but {parent_name!r} is "
+            "append_only with the build-time lock: a subtype cannot lift the "
+            "lock it would be substituted under"
         )
     # `links: { verb: null }` on the child un-declares an inherited link (the
     # `types.<name>: null` convention, one level down). `[]` cannot mean that:

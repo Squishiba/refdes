@@ -194,6 +194,80 @@ cannot be reconstructed from the current seal file.
 Overriding is allowed. Overriding invisibly is not — the same principle that
 governs [change tracking](change-tracking.md).
 
+### History-backed types (`sealing: history`)
+
+Everything above is the default, `sealing: build`, and it is what the bundled
+standard's `log` uses — including this project's own. A type can instead declare
+`sealing: history` (a project opts its `log` in with an overlay in
+`refdes-schema.yaml`):
+
+```yaml
+types:
+  log:
+    sealing: history
+```
+
+The entries stay append-only in the authoring sense — a correction is still a
+new entry that `amends` the old one — but nothing is sealed any more:
+
+- A build seals none of the type's entries, and an edit to one is **not** a
+  build error. If the entry was captured into `.refdes/history/` (a
+  `follows:` successor froze an edge to it, or `refdes history capture`), the
+  edit is the warning `LOG-001: edited after captured -- ...` under both
+  `check` and `build`; exit codes are unchanged. An entry that was never
+  captured has no snapshot to compare against, so editing it produces **no
+  diagnostic at all** from `check` or `build`. If a legacy seal record names
+  it, `refdes audit` still lists it (below); otherwise nothing reports the
+  edit.
+- A bare `follows:` on an entry a seal file already mentions freezes and is
+  captured like any other, instead of being left bare with "already sealed".
+- Seal files that already exist are kept and read as **legacy-seal markers** —
+  recorded hash only; original content was not captured. `build`, `check`,
+  `--reseal` and `revise` never change or delete their records, and never
+  delete a seal file. Two exceptions rewrite the *file* around them:
+  - When one seal file also holds records for a type that still uses
+    `sealing: build` (two append-only types sharing a board, or both on no
+    board), a build that legitimately writes for that type — sealing a new
+    entry, upgrading a hash format, accepting a `--reseal` — re-serializes the
+    whole file. The legacy-seal records come through with their data
+    unchanged, but the file's bytes can change: an older header is normalized
+    to the current one, for instance. A project where every append-only type
+    is history-backed never hits this.
+  - `refdes keys adopt`, an explicit one-time migration, re-keys them like any
+    seal file.
+
+  Deleting an entry one of them mentions is a warning
+  naming the record and the seal file, not an error:
+  `LOG-A-001 has a legacy seal record in .refdes/log-seal-board-a.yaml (key
+  5wh2j90t4hg) but is no longer in the project. ...`. Restore the entry from
+  version control if the removal was not deliberate — the record cannot bring
+  it back. A key that changed under such a record is still an error, as it is
+  for a sealed entry: a key never changes legitimately.
+- `refdes build --reseal` is accepted and says it has nothing to do:
+  `--reseal: sealing no longer applies to the 'log' type; nothing was
+  rewritten. ...`. It captures nothing.
+- `refdes audit` still lists such an entry under "Append-only entries edited
+  after sealing" when it no longer matches its legacy record (marked
+  `(legacy seal: recorded hash only; original content was not captured)`), and
+  lists captured entries that changed under "Entries edited after captured".
+- **A retired calc unit spelling becomes a build error.** Inside a sealed
+  entry, a `calc` line using a retired unit spelling is only a warning, because
+  fixing it would mean resealing (and `refdes calc-rewrite` refuses to touch a
+  sealed entry). A history-backed entry is not sealed, so neither exception
+  applies: the moment a type switches to `sealing: history`, any such line in
+  an existing entry is a `retired_unit_spelling` build **error**.
+  `refdes calc-rewrite` now rewrites those entries too, which clears it (the
+  legacy seal file is not touched; a captured entry then reads as edited after
+  captured). Run it, or fix the line by hand, when opting a type in.
+
+`refdes history migrate-seals` writes one `legacy-seal` event per seal record
+into the history store; it is independent of the switch and leaves the seal
+files untouched either way. A `sealing: history` type must be `append_only:
+true`, and a subtype cannot declare it under a parent that keeps the build-time
+lock. (Verified against `src/refdes/seal.py` and `tests/test_history_seal.py`;
+the retired-spelling behaviour against `src/refdes/build.py`'s `_run_item_calcs` and
+`src/refdes/calc_rewrite.py`, both of which read `seal.is_sealed`.)
+
 ### What sealing can and cannot do
 
 It **detects** an edit; it cannot **prevent** one. Anybody can open the YAML file.

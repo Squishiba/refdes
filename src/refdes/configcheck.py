@@ -43,7 +43,7 @@ from typing import Any
 from . import docs_url as docs_url_mod
 from . import parse as parse_mod
 from . import theme as theme_mod
-from .model import ON_CHANGE_MODES, SchemaError
+from .model import ON_CHANGE_MODES, SEALING_MODES, SchemaError
 from .parse import DuplicateKey
 
 # What a field's `type:` may be. Derived from the one mapping of declared field
@@ -84,6 +84,7 @@ TYPE_KEYS = frozenset(
         "body",
         "preview",
         "append_only",
+        "sealing",
         "satisfying_statuses",
         "verifying_statuses",
         "check_severity",
@@ -573,6 +574,8 @@ class BlockChecker:
         if "on_change" in body:
             self.mode(body.get("on_change"), f"{path}.body.on_change", "invalidate")
         self.boolean(spec.get("append_only"), f"{path}.append_only")
+        if spec.get("sealing") is not None and spec.get("sealing") not in SEALING_MODES:
+            raise self.wrong(f"{path}.sealing", f"one of {', '.join(SEALING_MODES)}", spec.get("sealing"))
         if spec.get("coverable") is not None:
             self.boolean(spec.get("coverable"), f"{path}.coverable")
         self.string_list(spec.get("preview"), f"{path}.preview", "a list of field names")

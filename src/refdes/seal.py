@@ -16,6 +16,16 @@ to no board (unchanged from before boards existed, and the *only* file used by a
 project with no `boards:` registry at all), plus, transitionally, any entry an
 older, single-file build sealed for an item that has since come to live on a
 board it hasn't been physically migrated out to yet -- see `verify()`.
+
+All of the above is the *build* policy, every append-only type's default. A
+type that declares `sealing: history` (living-notes plan §H5, Q1) is backed by
+captured history instead: it is never sealed, an edit to one of its entries is
+the history store's "edited after captured" warning rather than a build error,
+and `--reseal` has nothing to do for it. Seal files that already mention its
+entries are still read -- never rewritten, never deleted -- as legacy-seal
+markers: a recorded hash only, whose original content was not captured. The
+word "sealed" stays with the build-time lock and those markers alone
+(vocabulary review P5); the history-backed state is "captured".
 """
 
 from __future__ import annotations
@@ -29,7 +39,7 @@ import yaml
 
 from . import keys as keys_mod
 from . import model
-from .model import Item, Project
+from .model import SEALING_BUILD, SEALING_HISTORY, Item, Project
 from .parse import yaml_safe_load
 
 SEAL_FILE = ".refdes/log-seal.yaml"
@@ -332,13 +342,25 @@ def _matches_sealed_hash(
     return False, recorded
 
 
-def append_only_items(project: Project, board: str | None = None) -> list[Item]:
-    """Local append-only items, optionally narrowed to one board's own ("" included)."""
+def history_backed(project: Project, type_name: str) -> bool:
+    """Whether ``type_name`` is an append-only type backed by captured history
+    (``sealing: history``) rather than the build-time lock."""
+    spec = project.types.get(type_name)
+    return bool(spec and spec.append_only and spec.sealing == SEALING_HISTORY)
+
+
+def append_only_items(
+    project: Project, board: str | None = None, sealing: str | None = None
+) -> list[Item]:
+    """Local append-only items, optionally narrowed to one board's own ("" included)
+    and to one ``sealing`` policy (``None``: every append-only type)."""
     items = [
         item
         for item in project.local_items
         if project.types.get(item.type) and project.types[item.type].append_only
     ]
+    if sealing is not None:
+        items = [i for i in items if project.types[i.type].sealing == sealing]
     if board is not None:
         items = [i for i in items if i.board == board]
     return items
@@ -351,9 +373,14 @@ def is_sealed(project: Project, item: Item) -> bool:
     so it must inspect every declared board rather than relying on
     ``item.board``. A legacy base-file seal remains authoritative until a
     writable build migrates it to its board-specific file.
+
+    Always False for a history-backed type (``sealing: history``): a seal
+    record that mentions one of its entries is a legacy-seal marker, not a
+    lock, so nothing that refuses an edit to a sealed entry -- the bare
+    ``follows:`` freeze, the editor, an upload, a calc rewrite -- refuses it.
     """
     spec = project.types.get(item.type)
-    if spec is None or not spec.append_only:
+    if spec is None or not spec.append_only or spec.sealing != SEALING_BUILD:
         return False
     live_keys = {candidate.key for candidate in project.local_items if candidate.key}
     for board in sorted({""} | set(project.boards)):
@@ -362,9 +389,9 @@ def is_sealed(project: Project, item: Item) -> bool:
     return False
 
 
-def _boards_in_play(project: Project) -> list[str]:
+def _boards_in_play(project: Project, sealing: str | None = None) -> list[str]:
     """Every board key ("" included) at least one append-only item resolves to."""
-    return sorted({item.board for item in append_only_items(project)})
+    return sorted({item.board for item in append_only_items(project, sealing=sealing)})
 
 
 def verify(project: Project, write: bool = False, reseal: str | None = None) -> None:
@@ -390,6 +417,11 @@ def verify(project: Project, write: bool = False, reseal: str | None = None) -> 
     write-enabled build moves it into the board file and prunes the base copy;
     read-only ``check`` therefore never mutates seal storage while retaining
     the same tamper detection.
+
+    Everything above applies to build-sealed types only. History-backed types
+    (``sealing: history``) are never sealed, never hash-checked, and never
+    resealed here: their seal records are left exactly as they are on disk
+    (see ``_verify_history_backed``).
     """
     from . import build as build_mod
 
@@ -405,8 +437,8 @@ def verify(project: Project, write: bool = False, reseal: str | None = None) -> 
     # count; project-level diagnostics belong to no entry.
     errored_items = {d.item_id for d in project.errors if d.item_id}
 
-    for board in _boards_in_play(project):
-        entries = append_only_items(project, board=board)
+    for board in _boards_in_play(project, sealing=SEALING_BUILD):
+        entries = append_only_items(project, board=board, sealing=SEALING_BUILD)
         changed = False
         events: list[dict] = [] if board else base_events
         if board:
@@ -512,11 +544,86 @@ def verify(project: Project, write: bool = False, reseal: str | None = None) -> 
         elif changed:
             base_changed = True
 
+    _verify_history_backed(project, base, reseal=reseal)
+
     if _report_deleted(project, base, write=write, reseal=reseal, base_events=base_events):
         base_changed = True
 
     if write and base_changed:
         save_seals(project, base, board="", events=base_events)
+
+
+def _seal_file_label(project: Project, board: str) -> str:
+    return os.path.relpath(seal_path(project, board), project.root).replace("\\", "/")
+
+
+def _verify_history_backed(project: Project, base: Seals, reseal: str | None) -> None:
+    """The ``sealing: history`` half of ``verify()``. Read-only: it never writes,
+    upgrades, migrates or prunes a seal record.
+
+    An entry of a history-backed type is not hash-checked here at all -- an
+    edit to it is ``build.warn_edited_after_captured``'s warning, never a build
+    error. Two things still apply to it:
+
+    - A legacy seal record that names the entry under a *different* surrogate
+      key is key corruption, not an edit, and stays the error it is for a
+      build-sealed entry: a key never changes legitimately, whatever backs the
+      entry's content. (A deleted key is the deleted-key report's, as above.)
+    - ``--reseal`` is accepted and says it has nothing to do (plan Q2) -- it
+      captures nothing, and the legacy seal records stay byte-for-byte as
+      they are. A silent no-op would leave a documented habit looking like it
+      had worked (plan R7).
+    """
+    if reseal:
+        for tname in sorted(t for t in project.types if history_backed(project, t)):
+            project.warn(
+                f"--reseal: sealing no longer applies to the {tname!r} type; "
+                "nothing was rewritten. Its legacy seal records are kept as they "
+                "are, and an edit to a captured entry is reported as edited "
+                "after captured instead."
+            )
+
+    entries = append_only_items(project, sealing=SEALING_HISTORY)
+    if not entries:
+        return
+    seal_files = [("", base)] + [
+        (board, load_seals(project, board)) for board in sorted(project.boards)
+    ]
+    live_keys = {item.key for item in project.local_items if item.key}
+    for item in sorted(entries, key=lambda i: i.id):
+        if not item.key:
+            continue
+        for board, seals in seal_files:
+            found = _find_seal(seals, item, live_keys)
+            if found is None:
+                continue
+            recorded_key = _seal_key_mismatch(found[0], found[1], item)
+            if recorded_key is not None:
+                project.seal_violations.append(item.id)
+                project.error(
+                    f"{item.id}'s key changed since its legacy seal record in "
+                    f"{_seal_file_label(project, board)} was written: was "
+                    f"{recorded_key!r}, now {item.key!r}. A key never changes "
+                    "legitimately; restore the recorded key from history.",
+                    file=item.source_file, line=item.source_line, item_id=item.id,
+                )
+            break
+
+
+def _orphan_is_history_backed(project: Project, display_id: str) -> bool:
+    """Whether an orphaned seal record belonged to a history-backed type.
+
+    A seal record carries no type, so the record's display-id prefix narrows
+    the append-only types it could have come from; with no prefix match, every
+    append-only type is a candidate. Only when *every* candidate is
+    history-backed is the orphan one -- any doubt keeps today's error, because
+    reading a build-sealed deletion as a mere warning would remove the
+    deletion lock from the type that still has it.
+    """
+    append_only = [spec for spec in project.types.values() if spec.append_only]
+    prefix = display_id.split("-", 1)[0]
+    candidates = [spec for spec in append_only if spec.prefix == prefix] or append_only
+    return bool(candidates) and all(spec.sealing == SEALING_HISTORY for spec in candidates)
 
 
 def _report_deleted(
@@ -538,6 +645,14 @@ def _report_deleted(
     corruption; that case is reported once by ``verify()``, not again and
     misleadingly as a deleted item here. Read-only checks report but never
     remove entries.
+
+    This pass iterates seal *files*, not append-only items, so the sealing
+    policy has to be applied to each orphan explicitly: otherwise a type that
+    stopped locking edits would keep erroring on deletion. A record that
+    belonged to a history-backed type (``_orphan_is_history_backed``) is a
+    legacy-seal marker, and its entry going missing is a warning naming the
+    record and the seal file -- the same class of diagnostic as an edit, never
+    an error -- and ``--reseal`` never drops it.
     """
     live_ids = {item.id for item in project.local_items}
     live_ids |= set(project.former_ids)
@@ -563,7 +678,22 @@ def _report_deleted(
             continue
         reseal_here = bool(reseal) and (reseal == RESEAL_ALL or reseal == board)
         hint = _reseal_hint(board)
+        dropped = False
         for record_id, display_id in sorted(orphans, key=lambda pair: pair[1]):
+            if _orphan_is_history_backed(project, display_id):
+                key, _id, recorded, _hash_format = _seal_parts(record_id, seals[record_id])
+                project.warn(
+                    f"{display_id} has a legacy seal record in "
+                    f"{_seal_file_label(project, board)}"
+                    + (f" (key {key})" if key else "")
+                    + " but is no longer in the project. The record holds a hash "
+                    f"only ({recorded}); the original content was not captured, so "
+                    "it cannot be restored from history -- restore it from version "
+                    "control if the removal was not deliberate. The record is kept "
+                    "as it is.",
+                    item_id=display_id,
+                )
+                continue
             if reseal_here:
                 acceptance = (
                     "accepting the removal and dropping its seal; recorded in audit."
@@ -578,6 +708,7 @@ def _report_deleted(
                     key, _id, recorded, hash_format = _seal_parts(record_id, seals[record_id])
                     events.append(_reseal_event(display_id, key, recorded, None, hash_format))
                     del seals[record_id]
+                    dropped = True
             else:
                 project.error(
                     f"{display_id} is append-only and was sealed, but no item with "
@@ -587,7 +718,10 @@ def _report_deleted(
                     "is deliberate.",
                     item_id=display_id,
                 )
-        if reseal_here and write:
+        # Only a dropped record rewrites the file: a history-backed orphan is
+        # kept, so a board whose orphans are all legacy-seal markers is left
+        # byte-for-byte untouched even under --reseal.
+        if reseal_here and write and dropped:
             if board:
                 save_seals(project, seals, board, events=events)
             else:
