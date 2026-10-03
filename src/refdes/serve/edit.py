@@ -258,33 +258,11 @@ def file_revision(path: str) -> str:
 
 @contextmanager
 def _disk_write_lock(root: str):
-    """Lock a stable project file while a server checks and replaces an item.
+    """Use the same project lock as CLI writers."""
+    from ..write_lock import project_write_lock
 
-    Keep the file: unlinking a lock file lets a new process lock a different
-    inode while an existing process still owns the old one.
-    """
-    directory = os.path.join(root, ".refdes")
-    os.makedirs(directory, exist_ok=True)
-    path = os.path.join(directory, "serve-write.lock")
-    with open(path, "a+b") as fh:
-        fh.seek(0)
-        if os.name == "nt":
-            import msvcrt
-
-            msvcrt.locking(fh.fileno(), msvcrt.LK_LOCK, 1)
-            try:
-                yield
-            finally:
-                fh.seek(0)
-                msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
-        else:
-            import fcntl
-
-            fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
-            try:
-                yield
-            finally:
-                fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+    with project_write_lock(root):
+        yield
 
 
 # ---------------------------------------------------------------- the entry point
@@ -961,7 +939,8 @@ def create_item(project_root: str, request: CreateRequest):
     root = os.path.abspath(project_root)
     config = os.path.join(root, CONFIG_NAME)
     with write_lock_for(root):
-        return _create_locked(config, request)
+        with _disk_write_lock(root):
+            return _create_locked(config, request)
 
 
 def _create_locked(config: str, request: CreateRequest):

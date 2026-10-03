@@ -19,6 +19,7 @@ import yaml
 from . import textio
 from .model import Item, Project, destination_refusal, provisional_handle
 from .parse import FENCE_RE, yaml_safe_load
+from .write_lock import project_write_lock
 
 ID_RE = re.compile(r"^([A-Z][A-Z0-9]*(?:-[A-Z0-9]+)*)-(\d+)$")
 LIST_ENTRY_RE = re.compile(r"^(\s*)-(\s+)(\S.*)$")
@@ -136,7 +137,9 @@ def save_ledger(project: Project, ledger: dict) -> None:
     # write translated every LF to CRLF on Windows, so a committed
     # `.refdes/ids.yaml` flipped line endings depending on the platform that
     # last allocated an id. Same reasoning as lifecycle/seal/boards' saves.
-    textio.write_text(path, header + yaml.safe_dump(ledger, sort_keys=True, default_flow_style=False))
+    textio.atomic_write_text(
+        path, header + yaml.safe_dump(ledger, sort_keys=True, default_flow_style=False)
+    )
 
 
 def high_water(project: Project, ledger: dict) -> dict[str, int]:
@@ -287,6 +290,11 @@ def reserve_id(project: Project, new_id: str) -> None:
     its number burned as high-water. The counterpart of `plan_new_id` --
     consequential, so it is called only inside the same transaction as the
     file write that puts the id on disk, never by a preview."""
+    with project_write_lock(project.root):
+        _reserve_id_locked(project, new_id)
+
+
+def _reserve_id_locked(project: Project, new_id: str) -> None:
     ledger = load_ledger(project)
     allocated = ledger.setdefault("allocated", [])
     if new_id not in allocated:
@@ -515,6 +523,14 @@ def insert_into_list(
 
 
 def allocate(project: Project, dry_run: bool = False) -> list[tuple[Item, str]]:
+    """Allocate pending IDs; a dry run never acquires a write lock."""
+    if dry_run:
+        return _allocate_locked(project, dry_run=True)
+    with project_write_lock(project.root):
+        return _allocate_locked(project)
+
+
+def _allocate_locked(project: Project, dry_run: bool = False) -> list[tuple[Item, str]]:
     """Allocate IDs for every pending item and write them into the source files.
 
     Two passes, in this order, both against the same `marks` high-water dict:
@@ -622,7 +638,7 @@ def allocate(project: Project, dry_run: bool = False) -> list[tuple[Item, str]]:
                 lines = updated
 
         try:
-            textio.write_text(path, source.render(lines))
+            textio.atomic_write_text(path, source.render(lines))
         except OSError:
             # The filesystem's refusal, not a shape this command could not
             # write: nothing in this file was touched (the whole render is one

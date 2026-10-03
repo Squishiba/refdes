@@ -155,26 +155,24 @@ _SCHEMA_JSON_GITIGNORE = _GitignoreEntry(
     ),
 )
 
-_SERVE_WRITE_LOCK_GITIGNORE = _GitignoreEntry(
-    pattern=".refdes/serve-write.lock",
-    covers=_covers(".refdes/serve-write.lock", ".refdes"),
+_PROJECT_WRITE_LOCK_GITIGNORE = _GitignoreEntry(
+    pattern=".refdes-write.lock",
+    covers=_covers(".refdes-write.lock"),
     block=(
-        "# Written by `refdes init`. The write lock `refdes serve` takes so two\n"
-        "# instances of it cannot save over each other. Empty and per-machine:\n"
-        "# deleting it costs nothing while no `serve` is running -- the next save\n"
-        "# makes it again.\n"
-        ".refdes/serve-write.lock\n"
+        "# Shared project write lock for refdes CLI and serve. Empty and\n"
+        "# per-machine; leave it in place while any refdes process may run.\n"
+        ".refdes-write.lock\n"
     ),
 )
 
-# The `.refdes/` entries do not depend on anything else `init` does: those
-# files are written by `build`, `check`, `fetch` and `serve` whatever happened
-# here, so their ignore is written on every init. The `.vscode` entry is only
+# These entries do not depend on anything else `init` does: the files are
+# written by project commands whatever happened here, so their ignore is
+# written on every init. The `.vscode` entry is only
 # wanted when `init` actually wrote that file (see `_write_vscode_settings`).
 _REFDES_GITIGNORE = (
     _COPIES_GITIGNORE,
     _SCHEMA_JSON_GITIGNORE,
-    _SERVE_WRITE_LOCK_GITIGNORE,
+    _PROJECT_WRITE_LOCK_GITIGNORE,
 )
 
 

@@ -31,6 +31,7 @@ from . import seal as seal_mod
 from . import stub_tests as stub_tests_mod
 from .model import INVALIDATE, Item, Project
 from .schema import SchemaError, load_project
+from .write_lock import LockUnavailable, project_write_lock
 
 # Where the docs actually are for someone who installed refdes from a wheel.
 # Re-exported from docs_url, which carries the comment that has to travel with
@@ -2511,9 +2512,22 @@ def main(argv: list[str] | None = None) -> int:
 
     args = parser.parse_args(argv)
     try:
-        return args.func(args)
+        # Take the lock before loading: the load itself can rewrite sources,
+        # and ID planning must see the ledger left by the previous process.
+        if args.no_write or getattr(args, "dry_run", False) or args.command in {
+            "serve", "init", "new", "schema"
+        }:
+            return args.func(args)
+        from .schema import find_config
+
+        config = args.config or find_config()
+        with project_write_lock(os.path.dirname(os.path.abspath(config))):
+            return args.func(args)
     except SchemaError as exc:
         print(f"configuration error: {exc}", file=sys.stderr)
+        return 2
+    except LockUnavailable as exc:
+        print(str(exc), file=sys.stderr)
         return 2
 
 

@@ -43,6 +43,8 @@ next one from drifting back.
 from __future__ import annotations
 
 import difflib
+import os
+import tempfile
 
 LF = "\n"
 CRLF = "\r\n"
@@ -272,3 +274,28 @@ def write_text(path: str, text: str) -> None:
     """Write `text` to `path` verbatim, terminators included."""
     with open(path, "w", encoding="utf-8", newline="") as fh:
         fh.write(text)
+
+
+def atomic_write_text(path: str, text: str) -> None:
+    """Replace text using a same-directory temporary file, preserving bytes."""
+    directory = os.path.dirname(os.path.abspath(path))
+    # Rename can replace a read-only file on POSIX when its parent directory
+    # is writable. Keep the old write_text refusal in that case.
+    if os.path.exists(path) and not os.stat(path).st_mode & 0o222:
+        raise PermissionError(f"file is read-only: {path}")
+    if not os.stat(directory).st_mode & 0o222:
+        raise PermissionError(f"directory is read-only: {directory}")
+    fd, tmp = tempfile.mkstemp(
+        prefix=f".{os.path.basename(path)}.refdes-tmp-", dir=directory
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="") as fh:
+            fh.write(text)
+            fh.flush()
+            os.fsync(fh.fileno())
+        if os.path.exists(path):
+            os.chmod(tmp, os.stat(path).st_mode & 0o777)
+        os.replace(tmp, path)
+    finally:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
