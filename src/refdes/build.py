@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import difflib
 import hashlib
 import html as html_entities
 import json
@@ -272,8 +273,6 @@ def validate_items(project: Project) -> None:
             if value is None:
                 continue
             if fspec.type == "enum" and fspec.choices and value not in fspec.choices:
-                import difflib
-
                 close = difflib.get_close_matches(str(value), fspec.choices, n=1, cutoff=0.5)
                 hint = f" Did you mean {close[0]!r}?" if close else ""
                 _field_error(
@@ -1521,6 +1520,57 @@ def run_checks(project: Project) -> None:
                     file=item.source_file, line=item.source_line, item_id=item.id,
                 )
                 continue
+
+            # An unknown key inside an entry is the item's own unknown-field
+            # mistake one level down, and it is the same class of gap that let
+            # a `options:` of bare strings pass `check` and crash `build`. The
+            # schema this tool writes for the editor already refuses it --
+            # `additionalProperties: false` on exactly this sub-mapping
+            # (`schema_json.py`), which is what lights the key up in the editor
+            # the moment it is typed -- so saying nothing here leaves the
+            # published schema and the enforced one disagreeing.
+            #
+            # Two tiers, the ones `parse.py:965-992` implements for a field and
+            # `docs/authoring.md:267-292` states: a confident near-miss is an
+            # error, because that key's value is going nowhere and a warning is
+            # not something a green build can be trusted to have caught; a key
+            # with nothing close to it stays a warning whose value is kept --
+            # forward-compatible metadata, a field a future version declares,
+            # deliberate extra data, none of which has a typo to correct.
+            #
+            # Only an *extra* key reaches here. An entry that lost `value:` or
+            # `against:` outright was refused by the shape error just above,
+            # which `continue`s, so one keystroke is never reported twice.
+            for key in sorted(entry, key=str):
+                if key in ("value", "against"):
+                    continue
+                # `str()` because YAML keys are not necessarily strings: a
+                # `true:` or `1:` line here is the bool/int, and handing that
+                # to difflib (or sorting it beside the string keys) raises
+                # where this should report. A non-string key is unknown by
+                # definition -- the legal pair is spelled in letters.
+                text = str(key)
+                close = difflib.get_close_matches(
+                    text, ["value", "against"], n=1, cutoff=0.6
+                )
+                if close:
+                    message = (
+                        f"unknown key {text!r} in a checks: entry -- did you "
+                        f"mean the key {close[0]!r}? A misspelled key silently "
+                        f"drops its value instead of erroring; an entry holds "
+                        f"only 'value' and 'against'."
+                    )
+                    report = project.error
+                else:
+                    message = (
+                        f"unknown key {text!r} in a checks: entry -- it holds "
+                        f"only 'value' and 'against', and this one is ignored"
+                    )
+                    report = project.warn
+                report(
+                    message,
+                    file=item.source_file, line=item.source_line, item_id=item.id,
+                )
 
             name, target_id = str(entry["value"]), str(entry["against"])
 
@@ -3021,14 +3071,18 @@ def warn_edited_after_captured(project: Project) -> None:
     by_key = {item.key: item for item in project.items.values() if item.key}
     for finding in findings:
         item = finding.item
+        label = item.id or item.key
         successor_key = str(finding.event.get("successor_key") or "")
         successor = by_key.get(successor_key)
         succ_label = successor.id or successor.key if successor else successor_key
         captured_when = f"; captured when {succ_label} followed it" if succ_label else ""
         project.warn(
-            f"{item.id or item.key}: edited after captured -- current semantic "
+            f"{label}: edited after captured -- current semantic "
             f"content differs from the snapshot in {finding.event['kind']} "
-            f"event {finding.event['id']}{captured_when}",
+            f"event {finding.event['id']}{captured_when}. If the edit was a "
+            f"correction, revert it and append a new entry with "
+            f"`amends: [{label}]` instead; otherwise there is nothing to do. "
+            f"See {docs_url_mod.DESIGN_LOG_DOCS}.",
             file=item.source_file,
             line=item.source_line,
             item_id=item.id,
