@@ -699,6 +699,88 @@ def edited_after_captured(project) -> list:
     ]
 
 
+# ------------------------------------------ uncaptured edits (run-5 finding B3)
+
+
+class UncapturedEdit(NamedTuple):
+    """One entry of a ``sealing: history`` type whose live content no longer
+    matches the hash its legacy seal record holds, and which has no capture in
+    the store to compare against (run-5 finding B3). ``seal_file`` is the
+    project-relative record the prior hash came from, so the report can name
+    where the evidence of the edit came from."""
+
+    item: Item
+    seal_file: str
+    recorded: str
+
+
+def uncaptured_edits(project) -> list:
+    """Every live entry of a history-backed append-only type that has been
+    edited while nothing had recorded its content (run-5 §4).
+
+    Dropping the build-time lock leaves an entry of a ``sealing: history``
+    type with nothing but a capture to prove what it used to say. An entry
+    with no capture -- the state every project that upgraded from the
+    build-time seal starts in -- can therefore be rewritten wholesale and
+    draw no diagnostic from ``check``, ``build`` or ``release``, and the next
+    release stamps the rewritten text as the recorded truth.
+
+    Its prior content is not nothing, though: a legacy seal record still
+    holds the hash it was sealed under. So the detection is that record's hash
+    against the live one, through the same format-aware comparison
+    ``seal.verify`` uses, restricted to entries ``edited_after_captured``
+    does not already speak for -- an entry with a capture event is captured,
+    edited or not, and reporting it twice would be double-telling.
+
+    Read-only, and a diagnostic source only: it writes nothing, and its caller
+    reports through ``project.warn`` -- never an error, never a failed build.
+    """
+    entries = seal_mod.append_only_items(project, sealing=model.SEALING_HISTORY)
+    if not entries:
+        return []
+    captured = {
+        str(event["item_key"])
+        for event in load_events(str(project.root))
+        if event["kind"] in _CAPTURE_KINDS
+    }
+    live_keys = {item.key for item in project.local_items if item.key}
+    try:
+        seal_files = [("", seal_mod.load_seals(project, ""))] + [
+            (board, seal_mod.load_seals(project, board)) for board in sorted(project.boards)
+        ]
+    except ValueError:
+        # A seal file that cannot be parsed is `seal.verify`'s to report, and
+        # it runs one step later in the same build; declining here keeps this
+        # diagnostic source from being the thing that changes that.
+        return []
+    out: list[UncapturedEdit] = []
+    for item in sorted(entries, key=lambda i: i.id):
+        # Keyless: the deleted-key report owns the item. Captured: H3's.
+        if not item.key or item.key in captured:
+            continue
+        found, where = None, ""
+        for board, seals in seal_files:
+            found = seal_mod._find_seal(seals, item, live_keys)
+            if found is not None:
+                where = board
+                break
+        if found is None:
+            continue  # nothing ever recorded this entry's content to compare
+        _record_id, value, recorded, hash_format = found
+        if seal_mod._seal_key_mismatch(_record_id, value, item) is not None:
+            continue  # identity corruption: `_verify_history_backed` errors on it
+        matches, _upgraded = seal_mod._matches_sealed_hash(
+            recorded, item, project, hash_format
+        )
+        if not matches:
+            out.append(
+                UncapturedEdit(
+                    item, seal_mod._seal_file_label(project, where), recorded
+                )
+            )
+    return out
+
+
 # ------------------------------------------------- H4: the author commands
 
 

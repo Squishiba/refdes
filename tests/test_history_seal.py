@@ -411,7 +411,11 @@ def test_the_policy_is_per_type_in_one_project(tmp_path, capsys):
     assert code == 1
     assert "NTE-001 is append-only and has been modified since it was sealed" in output
     assert "NTE-002 is append-only and was sealed, but no item" in output
-    assert "LOG-001" not in output
+    # LOG-001's edit is no lock violation -- the type's build lock is off --
+    # but it is not silent either: run-5 B3 warns that the edit was made while
+    # the entry had no capture to compare it against.
+    assert "LOG-001 is append-only" not in output
+    assert "LOG-001: edited while uncaptured" in output
     assert "LOG-002 has a legacy seal record in .refdes/log-seal.yaml" in output
     assert "LOG-002 is append-only" not in output
     assert _seal_file(tmp_path).read_bytes() == seal_before

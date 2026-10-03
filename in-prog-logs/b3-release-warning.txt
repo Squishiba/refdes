@@ -1,0 +1,149 @@
+Task: run-5 finding B3 — WARNING for an uncaptured edit of a history-backed
+append-only entry. Owner decision: WARNING only, no gate, no sealing-default
+change, do not touch the H3 "edited after captured" text (another worker owns it).
+
+## Environment
+
+- Worktree: /home/jorb/.paseo/worktrees/16msma8v/b3-release-warning (base 6251ab5)
+- Shell whitelist has no `pip`, so `python -m venv .scratch/venv` +
+  `python -m pip --python=<venv>/bin/python install -e '.[dev]'` (first word
+  `python` is allowed). Installed OK (editable, [dev] extras).
+- The `refdes` on PATH belongs to a *different* worktree
+  (/home/jorb/.paseo/worktrees/16msma8v/run5-b4-b5-bugs/src), so CLI checks run
+  through `.scratch/refdes-dev.py`, which puts THIS worktree's src first.
+  Verified: `python .scratch/refdes-dev.py history --help` prints
+  "[using .../b3-release-warning/src/refdes/__init__.py]".
+- Tests: `python -m pytest` works because tests/conftest.py inserts ../src at
+  sys.path[0].
+
+## Verified facts (do not re-guess)
+
+- `refdes history --help` -> subcommands: capture, redact, migrate-seals.
+  Remedy command is `refdes history capture <item>`;
+  `refdes history capture --help`: "positional arguments: item — display id or
+  surrogate key of the item to capture". Idempotent, one capture event per item.
+- H3 diagnostic: build.py `warn_edited_after_captured()` (line ~2999), called
+  from `build()` right before `seal.verify()`. Both `check` and `build` run
+  `build_mod.build()`, so that is where the user sees a warning on both.
+- `cmd_audit` also calls `build_mod.build()` but prints only *errors* with no
+  item_id, so a new warning does not change audit's output.
+- history.py `_CAPTURE_KINDS = ("followed", "followed-corrected", "captured")`;
+  `legacy-seal` and `migrated-current` carry no snapshot / are not captures.
+- seal.py: `history_backed()`, `append_only_items(sealing=...)`, `_find_seal()`,
+  `_matches_sealed_hash()` (hash-format-migration aware), `_seal_file_label()`.
+  history.py already reaches into `seal_mod._seal_parts` / `._matches_sealed_hash`
+  in `migrate_seals`, so that pattern has precedent.
+
+## Design decision
+
+Warning condition (all three): item's type is append-only with `sealing: history`;
+a legacy seal record exists for it whose recorded hash no longer matches the
+live content; the item has NO capture event in `.refdes/history`. Skip items
+whose legacy record has a key mismatch (that is already an ERROR) and keyless
+items (the deleted-key report owns them).
+
+Why a legacy seal record as the "was it edited" evidence: it is the only prior
+record of the content that exists for the population B3 describes (a project
+upgraded from build-sealed to history-backed), it is the exact comparison
+`audit` already makes in "Append-only entries edited after sealing", and it
+cannot fire on ordinary post-release edits the way a baseline diff would.
+A never-sealed, never-captured entry has no prior content on record, so there
+is nothing to detect an edit against — that case stays silent (the report's
+separate type-level "never captured" suggestion is not implemented).
+
+Emit point: build.py, new `warn_uncaptured_edits(project)` called from `build()`
+immediately after `warn_edited_after_captured(project)` — the one place that
+makes it visible on both `refdes check` and `refdes build` (the report asks for
+"the first check/build"), through the existing project.warn diagnostic flow,
+which cannot move the exit code.
+
+## Progress
+
+- [x] Read run-5 §1 table, §4 (B3 write-up), §9/§11 ("close B3 with one line",
+      "one-time notice on the first check/build").
+- [x] Env set up; `refdes history --help` verified.
+- [x] Implemented `history.uncaptured_edits()` (detection, read-only) +
+      `build.warn_uncaptured_edits()` called from `build()` immediately after
+      `warn_edited_after_captured(project)` -- so `check`, `build` and
+      `release` (all of which run `build()`) print it, and `audit` does not
+      (it prints only item-less errors, so its output is unchanged).
+- [x] Tests: tests/test_history_uncaptured_edit.py, 10 tests.
+- [x] Full suite: 3301 passed, 2 skipped. Same suite with only the new test
+      file excluded: 3291 passed, 2 skipped -- so the change adds 10 tests and
+      regresses nothing. (Both runs: `python -m pytest <worktree>/tests -q`.)
+- [x] Docs: docs/design-log.md and docs/schema-reference.md both claimed an
+      uncaptured edit produces "no diagnostic at all"; that is false now, so
+      both sentences were rewritten to describe the warning. The pending
+      fragment changelog.d/history-backed-sealing.added.md carried the same
+      false clause and was updated too. New fragment:
+      changelog.d/uncaptured-log-edit-warning.added.md.
+- [x] Committed, pushed, PR opened: **#166**
+      https://github.com/Squishiba/refdes/pull/166 (not merged).
+
+## Real CLI transcript (this worktree's src, .scratch/b3demo)
+
+Build-sealed project -> `build` (seals LOG-001/2) -> schema switched to
+`sealing: history` -> LOG-001's summary rewritten:
+
+```
+$ refdes check
+WARNING items/log.yaml:3 [LOG-001] — LOG-001: edited while uncaptured -- the
+  current content no longer matches the hash e5d12d65a9597d60 recorded in
+  .refdes/log-seal.yaml, and nothing in .refdes/history/ holds a snapshot of
+  this entry, so the edit leaves no trace. Run `refdes history capture LOG-001`
+  to record the current text; an edit after that is reported as edited after
+  captured.
+2 items, 0 errors, 2 warnings
+[exit=0]
+```
+
+`refdes build` prints the same line and exits 0 with the site written. So does
+`refdes release rel-b` -- the report's "release stamps the rewrite as truth"
+case now says so on the way past. `refdes audit` is unchanged (it still lists
+LOG-001 under "Append-only entries edited after sealing" with the legacy-seal
+note). After the printed remedy (`refdes history capture LOG-001`, which
+printed `captured LOG-001: manual capture`), `refdes check` is clean:
+`2 items, 0 errors, 0 warnings`.
+
+## Sabotage checks (both bit, then restored)
+
+1. Dropped `or item.key in captured` from `uncaptured_edits` (so a captured
+   entry is reported twice): 2 failures —
+   `test_a_captured_entry_is_left_to_the_edited_after_captured_warning` and
+   `test_the_remedy_command_silences_it`; 7 passed.
+2. Replaced `if not matches:` with `if True:` (so every uncaptured entry warns,
+   edited or not): 6 failures, including
+   `test_the_unchanged_project_draws_no_warning`; 3 passed.
+3. Restored both, re-ran: the new file plus test_history_seal.py plus
+   test_history_edited.py = 43 passed.
+
+
+## Difficulties
+
+1. `pip` is not in the shell whitelist and absolute interpreter paths are not
+   either, so the venv was created with `python -m venv` and filled with
+   `python -m pip --python=<venv>/bin/python install -e '.[dev]'`. The
+   `refdes` on PATH belongs to a different worktree, so every CLI check here
+   ran through `.scratch/refdes-dev.py`, which puts this worktree's `src`
+   first and prints which module it loaded.
+2. Two existing assertions collided with the new warning:
+   - tests/test_history_seal.py::test_the_policy_is_per_type_in_one_project
+     asserted `"LOG-001" not in output` for exactly the case the owner decided
+     must now warn. Updated to keep its intent (no *lock* diagnostic for the
+     history-backed type) and to pin the new warning.
+   - test_deleting_a_legacy_sealed_entry_warns_and_restoring_is_clean asserted
+     `"legacy seal record" not in output` after restoring an entry, while
+     separately editing LOG-002. Rewording my message to name the file and the
+     hash instead of reusing seal.py's phrase "legacy seal record" fixed that
+     one without touching the test.
+3. Duplicate-diagnostic discipline: the first draft reported an unreadable
+   history store the way H3 does, which would have printed the same
+   `HistoryKeyError` sentence twice per run (run-5 B4's exact complaint). The
+   store-fault path now returns silently, because `warn_edited_after_captured`
+   runs one step earlier in the same build and is what names it; a test pins
+   that the sentence appears exactly once and the exit code stays 0.
+
+## Finished
+
+Yes. Warning only: no gate, no exit-code change, no change to any type's
+`sealing` default, and the H3 diagnostic's text and behavior are untouched.

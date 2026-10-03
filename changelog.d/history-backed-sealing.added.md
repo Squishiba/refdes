@@ -7,7 +7,9 @@
   type, and `hardware@1`/`hardware@2` are untouched. On a `sealing: history`
   type, a build seals nothing; an edit is never a
   build error (a captured entry gets the `edited after captured` warning; an
-  entry never captured gets no diagnostic at all);
+  entry never captured gets the `edited while uncaptured` warning while a
+  legacy seal record still holds its prior hash, and nothing when no record
+  names it);
   a bare `follows:` on an entry a seal file already mentions freezes and is
   captured instead of being refused as "already sealed"; existing seal files
   are read as legacy-seal markers ("recorded hash only; original content was

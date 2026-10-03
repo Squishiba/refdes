@@ -3035,6 +3035,49 @@ def warn_edited_after_captured(project: Project) -> None:
         )
 
 
+def warn_uncaptured_edits(project: Project) -> None:
+    """Run-5 finding B3: an edit to a history-backed entry that was never
+    captured is an edit with no record of it, and that is said out loud.
+
+    ``sealing: history`` drops the build-time lock, so the only thing that can
+    still say "this entry used to say something else" is a capture. An entry
+    with none -- every entry of a project that upgraded from the build-time
+    seal, until someone captures it -- could be rewritten wholesale with
+    ``check``, ``build`` and ``release`` all silent, and the next release would
+    stamp the rewrite as the recorded truth. The legacy seal record still holds
+    the hash it was sealed under, so the edit is detectable, and silence about a
+    detectable one is the finding.
+
+    One warning per entry, naming the entry, the record the prior hash came
+    from, and the command that ends the blind spot. Reported through
+    ``project.warn`` only -- it can never move the exit code, and it reads
+    ``.refdes/`` without writing it. An entry with a capture is left to
+    ``warn_edited_after_captured``, which says more about it; an entry nothing
+    ever recorded stays silent, because there is genuinely nothing here to
+    report an edit against. An unreadable history store is left unsaid here for
+    the same reason: ``warn_edited_after_captured`` reads the same store one
+    step earlier in this same build and is the diagnostic that names it, and a
+    second copy of that sentence would only inflate the counts it reports."""
+    try:
+        findings = history_mod.uncaptured_edits(project)
+    except (history_mod.HistoryError, OSError):
+        return
+    for finding in findings:
+        item = finding.item
+        label = item.id or item.key
+        project.warn(
+            f"{label}: edited while uncaptured -- the current content no longer "
+            f"matches the hash {finding.recorded} recorded in "
+            f"{finding.seal_file}, and nothing in .refdes/history/ holds a "
+            "snapshot of this entry, so the edit leaves no trace. Run "
+            f"`refdes history capture {label}` to record the current text; an "
+            "edit after that is reported as edited after captured.",
+            file=item.source_file,
+            line=item.source_line,
+            item_id=item.id,
+        )
+
+
 def build(
     project: Project,
     seal_write: bool = False,
@@ -3067,6 +3110,7 @@ def build(
     run_checks(project)
     compute_hashes(project)
     warn_edited_after_captured(project)
+    warn_uncaptured_edits(project)
     seal.verify(project, write=seal_write, reseal=reseal)
     boards_mod.verify(project, write=seal_write, accept_move=accept_board_move)
     boards_mod.lint_tokens(project)
