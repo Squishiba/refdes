@@ -90,9 +90,19 @@ def _find_item(project: Project, ref: str) -> tuple[Item | None, str | None]:
     """Resolve an item-view reference. Accepted spellings, in order: the
     `project.items` dict key (surrogate key, or the provisional handle of a
     keyless item — what `/api/items` rows carry as `handle`), then display id,
-    then surrogate key via `item_by_ref`. A provisional handle is never a
-    linkable identity, so it is deliberately looked up only here, only by
-    exact dict hit, and echoed back so the UI can address the item again."""
+    then surrogate key via `item_by_ref`, then a retired id some item still
+    records in `former_ids:`. A provisional handle is never a linkable
+    identity, so it is deliberately looked up only here, only by exact dict
+    hit, and echoed back so the UI can address the item again.
+
+    The retired-id step is what makes the hover promise of docs/ids.md true:
+    the id people have from a schematic or a commit message is the retired
+    one, and `refdes ls` already answers it. Without this step the API 404'd
+    on it (run-5 finding B5), so the hover card for a schematic id was
+    silent. A retired id that collides with a live id never reaches here as a
+    match at all: `ids.collect_former_ids` refuses to record one (it is a
+    build error), and the live lookups above run first regardless.
+    """
     if not ref:
         return None, None
     item = project.items.get(ref)
@@ -101,6 +111,14 @@ def _find_item(project: Project, ref: str) -> tuple[Item | None, str | None]:
     item = project.item_by_ref(ref)
     if item is not None:
         return item, item.key or ref
+    current_id = project.former_ids.get(ref)
+    if current_id is not None:
+        item = project.item_by_id(current_id)
+        if item is not None:
+            # The handle is the item's own live identity, never the retired
+            # spelling: the caller addresses the item again with it, and a
+            # retired id is not a durable one.
+            return item, item.key or item.id
     return None, None
 
 

@@ -801,6 +801,53 @@ def test_writable_check_reports_a_deleted_key_without_reminting(tmp_path, capsys
     assert "WARNING" in captured.out
 
 
+def test_a_deleted_key_is_reported_once_and_as_an_error(tmp_path, capsys):
+    """B4 (run 5): one hand-deleted key was counted as two findings -- the
+    ERROR `keys._validate_deleted_keys` reports during `build()`, and a
+    byte-identical WARNING `keys.report_deleted_keys` reports during the
+    load's minting step, from the same records and the same message
+    function. One condition gets one diagnostic, at the severity the
+    Layer-4 table in docs/design/keys.md gives it: error.
+    """
+    old_key = keys_mod.mint()
+    root = _keys_project(
+        tmp_path,
+        "defaults: { type: requirement }\n"
+        f"items:\n  - id: REQ-001\n    key: {old_key}\n    text: Same item.\n",
+    )
+    _stamp_keyed_baseline(root, "rev-a")
+    path = root / "items" / "r.yaml"
+    path.write_text(
+        path.read_text(encoding="utf-8").replace(f"    key: {old_key}\n", ""),
+        encoding="utf-8",
+    )
+
+    status = cli_mod.main(["-c", str(root / "refdes-project.yaml"), "check"])
+    captured = capsys.readouterr()
+
+    assert status == 1
+    project = _built_keys_project(root)
+    mentions = [d for d in project.diagnostics if "key deleted" in d.message]
+    assert len(mentions) == 1, [str(d) for d in project.diagnostics]
+    assert mentions[0].level == "error"
+
+    # The user-visible symptom: the run printed the lost key twice, and the
+    # tally it ends on counted one broken key as two findings.
+    printed = [
+        line
+        for line in (captured.out + captured.err).splitlines()
+        if line.startswith(("ERROR", "WARNING"))
+    ]
+    lines = [line for line in printed if "key deleted" in line]
+    assert len(lines) == 1, lines
+    assert lines[0].startswith("ERROR"), lines[0]
+    assert captured.out.strip().splitlines()[-1] == (
+        f"1 items, "
+        f"{sum(1 for line in printed if line.startswith('ERROR'))} errors, "
+        f"{sum(1 for line in printed if line.startswith('WARNING'))} warnings"
+    )
+
+
 def test_restoring_the_deleted_key_clears_the_deleted_key_error(tmp_path, capsys):
     old_key = keys_mod.mint()
     root = _keys_project(

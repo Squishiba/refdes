@@ -199,6 +199,18 @@ function itemsById() {
   const map = new Map();
   if (!index) return map;
   for (const item of index.data.items || []) map.set(item.id, item);
+  // Retired ids resolve too, so hovering the id a schematic or a commit
+  // message still names finds the item it became (docs/ids.md, "Looking an
+  // item up by a retired id"; run-5 finding B5 had this map keyed on `item.id`
+  // alone, and `provideHover` returns nothing for a miss). Live ids are
+  // indexed in their own pass first, so a project broken enough to record a
+  // live id as a former one still answers with the live item -- which is what
+  // `refdes ls` does with the same collision.
+  for (const item of index.data.items || []) {
+    for (const former of item.former_ids || []) {
+      if (!map.has(former)) map.set(former, item);
+    }
+  }
   return map;
 }
 

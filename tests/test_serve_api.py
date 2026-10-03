@@ -376,6 +376,57 @@ def test_item_view_returns_former_ids(tmp_path):
         app.stop()
 
 
+def test_item_view_resolves_a_retired_id(tmp_path):
+    """B5 (run 5): `/api/item/<ref>` is the lookup the VS Code hover and the
+    browser editor both ask, and it answered 404 for an id some item records
+    in `former_ids:` -- while `refdes ls REQ-900` resolves that same spelling
+    to the live item. The id a schematic or a commit message still names is
+    the retired one, so this was the case the hover exists for and did not
+    answer. Its own project, for the same reason as the test above: a
+    `former_ids:` entry burns an id into the ledger.
+    """
+    write_project_config(
+        tmp_path,
+        "site: { title: T, out: _site }\n"
+        "id: { width: 3 }\n"
+        "types:\n"
+        "  requirement:\n"
+        "    prefix: REQ\n"
+        "    fields: { text: { type: text, required: true } }\n",
+    )
+    items = tmp_path / "items"
+    items.mkdir()
+    (items / "reqs.yaml").write_text(
+        "defaults: { type: requirement }\n"
+        "items:\n"
+        "  - id: REQ-001\n"
+        "    text: The rail shall supply 3.3 V.\n"
+        "    former_ids: [REQ-900]\n"
+        "  - id: REQ-002\n"
+        "    text: Never renamed.\n",
+        encoding="utf-8",
+    )
+    app = EditorApp(str(tmp_path / "refdes-project.yaml"), poll_interval=60)
+    app.start()
+    try:
+        client = Client(app)
+        status, item = client.api_get("/api/item/REQ-900")
+        assert status == 200, item
+        assert item["id"] == "REQ-001"
+        assert item["former_ids"] == ["REQ-900"]
+        # The handle it hands back is the item's live identity, never the
+        # retired spelling, so the caller can address it again with what it got.
+        assert item["handle"] == "REQ-001"
+        status, again = client.api_get(f"/api/item/{item['handle']}")
+        assert status == 200 and again["id"] == "REQ-001"
+        # The live id resolves as it always did, and an unknown one is a 404.
+        status, live = client.api_get("/api/item/REQ-001")
+        assert status == 200 and live["id"] == "REQ-001"
+        assert client.api_get("/api/item/REQ-999")[0] == 404
+    finally:
+        app.stop()
+
+
 def test_item_view_addressed_by_the_row_handle(served):
     """The list hands out `handle`; the view must accept exactly that, which
     is the only way a keyless item (provisional handle, no key, no dict path)

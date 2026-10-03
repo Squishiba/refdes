@@ -1110,9 +1110,12 @@ that named the old key.
 So minting asks first. Before assigning any key, `keys.mint_missing()`
 consults every record that remembers an item's key — the latest baseline, the
 key-keyed seal files, the key-keyed membership manifest — and an item whose
-display id is recorded there **with** a key is left keyless. It gets a
-`WARNING` at load time and the `key deleted` error above, both naming the old
-key, the record it came from, and the two remedies: restore the line, or give
+display id is recorded there **with** a key is left keyless. It gets the
+`key deleted` error above and nothing else: one condition, one diagnostic.
+(Minting used to warn about it at load time as well, from the same records and
+the same message, so `refdes check` counted the same lost key twice — run-5
+finding B4.) The message names the old key, the record it came from, and the
+two remedies: restore the line, or give
 the item a new display id if it really is a different item, which lets a fresh
 key be minted. `refdes keys adopt` refuses outright for the same item rather
 than minting over it. An item with no key and no record anywhere is still
