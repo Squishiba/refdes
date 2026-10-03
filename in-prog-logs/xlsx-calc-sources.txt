@@ -1,0 +1,19 @@
+Task: finding 26 XLSX calc sources.
+
+Progress:
+- Read docs/design/calc-sources.md section 4 and the finding 26 backlog entry.
+- Traced CsvReader and the shared fetch/lock coordinator in citations.py.
+- Found the existing user page at docs/math.md and CI test jobs in .github/workflows/tests.yml.
+- Created .scratch/venv. Initial editable install failed while pip tried to fetch setuptools>=77: sandbox DNS could not resolve the package index. Retried with network access; editable .[dev,xlsx] installation succeeded.
+- Added the optional xlsx extra and changed both CI test jobs to install .[dev,xlsx]; core requirements remain the original four.
+- Implemented defined-name extraction for workbook and sheet scopes, with the shared fetch/lock coordinator and lazy openpyxl import. Added generated-workbook tests and the missing-extra test.
+- Verified a .scratch project with `refdes schema`, `refdes fetch`, `refdes build`, plain `fetch` after editing the cell, and `fetch --update`; the CLI reported 1.85 -> 2.3 only after update.
+- Targeted source tests passed (59); a server-picker regression surfaced in the full suite. The picker now checks for the optional listing method and explains why XLSX cannot yet be browsed there; the affected test and source tests passed (60).
+- Sabotage check: changed workbook-scoped lookup to a bogus name. The new XLSX tests failed (5 failed, 4 passed); restored the reader, then 9 passed. Output is retained in .scratch/sabotage-test-output.txt.
+- An unrestricted full-suite run reported 1 failed, 3299 passed, 2 skipped; the failure was the picker regression above. After the fix, the full suite passed: 3300 passed, 2 skipped in 237.58 seconds.
+- The scratch CLI project confirmed missing sheet and missing name each fail extraction without changing the existing lock record. A simulated missing openpyxl import through `cli.main(..., fetch --update)` named `refdes[xlsx]` and failed cleanly.
+- Committed with the required GPT-6-Sol trailer and rebased cleanly onto origin/main at d10ff69; its overlap was an unrelated backlog paragraph.
+- Post-rebase targeted tests passed (60), sabotage failed as expected (5 failed, 4 passed) and restored XLSX tests passed (9). The post-rebase full suite passed: 3326 passed, 2 skipped in 232.12 seconds. Ruff E9,F across src/tests and scoped E9,F,I on touched Python files passed.
+
+Difficulties: sandboxed pip could not resolve packages, and sandboxed full-suite runs cannot bind the loopback server socket. Both operations succeeded when run with network/socket access. GitHub CLI currently reports an invalid token; push and PR have not yet been attempted.
+Status: implementation and verification finished; push and PR delivery in progress.
