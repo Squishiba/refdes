@@ -383,6 +383,49 @@ def test_redaction_events_are_not_redaction_targets(tmp_path, capsys):
     assert [e["kind"] for e in history.load_events(str(tmp_path))] == ["redaction"]
 
 
+def test_a_redaction_fingerprint_that_reads_as_a_number_still_loads(
+    tmp_path, capsys, monkeypatch
+):
+    """The removal-set fingerprint is a digest, not a surrogate key, and the
+    store must not read it as one.
+
+    12 hex characters are all decimal digits about one time in 300 (and all
+    octal digits behind a leading zero some time in 4000), and PyYAML's implicit
+    resolver reads such a plain scalar back as an int -- which is exactly what
+    the key validator refuses. Storing the fingerprint in `successor_key` meant
+    one redaction in ~300 wrote an event file that made every later history
+    command exit 1 with `key '213312678452' is malformed: expected exactly 11
+    characters`; that is how this failed on windows-latest, run 37099112528
+    attempt 1, green on rerun. The file on disk was byte-correct -- safe_dump
+    quotes the value -- so the refusal was the validator reading a non-key as a
+    key. The unlucky value is forced here instead of waited for.
+    """
+    config = _setup(tmp_path)
+    config = _warm(tmp_path, capsys)
+    assert cli_mod.main(["-c", config, "history", "capture", "LOG-001"]) == 0
+    capsys.readouterr()
+
+    monkeypatch.setattr(
+        history, "_removal_fingerprint", lambda digests, event_ids: "213312678452"
+    )
+    assert cli_mod.main(
+        ["-c", config, "history", "redact", "LOG-001", "--confirm"]
+    ) == 0
+    capsys.readouterr()
+
+    events = history.load_events(str(tmp_path))
+    assert [e["kind"] for e in events] == ["redaction"]
+    assert events[0]["fingerprint"] == "213312678452"
+    assert "successor_key" not in events[0]
+
+    # The command that used to die: a second redact of the same target has to
+    # read the store before it can say nothing matched.
+    assert cli_mod.main(
+        ["-c", config, "history", "redact", "LOG-001", "--confirm"]
+    ) == 0
+    assert "nothing was redacted" in capsys.readouterr().out
+
+
 def test_redact_under_no_write_refuses(tmp_path, capsys):
     config = _setup(tmp_path)
     config = _warm(tmp_path, capsys)

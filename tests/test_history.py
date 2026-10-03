@@ -405,6 +405,32 @@ def test_duplicate_edge_under_two_ids_is_loud(root):
         history.load_events(root)
 
 
+def test_a_fingerprint_is_a_discriminator_and_not_a_key(root):
+    """`fingerprint` and `successor_key` are different fields with different
+    contracts: one is a digest, the other a surrogate key the store validates
+    as one. A 12-hex-char fingerprint whose plain YAML spelling resolves to an
+    int is therefore loadable, and the two fields cannot both name an id."""
+    fingerprint = "213312678452"  # all decimal digits: YAML would read it as 213312678452
+    path = history.append_event(root, "redaction", "K1", "", fingerprint=fingerprint)
+    stem = os.path.basename(path)[: -len(".yaml")]
+    assert stem == history.event_id("redaction", "K1", "", fingerprint)
+
+    events = history.load_events(root)
+    assert [e["kind"] for e in events] == ["redaction"]
+    assert events[0]["fingerprint"] == fingerprint
+    assert "successor_key" not in events[0]
+
+    # Two different removal sets are two different events of one target.
+    assert history.event_id("redaction", "K1", "", "a" * 12) != history.event_id(
+        "redaction", "K1", "", "b" * 12
+    )
+
+    with pytest.raises(history.HistoryError, match="not both"):
+        history.append_event(
+            root, "followed", "K1", "a" * 64, successor_key="S1", fingerprint="f" * 12
+        )
+
+
 def test_load_events_empty_and_sorted(root):
     assert history.load_events(root) == []  # no store at all is not an error
     e2 = history.append_event(root, "captured", "K2", "b" * 64)

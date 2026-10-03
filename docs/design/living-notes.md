@@ -296,7 +296,7 @@ not existing behavior:
 ```text
 .refdes/history/
   objects/<semantic-sha256>.yaml   # canonical snapshot payload
-  events/<uuid>.yaml               # {kind, occurred_at, item_key, object, reason, successor_key?}
+  events/<uuid>.yaml               # {kind, occurred_at, item_key, object, reason, successor_key?, fingerprint?}
 ```
 
 An object contains the item's key, display ID, type, own declared fields,
