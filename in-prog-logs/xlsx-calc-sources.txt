@@ -14,6 +14,7 @@ Progress:
 - The scratch CLI project confirmed missing sheet and missing name each fail extraction without changing the existing lock record. A simulated missing openpyxl import through `cli.main(..., fetch --update)` named `refdes[xlsx]` and failed cleanly.
 - Committed with the required GPT-6-Sol trailer and rebased cleanly onto origin/main at d10ff69; its overlap was an unrelated backlog paragraph.
 - Post-rebase targeted tests passed (60), sabotage failed as expected (5 failed, 4 passed) and restored XLSX tests passed (9). The post-rebase full suite passed: 3326 passed, 2 skipped in 232.12 seconds. Ruff E9,F across src/tests and scoped E9,F,I on touched Python files passed.
+- Pushed xlsx-calc-sources and opened PR #170 against main with `gh pr create`. Did not merge.
 
-Difficulties: sandboxed pip could not resolve packages, and sandboxed full-suite runs cannot bind the loopback server socket. Both operations succeeded when run with network/socket access. GitHub CLI currently reports an invalid token; push and PR have not yet been attempted.
-Status: implementation and verification finished; push and PR delivery in progress.
+Difficulties: sandboxed pip could not resolve packages, and sandboxed full-suite runs cannot bind the loopback server socket. Both operations succeeded when run with network/socket access. `gh auth status` reported an invalid token, but the push and PR creation succeeded.
+Status: finished. PR #170 is open and unmerged.
