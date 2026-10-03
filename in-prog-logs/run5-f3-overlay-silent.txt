@@ -64,9 +64,9 @@ back into build sealing".
 
 ## Tests
 
-`tests/test_sealing_optin_note.py`, 10 tests, regression-first: 9 failed / 1
+`tests/test_sealing_optin_note.py`, 11 tests, regression-first: 9 failed / 1
 passed before the change (the one that passed is the no-overlay silence test,
-which must pass either way). After: 10 passed.
+which must pass either way). After: 11 passed.
 
 Sabotage, both directions:
 1. Removed the two `_announce_sealing_optin(project)` calls (detection left
@@ -75,11 +75,14 @@ Sabotage, both directions:
    emission, not about the schema reading.
 2. Restored the calls but dropped `{SCHEMA_NAME}` from the message → exactly 1
    failed, `test_the_note_names_the_type_and_the_file_that_declared_it`.
-Both restored; 10 passed again.
+Both restored; 11 passed again.
 
-Full suite: `python -m pytest <worktree>/tests -q` → **3327 passed, 2 skipped**
-in 239s, with the change in. 3317 of those are the pre-existing suite; the new
-file is the 10.
+Full suite, run twice: **3327 passed, 2 skipped** in 239s with the 10-test
+version of the file, and **3328 passed, 2 skipped** in 235s on the committed
+tree (7612b47) with the 11th test in. The pre-existing suite is therefore 3317
+passed, 2 skipped. The first number is what the commit message and the PR body
+cite as the second — the first run collected its test list before the 11th test
+was written, so it could not have counted it.
 
 ## Environment notes (verified, and a deviation to flag)
 
