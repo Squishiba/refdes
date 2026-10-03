@@ -1,0 +1,132 @@
+# run-5 F3 — the opt-back-in overlay must report itself
+
+Task: `types: log: sealing: build` in `refdes-schema.yaml` switches an
+append-only type from history-backed to build-sealed, and `check`/`build` print
+nothing about it. Add a diagnostic naming the type and the overlay file, at the
+severity the report asks for, without changing exit codes.
+
+## Reading the finding
+
+`in-prog-logs/user-sim-release-gate-run5.md`:
+- §F3 (line 564): "There is no `note:`, no `WARNING`, nothing confirming the
+  overlay resolved. A user who adds it and runs `check` cannot tell whether it
+  worked, and a user whose *intent* was the overlay but who forgot it has no
+  way to discover that either."
+- Findings table (line 104): severity **friction (low)**, surface `check`,
+  `build`.
+- §5 table (line 449): the overlay "works, silent (F3)"; the typo'd value and
+  the wrong-file cases already exit 2 with good messages — only "took effect"
+  is unreported.
+
+## Severity decision (from the report, not from feel)
+
+`note:` on stderr, not a WARNING and not a `project.info()` diagnostic.
+- F3 is graded friction (low) and the overlay is a *deliberate* decision, so it
+  owes the reader no severity. Run-5 B4 in the same report is precisely the
+  complaint that a second diagnostic on one condition inflates
+  `N errors, M warnings`; a standing warning about a decision the author just
+  made would do that on every run of every project that has the overlay.
+- `project.info()` was rejected because `_visible()` (cli.py) hides info
+  diagnostics unless `--verbose` — the author would still be unable to see that
+  the overlay took effect, which is the whole finding.
+- Exit codes: `_report()` returns `1 if errors else 0`, so a stderr note joins
+  no count and moves no code. Verified by test and by hand (below).
+
+## What changed
+
+- `standards.build_sealing_optins(base_types, project_types_raw, resolved_types)`
+  — the detection. A type counts only if (a) the project's own overlay sets
+  `sealing: build` for it, (b) the standard (base+presets) had it on something
+  else, and (c) the resolved spec is still `append_only`. (b) is why the check
+  lives in `standards.py`: it is the one place the standard's own value and the
+  project's override are both in hand. (a) is safe because `load_project`
+  merges `refdes-project.yaml` and the overlay only after validating that
+  `types:` can come from the overlay file alone, so an overlay `types:` block
+  is always `refdes-schema.yaml`'s. (c) keeps a project that switched the type
+  off append-only out of it — sealing only names what backs an append-only
+  type's guarantee, per schema.py's own rule.
+- `resolve_namespaces` returns a 5th value, `sealing_optins`; `resolve_schema`
+  (the 2-value form, used by tests) is unchanged in signature.
+- `Project.sealing_optins: list[str]` (model.py), filled by `load_project`.
+- `cli._sealing_optin_note()` + `_announce_sealing_optin()`, called from
+  `cmd_check` and `cmd_build` only — the two commands F3 names.
+- `docs/design-log.md`: the overlay paragraph now quotes the line.
+- `changelog.d/sealing-optin-overlay-note.added.md`.
+
+The note:
+
+    note: refdes-schema.yaml opts the 'log' type back into build sealing -- an
+    edit to a sealed entry is a build error again, not the history-backed
+    'edited after captured' warning
+
+(one line; wrapped here for the log). Multi-type form: "opts 2 types (a, b)
+back into build sealing".
+
+## Tests
+
+`tests/test_sealing_optin_note.py`, 10 tests, regression-first: 9 failed / 1
+passed before the change (the one that passed is the no-overlay silence test,
+which must pass either way). After: 10 passed.
+
+Sabotage, both directions:
+1. Removed the two `_announce_sealing_optin(project)` calls (detection left
+   intact) → 8 failed, 2 passed. The two that stayed green are the no-overlay
+   silence test and the detection-only unit test — i.e. the failures were about
+   emission, not about the schema reading.
+2. Restored the calls but dropped `{SCHEMA_NAME}` from the message → exactly 1
+   failed, `test_the_note_names_the_type_and_the_file_that_declared_it`.
+Both restored; 10 passed again.
+
+Full suite: `python -m pytest <worktree>/tests -q` → **3327 passed, 2 skipped**
+in 239s, with the change in. 3317 of those are the pre-existing suite; the new
+file is the 10.
+
+## Environment notes (verified, and a deviation to flag)
+
+- This shell whitelist refuses `cd`, `pip`, `rm`, `sort`, and env-var prefixes.
+  `python -m venv` is allowed but the venv's own `bin/pip`/`bin/python` are not
+  on the whitelist, and `python -m pip install -e .` would have installed *this
+  worktree* over the shared `/home/jorb/work/venv-refdes` env that another
+  checkout (`/home/jorb/work/refdes`, at #173) is already installed into —
+  AGENTS.md warns about concurrent sessions on this checkout, so I did not do
+  it. **Deviation: no `.scratch/venv`.** Tests run on the ambient
+  `/home/jorb/work/venv-refdes/bin/python` (pytest 9.1.1, py3.13.5), and they
+  exercise *this* worktree's code because `tests/conftest.py:11` does
+  `sys.path.insert(0, <repo>/src)` — verified: with that path first,
+  `refdes.__file__` is the worktree's.
+- The `refdes` console script on PATH is the *other* checkout, so CLI probes ran
+  through `.scratch/refdes-run.py` (same sys.path trick, then `cli.main()`).
+  Verified by hand, this worktree's code:
+  - overlay project, `check` → note + `1 items, 0 errors, 0 warnings`, exit 0
+  - overlay project, `build` → note + same summary + `site written to ...`, exit 0
+  - plain project, both commands → no note, same summary, exit 0
+  - the overlay really does change the project: after `build`, the overlay
+    project has `.refdes/log-seal.yaml`; the plain one does not.
+- One thing the tests had to work around: adding `refdes-schema.yaml` to a
+  project that already generated `.refdes/schema.json` provokes the pre-existing
+  one-time `WARNING ... .refdes/schema.json was older than refdes-schema.yaml --
+  refreshed` (F3's "unrelated one-time" line). The with/without comparison test
+  settles each state with one run first, so it compares steady-state output and
+  not that trip-wire.
+
+## Left undone / uncertain
+
+- Only `check` and `build` print it, because that is what F3 names. `release`,
+  `audit`, `revision` and `index` load the same project and stay silent; if the
+  note should be project-wide, the place is `_report()`, and that would also
+  put it in front of `index`'s JSON on stdout (it goes to stderr, so it would
+  not break it) — a wider call than this finding.
+- Read-only modes print it too, which is right (it is a schema fact, not a
+  write) and is now verified by hand rather than assumed: `refdes --no-write
+  -c cfg check` and `refdes build --dry-run` both print the note and exit 0.
+  `refdes ls` and `refdes index` print no note (index's stdout is still clean
+  JSON). Not covered by the test file — the two commands F3 names are.
+- The `append_only: false` skip is tested at the detection level
+  (`sealing_optins == []`) and by silence, but it is a negative test, so like
+  the other silence tests it cannot fail against the pre-change tree except
+  through the missing `Project.sealing_optins` attribute. The regression
+  evidence is the positive tests: 9 of the first 10 failed before the change.
+- Stray file: `in-prog-logs/in-prog-logs-run5-f3-overlay-note.txt` is an early
+  draft of this log written before I registered the required filename. This
+  environment has no file deletion, so it is left in place, unmodified-and
+  untracked (not staged, not committed).
