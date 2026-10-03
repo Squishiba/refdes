@@ -191,28 +191,84 @@ verify_worktree() {
   deny "$label branch '$branch' has $ahead commit(s) ahead of origin/main and no PR was ever opened for it -- this is exactly the shape of work that gets permanently lost once Paseo's delayed archive-worktree sweep runs. Check 'git -C $cwd log' for what it actually did; commit/push and open a PR first if there's real work, or ask Jared."
 }
 
+# expand_home <path>: `paseo ls` prints cwds with a leading ~, `paseo workspace
+# ls` prints them in full. Expand before comparing either.
+expand_home() {
+  printf '%s' "${1/#\~/$HOME}"
+}
+
+# workspace_listing
+# Sets WS_LISTING to the active workspace list as a JSON array, or denies.
+# Must not run inside $(...): deny exits the script, and a subshell would
+# swallow that and leave the caller to read an empty list as "no workspaces".
+workspace_listing() {
+  local raw
+  raw="$(paseo workspace ls --json 2>/dev/null)" || deny "paseo workspace ls failed -- cannot verify this worktree's workspace, so refusing. Check it manually."
+  printf '%s' "$raw" | jq -e 'type == "array" or (type == "object" and (.workspaces | type == "array"))' >/dev/null 2>&1 \
+    || deny "paseo workspace ls returned output this guard cannot read -- refusing rather than guessing."
+  WS_LISTING="$(printf '%s' "$raw" | jq -c 'if type == "array" then . else .workspaces end')"
+}
+
+# agent_listing
+# Sets AGENT_LISTING to the active (non-archived) agents as a JSON array, or
+# denies. Same no-subshell rule as workspace_listing.
+agent_listing() {
+  local raw
+  raw="$(paseo ls -g --json 2>/dev/null)" || deny "paseo ls failed -- cannot tell which agents are still running, so refusing. Check it manually."
+  printf '%s' "$raw" | jq -e 'type == "array" or (type == "object" and (.agents | type == "array"))' >/dev/null 2>&1 \
+    || deny "paseo ls returned output this guard cannot read -- refusing rather than guessing."
+  AGENT_LISTING="$(printf '%s' "$raw" | jq -c 'if type == "array" then . else .agents end')"
+}
+
+# owning_workspaces <expanded cwd>
+# Prints the workspace IDs whose cwd is this directory, one per line.
+owning_workspaces() {
+  printf '%s' "$WS_LISTING" | jq -r --arg target "$1" \
+    '.[] | select(((.cwd // "") | sub("^~"; env.HOME)) == $target) | .workspaceId'
+}
+
+# unfinished_agents_in <expanded cwd>
+# Prints "id status name" for every active agent in this directory whose status
+# is not a finished one (idle, closed, error). Anything else, including a status
+# this guard has not seen before, counts as unfinished.
+unfinished_agents_in() {
+  printf '%s' "$AGENT_LISTING" | jq -r --arg target "$1" '
+    .[]
+    | select(((.cwd // "") | sub("^~"; env.HOME)) == $target)
+    | select(.status as $s | ["idle", "closed", "error"] | index($s) | not)
+    | "\(.id) \(.status) \(.name // "")"'
+}
+
 # verify_workspace_call
 # archive_workspace names a workspace, not an agent: look up its cwd in the
-# active workspace list and verify that one worktree. Fails closed on every
-# lookup error. A workspace missing from the active list is allowed: the daemon
-# drops a workspace whose directory is already gone, so there is no worktree
-# left for the sweep to delete and archiving only clears the record.
+# active workspace list, refuse if any agent in it is still working, and verify
+# that one worktree. Fails closed on every lookup error. A workspace missing
+# from the active list is allowed: the daemon drops a workspace whose directory
+# is already gone, so there is no worktree left for the sweep to delete and
+# archiving only clears the record.
 verify_workspace_call() {
-  local ws_id listing ws_cwd
+  local ws_id ws_cwd blocking
   ws_id="$(printf '%s' "$input" | jq -r '.tool_input.workspaceId // empty')"
   [ -n "$ws_id" ] || deny "archive_workspace call had no workspaceId to verify -- refusing rather than guessing."
 
-  listing="$(paseo workspace ls --json 2>/dev/null)" || deny "paseo workspace ls failed -- cannot verify workspace '$ws_id', so refusing. Check it manually."
-  printf '%s' "$listing" | jq -e 'type == "array" or (type == "object" and (.workspaces | type == "array"))' >/dev/null 2>&1 \
-    || deny "paseo workspace ls returned output this guard cannot read -- refusing to guess about workspace '$ws_id'."
-  ws_cwd="$(printf '%s' "$listing" | jq -r --arg id "$ws_id" \
-    '(if type == "array" then . else .workspaces end) | map(select(.workspaceId == $id)) | .[0].cwd // empty')" \
-    || deny "could not read the cwd of workspace '$ws_id' from paseo workspace ls -- refusing rather than guessing."
+  workspace_listing
+  ws_cwd="$(printf '%s' "$WS_LISTING" | jq -r --arg id "$ws_id" \
+    'map(select(.workspaceId == $id)) | .[0].cwd // empty')"
 
   if [ -z "$ws_cwd" ]; then
     printf 'archive-guard: allowing workspace %s -- not in the active workspace list, so no worktree is left to sweep\n' "$ws_id" >&2
     return 0
   fi
+  ws_cwd="$(expand_home "$ws_cwd")"
+
+  # Archiving a workspace archives its agents too, and an agent still working
+  # is interrupted by that. Let it finish first.
+  agent_listing
+  blocking="$(unfinished_agents_in "$ws_cwd")"
+  if [ -n "$blocking" ]; then
+    deny "workspace '$ws_id' still has agent(s) that are not finished, and archiving the workspace would interrupt them: $(printf '%s' "$blocking" | tr '\n' ';'). Let them finish, or stop them, then archive."
+  fi
+
   [ -d "$ws_cwd" ] || return 0
   verify_worktree "$ws_cwd" "workspace '$ws_id'"
 }
@@ -236,5 +292,22 @@ agent_cwd="$(printf '%s' "$info" | jq -r '.Cwd // empty')"
 [ -n "$agent_cwd" ] || exit 0
 [ -d "$agent_cwd" ] || exit 0
 
+# Clean and landed, or deny. A local checkout returns from here with nothing
+# to leak, so the agent archive is allowed.
 verify_worktree "$agent_cwd" "agent '$agent_id'"
+
+# A Paseo-owned worktree is removed only when its workspace is archived, not
+# when an agent in it is. Archiving the agent alone is what leaves a workspace
+# and its worktree behind, one per finished worker. Send the archive to the
+# owning workspace, which also archives this agent.
+case "$agent_cwd" in
+  "$HOME"/.paseo/worktrees/*) ;;
+  *) exit 0 ;;
+esac
+workspace_listing
+owners="$(owning_workspaces "$agent_cwd" | tr '\n' ' ' | sed 's/ *$//')"
+if [ -n "$owners" ]; then
+  deny "agent '$agent_id' runs in a Paseo-owned worktree ($agent_cwd) that workspace $owners owns. Archiving the agent alone leaves that workspace and its worktree behind. Archive the workspace instead (archive_workspace $owners): it archives this agent with it, and the worktree is removed with the workspace."
+fi
+exit 0
 exit 0
