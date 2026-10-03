@@ -1,0 +1,146 @@
+Task: windows-ci-flakes — fix two Windows-only CI failures.
+Worktree: /home/jorb/.paseo/worktrees/16msma8v/windows-ci-flakes (base origin/main 6251ab5)
+Branch: (to create) windows-ci-flakes
+
+## Environment
+- No Windows here; CI on the PR is the only real verification of the Windows
+  behaviour. Say that in the PR body.
+- Shell whitelist: no `cd`, `rm`, `for`, `set`; use absolute paths, `git -C`,
+  `python -m pytest`.
+- The interpreter on PATH is /home/jorb/work/venv-refdes (python 3.13) with all
+  deps, and it has an editable install of refdes pointing at a DIFFERENT
+  worktree (/home/jorb/.paseo/worktrees/16msma8v/run5-b4-b5-bugs/src). So plain
+  `python -m pytest` would import that other worktree's src. Fix: run pytest
+  with `-o pythonpath=src` so this worktree's src wins (pytest prepends
+  `pythonpath` entries to sys.path). Verified below.
+- Could not create+use a private venv: the whitelist rejects a command whose
+  first word is an absolute path, so `.scratch/venv/bin/python` cannot be
+  invoked. `-o pythonpath=src` is the equivalent without touching the shared
+  venv (installing editable there would have redirected other sessions'
+  imports).
+
+## Evidence gathered (gh)
+(a) tests/test_vscode_extension.py::test_id_completion_range_covers_the_whole_typed_id
+- Run 37099058285 attempt 1 (PR #161 branch validator-decision-options-list-of-strings),
+  windows-latest, `gh run view --attempt=1 --log-failed`:
+  `subprocess.TimeoutExpired: Command '['C:\\Program Files\\nodejs\\node.EXE',
+  '-e', <script>]' timed out after 10 seconds`, whole suite 3258 passed in
+  369.70s. Same test also failed on run 36971922062 attempt 1 (PR #156) and
+  37052790310 attempt 1 (PR #157) — both are attempt=2/success now, which is
+  why `gh run list` shows them green.
+- The test spawns node exactly ONCE (one subprocess.run for all four cases),
+  so there is no per-assertion spawn to collapse. The cost is node startup on
+  a loaded shared runner → raise the timeout, with the evidence in a comment.
+
+(b) tests/test_history_commands.py::test_redaction_events_are_not_redaction_targets
+- Run 37099112528 attempt 1 (PR #162 branch write-locks-tier-a), windows-latest:
+  `error: .refdes/history/events/f880bd78-....yaml: key '213312678452' is
+  malformed: expected exactly 11 characters ... If YAML already converted an
+  unquoted key and rewrote this file, its original spelling cannot be
+  recovered here.` → `assert 1 == 0` at tests/test_history_commands.py:377.
+- ROOT CAUSE (not platform-dependent at all): `history.redact()` stores
+  `fingerprint = sha256(...)[:12]` — 12 hex chars — in the event's
+  `successor_key` field. `load_events`/`append_event` validate that field with
+  `keys.require_storage_key`, whose contract is "a surrogate key". When the
+  fingerprint happens to be all decimal digits (or 0 + all octal digits),
+  PyYAML's implicit resolver would read its plain spelling as an int, so the
+  validator refuses the file and every later history command exits 1.
+  yaml.safe_dump quotes the value, so the file on disk is byte-correct — the
+  refusal is a false positive triggered by storing a non-key in a key field.
+- Reproduced on Linux, deterministically, in .scratch/repro_fingerprint.py:
+  forcing successor_key='213312678452' reproduces the exact CI message and the
+  exit code 1. Measured rate over 200k real sha256 fingerprints: 646/200000 =
+  0.32% of redactions produce an ambiguous one — so it is a ~1-in-300 random
+  event, which is why it looked like a Windows flake and passed on rerun.
+- Fix: stop storing a non-key in a key field. Give the removal-set fingerprint
+  its own `fingerprint:` field, keep it in the event-id and duplicate-edge
+  derivation (third uuid5 component stays `successor_key or fingerprint`, so
+  every existing event id is unchanged), and leave `successor_key` to real
+  keys only.
+
+## Progress
+- [x] Evidence for (a) and (b) from gh run logs (attempt 1 of rerun runs).
+- [x] Root-caused (b) and reproduced it on Linux.
+- [x] (a) tests/test_vscode_extension.py: NODE_TIMEOUT_S = 120 with the CI
+      evidence in a comment; the test already spawns node exactly once, so
+      there was nothing to fold. Grepped the whole tests/ tree: this is the
+      only node spawn in the suite (`shutil.which("node")` appears once), and
+      tests/test_vscode_adapter_contract.py spawns `sys.executable`, not node,
+      so there was nothing else to change consistently.
+- [x] (b) src/refdes/history.py: `redact()` stores the removal-set fingerprint
+      in a new `fingerprint:` field instead of `successor_key`; `event_id` and
+      `append_event` take a `fingerprint` argument and use `successor_key or
+      fingerprint` as the third uuid5 component, so every event id already
+      written to an existing store is unchanged; `load_events`' duplicate-edge
+      key reads the same discriminator. Fingerprint computation extracted to
+      `history._removal_fingerprint` so the regression test can force the
+      unlucky value instead of waiting for it. Refusing both fields at once is
+      a new loud error.
+- [x] Regression tests: tests/test_history_commands.py
+      ::test_a_redaction_fingerprint_that_reads_as_a_number_still_loads (the CI
+      scenario with the value forced, including the second `redact` that used
+      to exit 1) and tests/test_history.py
+      ::test_a_fingerprint_is_a_discriminator_and_not_a_key (field contract,
+      id derivation, distinct removal sets, both-fields refusal).
+- [x] changelog.d/redaction-fingerprint-is-not-a-key.fixed.md; the event-file
+      field list in docs/design/living-notes.md §3 and history.py's own
+      docstring/header comment now mention `fingerprint?`.
+
+## Test counts (Linux, this worktree)
+- Run with `-o pythonpath=src` (see Environment); verified with
+  .scratch/test_import_path.py that `refdes.__file__` resolves inside this
+  worktree's src/.
+- tests/test_vscode_extension.py: 8 passed (node present locally, so the
+  node-spawning test really ran).
+- tests/test_history.py + tests/test_history_commands.py: 41 passed.
+- tests/test_history.py, test_history_commands.py, test_history_capture.py,
+  test_history_edited.py, test_history_seal.py, test_keys_restore.py,
+  test_vscode_extension.py together: 131 passed.
+- Full suite `python -m pytest -o pythonpath=src -q`: **3293 passed, 2 skipped,
+  0 failed** in 237.86 s (0:03:57). Two of those passes are the new tests.
+  (I first wrote "3261 passed, 31 skipped in 154.76 s" here from memory of the
+  CI log instead of from the job output; the job's own tail says the line above.
+  The 31-skipped figure is the CI number, not the local one -- local skips 2.)
+- ruff (scoped to E501,E7,F,I on the touched files): no new findings; the
+  remaining E501/I001 hits are pre-existing lines (AGENTS.md says the repo does
+  not have a clean ruff baseline).
+
+## Difficulties
+- Could not create a private venv (whitelist rejects an absolute-path first
+  word), and the shared venv's editable install points at another worktree's
+  src. `-o pythonpath=src` is the workaround; it does not touch the shared env.
+- The attempt-1 logs of runs 36971922062 (PR #156) and 37052790310 (PR #157)
+  are no longer downloadable (`gh run view --log/--log-failed --attempt=1`
+  returns nothing for them, and `--job <id> --log` too), so for those two I
+  could confirm only that the windows-latest pytest step failed on attempt 1
+  and passed on attempt 2, not the failing test's name. The comment in the test
+  says exactly that instead of claiming three verified logs. Run 37099058285
+  (PR #161) is fully verified, message and all.
+- (b) is not platform-dependent at all, contrary to the task's hint about
+  ordering/paths/line endings. The traceback names a 12-character all-digit
+  key, which is not a key shape at all; it is `redact()`'s sha256 fingerprint.
+  Reproduced on Linux with the value forced, so no Windows behaviour is being
+  assumed.
+
+## Finished?
+Yes, on Linux. The Windows behaviour itself cannot be verified here -- CI on
+the PR is that verification. A project that already ran a redaction whose
+fingerprint was ambiguous still has an event file the validator refuses (the
+fix stops new ones, it does not re-read old ones); noted in the PR body as not
+addressed, since repairing a store nobody has reported stuck seemed like
+inventing a migration on speculation.
+
+## Shipped
+- Branch `windows-ci-flakes`, pushed to origin.
+- `0de5ad5` fix(history): a redaction fingerprint is not a successor key
+- `67815a5` test(vscode): wait for node instead of failing at 10 s
+- PR #167 against main: https://github.com/Squishiba/refdes/pull/167
+  (7 files, +312/-24). Not merged, per instructions; CI on the PR is the
+  Windows verification.
+- CI on PR #167: run `37110322977` on head `f7db86a` -- ubuntu-latest,
+  ubuntu-latest/py3.13 and **windows-latest all pass** (windows 7m24s). The two
+  earlier runs on this branch (heads `67815a5`, `c9ff1fd`) were **cancelled** as
+  later commits were pushed, not passed; I first reported the green as belonging
+  to `67815a5`, which was wrong. The green run covers the final tree.
+
+

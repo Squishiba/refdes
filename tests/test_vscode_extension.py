@@ -309,6 +309,29 @@ def test_id_completion_sets_an_explicit_range_and_insert_text():
 
 NODE = shutil.which("node")
 
+# How long to wait for the one node process this test starts.
+#
+# The test makes exactly one node spawn for all four cases, so there is no
+# per-assertion startup to fold into one; what is being waited on is node's own
+# process start. 10 s was generous for that on a warm Linux box -- the script
+# is ~30 lines doing four regex matches and two Range constructions, which runs
+# in tens of milliseconds. It is not generous on a shared windows-latest runner:
+# run 37099058285 (PR #161), attempt 1, failed its pytest step there with
+#
+#   subprocess.TimeoutExpired: Command '['C:\\Program Files\\nodejs\\node.EXE',
+#   '-e', ...]' timed out after 10 seconds
+#
+# naming this test, while the same job ran the other 3258 tests in ~370 s on a
+# diff that never touched this file. Runs 36971922062 (PR #156) and 37052790310
+# (PR #157) each failed their windows-latest pytest step on attempt 1 and went
+# green on attempt 2; their attempt-1 logs are no longer downloadable, so those
+# two are reported rather than re-read. Nothing here got slower -- a cold
+# antivirus scan of node.EXE plus CPU contention is what makes a process start
+# take over 10 s on a shared runner. So the timeout goes up rather than the test
+# going away: the assertions below are the same assertions, and a node that
+# really hangs still fails the test -- after 120 s instead of 10.
+NODE_TIMEOUT_S = 120
+
 
 @pytest.mark.skipif(NODE is None, reason="no node on PATH to execute the extracted logic")
 def test_id_completion_range_covers_the_whole_typed_id():
@@ -353,7 +376,11 @@ for (const before of cases) {{
 console.log(JSON.stringify(results));
 """
     proc = subprocess.run(
-        [NODE, "-e", script], capture_output=True, text=True, timeout=10, check=False
+        [NODE, "-e", script],
+        capture_output=True,
+        text=True,
+        timeout=NODE_TIMEOUT_S,
+        check=False,
     )
     assert proc.returncode == 0, proc.stderr
     results = {r["before"]: r["covers"] for r in json.loads(proc.stdout)}

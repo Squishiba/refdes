@@ -10,13 +10,15 @@ Layout (under the project root)::
     .refdes/history/
       objects/<semantic-sha256>.yaml   # canonical snapshot payload
       events/<event-id>.yaml           # {kind, occurred_at, item_key, object,
-                                       #  reason, successor_key?}
+                                       #  reason, successor_key?, fingerprint?}
 
 Two deliberate departures from the doc's sketch, both stated in the plan:
 
 1. **Event ids are derived, not random.** ``event_id`` is ``uuid5`` over
-   ``(kind, item_key, successor_key)``. A replay of the same edge regenerates
-   the identical path with the identical bytes, so idempotence (§2, case five)
+   ``(kind, item_key, successor_key or fingerprint)`` -- the third component is
+   the event's discriminator, whichever of the two it carries. A replay of the
+   same edge regenerates the identical path with the identical bytes, so
+   idempotence (§2, case five)
    is a filesystem no-op needing no index. ``occurred_at`` is excluded from
    the id and is display metadata only — never ordered, compared, or gated on.
 
@@ -112,9 +114,9 @@ _OBJECT_HEADER = (
 
 _EVENT_HEADER = (
     "# Refdes captured-history event. The id is derived from\n"
-    "# (kind, item_key, successor_key), so replaying the same edge is a\n"
-    "# no-op. occurred_at is display metadata only: never ordered, compared,\n"
-    "# or gated on.\n"
+    "# (kind, item_key, successor_key-or-fingerprint), so replaying the same\n"
+    "# edge is a no-op. occurred_at is display metadata only: never ordered,\n"
+    "# compared, or gated on.\n"
 )
 
 
@@ -347,8 +349,13 @@ def load_object(root: str, digest: str) -> dict[str, object]:
 # ------------------------------------------------------------- event records
 
 
-def event_id(kind: str, item_key: str, successor_key: str = "") -> str:
-    """The derived id of an event: uuid5 over (kind, item_key, successor_key).
+def event_id(kind: str, item_key: str, successor_key: str = "", fingerprint: str = "") -> str:
+    """The derived id of an event: uuid5 over (kind, item_key, discriminator).
+
+    The discriminator is the event's successor key, or -- when there is no
+    successor, which today means ``redaction`` -- the fingerprint of what it
+    removed. Either way it is what makes two genuinely different events of the
+    same kind on the same item two different ids.
 
     Derived, not random (plan §H1): a replay of the same edge — the old-branch
     checkout case — regenerates the identical path and is a filesystem no-op.
@@ -358,7 +365,7 @@ def event_id(kind: str, item_key: str, successor_key: str = "") -> str:
         raise HistoryError("event id requires a kind")
     if not item_key:
         raise HistoryError("event id requires an item_key")
-    name = "\0".join([kind, item_key, successor_key or ""])
+    name = "\0".join([kind, item_key, successor_key or fingerprint])
     return str(uuid.uuid5(_EVENT_NAMESPACE, name))
 
 
@@ -369,23 +376,34 @@ def append_event(
     object_digest: str,
     *,
     successor_key: str = "",
+    fingerprint: str = "",
     reason: str = "",
     occurred_at: object = None,
 ) -> str:
     """Append one event, idempotently; return its path.
 
-    One event per (kind, item_key, successor_key) pair, enforced by the
-    derived id: re-appending the same edge writes nothing new, even with a
+    One event per (kind, item_key, successor_key-or-fingerprint) triple, enforced
+    by the derived id: re-appending the same edge writes nothing new, even with a
     different ``occurred_at`` (a replay carries the replay clock, §2). If the
     file already exists but promises a *different* snapshot, that is two
     captures of one edge disagreeing about what was captured — a loud error,
     never a silent first-write-wins.
+
+    ``fingerprint`` is for a writer with no successor to name but a set of
+    things it changed -- ``redact`` -- and it is stored in its own field, never
+    in ``successor_key``: that one is a surrogate key, and the store validates
+    every value in it as one (see ``keys.require_storage_key``).
     """
     if kind not in EVENT_KINDS:
         raise HistoryError(f"unknown history event kind {kind!r}")
+    if successor_key and fingerprint:
+        raise HistoryError(
+            "an event discriminates itself with either a successor_key or a "
+            "fingerprint, not both"
+        )
     if not object_digest and kind not in NO_OBJECT_KINDS:
         raise HistoryError("an event must name the object digest it records")
-    eid = event_id(kind, item_key, successor_key)
+    eid = event_id(kind, item_key, successor_key, fingerprint)
     path = os.path.join(events_dir(root), f"{eid}.yaml")
     payload: dict[str, object] = {
         "history_format": HISTORY_FORMAT,
@@ -397,6 +415,8 @@ def append_event(
         payload["object"] = object_digest
     if successor_key:
         payload["successor_key"] = successor_key
+    if fingerprint:
+        payload["fingerprint"] = fingerprint
     if reason:
         payload["reason"] = reason
     if occurred_at is not None:
@@ -425,7 +445,7 @@ def load_events(root: str) -> list[dict[str, object]]:
     display metadata is not an ordering).
 
     Loud by design: a malformed event, an unknown kind, an id that disagrees
-    with its filename, or the same (kind, item_key, successor_key) edge under
+    with its filename, or the same (kind, item_key, discriminator) edge under
     two ids (only possible if ids were ever random) each raise. A history
     store that silently skips a bad record teaches its readers to distrust it.
     """
@@ -458,7 +478,11 @@ def load_events(root: str) -> list[dict[str, object]]:
                 f"{path}: event id {data['id']!r} does not match its filename; "
                 "event files are named by their derived id"
             )
-        edge = (str(data["kind"]), str(data["item_key"]), str(data.get("successor_key") or ""))
+        edge = (
+            str(data["kind"]),
+            str(data["item_key"]),
+            str(data.get("successor_key") or data.get("fingerprint") or ""),
+        )
         if edge in seen:
             raise HistoryError(
                 f"{path}: duplicate event for edge {edge!r}, already recorded by {seen[edge]}"
@@ -849,6 +873,25 @@ class RedactionResult(NamedTuple):
     event_path: "str | None"
 
 
+def _removal_fingerprint(removed_digests: list, removed_event_ids: list) -> str:
+    """The discriminator a ``redaction`` event carries in place of a successor
+    key: 12 hex characters over the set it removed.
+
+    Short on purpose -- it only has to tell two genuinely different redactions
+    of one target apart in ``event_id``, and a full digest in an event file
+    reads as noise. It is a digest and not a surrogate key, which is why it has
+    its own field: the key fields are validated as keys, and a value whose plain
+    YAML spelling resolves to an int -- all decimal digits, or all octal digits
+    behind a leading zero, which is about one fingerprint in 300 -- would make
+    the whole store unreadable (``keys.require_storage_key``). The forced-value
+    regression test is
+    ``tests/test_history_commands.py::test_a_redaction_fingerprint_that_reads_as_a_number_still_loads``.
+    """
+    return hashlib.sha256(
+        "\0".join(sorted(removed_digests + removed_event_ids)).encode("utf-8")
+    ).hexdigest()[:12]
+
+
 def redact(
     root: str, *, item_key: str = None, object_digest: str = None
 ) -> RedactionResult:
@@ -867,9 +910,15 @@ def redact(
       events that point at it as a successor — those record other items.
     * An object is deleted only when no surviving event still references it
       (content addressing lets two identical items share one snapshot).
-    * The event's ``successor_key`` carries a fingerprint of the removal
-      set, so a second, genuinely different redaction of the same target
-      gets its own event id instead of colliding with the first.
+    * The event's ``fingerprint`` field carries a fingerprint of the removal
+      set, so a second, genuinely different redaction of the same target gets
+      its own event id instead of colliding with the first. It is deliberately
+      not stored in ``successor_key``: that field holds surrogate keys and the
+      store validates every value in it as one, and a 12-hex-char digest is not
+      a key -- when its plain YAML spelling happens to resolve to an int (all
+      decimal digits, or all octal digits behind a leading zero: about one
+      redaction in 300) the validator reports the perfectly good file as a
+      corrupted key, and every later history command exits 1.
     * A caller-supplied ``object_digest`` must be exactly 64 lowercase hex
       (``_require_valid_digest``) and is refused before the store is even
       read: an unvalidated digest reaching ``object_path``+``os.remove`` is
@@ -929,11 +978,9 @@ def redact(
                 os.remove(path)
                 removed_files.append((path, blob))
                 removed_digests.append(digest)
-        fingerprint = hashlib.sha256(
-            "\0".join(
-                sorted(removed_digests + [str(e["id"]) for e in doomed])
-            ).encode("utf-8")
-        ).hexdigest()[:12]
+        fingerprint = _removal_fingerprint(
+            removed_digests, [str(e["id"]) for e in doomed]
+        )
         reason = (
             f"redacted {len(removed_digests)} object(s) and "
             f"{len(doomed)} event(s): "
@@ -947,7 +994,7 @@ def redact(
             "redaction",
             str(target),
             "",
-            successor_key=fingerprint,
+            fingerprint=fingerprint,
             reason=reason,
         )
     except Exception:
