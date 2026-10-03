@@ -228,10 +228,16 @@ new entry that `amends` the old one — but nothing is sealed any more:
   `hardware@3`, which declares no `follows:` — or `refdes history capture`), the
   edit is the warning `LOG-001: edited after captured -- ...` under both
   `check` and `build`; exit codes are unchanged. An entry that was never
-  captured has no snapshot to compare against, so editing it produces **no
-  diagnostic at all** from `check` or `build`. If a legacy seal record names
-  it, `refdes audit` still lists it (below); otherwise nothing reports the
-  edit.
+  captured has no snapshot to compare against, so there is nothing to compare
+  it to — but a project that upgraded from the build-time lock still holds
+  each entry's prior hash in its legacy seal record, and an edit that moves it
+  is the warning `LOG-001: edited while uncaptured -- ...` under both `check`
+  and `build`, naming the record it no longer matches and the
+  `refdes history capture` command that ends the blind spot. That one is a
+  warning too: the exit code and the build are unchanged. An entry no record
+  names at all stays silent — nothing recorded what it used to say, so there
+  is no edit to report. `refdes audit` lists either kind of changed entry
+  (below).
 - A bare `follows:` on an entry a seal file already mentions freezes and is
   captured like any other, instead of being left bare with "already sealed".
 - Seal files that already exist are kept and read as **legacy-seal markers** —

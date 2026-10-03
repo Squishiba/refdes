@@ -322,7 +322,7 @@ types:
 | `label` | title-cased name | Display name |
 | `plural` | title-cased `label` + `s` | Display name for a collection of this type; required alongside `label` under `extends` |
 | `append_only` | `false` | Seal items of this type after first build |
-| `sealing` | `build` | What backs an `append_only` type: `build` (sealed at first build; an edit is a build error) or `history` (never sealed, and an edit is never a build error: an entry that has been captured into `.refdes/history/` gets an "edited after captured" warning, while one never captured gets no diagnostic at all; existing seal files are read as legacy-seal markers). `history` requires `append_only: true`. See [the design log](design-log.md#history-backed-types-sealing-history) |
+| `sealing` | `build` | What backs an `append_only` type: `build` (sealed at first build; an edit is a build error) or `history` (never sealed, and an edit is never a build error: an entry that has been captured into `.refdes/history/` gets an "edited after captured" warning, while one never captured gets an "edited while uncaptured" warning when a legacy seal record still holds its prior hash and nothing when no record names it; existing seal files are read as legacy-seal markers). `history` requires `append_only: true`. See [the design log](design-log.md#history-backed-types-sealing-history) |
 | `preview` | `[]` | Fields shown in hover previews and index columns |
 | `fields` | `{}` | Legal fields |
 | `extends` | not set | The one type this specializes; the type then writes only its delta. See [`extends`](#extends) |
