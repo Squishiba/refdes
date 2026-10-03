@@ -831,7 +831,7 @@ def _parse_item_count(rel: str, text: str) -> int | None:
         return None
 
 
-def write_rewrites_verified(project, rewrites: list[FileRewrite]) -> set[str]:
+def write_rewrites_verified(project, rewrites: list[FileRewrite], on_error=None) -> set[str]:
     """Load-time write with a parse guard: no incidental write (key minting,
     link/check expansion, follows freeze) may turn a parseable item file into
     an unparseable one, or one that yields fewer items than it did before.
@@ -873,7 +873,17 @@ def write_rewrites_verified(project, rewrites: list[FileRewrite]) -> set[str]:
 
     Returns the project-relative paths of the files the filesystem refused, so
     each caller can leave its in-memory model matching the tree it could not
-    change -- see `keys.mint_missing()`. Empty in the ordinary case."""
+    change -- see `keys.mint_missing()`. Empty in the ordinary case.
+
+    `on_error` overrides the refusal hook, and is how a caller that is doing
+    more than a load says what a refusal means. Left None, a refused write is
+    the load-time normalisation above: one warning, the rest of the files
+    still written, and the refused paths handed back. `revise`'s
+    post-rename display-half refresh passes `_refuse_item_write` instead,
+    because a display half that never moved is not a normalisation left
+    undone -- it is a rename that landed in some item files and not others,
+    which the whole engine exists to refuse.
+    """
     if not rewrites:
         return set()
     # Withheld, not failed: these never reach the filesystem, so they must not
@@ -889,7 +899,8 @@ def write_rewrites_verified(project, rewrites: list[FileRewrite]) -> set[str]:
             return duplicate_keyed
     failed = write_rewrites(
         rewrites,
-        on_error=lambda rewrite, exc: _refuse_unwritable(project, rewrite),
+        on_error=on_error
+        or (lambda rewrite, exc: _refuse_unwritable(project, rewrite)),
     )
     failed_paths = {rewrite.path for rewrite in failed}
     for rewrite in rewrites:
@@ -1203,7 +1214,15 @@ def _simulate_key_ensure(
                     return errors, []
                 if rw.after != rw.before:
                     textio.write_text(path, rw.after)
-            _refresh_display_halves(copy_config)
+            try:
+                _refresh_display_halves(copy_config)
+            except Refused as exc:
+                # copytree preserves the read-only bit, so the simulated tree
+                # refuses exactly where the real one will. Reporting it as a
+                # blocker is what keeps `--dry-run` an honest preview of a run
+                # that will refuse, instead of a clean report for a rename
+                # that cannot land.
+                return [str(exc)], []
         report: list[str] = []
         for rel, value in sorted(snapshot.items()):
             path = os.path.join(copy, *rel.split("/"))
@@ -1248,11 +1267,26 @@ def _refresh_display_halves(config_path: str) -> None:
     """After a rename, refresh stale composite display halves (the §3 pass a
     writable load runs). Key-resolved hashes are untouched by this -- only
     the display text moves -- so it is safe between the file rewrite and the
-    hash carry-forward."""
+    hash carry-forward.
+
+    `_refuse_item_write`, not the load-time warning: this is the other half
+    of the rename, not a normalisation. A display half that cannot move is a
+    reference left naming an id this operation just retired, and the layout
+    that produces it -- one read-only item file holding the *reference*, with
+    the renamed item itself in a writable file, so the rename's own rewrite
+    pass never touches the refused file at all -- was the one partial
+    read-only shape `apply()`'s `write_rewrites(rewrites, on_error=
+    _refuse_item_write)` guard could not see. Degrading here is what let that
+    shape rename ids in the writable files, report the untouched composite as
+    `1 prose mention(s) ... (a rename never edits prose)`, and exit 0:
+    `expand_missing()` saw the refusal, dropped its planned rewrite for the
+    file, and reported nothing. The caller catches the `Refused` and rolls the
+    whole transaction back, same as for the rename's own writes.
+    """
     project = _load_light(config_path)
-    if links_mod.expand_missing(project, write=True):
+    if links_mod.expand_missing(project, write=True, on_error=_refuse_item_write):
         project = _load_light(config_path)
-    links_mod.expand_missing_checks(project, write=True)
+    links_mod.expand_missing_checks(project, write=True, on_error=_refuse_item_write)
 
 
 def _affected_ids(project: Project, mapping: Mapping) -> dict[str, str]:
@@ -1584,7 +1618,16 @@ def apply(
     # only the display half of `DISPLAY@key` references, and hashes are
     # key-resolved, so this cannot disturb the carry-forward below. Writes go
     # through the snapshot so a later refusal puts every byte back.
-    _refresh_display_halves(config_path)
+    #
+    # The same try/except as the rename's own writes, for the same reason: a
+    # file the refresh cannot write is a rename that landed in some item files
+    # and not others, so it rolls back rather than reporting the stale
+    # reference it left behind as prose (run 5, finding B2).
+    try:
+        _refresh_display_halves(config_path)
+    except Refused as exc:
+        _rollback()
+        return RevisionResult(ok=False, errors=[str(exc), "rolled back."])
     for rel, before in snapshot.items():
         path = os.path.join(project_before.root, *rel.split("/"))
         if not os.path.isfile(path):
