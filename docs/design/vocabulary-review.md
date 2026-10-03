@@ -5,6 +5,11 @@ words refdes asks an author to learn. Nothing here renames anything; §3 propose
 fixes and costs each one. The goal this review is scored against is the owner's,
 in his words: the vocabulary should be **intuitive**.
 
+**2026-10-01 supersession:** the `design-debate` preset discussed below is
+retired by the threads design decision (`threads.md` §5). Its inventory
+describes the still-bundled schema (`refdes schema` with the preset selected);
+P10's proposed `claim` rename is cancelled with the whole preset.
+
 ## Summary
 
 The vocabulary is mostly healthy: the link verbs are defined at their point of
@@ -931,6 +936,9 @@ stage `claimed` stays, because stage names appear in computed output and gate
 language.
 *Cost*: T1. `presets/design-debate.yaml`, its tests, `docs/links.md` and
 whatever preset prose exists.
+
+**Superseded 2026-10-01:** the whole `design-debate` preset retires; P10 is
+not an implementation step and its verbs are not retained for this purpose.
 
 **P11 — a question, not a rename: should `superseded` and `selected` exist as
 statuses at all?** Both are facts the `supersedes` and `selects` links already

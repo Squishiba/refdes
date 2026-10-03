@@ -50,6 +50,17 @@ merge, §7's migration file), it says so and stops there.
   result per (connected component, field) in the build-scoped `ChainGraph`,
   so a thread of N entries costs O(N) instead of O(N²).
 
+**Further decisions, Jared, 2026-10-01:**
+
+- **Retire the entire `design-debate` preset** (`debate`, `option`, `claim`,
+  `position`) when the thread merge lands. Its grouping capability retires
+  with it. Do not retarget `debate.resolved_by: [decision]` to `log`; the
+  earlier §5 position that `option` stays untouched is superseded.
+- **Keep a `citations:` set on the merged `log` type**, as `decision` and
+  `component` have in the current `hardware@3` schema. Revisit this if a
+  better way to handle citations emerges before threads phase 4a is
+  implemented.
+
 **Phase 1 implemented** (this session, 2026-09-14): §2's identity
 foundation — `Project.items` re-keyed on surrogate key (or, for an item
 with neither a key nor a display id yet, an in-memory-only provisional
@@ -623,7 +634,7 @@ types:
       rationale: { type: text, on_change: invalidate, required_when: {status: rejected} }
       options:   { type: options, on_change: invalidate }
       checks:    { type: checks, on_change: invalidate }
-    include: [provenance]
+    include: [provenance, citations]
     links:
       follows:        [log]         # new -- §1
       addresses:      [requirement, bound]
@@ -651,10 +662,15 @@ Real, disclosed field-level decisions this makes, each worth naming:
   existing exclusion of it (`standard-library.md` §1: "an append-only
   entry has no reviewer rotation") — a verdict entry doesn't get a
   reviewer-rotation field back just because it absorbed `decision`'s job.
-- **`option` (the design-debate preset) is untouched.** This merge is
-  scoped to `log`/`decision` only, matching the scoping discipline
-  `standard-library.md` already uses when it explicitly declines to widen
-  a change beyond its stated target.
+- **`citations:` stays on the merged `log` type.** The current bundled
+  `hardware@3` schema gives it to `decision` and `component`, but not `log`
+  (`refdes schema` with no preset selected). Retain the citations set in
+  phase 4a; reconsider only if a better citation model emerges before then.
+- **The `design-debate` preset retires as a whole.** Its four types and
+  grouping capability do not carry into the merged vocabulary. Since
+  `debate` retires, its `resolved_by: [decision]` link needs no new target.
+  This supersedes the earlier decision to leave the preset's `option` type
+  untouched (`docs/design/candidate-parts.md` §4).
 
 ### What this costs the standard
 

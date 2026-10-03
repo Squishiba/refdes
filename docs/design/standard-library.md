@@ -31,6 +31,13 @@ earlier draft; the document's prose describes the landed shape accurately —
 verify specifics against `standards.py` rather than assuming this file is
 current.
 
+**2026-10-01 supersession:** the `design-debate` preset used throughout this
+document as an example is retired by the threads design decision
+(`threads.md` §5). Its four types and grouping capability are not retained
+or retargeted when that design is implemented. The preset examples below
+record the earlier standard-library design and current bundled behavior;
+they are not a plan to keep the preset after the thread merge.
+
 ---
 
 ## 1. The standard dictionary itself
@@ -828,6 +835,11 @@ link verbs) against this design:
 ---
 
 ## 8. Optional presets: selection, composition, and change over time
+
+The `design-debate` examples in this section describe the original preset
+mechanism and the bundle that still exists today (`refdes schema` with the
+preset selected). Its future retirement is recorded above and in `threads.md`
+§5; the examples do not prescribe a replacement preset.
 
 The standard dictionary (§1) is the default — a project gets it with zero
 configuration. Anything beyond it, including a design-debate vocabulary

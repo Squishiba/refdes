@@ -23,8 +23,8 @@ The decision is taken. This document specs it; it does not relitigate it.
 
 **Implementation status:** implemented — engine (`standards._resolve_extends`),
 consumers, `coverage.group_inherited`, and `hardware@3`'s `bound extends
-requirement`, with the oracle in `tests/test_extends.py`. Preset adoption is
-still deferred to after threads Phase 4 (§7.2).
+requirement`, with the oracle in `tests/test_extends.py`. The earlier plan
+for design-debate preset adoption was cancelled on 2026-10-01 (§7.2).
 
 ---
 
@@ -45,11 +45,12 @@ The only genuine difference is `bound.limit:` — a required `limit` field.
 Everything else is structural duplication. The finding records that this
 duplication also propagates to four separate link target lists that each
 enumerate `[requirement, bound]` explicitly (`bound.derives_from`,
-`test.verifies`, `log.addresses`, and the design-debate preset's
+`test.verifies`, `log.addresses`, and the then-bundled design-debate preset's
 `option.met_by`), and any future requirement-like subtype would need to be
-added to all of them manually. With `extends:`, those four lists collapse to
-`[requirement]` — `bound` (and any future subtype) is automatically allowed
-wherever `requirement` is. Separately, `component.constrained_by` is
+added to all of them manually. With `extends:`, the surviving base lists
+collapse to `[requirement]` — `bound` (and any future subtype) is
+automatically allowed wherever `requirement` is. Separately,
+`component.constrained_by` is
 traceability-only (finding 7) and does not participate in substitution.
 
 ---
@@ -342,9 +343,9 @@ opening a `hardware@4`:
 
 **Cost:** ~40 lines of duplication removed from `base.yaml`, replaced with
 ~15 lines of `extends: requirement` + delta.
-**Benefit:** design-debate preset can specialize `decision` instead of
-redeclaring it fully; future requirement-like subtypes need only declare
-their delta.
+**Benefit:** future requirement-like subtypes need only declare their delta.
+The earlier proposed benefit of specializing a design-debate type is
+superseded by the 2026-10-01 decision to retire that preset (§7.2).
 
 ### 5.3 Existing projects on `hardware@2`
 
@@ -397,22 +398,13 @@ same version is consistent and avoids a version bump solely for this.
   identical, hashes don't churn.
 - Zero engine changes beyond the `extends:` implementation itself.
 
-### 7.2 Preset adoption waits for threads Phase 4
+### 7.2 Design-debate preset adoption cancelled
 
-The threads interaction is real for **presets**. The design-debate preset's
-`debate` type is substantially a `decision` (it shares `title`, `status`,
-`rationale`, `date`, `options`, `checks`, `include: [provenance, stewardship,
-citations]`, `satisfies: [requirement, bound]`, `constrained_by: [bound]`,
-`supersedes`, `selects`, `blocked_by`, `recorded_by: [log]`, `part_of:
-[group]`, `body:`). `threads.md` Phase 4 retires `decision` into `log` in
-`hardware@3` — when that lands, `debate` would extend the new unified `log`
-type (or a new `thread_entry` type), not `decision`.
-
-**State:** preset adoption of `extends:` waits until after threads Phase 4.
-Once `decision` is retired and the thread entry type exists, the design-debate
-preset's `debate` would declare `extends: <thread_entry_type>` (name TBD by
-threads Phase 4) with its delta (primarily the `options`/`checks` fields and
-any debate-specific links).
+**Decided 2026-10-01:** the `design-debate` preset retires with the threads
+merge, including its `debate`, `option`, `claim`, and `position` types and its
+grouping capability (`threads.md` §5). The previous plan to make `debate`
+extend `decision` or a new thread entry type after Phase 4 is cancelled.
+`debate.resolved_by: [decision]` needs no replacement target.
 
 ---
 
@@ -422,7 +414,7 @@ any debate-specific links).
 |---|---|
 | **1. Engine** | `standards.py` `_resolve_extends` pass; `ItemType.extends` field; `subtype_map` in `Project`; `is_subtype` helper |
 | **2. Consumers** | `build.py` link validation + coverage; `blocks.py` index filter; `schema_json.py` completion; `render.py` coverage grouping setting |
-| **3. Standard** | `hardware@v3/base.yaml` converts `bound` to `extends: requirement` with no migration, verified by identical resolved schemas; preset adoption deferred until after threads Phase 4 |
+| **3. Standard** | `hardware@v3/base.yaml` converts `bound` to `extends: requirement` with no migration, verified by identical resolved schemas; design-debate adoption cancelled (§7.2) |
 | **4. Tests** | Positive: subtype satisfies parent link targets, coverage honors parent's `satisfying_statuses`, index groups by parent when setting on. Negative: multi-level `extends:` errors, project overlay extending an extended type errors. |
 
 ---
@@ -450,9 +442,9 @@ recommended, but the *default* is `true` for every project, not `false` — see
 
    **Decided (Jared, 2026-09-19): YES** — a field override replaces the whole field definition.
 
-5. **`hardware@3` adopts `extends:` for `bound` now; presets after threads Phase 4** — **Recommended: YES**. `bound extends requirement` lands in `hardware@3` immediately (no migration, hash-neutral). Design-debate preset's `debate` waits for threads Phase 4 (when `decision` retires into `log`/`thread_entry`), then extends the new thread entry type.
+5. **`hardware@3` adopts `extends:` for `bound` now; design-debate adoption cancelled** — `bound extends requirement` lands in `hardware@3` immediately (no migration, hash-neutral). The 2026-09-19 recommendation to extend `debate` after Phase 4 is superseded by the 2026-10-01 retirement (§7.2).
 
-   **Decided (Jared, 2026-09-19): YES** — `hardware@3` adopts `bound extends requirement` now; preset adoption waits for threads Phase 4.
+   **Decided (Jared, 2026-09-19): YES** for `bound`; the later preset adoption plan is cancelled (§7.2).
 
 ---
 
@@ -526,7 +518,7 @@ The full text now in `backlog.md` also keeps the spec's other contents — the
 substitution rule, ALLOW vs LISTING consumer classification, single-level
 enforcement, `include:`/`body:` inheritance, child-declared
 `prefix`/`label`/`plural`, whole-definition field override, and hardware@3
-adoption for `bound` now with preset adoption after threads Phase 4.
+adoption for `bound` now; the design-debate preset retires (§7.2).
 
 
 ---
