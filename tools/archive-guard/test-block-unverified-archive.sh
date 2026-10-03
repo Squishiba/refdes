@@ -97,7 +97,17 @@ cat >"$work/bin/paseo" <<'STUB'
 #!/usr/bin/env bash
 # Fake `paseo inspect <id> --format json`: dumps the JSON named by
 # PASEO_STUB_JSON, or fails outright when PASEO_STUB_FAIL=1.
+# Fake `paseo workspace ls --json`: dumps PASEO_WS_JSON, or fails when
+# PASEO_WS_FAIL=1.
 set -u
+if [ "${1:-}" = "workspace" ] && [ "${2:-}" = "ls" ]; then
+  if [ "${PASEO_WS_FAIL:-0}" = "1" ]; then
+    echo "fake paseo: simulated workspace ls failure" >&2
+    exit 1
+  fi
+  cat "$PASEO_WS_JSON"
+  exit 0
+fi
 if [ "${PASEO_STUB_FAIL:-0}" = "1" ]; then
   echo "fake paseo: simulated inspect failure" >&2
   exit 1
@@ -127,7 +137,9 @@ reset_env() {
   FAKE_GH_HEAD_JSON='[]'
   FAKE_GH_MERGED_JSON='[]'
   PASEO_STUB_FAIL=0
+  PASEO_WS_FAIL=0
   TOOL_NAME="mcp__paseo__archive_agent"
+  TOOL_INPUT=""
 }
 
 write_inspect() { # <case dir> <cwd>
@@ -135,17 +147,30 @@ write_inspect() { # <case dir> <cwd>
     >"$1/inspect.json"
 }
 
+write_ws_listing() { # <case dir> <cwd, or empty for no active workspace>
+  if [ -n "$2" ]; then
+    jq -n --arg cwd "$2" '[{workspaceId: "wks_test", project: "p", name: "t", isolation: "worktree", cwd: $cwd}]' \
+      >"$1/ws.json"
+  else
+    printf '[]\n' >"$1/ws.json"
+  fi
+}
+
 # check <case name> <ALLOW|DENY> <case dir> <worktree path>
+# TOOL_INPUT, when set, is the raw tool_input JSON (default: an agentId).
 check() {
   local name="$1" expected="$2" dir="$3" cwd="$4"
-  local out rc decision reason
+  local out rc decision reason tool_input
+  tool_input="${TOOL_INPUT:-}"
+  [ -n "$tool_input" ] || tool_input='{"agentId":"ag_test"}'
   out="$(
     export HOME="$dir/home"
     export PATH="$work/bin:$PATH"
     export PASEO_STUB_JSON="$dir/inspect.json" PASEO_STUB_FAIL="$PASEO_STUB_FAIL"
+    export PASEO_WS_JSON="$dir/ws.json" PASEO_WS_FAIL="$PASEO_WS_FAIL"
     export FAKE_GH_EXIT FAKE_GH_HEAD_MATCH FAKE_GH_HEAD_JSON FAKE_GH_MERGED_JSON
     export TOOL_NAME
-    printf '{"tool_name":"%s","tool_input":{"agentId":"ag_test"}}' "$TOOL_NAME" \
+    printf '{"tool_name":"%s","tool_input":%s}' "$TOOL_NAME" "$tool_input" \
       | bash "$hook" 2>"$dir/hook.err"
   )"
   rc=$?
@@ -319,11 +344,13 @@ wt="$(new_worktree "$d" main)"
 PASEO_STUB_FAIL=1
 check 'paseo inspect fails' DENY "$d" "$wt"
 
-# 11. archive_workspace is denied outright, whatever the git state.
+# 11. archive_workspace with no workspaceId to verify is denied, whatever the
+#     git state: the guard refuses to guess which worktree it is about.
 d="$work/11-workspace-tool"; fresh_repo "$d"; reset_env
 wt="$(new_worktree "$d" main)"
 TOOL_NAME="mcp__paseo__archive_workspace"
-check 'archive_workspace call' DENY "$d" "$wt"
+TOOL_INPUT='{}'
+check 'archive_workspace without a workspaceId' DENY "$d" "$wt"
 
 # 12. The merged PR head is a commit this worktree has never seen (the PR
 #     branch took another commit after this worktree last fetched). The guard
@@ -353,5 +380,81 @@ else
 fi
 
 # ==========================================================================
+# archive_workspace: the workspace's cwd comes from `paseo workspace ls`, and
+# that worktree goes through the same checks as an agent's.
+# ==========================================================================
+
+# 13. A workspace the active list does not hold: its directory is gone, so no
+#     worktree is left for the sweep. Allowed.
+d="$work/13-ws-absent"; fresh_repo "$d"; reset_env
+TOOL_NAME="mcp__paseo__archive_workspace"; TOOL_INPUT='{"workspaceId":"wks_test"}'
+write_ws_listing "$d" ""
+check 'workspace absent from the active list' ALLOW "$d" "$d"
+
+# 14. The workspace listing command fails: cannot verify, so refuse.
+d="$work/14-ws-list-fails"; fresh_repo "$d"; reset_env
+TOOL_NAME="mcp__paseo__archive_workspace"; TOOL_INPUT='{"workspaceId":"wks_test"}'
+write_ws_listing "$d" ""
+PASEO_WS_FAIL=1
+check 'paseo workspace ls fails' DENY "$d" "$d"
+
+# 15. The listing is not JSON this guard can read: refuse rather than read it
+#     as "absent".
+d="$work/15-ws-list-garbage"; fresh_repo "$d"; reset_env
+TOOL_NAME="mcp__paseo__archive_workspace"; TOOL_INPUT='{"workspaceId":"wks_test"}'
+printf 'not json at all\n' >"$d/ws.json"
+check 'workspace listing is not JSON' DENY "$d" "$d"
+
+# 16. The workspace's directory has already been removed, but the listing
+#     still names it. Nothing on disk to sweep: allowed.
+d="$work/16-ws-dir-gone"; fresh_repo "$d"; reset_env
+TOOL_NAME="mcp__paseo__archive_workspace"; TOOL_INPUT='{"workspaceId":"wks_test"}'
+write_ws_listing "$d" "$d/home/.paseo/worktrees/gone-ws"
+check 'workspace listed, directory already gone' ALLOW "$d" "$d"
+
+# 17. A landed workspace: clean worktree, merged PR for its branch. Allowed.
+d="$work/17-ws-landed"; fresh_repo "$d"; reset_env
+wt="$(new_worktree "$d" feat-ws-landed)"
+TOOL_NAME="mcp__paseo__archive_workspace"; TOOL_INPUT='{"workspaceId":"wks_test"}'
+write_ws_listing "$d" "$wt"
+FAKE_GH_HEAD_MATCH="feat-ws-landed"
+FAKE_GH_HEAD_JSON='[{"state":"MERGED","mergedAt":"2026-10-01T00:00:00Z","number":163}]'
+check 'workspace worktree landed (merged PR)' ALLOW "$d" "$wt"
+
+# 18. Same shape, but the PR is still open: its work has not landed. Denied.
+d="$work/18-ws-unmerged"; fresh_repo "$d"; reset_env
+wt="$(new_worktree "$d" feat-ws-open)"
+TOOL_NAME="mcp__paseo__archive_workspace"; TOOL_INPUT='{"workspaceId":"wks_test"}'
+write_ws_listing "$d" "$wt"
+FAKE_GH_HEAD_MATCH="feat-ws-open"
+FAKE_GH_HEAD_JSON='[{"state":"OPEN","mergedAt":null,"number":999}]'
+check 'workspace worktree PR still open' DENY "$d" "$wt"
+
+# 19. Landed PR, but the worktree has uncommitted changes. Denied.
+d="$work/19-ws-dirty"; fresh_repo "$d"; reset_env
+wt="$(new_worktree "$d" feat-ws-dirty)"
+printf 'scratch\n' >"$wt/unsaved.md"
+TOOL_NAME="mcp__paseo__archive_workspace"; TOOL_INPUT='{"workspaceId":"wks_test"}'
+write_ws_listing "$d" "$wt"
+FAKE_GH_HEAD_MATCH="feat-ws-dirty"
+FAKE_GH_HEAD_JSON='[{"state":"MERGED","mergedAt":"2026-10-01T00:00:00Z","number":163}]'
+check 'workspace worktree dirty despite merged PR' DENY "$d" "$wt"
+
+# 20. A workspace over a checkout Paseo did not create (outside
+#     ~/.paseo/worktrees): no sweep can touch it. Allowed.
+d="$work/20-ws-local-checkout"; fresh_repo "$d"; reset_env
+TOOL_NAME="mcp__paseo__archive_workspace"; TOOL_INPUT='{"workspaceId":"wks_test"}'
+write_ws_listing "$d" "$d/main"
+check 'workspace over a local checkout' ALLOW "$d" "$d/main"
+
+# 21. Agent path still refuses a dirty worktree: the refactor must not have
+#     loosened it.
+d="$work/21-agent-dirty-regression"; fresh_repo "$d"; reset_env
+wt="$(new_worktree "$d" feat-agent-dirty)"
+printf 'scratch\n' >"$wt/unsaved.md"
+FAKE_GH_HEAD_MATCH="feat-agent-dirty"
+FAKE_GH_HEAD_JSON='[{"state":"MERGED","mergedAt":"2026-10-01T00:00:00Z","number":163}]'
+check 'agent worktree dirty despite merged PR (regression)' DENY "$d" "$wt"
+
 printf '\n%d passed, %d failed  (scratch: %s)\n' "$pass" "$fail" "$work"
 [ "$fail" -eq 0 ] || exit 1
