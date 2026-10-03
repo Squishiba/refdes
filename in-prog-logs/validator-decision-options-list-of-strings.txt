@@ -1,0 +1,97 @@
+Task: B1 -- a `decision` whose `options:` is a list of plain strings passes
+`refdes check` and then crashes `refdes build`.
+
+Branch: validator-decision-options-list-of-strings (off main @ 3483cf9).
+
+## Repro (before)
+
+Scratch project at `.scratch/b1/` (`site: {title: B1 repro, out: _site}`,
+`standard: {base: hardware, version: 3}`), one item in `items/d.yaml`:
+`DEC-X-001`, `status: proposed`, `options:` = two bare strings.
+
+    $ refdes --no-write -c .scratch/b1/refdes-project.yaml check
+    1 items, 0 errors, 0 warnings                 # exit 0
+
+    $ refdes -c .scratch/b1/refdes-project.yaml build -o .scratch/b1/_site
+    ... jinja2.exceptions.UndefinedError: 'str object' has no attribute 'get'
+    # exit 1, raw traceback out of item.html.j2 line 145 (the options panel)
+
+Note on running the CLI here: the shared venv's editable install
+(/home/jorb/work/venv-refdes) points at `.scratch`-adjacent worktree
+`help-text-gaps-f3-f5`, which no longer exists, so `import refdes` fails and
+the `refdes` binary is dead. `.scratch/refdes-cli.py` puts this worktree's
+`src/` first on sys.path and calls `refdes.cli.main` -- the same entry point
+as the console script. `python -m pytest` was already fine: tests/conftest.py
+inserts `../src` itself.
+
+## What the schema says the shape is
+
+`refdes schema` from `.scratch/b1/`, `$defs.decision__entry.properties.options`:
+array of objects, properties `name` / `verdict` / `because`, all strings,
+`additionalProperties: false`, no `required`. That matches the panel's own
+reads (`opt.get('name')` with an `(unnamed)` fallback, `verdict` defaulting to
+`considered`, `because` optional) and the examples in docs/getting-started.md
+and docs/authoring.md. So: an option is a mapping; `name` is the meaningful
+key but not required; an entry that is not a mapping cannot be rendered at
+all. That is the line the validator takes.
+
+## Fix
+
+- `src/refdes/build.py`, `validate_items`: new `elif fspec.type == "options"`
+  branch beside the `limit`/`citations` ones. Walks the list and reports one
+  error per non-mapping entry through `_field_error`, so it gets the item id,
+  the source line, and the `defaults:` attribution the other field errors
+  get. A non-list `options:` is left alone on purpose -- that keystroke
+  already belongs to `parse._reject_scalar_collection` (`options` is in
+  `NON_SCALAR_FIELD_TYPES`), and reporting one keystroke twice helps nobody.
+- `src/refdes/templates/item.html.j2`, `document.html.j2`: skip a
+  non-mapping entry in the options panel. This is a guard, not the fix.
+  `refdes build` renders a project it has already diagnosed (that is the
+  run-5 half-written-`_site/` issue, out of scope here), so without it the
+  validator error alone still ends in a traceback -- and the traceback
+  replaces the diagnostic, which is the part a user can act on. Both
+  templates needed it: with only `item.html.j2` guarded, the same item then
+  crashed `document.html.j2` on the next page of the same build.
+
+## After
+
+    $ refdes --no-write -c .scratch/b1/refdes-project.yaml check
+    ERROR items/d.yaml:3 [DEC-X-001] — options[0]: 'Linear regulator' is not an
+      option -- an option is a mapping with a 'name' and, optionally, a 'verdict'
+      and a 'because', as in options: [{name: LDO, verdict: rejected, because:
+      dissipates 10 W at full load}]
+    ERROR items/d.yaml:3 [DEC-X-001] — options[1]: ...
+    1 items, 2 errors, 0 warnings                 # exit 1
+
+    $ refdes -c .scratch/b1/refdes-project.yaml build -o .scratch/b1/_site
+    <the same two ERROR lines>
+    build completed with errors (use --keep-going to exit 0)
+    1 items, 2 errors, 0 warnings
+    site written to .../.scratch/b1/_site          # exit 1, no traceback
+
+## Tests
+
+`tests/test_decision_options.py`, 8 tests, on the bundled hardware@3 standard
+(not a hand-rolled schema) so it exercises the real `decision` type: the
+list-of-strings error (a), a list of mappings green (b), name-only mapping
+still valid, valid options still render their panel, the scalar form still
+firing its own single error (c), list-of-strings `checks:` still rejected (d),
+and build exiting 1 with the diagnostic and no traceback (e).
+
+Checked that they are real negative tests: reverse-applied the patch (saved at
+`.scratch/fix.patch`) and ran the file against main's source -- 3 failed (the
+two check-side ones and the build one, which died with the actual
+`UndefinedError`), 5 passed (the ones pinning behaviour that already worked).
+Re-applied; all 8 pass.
+
+Full suite: see the PR message for the counts.
+
+## Not done, on purpose
+
+- `build` still renders past a diagnosed error and writes `_site/` anyway
+  (run 5's finding). Unchanged here: the build test asserts the diagnostic
+  and the exit code, not that nothing was written.
+- The scalar-form message's own advice ("write it as a list ... options:
+  [first, second]") is generic loader text and now reads a little oddly for
+  `options:`, whose entries are mappings. Left alone -- it is the loader's
+  message for every collection field, and changing it is a different diff.
