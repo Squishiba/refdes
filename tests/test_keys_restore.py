@@ -52,7 +52,11 @@ types:
 
 
 def _snapshot(root):
-    return {p.relative_to(root).as_posix(): p.read_bytes() for p in root.rglob("*") if p.is_file()}
+    return {
+        p.relative_to(root).as_posix(): p.read_bytes()
+        for p in root.rglob("*")
+        if p.is_file() and p.name != ".refdes-write.lock"
+    }
 
 
 def _fixture(root, shape="md", missing=False):

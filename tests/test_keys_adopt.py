@@ -49,6 +49,7 @@ def _snapshot(root):
         path.relative_to(root).as_posix(): path.read_bytes()
         for path in root.rglob("*")
         if path.is_file() and "_site" not in path.parts and "schema.json" not in path.name
+        and path.name != ".refdes-write.lock"
     }
 
 

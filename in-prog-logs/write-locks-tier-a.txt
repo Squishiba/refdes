@@ -1,0 +1,33 @@
+WRITE LOCKS TIER A — progress
+============================
+2026-10-03: Read in-prog-logs/write-inventory-for-locking.txt first. Tier A is item sources, .refdes/ids.yaml, and .refdes/keys-adopted.yaml. Existing serve/edit.py lock uses fcntl.flock on POSIX and msvcrt.locking on Windows.
+
+Design: src/refdes/write_lock.py generalizes the existing stable .refdes/serve-write.lock path. An in-process RLock and thread-local depth make nested acquisition safe; the disk lock serializes processes. CLI acquires it before project load and holds it through command completion so key minting, reference expansion, ID planning, source edits, ledger save, and adoption-marker rewrite all share a snapshot. Serve edit uses the same lock for its final compare/write; serve creation holds it from load through file creation and ID reservation. Lock file is never unlinked. --no-write skips acquisition. A whole-tree read-only root skips lock creation and preserves ordinary write refusal handling.
+
+Lock order: project in-process RLock -> project disk lock -> project read/plan -> Tier-A source/marker atomic replacements -> ID ledger atomic replacement. Serve's existing per-process editor lock is acquired before project lock. No path may acquire these in reverse. Nested project lock acquisitions are reentrant.
+
+Atomic writes: textio.atomic_write_text uses same-directory mkstemp, original mode, flush/fsync, and os.replace, and checks read-only target/directory mode first. Applied to revise's FileRewrite writer/rollback and IDs' source and ledger writers. Output bytes remain the previous rendered text.
+
+Uncertainty under investigation: permission behavior when only .refdes/ is read-only, and full-suite failures. The initial simultaneous baseline and branch suite runs interfered with each other; stopped them and started a serial fail-fast run.
+
+Sabotage: copied src/refdes to .scratch/unlocked-src, replaced only write_lock.py with a no-op context manager, and ran .scratch/race_probe.py with two processes making 20 reservations each. It failed as intended: 40 item files, only 20 unique IDs and 20 ledger reservations.
+
+Status: in progress.
+
+Decision revision: the original .refdes/serve-write.lock path blocked a valid PR #152 case: .refdes/ read-only while items/ remained writable. CLI id must write the item and then report a ledger refusal. Moved the canonical shared lock to root/.refdes-write.lock so it is available in that case. Updated scaffold's ignore rule and its tests for the new coordination file. A whole-tree read-only root still leaves no lock artifact. The root lock is the only disk lock, avoiding two-inode split-brain. CLI dry runs skip lock creation, preserving their byte-identical tree guarantee. Tests that snapshot authoring content ignore the persistent coordination file.
+
+Expanded direct ID API coverage: ids.reserve_id now enters the reentrant lock around ledger read/modify/write. ids.allocate enters it around planning, source writes, and ledger save. CLI already holds the outer project lock, so these are nested acquisitions. Focused tests: 89 passed (scaffold, read-only, lock), then 62 passed (lock, IDs, read-only). The remaining socket tests need unsandboxed loopback access; full branch and main baseline runs are in progress.
+
+Full suite baseline on an archived main tree (unsandboxed for localhost server tests): 3280 passed, 2 skipped in 228.84s. First branch full run reached 3281 passed, 2 skipped, 1 failure. The single failure was tests/test_serve_state.py's Git-status fixture: it initialized a repo without .gitignore after a CLI build had made the new lock file, then expected a clean worktree. Updated the fixture to track the lock ignore rule that scaffold.init now writes. Final branch full run in progress.
+
+The sandbox denies loopback socket creation. A fail-fast run without escalation reproduced the same serve startup error on main and branch; full-suite counts therefore use escalated localhost access. Scoped ruff F821/F822/F823/I checks on touched production/new test files and git diff --check passed. Existing revise.py import-order finding was left unchanged.
+
+GitHub check: gh auth status reports the configured Squishiba token invalid; GH_TOKEN and GITHUB_TOKEN are unset. Will still attempt the requested push and gh pr create after commit, then record the exact result.
+
+Second full branch suite before the final mixed-permission guard: 3282 passed, 2 skipped in 234.79s; main 3280 passed, 2 skipped. Added a guard for a read-only root with any writable child directory: refuse before any Tier-A write rather than proceed without the root lock. This retains no-artifact behavior on wholly read-only trees. Added a focused test; 91 relevant tests passed. Repeated the sabotage on a fresh copy of final source under .scratch/unlocked-src: again 40 files, 20 unique IDs, 20 ledger reservations, expected assertion failure. The final full suite on this exact code is running.
+
+Final verification: pytest -q on the final branch code, with localhost access, completed 3283 passed, 2 skipped in 235.92s. Main archive completed 3280 passed, 2 skipped; delta +3 passing tests and no added failures. Scoped ruff and git diff --check passed. The lock implementation and local tests are finished. Commit/push/PR publication remain.
+
+Publication completed: commit f6591da was pushed to origin/write-locks-tier-a and PR https://github.com/Squishiba/refdes/pull/162 was opened against main with gh pr create. Phase 1 task finished. Phase 2 is the Tier B-and-below writer inventory listed in the PR body and the original inventory log.
+
+CI follow-up: Ubuntu and Ubuntu/Python 3.13 passed. The first Windows run failed in tests/test_history_commands.py::test_redaction_events_are_not_redaction_targets, outside Tier A: history.redact() uses a 12-character hex removal fingerprint as successor_key; this run's fingerprint was all digits (213312678452), YAML loaded it as an integer, and history key validation rejected it. No locking code was implicated. Reran the failed Windows job without code changes; it passed, leaving all three PR checks green. This history fingerprint edge case remains phase 2 work.

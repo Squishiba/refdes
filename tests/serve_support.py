@@ -416,7 +416,7 @@ def snapshot_tree(root) -> dict[str, str]:
         for name in names:
             path = os.path.join(dirpath, name)
             rel = os.path.relpath(path, str(root)).replace("\\", "/")
-            if rel == ".refdes/serve-write.lock":
+            if rel == ".refdes-write.lock":
                 continue  # persistent coordination file, not project content
             with open(path, "rb") as fh:
                 files[rel] = hashlib.sha256(fh.read()).hexdigest()

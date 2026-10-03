@@ -727,7 +727,7 @@ def write_rewrites(
     for rewrite in rewrites:
         try:
             os.makedirs(os.path.dirname(rewrite.path), exist_ok=True)
-            textio.write_text(rewrite.path, rewrite.after)
+            textio.atomic_write_text(rewrite.path, rewrite.after)
         except OSError as exc:
             if on_error is None:
                 raise
@@ -792,7 +792,7 @@ def restore_rewrites(rewrites: list[FileRewrite]) -> None:
             continue
         if os.path.isfile(rewrite.path) and textio.read_text(rewrite.path) == rewrite.before:
             continue
-        textio.write_text(rewrite.path, rewrite.before)
+        textio.atomic_write_text(rewrite.path, rewrite.before)
 
 
 def _parse_item_count(rel: str, text: str) -> int | None:
