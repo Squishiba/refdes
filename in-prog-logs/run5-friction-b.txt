@@ -143,6 +143,20 @@ reported shape is an *extra* key beside a valid pair — the docs'
 Yes — all three findings fixed, each with a regression test that failed before
 the change, full suite green. See the PR for the before/after output.
 
+## Shipped
+
+- Branch `run5-friction-b`, rebased onto `origin/main` at `086dcc2`.
+- **PR #168** — https://github.com/Squishiba/refdes/pull/168 — OPEN against
+  `main`, 10 files, +540/−9, not merged (per the brief).
+- Full suite on the rebased tree with everything in place:
+  **3317 passed, 2 skipped** (239 s). Derived baseline 3308 (the same tree
+  with 8 of the 9 new tests in place counted 3316), so 3308 + 9 = 3317 and
+  nothing else moved.
+- 9 new tests, 6 of which fail against the pre-fix source; the other 3 are
+  guards (`valid entry stays silent`, `missing value: stays the shape error
+  alone`, `non-string key crashes where it already did`) that pass both ways
+  by design.
+
 ## One crash found on the way, and what I did about it
 
 Writing the F7 loop I had to ask what a *non-string* key inside a `checks:`
