@@ -2,7 +2,8 @@
 
 `load_tree` is what every command's `_load()` runs: parse the item sources,
 mint missing surrogate keys, expand bare links/checks/calc references to
-composites, freeze `follows:`. With ``write=True`` those steps rewrite source
+composites, and freeze `follows:` and uniquely searched images. With
+``write=True`` those steps rewrite source
 files (docs/design/keys.md §2); with ``write=False`` (the global
 ``--no-write``) each one still resolves in memory but nothing under `items/`
 or `.refdes/` is touched.
@@ -20,6 +21,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 
 from . import build as build_mod
+from . import image_freeze as image_freeze_mod
 from . import imports as imports_mod
 from . import keys as keys_mod
 from . import links as links_mod
@@ -154,8 +156,15 @@ def load_tree(
         # needs a reparse. Rebuild the imported portion of the resolution
         # scope afterward so build() never sees a local-only graph.
         project.imports_loaded = False
-        parse_items(project, require_ids, discard=parse_span)
+        parse_span = parse_items(project, require_ids, discard=parse_span)
         imports_mod.load_imports(project)
+
+    if write:
+        project.load_writes.rewritten_images = image_freeze_mod.freeze_images(project)
+        if project.load_writes.rewritten_images:
+            parse_items(project, require_ids, discard=parse_span)
+            project.imports_loaded = False
+            imports_mod.load_imports(project)
 
     return project, schema_was_stale
 

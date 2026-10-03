@@ -105,6 +105,8 @@ def _load_write_notice(project: Project) -> str | None:
         parts.append(f"minted {writes.minted_keys} key(s)")
     if writes.rewritten_targets:
         parts.append(f"rewrote {writes.rewritten_targets} reference(s)")
+    if writes.rewritten_images:
+        parts.append(f"froze {writes.rewritten_images} image(s)")
     return f"({' and '.join(parts)} while loading)"
 
 

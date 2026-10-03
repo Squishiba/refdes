@@ -1,0 +1,22 @@
+Task: finding 36, section 4, resolve-and-freeze image write-back.
+
+Progress (2026-10-03):
+- Read finding 36 section 4, keys design, the follows freeze writer, image resolution and hash code, and the existing image docs/tests.
+- Verified the CLI help and ran `refdes schema` in `.scratch/schema-probe` with hardware version 3.
+- Created `.scratch/venv` and installed the project editable with dev dependencies. The first sandboxed pip attempt could not resolve the package index; the approved network retry succeeded.
+- Implemented writable-load source freezing for uniquely searched Markdown images. A leading slash anchors the frozen path at the project root so a document move does not retarget it. Missing/ambiguous sources remain for render diagnostics. Added no-write and source-preserving coverage.
+- Extended write-back to pages, YAML list body scalars, multiline and angle-bracket Markdown image syntax, while leaving code text untouched. Added CRLF preservation coverage.
+- Final focused run: `pytest -q tests/test_image_search.py`: 16 passed.
+- Final full suite with loopback sockets available: `pytest -q`: 3298 passed, 2 skipped in 235.28s. An earlier sandboxed full run failed at a browser preview socket bind (`PermissionError: [Errno 1] Operation not permitted`); the permitted rerun completed cleanly.
+- Sabotage check: temporarily disabled `image_freeze.freeze_images` in `loader.load_tree`; the new document-move test failed (exit 1, source still held `board.png`). Restored the call; the same test passed (exit 0, 1 passed).
+- Scoped Ruff checks passed for touched code; `git diff --check` passed before final review.
+- Committed as `2cb63cc`, rebased cleanly onto origin/main `d10ff69` as `aa4ee12` with the requested co-author trailer.
+- Post-rebase focused suites: `pytest -q tests/test_image_search.py tests/test_image_hash.py tests/test_render_assets.py tests/test_keys_links.py`: 96 passed.
+- Post-rebase full suite: `pytest -q`: 3324 passed, 2 skipped in 235.01s.
+- Repeated sabotage on the rebased branch: disabling the loader's image freeze call made the document-move test fail (exit 1); restoring it made the same test pass (exit 0, 1 passed). `git diff --exit-code -- src/refdes/loader.py` then showed no change.
+
+Difficulties / decisions:
+- The example in the backlog writes `figures/...`, but the existing resolver interprets that from the document's directory. A leading `/figures/...` is used as an explicit root anchor to meet the stated document-move guarantee without changing existing relative path precedence.
+- Page files load during build rather than during the item load pipeline; the freeze pass reads pages during writable load, then clears them for build's ordinary reload.
+
+Status: implementation, verification, commit, and rebase finished. Push and PR remain.

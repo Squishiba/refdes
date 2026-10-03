@@ -2032,7 +2032,8 @@ def _image_inputs_hash_value(project: Project, item: Item, digest_cache: dict):
     resolves -- ``digest`` being the same first-16-hex sha256 `_process_images`
     splices into the published asset leaf, so a hash contribution is directly
     comparable with the output filename. Resolution mirrors `_process_images`
-    exactly: relative to the item's own source file first (always wins), then
+    exactly: a frozen `/path` is project-root anchored; other sources resolve
+    relative to the item's own source file first, then
     the bare-name `site.assets:` search (`_search_image_matches`, the shared
     pure half of `_search_image_src`, so the two resolutions can never drift).
 
@@ -2057,9 +2058,7 @@ def _image_inputs_hash_value(project: Project, item: Item, digest_cache: dict):
         return None
     entries = set()
     for src in srcs:
-        full_path = os.path.normpath(
-            os.path.join(project.root, os.path.dirname(item.source_file), src)
-        )
+        full_path = _local_image_path(project, src, item.source_file)
         if os.path.isfile(full_path):
             resolved = full_path
         elif "/" in src or "\\" in src:
@@ -2600,6 +2599,15 @@ def _search_image_src(
     return None
 
 
+def _local_image_path(project: Project, src: str, where_file: str) -> str:
+    """A frozen /path is anchored at the project root; other paths are local."""
+    if src.startswith("/") and not src.startswith("//"):
+        return os.path.normpath(os.path.join(project.root, src.lstrip("/")))
+    return os.path.normpath(
+        os.path.join(project.root, os.path.dirname(where_file), src)
+    )
+
+
 def _process_images(
     html: str,
     project: Project,
@@ -2609,7 +2617,8 @@ def _process_images(
 ) -> str:
     """Resolve, validate, register, and rewrite local `<img src>` references.
 
-    A local src is resolved relative to the source file's own directory -- the
+    A frozen `/path` resolves from the project root. Other local sources resolve
+    relative to the source file's own directory -- the
     same base a browser would use to open the rendered page next to its markdown
     source, and the rule that always wins: a src that resolves there is used
     whatever else shares its filename, so no document that works today changes
@@ -2639,9 +2648,7 @@ def _process_images(
         prefix, src, suffix = match.group(1), match.group(2), match.group(3)
         if not src or _URL_SCHEME_RE.match(src):
             return match.group(0)
-        full_path = os.path.normpath(
-            os.path.join(project.root, os.path.dirname(where_file), src)
-        )
+        full_path = _local_image_path(project, src, where_file)
         if not os.path.isfile(full_path):
             if "/" in src or "\\" in src:
                 project.error(
