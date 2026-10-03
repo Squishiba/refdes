@@ -312,7 +312,7 @@ d="$work/04-dirty"; fresh_repo "$d"; reset_env
 wt="$(new_worktree "$d" living-notes-h5-sealing-1)"
 A="$(commit_in "$wt" 'feat(seal): history-backed sealing')"
 git -C "$wt" push -q origin 'HEAD:refs/heads/living-notes-h5-sealing'
-printf 'half-finished thought\n' >"$wt/draft.md"
+printf 'half-finished thought\n' >>"$wt/README.md"
 FAKE_GH_HEAD_MATCH="living-notes-h5-sealing"
 FAKE_GH_HEAD_JSON='[{"state":"MERGED","mergedAt":"2026-10-01T00:00:00Z","number":157}]'
 FAKE_GH_MERGED_JSON="[{\"headRefOid\":\"$A\",\"number\":157}]"
@@ -454,7 +454,7 @@ check 'workspace worktree PR still open' DENY "$d" "$wt"
 # 19. Landed PR, but the worktree has uncommitted changes. Denied.
 d="$work/19-ws-dirty"; fresh_repo "$d"; reset_env
 wt="$(new_worktree "$d" feat-ws-dirty)"
-printf 'scratch\n' >"$wt/unsaved.md"
+printf 'scratch\n' >>"$wt/README.md"
 TOOL_NAME="mcp__paseo__archive_workspace"; TOOL_INPUT='{"workspaceId":"wks_test"}'
 write_ws_listing "$d" "$wt"
 FAKE_GH_HEAD_MATCH="feat-ws-dirty"
@@ -472,7 +472,7 @@ check 'workspace over a local checkout' ALLOW "$d" "$d/main"
 #     loosened it.
 d="$work/21-agent-dirty-regression"; fresh_repo "$d"; reset_env
 wt="$(new_worktree "$d" feat-agent-dirty)"
-printf 'scratch\n' >"$wt/unsaved.md"
+printf 'scratch\n' >>"$wt/README.md"
 FAKE_GH_HEAD_MATCH="feat-agent-dirty"
 FAKE_GH_HEAD_JSON='[{"state":"MERGED","mergedAt":"2026-10-01T00:00:00Z","number":163}]'
 check 'agent worktree dirty despite merged PR (regression)' DENY "$d" "$wt"
@@ -552,6 +552,15 @@ FAKE_GH_HEAD_MATCH="feat-agent-wsfail"
 FAKE_GH_HEAD_JSON='[{"state":"MERGED","mergedAt":"2026-10-01T00:00:00Z","number":163}]'
 PASEO_WS_FAIL=1
 check 'landed agent, workspace list fails' DENY "$d" "$wt"
+
+# 29. Only an untracked file (a scratch note, a progress log) in an otherwise
+#     clean, landed worktree: not a reason to refuse. Allowed.
+d="$work/29-untracked-only"; fresh_repo "$d"; reset_env
+wt="$(new_worktree "$d" feat-untracked)"
+printf 'scratch notes\n' >"$wt/unsaved.md"
+FAKE_GH_HEAD_MATCH="feat-untracked"
+FAKE_GH_HEAD_JSON='[{"state":"MERGED","mergedAt":"2026-10-01T00:00:00Z","number":163}]'
+check 'untracked file only, work landed' ALLOW "$d" "$wt"
 
 printf '\n%d passed, %d failed  (scratch: %s)\n' "$pass" "$fail" "$work"
 [ "$fail" -eq 0 ] || exit 1
