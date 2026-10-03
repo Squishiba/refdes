@@ -1,0 +1,35 @@
+Task: fold the 2026-10-01 thread design decisions into design documentation.
+
+Progress:
+- Confirmed the worktree started clean and searched docs for design-debate and option-preset references.
+- Verified src/refdes/standards/hardware/v3/presets/design-debate.yaml exists.
+- Ran PYTHONPATH=<worktree>/src refdes schema in .scratch/threads-schema with hardware@3 and no preset. Its JSON Schema has decision__bare with citations; component__bare with citations; log__bare without citations. Entry types were bound, component, decision, group, log, requirement, test.
+- Ran the same schema command with presets: [design-debate]. Its JSON Schema adds debate, option, claim, position; debate__bare.resolved_by documents target: decision.
+- Updated docs/design/threads.md: records the 2026-10-01 retirement and citation decision, changes the merged-log sketch to include citations, and removes the old option-preservation stance.
+- Updated docs/design/living-notes.md: records both decisions and the citation caveat in the phase 4a section.
+- Updated docs/design/extends.md: cancels the debate inheritance/retargeting plan throughout.
+- Updated docs/design/candidate-parts.md: marks the older option-preservation statement superseded.
+- Updated docs/design/backlog.md: replaces deferred debate adoption with cancellation.
+- Updated docs/design/standard-library.md: labels the preset sketches as historical/current-bundle examples rather than a future retention plan.
+- Updated docs/design/vocabulary-review.md: marks the proposed claim rename cancelled with the preset.
+
+Checked and left alone:
+- docs/standard-library.md, docs/schema-reference.md, docs/cli-reference.md: document current bundled preset examples or current command reference. The preset still exists in the current hardware@3 bundle; retiring it is a design decision awaiting implementation.
+- docs/design/lifecycle.md: its phrase "design debate" is generic prose about a design discussion, not the preset.
+- docs/design/living-notes-plan.md: describes history/task phasing and no preset retention or citation-set choice.
+- docs/getting-started.md: checked only for a valid temporary project configuration; unrelated to the decisions.
+- docs/checks.md: checked for an option-preset reference; none present.
+- src/refdes/standards/hardware/v3/presets/design-debate.yaml: verified the source and target of the bundled preset; no YAML or code edits authorized.
+- pyproject.toml: checked pytest configuration; no package or test edits authorized.
+
+Verification:
+- git diff --check: passed.
+- Full suite, once: PYTHONPATH=src pytest -q => 2875 passed, 79 failed, 337 errors, 2 skipped in 336.09s.
+- The 416 failed/error cases in pytest's cache are server/socket-related tests, mostly tests/test_serve_*.py; a direct socket.socket() probe raised PermissionError: [Errno 1] Operation not permitted in this sandbox. The suite's first error was EditorApp attempting to create an IPv4 loopback server socket. No documentation-related test failures were listed.
+
+Difficulties:
+- The installed refdes entry point initially raised ModuleNotFoundError; PYTHONPATH=<worktree>/src resolved it.
+- The first scratch project schema run rejected site: _site because site must be a mapping; corrected the scratch config using docs/getting-started.md.
+- The sandbox disallows socket creation, so the full suite could not pass and the server tests could not be verified here.
+
+Status: Documentation finished; branch publication and PR creation follow this log entry.

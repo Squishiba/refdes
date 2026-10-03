@@ -550,6 +550,14 @@ CLI and VS Code. It must not make a site render create a snapshot.
 
 ## 7. Effect on threads phase 4a/4b
 
+**2026-10-01 decisions for the merged type:** phase 4a's `log` keeps a
+`citations:` set, as current `decision` and `component` do. Revisit that
+choice if a better citation model emerges before phase 4a is implemented.
+The `design-debate` preset (`debate`, `option`, `claim`, `position`) retires
+with its grouping capability; `debate.resolved_by: [decision]` does not need
+retargeting. These are design decisions, not changes to the current schema
+(`refdes schema` with and without the bundled preset; see `threads.md` §5).
+
 Phase 4a is not on `main`: branch `ao/refdes-64/root`, beginning at `0737950`
 with three follow-ups (tip `941c975`), changes `hardware@3` so `decision` merges
 into the append-only `log` type and gains `follows:` (`log` declares
@@ -565,6 +573,8 @@ unmerged fork is undefined (`src/refdes/chains.py:452-551`).
 | Phase 4 work | Under the recommended model |
 | --- | --- |
 | Retire `decision`, merge its fields/links into `log`, and migrate `title` to `summary` | **Keep.** One entry type is still the correct home for a narrative note and a verdict. |
+| Preserve citations in the merged `log` | **Keep.** Include the `citations:` set; revisit before 4a only if a better approach emerges. |
+| Retire the `design-debate` preset and its grouping capability | **Retire.** Do not retarget `debate.resolved_by` to `log`. |
 | `follows:` chain, fold, forks/merges, id-less continuations | **Keep.** It is exactly the topology needed to locate the editable tip and carry the task list. |
 | `append_only: true` meaning build seals every new log | **Change.** It would reintroduce the behavior this document rejects. `append_only` keeps its meaning for authoring (an entry is not rewritten in place; corrections are new entries) and loses the build-time hash lock. Log entries are capturable without being build-locked. |
 | `_load()` freezes hand-authored bare `follows:` on any writable command | **Keep, and extend.** The same writable-load path that freezes the edge (`src/refdes/links.py:592-693` via `src/refdes/cli.py:125`) is where the predecessor snapshot is captured (§2). Rendering and `--no-write` stay out. |

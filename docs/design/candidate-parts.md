@@ -400,9 +400,10 @@ the *item* alone, so the candidate that loses stays a component, keeps its
 `part_number`, stays on `parts.html`, and can still be linked
 `alternate:` to the winner.
 
-The `design-debate` preset's `option` type is not removed by this proposal —
-it is a debate option, which is a different thing from a candidate part, and
-`check_severity: info` on it keeps working unchanged.
+At the time of this proposal, the `design-debate` preset's `option` type
+remained separate from candidate parts. Jared's later 2026-10-01 threads
+decision retires that entire preset, including `option` and its grouping
+capability (`threads.md` §5); this candidate-parts design does not retain it.
 
 ---
 

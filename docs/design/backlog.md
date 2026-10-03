@@ -566,16 +566,20 @@ every project; see the Status below. `extends:` resolves on the fully merged sch
 presets → project overlay), so project overlays adding fields to `requirement`
 are inherited by `bound`. Adopting `extends:` for `bound` in `hardware@3`
 churns no hashes (`item.type` stays `"bound"`); no migration.yaml entry is
-needed. Preset adoption (design-debate's `debate`) waits for threads Phase 4.
+needed. The earlier plan for design-debate's `debate` to adopt `extends:`
+after threads Phase 4 was superseded on 2026-10-01: the preset retires with
+its grouping capability (`threads.md` §5; `extends.md` §7.2).
 
-**Status: decided (Jared, 2026-09-19); implemented on ao/refdes-113 (phases 1-4, preset adoption still deferred).** Spec at
+**Status: decided (Jared, 2026-09-19); implemented on ao/refdes-113
+(phases 1-4; preset adoption cancelled on 2026-10-01).** Spec at
 [`docs/design/extends.md`](extends.md) — states the substitution rule (universal
 Liskov, no opt-in marker), ALLOW vs LISTING consumer classification (§3.2),
 single-level enforcement, `include:` and `body:` inherited, `prefix`/`label`/
 `plural` declared by child, field override replaces whole definition,
-hardware@3 adoption for `bound` now (hash-neutral, no migration), preset
-adoption after threads Phase 4. **All five open questions in extends.md §9 are
-decided (2026-09-19), each as recommended — with one overturn of the spec's own
+hardware@3 adoption for `bound` now (hash-neutral, no migration). The
+design-debate preset adoption is cancelled (`extends.md` §7.2). **All five
+open questions in extends.md §9 are decided (2026-09-19), each as recommended
+— with one overturn of the spec's own
 recommendation: coverage grouping is the default, period.** The default is
 `coverage.group_inherited: true` for every project, new and existing, so an
 existing project that rebuilds gets one grouped coverage section where it used
