@@ -472,7 +472,9 @@ def _drop_refused(plan, refused: set[str]) -> None:
         ]
 
 
-def expand_missing(project: Project, write: bool = True) -> list[tuple[Item, str, str, str]]:
+def expand_missing(
+    project: Project, write: bool = True, on_error=None
+) -> list[tuple[Item, str, str, str]]:
     """Expand bare link targets and refresh stale composite display halves.
 
     Both operations use the same source-preserving write-back. Returns
@@ -489,6 +491,14 @@ def expand_missing(project: Project, write: bool = True) -> list[tuple[Item, str
     a bare target needs a durable key before it can be expanded. Bare targets
     that are dangling, external and keyless, or whose minting failed remain
     fully usable under the existing display-id resolution rule.
+
+    `on_error` is passed through to `revise.write_rewrites_verified`, so a
+    caller can decide what a refused file means. Left None, a refusal is the
+    load-time degradation this normally is: the planned rewrite for that file
+    is dropped, a warning names it, and every other file still lands. A
+    display-half *refresh* driven by a rename is not that -- see
+    `revise._refresh_display_halves` -- and passes `_refuse_item_write`, which
+    refuses the whole operation instead.
     """
     plan = plan_expansion(project)
     if not plan.rewrites:
@@ -500,7 +510,9 @@ def expand_missing(project: Project, write: bool = True) -> list[tuple[Item, str
 
     from .revise import write_rewrites_verified
 
-    _drop_refused(plan, write_rewrites_verified(project, plan.files))
+    _drop_refused(
+        plan, write_rewrites_verified(project, plan.files, on_error=on_error)
+    )
     replacements_by_item: dict[int, dict[str, str]] = defaultdict(dict)
     for item, _link_name, old, new in plan.rewrites:
         replacements_by_item[id(item)][old] = new
@@ -911,7 +923,7 @@ def plan_check_expansion(
 
 
 def expand_missing_checks(
-    project: Project, write: bool = True
+    project: Project, write: bool = True, on_error=None
 ) -> list[tuple[Item, str, str, str]]:
     """Expand bare `checks: against:` targets and refresh stale composite
     display halves -- the `checks:` counterpart of expand_missing(), run on
@@ -924,6 +936,9 @@ def expand_missing_checks(
     expand into. Safe to run either before or after expand_missing() itself
     -- the two touch disjoint fields (`links` vs. `checks`) and never
     contend for the same source line.
+
+    `on_error` is passed through to `revise.write_rewrites_verified`, for the
+    same reason and with the same contract as `expand_missing()`'s.
     """
     plan = plan_check_expansion(project)
     if not plan.rewrites:
@@ -935,7 +950,9 @@ def expand_missing_checks(
 
     from .revise import write_rewrites_verified
 
-    _drop_refused(plan, write_rewrites_verified(project, plan.files))
+    _drop_refused(
+        plan, write_rewrites_verified(project, plan.files, on_error=on_error)
+    )
     replacements_by_item: dict[int, dict[str, str]] = defaultdict(dict)
     for item, _name, old, new in plan.rewrites:
         replacements_by_item[id(item)][old] = new

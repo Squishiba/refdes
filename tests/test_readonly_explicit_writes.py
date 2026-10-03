@@ -326,6 +326,153 @@ def test_revise_rolls_back_on_a_whole_tree_read_only(rename_project, capsys):
 
 
 @needs_posix_bits
+def test_revise_refuses_a_read_only_file_holding_only_a_reference(tmp_path, capsys):
+    """The partial layout the whole-`items/` and one-read-only-subdirectory
+    shapes cannot reach (user-sim run 5, finding B2).
+
+    The one unwritable item file holds *no* id this rename moves: it is the
+    file a `satisfies:` composite lives in, and the item being renamed sits
+    in a perfectly writable sibling. So `apply()`'s own
+    `write_rewrites(..., on_error=_refuse_item_write)` guard has nothing to
+    refuse -- the rename's rewrite pass never plans a write for the read-only
+    file at all, because the display half of a `DISPLAY@key` composite moves
+    only in the post-rename `_refresh_display_halves` pass.
+
+    That pass went through `links.expand_missing()`, which degrades on a
+    refused write: it drops the planned rewrite for the file and reports
+    nothing. The run therefore renamed REQ-001 -> BUD-001 in the writable
+    file, left the composite naming the retired id, reported it as
+    `1 prose mention(s) ... (a rename never edits prose)` -- it is a
+    structured reference, misfiled as prose -- and exited 0.
+
+    A rename that lands in some item files and not others is not a rename, so
+    this refuses and rolls back exactly like every other layout.
+    """
+    write_project_config(
+        tmp_path,
+        "site: { title: T, out: _site }\n"
+        "id: { width: 3, ledger: .refdes/ids.yaml }\n"
+        "link_types:\n"
+        "  satisfies: { inverse: satisfied_by, label: Satisfies }\n"
+        "types:\n"
+        "  requirement:\n"
+        "    prefix: REQ\n"
+        "    coverable: true\n"
+        "    fields:\n"
+        "      text: { type: text, required: true }\n"
+        "  decision:\n"
+        "    prefix: DEC\n"
+        "    fields:\n"
+        "      title: { type: text, required: true }\n"
+        "    links:\n"
+        "      satisfies: [requirement]\n",
+    )
+    items = tmp_path / "items"
+    items.mkdir()
+    (items / "req.yaml").write_text(
+        "defaults:\n  type: requirement\n  prefix: REQ\n"
+        "items:\n  - id: REQ-001\n    text: Input voltage range.\n",
+        encoding="utf-8",
+    )
+    (items / "dec.md").write_text(
+        "---\nid: DEC-001\ntype: decision\ntitle: Buck topology.\n"
+        "satisfies: [REQ-001]\n---\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "mapping.yaml").write_text("prefixes:\n  REQ: BUD\n", encoding="utf-8")
+    config = str(tmp_path / "refdes-project.yaml")
+
+    # A writable load first, so the keys are minted and the reference is
+    # already composite -- the state this bug needs. Without it the rename
+    # refuses earlier and for a different reason (a bare reference), which is
+    # the shape `test_revise_refuses_an_item_write_it_could_not_make` covers.
+    assert cli_mod.main(["-c", config, "check"]) == 0
+
+    req, dec = items / "req.yaml", items / "dec.md"
+    before = _all_text([req, dec])
+    assert "REQ-001@" in _read(dec), "the composite reference this rename moves"
+
+    os.chmod(dec, 0o444)
+    try:
+        status = cli_mod.main(["-c", config, "revise", str(tmp_path / "mapping.yaml")])
+    finally:
+        os.chmod(dec, 0o644)
+
+    captured = capsys.readouterr()
+    assert status == 1
+    assert "refused:" in captured.err
+    assert "cannot write items/dec.md (read-only tree?)" in captured.err, captured.err
+    assert "rolled back." in captured.err
+    # Never the shape the bug reported: a structured composite is not prose.
+    assert "prose mention" not in captured.out
+    # Rolled back, including the id the rename did land before the refresh
+    # refused -- "changed 1 file(s)" with a live old reference is the failure.
+    assert _all_text([req, dec]) == before
+    assert "id: REQ-001" in _read(req)
+
+
+@needs_posix_bits
+def test_revise_dry_run_reports_the_refusal_a_read_only_file_will_cause(
+    tmp_path, capsys
+):
+    """`--dry-run` copies the tree and runs the whole sequence on the copy,
+    and `copytree` preserves the read-only bit -- so the simulation refuses
+    exactly where the real run will. That makes the refusal a blocker to
+    report rather than a clean preview of a rename that cannot land: the same
+    shape, the same exit, one command earlier."""
+    write_project_config(
+        tmp_path,
+        "site: { title: T, out: _site }\n"
+        "id: { width: 3, ledger: .refdes/ids.yaml }\n"
+        "link_types:\n"
+        "  satisfies: { inverse: satisfied_by, label: Satisfies }\n"
+        "types:\n"
+        "  requirement:\n"
+        "    prefix: REQ\n"
+        "    coverable: true\n"
+        "    fields:\n"
+        "      text: { type: text, required: true }\n"
+        "  decision:\n"
+        "    prefix: DEC\n"
+        "    fields:\n"
+        "      title: { type: text, required: true }\n"
+        "    links:\n"
+        "      satisfies: [requirement]\n",
+    )
+    items = tmp_path / "items"
+    items.mkdir()
+    (items / "req.yaml").write_text(
+        "defaults:\n  type: requirement\n  prefix: REQ\n"
+        "items:\n  - id: REQ-001\n    text: Input voltage range.\n",
+        encoding="utf-8",
+    )
+    (items / "dec.md").write_text(
+        "---\nid: DEC-001\ntype: decision\ntitle: Buck topology.\n"
+        "satisfies: [REQ-001]\n---\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "mapping.yaml").write_text("prefixes:\n  REQ: BUD\n", encoding="utf-8")
+    config = str(tmp_path / "refdes-project.yaml")
+    assert cli_mod.main(["-c", config, "check"]) == 0
+
+    dec = items / "dec.md"
+    before = _all_text([items / "req.yaml", dec])
+    os.chmod(dec, 0o444)
+    try:
+        status = cli_mod.main(
+            ["-c", config, "revise", "--dry-run", str(tmp_path / "mapping.yaml")]
+        )
+    finally:
+        os.chmod(dec, 0o644)
+
+    captured = capsys.readouterr()
+    assert status == 1
+    assert "cannot write items/dec.md (read-only tree?)" in captured.err, captured.err
+    # A dry run touches nothing, on either side of the refusal.
+    assert _all_text([items / "req.yaml", dec]) == before
+
+
+@needs_posix_bits
 def test_calc_rewrite_refuses_an_item_write_it_could_not_make(tmp_path, capsys):
     """`calc-rewrite` is the same transaction engine reached from another
     command, so a read-only `items/` must read the same way here -- including

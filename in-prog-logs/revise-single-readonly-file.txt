@@ -1,0 +1,122 @@
+# revise: refuse a single read-only item file that holds only a reference
+
+Run 5 finding **B2** (user-sim-release-gate-run5.md §7, "The read-only matrix
+run 4 §8 asked for"): *"`revise`, all layouts except one: tree, `items/`, and
+one read-only subdirectory all refuse ... **One read-only item file takes the
+B2 path instead.**"* Reported symptom: `1 prose mention(s) ... (a rename never
+edits prose)`, exit 0.
+
+## Reproducing it
+
+Scratch project (`.scratch/sweep.py`, kept): two item files, a `requirement`
+with prefix `REQ` in `items/req.yaml` and a `decision` linking to it in
+`items/dec.md`. Two things had to be true before the bug is reachable, and
+both are load state rather than project shape:
+
+1. A writable load first (`refdes check`), so keys are minted and the link is
+   already a composite `REQ-001@9azzpw8g0sm`. Without it the rename refuses
+   *earlier* and for an unrelated reason ("still a bare reference"), which is
+   a different, already-correct refusal and hides this one.
+2. The read-only file is the one holding the **link**, not the renamed item.
+   `chmod a-w items/req.yaml` refuses correctly (exit 1). `chmod a-w
+   items/dec.md` is the bug.
+
+Before the fix:
+
+```
+B-readonly-holds-the-link: read-only items/dec.md  (pre-check exit 0)
+exit=0
+changed 1 file(s):
+  items/req.yaml
+id changes:
+  REQ-001 -> BUD-001
+
+1 prose mention(s) of a renamed id left behind -- these no longer resolve, and
+were not rewritten (a rename never edits prose):
+  items/dec.md:6  REQ-001 -> BUD-001
+  items/req.yaml: CHANGED
+  items/dec.md: UNCHANGED
+```
+
+Note `items/dec.md:6` — that is a *structured* `satisfies:` composite being
+reported as prose, and the id rename itself landing in a writable file while
+the reference to it stayed put.
+
+`revise --dry-run` on the same tree also exited 0 and reported a clean
+`would change 1 file(s)`.
+
+## Where the layouts diverged
+
+`apply()` guards its own rename writes:
+
+```python
+write_rewrites(rewrites, on_error=_refuse_item_write)   # raises -> rollback
+```
+
+That covers every file the *rename's own rewrite pass* plans a write for. The
+missed layout has no such write: the renamed item lives in a writable file, so
+that pass only plans `items/req.yaml`. The read-only file is written one step
+later, by the post-rename composite refresh:
+
+```python
+_refresh_display_halves(config_path)   # revise.py, unguarded
+```
+
+which called `links.expand_missing(..., write=True)` → `write_rewrites_verified`,
+the **load-time** hook. That hook is `_refuse_unwritable`: one `project.warn`,
+the file's planned rewrite dropped by `links._drop_refused`, everything else
+keeps going. So the refusal was swallowed as a warning, the id rename stood,
+and the untouched composite surfaced at the end as a stale *prose* mention —
+`revise.py:_stale_prose_references` has no way to know the line was a
+structured reference the refresh was supposed to move.
+
+## The fix
+
+The smallest change that makes this layout behave like the others: let the
+caller choose the refusal hook.
+
+- `revise.write_rewrites_verified(project, rewrites, on_error=None)` — new
+  optional hook, defaulting to the existing load-time `_refuse_unwritable`.
+- `links.expand_missing(...)` / `expand_missing_checks(...)` — thread `on_error`
+  through to it. Default behaviour unchanged for every load-time caller.
+- `revise._refresh_display_halves` — passes `_refuse_item_write`, so a display
+  half that cannot move refuses instead of degrading.
+- `apply()` — wraps the refresh in the same `try/except Refused` →
+  `_rollback()` → `errors=[str(exc), "rolled back."]` as the rename's own
+  writes, giving the documented exit 1.
+- `_simulate_key_ensure` (the `--dry-run` twin) — reports the `Refused` as a
+  blocker. `shutil.copytree` preserves the read-only bit, so the simulated
+  tree refuses exactly where the real one will; without this the dry run
+  previewed a clean run.
+
+Did **not** touch `links.freeze_follows` (same call shape, different command
+path) or the `keys`/`expand_*` load-time defaults.
+
+After the fix, both single-file variants are byte-identical to the
+whole-`items/` one: `cannot write items/dec.md (read-only tree?) -- no item
+file was rewritten and no hash was carried forward ...` + `rolled back.`,
+exit 1, both files unchanged.
+
+## Tests
+
+`tests/test_readonly_explicit_writes.py`, beside the two existing `revise`
+read-only tests:
+
+- `test_revise_refuses_a_read_only_file_holding_only_a_reference` — the B2
+  shape. Asserts exit 1, `refused:` + `(read-only tree?)` + `rolled back.`,
+  `"prose mention" not in out` (the misfiling is the tell), and byte-identical
+  rollback of both files.
+- `test_revise_dry_run_reports_the_refusal_a_read_only_file_will_cause` — the
+  dry-run preview refuses too.
+
+Both verified failing against `HEAD`'s `revise.py`/`links.py` (exit 0 → assert
+`0 == 1`) with the test file kept new, then passing with the fix. The two
+pre-existing `revise` tests pass in both states.
+
+## Notes / uncertainties
+
+- `ruff check .` is not a gate here (~99 pre-existing findings, per AGENTS.md).
+  Scoped it to the touched files and the rules my change could plausibly
+  affect; clean.
+- Windows and root skip the chmod tests (`needs_posix_bits`), same as the
+  existing ones in the file, so this is unverified on those two.
