@@ -296,6 +296,32 @@ def validate_items(project: Project) -> None:
                     calc.parse_limit(str(value))
                 except calc.CalcError as exc:
                     _field_error(project, item, fname, f"{fname}: {exc}")
+            elif fspec.type == "options":
+                # Each option is read as a mapping by the templates --
+                # `opt.get('name')` in item.html.j2's options panel -- so a
+                # list of bare strings is a shape error the build has to own:
+                # it passed `check` with 0 errors and then died in the render
+                # with `UndefinedError: 'str object' has no attribute 'get'`,
+                # exit 1, a raw Jinja2 traceback and a half-written site.
+                # Same posture as the `citations:` branch below and `checks:`
+                # in `run_checks`: the shape of an entry is diagnosed at the
+                # item, not discovered by the template that consumes it.
+                # A non-list `options:` (scalar or mapping) is already the
+                # loader's error -- `_reject_scalar_collection` owns that
+                # keystroke, and reporting it twice helps nobody.
+                if not isinstance(value, list):
+                    continue
+                for index, entry in enumerate(value):
+                    if isinstance(entry, dict):
+                        continue
+                    _field_error(
+                        project, item, fname,
+                        f"{fname}[{index}]: {entry!r} is not an option -- an "
+                        f"option is a mapping with a 'name' and, optionally, "
+                        f"a 'verdict' and a 'because', as in "
+                        f"{fname}: [{{name: LDO, verdict: rejected, because: "
+                        f"dissipates 10 W at full load}}]",
+                    )
             elif fspec.type == "citations":
                 if not isinstance(value, list):
                     _field_error(

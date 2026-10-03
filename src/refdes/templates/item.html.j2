@@ -142,6 +142,11 @@
 <section class="options" id="field-options">
   <h2>Options considered</h2>
   {% for opt in item.fields['options'] %}
+  {# A non-mapping entry is a diagnosed error (build.validate_items names it
+     on the item), and `build` still renders a page it has diagnosed -- so the
+     panel skips the entry instead of dying on `opt.get` mid-render, which
+     would replace that diagnostic with a Jinja2 traceback. #}
+  {% if opt is mapping %}
   <div class="option option-{{ (opt.get('verdict') or 'considered') | lower }}">
     <div class="option-head">
       <span class="option-name">{{ opt.get('name', '(unnamed)') }}</span>
@@ -149,6 +154,7 @@
     </div>
     {% if opt.get('because') %}<p class="because">{{ opt['because'] }}</p>{% endif %}
   </div>
+  {% endif %}
   {% endfor %}
 </section>
 {% endif %}

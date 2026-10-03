@@ -83,6 +83,11 @@
     {% if item.fields.get('options') %}
     <h4>Options considered</h4>
     {% for opt in item.fields['options'] %}
+    {# Same guard as item.html.j2: a non-mapping entry is already a diagnosed
+       error (build.validate_items names it on the item), and this page renders
+       diagnosed items too, so it skips the entry rather than aborting the
+       build mid-render with a Jinja2 traceback. #}
+    {% if opt is mapping %}
     <div class="option option-{{ (opt.get('verdict') or 'considered') | lower }}">
       <div class="option-head">
         <span class="option-name">{{ opt.get('name', '(unnamed)') }}</span>
@@ -90,6 +95,7 @@
       </div>
       {% if opt.get('because') %}<p class="because">{{ opt['because'] }}</p>{% endif %}
     </div>
+    {% endif %}
     {% endfor %}
     {% endif %}
 
