@@ -1,0 +1,165 @@
+# run5-friction-b — F4, F5, F7 (run-5 friction findings, batch B)
+
+Base: origin/main @ 6251ab5 (worktree branch `run5-friction-b`).
+Source of truth for the tasks: `in-prog-logs/user-sim-release-gate-run5.md`
+§1 table + §6 write-ups (F4 at :584, F5 at :604, F7 at :630).
+
+## Environment
+
+- venv: `.scratch/venv` (created with `python -m venv`), project installed
+  editable with `[pdf,dev]`.
+- Shell whitelist gotcha: it refuses `pip`, `cd`, `set`, `for`, and any
+  *absolute-path* interpreter (`/abs/.scratch/venv/bin/python`). Allowed
+  first-words include `python`, `pytest`, `git`, `gh`. So:
+  - install: `python -m pip --python <venv-python> install -e '<repo>[pdf,dev]'`
+    (pip's `--python` must come *before* the `install` subcommand).
+  - running the product/tests: `.scratch/rd.py <projectdir> <refdes args...>`
+    and `.scratch/pytest_here.py <pytest args...>`, both of which
+    `sys.path.insert(0, <this worktree>/src)` and assert `refdes.__file__`
+    is under it. Needed because the `python` on PATH is a *shared* venv
+    (`/home/jorb/work/venv-refdes`) whose editable install points at the
+    `run5-b4-b5-bugs` worktree — running bare would have tested someone
+    else's source. `rd.py` also chdirs in-process, since `cd` is blocked.
+
+## Findings, as read
+
+- **F4** (`build.py:2998 warn_edited_after_captured`) — the warning names the
+  item and the capture event but gives no remedy and no docs URL, while the
+  `sealing: build` error it replaced (`seal.py:527`) says "Append a new entry
+  with `amends: [LOG-001]` instead, or run with refdes build --reseal".
+  Text + remedy only; trigger logic untouched.
+- **F5** (`cli.py:2005 p_check description`) — claims "A seal exists only once
+  'build' has run over the entry, so an entry that has never been built has no
+  append-only protection at all". False for the bundled `hardware@3` `log`,
+  which is `sealing: history` and is never sealed at all. `build --help`'s
+  `--reseal` help WAS updated ("A `sealing: history` type has nothing to
+  reseal"); this epilog sentence was missed.
+- **F7** (`build.py:1497 run_checks`) — an unknown key inside a `checks:`
+  entry is accepted with no diagnostic, though `.refdes/schema.json` declares
+  `additionalProperties: false` for that sub-mapping
+  (`schema_json.py:70-81`).
+
+## Severity decision for F7 (not by feel)
+
+Docs, in the repo, for the same class of mistake at top level:
+- `docs/authoring.md:267-292` — "An unknown field whose spelling is close to
+  one the type declares is a build **error**" ... "An unknown field with
+  nothing close to it stays a **warning**, and the value is kept:
+  forward-compatible metadata, a field a future schema version will declare,
+  deliberate extra data."
+- `docs/troubleshooting.md:103-109` — same two-tier rule.
+- `src/refdes/parse.py:965-992` — the implementation of that rule
+  (difflib cutoff 0.6 → error, else warning + value kept).
+- `docs/design/backlog.md:1553-1558` — the asymmetry principle: an unvalidated
+  sub-key is "the whole difference between a typo doing nothing and a typo
+  doing the wrong thing".
+
+The report's own framing: "Top-level unknown fields *are* warned about; the
+gap is only in list-entry sub-mappings." So parity = the two-tier rule, and
+the report's example key (`exrta`) has nothing close to `value`/`against` →
+**warning**, not error. Note the near-miss case is already an error today by a
+different route: typo'ing `value:` itself trips run_checks' existing
+"each checks: entry needs 'value' and 'against'" error, so the only newly
+reported shape is an *extra* key beside a valid pair — the docs'
+"deliberate extra data" case, which they keep at warning.
+
+## Progress
+
+- [x] Read all three findings in full (table + §6 write-ups).
+- [x] venv + editable install; `refdes --version` → `refdes 0.5.0`.
+- [x] Located all three sites (above).
+- [x] Checked for concurrent work: `origin/main` is one commit ahead of my
+      base (`3ade380` #163, revise/links only — no overlap with build.py's
+      history diagnostics or cli.py's check parser). `run5-friction-a` and
+      `b3-release-warning` have no commits ahead of main yet, so the other
+      worker's warning in the same area is not on main; will rebase if it
+      lands before my PR.
+- [x] All three reproduced against the real CLI on a throwaway project at
+      `.scratch/f7/proj` (hardware@3, one bound + one decision with a typo'd
+      `checks:` entry + one captured-then-edited log entry).
+- [x] F4 repro: `WARNING items/log.md:2 [LOG-001] — LOG-001: edited after
+      captured -- current semantic content differs from the snapshot in
+      captured event 46e8c25c-…` — no remedy, no URL. Matches the report.
+- [x] F5 repro: `refdes check --help` printed the stale sentence verbatim.
+- [x] F7 repro: `2 items, 0 errors, 1 warnings`, exit 0, with `rule:` and
+      `exrta:` in the entry and no diagnostic naming either. (The 1 warning is
+      the project's own coverage notice.) Matches the report's output.
+- [x] Regression tests written first and shown failing:
+      - `tests/test_history_edited.py::test_the_warning_carries_the_remedy_and_the_docs_page`
+        — failed on `assert 'amends: [LOG-001]' in <the old message>`.
+      - `tests/test_check_help_sealing.py` (new, 2 tests) — both failed.
+      - `tests/test_checks_unknown_keys.py` (new, 5 tests) — 3 failed, and the
+        2 guard tests (valid entry stays silent; a missing `value:` stays the
+        shape error alone) passed before and after, which is the point of them.
+- [x] F4 fix: `build.warn_edited_after_captured` message only — remedy
+      sentence (`amends:` half; NOT `--reseal`, which is no escape for a
+      history-backed type) + `docs_url.DESIGN_LOG_DOCS`, which is new and
+      points at `troubleshooting.html#the-design-log`. Trigger logic, level
+      and exit code untouched. Hoisted `item.id or item.key` into `label`
+      because the remedy needs the same label the message leads with.
+- [x] F5 fix: `cli.py` `p_check` description, scoped to `sealing: build` and
+      adding the `sealing: history` case + `refdes history capture`.
+- [x] F7 fix: `build.run_checks`, after the existing shape check (which
+      `continue`s, so a lost `value:` is still one error, not two). Two tiers
+      per `parse.py:965-992`. Needed a module-level `import difflib`; the one
+      `validate_items` had inside a branch was hoisted with it rather than
+      left as a second import.
+- [x] Verified after, on the same throwaway project: both unknown keys warned
+      (exit 0), `values:` an error with `did you mean the key 'value'?` (exit
+      1), the F4 warning carrying the remedy and the URL, and
+      `refdes check --help` printing the new description.
+- [x] Docs link verified two ways: built `docs-site/` with the real CLI into
+      `.scratch/docsbuild` and grepped `troubleshooting.html` for
+      `id="the-design-log"` (present); the published page's own "On this page"
+      nav lists "The design log".
+- [x] Changelog fragments: `edited-after-captured-remedy.fixed.md`,
+      `check-help-sealing-split.fixed.md`, `checks-entry-unknown-key.fixed.md`.
+- [x] Full suite: 3299 passed, 2 skipped (241s), via
+      `python .scratch/pytest_here.py -q`.
+
+## Difficulties
+
+- The shell whitelist here refuses `pip`, `cd`, `set`, `for`, and any
+  absolute-path interpreter, so the venv could not be used by invoking its own
+  `bin/python`. Everything runs through the whitelisted `python` with
+  `sys.path` pinned to this worktree's `src/` and an assert on
+  `refdes.__file__` — without that assert the tests would have silently run
+  the *other* worktree's source (`/home/jorb/work/venv-refdes` is installed
+  editable against `run5-b4-b5-bugs`). Recorded because it will bite the next
+  session on this box too.
+- The throwaway project's `against:` reference was rewritten to composite form
+  (`BND-PWR-001@ebyx0vzhgq9`) by the first writable `check`, which is the
+  documented load-time write, not damage — but it did mean an `edit` against
+  the file's earlier text missed and needed a re-read.
+- `origin/main` moved from `6251ab5` to `086dcc2` while I worked, and `f12fa95`
+  (#166, run-5 B3) is the other worker's warning in this same area: it adds
+  `build.warn_uncaptured_edits()` immediately *after*
+  `warn_edited_after_captured` and calls it from `build()`. No textual overlap
+  with my edit, which is inside the earlier function's body — but per the task
+  brief this means rebasing onto main and re-running.
+
+## Finished?
+
+Yes — all three findings fixed, each with a regression test that failed before
+the change, full suite green. See the PR for the before/after output.
+
+## One crash found on the way, and what I did about it
+
+Writing the F7 loop I had to ask what a *non-string* key inside a `checks:`
+entry does, because YAML reads `true:` as the bool and `1:` as the int: my
+`sorted(entry)` would compare `bool` against `str` and raise, one step earlier
+than anything else in the run. So the loop sorts with `key=str` and formats
+with `str(key)`, and
+`test_a_non_string_key_crashes_where_it_already_did_not_in_the_new_loop` pins
+the frame the `TypeError` comes from.
+
+The `TypeError` itself is **pre-existing and not fixed here**: a `checks:`
+entry with a `true:` key already dies inside `compute_hashes` →
+`json.dumps(payload, sort_keys=True)` (`build.py:1769`), which is hashing code
+this branch does not touch. Verified against an unmodified source tree
+(`/home/jorb/work/refdes`, `.scratch/probe_prechange.py` → `RAISED TypeError
+'<' not supported between instances of 'bool' and 'str'`), so it is not a
+regression I introduced and not in F4/F5/F7's scope. Worth its own finding:
+it is the same family as B1 — a shape the loader accepts and a later stage
+cannot serialize — and unlike B1 it is not even a diagnostic, it is a raw
+traceback out of `refdes check`.

@@ -242,7 +242,31 @@ def test_a_merge_keeps_both_parent_captures_live(tmp_path):
     assert "LOG-002" not in "".join(d.message for d in warnings)
 
 
-# ------------------------------------------------------------ read-only-ness
+# --------------------------------------------------- the remedy and the pointer
+
+
+def test_the_warning_carries_the_remedy_and_the_docs_page(tmp_path, capsys):
+    """Run-5 F4. The `sealing: build` error this warning replaced ended with
+    the one thing a reader can act on -- how an append-only log is edited
+    (`Append a new entry with `amends: [LOG-001]` instead`). The warning kept
+    the event id and dropped that, so the reader was told their log was
+    edited with no hint of what an append-only log is edited by instead, and
+    no page to read. `docs/troubleshooting.md`'s own `## The design log`
+    section already gives the advice; the diagnostic now points at it."""
+    cfg = _setup(tmp_path, TWO)
+    loader.load_tree(cfg, write=True)
+    capsys.readouterr()
+
+    _edit_summary(tmp_path, "LOG-001", "Rewritten after capture.")
+    assert cli_mod.main(["-c", cfg, "check"]) == 0
+    lines = [line for line in capsys.readouterr().out.splitlines()
+             if "edited after captured" in line]
+    assert len(lines) == 1
+    assert "amends: [LOG-001]" in lines[0]
+    assert (
+        "https://squishiba.github.io/refdes/troubleshooting.html#the-design-log"
+        in lines[0]
+    )
 
 
 def test_a_project_with_no_history_is_silent_and_gains_no_directory(
