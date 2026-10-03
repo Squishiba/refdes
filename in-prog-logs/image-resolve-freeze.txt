@@ -14,9 +14,10 @@ Progress (2026-10-03):
 - Post-rebase focused suites: `pytest -q tests/test_image_search.py tests/test_image_hash.py tests/test_render_assets.py tests/test_keys_links.py`: 96 passed.
 - Post-rebase full suite: `pytest -q`: 3324 passed, 2 skipped in 235.01s.
 - Repeated sabotage on the rebased branch: disabling the loader's image freeze call made the document-move test fail (exit 1); restoring it made the same test pass (exit 0, 1 passed). `git diff --exit-code -- src/refdes/loader.py` then showed no change.
+- Pushed `image-resolve-freeze` to origin and opened PR #171 against `main`. No merge was performed.
 
 Difficulties / decisions:
 - The example in the backlog writes `figures/...`, but the existing resolver interprets that from the document's directory. A leading `/figures/...` is used as an explicit root anchor to meet the stated document-move guarantee without changing existing relative path precedence.
 - Page files load during build rather than during the item load pipeline; the freeze pass reads pages during writable load, then clears them for build's ordinary reload.
 
-Status: implementation, verification, commit, and rebase finished. Push and PR remain.
+Status: finished. Implementation, verification, rebase, push, and PR are complete; PR #171 remains open for review.
