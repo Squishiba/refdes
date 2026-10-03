@@ -551,25 +551,6 @@ def deleted_key_message(record: DeletedKey) -> str:
     return message
 
 
-def report_deleted_keys(project: Project) -> list[DeletedKey]:
-    """Warn at load time about every hand-deleted key (§6, 2026-09-15).
-
-    Minting a replacement would be the destructive thing to do here: it makes
-    every reference and history entry to the old key dangle and overwrites
-    the evidence, so these items are deliberately left keyless and the build
-    reports them.
-    """
-    records = deleted_key_records(project)
-    for record in records:
-        project.warn(
-            deleted_key_message(record),
-            file=record.item.source_file,
-            line=record.item.source_line,
-            item_id=record.item.id,
-        )
-    return records
-
-
 def _validate_latest_baseline(project: Project) -> None:
     """Report §6 Layer 4 against the latest revision or release baseline."""
     from . import lifecycle
@@ -778,8 +759,15 @@ def mint_missing(project: Project, write: bool = True) -> list[tuple[Item, str]]
     the end of the run: a key is only durable once persisted, and re-minting
     a fresh one on every read-only run would make the same item resolve to a
     different key from one invocation to the next.
+
+    A hand-deleted key is left keyless here -- `missing_assignments` excludes
+    it -- and is reported once, as the `key deleted` error of
+    `_validate_deleted_keys`. Minting a replacement would be the destructive
+    thing to do: it dangles every reference and history entry to the old key
+    and overwrites the evidence, so this step stays silent and the lint owns
+    the diagnostic (finding B4: it used to warn here *and* error there, from
+    the same records and the same message, counting one problem twice).
     """
-    report_deleted_keys(project)
     assignments = missing_assignments(project)
     if not assignments:
         return []

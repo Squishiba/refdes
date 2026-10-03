@@ -368,3 +368,53 @@ console.log(JSON.stringify(results));
     # The `[[` form's range must not swallow the brackets themselves.
     assert results["[[LOG-MA"] == "LOG-MA"
     assert results["[["] == ""
+
+
+ITEMS_BY_ID = re.compile(r"function\s+itemsById\s*\(\s*\)\s*\{(.*?)\n\}", re.DOTALL)
+
+
+@pytest.mark.skipif(NODE is None, reason="no node on PATH to execute the extracted logic")
+def test_items_by_id_resolves_a_retired_id_to_the_live_item():
+    """B5 (run 5): the map `provideHover` looks the hovered token up in was
+    keyed on `item.id` alone, so hovering the id a schematic still names --
+    the retired one -- returned nothing, while `refdes ls` has long resolved
+    that same spelling to the live item. Runs the real `itemsById()` extracted
+    verbatim from the source, against an index shaped like `refdes index`'
+    (rows carry `former_ids`), so it cannot pass on a hand-copied duplicate.
+    """
+    source = _read(EXTENSION_JS)
+    extracted = ITEMS_BY_ID.search(source)
+    assert extracted, "editors/vscode/extension.js no longer defines itemsById()"
+
+    # REQ-003 records a *live* id as a former one -- a broken project (it is a
+    # build error), included because the live item has to win the spelling,
+    # which is what `refdes ls` does with the same collision. It comes first in
+    # the list so an implementation that indexed in one pass would let the
+    # retired claim shadow the live item.
+    items = [
+        {"id": "REQ-003", "former_ids": ["REQ-001"]},
+        {"id": "REQ-001", "former_ids": ["REQ-900"]},
+        {"id": "REQ-002", "former_ids": []},
+    ]
+    script = f"""
+const index = {{ data: {{ items: {json.dumps(items)} }} }};
+{extracted.group(0)}
+const map = itemsById();
+const id_of = (key) => (map.has(key) ? map.get(key).id : null);
+console.log(JSON.stringify({{
+  live: id_of("REQ-001"),
+  retired: id_of("REQ-900"),
+  plain: id_of("REQ-002"),
+  unknown: id_of("REQ-999"),
+}}));
+"""
+    proc = subprocess.run(
+        [NODE, "-e", script], capture_output=True, text=True, timeout=10, check=False
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert json.loads(proc.stdout) == {
+        "live": "REQ-001",  # the live item keeps its own id
+        "retired": "REQ-001",  # and the retired one resolves to it
+        "plain": "REQ-002",
+        "unknown": None,
+    }
