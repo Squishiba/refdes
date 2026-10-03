@@ -127,3 +127,12 @@ fix stops new ones, it does not re-read old ones); noted in the PR body as not
 addressed, since repairing a store nobody has reported stuck seemed like
 inventing a migration on speculation.
 
+## Shipped
+- Branch `windows-ci-flakes`, pushed to origin.
+- `0de5ad5` fix(history): a redaction fingerprint is not a successor key
+- `67815a5` test(vscode): wait for node instead of failing at 10 s
+- PR #167 against main: https://github.com/Squishiba/refdes/pull/167
+  (7 files, +312/-24). Not merged, per instructions; CI on the PR is the
+  Windows verification.
+
+
