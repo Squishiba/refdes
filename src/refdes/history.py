@@ -15,10 +15,10 @@ Layout (under the project root)::
 Two deliberate departures from the doc's sketch, both stated in the plan:
 
 1. **Event ids are derived, not random.** ``event_id`` is ``uuid5`` over
-   ``(kind, item_key, successor_key or fingerprint)`` -- the third component
-   is the event's discriminator, whichever of the two it carries. A replay of
-   the same edge regenerates
-   the identical path with the identical bytes, so idempotence (§2, case five)
+   ``(kind, item_key, successor_key or fingerprint)`` -- the third component is
+   the event's discriminator, whichever of the two it carries. A replay of the
+   same edge regenerates the identical path with the identical bytes, so
+   idempotence (§2, case five)
    is a filesystem no-op needing no index. ``occurred_at`` is excluded from
    the id and is display metadata only — never ordered, compared, or gated on.
 
@@ -352,10 +352,10 @@ def load_object(root: str, digest: str) -> dict[str, object]:
 def event_id(kind: str, item_key: str, successor_key: str = "", fingerprint: str = "") -> str:
     """The derived id of an event: uuid5 over (kind, item_key, discriminator).
 
-    The discriminator is the event's successor key, or -- for the events that
-    have none, the ``redaction`` event -- the fingerprint of what it removed.
-    Either way it is what makes two genuinely different events of the same kind
-    on the same item two different ids.
+    The discriminator is the event's successor key, or -- when there is no
+    successor, which today means ``redaction`` -- the fingerprint of what it
+    removed. Either way it is what makes two genuinely different events of the
+    same kind on the same item two different ids.
 
     Derived, not random (plan §H1): a replay of the same edge — the old-branch
     checkout case — regenerates the identical path and is a filesystem no-op.
