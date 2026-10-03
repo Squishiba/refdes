@@ -96,8 +96,11 @@ Branch: (to create) windows-ci-flakes
 - tests/test_history.py, test_history_commands.py, test_history_capture.py,
   test_history_edited.py, test_history_seal.py, test_keys_restore.py,
   test_vscode_extension.py together: 131 passed.
-- Full suite `python -m pytest -o pythonpath=src -q`: 3261 passed, 31 skipped,
-  0 failed, 154.76 s. Two of those passes are the new tests.
+- Full suite `python -m pytest -o pythonpath=src -q`: **3293 passed, 2 skipped,
+  0 failed** in 237.86 s (0:03:57). Two of those passes are the new tests.
+  (I first wrote "3261 passed, 31 skipped in 154.76 s" here from memory of the
+  CI log instead of from the job output; the job's own tail says the line above.
+  The 31-skipped figure is the CI number, not the local one -- local skips 2.)
 - ruff (scoped to E501,E7,F,I on the touched files): no new findings; the
   remaining E501/I001 hits are pre-existing lines (AGENTS.md says the repo does
   not have a clean ruff baseline).
@@ -134,5 +137,10 @@ inventing a migration on speculation.
 - PR #167 against main: https://github.com/Squishiba/refdes/pull/167
   (7 files, +312/-24). Not merged, per instructions; CI on the PR is the
   Windows verification.
+- CI on PR #167: run `37110322977` on head `f7db86a` -- ubuntu-latest,
+  ubuntu-latest/py3.13 and **windows-latest all pass** (windows 7m24s). The two
+  earlier runs on this branch (heads `67815a5`, `c9ff1fd`) were **cancelled** as
+  later commits were pushed, not passed; I first reported the green as belonging
+  to `67815a5`, which was wrong. The green run covers the final tree.
 
 
