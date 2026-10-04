@@ -22,3 +22,5 @@ The first complete unsandboxed test run after fixture updates found 3 failures a
 Final verification: the sabotage test failed 1/1 with the DEC legacy prefix removed, then passed 1/1 after exact restoration. `refdes schema --json` from the throwaway project confirmed before/after fields in .scratch/phase4a-baseline/schema-comparison.txt. Focused regressions passed 94/94. Final full suite passed 3321 tests with 2 skips. `ruff --select F821` passed on touched Python files and `git diff --check` was clean. The repo sample's `refdes --no-write check` still reports 20 items, 1 numeric check error (P_dens vs BND-THM-001), 2 coverage warnings; scratch upgraded decision project checked clean.
 
 Status: implementation and verification finished; commit, push, and PR publication in progress.
+
+Status: finished. Committed phase 4a as b3fc3c2, pushed branch threads-4a-decision-to-log, and opened PR #176 against main. PR remains unmerged as requested.
