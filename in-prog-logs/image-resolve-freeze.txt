@@ -21,3 +21,11 @@ Difficulties / decisions:
 - Page files load during build rather than during the item load pipeline; the freeze pass reads pages during writable load, then clears them for build's ordinary reload.
 
 Status: finished. Implementation, verification, rebase, push, and PR are complete; PR #171 remains open for review.
+
+Windows CI follow-up (2026-10-03):
+- Run 37115205029, job 111322529648 reported two failures on windows-latest. The page loader's universal-newline read turned CRLF into LF, while image_freeze searched for that body in raw source text. A raw-CRLF page regression reproduced the failure on Linux (1 failed, 1 passed before the fix).
+- Normalized only the page body comparison and calculated the body line offset from that normalized copy. SourceText still edits and writes the raw lines, preserving their exact CRLF endings. Added an exact-byte page check both with and without front matter.
+- The CRLF test fixture used Path.write_text (which can create CRLF on Windows), then replaced each LF with CRLF; that creates CRCRLF before the freeze writer runs. The writer already uses textio.atomic_write_text with newline="". Fixed the fixture to write exact CRLF bytes and assert no CRCRLF both before and after freezing.
+- Focused tests after the fix: test_image_search.py 16 passed; test_eol_fidelity.py 51 passed. Scoped Ruff checks passed.
+
+Windows CI follow-up status: fix implemented; full suite, rebase, push, and PR update pending. Windows execution is unavailable locally.

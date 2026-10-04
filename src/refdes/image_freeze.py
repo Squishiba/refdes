@@ -136,10 +136,14 @@ def freeze_images(project: Project) -> int:
         if page.body:
             path = os.path.join(project.root, page.source_file)
             source = textio.SourceText.of(path).text
-            offset = source.find(page.body)
-            if offset >= 0:
+            # pages._read_page reads in universal-newline mode. Match its
+            # normalized body against a normalized copy, but edit the raw
+            # SourceText lines below so CRLF terminators survive unchanged.
+            normalized = source.replace("\r\n", "\n").replace("\r", "\n")
+            if normalized.endswith(page.body):
+                offset = len(normalized) - len(page.body)
                 bodies.setdefault(page.source_file, []).append(
-                    (source[:offset].count("\n"), page.body)
+                    (normalized[:offset].count("\n"), page.body)
                 )
     for item in project.local_items:
         if item.source_file.endswith((".yaml", ".yml")):

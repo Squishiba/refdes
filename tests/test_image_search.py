@@ -305,14 +305,25 @@ def test_page_search_freezes_source(tmp_path):
     (tmp_path / "items").mkdir()
     (tmp_path / "pages").mkdir()
     page = tmp_path / "pages" / "index.md"
-    page.write_text("# Overview\n\n![the board](board.png)\n")
+    # pages._read_page normalizes these line endings when it loads the body;
+    # the freeze writer must still locate that body in the raw source bytes.
+    page.write_bytes(b"# Overview\r\n\r\n![the board](board.png)\r\n")
     (tmp_path / "shots").mkdir()
     (tmp_path / "shots" / "board.png").write_bytes(PNG)
 
     project = _writable_load(tmp_path)
     assert not project.errors
-    assert "![the board](/shots/board.png)" in page.read_text()
+    assert page.read_bytes() == b"# Overview\r\n\r\n![the board](/shots/board.png)\r\n"
     assert 'src="assets/shots/board.png"' in project.pages[0].body_html
+
+    # The body starts after front matter here, so its normalized offset is
+    # nonzero even though the physical file still uses CRLF throughout.
+    page.write_bytes(b"---\r\ntitle: Overview\r\n---\r\n\r\n![the board](board.png)\r\n")
+    project = _writable_load(tmp_path)
+    assert not project.errors
+    assert page.read_bytes() == (
+        b"---\r\ntitle: Overview\r\n---\r\n\r\n![the board](/shots/board.png)\r\n"
+    )
 
 
 def test_multiline_and_angle_spelling_freeze_without_touching_code(tmp_path):
@@ -362,7 +373,13 @@ def test_freeze_preserves_crlf_source(tmp_path):
     write_project_config(tmp_path, _config("shots"))
     _item(tmp_path, "![board](board.png)\n")
     source = tmp_path / "items" / "dec-a.md"
-    source.write_bytes(source.read_bytes().replace(b"\n", b"\r\n"))
+    # Path.write_text in _item already writes CRLF on Windows. Normalize the
+    # fixture first, then write exact bytes so a doubled CR cannot be mistaken
+    # for a failure of the freeze writer.
+    source.write_bytes(source.read_text().replace("\n", "\r\n").encode("utf-8"))
+    before = source.read_bytes()
+    assert b"\r\r\n" not in before
+    assert before.count(b"\r\n") == before.count(b"\n")
     (tmp_path / "shots").mkdir()
     (tmp_path / "shots" / "board.png").write_bytes(PNG)
 
@@ -370,4 +387,5 @@ def test_freeze_preserves_crlf_source(tmp_path):
     data = source.read_bytes()
     assert not project.errors
     assert b"![board](/shots/board.png)\r\n" in data
+    assert b"\r\r\n" not in data
     assert data.count(b"\n") == data.count(b"\r\n")
