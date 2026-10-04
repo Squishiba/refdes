@@ -569,7 +569,7 @@ def _run_stamp(args, kind: str) -> int:
         print(f"    date: {outcome.stamped_at[:10]}")
         print(f"    summary: Released {args.name} — sent to fab.")
         print("    citations:")
-        print("      - item: DEC-A-0NN  # an earlier log entry this release turned on")
+        print("      - item: LOG-A-0NN  # an earlier log entry this release turned on")
     return 0
 
 

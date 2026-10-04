@@ -353,7 +353,7 @@ Consider recording this in the design log, e.g.:
     date: 2026-08-17
     summary: Released rev-b — sent to fab.
     citations:
-      - item: DEC-A-0NN  # an earlier log entry this release turned on
+      - item: LOG-A-0NN  # an earlier log entry this release turned on
 ```
 
 Both ids are placeholders and say so: `LOG-A-0NN` is not shaped like a display

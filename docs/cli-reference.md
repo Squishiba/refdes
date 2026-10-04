@@ -992,7 +992,9 @@ Each bundled standard version ships its own `migration.yaml` — the delta
 from the version immediately before it (`hardware@2`'s renames
 `constraint.title` to `constraint.text` and the `constraint` type to
 `bound`, its `CON` prefix along with it; `hardware@3`'s renames
-`requirement.text`/`bound.text`/`test.method` to `body:`). See [the
+`requirement.text`/`bound.text`/`test.method` to `body:`, merges the
+retired `decision` type into `log` under `merge_types:`, and rewrites
+every `records:` edge to `follows:` under `links:`). See [the
 versions shipped so far](standard-library.md#the-versions-shipped-so-far).
 Upgrading across several versions chains each intervening one's own
 migration, in order — `v1→v2`, then `v2→v3`, and so on — never merged into
@@ -1035,14 +1037,18 @@ also an exit 1 with the config left at the version it had.
 
 ## `refdes revise <mapping-file>`
 
-Rewrite project-local vocabulary — type names, field names (scoped per
-type), link verb names, id prefixes, citation-entry key names — across every
+Rewrite project-local vocabulary — type names, type merges into an
+existing type, field names (scoped per type), link verb names, id prefixes,
+citation-entry key names, link-to-citation conversions — across every
 item file in one operation, from a hand-written mapping:
 
 ```yaml
 # rename.yaml
 types:
   constraint: bound
+merge_types:       # like types:, but the destination already exists: the
+  decision: log    # merged type's items keep their ids, only the type
+                   # spelling changes
 fields:
   constraint:      # keyed by the OLD type name
     title: text
@@ -1052,9 +1058,14 @@ prefixes:
   CON: BND
 citation_keys:     # renamed inside every citations-typed field's entries
   url: path
+citation_links:    # authored link verbs whose targets become `item:`
+  - records        # entries of the item's citations set (a bare-id
+                   # citation nothing maintains across renames — prefer
+                   # renaming the verb under links: when the new standard
+                   # declares a maintained link that fits)
 ```
 
-Those five sections are the whole vocabulary. **Any other top-level section is
+Those seven sections are the whole vocabulary. **Any other top-level section is
 refused**, not ignored — see below.
 
 For a bundled standard's own version upgrade, use `refdes standard upgrade

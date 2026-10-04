@@ -66,7 +66,16 @@ def test_existing_date_less_decision_upgrades_without_inventing_status(tmp_path)
     assert cli.main(["-c", str(config), "--no-write", "check"]) == 0
 
 
-def test_old_records_edges_upgrade_to_item_citations(tmp_path):
+def test_old_records_edges_upgrade_to_follows_links(tmp_path):
+    """A v2 `records:` edge becomes a `follows:` link, not an `item:` citation.
+
+    The citation spelling is bare-id data nothing maintains: it breaks on
+    the target's first rename and refuses the composite `ID@key` form
+    (PR #176 review). `follows:` is the one log-to-log link the merged
+    schema declares, and structured links are what the surrogate-key
+    machinery keeps current -- asserted below by letting a writable load
+    freeze the migrated edge like any authored one.
+    """
     config = _project(tmp_path, version=2)
     path = tmp_path / "items" / "thread.yaml"
     path.write_text(
@@ -80,8 +89,52 @@ def test_old_records_edges_upgrade_to_item_citations(tmp_path):
     assert len(steps) == 1 and steps[0].result.ok, steps
     text = path.read_text(encoding="utf-8")
     assert "recorded_by:" not in text and "records:" not in text
-    assert text.count("- item: DEC-001") == 1
+    assert "follows: [DEC-001]" in text
+    assert "- item:" not in text
     assert cli.main(["-c", str(config), "--no-write", "check"]) == 0
+
+    # The migrated edge is under the key machinery: the next writable load
+    # freezes it to `DEC-001@key` and captures the predecessor's snapshot,
+    # exactly as it does for an authored `follows:`.
+    assert cli.main(["-c", str(config), "check"]) == 0
+    text = path.read_text(encoding="utf-8")
+    assert "follows: [DEC-001@" in text
+    assert len(list((tmp_path / ".refdes" / "history" / "events").glob("*.yaml"))) == 1
+
+
+def test_migrated_decision_keeps_its_dec_id_without_a_prefix_warning(tmp_path, capsys):
+    """ids.validate_prefixes' legacy-prefix branch, behaviourally.
+
+    A v2 decision with no explicit `prefix:` migrates to `type: log` with
+    its DEC id intact; `legacy_prefixes: [DEC]` on the merged log type must
+    keep `check` warning-free for it. Deleting the branch in ids.py (the
+    only behavioural consumer of `legacy_prefixes`) otherwise ships green
+    (PR #176 review). The control row proves the warning still fires for a
+    prefix the type does not claim.
+    """
+    config = _project(tmp_path, version=2)
+    (tmp_path / "items" / "decision.yaml").write_text(
+        "items:\n"
+        "  - id: DEC-001\n    type: decision\n    title: Regulator choice\n"
+        "  - id: LOG-001\n    type: log\n    date: 2026-10-01\n"
+        "    summary: A log entry\n"
+        "  - id: FOO-001\n    type: log\n    date: 2026-10-02\n"
+        "    summary: Wrongly prefixed\n",
+        encoding="utf-8",
+    )
+    steps = revise.apply_standard_upgrade(str(tmp_path), 3)
+    assert len(steps) == 1 and steps[0].result.ok, steps
+    assert "id: DEC-001" in (tmp_path / "items" / "decision.yaml").read_text(
+        encoding="utf-8"
+    )
+
+    capsys.readouterr()  # clear the upgrade's own output
+    assert cli.main(["-c", str(config), "--no-write", "check"]) == 0
+    out = capsys.readouterr().out
+    # Exactly one prefix warning in the whole report, and it is the control
+    # row's -- DEC-001's legacy prefix is honoured, not warned.
+    assert out.count("does not match this item's prefix") == 1
+    assert "FOO-001" in out
 
 
 def test_item_citation_target_must_exist(tmp_path):

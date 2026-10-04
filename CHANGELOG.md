@@ -24,7 +24,7 @@ and this project uses [Semantic Versioning](https://semver.org/).
   -- first at line 12, again at line 21. ... rename one of them, e.g. 'x' ->
   'x_2'.` A name reused across *different* items is unaffected -- scope
   still resets per item, unchanged from before.
-- **The bundled standard moves to `hardware@3`.** Six changes, arriving
+- **The bundled standard moves to `hardware@3`.** Seven changes, arriving
   together because none was ever published on its own:
     1. A new link verb, `governed_by` (inverse `governs`), authored on
        `requirement`, targeting `[requirement, bound]` -- "this specific
@@ -83,6 +83,35 @@ and this project uses [Semantic Versioning](https://semver.org/).
        `refdes-schema.yaml`. One case turns *stricter*: a retired calc unit
        spelling inside a formerly sealed entry was a warning and is now a
        build error, which `refdes calc-rewrite` can now fix.
+    7. **`decision` is retired; the history-backed `log` absorbs it**
+       (threads phase 4a, `docs/design/threads.md` §5). A verdict and a
+       design-log entry are the same thing -- a dated point on the project's
+       timeline that records what happened and why -- and the split forced
+       every decision to be authored twice: a `decision` item, plus a `log`
+       entry with a `records:` edge pointing at it. The merged `log` takes
+       over `decision`'s vocabulary: `title:` becomes `summary:`, and
+       `status`/`rationale`/`options`/`checks`, the
+       `satisfies`/`constrained_by`/`selects`/`supersedes`/`blocked_by`
+       links, `satisfying_statuses: [accepted]` and `check_severity: error`
+       all move onto `log`. `date:` is optional and `status:` has no
+       default, so entries written before the merge keep their meaning;
+       `legacy_prefixes: [DEC]` keeps migrated items' DEC ids warning-free
+       while new items mint `LOG` ids. A new link verb, `follows` (inverse
+       `followed_by`), declared on `log` and restricted to `[log]` targets,
+       is how an entry names the earlier entry it continues -- the thread
+       relation `records:`/`recorded_by` used to approximate -- and it is
+       `trace: false` like the verb it replaces. Part 5's `recorded_by:`
+       addition is superseded by this merge: `records`/`recorded_by` leave
+       the vocabulary with it. The `design-debate` preset (`debate`,
+       `option`, `claim`, `position`) retires with the type it was built
+       around; enabling it at `version: 3` is a load error naming it.
+       `refdes standard upgrade --to 3` carries a v2 project across in the
+       same refuse-and-roll-back transaction as the rest: `type: decision`
+       to `type: log`, `title:` to `summary:`, and every `records:` edge to
+       `follows:` -- kept a structured link, because structured links are
+       what the surrogate-key machinery keeps current across a target
+       rename, while a `citations: - item:` entry is bare-id data nothing
+       maintains.
 
   `refdes init` pins `version: 3` from now on. `refdes new <type>` now hints
   at `body:` after the closing fence -- it's reserved, not a schema field,
@@ -91,8 +120,10 @@ and this project uses [Semantic Versioning](https://semver.org/).
   **A project pinned at `version: 1` or `version: 2` is completely
   unaffected** and stays that way until it chooses otherwise. To move:
   `refdes standard upgrade --to 3`, which renames `text:`/`method:` to
-  `body:` in every item file that still writes them and `datasheets:` to
-  `citations:` on any component that still writes it, carries content
+  `body:` in every item file that still writes them, `datasheets:` to
+  `citations:` on any component that still writes it, and merges `decision`
+  items into `log` (retyping them, renaming `title:` to `summary:` and
+  `records:` edges to `follows:`), carries content
   hashes forward in every stamped baseline and seal, and refuses (rolling
   back) rather than silently overwriting or orphaning content on any item
   that already has body content of its own -- merge the two by hand first,

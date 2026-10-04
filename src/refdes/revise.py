@@ -734,13 +734,16 @@ def _rewrite_links_as_citations(
             resolved = item.resolved_links.get(verb, [])
             if len(resolved) != len(item.links[verb]):
                 errors.append(
-                    f"{rel}:{item.source_line} [{item.id}] -- cannot convert {verb}: "
-                    "because a target did not resolve"
+                    f"{rel}:{item.source_line} [{item.id}] -- cannot convert the "
+                    f"{verb}: link because one of its targets did not resolve"
                 )
                 continue
             hits = [i for i, line in enumerate(segment) if _field_or_link_line_re(verb).match(line)]
             if len(hits) != 1:
-                errors.append(f"{rel}:{item.source_line} [{item.id}] -- cannot locate {verb}: to convert into citations")
+                errors.append(
+                    f"{rel}:{item.source_line} [{item.id}] -- cannot find the {verb}: "
+                    "link to convert into a citation"
+                )
                 continue
             i = hits[0]
             line = segment[i]
@@ -764,13 +767,20 @@ def _rewrite_links_as_citations(
             if _field_or_link_line_re("citations").match(line)
         ]
         if len(citations) > 1:
-            errors.append(f"{rel}:{item.source_line} [{item.id}] -- multiple citations: fields")
+            errors.append(
+                f"{rel}:{item.source_line} [{item.id}] -- this item has more than "
+                "one citations: field, so there is no single set to add to"
+            )
             continue
         if citations:
             i, line = citations[0]
             indent = len(line) - len(line.lstrip())
             if line.split(":", 1)[1].strip() not in ("", "[]"):
-                errors.append(f"{rel}:{item.source_line} [{item.id}] -- convert flow-style citations: to block style before upgrade")
+                errors.append(
+                    f"{rel}:{item.source_line} [{item.id}] -- the citations: field "
+                    "is written in flow style; convert it to block style before "
+                    "running the upgrade"
+                )
                 continue
             if line.split(":", 1)[1].strip() == "[]":
                 segment[i] = line.split(":", 1)[0] + ":"
@@ -786,7 +796,11 @@ def _rewrite_links_as_citations(
             # A new field uses the indentation of this item's authored keys.
             key_line = next((line for line in segment if _field_or_link_line_re("id").match(line)), None)
             if key_line is None:
-                errors.append(f"{rel}:{item.source_line} [{item.id}] -- cannot locate item id to add citations:")
+                errors.append(
+                    f"{rel}:{item.source_line} [{item.id}] -- cannot find this "
+                    "item's id: line, which is where the new citations: field "
+                    "would be placed"
+                )
                 continue
             key_indent = len(key_line) - len(key_line.lstrip())
             # Sequence items write '- id:'; following fields align under id.

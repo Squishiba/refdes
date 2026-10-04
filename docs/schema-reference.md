@@ -319,6 +319,7 @@ types:
 | Key | Default | Purpose |
 |---|---|---|
 | `prefix` | first 3 letters, uppercased | ID prefix when a list file gives none |
+| `legacy_prefixes` | `[]` | Prefixes items of this type may already carry without the prefix-mismatch warning — the retired prefix a merged type inherits (hardware@3's `log` carries `DEC` for items migrated from the retired `decision`). Honoured only for ids that already start with it; never used to mint new ids |
 | `label` | title-cased name | Display name |
 | `plural` | title-cased `label` + `s` | Display name for a collection of this type; required alongside `label` under `extends` |
 | `append_only` | `false` | Seal items of this type after first build |

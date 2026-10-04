@@ -85,9 +85,10 @@ types:
   inherited one, a new key adds one, and `field: null` removes it. A field's
   own spec is never partially merged — redeclaring `status` means redeclaring
   every key on it (`choices:` included), not just the ones you're changing.
-- Every other type-level scalar (`label`, `prefix`, `check_severity`,
-  `coverable`, `coverable_statuses`, `append_only`, ...) is replaced wholesale
-  when the project gives it, left untouched otherwise.
+- Every other type-level scalar (`label`, `prefix`, `legacy_prefixes`,
+  `check_severity`, `coverable`, `coverable_statuses`, `append_only`, ...)
+  is replaced wholesale when the project gives it, left untouched
+  otherwise.
 - Removing something the config still relies on is a load-time error, not a
   silent gap: `types.component: null` fails the build if anything still
   declares `selects: [component]`, naming both sides.
@@ -523,12 +524,31 @@ nothing.
    stops a group from discharging its members' obligations by being satisfied
    itself, which is the failure mode this addition was framed against.
 
+7. **`decision` is retired; the history-backed `log` absorbs it** (threads
+   phase 4a). A verdict is a dated point on the project's timeline — the
+   same kind of thing a log entry always was — so the two types merged:
+   `decision`'s `title:` becomes `log`'s `summary:`, and its
+   `status`/`rationale`/`options`/`checks` fields, its
+   `satisfies`/`constrained_by`/`selects`/`supersedes`/`blocked_by` links,
+   `satisfying_statuses: [accepted]` and `check_severity: error` all live
+   on `log` now. `date:` is optional and `status:` has no default, so
+   pre-merge entries keep their meaning, and `legacy_prefixes: [DEC]` on
+   the type keeps migrated DEC ids warning-free. The new `follows` link
+   verb (inverse `followed_by`, `trace: false`, `[log]` targets) is how an
+   entry names the earlier entry it continues — the thread relation
+   `records:` used to approximate — and `records`/`recorded_by` leave the
+   vocabulary with the retired type. The `design-debate` preset retires
+   too: enabling it at `version: 3` is a load error naming it.
+
 `hardware@1` and `@2` resolve exactly as they always have — including the
 verb, which those two still spell `equivalent`.
 
 `refdes standard upgrade --to 3` renames `text:`/`method:` to `body:` and the
 `equivalent` link verb to `drop_in:` in every item file that still writes
-them. Changes 1 and 2 need no migration —
+them, and retypes `decision` items as `log` — `title:` renamed to
+`summary:`, and every `records:` edge rewritten to `follows:`, kept a
+structured link because that is the spelling the surrogate-key machinery
+keeps current across a target rename. Changes 1 and 2 need no migration —
 a widened target list or a new field/link accepts everything a narrower one
 already did, so there's nothing existing to rename. The upgrade refuses
 (rolling back) rather than silently overwriting or orphaning content on any

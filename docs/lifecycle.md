@@ -121,7 +121,7 @@ Consider recording this in the design log, e.g.:
     date: 2026-08-17
     summary: Released rev-b — sent to fab.
     citations:
-      - item: DEC-A-0NN  # an earlier log entry this release turned on
+      - item: LOG-A-0NN  # an earlier log entry this release turned on
 ```
 
 Nothing writes that log entry for you — see [After a
