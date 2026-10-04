@@ -35,8 +35,9 @@ _NAMESPACE_LABEL = {
 
 def resolve_namespaces(
     raw: dict[str, Any], require_rejection_rationale: bool
-) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], list[str]]:
-    """Return (sets, link_types, types, warnings) as plain dicts, fully merged.
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], list[str], list[str]]:
+    """Return (sets, link_types, types, warnings, sealing_optins) as plain
+    dicts, fully merged.
 
     The three namespaces of `refdes-schema.yaml`, resolved base -> presets ->
     project overlay. Types come back `include:`-free; the sets are the
@@ -47,6 +48,11 @@ def resolve_namespaces(
     `standard:` absent, `None`, or the string "none" is the explicit escape
     hatch (docs/design/standard-library.md §3): today's fully self-declared
     behavior, sets/include still available for the project's own types.
+
+    `sealing_optins` is `build_sealing_optins`'s answer for this project -- the
+    one place that has the standard's own value and the project's override in
+    hand at the same time, which is what makes "the overlay moved this one"
+    knowable at all.
     """
     standard_cfg = raw.get("standard", "none")
     if standard_cfg is None:
@@ -83,7 +89,9 @@ def resolve_namespaces(
 
     types = _resolve_extends(types, sets)
 
-    return sets, link_types, types, warnings
+    sealing_optins = build_sealing_optins(base_types, raw.get("types") or {}, types)
+
+    return sets, link_types, types, warnings, sealing_optins
 
 
 def resolve_schema(
@@ -91,10 +99,60 @@ def resolve_schema(
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """The two-value form of `resolve_namespaces`, for callers that have no
     use for the set namespace."""
-    _sets, link_types, types, _warnings = resolve_namespaces(
+    _sets, link_types, types, _warnings, _optins = resolve_namespaces(
         raw, require_rejection_rationale
     )
     return link_types, types
+
+
+def build_sealing_optins(
+    base_types: dict[str, Any],
+    project_types_raw: dict[str, Any],
+    resolved_types: dict[str, Any],
+) -> list[str]:
+    """Type names the project's own overlay opts back into `sealing: build`.
+
+    `hardware@3`'s `log` declares `sealing: history`, which drops the
+    build-time hash lock: editing an entry stops being a build error and
+    becomes a warning (docs/design-log.md "History-backed types"). Three lines
+    in `refdes-schema.yaml` --
+
+        types:
+          log:
+            sealing: build
+
+    -- put that lock back, and run-5 F3's complaint is that nothing in the
+    tool's output ever said so: "The only way to confirm it took effect is to
+    edit an entry and see whether the build fails ... a user whose *intent* was
+    the overlay but who forgot it has no way to discover that either", since a
+    project that never opted in looks identical to one that decided to. This
+    is the fact `check`/`build` announce, and it names the file because the
+    file is where the decision lives.
+
+    Only a type the standard had actually moved *off* build counts. `build` is
+    the engine default, so a project declaring it for a type of its own -- or
+    for a subtype, which never inherits `sealing:` (docs/schema-reference.md)
+    -- has changed nothing and must not be told it changed something. A type
+    whose resolved spec is no longer `append_only` is skipped too: sealing
+    names what backs an append-only type's guarantee (schema.py's own rule), so
+    there is no lock there to have come back.
+    """
+    opted: list[str] = []
+    for tname, traw in (project_types_raw or {}).items():
+        if not isinstance(traw, dict):
+            continue  # `types.<name>: null` removes the type; nothing opted in
+        if traw.get("sealing") != SEALING_BUILD:
+            continue
+        base = base_types.get(tname)
+        if not isinstance(base, dict):
+            continue  # the project's own type: `build` is the default, not a switch
+        if base.get("sealing", SEALING_BUILD) == SEALING_BUILD:
+            continue  # the overlay only restates the standard; nothing moved
+        resolved = resolved_types.get(tname)
+        if not isinstance(resolved, dict) or not resolved.get("append_only", False):
+            continue
+        opted.append(tname)
+    return sorted(opted)
 
 
 # ------------------------------------------------------------- loading the bundle

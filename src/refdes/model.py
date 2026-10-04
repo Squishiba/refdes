@@ -970,6 +970,17 @@ class Project:
     # pinned version produced the types/link_types it already has in hand.
     standard_base: str = ""
     standard_version: int | None = None
+    # Types this project's own `refdes-schema.yaml` opted back into
+    # `sealing: build` over the standard's `sealing: history` -- sorted names,
+    # empty for the overwhelming majority of projects. The resolved `types:`
+    # cannot tell the two states apart (both read `sealing == 'build'`), and
+    # the difference is a decision the author made in a file, so it is recorded
+    # at the one moment both sides are in hand: `standards.build_sealing_optins`,
+    # through `resolve_namespaces`. `check` and `build` say it out of that --
+    # run-5 F3, where an overlay that changes what an edit to a log entry costs
+    # reported nothing, and a forgotten overlay was indistinguishable from a
+    # deliberate history-backed project.
+    sealing_optins: list[str] = field(default_factory=list)
 
     @property
     def subtype_map(self) -> dict[str, set[str]]:
