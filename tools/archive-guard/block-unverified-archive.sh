@@ -113,7 +113,9 @@ verify_worktree() {
 
   git -C "$cwd" rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 0
 
-  dirty="$(git -C "$cwd" status --short 2>/dev/null || echo UNKNOWN)"
+  # Untracked files do not count: the owner decided a scratch or log file alone
+  # is not a reason to refuse. Tracked edits still are.
+  dirty="$(git -C "$cwd" status --short --untracked-files=no 2>/dev/null || echo UNKNOWN)"
   if [ "$dirty" = "UNKNOWN" ]; then
     deny "git status failed in $cwd -- cannot verify this worktree is clean, so refusing. Check manually before archiving."
   fi
