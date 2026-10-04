@@ -21,8 +21,8 @@ evaluation subsequently consumes that lockfile record. It never parses a
 spreadsheet, netlist, or schematic during `check` or `build`.
 
 **V1 is CSV only.** CSV uses a fixed `key`/`value` table contract, UTF-8 with an
-optional BOM, and the standard library. XLSX is an optional `openpyxl` reader in
-a later minor release, behind an extra dependency. Reader registration is an
+optional BOM, and the standard library. The XLSX follow-on is now implemented
+as an optional `openpyxl` reader behind the `xlsx` extra. Reader registration is an
 internal extension seam, not an entry-point plugin API. EDA readers and
 schematic drift checks are deferred; their correct first product is a comparison
 against a refdes value, not a way to make a schematic authoritative over a
@@ -424,6 +424,13 @@ currently used, and avoids needless I/O.
 
 ## 4. XLSX reader: optional follow-on
 
+**Implementation status:** shipped in the follow-on XLSX slice. The reader is
+`XlsxReader` in `src/refdes/sources.py`; `pyproject.toml` declares the optional
+`xlsx` extra. The fetch coordinator in `src/refdes/citations.py` still owns
+file hashing and lockfile writes for both CSV and XLSX.
+Enumerating XLSX names in the browser picker remains separate editor work;
+this reader implements source extraction and pinning.
+
 ### Recommendation
 
 Implement XLSX only after CSV is proven in a real project, as an optional
@@ -443,9 +450,8 @@ decimal derived from the returned Python numeric value and rejects text,
 boolean, date/time, error, blank, formula-without-cache, multi-cell ranges, and
 external references.
 
-`openpyxl` is not currently a project dependency; `pyproject.toml:34-42` lists
-only four runtime dependencies and no `xlsx` extra. This feature therefore does
-not exist today.
+`openpyxl` is an optional dependency under `refdes[xlsx]`, not a core
+dependency. Without it, fetch reports the extra to install.
 
 ### Verified formula-cache behavior
 
@@ -824,7 +830,7 @@ source-derived `Value` passed as an ordinary argument.
 
 ### Later
 
-- [ ] Optional `xlsx` extra using workbook- and sheet-scoped, one-cell defined
+- [x] Optional `xlsx` extra using workbook- and sheet-scoped, one-cell defined
   names and cached values only.
 - [ ] Separate `source_checks:` drift-check contract and first LTspice/CSV
   BOM/netlist reader where a real project provides fixtures.

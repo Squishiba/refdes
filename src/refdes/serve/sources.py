@@ -28,10 +28,10 @@ applies:
   rules -- the citation is this item's own, and the bytes are the pinned ones.
   The path a payload carries back is the canonical project-relative one the
   local case returns, or the URL as the citation spells it in the remote case.
-- **Only a file with a registered reader.** Dispatch is `sources.reader_for`
-  by extension, exactly as extraction dispatches. A cited `.xlsx`, `.py` or
-  extensionless file is refused with the registry's own words and is never
-  opened; there is no fallback text parse here either. A cited `.pdf` is
+- **Only a file whose registered reader can list entries.** Dispatch is
+  `sources.reader_for` by extension, exactly as extraction dispatches. A cited
+  `.xlsx` has an extractor but no picker listing yet; `.py` and extensionless
+  files have no reader. None is opened by this keyed-file picker. A cited `.pdf` is
   refused too when the `refdes[pdf]` extra is not installed, with that extra's
   install hint rather than as an unhandled file type.
 - **Bounded.** The caps live in `refdes.sources`, where the file is read, so
@@ -664,6 +664,10 @@ def files_payload(project: Project, item: Item) -> dict:
             reader = sources_mod.reader_for(canon)
         except sources_mod.SourceExtractionError as exc:
             problem(canon, "; ".join(exc.problems))
+            continue
+        if not callable(getattr(reader, "list_entries", None)):
+            problem(canon, f"{canon}: the {reader.name} reader can extract named "
+                    "keys but cannot list a file's entries")
             continue
         record = records.get(canon) or {}
         files.append(_file_entry(

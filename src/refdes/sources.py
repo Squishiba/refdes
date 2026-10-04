@@ -43,6 +43,7 @@ from __future__ import annotations
 
 import csv
 import difflib
+import importlib
 import importlib.util
 import math
 import re
@@ -54,6 +55,7 @@ from dataclasses import dataclass, replace
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Protocol
+from zipfile import BadZipFile
 
 
 class SourceExtractionError(Exception):
@@ -507,6 +509,130 @@ def _header_column(header, name, label, line, problems) -> int:
             "exactly one is required"
         )
     return -1
+
+
+# --------------------------------------------------------------------------- XLSX
+
+class XlsxReader:
+    """One finite numeric cell selected by an Excel defined name (§4)."""
+
+    name = "xlsx"
+    extensions = (".xlsx",)
+
+    def extract(
+        self,
+        path: Path,
+        requests: Collection[SourceRequest],
+        *,
+        label: str | None = None,
+    ) -> dict[str, ExtractedSource]:
+        label = label if label else path.as_posix()
+        try:
+            openpyxl = importlib.import_module("openpyxl")
+        except ModuleNotFoundError as exc:
+            if exc.name != "openpyxl":
+                raise
+            raise SourceExtractionError([
+                f"{label}: the xlsx source reader needs the optional XLSX extra: "
+                'install with pip install "refdes[xlsx]"'
+            ]) from exc
+
+        try:
+            workbook = openpyxl.load_workbook(path, data_only=True, keep_links=False)
+        except OSError as exc:
+            raise _cannot_read(label, exc) from exc
+        except (BadZipFile, ValueError, TypeError, KeyError) as exc:
+            raise SourceExtractionError([
+                f"{label}: cannot read XLSX workbook: {exc}"
+            ]) from exc
+        try:
+            problems: list[str] = []
+            out: dict[str, ExtractedSource] = {}
+            for key in sorted({r.key for r in requests}):
+                prefix = f"{label}: key {key!r}: "
+                if "!" in key:
+                    scope, name = key.split("!", 1)
+                    if scope not in workbook:
+                        problems.append(prefix + f"sheet {scope!r} does not exist")
+                        continue
+                    defined = workbook[scope].defined_names.get(name)
+                else:
+                    defined = workbook.defined_names.get(key)
+                    if defined is None:
+                        found = [
+                            sheet for sheet in workbook.sheetnames
+                            if workbook[sheet].defined_names.get(key) is not None
+                        ]
+                        if len(found) > 1:
+                            problems.append(
+                                prefix + "sheet-scoped name is ambiguous (defined on: "
+                                + ", ".join(map(repr, found)) + "); qualify the key with a sheet"
+                            )
+                            continue
+                        if found:
+                            defined = workbook[found[0]].defined_names[key]
+                if defined is None:
+                    problems.append(prefix + "no defined name has this key")
+                    continue
+
+                try:
+                    destinations = list(defined.destinations)
+                except (ValueError, TypeError, AttributeError) as exc:
+                    problems.append(prefix + f"invalid defined-name destination: {exc}")
+                    continue
+                if len(destinations) != 1:
+                    problems.append(prefix + "defined name must refer to exactly one cell")
+                    continue
+                sheet, address = destinations[0]
+                if "[" in sheet or "]" in sheet or "[" in defined.attr_text:
+                    problems.append(prefix + "external workbook references are not supported")
+                    continue
+                if sheet not in workbook:
+                    problems.append(prefix + f"destination sheet {sheet!r} does not exist")
+                    continue
+                try:
+                    from openpyxl.utils.cell import range_boundaries
+
+                    col1, row1, col2, row2 = range_boundaries(address)
+                    if None in (col1, row1, col2, row2) or (col1, row1) != (col2, row2):
+                        raise ValueError("not a single cell")
+                    cell = workbook[sheet].cell(row1, col1)
+                except (ValueError, TypeError) as exc:
+                    problems.append(prefix + f"defined name must refer to one cell: {exc}")
+                    continue
+
+                raw = cell.value
+                if raw is None:
+                    # data_only=True hides the formula itself. Reopen only this
+                    # exceptional case to give the author the actionable cache hint.
+                    formula_book = openpyxl.load_workbook(path, data_only=False, keep_links=False)
+                    try:
+                        is_formula = formula_book[sheet].cell(row1, col1).data_type == "f"
+                    finally:
+                        formula_book.close()
+                    if is_formula:
+                        problems.append(
+                            prefix + f"{sheet}!{cell.coordinate} has no cached numeric value; "
+                            "open the workbook in a calculating application, save it, then "
+                            "fetch --update"
+                        )
+                    else:
+                        problems.append(prefix + f"{sheet}!{cell.coordinate} is blank")
+                    continue
+                if isinstance(raw, bool) or not isinstance(raw, (int, float, Decimal)):
+                    problems.append(prefix + f"{sheet}!{cell.coordinate} is not a numeric cell")
+                    continue
+                try:
+                    value = parse_decimal(str(raw))
+                except ValueError as exc:
+                    problems.append(prefix + f"{sheet}!{cell.coordinate}: {exc}")
+                    continue
+                out[key] = ExtractedSource(self.name, key, value)
+            if problems:
+                raise SourceExtractionError(problems)
+            return out
+        finally:
+            workbook.close()
 
 
 # ----------------------------------------------------------------------- PDF
@@ -1289,4 +1415,5 @@ def page_candidates(
 
 
 register(CsvReader())
+register(XlsxReader())
 register_pdf_reader()
