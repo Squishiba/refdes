@@ -332,7 +332,7 @@ def validate_items(project: Project) -> None:
                         if not isinstance(entry, dict):
                             _field_error(
                                 project, item, fname,
-                                f"{fname}[{index}]: each citation needs a 'path'",
+                                f"{fname}[{index}]: each citation needs a 'path' or 'item'",
                             )
                             continue
                         if "url" in entry:
@@ -362,12 +362,26 @@ def validate_items(project: Project) -> None:
                                 f"-> @3 content)",
                             )
                             continue
-                        if not entry.get("path"):
+                        if "item" in entry:
+                            target = entry["item"]
+                            if not isinstance(target, str) or not target.strip():
+                                _field_error(
+                                    project, item, fname,
+                                    f"{fname}[{index}]: item: must name an item id",
+                                )
+                            elif project.item_by_id(target) is None:
+                                _field_error(
+                                    project, item, fname,
+                                    f"{fname}[{index}]: item: {target!r} does not exist",
+                                )
+                        if not entry.get("path") and not entry.get("item"):
                             _field_error(
                                 project, item, fname,
-                                f"{fname}[{index}]: each citation needs a 'path'",
+                                f"{fname}[{index}]: each citation needs a 'path' or 'item'",
                             )
                             continue
+                        if not entry.get("path"):
+                            continue  # item-only citations have no document to verify
                         try:
                             kind, _canon = citations_mod.classify(
                                 project.root, str(entry["path"])

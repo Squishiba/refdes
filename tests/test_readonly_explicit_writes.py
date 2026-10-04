@@ -184,7 +184,10 @@ def preset_project(tmp_path):
     configuration error and never reaches its writes."""
     from refdes import scaffold as scaffold_mod
 
-    scaffold_mod.init(str(tmp_path), presets=["design-debate"])
+    scaffold_mod.init(str(tmp_path))
+    config = tmp_path / "refdes-project.yaml"
+    config.write_text(config.read_text().replace("version: 3", "version: 2"))
+    scaffold_mod.add_preset(str(tmp_path), "design-debate")
     return tmp_path
 
 
@@ -197,6 +200,8 @@ def unselected_preset_project(tmp_path):
     from refdes import scaffold as scaffold_mod
 
     scaffold_mod.init(str(tmp_path))
+    config = tmp_path / "refdes-project.yaml"
+    config.write_text(config.read_text().replace("version: 3", "version: 2"))
     return tmp_path
 
 

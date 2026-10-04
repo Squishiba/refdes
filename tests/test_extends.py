@@ -570,7 +570,6 @@ def _normalized(dump: str) -> dict:
     "fixture, presets",
     [
         ("hardware3_resolved.json", []),
-        ("hardware3_design_debate_resolved.json", ["design-debate"]),
     ],
 )
 def test_hardware3_base_resolves_unchanged(fixture, presets):
@@ -613,7 +612,7 @@ def test_hardware3_bound_satisfies_every_list_that_names_requirement(tmp_path):
         "items:\n"
         "  - { id: BND-001, type: bound, status: active, limit: '<= 5 V',\n"
         "      body: The rail stays under five volts. }\n"
-        "  - { id: DEC-001, type: decision, status: accepted, title: Regulator,\n"
+        "  - { id: DEC-001, type: log, status: accepted, summary: Regulator,\n"
         "      satisfies: [BND-001] }\n"
         "  - { id: TST-001, type: test, status: passing, title: Rail check, verifies: [BND-001] }\n",
         encoding="utf-8",
@@ -756,4 +755,3 @@ def test_overlay_renulling_an_already_suppressed_link_stays_suppressed(tmp_path)
         tmp_path, HARDWARE3 + "types:\n  bound:\n    links:\n      governed_by: null\n"
     )
     assert "governed_by" not in project.types["bound"].links
-

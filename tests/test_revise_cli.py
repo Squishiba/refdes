@@ -331,10 +331,10 @@ def test_cli_release_log_nudge_ids_are_marked_placeholders(lifecycle_project, ca
     assert "#" in id_line, "the placeholder is not marked as one"
     assert "LOG-..." not in text
 
-    records_line = next(line for line in block if "records:" in line)
-    recorded = re.search(r"records: \[(.*)\]", records_line).group(1).strip()
+    citation_line = next(line for line in block if "- item:" in line)
+    recorded = citation_line.split("- item:", 1)[1].split("#", 1)[0].strip()
     assert ids_mod.split_id(recorded) is None, f"{recorded} is a real id shape"
-    assert "#" in records_line, "the placeholder is not marked as one"
+    assert "#" in citation_line, "the placeholder is not marked as one"
 
 
 @pytest.mark.parametrize(

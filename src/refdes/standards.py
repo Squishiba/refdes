@@ -155,24 +155,25 @@ def _load_standard(
         origin[("types", name)] = f"the {base_name} standard"
 
     # The require_rejection_rationale toggle applies to the *bundled*
-    # decision.rationale before any preset or project overlay is merged in --
+    # the verdict type's rationale before any preset or project overlay is merged in --
     # see docs/design/standard-library.md §2 "The toggle." A project can still
     # override rationale's required_when directly regardless of this flag; that
     # raw override path is untouched by this.
     if not require_rejection_rationale:
-        decision = types.get("decision")
-        if isinstance(decision, dict):
-            fields = decision.get("fields") or {}
+        verdict_name = "decision" if "decision" in types else "log"
+        verdict = types.get(verdict_name)
+        if isinstance(verdict, dict):
+            fields = verdict.get("fields") or {}
             rationale = fields.get("rationale")
             if isinstance(rationale, dict) and "required_when" in rationale:
                 rationale = dict(rationale)
                 del rationale["required_when"]
                 fields = dict(fields)
                 fields["rationale"] = rationale
-                decision = dict(decision)
-                decision["fields"] = fields
+                verdict = dict(verdict)
+                verdict["fields"] = fields
                 types = dict(types)
-                types["decision"] = decision
+                types[verdict_name] = verdict
 
     for preset_name in presets:
         preset_path = os.path.join(version_dir, "presets", f"{preset_name}.yaml")

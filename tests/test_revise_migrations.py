@@ -570,8 +570,8 @@ def _cmp_bnd_project(tmp_path, *, decision_extra="", component_extra=""):
     )
     if decision_extra:
         (items / "dec.yaml").write_text(
-            "defaults: { type: decision, prefix: DEC }\n"
-            f"items:\n  - id: DEC-001\n    title: Driver selection.\n{decision_extra}",
+            "defaults: { type: log, prefix: DEC }\n"
+            f"items:\n  - id: DEC-001\n    summary: Driver selection.\n{decision_extra}",
             encoding="utf-8",
         )
     if component_extra:

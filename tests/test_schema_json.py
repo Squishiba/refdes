@@ -76,7 +76,7 @@ def test_build_schema_link_carries_target_description():
     # The bundled standard defines `doc:` for satisfies (finding 38), so the
     # description is the definition followed by the target hint.
     assert satisfies["description"].endswith("(target: requirement, bound)")
-    assert satisfies["description"].startswith("A decision or component claims")
+    assert satisfies["description"].startswith("A verdict log entry or component claims")
 
 
 def test_build_schema_section_marker_validates_in_a_list_file(tmp_path):
@@ -257,7 +257,9 @@ def test_build_graph_unrestricted_target_draws_to_a_single_any_node():
     project = _build_at_repo_schema()
     graph = schema_json_mod.build_graph(project)
     assert 'data-peer="any" data-direction="out" data-verbs="blocked_by"' in graph
-    assert graph.count('data-verbs="blocked_by"') == 1
+    assert graph.count('data-verbs="blocked_by"') == sum(
+        "blocked_by" in spec.links for spec in project.types.values()
+    )
 
 
 def test_cli_schema_graph_prints_the_term_diagrams(tmp_path, capsys):

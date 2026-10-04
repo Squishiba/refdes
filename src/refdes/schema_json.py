@@ -85,6 +85,7 @@ _FIELD_TYPE_MAP: dict[str, dict[str, Any]] = {
             "type": "object",
             "properties": {
                 "path": {"type": "string"},
+                "item": {"type": "string"},
                 "rev": {"type": "string"},
                 "page": {"type": "string"},
                 "section": {"type": "string", "minLength": 1},
@@ -92,7 +93,7 @@ _FIELD_TYPE_MAP: dict[str, dict[str, Any]] = {
                 "keep_copy": {"type": "boolean"},
                 "id": {"type": "string"},
             },
-            "required": ["path"],
+            "anyOf": [{"required": ["path"]}, {"required": ["item"]}],
             "additionalProperties": False,
         },
     },

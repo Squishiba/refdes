@@ -83,13 +83,13 @@ types:
 PRESET_ON = """\
 site: { title: "Preset Diagram", out: _site }
 id: { width: 3 }
-standard: { base: hardware, version: 3, presets: [design-debate] }
+standard: { base: hardware, version: 2, presets: [design-debate] }
 """
 
 PRESET_OFF = """\
 site: { title: "Preset Diagram", out: _site }
 id: { width: 3 }
-standard: { base: hardware, version: 3, presets: [] }
+standard: { base: hardware, version: 2, presets: [] }
 """
 
 

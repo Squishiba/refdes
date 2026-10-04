@@ -570,7 +570,8 @@ def _run_stamp(args, kind: str) -> int:
         print("  - id: LOG-A-0NN  # placeholder: your log prefix, next free number")
         print(f"    date: {outcome.stamped_at[:10]}")
         print(f"    summary: Released {args.name} — sent to fab.")
-        print("    records: [DEC-A-0NN]  # the decision(s) this release turned on")
+        print("    citations:")
+        print("      - item: DEC-A-0NN  # an earlier log entry this release turned on")
     return 0
 
 
@@ -2211,7 +2212,7 @@ def main(argv: list[str] | None = None) -> int:
         "from the identical resolved schema 'refdes schema --json' emits -- not "
         "a second, hand-maintained template that could drift from it. Prints to "
         "stdout; redirect it where you want the item to live, e.g. "
-        "'refdes new decision > items/power/dec-005.md'.",
+        "'refdes new log > items/power/log-005.md'.",
     )
     p_new.add_argument("type", help="an item type in the merged schema, standard or project-defined")
     p_new.add_argument(
@@ -2364,8 +2365,8 @@ def main(argv: list[str] | None = None) -> int:
     p_revise.add_argument(
         "mapping",
         help=(
-            "path to a YAML file with types:/fields:/links:/prefixes:/"
-            "citation_keys: renames -- any other top-level section is refused"
+            "path to a YAML file with types:/merge_types:/fields:/links:/prefixes:/"
+            "citation_keys:/citation_links: changes -- any other top-level section is refused"
         ),
     )
     p_revise.add_argument(
