@@ -233,6 +233,9 @@ class ItemType:
     name: str
     prefix: str
     label: str
+    # Former display prefixes retained by a merged type. New ids still use
+    # `prefix`; existing ids keep their spelling through standard upgrades.
+    legacy_prefixes: list[str] = field(default_factory=list)
     plural: str = ""
     # The one type this extends (docs/design/extends.md), "" when it extends
     # nothing. Single level: never a type that itself extends. A subtype

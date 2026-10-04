@@ -127,14 +127,13 @@ def test_new_list_skeleton(tmp_path, capsys):
     assert "title" in entry
     assert "status" not in entry
 
-    # A type with no status field (hardware@3's log) emits no status: line
-    # at all and no dead default for a skeleton that can't use one.
+    # A type with no status default emits no status: line in its skeleton.
     status = cli_mod.main(["-c", config, "new", "log", "--list"])
     assert status == 0
     out_log = capsys.readouterr().out
     assert "type: log" in out_log
-    assert "date:  # required" in out_log
-    assert "status" not in out_log
+    assert "summary:  # required" in out_log
+    assert "  status:" not in out_log
 
     # new writes nothing with or without --no-write, so composing the print
     # with a redirect is safe and --no-write keeps it side-effect-free.
@@ -230,8 +229,8 @@ def test_selects_rejected_component_warns(tmp_path):
         tmp_path,
         CANDIDATES_YAML
         + "  - id: DEC-PWR-001\n"
-        "    type: decision\n"
-        "    title: Pick the loser\n"
+        "    type: log\n"
+        "    summary: Pick the loser\n"
         "    status: accepted\n"
         "    selects: [CMP-PWR-002]\n",
     )

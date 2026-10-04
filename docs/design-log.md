@@ -1,12 +1,12 @@
 # The design log
 
-A dated, append-only record of how the design actually got where it is: the
+A history-backed, append-only record of how the design actually got where it is: the
 measurements, the dead ends, and the reasoning between a requirement being handed
 to you and a decision being made.
 
-A **decision** is the settled conclusion. A **log entry** is a step on the way to
-one. You read decisions to find out why the board is the way it is; you read the
-log in order to understand how it got there.
+A log entry can be a narrative note or a verdict. A verdict declares `status:`,
+while a note can leave it blank. A thread links successive entries with
+`follows:`; its current conclusion comes from its tip.
 
 ## Writing entries
 
@@ -32,17 +32,20 @@ items:
 
 | Field | Purpose |
 |---|---|
-| `date` | required; orders the timeline |
+| `date` | optional; records when an entry was written if known |
 | `summary` | required; the one-line version shown on the timeline |
 | `author` | who wrote it |
+| `status` | optional verdict; leave it blank for a narrative entry |
+| `citations` | document `path:` or another item's `item:` id; a dangling item id is a build error |
 | `board` | which board, when a project holds several — see below |
 | `body` | the detail — markdown, may contain calc blocks |
 
 | Link | Points at |
 |---|---|
 | `addresses` | a requirement or bound this entry works on |
-| `records` | the decision this entry led to |
+| `follows` | the earlier log entry this one continues |
 | `amends` | an earlier log entry this corrects |
+| `satisfies` | a requirement or bound addressed by an accepted verdict |
 
 ### `board` is a plain field here, not the reserved override
 
@@ -224,8 +227,7 @@ new entry that `amends` the old one — but nothing is sealed any more:
 
 - A build seals none of the type's entries, and an edit to one is **not** a
   build error. If the entry was captured into `.refdes/history/` (a
-  `follows:` successor froze an edge to it — not yet possible under
-  `hardware@3`, which declares no `follows:` — or `refdes history capture`), the
+  `follows:` successor froze an edge to it, or `refdes history capture`), the
   edit is the warning `LOG-001: edited after captured -- ...` under both
   `check` and `build`; exit codes are unchanged. An entry that was never
   captured has no snapshot to compare against, so there is nothing to compare
@@ -322,9 +324,8 @@ currently concludes, with each value attributed to the entry that concluded it,
 and the whole thread as a timeline. A thread that has forked would show no
 conclusion at all, only the open tips.
 
-This is not available today: no bundled standard declares `follows:`, so
-writing it in an item is an unknown-link error. The thread behaviour ships
-with the threads work, covered in full in [threads](design/threads.md).
+The bundled standard declares `follows:`. The thread conclusion and timeline
+page described above are later threads work; see [threads](design/threads.md).
 
 ## Coverage
 
@@ -351,7 +352,8 @@ Consider recording this in the design log, e.g.:
   - id: LOG-A-0NN  # placeholder: your log prefix, next free number
     date: 2026-08-17
     summary: Released rev-b — sent to fab.
-    records: [DEC-A-0NN]  # the decision(s) this release turned on
+    citations:
+      - item: DEC-A-0NN  # an earlier log entry this release turned on
 ```
 
 Both ids are placeholders and say so: `LOG-A-0NN` is not shaped like a display
@@ -359,7 +361,7 @@ id (`ids.split_id` wants a trailing `-<digits>`), so a copy-paste that skips
 substituting them fails the id check rather than minting something you then
 have to `refdes revise` away.
 
-Write the entry the same way you'd write any other — `records:` the
-decision(s) the release actually turned on, and say in `summary:` what
+Write the entry the same way you'd write any other — cite the earlier log
+entry or entries the release actually turned on, and say in `summary:` what
 shipped and why, the same as any other point on the timeline. See
 [lifecycle](lifecycle.md) for `revision`/`release` themselves.

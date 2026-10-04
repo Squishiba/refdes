@@ -633,7 +633,7 @@ class TestConfigWrites:
     # types would then come from the bundled standard instead of the fixture.
     CONFIG = (
         "site: {title: EOL, out: _site}\n"
-        "standard: {base: hardware, version: 3, presets: []}\n"
+        "standard: {base: hardware, version: 2, presets: []}\n"
         "id: {width: 3, ledger: .refdes/ids.yaml}\n"
     )
 
@@ -689,7 +689,7 @@ class TestConfigWrites:
             else:
                 assert b"\r\n" not in raw, raw
             # And nothing but the number moved.
-            assert raw == before.replace(b"version: 3", b"version: 99")
+            assert raw == before.replace(b"version: 2", b"version: 99")
 
 
 class TestEditorCreate:

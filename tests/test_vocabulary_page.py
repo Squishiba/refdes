@@ -219,11 +219,16 @@ def test_examples_render_in_both_renderers(vocab_project):
     assert "```yaml" in md
 
 
-def test_bundled_standard_terms_have_hand_written_examples():
+def test_bundled_standard_terms_have_hand_written_examples(tmp_path):
     """Every hardware@3 term the pinned schema resolves is covered by the
     hand-written EXAMPLES table -- a standard term silently falling back to
     the generic generator (a preset verb, a renamed term) is a gap to close."""
-    project = load_project(config_path=os.path.join(REPO, "refdes-project.yaml"))
+    write_project_config(
+        tmp_path,
+        "site: { title: Bundled vocabulary }\n"
+        "standard: { base: hardware, version: 3 }\n",
+    )
+    project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
     for e in vocabulary.entries(project).terms():
         assert (e.kind, e.name) in vocabulary.EXAMPLES, (
             f"{e.kind} term {e.name!r} has no hand-written example"

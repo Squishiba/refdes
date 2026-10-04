@@ -534,7 +534,8 @@ Consider recording this in the design log, e.g.:
   - id: LOG-A-0NN  # placeholder: your log prefix, next free number
     date: 2026-08-17
     summary: Released rev-b — sent to fab.
-    records: [DEC-A-0NN]  # the decision(s) this release turned on
+    citations:
+      - item: DEC-A-0NN  # an earlier log entry this release turned on
 ```
 
 (As shipped: the two ids are marked as placeholders in the line itself. The

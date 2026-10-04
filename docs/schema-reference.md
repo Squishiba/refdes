@@ -594,36 +594,6 @@ status: draft  # choices: draft, active, retired
 <!-- required: the content itself goes here. -->
 ```
 
-#### `decision` — hardware@3
-
-```yaml
----
-id:
-type: decision
-# source:  # text
-# note:  # text
-# tags:  # list
-# owner:  # person
-# last_reviewed:  # date
-# citations:  # citations
-title:  # required -- text
-status: proposed  # choices: proposed, in_progress, accepted, on_hold, rejected, superseded
-# rationale:  # text; required when status is 'rejected'
-# date:  # date
-# options:  # options
-# checks:  # checks
-# part_of: []  # target: group
-# satisfies: []  # target: requirement, bound
-# constrained_by: []  # target: bound
-# supersedes: []  # target: decision
-# selects: []  # target: component
-# blocked_by: []  # target: any
-# recorded_by: []  # target: log
----
-
-<!-- optional body. -->
-```
-
 #### `test` — hardware@3
 
 ```yaml
@@ -698,12 +668,22 @@ type: log
 # source:  # text
 # note:  # text
 # tags:  # list
-date:  # required -- date
+# citations:  # citations
+# date:  # date
 summary:  # required -- text
 # author:  # person
+# status:  # choices: proposed, in_progress, accepted, on_hold, rejected, superseded
+# rationale:  # text; required when status is 'rejected'
+# options:  # options
+# checks:  # checks
+# satisfies: []  # target: requirement, bound
+# constrained_by: []  # target: bound
+# follows: []  # target: log
 # addresses: []  # target: requirement, bound
 # amends: []  # target: log
-# records: []  # target: decision
+# supersedes: []  # target: log
+# selects: []  # target: component
+# blocked_by: []  # target: any
 ---
 
 <!-- optional body. -->

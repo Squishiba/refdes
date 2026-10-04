@@ -46,7 +46,7 @@ Every term below is what the resolved **hardware@3** schema in this repo's `refd
 A numeric limit the design must respect — a voltage, a current, a tolerance. Its limit field makes it checkable by other items' checks. Counts toward coverage while active.
 
 - **Id prefix:** `BND`
-- **Pointed at by:** `addresses` from `log`; `constrained_by` from `component`, `decision`; `derives_from` from `bound`; `governed_by` from `requirement`; `refines` from `bound`; `satisfies` from `component`, `decision`; `verifies` from `test`
+- **Pointed at by:** `addresses` from `log`; `constrained_by` from `component`, `log`; `derives_from` from `bound`; `governed_by` from `requirement`; `refines` from `bound`; `satisfies` from `component`, `log`; `verifies` from `test`
 
 | Field | Definition | Type | Required |
 |---|---|---|---|
@@ -79,7 +79,7 @@ items:
 A part the design uses. A selected component closes coverage on what it satisfies, and it can carry its own checks against bounds. Drop-in and alternate claims between components are made here, not facts from a parts database.
 
 - **Id prefix:** `CMP`
-- **Pointed at by:** `alternate` from `component`; `drop_in` from `component`; `selects` from `decision`
+- **Pointed at by:** `alternate` from `component`; `drop_in` from `component`; `selects` from `log`
 
 | Field | Definition | Type | Required |
 |---|---|---|---|
@@ -88,7 +88,7 @@ A part the design uses. A selected component closes coverage on what it satisfie
 | `tags` | Free-form labels for grouping and finding items; free-text search matches tags as well as titles. Kept out of the content hash. | list | no |
 | `owner` | The person responsible for this item — who a question about it goes to. Kept out of the content hash, so ownership changes never invalidate downstream work. | person | no |
 | `last_reviewed` | The date this item was last reviewed. Bookkeeping only: kept out of the content hash. | date | no |
-| `citations` | External documents this item relies on. Each entry needs a path — an http(s) URL or a project-root-relative file — and may carry rev, page, section, part_number, keep_copy and an id for [[cite:]] references. | citations | no |
+| `citations` | Sources this item relies on. Each entry names a path (an http(s) URL or project-root-relative file) or item (another item's id); document entries may carry rev, page, section, part_number, keep_copy and an id for [[cite:]] references. | citations | no |
 | `title` | What the component is, in one line. Required. | text | yes |
 | `part_number` | The manufacturer part number. Indexed into the parts page, alongside part numbers cited inside citations entries. | text | no |
 | `refdes` | Reference designators on the board — U14, R7 — where this part is placed. Kept out of the content hash. | list | no |
@@ -109,52 +109,12 @@ items:
     status: selected
 ```
 
-### `decision`
-
-A design choice that was made — what was picked, why, and what it satisfies. A settled (accepted) decision closes coverage on what it satisfies; a failing check on a decision is an error.
-
-- **Id prefix:** `DEC`
-- **Pointed at by:** `records` from `log`; `supersedes` from `decision`
-
-| Field | Definition | Type | Required |
-|---|---|---|---|
-| `source` | Where the item's content came from — a spec section, a datasheet, a conversation. Kept out of the content hash, so correcting it never marks downstream items suspect. | text | no |
-| `note` | A free-text remark about the item's provenance, kept beside the item instead of inside its body. Kept out of the content hash. | text | no |
-| `tags` | Free-form labels for grouping and finding items; free-text search matches tags as well as titles. Kept out of the content hash. | list | no |
-| `owner` | The person responsible for this item — who a question about it goes to. Kept out of the content hash, so ownership changes never invalidate downstream work. | person | no |
-| `last_reviewed` | The date this item was last reviewed. Bookkeeping only: kept out of the content hash. | date | no |
-| `citations` | External documents this item relies on. Each entry needs a path — an http(s) URL or a project-root-relative file — and may carry rev, page, section, part_number, keep_copy and an id for [[cite:]] references. | citations | no |
-| `title` | What was decided, in one line. Required — every decision needs a label. | text | yes |
-| `status` | Where the decision stands. Only an accepted decision counts as settled and closes coverage on what it satisfies. | enum | no |
-| `rationale` | Why this decision, and why not the alternatives. Required when the decision is rejected — the reason a rejection happened is the point of recording it. | text | no |
-| `date` | When the decision was made. Kept out of the content hash, so fixing a date never marks downstream items suspect. | date | no |
-| `options` | The alternatives considered, as name / verdict / because entries. Rendered as the options-considered panel on the decision's page. | options | no |
-| `checks` | Numeric checks: each entry compares a value from this item's calc block against a bound's limit. A failed check here is reported as an error. | checks | no |
-
-**Example:**
-
-```yaml
-# A decision as a Markdown item: front matter, then the prose body.
----
-id: DEC-PWR-001
-type: decision
-title: 3V3 rail regulator topology
-status: accepted  # an accepted decision closes coverage on what it satisfies
-date: 2026-03-14
-satisfies: [REQ-PWR-002, REQ-PWR-003]
-constrained_by: [BND-THM-001]
-selects: [CMP-PWR-001]
----
-
-The 3V3 rail draws up to 1.2 A from a 9–36 V input, in a sealed enclosure.
-```
-
 ### `group`
 
 A named collection of items — 'the PCIe interface spec' — that names the collection without letting it stand in for its members. Members point here with part_of; a group never lists its members, never appears in coverage, and nothing may satisfy one.
 
 - **Id prefix:** `GRP`
-- **Pointed at by:** `part_of` from `bound`, `component`, `decision`, `requirement`, `test`
+- **Pointed at by:** `part_of` from `bound`, `component`, `requirement`, `test`
 
 | Field | Definition | Type | Required |
 |---|---|---|---|
@@ -179,19 +139,24 @@ items:
 
 ### `log`
 
-A dated entry in the design log — work done, questions raised, corrections. Entries are append-only: a correction is a new entry with amends, never a rewrite of the old one. Editing an entry is not a build error: once it has been captured into the project's history (refdes history capture), an edit is reported as edited after captured, a warning.
+A design-log entry — narrative work or a verdict. Entries are append-only in the authoring sense: corrections are new entries. Captured history records earlier content; an edit after capture is a warning.
 
 - **Id prefix:** `LOG`
-- **Pointed at by:** `amends` from `log`
+- **Pointed at by:** `amends` from `log`; `follows` from `log`; `supersedes` from `log`
 
 | Field | Definition | Type | Required |
 |---|---|---|---|
 | `source` | Where the item's content came from — a spec section, a datasheet, a conversation. Kept out of the content hash, so correcting it never marks downstream items suspect. | text | no |
 | `note` | A free-text remark about the item's provenance, kept beside the item instead of inside its body. Kept out of the content hash. | text | no |
 | `tags` | Free-form labels for grouping and finding items; free-text search matches tags as well as titles. Kept out of the content hash. | list | no |
-| `date` | When this entry was written. Required — an undated log entry cannot be ordered in time. | date | yes |
+| `citations` | Sources this item relies on. Each entry names a path (an http(s) URL or project-root-relative file) or item (another item's id); document entries may carry rev, page, section, part_number, keep_copy and an id for [[cite:]] references. | citations | no |
+| `date` | When this entry was written, if known. Older decisions may not have a date. | date | no |
 | `summary` | One-line account of what happened, shown in log listings above the body. | text | yes |
 | `author` | Who wrote the entry. | person | no |
+| `status` | A verdict when this entry declares one. Accepted entries can close coverage on what they satisfy. | enum | no |
+| `rationale` | Why this verdict was reached; required for a rejected verdict. | text | no |
+| `options` | Alternatives considered for this verdict. | options | no |
+| `checks` | Numeric checks against bounds; a failed check is an error. | checks | no |
 
 **Example:**
 
@@ -204,6 +169,11 @@ items:
     date: 2026-02-18
     summary: Took delivery of the customer spec rev D.
     addresses: [REQ-PWR-001, REQ-PWR-002]
+  - id: LOG-A-002
+    summary: Chose the 3V3 rail regulator.
+    status: accepted
+    follows: [LOG-A-001]
+    satisfies: [REQ-PWR-002]
 ```
 
 ### `requirement`
@@ -211,7 +181,7 @@ items:
 Something the design must achieve, stated as one prose body. Counts toward coverage while active; a draft or retired requirement is left out of coverage entirely.
 
 - **Id prefix:** `REQ`
-- **Pointed at by:** `addresses` from `log`; `derives_from` from `bound`; `governed_by` from `requirement`; `refines` from `requirement`; `satisfies` from `component`, `decision`; `verifies` from `test`
+- **Pointed at by:** `addresses` from `log`; `derives_from` from `bound`; `governed_by` from `requirement`; `refines` from `requirement`; `satisfies` from `component`, `log`; `verifies` from `test`
 
 | Field | Definition | Type | Required |
 |---|---|---|---|
@@ -322,11 +292,11 @@ A log entry corrects an earlier log entry. Entries are append-only, so a correct
 
 ### `blocked_by`
 
-Something is holding this decision up. Name only the immediate blocker; reports resolve the chain to its root. May point at an item of any type; a cycle is a build error.
+Something is holding this entry up. Name only the immediate blocker; reports resolve the chain to its root. May point at an item of any type; a cycle is a build error.
 
 - **Points at:** any type
 - **Inverse:** `blocks`
-- **Declared on:** `decision`
+- **Declared on:** `log`
 
 **Example:**
 
@@ -339,11 +309,11 @@ Something is holding this decision up. Name only the immediate blocker; reports 
 
 ### `constrained_by`
 
-A decision or component that must respect a bound. Traceability only — it does not close coverage on the bound; satisfies does.
+A verdict log entry or component that must respect a bound. Traceability only — it does not close coverage on the bound; satisfies does.
 
 - **Points at:** `bound`
 - **Inverse:** `constrains`
-- **Declared on:** `component`, `decision`
+- **Declared on:** `component`, `log`
 
 **Example:**
 
@@ -386,6 +356,22 @@ This component is a drop-in second source for that one — interchangeable as cl
                           # and no rationale is required
 ```
 
+### `follows`
+
+This log entry continues an earlier entry in the same thread.
+
+- **Points at:** `log`
+- **Inverse:** `followed_by`
+- **Declared on:** `log`
+
+**Example:**
+
+```yaml
+- id: LOG-A-004
+  summary: Recorded the release outcome.
+  follows: [LOG-A-003]  # the earlier entry freezes here
+```
+
 ### `governed_by`
 
 This requirement must comply with a general rule stated elsewhere — another requirement or a bound — without being a narrower version of it. Traceability only; it never feeds coverage.
@@ -410,7 +396,7 @@ This item belongs to a group. Membership is always declared by the member, never
 
 - **Points at:** `group`
 - **Inverse:** `contains`
-- **Declared on:** `bound`, `component`, `decision`, `requirement`, `test`
+- **Declared on:** `bound`, `component`, `requirement`, `test`
 
 **Example:**
 
@@ -419,25 +405,6 @@ This item belongs to a group. Membership is always declared by the member, never
 - id: REQ-DIO-003
   part_of: [GRP-IO-001]
 # GRP-IO-001 shows contains: [REQ-DIO-003] as the computed backlink.
-```
-
-### `records`
-
-A log entry records a decision — the design-log side of the decision's own recorded_by end of the same edge.
-
-- **Points at:** `decision`
-- **Inverse:** `recorded_by`
-- **Declared on:** `decision`, `log`
-
-**Example:**
-
-```yaml
-# From the log entry:
-- id: LOG-A-004
-  records: [DEC-PWR-001]
-# Or from the decision, which declares the verb under its inverse name:
-- id: DEC-PWR-001
-  recorded_by: [LOG-A-004]
 ```
 
 ### `refines`
@@ -460,11 +427,11 @@ A narrower, more detailed version of the same kind of statement: a requirement r
 
 ### `satisfies`
 
-A decision or component claims to meet a requirement or bound. This is the link that closes coverage once the claiming item reaches a satisfying status.
+A verdict log entry or component claims to meet a requirement or bound. This closes coverage once the claiming item reaches a satisfying status.
 
 - **Points at:** `bound`, `requirement`
 - **Inverse:** `satisfied_by`
-- **Declared on:** `component`, `decision`
+- **Declared on:** `component`, `log`
 
 **Example:**
 
@@ -478,11 +445,11 @@ A decision or component claims to meet a requirement or bound. This is the link 
 
 ### `selects`
 
-A decision picks a component. The component's own status marks it selected; this link records which decision made the pick. A build warns when either half is missing and the other is not.
+A verdict selects a component. The component's own status marks it selected; this link records which entry made the pick. A build warns when either half is missing and the other is not.
 
 - **Points at:** `component`
 - **Inverse:** `selected_by`
-- **Declared on:** `decision`
+- **Declared on:** `log`
 
 **Example:**
 
@@ -495,11 +462,11 @@ A decision picks a component. The component's own status marks it selected; this
 
 ### `supersedes`
 
-This decision replaces an older one. The older decision keeps its history; moving its status to superseded is your edit, not something the link does by itself. Because the two are separate claims, a build warns when this link says superseded and the target's status says something else.
+This verdict replaces an older one. The older entry keeps its history; moving its status to superseded is your edit, not something the link does by itself. A build warns when the link and target status disagree.
 
-- **Points at:** `decision`
+- **Points at:** `log`
 - **Inverse:** `superseded_by`
-- **Declared on:** `decision`
+- **Declared on:** `log`
 
 **Example:**
 
@@ -535,11 +502,11 @@ A test proves a requirement or bound. Counts toward coverage when the test's sta
 
 _No definition._
 
-- **Included by:** `component`, `decision`
+- **Included by:** `component`, `log`
 
 | Field | Definition | Type | Required |
 |---|---|---|---|
-| `citations` | External documents this item relies on. Each entry needs a path — an http(s) URL or a project-root-relative file — and may carry rev, page, section, part_number, keep_copy and an id for [[cite:]] references. | citations | no |
+| `citations` | Sources this item relies on. Each entry names a path (an http(s) URL or project-root-relative file) or item (another item's id); document entries may carry rev, page, section, part_number, keep_copy and an id for [[cite:]] references. | citations | no |
 
 **Example:**
 
@@ -559,7 +526,7 @@ types:
 
 _No definition._
 
-- **Included by:** `component`, `decision`
+- **Included by:** `component`, `log`
 
 **Example:**
 
@@ -576,7 +543,7 @@ types:
 
 _No definition._
 
-- **Included by:** `bound`, `component`, `decision`, `requirement`, `test`
+- **Included by:** `bound`, `component`, `requirement`, `test`
 
 **Example:**
 
@@ -593,7 +560,7 @@ types:
 
 _No definition._
 
-- **Included by:** `component`, `decision`, `log`, `test`
+- **Included by:** `component`, `log`, `test`
 
 **Example:**
 
@@ -608,7 +575,7 @@ types:
 
 _No definition._
 
-- **Included by:** `component`, `decision`, `test`
+- **Included by:** `component`, `test`
 
 | Field | Definition | Type | Required |
 |---|---|---|---|
@@ -629,7 +596,7 @@ types:
 
 _No definition._
 
-- **Included by:** `bound`, `component`, `decision`, `group`, `log`, `requirement`, `test`
+- **Included by:** `bound`, `component`, `group`, `log`, `requirement`, `test`
 
 | Field | Definition | Type | Required |
 |---|---|---|---|
@@ -678,7 +645,7 @@ types:
 
 _No definition._
 
-- **Included by:** `bound`, `component`, `decision`, `group`, `requirement`, `test`
+- **Included by:** `bound`, `component`, `group`, `requirement`, `test`
 
 | Field | Definition | Type | Required |
 |---|---|---|---|

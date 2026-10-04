@@ -63,12 +63,12 @@ BOUND = (
 )
 
 
-def _decision(checks_yaml: str) -> str:
+def _log_verdict(checks_yaml: str) -> str:
     return (
         "---\n"
-        "id: DEC-PWR-001\n"
-        "type: decision\n"
-        "title: Which regulator topology for the 3V3 rail\n"
+        "id: LOG-PWR-001\n"
+        "type: log\n"
+        "summary: Which regulator topology for the 3V3 rail\n"
         "status: proposed\n"
         "checks:\n"
         f"{checks_yaml}"
@@ -100,7 +100,7 @@ def _project(tmp_path, checks_yaml: str):
     items = tmp_path / "items"
     items.mkdir()
     (items / "bnd.md").write_text(BOUND, encoding="utf-8")
-    (items / "dec.md").write_text(_decision(checks_yaml), encoding="utf-8")
+    (items / "dec.md").write_text(_log_verdict(checks_yaml), encoding="utf-8")
     return tmp_path
 
 

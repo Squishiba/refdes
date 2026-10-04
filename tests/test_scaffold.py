@@ -40,6 +40,19 @@ def test_latest_version_resolves_the_concrete_bundled_max():
 def test_available_presets_includes_design_debate():
     assert "design-debate" in standards.available_presets("hardware", 1)
     assert "design-debate" in standards.available_presets("hardware", 2)
+    assert "design-debate" not in standards.available_presets("hardware", 3)
+
+
+def _init_legacy(root, *, presets=()):
+    """Pin old preset tests to the version that still offers it."""
+    path = scaffold_mod.init(str(root))
+    text = (root / "refdes-project.yaml").read_text(encoding="utf-8")
+    (root / "refdes-project.yaml").write_text(
+        text.replace("version: 3", "version: 2"), encoding="utf-8"
+    )
+    for preset in presets:
+        scaffold_mod.add_preset(str(root), preset)
+    return path
 
 
 def test_preset_providers_maps_names_to_the_preset():
@@ -69,7 +82,7 @@ def test_init_writes_the_exact_documented_file(tmp_path):
     # The file must actually load and resolve to a real, usable schema.
     project = load_project(config_path=path)
     assert "requirement" in project.types
-    assert "decision" in project.types
+    assert "log" in project.types
 
 
 def test_init_standard_none_writes_the_escape_hatch(tmp_path):
@@ -80,7 +93,7 @@ def test_init_standard_none_writes_the_escape_hatch(tmp_path):
 
 
 def test_init_with_preset_writes_it_into_the_list(tmp_path):
-    path = scaffold_mod.init(str(tmp_path), standard="hardware", presets=["design-debate"])
+    path = _init_legacy(tmp_path, presets=["design-debate"])
     text = open(path, encoding="utf-8").read()
     assert "presets: [design-debate]" in text
     project = load_project(config_path=path)
@@ -635,11 +648,11 @@ def test_new_item_text_links_are_commented_out_with_target_hint():
 
 def test_cli_new_unknown_type_reports_a_hint(tmp_path, capsys):
     scaffold_mod.init(str(tmp_path))
-    status = cli_mod.main(["-c", str(tmp_path / "refdes-project.yaml"), "new", "decisoin"])
+    status = cli_mod.main(["-c", str(tmp_path / "refdes-project.yaml"), "new", "lgo"])
     assert status == 1
     err = capsys.readouterr().err
-    assert "unknown type 'decisoin'" in err
-    assert "Did you mean 'decision'?" in err
+    assert "unknown type 'lgo'" in err
+    assert "Did you mean 'log'?" in err
 
 
 def test_cli_new_known_type_prints_scaffold(tmp_path, capsys):
@@ -654,26 +667,26 @@ def test_cli_new_known_type_prints_scaffold(tmp_path, capsys):
 
 
 def test_add_preset_appends_to_the_list(tmp_path):
-    scaffold_mod.init(str(tmp_path))
+    _init_legacy(tmp_path)
     scaffold_mod.add_preset(str(tmp_path), "design-debate")
     text = (tmp_path / "refdes-project.yaml").read_text(encoding="utf-8")
     assert "presets: [design-debate]" in text
 
 
 def test_add_preset_unknown_name_is_an_error(tmp_path):
-    scaffold_mod.init(str(tmp_path))
+    _init_legacy(tmp_path)
     with pytest.raises(SchemaError, match="does not exist"):
         scaffold_mod.add_preset(str(tmp_path), "nope-preset")
 
 
 def test_add_preset_already_selected_is_an_error(tmp_path):
-    scaffold_mod.init(str(tmp_path), presets=["design-debate"])
+    _init_legacy(tmp_path, presets=["design-debate"])
     with pytest.raises(SchemaError, match="already selected"):
         scaffold_mod.add_preset(str(tmp_path), "design-debate")
 
 
 def test_add_preset_preserves_hand_written_comments(tmp_path):
-    scaffold_mod.init(str(tmp_path))
+    _init_legacy(tmp_path)
     config_path = tmp_path / "refdes-project.yaml"
     text = config_path.read_text(encoding="utf-8")
     text = text.replace("site:", "# A hand-written comment nobody wants lost.\nsite:")
@@ -685,20 +698,20 @@ def test_add_preset_preserves_hand_written_comments(tmp_path):
 
 
 def test_remove_preset_removes_from_the_list(tmp_path):
-    scaffold_mod.init(str(tmp_path), presets=["design-debate"])
+    _init_legacy(tmp_path, presets=["design-debate"])
     scaffold_mod.remove_preset(str(tmp_path), "design-debate")
     text = (tmp_path / "refdes-project.yaml").read_text(encoding="utf-8")
     assert "presets: []" in text
 
 
 def test_remove_preset_not_selected_is_an_error(tmp_path):
-    scaffold_mod.init(str(tmp_path))
+    _init_legacy(tmp_path)
     with pytest.raises(SchemaError, match="not currently selected"):
         scaffold_mod.remove_preset(str(tmp_path), "design-debate")
 
 
 def test_remove_preset_reports_orphaned_items_before_writing(tmp_path):
-    scaffold_mod.init(str(tmp_path), presets=["design-debate"])
+    _init_legacy(tmp_path, presets=["design-debate"])
     items = tmp_path / "items"
     items.mkdir()
     (items / "db-001.md").write_text(
@@ -720,7 +733,7 @@ def test_remove_preset_reports_orphaned_items_before_writing(tmp_path):
 
 
 def test_cli_standard_add_and_remove_preset(tmp_path, capsys):
-    scaffold_mod.init(str(tmp_path))
+    _init_legacy(tmp_path)
     config = str(tmp_path / "refdes-project.yaml")
     status = cli_mod.main(["-c", config, "standard", "add-preset", "design-debate"])
     assert status == 0
@@ -732,7 +745,7 @@ def test_cli_standard_add_and_remove_preset(tmp_path, capsys):
 
 
 def test_cli_standard_remove_preset_exit_code_reflects_errors(tmp_path):
-    scaffold_mod.init(str(tmp_path), presets=["design-debate"])
+    _init_legacy(tmp_path, presets=["design-debate"])
     items = tmp_path / "items"
     items.mkdir()
     (items / "db-001.md").write_text(
@@ -748,7 +761,7 @@ def test_cli_standard_remove_preset_exit_code_reflects_errors(tmp_path):
 
 
 def test_unknown_type_matching_a_preset_names_it(tmp_path):
-    scaffold_mod.init(str(tmp_path))  # no presets selected
+    _init_legacy(tmp_path)  # no presets selected
     items = tmp_path / "items"
     items.mkdir()
     (items / "db-001.md").write_text(
@@ -765,7 +778,7 @@ def test_unknown_type_matching_a_preset_names_it(tmp_path):
 
 
 def test_unknown_type_with_no_preset_match_is_the_ordinary_message(tmp_path):
-    scaffold_mod.init(str(tmp_path))
+    _init_legacy(tmp_path)
     items = tmp_path / "items"
     items.mkdir()
     (items / "x.md").write_text(
@@ -778,7 +791,7 @@ def test_unknown_type_with_no_preset_match_is_the_ordinary_message(tmp_path):
 
 
 def test_unknown_link_matching_a_preset_names_it(tmp_path):
-    scaffold_mod.init(str(tmp_path))  # no presets selected
+    _init_legacy(tmp_path)  # no presets selected
     items = tmp_path / "items"
     items.mkdir()
     (items / "dec-001.md").write_text(

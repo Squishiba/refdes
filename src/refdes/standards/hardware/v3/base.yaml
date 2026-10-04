@@ -1,6 +1,6 @@
 # The refdes standard dictionary — "hardware" base, version 3.
 #
-# Shipped inside the refdes package. Byte-identical forever once released: a
+# Bundled inside the refdes package; hardware@3 is still unreleased. Once released, a
 # project pinning `standard: {base: hardware, version: 3}` gets exactly this
 # file, unchanged by any future refdes upgrade. See
 # docs/design/standard-library.md for the full design discussion behind every
@@ -65,7 +65,8 @@
 #    and `note` because they are `on_change: log`, and folding either into
 #    an `on_change: invalidate` field would silently make a provenance note
 #    invalidate downstream links; the log's `summary` because it is
-#    required, and log is not part of this change at all.
+#    required. Phase 4a later merged decision into log within this unreleased
+#    version; the merged log retains its required summary.
 #
 # 4. A new type: `group` (prefix GRP) — names a collection of items as a
 #    thing ("the PCIe interface spec") without letting that thing stand in
@@ -119,7 +120,7 @@ sets:
       last_reviewed: { type: date, on_change: ignore, doc: "The date this item was last reviewed. Bookkeeping only: kept out of the content hash." }
   citations:
     fields:
-      citations: { type: citations, on_change: invalidate, doc: "External documents this item relies on. Each entry needs a path — an http(s) URL or a project-root-relative file — and may carry rev, page, section, part_number, keep_copy and an id for [[cite:]] references." }
+      citations: { type: citations, on_change: invalidate, doc: "Sources this item relies on. Each entry names a path (an http(s) URL or project-root-relative file) or item (another item's id); document entries may carry rev, page, section, part_number, keep_copy and an id for [[cite:]] references." }
   statement_title:
     # The optional label of a prose-statement type (requirement, bound).
     # Each includer keeps its own wording with a doc-only patch
@@ -151,22 +152,22 @@ sets:
     body: { on_change: invalidate }
 
 link_types:
-  # trace: false on amends/records/supersedes/addresses -- none of these is
+  # trace: false on amends/follows/supersedes/addresses -- none of these is
   # "this item's correctness is justified by that one," which is what a
   # {{cascade}} block's default walk is for (docs/design/index-blocks.md §6).
   # Every other verb traces by default.
   refines:        { inverse: refined_by,    label: "Refines", doc: "A narrower, more detailed version of the same kind of statement: a requirement refining a requirement, or a bound refining a bound. Same category of thing, different altitude." }
   derives_from:   { inverse: derived_by,    label: "Derives from", doc: "A bound whose value follows from a requirement or another bound — where the number came from, not a restatement of it." }
   governed_by:    { inverse: governs,       label: "Governed by", doc: "This requirement must comply with a general rule stated elsewhere — another requirement or a bound — without being a narrower version of it. Traceability only; it never feeds coverage." }
-  satisfies:      { inverse: satisfied_by,  label: "Satisfies", doc: "A decision or component claims to meet a requirement or bound. This is the link that closes coverage once the claiming item reaches a satisfying status." }
-  constrained_by: { inverse: constrains,    label: "Constrained by", doc: "A decision or component that must respect a bound. Traceability only — it does not close coverage on the bound; satisfies does." }
+  satisfies:      { inverse: satisfied_by,  label: "Satisfies", doc: "A verdict log entry or component claims to meet a requirement or bound. This closes coverage once the claiming item reaches a satisfying status." }
+  constrained_by: { inverse: constrains,    label: "Constrained by", doc: "A verdict log entry or component that must respect a bound. Traceability only — it does not close coverage on the bound; satisfies does." }
   verifies:       { inverse: verified_by,   label: "Verifies", doc: "A test proves a requirement or bound. Counts toward coverage when the test's status is one of the type's verifying_statuses." }
   addresses:      { inverse: addressed_by,  label: "Addresses",   trace: false, doc: "A log entry records work done on a requirement or bound. Counts as addressed coverage — someone has worked on it and written it up — without claiming it is met." }
-  records:        { inverse: recorded_by,   label: "Records",     trace: false, doc: "A log entry records a decision — the design-log side of the decision's own recorded_by end of the same edge." }
+  follows:        { inverse: followed_by,  label: "Follows",     trace: false, doc: "This log entry continues an earlier entry in the same thread." }
   amends:         { inverse: amended_by,    label: "Amends",      trace: false, doc: "A log entry corrects an earlier log entry. Entries are append-only, so a correction is written as a new entry pointing back at this one rather than as an edit." }
-  supersedes:     { inverse: superseded_by, label: "Supersedes",  trace: false, doc: "This decision replaces an older one. The older decision keeps its history; moving its status to superseded is your edit, not something the link does by itself. Because the two are separate claims, a build warns when this link says superseded and the target's status says something else." }
-  selects:        { inverse: selected_by,   label: "Selects", doc: "A decision picks a component. The component's own status marks it selected; this link records which decision made the pick. A build warns when either half is missing and the other is not." }
-  blocked_by:     { inverse: blocks,        label: "Blocked by", doc: "Something is holding this decision up. Name only the immediate blocker; reports resolve the chain to its root. May point at an item of any type; a cycle is a build error." }
+  supersedes:     { inverse: superseded_by, label: "Supersedes",  trace: false, doc: "This verdict replaces an older one. The older entry keeps its history; moving its status to superseded is your edit, not something the link does by itself. A build warns when the link and target status disagree." }
+  selects:        { inverse: selected_by,   label: "Selects", doc: "A verdict selects a component. The component's own status marks it selected; this link records which entry made the pick. A build warns when either half is missing and the other is not." }
+  blocked_by:     { inverse: blocks,        label: "Blocked by", doc: "Something is holding this entry up. Name only the immediate blocker; reports resolve the chain to its root. May point at an item of any type; a cycle is a build error." }
   part_of:        { inverse: contains,      label: "Part of", doc: "This item belongs to a group. Membership is always declared by the member, never by the group; contains is the computed backlink." }
   drop_in:        { inverse: drop_in,       label: "Drop-in", doc: "This component is a drop-in second source for that one — interchangeable as claimed, no review needed. Self-inverse, and restricted to component-to-component. For a part that is close but needs checking before it goes in a design, use alternate." }
   alternate:      { inverse: alternate,     label: "Alternate", doc: "This component is functionally close to that one but not a drop-in: check before substituting. Self-inverse, component-to-component, and the rationale explaining what differs is required." }
@@ -214,28 +215,6 @@ types:
       refines:      [bound]
       derives_from: [requirement, bound]
       governed_by:  null   # un-declared: a bound is not governed_by-capable (keeps the resolved bound as it was)
-
-  decision:
-    doc: "A design choice that was made — what was picked, why, and what it satisfies. A settled (accepted) decision closes coverage on what it satisfies; a failing check on a decision is an error."
-    prefix: DEC
-    label: Decision
-    preview: [status, title, date]
-    satisfying_statuses: [accepted]
-    check_severity: error
-    fields:
-      title:     { doc: "What was decided, in one line. Required — every decision needs a label." }
-      status:    { type: enum, choices: [proposed, in_progress, accepted, on_hold, rejected, superseded],
-                   default: proposed, on_change: invalidate, doc: "Where the decision stands. Only an accepted decision counts as settled and closes coverage on what it satisfies." }
-      rationale: { type: text, on_change: invalidate, required_when: {status: rejected}, doc: "Why this decision, and why not the alternatives. Required when the decision is rejected — the reason a rejection happened is the point of recording it." }
-      date:      { type: date, on_change: log, doc: "When the decision was made. Kept out of the content hash, so fixing a date never marks downstream items suspect." }
-      options:   { type: options, on_change: invalidate, doc: "The alternatives considered, as name / verdict / because entries. Rendered as the options-considered panel on the decision's page." }
-      checks:    { type: checks, on_change: invalidate, doc: "Numeric checks: each entry compares a value from this item's calc block against a bound's limit. A failed check here is reported as an error." }
-    include: [provenance, stewardship, citations, named_title, grouped, claims, invalidate_body]
-    links:
-      supersedes:     [decision]
-      selects:        [component]
-      blocked_by:     []   # empty target list = unrestricted
-      recorded_by:    [log]
 
   test:
     doc: "A verification item that proves a requirement or bound. Its verifies links count toward coverage when the test's status is passing."
@@ -287,8 +266,9 @@ types:
     body: { on_change: log }
 
   log:
-    doc: "A dated entry in the design log — work done, questions raised, corrections. Entries are append-only: a correction is a new entry with amends, never a rewrite of the old one. Editing an entry is not a build error: once it has been captured into the project's history (refdes history capture), an edit is reported as edited after captured, a warning."
+    doc: "A design-log entry — narrative work or a verdict. Entries are append-only in the authoring sense: corrections are new entries. Captured history records earlier content; an edit after capture is a warning."
     prefix: LOG
+    legacy_prefixes: [DEC]
     label: Log entry
     plural: Log entries
     append_only: true
@@ -296,13 +276,22 @@ types:
     # plan §H5). Seal files from before this keep being read as legacy-seal
     # markers. Every other type keeps the engine default, `sealing: build`.
     sealing: history
-    preview: [date, author, summary]
+    preview: [date, author, status, summary]
+    satisfying_statuses: [accepted]
+    check_severity: error
     fields:
-      date:    { type: date, required: true, on_change: invalidate, doc: "When this entry was written. Required — an undated log entry cannot be ordered in time." }
+      date:    { type: date, on_change: invalidate, doc: "When this entry was written, if known. Older decisions may not have a date." }
       summary: { type: text, required: true, on_change: invalidate, doc: "One-line account of what happened, shown in log listings above the body." }
       author:  { type: person, on_change: invalidate, doc: "Who wrote the entry." }
-    include: [provenance, invalidate_body]
+      status: { type: enum, choices: [proposed, in_progress, accepted, on_hold, rejected, superseded], on_change: invalidate, doc: "A verdict when this entry declares one. Accepted entries can close coverage on what they satisfy." }
+      rationale: { type: text, on_change: invalidate, required_when: {status: rejected}, doc: "Why this verdict was reached; required for a rejected verdict." }
+      options: { type: options, on_change: invalidate, doc: "Alternatives considered for this verdict." }
+      checks: { type: checks, on_change: invalidate, doc: "Numeric checks against bounds; a failed check is an error." }
+    include: [provenance, citations, claims, invalidate_body]
     links:
+      follows:   [log]
       addresses: [requirement, bound]
       amends:    [log]
-      records:   [decision]
+      supersedes: [log]
+      selects: [component]
+      blocked_by: []

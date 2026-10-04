@@ -409,21 +409,6 @@ EXAMPLES: dict[tuple[str, str], str] = {
         "    limit: \"<= 0.15 W/in^2\"  # required -- what makes it checkable\n"
         "    rationale: Natural convection only; the enclosure is sealed."
     ),
-    ("types", "decision"): (
-        "# A decision as a Markdown item: front matter, then the prose body.\n"
-        "---\n"
-        "id: DEC-PWR-001\n"
-        "type: decision\n"
-        "title: 3V3 rail regulator topology\n"
-        "status: accepted  # an accepted decision closes coverage on what it satisfies\n"
-        "date: 2026-03-14\n"
-        "satisfies: [REQ-PWR-002, REQ-PWR-003]\n"
-        "constrained_by: [BND-THM-001]\n"
-        "selects: [CMP-PWR-001]\n"
-        "---\n"
-        "\n"
-        "The 3V3 rail draws up to 1.2 A from a 9–36 V input, in a sealed enclosure."
-    ),
     ("types", "test"): (
         "defaults:\n"
         "  type: test\n"
@@ -462,7 +447,12 @@ EXAMPLES: dict[tuple[str, str], str] = {
         "  - id: LOG-A-001\n"
         "    date: 2026-02-18\n"
         "    summary: Took delivery of the customer spec rev D.\n"
-        "    addresses: [REQ-PWR-001, REQ-PWR-002]"
+        "    addresses: [REQ-PWR-001, REQ-PWR-002]\n"
+        "  - id: LOG-A-002\n"
+        "    summary: Chose the 3V3 rail regulator.\n"
+        "    status: accepted\n"
+        "    follows: [LOG-A-001]\n"
+        "    satisfies: [REQ-PWR-002]"
     ),
     # ------------------------------------------------------------- link verbs
     ("links", "refines"): (
@@ -510,13 +500,10 @@ EXAMPLES: dict[tuple[str, str], str] = {
         "  addresses: [REQ-PWR-001, REQ-PWR-002]\n"
         "# Addressed coverage: worked on and written up, without claiming it is met."
     ),
-    ("links", "records"): (
-        "# From the log entry:\n"
+    ("links", "follows"): (
         "- id: LOG-A-004\n"
-        "  records: [DEC-PWR-001]\n"
-        "# Or from the decision, which declares the verb under its inverse name:\n"
-        "- id: DEC-PWR-001\n"
-        "  recorded_by: [LOG-A-004]"
+        "  summary: Recorded the release outcome.\n"
+        "  follows: [LOG-A-003]  # the earlier entry freezes here"
     ),
     ("links", "amends"): (
         "- id: LOG-A-006\n"

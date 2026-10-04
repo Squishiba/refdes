@@ -14,7 +14,8 @@ different population.
 
 The decision is taken. This document specs it; it does not relitigate it.
 
-**Status: Phase 3a implemented.**
+**Status: Phase 4a implemented.** H6–H9 and the Phase 4b thread panel remain
+later work.
 
 **Scope note on concurrent work:** this document does not touch, and makes
 no claim about, `standards/hardware/v3/base.yaml`, any file under `docs/`
@@ -60,6 +61,20 @@ merge, §7's migration file), it says so and stops there.
   `component` have in the current `hardware@3` schema. Revisit this if a
   better way to handle citations emerges before threads phase 4a is
   implemented.
+
+**Phase 4a migration decisions, owner, 2026-10-03:**
+
+- Missing date: RELAX the merged log's date so it is optional, matching what
+  decision allows today. Do not reject valid projects and do not invent a date.
+  Existing projects must keep building.
+- Missing status: LEAVE IT BLANK. Do not write the default `proposed` into
+  migrated entries. A missing status keeps its current meaning.
+- `records` / `recorded_by` links: CONVERT them into entries of the merged
+  log's citations set, so no link is lost.
+- Internal link encoding: ADD AN ITEM FIELD to citations. A citation entry may
+  carry `item:` naming another item's id. Validate at build time that the id
+  exists; a dangling item target is an error, the same as a dangling link.
+  Keep the single citations set. Do not add a separate refs set.
 
 **Phase 1 implemented** (this session, 2026-09-14): §2's identity
 foundation — `Project.items` re-keyed on surrogate key (or, for an item
@@ -626,7 +641,7 @@ types:
     satisfying_statuses: [accepted]     # from decision
     check_severity: error               # from decision
     fields:
-      date:      { type: date, required: true, on_change: invalidate }
+      date:      { type: date, on_change: invalidate }
       summary:   { type: text, required: true, on_change: invalidate }
       author:    { type: person, on_change: invalidate }
       status:    { type: enum, on_change: invalidate,
@@ -774,14 +789,11 @@ can (and typically will) declare both: `follows:` for its place in the
 chain, `amends:` for what it's correcting, which may or may not be its own
 immediate predecessor.
 
-`records:`/`recorded_by:` — finding 16's whole problem — still dissolves,
-for the reason the previous draft gave: the deliberation and its
-conclusion are positions in the same chain now, no cross-item link needed
-to associate them. A genuinely cross-chain "this entry's reasoning also
-fed a different, unrelated decision" case is rare enough in the record of
-real usage that this document doesn't propose a replacement mechanism for
-it — same disclosed gap `amends:` has for a cross-chain correction, use
-prose (`[[...]]`) until it proves common enough to need more.
+`records:`/`recorded_by:` — finding 16's whole problem — dissolves as a link
+verb. Deliberation and conclusion are positions in the same chain. During
+migration, every authored target is preserved in the merged log's single
+`citations:` set as an `item:` entry. An author can also use `item:` for a
+cross-chain reference without changing the `follows:` topology.
 
 ---
 
@@ -792,8 +804,9 @@ prose (`[[...]]`) until it proves common enough to need more.
 The previous draft needed a `former_ids`-shaped propose/confirm tool to
 *group* existing items into new containers — real, substantial, new
 machinery. **This model needs no grouping step for correctness at all.**
-Every existing `log` item stays exactly what it is (already the surviving
-type). Every existing `decision` item becomes a `log` item with its fields
+Every existing `log` item remains the surviving type; authored `records:`
+targets move into its citations set. Every existing `decision` item becomes a
+`log` item with its fields
 carried over — a mechanical, per-item rename, structurally identical in
 shape to the `text:`/`method:` → `body:` migration `hardware@2` → `@3`
 already shipped, reusing `revise.py`'s existing atomic-rewrite engine
@@ -810,9 +823,10 @@ type the moment `@3` ships:
 # later change's to write
 fields:
   decision:            # keyed by the OLD type name
-    title: null         # dropped -- summary already exists and serves the role (§5)
-types:
-  decision: log         # type rename; decision's own fields merge into log's
+    title: summary      # preserve the former one-line label
+merge_types:
+  decision: log         # destination already exists
+citation_links: [records, recorded_by]
 ```
 
 No item loses its id. No item's content hash needs reconstructing beyond

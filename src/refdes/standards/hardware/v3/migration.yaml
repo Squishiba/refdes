@@ -13,8 +13,8 @@
 #
 # Not every v3 change is additive, though: citations moved from a field
 # hardcoded onto component alone into a field set both component and
-# decision include, under one field name, so a decision can cite a
-# document too. That renames component's `datasheets:` to `citations:`,
+# the merged log include, under one field name, so a log can cite a
+# document or item too. That renames component's `datasheets:` to `citations:`,
 # and this file rewrites it.
 #
 # fields: below renames text: -> body: on requirement/bound, method: ->
@@ -55,6 +55,8 @@ links:
   equivalent: drop_in
 
 fields:
+  decision:
+    title: summary
   requirement:   # keyed by the OLD type name
     text: body
   bound:
@@ -67,3 +69,12 @@ fields:
 citation_keys:
   url: path
   vendor: keep_copy
+
+# Keep DEC display ids and omitted fields exactly as authored. The surviving
+# log type accepts DEC as a legacy prefix and an absent date/status.
+merge_types:
+  decision: log
+
+# Preserve both authored directions of the retired records link as item
+# citations. These are data, not inferred follows edges.
+citation_links: [records, recorded_by]
