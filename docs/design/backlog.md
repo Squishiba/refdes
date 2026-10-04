@@ -2263,12 +2263,13 @@ resolves still wins untouched, a failing multi-segment path stays a plain
 does-not-exist error, and a name found nowhere errors naming the directories
 searched. The ambiguity rule ships as decided: error at the reference site
 naming every candidate's full path, no tie-breaker, silent duplicates.
-§4's resolve-and-freeze write-back did **not** ship: resolution re-runs every
-build, and the ambiguity error closes the drift hole freezing was meant to
-(adding a second same-named file turns an existing document's image into a
-loud error, not a silent re-point); `docs/markdown.md` discloses this and
-that moving an *asset* still breaks a hand-written relative path. Tests in
-`tests/test_image_search.py`.
+**Status: done (§4), pending release.** A writable load freezes a uniquely
+searched Markdown image to a project-root-anchored `/path` in the source;
+`--no-write`, missing images, and ambiguous images keep their source spelling.
+The root anchor keeps the reference stable across document moves and later
+same-name additions. Moving the asset still breaks the path. The existing
+render pass resolves these frozen paths directly; `docs/markdown.md` describes
+the author-facing behavior. Tests in `tests/test_image_search.py`.
 
 **Local model: not suitable.** Ambiguity resolution and the freeze semantics
 are exactly the shape of judgment call this project keeps off a smaller

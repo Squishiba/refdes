@@ -167,11 +167,15 @@ A searched image is copied into `_site/assets/` and rewritten like any other
 (see above — including the `site.assets:` rule that a file inside a declared
 asset directory is copied verbatim rather than content-hashed), and it takes
 `{width=... caption="..."}` attributes exactly as a relative-path image does.
-What the search does *not* buy you: an asset identity. The lookup happens on
-every build, so adding a second file with the same name under a declared
-directory turns an existing, unmodified document's image into the ambiguity
-error above — which is the point of erroring rather than picking. If you want
-the reference pinned so it can never drift, write the relative path.
+On a writable command, a unique search result is frozen into the source
+Markdown: `![Thermal curve](curve.png)` becomes
+`![Thermal curve](/figures/curve.png)`. The leading `/` anchors the path to
+the project root, so moving the document does not change which image it shows.
+`--no-write` leaves the short form untouched and still resolves it in memory;
+an ambiguous or missing name is never frozen. After a freeze, adding another
+`curve.png` to `site.assets:` cannot change this reference. The image file
+itself has no surrogate identity: moving or deleting it breaks the pinned path
+and produces a build error.
 
 ### Uploading an image from the browser editor
 
