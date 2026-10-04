@@ -29,4 +29,4 @@ Windows CI follow-up (2026-10-03):
 - Focused tests after the fix: test_image_search.py 16 passed; test_eol_fidelity.py 51 passed. Scoped Ruff checks passed.
 - Committed as ac5607d, then rebased cleanly onto origin/main ff46050. Post-rebase focused suites (image search, end-of-line fidelity, image hashing, rendered assets, and keys/links): 147 passed. Post-rebase full suite: 3324 passed, 2 skipped in 237.83s. The branch diff passed `git diff --check`.
 
-Windows CI follow-up status: fix implemented, rebased, and locally verified. Push, PR update, and Windows CI rerun remain; Windows execution is unavailable locally.
+Windows CI follow-up status: fix implemented, rebased, locally verified, pushed, and documented in PR #171. The Windows CI rerun remains unverified; Windows execution is unavailable locally. PR #171 remains open and unmerged.
