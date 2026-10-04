@@ -27,3 +27,14 @@
   count *is* on record keeps its `ok` even when a cited page is out of range:
   that page is a separate warning `check` already gives, and the pin itself is
   genuinely fine.
+
+  Only a citation that actually cites a `page:` is reported this way, which is
+  what makes `audit` agree with `check` rather than overtake it: `check`
+  reports an uncountable document once per cited `page:` and never reaches the
+  count for a citation without one. The lockfile cannot decide that by itself —
+  `fetch` writes the failed count against the *path*, so it outlives the `page:`
+  that caused it, and an author who deletes the `page:` from the item has a
+  record left over that no citation refers to any more. The state column is one
+  character wider, because `pages unchecked` is longer than every state it
+  replaces and a second column that starts one space along on one row of a
+  report reads as a different column.

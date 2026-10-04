@@ -217,3 +217,68 @@ F8: the imported-target ending (a fourth wording, on purpose: `keys restore`
    writes a file in this project and cannot reach a key that lives upstream),
    and all link-resolution logic.
 
+
+REVIEW ROUND (PR #169)
+======================
+Four review points, all four about the changes above. Fixed on the same branch.
+
+1 (MEDIUM, was a real bug) `audit` printed `pages unchecked` / "no cited page
+   number was checked" for a citation that cites no `page:` at all. The
+   lockfile cannot decide that: `fetch` writes `page_count_error:` against the
+   *path*, so it outlives the `page:` that caused it -- delete the `page:` from
+   the item and the record stays, and audit then reported a page number nobody
+   cites. `check` gets this for free because it walks cited `page:` values to
+   begin with (`_apply_page` never reaches the count without one), so audit now
+   gates on `any(s.spec.page for s in statuses)` and the two commands agree on
+   the same set of citations. `page_count_gaps`' docstring says why the record
+   alone cannot answer it.
+   New test: test_a_citation_citing_no_page_has_no_unchecked_page_number.
+   Sabotage check: gate removed -> that test fails (row reads
+   `pages unchecked hash-only cited by CMP-001`); gate restored -> passes.
+   Real CLI: .scratch/proj with the `page:` line deleted from the item and the
+   lockfile still carrying page_count_error -> `ok              hash-only
+   cited by CMP-001`, no reason line.
+
+2 (LOW) `pages unchecked` is 15 characters in a `:<14` column, so the pin
+   column shifted by one on exactly those rows. Column widened to 15; the doc
+   sample in cli-reference.md re-padded to match.
+   New test: test_the_pages_unchecked_row_does_not_shift_the_pin_column, which
+   puts an `ok` row and a `pages unchecked` row in one report and compares
+   where the pin column starts. Sabotage check: width back to 14 -> fails with
+   `assert 20 == 19`; width 15 -> passes.
+
+3 (LOW) `_owning_pypdf_logs` forced the pypdf logger to WARNING for the
+   duration of a read. Took the reviewer's first option: the level is now left
+   completely alone and only the handler and `propagate` come and go. It was
+   global state mutated inside a library call, visible to every other thread of
+   a running `refdes serve`, and it overruled a caller who had put pypdf below
+   WARNING. The cost is documented in the function and pinned by a test rather
+   than hidden: a caller that silenced pypdf below WARNING does not get pypdf's
+   words handed to it inside refdes's message either -- it gets the exception's
+   own words. No changelog entry, since nothing shipped with the clamp.
+   New test: test_a_caller_that_asked_pypdf_to_be_quiet_stays_quiet.
+   Sabotage check: clamp put back -> fails, the message comes back with
+   `(EOF marker not found)` folded in; clamp removed -> passes.
+
+4 (NIT) build.py said "The label is not used as a fallback" on a bare key, a
+   reference with no label -- asserting a fallback exists in the one shape that
+   has nothing to fall back from. Now "A reference resolves by its key alone,
+   so check git history to confirm identity.", true of both shapes. And
+   `refdes keys restore DISPLAY-ID@1qdn93k2nf4 --dry-run` does not run as
+   printed, so the message now says so: "... --dry-run`, replacing DISPLAY-ID
+   with the item's display id, then repeat ...". Angle brackets were rejected
+   on purpose: `<` and `>` are shell redirections, so a pasted placeholder
+   would have failed in a worse way. The real display id cannot be printed --
+   which item owned the key is exactly what the author is being sent to git
+   history to find out.
+   New test: test_a_bare_key_says_its_command_argument_is_a_placeholder.
+   _wording() in the F8 test strips the substitution clause along with the
+   other shape-dependent parts, so "one wording" is still asserted.
+   Tests updated for the new sentence: test_keys_restore.py `_message()`,
+   test_checks_keys.py:299. Docs: design/keys.md sample, the F8 changelog
+   fragment.
+
+After the round: tests/test_run5_friction_f1_f2_f6_f8.py 12 passed (was 8).
+CI lint (`ruff check --select E9,F src tests`) clean. Full suite below.
+
+

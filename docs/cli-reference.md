@@ -771,7 +771,7 @@ Imported projects (read-only):
 
 Citations:
   https://www.ti.com/lit/ds/symlink/tps62913.pdf
-    unpinned       no pin     cited by CMP-PWR-001
+    unpinned        no pin     cited by CMP-PWR-001
 
 Parts:
   TPS62913       used by CMP-PWR-001 (component) — board: power
@@ -840,11 +840,14 @@ citation whose kept copy is gone says `no copy` rather than claiming `kept`.
 A `hash_mismatch` row reads `kept`: the blob is there, and the state column is
 what says its bytes are wrong.
 
-A row whose document's pages could not be counted reads `pages unchecked`
-instead of `ok`, with the reason the lockfile recorded on the line below it. The
-pin is fine — a cited `page:` simply has nothing to be compared against, and an
-`ok` that meant "recorded" was read as "checked". `refdes check` warns about the
-same fact; `page_count_error:` in `.refdes/citations.yaml` is where both read it,
+A row whose document's pages could not be counted, **and which cites a `page:`
+of that document**, reads `pages unchecked` instead of `ok`, with the reason the
+lockfile recorded on the line below it. The pin is fine — a cited `page:` simply
+has nothing to be compared against, and an `ok` that meant "recorded" was read
+as "checked". `refdes check` warns about the same fact, and about the same set of
+citations: a citation citing no page has no unchecked page number, even when the
+lockfile still records a failed count for the path from before the `page:` was
+deleted. `page_count_error:` in `.refdes/citations.yaml` is where both read it,
 and `refdes fetch --update --path <path>` is what replaces it with a count.
 
 An import declared with a `version:` reads `pinned to 2026.3`; one declared

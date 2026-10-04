@@ -1177,13 +1177,28 @@ def cmd_audit(args) -> int:
                 pin = "hash-only"
             citers = ", ".join(sorted({s.item_id for s in statuses}))
             gap = gaps.get(path, "")
+            # Two things have to be true on top of the recorded failure.
+            #
             # Only an otherwise-clean pin is ambiguous: a pin that is already
             # `unpinned` or `hash_mismatch` says something worse on this line,
             # and that is the fact to read first.
-            unchecked = bool(gap) and state == "ok"
+            #
+            # And something here has to cite a page. `check` reports an
+            # uncountable document per cited `page:` -- `_apply_page` returns
+            # before the count is ever read for a spec without one -- so a
+            # citation that cites no page has no unchecked page number, and
+            # saying it did would be this finding's own mistake pointed the
+            # other way. The record cannot say this: a `page_count_error:`
+            # outlives the `page:` that caused it, since `fetch` writes it
+            # against the path and an author deleting the `page:` changes the
+            # item, not the lockfile.
+            unchecked = bool(gap) and state == "ok" and any(s.spec.page for s in statuses)
             print(f"  {path}")
+            # 15, not the 14 the states alone needed: `pages unchecked` is the
+            # longest thing this column can now print, and a column that
+            # shifts by a space on one row is read as a different column.
             print(
-                f"    {'pages unchecked' if unchecked else state:<14} "
+                f"    {'pages unchecked' if unchecked else state:<15} "
                 f"{pin:<10} cited by {citers}"
             )
             if unchecked:

@@ -1000,9 +1000,9 @@ used as a fallback:
 ```
 ERROR   items/io/decisions.md:8 [DEC-IO-005] — satisfies points at key
         'k2p9w3x1r7s' (labelled REQ-IO-AI-001), which no item declares. The
-        target may have been deleted or its key lost or changed. The label is
-        not used as a fallback. Check git history to confirm identity. If it is
-        the same item, run `refdes keys restore REQ-IO-AI-001@k2p9w3x1r7s
+        target may have been deleted or its key lost or changed. A reference
+        resolves by its key alone, so check git history to confirm identity. If
+        it is the same item, run `refdes keys restore REQ-IO-AI-001@k2p9w3x1r7s
         --dry-run`, then repeat without --dry-run to restore the original key.
 ```
 

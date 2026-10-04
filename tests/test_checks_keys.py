@@ -296,7 +296,7 @@ def test_unknown_key_in_against_reports_layer3_no_display_id_fallback(tmp_path):
     assert "check against key 'k2p9w3x1r7s' (labelled BND-001), which no item declares" in message
     assert "A live item labelled BND-001 declares no key" in message
     assert "Its key may have been lost, or the label may now name a different item" in message
-    assert "The label is not used as a fallback" in message
+    assert "A reference resolves by its key alone" in message
 
 
 def test_dangling_bare_against_names_the_remedy_a_hand_rename_needs(tmp_path):

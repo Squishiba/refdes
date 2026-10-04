@@ -67,13 +67,16 @@ PAGE_COUNT_ERROR = (
 )
 
 
-def _citation_project(root, *urls: str) -> str:
-    """One component per url, each citing `page: "99"` of it."""
+def _citation_project(root, *urls: str, pages: bool = True) -> str:
+    """One component per url, each citing `page: "99"` of it -- or citing no
+    page at all, which is the shape that must not be reported as having an
+    unchecked page number."""
     write_project_config(root, SCHEMA)
     (root / "items").mkdir()
+    cited_page = '        page: "99"\n' if pages else ""
     rows = "".join(
         f"  - id: CMP-{i:03d}\n    title: Part {i}\n    datasheets:\n"
-        f"      - path: {url}\n        rev: C\n        page: \"99\"\n"
+        f"      - path: {url}\n        rev: C\n{cited_page}"
         for i, url in enumerate(urls, start=1)
     )
     (root / "items" / "cmp.yaml").write_text(
@@ -82,9 +85,11 @@ def _citation_project(root, *urls: str) -> str:
     return str(root / "refdes-project.yaml")
 
 
-def _pin(root, urls, **extra) -> None:
+def _pin(root, urls, extra_by_url=None, **extra) -> None:
     """One hash-only record per url. `extra` is what the fetch could not
-    decide -- `page_count`, or the reason there is no page count."""
+    decide -- `page_count`, or the reason there is no page count -- and
+    `extra_by_url` overrides that per url, for a project whose two citations
+    are in two different states at once."""
     path = root / ".refdes" / "citations.yaml"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
@@ -96,6 +101,7 @@ def _pin(root, urls, **extra) -> None:
                         "fetched": "2026-01-01T00:00:00Z",
                         "kept_copy": False,
                         **extra,
+                        **(extra_by_url or {}).get(url, {}),
                     }
                     for url in urls
                 }
@@ -119,6 +125,18 @@ def _said_unreachable(lines):
         for line in lines
         if "could not refresh" in line or "could not be refreshed" in line
     ]
+
+
+def _audit_rows(out, *citers):
+    """The audit report's citation rows, verbatim -- leading spaces and all --
+    so a test can be about the columns and not only the words."""
+    rows = [
+        line
+        for line in out.splitlines()
+        if any(line.rstrip().endswith(f"cited by {c}") for c in citers)
+    ]
+    assert len(rows) == len(citers), out
+    return rows
 
 
 def _audit_row(out):
@@ -156,6 +174,48 @@ def test_audit_still_calls_a_counted_pin_ok(tmp_path, capsys):
     assert _audit_row(out).split()[0] == "ok", out
 
 
+def test_a_citation_citing_no_page_has_no_unchecked_page_number(tmp_path, capsys):
+    """`check` reports an uncountable document once per cited `page:` --
+    `_apply_page` never reaches the count for a citation without one -- so a
+    citation citing no page has nothing unchecked, and `audit` must not say it
+    does. The lockfile cannot decide this on its own: `fetch` writes the failed
+    count against the path, and deleting the `page:` from the item leaves the
+    record as it was, so the row would otherwise keep reporting a page number
+    nobody cites any more."""
+    config = _citation_project(tmp_path, DEAD, pages=False)
+    _pin(tmp_path, [DEAD], page_count_error=PAGE_COUNT_ERROR)
+    code, out, err = _run(capsys, config, "audit")
+    assert code == 0, err
+    assert _audit_row(out).startswith("ok "), out
+    assert "pages unchecked" not in out, out
+    assert "no cited page number was checked" not in out, out
+
+
+def test_the_pages_unchecked_row_does_not_shift_the_pin_column(tmp_path, capsys):
+    """`pages unchecked` is longer than every state it replaces, so the state
+    column is as wide as the widest thing it can print. A second column that
+    starts one space along on one row of a report is read as a different
+    column, which is the mistake this report's own history is about."""
+    config = _citation_project(tmp_path, DEAD, LIVE)
+    _pin(
+        tmp_path,
+        [DEAD, LIVE],
+        extra_by_url={
+            DEAD: {"page_count_error": PAGE_COUNT_ERROR},
+            LIVE: {"page_count": 8},
+        },
+    )
+    code, out, err = _run(capsys, config, "audit")
+    assert code == 0, err
+    unchecked, counted = _audit_rows(out, "CMP-001", "CMP-002")
+    assert unchecked.split()[:2] == ["pages", "unchecked"], unchecked
+    assert counted.split()[0] == "ok", counted
+    assert unchecked.index("hash-only") == counted.index("hash-only"), (
+        unchecked,
+        counted,
+    )
+
+
 # ------------------------------------------------------------------ F2 -- pypdf
 
 
@@ -178,6 +238,29 @@ def test_refdes_reads_the_pdf_so_refdes_owns_the_report(capsys, caplog):
     # nothing is lost: pypdf's own words survive, inside the message
     assert "EOF marker not found" in str(caught.value), caught.value
     assert "Stream has ended unexpectedly" in str(caught.value), caught.value
+
+
+def test_a_caller_that_asked_pypdf_to_be_quiet_stays_quiet():
+    """The routing adds a handler and nothing else.
+
+    A logger is global state and `refdes serve` is threaded, so setting the
+    pypdf level for the duration of one read is a setting every other thread
+    sees -- and one that overrules what the caller asked pypdf for. The cost
+    of leaving it alone is stated here rather than hidden: a caller that put
+    pypdf below WARNING does not get pypdf's words handed to it inside refdes's
+    message either, and gets the exception's own words, which is the whole
+    message minus the detail it chose to silence."""
+    logger = logging.getLogger("pypdf")
+    handlers = list(logger.handlers)
+    logger.setLevel(logging.ERROR)
+    try:
+        with pytest.raises(citations_mod.SectionError) as caught:
+            citations_mod.page_count(NOT_A_PDF)
+    finally:
+        logger.setLevel(logging.NOTSET)
+    assert list(logger.handlers) == handlers  # the capture handler comes back off
+    assert "Stream has ended unexpectedly" in str(caught.value), caught.value
+    assert "EOF marker not found" not in str(caught.value), caught.value
 
 
 def test_fetch_says_what_to_do_about_uncountable_pages(tmp_path, monkeypatch, capsys):
@@ -257,10 +340,12 @@ def _wording(message: str) -> str:
     """What is left of a diagnostic once the parts that legitimately vary are
     removed: which key and label are named, the one extra fact about a live
     item that carries the label (a fact, not a wording -- and
-    docs/troubleshooting.md promises it), and the argument of the restore
-    command, which is a value."""
+    docs/troubleshooting.md promises it), the argument of the restore command,
+    which is a value, and the words telling the author to substitute the one
+    part of it a bare-key reference cannot know."""
     tail = message.split("which no item declares. ")[1]
     tail = re.sub(r"^A live item labelled \S+ .*?different item\. ", "", tail)
+    tail = tail.replace(", replacing DISPLAY-ID with the item's display id", "")
     return re.sub(r"restore \S+ --dry-run", "restore <target> --dry-run", tail)
 
 
@@ -291,3 +376,16 @@ def test_the_restore_command_is_spelled_out_for_a_composite_reference(tmp_path):
         project, "refines points at", f"REQ-001@{original}"
     )
     assert f"run `refdes keys restore REQ-001@{original} --dry-run`" in message, message
+
+
+def test_a_bare_key_says_its_command_argument_is_a_placeholder(tmp_path):
+    """`DISPLAY-ID@<key>` is the metavar `keys restore --help` prints, not a
+    command that runs: a bare key carries no label, and which item the key
+    belonged to is precisely what the author has to go and find out. So the
+    message says that in words instead of printing a line that fails when
+    pasted -- and keeps naming the command, which is what F8 was about."""
+    project = _keyless_project(tmp_path)
+    bare = keys.mint()
+    message = build_mod._unknown_key_message(project, "refines points at", bare)
+    assert f"run `refdes keys restore DISPLAY-ID@{bare} --dry-run`" in message, message
+    assert "replacing DISPLAY-ID with the item's display id" in message, message

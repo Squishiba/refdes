@@ -596,9 +596,10 @@ def _unknown_key_message(project: Project, pointer: str, target_id: str) -> str:
     the author to archaeology, while only the shape whose label happened to
     name a live item named `refdes keys restore` -- the command that fixes it
     without any. The explanation and the remedy below are now one text for
-    every local target, and what varies is only what is true: the extra
-    sentence about a live item carrying this label, and the argument of the
-    restore command. The imported-target ending stays different on purpose --
+    every local target, and what varies is only what is true of the reference
+    being reported: the extra sentence about a live item carrying this label,
+    the argument of the restore command, and -- for a bare key, whose label is
+    the very thing that is missing -- the words saying to substitute it. The imported-target ending stays different on purpose --
     `keys restore` writes to a file in this project, so it cannot reach a key
     that lives upstream (docs/troubleshooting.md).
     """
@@ -618,8 +619,9 @@ def _unknown_key_message(project: Project, pointer: str, target_id: str) -> str:
             f"{loss}, or the label may now name a different item. "
         )
     message += (
-        "The target may have been deleted or its key lost or changed. The "
-        "label is not used as a fallback. Check git history to confirm identity. "
+        "The target may have been deleted or its key lost or changed. A "
+        "reference resolves by its key alone, so check git history to confirm "
+        "identity. "
     )
     if live is not None and live.external:
         # The composite is the reason this author is confused: a writable load
@@ -631,12 +633,22 @@ def _unknown_key_message(project: Project, pointer: str, target_id: str) -> str:
             "composite reference was written into your file by refdes on a "
             f"load, not typed by hand — see {docs_url_mod.MULTI_BOARD_DOCS}."
         )
-    # A bare key names no label to put in front of the `@`, so the command
-    # carries the metavar `refdes keys restore --help` prints for it.
-    restore = f"{label}@{key}" if separator else f"DISPLAY-ID@{key}"
+    # A bare key carries no label to put in front of the `@`, and nothing here
+    # knows which item the key belonged to -- finding that is what the git
+    # history above is for. So the command shows the metavar
+    # `keys restore --help` prints, and says in words that it is one: a line
+    # an author pastes without replacing the placeholder is worse than no
+    # command at all, and angle brackets would only have made it fail in a
+    # different way.
+    if separator:
+        restore, substitution = f"{label}@{key}", ""
+    else:
+        restore = f"DISPLAY-ID@{key}"
+        substitution = ", replacing DISPLAY-ID with the item's display id"
     return message + (
         f"If it is the same item, run `refdes keys restore {restore} "
-        "--dry-run`, then repeat without --dry-run to restore the original key."
+        f"--dry-run`{substitution}, then repeat without --dry-run to restore "
+        "the original key."
     )
 
 

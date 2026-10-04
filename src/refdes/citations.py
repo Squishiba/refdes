@@ -344,20 +344,25 @@ def _owning_pypdf_logs() -> Iterator[list[str]]:
     `pypdf` logger means the last-resort handler is no longer reached, and
     `propagate = False` means a project that *does* configure logging gets
     pypdf's words inside refdes's message rather than on a line of their own.
-    Both are undone on the way out, so a caller that configures pypdf's logger
-    for its own purposes still finds it as it left it.
+
+    The logger's *level* is deliberately left alone. Raising or lowering it
+    would change what the caller asked for -- and this runs inside a library
+    call in a threaded server, so the change would be visible to every other
+    thread for its duration. What the caller's level decides, it still decides
+    here: leave pypdf quieter than WARNING and its words are not collected, so
+    they are not folded into the message either, which is the caller's choice
+    and not refdes's to overrule. The handler is removed and `propagate` put
+    back on the way out.
     """
     logger = logging.getLogger("pypdf")
     handler = _PypdfLogCapture()
-    level, propagate = logger.level, logger.propagate
+    propagate = logger.propagate
     logger.addHandler(handler)
-    logger.setLevel(logging.WARNING)
     logger.propagate = False
     try:
         yield handler.messages
     finally:
         logger.removeHandler(handler)
-        logger.setLevel(level)
         logger.propagate = propagate
 
 
@@ -1282,6 +1287,12 @@ def page_count_gaps(records: Mapping[str, Mapping]) -> dict[str, str]:
     a pin written before any count was attempted. That is `_apply_page`'s
     distinction, kept here so the two commands cannot disagree about what "we
     could not check this" means.
+
+    What a record cannot know is whether anything still cites a `page:` of this
+    path -- `fetch` writes the failure against the path, and deleting the `page:`
+    from the item does not delete it -- so a caller reporting "no page number
+    was checked" has to pair this with the citations it has, as `cmd_audit`
+    does. `check` gets it for free: it walks cited `page:` values to begin with.
     """
     gaps: dict[str, str] = {}
     for path, record in records.items():

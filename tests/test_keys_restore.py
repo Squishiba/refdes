@@ -92,8 +92,8 @@ def _message(original, current, *, pointer="refines points at", label="REQ-001")
         f"{pointer} key {original!r} (labelled {label}), which no item declares. "
         f"A live item labelled {label} {declared}. Its key may have been {loss}, "
         "or the label may now name a different item. The target may have been "
-        "deleted or its key lost or changed. The label is not used as a "
-        "fallback. Check git history to confirm identity. "
+        "deleted or its key lost or changed. A reference resolves by its key "
+        "alone, so check git history to confirm identity. "
         f"If it is the same item, run `refdes keys restore {label}@{original} "
         "--dry-run`, then repeat without --dry-run to restore the original key."
     )
