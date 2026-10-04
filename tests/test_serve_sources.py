@@ -161,8 +161,9 @@ def test_the_source_picker_lists_only_the_citing_item_s_own_files(served):
 
 
 def test_the_file_list_says_why_a_cited_file_is_not_listable(tmp_path):
-    # A cited .xlsx (a PDF is listable now that it has a reader -- see
-    # tests/test_serve_pdf_sources.py), a remote URL and a path that escapes the
+    # A cited .xlsx has an extractor but no picker listing (a PDF is listable
+    # now that it has a page reader -- see tests/test_serve_pdf_sources.py),
+    # a remote URL and a path that escapes the
     # root are all named with the reason, and none of them is listable. This is
     # the honest gap of §8 -- an item that cites no readable file gets an empty
     # picker -- made legible rather than silent.
@@ -184,7 +185,7 @@ def test_the_file_list_says_why_a_cited_file_is_not_listable(tmp_path):
         assert status == 200, payload
         assert [f["path"] for f in payload["files"]] == ["analysis/budget.csv"]
         reasons = {p["path"]: p["problem"] for p in payload["problems"]}
-        assert "no source reader for '.xlsx' files" in reasons["analysis/sheet.xlsx"]
+        assert "can extract named keys but cannot list" in reasons["analysis/sheet.xlsx"]
         assert "remote citation" in reasons["https://example.com/budget.csv"]
         assert "escapes the project root" in reasons["../outside/budget.csv"]
     finally:

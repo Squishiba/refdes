@@ -867,7 +867,7 @@ becomes derived, which is backwards, and round-trips the moment an engineer
 edits it) and changes the failure class from "the document is wrong" to
 "refdes corrupted my schematic."
 
-**Status: implemented for CSV; xlsx still outstanding; design reviewed.** The
+**Status: implemented for CSV and XLSX; design reviewed.** The
 claim that no CSV reader exists in the package is no longer true —
 `src/refdes/sources.py` is the reader module (`extensions = (".csv",)` at
 `sources.py:230`, `csv.reader(fh, strict=True)` at `sources.py:465`), and
@@ -876,10 +876,11 @@ claim that no CSV reader exists in the package is no longer true —
 hashes alongside the locked extracted values; the values are what calc
 evaluation now consumes. The blocker that parked this finding — finding 25's
 Part 2, a citation being able to name a repo-local file — landed on `main`
-earlier (`2001801`, `4496053`, 2026-09-15). **XLSX is still outstanding** and
-is still scoped to an optional `openpyxl` extra in a later minor release
-(`calc-sources.md` §"V1 is CSV only"); that half of the original status was
-accurate and stays. The draft design status also moved on independently:
+earlier (`2001801`, `4496053`, 2026-09-15). **The XLSX part has shipped** as
+the optional `refdes[xlsx]` extra, with workbook- and sheet-scoped defined-name
+lookup in `src/refdes/sources.py`. EDA readers and schematic drift checks remain
+future work, as does XLSX name listing in the browser picker. The draft design
+status also moved on independently:
 `docs/design/calc-sources.md:1-3` reads "**Status: Reviewed** — Jared's
 decisions recorded 2026-09-19; question 2 … decided 2026-09-21 … All section 11
 questions are now answered", so it is no longer awaiting review. The draft

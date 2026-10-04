@@ -55,6 +55,7 @@ dependencies = [
 # place a row without coordinates, and a page drawn in the corner is a wrong
 # answer wearing a working shape.
 pdf = ["pypdf>=6.19"]
+xlsx = ["openpyxl>=3.1"]
 dev = ["pytest>=8.0", "build>=1.0", "twine>=5.0", "jsonschema>=4.0", "ruff>=0.6", "pypdf>=6.19"]
 
 [project.urls]

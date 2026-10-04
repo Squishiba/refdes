@@ -44,10 +44,8 @@ jobs:
         with:
           # pyproject.toml's requires-python floor, and what docs.yml uses.
           python-version: "3.11"
-      # The dev extra is what the suite actually needs: pytest, plus pypdf so
-      # the citation-section tests build real PDFs instead of skipping
-      # themselves into a falsely green run.
-      - run: pip install -e ".[dev]"
+      # Install the XLSX extra so its tests run in CI, alongside dev's PDF reader.
+      - run: pip install -e ".[dev,xlsx]"
       - name: Ruff (E9,F)
         run: ruff check --select E9,F src tests
       - name: pytest
@@ -84,6 +82,6 @@ jobs:
           # The newest version in pyproject.toml's requires-python range, whose
           # classifiers already claim 3.11 through 3.13.
           python-version: "3.13"
-      - run: pip install -e ".[dev]"
+      - run: pip install -e ".[dev,xlsx]"
       - name: pytest
         run: python -m pytest -q
