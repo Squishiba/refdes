@@ -248,9 +248,14 @@ network being down and the vendor having deleted the datasheet, which are
 indistinguishable from `check`'s side:
 
 ```
-ERROR   <project> — could not refresh https://www.ti.com/lit/ds/symlink/tps62913.pdf: <urlopen error [Errno 111] Connection refused> -- upstream drift was NOT verified for this citation (no bytes arrived, so there is nothing to compare the pin against)
-ERROR   <project> — 1 pinned citation could not be refreshed, so upstream drift was NOT verified for it -- the run cannot claim to have checked it. Fix the network or the urls, or pass --allow-unreachable to treat an unreachable source as a warning and let the exit code reflect only real findings (you then get no guarantee that every pinned source was checked at all)
+ERROR   <project> — could not refresh https://www.ti.com/lit/ds/symlink/tps62913.pdf: <urlopen error [Errno 111] Connection refused> -- upstream drift was NOT verified for this citation (no bytes arrived, so there is nothing to compare the pin against) -- the run cannot claim to have checked it. Fix the network or the urls, or pass --allow-unreachable to treat an unreachable source as a warning and let the exit code reflect only real findings (you then get no guarantee that every pinned source was checked at all)
 ```
+
+One line per unreachable url, each carrying its own reason and its own remedy.
+With more than one there is a second line as well, the count — the one thing a
+per-url line cannot say — and with one there is not, because a line naming the
+url and a line saying that one citation could not be refreshed are the same
+fact twice.
 
 A partially reachable project is not an exception: every url is attempted, the
 ones that answered are compared and reported as usual, and the unreachable ones
@@ -265,9 +270,8 @@ refdes check --refresh --allow-unreachable
 ```
 
 ```
-WARNING <project> — could not refresh https://www.ti.com/lit/ds/symlink/tps62913.pdf: <urlopen error [Errno 111] Connection refused>
-WARNING <project> — 1 pinned citation could not be refreshed, so upstream drift was NOT verified for it -- drop --allow-unreachable to fail the run on this instead
-2 items, 0 errors, 2 warnings
+WARNING <project> — could not refresh https://www.ti.com/lit/ds/symlink/tps62913.pdf: <urlopen error [Errno 111] Connection refused> -- upstream drift was NOT verified for it -- drop --allow-unreachable to fail the run on this instead
+2 items, 0 errors, 1 warnings
 ```
 
 What you give up is the guarantee that `--refresh` reached every pinned source:
@@ -835,6 +839,13 @@ citation whose kept copy is gone says `no copy` rather than claiming `kept`.
 
 A `hash_mismatch` row reads `kept`: the blob is there, and the state column is
 what says its bytes are wrong.
+
+A row whose document's pages could not be counted reads `pages unchecked`
+instead of `ok`, with the reason the lockfile recorded on the line below it. The
+pin is fine — a cited `page:` simply has nothing to be compared against, and an
+`ok` that meant "recorded" was read as "checked". `refdes check` warns about the
+same fact; `page_count_error:` in `.refdes/citations.yaml` is where both read it,
+and `refdes fetch --update --path <path>` is what replaces it with a count.
 
 An import declared with a `version:` reads `pinned to 2026.3`; one declared
 without one reads `unpinned`, and its items still count toward the

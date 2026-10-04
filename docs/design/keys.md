@@ -1000,16 +1000,21 @@ used as a fallback:
 ```
 ERROR   items/io/decisions.md:8 [DEC-IO-005] — satisfies points at key
         'k2p9w3x1r7s' (labelled REQ-IO-AI-001), which no item declares. The
-        label may be stale; the key is what resolves. The target may have
-        been deleted or its key lost or changed. Check git history before
-        restoring the original key or removing the reference.
+        target may have been deleted or its key lost or changed. The label is
+        not used as a fallback. Check git history to confirm identity. If it is
+        the same item, run `refdes keys restore REQ-IO-AI-001@k2p9w3x1r7s
+        --dry-run`, then repeat without --dry-run to restore the original key.
 ```
 
 **Recovery decision, 2026-09-28:** the message above applies when the label
-matches no live item. When it does match, `build._unknown_key_message` reports
-the live item's different key (or missing key), and names both possibilities:
+matches no live item. When it does match, `build._unknown_key_message` adds the
+live item's different key (or missing key), and names both possibilities:
 key loss/regeneration and a label reused by a different item. It does not
-infer continuity and never changes the resolution rule. The same diagnostic
+infer continuity and never changes the resolution rule. The explanation and the
+remedy are the same text for every local target whatever the shape of the
+reference — bare key, stale label, or label naming a live item — because one
+condition reported three ways sent authors to git history from one reference and
+to the right command from another. The same diagnostic
 serves structured links, `checks: against:`, and cross-item calc references.
 
 `refdes keys restore DISPLAY-ID@ORIGINAL-KEY ...` is the explicit recovery
