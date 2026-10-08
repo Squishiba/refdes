@@ -170,3 +170,34 @@ changes.
 
 Status: round 4 finished. Pushed to threads-4a-decision-to-log; PR #176 left
 open, not merged.
+
+## Round 5 (review .scratch/REVIEW-176-round5.md, CHANGES REQUESTED)
+
+Two doc corrections, both verified against the tool before editing.
+
+- Finding 1 (MEDIUM), docs/concepts.md. The append-only paragraph claimed
+  edits are "never" made and the convention "is enforced by the build" —
+  true under hardware@1/@2 (`sealing: build`) but not hardware@3, where
+  log declares `sealing: history` (base.yaml:274-278) and design-log.md
+  :76-79 says an edit is never a build error. Rewrote to: append-only as
+  the authoring convention (a correction is a new entry that `amends` or
+  `supersedes`), hardware@3's build does not enforce it, and an edit to a
+  captured entry is a warning (design-log.md:236-253); linked
+  design-log.md#append-only in the page's existing link style. Also
+  dropped "dated" from the opening sentence at :68 — `date` is optional
+  on log (base.yaml:283, only `summary` required).
+- Finding 2 (LOW), docs/design/index-blocks.md:355-359. The invalid-field
+  error example listed stale log fields (no `citations`, phantom `owner`/
+  `last_reviewed`). Reproduced in a plain hardware@3 project
+  (.scratch/probes/hw3, page with {{index by="schematic_page"
+  type="log"}}): `... --no-write check` printed
+  `Declared fields: author, checks, citations, date, note, options,
+  rationale, source, status, summary, tags.` — sorted, matching
+  blocks.py:169-173. Copied that list into the example (page keeps the
+  section's wrapped display style).
+- Tests: test_docs_examples + test_blocks + test_standard_docs_complete:
+  50 passed. gen_examples.py --check: both generated pages up to date,
+  exit 0. Full suite not re-run (prose-only edits, nothing failed).
+
+Status: round 5 finished. Pushed to threads-4a-decision-to-log; PR #176
+left open, not merged.

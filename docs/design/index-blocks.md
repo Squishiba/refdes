@@ -354,8 +354,8 @@ Same difflib-suggestion machinery `validate_items`
 ```
 ERROR pages/schematic.md:12 — {{index by="schematic_page" type="log"}}
       — type 'log' has no field 'schematic_page'. Declared fields:
-      summary, status, rationale, date, options, checks, author, source,
-      note, tags, owner, last_reviewed.
+      author, checks, citations, date, note, options, rationale, source,
+      status, summary, tags.
 ```
 
 Lists the type's actual resolved fields (`spec.fields`, `src/refdes/model.py:96`)

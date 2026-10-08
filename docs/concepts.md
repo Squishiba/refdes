@@ -65,7 +65,7 @@ addressed for weeks with no decision reached. One "done" flag hides both. See
 
 ## Verdicts and running notes
 
-A **log entry** is one dated entry in the design's story: either a running note —
+A **log entry** is one entry in the design's story: either a running note —
 the measurement that surprised you, the approach that failed — or a **verdict**,
 a settled conclusion with the options considered and why the rejected ones lost.
 An entry that just narrates sets `summary` and a body; an entry that also reaches
@@ -73,11 +73,14 @@ a verdict adds a `status` to the same type, and an `accepted` one closes coverag
 on what it `satisfies`. Read a verdict later to find out why the board is the way
 it is; read the entries in order to understand how the design got here.
 
-Log entries are **append-only**: a correction is a new entry that `amends` the
-old one, never an edit. That is the paper-notebook convention, and it is enforced
-by the build. (`hardware@1` and `hardware@2` kept settled conclusions in a
-separate `decision` type; `hardware@3` merged it into `log` — see the
-[standard library](standard-library.md#versioning-and-pinning).)
+Log entries are **append-only**: a correction is a new entry that `amends` or
+`supersedes` the old one, not a rewrite of it. That is the paper-notebook
+convention, but under `hardware@3` the build does not enforce it — an edit is
+not a build error, and once an entry's history is captured, a later edit is
+flagged with a warning (`hardware@1` and `hardware@2` kept settled conclusions
+in a separate `decision` type; `hardware@3` merged it into `log` — see the
+[standard library](standard-library.md#versioning-and-pinning) and the
+[design log](design-log.md#append-only).)
 
 ## Change is classified, not just recorded
 
