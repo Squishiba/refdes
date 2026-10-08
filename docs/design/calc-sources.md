@@ -98,14 +98,14 @@ citation is remote and belongs to `CMP-PWR-001`, not this decision
 (`items/components/power.yaml:12-18`), so it cannot satisfy the proposed
 same-item source rule.
 
-**Migration note:** this example intentionally retains its current `type: decision`; after the in-progress phase 4a decision-to-log merge lands, `DEC-PWR-001` is `type: log` with the fields shown here otherwise unchanged.
+**Migration note:** the phase 4a decision-to-log merge has landed: hardware@3 retires `decision` and the history-backed `log` absorbs it, so `DEC-PWR-001` is a `type: log` entry with the fields shown here otherwise unchanged — the `DEC` id survives because `log` carries `DEC` as a legacy id prefix. (This repository's own item files still carry the old spelling on disk, kept alive until the phase 4b item migration by the interim `refdes-schema.yaml` bridge; in a plain hardware@3 project the retired spelling is an unknown-type error.)
 
 **Before (current):**
 
 ````markdown
 ---
 id: DEC-PWR-001
-type: decision
+type: log
 # … existing fields …
 ---
 
@@ -124,7 +124,7 @@ P_diss           = P_out * (1/eff - 1) | W
 ````markdown
 ---
 id: DEC-PWR-001
-type: decision
+type: log
 # … existing fields …
 citations:
   - path: analysis/power-budget.csv
@@ -311,9 +311,10 @@ P_3v3  = 3.3 V * (I_load + I_q) | W
 ```
 ````
 
-As in section 1's example, this uses the post-phase-4a `log` shape; until the
-decision-to-log merge lands, the identical entry is `type: decision`. Each
-current is one extracted scalar, exactly as this design specifies; the sum is
+As in section 1's example, this uses the `log` shape phase 4a shipped: the
+decision-to-log merge has landed, hardware@3 retires `decision`, and the
+identical entry is a log entry. Each current is one extracted scalar, exactly
+as this design specifies; the sum is
 refdes-side arithmetic, and the check verifies the total against the rail bound
 instead of asserting it as prose. When the budget changes, `refdes fetch
 --update` prints the extracted-value diff —

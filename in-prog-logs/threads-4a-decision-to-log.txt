@@ -58,3 +58,56 @@ that example text. Re-pinned vocabulary.html in
 tests/fixtures/no_theme_build_hashes.json (CRLF variant, f472560f...), as
 b3fc3c2 did for the same fixture. tests/test_theme.py: 55 passed.
 Not done: PR body refresh.
+
+Round 3 (2026-10-08, PR #176 review round 3, .scratch/REVIEW-176-round3.md):
+
+Finding 2 (branch behind main) done first, so the docs fix lands on the merged
+tree: `git merge origin/main` (5 commits in, no fetch/pull). The overlapping
+files (build.py, cli.py, model.py, schema.py, standards.py) auto-merged with
+zero textual conflicts, so there were no conflict hunks to resolve by hand;
+I verified the merge kept both sides instead of trusting that: `git diff
+ff8aa45 HEAD` over those files shows main's changes landing intact (image
+freeze `/path` resolution + `_local_image_path` in build.py,
+`rewritten_images` in model.LoadWrites + its `__bool__`, the sealing-opt-in
+overlay note through schema.py/model.py, sealing opt-ins + F3 check/build
+wording in cli.py/standards.py), and `git diff origin/main HEAD` shows only
+this branch's decision-to-log work on top (citation key resolution,
+`legacy_prefixes`, the merge_types revise help, the 0NN/0MM nudge). Merge
+commit 534baeb, amended message-only to carry the attribution trailers.
+
+Finding 1 (stale decision examples) done second, after re-verifying the type
+system per AGENTS.md: `python -m refdes.cli schema` run from a scratch
+hardware@3 project (.scratch/probes/hw3, plain standard, no overlay) shows
+only bound/component/group/log/requirement/test -- `decision` is not there; a
+`type: decision` item there fails `refdes check` with
+`unknown type 'decision'`; `log` carries `legacy_prefixes: [DEC]`
+(standards/hardware/v3/base.yaml), so DEC display ids survive on log entries.
+A probe item written exactly as the doc's "After" block (id DEC-PWR-001,
+type: log, same-item path citation, source() calc) fetched and checked with 0
+errors under that plain hardware@3 project. docs/design/calc-sources.md
+changes: the section 1 migration note now says the merge has landed and
+hardware@3 retires `decision` (with the dogfood bridge spelled out as the
+reason this repo's own files still read `type: decision` until 4b); both
+worked-example frontmatters (Before and After) retyped `type: log`; the
+section 2 "until the decision-to-log merge lands" sentence rewritten to say
+what shipped. The section 9 HASH_FORMAT lines ("coordinate with phase 4a")
+were left: they are forward guidance for unimplemented work, not
+pending-merge claims, and were not in the finding.
+
+Remaining `type: decision` occurrences in docs/ (grepped, listed, left as
+historical): docs/design/named-calc-blocks.md:654,703 (transcribe the real
+dogfood DEC-PWR-001 and its sibling, which still read `decision` on disk via
+the bridge); docs/design/candidate-parts.md:709 and docs/design/lifecycle.md:241
+(dated pre-4a design-spec examples, no pending-merge claim);
+docs/design/living-notes-plan.md:535 (describes the decision->log migration
+itself). README.md, docs-site/, and the docs/*.md user-facing pages are clean
+(round-2 sweep held; the merge did not reintroduce any).
+
+Full suite on the merged tree with the docs fix applied, captured to
+.scratch/suite-round3.txt: 3345 passed, 10 skipped, exit 0. No theme re-pin:
+tests/fixtures/no_theme_build_hashes.json pins a fixture-project build, not
+docs pages (calc-sources.md is not in the pinned set), and the suite passed
+with the pins untouched.
+
+Status: round 3 finished. Docs fix + this log committed separately on top of
+merge commit 534baeb and pushed; PR #176 left open, not merged.
