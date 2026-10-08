@@ -24,13 +24,13 @@ def _type_dict(item_type) -> dict:
     return out
 
 
-def resolved_dump(presets: list[str]) -> str:
+def resolved_dump(presets: list[str], version: int = 3) -> str:
     with tempfile.TemporaryDirectory() as tmp:
         preset_yaml = "".join(f"    - {p}\n" for p in presets)
         write_project_config(
             Path(tmp),
             "site: { title: T, out: _site }\n"
-            "standard:\n  base: hardware\n  version: 3\n"
+            f"standard:\n  base: hardware\n  version: {version}\n"
             + (f"  presets:\n{preset_yaml}" if presets else ""),
         )
         project = load_project(config_path=str(Path(tmp) / "refdes-project.yaml"))

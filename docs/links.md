@@ -7,11 +7,11 @@ and what they may point at, is declared in `refdes-schema.yaml`:
 
 ```yaml
 types:
-  decision:
+  log:
     links:
       satisfies:      [requirement]
       constrained_by: [bound]
-      supersedes:     [decision]
+      supersedes:     [log]
 ```
 
 In an item:
@@ -22,7 +22,7 @@ constrained_by: [BND-THM-001]
 ```
 
 The [standard library](standard-library.md) already declares this vocabulary for
-the seven standard types, so most projects never write a `types:...links:` block
+the six standard types, so most projects never write a `types:...links:` block
 at all — this is what to reach for on a custom type, or one the standard doesn't
 cover.
 
@@ -86,8 +86,8 @@ Declare the edge from **either** end and the other direction appears automatical
 A test saying `verifies: [REQ-PWR-002]` gives the requirement
 `verified_by: [TST-PWR-002]` without the requirement mentioning it.
 
-Declare it from whichever end is natural — a test knows what it covers; a decision
-knows what it satisfies. Declaring both ends is allowed but redundant.
+Declare it from whichever end is natural — a test knows what it covers; a log
+entry knows what it satisfies. Declaring both ends is allowed but redundant.
 
 ## Starter link types
 
@@ -109,21 +109,28 @@ stdout.
 | `refines` | `refined_by` | a requirement narrowing another requirement, or a bound narrowing another bound |
 | `derives_from` | `derived_by` | a bound derived from a requirement or another bound |
 | `governed_by` | `governs` | a requirement that must comply with a general rule stated in another requirement or bound — see [below](#governed_by-vs-refines-vs-constrained_by) |
-| `satisfies` | `satisfied_by` | decision or component → requirement or bound |
-| `constrained_by` | `constrains` | decision or component → bound — traceability only, does **not** feed [coverage](coverage.md#which-links-feed-coverage) |
+| `satisfies` | `satisfied_by` | verdict log entry or component → requirement or bound |
+| `constrained_by` | `constrains` | verdict log entry or component → bound — traceability only, does **not** feed [coverage](coverage.md#which-links-feed-coverage) |
 | `verifies` | `verified_by` | test → requirement or bound |
-| `selects` | `selected_by` | decision → component |
+| `selects` | `selected_by` | verdict log entry → component |
 | `addresses` | `addressed_by` | log entry → requirement or bound |
 | `amends` | `amended_by` | log entry → earlier log entry |
-| `records` | `recorded_by` | log entry → decision |
-| `supersedes` | `superseded_by` | decision → older decision |
-| `blocked_by` | `blocks` | decision → anything holding it up — see [below](#blocked_by-and-the-cascade-report) |
-| `part_of` | `contains` | an item belonging to a group — requirement, bound, decision, test, or component → group |
+| `follows` | `followed_by` | log entry → the earlier entry it continues |
+| `supersedes` | `superseded_by` | verdict log entry → older one |
+| `blocked_by` | `blocks` | log entry → anything holding it up — see [below](#blocked_by-and-the-cascade-report) |
+| `part_of` | `contains` | an item belonging to a group — requirement, bound, test, or component → group (deliberately not `log`) |
 | `drop_in` | `drop_in` (self-inverse) | component → drop-in second source, no review needed — see [below](#part-equivalence-drop_in-and-alternate) |
 | `alternate` | `alternate` (self-inverse) | component → functionally close, check before substituting — see [below](#part-equivalence-drop_in-and-alternate) |
 
 > **Only from `hardware@3` onward.** `part_of`, and the `group` type it points
 > at, are new in `hardware@3` — v1 and v2 declare neither.
+>
+> **`follows` is `hardware@3`'s spelling of what `records` was.** In `hardware@2`
+> a `log` declared `records: [decision]` to name the decision an entry was
+> about; v3 merges the two types, so the edge is log-to-log and is spelled
+> `follows:`. `refdes standard upgrade --to 3` renames the verb in place, and
+> the migrated edge is a maintained link from then on — a writable load
+> freezes it to `DISPLAY-ID@key` and captures the predecessor's snapshot.
 
 Add your own by declaring them in `link_types` and listing them under a type's
 `links:`.
@@ -136,7 +143,7 @@ Three verbs, three different questions, easy to reach for the wrong one:
   of statement*: a board-level numeric rule refining a platform-level one,
   same category of thing, different altitude.
 - **`constrained_by`** — a machine-checkable numeric limit, the case where a
-  `bound` and `checks:` are actually involved. `decision`/`component` →
+  `bound` and `checks:` are actually involved. `log`/`component` →
   `bound`.
 - **`governed_by`** — neither of those. The declaring requirement is a
   *different* fact (which specific inputs exist, say) that must comply with
@@ -214,7 +221,7 @@ checked — `drop_in: [REQ-PWR-001]` on a component is a build error.
 
 > **Only from `hardware@2` onward.** v1 wrote both target lists as `[]`,
 > which the loader reads as *unrestricted* (the same way
-> `decision.blocked_by: []` deliberately is), so on v1 the same line builds
+> `log.blocked_by: []` deliberately is), so on v1 the same line builds
 > clean. A project pinned at v1 keeps that behaviour, since a pinned version
 > never changes under you; `refdes standard upgrade --to 2` is what opts
 > into the check, and it will refuse and roll back if an existing link
@@ -244,7 +251,7 @@ status on the item the link points at:
 
 | The link | The status it asserts | On the link's target |
 |---|---|---|
-| `supersedes: [DEC-002]` | `status: superseded` | DEC-002 |
+| `supersedes: [LOG-002]` | `status: superseded` | LOG-002 |
 | `selects: [CMP-001]` | `status: selected` | CMP-001 |
 
 Neither half does anything to the other, and that is deliberate: the verbs'
@@ -254,13 +261,13 @@ one fact can disagree, and until now nothing noticed. A build now **warns** in
 either direction:
 
 ```yaml
-# DEC-003 supersedes DEC-002, and DEC-002 is still `status: accepted`:
-#   WARNING  [DEC-003] supersedes DEC-002, but that item's status is
+# LOG-003 supersedes LOG-002, and LOG-002 is still `status: accepted`:
+#   WARNING  [LOG-003] supersedes LOG-002, but that item's status is
 #   'accepted', not 'superseded' -- the link does not move a status on its
-#   own. Set DEC-002's status to 'superseded', or remove the supersedes link
+#   own. Set LOG-002's status to 'superseded', or remove the supersedes link
 #   if it is not true.
 
-# CMP-001 is `status: selected` and no decision anywhere selects it:
+# CMP-001 is `status: selected` and no log entry anywhere selects it:
 #   WARNING  [CMP-001] status is 'selected' but nothing selects it -- no item
 #   declares selects: pointing at this one. Author selects: on the item that
 #   makes it so, or move this item off 'selected'.
@@ -281,23 +288,23 @@ never be in disagreement about it. And a project that never declares
 
 ## `blocked_by:` and the cascade report
 
-A decision on hold pending an unresolved question routinely has other
-decisions depending on its outcome. `blocked_by:` records that dependency,
+A log entry on hold pending an unresolved question routinely has other
+entries depending on its outcome. `blocked_by:` records that dependency,
 targeting any item type with no restriction:
 
 ```yaml
-- id: DEC-IO-005
-  blocked_by: [DEC-IO-001]
+- id: LOG-IO-005
+  blocked_by: [LOG-IO-001]
 ```
 
 **The declared edge is direct** — an item names only its immediate
 blocker(s) — **but the report resolves transitively**, because naming the
-root cause, not the nearest link in the chain, is the whole value. `DEC-IO-016`
-declaring `blocked_by: [DEC-IO-003]`, itself `blocked_by: [DEC-IO-001]`,
-reads as blocked on `DEC-IO-001`, with the full path shown, not collapsed:
+root cause, not the nearest link in the chain, is the whole value. `LOG-IO-016`
+declaring `blocked_by: [LOG-IO-003]`, itself `blocked_by: [LOG-IO-001]`,
+reads as blocked on `LOG-IO-001`, with the full path shown, not collapsed:
 
 ```
-DEC-IO-016 <- DEC-IO-003 <- DEC-IO-001 (on_hold, root)
+LOG-IO-016 <- LOG-IO-003 <- LOG-IO-001 (on_hold, root)
 ```
 
 "Root" is structural — the walk follows `blocked_by` edges until it reaches
@@ -316,8 +323,8 @@ with itself.
 file:line of the edge that actually closes the loop:
 
 ```
-ERROR items/main-io/decisions.md:12 [DEC-IO-003] — blocked_by cycle:
-  DEC-IO-003 -> DEC-IO-001 -> DEC-IO-003
+ERROR items/main-io/log.md:12 [LOG-IO-003] — blocked_by cycle:
+  LOG-IO-003 -> LOG-IO-001 -> LOG-IO-003
 ```
 
 **The stale-blocker check.** The moment an edge stops being live — its
@@ -326,7 +333,7 @@ target reaches a settled status (per the type's `satisfying_statuses:` or
 still declares it — is worth a nudge:
 
 ```
-INFO items/main-io/decisions.md:80 [DEC-IO-005] — blocked_by DEC-IO-001, which
+INFO items/main-io/log.md:80 [LOG-IO-005] — blocked_by LOG-IO-001, which
   is now 'accepted' — is it still blocked? Remove the edge if resolved, or say
   in 'rationale' why it still applies.
 ```
@@ -370,15 +377,15 @@ links to the collapsed row where it would have been.
 
 A named [calc block](math.md#naming-a-calc-block) gets the same envelope with
 a `calc:` prefix —
-`[[DEC-PWR-001#calc:losses]]`, or `[[DEC-PWR-001#calc:losses|the losses
+`[[LOG-PWR-001#calc:losses]]`, or `[[LOG-PWR-001#calc:losses|the losses
 calculation]]` — which links to that block's table on the target's page. The
 `id="losses"` an author writes on a `calc` block's fence line gives the block
 its name, and the named block's table is what the link points at. It links;
 it never inlines the numbers, so it cannot go stale when a result moves. The
 `calc:` prefix is required: field names are schema-declared, while calc block
 names are author-chosen and exist only once a fence says so, and a bare
-fragment is read as a field name — `[[DEC-PWR-001#losses]]` warns that type
-`decision` declares no field `losses` rather than guessing. A miss on a
+fragment is read as a field name — `[[LOG-PWR-001#losses]]` warns that type
+`log` declares no field `losses` rather than guessing. A miss on a
 `#calc:` fragment is a warning that says what the target actually has — a
 block of another name (naming them), fences with no name at all, or no calc
 blocks — never a build failure, the same unresolved-reference posture as
@@ -427,5 +434,5 @@ devices.
 Each item page lists **Outgoing** links (what it declares) and **Incoming** links
 (what points at it), grouped by relationship. Combined with
 [coverage](coverage.md), this is the traceability story: from a requirement you can
-reach the log entries that worked on it, the decision that satisfies it, and the
-test that verifies it.
+reach the log entries that worked on it, the verdict entry that satisfies it,
+and the test that verifies it.

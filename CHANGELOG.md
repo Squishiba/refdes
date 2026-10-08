@@ -113,6 +113,51 @@ and this project uses [Semantic Versioning](https://semver.org/).
        rename, while a `citations: - item:` entry is bare-id data nothing
        maintains.
 
+       **A migrated `records:` edge becomes a live thread edge, and the
+       first writable command after the upgrade captures history.** This is
+       the part worth reading before upgrading. The upgrade itself writes
+       bare targets (`follows: [DEC-001]`) and no events; the next command
+       that loads the project *writably* -- `check`, `build`, `index`, `id`,
+       `fetch`, `audit`, anything but `--no-write` -- then does exactly what
+       it does for a hand-authored `follows:` edge: it freezes each migrated
+       edge to its target's current thread tip and captures that target's
+       snapshot:
+
+       ```
+       $ refdes check
+       captured DEC-001: LOG-001 now follows it
+       (minted 2 key(s) and rewrote 1 reference(s) while loading)
+       2 items, 0 errors, 0 warnings
+       ```
+
+       The item file now reads `follows: [DEC-001@k9585h4cgtm]` and one event
+       has landed in `.refdes/history/events/`. From then on, editing the
+       old decision is reported like any other edited-after-captured entry:
+
+       ```
+       WARNING items/dec.yaml:5 [DEC-001] -- DEC-001: edited after captured --
+       current semantic content differs from the snapshot in followed event
+       067082b9-...; captured when LOG-001 followed it. If the edit was a
+       correction, revert it and append a new entry with `amends: [DEC-001]`
+       instead; otherwise there is nothing to do.
+       ```
+
+       So an edge you wrote as inert documentation ("this entry is about that
+       decision") comes back as a real thread edge, and the decision it
+       names is now under capture -- editing it warns instead of passing
+       silently. It is still a warning, never a build error, and
+       `--no-write` in between changes nothing about when it happens. If you
+       would rather not have those edges frozen, drop the `follows:` lines
+       before the first writable command.
+
+       One more field-semantics change rides along, because the merged `log`
+       is also the standard's activity log: `date` moves from
+       `on_change: log` (outside the content hash) to `on_change: invalidate`
+       (inside it), so a migrated decision's date now invalidates its
+       downstream links. Nothing orphans -- `title` -> `summary` and
+       `records` -> `follows` are the only losses -- but a date edit that
+       used to be invisible in a baseline diff is not any more.
+
   `refdes init` pins `version: 3` from now on. `refdes new <type>` now hints
   at `body:` after the closing fence -- it's reserved, not a schema field,
   so it never showed up in the scaffold's per-field loop before this.

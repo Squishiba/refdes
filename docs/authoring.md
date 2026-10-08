@@ -63,9 +63,9 @@ front-matter, then the body.
 
 ````markdown
 ---
-id: DEC-PWR-001
-type: decision
-title: 3V3 rail regulator topology
+id: LOG-PWR-001
+type: log
+summary: 3V3 rail regulator topology
 status: accepted
 date: 2026-03-14
 satisfies: [REQ-PWR-002]
@@ -103,20 +103,20 @@ follows, the same way `defaults:` works in a list file:
 ````markdown
 ---
 defaults:
-  type: decision
-  prefix: DEC-PWR
+  type: log
+  prefix: LOG-PWR
 ---
-id: DEC-PWR-001
-title: 3V3 rail regulator topology
----
-
-Body of the first decision.
-
----
-title: LDO thermal fallback, rejected
+id: LOG-PWR-001
+summary: 3V3 rail regulator topology
 ---
 
-Body of the second decision. Each item keeps its own body — the next item's
+Body of the first entry.
+
+---
+summary: LDO thermal fallback, rejected
+---
+
+Body of the second entry. Each item keeps its own body — the next item's
 front-matter is where this one ends.
 ````
 
@@ -135,11 +135,11 @@ value wins:
 
 ```yaml
 defaults:
-  type: decision
-  prefix: DEC-PWR
+  type: log
+  prefix: LOG-PWR
 ---
-prefix: DEC-MECH   # this one item only, everything else still gets DEC-PWR
-title: Enclosure fastener torque
+prefix: LOG-MECH   # this one item only, everything else still gets LOG-PWR
+summary: Enclosure fastener torque
 ---
 ```
 
@@ -193,13 +193,13 @@ item under it is that type until the next `section:` or the end of the file.
 
 This is the actual difference between the two, not just a second way to spell the
 same thing. Under `defaults: {type: requirement}`, an item may still legally
-declare `type: decision` — a default is something an item is free to override.
+declare `type: test` — a default is something an item is free to override.
 Under `section: requirement`, the container has already stated what its items
 are, so an item inside it declaring a conflicting `type:` is an **error** naming
 both, not a silent override:
 
 ```
-ERROR items/main-io/interfaces.yaml:6 — item declares type 'decision' but sits
+ERROR items/main-io/interfaces.yaml:6 — item declares type 'test' but sits
       inside a 'section: requirement' block (opened at line 2) -- a section
       asserts its items' type; this one disagrees. Move the item out of the
       section, or fix whichever of the two is wrong.
@@ -304,9 +304,9 @@ project schema is still free to use that name), its `summary`, its `name`, its
 `body` (truncated to a sentence-length preview), or its ID — the first of those
 it actually has, in that order. This is why a `requirement`/`bound`
 needs no `title:` at all in the common case: the sentence lives in `body:`,
-and the title falls back to *that*, truncated if it runs long — a decision or
-test, whose real content lives elsewhere (`options:`, a linked `checks:`),
-needs `title:` written explicitly instead, since there's no prose to fall
+and the title falls back to *that*, truncated if it runs long — a `test`,
+whose real content lives elsewhere (a linked `checks:`), needs `title:`
+written explicitly instead, since there's no prose to fall
 back to. Write `title:` on a requirement/bound too once the sentence is long
 enough to want a short label of its own in a table; it wins over the body
 fallback whenever it's present.
@@ -334,7 +334,7 @@ content rather than a *reason*); if not, it's `note:`.
 
 `source` and `note` come from `sets.provenance` (see [`sets` and
 `include:`](standard-library.md#sets-and-include)); `rationale` is
-declared per type, and required on some (`decision.rationale`, when `status:
+declared per type, and required on some (`log.rationale`, when `status:
 rejected`); `body` is a reserved key, not a field at all — see [bodies in
 list files](#bodies-in-list-files) and [reserved keys](#reserved-keys) below.
 
@@ -368,7 +368,7 @@ items/
   requirements/power.yaml
   requirements/mechanical.yaml
   bounds/thermal.yaml
-  decisions/dec-pwr-001-regulator.md
+  log/log-pwr-001-regulator.md
   tests/power.yaml
   log/board-a.yaml
 ```

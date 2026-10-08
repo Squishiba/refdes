@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-import yaml
+import pytest
 from conftest import write_project_config
 
 from refdes import cli, parse, revise
-from refdes.model import Item
 from refdes.schema import SchemaError, load_project
 
 
@@ -151,23 +150,63 @@ def test_item_citation_target_must_exist(tmp_path):
     assert any("item: 'DEC-404' does not exist" in d.message for d in project.errors)
 
 
-def test_recorded_by_and_existing_citations_share_one_set():
-    lines = [
-        "---", "id: DEC-001", "type: decision", "recorded_by: [LOG-001@abc123]",
-        "citations:", "  - path: evidence.pdf", "---", "Body.",
+def _cite_target(tmp_path, spelling):
+    """One project whose `citations: - item:` names LOG-001 as `spelling`."""
+    config = _project(tmp_path)
+    (tmp_path / "items" / "log.yaml").write_text(
+        "items:\n  - id: LOG-001\n    type: log\n    summary: The target\n"
+        "  - id: LOG-002\n    type: log\n    summary: Cites it\n"
+        f"    citations:\n      - item: {spelling}\n",
+        encoding="utf-8",
+    )
+    project = load_project(config_path=str(config))
+    parse.load_items(project)
+    from refdes import keys
+    keys.mint_missing(project)
+    key = project.item_by_id("LOG-001").key
+    return project, key
+
+
+@pytest.mark.parametrize("form", ["composite", "bare-key"])
+def test_item_citation_resolves_the_maintained_key_spellings(tmp_path, form):
+    """`ID@key` and a bare key resolve like every other target spelling.
+
+    PR #176 review: `validate_items` looked citations up with `item_by_id`,
+    which is display-id only, so a citation written in the tool's own
+    maintained composite form reported `item: 'LOG-001@1zn5skrv6k3' does not
+    exist` for an item that was demonstrably there. Resolution now goes
+    through `resolve_link_target`, the same helper links, `checks: against:`
+    and cross-item calc references use.
+    """
+    project, key = _cite_target(tmp_path, "PLACEHOLDER")
+    spelling = f"LOG-001@{key}" if form == "composite" else key
+    project.item_by_id("LOG-002").fields["citations"] = [{"item": spelling}]
+    from refdes import build
+    build.build(project)
+    assert not project.errors, [d.message for d in project.errors]
+
+
+def test_item_citation_with_a_dead_key_reports_the_real_cause(tmp_path):
+    """The composite failure mode names the key, not a missing item.
+
+    Same review finding, other half: a composite whose key resolves to
+    nothing used to be indistinguishable from an unknown id. It now takes
+    the shared `_unknown_key_message` text, which says the key is what
+    resolves, that the label may be stale, and that the display half is not
+    used as a fallback -- with the remedy clause the bare-id message has
+    never had, because a bare id has no key to lose.
+    """
+    project, _key = _cite_target(tmp_path, "PLACEHOLDER")
+    project.item_by_id("LOG-002").fields["citations"] = [
+        {"item": "LOG-001@aaaaaaaaaaa"}
     ]
-    item = Item(
-        id="DEC-001", type="decision", source_file="decision.md", source_line=2,
-        links={"recorded_by": ["LOG-001@abc123"]},
-        resolved_links={"recorded_by": ["LOG-001"]},
-    )
-    rewritten, errors = revise._rewrite_links_as_citations(
-        lines, "decision.md", [item], revise.Mapping(citation_links=["recorded_by"])
-    )
-    assert errors == []
-    front = yaml.safe_load("\n".join(rewritten[1:rewritten.index("---", 1)]))
-    assert front["citations"] == [{"path": "evidence.pdf"}, {"item": "LOG-001"}]
-    assert "recorded_by:" not in "\n".join(rewritten)
+    from refdes import build
+    build.build(project)
+    messages = [d.message for d in project.errors]
+    assert len(messages) == 1, messages
+    assert "does not exist" not in messages[0]
+    assert "key 'aaaaaaaaaaa' (labelled LOG-001), which no item declares" in messages[0]
+    assert "refdes keys restore" in messages[0]
 
 
 def test_bundled_follows_freezes_and_captures_predecessor(tmp_path):

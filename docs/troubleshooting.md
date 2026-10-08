@@ -109,8 +109,9 @@ spelling. An unknown field with nothing close to it is only a warning
 the forward-compatible case, where there is no typo to correct.
 
 **`missing required field 'title'`**
-The schema marks it `required: true`. In the bundled standard, `decision`,
-`test`, and `component` use `title`. `requirement` and `bound` have no
+The schema marks it `required: true`. In the bundled standard, `test` and
+`component` use `title`, and a verdict-bearing `log` entry uses `summary`
+(the merged type; `title` is not its label field). `requirement` and `bound` have no
 required field at all under **hardware@3** -- their content lives in the
 markdown `body:`, which is required but enforced as a *warning*, so a stub
 can exist while it is still being drafted:
@@ -300,7 +301,7 @@ key was ever involved:
   live display id or key. Verified: recording `former_ids: [REQ-PWR-001]` onto
   the renamed item leaves this error exactly as it was.
 - `refdes revise` — maps `types:`/`merge_types:`/`fields:`/`links:`/
-  `prefixes:`/`citation_keys:`/`citation_links:`,
+  `prefixes:`/`citation_keys:`,
   not individual ids, so it cannot rename a single item. It is the tool for a
   prefix-wide rename, and it expands bare references *first* so they follow. An
   `ids:` mapping handed to it is refused by name, with that pointed at here.
@@ -311,7 +312,7 @@ writable load expands it to `NEW-ID@key` and the build is clean.
 **`constrained_by may point at bound, but REQ-PWR-002 is a requirement`**
 Wrong link type. `constrained_by` is reserved for the limit-bearing case —
 a `bound` and `checks:` actually involved — and only ever targets `bound`.
-To point at a requirement instead, use `satisfies` (decision/component,
+To point at a requirement instead, use `satisfies` (log/component,
 also reaches `bound`) or `governed_by`/`refines` (requirement) — see
 [`governed_by` vs. `refines` vs.
 `constrained_by`](links.md#governed_by-vs-refines-vs-constrained_by).
@@ -407,7 +408,7 @@ the name would disambiguate nothing. Rename one of the blocks ("rename one of
 them, e.g. 'losses' -> 'losses_2'"), in both item and page references to it.
 The same name in two different items is fine.
 
-**`[[DEC-PWR-001#calc:loess]]: DEC-PWR-001 has no calc block named 'loess' (it names: losses).`**
+**`[[LOG-PWR-001#calc:loess]]: LOG-PWR-001 has no calc block named 'loess' (it names: losses).`**
 A `[[…#calc:name]]` fragment in prose named a block the target doesn't have;
 the warning lists the names it does. Like any unresolved `[[…]]`, this is a
 **warning**, not an error — the build succeeds, and the reference stays in the

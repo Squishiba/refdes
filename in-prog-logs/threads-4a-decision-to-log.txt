@@ -24,3 +24,37 @@ Final verification: the sabotage test failed 1/1 with the DEC legacy prefix remo
 Status: implementation and verification finished; commit, push, and PR publication in progress.
 
 Status: finished. Committed phase 4a as b3fc3c2, pushed branch threads-4a-decision-to-log, and opened PR #176 against main. PR remains unmerged as requested.
+
+Status: second-round review fixes in progress (PR #176 review round 2, .scratch/REVIEW-176-round2.md).
+
+Findings 1-2 (docs still teach the retired `decision` type) done: swept every page under docs/ plus README.md to the `log` vocabulary -- getting-started, checks, schema-reference, standard-library, lifecycle, troubleshooting, authoring, links, cli-reference, coverage, blocks, math, markdown, multi-board, workspaces, ids, parts, design-log, output. Fixed the standard-library page's wrong upgrade claim (a `standard upgrade` landing on a version without a selected preset refuses and rolls back; it does not strip `presets:` for you -- verified in .scratch/v2probe). Also corrected two claims that were wrong against the shipped v3 schema: `part_of` is deliberately not on `log`, and the `satisfying_statuses` example in coverage.md used a `decision` block that no longer resolves (retyped to `component`). src/refdes/vocabulary.py regenerated the per-type examples; `python docs-site/gen_examples.py --check` passes.
+
+Finding 3 (undisclosed capture) done: verified on a clean v2 project that the upgrade writes `follows: [DEC-001]` with no events, and the first writable load then prints `captured DEC-001: LOG-001 now follows it`, freezes to `follows: [DEC-001@k9585h4cgtm]`, and writes one event; a later edit to DEC-001 then warns. Recorded that in CHANGELOG.md item 7 and as new bullets in changelog.d/threads-4a-decision-merge.breaking.md, plus a note in docs/standard-library.md.
+
+Finding 4 done: `validate_items` resolved `citations: - item:` through `project.item_by_id` (display-id only), so a composite `ID@key` -- the spelling the surrogate-key machinery itself writes -- reported `does not exist` for an item that was there. Now resolves via `resolve_link_target`, and anything key-shaped that still fails takes the shared `_unknown_key_message` text, which names the key, warns the label may be stale, and carries the `refdes keys restore` remedy. Three tests in tests/test_decision_merge.py; sabotage-verified both halves (reverting the resolver fails the 2 resolution tests; disabling the diagnostic branch fails the dead-key test).
+
+Finding 5 done: `citation_links` had no consumer -- no bundled migration used it and only one test referenced it. Removed `_rewrite_links_as_citations`, the `Mapping` field/parser/merge arms, the ACCEPTED_SECTIONS entry, the cli.py help text, the docs in cli-reference.md and troubleshooting.md, and the two tests. Verified `refdes revise` now refuses `citation_links:` by name, exit 2.
+
+Finding 6 done: added a dated implementation note to docs/design/threads.md recording that phase 4a renamed `records:` to `follows:` rather than converting to `citations: - item:`, and why (a citation entry is bare-id data nothing maintains; structured links are what the key machinery keeps current). The owner's 2026-10-03 bullets are unchanged; the contradicting §6 and §7 sketches now say what shipped.
+
+Finding 7 done: the release nudge printed `- id: LOG-A-0NN` and `- item: LOG-A-0NN` -- one placeholder for two different entries, so following it wrote an entry citing itself, and nothing caught that because a self-citation resolves. The cited placeholder is now `LOG-A-0MM`. Added an assertion that the two differ; sabotage-verified (putting `0NN` back fails 4 tests).
+
+Finding 8 done: `tests/fixtures/hardware3_design_debate_resolved.json` was referenced by nothing, and it could not be used again -- v3 + design-debate no longer resolves at all, since the preset retired with `decision`. Regenerated the snapshot against hardware@2, where the preset still exists, and restored the dropped oracle row there. `resolved_dump` now takes a version. Sabotage-verified by perturbing one prefix in the fixture.
+
+Finding 9: this entry.
+
+Tutorial walked end to end in .scratch/tut3 against the edited docs. Two mismatches found and the docs corrected: step 5's sample output said "2 item(s) with no coverage" where the real run says the same, but step 6's count was wrong (docs said 6 items/2 warnings at a point where the real sequence gives 5 items/1 error/2 warnings), and the superseding paragraph's example check needed a calc block to be legal. Every command now produces the output the page shows, including the overlay case ending at `7 items, 0 errors, 2 warnings` and `-v` moving the demoted failure to info.
+
+Not yet done at this point: full suite, commit, push, PR body.
+
+Round 2 close-out (orchestrator, Claude, 2026-10-08): the Space Bunny fixer ran
+out of usage after finishing findings 1-9, before the suite/commit/push.
+Full suite on its tree: 1 failed, 3325 passed, 2 skipped. The failure was
+tests/test_theme.py::test_no_theme_build_is_byte_identical_to_the_pinned_output:
+vocabulary.html changed because finding 1-2 rewrote the decision examples in
+src/refdes/vocabulary.py to log. Built the page at HEAD 85e4f1c: it hashes to
+the old pin exactly (cce5202e...), and the only diff against the new build is
+that example text. Re-pinned vocabulary.html in
+tests/fixtures/no_theme_build_hashes.json (CRLF variant, f472560f...), as
+b3fc3c2 did for the same fixture. tests/test_theme.py: 55 passed.
+Not done: PR body refresh.

@@ -612,11 +612,11 @@ def test_revise_still_accepts_every_section_it_documents(tmp_path, capsys):
     directions: the sections the docs and `revise --help` name load, and
     nothing else does."""
     assert revise.ACCEPTED_SECTIONS == (
-        "types", "merge_types", "fields", "links", "prefixes", "citation_keys", "citation_links",
+        "types", "merge_types", "fields", "links", "prefixes", "citation_keys",
     )
     _, mapping = _revise_project_with_mapping(
         tmp_path,
-        "types: {}\nmerge_types: {}\nfields: {}\nlinks: {}\nprefixes: {}\ncitation_keys: {}\ncitation_links: []\n",
+        "types: {}\nmerge_types: {}\nfields: {}\nlinks: {}\nprefixes: {}\ncitation_keys: {}\n",
     )
     assert revise.load_mapping(mapping).is_empty()  # present but empty, not refused
 

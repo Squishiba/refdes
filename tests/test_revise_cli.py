@@ -353,11 +353,20 @@ def test_release_nudge_citation_form_loads_under_the_shipped_schema(lifecycle_pr
     # The cited entry is an earlier log entry, so its placeholder carries
     # the log prefix the nudge's own new entry uses -- not a retired one.
     assert cited_placeholder.split("-")[0] == id_placeholder.split("-")[0]
+    # ...but a different placeholder, because these are two different entries.
+    # One placeholder used for both pasted as an entry citing itself (PR #176
+    # review), and nothing catches it: a self-citation resolves, so the build
+    # stayed clean and the mistake shipped.
+    assert cited_placeholder != id_placeholder, (
+        "the nudge's `- id:` and `- item:` placeholders are identical, so "
+        "following the tool's own advice writes an entry citing itself"
+    )
 
     # Run the hint's citation form through the loader: substitute the
     # placeholder digits and build a hardware@3 project whose log entry
-    # cites an id of exactly that shape.
-    cited = re.sub(r"\d*NN$", "001", cited_placeholder)
+    # cites an id of exactly that shape. Both placeholders end in a run of
+    # placeholder letters, so substitute whichever run this one carries.
+    cited = re.sub(r"[A-Z]+$", "001", cited_placeholder)
     root = lifecycle_project / "v3-after"
     root.mkdir()
     write_project_config(

@@ -567,12 +567,19 @@ def _normalized(dump: str) -> dict:
 
 
 @pytest.mark.parametrize(
-    "fixture, presets",
+    "fixture, version, presets",
     [
-        ("hardware3_resolved.json", []),
+        ("hardware3_resolved.json", 3, []),
+        # The design-debate row moved to hardware@2 (PR #176 review). The
+        # preset retired in hardware@3 along with the `decision` type, so
+        # v3 + design-debate no longer resolves at all and the old v3
+        # snapshot had no test that could use it. The preset still exists at
+        # v1/v2, so the layered-resolution case is kept there instead of
+        # dropped -- which is what the dropped row lost.
+        ("hardware2_design_debate_resolved.json", 2, ["design-debate"]),
     ],
 )
-def test_hardware3_base_resolves_unchanged(fixture, presets):
+def test_hardware3_base_resolves_unchanged(fixture, version, presets):
     """The acceptance test of extends.md §5.2: converting `bound` to
     `extends: requirement` leaves the resolved schema literally identical, so
     nothing that hashes, seals or baselines an item can tell. The fixtures are
@@ -581,7 +588,7 @@ def test_hardware3_base_resolves_unchanged(fixture, presets):
     (`governed_by: null`, §2.2). Field order is compared too; link-verb order
     is not (inherited verbs come first), and nothing reads it."""
     expected = _normalized((FIXTURES / fixture).read_text(encoding="utf-8"))
-    actual = _normalized(resolved_dump(presets))
+    actual = _normalized(resolved_dump(presets, version=version))
 
     assert list(actual["types"]) == list(expected["types"])
     for name, spec in expected["types"].items():

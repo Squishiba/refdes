@@ -2,7 +2,7 @@
 
 A new project's `refdes-project.yaml` doesn't need to declare `requirement`,
 `bound`, or any of the usual hardware-traceability vocabulary by hand.
-`refdes` ships a **standard dictionary** — seven item types, their fields, their
+`refdes` ships a **standard dictionary** — six item types, their fields, their
 status lifecycles, and the link vocabulary connecting them — bundled inside
 the package and resolved live, by reference, into every project that opts in.
 
@@ -10,7 +10,7 @@ the package and resolved live, by reference, into every project that opts in.
 # refdes-project.yaml
 standard:
   base: hardware
-  version: 2
+  version: 3
   presets: []
 ```
 
@@ -23,25 +23,32 @@ have no `refdes-schema.yaml` at all — and their absence is the point:
 
 ## What's in it
 
-Seven types, each with a `prefix`, a `status` lifecycle (where it has one), and
+Six types, each with a `prefix`, a `status` lifecycle (where it has one), and
 the standard link vocabulary:
 
 | Type | Prefix | Status lifecycle | Purpose |
 |---|---|---|---|
 | `requirement` | `REQ` | `draft` → `active` → `retired` | What the design must do |
 | `bound` | `BND` | `draft` → `active` → `retired` | A machine-checkable limit, compared against a `calc` result |
-| `decision` | `DEC` | `proposed` → `in_progress` → `accepted` / `on_hold` / `rejected` / `superseded` | A settled choice, with options considered |
 | `test` | `TST` | `planned` → `passing` / `failing` / `blocked` | Proof a requirement or bound holds |
-| `component` | `CMP` | `candidate` → `selected` / `rejected` / `obsolete` | A specific part realizing a decision |
+| `component` | `CMP` | `candidate` → `selected` / `rejected` / `obsolete` | A specific part realizing a design choice |
 | `group` | `GRP` | — (never coverable) | A named collection — "the PCIe interface spec" — that names the collection without standing in for its members |
-| `log` | `LOG` | — (append-only) | The dated, unedited record of how the design got here |
+| `log` | `LOG` | optional `proposed` → `in_progress` → `accepted` / `on_hold` / `rejected` / `superseded` (append-only) | One dated design-log entry: narrative work, a verdict that settles a choice, or both |
 
 And fifteen link verbs, each declared on the type that would naturally author
 it — `refines`, `derives_from`, `governed_by`, `satisfies`, `constrained_by`,
-`verifies`, `addresses`, `records`, `amends`, `supersedes`, `selects`,
+`verifies`, `addresses`, `follows`, `amends`, `supersedes`, `selects`,
 `blocked_by`, `part_of`, plus the self-inverse `drop_in`/`alternate` pair on
 `component`. See
 [links](links.md) for how declaring one end gives you the other for free.
+
+There is no `decision` type. `hardware@1` and `hardware@2` had one, and
+`hardware@3` merged it into `log`: an entry that only narrates sets `summary`
+and a body, and one that also reaches a verdict adds `status`, `options` and
+`checks` to the same type. The merged type keeps `DEC` as a `legacy_prefixes`
+entry so ids minted under the old type still load without a prefix warning.
+See [versioning and
+pinning](#versioning-and-pinning) below for the migration path.
 
 Every type also carries `owner`/`last_reviewed` (the `stewardship` set)
 and `source`/`note`/`tags` (`provenance`) — see [sets and
@@ -149,18 +156,24 @@ confers no substitutability between the types that include it.
 Bundled, curated extensions to the base standard, opted into by name:
 
 ```yaml
-# refdes-project.yaml
+# refdes-project.yaml -- hardware@1/@2; hardware@3 has no presets to list
 standard:
   base: hardware
   version: 2
   presets: [design-debate]
 ```
 
-`design-debate` (the only preset shipped today) adds `debate`, `option`,
-`claim`, and `position` — a vocabulary for recording the argument that
-produces a decision, not just the decision itself. It isn't in the base
-standard because most projects don't need it, and pre-seeding it everywhere
-would reproduce the exact config bloat the standard exists to avoid.
+**`hardware@3` ships no presets at all** — `standard.add-preset` against it
+answers `configuration error: preset 'design-debate' does not exist for
+hardware@3 (available: []).` Everything below describes the mechanism, and
+`design-debate` is the worked example from the versions that still ship one:
+`hardware@1` and `hardware@2`. It adds `debate`, `option`, `claim`, and
+`position` — a vocabulary for recording the argument that produces a
+conclusion, not just the conclusion itself — and it was retired along with the
+`decision` type in `hardware@3` (change 7 [below](#versioning-and-pinning)),
+because its `resolved_by: [decision]` link had nothing left to target and its
+grouping was exactly the "narrative vs. verdict" split the merge removes. A
+project still on `@1` or `@2` keeps it; nothing forces an upgrade to keep it.
 
 Presets are **peers**: each is purely additive against the base and against
 every other selected preset, and none may extend or override another's type.
@@ -183,10 +196,28 @@ are the same operation — resolution is live, so there's no difference
 between "chosen at init" and "added by hand afterward":
 
 ```bash
-refdes init --preset design-debate         # at project creation
+refdes init --preset design-debate         # at project creation (hardware@1/@2)
 refdes standard add-preset design-debate   # or later, on an existing project
 refdes standard remove-preset design-debate
 ```
+
+Each of the three names is checked against the version the project is pinned
+to, so all three refuse the same name on a `hardware@3` project with the same
+`does not exist for hardware@3 (available: [])` error.
+
+A `standard upgrade` that would land on a version without a preset you
+selected **refuses and rolls back** rather than dropping the preset for you —
+the rename is yours to make, in the order you choose:
+
+```
+$ refdes standard upgrade --to 3
+v2 -> v3:
+refused:
+  rewritten project no longer loads: preset 'design-debate' does not exist for hardware@3 (available: []).
+```
+
+`refdes standard remove-preset design-debate` first, then upgrade, and both
+succeed — as do a hand-edit of `presets:` and the upgrade.
 
 Hand-editing `standard.presets:` directly and re-running `refdes build` does
 exactly the same thing as either command — they exist for the validation
@@ -209,7 +240,8 @@ removed preset 'design-debate' from standard.presets:
 
 The same wording appears for a link name a since-removed preset provided
 (`unknown field 'raises' on decision -- it was provided by the
-'design-debate' preset...`), rather than a bare "unknown field."
+'design-debate' preset...` -- a hardware@1/@2 example, since the preset
+retired in @3), rather than a bare "unknown field."
 
 ## `refdes init`
 
@@ -236,35 +268,46 @@ real number — never the literal word `"latest"`.
 ## `refdes new <type>`
 
 Scaffolds a starter item's front matter for any type in the merged schema —
-standard or project-defined — so "what fields does a decision take again"
-never means a trip back to this page:
+standard or project-defined — so "what fields does a log entry take again"
+never means a trip back to this page. On `hardware@3` that means one of the six
+types; `decision` is not one of them, and `refdes new decision` answers
+`configuration error: unknown type 'decision'.`
 
 ```bash
-refdes new decision > items/power/dec-005.md
+refdes new log > items/power/log-005.md
 ```
 
 ```yaml
 ---
 id:
-type: decision
+type: log
 # source:  # text
 # note:  # text
 # tags:  # list
-# owner:  # person
-# last_reviewed:  # date
-title:  # required -- text
-status: proposed  # choices: proposed, in_progress, accepted, on_hold, rejected, superseded
-# rationale:  # text; required when status is 'rejected'
+# citations:  # citations
 # date:  # date
+summary:  # required -- text
+# author:  # person
+# status:  # choices: proposed, in_progress, accepted, on_hold, rejected, superseded
+# rationale:  # text; required when status is 'rejected'
 # options:  # options
 # checks:  # checks
-# satisfies: []  # target: requirement
+# satisfies: []  # target: requirement, bound
 # constrained_by: []  # target: bound
-# supersedes: []  # target: decision
+# follows: []  # target: log
+# addresses: []  # target: requirement, bound
+# amends: []  # target: log
+# supersedes: []  # target: log
 # selects: []  # target: component
 # blocked_by: []  # target: any
 ---
+
+<!-- optional body. -->
 ```
+
+`status` is optional and defaults to nothing — a `log` entry that is a verdict
+gets a `status:` and is checked; one that is a narrative step doesn't need one,
+and merging the two types means neither shape can be forced on the other.
 
 A required field with a declared default is written with that default; a
 required field with none gets an empty placeholder; an optional field is
@@ -405,8 +448,9 @@ its own, so they are one version rather than three:
 
 3. **`component.equivalent` and `component.alternate` are restricted to
    `[component]`**, where v1 wrote both as `[]`. An empty target list means
-   *unrestricted*, which is what it deliberately means on
-   `decision.blocked_by:`; on these two verbs it was a slip, and v1's
+   *unrestricted*, which is what it deliberately means on `blocked_by:`
+   (`decision.blocked_by:` before the merge); on these two verbs it was a
+   slip, and v1's
    dictionary accepted `equivalent: [REQ-PWR-001]` on a component without a
    word while every version of the docs said component → component.
 
@@ -440,8 +484,9 @@ nothing.
    `requirement` for the same reason `constrained_by`/`refines` both already
    do — a general rule is stated as often against a bound as a requirement.
 
-2. **`satisfies` widens to `[requirement, bound]`** on both `decision` and
-   `component` (each was `[requirement]`) — before this, a `bound` could be
+2. **`satisfies` widens to `[requirement, bound]`** on both the verdict type
+   (`log` in `hardware@3`; `decision` in the version this was written
+   against) and `component` (each was `[requirement]`) — before this, a `bound` could be
    `verified` or `addressed` but never *satisfied*, so it could never be
    fully covered no matter how much design work answered to it (coverage is
    computed strictly from the `addressed_by`/`satisfied_by`/`verified_by`
@@ -449,7 +494,7 @@ nothing.
    [which links feed coverage](coverage.md#which-links-feed-coverage)).
    `component` also gains `constrained_by: [bound]`, which it previously had
    no path to at all, and a `checks:` field, so a component can demonstrate
-   compliance with a bound directly rather than a `decision` having to be
+   compliance with a bound directly rather than a verdict entry having to be
    invented purely to host the check — `run_checks()` already iterates every
    local item, so this needed no engine change.
 
@@ -510,8 +555,10 @@ nothing.
    it.** A group is a named collection — "the PCIe interface spec" — that
    names the collection without letting it stand in for its members.
    Membership is declared by the *member*, pointing at the group with
-   `part_of:` (available to `requirement`, `bound`, `decision`, `test`, and
-   `component`); a group never lists its own occupants, and `contains` exists
+   `part_of:` (available to `requirement`, `bound`, `test`, and `component`,
+   but deliberately **not** to `log` — a log entry is a record of activity,
+   not a thing a group collects); a group never lists its own occupants, and
+   `contains` exists
    only as the computed inverse backlink, so a group cannot silently enlarge
    its own meaning as its contents grow. To gather items under a name, author
    `part_of: [GRP-…]` on each member and read a group's contents through its
@@ -555,6 +602,43 @@ already did, so there's nothing existing to rename. The upgrade refuses
 item that already has body content of its own before the rename — merge the
 two by hand first, then upgrade.
 
+**The first writable command after the upgrade captures history.** The
+upgrade itself writes bare targets and no events; the next command that loads
+the project writably then does what it does for an authored `follows:` —
+freezes each migrated edge to its target's current thread tip and captures
+that target's snapshot, so a decision you already superseded stays readable
+after you start editing its successor:
+
+```
+$ refdes standard upgrade --to 3      # writes follows: [DEC-001], no events
+v2 -> v3:
+changed 2 file(s):
+  items/dec.yaml
+  items/thread.yaml
+
+upgraded to v3.
+
+$ refdes check                        # first writable load after the upgrade
+captured DEC-001: LOG-001 now follows it
+(minted 2 key(s) and rewrote 1 reference(s) while loading)
+2 items, 0 errors, 0 warnings
+```
+
+`items/thread.yaml` now reads `follows: [DEC-001@k9585h4cgtm]` and one event
+landed in `.refdes/history/events/`. From then on, editing `DEC-001` is
+reported like any other edited-after-captured entry:
+
+```
+WARNING items/dec.yaml:5 [DEC-001] — DEC-001: edited after captured -- current
+        semantic content differs from the snapshot in followed event
+        067082b9-22c5-5ac9-b570-91ee96f00dae; captured when LOG-001 followed it.
+        If the edit was a correction, revert it and append a new entry with
+        `amends: [DEC-001]` instead; otherwise there is nothing to do.
+```
+
+`--no-write` never reaches the capture, so a read-only command in between the
+upgrade and your first real one changes nothing about when it happens.
+
 ## `coverable`, `coverable_statuses`, `verifying_statuses`, and `required_when`
 
 These four are general schema-engine capabilities, not standard-specific
@@ -569,7 +653,7 @@ The standard's own types simply use them:
 - `required_when:` makes a field conditionally required on a sibling field's
   value or a link being present — see [schema
   reference](schema-reference.md#required-when). The standard's own
-  `decision.rationale` uses it (`required_when: {status: rejected}`), toggled
+  `log.rationale` uses it (`required_when: {status: rejected}`), toggled
   off by setting `require_rejection_rationale: false` in
   `refdes-project.yaml`.
 

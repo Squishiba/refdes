@@ -2,7 +2,7 @@
 
 A history-backed, append-only record of how the design actually got where it is: the
 measurements, the dead ends, and the reasoning between a requirement being handed
-to you and a decision being made.
+to you and a verdict being reached.
 
 A log entry can be a narrative note or a verdict. A verdict declares `status:`,
 while a note can leave it blank. A thread links successive entries with
@@ -156,7 +156,7 @@ Append a new entry rather than editing the old one:
     addresses: [REQ-PWR-003]
     body: |
       Re-read my own bench notes. The 93 % measurement was at 12 V input; at 36 V
-      it drops to 91 %. DEC-PWR-001 uses 0.93, which is optimistic for worst case.
+      it drops to 91 %. LOG-PWR-001 uses 0.93, which is optimistic for worst case.
       Leaving LOG-A-003 as written and recording the correction here.
 ```
 
@@ -330,7 +330,7 @@ page described above are later threads work; see [threads](design/threads.md).
 ## Coverage
 
 An entry that `addresses` a requirement moves it from **open** to **addressed** —
-somebody has worked on it, even though no decision has been reached and no test
+somebody has worked on it, even though no verdict has been reached and no test
 exists. See [coverage](coverage.md).
 
 ## After a release
@@ -353,7 +353,7 @@ Consider recording this in the design log, e.g.:
     date: 2026-08-17
     summary: Released rev-b — sent to fab.
     citations:
-      - item: LOG-A-0NN  # an earlier log entry this release turned on
+      - item: LOG-A-0MM  # an EARLIER log entry this release turned on
 ```
 
 Both ids are placeholders and say so: `LOG-A-0NN` is not shaped like a display

@@ -266,7 +266,7 @@ def _verb_facts(project: Project) -> dict:
     """Who declares each verb, what it may point at, and what points at a type.
 
     A type may declare a verb under its own name or under its inverse
-    (`decision: {links: {recorded_by: [log]}}` is `log --records--> decision`),
+    (`log: {links: {followed_by: [log]}}` is `log --follows--> log`),
     so both spellings resolve to the same edge before anything is reported.
     """
     inverse_to_verb = {lt.inverse: name for name, lt in project.link_types.items()}
@@ -476,14 +476,14 @@ EXAMPLES: dict[tuple[str, str], str] = {
         "# to obey it. governs, the backlink, is computed."
     ),
     ("links", "satisfies"): (
-        "# Declared from the decision (or component):\n"
-        "- id: DEC-PWR-001\n"
+        "# Declared from the verdict log entry (or component):\n"
+        "- id: LOG-PWR-001\n"
         "  satisfies: [REQ-PWR-002, REQ-PWR-003]\n"
-        "# The requirements gain satisfied_by: [DEC-PWR-001]; once the decision\n"
-        "# is accepted, that closes their coverage."
+        "# The requirements gain satisfied_by: [LOG-PWR-001]; once the entry\n"
+        "# reaches status: accepted, that closes their coverage."
     ),
     ("links", "constrained_by"): (
-        "- id: DEC-PWR-001\n"
+        "- id: LOG-PWR-001\n"
         "  constrained_by: [BND-THM-001]\n"
         "# Traceability only -- it does not close coverage on the bound; satisfies does."
     ),
@@ -511,20 +511,20 @@ EXAMPLES: dict[tuple[str, str], str] = {
         "                       # never an edit to the sealed original"
     ),
     ("links", "supersedes"): (
-        "- id: DEC-PWR-002\n"
-        "  supersedes: [DEC-PWR-001]\n"
-        "# The link does not move DEC-PWR-001's status -- set status: superseded\n"
+        "- id: LOG-PWR-002\n"
+        "  supersedes: [LOG-PWR-001]\n"
+        "# The link does not move LOG-PWR-001's status -- set status: superseded\n"
         "# there yourself, or the build warns that the two halves disagree."
     ),
     ("links", "selects"): (
-        "- id: DEC-PWR-001\n"
+        "- id: LOG-PWR-001\n"
         "  selects: [CMP-PWR-001]\n"
         "# The part's own status: selected is the other half of the same claim;\n"
         "# the build warns when one exists and the other does not."
     ),
     ("links", "blocked_by"): (
-        "- id: DEC-IO-005\n"
-        "  blocked_by: [DEC-IO-001]\n"
+        "- id: LOG-IO-005\n"
+        "  blocked_by: [LOG-IO-001]\n"
         "# May point at an item of any type; name only the immediate blocker --\n"
         "# reports resolve the chain to its root, and a cycle is a build error."
     ),
@@ -589,11 +589,11 @@ EXAMPLES: dict[tuple[str, str], str] = {
     ),
     ("sets", "named_title"): (
         "types:\n"
-        "  decision:\n"
+        "  test:\n"
         "    include: [named_title]\n"
-        "- id: DEC-PWR-001\n"
+        "- id: TST-PWR-001\n"
         "  title: Regulator choice\n"
-        "  # title is required on decision, test and component"
+        "  # title is required on test and component"
     ),
     ("sets", "grouped"): (
         "types:\n"
@@ -605,15 +605,15 @@ EXAMPLES: dict[tuple[str, str], str] = {
     ),
     ("sets", "claims"): (
         "types:\n"
-        "  decision:\n"
+        "  log:\n"
         "    include: [claims]\n"
-        "- id: DEC-PWR-001\n"
+        "- id: LOG-PWR-001\n"
         "  satisfies: [REQ-PWR-001]\n"
         "  constrained_by: [BND-PWR-001]"
     ),
     ("sets", "invalidate_body"): (
         "types:\n"
-        "  decision:\n"
+        "  log:\n"
         "    include: [invalidate_body]\n"
         "# editing such a body marks downstream items suspect"
     ),
@@ -629,8 +629,8 @@ EXAMPLES: dict[tuple[str, str], str] = {
         "# An item may also state its own, or a Markdown item carries it in\n"
         "# the front matter:\n"
         "---\n"
-        "id: DEC-PWR-001\n"
-        "type: decision\n"
+        "id: LOG-PWR-001\n"
+        "type: log\n"
         "---"
     ),
     ("keys", "key"): (

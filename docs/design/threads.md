@@ -76,6 +76,26 @@ merge, §7's migration file), it says so and stops there.
   exists; a dangling item target is an error, the same as a dangling link.
   Keep the single citations set. Do not add a separate refs set.
 
+**How phase 4a actually implemented the `records`/`recorded_by` decision
+(2026-10-07, added by the implementation session; the owner bullets above are
+unchanged and still stand as decisions):** by renaming the link verb to
+`follows:` rather than converting its targets into `citations: - item:`
+entries. `v3/migration.yaml` carries `links: { records: follows }`, which is
+the whole conversion — no new citation shape, no new field, no new
+validation path. The reason, recorded in `migration.yaml:57-64`: an
+`item:` citation entry is **bare-id data that nothing maintains**. It breaks
+on the target's first rename, and the composite `DISPLAY-ID@key` spelling the
+surrogate-key machinery writes everywhere else is not accepted there at all
+(`item_by_id` is display-id only). A structured link is the one spelling the
+key machinery keeps current — it freezes to `DISPLAY-ID@key`, and the readable
+half is refreshed when the target renames. So the owner's requirement ("no
+link is lost", "a dangling item target is an error") is met by keeping the
+edge a maintained link rather than by re-encoding it as a citation. The
+`citations: - item:` shape itself still exists on the merged `log` type and
+still validates as the owner specified — it just is not what a *migrated*
+edge becomes. §6 and §7 below still describe the citation encoding; this note
+and `migration.yaml` record what shipped.
+
 **Phase 1 implemented** (this session, 2026-09-14): §2's identity
 foundation — `Project.items` re-keyed on surrogate key (or, for an item
 with neither a key nor a display id yet, an in-memory-only provisional
@@ -790,10 +810,15 @@ chain, `amends:` for what it's correcting, which may or may not be its own
 immediate predecessor.
 
 `records:`/`recorded_by:` — finding 16's whole problem — dissolves as a link
-verb. Deliberation and conclusion are positions in the same chain. During
-migration, every authored target is preserved in the merged log's single
-`citations:` set as an `item:` entry. An author can also use `item:` for a
-cross-chain reference without changing the `follows:` topology.
+verb. Deliberation and conclusion are positions in the same chain.
+
+**What shipped, 2026-10-07:** during migration the verb is *renamed*, to
+`follows:`, so every authored target is preserved as a maintained edge rather
+than re-encoded as a `citations: - item:` entry. The reasoning, and the
+contradiction with the sketch below this paragraph, are recorded in the
+implementation note in the "Phase 4a migration decisions" block above. An
+author can still use `item:` in a citation for a cross-chain reference that is
+not part of the thread; that shape is unchanged.
 
 ---
 
@@ -805,7 +830,9 @@ The previous draft needed a `former_ids`-shaped propose/confirm tool to
 *group* existing items into new containers — real, substantial, new
 machinery. **This model needs no grouping step for correctness at all.**
 Every existing `log` item remains the surviving type; authored `records:`
-targets move into its citations set. Every existing `decision` item becomes a
+edges become `follows:` edges (the citation encoding this paragraph originally
+sketched is superseded — see the 2026-10-07 note above). Every existing
+`decision` item becomes a
 `log` item with its fields
 carried over — a mechanical, per-item rename, structurally identical in
 shape to the `text:`/`method:` → `body:` migration `hardware@2` → `@3`
@@ -826,7 +853,11 @@ fields:
     title: summary      # preserve the former one-line label
 merge_types:
   decision: log         # destination already exists
-citation_links: [records, recorded_by]
+links:
+  records: follows      # what shipped -- see the 2026-10-07 note above
+# citation_links: [records, recorded_by]   <- NOT what shipped. The
+#   conversion-to-citation section was never needed by any bundled
+#   migration, has no consumer, and was dropped on 2026-10-07.
 ```
 
 No item loses its id. No item's content hash needs reconstructing beyond

@@ -236,8 +236,8 @@ points and what points at it, and its fields.
   `refdes/vocabulary.py` — one place, cited by the page.
 - **Direction is computed, not restated.** "Pointed at by" for a type comes
   from every declaration that may target it, including a verb declared under
-  its **inverse** name (`decision: {links: {recorded_by: [log]}}` is
-  `log --records--> decision`), and a verb with an empty target list says it
+  its **inverse** name (`log: {links: {followed_by: [log]}}` is
+  `log --follows--> log`), and a verb with an empty target list says it
   points at any type rather than showing nothing.
 - **It opens with the graph.** Item types as nodes and every declared link
   verb as a labelled arrow to each type it may target — `group` included,
@@ -291,7 +291,7 @@ The print stylesheet hides all of this.
 - Coverage strip for requirements and bounds
 - Field table, with each field's `on_change` mode shown
 - Rendered body, with calc blocks as evaluated tables and IDs autolinked
-- Options-considered panel for decisions, chosen and rejected
+- Options-considered panel for entries carrying `options:`, chosen and rejected
 - Checks table with pass/fail and the worst-case detail
 - Citations table for any `citations`-typed field — pinned/kept state, rev, page, part number. The page is the authored `page:`, or the page a `section:` resolved to at fetch time
 - Traceability: outgoing and incoming links
@@ -316,7 +316,7 @@ per-item `board` for a [`boards:`](multi-board.md) registry, top-level
       "stage": "satisfied",
       "addressed_by": ["LOG-A-003", "LOG-A-004", "LOG-A-006"],
       "claimed_by": [],
-      "satisfied_by": ["DEC-PWR-001"],
+      "satisfied_by": ["LOG-PWR-001"],
       "verified_by": []
     }
   },
@@ -332,9 +332,9 @@ per-item `board` for a [`boards:`](multi-board.md) registry, top-level
   },
   "items": [
     {
-      "id": "DEC-PWR-001",
-      "type": "decision",
-      "title": "3V3 rail regulator topology",
+      "id": "LOG-PWR-001",
+      "type": "log",
+      "summary": "3V3 rail regulator topology",
       "fields": { "status": "accepted", "options": [ ... ] },
       "citations": {
         "citations": [
@@ -345,13 +345,13 @@ per-item `board` for a [`boards:`](multi-board.md) registry, top-level
         ]
       },
       "links": { "satisfies": ["REQ-PWR-002"], "constrained_by": ["BND-THM-001"] },
-      "backlinks": { "recorded_by": ["LOG-A-004"] },
+      "backlinks": { "followed_by": ["LOG-A-004"] },
       "content_hash": "673e6ba11269f350",
       "external": false,
       "origin": "",
       "board": "board-a",
       "former_ids": [],
-      "source": { "file": "items/decisions/dec-pwr-001-regulator.md", "line": 2 },
+      "source": { "file": "items/log/log-pwr-001-regulator.md", "line": 2 },
       "calcs": [
         { "name": "P_diss", "expression": "P_out * (1/eff - 1)",
           "result": "0.2981 W", "bounds": "", "error": null }
@@ -366,7 +366,7 @@ per-item `board` for a [`boards:`](multi-board.md) registry, top-level
   ],
   "diagnostics": [
     { "level": "error", "message": "...", "file": "...", "line": 2,
-      "item": "DEC-PWR-001" }
+      "item": "LOG-PWR-001" }
   ]
 }
 ```

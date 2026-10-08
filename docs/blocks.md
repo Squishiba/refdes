@@ -4,7 +4,7 @@ A generated block is a directive that appears alone on its own line in a
 **narrative page** and is replaced, at build time, with HTML computed from
 the current state of the project — a table, a list, a small tree. It exists
 so a page never has to hand-maintain something the project already knows:
-which decisions land on which schematic page, what a requirement's
+which log entries land on which schematic page, what a requirement's
 traceability graph looks like today.
 
 **Scope: narrative pages only, not items.** An item is one typed record; a
@@ -17,7 +17,7 @@ pages. Neither is legal in the other kind of document.
 ## Syntax
 
 ```markdown
-{{index by="schematic_page" type="decision"}}
+{{index by="schematic_page" type="log"}}
 ```
 
 The directive must sit alone on its own line. The first token is the block
@@ -35,7 +35,7 @@ Groups every local item of one type by the current value of a field,
 rendered as one table per group.
 
 ```markdown
-{{index by="schematic_page" type="decision"}}
+{{index by="schematic_page" type="log"}}
 ```
 
 | Parameter | Required | Meaning |
@@ -65,11 +65,11 @@ language bolted on.
 ## `{{cascade}}`
 
 Renders a bounded, rooted walk of the traceability graph starting from one
-item — "what does this decision ultimately satisfy, going up its links" or
+item — "what does this log entry ultimately satisfy, going up its links" or
 "what is downstream of this requirement, going down its backlinks."
 
 ```markdown
-{{cascade from="DEC-PWR-014" direction="up"}}
+{{cascade from="LOG-PWR-014" direction="up"}}
 ```
 
 | Parameter | Required | Meaning |
@@ -100,7 +100,7 @@ and `refdes audit`, with a cycle in it treated as a hard build error since a
 author places it, and treats a cycle as a normal, renderable reconvergence
 since it can't assume acyclicity from an arbitrary `via=`. Once `via=` and
 `blocked_by:` links both exist, nothing stops an author from writing
-`{{cascade from="DEC-IO-005" direction="up" via="blocked_by"}}` for an ad
+`{{cascade from="LOG-IO-005" direction="up" via="blocked_by"}}` for an ad
 hoc rendering of one blocker chain — that's a convenience overlap, not a
 substitute for the dedicated report, which computes staleness and feeds
 coverage in a way the block does not.
@@ -142,7 +142,7 @@ other ID in prose.
 ## `{{calcblock}}`
 
 ```markdown
-{{calcblock item="DEC-PWR-001" block="losses"}}
+{{calcblock item="LOG-PWR-001" block="losses"}}
 ```
 
 Renders one named [calc block](math.md#naming-a-calc-block)'s rows on a
@@ -182,27 +182,27 @@ The blocks validate strictly and name the specific fix, the same bar every
 other refdes diagnostic holds to:
 
 ```
-{{index by="pageno" type="decision"}} — type 'decision' has no field 'pageno'.
+{{index by="pageno" type="log"}} — type 'log' has no field 'pageno'.
     Declared fields: schematic_page, status, title.
 ```
 
 ```
-{{index by="status" type="decisoin"}} — unknown type 'decisoin'.
-    Did you mean 'decision'?
+{{index by="status" type="requriement"}} — unknown type 'requriement'.
+    Did you mean 'requirement'?
 ```
 
 ```
-{{cascade from="DEC-PWR-014" direction="sideways"}} — unknown direction
+{{cascade from="LOG-PWR-014" direction="sideways"}} — unknown direction
     'sideways'. cascade accepts: down, up, both.
 ```
 
 ```
-{{index by="status" type="decision" sortt="asc"}} — unknown parameter
+{{index by="status" type="log" sortt="asc"}} — unknown parameter
     'sortt'. index accepts: by, type, board, tag, subtypes.
 ```
 
 ```
-{{calcblock item="DEC-PWR-001" block="loess"}} — 'DEC-PWR-001' has no calc
+{{calcblock item="LOG-PWR-001" block="loess"}} — 'LOG-PWR-001' has no calc
     block named 'loess'. It names: losses, supply.
 ```
 
@@ -213,7 +213,7 @@ other refdes diagnostic holds to:
 ```
 
 ```
-{{calcblock item="DEC-THM-009" block="losses"}} — DEC-THM-009 has calc
+{{calcblock item="LOG-THM-009" block="losses"}} — LOG-THM-009 has calc
     blocks but none is named -- add id="..." to its fence to make this block
     work.
 ```
@@ -225,12 +225,12 @@ other refdes diagnostic holds to:
 ```
 
 ```
-{{calcblock item="DEC-PWR-001"}} — missing required parameter 'block'.
+{{calcblock item="LOG-PWR-001"}} — missing required parameter 'block'.
     calcblock accepts: block, item.
 ```
 
 ```
-{{calcblock item="DEC-PWR-001" block="losses" all="true"}} — unknown
+{{calcblock item="LOG-PWR-001" block="losses" all="true"}} — unknown
     parameter 'all'. calcblock accepts: block, item.
 ```
 
@@ -252,7 +252,7 @@ exist in the project; it cannot decide that something exists, is true, or
 is correct, and it cannot be composed into an expression the tool would have
 to parse and evaluate. That is what keeps a generated index or cascade as
 auditable as the hand-maintained table or diagram it replaces: anyone who
-can read `by="schematic_page" type="decision"` or `from="REQ-IO-001"
+can read `by="schematic_page" type="log"` or `from="REQ-IO-001"
 direction="down"` already knows exactly what will appear on the page, with
 no interpreter and no query language standing in between the source and the
 number.

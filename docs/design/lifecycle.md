@@ -535,7 +535,7 @@ Consider recording this in the design log, e.g.:
     date: 2026-08-17
     summary: Released rev-b — sent to fab.
     citations:
-      - item: LOG-A-0NN  # an earlier log entry this release turned on
+      - item: LOG-A-0MM  # an EARLIER log entry this release turned on
 ```
 
 (As shipped: the two ids are marked as placeholders in the line itself. The

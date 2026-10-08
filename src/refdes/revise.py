@@ -54,7 +54,7 @@ from .schema import load_project
 # `refdes revise --help` list them. Kept here as the one place that knows the
 # whole vocabulary: mapping_from_dict reads exactly these and _refuse_unknown_sections
 # rejects anything else, so the two cannot fall out of step.
-ACCEPTED_SECTIONS = ("types", "merge_types", "fields", "links", "prefixes", "citation_keys", "citation_links")
+ACCEPTED_SECTIONS = ("types", "merge_types", "fields", "links", "prefixes", "citation_keys")
 
 
 def _refuse_unknown_sections(raw: dict[str, Any], source: str) -> None:
@@ -127,13 +127,11 @@ class Mapping:
     # any type -- the blind spot this closes is that `fields:` only sees
     # item-level keys, never keys nested inside a structured field's entries.
     citation_keys: dict[str, str] = field(default_factory=dict)
-    # Authored link verbs whose targets become item citations during a merge.
-    citation_links: list[str] = field(default_factory=list)
 
     def is_empty(self) -> bool:
         return not (
             self.types or self.merge_types or self.fields or self.links or self.prefixes
-            or self.citation_keys or self.citation_links
+            or self.citation_keys
         )
 
     def merge(self, other: "Mapping") -> "Mapping":
@@ -155,14 +153,12 @@ class Mapping:
             links=dict(self.links),
             prefixes=dict(self.prefixes),
             citation_keys=dict(self.citation_keys),
-            citation_links=list(self.citation_links),
         )
         merged.types.update(other.types)
         merged.merge_types.update(other.merge_types)
         merged.links.update(other.links)
         merged.prefixes.update(other.prefixes)
         merged.citation_keys.update(other.citation_keys)
-        merged.citation_links.extend(other.citation_links)
         merged.fields = {t: dict(f) for t, f in self.fields.items()}
         for tname, frenames in other.fields.items():
             merged.fields.setdefault(tname, {}).update(frenames)
@@ -205,17 +201,10 @@ def mapping_from_dict(raw: dict[str, Any], source: str) -> Mapping:
     citation_keys = {
         str(k): str(v) for k, v in (raw.get("citation_keys") or {}).items()
     }
-    raw_citation_links = raw.get("citation_links") or []
-    if not isinstance(raw_citation_links, list) or not all(
-        isinstance(verb, str) and verb for verb in raw_citation_links
-    ):
-        raise SchemaError(f"{source}: citation_links: must be a list of link names")
-    citation_links = list(raw_citation_links)
     return Mapping(
         types=types, fields=fields, links=links, prefixes=prefixes,
         merge_types=merge_types,
         citation_keys=citation_keys,
-        citation_links=citation_links,
     )
 
 
@@ -710,111 +699,6 @@ def _rewrite_citation_region(
     return rewrote
 
 
-def _rewrite_links_as_citations(
-    lines: list[str], rel: str, items: list[Item], mapping: Mapping
-) -> tuple[list[str], list[str]]:
-    """Move authored link edges into the same citations set as document sources.
-
-    Work backwards through item spans so inserting entries never changes the
-    offsets of an item still to be visited. A formatting shape that cannot be
-    safely edited is refused by the upgrade transaction.
-    """
-    if not mapping.citation_links:
-        return lines, []
-    out = list(lines)
-    errors: list[str] = []
-    for item, start, end in reversed(_item_spans(rel, lines, items)):
-        verbs = [verb for verb in mapping.citation_links if verb in item.links]
-        if not verbs:
-            continue
-        segment = out[start:end]
-        targets: list[str] = []
-        removals: list[tuple[int, int]] = []
-        for verb in verbs:
-            resolved = item.resolved_links.get(verb, [])
-            if len(resolved) != len(item.links[verb]):
-                errors.append(
-                    f"{rel}:{item.source_line} [{item.id}] -- cannot convert the "
-                    f"{verb}: link because one of its targets did not resolve"
-                )
-                continue
-            hits = [i for i, line in enumerate(segment) if _field_or_link_line_re(verb).match(line)]
-            if len(hits) != 1:
-                errors.append(
-                    f"{rel}:{item.source_line} [{item.id}] -- cannot find the {verb}: "
-                    "link to convert into a citation"
-                )
-                continue
-            i = hits[0]
-            line = segment[i]
-            indent = len(line) - len(line.lstrip())
-            j = i + 1
-            while j < len(segment):
-                follow = segment[j]
-                if follow.strip() and len(follow) - len(follow.lstrip()) <= indent:
-                    break
-                j += 1
-            removals.append((i, j))
-            targets.extend(resolved)
-        if len(removals) != len(verbs):
-            continue
-        for i, j in sorted(removals, reverse=True):
-            del segment[i:j]
-        if not targets:
-            continue
-        citations = [
-            (i, line) for i, line in enumerate(segment)
-            if _field_or_link_line_re("citations").match(line)
-        ]
-        if len(citations) > 1:
-            errors.append(
-                f"{rel}:{item.source_line} [{item.id}] -- this item has more than "
-                "one citations: field, so there is no single set to add to"
-            )
-            continue
-        if citations:
-            i, line = citations[0]
-            indent = len(line) - len(line.lstrip())
-            if line.split(":", 1)[1].strip() not in ("", "[]"):
-                errors.append(
-                    f"{rel}:{item.source_line} [{item.id}] -- the citations: field "
-                    "is written in flow style; convert it to block style before "
-                    "running the upgrade"
-                )
-                continue
-            if line.split(":", 1)[1].strip() == "[]":
-                segment[i] = line.split(":", 1)[0] + ":"
-            j = i + 1
-            while j < len(segment):
-                follow = segment[j]
-                if follow.strip() and len(follow) - len(follow.lstrip()) <= indent:
-                    break
-                j += 1
-            entry_indent = " " * (indent + 2)
-            segment[j:j] = [f"{entry_indent}- item: {target}" for target in targets]
-        else:
-            # A new field uses the indentation of this item's authored keys.
-            key_line = next((line for line in segment if _field_or_link_line_re("id").match(line)), None)
-            if key_line is None:
-                errors.append(
-                    f"{rel}:{item.source_line} [{item.id}] -- cannot find this "
-                    "item's id: line, which is where the new citations: field "
-                    "would be placed"
-                )
-                continue
-            key_indent = len(key_line) - len(key_line.lstrip())
-            # Sequence items write '- id:'; following fields align under id.
-            if key_line.lstrip().startswith("- "):
-                key_indent += 2
-            field_indent = " " * key_indent
-            entry_indent = " " * (key_indent + 2)
-            segment.extend([f"{field_indent}citations:"] + [
-                f"{entry_indent}- item: {target}" for target in targets
-            ])
-        out[start:end] = segment
-    return out, errors
-
-
 @dataclass
 class FileRewrite:
     path: str
@@ -1135,8 +1019,6 @@ def _rewrite_file(project: Project, path: str, rel: str, mapping: Mapping) -> tu
     errors = [f"{rel}:{n} - {message}" for n, message in tp_errors]
     lines, link_errors = _rewrite_fields_and_links(lines, rel, items, mapping, project)
     errors = errors + link_errors
-    lines, citation_errors = _rewrite_links_as_citations(lines, rel, items, mapping)
-    errors += citation_errors
 
     # render() rather than a whole-file `newline.join(lines)`: a rename that
     # touches three lines must not restyle the other three hundred, and a file

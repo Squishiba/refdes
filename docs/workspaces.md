@@ -117,7 +117,7 @@ This is the payoff. An **authored** link from one workspace's item into
 another workspace's item — one that isn't marked `shared: true` — is flagged:
 
 ```
-WARNING items/product-b/board-b/decisions.yaml:5 [DEC-B-014] — satisfies
+WARNING items/product-b/board-b/log.yaml:5 [LOG-B-014] — satisfies
         points at REQ-A-009, in workspace 'product-a', which is not marked
         shared: true -- workspace 'product-b' would gain a hidden dependency
         on it
@@ -161,15 +161,15 @@ section. In an adopted project both sections use the item's surrogate key:
 ```yaml
 boards:
   k7f3m2q9x4a:
-    id: DEC-A-001
+    id: LOG-A-001
     board: board-a
 workspaces:
   k7f3m2q9x4a:
-    id: DEC-A-001
+    id: LOG-A-001
     workspace: product-a
 ```
 
-Legacy `DEC-A-001: product-a` scalars remain readable, and non-adopted
+Legacy `LOG-A-001: product-a` scalars remain readable, and non-adopted
 projects keep writing that legacy shape. Moving a file across a workspace
 boundary warns exactly like a board move does, including when its display id
 is renamed in the same change. `refdes build --accept-board-move` accepts
@@ -212,7 +212,7 @@ about a board, a type, a file or a tag — but not a workspace, even though
 `index --compact` had been exporting one per item all along.
 
 Same report-filter posture as `--board`, and combinable with it: the whole
-project still parses and every link still resolves — a decision in one
+project still parses and every link still resolves — a log entry in one
 workspace that (legitimately) satisfies a shared requirement still checks
 correctly — only what gets *printed* is narrowed to that workspace's own
 items.
@@ -227,7 +227,7 @@ filters:
 $ refdes ls     # a project that declares workspaces:, some rows
 BND-A-001     bound        product-b  board-b  Product A input current.
 BND-CAN-001   bound                            CAN bitrate.
-DEC-A-001     decision     product-a  board-a  Regulator sized for product A.
+LOG-A-001     log          product-a  board-a  Regulator sized for product A.
 REQ-A-002     requirement  product-a  board-a  Product A shall survive -40 C to 85 C.
 REQ-PLAT-001  requirement  platform            The platform shall run from 9 V to 36 V.
 ```

@@ -301,8 +301,8 @@ Something is holding this entry up. Name only the immediate blocker; reports res
 **Example:**
 
 ```yaml
-- id: DEC-IO-005
-  blocked_by: [DEC-IO-001]
+- id: LOG-IO-005
+  blocked_by: [LOG-IO-001]
 # May point at an item of any type; name only the immediate blocker --
 # reports resolve the chain to its root, and a cycle is a build error.
 ```
@@ -318,7 +318,7 @@ A verdict log entry or component that must respect a bound. Traceability only â€
 **Example:**
 
 ```yaml
-- id: DEC-PWR-001
+- id: LOG-PWR-001
   constrained_by: [BND-THM-001]
 # Traceability only -- it does not close coverage on the bound; satisfies does.
 ```
@@ -436,11 +436,11 @@ A verdict log entry or component claims to meet a requirement or bound. This clo
 **Example:**
 
 ```yaml
-# Declared from the decision (or component):
-- id: DEC-PWR-001
+# Declared from the verdict log entry (or component):
+- id: LOG-PWR-001
   satisfies: [REQ-PWR-002, REQ-PWR-003]
-# The requirements gain satisfied_by: [DEC-PWR-001]; once the decision
-# is accepted, that closes their coverage.
+# The requirements gain satisfied_by: [LOG-PWR-001]; once the entry
+# reaches status: accepted, that closes their coverage.
 ```
 
 ### `selects`
@@ -454,7 +454,7 @@ A verdict selects a component. The component's own status marks it selected; thi
 **Example:**
 
 ```yaml
-- id: DEC-PWR-001
+- id: LOG-PWR-001
   selects: [CMP-PWR-001]
 # The part's own status: selected is the other half of the same claim;
 # the build warns when one exists and the other does not.
@@ -471,9 +471,9 @@ This verdict replaces an older one. The older entry keeps its history; moving it
 **Example:**
 
 ```yaml
-- id: DEC-PWR-002
-  supersedes: [DEC-PWR-001]
-# The link does not move DEC-PWR-001's status -- set status: superseded
+- id: LOG-PWR-002
+  supersedes: [LOG-PWR-001]
+# The link does not move LOG-PWR-001's status -- set status: superseded
 # there yourself, or the build warns that the two halves disagree.
 ```
 
@@ -532,9 +532,9 @@ _No definition._
 
 ```yaml
 types:
-  decision:
+  log:
     include: [claims]
-- id: DEC-PWR-001
+- id: LOG-PWR-001
   satisfies: [REQ-PWR-001]
   constrained_by: [BND-PWR-001]
 ```
@@ -566,7 +566,7 @@ _No definition._
 
 ```yaml
 types:
-  decision:
+  log:
     include: [invalidate_body]
 # editing such a body marks downstream items suspect
 ```
@@ -585,11 +585,11 @@ _No definition._
 
 ```yaml
 types:
-  decision:
+  test:
     include: [named_title]
-- id: DEC-PWR-001
+- id: TST-PWR-001
   title: Regulator choice
-  # title is required on decision, test and component
+  # title is required on test and component
 ```
 
 ### `provenance`
@@ -693,8 +693,8 @@ defaults:
 # An item may also state its own, or a Markdown item carries it in
 # the front matter:
 ---
-id: DEC-PWR-001
-type: decision
+id: LOG-PWR-001
+type: log
 ---
 ```
 
