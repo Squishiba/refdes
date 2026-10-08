@@ -22,6 +22,20 @@ from refdes.serve.server import sigterm_is_deliverable, sigterm_stops_cleanly
 SRC = os.path.join(os.path.dirname(__file__), "..", "src")
 
 
+def _reset_sigint_to_default():
+    """Run in the forked child before exec (``preexec_fn``).
+
+    A suite started as a background job has SIGINT set to SIG_IGN (POSIX
+    does that for SIGINT and SIGQUIT for a job of a shell without job
+    control), and an *ignored* signal survives ``exec()``, unlike a caught one. The
+    child would then discard the SIGINT a test sends, serve would never see
+    the Ctrl+C, and the launch would outlive the test as an orphan. Reset it
+    here so serve starts with SIGINT at its default disposition, exactly as
+    it does when a person starts it from a terminal.
+    """
+    signal.signal(signal.SIGINT, signal.SIG_DFL)
+
+
 def _start(config, *extra, tmpdir=None):
     env = dict(os.environ, PYTHONPATH=os.path.abspath(SRC), PYTHONIOENCODING="utf-8")
     if tmpdir is not None:
@@ -31,6 +45,12 @@ def _start(config, *extra, tmpdir=None):
     return subprocess.Popen(
         [sys.executable, "-m", "refdes.cli", "-c", config, "serve", "--no-open", *extra],
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env,
+        # None is accepted on Windows and raises nothing; only a non-None
+        # preexec_fn is refused there, and it has no Windows equivalent.
+        # The fork is safe here in practice: the callback is one signal.signal
+        # call before exec, and this harness's only threads block on readline
+        # of a pipe -- they hold no lock the callback could need.
+        preexec_fn=None if os.name == "nt" else _reset_sigint_to_default,  # noqa: PLW1509
     )
 
 
@@ -213,11 +233,20 @@ def test_token_file_holds_a_working_credential(tmp_path):
 def test_token_file_is_removed_when_serve_stops(tmp_path):
     token_file = str(tmp_path / "launch-url.txt")
     proc = _start(make_project(tmp_path), "--token-file", token_file)
-    _wait_for_file(token_file)
-    proc.send_signal(signal.SIGINT)  # Ctrl+C, the documented stop
-    proc.wait(timeout=60)
-    assert proc.returncode == 0
-    assert not os.path.exists(token_file), "a dead launch's credential outlived it"
+    try:
+        _wait_for_file(token_file)
+        proc.send_signal(signal.SIGINT)  # Ctrl+C, the documented stop
+        proc.wait(timeout=60)
+        assert proc.returncode == 0
+        assert not os.path.exists(token_file), "a dead launch's credential outlived it"
+    finally:
+        # Same shape as the SIGTERM test below: whatever this test does on the
+        # way out -- a failed assert, a timeout, an error in the wait -- the
+        # launch it started dies with it. Without this the test orphaned a
+        # serve per failure, and 16 of them had accumulated on one machine.
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait(timeout=30)
 
 
 @pytest.mark.skipif(
