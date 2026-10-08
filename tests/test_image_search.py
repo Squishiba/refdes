@@ -15,7 +15,7 @@ from conftest import write_project_config
 from helpers import COVERAGE_SCHEMA, _build_and_render
 
 from refdes import build as build_mod
-from refdes import parse
+from refdes import loader, parse
 from refdes.schema import load_project
 
 PNG = b"\x89PNG\r\n\x1a\n"
@@ -221,3 +221,171 @@ def test_searched_image_on_a_page_resolves_too(tmp_path):
     assert not project.errors
     assert 'src="assets/shots/board.png"' in project.pages[0].body_html
     assert os.path.isfile(os.path.join(out, "assets", "shots", "board.png"))
+
+
+# ----------------------------------------------------------- resolve and freeze
+
+
+def _writable_load(root, write=True):
+    project, _stale = loader.load_tree(str(root / "refdes-project.yaml"), write=write)
+    build_mod.build(project)
+    return project
+
+
+def test_unique_search_freezes_source_and_survives_later_collision_and_document_move(tmp_path):
+    write_project_config(tmp_path, _config("shots, later"))
+    _item(tmp_path, "![the board](board.png)\n")
+    (tmp_path / "shots").mkdir()
+    (tmp_path / "shots" / "board.png").write_bytes(PNG)
+
+    first = _writable_load(tmp_path)
+    source = tmp_path / "items" / "dec-a.md"
+    assert not first.errors
+    assert "![the board](/shots/board.png)" in source.read_text()
+    assert first.load_writes.rewritten_images == 1
+
+    (tmp_path / "later").mkdir()
+    (tmp_path / "later" / "board.png").write_bytes(b"other")
+    moved = tmp_path / "items" / "nested" / "dec-a.md"
+    moved.parent.mkdir()
+    source.rename(moved)
+    again = _writable_load(tmp_path)
+    assert not again.errors
+    assert again.load_writes.rewritten_images == 0
+    assert 'src="assets/shots/board.png"' in again.item_by_id("DEC-A-001").body_html
+
+
+def test_freeze_skips_relative_url_missing_ambiguous_multisegment_and_code(tmp_path):
+    write_project_config(tmp_path, _config("shots, later"))
+    body = (
+        "![beside](beside.png)\n\n![url](https://example.com/image.png)\n\n"
+        "![missing](missing.png)\n\n![ambiguous](dupe.png)\n\n"
+        "![specific](wrong/unique.png)\n\n```md\n![code](unique.png)\n```\n\n"
+        "![unique](unique.png)\n"
+    )
+    _item(tmp_path, body)
+    (tmp_path / "items" / "beside.png").write_bytes(PNG)
+    (tmp_path / "shots").mkdir()
+    (tmp_path / "later").mkdir()
+    for directory in ("shots", "later"):
+        (tmp_path / directory / "dupe.png").write_bytes(PNG)
+    (tmp_path / "shots" / "unique.png").write_bytes(PNG)
+
+    project = _writable_load(tmp_path)
+    source = (tmp_path / "items" / "dec-a.md").read_text()
+    assert project.load_writes.rewritten_images == 1
+    assert "![unique](/shots/unique.png)" in source
+    for original in (
+        "![beside](beside.png)", "![url](https://example.com/image.png)",
+        "![missing](missing.png)", "![ambiguous](dupe.png)",
+        "![specific](wrong/unique.png)", "![code](unique.png)",
+    ):
+        assert original in source
+    messages = [d.message for d in project.errors]
+    assert any("missing.png" in m and "does not exist" in m for m in messages)
+    assert any("dupe.png" in m and "ambiguous" in m for m in messages)
+    assert any("wrong/unique.png" in m and "does not exist" in m for m in messages)
+
+
+def test_no_write_keeps_bare_source_but_resolves_in_memory(tmp_path):
+    write_project_config(tmp_path, _config("shots"))
+    _item(tmp_path, "![the board](board.png)\n")
+    (tmp_path / "shots").mkdir()
+    (tmp_path / "shots" / "board.png").write_bytes(PNG)
+
+    project = _writable_load(tmp_path, write=False)
+    assert not project.errors
+    assert project.load_writes.rewritten_images == 0
+    assert "![the board](board.png)" in (tmp_path / "items" / "dec-a.md").read_text()
+    assert 'src="assets/shots/board.png"' in project.item_by_id("DEC-A-001").body_html
+
+
+def test_page_search_freezes_source(tmp_path):
+    write_project_config(tmp_path, _config("shots"))
+    (tmp_path / "items").mkdir()
+    (tmp_path / "pages").mkdir()
+    page = tmp_path / "pages" / "index.md"
+    # pages._read_page normalizes these line endings when it loads the body;
+    # the freeze writer must still locate that body in the raw source bytes.
+    page.write_bytes(b"# Overview\r\n\r\n![the board](board.png)\r\n")
+    (tmp_path / "shots").mkdir()
+    (tmp_path / "shots" / "board.png").write_bytes(PNG)
+
+    project = _writable_load(tmp_path)
+    assert not project.errors
+    assert page.read_bytes() == b"# Overview\r\n\r\n![the board](/shots/board.png)\r\n"
+    assert 'src="assets/shots/board.png"' in project.pages[0].body_html
+
+    # The body starts after front matter here, so its normalized offset is
+    # nonzero even though the physical file still uses CRLF throughout.
+    page.write_bytes(b"---\r\ntitle: Overview\r\n---\r\n\r\n![the board](board.png)\r\n")
+    project = _writable_load(tmp_path)
+    assert not project.errors
+    assert page.read_bytes() == (
+        b"---\r\ntitle: Overview\r\n---\r\n\r\n![the board](/shots/board.png)\r\n"
+    )
+
+
+def test_multiline_and_angle_spelling_freeze_without_touching_code(tmp_path):
+    write_project_config(tmp_path, _config("shots"))
+    _item(
+        tmp_path,
+        "![multiline](\nboard.png)\n\n![angle](<board.png>)\n\n"
+        "`![code](board.png)`\n",
+    )
+    (tmp_path / "shots").mkdir()
+    (tmp_path / "shots" / "board.png").write_bytes(PNG)
+
+    project = _writable_load(tmp_path)
+    source = (tmp_path / "items" / "dec-a.md").read_text()
+    assert not project.errors
+    assert project.load_writes.rewritten_images == 2
+    assert "![multiline](\n/shots/board.png)" in source
+    assert "![angle](</shots/board.png>)" in source
+    assert "`![code](board.png)`" in source
+
+
+def test_yaml_list_bodies_freeze_without_reformatting(tmp_path):
+    write_project_config(tmp_path, _config("shots"))
+    (tmp_path / "items").mkdir()
+    source = tmp_path / "items" / "decisions.yaml"
+    source.write_text(
+        "items:\n"
+        "  - id: DEC-A-001\n    type: decision\n    title: Block\n"
+        "    status: accepted\n    body: |\n      ![block](board.png)\n"
+        "      `![code](board.png)`\n"
+        "  - id: DEC-A-002\n    type: decision\n    title: Inline\n"
+        "    status: accepted\n    body: \"![inline](board.png)\"\n"
+    )
+    (tmp_path / "shots").mkdir()
+    (tmp_path / "shots" / "board.png").write_bytes(PNG)
+
+    project = _writable_load(tmp_path)
+    contents = source.read_text()
+    assert not project.errors
+    assert project.load_writes.rewritten_images == 2
+    assert "      ![block](/shots/board.png)\n" in contents
+    assert 'body: "![inline](/shots/board.png)"' in contents
+    assert "`![code](board.png)`" in contents
+
+
+def test_freeze_preserves_crlf_source(tmp_path):
+    write_project_config(tmp_path, _config("shots"))
+    _item(tmp_path, "![board](board.png)\n")
+    source = tmp_path / "items" / "dec-a.md"
+    # Path.write_text in _item already writes CRLF on Windows. Normalize the
+    # fixture first, then write exact bytes so a doubled CR cannot be mistaken
+    # for a failure of the freeze writer.
+    source.write_bytes(source.read_text().replace("\n", "\r\n").encode("utf-8"))
+    before = source.read_bytes()
+    assert b"\r\r\n" not in before
+    assert before.count(b"\r\n") == before.count(b"\n")
+    (tmp_path / "shots").mkdir()
+    (tmp_path / "shots" / "board.png").write_bytes(PNG)
+
+    project = _writable_load(tmp_path)
+    data = source.read_bytes()
+    assert not project.errors
+    assert b"![board](/shots/board.png)\r\n" in data
+    assert b"\r\r\n" not in data
+    assert data.count(b"\n") == data.count(b"\r\n")

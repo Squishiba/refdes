@@ -200,6 +200,22 @@ slipping in:
 - `source(...)` must be the whole right-hand side (not inside an expression),
   and is not callable from a project equation.
 
+An `.xlsx` citation also works when the optional `refdes[xlsx]` extra is
+installed. Its source key is an Excel defined name pointing to one numeric
+cell. A workbook-scoped name can be used as-is; a sheet-scoped name can be
+written as `Sheet1!case_rise`. An unqualified name resolves to a sheet-scoped
+name when exactly one sheet defines it. If several sheets define it, qualify
+the key. A qualified key only searches that sheet. For example:
+
+```calc
+rise = source("analysis/thermal-model.xlsx", "Sheet1!case_rise") | delta_degC
+```
+
+The XLSX reader uses the workbook's saved numeric result for a formula; it
+does not calculate formulas. Open and save a workbook in a calculating
+application before fetching a formula that has no cached value. The same
+`fetch --update` acceptance and locked-value rules below apply to XLSX.
+
 ### When the file changes
 
 A changed source file **warns loudly; it does not fail the build**, and the

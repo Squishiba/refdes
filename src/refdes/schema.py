@@ -572,7 +572,7 @@ def load_project(config_path: str | None = None, start: str = ".") -> Project:
     # base -> presets -> this project's own overlay, with `include:` resolved
     # into `fields:` -- everything below reads them exactly as it always read
     # raw.get("link_types")/raw.get("types") directly.
-    resolved_sets, resolved_link_types, resolved_types, schema_warnings = (
+    resolved_sets, resolved_link_types, resolved_types, schema_warnings, sealing_optins = (
         standards.resolve_namespaces(raw, settings["require_rejection_rationale"])
     )
 
@@ -831,6 +831,7 @@ def load_project(config_path: str | None = None, start: str = ".") -> Project:
         preset_provided_links=preset_provided_links,
         standard_base=standard_base,
         standard_version=standard_version,
+        sealing_optins=sealing_optins,
     )
     # Install the equation registry alongside the unit config. Loading a project
     # is what fixes how its expressions read, and build.py applies unit aliases

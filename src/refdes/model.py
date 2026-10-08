@@ -754,7 +754,8 @@ class LoadWrites:
     of loading rather than as the command the user asked for (docs/design/
     keys.md §2): keys minted, and bare/stale reference texts rewritten into
     `DISPLAY-ID@key` composites -- link targets, `checks: against:`, cross-item
-    calc references and frozen `follows:` edges, all counted together.
+    calc references and frozen `follows:` edges, all counted together, plus
+    images frozen to concrete project paths.
 
     Filled in by `loader.load_tree` and read by any command whose own verdict
     would otherwise contradict it -- `refdes id` answering "no items are
@@ -764,7 +765,7 @@ class LoadWrites:
     so a reader gated on this prints nothing on a read-only run without having
     to know about the flag at all.
 
-    The two counts are of writes that *landed*. A filesystem that refuses one
+    The counts are of writes that *landed*. A filesystem that refuses one
     (a read-only checkout, a frozen CI tree) is reported in `blocked` instead,
     with a warning naming the file: counting a write that never happened would
     be the same dishonesty this struct exists to fix, pointed the other way.
@@ -772,6 +773,7 @@ class LoadWrites:
 
     minted_keys: int = 0
     rewritten_targets: int = 0
+    rewritten_images: int = 0
     #: Project-relative paths this load tried to write and could not, in the
     #: order they were refused. `refdes check` reads it to keep its
     #: `.refdes/schema.json` trip-wire from saying "refreshed" about a file it
@@ -779,7 +781,7 @@ class LoadWrites:
     blocked: list[str] = field(default_factory=list)
 
     def __bool__(self) -> bool:
-        return bool(self.minted_keys or self.rewritten_targets)
+        return bool(self.minted_keys or self.rewritten_targets or self.rewritten_images)
 
 
 @dataclass
@@ -971,6 +973,17 @@ class Project:
     # pinned version produced the types/link_types it already has in hand.
     standard_base: str = ""
     standard_version: int | None = None
+    # Types this project's own `refdes-schema.yaml` opted back into
+    # `sealing: build` over the standard's `sealing: history` -- sorted names,
+    # empty for the overwhelming majority of projects. The resolved `types:`
+    # cannot tell the two states apart (both read `sealing == 'build'`), and
+    # the difference is a decision the author made in a file, so it is recorded
+    # at the one moment both sides are in hand: `standards.build_sealing_optins`,
+    # through `resolve_namespaces`. `check` and `build` say it out of that --
+    # run-5 F3, where an overlay that changes what an edit to a log entry costs
+    # reported nothing, and a forgotten overlay was indistinguishable from a
+    # deliberate history-backed project.
+    sealing_optins: list[str] = field(default_factory=list)
 
     @property
     def subtype_map(self) -> dict[str, set[str]]:

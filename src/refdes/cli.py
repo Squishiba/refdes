@@ -30,7 +30,7 @@ from . import schema_json as schema_json_mod
 from . import seal as seal_mod
 from . import stub_tests as stub_tests_mod
 from .model import INVALIDATE, Item, Project
-from .schema import SchemaError, load_project
+from .schema import SCHEMA_NAME, SchemaError, load_project
 from .write_lock import LockUnavailable, project_write_lock
 
 # Where the docs actually are for someone who installed refdes from a wheel.
@@ -105,6 +105,8 @@ def _load_write_notice(project: Project) -> str | None:
         parts.append(f"minted {writes.minted_keys} key(s)")
     if writes.rewritten_targets:
         parts.append(f"rewrote {writes.rewritten_targets} reference(s)")
+    if writes.rewritten_images:
+        parts.append(f"froze {writes.rewritten_images} image(s)")
     return f"({' and '.join(parts)} while loading)"
 
 
@@ -173,6 +175,50 @@ def _announce_load_writes(
         refusal = _load_blocked_notice(project)
         if refusal:
             print(refusal, file=out)
+
+
+def _sealing_optin_note(project: Project) -> str | None:
+    """Run-5 F3: the opt-back-in overlay has to say that it took effect.
+
+    `types: {log: {sealing: build}}` in `refdes-schema.yaml` puts the
+    build-time hash lock back on a type the bundled standard had moved to
+    `sealing: history` -- a different project, with different rules for the
+    same files. Until now the only way to confirm those three lines did
+    anything was to edit an entry and see whether the build failed, which
+    leaves the author who added them unable to see that they worked and the
+    author who meant to add them and forgot unable to see that they did not.
+    So the note names the type and the file that declared it.
+
+    A `note:` on stderr, not a diagnostic: F3 is graded friction (low) and the
+    overlay is a *deliberate* decision, so it owes the reader no severity, no
+    place in the `N errors, M warnings` count (run-5 B4 is the complaint about
+    counting one condition twice), and no change to any exit code. Not a
+    `project.info()` diagnostic either, for the reason the note exists at all:
+    `_visible()` hides info unless `--verbose`, which would leave the author
+    still hunting for the confirmation.
+    """
+    names = project.sealing_optins
+    if not names:
+        return None
+    if len(names) == 1:
+        moved = f"the {names[0]!r} type"
+    else:
+        moved = f"{len(names)} types ({', '.join(names)})"
+    return (
+        f"note: {SCHEMA_NAME} opts {moved} back into build sealing -- an edit "
+        "to a sealed entry is a build error again, not the history-backed "
+        "'edited after captured' warning"
+    )
+
+
+def _announce_sealing_optin(project: Project) -> None:
+    """`check` and `build` only -- the two commands run-5 F3 names, and the two
+    an author reaches for to ask whether their config took effect. Nothing to
+    print for a project with no overlay, which is most projects and every one
+    that has never thought about sealing at all."""
+    note = _sealing_optin_note(project)
+    if note:
+        print(note, file=sys.stderr)
 
 
 def _print_late_refusals(project: Project, announced: int) -> None:
@@ -251,6 +297,7 @@ def cmd_check(args) -> int:
     # per-file warnings reach this command through `_report` below, so the
     # notice names only what landed.
     _announce_load_writes(project, name_blocked=False)
+    _announce_sealing_optin(project)
     if schema_was_stale:
         # Name the file that actually triggered it: the mtime check is a max
         # across both config files, and a warning pointing at the wrong one
@@ -328,6 +375,7 @@ def cmd_check(args) -> int:
 def cmd_build(args) -> int:
     project, _stale = _load(args)
     _announce_load_writes(project, name_blocked=False)
+    _announce_sealing_optin(project)
     if args.out:
         project.out_dir = args.out
     if args.reseal and args.reseal != seal_mod.RESEAL_ALL and args.reseal not in project.boards:

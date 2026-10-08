@@ -867,7 +867,7 @@ becomes derived, which is backwards, and round-trips the moment an engineer
 edits it) and changes the failure class from "the document is wrong" to
 "refdes corrupted my schematic."
 
-**Status: implemented for CSV; xlsx still outstanding; design reviewed.** The
+**Status: implemented for CSV and XLSX; design reviewed.** The
 claim that no CSV reader exists in the package is no longer true —
 `src/refdes/sources.py` is the reader module (`extensions = (".csv",)` at
 `sources.py:230`, `csv.reader(fh, strict=True)` at `sources.py:465`), and
@@ -876,10 +876,11 @@ claim that no CSV reader exists in the package is no longer true —
 hashes alongside the locked extracted values; the values are what calc
 evaluation now consumes. The blocker that parked this finding — finding 25's
 Part 2, a citation being able to name a repo-local file — landed on `main`
-earlier (`2001801`, `4496053`, 2026-09-15). **XLSX is still outstanding** and
-is still scoped to an optional `openpyxl` extra in a later minor release
-(`calc-sources.md` §"V1 is CSV only"); that half of the original status was
-accurate and stays. The draft design status also moved on independently:
+earlier (`2001801`, `4496053`, 2026-09-15). **The XLSX part has shipped** as
+the optional `refdes[xlsx]` extra, with workbook- and sheet-scoped defined-name
+lookup in `src/refdes/sources.py`. EDA readers and schematic drift checks remain
+future work, as does XLSX name listing in the browser picker. The draft design
+status also moved on independently:
 `docs/design/calc-sources.md:1-3` reads "**Status: Reviewed** — Jared's
 decisions recorded 2026-09-19; question 2 … decided 2026-09-21 … All section 11
 questions are now answered", so it is no longer awaiting review. The draft
@@ -2263,12 +2264,13 @@ resolves still wins untouched, a failing multi-segment path stays a plain
 does-not-exist error, and a name found nowhere errors naming the directories
 searched. The ambiguity rule ships as decided: error at the reference site
 naming every candidate's full path, no tie-breaker, silent duplicates.
-§4's resolve-and-freeze write-back did **not** ship: resolution re-runs every
-build, and the ambiguity error closes the drift hole freezing was meant to
-(adding a second same-named file turns an existing document's image into a
-loud error, not a silent re-point); `docs/markdown.md` discloses this and
-that moving an *asset* still breaks a hand-written relative path. Tests in
-`tests/test_image_search.py`.
+**Status: done (§4), pending release.** A writable load freezes a uniquely
+searched Markdown image to a project-root-anchored `/path` in the source;
+`--no-write`, missing images, and ambiguous images keep their source spelling.
+The root anchor keeps the reference stable across document moves and later
+same-name additions. Moving the asset still breaks the path. The existing
+render pass resolves these frozen paths directly; `docs/markdown.md` describes
+the author-facing behavior. Tests in `tests/test_image_search.py`.
 
 **Local model: not suitable.** Ambiguity resolution and the freeze semantics
 are exactly the shape of judgment call this project keeps off a smaller

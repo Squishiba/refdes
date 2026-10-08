@@ -99,6 +99,8 @@ cat >"$work/bin/paseo" <<'STUB'
 # PASEO_STUB_JSON, or fails outright when PASEO_STUB_FAIL=1.
 # Fake `paseo workspace ls --json`: dumps PASEO_WS_JSON, or fails when
 # PASEO_WS_FAIL=1.
+# Fake `paseo ls -g --json`: dumps PASEO_AGENTS_JSON, or fails when
+# PASEO_LS_FAIL=1.
 set -u
 if [ "${1:-}" = "workspace" ] && [ "${2:-}" = "ls" ]; then
   if [ "${PASEO_WS_FAIL:-0}" = "1" ]; then
@@ -106,6 +108,14 @@ if [ "${1:-}" = "workspace" ] && [ "${2:-}" = "ls" ]; then
     exit 1
   fi
   cat "$PASEO_WS_JSON"
+  exit 0
+fi
+if [ "${1:-}" = "ls" ]; then
+  if [ "${PASEO_LS_FAIL:-0}" = "1" ]; then
+    echo "fake paseo: simulated ls failure" >&2
+    exit 1
+  fi
+  cat "$PASEO_AGENTS_JSON"
   exit 0
 fi
 if [ "${PASEO_STUB_FAIL:-0}" = "1" ]; then
@@ -138,8 +148,14 @@ reset_env() {
   FAKE_GH_MERGED_JSON='[]'
   PASEO_STUB_FAIL=0
   PASEO_WS_FAIL=0
+  PASEO_LS_FAIL=0
   TOOL_NAME="mcp__paseo__archive_agent"
   TOOL_INPUT=""
+}
+
+# write_agents <case dir> <json array of {id,status,cwd,name}>
+write_agents() {
+  printf '%s\n' "$2" >"$1/agents.json"
 }
 
 write_inspect() { # <case dir> <cwd>
@@ -163,11 +179,16 @@ check() {
   local out rc decision reason tool_input
   tool_input="${TOOL_INPUT:-}"
   [ -n "$tool_input" ] || tool_input='{"agentId":"ag_test"}'
+  # Default listings: no workspace and no other agents, so a case that does not
+  # set one behaves as it did before the owner and running-agent checks existed.
+  [ -f "$dir/ws.json" ] || printf '[]\n' >"$dir/ws.json"
+  [ -f "$dir/agents.json" ] || printf '[]\n' >"$dir/agents.json"
   out="$(
     export HOME="$dir/home"
     export PATH="$work/bin:$PATH"
     export PASEO_STUB_JSON="$dir/inspect.json" PASEO_STUB_FAIL="$PASEO_STUB_FAIL"
     export PASEO_WS_JSON="$dir/ws.json" PASEO_WS_FAIL="$PASEO_WS_FAIL"
+    export PASEO_AGENTS_JSON="$dir/agents.json" PASEO_LS_FAIL="$PASEO_LS_FAIL"
     export FAKE_GH_EXIT FAKE_GH_HEAD_MATCH FAKE_GH_HEAD_JSON FAKE_GH_MERGED_JSON
     export TOOL_NAME
     printf '{"tool_name":"%s","tool_input":%s}' "$TOOL_NAME" "$tool_input" \
@@ -291,7 +312,7 @@ d="$work/04-dirty"; fresh_repo "$d"; reset_env
 wt="$(new_worktree "$d" living-notes-h5-sealing-1)"
 A="$(commit_in "$wt" 'feat(seal): history-backed sealing')"
 git -C "$wt" push -q origin 'HEAD:refs/heads/living-notes-h5-sealing'
-printf 'half-finished thought\n' >"$wt/draft.md"
+printf 'half-finished thought\n' >>"$wt/README.md"
 FAKE_GH_HEAD_MATCH="living-notes-h5-sealing"
 FAKE_GH_HEAD_JSON='[{"state":"MERGED","mergedAt":"2026-10-01T00:00:00Z","number":157}]'
 FAKE_GH_MERGED_JSON="[{\"headRefOid\":\"$A\",\"number\":157}]"
@@ -433,7 +454,7 @@ check 'workspace worktree PR still open' DENY "$d" "$wt"
 # 19. Landed PR, but the worktree has uncommitted changes. Denied.
 d="$work/19-ws-dirty"; fresh_repo "$d"; reset_env
 wt="$(new_worktree "$d" feat-ws-dirty)"
-printf 'scratch\n' >"$wt/unsaved.md"
+printf 'scratch\n' >>"$wt/README.md"
 TOOL_NAME="mcp__paseo__archive_workspace"; TOOL_INPUT='{"workspaceId":"wks_test"}'
 write_ws_listing "$d" "$wt"
 FAKE_GH_HEAD_MATCH="feat-ws-dirty"
@@ -451,10 +472,95 @@ check 'workspace over a local checkout' ALLOW "$d" "$d/main"
 #     loosened it.
 d="$work/21-agent-dirty-regression"; fresh_repo "$d"; reset_env
 wt="$(new_worktree "$d" feat-agent-dirty)"
-printf 'scratch\n' >"$wt/unsaved.md"
+printf 'scratch\n' >>"$wt/README.md"
 FAKE_GH_HEAD_MATCH="feat-agent-dirty"
 FAKE_GH_HEAD_JSON='[{"state":"MERGED","mergedAt":"2026-10-01T00:00:00Z","number":163}]'
 check 'agent worktree dirty despite merged PR (regression)' DENY "$d" "$wt"
+
+# ==========================================================================
+# owner and running-agent checks: a Paseo worktree's workspace is archived
+# instead of the agent, so the worktree actually goes.
+# ==========================================================================
+
+# 22. A landed agent in a Paseo worktree that a workspace owns: archiving the
+#     agent alone would leave the worktree behind. Denied, with the redirect.
+d="$work/22-agent-owned-by-workspace"; fresh_repo "$d"; reset_env
+wt="$(new_worktree "$d" feat-agent-owned)"
+TOOL_NAME="mcp__paseo__archive_agent"
+write_ws_listing "$d" "$wt"
+FAKE_GH_HEAD_MATCH="feat-agent-owned"
+FAKE_GH_HEAD_JSON='[{"state":"MERGED","mergedAt":"2026-10-01T00:00:00Z","number":163}]'
+check 'landed agent whose worktree a workspace owns' DENY "$d" "$wt"
+
+# 23. The same landed agent, but no workspace lists its worktree (it was
+#     orphaned): nothing else would remove the worktree, so the agent archive
+#     is allowed.
+d="$work/23-agent-orphan-worktree"; fresh_repo "$d"; reset_env
+wt="$(new_worktree "$d" feat-agent-orphan)"
+FAKE_GH_HEAD_MATCH="feat-agent-orphan"
+FAKE_GH_HEAD_JSON='[{"state":"MERGED","mergedAt":"2026-10-01T00:00:00Z","number":163}]'
+check 'landed agent, worktree owned by no workspace' ALLOW "$d" "$wt"
+
+# 24. Archiving a workspace whose other agent is still running would interrupt
+#     it. Denied.
+d="$work/24-ws-running-agent"; fresh_repo "$d"; reset_env
+wt="$(new_worktree "$d" feat-ws-running)"
+TOOL_NAME="mcp__paseo__archive_workspace"; TOOL_INPUT='{"workspaceId":"wks_test"}'
+write_ws_listing "$d" "$wt"
+FAKE_GH_HEAD_MATCH="feat-ws-running"
+FAKE_GH_HEAD_JSON='[{"state":"MERGED","mergedAt":"2026-10-01T00:00:00Z","number":163}]'
+write_agents "$d" "[{\"id\":\"ag_other\",\"status\":\"running\",\"cwd\":\"$wt\",\"name\":\"other\"}]"
+check 'workspace has a running agent' DENY "$d" "$wt"
+
+# 25. Every agent in the workspace is idle and the work landed: allowed.
+d="$work/25-ws-idle-agents"; fresh_repo "$d"; reset_env
+wt="$(new_worktree "$d" feat-ws-idle)"
+TOOL_NAME="mcp__paseo__archive_workspace"; TOOL_INPUT='{"workspaceId":"wks_test"}'
+write_ws_listing "$d" "$wt"
+FAKE_GH_HEAD_MATCH="feat-ws-idle"
+FAKE_GH_HEAD_JSON='[{"state":"MERGED","mergedAt":"2026-10-01T00:00:00Z","number":163}]'
+write_agents "$d" "[{\"id\":\"ag_other\",\"status\":\"idle\",\"cwd\":\"$wt\",\"name\":\"other\"}]"
+check 'workspace agents all idle, work landed' ALLOW "$d" "$wt"
+
+# 26. The active agent list cannot be read: cannot tell whether anything is
+#     running, so refuse.
+d="$work/26-ws-ls-fails"; fresh_repo "$d"; reset_env
+wt="$(new_worktree "$d" feat-ws-lsfail)"
+TOOL_NAME="mcp__paseo__archive_workspace"; TOOL_INPUT='{"workspaceId":"wks_test"}'
+write_ws_listing "$d" "$wt"
+FAKE_GH_HEAD_MATCH="feat-ws-lsfail"
+FAKE_GH_HEAD_JSON='[{"state":"MERGED","mergedAt":"2026-10-01T00:00:00Z","number":163}]'
+PASEO_LS_FAIL=1
+check 'paseo ls fails during workspace archive' DENY "$d" "$wt"
+
+# 27. The agent list writes its cwd with a leading ~. A running agent there
+#     must still match its workspace.
+d="$work/27-ws-running-tilde-cwd"; fresh_repo "$d"; reset_env
+wt="$(new_worktree "$d" feat-ws-tilde)"
+TOOL_NAME="mcp__paseo__archive_workspace"; TOOL_INPUT='{"workspaceId":"wks_test"}'
+write_ws_listing "$d" "$wt"
+FAKE_GH_HEAD_MATCH="feat-ws-tilde"
+FAKE_GH_HEAD_JSON='[{"state":"MERGED","mergedAt":"2026-10-01T00:00:00Z","number":163}]'
+write_agents "$d" "[{\"id\":\"ag_other\",\"status\":\"running\",\"cwd\":\"~/${wt#"$d"/home/}\",\"name\":\"other\"}]"
+check 'running agent with a ~ cwd matches its workspace' DENY "$d" "$wt"
+
+# 28. An agent in a Paseo worktree, but the workspace list cannot be read, so
+#     the owner cannot be ruled out. Refuse.
+d="$work/28-agent-ws-list-fails"; fresh_repo "$d"; reset_env
+wt="$(new_worktree "$d" feat-agent-wsfail)"
+FAKE_GH_HEAD_MATCH="feat-agent-wsfail"
+FAKE_GH_HEAD_JSON='[{"state":"MERGED","mergedAt":"2026-10-01T00:00:00Z","number":163}]'
+PASEO_WS_FAIL=1
+check 'landed agent, workspace list fails' DENY "$d" "$wt"
+
+# 29. Only an untracked file (a scratch note, a progress log) in an otherwise
+#     clean, landed worktree: not a reason to refuse. Allowed.
+d="$work/29-untracked-only"; fresh_repo "$d"; reset_env
+wt="$(new_worktree "$d" feat-untracked)"
+printf 'scratch notes\n' >"$wt/unsaved.md"
+FAKE_GH_HEAD_MATCH="feat-untracked"
+FAKE_GH_HEAD_JSON='[{"state":"MERGED","mergedAt":"2026-10-01T00:00:00Z","number":163}]'
+check 'untracked file only, work landed' ALLOW "$d" "$wt"
 
 printf '\n%d passed, %d failed  (scratch: %s)\n' "$pass" "$fail" "$work"
 [ "$fail" -eq 0 ] || exit 1
