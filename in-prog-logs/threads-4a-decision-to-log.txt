@@ -111,3 +111,62 @@ with the pins untouched.
 
 Status: round 3 finished. Docs fix + this log committed separately on top of
 merge commit 534baeb and pushed; PR #176 left open, not merged.
+
+## Round 4 (this commit)
+
+Round-4 review (CHANGES REQUESTED) said the docs still presenting `decision`
+as a live hardware@3 type had to be swept exhaustively, not page-by-page.
+Before editing anything I re-verified the merged schema against the probe
+project (.scratch/probes/hw3, plain hardware@3): `decision` is absent from
+`$defs`; `log` carries date/summary/author/status/rationale/options/checks,
+satisfies/constrained_by, follows/addresses/amends/supersedes/selects/
+blocked_by, and `legacy_prefixes: [DEC]` — so DEC ids stay, `title:` does not.
+
+Ledger (full table: .scratch/decision-ledger.md; built before any edit from
+the review's grep plus a case-insensitive sweep — 467 word hits in 37 files,
+218 pattern hits):
+- LIVE fixed: 33 lines in 11 files. The big one is docs/concepts.md: the
+  item list, the coverage table (claimed/satisfied now name log/component),
+  the "Decisions vs. log entries" section rewritten as "Verdicts and running
+  notes" for the merged type, and the rich-items line. Plus the §8 examples in
+  named-calc-blocks.md and the §7.3 example in candidate-parts.md (retyped
+  `type: log`, `title:`→`summary:`, with a grounding note that these use the
+  post-merge spelling while the repo's own on-disk files wait on phase 4b) —
+  this deliberately reverses round 3's decision to leave those as historical,
+  because round-4 finding 2 called them out explicitly. design/standard-
+  library.md §9 now declares `blocked_by` on `log` (v3 base.yaml:296).
+  index-blocks.md's implemented `{{index}}` examples moved to `type="log"`
+  (they would otherwise be unknown-type errors), its trace-flag yaml now
+  shows `follows` instead of the retired `records`, and the empty-render line
+  to "No log items." (matches blocks.py:221). Small ones: change-tracking,
+  stale-arithmetic-signal, thread-workbench, form-ingestion (governed_by
+  target fixed against live `refdes new requirement` output).
+- STATUS fixed: 5 lines — living-notes.md :478 and the "Phase 4a is not on
+  main" paragraph (now landed-state with live base.yaml:268/:280/:292
+  citations), living-notes-plan.md "Then 4b" (4a no longer a blocker; the
+  bridge now exists for the repo's own un-migrated items) and R4 (interim
+  window closed), stale-arithmetic-signal's "no doc yet" (threads.md exists).
+- HISTORICAL kept: everything version-labelled or dated — the retirement
+  records in cli-reference/getting-started/standard-library(user)/links/
+  schema-reference, the v1-labelled dictionary in design/standard-library.md
+  §1-§2 (its yaml block is headed `hardware/v1/base.yaml`), the dated design
+  records (threads.md itself, vocabulary-review, backlog findings 16/22,
+  composition, extends, the 2026-10-01 living-notes decision records),
+  lifecycle.md:241 (a refdes_version "0.3.0" release-snapshot manifest —
+  same call the round-4 reviewer made), item-search-hover's vocabulary
+  snapshot (dated "verified 2026-09-29" and still literally true of this
+  repo via the bridge).
+- ENGLISH/id: ~330 plain-word and DEC-id lines skipped, counted per file in
+  the ledger.
+
+Verification: step-1 grep re-run — 210 hits remain, all HISTORICAL or DEC
+ids; `type: decision` survives only in lifecycle.md:241 (release snapshot)
+and living-notes-plan.md:537 (the migration mapping's from-side). "decision
+(item|type|entry|block)" now zero. gen_examples.py --check: both generated
+pages up to date. test_docs_examples + test_vocabulary_page + test_keys_links:
+56 passed. Full suite (.scratch/suite-round4.txt): 3345 passed, 10 skipped,
+exit 0 — unchanged from the round-3 baseline, as expected for markdown-only
+changes.
+
+Status: round 4 finished. Pushed to threads-4a-decision-to-log; PR #176 left
+open, not merged.

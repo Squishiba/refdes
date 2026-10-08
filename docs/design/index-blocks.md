@@ -2,10 +2,10 @@
 
 ## Decision
 
-Decisions carry a `schematic_page` field. Today, if a narrative page wants a
-page-number-to-decision table, someone hand-writes it — and it's stale from
+Verdict log entries carry a `schematic_page` field. Today, if a narrative page wants a
+page-number-to-verdict table, someone hand-writes it — and it's stale from
 the moment it's typed, because nothing regenerates it and nothing notices
-when a decision's `schematic_page` changes. The same shape recurs for
+when a verdict entry's `schematic_page` changes. The same shape recurs for
 by-owner, by-status, and by-date views, and will keep recurring. Separately,
 a design record printed or archived as `document.html` has no way to say
 "see Figure 3" — images have no identity, so they can't be numbered or
@@ -59,7 +59,7 @@ already used for figure captions (`FIGURE_ATTR_RE`,
 No new parser — the tool already owns a regex for exactly this shape.
 
 ```markdown
-{{index by="schematic_page" type="decision"}}
+{{index by="schematic_page" type="log"}}
 ```
 
 Must sit alone on its own line (its own markdown paragraph). This isn't an
@@ -180,7 +180,7 @@ field is meant — the standard-library design (`docs/design/standard-library.md
 only shares a `field_sets:` entry across types when the field is
 byte-identical. Letting `type` be a list, or omitting it and indexing every
 type that happens to declare the named field, would silently paper over that
-same hazard inside one block. If a project wants decisions and components
+same hazard inside one block. If a project wants verdict entries and components
 indexed by the same field, that's two `{{index}}` blocks, not one — the
 family's whole premise (Decision, above) is that the cost of one more block
 call is linear and acceptable; the cost of teaching one block to reason
@@ -342,8 +342,8 @@ set: name the specific fix, not a generic "invalid" message.
 **Unknown type:**
 
 ```
-ERROR pages/schematic.md:12 — {{index type="decison"}} — unknown type
-      'decison'. Did you mean 'decision'?
+ERROR pages/schematic.md:12 — {{index type="lgo"}} — unknown type 'lgo'.
+      Did you mean 'log'?
 ```
 
 Same difflib-suggestion machinery `validate_items`
@@ -352,10 +352,10 @@ Same difflib-suggestion machinery `validate_items`
 **Field not declared on the named type:**
 
 ```
-ERROR pages/schematic.md:12 — {{index by="schematic_page" type="decision"}}
-      — type 'decision' has no field 'schematic_page'. Declared fields:
-      title, status, rationale, date, options, checks, source, note, owner,
-      last_reviewed.
+ERROR pages/schematic.md:12 — {{index by="schematic_page" type="log"}}
+      — type 'log' has no field 'schematic_page'. Declared fields:
+      summary, status, rationale, date, options, checks, author, source,
+      note, tags, owner, last_reviewed.
 ```
 
 Lists the type's actual resolved fields (`spec.fields`, `src/refdes/model.py:96`)
@@ -369,7 +369,7 @@ check, because neither is a key in `spec.fields`.
 **Field exists but isn't a groupable type:**
 
 ```
-ERROR pages/schematic.md:12 — {{index by="checks" type="decision"}} —
+ERROR pages/schematic.md:12 — {{index by="checks" type="log"}} —
       'checks' is type 'checks', not a groupable field. index supports
       text, enum, date, person, list, and quantity fields.
 ```
@@ -377,7 +377,7 @@ ERROR pages/schematic.md:12 — {{index by="checks" type="decision"}} —
 **Unknown parameter:**
 
 ```
-ERROR pages/schematic.md:12 — {{index by="schematic_page" type="decision"
+ERROR pages/schematic.md:12 — {{index by="schematic_page" type="log"
       sort="date"}} — unknown parameter 'sort'. index accepts: by, type,
       board.
 ```
@@ -385,14 +385,14 @@ ERROR pages/schematic.md:12 — {{index by="schematic_page" type="decision"
 **Missing required parameter:**
 
 ```
-ERROR pages/schematic.md:12 — {{index type="decision"}} — index is missing
+ERROR pages/schematic.md:12 — {{index type="log"}} — index is missing
       required parameter 'by'.
 ```
 
 **Unknown board:**
 
 ```
-ERROR pages/schematic.md:12 — {{index by="schematic_page" type="decision"
+ERROR pages/schematic.md:12 — {{index by="schematic_page" type="log"
       board="powr"}} — unknown board 'powr'. Did you mean 'power'?
 ```
 
@@ -404,7 +404,7 @@ whether their directive even ran, so it renders one visible line instead of
 either a build failure or silence:
 
 ```html
-<p class="index-empty">No decision items.</p>
+<p class="index-empty">No log items.</p>
 ```
 
 **Scope of "matches nothing" / "matches something": local items only.**
@@ -468,7 +468,7 @@ split, applied recursively instead of one hop deep:
   concrete artifacts that "hang off" a requirement, which is what "traces
   downward from this requirement" means in practice.
 - **`direction="up"`** walks the current node's own **declared `links:`**,
-  recursively. Starting from a decision, this is what *it* points at —
+  recursively. Starting from a verdict entry, this is what *it* points at —
   `constrained_by`, `satisfies`, `selects` — the things it depends on or is
   justified by, which is "what this decision depends on" read literally.
 - **`direction="both"`** renders **two independent subtrees** under the root
@@ -498,7 +498,7 @@ alongside `inverse` and `label`:
 ```yaml
 link_types:
   amends:      { inverse: amended_by,    label: "Amends",      trace: false }
-  records:     { inverse: recorded_by,   label: "Records",     trace: false }
+  follows:     { inverse: followed_by,   label: "Follows",     trace: false }
   supersedes:  { inverse: superseded_by, label: "Supersedes",  trace: false }
   addresses:   { inverse: addressed_by,  label: "Addresses",   trace: false }
   satisfies:   { inverse: satisfied_by,  label: "Satisfies" }               # trace: true, the default
@@ -752,7 +752,7 @@ exist in the project; it cannot decide that something exists, is true, or
 is correct, and it cannot be composed into an expression the tool would
 have to parse and evaluate. That is what keeps a generated index or cascade
 as auditable as the hand-maintained table or diagram it replaces: anyone who
-can read `by="schematic_page" type="decision"` or `from="REQ-IO-001"
+can read `by="schematic_page" type="log"` or `from="REQ-IO-001"
 direction="down"` already knows exactly what will appear on the page, with
 no interpreter and no query language standing in between the source and the
 number.

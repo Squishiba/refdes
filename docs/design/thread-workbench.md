@@ -173,7 +173,7 @@ mechanism produces this, and how does it strip at publish?*
    later decision — it is not implied or pre-committed by anything here.
 2. **Scope: thread tips only, or any item?**
    **Decided: any item.** The mechanism is item-scoped; thread tips are the
-   killer app, not the boundary. A `log` head, a `decision` under revision,
+   killer app, not the boundary. A `log` head, a verdict entry under revision,
    and a part record all benefit from D2/D3.
 3. **Coupling to an editor.**
    **Decided: both.** Jared writes prose directly in VS Code today (that is

@@ -1080,15 +1080,16 @@ are unsettled *because of* one open question."
 
 ### The edge, and why the report resolves further than it does
 
-`blocked_by:` is declared on `decision`, targeting any item type with no
-restriction (§1's YAML):
+`blocked_by:` is declared on the verdict type — `log` in the landed `hardware@3`,
+which absorbed the retired `decision` — targeting any item type with no
+restriction:
 
 ```yaml
 link_types:
   blocked_by: { inverse: blocks, label: "Blocked by" }
 
 types:
-  decision:
+  log:
     links:
       blocked_by: []   # empty target list = unrestricted, an existing engine behavior
 ```
@@ -1100,12 +1101,12 @@ already means "no restriction" for any link in this schema — `blocked_by` is
 simply the first standard verb to use that behavior deliberately rather than
 by omission.
 
-`blocked_by` is standard on `decision` only, not on every type — matching
+`blocked_by` is standard on `log` only, not on every type — matching
 the only case with direct evidence (below), and keeping the vocabulary at
 the size §1 already argues for, where each verb earns its place. A project
 that needs a `requirement` or `test` blockable the same way adds
 `blocked_by:` to that type's own `links:` under §2's ordinary extension
-rule; nothing about the link type itself is decision-specific.
+rule; nothing about the link type itself is verdict-specific.
 
 **The declared edge is direct** — an item names only its immediate
 blocker(s), the same as every other link in this vocabulary:

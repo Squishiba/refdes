@@ -23,7 +23,7 @@ exists, `log` and `ignore` are indistinguishable in every *other*
 observable way -- see [what is not built yet](#what-is-not-built-yet).
 
 `invalidate` is for the substance: a requirement's text, a bound's limit, a
-decision's rationale. `log` is for things worth seeing but harmless: owner, tags,
+verdict entry's rationale. `log` is for things worth seeing but harmless: owner, tags,
 source reference. `ignore` is for noise: timestamps, generated fields.
 
 Note this controls **significance, not retention**. Git still records every byte.

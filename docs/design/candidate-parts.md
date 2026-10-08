@@ -189,7 +189,7 @@ Left to right:
    disqualification signal, and it is arithmetic over the columns to its left,
    not a verdict the block invents: there is no rule here about how many
    failures disqualify a part, because that is an engineering judgement the
-   decision item records in prose.
+   log entry records in prose.
 
 Failing cells carry `class="check-fail"`; the row itself is not styled, because
 a row with one failed criterion and a second good one is exactly the row an
@@ -225,7 +225,7 @@ are different findings with different fixes.
   selection is a frozen record; the live table beside it is the project's
   current state. Those two disagreeing is correct — the entry says what was
   believed on 2026-09-21, the table says what is true today — and it is the
-  reason a *frozen* comparison belongs on the decision item's `options:`
+  reason a *frozen* comparison belongs on the log entry's `options:`
   panel (`name`/`verdict`/`because`, rendered as the options-considered panel)
   rather than in a snapshot of this table.
 - **`--no-write` changes nothing.** The block writes nothing to the source
@@ -706,8 +706,8 @@ links it with `[[cite:mp1584-ds]]` (`docs/markdown.md` §Citing a datasheet).
 
 ```yaml
 id: DEC-PWR-007
-type: decision
-title: 3V3 rail regulator is the MP1584EN
+type: log
+summary: 3V3 rail regulator is the MP1584EN
 status: accepted
 selects: [CMP-PWR-014]
 satisfies: [BND-PWR-011]

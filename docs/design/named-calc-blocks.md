@@ -193,7 +193,7 @@ name        = lowercase-letter [ *( lowercase-letter | digit | "_" | "-" ) ]
   it's intuitive using both because the process for one carries to the
   other."*
 - **Quoted value**, `id="losses"`, exactly like `caption="…"` and
-  `type="decision"`. Unquoted is rejected: `width=60%` is unquoted in the image
+  `type="log"`. Unquoted is rejected: `width=60%` is unquoted in the image
   suffix because it is a number; every string-valued attribute in the project
   is quoted.
 - **Length**: 1–40 characters. Long enough for `thermal_headroom`, short enough
@@ -639,11 +639,15 @@ exactly **one** item with a calc block (`DEC-PWR-001`, one block, eight
 assignments) and **no** item with two. So the example below is **constructed**:
 it takes the real `DEC-PWR-001` and splits its single block along the seam its
 own prose already makes — supply assumptions versus the dissipation argument —
-and adds one new decision item, `DEC-THM-002`, in the same `items/decisions/`
-directory. Every ID that is not `DEC-THM-002` is a real item in this repo
-(`REQ-PWR-002`, `REQ-PWR-003`, `BND-THM-001`, `BND-THM-002`, `CMP-PWR-001`),
+and adds one new verdict log entry, `DEC-THM-002`, in the same
+`items/decisions/` directory. Every ID that is not `DEC-THM-002` is a real item
+in this repo (`REQ-PWR-002`, `REQ-PWR-003`, `BND-THM-001`, `BND-THM-002`,
+`CMP-PWR-001`),
 and the `@key` composites are the ones committed in `DEC-PWR-001`'s front
-matter.
+matter. Both examples use the post-merge `hardware@3` spelling — `type: log`,
+`summary:` instead of the retired decision's `title:` — while this repo's own
+item files still carry the old spelling on disk until the phase 4b item
+migration.
 
 ### 8.1 The item with two named blocks
 
@@ -651,8 +655,8 @@ matter.
 ---
 key: fd24s541bbt
 id: DEC-PWR-001
-type: decision
-title: 3V3 rail regulator topology
+type: log
+summary: 3V3 rail regulator topology
 status: accepted
 board: board-a
 satisfies: [REQ-PWR-002@rgsmdxz3w5m, REQ-PWR-003@na934tg83df]
@@ -700,8 +704,8 @@ keeps `calc_hash_for` honest about what "the arithmetic changed" means (§6.1).
 ---
 key: 7ht4m2xk9pq
 id: DEC-THM-002
-type: decision
-title: Thermal re-check after the enclosure change
+type: log
+summary: Thermal re-check after the enclosure change
 status: accepted
 date: 2026-09-23
 board: board-a
@@ -861,7 +865,7 @@ the one the doc's own recommendation lost.
    (citation `id: mp1584-ds`, figure `id="fig-curve"`) — now governs the
    key's spelling, not just the value's lowercase-hyphen shape. The rest of
    the answer stands: a quoted `key="value"` attribute, matching
-   `caption="…"` / `type="decision"`. `#calc:losses` is unaffected — that
+   `caption="…"` / `type="log"`. `#calc:losses` is unaffected — that
    prefix was never `#calc:name`. And this rename touches only the
    block-level attribute: a calc value's own name (`P_diss`, `V_in`) is
    unchanged everywhere, including all of §4.
