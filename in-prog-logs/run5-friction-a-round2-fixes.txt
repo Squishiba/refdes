@@ -191,3 +191,41 @@ than estimated -- the first estimate I wrote into the PR body draft was wrong.
 State when this was written: FINISHED for round 2. F3, F4, F5 and F7 from the
 original run-5 ticket remain open -- that is a four-finding PR and the reviewer
 agreed that is legitimate; they were verified still open, not half-done.
+
+
+Round 3 (round-3 review, verdict CHANGES REQUESTED -- two findings, both fixed):
+
+  Finding 1 (MEDIUM): _PypdfLogCapture attributed a record to a read by
+  comparing LogRecord.threadName with the owner thread's *name*. Names are
+  caller-controlled and not unique, so two live threads sharing a name each
+  collected the other's pypdf records -- one PDF's failure text could reach
+  another PDF's recorded reason / committed lockfile. Now the handler takes the
+  owner's threading.get_ident() and filters on record.thread, which is unique
+  among live threads (src/refdes/citations.py, _PypdfLogCapture + the handler
+  construction in _owning_pypdf_logs). Docstring updated to say why the name
+  was not enough.
+  New regression test: test_same_named_threads_do_not_pick_up_each_others_records
+  in tests/test_run5_friction_f1_f2_f6_f8.py -- two reads on two threads both
+  named "shared-worker", deterministic via a barrier (both handlers live when
+  both records land, like the existing overlapping-reads test).
+  Sabotage check: re-running the name-based filter
+  (`record.threadName != threading.current_thread().name`) made the new test
+  fail -- measured output: `{'CMP-002': ['CMP-002 damage'], 'CMP-001':
+  ['CMP-001 damage', 'CMP-002 damage']}` -- the read whose handler attached
+  first also collected the other thread's record. The ident-based filter
+  passes; the sabotage was reverted and `git diff` of citations.py shows only
+  the intended change.
+
+  Finding 2 (LOW): in-prog-logs/run5-friction-a.txt recorded "3317 passed, 2
+  skipped" as the round-1 full suite at 3fce4c1; that is the round-2 count.
+  Corrected to the round-2 review's measured round-1 figure, 3303 passed, 2
+  skipped.
+
+  Suite after both fixes, on this tree:
+    PYTHONPATH=$PWD/src /home/jorb/work/venv-refdes/bin/python -m pytest -q \
+      -p no:cacheprovider
+    3318 passed, 2 skipped in 240.11s (0:04:00)  -- 3317 + the new test.
+  CI lint (`ruff check --select E9,F` on the touched files) clean.
+
+State when this was written: FINISHED for round 3; both round-3 findings fixed,
+nothing else touched. F3, F4, F5 and F7 remain open by design, as above.

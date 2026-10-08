@@ -325,20 +325,23 @@ class _PypdfLogCapture(logging.Handler):
     performing, so the record is collected here and folded into refdes's own
     message, where it names a file and says what to do.
 
-    `thread_name` is what keeps one read's words out of another's message. Two
-    overlapping blocks both have a handler attached to the one `pypdf` logger,
-    and a record has no way of saying which block it belongs to -- so without
-    this, a threaded server reading two documents at once folds each document's
-    complaint into both reasons.
+    The owning thread's identifier is what keeps one read's words out of
+    another's message. Two overlapping blocks both have a handler attached to
+    the one `pypdf` logger, and a record has no way of saying which block it
+    belongs to -- so without this, a threaded server reading two documents at
+    once folds each document's complaint into both reasons. The identifier and
+    not the thread's name: names are caller-controlled and not unique, so two
+    live threads sharing one name would pick up each other's records (run-5
+    round-3 finding 1).
     """
 
-    def __init__(self, thread_name: str) -> None:
+    def __init__(self, thread_ident: int) -> None:
         super().__init__(level=logging.WARNING)
         self.messages: list[str] = []
-        self._thread_name = thread_name
+        self._thread_ident = thread_ident
 
     def emit(self, record: logging.LogRecord) -> None:
-        if record.threadName != self._thread_name:
+        if record.thread != self._thread_ident:
             return
         try:
             self.messages.append(record.getMessage())
@@ -382,7 +385,7 @@ def _owning_pypdf_logs() -> Iterator[list[str]]:
     """
     global _pypdf_route_depth, _pypdf_route_saved
     logger = logging.getLogger("pypdf")
-    handler = _PypdfLogCapture(threading.current_thread().name)
+    handler = _PypdfLogCapture(threading.get_ident())
     with _PYPDF_ROUTE_LOCK:
         if _pypdf_route_depth == 0:
             _pypdf_route_saved = logger.propagate

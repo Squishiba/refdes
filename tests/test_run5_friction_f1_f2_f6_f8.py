@@ -692,6 +692,41 @@ def test_one_reads_words_do_not_land_in_anothers_message():
     assert got["CMP-002"] == ["CMP-002 is damaged"], got
 
 
+def test_same_named_threads_do_not_pick_up_each_others_records():
+    """Round 3, finding 1: the handler above filtered on `LogRecord.threadName`,
+    but a thread's name is caller-controlled and not unique. A server whose
+    worker threads share a name had two live handlers accepting each other's
+    records -- one PDF's failure detail landing in another PDF's recorded
+    reason, the exact cross-read contamination this block exists to prevent.
+    The filter is the thread *identifier* now, unique among live threads.
+
+    Pinned, not raced: both threads log while both handlers are attached (the
+    barrier holds each read open until the other's record has landed), so under
+    the name-based filter each capture deterministically holds BOTH documents'
+    damage."""
+    logger = logging.getLogger("pypdf")
+    inside = threading.Barrier(2)
+    got: dict[str, list[str]] = {}
+
+    def read(name: str):
+        with citations_mod._owning_pypdf_logs() as logged:
+            logger.warning(f"{name} damage")
+            inside.wait(timeout=5)  # let both records land while both are live
+        got[name] = list(logged)
+
+    threads = [
+        threading.Thread(target=read, args=(name,), name="shared-worker")
+        for name in ("CMP-001", "CMP-002")
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=5)
+
+    assert got["CMP-001"] == ["CMP-001 damage"], got
+    assert got["CMP-002"] == ["CMP-002 damage"], got
+
+
 # ------------------------------------------- round 2 -- F6/finding 5: diagnosis
 
 

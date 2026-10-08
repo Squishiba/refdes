@@ -287,9 +287,10 @@ CI lint (`ruff check --select E9,F src tests`) clean. Full suite below.
    whether the task finished. Both numbers below are measured, not recalled;
    the stale figures previously quoted on the PR body were from 9c4b5db.)
 
-   Round 1 full suite, measured at the round-1 head 3fce4c1:
+   Round 1 full suite, measured at the round-1 head 3fce4c1 (round-3
+   correction: this line read 3317, which is the round-2 count):
      PYTHONPATH=$PWD/src python3 -m pytest -q -p no:cacheprovider
-     3317 passed, 2 skipped in 243.65s (0:04:03)
+     3303 passed, 2 skipped in 243.65s (0:04:03)
    Round 2 (this branch, 9 review findings addressed), full suite:
      see in-prog-logs/run5-friction-a-round2-fixes.txt for the per-finding
      write-up; the figure is recorded here at commit time.
