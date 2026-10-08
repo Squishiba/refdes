@@ -239,6 +239,9 @@ Two shapes of the same report. A key still bare drops the label clause —
 `refines points at key 'k7f3m2q9x4a', which no item declares. ...` — while a
 bare display id that resolves to nothing gets the ordinary `... points at
 'REQ-PWR-002', which does not exist`.
+The report is one wording for all three local shapes, and it names the command
+below on its own last line — with this reference's own label and key in it, or
+with `DISPLAY-ID` in the label's place when the reference carries no label.
 **Remedy:** check git history to confirm whether this is the original item.
 If it is, restore its **original** key, preserving its references and history:
 
@@ -596,10 +599,12 @@ read the file.
 refused>` from `refdes check --refresh`**
 One pinned citation could not be re-fetched, so no comparison was made for it and
 the run **exits 1**. It is not drift — drift is a finding, this is a check that
-did not happen — and the wording of the second line says which of the two you are
-looking at: `N pinned citation(s) could not be refreshed, so upstream drift was
-NOT verified`. What to do depends on the cause, and the two are not the same
-problem:
+did not happen — and the line says which of the two you are looking at:
+`upstream drift was NOT verified for this citation`. With more than one
+unreachable url a second line follows, naming how many: `N pinned citation(s)
+could not be refreshed, so upstream drift was NOT verified`; with one, that line
+would only repeat the count you can already read. What to do depends on the
+cause, and the two are not the same problem:
 
 - **The origin is gone or the network is down** (connection refused, DNS failure,
   timeout, TLS failure). Wait, or run it somewhere with network. Passing

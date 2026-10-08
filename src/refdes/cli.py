@@ -1174,6 +1174,15 @@ def cmd_audit(args) -> int:
     grouped = citations_mod.by_path(project)
     if grouped:
         print("\nCitations:")
+        # Whether these bytes' pages could be counted is a fact the lockfile
+        # holds and the pin does not, and it decides whether a cited `page:`
+        # was ever compared to anything. Read it once, here, so the row can
+        # say what the state column alone cannot (run-5 F1: a verified pin, a
+        # document too big to open and a file that is not a PDF at all all
+        # printed the same `ok  hash-only` row, while `check` warned about two
+        # of them).
+        records, _lockfile_problem = citations_mod.read_lockfile(project)
+        gaps = citations_mod.page_count_gaps(records)
         for path, statuses in grouped.items():
             state = statuses[0].state
             # The second column describes the pin, so it has to agree with the
@@ -1197,7 +1206,11 @@ def cmd_audit(args) -> int:
             # The state column is deliberately not touched: the release gate's
             # `missing_kept_copies` rule filters on
             # `state == "cache_missing"` (lifecycle.py:577-585), so rewording
-            # it would change what blocks a release.
+            # it would change what blocks a release. What is printed below is
+            # the model's state, except for the one case where the model is
+            # silent rather than true: `ok` on a pin whose pages could not be
+            # counted is a record being read as a check, and `pages unchecked`
+            # is what this row means. Nothing outside this print reads it.
             #
             # `hash_mismatch` keeps `kept`: the blob *is* there, and that is
             # what this column says -- the state column is what says its bytes
@@ -1211,8 +1224,61 @@ def cmd_audit(args) -> int:
             else:
                 pin = "hash-only"
             citers = ", ".join(sorted({s.item_id for s in statuses}))
+            gap = gaps.get(path, "")
+            # Two things have to be true on top of the recorded failure.
+            #
+            # Only an otherwise-clean pin is ambiguous: a pin that is already
+            # `unpinned` or `hash_mismatch` says something worse on this line,
+            # and that is the fact to read first.
+            #
+            # And something here has to cite a page. `check` reports an
+            # uncountable document per cited `page:` -- `_apply_page` returns
+            # before the count is ever read for a spec without one -- so a
+            # citation that cites no page has no unchecked page number, and
+            # saying it did would be this finding's own mistake pointed the
+            # other way. The record cannot say this: a `page_count_error:`
+            # outlives the `page:` that caused it, since `fetch` writes it
+            # against the path and an author deleting the `page:` changes the
+            # item, not the lockfile.
+            unchecked = bool(gap) and state == "ok" and any(s.spec.page for s in statuses)
+            # A `pages unchecked` row's `cited by` names the citers whose claim is
+            # being un-made, and a citation with no `page:` made no such claim.
+            # Listing CMP-003 beside CMP-001 on one row, with a sentence saying
+            # "no cited page number was checked", said the same thing about both
+            # -- this finding's own mistake pointed at the reader instead of the
+            # tool (run-5 review nit 7).
+            #
+            # Dropping the page-less citer entirely would be a different version
+            # of the same fault, in the direction `audit` was rebuilt to stop
+            # taking: the row is the report's only record that CMP-003 cites this
+            # path at all, so it is named -- on its own line, carrying only the
+            # fact it alone has, and only when it is there to be named.
+            silent = sorted({s.item_id for s in statuses if not s.spec.page})
+            if unchecked:
+                citers = ", ".join(
+                    sorted({s.item_id for s in statuses if s.spec.page})
+                )
             print(f"  {path}")
-            print(f"    {state:<14} {pin:<10} cited by {citers}")
+            # 15, not the 14 the states alone needed: `pages unchecked` is the
+            # longest thing this column can now print, and a column that
+            # shifts by a space on one row is read as a different column.
+            print(
+                f"    {'pages unchecked' if unchecked else state:<15} "
+                f"{pin:<10} cited by {citers}"
+            )
+            if unchecked:
+                print(
+                    f"      the pages could not be counted, so no cited page "
+                    f"number was checked: {gap}"
+                )
+                if silent:
+                    print(
+                        f"      {', '.join(silent)} "
+                        f"{'cites' if len(silent) == 1 else 'cite'} this path "
+                        "without a page number, so nothing of "
+                        f"{'its' if len(silent) == 1 else 'their'} own went "
+                        "unchecked"
+                    )
 
     grouped_parts = citations_mod.by_part_number(project)
     if grouped_parts:

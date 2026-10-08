@@ -91,8 +91,9 @@ def _message(original, current, *, pointer="refines points at", label="REQ-001")
     return (
         f"{pointer} key {original!r} (labelled {label}), which no item declares. "
         f"A live item labelled {label} {declared}. Its key may have been {loss}, "
-        "or the label may now name a different item. The "
-        "label is not used as a fallback. Check git history to confirm identity. "
+        "or the label may now name a different item. The target may have been "
+        "deleted or its key lost or changed. A reference resolves by its key "
+        "alone, so check git history to confirm identity. "
         f"If it is the same item, run `refdes keys restore {label}@{original} "
         "--dry-run`, then repeat without --dry-run to restore the original key."
     )
@@ -169,7 +170,19 @@ def test_live_label_and_absent_label_diagnostics(tmp_path, missing):
         message = build._unknown_key_message(project, "refines points at", target)
         assert "The target may have been deleted or its key lost or changed." in message
         assert "predates" not in message
-        assert "keys restore" not in message
+        # Run-5 F8: these two shapes used to stop at "check git history before
+        # restoring the original key or removing the reference" and never name
+        # the command the live-label wording spelled out, so one condition sent
+        # an author either to the right command or to archaeology depending on
+        # whether their reference happened to carry a label. Every local shape
+        # names the command now; a bare key has no label to put in front of
+        # the `@`, so it gets a `DISPLAY-ID@` placeholder -- the shape `keys
+        # restore --help` asks for, verified by running it -- with this
+        # reference's own key already filled in.
+        assert (
+            f"run `refdes keys restore {target if '@' in target else 'DISPLAY-ID@' + original} "
+            "--dry-run`"
+        ) in message, message
 
 
 @pytest.mark.parametrize("dry_run", [False, True])

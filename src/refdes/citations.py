@@ -42,10 +42,14 @@ from __future__ import annotations
 import difflib
 import hashlib
 import io
+import logging
 import os
 import posixpath
 import re
+import threading
 from collections import defaultdict
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -308,20 +312,167 @@ def page_number(text: str) -> int | None:
     return value if value >= 1 else None
 
 
-def _pdf_reader(data: bytes):
+class _PypdfLogCapture(logging.Handler):
+    """pypdf's own words about a document, collected instead of printed.
+
+    pypdf reports a damaged document partly by *logging* it -- `logger_warning
+    ("EOF marker not found")` on the `pypdf._reader` logger -- and an
+    application that configured no logging receives it anyway: Python's
+    last-resort handler prints the bare message on stderr. That is a line with
+    no file, no path and no context, arriving immediately above the refdes
+    warning that explains the same failure, so it reads as the tool crashing
+    and then recovering (run-5 F2). refdes owns the report of a read refdes is
+    performing, so the record is collected here and folded into refdes's own
+    message, where it names a file and says what to do.
+
+    The owning thread's identifier is what keeps one read's words out of
+    another's message. Two overlapping blocks both have a handler attached to
+    the one `pypdf` logger, and a record has no way of saying which block it
+    belongs to -- so without this, a threaded server reading two documents at
+    once folds each document's complaint into both reasons. The identifier and
+    not the thread's name: names are caller-controlled and not unique, so two
+    live threads sharing one name would pick up each other's records (run-5
+    round-3 finding 1).
+    """
+
+    def __init__(self, thread_ident: int) -> None:
+        super().__init__(level=logging.WARNING)
+        self.messages: list[str] = []
+        self._thread_ident = thread_ident
+
+    def emit(self, record: logging.LogRecord) -> None:
+        if record.thread != self._thread_ident:
+            return
+        try:
+            self.messages.append(record.getMessage())
+        except Exception:  # pragma: no cover -- a log record never breaks a build
+            pass
+
+
+# The `pypdf` logger is one object shared by the whole process, so the routing
+# below is global state and has to be accounted for as such: only the outermost
+# block saves the flag, only the outermost block puts it back. Saving and
+# restoring per block is what let two overlapping reads leave `propagate` at
+# whatever the last of them happened to observe, which is how one read's
+# suppression became the whole process's (run-5 review finding 2). The lock
+# guards the count and the saved flag, not the read: two blocks may still be
+# inside pypdf at once, which is why the handler above is per-thread.
+_PYPDF_ROUTE_LOCK = threading.RLock()
+_pypdf_route_depth = 0
+_pypdf_route_saved: bool | None = None
+
+
+@contextmanager
+def _owning_pypdf_logs() -> Iterator[list[str]]:
+    """Yield the list pypdf's warnings are collected into while the block runs.
+
+    One line of routing, which is all the finding asked for: a handler on the
+    `pypdf` logger means the last-resort handler is no longer reached, and
+    `propagate = False` means a project that *does* configure logging gets
+    pypdf's words inside refdes's message rather than on a line of their own.
+    That second half is a mutation of a logger the caller owns, so it is counted
+    rather than saved and restored per block: overlapping and nested blocks are
+    one suppression with one restoration, and a caller that arranged its own
+    `propagate` gets it back rather than refdes's opinion of it.
+
+    The logger's *level* is deliberately left alone. Raising or lowering it
+    would change what the caller asked for -- and this runs inside a library
+    call in a threaded server, so the change would be visible to every other
+    thread for its duration. What the caller's level decides, it still decides
+    here: leave pypdf quieter than WARNING and its words are not collected, so
+    they are not folded into the message either, which is the caller's choice
+    and not refdes's to overrule. The handler is always removed on the way out.
+    """
+    global _pypdf_route_depth, _pypdf_route_saved
+    logger = logging.getLogger("pypdf")
+    handler = _PypdfLogCapture(threading.get_ident())
+    with _PYPDF_ROUTE_LOCK:
+        if _pypdf_route_depth == 0:
+            _pypdf_route_saved = logger.propagate
+            logger.propagate = False
+        _pypdf_route_depth += 1
+    logger.addHandler(handler)
+    try:
+        yield handler.messages
+    finally:
+        logger.removeHandler(handler)
+        with _PYPDF_ROUTE_LOCK:
+            _pypdf_route_depth -= 1
+            if _pypdf_route_depth == 0:
+                logger.propagate = bool(_pypdf_route_saved)
+                _pypdf_route_saved = None
+
+
+# pypdf narrates its own recovery, and one of those narrations quotes a live
+# object: `Root found at IndirectObject(2, 0, 139905524280560)`. That address is
+# ASLR-dependent, so folding the line in puts a different number in
+# `.refdes/citations.yaml` on every `refdes fetch` of the same bytes -- a
+# permanent spurious diff in a committed file, and an ASLR address committed to
+# the repository. The object number and generation are stable and are what
+# identifies the object, so only the address goes.
+_PYPDF_ADDRESS_REPR = re.compile(r"\((\d+), (\d+), (\d{6,})\)")
+_PYPDF_HEX_ADDRESS = re.compile(r"\b0x[0-9a-fA-F]{6,}\b")
+# A reason is recorded in the lockfile and reprinted by `check` and `audit`, so
+# it is one bounded sentence about the bytes and not a transcript of the parser.
+# 200 is roughly what the exception alone needs for pypdf's worst complaints.
+UNREADABLE_REASON_MAX = 200
+
+
+def _stable_reason_text(text: str) -> str:
+    """`text` with anything that differs between two runs of the same input
+    removed: an object repr's address, a bare hex address, and whitespace."""
+    text = _PYPDF_ADDRESS_REPR.sub(r"(\1, \2)", text)
+    text = _PYPDF_HEX_ADDRESS.sub("0x...", text)
+    return " ".join(text.split())
+
+
+def _unreadable_reason(exc: Exception, logged: list[str] | None = None) -> str:
+    """Why pypdf could not open these bytes, in pypdf's own words.
+
+    Including the one it logged rather than raised: `EOF marker not found` is
+    the fact that names the damage -- a file that ends before its trailer does
+    -- and the exception pypdf finally raises says only "Stream has ended
+    unexpectedly". Folding that in is what makes routing the line safe to do:
+    nothing that was printed before is lost, it is only attributed now.
+
+    The *first* logged line, and only the first. The rest is pypdf narrating
+    its recovery attempt, and a narration line carries whatever it happened to
+    print on the way past -- including the address reprs above. Folding all of
+    it in made a 90-character fact on the baseline a 1307-character one, changing
+    on every run of the same bytes, which for a committed lockfile means a
+    spurious diff and an ASLR address in the repository (run-5 review finding 1).
+    What is left is bounded and byte-identical across processes, and the first
+    line is the one that names the damage: across four hundred randomly damaged
+    PDFs the first logged line was always the complaint, and it was never the
+    address repr.
+    """
+    message = _stable_reason_text(f"pypdf could not read the PDF: {exc}")
+    for line in logged or ():
+        line = _stable_reason_text(line)
+        if line and line not in message:
+            message = f"{message} ({line})"
+            break
+    if len(message) > UNREADABLE_REASON_MAX:
+        message = message[: UNREADABLE_REASON_MAX - 1].rstrip()
+        message = f"{message}…"
+    return message
+
+
+def _pdf_reader(data: bytes, logged: list[str] | None = None):
     """pypdf's reader over one document's bytes, or SectionError.
 
     The one place a PDF is opened from bytes, for both questions asked of it
     here -- its outline (`outline_titles`) and how many pages it has
     (`page_count`) -- so the missing-extra and unreadable-file wording cannot
-    drift between them.
+    drift between them. `logged` is the caller's `_owning_pypdf_logs` list, so
+    the reason can quote what pypdf logged during this read.
     """
     PdfReader = _import_pypdf()
     try:
         return PdfReader(io.BytesIO(data))
     except Exception as exc:  # pypdf raises many types here, none of them ours
         raise SectionError(
-            "", f"pypdf could not read the PDF: {exc}", KIND_UNREADABLE
+            "", _unreadable_reason(exc, logged), KIND_UNREADABLE
         ) from exc
 
 
@@ -336,18 +487,23 @@ def page_count(data: bytes) -> int:
     matters is the one for those bytes and no other.
 
     Bytes pypdf cannot open raise SectionError(kind=unreadable) with pypdf's own
-    message; a missing extra raises SectionError(kind=missing_extra) with the
-    install hint. Neither is a document with zero pages, and neither is ever
-    recorded as a count.
+    message -- including what it logged instead of raising -- and nothing it
+    says reaches the terminal on its own while this function is reading;
+    a missing extra raises SectionError(kind=missing_extra) with the install
+    hint. Neither is a document with zero pages, and neither is ever recorded
+    as a count.
     """
-    try:
-        return len(_pdf_reader(data).pages)
-    except SectionError:
-        raise
-    except Exception as exc:  # pypdf parses the page tree lazily; anything can come out
-        raise SectionError(
-            "", f"pypdf could not read the PDF: {exc}", KIND_UNREADABLE
-        ) from exc
+    with _owning_pypdf_logs() as logged:
+        try:
+            return len(_pdf_reader(data, logged).pages)
+        except SectionError:
+            raise
+        # pypdf parses the page tree lazily, so the failure can surface here
+        # rather than in the open
+        except Exception as exc:
+            raise SectionError(
+                "", _unreadable_reason(exc, logged), KIND_UNREADABLE
+            ) from exc
 
 
 def page_out_of_range(canon: str, page: int, count: int) -> str:
@@ -375,38 +531,40 @@ def outline_titles(data: bytes) -> list[tuple[str, int]]:
 
     [] means the PDF genuinely has no outline -- the caller reports that as its
     own case, never as "section not found". A PDF pypdf cannot open raises
-    SectionError(kind=unreadable) carrying pypdf's own message.
+    SectionError(kind=unreadable) carrying pypdf's own message, logged words
+    included, and says it as refdes's own line rather than pypdf's bare one.
     """
-    reader = _pdf_reader(data)
-    try:
-        outline = reader.outline
-    except Exception as exc:  # pypdf raises many types here, none of them ours
-        raise SectionError(
-            "", f"pypdf could not read the PDF: {exc}", KIND_UNREADABLE
-        ) from exc
+    with _owning_pypdf_logs() as logged:
+        reader = _pdf_reader(data, logged)
+        try:
+            outline = reader.outline
+        except Exception as exc:  # pypdf raises many types here, none of them ours
+            raise SectionError(
+                "", _unreadable_reason(exc, logged), KIND_UNREADABLE
+            ) from exc
 
-    out: list[tuple[str, int]] = []
+        out: list[tuple[str, int]] = []
 
-    def walk(items) -> None:
-        for entry in items:
-            if isinstance(entry, list):
-                walk(entry)
-                continue
-            title = getattr(entry, "title", None)
-            if title is None:
-                continue
-            page = _destination_page(reader, entry)
-            if page is None:
-                continue
-            out.append((str(title), page))
+        def walk(items) -> None:
+            for entry in items:
+                if isinstance(entry, list):
+                    walk(entry)
+                    continue
+                title = getattr(entry, "title", None)
+                if title is None:
+                    continue
+                page = _destination_page(reader, entry)
+                if page is None:
+                    continue
+                out.append((str(title), page))
 
-    try:
-        walk(outline)
-    except Exception as exc:  # a malformed outline tree, not a bad section
-        raise SectionError(
-            "", f"pypdf could not read the PDF outline: {exc}", KIND_UNREADABLE
-        ) from exc
-    return out
+        try:
+            walk(outline)
+        except Exception as exc:  # a malformed outline tree, not a bad section
+            raise SectionError(
+                "", f"pypdf could not read the PDF outline: {exc}", KIND_UNREADABLE
+            ) from exc
+        return out
 
 
 def _outline_hints(want: str, titles: list[str], limit: int = 5) -> list[str]:
@@ -1189,6 +1347,38 @@ def locked_source_value(record: dict | None, key: str) -> str | None:
     if isinstance(entry, dict) and entry.get("value") is not None:
         return str(entry["value"])
     return None
+
+
+def page_count_gaps(records: Mapping[str, Mapping]) -> dict[str, str]:
+    """`path` -> why this document's pages could not be counted, for every
+    pinned record that records the attempt's failure instead of a count.
+
+    The lockfile already holds this fact (`fetch` writes it, `_apply_page` reads
+    it so that `check` can warn without the bytes), and `audit` -- the command a
+    release reviewer actually runs -- printed nothing about it, so a pin whose
+    cited page numbers were never compared to anything read `ok` (run-5 F1).
+
+    Two kinds of record are deliberately absent: one with a count, whose pages
+    were checked, and one with neither, which claims nothing about its pages --
+    a pin written before any count was attempted. That is `_apply_page`'s
+    distinction, kept here so the two commands cannot disagree about what "we
+    could not check this" means.
+
+    What a record cannot know is whether anything still cites a `page:` of this
+    path -- `fetch` writes the failure against the path, and deleting the `page:`
+    from the item does not delete it -- so a caller reporting "no page number
+    was checked" has to pair this with the citations it has, as `cmd_audit`
+    does. `check` gets it for free: it walks cited `page:` values to begin with.
+    """
+    gaps: dict[str, str] = {}
+    for path, record in records.items():
+        counted = record.get(PAGE_COUNT_KEY)
+        if isinstance(counted, int) and counted >= 1:
+            continue
+        why = record.get(PAGE_COUNT_ERROR_KEY)
+        if why:
+            gaps[path] = str(why)
+    return gaps
 
 
 def by_path(
@@ -2121,6 +2311,29 @@ def _check_pages(
         )
 
 
+def _page_count_remedy(canon: str, why: str) -> str:
+    """What to do about a page count that could not be taken, or "" when `why`
+    already carries the fix.
+
+    Only one of `_page_count_for_pin`'s two reasons needs this: a missing extra
+    is repaired by the install command `why` itself names, and telling an author
+    their *file* is broken because they did not install a library is a false
+    lead. Bytes that will not open are theirs to fix, and this fetch-time line
+    is all they get until `check` repeats it -- which is why it has to say what
+    to do, in the shape `_apply_page` already uses (run-5 F2: pypdf's complaint
+    used to print itself above this line, and read as a crash because nothing on
+    the screen attributed it).
+    """
+    if PDF_EXTRA_HINT in why:
+        return ""
+    return (
+        f". The page numbers cited for {canon} are not checked: confirm that "
+        f"{canon} really is a complete PDF -- a download that ended early is "
+        f"the usual cause -- then run 'refdes fetch --update --path {canon}' "
+        f"to count its pages"
+    )
+
+
 def _page_count_for_pin(canon: str, data: bytes) -> tuple[int | None, str]:
     """`(count, "")` when this document's pages can be counted, else
     `(None, why they cannot)`.
@@ -2484,10 +2697,14 @@ def fetch_all(
                 # The pages could not be counted, so they are not checked --
                 # which is a different fact from "this document has no pages",
                 # and the reason is kept so a later `check` can say it without
-                # having the bytes.
+                # having the bytes. pypdf's own complaint about these bytes now
+                # arrives inside `why` instead of as a bare line of stderr
+                # above this warning (run-5 F2), so this line is the whole of
+                # what the author gets, and it carries the remedy too.
                 result.page_warnings.append(
                     f"{canon}: the pages could not be counted to check the page "
                     f"numbers cited here -- {why}"
+                    + _page_count_remedy(canon, why)
                 )
                 record[PAGE_COUNT_ERROR_KEY] = why
         if new_values:
@@ -2564,7 +2781,7 @@ def refresh(project: Project, fetcher=None, allow_unreachable: bool = False) -> 
         citers[spec.path].append(item.id)
 
     drift: list[DriftEntry] = []
-    unreachable: list[str] = []
+    unreachable: list[tuple[str, Exception]] = []
     for target in sorted(citers):
         try:
             kind = classify(project.root, target)[0]
@@ -2578,15 +2795,7 @@ def refresh(project: Project, fetcher=None, allow_unreachable: bool = False) -> 
         try:
             data = fetcher(target)
         except Exception as exc:  # noqa: BLE001
-            unreachable.append(target)
-            if allow_unreachable:
-                project.warn(f"could not refresh {target}: {exc}")
-            else:
-                project.error(
-                    f"could not refresh {target}: {exc} -- upstream drift was NOT "
-                    f"verified for this citation (no bytes arrived, so there is "
-                    f"nothing to compare the pin against)"
-                )
+            unreachable.append((target, exc))
             continue
         upstream_sha256 = hashlib.sha256(data).hexdigest()
         pinned_sha256 = str(record.get("sha256") or "")
@@ -2600,26 +2809,66 @@ def refresh(project: Project, fetcher=None, allow_unreachable: bool = False) -> 
                 )
             )
     if unreachable:
-        # One summary line naming the escape hatch, so the per-url lines above
-        # are read as "the run failed because it could not check these" rather
-        # than as N unrelated flakes -- and so the remedy is on the same screen
-        # as the failure.
+        # One line per url that could not be reached, and the count line only
+        # when there is more than one url to count. It used to be printed for
+        # one as well, which said the same thing twice on one screen -- the
+        # per-url line naming the url and the reason, the summary saying the
+        # same citation could not be refreshed -- and the summary's only
+        # non-repeated word was the number one, which the reader can count
+        # (run-5 F6). So with a single url the remedy rides on its own line
+        # instead, and nothing about the failure or the escape hatch is lost.
         n = len(unreachable)
         plural = "s" if n != 1 else ""
-        if allow_unreachable:
-            project.warn(
-                f"{n} pinned citation{plural} could not be refreshed, so upstream "
-                f"drift was NOT verified for {('them' if n != 1 else 'it')} -- "
-                f"drop {ALLOW_UNREACHABLE_FLAG} to fail the run on this instead"
-            )
-        else:
-            project.error(
-                f"{n} pinned citation{plural} could not be refreshed, so upstream "
-                f"drift was NOT verified for {('them' if n != 1 else 'it')} -- the "
-                f"run cannot claim to have checked {('them' if n != 1 else 'it')}. "
-                f"Fix the network or the urls, or pass {ALLOW_UNREACHABLE_FLAG} to "
-                f"treat an unreachable source as a warning and let the exit code "
-                f"reflect only real findings (you then get no guarantee that every "
-                f"pinned source was checked at all)"
-            )
+        for target, exc in unreachable:
+            head = f"could not refresh {target}: {exc}"
+            # The diagnosis rides on the per-url line only when that line is the
+            # only place it will be said. With two urls the summary below says
+            # it once for all of them, and saying it on every line as well made
+            # three repetitions of one sentence where the baseline had one
+            # (run-5 F6, review finding 5). What stays on every line is what
+            # only that line knows: the url and why it failed.
+            if allow_unreachable:
+                project.warn(
+                    head
+                    + (
+                        " -- upstream drift was NOT verified for it"
+                        f" -- drop {ALLOW_UNREACHABLE_FLAG} to fail the run on "
+                        "this instead"
+                        if n == 1
+                        else ""
+                    )
+                )
+            else:
+                project.error(
+                    head
+                    + (
+                        " -- upstream drift was NOT verified for this citation "
+                        "(no bytes arrived, so there is nothing to compare the "
+                        "pin against)"
+                        " -- the run cannot claim to have checked it. Fix the "
+                        f"network or the urls, or pass {ALLOW_UNREACHABLE_FLAG} "
+                        "to treat an unreachable source as a warning and let the "
+                        "exit code reflect only real findings (you then get no "
+                        "guarantee that every pinned source was checked at all)"
+                        if n == 1
+                        else ""
+                    )
+                )
+        if n > 1:
+            if allow_unreachable:
+                project.warn(
+                    f"{n} pinned citation{plural} could not be refreshed, so upstream "
+                    f"drift was NOT verified for them -- "
+                    f"drop {ALLOW_UNREACHABLE_FLAG} to fail the run on this instead"
+                )
+            else:
+                project.error(
+                    f"{n} pinned citation{plural} could not be refreshed, so upstream "
+                    f"drift was NOT verified for them -- the "
+                    f"run cannot claim to have checked them. "
+                    f"Fix the network or the urls, or pass {ALLOW_UNREACHABLE_FLAG} to "
+                    f"treat an unreachable source as a warning and let the exit code "
+                    f"reflect only real findings (you then get no guarantee that every "
+                    f"pinned source was checked at all)"
+                )
     return drift

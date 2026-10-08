@@ -588,32 +588,42 @@ def _unknown_key_message(project: Project, pointer: str, target_id: str) -> str:
     points at" or "check against"). The remaining text deliberately never
     falls back to a display ID; for a composite its label may be stale, and
     for a bare key the key itself is the immutable identity.
+
+    One condition, one wording (run-5 F8). This used to say the same thing
+    three ways: a bare key and a stale label each got "check git history
+    before restoring the original key or removing the reference", which sends
+    the author to archaeology, while only the shape whose label happened to
+    name a live item named `refdes keys restore` -- the command that fixes it
+    without any. The explanation and the remedy below are now one text for
+    every local target, and what varies is only what is true of the reference
+    being reported: the extra sentence about a live item carrying this label,
+    the argument of the restore command, and -- for a bare key, whose label is
+    the very thing that is missing -- the words saying to substitute it. The
+    imported-target ending stays different on purpose: `keys restore` writes to
+    a file in this project, so it cannot reach a key that lives upstream
+    (docs/troubleshooting.md).
     """
     label, separator, key = target_id.partition("@")
     if not separator:
-        return (
-            f"{pointer} key {target_id!r}, which no item declares. The target "
-            "may have been deleted or its key lost or changed. Check git history "
-            "before restoring the original key or removing the reference."
+        label, key = "", target_id
+    message = f"{pointer} key {key!r}"
+    if separator:
+        message += f" (labelled {label})"
+    message += ", which no item declares. "
+    live = project.item_by_id(label) if separator else None
+    if live is not None:
+        declared = f"declares key {live.key!r}" if live.key else "declares no key"
+        loss = "lost and regenerated" if live.key else "lost"
+        message += (
+            f"A live item labelled {label} {declared}. Its key may have been "
+            f"{loss}, or the label may now name a different item. "
         )
-    message = (
-        f"{pointer} key {key!r} (labelled {label}), which no item declares. "
-    )
-    live = project.item_by_id(label)
-    if live is None:
-        return message + (
-            "The label may be stale; the key is what resolves. The target may "
-            "have been deleted or its key lost or changed. Check git history "
-            "before restoring the original key or removing the reference."
-        )
-    declared = f"declares key {live.key!r}" if live.key else "declares no key"
-    loss = "lost and regenerated" if live.key else "lost"
     message += (
-        f"A live item labelled {label} {declared}. Its key may have been {loss}, "
-        "or the label may now name a different item. The "
-        "label is not used as a fallback. Check git history to confirm identity. "
+        "The target may have been deleted or its key lost or changed. A "
+        "reference resolves by its key alone, so check git history to confirm "
+        "identity. "
     )
-    if live.external:
+    if live is not None and live.external:
         # The composite is the reason this author is confused: a writable load
         # of *their* project wrote it (docs/multi-board.md), so "no item
         # declares this key" reads like a claim about a file they never
@@ -623,9 +633,23 @@ def _unknown_key_message(project: Project, pointer: str, target_id: str) -> str:
             "composite reference was written into your file by refdes on a "
             f"load, not typed by hand — see {docs_url_mod.MULTI_BOARD_DOCS}."
         )
+    # A bare key carries no label to put in front of the `@`, and nothing here
+    # knows which item the key belonged to -- finding that is what the git
+    # history above is for. So the command shows a placeholder for the label,
+    # and says in words that it is one: a line an author pastes without
+    # replacing it is worse than no command at all, and angle brackets would
+    # only have made it fail in a different way. The shape is the argument
+    # `keys restore --help` takes (`DISPLAY-ID@ORIGINAL-KEY`, verified by
+    # running it) with this reference's own real key already substituted in.
+    if separator:
+        restore, substitution = f"{label}@{key}", ""
+    else:
+        restore = f"DISPLAY-ID@{key}"
+        substitution = ", replacing DISPLAY-ID with the item's display id"
     return message + (
-        f"If it is the same item, run `refdes keys restore {label}@{key} "
-        "--dry-run`, then repeat without --dry-run to restore the original key."
+        f"If it is the same item, run `refdes keys restore {restore} "
+        f"--dry-run`{substitution}, then repeat without --dry-run to restore "
+        "the original key."
     )
 
 

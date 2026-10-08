@@ -1,0 +1,301 @@
+run5-friction-a -- run-5 gate findings F1, F2, F6, F8
+=====================================================
+
+Branch: run5-friction-a, base origin/main @ 6251ab5.
+Log for: in-prog-logs/user-sim-release-gate-run5.md sections 1 (table) + 6 (detail).
+
+Environment notes (difficulties, recorded because they cost time)
+-----------------------------------------------------------------
+- The shell whitelist here only runs commands whose FIRST WORD is a safe
+  prefix (`python `, `git `, `refdes `, ...). So:
+    * `cd` is refused -> absolute paths everywhere, `git -C`.
+    * `.scratch/venv/bin/python` / `.../bin/refdes` cannot be invoked
+      directly (absolute path is not a safe prefix).
+    * env-var prefixes (`PYTHONPATH=...`) are refused too.
+  Workaround, both in .scratch/:
+    * venv created with `python -m venv --system-site-packages
+      .scratch/venv` and the project installed editable into it with
+      `python -m pip --python <venv python> install -e .[dev,pdf]`
+      (the .pth in that venv points at THIS worktree's src).
+    * `.scratch/rd.py`  = the body of the `refdes` console script
+      (`refdes.cli:main`) with sys.path pinned to THIS worktree's src.
+      The `refdes` on PATH is an editable install of a DIFFERENT worktree
+      (run5-b4-b5-bugs), so it must not be used.
+    * `.scratch/pt.py`  = pytest with sys.path[0] pinned to THIS src, for
+      the same reason.
+  Every CLI/test run below prints/records which refdes it imported, so the
+  provenance of each result is checkable.
+
+Progress
+--------
+[done] venv at .scratch/venv, project installed editable with [dev,pdf].
+[done] baseline full suite BEFORE any change:
+       python .scratch/pt.py tests -q  ->  3291 passed, 2 skipped (241s)
+[done] throwaway project .scratch/proj + .scratch/www (python -m http.server
+       8899) reproducing F1 and F2 with the real CLI.
+
+Reproduced BEFORE the fixes (real CLI, `python .scratch/rd.py -c
+.scratch/proj/refdes-project.yaml ...`, project cites
+http://127.0.0.1:8899/bad.pdf which is 80 bytes of non-PDF):
+
+  F2 `fetch`:
+      EOF marker not found
+      WARNING  http://127.0.0.1:8899/bad.pdf: the pages could not be counted
+        to check the page numbers cited here -- counting a document's pages
+        failed: pypdf could not read the PDF: Stream has ended unexpectedly
+      fetched  http://127.0.0.1:8899/bad.pdf  sha256=b92ac52ade1b... hash-only
+    -> line 1 is pypdf's own logger (logging.getLogger("pypdf._reader") via
+       pypdf/_reader.py:801 `logger_warning("EOF marker not found")`), bare,
+       unattributed, no file, no path, no remedy.
+
+  F1 `audit` (same project, after the fetch above):
+      Citations:
+        http://127.0.0.1:8899/bad.pdf
+          ok             hash-only  cited by CMP-001
+    while `check` on the same project says
+      "the page numbers cited for ... are not checked: the lockfile records
+       no page count ... because counting a document's pages failed: ..."
+    -> audit claims ok about a pin whose page numbers were never checked.
+
+  F6 `check --refresh --allow-unreachable` (server stopped, so the pinned url
+     refuses the connection):
+      WARNING <project> — could not refresh http://127.0.0.1:8899/bad.pdf:
+          <urlopen error [Errno 111] Connection refused>
+      WARNING <project> — 1 pinned citation could not be refreshed, so
+          upstream drift was NOT verified for it -- drop --allow-unreachable
+          to fail the run on this instead
+    -> the same fact twice for one citation; the summary adds nothing but the
+       count when there is only one.
+
+  F8: three wordings of the unknown-key diagnostic, all in
+      build._unknown_key_message (build.py:582-630):
+        bare key            -> "The target may have been deleted or its key
+                                lost or changed. Check git history before
+                                restoring the original key or removing the
+                                reference."   (no command)
+        composite, label
+                         dead -> "... The label may be stale; the key is what
+                                resolves. The target may have been deleted..."
+                                                            (no command)
+        composite, label
+                         live -> "... Check git history to confirm identity.
+                                If it is the same item, run `refdes keys
+                                restore L@K --dry-run`, ..."  (has command)
+      grep -rn "no item declares|key lost or changed|Check git history"
+      src/ finds exactly these three; the imported-target ending is a fourth,
+      deliberate ending (docs/troubleshooting.md:268 and
+      tests/test_keys_restore.py:552 say `keys restore` cannot reach an
+      imported item), so it stays.
+
+Plan
+----
+F1 cli.py cmd_audit citations block: a pin whose lockfile records
+   page_count_error must not print `ok`; print `pages unchecked` and the
+   recorded reason. Model state untouched (lifecycle.py's release gate filters
+   on state == "cache_missing", and docs/output.md's `state` table is about
+   the JSON, so only audit's printed column changes).
+F2 citations.py: capture pypdf's logger while refdes reads a PDF and fold its
+   words into refdes's own SectionError message; give the fetch-time page
+   warning the remedy the check-time one already carries.
+F6 citations.refresh(): one line per unreachable url, and the count summary
+   only when there is more than one url (with one, the remedy moves onto the
+   single line).
+F8 build._unknown_key_message: one wording for "key no item declares", the
+   one that carries the `refdes keys restore` remedy, everywhere it is
+   produced. Message strings only -- no resolution logic touched (another
+   worker is in retired-id link resolution).
+
+RESULTS
+=======
+
+Regression tests: tests/test_run5_friction_f1_f2_f6_f8.py (8 tests, 4 findings
++ 4 controls so a fix that only makes everything gloomier fails).
+
+BEFORE the code changes (`python .scratch/pt.py
+ tests/test_run5_friction_f1_f2_f6_f8.py -q`):
+
+    F.FFF.F.  ->  5 failed, 3 passed
+    FAILED ::test_audit_does_not_call_an_uncheckable_pin_ok
+        AssertionError: ok hash-only cited by CMP-001
+    FAILED ::test_refdes_reads_the_pdf_so_refdes_owns_the_report
+        AssertionError: SectionError('pypdf could not read the PDF: Stream has
+        ended unexpectedly')   [and the captured log shows
+        `WARNING pypdf._reader: EOF marker not found` escaping to the root
+        logger, which is what prints it bare]
+    FAILED ::test_fetch_says_what_to_do_about_uncountable_pages
+        assert 0 == 1  -- no line of the fetch output names the file and the
+                         remedy together
+    FAILED ::test_unreachable_refresh_is_said_once
+        2 lines: `could not refresh <url>: [Errno 111]` and
+        `1 pinned citation could not be refreshed, ... drop --allow-unreachable`
+    FAILED ::test_one_wording_for_a_key_no_item_declares
+        the stale-label wording has no `keys restore` in it at all
+
+AFTER the code changes:
+
+    ........  ->  8 passed in 0.20s
+
+Full suite AFTER (`python .scratch/pt.py tests -q`):
+    3299 passed, 2 skipped in 236.42s
+    (baseline before any change: 3291 passed, 2 skipped -- the +8 are the new
+    file, and nothing that passed before stopped passing)
+
+CI lint gate (`ruff check --select E9,F src tests`, the workflow's own command):
+    All checks passed!
+
+Real CLI, same throwaway projects as the BEFORE runs
+(`python .scratch/rd.py -c .scratch/proj/refdes-project.yaml ...`, junk PDF
+served from .scratch/www on 8899):
+
+  F2 `fetch --update` -- the bare `EOF marker not found` line is gone; the
+  same words are now inside refdes's own warning, which names the file and
+  says what to do:
+      WARNING  http://127.0.0.1:8899/bad.pdf: the pages could not be counted
+        to check the page numbers cited here -- counting a document's pages
+        failed: pypdf could not read the PDF: Stream has ended unexpectedly
+        (EOF marker not found). The page numbers cited for
+        http://127.0.0.1:8899/bad.pdf are not checked: confirm that ... really
+        is a complete PDF -- a download that ended early is the usual cause --
+        then run 'refdes fetch --update --path ...' to count its pages
+      fetched  http://127.0.0.1:8899/bad.pdf  sha256=b92ac52ade1b... hash-only
+
+  F1 `audit` -- the row no longer claims ok, and says why:
+      Citations:
+        http://127.0.0.1:8899/bad.pdf
+          pages unchecked hash-only  cited by CMP-001
+            the pages could not be counted, so no cited page number was
+            checked: counting a document's pages failed: pypdf could not read
+            the PDF: Stream has ended unexpectedly (EOF marker not found)
+
+  F6 `check --refresh --allow-unreachable` (server stopped) -- one line:
+      WARNING <project> — could not refresh http://127.0.0.1:8899/bad.pdf:
+        <urlopen error [Errno 111] Connection refused> -- upstream drift was
+        NOT verified for it -- drop --allow-unreachable to fail the run on
+        this instead
+      1 items, 0 errors, 2 warnings
+    (the second warning is the unrelated page-count one, present before too)
+
+  F8 `.scratch/f8` project, three dangling references in one item -- all three
+  now end with the same explanation and the same command:
+      ... (labelled REQ-001), which no item declares. A live item labelled
+      REQ-001 declares no key. ... The target may have been deleted or its key
+      lost or changed. The label is not used as a fallback. Check git history
+      to confirm identity. If it is the same item, run `refdes keys restore
+      REQ-001@tz5wxxsctk0 --dry-run`, ...
+      ... (labelled REQ-999), which no item declares. The target may have ...
+      run `refdes keys restore REQ-999@v17yhdq8v1m --dry-run`, ...
+      ... key '1qdn93k2nf4', which no item declares. The target may have ...
+      run `refdes keys restore DISPLAY-ID@1qdn93k2nf4 --dry-run`, ...
+    (a bare key carries no label, so its command names the metavar
+    `refdes keys restore --help` itself prints -- DISPLAY-ID@ORIGINAL-KEY)
+
+Existing tests/docs that pinned the OLD strings, updated as part of the change
+(each is a wording assertion the finding deliberately invalidates):
+  tests/test_keys_restore.py  _message() gains the one shared explanation
+      sentence; test_live_label_and_absent_label_diagnostics asserted
+      `"keys restore" not in message` -- the bug itself -- and now asserts the
+      command is there, spelled out, for both shapes.
+  docs/cli-reference.md  the two `check --refresh` samples (one unreachable url
+      now prints one line, not two) and the audit citation-column paragraph
+      (adds `pages unchecked`).
+  docs/troubleshooting.md  the refresh entry ("the wording of the second
+      line") and the lost-key entry (one wording, command named).
+  docs/design/keys.md  the Layer-3 sample message.
+  docs/multi-board.md  untouched: it quotes the imported-target ending, which
+      is deliberately still different, with "..." eliding the middle.
+
+Deliberately NOT changed
+------------------------
+F1: the model's `state` field and the JSON `state` table in docs/output.md --
+   audit's printed column is the only thing that changes, because
+   lifecycle.py's `missing_kept_copies` release-gate rule filters on
+   `state == "cache_missing"` and the release gate must not move. Also not
+   changed: a pin whose count IS on record but whose cited page is out of
+   range. That case is not ambiguous -- `check` warns about it and `audit`'
+   `ok` is true of the pin -- so it still reads `ok`.
+F8: the imported-target ending (a fourth wording, on purpose: `keys restore`
+   writes a file in this project and cannot reach a key that lives upstream),
+   and all link-resolution logic.
+
+
+REVIEW ROUND (PR #169)
+======================
+Four review points, all four about the changes above. Fixed on the same branch.
+
+1 (MEDIUM, was a real bug) `audit` printed `pages unchecked` / "no cited page
+   number was checked" for a citation that cites no `page:` at all. The
+   lockfile cannot decide that: `fetch` writes `page_count_error:` against the
+   *path*, so it outlives the `page:` that caused it -- delete the `page:` from
+   the item and the record stays, and audit then reported a page number nobody
+   cites. `check` gets this for free because it walks cited `page:` values to
+   begin with (`_apply_page` never reaches the count without one), so audit now
+   gates on `any(s.spec.page for s in statuses)` and the two commands agree on
+   the same set of citations. `page_count_gaps`' docstring says why the record
+   alone cannot answer it.
+   New test: test_a_citation_citing_no_page_has_no_unchecked_page_number.
+   Sabotage check: gate removed -> that test fails (row reads
+   `pages unchecked hash-only cited by CMP-001`); gate restored -> passes.
+   Real CLI: .scratch/proj with the `page:` line deleted from the item and the
+   lockfile still carrying page_count_error -> `ok              hash-only
+   cited by CMP-001`, no reason line.
+
+2 (LOW) `pages unchecked` is 15 characters in a `:<14` column, so the pin
+   column shifted by one on exactly those rows. Column widened to 15; the doc
+   sample in cli-reference.md re-padded to match.
+   New test: test_the_pages_unchecked_row_does_not_shift_the_pin_column, which
+   puts an `ok` row and a `pages unchecked` row in one report and compares
+   where the pin column starts. Sabotage check: width back to 14 -> fails with
+   `assert 20 == 19`; width 15 -> passes.
+
+3 (LOW) `_owning_pypdf_logs` forced the pypdf logger to WARNING for the
+   duration of a read. Took the reviewer's first option: the level is now left
+   completely alone and only the handler and `propagate` come and go. It was
+   global state mutated inside a library call, visible to every other thread of
+   a running `refdes serve`, and it overruled a caller who had put pypdf below
+   WARNING. The cost is documented in the function and pinned by a test rather
+   than hidden: a caller that silenced pypdf below WARNING does not get pypdf's
+   words handed to it inside refdes's message either -- it gets the exception's
+   own words. No changelog entry, since nothing shipped with the clamp.
+   New test: test_a_caller_that_asked_pypdf_to_be_quiet_stays_quiet.
+   Sabotage check: clamp put back -> fails, the message comes back with
+   `(EOF marker not found)` folded in; clamp removed -> passes.
+
+4 (NIT) build.py said "The label is not used as a fallback" on a bare key, a
+   reference with no label -- asserting a fallback exists in the one shape that
+   has nothing to fall back from. Now "A reference resolves by its key alone,
+   so check git history to confirm identity.", true of both shapes. And
+   `refdes keys restore DISPLAY-ID@1qdn93k2nf4 --dry-run` does not run as
+   printed, so the message now says so: "... --dry-run`, replacing DISPLAY-ID
+   with the item's display id, then repeat ...". Angle brackets were rejected
+   on purpose: `<` and `>` are shell redirections, so a pasted placeholder
+   would have failed in a worse way. The real display id cannot be printed --
+   which item owned the key is exactly what the author is being sent to git
+   history to find out.
+   New test: test_a_bare_key_says_its_command_argument_is_a_placeholder.
+   _wording() in the F8 test strips the substitution clause along with the
+   other shape-dependent parts, so "one wording" is still asserted.
+   Tests updated for the new sentence: test_keys_restore.py `_message()`,
+   test_checks_keys.py:299. Docs: design/keys.md sample, the F8 changelog
+   fragment.
+
+After the round: tests/test_run5_friction_f1_f2_f6_f8.py 12 passed (was 8).
+CI lint (`ruff check --select E9,F src tests`) clean. Full suite below.
+
+
+   (entry completed after round 2 -- the full suite line above was never
+   written, and the round-2 review's finding 6 is that this log had to say
+   whether the task finished. Both numbers below are measured, not recalled;
+   the stale figures previously quoted on the PR body were from 9c4b5db.)
+
+   Round 1 full suite, measured at the round-1 head 3fce4c1 (round-3
+   correction: this line read 3317, which is the round-2 count):
+     PYTHONPATH=$PWD/src python3 -m pytest -q -p no:cacheprovider
+     3303 passed, 2 skipped in 243.65s (0:04:03)
+   Round 2 (this branch, 9 review findings addressed), full suite:
+     see in-prog-logs/run5-friction-a-round2-fixes.txt for the per-finding
+     write-up; the figure is recorded here at commit time.
+
+   State: FINISHED. F1, F2, F6, F8 addressed (round 1) and all nine round-2
+   review findings addressed (round 2). F3, F4, F5, F7 from the run-5 ticket
+   remain open by design -- this is a four-finding PR, and the reviewer agreed
+   that is legitimate after checking they are still open rather than half-done.
