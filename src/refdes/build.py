@@ -599,9 +599,10 @@ def _unknown_key_message(project: Project, pointer: str, target_id: str) -> str:
     every local target, and what varies is only what is true of the reference
     being reported: the extra sentence about a live item carrying this label,
     the argument of the restore command, and -- for a bare key, whose label is
-    the very thing that is missing -- the words saying to substitute it. The imported-target ending stays different on purpose --
-    `keys restore` writes to a file in this project, so it cannot reach a key
-    that lives upstream (docs/troubleshooting.md).
+    the very thing that is missing -- the words saying to substitute it. The
+    imported-target ending stays different on purpose: `keys restore` writes to
+    a file in this project, so it cannot reach a key that lives upstream
+    (docs/troubleshooting.md).
     """
     label, separator, key = target_id.partition("@")
     if not separator:
@@ -635,11 +636,12 @@ def _unknown_key_message(project: Project, pointer: str, target_id: str) -> str:
         )
     # A bare key carries no label to put in front of the `@`, and nothing here
     # knows which item the key belonged to -- finding that is what the git
-    # history above is for. So the command shows the metavar
-    # `keys restore --help` prints, and says in words that it is one: a line
-    # an author pastes without replacing the placeholder is worse than no
-    # command at all, and angle brackets would only have made it fail in a
-    # different way.
+    # history above is for. So the command shows a placeholder for the label,
+    # and says in words that it is one: a line an author pastes without
+    # replacing it is worse than no command at all, and angle brackets would
+    # only have made it fail in a different way. The shape is the argument
+    # `keys restore --help` takes (`DISPLAY-ID@ORIGINAL-KEY`, verified by
+    # running it) with this reference's own real key already substituted in.
     if separator:
         restore, substitution = f"{label}@{key}", ""
     else:

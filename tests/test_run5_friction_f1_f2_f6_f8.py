@@ -11,18 +11,28 @@ version of each:
   F2  pypdf's own logger put a bare `EOF marker not found` on stderr, with no
       file, no path and no remedy, immediately above refdes's own warning about
       the same failure. It reads as the tool crashing and then recovering.
-  F6  `check --refresh --allow-unreachable` said the same thing twice for one
-      unreachable citation: once naming the url, once as a summary.
+  F6  one unreachable citation is said twice: once naming the url, once as a
+      summary that repeats it. With two urls the summary earns its line, but
+      the *diagnosis* it carries is said three times.
   F8  one condition -- a key no live item declares -- was reported with three
       wordings, and two of them dropped the `refdes keys restore` command the
       third spelled out.
+
+The round-2 review findings are tested here too, under the same discipline: each
+test fails on the round-1 head, and the comments say which finding it pins.
 """
 
 from __future__ import annotations
 
 import hashlib
 import logging
+import pathlib
+import random
 import re
+import subprocess
+import sys
+import textwrap
+import threading
 
 import pytest
 import yaml
@@ -81,6 +91,23 @@ def _citation_project(root, *urls: str, pages: bool = True) -> str:
     )
     (root / "items" / "cmp.yaml").write_text(
         f"defaults:\n  type: component\nitems:\n{rows}", encoding="utf-8"
+    )
+    return str(root / "refdes-project.yaml")
+
+
+def _mixed_page_project(root, url: str) -> str:
+    """One path cited twice: CMP-001 cites a `page:` of it, CMP-003 cites it with
+    no page. `audit` groups rows by path, so this is the only shape where a
+    `pages unchecked` row's `cited by` column can over-claim."""
+    write_project_config(root, SCHEMA)
+    (root / "items").mkdir()
+    (root / "items" / "cmp.yaml").write_text(
+        "defaults:\n  type: component\nitems:\n"
+        "  - id: CMP-001\n    title: Part 1\n    datasheets:\n"
+        f"      - path: {url}\n        rev: C\n        page: \"99\"\n"
+        "  - id: CMP-003\n    title: Part 3\n    datasheets:\n"
+        f"      - path: {url}\n        rev: C\n",
+        encoding="utf-8",
     )
     return str(root / "refdes-project.yaml")
 
@@ -379,13 +406,375 @@ def test_the_restore_command_is_spelled_out_for_a_composite_reference(tmp_path):
 
 
 def test_a_bare_key_says_its_command_argument_is_a_placeholder(tmp_path):
-    """`DISPLAY-ID@<key>` is the metavar `keys restore --help` prints, not a
-    command that runs: a bare key carries no label, and which item the key
-    belonged to is precisely what the author has to go and find out. So the
-    message says that in words instead of printing a line that fails when
-    pasted -- and keeps naming the command, which is what F8 was about."""
+    """`DISPLAY-ID@` stands for the label, not for the key: a bare key carries
+    no label, and which item the key belonged to is precisely what the author
+    has to go and find out. So the message says that in words instead of printing
+    a line that fails when pasted -- and keeps naming the command, which is what
+    F8 was about."""
     project = _keyless_project(tmp_path)
     bare = keys.mint()
     message = build_mod._unknown_key_message(project, "refines points at", bare)
     assert f"run `refdes keys restore DISPLAY-ID@{bare} --dry-run`" in message, message
     assert "replacing DISPLAY-ID with the item's display id" in message, message
+
+
+# ---------------------------------------------- round 2 -- F2/finding 1: the record
+
+# A byte pattern, not a mock. `random.Random(seed)` makes the damage reproducible
+# and `helpers.pdf_bytes` makes the document reproducible, so this file is the
+# same on every machine. It is a document pypdf cannot open *and* narrates in a
+# log line -- for this shape, one of those lines quotes the live address of an
+# object it found: `Root found at IndirectObject(1, 0, <address>)`. Forty flips was
+# the count that reached it; the count is part of the fixture, not a tuning knob,
+# because the tests below assert a property of the recorded reason rather than any
+# particular pypdf version's wording.
+_DAMAGED_SEED = 3
+_DAMAGED_FLIPS = 40
+
+
+def _damaged_pdf() -> bytes:
+    """A one-page PDF with `_DAMAGED_FLIPS` bytes overwritten at seeded offsets."""
+    import helpers
+
+    rng = random.Random(_DAMAGED_SEED)
+    out = bytearray(helpers.pdf_bytes(helpers.pdf_page("hello")))
+    for _ in range(_DAMAGED_FLIPS):
+        out[rng.randrange(len(out))] = rng.randrange(256)
+    return bytes(out)
+
+
+def _recorded_reason() -> str:
+    """What `page_count` would put in the lockfile for `_damaged_pdf()`."""
+    with pytest.raises(citations_mod.SectionError) as caught:
+        citations_mod.page_count(_damaged_pdf())
+    return str(caught.value)
+
+
+def test_the_recorded_reason_survives_a_reload_byte_for_byte():
+    """Round 2, finding 1: the reason is written into `.refdes/citations.yaml`,
+    which is a committed file, so the same bytes have to produce the same reason
+    every time. Folding every line pypdf logged made it 1.3 KB and different on
+    every run, because pypdf narrates its own recovery and one of those lines
+    quotes the address of an object it found.
+
+    So what is under test is not pypdf's wording -- it is that nothing which
+    differs between two runs of the same bytes survives into the record."""
+    exc = RuntimeError("Stream has ended unexpectedly")
+    first = citations_mod._unreadable_reason(
+        exc, ["EOF marker not found", "Root found at IndirectObject(2, 0, 139905524280560)"]
+    )
+    second = citations_mod._unreadable_reason(
+        exc, ["EOF marker not found", "Root found at IndirectObject(2, 0, 140251244293360)"]
+    )
+    assert first == second, (first, second)
+
+
+def test_the_recorded_reason_keeps_the_address_out():
+    """The address is the part that moves between runs, and it is the whole
+    reason the record changed. Object number and generation stay: those identify
+    the object, and unlike its address they are stable."""
+    reason = citations_mod._unreadable_reason(
+        RuntimeError("Stream has ended unexpectedly"),
+        ["Root found at IndirectObject(2, 0, 139905524280560)"],
+    )
+    assert "139905524280560" not in reason, reason
+    assert "(2, 0)" in reason, reason
+
+
+def test_the_recorded_reason_is_bounded():
+    """Round 2, finding 1, second half: it is a lockfile value reprinted by
+    `check` and `audit`, not a transcript of the parser. pypdf logged 26
+    distinct lines for the fixture above, and one of its *single* lines embeds a
+    whole dict repr -- `Expecting a NameObject for key but found {'/F1':
+    IndirectObject(...)}` -- so keeping only the first line is not by itself a
+    bound. One long line is what this needs, and that is the shape that would
+    otherwise reach the file."""
+    reason = citations_mod._unreadable_reason(
+        RuntimeError("boom"),
+        ["Expecting a NameObject for key but found " + ", ".join(
+            f"'/Key{i}': IndirectObject({i}, 0, {1000000000000 + i})"
+            for i in range(20)
+        )],
+    )
+    assert len(reason) <= citations_mod.UNREADABLE_REASON_MAX, (len(reason), reason)
+    # bounded by saying so, not by cutting mid-word with nothing to show
+    assert reason.endswith("…"), reason
+    # ...and the part that was kept still says what went wrong
+    assert reason.startswith("pypdf could not read the PDF:"), reason
+
+
+def test_only_the_line_that_names_the_damage_is_folded_in():
+    """F2 asked for pypdf's *logged* words because the exception it finally
+    raises only says the stream ended while the log says why -- `EOF marker not
+    found`. One line is that fact. The lines after it are pypdf narrating its
+    recovery attempt, and one of those is the address repr, so the fold stops at
+    the first line and keeps the damage rather than the commentary."""
+    reason = citations_mod._unreadable_reason(
+        RuntimeError("Stream has ended unexpectedly"),
+        [
+            "EOF marker not found",
+            "incorrect startxref pointer(291)",
+            "trying to reconstruct xref table...",
+            "Root found at IndirectObject(2, 0, 139905524280560)",
+        ],
+    )
+    assert "EOF marker not found" in reason, reason
+    assert "incorrect startxref" not in reason, reason
+    assert "reconstruct xref" not in reason, reason
+
+
+def test_two_processes_record_the_same_reason_for_the_same_bytes():
+    """The end-to-end shape of the finding, and the only test that can catch it:
+    ASLR means the address differs between *processes*, not within one, so an
+    in-process test cannot see the bug at all -- CPython hands back the same freed
+    address every time. Two interpreters, the same bytes, and the string that goes
+    into the lockfile.
+
+    Five processes of this on the round-1 head produced five different
+    `page_count_error` values; the review's own diff shows the address changing in
+    the committed file between two `refdes fetch` runs.
+    """
+    script = textwrap.dedent(
+        """
+        import random
+        import sys
+
+        sys.path.insert(0, {tests!r})
+        sys.path.insert(0, {src!r})
+        import helpers
+        from refdes import citations
+
+        rng = random.Random({seed})
+        out = bytearray(helpers.pdf_bytes(helpers.pdf_page("hello")))
+        for _ in range({flips}):
+            out[rng.randrange(len(out))] = rng.randrange(256)
+        try:
+            citations.page_count(bytes(out))
+        except citations.SectionError as exc:
+            print(exc)
+        """
+    ).format(
+        tests=str(pathlib.Path(__file__).resolve().parent),
+        src=str(pathlib.Path(citations_mod.__file__).resolve().parents[1]),
+        seed=_DAMAGED_SEED,
+        flips=_DAMAGED_FLIPS,
+    )
+
+    def reason_in_a_fresh_interpreter():
+        done = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            text=True,
+            timeout=120,
+            check=False,
+        )
+        assert done.returncode == 0, done.stderr
+        return done.stdout.strip()
+
+    first = reason_in_a_fresh_interpreter()
+    assert first, "the fixture is supposed to be unreadable"
+    assert first == reason_in_a_fresh_interpreter(), (
+        "same bytes, two processes, two records -- a committed lockfile would "
+        "diff on every fetch"
+    )
+    # and the properties that make it safe to keep, asserted on the real bytes
+    assert len(first) <= citations_mod.UNREADABLE_REASON_MAX, first
+    assert not citations_mod._PYPDF_ADDRESS_REPR.search(first), first
+
+
+# ------------------------------------------ round 2 -- F2/finding 2: threading
+
+
+def test_two_overlapping_reads_leave_the_callers_logging_alone():
+    """Round 2, finding 2: `propagate` is a logger the host application owns,
+    and the routing was saving it per block. Two reads overlapping on two
+    threads interleaved so the flag was never put back -- 300/300 in the review's
+    reproduction -- leaving the host blind to pypdf for the rest of the process.
+
+    `refdes serve` is threaded, so overlapping reads are the normal case and not
+    a hypothetical one.
+
+    The interleaving is pinned rather than raced: the second read enters while the
+    first is inside, so per-block save/restore has it save the already-mutated
+    `False` -- and the *second* is released first, so its restore is the one that
+    lands last and the leak is the value a real server would be left with. With
+    the release order left to chance the test caught this only about half the
+    time, which is a test that cannot be relied on to catch it at all.
+    """
+    logger = logging.getLogger("pypdf")
+    first_entered, second_entered = threading.Event(), threading.Event()
+    release_first, release_second = threading.Event(), threading.Event()
+    # A thread that dies leaves the barrier unsignalled and the wait below
+    # times out, which reports a timeout instead of the real error -- so carry
+    # whatever the thread raised out.
+    errors: list[BaseException] = []
+
+    def read(entered, release):
+        try:
+            with citations_mod._owning_pypdf_logs():
+                entered.set()
+                release.wait(timeout=5)
+        except BaseException as exc:  # noqa: BLE001 -- reported by the test
+            errors.append(exc)
+
+    first = threading.Thread(target=read, args=(first_entered, release_first))
+    first.start()
+    second = threading.Thread(target=read, args=(second_entered, release_second))
+    second.start()
+    for entered in (first_entered, second_entered):
+        if not entered.wait(timeout=5) and errors:
+            break
+    release_first.set()
+    first.join(timeout=5)
+    release_second.set()  # ...so the second's restore lands last
+    second.join(timeout=5)
+    assert not errors, errors
+
+    assert logger.propagate is True, (
+        "propagate leaked: a host application's logging would be blind to pypdf "
+        "for the rest of the process"
+    )
+    assert list(logger.handlers) == [], logger.handlers
+
+
+def test_a_nested_read_does_not_restore_propagation_early():
+    """The same race without threads: `_unreadable_reason` is called from inside
+    a read, so a nested block that restored what it saved would put the flag
+    back while the outer read was still running."""
+    logger = logging.getLogger("pypdf")
+    with citations_mod._owning_pypdf_logs():
+        with citations_mod._owning_pypdf_logs():
+            pass
+        # the outer block is still reading here, so pypdf must still be muted
+        assert logger.propagate is False, logger.propagate
+    assert logger.propagate is True, logger.propagate
+
+
+def test_a_caller_who_turned_propagation_off_gets_it_back_off():
+    """The routing is a mutation of something the caller owns, so what it must
+    restore is the caller's setting, not refdes's opinion of it. A host that
+    muted pypdf before calling in is not un-muted afterwards."""
+    logger = logging.getLogger("pypdf")
+    logger.propagate = False
+    try:
+        with citations_mod._owning_pypdf_logs():
+            pass
+        assert logger.propagate is False, logger.propagate
+    finally:
+        logger.propagate = True
+
+
+def test_one_reads_words_do_not_land_in_anothers_message():
+    """The handler is attached to the one `pypdf` logger and a log record does
+    not say which read produced it, so two concurrent reads used to fold each
+    document's complaint into both reasons. A message naming one document's
+    damage, quoted in another document's error, is worse than no detail."""
+    logger = logging.getLogger("pypdf")
+    inside = threading.Barrier(2)
+    got: dict[str, list[str]] = {}
+
+    def read(name: str):
+        with citations_mod._owning_pypdf_logs() as logged:
+            logger.warning(f"{name} is damaged")
+            inside.wait(timeout=5)  # let both records land while both are live
+        got[name] = list(logged)
+
+    threads = [
+        threading.Thread(target=read, args=(name,))
+        for name in ("CMP-001", "CMP-002")
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=5)
+
+    assert got["CMP-001"] == ["CMP-001 is damaged"], got
+    assert got["CMP-002"] == ["CMP-002 is damaged"], got
+
+
+# ------------------------------------------- round 2 -- F6/finding 5: diagnosis
+
+
+def test_two_unreachable_urls_are_diagnosed_once(tmp_path, monkeypatch, capsys):
+    """Round 2, finding 5: with two urls the summary line is the one place the
+    shared diagnosis belongs, because it is the only line that speaks for both.
+    Saying it on each url's line as well is three repetitions of one sentence
+    where the baseline had one -- and F6 is precisely the finding that said so."""
+    config = _citation_project(tmp_path, DEAD, LIVE)
+    _pin(tmp_path, [DEAD, LIVE])
+    monkeypatch.setattr(citations_mod, "fetch_bytes", _dead_fetcher)
+    code, out, err = _run(capsys, config, "check", "--refresh", "--allow-unreachable")
+    combined = out + err
+    assert code == 0, combined
+    assert combined.count("upstream drift was NOT verified") == 1, combined
+    # and the remedy survives on the summary line, so nothing is lost
+    assert citations_mod.ALLOW_UNREACHABLE_FLAG in combined, combined
+
+
+def test_two_unreachable_urls_are_diagnosed_once_when_the_run_fails(
+    tmp_path, monkeypatch, capsys
+):
+    """Same, on the error path -- no `--allow-unreachable`, so this is the shape
+    that fails the run and is the one a release reviewer actually hits."""
+    config = _citation_project(tmp_path, DEAD, LIVE)
+    _pin(tmp_path, [DEAD, LIVE])
+    monkeypatch.setattr(citations_mod, "fetch_bytes", _dead_fetcher)
+    code, out, err = _run(capsys, config, "check", "--refresh")
+    combined = out + err
+    assert code != 0, combined
+    assert combined.count("upstream drift was NOT verified") == 1, combined
+
+
+def test_one_unreachable_url_still_carries_the_diagnosis_and_the_remedy(
+    tmp_path, monkeypatch, capsys
+):
+    """Gating it on `n == 1` must not lose it where it is the only place it is
+    said: with one url the summary line is gone, so the per-url line has to
+    carry both the diagnosis and the way out."""
+    config = _citation_project(tmp_path, DEAD)
+    _pin(tmp_path, [DEAD])
+    monkeypatch.setattr(citations_mod, "fetch_bytes", _dead_fetcher)
+    code, out, err = _run(capsys, config, "check", "--refresh", "--allow-unreachable")
+    combined = out + err
+    assert code == 0, combined
+    said = _said_unreachable(combined.splitlines())
+    assert len(said) == 1, combined
+    assert "upstream drift was NOT verified" in said[0], said[0]
+    assert citations_mod.ALLOW_UNREACHABLE_FLAG in said[0], said[0]
+
+
+# ---------------------------------------- round 2 -- F1 nit 7: who the row names
+
+
+def test_the_pages_unchecked_row_names_only_citers_that_cite_a_page(tmp_path, capsys):
+    """Round 2, nit 7: rows are grouped by path, so one row can cover a
+    page-citing citer and a page-less one, and the sentence under it says "no
+    cited page number was checked" -- which for the page-less citer is F1's own
+    mistake pointed at the reader.
+
+    The page-less citer is still named, on its own line: dropping it would take
+    the report's only record that CMP-003 cites this path at all, which is the
+    same invisible-suppression fault from the other direction."""
+    config = _mixed_page_project(tmp_path, DEAD)
+    _pin(tmp_path, [DEAD], page_count_error=PAGE_COUNT_ERROR)
+    code, out, err = _run(capsys, config, "audit")
+    assert code == 0, err
+    row = _audit_row(out)
+    assert row.startswith("pages unchecked "), row
+    assert row.endswith("cited by CMP-001"), row
+    assert "CMP-003" not in row, row
+    # ...and it is named, with the fact it alone has
+    assert "CMP-003 cites this path without a page number" in out, out
+    # nothing is claimed about a page number CMP-003 never cited
+    assert "no cited page number was checked" in out, out
+
+
+def test_a_row_with_every_citer_citing_a_page_names_them_all(tmp_path, capsys):
+    """The extra line is for the mixed case only. A path whose every citer cites
+    a page prints the row it always printed, with no trailing note."""
+    config = _citation_project(tmp_path, DEAD)
+    _pin(tmp_path, [DEAD], page_count_error=PAGE_COUNT_ERROR)
+    code, out, err = _run(capsys, config, "audit")
+    assert code == 0, err
+    assert _audit_row(out).endswith("cited by CMP-001"), out
+    assert "without a page number" not in out, out

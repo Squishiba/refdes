@@ -1,0 +1,193 @@
+Run 5 friction findings F1/F2/F6/F8 — round 2, addressing
+.scratch/REVIEW-169-round2.md (CHANGES REQUESTED at 3fce4c1)
+Branch run5-friction-a. Replaces the dangling "Full suite below." at the end of
+run5-friction-a.txt, which was never written up.
+
+All nine findings in the round-2 review are addressed. Five were code, three were
+wording that cited something that does not exist, one was this log.
+
+--------------------------------------------------------------------------------
+1 (HIGH) page_count_error in a committed lockfile was nondeterministic, 1.3 KB
+--------------------------------------------------------------------------------
+`_unreadable_reason` folded *every* distinct line pypdf logged into one string.
+pypdf narrates its own recovery while parsing a damaged file, and some of those
+lines quote the live address of an object it found:
+
+    Root found at IndirectObject(2, 0, 139905524280560)
+
+That address is ASLR-dependent, so the same bytes recorded a different reason in
+`.refdes/citations.yaml` on every `refdes fetch` -- and the lockfile is committed.
+The review measured 1307 chars over 18 YAML lines where base had 90 chars, and a
+different address in each of five separate processes. 5 of 40 randomly shredded
+PDFs hit the address case.
+
+Three changes, because there were three separate ways for the record to be wrong:
+
+  a. Only the *first* logged line is folded in. F2 asked for pypdf's logged
+     words because the exception it finally raises only says the stream ended
+     while the log says why ("EOF marker not found") -- one line is that fact.
+     The rest is recovery narration, and that is where the address repr lives.
+     Measured: across 400 randomly damaged PDFs the first logged line was always
+     the complaint and was never the address repr (.scratch/probe_first_logged.py).
+
+  b. An address is stripped anyway, belt and braces: `_PYPDF_ADDRESS_REPR` keeps
+     the object and generation (`(2, 0)`) and drops the address, and
+     `_PYPDF_HEX_ADDRESS` covers a bare `0x...`. So a later pypdf version that
+     puts the address first still cannot reach the file.
+
+  c. The reason is bounded at `UNREADABLE_REASON_MAX = 200`. Keeping one line is
+     not by itself a bound -- pypdf logs single lines that embed a whole dict
+     repr ("Expecting a NameObject for key but found {'/F1': IndirectObject(...)}")
+     -- so the clamp stays.
+
+Measured after: 400 damaged PDFs, max reason length 200, zero over cap, zero
+address-style survivors. Measured across processes: identical.
+
+--------------------------------------------------------------------------------
+2 (MEDIUM) _owning_pypdf_logs permanently leaked propagate = False
+--------------------------------------------------------------------------------
+Round 1 removed the level mutation and left the `propagate` save/set/restore,
+which is the same class of bug. Two blocks interleaving on two threads meant the
+flag was never put back -- 300/300 in the review's reproduction -- so the host
+application's logging stayed blind to pypdf for the rest of the process. The
+function's own docstring reasons about "a threaded server", and `refdes serve`
+is threaded.
+
+  - `_PYPDF_ROUTE_LOCK` + `_pypdf_route_depth`: only the outermost of any number
+    of overlapping or nested blocks saves the flag and only the outermost puts it
+    back. The lock guards the count and the saved value, not the read.
+  - What is restored is the *caller's* setting, read at entry, not refdes's
+    opinion of it. A host that muted pypdf before calling in is not un-muted
+    afterwards.
+  - `_PypdfLogCapture` now takes a thread name and drops records from any other
+    thread. There is one `pypdf` logger and a record cannot say which read
+    produced it, so two concurrent reads used to fold each document's complaint
+    into both reasons -- a message naming one document's damage, quoted in
+    another's error.
+
+`propagate = False` itself is kept: F2's test
+(`test_refdes_reads_the_pdf_so_refdes_owns_the_report`) requires that pypdf's
+words do not reach the host's logging either, and removing it fails that test.
+
+--------------------------------------------------------------------------------
+3 (LOW) changelog + PR body cited `refdes audit --json`, which does not exist
+--------------------------------------------------------------------------------
+Verified by running it: `refdes audit --json` errors, and the global parser
+rejects `--json` too. It exists only on `refdes schema`. The underlying claim was
+true -- the `state` field is untouched -- but it was cited to a surface that is
+not there. Now points at the `state` field each citation carries in the built
+`items.json` (emitted at src/refdes/render.py:558) and the `state` table in
+docs/output.md, which is where the release gate's `state == "cache_missing"` rule
+actually reads it (src/refdes/lifecycle.py:595).
+
+--------------------------------------------------------------------------------
+4 (LOW) "the metavar `keys restore --help` prints" was false
+--------------------------------------------------------------------------------
+`AGENTS.md` asks for `--help` to be run before claiming what it prints. Run: the
+metavar is `DISPLAY-ID@ORIGINAL-KEY`, not `DISPLAY-ID@<key>`. The emitted command
+was always fine; only the stated authority for it was wrong, in build.py and in
+the F8 test's docstring, and in the F8 changelog fragment. Corrected in all three.
+
+--------------------------------------------------------------------------------
+5 (LOW) F6 repeated its diagnosis three times for two urls
+--------------------------------------------------------------------------------
+"upstream drift was NOT verified" was on every per-url line *and* in the n > 1
+summary, so two urls said it three times where base said it once. F6's own ticket
+text is the complaint about exactly this shape. Now gated on `n == 1`, like the
+remedy next to it. Fixed on both the warning and the error branch -- the error
+branch had the same repetition, which the finding did not name.
+
+--------------------------------------------------------------------------------
+6 (LOW) this log, and the PR body's numbers
+--------------------------------------------------------------------------------
+in-prog-logs/run5-friction-a.txt ended with "Full suite below." and nothing below
+it. Closed below. The PR body's quoted figures were the 9c4b5db ones; corrected
+in the new PR body.
+
+--------------------------------------------------------------------------------
+NIT 7  a page-less citer inherited "pages unchecked"
+--------------------------------------------------------------------------------
+Rows are grouped by path, so one row covered a page-citing citer and a page-less
+one and said "no cited page number was checked" about both -- F1's own mistake
+pointed at the reader. The `cited by` column now names only the citers whose
+page number went unchecked.
+
+Dropping the page-less citer outright was rejected: the row is the report's only
+record that CMP-003 cites this path at all, so removing it is the same
+invisible-suppression fault from the other direction, which is the thing this
+whole finding exists to stop. It is named on the line below instead, carrying
+only the fact it alone has, and only when there is one to name -- the common
+single-citer case prints exactly what it always printed.
+
+--------------------------------------------------------------------------------
+NITs 8, 9  cosmetics
+--------------------------------------------------------------------------------
+8: build.py had one 129-char line (limit 100). Wrapped. That file now has 5
+   over-long lines where it had 6; no file I touched gained one.
+9: changelog.d/unknown-key-one-wording.fixed.md had a stray double backtick,
+   which release.py folds into CHANGELOG.md as a literal backtick. Removed, and
+   the sentence's metavar claim corrected per finding 4. Both fragments I edited
+   now have zero runs of exactly-two backticks (fences of 3+ excluded).
+
+--------------------------------------------------------------------------------
+Verification
+--------------------------------------------------------------------------------
+Sabotage-checked every new test: each fix reverted in isolation, the named tests
+required to FAIL, file restored byte-for-byte, tests required to pass again.
+Driver kept at .scratch/sabotage_round2.py. 11/11 behaved as required:
+
+  finding 1: no address normalization ...................... 3 tests failed
+  finding 1: no bound on the recorded reason ............... 2 tests failed
+  finding 1: fold every logged line (the round-1 head) .... 2 tests failed
+  finding 2: per-block save/restore, no lock or depth ...... 2 tests failed
+  finding 2: restore refdes's opinion, not the caller's ... 1 test failed
+  finding 2: one shared capture, no per-thread filter ..... 1 test failed
+  finding 5: diagnosis repeated on every warning .......... 1 test failed
+  finding 5: diagnosis repeated on every error ............ 1 test failed
+  finding 5: over-gated, dropped even for one url ......... 2 tests failed
+  nit 7: every citer named under the page-number sentence . 1 test failed
+  nit 7: over-fixed, note printed unconditionally ......... 1 test failed
+
+Two of these exist to catch over-correction rather than the defect itself (the
+over-gated and over-fixed rows), which is how I found a weak test: the first
+version of the bound test folded 40 short lines, which the first-line-only rule
+already reduces to one -- so it passed with the cap removed. Rewritten to use one
+long line, which is the shape that actually reaches the file.
+
+A second weak test, found the same way but by measuring base rather than by
+sabotage. The overlapping-reads test released both threads at once, so which
+block's restore landed last was a coin flip -- with per-block save/restore that
+is exactly the leak, so it should fail, but it only failed about half the time.
+It passed on one base run and would have shipped as a test that catches a real
+bug about half the time. Rewritten to pin the interleaving: the second read enters
+while the first is inside (so it saves the already-mutated `False`), and the
+first is released first (so the second's restore lands last). Verified 8/8
+deterministic at the round-1 head where the race actually exists, and 5/5 on base.
+This is also why the PR body's before/after numbers below are measured rather
+than estimated -- the first estimate I wrote into the PR body draft was wrong.
+
+  tests/test_run5_friction_f1_f2_f6_f8.py  26 passed (was 12)
+  this file on the merge base 6251ab5 ....... 19 failed, 7 passed
+      (measured in a dedicated worktree at 6251ab5 with this file copied in;
+       3 runs, identical each time. The 7 that pass on base are the controls.)
+  plus test_citation_pages / test_lockfile_corruption / test_sources_pdf:
+                                           257 passed in 8.62s
+  ruff check --select E9,F src tests ....... All checks passed!  (CI's gate)
+  ruff check (default set) on the four touched files ... 8 findings, identical
+      to the 8 already there at 3fce4c1 -- no new ones. AGENTS.md records that a
+      clean `ruff check .` is not a valid gate today, so I scoped this to the
+      files and rules I touched rather than silencing unrelated findings.
+  python docs-site/gen_examples.py --check .. both generated pages up to date
+  Full suite: PYTHONPATH=$PWD/src python3 -m pytest -q -p no:cacheprovider
+              3317 passed, 2 skipped in 245.75s (0:04:05)
+              (Orchestrator re-run 2026-10-08 on the staged tree: exit 0,
+              3319 collected = 3317 passed + 2 skipped. An earlier note here
+              said round 1 was "also 3317"; that cannot be right, since this
+              file went 12 -> 26 tests, so it was removed.)
+
+  No new line over the 100-char limit in any file touched; build.py went from 6
+  over-long lines to 5.
+
+State when this was written: FINISHED for round 2. F3, F4, F5 and F7 from the
+original run-5 ticket remain open -- that is a four-finding PR and the reviewer
+agreed that is legitimate; they were verified still open, not half-done.

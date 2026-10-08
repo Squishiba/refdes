@@ -176,7 +176,9 @@ def test_live_label_and_absent_label_diagnostics(tmp_path, missing):
         # an author either to the right command or to archaeology depending on
         # whether their reference happened to carry a label. Every local shape
         # names the command now; a bare key has no label to put in front of
-        # the `@`, so it gets the metavar `keys restore --help` prints.
+        # the `@`, so it gets a `DISPLAY-ID@` placeholder -- the shape `keys
+        # restore --help` asks for, verified by running it -- with this
+        # reference's own key already filled in.
         assert (
             f"run `refdes keys restore {target if '@' in target else 'DISPLAY-ID@' + original} "
             "--dry-run`"

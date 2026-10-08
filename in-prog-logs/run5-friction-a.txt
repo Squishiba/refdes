@@ -282,3 +282,19 @@ After the round: tests/test_run5_friction_f1_f2_f6_f8.py 12 passed (was 8).
 CI lint (`ruff check --select E9,F src tests`) clean. Full suite below.
 
 
+   (entry completed after round 2 -- the full suite line above was never
+   written, and the round-2 review's finding 6 is that this log had to say
+   whether the task finished. Both numbers below are measured, not recalled;
+   the stale figures previously quoted on the PR body were from 9c4b5db.)
+
+   Round 1 full suite, measured at the round-1 head 3fce4c1:
+     PYTHONPATH=$PWD/src python3 -m pytest -q -p no:cacheprovider
+     3317 passed, 2 skipped in 243.65s (0:04:03)
+   Round 2 (this branch, 9 review findings addressed), full suite:
+     see in-prog-logs/run5-friction-a-round2-fixes.txt for the per-finding
+     write-up; the figure is recorded here at commit time.
+
+   State: FINISHED. F1, F2, F6, F8 addressed (round 1) and all nine round-2
+   review findings addressed (round 2). F3, F4, F5, F7 from the run-5 ticket
+   remain open by design -- this is a four-finding PR, and the reviewer agreed
+   that is legitimate after checking they are still open rather than half-done.

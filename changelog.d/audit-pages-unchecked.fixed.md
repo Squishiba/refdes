@@ -20,21 +20,37 @@
         Stream has ended unexpectedly (EOF marker not found)
   ```
 
-  Nothing else moves. The `state` field in `--json` output and the `state`
-  table in `docs/output.md` are untouched, because the release gate's
-  `missing_kept_copies` rule filters on `state == "cache_missing"`
-  (`src/refdes/lifecycle.py`) and this is a report, not a gate. A pin whose
-  count *is* on record keeps its `ok` even when a cited page is out of range:
-  that page is a separate warning `check` already gives, and the pin itself is
-  genuinely fine.
+  Nothing else moves. The `state` field each citation carries in the built
+  `items.json`, and the `state` table in `docs/output.md`, are untouched, because
+  the release gate's `missing_kept_copies` rule filters on
+  `state == "cache_missing"` (`src/refdes/lifecycle.py`) and this is a report, not
+  a gate. A pin whose count *is* on record keeps its `ok` even when a cited page
+  is out of range: that page is a separate warning `check` already gives, and the
+  pin itself is genuinely fine.
 
   Only a citation that actually cites a `page:` is reported this way, which is
   what makes `audit` agree with `check` rather than overtake it: `check`
   reports an uncountable document once per cited `page:` and never reaches the
-  count for a citation without one. The lockfile cannot decide that by itself —
-  `fetch` writes the failed count against the *path*, so it outlives the `page:`
-  that caused it, and an author who deletes the `page:` from the item has a
-  record left over that no citation refers to any more. The state column is one
-  character wider, because `pages unchecked` is longer than every state it
-  replaces and a second column that starts one space along on one row of a
-  report reads as a different column.
+  count for a citation without one. Rows are grouped by path, so one row can
+  cover both — and on that row the `cited by` column now names only the citers
+  whose page number went unchecked. A citation sharing the path without citing a
+  page is named on the line below, with the fact it alone has, rather than being
+  named under a sentence about page numbers it never claimed:
+
+  ```
+  Citations:
+    http://127.0.0.1:8899/bad.pdf
+      pages unchecked hash-only  cited by CMP-001
+        the pages could not be counted, so no cited page number was checked:
+        counting a document's pages failed: pypdf could not read the PDF:
+        Stream has ended unexpectedly (EOF marker not found)
+        CMP-003 cites this path without a page number, so nothing of its own
+        went unchecked
+  ```
+
+  The lockfile cannot decide any of that by itself — `fetch` writes the failed
+  count against the *path*, so it outlives the `page:` that caused it, and an
+  author who deletes the `page:` from the item has a record left over that no
+  citation refers to any more. The state column is one character wider, because
+  `pages unchecked` is longer than every state it replaces and a second column
+  that starts one space along on one row of a report reads as a different column.

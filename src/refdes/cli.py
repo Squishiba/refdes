@@ -1193,6 +1193,23 @@ def cmd_audit(args) -> int:
             # against the path and an author deleting the `page:` changes the
             # item, not the lockfile.
             unchecked = bool(gap) and state == "ok" and any(s.spec.page for s in statuses)
+            # A `pages unchecked` row's `cited by` names the citers whose claim is
+            # being un-made, and a citation with no `page:` made no such claim.
+            # Listing CMP-003 beside CMP-001 on one row, with a sentence saying
+            # "no cited page number was checked", said the same thing about both
+            # -- this finding's own mistake pointed at the reader instead of the
+            # tool (run-5 review nit 7).
+            #
+            # Dropping the page-less citer entirely would be a different version
+            # of the same fault, in the direction `audit` was rebuilt to stop
+            # taking: the row is the report's only record that CMP-003 cites this
+            # path at all, so it is named -- on its own line, carrying only the
+            # fact it alone has, and only when it is there to be named.
+            silent = sorted({s.item_id for s in statuses if not s.spec.page})
+            if unchecked:
+                citers = ", ".join(
+                    sorted({s.item_id for s in statuses if s.spec.page})
+                )
             print(f"  {path}")
             # 15, not the 14 the states alone needed: `pages unchecked` is the
             # longest thing this column can now print, and a column that
@@ -1206,6 +1223,14 @@ def cmd_audit(args) -> int:
                     f"      the pages could not be counted, so no cited page "
                     f"number was checked: {gap}"
                 )
+                if silent:
+                    print(
+                        f"      {', '.join(silent)} "
+                        f"{'cites' if len(silent) == 1 else 'cite'} this path "
+                        "without a page number, so nothing of "
+                        f"{'its' if len(silent) == 1 else 'their'} own went "
+                        "unchecked"
+                    )
 
     grouped_parts = citations_mod.by_part_number(project)
     if grouped_parts:

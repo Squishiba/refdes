@@ -2,16 +2,17 @@
   live item declares was reported three ways depending on the shape of the
   reference, and only one of the three named the way out: a composite whose
   label happened to name a live item ended with
-  `run `refdes keys restore REQ-PWR-002@k7f3m2q9x4a --dry-run``, while a
+  `run refdes keys restore REQ-PWR-002@k7f3m2q9x4a --dry-run`, while a
   composite with a stale label and a still-bare key each ended with "Check git
   history before restoring the original key or removing the reference" — the
   same trap, sent either to the command that fixes it or to archaeology
   (run-5 gate finding F8). Every local shape now gets the same explanation and
   the same remedy, with the command spelled out with that reference's own label
   and key. A bare key carries no label — which item the key belonged to is the
-  very thing the author has to go and find out — so its command shows the
-  metavar `refdes keys restore --help` prints, and says in words that it is
-  one:
+  very thing the author has to go and find out — so its command uses
+  `DISPLAY-ID@` for the label, the same shape `refdes keys restore --help` asks
+  for, with this reference's own key already filled in, and says in words that
+  the label still has to be substituted:
 
   ```
   ERROR   items/req.yaml:6 [REQ-002] — refines points at key '1qdn93k2nf4',

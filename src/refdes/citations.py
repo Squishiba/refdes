@@ -46,6 +46,7 @@ import logging
 import os
 import posixpath
 import re
+import threading
 from collections import defaultdict
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
@@ -323,17 +324,39 @@ class _PypdfLogCapture(logging.Handler):
     and then recovering (run-5 F2). refdes owns the report of a read refdes is
     performing, so the record is collected here and folded into refdes's own
     message, where it names a file and says what to do.
+
+    `thread_name` is what keeps one read's words out of another's message. Two
+    overlapping blocks both have a handler attached to the one `pypdf` logger,
+    and a record has no way of saying which block it belongs to -- so without
+    this, a threaded server reading two documents at once folds each document's
+    complaint into both reasons.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, thread_name: str) -> None:
         super().__init__(level=logging.WARNING)
         self.messages: list[str] = []
+        self._thread_name = thread_name
 
     def emit(self, record: logging.LogRecord) -> None:
+        if record.threadName != self._thread_name:
+            return
         try:
             self.messages.append(record.getMessage())
         except Exception:  # pragma: no cover -- a log record never breaks a build
             pass
+
+
+# The `pypdf` logger is one object shared by the whole process, so the routing
+# below is global state and has to be accounted for as such: only the outermost
+# block saves the flag, only the outermost block puts it back. Saving and
+# restoring per block is what let two overlapping reads leave `propagate` at
+# whatever the last of them happened to observe, which is how one read's
+# suppression became the whole process's (run-5 review finding 2). The lock
+# guards the count and the saved flag, not the read: two blocks may still be
+# inside pypdf at once, which is why the handler above is per-thread.
+_PYPDF_ROUTE_LOCK = threading.RLock()
+_pypdf_route_depth = 0
+_pypdf_route_saved: bool | None = None
 
 
 @contextmanager
@@ -344,6 +367,10 @@ def _owning_pypdf_logs() -> Iterator[list[str]]:
     `pypdf` logger means the last-resort handler is no longer reached, and
     `propagate = False` means a project that *does* configure logging gets
     pypdf's words inside refdes's message rather than on a line of their own.
+    That second half is a mutation of a logger the caller owns, so it is counted
+    rather than saved and restored per block: overlapping and nested blocks are
+    one suppression with one restoration, and a caller that arranged its own
+    `propagate` gets it back rather than refdes's opinion of it.
 
     The logger's *level* is deliberately left alone. Raising or lowering it
     would change what the caller asked for -- and this runs inside a library
@@ -351,34 +378,80 @@ def _owning_pypdf_logs() -> Iterator[list[str]]:
     thread for its duration. What the caller's level decides, it still decides
     here: leave pypdf quieter than WARNING and its words are not collected, so
     they are not folded into the message either, which is the caller's choice
-    and not refdes's to overrule. The handler is removed and `propagate` put
-    back on the way out.
+    and not refdes's to overrule. The handler is always removed on the way out.
     """
+    global _pypdf_route_depth, _pypdf_route_saved
     logger = logging.getLogger("pypdf")
-    handler = _PypdfLogCapture()
-    propagate = logger.propagate
+    handler = _PypdfLogCapture(threading.current_thread().name)
+    with _PYPDF_ROUTE_LOCK:
+        if _pypdf_route_depth == 0:
+            _pypdf_route_saved = logger.propagate
+            logger.propagate = False
+        _pypdf_route_depth += 1
     logger.addHandler(handler)
-    logger.propagate = False
     try:
         yield handler.messages
     finally:
         logger.removeHandler(handler)
-        logger.propagate = propagate
+        with _PYPDF_ROUTE_LOCK:
+            _pypdf_route_depth -= 1
+            if _pypdf_route_depth == 0:
+                logger.propagate = bool(_pypdf_route_saved)
+                _pypdf_route_saved = None
+
+
+# pypdf narrates its own recovery, and one of those narrations quotes a live
+# object: `Root found at IndirectObject(2, 0, 139905524280560)`. That address is
+# ASLR-dependent, so folding the line in puts a different number in
+# `.refdes/citations.yaml` on every `refdes fetch` of the same bytes -- a
+# permanent spurious diff in a committed file, and an ASLR address committed to
+# the repository. The object number and generation are stable and are what
+# identifies the object, so only the address goes.
+_PYPDF_ADDRESS_REPR = re.compile(r"\((\d+), (\d+), (\d{6,})\)")
+_PYPDF_HEX_ADDRESS = re.compile(r"\b0x[0-9a-fA-F]{6,}\b")
+# A reason is recorded in the lockfile and reprinted by `check` and `audit`, so
+# it is one bounded sentence about the bytes and not a transcript of the parser.
+# 200 is roughly what the exception alone needs for pypdf's worst complaints.
+UNREADABLE_REASON_MAX = 200
+
+
+def _stable_reason_text(text: str) -> str:
+    """`text` with anything that differs between two runs of the same input
+    removed: an object repr's address, a bare hex address, and whitespace."""
+    text = _PYPDF_ADDRESS_REPR.sub(r"(\1, \2)", text)
+    text = _PYPDF_HEX_ADDRESS.sub("0x...", text)
+    return " ".join(text.split())
 
 
 def _unreadable_reason(exc: Exception, logged: list[str] | None = None) -> str:
     """Why pypdf could not open these bytes, in pypdf's own words.
 
-    Including the ones it logged rather than raised: `EOF marker not found` is
+    Including the one it logged rather than raised: `EOF marker not found` is
     the fact that names the damage -- a file that ends before its trailer does
     -- and the exception pypdf finally raises says only "Stream has ended
-    unexpectedly". Folding the logged words in is what makes routing them safe
-    to do: nothing that was printed before is lost, it is only attributed now.
+    unexpectedly". Folding that in is what makes routing the line safe to do:
+    nothing that was printed before is lost, it is only attributed now.
+
+    The *first* logged line, and only the first. The rest is pypdf narrating
+    its recovery attempt, and a narration line carries whatever it happened to
+    print on the way past -- including the address reprs above. Folding all of
+    it in made a 90-character fact on the baseline a 1307-character one, changing
+    on every run of the same bytes, which for a committed lockfile means a
+    spurious diff and an ASLR address in the repository (run-5 review finding 1).
+    What is left is bounded and byte-identical across processes, and the first
+    line is the one that names the damage: across four hundred randomly damaged
+    PDFs the first logged line was always the complaint, and it was never the
+    address repr.
     """
-    message = f"pypdf could not read the PDF: {exc}"
-    extra = [m for m in dict.fromkeys(logged or ()) if m and m not in message]
-    if extra:
-        message = f"{message} ({'; '.join(extra)})"
+    message = _stable_reason_text(f"pypdf could not read the PDF: {exc}")
+    for line in logged or ():
+        line = _stable_reason_text(line)
+        if line and line not in message:
+            message = f"{message} ({line})"
+            break
+    if len(message) > UNREADABLE_REASON_MAX:
+        message = message[: UNREADABLE_REASON_MAX - 1].rstrip()
+        message = f"{message}…"
     return message
 
 
@@ -2745,22 +2818,30 @@ def refresh(project: Project, fetcher=None, allow_unreachable: bool = False) -> 
         plural = "s" if n != 1 else ""
         for target, exc in unreachable:
             head = f"could not refresh {target}: {exc}"
+            # The diagnosis rides on the per-url line only when that line is the
+            # only place it will be said. With two urls the summary below says
+            # it once for all of them, and saying it on every line as well made
+            # three repetitions of one sentence where the baseline had one
+            # (run-5 F6, review finding 5). What stays on every line is what
+            # only that line knows: the url and why it failed.
             if allow_unreachable:
                 project.warn(
                     head
-                    + " -- upstream drift was NOT verified for it"
                     + (
+                        " -- upstream drift was NOT verified for it"
                         f" -- drop {ALLOW_UNREACHABLE_FLAG} to fail the run on "
-                        "this instead" if n == 1 else ""
+                        "this instead"
+                        if n == 1
+                        else ""
                     )
                 )
             else:
                 project.error(
                     head
-                    + " -- upstream drift was NOT verified for this citation "
-                    "(no bytes arrived, so there is nothing to compare the pin "
-                    "against)"
                     + (
+                        " -- upstream drift was NOT verified for this citation "
+                        "(no bytes arrived, so there is nothing to compare the "
+                        "pin against)"
                         " -- the run cannot claim to have checked it. Fix the "
                         f"network or the urls, or pass {ALLOW_UNREACHABLE_FLAG} "
                         "to treat an unreachable source as a warning and let the "
