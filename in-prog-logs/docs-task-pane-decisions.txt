@@ -1,0 +1,69 @@
+Task: record the owner's task-pane decisions (Jared, 2026-10-10) in the
+design docs. Docs only, no code. Branch docs-task-pane-decisions, cut from
+main at d71c143. Finished.
+
+What changed
+
+1. docs/design/thread-workbench.md
+   - New "## 7a. Task pane — decided (Jared, 2026-10-10)" between §7 and §8,
+     in the doc's own decided-question style. Records the headline ("task
+     list stays with the tip" is primarily a feature of the serve preview
+     pane and the browser editor), the three behavioural bullets (click
+     open/close floating pane that follows the scroll; viewing a newer tip
+     brings the pane along; scrolling over a different thread switches the
+     pane), all six sub-decisions (tip's list + "viewing LOG-007 · tasks as
+     of tip LOG-012" note on older entries; ticks collected into a draft
+     continuation saved deliberately, consistent with living-notes §5's
+     complete-list model; one tab per open tip on an unmerged fork, never a
+     union; derived self-closing rows in a second collapsed labelled
+     section with no checkboxes; no thread in view -> pane greyed out in
+     place showing the last thread's name; the built static site gets the
+     same pane read-only with an always-reachable toggle), and the
+     architecture constraint: client of the read-only query service / index
+     `threads` projection (living-notes-plan phase H7), must not compute its
+     own fold, data from H6 (`tasks:` + fold) and H7, CLI parity stays.
+   - New W5 phase line in §8: task pane, not started, blocked on H6 and H7.
+     Numbered W5 because W1-W3 landed and W4 is folded in per §7.4.
+
+2. docs/design/living-notes.md §6
+   - Added one short paragraph after the existing "Decided: build one read-
+     only query service first" paragraph: the primary interactive task
+     surface is now the floating task pane in the serve preview, the browser
+     editor, and (read-only) the static site; it stays a client of the one
+     query service, with a link to thread-workbench.md §7a. The existing
+     one-query-service decision text is untouched.
+
+3. docs/design/browser-editor.md
+   - Added one cross-reference line in "Launch and navigation" (the place
+     that introduces both surfaces and how they link to each other): the
+     floating task pane belongs to both surfaces, spec in
+     thread-workbench.md §7a. Nothing else touched.
+
+Verification
+
+- python docs-site/gen_examples.py --check: clean (schema-reference.md and
+  vocabulary.md up to date; exit 0).
+- python -m pytest tests/test_docs_examples.py -q: 6 passed.
+- Changelog fragment: checked `git show --stat 385527e` per the task. That
+  design-decision-only commit carried no changelog.d fragment (docs +
+  in-prog-logs only), so this commit follows it and adds none.
+
+Noticed but left alone (per task rule: do not change other claims)
+
+- thread-workbench.md's opening Status paragraph still describes only the
+  2026-09-23 five-question round; it does not mention the task pane. I
+  added §7a and W5 without touching it, as instructed.
+- living-notes.md §1 table row: "`refdes serve` does not exist
+  (`docs/design/browser-editor.md:1-23`)" looks stale — serve exists and
+  the workbench W1-W3 decorations have landed in its preview per
+  thread-workbench.md's own status. Left as-is.
+- living-notes.md §5: "The browser editor described in
+  `docs/design/browser-editor.md` is a proposal, not an implementation"
+  also reads stale against the shipped editor slices recorded in
+  browser-editor.md (image upload shipped, slices landed) and the
+  changelog.d fragments. Left as-is.
+- living-notes.md §6's last line ("`refdes serve` remains an optional
+  client proposal, not a prerequisite") could be read as cooled by the new
+  paragraph naming the pane the primary interactive surface; I did not
+  reword it — the pane's status is about surface choice, not about making
+  serve a prerequisite, so I left the claim exactly as written.

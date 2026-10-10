@@ -194,6 +194,47 @@ mechanism produces this, and how does it strip at publish?*
    per item, `?workbench=1` or a toggle — not a new `/workbench/<ref>` route.
    D1–D5 decorate the real page, not a parallel template.
 
+## 7a. Task pane — decided (Jared, 2026-10-10)
+
+**"Task list stays with the tip" is primarily a feature of the serve preview
+pane and the browser editor:** a floating task pane over the preview, not a
+new surface.
+
+- The pane opens and closes with a click over the normal preview, and follows
+  the scroll.
+- Viewing a newer thread tip automatically brings the task pane along: an
+  active view of what is done and not done.
+- When you scroll over a different thread, the pane switches to that thread's
+  task list.
+
+Sub-decisions:
+
+1. **Older entry, tip's list.** On an older entry of a thread, the pane shows
+   the tip's list, with a note such as `viewing LOG-007 · tasks as of tip
+   LOG-012`.
+2. **Ticking collects into a draft.** Ticking a task in the pane collects the
+   change into a draft continuation that the author saves deliberately. Ten
+   ticks never become ten log entries. This is consistent with living-notes
+   §5's decided complete-list model: saving appends a continuation with the
+   copied-and-updated list and never mutates the tip.
+3. **Forks get tabs, never a union.** A thread with an unmerged fork shows one
+   tab per open tip, never a union (living-notes §5 fold rule 4).
+4. **Derived rows in a second, collapsed section.** Derived, self-closing rows
+   (living-notes §5 "Generated worklist" and its binding rules) appear in a
+   second, collapsed section of the same pane. That section is explicitly
+   marked/labelled as derived, and its rows have no checkboxes.
+5. **No thread in view: greyed out, not jumpy.** The pane stays where it is,
+   greyed out, showing the last thread's name; it does not jump around.
+6. **The built static site gets the same pane, read-only.** On the site the
+   floating pane can be toggled on and off while scrolling, and the toggle
+   must always be reachable somewhere on the page.
+
+**Architecture constraint, already decided in living-notes §6:** the pane is a
+client of the read-only query service / index `threads` projection (plan phase
+H7, `docs/design/living-notes-plan.md`). It must not compute its own fold. The
+data it shows comes from H6 (`tasks:` + fold) and H7 (the two read commands
+and the index projection). CLI parity (`refdes thread`, `refdes work`) stays.
+
 ## 8. Phasing
 
 - **W1 — pin.** Preview already rebuilds on change and swaps generations
@@ -210,6 +251,12 @@ mechanism produces this, and how does it strip at publish?*
   incremental/single-item rebuild effort stays deferred unless the ~1 s
   ceiling is actually felt. No speculative optimizations: if nothing cheap is
   visible while implementing W1–W3, that is the finding, stated plainly.
+- **W5 — task pane.** The floating task pane of §7a: tip-following task list
+  over the preview, ticks collected into a draft continuation, one tab per
+  open tip, collapsed derived section, and the read-only variant on the
+  static site. **Not started; blocked on H6 (`tasks:` + fold) and H7 (`refdes
+  thread` / `refdes work` + the index `threads` projection)** — the pane is a
+  client of that projection and computes nothing itself.
 
 Each phase is independently shippable and independently verifiable against the
 contract: for every rendered fact, name the Python mechanism that produced it.

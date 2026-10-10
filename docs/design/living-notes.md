@@ -508,6 +508,12 @@ learn the thread tip or task list. None of `refdes thread`, `refdes work`, or
 `schema`, `standard`, `keys`, `revise`, `stub-tests`, and `former-ids` — so
 everything in this section is a proposal.
 
+Decided later (Jared, 2026-10-10): the primary interactive task surface is the
+floating task pane — in the `serve` preview, in the browser editor, and
+(read-only) on the static site. It stays a client of the one query service
+above, never a second implementation of the fold; the behaviour and its six
+sub-decisions are recorded in `docs/design/thread-workbench.md` §7a.
+
 Proposed CLI, explicitly a sketch rather than current behavior:
 
 ```console
