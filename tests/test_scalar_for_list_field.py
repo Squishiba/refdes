@@ -321,4 +321,4 @@ def test_the_editor_and_the_loader_share_one_constant():
     assert api_mod.NON_SCALAR_FIELD_TYPES is NON_SCALAR_FIELD_TYPES
     # An unknown type name in the set would make the loader's check dead code:
     # it compares `fspec.type` against exactly these.
-    assert NON_SCALAR_FIELD_TYPES == {"list", "checks", "citations", "options"}
+    assert NON_SCALAR_FIELD_TYPES == {"list", "checks", "citations", "options", "tasks"}

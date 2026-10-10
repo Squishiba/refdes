@@ -37,6 +37,7 @@ items:
 | `author` | who wrote it |
 | `status` | optional verdict; leave it blank for a narrative entry |
 | `citations` | document `path:` or another item's `item:` id; a dangling item id is a build error |
+| `tasks` | the thread's task list: rows with a stable `id`, a `text`, and a `state` of `open`, `done` or `dropped` — see below |
 | `board` | which board, when a project holds several — see below |
 | `body` | the detail — markdown, may contain calc blocks |
 
@@ -70,6 +71,34 @@ file somewhere that isn't a registered board means every entry resolves to no
 board at all — one warning per entry, on every build. This repository's own
 sample project does exactly this; see
 [`items/board-a/log.yaml`](../items/board-a/log.yaml).
+
+### Task lists
+
+A log entry may carry the thread's open work as `tasks:` rows — each a mapping
+with a stable `id`, the task's `text`, and its `state`: `open`, `done` or
+`dropped`. Task ids must be unique within a list, and a state outside those
+three words is a build error.
+
+```yaml
+  - id: LOG-A-003
+    follows: LOG-A-002
+    summary: Ruled out the LDO; copper modelling remains.
+    tasks:
+      - {id: T-thermal-model, text: Model worst-case copper temperature., state: open}
+      - {id: T-ldo-choice, text: Pick the regulator topology., state: done}
+```
+
+The list lives at the *thread*, not the entry: a continuation entry that
+omits `tasks:` keeps the nearest prior list, an explicit `tasks: []` clears
+it, and a declared list replaces the whole list it continues. Two
+equally-near entries declaring different lists are ambiguous — the thread
+reports that reconciliation is required rather than picking one. A fork
+resolves to one labelled list per tip, never a union.
+
+Ticking a task is a log event, not a content change: `tasks:` is declared
+`on_change: log`, so a tick is seen by history while leaving the entry's
+`content_hash` and any baseline diff untouched — downstream items do not go
+suspect because a task moved to `done`.
 
 ## Append-only
 

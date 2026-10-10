@@ -152,7 +152,18 @@ class FieldSpec:
 # one-element target list (`satisfies: REQ-001` is one edge, not a
 # mis-written list), and that leniency is intended and unchanged -- a scalar
 # there loses nothing, since one target is what was written.
-NON_SCALAR_FIELD_TYPES = frozenset({"list", "checks", "citations", "options"})
+NON_SCALAR_FIELD_TYPES = frozenset(
+    {"list", "checks", "citations", "options", "tasks"}
+)
+
+# The complete state vocabulary of a `tasks:` row (living-notes.md §5, plan
+# phase H6; vocabulary-review P6: the noun is always `task`). Shared here
+# because both halves of the tool spell it: `build.validate_items` reports a
+# state outside it, and `schema_json._FIELD_TYPE_MAP` puts it in the editor's
+# completion -- a drift between the two would make the editor offer words the
+# build rejects. The hardware@3 standard's `doc:` prose and the fold's tests
+# name the same three words.
+TASK_STATES = ("open", "done", "dropped")
 
 
 @dataclass

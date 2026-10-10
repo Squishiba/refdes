@@ -748,6 +748,16 @@
      "default": null,
      "required_when": null,
      "doc": "Numeric checks against bounds; a failed check is an error."
+    },
+    "tasks": {
+     "name": "tasks",
+     "type": "tasks",
+     "on_change": "log",
+     "required": false,
+     "choices": null,
+     "default": null,
+     "required_when": null,
+     "doc": "Tasks at the thread tip: rows with a stable id, the task's text, and its state (open, done or dropped). A continuation entry that omits tasks: keeps the nearest prior list; an explicit empty list clears it; a declared list replaces it whole. Kept out of the content hash, so ticking a task never marks downstream items suspect or churns a baseline."
     }
    },
    "links": {
