@@ -1,0 +1,119 @@
+Task: fix-serve-sigint-test-leak — `tests/test_serve_cli.py`'s SIGINT test
+orphaned a `refdes serve` process every time it failed; make it stop leaking
+and make it test what it means to test even when the runner ignores SIGINT.
+
+## The bug
+
+`test_token_file_is_removed_when_serve_stops` (tests/test_serve_cli.py:213)
+started serve with `_start(...)`, sent `SIGINT`, and `proc.wait(timeout=60)`
+with no `try/finally` — unlike its SIGTERM twin at :230, which does have one.
+When the wait timed out the test raised `TimeoutExpired` and the launch kept
+running: an orphan. The orchestrator found 16 such processes on this machine,
+some 4.5 days old, all with `test_token_file_is_removed_whe0` in their temp
+project path.
+
+Suspected and confirmed trigger: a suite started as a background job has
+SIGINT set to `SIG_IGN` (POSIX does that for SIGINT and SIGQUIT for a job of a
+shell without job control), and an *ignored* signal survives `exec()` — unlike
+a caught one — so the child serve discarded the SIGINT the test sent. Agents
+run suites this way, which is why 16 accumulated rather than zero.
+
+## Confirmation (before the fix)
+
+Ran the test with SIGINT ignored in the parent, exactly as a background runner
+would:
+
+    PYTHONPATH=$PWD/src /home/jorb/work/venv-refdes/bin/python -c "import signal,subprocess,sys; \
+      signal.signal(signal.SIGINT, signal.SIG_IGN); \
+      sys.exit(subprocess.call([sys.executable,'-m','pytest','-q','-p','no:cacheprovider', \
+      'tests/test_serve_cli.py::test_token_file_is_removed_when_serve_stops']))"
+
+→ `FAILED ... subprocess.TimeoutExpired: Command '[... refdes.cli -c
+/tmp/pytest-of-jorb/pytest-518/test_token_file_is_removed_whe0/refdes-project.yaml
+serve --no-open --token-file ...]' timed out after 60 seconds` /
+`1 failed in 60.91s`, exit 1. And it left the process behind:
+
+    ps -eo pid,etime,args | grep "[t]est_token_file_is_removed_whe0"
+    2672879  01:09  .../python -m refdes.cli -c .../test_token_file_is_removed_whe0/refdes-project.yaml serve --no-open --token-file ...
+
+Recorded, then `kill 2672879` (only that PID — it was the one my run started);
+`ps` then reported nothing. Baseline check before the run had shown no
+pre-existing orphans, so that PID was mine.
+
+The same test run normally (no `SIG_IGN` in the parent) passes: `1 passed in
+0.85s`, no orphan. So the leak is the ignored-SIGINT path, not serve itself.
+
+## The fix (tests/test_serve_cli.py only — no product change)
+
+1. `_start` passes a `preexec_fn` on POSIX
+   (`_reset_sigint_to_default`, which does
+   `signal.signal(signal.SIGINT, signal.SIG_DFL)` in the forked child before
+   `exec()`), so serve starts with SIGINT at its default disposition just as
+   it does when a person starts it from a terminal. Windows keeps
+   `preexec_fn=None` — only a non-None `preexec_fn` raises `ValueError` there
+   (`/usr/lib/python3.13/subprocess.py:855`), and the SIGINT test is skipped on
+   Windows anyway. It lives in `_start` rather than in one call so every launch
+   in this module is robust, which is the actual condition agents run under.
+2. The test grew the same `try/finally` shape as the SIGTERM test at :230:
+   `if proc.poll() is None: proc.kill(); proc.wait(timeout=30)`. Whatever the
+   test does on the way out — failed assert, timeout, error in the wait — the
+   launch it started dies with it.
+
+Product code untouched, deliberately: `cmd_serve` (src/refdes/cli.py:490)
+installs a SIGTERM handler via `sigterm_stops_cleanly()` and catches
+`KeyboardInterrupt`, but installs no SIGINT handler — it relies on SIGINT's
+default disposition producing `KeyboardInterrupt`. A process that inherits
+`SIG_IGN` for SIGINT ignoring SIGINT is POSIX behaviour, not a refdes bug: a
+terminal Ctrl+C (default disposition) still stops serve, and the scripted stop
+is SIGTERM, which is what :230 pins. `preexec_fn` is annotated
+`# noqa: PLW1509` (fork-with-threads) because this module does create a daemon
+thread; the callback is one `signal.signal` call before `exec()` and the
+thread only ever blocks on `readline` of a pipe, so it holds no lock the
+callback could need.
+
+## Proof both halves work
+
+With the fix, the ignored-SIGINT command above → `1 passed in 0.67s`, exit 0,
+and `ps ... | grep "[t]est_token_file_is_removed_whe0"` → no orphan. So the
+child sees the Ctrl+C even when the runner ignores SIGINT.
+
+Sabotage: removed *only* the SIG_DFL reset (`preexec_fn=None`), leaving the
+`finally` in place, and re-ran the same ignored-SIGINT command →
+`1 failed in 60.64s` (timeout, as expected) and **no orphan** — the `finally`
+killed it. That separates the two halves: the reset is what makes the test
+test the thing, the `finally` is what makes it incapable of leaking. Restored
+the reset afterwards and re-ran the ignored-SIGINT command once more against
+the final file: `1 passed in 0.67s`, no orphan.
+
+## Test runs
+
+- `pytest -q tests/test_serve_cli.py` → `12 passed in 8.28s`, exit 0.
+- Full suite, foreground, output in `.scratch/suite.txt`:
+
+      PYTHONPATH=$PWD/src /home/jorb/work/venv-refdes/bin/python -m pytest -q -p no:cacheprovider > .scratch/suite.txt 2>&1; echo exit=$?
+
+  → `exit=0`, tail: `3363 passed, 10 skipped in 250.06s (0:04:10)`. No
+  orphaned serve left behind by the suite (`ps` grep for the test's temp dir
+  found nothing).
+- `ruff check --select E9,F src tests` (what CI runs, `.github/workflows/tests.yml:50`)
+  → All checks passed. `ruff check tests/test_serve_cli.py` with the installed
+  ruff 0.16.9's broader default set → clean on this file too, with the one
+  `noqa` above.
+
+## Changelog: no fragment, and why
+
+No file added in `changelog.d/`. Its README's criterion is "each change that
+*deserves a changelog entry*" and the entry is written "for a reader of the
+project, saying what changed and what they must do about it" — a test-harness
+process leak changes nothing a user of `refdes` does or sees. The precedents
+agree: the test-only commits `ccbdb6c` (*test(build): pin one markdown-it
+parser per build*, #155) and `4ba8007` (*test: make the citation path-hygiene
+tests portable to Windows*, #142) shipped without a fragment. The one
+test-centred commit that does have a fragment, `3c24a63` (#108), is a different
+kind of change: it announced new CI-pinned coverage as a capability *and*
+corrected a false claim in `editors/vscode/README.md`, which is reader-facing.
+
+## Status
+
+Finished. Branch `fix-serve-sigint-test-leak` off main at 75e8782; one file
+changed (`tests/test_serve_cli.py`) plus this log.
