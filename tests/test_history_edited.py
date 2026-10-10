@@ -269,6 +269,65 @@ def test_the_warning_carries_the_remedy_and_the_docs_page(tmp_path, capsys):
     )
 
 
+REMEDY_SCOPE_SCHEMA = """\
+site: { title: Remedy Scope, out: ../site_out_remedy }
+id: { width: 3, ledger: .refdes/ids.yaml }
+types:
+  log:
+    prefix: LOG
+    append_only: true
+    sealing: history
+    fields:
+      summary: { type: text, required: true }
+  memo:
+    prefix: MEMO
+    fields:
+      summary: { type: text, required: true }
+"""
+
+ONE_EACH = (
+    "items:\n"
+    "  - id: LOG-001\n    type: log\n    summary: First entry.\n"
+    "  - id: MEMO-001\n    type: memo\n    summary: First memo.\n"
+)
+
+
+def test_the_amends_remedy_is_offered_only_where_following_it_is_legal(
+    tmp_path, capsys
+):
+    """Run-5 F4's remedy names `amends:`, but `amends` is an append-only type's
+    verb for correcting its own entries -- the bundled `hardware@3` restricts
+    it to `log`, and the project schema here does the same. `history capture`
+    takes any keyed item, so a captured `memo` got the same sentence, and doing
+    what it says is a build error (`amends may point at log, but MEMO-001 is a
+    memo`): the one tool that can spot the edit confidently recommended a
+    construct the project's own standard forbids. The advice belongs to the
+    append-only entry only; the editable one is told its edit needs nothing
+    done about it."""
+    write_project_config(tmp_path, REMEDY_SCOPE_SCHEMA)
+    items = tmp_path / "items"
+    items.mkdir()
+    (items / "log.yaml").write_text(ONE_EACH, encoding="utf-8")
+    cfg = str(tmp_path / "refdes-project.yaml")
+    assert cli_mod.main(["-c", cfg, "build"]) == 0
+    for item_id in ("LOG-001", "MEMO-001"):
+        assert cli_mod.main(["-c", cfg, "history", "capture", item_id]) == 0
+    capsys.readouterr()
+
+    _edit_summary(tmp_path, "LOG-001", "First entry, edited.")
+    _edit_summary(tmp_path, "MEMO-001", "First memo, edited.")
+    assert cli_mod.main(["-c", cfg, "check"]) == 0
+    lines = [
+        line for line in capsys.readouterr().out.splitlines()
+        if "edited after captured" in line
+    ]
+    assert len(lines) == 2
+    memo = next(line for line in lines if "[MEMO-001]" in line)
+    assert "amends" not in memo
+    log_line = next(line for line in lines if "[LOG-001]" in line)
+    assert "amends: [LOG-001]" in log_line
+
+
 def test_a_project_with_no_history_is_silent_and_gains_no_directory(
     tmp_path, capsys
 ):

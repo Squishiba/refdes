@@ -3142,12 +3142,28 @@ def warn_edited_after_captured(project: Project) -> None:
         successor = by_key.get(successor_key)
         succ_label = successor.id or successor.key if successor else successor_key
         captured_when = f"; captured when {succ_label} followed it" if succ_label else ""
+        # Run-5 F4's remedy, scoped to where it is legal: `amends` is a verb an
+        # append-only type declares for correcting its own entries, so the
+        # advice applies only to an item whose type is append-only. For an
+        # editable type -- which is most of what `history capture` can take --
+        # following the same sentence would produce a link-target error, so the
+        # warning says plainly that the snapshot no longer matches and stops.
+        spec = project.types.get(item.type)
+        if spec is not None and spec.append_only:
+            correction = (
+                f"If the edit was a correction, revert it and append a new "
+                f"entry with `amends: [{label}]` instead; otherwise there is "
+                "nothing to do."
+            )
+        else:
+            correction = (
+                "The entry's type is editable, so a deliberate edit needs "
+                "nothing done about it; revert it if it was not deliberate."
+            )
         project.warn(
             f"{label}: edited after captured -- current semantic "
             f"content differs from the snapshot in {finding.event['kind']} "
-            f"event {finding.event['id']}{captured_when}. If the edit was a "
-            f"correction, revert it and append a new entry with "
-            f"`amends: [{label}]` instead; otherwise there is nothing to do. "
+            f"event {finding.event['id']}{captured_when}. {correction} "
             f"See {docs_url_mod.DESIGN_LOG_DOCS}.",
             file=item.source_file,
             line=item.source_line,

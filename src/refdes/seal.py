@@ -613,16 +613,23 @@ def _verify_history_backed(project: Project, base: Seals, reseal: str | None) ->
 def _orphan_is_history_backed(project: Project, display_id: str) -> bool:
     """Whether an orphaned seal record belonged to a history-backed type.
 
-    A seal record carries no type, so the record's display-id prefix narrows
-    the append-only types it could have come from; with no prefix match, every
-    append-only type is a candidate. Only when *every* candidate is
+    A seal record carries no type, so the declared prefix opening the record's
+    display id narrows the append-only types it could have come from; with no
+    prefix match, every append-only type is a candidate. Prefixes may
+    themselves contain hyphens (``REQ-TMP``), so the match runs to a prefix
+    boundary -- the longest declared prefix the display id starts with --
+    rather than cutting at the first hyphen. Only when *every* candidate is
     history-backed is the orphan one -- any doubt keeps today's error, because
     reading a build-sealed deletion as a mere warning would remove the
     deletion lock from the type that still has it.
     """
     append_only = [spec for spec in project.types.values() if spec.append_only]
-    prefix = display_id.split("-", 1)[0]
-    candidates = [spec for spec in append_only if spec.prefix == prefix] or append_only
+    matched = [spec for spec in append_only if display_id.startswith(f"{spec.prefix}-")]
+    if matched:
+        longest = max(len(spec.prefix) for spec in matched)
+        candidates = [spec for spec in matched if len(spec.prefix) == longest]
+    else:
+        candidates = append_only
     return bool(candidates) and all(spec.sealing == SEALING_HISTORY for spec in candidates)
 
 

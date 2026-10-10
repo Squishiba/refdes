@@ -434,6 +434,67 @@ def test_the_policy_is_per_type_in_one_project(tmp_path, capsys):
             assert seals[record_id] == value
 
 
+HYPHEN = """\
+site: { title: Hyphen, out: _site }
+id: { width: 3, ledger: .refdes/ids.yaml }
+types:
+  log:
+    prefix: REQ-TMP
+    append_only: true
+    SEALING_LOG
+    fields:
+      summary: { type: text, required: true }
+  note:
+    prefix: NTE
+    append_only: true
+    fields:
+      summary: { type: text, required: true }
+"""
+
+HYPHEN_ITEMS = (
+    "items:\n"
+    "  - id: REQ-TMP-001\n    type: log\n    summary: A log.\n"
+    "  - id: REQ-TMP-002\n    type: log\n    summary: Another log.\n"
+    "  - id: NTE-001\n    type: note\n    summary: A note.\n"
+    "  - id: NTE-002\n    type: note\n    summary: Another note.\n"
+)
+
+
+def test_a_hyphenated_prefix_still_classifies_its_orphans(tmp_path, capsys):
+    """A hyphenated prefix is a first-class supported form; the orphan's type
+    must be matched on the *whole* declared prefix, not the text before the
+    first hyphen. With `split("-", 1)` the prefix `REQ-TMP` truncated to `REQ`,
+    never matched, the orphan fell back to every append-only type, and (mixed
+    with the build-sealed `note`) the history-backed record was read as
+    build-sealed: `check` errored and `--reseal` dropped it -- the exact silent
+    record loss the PR's own docs promise cannot happen."""
+    (tmp_path / ".refdes").mkdir()
+    (tmp_path / ".refdes" / "keys-adopted.yaml").write_text("adopted: true\n", encoding="utf-8")
+    (tmp_path / "items").mkdir()
+    (tmp_path / "items" / "log.yaml").write_text(HYPHEN_ITEMS, encoding="utf-8")
+    write_project_config(tmp_path, HYPHEN.replace("    SEALING_LOG\n", ""))
+    cfg = str(tmp_path / "refdes-project.yaml")
+    assert cli_mod.main(["-c", cfg, "build"]) == 0
+    _age_seal_file(tmp_path)
+    write_project_config(tmp_path, HYPHEN.replace("SEALING_LOG", "sealing: history"))
+    seal_before = _seal_file(tmp_path).read_bytes()
+
+    _drop_item(tmp_path, "REQ-TMP-002")
+
+    code, output = _run(capsys, cfg, "check")
+    assert code == 0, output  # a history-backed orphan is a warning, not an error
+    assert "REQ-TMP-002 has a legacy seal record in .refdes/log-seal.yaml" in output
+    assert "REQ-TMP-002 is append-only and was sealed" not in output
+    assert _seal_file(tmp_path).read_bytes() == seal_before
+
+    code, output = _run(capsys, cfg, "build", "--reseal")
+    assert code == 0, output
+    assert "nothing was rewritten" in output
+    assert "REQ-TMP-002 was sealed as append-only" not in output
+    # The legacy record is kept byte-for-byte: nothing to drop means no rewrite.
+    assert _seal_file(tmp_path).read_bytes() == seal_before
+
+
 # ------------------------------------------------------------ corruption stays loud
 
 
