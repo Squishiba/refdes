@@ -166,4 +166,4 @@ failed, then the code was restored.
 - `ruff check --select E9,F` passes for every touched Python file.
 - Temporary scripts/build output remain under `.scratch/` per AGENTS.md and are not
   staged.
-- Status: implementation and verification complete; commit/push/PR pending.
+- Status: finished. Committed as `5b05631`, pushed, and PR #184 opened.
