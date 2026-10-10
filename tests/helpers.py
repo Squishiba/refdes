@@ -32,7 +32,7 @@ def _project():
 COVERAGE_SCHEMA = """\
 site: {title: "Coverage Test", out: _site}
 id: {width: 3, ledger: .refdes/ids.yaml}
-history: {default: invalidate}
+on_change: {default: invalidate}
 units: {preferred: []}
 link_types:
   satisfies: { inverse: satisfied_by, label: "Satisfies" }
@@ -193,7 +193,7 @@ types:
 CHECK_SEVERITY_SCHEMA = """\
 site: {title: "Check Severity Test", out: _site}
 id: {width: 3, ledger: .refdes/ids.yaml}
-history: {default: invalidate}
+on_change: {default: invalidate}
 units: {preferred: []}
 types:
   constraint:
@@ -411,7 +411,7 @@ def pdf_bytes(*pages: str) -> bytes:
 BLOCKS_SCHEMA = """\
 site: {title: "Blocks Test", out: _site}
 id: {width: 3, ledger: .refdes/ids.yaml}
-history: {default: invalidate}
+on_change: {default: invalidate}
 units: {preferred: []}
 boards:
   power: {label: Power}
@@ -536,7 +536,7 @@ verifies: [REQ-001]
 PARTS_SCHEMA = """\
 site: {title: "Parts Test", out: _site}
 id: {width: 3, ledger: .refdes/ids.yaml}
-history: {default: invalidate}
+on_change: {default: invalidate}
 units: {preferred: []}
 item_layout: workspace
 workspaces:

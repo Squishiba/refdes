@@ -56,7 +56,7 @@ def test_satisfying_statuses_absent_keeps_old_behavior(coverage_project):
 NO_STATUS_FIELD_SCHEMA = """\
 site: {title: "Bad Schema", out: _site}
 id: {width: 3, ledger: .refdes/ids.yaml}
-history: {default: invalidate}
+on_change: {default: invalidate}
 units: {preferred: []}
 link_types:
   satisfies: { inverse: satisfied_by, label: "Satisfies" }
@@ -183,7 +183,7 @@ def test_the_wrong_link_type_error_names_the_bare_display_id(tmp_path):
 COVERAGE_AGGREGATION_SCHEMA = """\
 site: {title: "Coverage Aggregation Test", out: _site}
 id: {width: 3, ledger: .refdes/ids.yaml}
-history: {default: invalidate}
+on_change: {default: invalidate}
 units: {preferred: []}
 link_types:
   satisfies: { inverse: satisfied_by, label: "Satisfies" }

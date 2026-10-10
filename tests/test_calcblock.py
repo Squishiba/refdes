@@ -33,7 +33,7 @@ from refdes import cli as cli_mod
 CALCBLOCK_SCHEMA = """\
 site: { title: "Calcblock Test", out: _site }
 id: { width: 3, ledger: .refdes/ids.yaml }
-history: { default: invalidate }
+on_change: { default: invalidate }
 units: { preferred: [] }
 types:
   decision:

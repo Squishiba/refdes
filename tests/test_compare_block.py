@@ -22,7 +22,7 @@ from refdes import blocks as blocks_mod
 COMPARE_SCHEMA = """\
 site: {title: "Compare Test", out: _site}
 id: {width: 3, ledger: .refdes/ids.yaml}
-history: {default: invalidate}
+on_change: {default: invalidate}
 units: {preferred: []}
 link_types:
   satisfies: { inverse: satisfied_by, label: "Satisfies" }

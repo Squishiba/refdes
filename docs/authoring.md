@@ -347,7 +347,7 @@ These are never treated as fields:
 | `id` | The item's identity |
 | `type` | Which item type it is |
 | `body` | Markdown body (list files only) |
-| `history` | Item-level [`on_change` overrides](change-tracking.md) |
+| `on_change` | Item-level [`on_change` overrides](change-tracking.md) |
 | `prefix` | [ID allocator](ids.md) prefix, item overrides file `defaults:` |
 | `board` | [Board](multi-board.md) override, item overrides file `defaults:` |
 | `workspace` | [Workspace](workspaces.md) override, item overrides file `defaults:` |

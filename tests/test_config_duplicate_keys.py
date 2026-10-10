@@ -55,7 +55,7 @@ from refdes.model import SchemaError
 from refdes.revise import load_mapping
 from refdes.schema import PROJECT_SETTINGS_NAME, SCHEMA_NAME, load_project
 
-# A clean baseline: one site, one id, one history, one standard, no overlay
+# A clean baseline: one site, one id, one on_change, one standard, no overlay
 # file. Every test below adds exactly one thing to this, so the only difference
 # between a passing and a failing case is the repeat under test. The
 # `standard:` block is here so the file reaches a full load -- a project
@@ -66,7 +66,7 @@ site:
   out: _site
 id:
   width: 3
-history:
+on_change:
   default: invalidate
 standard:
   base: hardware
@@ -151,11 +151,11 @@ def test_every_repeat_in_the_file_is_named_in_one_error(tmp_path):
     """`configcheck`'s own rule for a block with two typos: one read of an
     error, not one per `refdes check`. Two repeats, one message -- and the
     second is named rather than swallowed by the first."""
-    settings = _write(tmp_path, CLEAN + "\nsigfigs: 6\nhistory:\n  default: invalidate\n")
+    settings = _write(tmp_path, CLEAN + "\nsigfigs: 6\non_change:\n  default: invalidate\n")
 
     message = _config_error(settings)
     assert "duplicate key 'sigfigs'" in message, message
-    assert "Also: duplicate key 'history'" in message, message
+    assert "Also: duplicate key 'on_change'" in message, message
     # Only the first is written out with the remedy and the page pointer; the
     # rest follow it, which is what keeps the message one readable paragraph.
     assert message.count("keep the one you meant") == 1, message

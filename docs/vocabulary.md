@@ -739,17 +739,17 @@ The item's prose, below the front matter. Its change policy comes from the type'
 # In a Markdown item, body is the prose below the front matter instead.
 ```
 
-### `history`
+### `on_change`
 
-This item's change-policy override, in place of the project's `history: default`.
+This item's change-policy override, in place of the project's `on_change: default`. A type that declares a field of this name takes it over.
 
-- **Scope:** every item; a type may not shadow it
+- **Scope:** every item, unless its type declares a field of that name
 
 **Example:**
 
 ```yaml
 - id: REQ-PWR-004
-  history:
+  on_change:
     fields:
       owner: ignore
     reason: Owner rotates weekly during bring-up; not a meaningful change.

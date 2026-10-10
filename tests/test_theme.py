@@ -54,7 +54,7 @@ site:
   title: T
   out: _site{site_extra}
 id: {{width: 3}}
-history: {{default: invalidate}}
+on_change: {{default: invalidate}}
 units: {{preferred: []}}
 """
 

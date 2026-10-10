@@ -15,7 +15,7 @@ find it. Each section below says which file its key belongs in.
 # refdes-project.yaml — every project setting
 site:        { ... }   # title, output directory, version
 id:          { ... }   # ID width and ledger location
-history:     { ... }   # default on_change mode
+on_change:   { ... }   # default on_change mode
 coverage:    { ... }   # coverage presentation (grouping subtypes under their parent)
 date_format:  YYYY-MM-DD  # log-date order; default shown
 units:       { ... }   # preferred display units
@@ -129,10 +129,10 @@ inconsistent. See [IDs](ids.md).
 
 ---
 
-## `history`
+## `on_change`
 
 ```yaml
-history:
+on_change:
   default: invalidate
 ```
 
@@ -145,7 +145,7 @@ behaves exactly like `ignore` -- choosing between them is not yet a meaningful
 decision.
 
 This entire surface only matters to a project under version control. Without a
-VCS there is no history layer to feed, and `history:` reduces to nothing more
+VCS there is no history layer to feed, and `on_change:` reduces to nothing more
 than a hash-exclusion list.
 
 ---
@@ -774,14 +774,14 @@ error at project-load time naming both sides.
 
 ---
 
-## Item-level `history`
+## Item-level `on_change`
 
-Not part of either config file, but the counterpart to the `history:`
+Not part of either config file, but the counterpart to the `on_change:`
 setting in `refdes-project.yaml`. In an item's
 front-matter:
 
 ```yaml
-history:
+on_change:
   fields:
     owner: ignore
   reason: "Owner rotates weekly during bring-up; not a meaningful change."
@@ -790,8 +790,11 @@ history:
 Or as a scalar for the whole item:
 
 ```yaml
-history: ignore
+on_change: ignore
 ```
+
+A type that declares a field literally named `on_change` owns that front-matter
+key; the change-policy override is available only to types that do not.
 
 Precedence: item field override → whole-item mode → schema field → project
 default.

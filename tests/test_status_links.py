@@ -26,7 +26,7 @@ from refdes import schema as schema_mod
 STATUS_LINK_SCHEMA = """\
 site: {title: "Status Links", out: _site}
 id: {width: 3, ledger: .refdes/ids.yaml}
-history: {default: invalidate}
+on_change: {default: invalidate}
 units: {preferred: []}
 link_types:
   supersedes: { inverse: superseded_by, label: "Supersedes" }

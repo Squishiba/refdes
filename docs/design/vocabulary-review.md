@@ -170,18 +170,17 @@ Their definitions live in code, in `src/refdes/vocabulary.py:57-107`
 | `key` | `:67` | "The item's surrogate key: opaque, immutable, and the identity the engine actually uses. Nothing rewrites it, and links resolve through it rather than through a display id." |
 | `former_ids` | `:72` | "Display ids this item used to have. Written by the engine when an id is re-minted, so old citations still resolve." |
 | `body` | `:76` | "The item's prose, below the front matter. Its change policy comes from the type's `body:` setting; for types whose content is the statement itself it is the required field." |
-| `history` | `:81` | "This item's change-policy override, in place of the project's `history: default`." |
+| `on_change` | `:84` | "This item's change-policy override, in place of the project's `on_change: default`. A type that declares a field of this name takes it over." |
 | `prefix` | `:85` | "On a type: the id prefix its items carry. As an item key it is the engine's own, and a type that declares a field of this name takes it over." |
 | `board` | `:89` | "Which board an item belongs to -- the first path segment under `items/` unless the item says otherwise. Overridable by a type's own field." |
 | `workspace` | `:93` | "Which workspace an item belongs to, when the project registers them. Overridable by a type's own field." |
 | `defaults` | `:97` | "In a YAML list file: the type and field values every entry in that file inherits, before its own keys." |
 | `section` | `:101` | "In a YAML list file: the section heading its entries file under on the item's page; in a Markdown marker block, the section a generated block belongs to." |
 
-Note that `history` is *also* a project-config key with a different meaning:
-`docs/schema-reference.md:78` "## `history`" — `history: { ... } # default
-on_change mode` (`docs/schema-reference.md:18`), and `:652` "## Item-level
-`history`" — "Not part of either config file, but the counterpart to the
-`history:`" block. §2.3 comes back to this.
+The collision P2 addressed was that `history` was *also* a project-config key
+with a different meaning. P2 landed on 2026-10-10: both the project setting and
+the item-level override are now `on_change:`, while `history` is left to the
+history store and its command family. §2.3 describes the pre-rename state.
 
 ### 1.4 Block names in bodies
 
@@ -797,14 +796,13 @@ Each proposal is one line of old to new, what has to change, and what breaks.
 They are grouped by cost, not by severity, because the cheapest fixes are the
 ones worth doing first.
 
-**Status (2026-09-20).** The owner approved P1, P2, P5 and P6. P1, P5 and P6
+**Status (2026-10-10).** The owner approved P1, P2, P5 and P6. P1, P5 and P6
 are applied: `record`/`recorded` are `capture`/`captured` throughout
 `living-notes.md` and `living-notes-plan.md` (the shipped `records:` verb and
 `recorded_by` untouched), and the plan now carries the P5 `sealed` rule in H5
-and the P6 `task`/`work` rule in H6. P2 is **held, not applied**: the project
-`history:` key is implemented (`schema.py:480`, item-level override in
-`parse.py`/`model.py`), so the rename now needs the migration this tiering was
-measured to avoid; the docs keep describing what the code does.
+and the P6 `task`/`work` rule in H6. P2 was initially held because the project
+`history:` key was already implemented, but the owner lifted the hold on
+2026-10-10 and the rename to `on_change:` has landed.
 
 ### 3.0 Cost tiers
 
@@ -852,6 +850,15 @@ command family, `refdes history capture` / `redact` / `migrate-seals`.
 default in `model.py`, `parse.py`'s reserved-key handling for the item-level
 override, `schema-reference.md`, `change-tracking.md`, and tests. No item body
 changes. Doing it before H1 means no project ever has to migrate.
+
+**Landed (2026-10-10).** The project-level setting and item-level override are
+now both `on_change:`. The old spellings are hard errors naming the new key.
+The history store and `refdes history` command family keep the word `history`;
+the per-field `on_change:` attribute in type schemas is unchanged. An item
+type that declares a field literally named `on_change` takes over the front-
+matter key rather than having it shadowed. `refdes revise` cannot express this
+rename: its mapping sections rewrite item vocabulary, not project settings or
+reserved front-matter keys.
 
 **P3 — keep `snapshot`, and say what distinguishes it from `baseline`.**
 `snapshot` is uncollided and names the stored object, which `capture` (the

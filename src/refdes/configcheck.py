@@ -65,7 +65,7 @@ SITE_KEYS = frozenset(
     {"title", "out", "version", "pages", "nav", "assets", "theme", "tokens"}
 )
 ID_KEYS = frozenset({"width", "ledger"})
-HISTORY_KEYS = frozenset({"default"})
+ON_CHANGE_KEYS = frozenset({"default"})
 COVERAGE_KEYS = frozenset({"group_inherited"})
 UNITS_KEYS = frozenset({"preferred", "aliases"})
 STANDARD_KEYS = frozenset({"base", "version", "presets"})
@@ -337,10 +337,10 @@ class BlockChecker:
             or ".refdes/ids.yaml",
         }
 
-    def history(self, raw: dict) -> dict:
-        block = self.mapping(raw.get("history"), "history", "a mapping of history settings")
-        self.keys(block, HISTORY_KEYS, "history", "history:")
-        return {"default": self.mode(block.get("default"), "history.default", "invalidate")}
+    def on_change(self, raw: dict) -> dict:
+        block = self.mapping(raw.get("on_change"), "on_change", "a mapping of change-policy settings")
+        self.keys(block, ON_CHANGE_KEYS, "on_change", "on_change:")
+        return {"default": self.mode(block.get("default"), "on_change.default", "invalidate")}
 
     def coverage(self, raw: dict) -> dict:
         block = self.mapping(raw.get("coverage"), "coverage", "a mapping of coverage settings")
@@ -597,7 +597,7 @@ def validate_settings(raw: dict[str, Any], source: str) -> dict[str, Any]:
     return {
         "site": check.site(raw),
         "id": check.id(raw),
-        "history": check.history(raw),
+        "on_change": check.on_change(raw),
         "coverage": check.coverage(raw),
         "units": check.units(raw),
         "boards": check.boards(raw),

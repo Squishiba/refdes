@@ -17,7 +17,7 @@ feeds `tree.html.j2`) and `render_markdown` for the docs site's
 `docs/vocabulary.md` (via `docs-site/gen_examples.py`). Both are static
 markup: no script, no handler attribute, printable.
 
-Engine-reserved keys (`id`, `type`, `history`, ...) have no `doc:` slot in
+Engine-reserved keys (`id`, `type`, `on_change`, ...) have no `doc:` slot in
 any YAML -- they are not author-declared -- so their definitions live here,
 in `RESERVED_KEYS`, the one place they can be written once and cited.
 """
@@ -81,9 +81,10 @@ RESERVED_KEYS: dict[str, str] = {
         "from the type's `body:` setting; for types whose content is the "
         "statement itself it is the required field."
     ),
-    "history": (
+    "on_change": (
         "This item's change-policy override, in place of the project's "
-        "`history: default`."
+        "`on_change: default`. A type that declares a field of this name takes "
+        "it over."
     ),
     "prefix": (
         "On a type: the id prefix its items carry. As an item key it is the "
@@ -647,9 +648,9 @@ EXAMPLES: dict[tuple[str, str], str] = {
         "  body: The unit shall operate from an input supply of 9 V to 36 V.\n"
         "# In a Markdown item, body is the prose below the front matter instead."
     ),
-    ("keys", "history"): (
+    ("keys", "on_change"): (
         "- id: REQ-PWR-004\n"
-        "  history:\n"
+        "  on_change:\n"
         "    fields:\n"
         "      owner: ignore\n"
         "    reason: Owner rotates weekly during bring-up; not a meaningful change."

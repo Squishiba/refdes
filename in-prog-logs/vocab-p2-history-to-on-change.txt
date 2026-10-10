@@ -1,0 +1,169 @@
+Task: rename project-level `history:` and item-level override to `on_change:`.
+Status: in progress.
+
+## Initial state
+
+- Branch: `vocab-p2-history-to-on-change` at `d71c143`.
+- Full assignment re-read from `.scratch/TASK.txt`, including all 39 lines.
+- Working tree was clean except ignored `.scratch/probes/` from earlier exploration.
+- Interpreter: `/home/jorb/work/venv-refdes/bin/python`.
+- CLI verification command form:
+  `PYTHONPATH=$PWD/src /home/jorb/work/venv-refdes/bin/python -m refdes.cli ...`
+
+## Map of the renamed concept
+
+### Project-level config key
+
+- `src/refdes/schema.py`
+  - `_PROJECT_SETTING_KEYS` contains the old setting `history`.
+  - `_KNOWN_SETTINGS` derives from those keys, so unknown `on_change` currently fails with
+    `unknown setting 'on_change'` (verified with a copied project file).
+  - `_validate_settings()` reports unknown settings and special-cases prior renames.
+  - `LEGACY_CONFIG_ERROR` names `history:` among settings moved into `refdes-project.yaml`.
+  - `load_project()` reads `blocks["history"]["default"]` and uses it as the default per-field
+    `on_change` mode.
+- `src/refdes/configcheck.py`
+  - `HISTORY_KEYS = {"default"}`.
+  - `BlockChecker.history()` validates the `history:` mapping and returns `default`.
+  - `validate_settings()` returns the resolved block under `"history"`.
+- `refdes-project.yaml`
+  - Repo config currently has `history: {default: invalidate}`.
+- Docs/tests/fixtures
+  - `AGENTS.md`, `README.md`, `docs/schema-reference.md`, `docs/change-tracking.md`,
+    `docs/standard-library.md`, `docs/output.md`, and generated `docs/vocabulary.md` describe
+    the old key or item key.
+  - Test helpers and many tests use project config `history: {default: invalidate}` or multiline
+    equivalents.
+
+### Item-level override
+
+- `src/refdes/parse.py`
+  - `RESERVED = {"id", "type", "history", "body", "former_ids", "key"}`.
+  - `OVERRIDABLE = {"prefix", "board", "workspace"}`.
+  - `_build_item()` reads `raw.get("history")` into `item.history`, validates scalar modes, and
+    warns for a field override without `reason:`.
+  - The generic loop skips `RESERVED` and handles `OVERRIDABLE` only when the field is not declared.
+- `src/refdes/model.py`
+  - `Item.history` stores the parsed override.
+  - `Item.on_change_for()` implements precedence: item field override, whole-item mode, schema field,
+    project default.
+- `src/refdes/cli.py`
+  - `refdes audit` prints `item.history` and help says `item-level history overrides`.
+- `src/refdes/schema_json.py`
+  - `HISTORY_DEF` describes the front-matter override and every type branch unconditionally adds
+    `properties["history"]`.
+- `src/refdes/vocabulary.py`
+  - `RESERVED_KEYS["history"]` defines the item-key entry and the example writes `history:`.
+- `docs/schema-reference.md`, `docs/change-tracking.md`, `docs/authoring.md`, and generated docs
+  describe the front-matter key.
+
+### Things that must remain `history`
+
+- `refdes history capture`, `redact`, and `migrate-seals`.
+- `.refdes/history/`, `SEALING_HISTORY`, `sealing: history`, history-backed sealing.
+- Captured history and git history prose.
+- Per-field schema attribute `on_change:` already used in standards and type definitions.
+
+## Verified behavior before changes
+
+- Project-level `on_change:` is unknown today:
+  `configuration error: refdes-project.yaml: unknown setting 'on_change'.`
+- `refdes revise --help` accepts only top-level mapping sections
+  `types:/merge_types:/fields:/links:/prefixes:/citation_keys:`. It cannot rename a setting in
+  `refdes-project.yaml`, and it cannot rename a reserved front-matter key. Do not claim revise can
+  migrate this rename.
+
+## Decisions
+
+1. Rename both the project setting and item front-matter key to `on_change:`.
+2. Old project `history:` becomes a hard configuration error naming the replacement.
+3. Old item `history:` becomes a hard item error naming the replacement, except when the item's
+   type declares a field literally named `history`; then that field continues to own the key.
+4. The new item key must not shadow a declared field. To preserve this guarantee, move
+   `on_change` from the strictly reserved family to the overridable family: if the type declares
+   field `on_change`, that field owns the front-matter key; otherwise the front-matter key is the
+   change-policy override.
+5. Rename internal `Item.history` to `Item.on_change_override` so it is not confused with either
+   the history store or a field named `on_change`.
+6. Preserve value shapes and precedence exactly:
+   scalar mode or `{mode, fields, reason}`; item field > item whole > schema field > project default.
+
+## Progress
+
+- Mapped all relevant code and docs.
+- Wrote this work log.
+- Implemented engine/config changes:
+  - `schema.py`: accepts `on_change:`, hard-errors project `history:` with
+    `history: was renamed to on_change: -- it set the default on_change mode, not
+    the history store; rename it in refdes-project.yaml`.
+  - `configcheck.py`: validates nested `on_change.default`.
+  - `parse.py`: accepts item `on_change:` as an overridable key; hard-errors old
+    item `history:` with `item-level history: was renamed to on_change: -- rename
+    this key in the source file. Its override is used in this build so the change
+    policy is not silently lost.`
+  - `model.py`: renamed internal `Item.history` to `Item.on_change_override`.
+  - `schema_json.py`: item property and definition are `on_change`, omitted when
+    the type declares field `on_change`.
+  - `vocabulary.py`, README, AGENTS, schema/change tracking, standards/output/authoring/
+    troubleshooting docs, repo config, and one repo item were updated.
+  - Existing unreleased changelog fragments were left as historical prose; added
+    `changelog.d/history-config-on-change.breaking.md`.
+- Regenerated `docs/schema-reference.md` and `docs/vocabulary.md` with
+  `python docs-site/gen_examples.py`; `--check` passes.
+- Updated tests/helpers and config/item fixtures from project `history:` to
+  `on_change:`.
+- Added `tests/test_change_policy_on_change_key.py`:
+  1. project `on_change:` default works;
+  2. item scalar works;
+  3. item field mapping works;
+  4. old item spelling errors and still applies override;
+  5. old project spelling errors;
+  6. declared field named `on_change` owns the item key;
+  7. parse without build recognizes override.
+
+## Sabotage checks
+
+All sabotages were applied, the corresponding test was run in the foreground, it
+failed, then the code was restored.
+
+1. `test_project_on_change_key_sets_the_schema_default`: temporarily replaced
+   `default_on_change = blocks["on_change"]["default"]` with
+   `default_on_change = "invalidate"`; test failed
+   (`'invalidate' == 'ignore'`), then restored.
+2. `test_item_on_change_scalar_override`: temporarily made whole-item
+   `on_change_for` ignore `mode`; test failed (`ignore` instead of `invalidate`),
+   then restored.
+3. `test_item_on_change_field_override`: temporarily made field override read
+   return `None`; test failed (`ignore` instead of `log`), then restored.
+4. `test_old_item_history_override_errors_and_renames`: temporarily disabled the
+   old-item rename check; test failed because the rename message was absent, then
+   restored.
+5. `test_old_project_history_key_errors_and_renames`: temporarily disabled the
+   project rename check; test failed because old `history:` reported only as an
+   unknown setting, then restored.
+6. `test_declared_on_change_field_takes_over_the_item_key`: temporarily made
+   `on_change` override regardless of a declared field; test failed with missing
+   field value, then restored.
+7. `test_item_override_is_parsed_without_building_the_site`: temporarily disabled
+   scalar override assignment in `_apply_change_override`; test failed with empty
+   override, then restored.
+
+## Current verification
+
+- Focused changed-config/vocabulary/build/load/integration tests pass.
+- Full suite before fixture hash update: `1 failed, 3379 passed, 10 skipped`.
+- The failure was expected generated-output hash drift for `vocabulary.html`.
+  Updated `tests/fixtures/no_theme_build_hashes.json` to
+  `3793fef8d36abe14741ab88e022c3e307ac654a63f12883412fc1562313f8409` using a
+  `.scratch/hash_gen.py` build of the same coverage fixture.
+- `tests/test_theme.py::test_no_theme_build_is_byte_identical_to_the_pinned_output`
+  passes after the hash update.
+- Final full suite, foreground with output to `.scratch/suite.txt`:
+  `3380 passed, 10 skipped in 255.51s (0:04:15)`; exit `0`.
+  This is baseline `3372 passed, 10 skipped` plus 8 net added config/change-policy
+  tests.
+- `python docs-site/gen_examples.py --check` passes for both generated docs pages.
+- `ruff check --select E9,F` passes for every touched Python file.
+- Temporary scripts/build output remain under `.scratch/` per AGENTS.md and are not
+  staged.
+- Status: implementation and verification complete; commit/push/PR pending.

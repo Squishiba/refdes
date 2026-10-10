@@ -37,7 +37,7 @@ from refdes.schema import load_project
 BASE = """\
 site: {title: T, out: _site}
 id: {width: 3}
-history: {default: invalidate}
+on_change: {default: invalidate}
 units: {preferred: []}
 """
 

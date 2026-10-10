@@ -45,7 +45,7 @@ from refdes.schema import load_project
 MIN_SETTINGS = """\
 site: {title: T, out: _site}
 id: {width: 3}
-history: {default: invalidate}
+on_change: {default: invalidate}
 units: {preferred: []}
 """
 
@@ -186,17 +186,23 @@ def test_id_block_must_be_a_mapping(tmp_path):
     _wrong_type(tmp_path, "id")
 
 
-# ----------------------------------------------------------------- history
+# ----------------------------------------------------------------- on_change
 
 
-def test_history_unknown_key_is_an_error(tmp_path):
-    _write(tmp_path, "history:\n  defualt: invalidate\n")
-    _unknown(tmp_path, "history.defualt", "defualt", hint="default")
+def test_history_setting_names_the_rename(tmp_path):
+    _write(tmp_path, "history:\n  default: invalidate\n")
+    message = _error(tmp_path)
+    assert "history: was renamed to on_change:" in message, message
 
 
-def test_history_block_must_be_a_mapping(tmp_path):
-    _write(tmp_path, "history: invalidate\n")
-    _wrong_type(tmp_path, "history")
+def test_on_change_unknown_key_is_an_error(tmp_path):
+    _write(tmp_path, "on_change:\n  defualt: invalidate\n")
+    _unknown(tmp_path, "on_change.defualt", "defualt", hint="default")
+
+
+def test_on_change_block_must_be_a_mapping(tmp_path):
+    _write(tmp_path, "on_change: invalidate\n")
+    _wrong_type(tmp_path, "on_change")
 
 
 # ------------------------------------------------------------------- units

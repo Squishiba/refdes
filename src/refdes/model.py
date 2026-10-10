@@ -528,7 +528,7 @@ class Item:
     calcs: list[CalcLine] = field(default_factory=list)
     checks: list[CheckResult] = field(default_factory=list)
     body_html: str = ""
-    history: dict[str, Any] = field(default_factory=dict)  # item-level on_change overrides
+    on_change_override: dict[str, Any] = field(default_factory=dict)  # item-level change policy
     calc_values: dict[str, str] = field(default_factory=dict)  # name -> formatted result
     prefix_hint: str = ""  # 'prefix:' override -- own key or file/block defaults:, used by the ID allocator
     # A bare-numeric `id:` value (finding 8 Part 1), e.g. "042" from a
@@ -596,10 +596,14 @@ class Item:
 
     def on_change_for(self, field_name: str, spec: ItemType, default: str) -> str:
         """Precedence: item override > schema field > project default."""
-        override = (self.history or {}).get("fields", {}).get(field_name)
+        override = (self.on_change_override or {}).get("fields", {}).get(field_name)
         if override in ON_CHANGE_MODES:
             return override
-        whole = self.history.get("mode") if isinstance(self.history, dict) else None
+        whole = (
+            self.on_change_override.get("mode")
+            if isinstance(self.on_change_override, dict)
+            else None
+        )
         if whole in ON_CHANGE_MODES:
             return whole
         fs = spec.fields.get(field_name)

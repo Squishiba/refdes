@@ -13,7 +13,7 @@ or pass `-c path/to/refdes-project.yaml`.
 **`refdes.yaml is retired. Split it into the two files it became: ...`**
 Your project still carries the old single-file config, which the loader now
 refuses rather than reading quietly. Move every project setting — `site:`,
-`id:`, `boards:`, `workspaces:`, `units:`, `history:`, `standard:`,
+`id:`, `boards:`, `workspaces:`, `units:`, `on_change:`, `standard:`,
 `equations:`, `imports:`, and the process settings like `sigfigs:` and
 `release_gate:` — into `refdes-project.yaml`, and move any
 `types:`/`link_types:`/`sets:` into the optional `refdes-schema.yaml`
