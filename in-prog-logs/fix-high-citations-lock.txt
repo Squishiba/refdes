@@ -1,0 +1,157 @@
+# fix-high-citations-lock — work log
+
+Workspace: /home/jorb/.paseo/worktrees/16msma8v/fix-high-citations-lock
+Branch: fix-high-citations-lock, cut from main at d71c143.
+Inputs: .scratch/inputs/findings.md, .scratch/inputs/reports/pr-134.md, pr-140.md.
+
+## Finding WRITE-CONCUR-001 (HIGH, PR #134)
+
+### Re-confirmed on d71c143: YES, reproduces unchanged
+
+Probe: .scratch/probe_write_concur_001.py (drives the real `serve.edit.apply_edit`
+for writer B with pins, and stands in for writer A's *applied* writes — lockfile
+pinned `other`, body naming it — inside the window between B's `_accept_pins`
+lockfile write and B's late revision check; the window `_apply_locked`'s own
+comment describes: "The candidate gate can take seconds. Another server may have
+saved since the first check, so check again under the cross-process write lock.")
+
+Command:
+    PYTHONPATH=$PWD/src:$PWD/tests /home/jorb/work/venv-refdes/bin/python -m pytest .scratch/probe_write_concur_001.py -q -s -p no:cacheprovider
+
+Output (pre-fix, saved at .scratch/repro_001.txt):
+
+    B result: Conflict
+    on-disk body names A's line: True
+    lockfile still pins A's key: False
+    lockfile == pre-B bytes: True
+    refdes check exit: 1
+    check stderr: ERROR items/decisions.yaml:3 [DEC-001] — calc 'o':
+      source('analysis/budget.csv', 'other') has no locked value ...
+
+Same shape as the PR-134 demonstration. Mechanism on current main:
+`_apply_locked` (src/refdes/serve/edit.py:397) calls `_accept_pins` — which
+reads the lockfile's previous bytes (edit.py:~594) and writes the whole file
+(:603-610) — *before* taking the cross-process `_disk_write_lock` at :436.
+On the late revision mismatch it calls `_undo_accept` (:439), and
+`_LockfileWrite.rollback` restored `previous` unconditionally. Still no test
+asserted anything about citations.yaml after a conflicting save.
+
+### Root cause
+
+`_LockfileWrite.rollback` unconditionally wrote back `previous` — the bytes it
+read *before its own write* — over whatever was on disk at rollback time. That
+snapshot is only valid if nobody else replaced the file in the meantime; with
+cooperating serve processes (the exact class PR #134 claims to make safe) a
+later writer's committed whole-file lockfile write gets clobbered to base bytes
+by the loser's rollback, while the winner's body — which names the pin — stays.
+
+### Fix
+
+src/refdes/serve/edit.py, `_LockfileWrite.rollback`: compare-and-restore. Read
+the file; restore `previous` (or unlink, when previous is None) only if the
+file still holds exactly `staged`, the bytes this writer wrote. If it holds
+anything else another writer has landed since; leave it alone. The loser's
+un-restored pin is the failure mode the design itself names as inert and
+cleaned by the next fetch (docs/design/editor-source-picker.md §4 /
+`_undo_accept` docstring), whereas destroying a landed writer's state is not.
+No new user-visible behaviour on any single-writer path: the single-writer
+refusal paths leave disk == staged, so they restore exactly as before (all
+existing accept-refusal byte-identity tests still pass).
+
+### Regression test + sabotage
+
+tests/test_serve_sources_accept.py::
+test_a_conflicting_accept_does_not_unpin_a_save_that_already_landed
+
+- With the fix: passes (26 passed in the whole file).
+- Sabotage (fix reverted, only `rollback` restored to the old unconditional
+  body): the test fails with
+  `AssertionError: assert 'other' in {'rail_load': ...}` — the winner's pin is
+  gone, exactly the finding. Fix then restored and test passes again.
+
+## Finding DOC-REMEDY-002 (HIGH, PR #140)
+
+### Re-confirmed on d71c143: YES, reproduces unchanged
+
+Probe: .scratch/probe_doc_remedy_002.py — drives the real `cli.main` with
+`refdes.citations.fetch_bytes` patched (no network, network call counter),
+using the PR-140 fixture (CMP-001 cites https://example.com/ds.pdf,
+`keep_copy: true`).
+
+Command:
+    PYTHONPATH=$PWD/src:$PWD/tests /home/jorb/work/venv-refdes/bin/python -m pytest .scratch/probe_doc_remedy_002.py -q -s -p no:cacheprovider
+
+Pre-fix output (identical shape to the PR-140 demonstration):
+- initial fetch: `fetched ... kept`, net=1, blob on disk;
+- `rm .refdes/copies/<sha>.pdf`;
+- `refdes audit`: `cache_missing   no copy    cited by CMP-001`;
+- documented remedy `refdes fetch --path <path>`: exit 0, net_calls stays 1
+  (no network), prints `skipped  ...  kept`, blob NOT restored.
+
+The doc sentence itself is unchanged on this checkout (was
+docs/cli-reference.md:834-835, "re-run `refdes fetch --path <path>` to put
+them back") and contradicts line ~619 ("Already-pinned paths are skipped
+... unless `--update` is given"). The print is src/refdes/cli.py cmd_fetch
+(`kept = "kept" if r.kept_copy else "hash-only"`) fed by the skip branch in
+citations.fetch_all (kept_copy copied straight from the lockfile record).
+
+### Root cause
+
+Two halves of one false claim, "kept means the bytes are here":
+1. the doc remedy names a command variant that provably cannot restore the
+   bytes (skip-when-pinned is the documented fetch policy);
+2. the skipped fetch line derives the pin word from the lockfile flag alone
+   — byte-for-byte the derivation PR 140 removed from `audit` — so the same
+   fact prints `no copy` in `audit` and `kept` in `fetch`.
+
+### Fixes
+
+1. docs/cli-reference.md audit section: remedy is now
+   `refdes fetch --path <path> --update` (with the skip rule spelled), and the
+   `refdes fetch` section now documents the `no copy` word on a skipped row.
+   Verified by actually running it (see probe re-run post-fix: plain skip
+   still downloads nothing; `fetch --path <path> --update` makes the network
+   call, blob is back, line reads `kept`).
+2. src/refdes/cli.py cmd_fetch: a `kept` pin word is now only printed when
+   the kept blob is actually on disk (`citations_mod.kept_copy_path` — the
+   same derivation `citations._resolve` uses to set `cache_missing`); a
+   skipped kept pin whose bytes are gone prints `no copy`, audit's existing
+   word for that fact (I reused audit's word rather than the report's coined
+   `kept copy missing`, so one fact keeps one spelling; report's other option,
+   suppressing the word entirely, would also mute the honest `kept` on healthy
+   skipped rows).
+
+### Regression tests + sabotage
+
+tests/test_citations.py:
+- test_a_skipped_kept_copy_with_a_missing_blob_does_not_print_kept
+  (behavior: skip prints `no copy` not `kept`, no network, no blob; then the
+  documented `--update` remedy re-downloads and restores — this also keeps
+  the docs honest about `--update`, which the PR-140 report listed as a test
+  gap), and
+- test_the_missing_kept_copy_remedy_in_the_docs_names_update (doc-pinning,
+  in the style of tests/test_audit_hash_only_wording.py).
+
+Sabotage (both fixes reverted only — cli print restored to the flag-only
+derivation, doc restored to `refdes fetch --path <path> to put them back`);
+captured failures:
+    E  AssertionError: skipped  https://example.com/ds.pdf  sha256=932d2676c1e4...  kept
+    E  assert 'no copy' in 'skipped  https://example.com/ds.pdf  sha256=932d2676c1e4...  kept'
+and for the doc test, the same assertion fails against the restored old
+sentence (it now demands the `--update` form of the remedy, which the old
+text does not contain). Fixes restored; all three tests pass again.
+
+## Final state
+
+- Changelog fragments (existing *.fixed.md style):
+  changelog.d/serve-accept-conflict-keeps-other-writers-pin.fixed.md,
+  changelog.d/fetch-missing-kept-copy-remedy.fixed.md.
+- Full suite, foreground:
+  PYTHONPATH=$PWD/src /home/jorb/work/venv-refdes/bin/python -m pytest -q -p no:cacheprovider
+  -> 3375 passed, 10 skipped in 259.03s, exit 0 (.scratch/suite.txt).
+  Baseline on main (d71c143) is 3372 passed, 10 skipped; +3 = the three new
+  tests.
+- `ruff check --select E9,F src tests` -> All checks passed! (exit 0).
+- Task finished: both findings re-confirmed, fixed, regression-tested with
+  sabotage recorded, docs fixed and their remedy verified by running it.
+

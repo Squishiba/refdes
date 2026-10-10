@@ -11,7 +11,7 @@ import os
 import pytest
 import yaml
 from conftest import write_project_config
-from helpers import _build_and_render, _build_at
+from helpers import REPO, _build_and_render, _build_at
 
 from refdes import build as build_mod
 from refdes import citations as citations_mod
@@ -715,6 +715,64 @@ def test_cli_fetch_pins_via_monkeypatched_network(citation_project, monkeypatch,
     out = capsys.readouterr().out
     assert "fetched" in out
     assert "1 citation(s) processed, 0 failed" in out
+
+
+def test_a_skipped_kept_copy_with_a_missing_blob_does_not_print_kept(
+    citation_project, monkeypatch, capsys
+):
+    """DOC-REMEDY-002 (the PR #140 review's HIGH): `audit` calls a kept pin
+    whose blob is gone `no copy`, but a plain `refdes fetch` of the same path
+    skipped it -- no network, no bytes -- and printed `kept` straight from the
+    lockfile flag, the same claim the PR had just removed from `audit`. The
+    fetch line now reads `no copy` too, and the doc's remedy is the one that
+    demonstrably works: `--update`, driven here as the second half of the
+    test."""
+    data = b"%PDF-1.4 fake"
+    net_calls = []
+
+    def fetcher(url, timeout=30.0):
+        net_calls.append(url)
+        return data
+
+    monkeypatch.setattr(citations_mod, "fetch_bytes", fetcher)
+    config = ["-c", str(citation_project / "refdes-project.yaml")]
+    assert cli_mod.main(config + ["fetch"]) == 0
+    capsys.readouterr()
+    sha = hashlib.sha256(data).hexdigest()
+    blob = citation_project / ".refdes" / "copies" / f"{sha}.pdf"
+    assert blob.exists()
+    blob.unlink()
+
+    code = cli_mod.main(config + ["fetch", "--path", "https://example.com/ds.pdf"])
+    out = capsys.readouterr().out
+    assert code == 0
+    assert len(net_calls) == 1, "the skipped path made a network call"
+    assert not blob.exists(), "the skipped path restored the blob"
+    skipped = [line for line in out.splitlines() if line.startswith("skipped")]
+    assert len(skipped) == 1, out
+    assert "no copy" in skipped[0], skipped[0]
+    assert "kept" not in skipped[0], skipped[0]
+
+    # the documented remedy: --update re-downloads and puts the copy back
+    code = cli_mod.main(
+        config + ["fetch", "--update", "--path", "https://example.com/ds.pdf"]
+    )
+    out = capsys.readouterr().out
+    assert code == 0
+    assert len(net_calls) == 2, "the --update remedy made no network call"
+    assert blob.exists(), "the --update remedy did not restore the kept copy"
+    assert "kept" in out
+
+
+def test_the_missing_kept_copy_remedy_in_the_docs_names_update():
+    """The docs used to tell the reader to re-run plain `refdes fetch --path
+    <path>` to put a missing kept copy back -- a no-op on an already-pinned
+    path, as the same page says three paragraphs earlier. The remedy sentence
+    has to name `--update`, the flag that actually re-downloads."""
+    with open(os.path.join(REPO, "docs", "cli-reference.md"), encoding="utf-8") as fh:
+        body = " ".join(fh.read().split())
+    assert "`refdes fetch --path <path> --update` to put them back" in body
+    assert "`refdes fetch --path <path>` to put them back" not in body
 
 
 def test_cli_fetch_unknown_item_returns_nonzero(citation_project, capsys):

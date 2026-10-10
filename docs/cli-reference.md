@@ -628,6 +628,9 @@ instead. Resolution covers every section any item in the project cites for the
 path being pinned, not just the ones inside `--item`/`--path` scope — a page
 number is a fact about the bytes being pinned, so re-pinning a file under one
 item cannot leave another item's section pointing at the bytes it replaced.
+A `skipped` row whose lockfile keeps a copy reads `no copy` instead of `kept`
+when those bytes are not on disk — the same fact `refdes audit`'s pin column
+reports for that path — because a skip downloads nothing and puts nothing back.
 Updates `.refdes/citations.yaml`, and `.refdes/copies/` for any citation that
 opted into keeping a local copy.
 
@@ -832,7 +835,8 @@ default, since datasheets are generally copyrighted), `kept` (pinned, with the
 bytes kept at `.refdes/copies/<sha256><ext>`) or `no copy` (the lockfile says
 `kept_copy: true`, but the kept bytes are gone from `.refdes/copies/` — the
 same fact the state column reports as `cache_missing`; re-run
-`refdes fetch --path <path>` to put them back). The two columns are
+`refdes fetch --path <path> --update` to put them back: without `--update` an
+already-pinned path is skipped and no bytes are downloaded). The two columns are
 independent facts about the same pin, so they never contradict each other: an
 unpinned citation has no hash to be `hash-only` about and says `no pin`, and a
 citation whose kept copy is gone says `no copy` rather than claiming `kept`.

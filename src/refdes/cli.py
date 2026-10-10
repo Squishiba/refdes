@@ -898,7 +898,21 @@ def cmd_fetch(args) -> int:
                 print(f"FAILED  {source_error}", file=sys.stderr)
             continue
         verb = "skipped" if r.skipped else "fetched"
-        kept = "kept" if r.kept_copy else "hash-only"
+        # The word has to be true of the bytes on disk now, not only of what
+        # the lockfile claims -- the same rule `audit`'s pin column learned in
+        # PR 140 (`cache_missing` prints `no copy`, not `kept`). A skipped
+        # path copies `kept_copy` straight from the lockfile, so a kept pin
+        # whose blob was deleted would print `kept` here while `audit` on the
+        # very next line of the same docs calls it `no copy` -- and `skipped
+        # ... kept` is exactly the lie that makes the documented remedy (plain
+        # `refdes fetch --path <path>`, since a pinned path is skipped without
+        # `--update`) look broken.
+        if r.kept_copy and not os.path.isfile(
+            citations_mod.kept_copy_path(project, r.sha256, r.path)
+        ):
+            kept = "no copy"
+        else:
+            kept = "kept" if r.kept_copy else "hash-only"
         print(f"{verb:8} {r.path}  sha256={r.sha256[:12]}...  {kept}")
         for key, value in sorted(r.source_values.items()):
             if not any(c.startswith(f"{r.path}: {key}: ") for c in r.source_changes):
