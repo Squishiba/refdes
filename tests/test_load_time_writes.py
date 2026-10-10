@@ -32,7 +32,7 @@ from conftest import write_project_config
 
 from refdes import build as build_mod
 from refdes import cli as cli_mod
-from refdes import ids, keys, model, parse, revise
+from refdes import ids, keys, links, model, parse, revise
 from refdes.schema import load_project
 
 FLOW_SCHEMA = (
@@ -154,6 +154,77 @@ def test_load_time_write_that_breaks_parsing_is_rolled_back(tmp_path, monkeypatc
     keys.mint_missing(project)
     assert path.read_text(encoding="utf-8") == before
     assert any("rolled back" in str(d) for d in project.diagnostics)
+
+
+def test_a_guard_rolled_back_mint_is_no_key_for_the_rest_of_the_load(
+    tmp_path, monkeypatch
+):
+    """The invariant `write_rewrites_verified`'s returned set exists to keep:
+    a key whose write did not reach disk is not a key -- for any of the three
+    ways a write fails to land (finding KEY-GUARD-001). The insert refusing
+    and the filesystem refusing both fed that set; the parse guard's own
+    rollback did not, so the rolled-back item kept its minted key in memory
+    and the next step of the same load froze a composite naming it.
+
+    A forced guard (same monkeypatch as the test above) rolls back the mint
+    into a flow-front-matter item, and a block-style sibling links to it
+    bare. After the load's own next step -- link expansion -- the sibling
+    must name no composite on disk, the sibling's in-memory link must stay
+    bare, and the *following* load must find nothing to report: before the
+    fix every later load errored with "points at key ... which no item
+    declares", cleared only by hand-editing an item file.
+    """
+    a_md = tmp_path / "items" / "a.md"
+    b_yaml = tmp_path / "items" / "b.yaml"
+    write_project_config(
+        tmp_path,
+        "site: { title: T, out: _site }\n"
+        "link_types:\n"
+        "  part_of: { inverse: has_parts, label: Part of }\n"
+        "types:\n"
+        "  requirement:\n"
+        "    prefix: REQ\n"
+        "    fields:\n"
+        "      title: { type: text, required: true }\n"
+        "    links:\n"
+        "      part_of: [requirement]\n",
+    )
+    a_md.parent.mkdir(exist_ok=True)
+    before_a = _flow_md("{id: REQ-001, type: requirement, title: x}")
+    a_md.write_text(before_a, encoding="utf-8")
+    b_yaml.write_text(
+        "defaults:\n  type: requirement\n  prefix: REQ\n"
+        "items:\n  - id: REQ-002\n    title: y\n    part_of: REQ-001\n",
+        encoding="utf-8",
+    )
+    cfg = str(tmp_path / "refdes-project.yaml")
+
+    def corrupting_insert(lines, line_no, new_line, old_value=None):
+        index = max(0, line_no - 1)
+        return lines[:index] + [new_line] + lines[index:]
+
+    monkeypatch.setattr(ids, "insert_into_markdown", corrupting_insert)
+    project = load_project(config_path=cfg)
+    parse.load_items(project)
+    keys.mint_missing(project)
+    assert a_md.read_text(encoding="utf-8") == before_a  # the guard rolled back
+
+    item_a = next(item for item in project.local_items if item.id == "REQ-001")
+    assert not item_a.key, (
+        f"key {item_a.key!r} is in memory but not on the disk the guard restored"
+    )
+
+    links.expand_missing(project, write=True)
+    assert "@" not in b_yaml.read_text(), (
+        "a composite naming a key that never reached disk"
+    )
+    item_b = next(item for item in project.local_items if item.id == "REQ-002")
+    assert item_b.links["part_of"] == ["REQ-001"]
+
+    project2 = load_project(config_path=cfg)
+    parse.load_items(project2)
+    build_mod.build(project2)
+    assert not project2.errors, [str(d) for d in project2.errors]
 
 
 def test_guard_lets_good_writes_through(tmp_path):

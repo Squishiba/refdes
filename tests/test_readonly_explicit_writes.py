@@ -417,6 +417,93 @@ def test_revise_refuses_a_read_only_file_holding_only_a_reference(tmp_path, caps
 
 
 @needs_posix_bits
+def test_revise_rolls_back_refresh_writes_that_landed_before_the_refusal(
+    tmp_path, capsys
+):
+    """The property the single-reference-file test above only reaches by
+    accident (finding TXN-ROLLBACK-001). Two writable-then-refused files hold
+    the composite this rename moves, and the read-only one is *second* in
+    path order: `links.plan_expansion` walks `files_touched` sorted, the
+    refresh writes `dec_a.md` first -- that write lands -- and only then
+    refuses `dec_b.md`. The handler at the refresh's call site catches the
+    `Refused` and rolls back, but its rollback restores `refresh_rewrites`,
+    and that list was still being filled by the code that runs only *after*
+    the refresh returns: nothing the refresh had already written got put
+    back, while the run printed "rolled back.". `req.yaml` went back to
+    `REQ-001` and `dec_a.md` stayed renamed to `BUD-001@key` -- a composite
+    naming the id this operation retired and took back, which no later
+    command reports.
+
+    This is the shape that asserts the property, not the accident: after a
+    refused revise, every item file holds the bytes it was found with.
+    """
+    write_project_config(
+        tmp_path,
+        "site: { title: T, out: _site }\n"
+        "id: { width: 3, ledger: .refdes/ids.yaml }\n"
+        "link_types:\n"
+        "  satisfies: { inverse: satisfied_by, label: Satisfies }\n"
+        "types:\n"
+        "  requirement:\n"
+        "    prefix: REQ\n"
+        "    coverable: true\n"
+        "    fields:\n"
+        "      text: { type: text, required: true }\n"
+        "  decision:\n"
+        "    prefix: DEC\n"
+        "    fields:\n"
+        "      title: { type: text, required: true }\n"
+        "    links:\n"
+        "      satisfies: [requirement]\n",
+    )
+    items = tmp_path / "items"
+    items.mkdir()
+    (items / "req.yaml").write_text(
+        "defaults:\n  type: requirement\n  prefix: REQ\n"
+        "items:\n  - id: REQ-001\n    text: Input voltage range.\n",
+        encoding="utf-8",
+    )
+    (items / "dec_a.md").write_text(
+        "---\nid: DEC-001\ntype: decision\ntitle: Buck topology.\n"
+        "satisfies: [REQ-001]\n---\n",
+        encoding="utf-8",
+    )
+    (items / "dec_b.md").write_text(
+        "---\nid: DEC-002\ntype: decision\ntitle: Boost topology.\n"
+        "satisfies: [REQ-001]\n---\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "mapping.yaml").write_text("prefixes:\n  REQ: BUD\n", encoding="utf-8")
+    config = str(tmp_path / "refdes-project.yaml")
+    assert cli_mod.main(["-c", config, "check"]) == 0
+
+    paths = [items / "req.yaml", items / "dec_a.md", items / "dec_b.md"]
+    before = _all_text(paths)
+    assert "REQ-001@" in _read(items / "dec_a.md"), "both references composite"
+    assert "REQ-001@" in _read(items / "dec_b.md")
+
+    # The read-only file is the LAST one in the refresh's write order, so the
+    # earlier refresh write lands before the refusal -- the layout that made
+    # the single-file test's "rolled back." true only because its one
+    # candidate file was also its refused file.
+    os.chmod(items / "dec_b.md", 0o444)
+    try:
+        status = cli_mod.main(["-c", config, "revise", str(tmp_path / "mapping.yaml")])
+    finally:
+        os.chmod(items / "dec_b.md", 0o644)
+
+    captured = capsys.readouterr()
+    assert status == 1
+    assert "cannot write items/dec_b.md (read-only tree?)" in captured.err, captured.err
+    assert "rolled back." in captured.err
+    # The message's promise, checked against the tree: the file the refresh
+    # wrote first is back to the bytes it was found with, same as the one it
+    # never reached.
+    assert _all_text(paths) == before
+    assert "id: REQ-001" in _read(items / "req.yaml")
+
+
+@needs_posix_bits
 def test_revise_dry_run_reports_the_refusal_a_read_only_file_will_cause(
     tmp_path, capsys
 ):

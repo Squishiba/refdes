@@ -1,0 +1,154 @@
+Task: fix HIGH-severity review findings — rollback-keys
+Branch: fix-high-rollback-keys (cut from main at d71c143)
+Status: FINISHED — both findings re-confirmed, fixed, tested, sabotaged, suite green.
+
+Inputs: .scratch/inputs/findings.md, .scratch/inputs/reports/pr-163.md,
+.scratch/inputs/reports/pr-113.md. AGENTS.md followed: claims verified by
+running commands, never from memory.
+
+=====================================================================
+FINDING 1: TXN-ROLLBACK-001 (PR #163, HIGH) — RE-CONFIRMED on d71c143
+=====================================================================
+
+Claim: the `except Refused` handler around `_refresh_display_halves` in
+`revise.apply` calls `_rollback()` while `refresh_rewrites` is still empty,
+so refresh writes that landed stay on disk while the run prints "rolled
+back.". Line drift: on this checkout the handler is revise.py:1642-1646,
+`refresh_rewrites` initialises empty at :1462, `_rollback` is at :1533
+(starts `restore_rewrites(refresh_rewrites)`), population loop at :1647-1657
+— runs only AFTER the refresh returns. Same shape as the packet describes.
+
+Re-confirmation (real commands, scratch project .scratch/repro-txn001):
+  hardware project (custom types), items/req.yaml (REQ-001), dec_a.md and
+  dec_b.md each `satisfies: [REQ-001]`, mapping prefixes REQ->BUD.
+  1. `refdes check` (writable load) -> "(minted 3 key(s) and rewrote 2
+     reference(s) while loading)", both dec files now `REQ-001@ajtez6xsfyg`.
+  2. `chmod 0444 items/dec_b.md` (dec_a sorts first -> its refresh write
+     lands before the refusal), then `refdes revise mapping.yaml`:
+
+     refused:
+       cannot write items/dec_b.md (read-only tree?) -- no item file was
+       rewritten and no hash was carried forward, so the tree is exactly as
+       it was found. Make the tree writable and run it again.
+       rolled back.
+     revise exit=1
+
+  3. diff vs pre-run copies: req.yaml unchanged, dec_b.md unchanged, but
+     dec_a.md CHANGED: `satisfies: [REQ-001@ajtez6xsfyg]` ->
+     `satisfies: [BUD-001@ajtez6xsfyg]`. PRESENT: a landed refresh write
+     naming the retired id, stamped "rolled back."
+
+Root cause: ordering. The refresh writes files in path order (plan_expansion
+sorts files_touched) and raises on the first refusal; the only account of
+what it wrote is the snapshot comparison, which ran strictly after the try
+block, so the except path rolled back an empty `refresh_rewrites`.
+
+Fix (src/refdes/revise.py): extracted the population loop into
+`_collect_refresh_rewrites()` inside apply() and call it in the except
+branch BEFORE `_rollback()` (and once after the refresh as before). Nothing
+else changed; write order, messages, exit codes untouched.
+
+Regression test:
+tests/test_readonly_explicit_writes.py::
+test_revise_rolls_back_refresh_writes_that_landed_before_the_refusal
+Two referencing files, refused file second in path order; asserts
+`_all_text(req, dec_a, dec_b) == before` (the property the old single-file
+test only reached by accident — PR #163 report "test gap 1").
+
+Sabotage: removed the `_collect_refresh_rewrites()` call from the except
+branch only -> test FAILS exactly on the bug
+(dec_a.md left `satisfies: [BUD-001@dwdxn50yzcj]` vs expected
+`REQ-001@dwdxn50yzcj`). Restored from .scratch/revise.py.fixed.bak ->
+passes; full file test run: test_readonly_explicit_writes.py +
+test_load_time_writes.py = 76 passed.
+
+Docs check: docs/cli-reference.md:61 and :1102 promise exit 1 + "the whole
+operation is rolled back"/"never partially applied" — those promises were
+FALSE before this fix and are TRUE after it; the printed remedy ("the tree
+is exactly as it was found") likewise. Verified by re-running the repro
+above against the fixed code: all three files unchanged, message unchanged.
+No doc text needed changing.
+
+=====================================================================
+FINDING 2: KEY-GUARD-001 (PR #113, HIGH) — RE-CONFIRMED on d71c143
+=====================================================================
+
+Claim: the "a refused write means the write did not happen" invariant covers
+two of the three refusal channels; the parse-guard rollback leaves an
+in-memory key and lets the load freeze a composite naming a key that never
+reached disk.
+
+Current-code pointers (line-drifted): the guard rollback branch is
+revise.py:932-939 (restore + project.error, no record), return was
+revise.py:940 `{rewrite.rel for rewrite in failed} | duplicate_keyed`;
+consumers keys.py:781-796 (mint_missing's landed filter) and links.py
+`_drop_refused` (:462, used at :513, :785, :953, :1152).
+
+Re-confirmation: .scratch/probe_key_guard_001.py (same forced-guard
+monkeypatch as tests/test_load_time_writes.py:147 — `ids.insert_into_markdown`
+patched to the old corrupting insert; a.md flow front matter, b.yaml links
+`part_of: REQ-001`). Output on d71c143 (unfixed):
+  STEP 1  a.md rolled back (no key on disk)? True
+  STEP 2  in-memory key on rolled-back item: 'f52a25n5jyv'
+  STEP 3  b.yaml names a composite on disk? True  (part_of: REQ-001@f52a25n5jyv)
+  STEP 4  next-load errors: [ERROR items/b.yaml:5 [REQ-002] — part_of points
+          at key 'f52a25n5jyv' ... which no item declares ...]
+PRESENT, matching the packet exactly. Reachability caveat carried over from
+the original review: needs a forced guard failure; ordinary input
+reachability was not established.
+
+Root cause: the third failure channel (parse guard rolls the file back)
+never joined the "did not land" set that mint_missing's landed filter and
+links._drop_refused are keyed on.
+
+Fix (src/refdes/revise.py): the guard rollback branch now adds
+`rewrite.rel` to a `rolled_back` set included in the return
+(`| rolled_back`), and the docstring's Returns paragraph was corrected to
+name both channels. All five consumer sites already treat the returned set
+as "file did not change; drop your in-memory claim" — dropping is exactly
+right for freeze_follows (:785) and calc-ref expansion (:1152) too, so the
+fix propagates for free (item stays keyless -> no composite is ever planned
+for a keyless target).
+
+Regression test:
+tests/test_load_time_writes.py::
+test_a_guard_rolled_back_mint_is_no_key_for_the_rest_of_the_load
+Asserts: disk bytes restored; `not item_a.key` in memory; no "@" written
+into b.yaml; sibling's in-memory link stays bare; next load reports no
+errors. (Covers the PR #113 report's "test gap 2" property shape.)
+
+Sabotage: reverted only the return statement (dropped `| rolled_back`) ->
+test FAILS with `key='heehxz8ac6w'` in memory on the rolled-back item.
+Restored -> passes. Probe re-run against fixed code: in-memory key '' (no
+key), b.yaml stays bare `part_of: REQ-001`, next-load errors [].
+
+Docs check: the invariant claim lives only in the historical changelog
+fragment (load-writes-everywhere.fixed.md) — a record of PR #113, not
+current docs; left as history, corrected going forward by the new fragment
+changelog.d/guard-rollback-key-invariant.fixed.md. No printed remedy text
+was wrong.
+
+=====================================================================
+GATES
+=====================================================================
+- Full suite, foreground:
+  PYTHONPATH=$PWD/src /home/jorb/work/venv-refdes/bin/python -m pytest -q \
+    -p no:cacheprovider > .scratch/suite.txt 2>&1; echo exit=$?
+  -> exit=0, tail: "3374 passed, 10 skipped in 260.78s (0:04:20)"
+  (main baseline 3372 passed, 10 skipped; +2 = the two regression tests).
+- `ruff check --select E9,F src tests` -> All checks passed! (untouched
+  pre-existing findings elsewhere per AGENTS.md).
+- Repro/probe scripts live in .scratch/ (repro-txn001/,
+  probe_key_guard_001.py, revise.py.fixed.bak), left in place per
+  instructions.
+
+Files touched:
+  src/refdes/revise.py                              (both fixes)
+  tests/test_readonly_explicit_writes.py            (TXN-ROLLBACK-001 test)
+  tests/test_load_time_writes.py                    (KEY-GUARD-001 test)
+  changelog.d/revise-refresh-refusal-rollback.fixed.md
+  changelog.d/guard-rollback-key-invariant.fixed.md
+  in-prog-logs/fix-high-rollback-keys.txt           (this file)
+
+Finished: yes. Committed, pushed, PR opened — see branch
+fix-high-rollback-keys.
