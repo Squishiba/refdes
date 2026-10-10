@@ -517,10 +517,11 @@ defaults:
   type: component
   status: candidate
 
-- id: CMP-PWR-014
-  title: MP1584EN buck module
-  part_number: MP1584EN-LF-Z
-  ...
+items:
+  - id: CMP-PWR-014
+    title: MP1584EN buck module
+    part_number: MP1584EN-LF-Z
+    # …plus the component's other fields
 ```
 
 `defaults:` is already merged under every item in a list file with the item's
@@ -593,9 +594,10 @@ be registered, so a registry would be ceremony around a convention.
     type: component
     status: candidate
 
-  - id:
-    title:
-    part_number:
+  items:
+    - id:
+      title:
+      part_number:
   ```
 
   `defaults.type` from the requested type; `defaults.status` from that type's
@@ -634,66 +636,67 @@ defaults:
   type: component
   status: candidate
 
-- id: CMP-PWR-014
-  title: MP1584EN buck module
-  part_number: MP1584EN-LF-Z
-  status: selected
-  citations:
-    - path: datasheets/mp1584.pdf
-      id: mp1584-ds
-      keep_copy: true
-  checks:
-    - { value: I_out, against: BND-PWR-011 }
-    - { value: I_q,   against: BND-PWR-012 }
-  ---
-  ```calc
-  I_out = source("datasheets/mp1584.csv", "i_out_max") | A
-  I_q   = source("datasheets/mp1584.csv", "i_q_typ")   | uA
-  ```
+items:
+  - id: CMP-PWR-014
+    title: MP1584EN buck module
+    part_number: MP1584EN-LF-Z
+    status: selected
+    citations:
+      - path: datasheets/mp1584.pdf
+        id: mp1584-ds
+        keep_copy: true
+    checks:
+      - { value: I_out, against: BND-PWR-011 }
+      - { value: I_q,   against: BND-PWR-012 }
+    body: |
+      ```calc
+      I_out = source("datasheets/mp1584.csv", "i_out_max") | A
+      I_q   = source("datasheets/mp1584.csv", "i_q_typ")   | uA
+      ```
 
-- id: CMP-PWR-015
-  title: TPS562200 buck regulator
-  part_number: TPS562200DDCR
-  status: rejected
-  rationale: >
-    Fails the 3 A rail requirement by a third. Nothing else about it is wrong
-    — its quiescent current is the best of the three — but BND-PWR-011 is not
-    negotiable, so it is out.
-  citations:
-    - path: datasheets/tps562200.pdf
-      id: tps562200-ds
-  checks:
-    - { value: I_out, against: BND-PWR-011 }
-    - { value: I_q,   against: BND-PWR-012 }
-  ---
-  ```calc
-  I_out = source("datasheets/tps562200.csv", "i_out_max") | A
-  I_q   = source("datasheets/tps562200.csv", "i_q_typ")   | uA
-  ```
+  - id: CMP-PWR-015
+    title: TPS562200 buck regulator
+    part_number: TPS562200DDCR
+    status: rejected
+    rationale: >
+      Fails the 3 A rail requirement by a third. Nothing else about it is wrong
+      — its quiescent current is the best of the three — but BND-PWR-011 is not
+      negotiable, so it is out.
+    citations:
+      - path: datasheets/tps562200.pdf
+        id: tps562200-ds
+    checks:
+      - { value: I_out, against: BND-PWR-011 }
+      - { value: I_q,   against: BND-PWR-012 }
+    body: |
+      ```calc
+      I_out = source("datasheets/tps562200.csv", "i_out_max") | A
+      I_q   = source("datasheets/tps562200.csv", "i_q_typ")   | uA
+      ```
 
-- id: CMP-PWR-016
-  title: LM2596-ADJ switching regulator
-  part_number: LM2596S-ADJ
-  status: rejected
-  rationale: >
-    Current is fine; quiescent is ten times the standby budget. Kept as an
-    alternate for the non-battery variant, where BND-PWR-012 does not apply.
-  alternate: [CMP-PWR-014]
-  citations:
-    - path: datasheets/lm2596.pdf
-      id: lm2596-ds
-  checks:
-    - { value: I_out, against: BND-PWR-011 }
-    - { value: I_q,   against: BND-PWR-012 }
-  ---
-  ```calc
-  I_out = source("datasheets/lm2596.csv", "i_out_max") | A
-  I_q   = source("datasheets/lm2596.csv", "i_q_typ")   | uA
-  ```
+  - id: CMP-PWR-016
+    title: LM2596-ADJ switching regulator
+    part_number: LM2596S-ADJ
+    status: rejected
+    rationale: >
+      Current is fine; quiescent is ten times the standby budget. Kept as an
+      alternate for the non-battery variant, where BND-PWR-012 does not apply.
+    alternate: [CMP-PWR-014]
+    citations:
+      - path: datasheets/lm2596.pdf
+        id: lm2596-ds
+    checks:
+      - { value: I_out, against: BND-PWR-011 }
+      - { value: I_q,   against: BND-PWR-012 }
+    body: |
+      ```calc
+      I_out = source("datasheets/lm2596.csv", "i_out_max") | A
+      I_q   = source("datasheets/lm2596.csv", "i_q_typ")   | uA
+      ```
 
-- id: CMP-PWR-017
-  title: TBD — second-source search still open
-  status: candidate
+  - id: CMP-PWR-017
+    title: TBD — second-source search still open
+    status: candidate
 ```
 
 Every `source()` line carries its own unit assertion, per
