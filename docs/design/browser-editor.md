@@ -307,6 +307,8 @@ later “fix a typo from anywhere” path, contingent on real test CI existing.
 `refdes serve` loads exactly one project and prints a launch URL containing a
 per-launch random token. The browser opens to the rendered project dashboard.
 A server-only toolbar opens `/edit/`; an item page can open that item's form.
+The floating task pane decided 2026-10-10 belongs to both surfaces — preview
+and editor — and is specified in `docs/design/thread-workbench.md` §7a.
 The editor shows the current git branch/HEAD when available and whether the
 working tree or index is dirty. It never stages or commits. Git remains the
 undo and review mechanism.
