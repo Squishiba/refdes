@@ -54,7 +54,7 @@ from .schema import load_project
 # `refdes revise --help` list them. Kept here as the one place that knows the
 # whole vocabulary: mapping_from_dict reads exactly these and _refuse_unknown_sections
 # rejects anything else, so the two cannot fall out of step.
-ACCEPTED_SECTIONS = ("types", "fields", "links", "prefixes", "citation_keys")
+ACCEPTED_SECTIONS = ("types", "merge_types", "fields", "links", "prefixes", "citation_keys")
 
 
 def _refuse_unknown_sections(raw: dict[str, Any], source: str) -> None:
@@ -109,6 +109,9 @@ class Mapping:
     """
 
     types: dict[str, str] = field(default_factory=dict)
+    # A type merge permits a destination that already exists. Its items keep
+    # their ids while their type spelling changes to the surviving type.
+    merge_types: dict[str, str] = field(default_factory=dict)
     # old type name -> {old field name -> new field name}. Scoped per type,
     # since two different types are free to use the same field name for
     # different things -- a field rename must never touch a same-named field
@@ -127,7 +130,8 @@ class Mapping:
 
     def is_empty(self) -> bool:
         return not (
-            self.types or self.fields or self.links or self.prefixes or self.citation_keys
+            self.types or self.merge_types or self.fields or self.links or self.prefixes
+            or self.citation_keys
         )
 
     def merge(self, other: "Mapping") -> "Mapping":
@@ -145,11 +149,13 @@ class Mapping:
         """
         merged = Mapping(
             types=dict(self.types),
+            merge_types=dict(self.merge_types),
             links=dict(self.links),
             prefixes=dict(self.prefixes),
             citation_keys=dict(self.citation_keys),
         )
         merged.types.update(other.types)
+        merged.merge_types.update(other.merge_types)
         merged.links.update(other.links)
         merged.prefixes.update(other.prefixes)
         merged.citation_keys.update(other.citation_keys)
@@ -186,6 +192,7 @@ def mapping_from_dict(raw: dict[str, Any], source: str) -> Mapping:
     _refuse_unknown_sections(raw, source)
 
     types = {str(k): str(v) for k, v in (raw.get("types") or {}).items()}
+    merge_types = {str(k): str(v) for k, v in (raw.get("merge_types") or {}).items()}
     fields: dict[str, dict[str, str]] = {}
     for tname, frenames in (raw.get("fields") or {}).items():
         fields[str(tname)] = {str(k): str(v) for k, v in (frenames or {}).items()}
@@ -196,6 +203,7 @@ def mapping_from_dict(raw: dict[str, Any], source: str) -> Mapping:
     }
     return Mapping(
         types=types, fields=fields, links=links, prefixes=prefixes,
+        merge_types=merge_types,
         citation_keys=citation_keys,
     )
 
@@ -269,6 +277,10 @@ def check_ambiguous(
     """
     errors: list[str] = []
     errors += _collisions(mapping.types, "type")
+    errors += _collisions(mapping.merge_types, "type merge")
+    for old in mapping.merge_types:
+        if old in mapping.types:
+            errors.append(f"type {old!r} cannot be both renamed and merged")
     errors += _collisions(mapping.links, "link")
     errors += _collisions(mapping.prefixes, "prefix")
     errors += _collisions(mapping.citation_keys, "citation key")
@@ -280,6 +292,10 @@ def check_ambiguous(
             continue
         if new in project.types and new not in mapping.types:
             errors.append(f"type rename {old!r} -> {new!r}: {new!r} already names an existing type")
+
+    for old, new in mapping.merge_types.items():
+        if old != new and old in project.types and new not in project.types and not schema_moving:
+            errors.append(f"type merge {old!r} -> {new!r}: destination type is unknown")
 
     for old, new in mapping.links.items():
         if old == new:
@@ -460,7 +476,7 @@ def _rewrite_type_and_prefix_lines(
         return new_line
 
     def _lookup_type(old: str) -> str | None:
-        return mapping.types.get(old)
+        return mapping.types.get(old) or mapping.merge_types.get(old)
 
     def _lookup_prefix(old: str) -> str | None:
         return _rename_prefix(old, mapping.prefixes)

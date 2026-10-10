@@ -20,8 +20,34 @@
 # sealed (hardware@3's log is `sealing: history`), but every entry would then
 # differ from its legacy seal record in .refdes/log-seal-board-a.yaml, which
 # `refdes audit` reports.
-# Everything else about `log` comes from the standard unchanged.
+# The phase 4a standard merges decision into log. This project's own decision
+# items and records edge are migrated in phase 4b; keep their old vocabulary
+# here until that item migration lands.
+link_types:
+  records: { inverse: recorded_by, label: Records, trace: false }
+
 types:
   log:
     fields:
       board: { type: text, on_change: invalidate }
+    links:
+      records: [decision]
+  decision:
+    prefix: DEC
+    label: Decision
+    preview: [status, title, date]
+    satisfying_statuses: [accepted]
+    check_severity: error
+    fields:
+      title: { type: text, required: true, on_change: invalidate }
+      status: { type: enum, choices: [proposed, in_progress, accepted, on_hold, rejected, superseded], default: proposed, on_change: invalidate }
+      rationale: { type: text, on_change: invalidate, required_when: {status: rejected} }
+      date: { type: date, on_change: log }
+      options: { type: options, on_change: invalidate }
+      checks: { type: checks, on_change: invalidate }
+    include: [provenance, stewardship, citations, grouped, claims, invalidate_body]
+    links:
+      supersedes: [decision]
+      selects: [component]
+      blocked_by: []
+      recorded_by: [log]

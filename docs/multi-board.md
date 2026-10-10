@@ -12,7 +12,7 @@ extra machinery:
 items/
   shared/interfaces.yaml     IFC-CAN-001, IFC-PWR-002
   board-a/requirements.yaml  REQ-A-PWR-001
-  board-a/decisions/...
+  board-a/log/...
   board-b/requirements.yaml  REQ-B-PWR-001
 ```
 
@@ -21,7 +21,7 @@ coverage, and previews all work across folders. A shared bound checked by two
 boards shows both in its incoming links:
 
 ```
-IFC-CAN-001 backlinks: {'constrained_by': ['DEC-A-001', 'DEC-B-001']}
+IFC-CAN-001 backlinks: {'constrained_by': ['LOG-A-001', 'LOG-B-001']}
 ```
 
 Tighten that shared limit and each board's own arithmetic is re-checked against it.
@@ -95,7 +95,7 @@ gets a group per board linking to that set automatically — see
 overview page into the same group instead of hand-linking it.
 
 **Reviewing one board.** `refdes check --board board-a` still parses and
-resolves the whole project — a decision on one board that satisfies a
+resolves the whole project — a log entry on one board that satisfies a
 requirement on another still checks correctly — it just only *reports*
 board-a's own diagnostics, so a team can review their own board without
 someone else's unrelated warning in the way. See [CLI reference](cli-reference.md).
@@ -174,7 +174,7 @@ WARNING items/board-a/requirements.yaml:9 [IFC-DBG-001] — IFC-DBG-001 is not
         stage counts only board-b's own items — see coverage-board-b.html
 ```
 
-A satisfier with no board counts for no board: an unboarded decision still
+A satisfier with no board counts for no board: an unboarded log entry still
 satisfies `IFC-DBG-001` for the project as a whole, and discharges nobody's
 per-board obligation.
 
@@ -337,7 +337,7 @@ to change a title. Which is why losing a key upstream surfaces as an error in
 your build, against a reference you never typed:
 
 ```
-ERROR items/decisions/pins.md:2 [DEC-A-001] — constrained_by points at key
+ERROR items/log/pins.md:2 [LOG-A-001] — constrained_by points at key
       'hfcfwy6kxy4' (labelled IFC-CAN-001), which no item declares. A live item
       labelled IFC-CAN-001 declares key '71vt2cfhfrh'. ... If it is the same
       item, restore its original key upstream. This composite reference was
@@ -377,7 +377,7 @@ This is the payoff. Platform tightens the connector rating:
 Board A, unchanged, now fails:
 
 ```
-ERROR items/decisions/pins.md:2 [DEC-A-001] — I_pin violates IFC-CAN-001:
+ERROR items/log/pins.md:2 [LOG-A-001] — I_pin violates IFC-CAN-001:
       worst case 2.4 A vs <= 2 A
 ```
 

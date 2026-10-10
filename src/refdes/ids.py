@@ -332,6 +332,13 @@ def validate_prefixes(project: Project) -> None:
         expected = prefix_for(project, item)
         if item.id.startswith(f"{expected}-"):
             continue
+        spec = project.types.get(item.type)
+        if (
+            not item.prefix_hint
+            and spec is not None
+            and any(item.id.startswith(f"{old}-") for old in spec.legacy_prefixes)
+        ):
+            continue
         source = "from defaults:" if item.prefix_hint else f"the {item.type!r} type's default"
         project.warn(
             f"id {item.id!r} does not match this item's prefix {expected!r} "

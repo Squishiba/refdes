@@ -24,7 +24,7 @@ and this project uses [Semantic Versioning](https://semver.org/).
   -- first at line 12, again at line 21. ... rename one of them, e.g. 'x' ->
   'x_2'.` A name reused across *different* items is unaffected -- scope
   still resets per item, unchanged from before.
-- **The bundled standard moves to `hardware@3`.** Six changes, arriving
+- **The bundled standard moves to `hardware@3`.** Seven changes, arriving
   together because none was ever published on its own:
     1. A new link verb, `governed_by` (inverse `governs`), authored on
        `requirement`, targeting `[requirement, bound]` -- "this specific
@@ -83,6 +83,80 @@ and this project uses [Semantic Versioning](https://semver.org/).
        `refdes-schema.yaml`. One case turns *stricter*: a retired calc unit
        spelling inside a formerly sealed entry was a warning and is now a
        build error, which `refdes calc-rewrite` can now fix.
+    7. **`decision` is retired; the history-backed `log` absorbs it**
+       (threads phase 4a, `docs/design/threads.md` §5). A verdict and a
+       design-log entry are the same thing -- a dated point on the project's
+       timeline that records what happened and why -- and the split forced
+       every decision to be authored twice: a `decision` item, plus a `log`
+       entry with a `records:` edge pointing at it. The merged `log` takes
+       over `decision`'s vocabulary: `title:` becomes `summary:`, and
+       `status`/`rationale`/`options`/`checks`, the
+       `satisfies`/`constrained_by`/`selects`/`supersedes`/`blocked_by`
+       links, `satisfying_statuses: [accepted]` and `check_severity: error`
+       all move onto `log`. `date:` is optional and `status:` has no
+       default, so entries written before the merge keep their meaning;
+       `legacy_prefixes: [DEC]` keeps migrated items' DEC ids warning-free
+       while new items mint `LOG` ids. A new link verb, `follows` (inverse
+       `followed_by`), declared on `log` and restricted to `[log]` targets,
+       is how an entry names the earlier entry it continues -- the thread
+       relation `records:`/`recorded_by` used to approximate -- and it is
+       `trace: false` like the verb it replaces. Part 5's `recorded_by:`
+       addition is superseded by this merge: `records`/`recorded_by` leave
+       the vocabulary with it. The `design-debate` preset (`debate`,
+       `option`, `claim`, `position`) retires with the type it was built
+       around; enabling it at `version: 3` is a load error naming it.
+       `refdes standard upgrade --to 3` carries a v2 project across in the
+       same refuse-and-roll-back transaction as the rest: `type: decision`
+       to `type: log`, `title:` to `summary:`, and every `records:` edge to
+       `follows:` -- kept a structured link, because structured links are
+       what the surrogate-key machinery keeps current across a target
+       rename, while a `citations: - item:` entry is bare-id data nothing
+       maintains.
+
+       **A migrated `records:` edge becomes a live thread edge, and the
+       first writable command after the upgrade captures history.** This is
+       the part worth reading before upgrading. The upgrade itself writes
+       bare targets (`follows: [DEC-001]`) and no events; the next command
+       that loads the project *writably* -- `check`, `build`, `index`, `id`,
+       `fetch`, `audit`, anything but `--no-write` -- then does exactly what
+       it does for a hand-authored `follows:` edge: it freezes each migrated
+       edge to its target's current thread tip and captures that target's
+       snapshot:
+
+       ```
+       $ refdes check
+       captured DEC-001: LOG-001 now follows it
+       (minted 2 key(s) and rewrote 1 reference(s) while loading)
+       2 items, 0 errors, 0 warnings
+       ```
+
+       The item file now reads `follows: [DEC-001@k9585h4cgtm]` and one event
+       has landed in `.refdes/history/events/`. From then on, editing the
+       old decision is reported like any other edited-after-captured entry:
+
+       ```
+       WARNING items/dec.yaml:5 [DEC-001] -- DEC-001: edited after captured --
+       current semantic content differs from the snapshot in followed event
+       067082b9-...; captured when LOG-001 followed it. If the edit was a
+       correction, revert it and append a new entry with `amends: [DEC-001]`
+       instead; otherwise there is nothing to do.
+       ```
+
+       So an edge you wrote as inert documentation ("this entry is about that
+       decision") comes back as a real thread edge, and the decision it
+       names is now under capture -- editing it warns instead of passing
+       silently. It is still a warning, never a build error, and
+       `--no-write` in between changes nothing about when it happens. If you
+       would rather not have those edges frozen, drop the `follows:` lines
+       before the first writable command.
+
+       One more field-semantics change rides along, because the merged `log`
+       is also the standard's activity log: `date` moves from
+       `on_change: log` (outside the content hash) to `on_change: invalidate`
+       (inside it), so a migrated decision's date now invalidates its
+       downstream links. Nothing orphans -- `title` -> `summary` and
+       `records` -> `follows` are the only losses -- but a date edit that
+       used to be invisible in a baseline diff is not any more.
 
   `refdes init` pins `version: 3` from now on. `refdes new <type>` now hints
   at `body:` after the closing fence -- it's reserved, not a schema field,
@@ -91,8 +165,10 @@ and this project uses [Semantic Versioning](https://semver.org/).
   **A project pinned at `version: 1` or `version: 2` is completely
   unaffected** and stays that way until it chooses otherwise. To move:
   `refdes standard upgrade --to 3`, which renames `text:`/`method:` to
-  `body:` in every item file that still writes them and `datasheets:` to
-  `citations:` on any component that still writes it, carries content
+  `body:` in every item file that still writes them, `datasheets:` to
+  `citations:` on any component that still writes it, and merges `decision`
+  items into `log` (retyping them, renaming `title:` to `summary:` and
+  `records:` edges to `follows:`), carries content
   hashes forward in every stamped baseline and seal, and refuses (rolling
   back) rather than silently overwriting or orphaning content on any item
   that already has body content of its own -- merge the two by hand first,

@@ -120,7 +120,8 @@ Consider recording this in the design log, e.g.:
   - id: LOG-A-0NN  # placeholder: your log prefix, next free number
     date: 2026-08-17
     summary: Released rev-b — sent to fab.
-    records: [DEC-A-0NN]  # the decision(s) this release turned on
+    citations:
+      - item: LOG-A-0MM  # an EARLIER log entry this release turned on
 ```
 
 Nothing writes that log entry for you — see [After a
@@ -165,7 +166,7 @@ gate:
 items:
   CMP-PWR-001: {hash: 673e6ba11269f350, type: component, title: "Buck converter",
     hash_format: 5, key: pktmysgxn8x, verdict: selected}
-  DEC-PWR-001: {hash: a1b2c3d4e5f60718, type: decision, title: "LDO vs. buck for 3V3 rail",
+  LOG-PWR-001: {hash: a1b2c3d4e5f60718, type: log, summary: "LDO vs. buck for 3V3 rail",
     hash_format: 5, key: fd24s541bbt, verdict: accepted, calc_hash: d73ecea8e6f01f1e}
   # ... one entry per local item
 ```
@@ -263,7 +264,7 @@ Baselines:
   most recent release: rev-b (2026-07-02T16:40:00Z)
 
 Since last revision (rev-c, 2026-08-10T09:12:00Z):
-  changed   3   DEC-PWR-002, CMP-PWR-001, REQ-PWR-003
+  changed   3   LOG-PWR-002, CMP-PWR-001, REQ-PWR-003
   added     1   TST-PWR-004
   removed   0
   relabelled 1
@@ -271,8 +272,8 @@ Since last revision (rev-c, 2026-08-10T09:12:00Z):
   (38 unchanged)
 
 Since last release (rev-b, 2026-07-02T16:40:00Z):
-  changed   9   CMP-PWR-001, DEC-PWR-001, DEC-PWR-002, REQ-PWR-002, ...
-  added     4   TST-PWR-003, TST-PWR-004, DEC-PWR-003, CMP-PWR-005
+  changed   9   CMP-PWR-001, LOG-PWR-001, LOG-PWR-002, REQ-PWR-002, ...
+  added     4   TST-PWR-003, TST-PWR-004, LOG-PWR-003, CMP-PWR-005
   removed   1
     REQ-OLD-002 (requirement) 'Legacy input protection' — no longer in the project
   relabelled 2
@@ -352,7 +353,7 @@ reports zero changes.
 **An item deleted since a baseline was stamped.** Reported by the diff as
 `removed`, using the `type`/`title` captured at stamp time. Not a gate
 condition — deletion is routinely intentional (retirement, a merge, a
-superseded decision removed outright) and there's no reliable machine
+superseded log entry removed outright) and there's no reliable machine
 signal to tell that apart from an accident. A gate rule with a high
 false-positive rate is worse than no rule at all.
 

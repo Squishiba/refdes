@@ -105,8 +105,8 @@ needed — arithmetic is calc's job, and a `limit` only ever compares one value.
 
 ## Declaring a check
 
-In the item doing the work — usually a decision — name a calc value and the item to
-check it against:
+In the item doing the work — usually the entry that reaches a verdict — name a calc
+value and the item to check it against:
 
 ```yaml
 checks:
@@ -142,7 +142,7 @@ nominal 10 V passes. This is the whole reason tolerances propagate.
 ## What a failure looks like
 
 ```
-ERROR items/decisions/dec-pwr-001-regulator-topology.md:2 [DEC-PWR-001] —
+ERROR items/log/regulator.md:2 [LOG-PWR-001] —
       P_dens violates BND-THM-001: worst case 0.2366 W/in² vs <= 0.15 W/in^2
 ```
 
@@ -154,7 +154,7 @@ author typed can differ — see [worst case, not nominal](#worst-case-not-nomina
 above:
 
 ```
-ERROR items/decisions/dec-io-002.md:2 [DEC-IO-002] — CLIM violates BND-IO-004:
+ERROR items/log/io.md:2 [LOG-IO-002] — CLIM violates BND-IO-004:
       worst case 0.697 A vs <= 600 mA (nominal 0.6061 A)
 ```
 
@@ -165,9 +165,9 @@ CI catches it.
 Tip: use a [unit assertion](math.md) matching the bound's units
 (`P_dens : W/in^2`) so both sides of the comparison read in the same unit.
 
-## Candidates vs. decisions
+## Candidates vs. verdicts
 
-A failing check being a build error assumes the item is a decision: the design
+A failing check being a build error assumes the item reaches a verdict: the design
 either meets the bound or it doesn't. That's the wrong reading for an item
 that is still a *candidate* — comparing several microcontrollers against a
 shared `BND-IO-008 (>= 2 DACs)`, two of them lacking an on-chip DAC is the
@@ -197,7 +197,7 @@ instead.
 
 This only changes the diagnostic for a check that *ran and failed*. The item
 page's `fail` badge and the check table's detail string are unaffected — a
-candidate that fails a criterion still shows `fail`, exactly as a decision
+candidate that fails a criterion still shows `fail`, exactly as a verdict entry
 would, because a comparison table needs every row read the same way.
 
 ### Severity per status
@@ -209,7 +209,7 @@ same part, once you have committed to it, is a defect. For that, write
 
 ```yaml
 types:
-  decision:
+  log:
     check_severity:
       default: error
       superseded: info       # settled history, not a defect
@@ -222,11 +222,11 @@ that would leave some status with no level at all is refused at load:
 
 ```
 $ refdes check
-configuration error: types.decision.check_severity does not cover status 'proposed'. Add it, or add default: <level>.
+configuration error: types.log.check_severity does not cover status 'proposed'. Add it, or add default: <level>.
 ```
 
-So the overlay above demotes a superseded decision's failure to `-v` without
-weakening a live one: a `decision` that is still `accepted` and still failing
+So the overlay above demotes a superseded entry's failure to `-v` without
+weakening a live one: a `log` entry that is still `accepted` and still failing
 resolves to `default: error` and still fails the build. The mapping is resolved
 per item, not per type, which means a one-word status edit is all it takes to
 move a failure from hidden to build-blocking — or back. `refdes release` reads
@@ -248,7 +248,7 @@ numbers and the identical failure is a build error. An overlay that names
 
 A mapping has three more load-time refusals, all worth knowing before you write
 one: a key that is not one of the type's declared `status` choices
-(`types.decision.check_severity key 'choosen' is not a declared status.
+(`types.log.check_severity key 'choosen' is not a declared status.
 Declared choices: proposed, in_progress, accepted, on_hold, rejected,
 superseded.`), a mapping on a type that declares no `status` field at all
 (`types.group.check_severity is a mapping but type 'group' declares no

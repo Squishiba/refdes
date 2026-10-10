@@ -554,5 +554,5 @@ def test_base_yaml_doc_only_diffs_are_the_approved_survivors():
     assert sorted(pairs) == sorted([
         ("status", ("bound", "requirement")),
         ("rationale", ("bound", "requirement")),
-        ("checks", ("component", "decision")),
+        ("checks", ("component", "log")),
     ])

@@ -105,33 +105,6 @@ def test_standard_hardware_v1_still_has_constraint_title(tmp_path):
     assert constraint.preview == ["status", "limit", "rationale"]
 
 
-def test_hardware_v3_decision_declares_recorded_by_and_the_link_resolves(tmp_path):
-    """A sealed log can never point forward at a decision written after it, so
-    the decision carries the `recorded_by:` end of the existing records/
-    recorded_by pair (backlog finding 16)."""
-    write_project_config(
-        tmp_path,
-        "site: { title: T, out: _site }\n"
-        "standard: { base: hardware, version: 3, presets: [] }\n",
-    )
-    project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
-    assert project.types["decision"].links["recorded_by"] == ["log"]
-
-    (tmp_path / "items").mkdir()
-    (tmp_path / "items" / "i.yaml").write_text(
-        "items:\n"
-        "  - id: LOG-001\n    type: log\n    date: 2024-01-01\n    summary: Deliberating.\n"
-        "  - id: DEC-001\n    type: decision\n    title: Decided afterwards.\n"
-        "    status: accepted\n    recorded_by: [LOG-001]\n",
-        encoding="utf-8",
-    )
-    project = _build_at(tmp_path)
-
-    assert not project.errors
-    assert project.item_by_id("DEC-001").resolved_links["recorded_by"] == ["LOG-001"]
-    assert project.item_by_id("LOG-001").backlinks["records"] == ["DEC-001"]
-
-
 def test_standard_version_must_be_a_pinned_integer(tmp_path):
     write_project_config(
         tmp_path,
@@ -686,11 +659,11 @@ def test_group_cannot_be_a_satisfies_target(tmp_path):
     lets satisfies target groups -- the silently-too-permissive case."""
     project = _group_project(
         tmp_path,
-        "  - id: DEC-001\n    type: decision\n    title: Claims the whole spec.\n"
+        "  - id: LOG-001\n    type: log\n    summary: Claims the whole spec.\n"
         "    status: accepted\n    satisfies: [GRP-001]\n",
     )
 
-    errors = [d for d in project.errors if d.item_id == "DEC-001"]
+    errors = [d for d in project.errors if d.item_id == "LOG-001"]
     assert errors, "satisfies: [GRP-001] was accepted with no error"
     assert any(
         "satisfies" in d.message and "is a group" in d.message for d in errors
@@ -698,8 +671,8 @@ def test_group_cannot_be_a_satisfies_target(tmp_path):
 
     # The claim is not merely reported-and-kept: it resolves nowhere, so it
     # cannot settle anything even as a side effect.
-    assert "GRP-001" not in project.item_by_id("DEC-001").resolved_links.get("satisfies", [])
-    assert "DEC-001" not in project.item_by_id("GRP-001").backlinks.get("satisfied_by", [])
+    assert "GRP-001" not in project.item_by_id("LOG-001").resolved_links.get("satisfies", [])
+    assert "LOG-001" not in project.item_by_id("GRP-001").backlinks.get("satisfied_by", [])
 
 
 def test_part_of_resolves_and_the_group_sees_members_through_contains(tmp_path):

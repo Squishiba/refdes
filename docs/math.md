@@ -45,7 +45,7 @@ P_diss = P_out * (1/eff - 1) | W
 ````
 
 `id="..."` is an attribute on the opening fence line — the fence's info
-string, quoted exactly like `caption="..."` on a figure or `type="decision"`
+string, quoted exactly like `caption="..."` on a figure or `type="log"`
 on a page block. Naming is **opt-in**: a ```` ```calc ```` with no attribute is
 legal and renders byte-for-byte as it always has; a block needs no name until
 something wants to point at it.
@@ -62,8 +62,8 @@ grammar — is a build error at the fence line naming the fix (see
 What a name is: **a label on the rendering.** A named block's table gains an
 anchor (`#calc-<name>`) and a caption carrying the name, so the two
 calculations in an item are distinguishable on its page.
-`[[DEC-PWR-001#calc:losses]]` in prose links straight to that table, and
-`{{calcblock item="DEC-PWR-001" block="losses"}}` on a page renders it — both
+`[[LOG-PWR-001#calc:losses]]` in prose links straight to that table, and
+`{{calcblock item="LOG-PWR-001" block="losses"}}` on a page renders it — both
 address the block itself, never its individual values.
 
 What a name is **not**:
@@ -92,28 +92,28 @@ the copies diverge silently when the original changes. A dotted reference names
 another item's calc value directly:
 
 ```calc
-V_in = DEC-PWR-001.V_in
+V_in = LOG-PWR-001.V_in
 P_in = V_in * I_in | W
 ```
 
 This is a real dependency, not a convenience alias. The build evaluates items
 in dependency order — an item's calc runs only after every item it reads from —
 and the reference is stored expanded as a `DISPLAY-ID@key` composite like every
-other structured reference, so renaming `DEC-PWR-001` refreshes the label and
+other structured reference, so renaming `LOG-PWR-001` refreshes the label and
 keeps resolving. The next writable command freezes the bare spelling to its
 composite; under `--no-write` the bare reference still resolves on the display
 id, and nothing is written.
 
 Any named value in the target's calc blocks is referenceable — there is no
 exports list. The pipe unit works on a reference like on any line:
-`V_in = DEC-PWR-001.V_in | mV` re-expresses the target's value in millivolts.
+`V_in = LOG-PWR-001.V_in | mV` re-expresses the target's value in millivolts.
 Units and tolerances flow through untouched: a reference to `12 V ± 5%` arrives
 with its ±5% intact, which is exactly what a retyped `12 V` loses.
 
 A reference never names a block: the target half is an item, the name half is a
 value, and that is the whole grammar — block names are labels on the rendering,
-not part of value resolution. So `DEC-PWR-001.losses.P_diss` is a build error
-naming the working form `DEC-PWR-001.P_diss`, not a second spelling of one
+not part of value resolution. So `LOG-PWR-001.losses.P_diss` is a build error
+naming the working form `LOG-PWR-001.P_diss`, not a second spelling of one
 reference.
 
 A reference binds a name exactly as an assignment does, so the one-name-per-item
@@ -124,10 +124,10 @@ Every failure is a loud error at the referring line — never a silent default o
 a stale value:
 
 ```
-ERROR calc V: no item 'DEC-NOPE' -- cross-item reference 'DEC-NOPE.V_in' names an item that does not exist
-ERROR calc X: cross-item reference 'DEC-001.Iout': DEC-001 does not define 'Iout' (it defines: I_out, V_in)
-ERROR calc V: cannot resolve 'DEC-001.V_in': DEC-001's own calc failed
-ERROR calc reference cycle: DEC-001 -> DEC-002 -> DEC-001
+ERROR calc V: no item 'LOG-NOPE' -- cross-item reference 'LOG-NOPE.V_in' names an item that does not exist
+ERROR calc X: cross-item reference 'LOG-001.Iout': LOG-001 does not define 'Iout' (it defines: I_out, V_in)
+ERROR calc V: cannot resolve 'LOG-001.V_in': LOG-001's own calc failed
+ERROR calc reference cycle: LOG-001 -> LOG-002 -> LOG-001
 ```
 
 A reference to an item whose own calc failed reports *that*, in one line — the
@@ -141,13 +141,13 @@ version, and that is a later decision.
 ### An upstream change marks the dependent changed
 
 The value a reference resolved to is part of the referring item's content
-hash (`hash_format` 4), so when `DEC-PWR-001`'s `V_in` moves, `DEC-B` shows up
+hash (`hash_format` 4), so when `LOG-PWR-001`'s `V_in` moves, `LOG-B` shows up
 as `changed` in the baseline diff even though nothing in its own text did --
 and `refdes audit` says which reference moved:
 
 ```
-  changed   2   DEC-B, DEC-PWR-001
-    DEC-B -- referenced DEC-PWR-001.V_in: 12 V (11.4 V … 12.6 V) -> 11.4 V (10.83 V … 11.97 V)
+  changed   2   LOG-B, LOG-PWR-001
+    LOG-B -- referenced LOG-PWR-001.V_in: 12 V (11.4 V … 12.6 V) -> 11.4 V (10.83 V … 11.97 V)
 ```
 
 The hash covers the target's key and the full-precision value with its unit

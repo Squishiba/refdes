@@ -14,7 +14,8 @@ different population.
 
 The decision is taken. This document specs it; it does not relitigate it.
 
-**Status: Phase 3a implemented.**
+**Status: Phase 4a implemented.** H6–H9 and the Phase 4b thread panel remain
+later work.
 
 **Scope note on concurrent work:** this document does not touch, and makes
 no claim about, `standards/hardware/v3/base.yaml`, any file under `docs/`
@@ -60,6 +61,40 @@ merge, §7's migration file), it says so and stops there.
   `component` have in the current `hardware@3` schema. Revisit this if a
   better way to handle citations emerges before threads phase 4a is
   implemented.
+
+**Phase 4a migration decisions, owner, 2026-10-03:**
+
+- Missing date: RELAX the merged log's date so it is optional, matching what
+  decision allows today. Do not reject valid projects and do not invent a date.
+  Existing projects must keep building.
+- Missing status: LEAVE IT BLANK. Do not write the default `proposed` into
+  migrated entries. A missing status keeps its current meaning.
+- `records` / `recorded_by` links: CONVERT them into entries of the merged
+  log's citations set, so no link is lost.
+- Internal link encoding: ADD AN ITEM FIELD to citations. A citation entry may
+  carry `item:` naming another item's id. Validate at build time that the id
+  exists; a dangling item target is an error, the same as a dangling link.
+  Keep the single citations set. Do not add a separate refs set.
+
+**How phase 4a actually implemented the `records`/`recorded_by` decision
+(2026-10-07, added by the implementation session; the owner bullets above are
+unchanged and still stand as decisions):** by renaming the link verb to
+`follows:` rather than converting its targets into `citations: - item:`
+entries. `v3/migration.yaml` carries `links: { records: follows }`, which is
+the whole conversion — no new citation shape, no new field, no new
+validation path. The reason, recorded in `migration.yaml:57-64`: an
+`item:` citation entry is **bare-id data that nothing maintains**. It breaks
+on the target's first rename, and the composite `DISPLAY-ID@key` spelling the
+surrogate-key machinery writes everywhere else is not accepted there at all
+(`item_by_id` is display-id only). A structured link is the one spelling the
+key machinery keeps current — it freezes to `DISPLAY-ID@key`, and the readable
+half is refreshed when the target renames. So the owner's requirement ("no
+link is lost", "a dangling item target is an error") is met by keeping the
+edge a maintained link rather than by re-encoding it as a citation. The
+`citations: - item:` shape itself still exists on the merged `log` type and
+still validates as the owner specified — it just is not what a *migrated*
+edge becomes. §6 and §7 below still describe the citation encoding; this note
+and `migration.yaml` record what shipped.
 
 **Phase 1 implemented** (this session, 2026-09-14): §2's identity
 foundation — `Project.items` re-keyed on surrogate key (or, for an item
@@ -626,7 +661,7 @@ types:
     satisfying_statuses: [accepted]     # from decision
     check_severity: error               # from decision
     fields:
-      date:      { type: date, required: true, on_change: invalidate }
+      date:      { type: date, on_change: invalidate }
       summary:   { type: text, required: true, on_change: invalidate }
       author:    { type: person, on_change: invalidate }
       status:    { type: enum, on_change: invalidate,
@@ -774,14 +809,16 @@ can (and typically will) declare both: `follows:` for its place in the
 chain, `amends:` for what it's correcting, which may or may not be its own
 immediate predecessor.
 
-`records:`/`recorded_by:` — finding 16's whole problem — still dissolves,
-for the reason the previous draft gave: the deliberation and its
-conclusion are positions in the same chain now, no cross-item link needed
-to associate them. A genuinely cross-chain "this entry's reasoning also
-fed a different, unrelated decision" case is rare enough in the record of
-real usage that this document doesn't propose a replacement mechanism for
-it — same disclosed gap `amends:` has for a cross-chain correction, use
-prose (`[[...]]`) until it proves common enough to need more.
+`records:`/`recorded_by:` — finding 16's whole problem — dissolves as a link
+verb. Deliberation and conclusion are positions in the same chain.
+
+**What shipped, 2026-10-07:** during migration the verb is *renamed*, to
+`follows:`, so every authored target is preserved as a maintained edge rather
+than re-encoded as a `citations: - item:` entry. The reasoning, and the
+contradiction with the sketch below this paragraph, are recorded in the
+implementation note in the "Phase 4a migration decisions" block above. An
+author can still use `item:` in a citation for a cross-chain reference that is
+not part of the thread; that shape is unchanged.
 
 ---
 
@@ -792,8 +829,11 @@ prose (`[[...]]`) until it proves common enough to need more.
 The previous draft needed a `former_ids`-shaped propose/confirm tool to
 *group* existing items into new containers — real, substantial, new
 machinery. **This model needs no grouping step for correctness at all.**
-Every existing `log` item stays exactly what it is (already the surviving
-type). Every existing `decision` item becomes a `log` item with its fields
+Every existing `log` item remains the surviving type; authored `records:`
+edges become `follows:` edges (the citation encoding this paragraph originally
+sketched is superseded — see the 2026-10-07 note above). Every existing
+`decision` item becomes a
+`log` item with its fields
 carried over — a mechanical, per-item rename, structurally identical in
 shape to the `text:`/`method:` → `body:` migration `hardware@2` → `@3`
 already shipped, reusing `revise.py`'s existing atomic-rewrite engine
@@ -810,9 +850,14 @@ type the moment `@3` ships:
 # later change's to write
 fields:
   decision:            # keyed by the OLD type name
-    title: null         # dropped -- summary already exists and serves the role (§5)
-types:
-  decision: log         # type rename; decision's own fields merge into log's
+    title: summary      # preserve the former one-line label
+merge_types:
+  decision: log         # destination already exists
+links:
+  records: follows      # what shipped -- see the 2026-10-07 note above
+# citation_links: [records, recorded_by]   <- NOT what shipped. The
+#   conversion-to-citation section was never needed by any bundled
+#   migration, has no consumer, and was dropped on 2026-10-07.
 ```
 
 No item loses its id. No item's content hash needs reconstructing beyond

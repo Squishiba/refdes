@@ -331,10 +331,58 @@ def test_cli_release_log_nudge_ids_are_marked_placeholders(lifecycle_project, ca
     assert "#" in id_line, "the placeholder is not marked as one"
     assert "LOG-..." not in text
 
-    records_line = next(line for line in block if "records:" in line)
-    recorded = re.search(r"records: \[(.*)\]", records_line).group(1).strip()
+    citation_line = next(line for line in block if "- item:" in line)
+    recorded = citation_line.split("- item:", 1)[1].split("#", 1)[0].strip()
     assert ids_mod.split_id(recorded) is None, f"{recorded} is a real id shape"
-    assert "#" in records_line, "the placeholder is not marked as one"
+    assert "#" in citation_line, "the placeholder is not marked as one"
+
+
+def test_release_nudge_citation_form_loads_under_the_shipped_schema(lifecycle_project, capsys):
+    """The nudge's `- item:` placeholder must name an id the shipped schema
+    can actually mint. It used to print `DEC-A-0NN` -- a prefix hardware@3
+    never hands out after the decision merge -- so following the tool's own
+    advice cited an item that cannot exist and failed the build (PR #176
+    review). The placeholder must carry the same prefix as the nudge's own
+    `- id:`, and the substituted form must survive the loader and a build.
+    """
+    block = _cover_both_requirements_and_release(lifecycle_project, capsys)
+    id_line = next(line for line in block if "- id:" in line)
+    citation_line = next(line for line in block if "- item:" in line)
+    id_placeholder = id_line.split("- id:", 1)[1].split("#", 1)[0].strip()
+    cited_placeholder = citation_line.split("- item:", 1)[1].split("#", 1)[0].strip()
+    # The cited entry is an earlier log entry, so its placeholder carries
+    # the log prefix the nudge's own new entry uses -- not a retired one.
+    assert cited_placeholder.split("-")[0] == id_placeholder.split("-")[0]
+    # ...but a different placeholder, because these are two different entries.
+    # One placeholder used for both pasted as an entry citing itself (PR #176
+    # review), and nothing catches it: a self-citation resolves, so the build
+    # stayed clean and the mistake shipped.
+    assert cited_placeholder != id_placeholder, (
+        "the nudge's `- id:` and `- item:` placeholders are identical, so "
+        "following the tool's own advice writes an entry citing itself"
+    )
+
+    # Run the hint's citation form through the loader: substitute the
+    # placeholder digits and build a hardware@3 project whose log entry
+    # cites an id of exactly that shape. Both placeholders end in a run of
+    # placeholder letters, so substitute whichever run this one carries.
+    cited = re.sub(r"[A-Z]+$", "001", cited_placeholder)
+    root = lifecycle_project / "v3-after"
+    root.mkdir()
+    write_project_config(
+        root, "site: { title: v3 }\nstandard: { base: hardware, version: 3 }\n"
+    )
+    (root / "items").mkdir()
+    (root / "items" / "log.yaml").write_text(
+        "items:\n"
+        f"  - id: {cited}\n    type: log\n    summary: Earlier entry\n"
+        "  - id: LOG-900\n    type: log\n    summary: Released rev-a\n"
+        f"    citations:\n      - item: {cited}\n",
+        encoding="utf-8",
+    )
+    assert cli_mod.main(
+        ["-c", str(root / "refdes-project.yaml"), "--no-write", "check"]
+    ) == 0
 
 
 @pytest.mark.parametrize(

@@ -8,7 +8,7 @@ describes accurately.
 
 ## The problem
 
-A decision's verdict and its `calc` block are two independent pieces of
+A log entry's verdict and its `calc` block are two independent pieces of
 content that happen to sit in the same item. Someone edits `status:` (or
 writes "we switched to the 2 A part" in prose) without touching the `calc`
 block underneath. `refdes check`/`build` evaluate that block live, against
@@ -158,8 +158,9 @@ baseline and now.
 
 ## Forward-compat with threads
 
-`docs/design/` has no doc yet for collapsing `log` and `decision` into
-append-only threads (issue #7 finding 17) — this section is scoped only to
+`docs/design/` had no doc for collapsing `log` and `decision` into
+append-only threads when this was written (issue #7 finding 17; the
+`threads.md` spec has since landed) — this section is scoped only to
 not foreclosing on that, not to designing it.
 
 The two probes this signal needs — "what's the current verdict, did it

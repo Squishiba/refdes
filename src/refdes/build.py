@@ -239,6 +239,10 @@ def _field_error(project: Project, item: Item, fname: str, message: str) -> None
 
 
 def validate_items(project: Project) -> None:
+    # Built once for the whole pass: `citations: - item:` resolves through the
+    # same helper as every other target spelling, and `_key_index` is one dict
+    # comprehension over items already in memory.
+    by_key = _key_index(project)
     for item in project.local_items:
         spec = project.types[item.type]
 
@@ -332,7 +336,7 @@ def validate_items(project: Project) -> None:
                         if not isinstance(entry, dict):
                             _field_error(
                                 project, item, fname,
-                                f"{fname}[{index}]: each citation needs a 'path'",
+                                f"{fname}[{index}]: each citation needs a 'path' or 'item'",
                             )
                             continue
                         if "url" in entry:
@@ -362,12 +366,43 @@ def validate_items(project: Project) -> None:
                                 f"-> @3 content)",
                             )
                             continue
-                        if not entry.get("path"):
+                        if "item" in entry:
+                            target = entry["item"]
+                            if not isinstance(target, str) or not target.strip():
+                                _field_error(
+                                    project, item, fname,
+                                    f"{fname}[{index}]: item: must name an item id",
+                                )
+                            elif resolve_link_target(by_key, project, target) is None:
+                                # `ID@key` and a bare key resolve here exactly
+                                # as they do for every other target spelling
+                                # (docs/design/keys.md §3); a display-id-only
+                                # lookup reported a composite whose target was
+                                # alive as "does not exist", which names neither
+                                # the real cause nor a way out. Anything that
+                                # *looks* like a key spelling now gets the shared
+                                # key diagnostic instead, which explains that the
+                                # key is what resolves and the label may be stale.
+                                if "@" in target or _is_bare_key_token(target):
+                                    _field_error(
+                                        project, item, fname,
+                                        _unknown_key_message(
+                                            project, f"{fname}[{index}]: item:", target
+                                        ),
+                                    )
+                                else:
+                                    _field_error(
+                                        project, item, fname,
+                                        f"{fname}[{index}]: item: {target!r} does not exist",
+                                    )
+                        if not entry.get("path") and not entry.get("item"):
                             _field_error(
                                 project, item, fname,
-                                f"{fname}[{index}]: each citation needs a 'path'",
+                                f"{fname}[{index}]: each citation needs a 'path' or 'item'",
                             )
                             continue
+                        if not entry.get("path"):
+                            continue  # item-only citations have no document to verify
                         try:
                             kind, _canon = citations_mod.classify(
                                 project.root, str(entry["path"])

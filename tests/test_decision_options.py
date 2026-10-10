@@ -4,7 +4,7 @@ The repro, on a project with the bundled `hardware@3` standard:
 
     items/d.yaml
       - id: DEC-X-001
-        title: Which regulator topology for the 3V3 rail
+        summary: Which regulator topology for the 3V3 rail
         status: proposed
         options:
           - Linear regulator          # meant as a name; the panel wants a mapping
@@ -55,10 +55,10 @@ CONFIG = (
 )
 
 STRING_OPTIONS = (
-    "defaults: { type: decision, prefix: DEC }\n"
+    "defaults: { type: log, prefix: DEC }\n"
     "items:\n"
     "  - id: DEC-X-001\n"
-    "    title: Which regulator topology for the 3V3 rail\n"
+    "    summary: Which regulator topology for the 3V3 rail\n"
     "    status: proposed\n"
     "    options:\n"
     "      - Linear regulator\n"
@@ -66,10 +66,10 @@ STRING_OPTIONS = (
 )
 
 MAPPING_OPTIONS = (
-    "defaults: { type: decision, prefix: DEC }\n"
+    "defaults: { type: log, prefix: DEC }\n"
     "items:\n"
     "  - id: DEC-X-001\n"
-    "    title: Which regulator topology for the 3V3 rail\n"
+    "    summary: Which regulator topology for the 3V3 rail\n"
     "    status: proposed\n"
     "    options:\n"
     "      - name: Linear regulator\n"
@@ -81,29 +81,29 @@ MAPPING_OPTIONS = (
 )
 
 NAME_ONLY_OPTIONS = (
-    "defaults: { type: decision, prefix: DEC }\n"
+    "defaults: { type: log, prefix: DEC }\n"
     "items:\n"
     "  - id: DEC-X-001\n"
-    "    title: Which regulator topology for the 3V3 rail\n"
+    "    summary: Which regulator topology for the 3V3 rail\n"
     "    status: proposed\n"
     "    options:\n"
     "      - name: Linear regulator\n"
 )
 
 SCALAR_OPTIONS = (
-    "defaults: { type: decision, prefix: DEC }\n"
+    "defaults: { type: log, prefix: DEC }\n"
     "items:\n"
     "  - id: DEC-X-001\n"
-    "    title: Which regulator topology for the 3V3 rail\n"
+    "    summary: Which regulator topology for the 3V3 rail\n"
     "    status: proposed\n"
     "    options: Linear regulator or switching regulator\n"
 )
 
 STRING_CHECKS = (
-    "defaults: { type: decision, prefix: DEC }\n"
+    "defaults: { type: log, prefix: DEC }\n"
     "items:\n"
     "  - id: DEC-X-001\n"
-    "    title: Which regulator topology for the 3V3 rail\n"
+    "    summary: Which regulator topology for the 3V3 rail\n"
     "    status: proposed\n"
     "    checks:\n"
     "      - P_diss\n"

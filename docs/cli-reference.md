@@ -79,7 +79,7 @@ below):
 WARNING items/bounds/thermal.yaml:1 — could not write this file (read-only tree?); run with --no-write to silence this
 
 # commands that print none: one summary line naming the files
-(load could not write this file (read-only tree?) -- .refdes/schema.json, items/bounds/thermal.yaml, items/decisions/dec.md, items/log.yaml (+3 more); run with --no-write to silence this)
+(load could not write this file (read-only tree?) -- .refdes/schema.json, items/bounds/thermal.yaml, items/log/entry.md, items/log.yaml (+3 more); run with --no-write to silence this)
 ```
 
 The split is deliberate, and worth knowing which side of it a command is on
@@ -193,7 +193,7 @@ refdes check
 ```
 
 ```
-ERROR   items/decisions/dec-pwr-001-regulator-topology.md:2 [DEC-PWR-001] — P_dens violates BND-THM-001: worst case 0.2366 W/in² vs <= 0.15 W/in^2
+ERROR   items/log/log-pwr-001-regulator.md:2 [LOG-PWR-001] — P_dens violates BND-THM-001: worst case 0.2366 W/in² vs <= 0.15 W/in^2
 WARNING <project> — 1 item(s) with no coverage — see coverage.html
 20 items, 1 errors, 8 warnings
 ```
@@ -212,7 +212,7 @@ Errors go to stderr, warnings to stdout. Every diagnostic leads with
 | `-v`, `--verbose` | Also show info-level diagnostics |
 
 `--board`/`--workspace` are report filters, not a smaller build: the whole
-project is still parsed and every link still resolved, so a decision on one
+project is still parsed and every link still resolved, so a log entry on one
 board that `satisfies` a requirement on another still checks correctly. Only
 what gets *printed* — and the item count in the summary line — is narrowed to
 that scope's own items. A diagnostic that isn't attributable to any one item
@@ -738,7 +738,7 @@ Baselines:
   most recent release: rev-b (2026-07-02T16:40:00Z)
 
 Since last revision (rev-c, 2026-08-10T09:12:00Z):
-  changed   3   DEC-PWR-002, CMP-PWR-001, REQ-PWR-003
+  changed   3   LOG-PWR-002, CMP-PWR-001, REQ-PWR-003
   added     1   TST-PWR-004
   removed   0
   relabelled 1
@@ -746,8 +746,8 @@ Since last revision (rev-c, 2026-08-10T09:12:00Z):
   (12 unchanged)
 
 Since last release (rev-b, 2026-07-02T16:40:00Z):
-  changed   9   CMP-PWR-001, DEC-PWR-001, DEC-PWR-002, REQ-PWR-002, ...
-  added     4   TST-PWR-003, TST-PWR-004, DEC-PWR-003, CMP-PWR-005
+  changed   9   CMP-PWR-001, LOG-PWR-001, LOG-PWR-002, REQ-PWR-002, ...
+  added     4   TST-PWR-003, TST-PWR-004, LOG-PWR-003, CMP-PWR-005
   removed   0
   relabelled 2
     REQ-PWR-009 -> REQ-PWR-012   (k7f3m2q9x4a)
@@ -764,7 +764,7 @@ Workspace moves since the manifest was last written:
   (none)
 
 Blocked chains:
-  DEC-PWR-005 <- DEC-PWR-001 (on_hold, root)
+  LOG-PWR-005 <- LOG-PWR-001 (on_hold, root)
 
 Imported projects (read-only):
   platform       1 items pinned to 2026.3  <- ../platform/_site/items.json
@@ -898,9 +898,12 @@ standard library](standard-library.md#refdes-new-lt-type-gt).
 | `--list` | Print a list-file skeleton (a `defaults:` block and an `items:` list holding one empty entry) instead of a single item. |
 
 ```bash
-refdes new decision > items/power/dec-005.md
+refdes new log > items/power/log-005.md
 refdes new component --list > items/power/candidates.yaml
 ```
+
+`decision` was retired in `hardware@3` — a verdict is a `log` entry now, so
+`refdes new decision` answers `configuration error: unknown type 'decision'.`
 
 An unknown type exits 1 with a did-you-mean suggestion, the same as an
 unknown type anywhere else in the tool. Outside a project it still works,
@@ -926,7 +929,7 @@ out of that list.
 
 ```bash
 refdes schema --json > schema.json
-refdes schema --json | jq '."$defs".decision__bare.properties'
+refdes schema --json | jq '."$defs".log__bare.properties'
 ```
 
 ---
@@ -950,7 +953,7 @@ refdes schema --graph                           # every type, plus the spine
 With `TYPE`, only that type's diagram is drawn:
 
 ```bash
-refdes schema --graph decision > decision.svg
+refdes schema --graph log > log.svg
 ```
 
 Each one is byte-for-byte the drawing the built site puts on the matching
@@ -1006,7 +1009,9 @@ Each bundled standard version ships its own `migration.yaml` — the delta
 from the version immediately before it (`hardware@2`'s renames
 `constraint.title` to `constraint.text` and the `constraint` type to
 `bound`, its `CON` prefix along with it; `hardware@3`'s renames
-`requirement.text`/`bound.text`/`test.method` to `body:`). See [the
+`requirement.text`/`bound.text`/`test.method` to `body:`, merges the
+retired `decision` type into `log` under `merge_types:`, and rewrites
+every `records:` edge to `follows:` under `links:`). See [the
 versions shipped so far](standard-library.md#the-versions-shipped-so-far).
 Upgrading across several versions chains each intervening one's own
 migration, in order — `v1→v2`, then `v2→v3`, and so on — never merged into
@@ -1049,14 +1054,18 @@ also an exit 1 with the config left at the version it had.
 
 ## `refdes revise <mapping-file>`
 
-Rewrite project-local vocabulary — type names, field names (scoped per
-type), link verb names, id prefixes, citation-entry key names — across every
-item file in one operation, from a hand-written mapping:
+Rewrite project-local vocabulary — type names, type merges into an
+existing type, field names (scoped per type), link verb names, id prefixes,
+citation-entry key names — across every item file in one operation, from a
+hand-written mapping:
 
 ```yaml
 # rename.yaml
 types:
   constraint: bound
+merge_types:       # like types:, but the destination already exists: the
+  decision: log    # merged type's items keep their ids, only the type
+                   # spelling changes
 fields:
   constraint:      # keyed by the OLD type name
     title: text
@@ -1068,8 +1077,15 @@ citation_keys:     # renamed inside every citations-typed field's entries
   url: path
 ```
 
-Those five sections are the whole vocabulary. **Any other top-level section is
+Those six sections are the whole vocabulary. **Any other top-level section is
 refused**, not ignored — see below.
+
+A mapping file carrying `citation_links:` is refused by name, like any other
+unknown section. That section once turned an authored link's targets into
+`citations: - item:` entries; nothing used it (no bundled migration ever did),
+and the conversion it existed for is better done as a link rename. When a new
+standard declares a maintained link that fits, rename the verb under `links:`;
+`refdes standard upgrade` does exactly that for `records:` → `follows:`.
 
 For a bundled standard's own version upgrade, use `refdes standard upgrade
 --to N` instead (above) — it needs no hand-written mapping. `revise` is
@@ -1209,7 +1225,7 @@ does instead is tell you, so the difference is never silent:
 ```
 2 prose mention(s) of a renamed id left behind -- these no longer resolve,
 and were not rewritten (a rename never edits prose):
-  items/decisions/dec-pwr-001.md:36  CON-THM-001 -> BND-THM-001
+  items/log/log-pwr-001.md:36  CON-THM-001 -> BND-THM-001
   pages/overview.md:5  CON-THM-001 -> BND-THM-001
 ```
 
@@ -1481,7 +1497,7 @@ membership manifests rebased:
   .refdes/boards.yaml (35/35 entries carried)
 changed files:
   items/power/requirements.yaml
-  items/thermal/decisions.md
+  items/thermal/log.md
   .refdes/baselines/rev-c.yaml
   .refdes/baselines/rev-b.yaml
   .refdes/log-seal.yaml

@@ -190,7 +190,7 @@ The two shapes the code supports today:
       text:  # required -- text
       # status:  # choices: draft, approved
       # refines: []  # target: requirement
-      # governed_by: []  # target: requirement, decision
+      # governed_by: []  # target: requirement, bound
       ---
 
       <!-- optional body. -->

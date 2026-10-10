@@ -1,0 +1,203 @@
+Task: threads phase 4a decision-to-log merge
+Status: in progress.
+
+Read docs/design/threads.md sections 5 and 7, docs/design/living-notes.md section 7, and docs/design/living-notes-plan.md H1-H5 and Threads handoff. Owner decisions dated 2026-10-01 keep citations on merged log and retire the design-debate preset when the merge lands. Confirmed H1-H4 code exists in history.py and H5 in seal.py and hardware/v3/base.yaml.
+
+Difficulty: held ao/refdes-64/root branch is not a local ref or object in this worktree, so implementation would have to be reconstructed from the current spec and engine. An editable install into .scratch/venv failed: package-index DNS is unavailable, and offline pip cannot import setuptools.build_meta. The existing /home/jorb/work/venv-refdes executable was used read-only with PYTHONPATH pointed at this worktree for verification.
+
+Verified baseline with `refdes schema --json` in .scratch/phase4a-baseline: decision requires title, permits omitted date, and defaults status to proposed; log requires date and summary. `refdes --no-write check` on a v3 decision with title and accepted status but no date returned exit 0, 1 item, 0 errors, 0 warnings. The merged-log sketch in threads.md section 5 still requires date. The migration sections do not specify how to convert a valid date-less decision into a required-date log without inventing a date, weakening the new schema, or rejecting a valid existing project. This is a behavior-changing unresolved choice and conflicts with the task's compatibility requirement.
+
+Additional migration ambiguity: threads.md section 7 sketches dropping decision.title while its section 5 says it is replaced by log.summary; the later living-notes.md and plan specify title-to-summary, so the later decision resolves this. Existing decision status has a proposed default, while the merged status has no default; the docs do not say whether migration materializes proposed for absent status. Existing records/recorded_by links are said to dissolve, while section 7 also says zero data loss; the migration disposition of authored edges is not specified. These latter issues would also change behavior.
+
+Status at first turn: unfinished, stopped before implementation as requested because the design docs did not resolve the date migration rule. No code, tests, schema changes, commit, push, or PR at that point.
+
+Owner follow-up: date optional on merged log; omitted status stays blank; old records/recorded_by edges must become citations. The first two are implemented. The third has an encoding gap: `refdes schema --json` confirms citations entries allow only a document path plus document metadata, so I requested the exact internal-link citation shape before touching those edges. Work that does not depend on that answer continues.
+
+Set up .scratch/venv with editable `refdes[dev]` after a network-enabled install. Added the merged hardware@3 log vocabulary, `follows`, DEC legacy prefix handling, and merge_types support in revise. A scratch v2 decision lacking both date and explicit status upgraded via `refdes standard upgrade --to 3` to `type: log`, `summary:` from title, unchanged DEC id, no date/status; `refdes --no-write check` returned 1 item, 0 errors, 0 warnings. This verifies the independent migration path only; links-to-citations remains pending.
+
+Owner clarification received: a citation entry may carry `item:` naming another item's id; build-time validation rejects a dangling id. Kept one citations set and no refs set. Implemented `citation_links: [records, recorded_by]` in the v2-to-v3 migration and the merged schema's citation item shape. A migration refusal now protects unresolved old link targets from being dropped. Added tests for records conversion, recorded_by conversion with an existing document citation, dangling citation targets, date/status preservation, and follows capture. The repo's own unmigrated decision items remain behind a temporary overlay bridge for phase 4b.
+
+The first complete unsandboxed test run after fixture updates found 3 failures and 3318 passes, 2 skips: two stale release-nudge expectations and one pinned vocabulary-page digest. Updated those fixtures and focused rerun passed 5/5. Full-suite final rerun and sabotage check remain pending.
+
+Final verification: the sabotage test failed 1/1 with the DEC legacy prefix removed, then passed 1/1 after exact restoration. `refdes schema --json` from the throwaway project confirmed before/after fields in .scratch/phase4a-baseline/schema-comparison.txt. Focused regressions passed 94/94. Final full suite passed 3321 tests with 2 skips. `ruff --select F821` passed on touched Python files and `git diff --check` was clean. The repo sample's `refdes --no-write check` still reports 20 items, 1 numeric check error (P_dens vs BND-THM-001), 2 coverage warnings; scratch upgraded decision project checked clean.
+
+Status: implementation and verification finished; commit, push, and PR publication in progress.
+
+Status: finished. Committed phase 4a as b3fc3c2, pushed branch threads-4a-decision-to-log, and opened PR #176 against main. PR remains unmerged as requested.
+
+Status: second-round review fixes in progress (PR #176 review round 2, .scratch/REVIEW-176-round2.md).
+
+Findings 1-2 (docs still teach the retired `decision` type) done: swept every page under docs/ plus README.md to the `log` vocabulary -- getting-started, checks, schema-reference, standard-library, lifecycle, troubleshooting, authoring, links, cli-reference, coverage, blocks, math, markdown, multi-board, workspaces, ids, parts, design-log, output. Fixed the standard-library page's wrong upgrade claim (a `standard upgrade` landing on a version without a selected preset refuses and rolls back; it does not strip `presets:` for you -- verified in .scratch/v2probe). Also corrected two claims that were wrong against the shipped v3 schema: `part_of` is deliberately not on `log`, and the `satisfying_statuses` example in coverage.md used a `decision` block that no longer resolves (retyped to `component`). src/refdes/vocabulary.py regenerated the per-type examples; `python docs-site/gen_examples.py --check` passes.
+
+Finding 3 (undisclosed capture) done: verified on a clean v2 project that the upgrade writes `follows: [DEC-001]` with no events, and the first writable load then prints `captured DEC-001: LOG-001 now follows it`, freezes to `follows: [DEC-001@k9585h4cgtm]`, and writes one event; a later edit to DEC-001 then warns. Recorded that in CHANGELOG.md item 7 and as new bullets in changelog.d/threads-4a-decision-merge.breaking.md, plus a note in docs/standard-library.md.
+
+Finding 4 done: `validate_items` resolved `citations: - item:` through `project.item_by_id` (display-id only), so a composite `ID@key` -- the spelling the surrogate-key machinery itself writes -- reported `does not exist` for an item that was there. Now resolves via `resolve_link_target`, and anything key-shaped that still fails takes the shared `_unknown_key_message` text, which names the key, warns the label may be stale, and carries the `refdes keys restore` remedy. Three tests in tests/test_decision_merge.py; sabotage-verified both halves (reverting the resolver fails the 2 resolution tests; disabling the diagnostic branch fails the dead-key test).
+
+Finding 5 done: `citation_links` had no consumer -- no bundled migration used it and only one test referenced it. Removed `_rewrite_links_as_citations`, the `Mapping` field/parser/merge arms, the ACCEPTED_SECTIONS entry, the cli.py help text, the docs in cli-reference.md and troubleshooting.md, and the two tests. Verified `refdes revise` now refuses `citation_links:` by name, exit 2.
+
+Finding 6 done: added a dated implementation note to docs/design/threads.md recording that phase 4a renamed `records:` to `follows:` rather than converting to `citations: - item:`, and why (a citation entry is bare-id data nothing maintains; structured links are what the key machinery keeps current). The owner's 2026-10-03 bullets are unchanged; the contradicting §6 and §7 sketches now say what shipped.
+
+Finding 7 done: the release nudge printed `- id: LOG-A-0NN` and `- item: LOG-A-0NN` -- one placeholder for two different entries, so following it wrote an entry citing itself, and nothing caught that because a self-citation resolves. The cited placeholder is now `LOG-A-0MM`. Added an assertion that the two differ; sabotage-verified (putting `0NN` back fails 4 tests).
+
+Finding 8 done: `tests/fixtures/hardware3_design_debate_resolved.json` was referenced by nothing, and it could not be used again -- v3 + design-debate no longer resolves at all, since the preset retired with `decision`. Regenerated the snapshot against hardware@2, where the preset still exists, and restored the dropped oracle row there. `resolved_dump` now takes a version. Sabotage-verified by perturbing one prefix in the fixture.
+
+Finding 9: this entry.
+
+Tutorial walked end to end in .scratch/tut3 against the edited docs. Two mismatches found and the docs corrected: step 5's sample output said "2 item(s) with no coverage" where the real run says the same, but step 6's count was wrong (docs said 6 items/2 warnings at a point where the real sequence gives 5 items/1 error/2 warnings), and the superseding paragraph's example check needed a calc block to be legal. Every command now produces the output the page shows, including the overlay case ending at `7 items, 0 errors, 2 warnings` and `-v` moving the demoted failure to info.
+
+Not yet done at this point: full suite, commit, push, PR body.
+
+Round 2 close-out (orchestrator, Claude, 2026-10-08): the Space Bunny fixer ran
+out of usage after finishing findings 1-9, before the suite/commit/push.
+Full suite on its tree: 1 failed, 3325 passed, 2 skipped. The failure was
+tests/test_theme.py::test_no_theme_build_is_byte_identical_to_the_pinned_output:
+vocabulary.html changed because finding 1-2 rewrote the decision examples in
+src/refdes/vocabulary.py to log. Built the page at HEAD 85e4f1c: it hashes to
+the old pin exactly (cce5202e...), and the only diff against the new build is
+that example text. Re-pinned vocabulary.html in
+tests/fixtures/no_theme_build_hashes.json (CRLF variant, f472560f...), as
+b3fc3c2 did for the same fixture. tests/test_theme.py: 55 passed.
+Not done: PR body refresh.
+
+Round 3 (2026-10-08, PR #176 review round 3, .scratch/REVIEW-176-round3.md):
+
+Finding 2 (branch behind main) done first, so the docs fix lands on the merged
+tree: `git merge origin/main` (5 commits in, no fetch/pull). The overlapping
+files (build.py, cli.py, model.py, schema.py, standards.py) auto-merged with
+zero textual conflicts, so there were no conflict hunks to resolve by hand;
+I verified the merge kept both sides instead of trusting that: `git diff
+ff8aa45 HEAD` over those files shows main's changes landing intact (image
+freeze `/path` resolution + `_local_image_path` in build.py,
+`rewritten_images` in model.LoadWrites + its `__bool__`, the sealing-opt-in
+overlay note through schema.py/model.py, sealing opt-ins + F3 check/build
+wording in cli.py/standards.py), and `git diff origin/main HEAD` shows only
+this branch's decision-to-log work on top (citation key resolution,
+`legacy_prefixes`, the merge_types revise help, the 0NN/0MM nudge). Merge
+commit 534baeb, amended message-only to carry the attribution trailers.
+
+Finding 1 (stale decision examples) done second, after re-verifying the type
+system per AGENTS.md: `python -m refdes.cli schema` run from a scratch
+hardware@3 project (.scratch/probes/hw3, plain standard, no overlay) shows
+only bound/component/group/log/requirement/test -- `decision` is not there; a
+`type: decision` item there fails `refdes check` with
+`unknown type 'decision'`; `log` carries `legacy_prefixes: [DEC]`
+(standards/hardware/v3/base.yaml), so DEC display ids survive on log entries.
+A probe item written exactly as the doc's "After" block (id DEC-PWR-001,
+type: log, same-item path citation, source() calc) fetched and checked with 0
+errors under that plain hardware@3 project. docs/design/calc-sources.md
+changes: the section 1 migration note now says the merge has landed and
+hardware@3 retires `decision` (with the dogfood bridge spelled out as the
+reason this repo's own files still read `type: decision` until 4b); both
+worked-example frontmatters (Before and After) retyped `type: log`; the
+section 2 "until the decision-to-log merge lands" sentence rewritten to say
+what shipped. The section 9 HASH_FORMAT lines ("coordinate with phase 4a")
+were left: they are forward guidance for unimplemented work, not
+pending-merge claims, and were not in the finding.
+
+Remaining `type: decision` occurrences in docs/ (grepped, listed, left as
+historical): docs/design/named-calc-blocks.md:654,703 (transcribe the real
+dogfood DEC-PWR-001 and its sibling, which still read `decision` on disk via
+the bridge); docs/design/candidate-parts.md:709 and docs/design/lifecycle.md:241
+(dated pre-4a design-spec examples, no pending-merge claim);
+docs/design/living-notes-plan.md:535 (describes the decision->log migration
+itself). README.md, docs-site/, and the docs/*.md user-facing pages are clean
+(round-2 sweep held; the merge did not reintroduce any).
+
+Full suite on the merged tree with the docs fix applied, captured to
+.scratch/suite-round3.txt: 3345 passed, 10 skipped, exit 0. No theme re-pin:
+tests/fixtures/no_theme_build_hashes.json pins a fixture-project build, not
+docs pages (calc-sources.md is not in the pinned set), and the suite passed
+with the pins untouched.
+
+Status: round 3 finished. Docs fix + this log committed separately on top of
+merge commit 534baeb and pushed; PR #176 left open, not merged.
+
+## Round 4 (this commit)
+
+Round-4 review (CHANGES REQUESTED) said the docs still presenting `decision`
+as a live hardware@3 type had to be swept exhaustively, not page-by-page.
+Before editing anything I re-verified the merged schema against the probe
+project (.scratch/probes/hw3, plain hardware@3): `decision` is absent from
+`$defs`; `log` carries date/summary/author/status/rationale/options/checks,
+satisfies/constrained_by, follows/addresses/amends/supersedes/selects/
+blocked_by, and `legacy_prefixes: [DEC]` — so DEC ids stay, `title:` does not.
+
+Ledger (full table: .scratch/decision-ledger.md; built before any edit from
+the review's grep plus a case-insensitive sweep — 467 word hits in 37 files,
+218 pattern hits):
+- LIVE fixed: 33 lines in 11 files. The big one is docs/concepts.md: the
+  item list, the coverage table (claimed/satisfied now name log/component),
+  the "Decisions vs. log entries" section rewritten as "Verdicts and running
+  notes" for the merged type, and the rich-items line. Plus the §8 examples in
+  named-calc-blocks.md and the §7.3 example in candidate-parts.md (retyped
+  `type: log`, `title:`→`summary:`, with a grounding note that these use the
+  post-merge spelling while the repo's own on-disk files wait on phase 4b) —
+  this deliberately reverses round 3's decision to leave those as historical,
+  because round-4 finding 2 called them out explicitly. design/standard-
+  library.md §9 now declares `blocked_by` on `log` (v3 base.yaml:296).
+  index-blocks.md's implemented `{{index}}` examples moved to `type="log"`
+  (they would otherwise be unknown-type errors), its trace-flag yaml now
+  shows `follows` instead of the retired `records`, and the empty-render line
+  to "No log items." (matches blocks.py:221). Small ones: change-tracking,
+  stale-arithmetic-signal, thread-workbench, form-ingestion (governed_by
+  target fixed against live `refdes new requirement` output).
+- STATUS fixed: 5 lines — living-notes.md :478 and the "Phase 4a is not on
+  main" paragraph (now landed-state with live base.yaml:268/:280/:292
+  citations), living-notes-plan.md "Then 4b" (4a no longer a blocker; the
+  bridge now exists for the repo's own un-migrated items) and R4 (interim
+  window closed), stale-arithmetic-signal's "no doc yet" (threads.md exists).
+- HISTORICAL kept: everything version-labelled or dated — the retirement
+  records in cli-reference/getting-started/standard-library(user)/links/
+  schema-reference, the v1-labelled dictionary in design/standard-library.md
+  §1-§2 (its yaml block is headed `hardware/v1/base.yaml`), the dated design
+  records (threads.md itself, vocabulary-review, backlog findings 16/22,
+  composition, extends, the 2026-10-01 living-notes decision records),
+  lifecycle.md:241 (a refdes_version "0.3.0" release-snapshot manifest —
+  same call the round-4 reviewer made), item-search-hover's vocabulary
+  snapshot (dated "verified 2026-09-29" and still literally true of this
+  repo via the bridge).
+- ENGLISH/id: ~330 plain-word and DEC-id lines skipped, counted per file in
+  the ledger.
+
+Verification: step-1 grep re-run — 210 hits remain, all HISTORICAL or DEC
+ids; `type: decision` survives only in lifecycle.md:241 (release snapshot)
+and living-notes-plan.md:537 (the migration mapping's from-side). "decision
+(item|type|entry|block)" now zero. gen_examples.py --check: both generated
+pages up to date. test_docs_examples + test_vocabulary_page + test_keys_links:
+56 passed. Full suite (.scratch/suite-round4.txt): 3345 passed, 10 skipped,
+exit 0 — unchanged from the round-3 baseline, as expected for markdown-only
+changes.
+
+Status: round 4 finished. Pushed to threads-4a-decision-to-log; PR #176 left
+open, not merged.
+
+## Round 5 (review .scratch/REVIEW-176-round5.md, CHANGES REQUESTED)
+
+Two doc corrections, both verified against the tool before editing.
+
+- Finding 1 (MEDIUM), docs/concepts.md. The append-only paragraph claimed
+  edits are "never" made and the convention "is enforced by the build" —
+  true under hardware@1/@2 (`sealing: build`) but not hardware@3, where
+  log declares `sealing: history` (base.yaml:274-278) and design-log.md
+  :76-79 says an edit is never a build error. Rewrote to: append-only as
+  the authoring convention (a correction is a new entry that `amends` or
+  `supersedes`), hardware@3's build does not enforce it, and an edit to a
+  captured entry is a warning (design-log.md:236-253); linked
+  design-log.md#append-only in the page's existing link style. Also
+  dropped "dated" from the opening sentence at :68 — `date` is optional
+  on log (base.yaml:283, only `summary` required).
+- Finding 2 (LOW), docs/design/index-blocks.md:355-359. The invalid-field
+  error example listed stale log fields (no `citations`, phantom `owner`/
+  `last_reviewed`). Reproduced in a plain hardware@3 project
+  (.scratch/probes/hw3, page with {{index by="schematic_page"
+  type="log"}}): `... --no-write check` printed
+  `Declared fields: author, checks, citations, date, note, options,
+  rationale, source, status, summary, tags.` — sorted, matching
+  blocks.py:169-173. Copied that list into the example (page keeps the
+  section's wrapped display style).
+- Tests: test_docs_examples + test_blocks + test_standard_docs_complete:
+  50 passed. gen_examples.py --check: both generated pages up to date,
+  exit 0. Full suite not re-run (prose-only edits, nothing failed).
+
+Status: round 5 finished. Pushed to threads-4a-decision-to-log; PR #176
+left open, not merged.

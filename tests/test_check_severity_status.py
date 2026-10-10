@@ -107,8 +107,10 @@ def _mapping_project(tmp_path, *, status="candidate", checks_extra="", sub=""):
 # ------------------------------------------------- §4.6 scalar unchanged
 
 
-@pytest.mark.parametrize("version", [1, 2, 3])
-@pytest.mark.parametrize("presets", [[], ["design-debate"]])
+@pytest.mark.parametrize(
+    "version,presets",
+    [(1, []), (1, ["design-debate"]), (2, []), (2, ["design-debate"]), (3, [])],
+)
 def test_scalar_severity_unchanged(tmp_path, version, presets):
     """Resolved-schema oracle over every bundled standard: every resolved
     check_severity is the same scalar it was before the mapping existed (§4.6)

@@ -1,8 +1,8 @@
 # Getting started
 
 We will build a small but complete project: two requirements, a thermal
-bound, a decision with real arithmetic, a test, and a log entry. By the end
-the build will catch a genuine design problem.
+bound, a design-log entry that settles the topology with real arithmetic, and a
+test. By the end the build will catch a genuine design problem.
 
 ## Install
 
@@ -168,24 +168,23 @@ items:
 `limit` is a real field type. `<= 0.15 W/in^2` is parsed into a quantity, not
 stored as a string.
 
-## 4. Write a decision that does arithmetic
+## 4. Write an entry that settles the topology
 
-Items with a body go in their own markdown file. Not sure what fields a
-decision takes? `refdes new decision` prints a starter with every field
-commented in, generated from the same resolved schema an editor's
-completion reads.
+Items with a body go in their own markdown file. Not sure what fields a log
+entry takes? `refdes new log` prints a starter with every field commented in,
+generated from the same resolved schema an editor's completion reads.
 
 ```bash
-refdes new decision > items/decisions/dec-pwr-001-regulator.md
+refdes new log > items/log/regulator.md
 ```
 
-`items/decisions/dec-pwr-001-regulator.md`
+`items/log/regulator.md`
 
 ````markdown
 ---
-id: DEC-PWR-001
-type: decision
-title: 3V3 rail regulator topology
+id: LOG-PWR-001
+type: log
+summary: 3V3 rail regulator topology
 status: accepted
 date: 2026-03-14
 satisfies: [REQ-PWR-002]
@@ -226,6 +225,14 @@ Three things are happening:
   the build fails at that line.
 - `checks:` compares `P_dens` against `BND-THM-001`'s limit.
 
+One type covers all of it. Under `hardware@3` there is no separate `decision`
+type: an entry that just narrates sets `summary` and a body, and an entry that
+also reaches a verdict adds `status`, `options` and `checks` to the same `log`
+type. The verdict is a property of what the entry says, not of what kind of item
+it is. (`hardware@1` and `hardware@2` did have a separate `decision` type;
+`standard-library.md` [records that
+history](standard-library.md#versioning-and-pinning).)
+
 ## 5. Build
 
 ```bash
@@ -234,7 +241,7 @@ refdes build
 
 ```
 (minted 2 key(s) and rewrote 3 reference(s) while loading)
-ERROR   items/decisions/dec-pwr-001-regulator.md:2 [DEC-PWR-001] — P_dens violates BND-THM-001: worst case 0.2366 W/in² vs <= 0.15 W/in^2
+ERROR   items/log/regulator.md:2 [LOG-PWR-001] — P_dens violates BND-THM-001: worst case 0.2366 W/in² vs <= 0.15 W/in^2
 WARNING <project> — 2 item(s) with no coverage — see coverage.html
 4 items, 1 errors, 1 warnings
 site written to /path/to/my-board/_site
@@ -275,11 +282,11 @@ test — back-links are computed. `REQ-PWR-001` now shows as **verified** on
 ```yaml
 defaults:
   type: log
-  prefix: LOG
+  prefix: LOG-PWR
   author: J. Bin
 
 items:
-  - id: LOG-001
+  - id: LOG-PWR-002
     date: 2026-03-16
     summary: Thermal check fails; the power stage is over the density budget.
     addresses: [BND-THM-001]
@@ -289,23 +296,28 @@ items:
       because option three changes a bound other decisions depend on.
 ```
 
-Log entries are **append-only**. Once built, editing this entry fails the build;
-corrections are appended with `amends:`. See [the design log](design-log.md).
+Log entries are **append-only** in the authoring sense: a correction is a new
+entry carrying `amends:`, never an edit to the old one. Under `hardware@3` the
+log is backed by captured history, so an edit to a captured entry
+(`refdes history capture LOG-PWR-002`) is reported as a warning on every
+`check` — and if you set `sealing: build` for the type, as `hardware@1` and
+`hardware@2` did, editing it fails the build instead. See [the design
+log](design-log.md#append-only).
 
-**Nothing above turns the build green, and superseding the decision will not
-either.** Write a passing decision that carries `supersedes: [DEC-PWR-001]`, set
-`DEC-PWR-001`'s status to `superseded`, and `refdes check` still reports the
-old failure. That is history, not a bug — the decision's own numbers stay on
-the record, and a superseded decision still shows as having missed the bound.
-`decision` ships `check_severity: error` for every status, so nothing about the
-walkthrough clears it for you.
+**Nothing above turns the build green, and superseding the entry will not
+either.** Append a passing log entry that carries `supersedes: [LOG-PWR-001]`,
+move `LOG-PWR-001` to `status: superseded`, and `refdes check` still reports the
+old failure. That is history, not a bug — the entry's own numbers stay on the
+record, and a superseded entry still shows as having missed the bound. `log`
+ships `check_severity: error` for every status, so nothing about the walkthrough
+clears it for you.
 
 To let settled history drop to a non-blocking level, map the statuses in
 `refdes-schema.yaml`:
 
 ```yaml
 types:
-  decision:
+  log:
     check_severity:
       default: error
       superseded: info
@@ -313,11 +325,11 @@ types:
 ```
 
 `default:` is required — omit it and the project refuses to load with
-`types.decision.check_severity does not cover status 'proposed'`. Statuses you
-do not map keep `default:`, so a decision that is still `accepted` and still
-failing remains a build error. A demoted failure is not gone either; it moves
-to `refdes check -v`. `component` ships a mapping like this already. See
-[candidates vs. decisions](checks.md#candidates-vs-decisions) and the
+`types.log.check_severity does not cover status 'proposed'`. Statuses you do not
+map keep `default:`, so an entry that is still `accepted` and still failing
+remains a build error. A demoted failure is not gone either; it moves to
+`refdes check -v`. `component` ships a mapping like this already. See
+[candidates vs. verdicts](checks.md#candidates-vs-verdicts) and the
 [types reference](schema-reference.md#types).
 
 ## Where to go next

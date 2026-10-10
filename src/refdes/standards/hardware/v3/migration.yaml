@@ -13,8 +13,8 @@
 #
 # Not every v3 change is additive, though: citations moved from a field
 # hardcoded onto component alone into a field set both component and
-# decision include, under one field name, so a decision can cite a
-# document too. That renames component's `datasheets:` to `citations:`,
+# the merged log include, under one field name, so a log can cite a
+# document or item too. That renames component's `datasheets:` to `citations:`,
 # and this file rewrites it.
 #
 # fields: below renames text: -> body: on requirement/bound, method: ->
@@ -48,13 +48,30 @@
 # project happily reports itself upgraded to v3. Verified by running the
 # step against a v2 project that declares one.
 #
+# The same rename carries `records` -> `follows` (threads phase 4a): v2's
+# `log` declared `records: [decision]`, and the merged `log` declares
+# `follows: [log]` -- the same log-to-log edge under the thread vocabulary.
+# A link rename keeps the edge a *link*, which is what keeps it maintained:
+# structured links are the one spelling the surrogate-key machinery
+# refreshes across a target rename (links.py), while a
+# `citations: - item: <id>` entry is bare-id data nothing maintains -- it
+# breaks on the target's first rename and the composite `ID@key` spelling
+# is not accepted there (PR #176 review). `recorded_by` needs no entry:
+# in v2 it is only the computed inverse name, never an authored key, so no
+# v2 item carries it. A migrated bare `follows:` target is chain-aware
+# like an authored one: the next writable load freezes it to its target's
+# current thread tip and captures the predecessor's snapshot.
+#
 # See docs/design/standard-library.md §3 for the versioning design this
 # implements.
 
 links:
   equivalent: drop_in
+  records: follows
 
 fields:
+  decision:
+    title: summary
   requirement:   # keyed by the OLD type name
     text: body
   bound:
@@ -67,3 +84,8 @@ fields:
 citation_keys:
   url: path
   vendor: keep_copy
+
+# Keep DEC display ids and omitted fields exactly as authored. The surviving
+# log type accepts DEC as a legacy prefix and an absent date/status.
+merge_types:
+  decision: log

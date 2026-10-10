@@ -319,6 +319,7 @@ types:
 | Key | Default | Purpose |
 |---|---|---|
 | `prefix` | first 3 letters, uppercased | ID prefix when a list file gives none |
+| `legacy_prefixes` | `[]` | Prefixes items of this type may already carry without the prefix-mismatch warning — the retired prefix a merged type inherits (hardware@3's `log` carries `DEC` for items migrated from the retired `decision`). Honoured only for ids that already start with it; never used to mint new ids |
 | `label` | title-cased name | Display name |
 | `plural` | title-cased `label` + `s` | Display name for a collection of this type; required alongside `label` under `extends` |
 | `append_only` | `false` | Seal items of this type after first build |
@@ -330,7 +331,7 @@ types:
 | `links` | `{}` | Legal links, mapped to allowed target types |
 | `body` | `on_change`: project default; `required`: `false` | `on_change` mode for the markdown body, and whether it must be non-empty (`required: true` — the bundled standard sets this on `requirement`/`bound`, hardware@3). Enforced as a **warning**, not a build-blocking error the way `required: true` is on an ordinary field — a stub can still exist while it's being drafted. |
 | `satisfying_statuses` | not set — every `satisfies:` link counts | `status` values that count as settled; see [coverage](coverage.md#which-statuses-count-as-satisfying) |
-| `check_severity` | `error` | Diagnostic level for a failing `checks:` entry on items of this type; see [checks](checks.md#candidates-vs-decisions) |
+| `check_severity` | `error` | Diagnostic level for a failing `checks:` entry on items of this type; see [checks](checks.md#candidates-vs-verdicts) |
 | `coverable` | not set — falls back to name-based detection, see below | Whether items of this type get a `Coverage` object at all |
 | `coverable_statuses` | not set — excludes `status: retired` if a `status` field exists, nothing otherwise | `status` values that keep an item in coverage; unlisted statuses (e.g. `draft`) are excluded entirely, not just "open" |
 | `verifying_statuses` | not set — every `verifies:` link counts | `status` values on a verifier (a type declaring a `verifies`-family link) that actually count as having verified, as opposed to merely linked; mirrors `satisfying_statuses` |
@@ -466,7 +467,7 @@ fields:
   exist, isn't an `enum`, or names a value outside that enum's resolved
   `choices:` fails the build at load time, not silently.
 
-The standard's own `decision.rationale` uses this
+The standard's own `log.rationale` uses this
 (`required_when: {status: rejected}`), toggled by
 `require_rejection_rationale:` in `refdes-project.yaml`. `component.rationale`
 uses the `links` form (`required_when: {links: alternate}`) — see
@@ -518,7 +519,7 @@ same posture a figure's `id=` already has.
 
 ### Starter types
 
-`requirement`, `bound`, `decision`, `component`, `test`, `log` — the
+`requirement`, `bound`, `component`, `group`, `test`, `log` — the
 [standard library](standard-library.md) ships these by default, so most
 projects never declare `types:` at all — and have no `refdes-schema.yaml`
 either. A project may still add, remove, or
@@ -592,36 +593,6 @@ status: draft  # choices: draft, active, retired
 ---
 
 <!-- required: the content itself goes here. -->
-```
-
-#### `decision` — hardware@3
-
-```yaml
----
-id:
-type: decision
-# source:  # text
-# note:  # text
-# tags:  # list
-# owner:  # person
-# last_reviewed:  # date
-# citations:  # citations
-title:  # required -- text
-status: proposed  # choices: proposed, in_progress, accepted, on_hold, rejected, superseded
-# rationale:  # text; required when status is 'rejected'
-# date:  # date
-# options:  # options
-# checks:  # checks
-# part_of: []  # target: group
-# satisfies: []  # target: requirement, bound
-# constrained_by: []  # target: bound
-# supersedes: []  # target: decision
-# selects: []  # target: component
-# blocked_by: []  # target: any
-# recorded_by: []  # target: log
----
-
-<!-- optional body. -->
 ```
 
 #### `test` — hardware@3
@@ -698,12 +669,22 @@ type: log
 # source:  # text
 # note:  # text
 # tags:  # list
-date:  # required -- date
+# citations:  # citations
+# date:  # date
 summary:  # required -- text
 # author:  # person
+# status:  # choices: proposed, in_progress, accepted, on_hold, rejected, superseded
+# rationale:  # text; required when status is 'rejected'
+# options:  # options
+# checks:  # checks
+# satisfies: []  # target: requirement, bound
+# constrained_by: []  # target: bound
+# follows: []  # target: log
 # addresses: []  # target: requirement, bound
 # amends: []  # target: log
-# records: []  # target: decision
+# supersedes: []  # target: log
+# selects: []  # target: component
+# blocked_by: []  # target: any
 ---
 
 <!-- optional body. -->

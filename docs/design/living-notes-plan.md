@@ -526,10 +526,12 @@ numbers below are branch-side — that file exists only on `ao/refdes-64/root`.
    disclosed, not fixed, in 4a.
 
 **Then 4b.** This repo's own decision→log migration, the static thread panel,
-and removal of the `refdes-schema.yaml` bridge (which exists only because main
-still has the `decision` type 4a deletes). Blocked on: 4a landing (the type
-merge), and H7 for the panel — 4b's panel is a client of the `threads` index
-projection and must not compute its own fold. The `items/` migration itself is
+and removal of the `refdes-schema.yaml` bridge (which exists only because
+this repo's item files still carry the `decision` spelling that the
+migration rewrites — plain `hardware@3` retired the type when 4a landed).
+Blockers: H7 for the panel — 4b's panel is a client of the `threads` index
+projection and must not compute its own fold; 4a's landing is no longer one
+of them. The `items/` migration itself is
 blocked on nothing else: `standard upgrade --to 3` applies `migration.yaml`'s
 `merge_types` automatically, and the analysis verified that path live
 (`defaults: { type: decision, prefix: DEC }` → `{ type: log, prefix: DEC }`,
@@ -553,9 +555,10 @@ the capture line could become wallpaper. Mitigation: it prints only when an even
 was actually written, and never in `--compact` output (Q4).
 
 **R4 — the interim lock.** Between H5 landing and 4a landing, `main`'s v3 `log`
-is history-backed while `decision` still exists separately. That is a strictly
+was history-backed while `decision` still existed separately. That was a strictly
 better interim than today's (nothing new gets sealed under the rejected policy),
-and it is the reason H5 lands on `main` before 4a rather than inside it (Q7).
+and it is the reason H5 landed on `main` before 4a rather than inside it (Q7).
+4a has since landed and `decision` is retired, so this interim window is closed.
 
 **R5 — the two digests drift apart.** `semantic_digest` and `content_hash`
 differ by design; a future change that "simplifies" one into the other would

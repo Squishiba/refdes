@@ -4,6 +4,7 @@
    "name": "requirement",
    "prefix": "REQ",
    "label": "Requirement",
+   "legacy_prefixes": [],
    "plural": "Requirements",
    "fields": {
     "source": {
@@ -124,6 +125,7 @@
    "name": "bound",
    "prefix": "BND",
    "label": "Bound",
+   "legacy_prefixes": [],
    "plural": "Bounds",
    "fields": {
     "source": {
@@ -251,186 +253,11 @@
    "verifying_statuses": null,
    "doc": "A numeric limit the design must respect \u2014 a voltage, a current, a tolerance. Its limit field makes it checkable by other items' checks. Counts toward coverage while active."
   },
-  "decision": {
-   "name": "decision",
-   "prefix": "DEC",
-   "label": "Decision",
-   "plural": "Decisions",
-   "fields": {
-    "source": {
-     "name": "source",
-     "type": "text",
-     "on_change": "log",
-     "required": false,
-     "choices": null,
-     "default": null,
-     "required_when": null,
-     "doc": "Where the item's content came from \u2014 a spec section, a datasheet, a conversation. Kept out of the content hash, so correcting it never marks downstream items suspect."
-    },
-    "note": {
-     "name": "note",
-     "type": "text",
-     "on_change": "log",
-     "required": false,
-     "choices": null,
-     "default": null,
-     "required_when": null,
-     "doc": "A free-text remark about the item's provenance, kept beside the item instead of inside its body. Kept out of the content hash."
-    },
-    "tags": {
-     "name": "tags",
-     "type": "list",
-     "on_change": "ignore",
-     "required": false,
-     "choices": null,
-     "default": null,
-     "required_when": null,
-     "doc": "Free-form labels for grouping and finding items; free-text search matches tags as well as titles. Kept out of the content hash."
-    },
-    "owner": {
-     "name": "owner",
-     "type": "person",
-     "on_change": "log",
-     "required": false,
-     "choices": null,
-     "default": null,
-     "required_when": null,
-     "doc": "The person responsible for this item \u2014 who a question about it goes to. Kept out of the content hash, so ownership changes never invalidate downstream work."
-    },
-    "last_reviewed": {
-     "name": "last_reviewed",
-     "type": "date",
-     "on_change": "ignore",
-     "required": false,
-     "choices": null,
-     "default": null,
-     "required_when": null,
-     "doc": "The date this item was last reviewed. Bookkeeping only: kept out of the content hash."
-    },
-    "citations": {
-     "name": "citations",
-     "type": "citations",
-     "on_change": "invalidate",
-     "required": false,
-     "choices": null,
-     "default": null,
-     "required_when": null,
-     "doc": "External documents this item relies on. Each entry needs a path \u2014 an http(s) URL or a project-root-relative file \u2014 and may carry rev, page, section, part_number, keep_copy and an id for [[cite:]] references."
-    },
-    "title": {
-     "name": "title",
-     "type": "text",
-     "on_change": "invalidate",
-     "required": true,
-     "choices": null,
-     "default": null,
-     "required_when": null,
-     "doc": "What was decided, in one line. Required \u2014 every decision needs a label."
-    },
-    "status": {
-     "name": "status",
-     "type": "enum",
-     "on_change": "invalidate",
-     "required": false,
-     "choices": [
-      "proposed",
-      "in_progress",
-      "accepted",
-      "on_hold",
-      "rejected",
-      "superseded"
-     ],
-     "default": "proposed",
-     "required_when": null,
-     "doc": "Where the decision stands. Only an accepted decision counts as settled and closes coverage on what it satisfies."
-    },
-    "rationale": {
-     "name": "rationale",
-     "type": "text",
-     "on_change": "invalidate",
-     "required": false,
-     "choices": null,
-     "default": null,
-     "required_when": {
-      "status": "rejected"
-     },
-     "doc": "Why this decision, and why not the alternatives. Required when the decision is rejected \u2014 the reason a rejection happened is the point of recording it."
-    },
-    "date": {
-     "name": "date",
-     "type": "date",
-     "on_change": "log",
-     "required": false,
-     "choices": null,
-     "default": null,
-     "required_when": null,
-     "doc": "When the decision was made. Kept out of the content hash, so fixing a date never marks downstream items suspect."
-    },
-    "options": {
-     "name": "options",
-     "type": "options",
-     "on_change": "invalidate",
-     "required": false,
-     "choices": null,
-     "default": null,
-     "required_when": null,
-     "doc": "The alternatives considered, as name / verdict / because entries. Rendered as the options-considered panel on the decision's page."
-    },
-    "checks": {
-     "name": "checks",
-     "type": "checks",
-     "on_change": "invalidate",
-     "required": false,
-     "choices": null,
-     "default": null,
-     "required_when": null,
-     "doc": "Numeric checks: each entry compares a value from this item's calc block against a bound's limit. A failed check here is reported as an error."
-    }
-   },
-   "links": {
-    "part_of": [
-     "group"
-    ],
-    "satisfies": [
-     "requirement",
-     "bound"
-    ],
-    "constrained_by": [
-     "bound"
-    ],
-    "supersedes": [
-     "decision"
-    ],
-    "selects": [
-     "component"
-    ],
-    "blocked_by": [],
-    "recorded_by": [
-     "log"
-    ]
-   },
-   "preview": [
-    "status",
-    "title",
-    "date"
-   ],
-   "body_on_change": "invalidate",
-   "body_required": false,
-   "append_only": false,
-   "sealing": "build",
-   "satisfying_statuses": [
-    "accepted"
-   ],
-   "check_severity": "error",
-   "coverable": null,
-   "coverable_statuses": null,
-   "verifying_statuses": null,
-   "doc": "A design choice that was made \u2014 what was picked, why, and what it satisfies. A settled (accepted) decision closes coverage on what it satisfies; a failing check on a decision is an error."
-  },
   "test": {
    "name": "test",
    "prefix": "TST",
    "label": "Test",
+   "legacy_prefixes": [],
    "plural": "Tests",
    "fields": {
     "source": {
@@ -539,6 +366,7 @@
    "name": "component",
    "prefix": "CMP",
    "label": "Component",
+   "legacy_prefixes": [],
    "plural": "Components",
    "fields": {
     "source": {
@@ -599,7 +427,7 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": "External documents this item relies on. Each entry needs a path \u2014 an http(s) URL or a project-root-relative file \u2014 and may carry rev, page, section, part_number, keep_copy and an id for [[cite:]] references."
+     "doc": "Sources this item relies on. Each entry names a path (an http(s) URL or project-root-relative file) or item (another item's id); document entries may carry rev, page, section, part_number, keep_copy and an id for [[cite:]] references."
     },
     "title": {
      "name": "title",
@@ -714,6 +542,7 @@
    "name": "group",
    "prefix": "GRP",
    "label": "Group",
+   "legacy_prefixes": [],
    "plural": "Groups",
    "fields": {
     "source": {
@@ -796,6 +625,9 @@
    "name": "log",
    "prefix": "LOG",
    "label": "Log entry",
+   "legacy_prefixes": [
+    "DEC"
+   ],
    "plural": "Log entries",
    "fields": {
     "source": {
@@ -828,15 +660,25 @@
      "required_when": null,
      "doc": "Free-form labels for grouping and finding items; free-text search matches tags as well as titles. Kept out of the content hash."
     },
+    "citations": {
+     "name": "citations",
+     "type": "citations",
+     "on_change": "invalidate",
+     "required": false,
+     "choices": null,
+     "default": null,
+     "required_when": null,
+     "doc": "Sources this item relies on. Each entry names a path (an http(s) URL or project-root-relative file) or item (another item's id); document entries may carry rev, page, section, part_number, keep_copy and an id for [[cite:]] references."
+    },
     "date": {
      "name": "date",
      "type": "date",
      "on_change": "invalidate",
-     "required": true,
+     "required": false,
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": "When this entry was written. Required \u2014 an undated log entry cannot be ordered in time."
+     "doc": "When this entry was written, if known. Older decisions may not have a date."
     },
     "summary": {
      "name": "summary",
@@ -857,9 +699,68 @@
      "default": null,
      "required_when": null,
      "doc": "Who wrote the entry."
+    },
+    "status": {
+     "name": "status",
+     "type": "enum",
+     "on_change": "invalidate",
+     "required": false,
+     "choices": [
+      "proposed",
+      "in_progress",
+      "accepted",
+      "on_hold",
+      "rejected",
+      "superseded"
+     ],
+     "default": null,
+     "required_when": null,
+     "doc": "A verdict when this entry declares one. Accepted entries can close coverage on what they satisfy."
+    },
+    "rationale": {
+     "name": "rationale",
+     "type": "text",
+     "on_change": "invalidate",
+     "required": false,
+     "choices": null,
+     "default": null,
+     "required_when": {
+      "status": "rejected"
+     },
+     "doc": "Why this verdict was reached; required for a rejected verdict."
+    },
+    "options": {
+     "name": "options",
+     "type": "options",
+     "on_change": "invalidate",
+     "required": false,
+     "choices": null,
+     "default": null,
+     "required_when": null,
+     "doc": "Alternatives considered for this verdict."
+    },
+    "checks": {
+     "name": "checks",
+     "type": "checks",
+     "on_change": "invalidate",
+     "required": false,
+     "choices": null,
+     "default": null,
+     "required_when": null,
+     "doc": "Numeric checks against bounds; a failed check is an error."
     }
    },
    "links": {
+    "satisfies": [
+     "requirement",
+     "bound"
+    ],
+    "constrained_by": [
+     "bound"
+    ],
+    "follows": [
+     "log"
+    ],
     "addresses": [
      "requirement",
      "bound"
@@ -867,25 +768,32 @@
     "amends": [
      "log"
     ],
-    "records": [
-     "decision"
-    ]
+    "supersedes": [
+     "log"
+    ],
+    "selects": [
+     "component"
+    ],
+    "blocked_by": []
    },
    "preview": [
     "date",
     "author",
+    "status",
     "summary"
    ],
    "body_on_change": "invalidate",
    "body_required": false,
    "append_only": true,
    "sealing": "history",
-   "satisfying_statuses": null,
+   "satisfying_statuses": [
+    "accepted"
+   ],
    "check_severity": "error",
    "coverable": null,
    "coverable_statuses": null,
    "verifying_statuses": null,
-   "doc": "A dated entry in the design log \u2014 work done, questions raised, corrections. Entries are append-only: a correction is a new entry with amends, never a rewrite of the old one. Editing an entry is not a build error: once it has been captured into the project's history (refdes history capture), an edit is reported as edited after captured, a warning."
+   "doc": "A design-log entry \u2014 narrative work or a verdict. Entries are append-only in the authoring sense: corrections are new entries. Captured history records earlier content; an edit after capture is a warning."
   }
  },
  "link_types": {
@@ -915,14 +823,14 @@
    "inverse": "satisfied_by",
    "label": "Satisfies",
    "trace": true,
-   "doc": "A decision or component claims to meet a requirement or bound. This is the link that closes coverage once the claiming item reaches a satisfying status."
+   "doc": "A verdict log entry or component claims to meet a requirement or bound. This closes coverage once the claiming item reaches a satisfying status."
   },
   "constrained_by": {
    "name": "constrained_by",
    "inverse": "constrains",
    "label": "Constrained by",
    "trace": true,
-   "doc": "A decision or component that must respect a bound. Traceability only \u2014 it does not close coverage on the bound; satisfies does."
+   "doc": "A verdict log entry or component that must respect a bound. Traceability only \u2014 it does not close coverage on the bound; satisfies does."
   },
   "verifies": {
    "name": "verifies",
@@ -938,12 +846,12 @@
    "trace": false,
    "doc": "A log entry records work done on a requirement or bound. Counts as addressed coverage \u2014 someone has worked on it and written it up \u2014 without claiming it is met."
   },
-  "records": {
-   "name": "records",
-   "inverse": "recorded_by",
-   "label": "Records",
+  "follows": {
+   "name": "follows",
+   "inverse": "followed_by",
+   "label": "Follows",
    "trace": false,
-   "doc": "A log entry records a decision \u2014 the design-log side of the decision's own recorded_by end of the same edge."
+   "doc": "This log entry continues an earlier entry in the same thread."
   },
   "amends": {
    "name": "amends",
@@ -957,21 +865,21 @@
    "inverse": "superseded_by",
    "label": "Supersedes",
    "trace": false,
-   "doc": "This decision replaces an older one. The older decision keeps its history; moving its status to superseded is your edit, not something the link does by itself. Because the two are separate claims, a build warns when this link says superseded and the target's status says something else."
+   "doc": "This verdict replaces an older one. The older entry keeps its history; moving its status to superseded is your edit, not something the link does by itself. A build warns when the link and target status disagree."
   },
   "selects": {
    "name": "selects",
    "inverse": "selected_by",
    "label": "Selects",
    "trace": true,
-   "doc": "A decision picks a component. The component's own status marks it selected; this link records which decision made the pick. A build warns when either half is missing and the other is not."
+   "doc": "A verdict selects a component. The component's own status marks it selected; this link records which entry made the pick. A build warns when either half is missing and the other is not."
   },
   "blocked_by": {
    "name": "blocked_by",
    "inverse": "blocks",
    "label": "Blocked by",
    "trace": true,
-   "doc": "Something is holding this decision up. Name only the immediate blocker; reports resolve the chain to its root. May point at an item of any type; a cycle is a build error."
+   "doc": "Something is holding this entry up. Name only the immediate blocker; reports resolve the chain to its root. May point at an item of any type; a cycle is a build error."
   },
   "part_of": {
    "name": "part_of",

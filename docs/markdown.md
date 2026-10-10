@@ -97,9 +97,9 @@ resolved relative to **your source file's own directory** — the same base a
 browser would use to open the rendered page next to its markdown source —
 copied into `_site/assets/`, and its `src` in the rendered page is rewritten
 to point at that copy. `figures/pattern.png` written in
-`items/decisions/dec-001.md` resolves against
-`items/decisions/figures/pattern.png` on disk, and ends up at
-`_site/assets/items/decisions/figures/pattern.<hash>.png` — same directory
+`items/log/dec-001.md` resolves against
+`items/log/figures/pattern.png` on disk, and ends up at
+`_site/assets/items/log/figures/pattern.<hash>.png` — same directory
 structure, a short content hash spliced into the leaf filename. The hash
 changes whenever the bytes do, so editing an image and rebuilding can never
 serve stale content from a browser or CDN cache under the same URL; you never
@@ -122,7 +122,7 @@ dangling cross-reference there is no sensible way to render a missing image,
 so a broken one stops the build:
 
 ```
-ERROR items/decisions/dec-001.md:2 [DEC-001] — image src 'figures/nope.png' does not exist
+ERROR items/log/dec-001.md:2 [LOG-001] — image src 'figures/nope.png' does not exist
 ```
 
 ### A bare filename, found on the search path
@@ -155,7 +155,7 @@ follow from that, and all three are deliberate:
   than one declared directory refuses, naming every candidate:
 
   ```
-  ERROR items/decisions/dec-001.md:4 [DEC-001] — image src 'curve.png' is ambiguous: it exists in more than one site.assets directory (figures/curve.png, photos/shared/curve.png). Write the path relative to items/decisions/dec-001.md instead of the bare filename, or rename one of them
+  ERROR items/log/dec-001.md:4 [LOG-001] — image src 'curve.png' is ambiguous: it exists in more than one site.assets directory (figures/curve.png, photos/shared/curve.png). Write the path relative to items/log/dec-001.md instead of the bare filename, or rename one of them
   ```
 
   There is no first-declared, newest-file, or alphabetical winner, because

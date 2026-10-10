@@ -52,7 +52,7 @@ carries problem matchers that work out of the box.
 
 One object model, two serializations. Rich items get a file; bulk items get a list.
 
-**`items/**/*.md`** — front-matter plus a markdown body, for decisions and anything
+**`items/**/*.md`** — front-matter plus a markdown body, for log entries and anything
 with prose, calcs, or options. Not limited to one item: a further `---` starts a
 new item's front-matter, and an optional leading block whose only key is
 `defaults:` applies to every item that follows, the same way `defaults:` works in
@@ -61,20 +61,20 @@ a list file:
 ```markdown
 ---
 defaults:
-  type: decision
-  prefix: DEC-PWR
+  type: log
+  prefix: LOG-PWR
 ---
-id: DEC-PWR-001
-title: 3V3 rail regulator topology
----
-
-Body of the first decision.
-
----
-title: LDO thermal fallback, rejected
+id: LOG-PWR-001
+summary: 3V3 rail regulator topology
 ---
 
-Body of the second decision. Each item keeps its own body — the next item's
+Body of the first entry.
+
+---
+summary: LDO thermal fallback, rejected
+---
+
+Body of the second entry. Each item keeps its own body — the next item's
 front-matter is where this one ends.
 ```
 
@@ -158,13 +158,13 @@ be expensive.
 
 ## Checks
 
-A bound declares a limit; a decision declares what it is checking:
+A bound declares a limit; a log entry declares what it is checking:
 
 ```yaml
 # in the bound
 limit: "<= 0.15 W/in^2"
 
-# in the decision
+# in the log entry
 checks:
   - value: P_dens
     against: BND-THM-001
@@ -197,8 +197,10 @@ invisible suppression is not.
 
 A dated, append-only record of how the design actually got where it is — the
 measurements, the dead ends, the reasoning between a requirement being handed to
-you and a decision being made. A `decision` is the settled conclusion; a `log`
-entry is a step on the way to one.
+you and a verdict being reached. It is one type: an entry that only narrates sets
+`summary` and a body, and one that also settles something adds `status`, `options`
+and `checks` to the same type. (A separate `decision` type existed through
+`hardware@2`; `hardware@3` merged it in.)
 
 ```yaml
 defaults:
@@ -251,7 +253,7 @@ Three separate questions, deliberately not collapsed into one flag:
 |---|---|
 | `open` | nothing references it at all |
 | `addressed` | a log entry works on it |
-| `satisfied` | a decision claims to meet it |
+| `satisfied` | a verdict log entry claims to meet it |
 | `verified` | a test proves it |
 
 A requirement can be satisfied without being verified, and addressed without being

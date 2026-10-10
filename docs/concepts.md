@@ -2,8 +2,8 @@
 
 ## Items
 
-Everything is an **item**: a requirement, a bound, a decision, a component, a
-test, a log entry, a group. An item has
+Everything is an **item**: a requirement, a bound, a component, a test,
+a log entry, a group. An item has
 
 - a stable **ID** (`REQ-PWR-002`) that never changes,
 - a **type**, which decides what fields and links are legal,
@@ -55,27 +55,32 @@ is the absence of all of them:
 |---|---|---|
 | `open` | Nothing references it | — |
 | `addressed` | Somebody has worked on it | a **log** entry `addresses` it |
-| `claimed` | A decision or component says it meets it, but that claim hasn't settled | a **decision**/**component** `satisfies` it, with a `status` not (yet) in the type's `satisfying_statuses:` |
-| `satisfied` | A settled decision or component claims to meet it | a **decision**/**component** `satisfies` it, with a `status` in `satisfying_statuses:` |
+| `claimed` | A verdict or component says it meets it, but that claim hasn't settled | a **log**/**component** `satisfies` it, with a `status` not (yet) in the type's `satisfying_statuses:` |
+| `satisfied` | A settled verdict or component claims to meet it | a **log**/**component** `satisfies` it, with a `status` in `satisfying_statuses:` |
 | `verified` | A test proves it | a **test** `verifies` it |
 
 A requirement can be satisfied on paper and completely unverified. Another can be
 addressed for weeks with no decision reached. One "done" flag hides both. See
 [coverage](coverage.md).
 
-## Decisions vs. log entries
+## Verdicts and running notes
 
-A **decision** is a settled conclusion, with the options considered and why the
-rejected ones lost. It is a reference document — you read it later to find out why
-the board is the way it is.
+A **log entry** is one entry in the design's story: either a running note —
+the measurement that surprised you, the approach that failed — or a **verdict**,
+a settled conclusion with the options considered and why the rejected ones lost.
+An entry that just narrates sets `summary` and a body; an entry that also reaches
+a verdict adds a `status` to the same type, and an `accepted` one closes coverage
+on what it `satisfies`. Read a verdict later to find out why the board is the way
+it is; read the entries in order to understand how the design got here.
 
-A **log entry** is a dated step on the way to a conclusion, including the
-measurement that surprised you and the approach that failed. It is a narrative — you
-read it in order to understand how the design got here.
-
-Decisions are edited as understanding improves. Log entries are **append-only**: a
-correction is a new entry that `amends` the old one, never an edit. That is the
-paper-notebook convention, and it is enforced by the build.
+Log entries are **append-only**: a correction is a new entry that `amends` or
+`supersedes` the old one, not a rewrite of it. That is the paper-notebook
+convention, but under `hardware@3` the build does not enforce it — an edit is
+not a build error, and once an entry's history is captured, a later edit is
+flagged with a warning (`hardware@1` and `hardware@2` kept settled conclusions
+in a separate `decision` type; `hardware@3` merged it into `log` — see the
+[standard library](standard-library.md#versioning-and-pinning) and the
+[design log](design-log.md#append-only).)
 
 ## Change is classified, not just recorded
 
@@ -98,7 +103,7 @@ hook the git history layer plugs into. See [change tracking](change-tracking.md)
 
 ## Two serializations, one model
 
-Rich items — decisions, anything with prose or math — get their own markdown file.
+Rich items — verdict entries, anything with prose or math — get their own markdown file.
 Bulk items — requirements, log entries — go in list files sharing `defaults:`.
 Both produce identical items. Neither is a lesser form, and
 `refdes promote` (not yet built) is intended to move an item between them.

@@ -15,7 +15,7 @@ Task: implement extends.md in full, phased per its section 8; report to refdes-2
   append-only parent errors. Preset-extends-another-preset errors (spec 2.4).
 - Set-named-as-parent message says "set" not "field_set" (composition.md predates the rename).
 - Un-deferred the two composition tests. Oracle fixtures snapshotted BEFORE any base.yaml change:
-  tests/fixtures/hardware3_resolved.json and ..._design_debate_resolved.json (tests/oracle_dump.py).
+  tests/fixtures/hardware3_resolved.json and hardware2_design_debate_resolved.json (tests/oracle_dump.py).
 - Difficulty: bash heredocs mangle `
 ` inside python strings -- wrote test tails with the Write tool.
 

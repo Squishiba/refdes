@@ -108,7 +108,7 @@ overrides it in place:
 ```yaml
   - id: CMP-PWR-014
     title: MP1584EN buck module
-    status: selected    # DEC-PWR-007 selects this one
+    status: selected    # LOG-PWR-007 selects this one
 ```
 
 The winner does **not** move to a separate file — one file, one status
