@@ -66,6 +66,6 @@ Verification runs (all foreground):
   main; 3420 > 3409 with zero failures, and this branch adds no tests, so
   the quoted baseline figure is just approximate/stale.
 
-Status: all six task items done in the tree; committing, pushing, and
-opening the PR now — the PR URL is appended to this log in the follow-up
-commit.
+Finished: all six task items done, committed (b07bd85), pushed, PR opened:
+https://github.com/Squishiba/refdes/pull/185. Not merged/closed/approved,
+per instructions.
