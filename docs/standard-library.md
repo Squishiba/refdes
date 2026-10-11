@@ -67,7 +67,7 @@ was reversed. What each means, and which `status` enum has it, as
 
 | Word | Whose `status` has it | What it means there |
 |---|---|---|
-| `retired` | `requirement`, `bound` | The statement is no longer one the design owes. Both types are coverable only while `active` (`coverable_statuses: [active]`, inherited by `bound` from `requirement`), so a retired one is not left sitting at `open` — it drops out of coverage and its warnings entirely. |
+| `retired` | `requirement`, `bound` | The statement is no longer one the design owes. Both types are coverable only while `active` (`coverable_statuses: [active]`, inherited by `bound` from `requirement`), so a retired one is not left sitting at `open` — it drops out of coverage, and coverage's warnings about it go with it. Nothing else goes quiet: a retired item's own diagnostics (a dangling link, say) still fire. |
 | `superseded` | `log` | A newer entry has replaced this verdict. The `supersedes:` link records *which*, and the link does not move the status: a build warns in both directions when link and status disagree. `satisfying_statuses: [accepted]`, so a superseded entry's `satisfies:` claim holds its target at `claimed`. |
 | `obsolete` | `component` | This design no longer uses the part. Only `selected` satisfies, and `check_severity` puts `obsolete` at `info`, so its failing checks cannot break the build. |
 | `on_hold` | `log` | Paused rather than finished: the verdict is still owed. Not in `satisfying_statuses: [accepted]`, so its claims stay `claimed`, and when a `blocked_by:` chain resolves to it the cascade report names it — *"2 requirement(s) unsettled because LOG-A-001 is on_hold"*. |

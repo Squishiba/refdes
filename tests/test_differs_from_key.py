@@ -86,11 +86,6 @@ def _schema(
     )
 
 
-def _load_vocab(tmp_path, schema: str):
-    write_project_config(tmp_path, BASE + schema)
-    return load_project(start=str(tmp_path))
-
-
 # ------------------------------------------------------- accepted in an overlay
 
 
@@ -344,7 +339,7 @@ def test_a_term_deleted_by_an_override_is_still_dangling(tmp_path):
     with pytest.raises(SchemaError) as exc:
         load_project(start=str(tmp_path))
     assert "types.note.differs_from" in str(exc.value)
-    assert "test" in str(exc.value)
+    assert "'test'" in str(exc.value)
 
 
 def test_inverse_names_and_own_fields_resolve(tmp_path):
@@ -368,7 +363,7 @@ def test_inverse_names_and_own_fields_resolve(tmp_path):
 
 
 def test_a_term_fact_line_links_the_other_term_in_html(tmp_path):
-    project = _load_vocab(
+    project = _load(
         tmp_path,
         _schema(note_extra="    differs_from:\n      bound: a note is prose; a bound is a checkable number.\n"),
     )
@@ -380,7 +375,7 @@ def test_a_term_fact_line_links_the_other_term_in_html(tmp_path):
 
 
 def test_a_field_fact_line_links_the_page_term(tmp_path):
-    project = _load_vocab(
+    project = _load(
         tmp_path,
         _schema(
             note_fields="    fields:\n"
@@ -400,7 +395,7 @@ def test_a_term_naming_a_verb_by_its_inverse_name_links_the_verb(tmp_path):
     """Validation resolves a verb's inverse name (own-or-inverse), so the
     other term does have a page entry -- the verb's own -- and the fact line
     links it there rather than falling back to plain code text."""
-    project = _load_vocab(
+    project = _load(
         tmp_path,
         _schema(
             note_extra="    differs_from:\n"
@@ -415,7 +410,7 @@ def test_a_term_naming_a_verb_by_its_inverse_name_links_the_verb(tmp_path):
 def test_a_type_may_name_its_own_field_without_an_anchor(tmp_path):
     """`limit` is a field, not a page entry: the fact line names it in code
     text and links nothing."""
-    project = _load_vocab(
+    project = _load(
         tmp_path,
         _schema(
             bound_extra="    differs_from:\n"
@@ -430,7 +425,7 @@ def test_a_type_may_name_its_own_field_without_an_anchor(tmp_path):
 
 
 def test_fact_lines_render_in_markdown(tmp_path):
-    project = _load_vocab(
+    project = _load(
         tmp_path,
         _schema(
             note_extra="    differs_from:\n"
@@ -457,7 +452,7 @@ def test_a_doc_less_field_with_two_pairs_keeps_both_lines(tmp_path):
     """The append-vs-replace decision tracks what the row already shows, not
     the original doc: with no doc at all, a second pair must not overwrite
     the first -- both sentences stay on both pages."""
-    project = _load_vocab(
+    project = _load(
         tmp_path,
         _schema(
             note_fields="    fields:\n"
@@ -482,7 +477,7 @@ def test_a_doc_less_field_with_two_pairs_keeps_both_lines(tmp_path):
 
 
 def test_a_sentence_with_markup_stays_text(tmp_path):
-    project = _load_vocab(
+    project = _load(
         tmp_path,
         _schema(note_extra="    differs_from:\n      bound: a note holds <script> nothing checkable.\n"),
     )
@@ -506,8 +501,11 @@ def test_the_bundled_pairs_are_on_both_generated_pages(repo_project):
     alt = alt[: alt.index('id="term-blocked_by"') if 'id="term-blocked_by"' in alt else len(alt)]
     assert '<a href="#term-drop_in"><code>drop_in</code></a>' in alt
     assert "needs checking before it goes in a design" in alt
-    assert "<dt>Differs from</dt>" in html[html.index('id="term-bound"'):]
-    assert "<code>limit</code>: the bound is the numeric" in html
+    bound_start = html.index('id="term-bound"')
+    bound_end = html.index('id="term-', bound_start + len('id="term-bound"'))
+    bound = html[bound_start:bound_end]
+    assert "<dt>Differs from</dt>" in bound
+    assert "<code>limit</code>: the bound is the numeric" in bound
     assert "**Differs from `drop_in`:**" in md
     assert "**Differs from `limit`:**" in md
 
@@ -617,11 +615,36 @@ def test_a_dangling_term_in_the_bundle_is_a_configuration_error(tmp_path, monkey
     assert "nogterm" in str(exc.value)
 
 
+def test_a_malformed_differs_from_on_a_set_no_type_includes_is_a_configuration_error(
+    tmp_path, monkeypatch
+):
+    """The gap the vocabulary page's raw-set-dict path used to drive into: a
+    `sets:` entry no type `include:`s never becomes `FieldSpec`s, so nothing
+    in schema.py ever looked at its fields and a malformed `differs_from:`
+    surfaced only as a `dict(42)` TypeError (a string's a ValueError) while
+    *rendering the page*. It is now the same load-time configuration error
+    naming the path that every other differs_from gets."""
+    with pytest.raises(SchemaError) as exc:
+        _bundle_project(
+            tmp_path,
+            monkeypatch,
+            BUNDLE_BASE
+            + "sets:\n"
+            "  orphan:\n"
+            "    fields:\n"
+            "      x:\n"
+            "        type: text\n"
+            "        differs_from: 42\n",
+        )
+    assert "sets.orphan.fields.x.differs_from" in str(exc.value)
+    assert "non-empty mapping" in str(exc.value)
+
+
 # ------------------------------------- no differs_from means no byte drift
 
 
 def test_a_project_without_differs_from_keys_shows_nothing(tmp_path):
-    project = _load_vocab(tmp_path, _schema())
+    project = _load(tmp_path, _schema())
     html = vocabulary.render_html(project)
     md = vocabulary.render_markdown(project)
     assert "Differs from" not in html

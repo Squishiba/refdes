@@ -426,10 +426,12 @@ definition is written once and rides along into every type that `include:`s the
 set), and a link type — in the bundled standard and in a project's
 `refdes-schema.yaml` alike.
 
-The value must be a non-empty string; `doc: 42`, `doc: [a, b]` and a bare
-`doc:` are configuration errors naming the block path, the same way any other
-wrong-typed config value is. A misspelling (`docs:`) is the unknown-key error
-the rest of the config already raises, did-you-mean included.
+The value must be a non-empty string; `doc: 42` and `doc: [a, b]` are
+configuration errors naming the block path, the same way any other
+wrong-typed config value is, while a bare `doc:` is not one: like a bare
+`differs_from:` below, YAML null reads as no definition at all. A misspelling
+(`docs:`) is the unknown-key error the rest of the config already raises,
+did-you-mean included.
 
 Nothing is rendered and nothing changes for a project that declares none: a
 term without `doc:` exports exactly what it exported before the key existed.

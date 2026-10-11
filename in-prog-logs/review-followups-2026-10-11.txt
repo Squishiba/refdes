@@ -1,0 +1,222 @@
+# review-followups-2026-10-11 — sweep 2 work log
+
+Branch cut from main at 7175dc8. Each item below is a reviewer claim; each was
+reproduced (or not) before touching anything. Verifications run from this
+worktree with PYTHONPATH=$PWD/src and /home/jorb/work/venv-refdes/bin/python.
+
+## D1. docs/standard-library.md:81 link to links.md#blocked-by-and-the-cascade-report — SKIPPED (does not reproduce on the docs site)
+
+- Target heading is docs/links.md:324: `## \`blocked_by:\` and the cascade
+  report`.
+- Docs-site anchor, verified by *building*: `refdes build` from docs-site/
+  (pages at ../docs, output ../_docs). The heading renderer is
+  `pages.add_heading_anchors` -> `pages._slugify`
+  (`re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")`, src/refdes/pages.py:22)
+  -- underscores are not in [a-z0-9], so the generated id is
+  `blocked-by-and-the-cascade-report` (checked in the built _docs/links.html).
+- The existing link on standard-library.md:81 is `#blocked-by-and-the-cascade-report`
+  -- *exactly* the docs-site id. In the built standard-library.html the href
+  resolves (`links.html#blocked-by-and-the-cascade-report`). The link works on
+  the primary target.
+- GitHub would slug the same heading `blocked_by-and-the-cascade-report`
+  (GitHub keeps underscores in heading anchors). The two generators differ, so
+  no single markdown link works on both; the task says the docs site wins and
+  the difference gets logged, which is what is happening.
+- Related, not in this item's scope (left alone, noted for a future sweep):
+  docs/coverage.md:194, docs/coverage.md:224 and docs/links.md:120 use the
+  underscore form `#blocked_by-...` -- correct on GitHub, dead on the docs
+  site (the built links.html contains the unmatched `href="#blocked_by-..."`).
+  standard-library.md:730 and cli-reference.md:700 use the hyphen form, fine
+  on the docs site.
+
+## D2. docs/concepts.md "Five of these file an item somewhere" — CONFIRMED, fixed
+
+- concepts.md:25 says five of the six groupings file an item and the sixth is
+  a view. The table's own "Data or path?" column says `section` is "Neither:
+  file-local authoring syntax" and `{{tree}}` is "Neither: it is a rendered
+  view". Four rows are Data-or-path (board, workspace = path; group, tag =
+  data); two are neither. The lead-in over-counted by exactly the one the
+  reviewer flagged.
+- Fix: "Four of these file an item somewhere ... section files nothing ...
+  {{tree}} is a view", and "instead of five paragraphs" -> "six paragraphs"
+  (there are six rows in the table it replaces).
+
+## D3. docs/standard-library.md `retired` row "and its warnings entirely" — CONFIRMED, fixed
+
+- Code check: `status == retired` / `coverable_statuses` gate coverage only.
+  `_excluded_by_status` (src/refdes/build.py:905) is referenced only from the
+  coverage builders (build.py:1125 group members, build.py:1194 the per-item
+  coverage loop); grep for `retired` in src/refdes/lifecycle.py: no hits.
+  The bundled standard's own doc text says the same: base.yaml:185 "a draft or
+  retired requirement is left out of coverage entirely".
+- Empirical (scratch .scratch/d3, hardware@3, REQ-A-001 active open +
+  REQ-A-002 retired with a dangling `refines:`): the retired item gets no
+  coverage row and is excluded from the "1 item(s) with no coverage" count
+  (only the active one is counted) -- but it still produced a build ERROR for
+  its dangling link. So "drops out of coverage and its warnings entirely"
+  overstates it: what drops out is coverage and coverage's per-item warnings
+  for it; the item's other diagnostics still fire.
+- Fix: the row now says it drops out of coverage, taking coverage's warnings
+  with it, and that the item's other diagnostics (link errors) do not go quiet.
+
+## D4. docs/schema-reference.md bare `differs_from:` vs bare `doc:` — CONFIRMED, the :429 sentence is wrong, fixed
+
+- Ran the real CLI on a scratch project (.scratch/d4, hardware@3 + overlay):
+  bare `doc:` on a type, bare `doc:` on a field, bare `differs_from:` on a
+  type/field/link-type/set-field: all load and build fine (exit 0). Code
+  agrees: `configcheck.definition` and `configcheck.differs_from` both return
+  "" / {} for None, and `schema._doc_text`/`_differs_from` (used for the
+  bundle path) do the same. `doc: 42` and `differs_from: 42` do raise
+  configuration errors naming the path.
+- So :482-483 ("a bare `differs_from:` is not one: like a bare `doc:` ...")
+  is correct, and :429-431 ("a bare `doc:` [is] a configuration error") is
+  the wrong sentence. Fixed :429-431 to name `doc: 42`/`doc: [a, b]` as
+  errors and a bare `doc:` as not one.
+
+## T1. test_differs_from_key.py unbounded HTML slice — CONFIRMED, fixed
+
+- `assert "<dt>Differs from</dt>" in html[html.index('id="term-bound"'):]`
+  slices to end of page; any later entry's "Differs from" satisfies it.
+- Fix: bound the slice at the next `id="term-` heading after term-bound.
+- Sabotage (see sabotage results below): old assertion passes with bound's
+  differs_from removed from the resolved repo project, new one fails.
+
+## T2. `_load` / `_load_vocab` identical bodies — CONFIRMED, fixed (kept `_load`)
+
+## T3. `assert "test" in str(exc.value)` vacuous — CONFIRMED, fixed
+
+- The error is `{owner}.differs_from names {term!r}, ...` (schema.py
+  _validate_differs_from), so the term prints quoted. Pinned to `"'test'"`.
+  ("latest" contains "test" -- the old assert passed on the word "latest"
+  alone; checked the message actually printed.)
+
+## T4. fixture trailing newline — CONFIRMED, fixed
+
+- `git show 7175dc8~1:...hardware2_design_debate_resolved.json` ends `}\n`;
+  at 7175dc8 (#190) it ends `}` (no newline). #190's re-pin lost it.
+- Writer: `tests/oracle_dump.py resolved_dump` returns `json.dumps(...)` with
+  no trailing newline -- that is what wrote it. The other resolved fixture
+  (hardware3_resolved.json) also lost its newline long ago (since 62d5f79; it
+  had one at ab55e27). no_theme_build_hashes.json ends with one.
+- Fix (task's preferred shape): resolved_dump now appends "\n", and both
+  resolved fixture files are re-emitted by the writer itself so file bytes ==
+  writer bytes. Golden tests parse with json.loads, so nothing else depends
+  on the exact bytes.
+
+## T5. vocabulary._field_entry crash on malformed sets: differs_from — CONFIRMED, fixed
+
+- Reproduced (.scratch/t5_probe.py): a bundle standard (custom standards root
+  in a scratch dir, standards._STANDARDS_ROOT/_KNOWN_BASES patched) whose
+  `sets:` entry no type includes carries a field with `differs_from: 42`:
+  load succeeds; `vocabulary.render_html`/`render_markdown` raise
+  TypeError: 'int' object is not iterable -- from `dict(differs)` in
+  _field_entry (vocabulary.py:268/277,279). A string value raises ValueError
+  instead ("dictionary update sequence element #0...") -- the reviewer's
+  exception type depends on the spelling; the crash is the same gap.
+- Reachability: the project overlay path is already safe --
+  configcheck.sets -> field_spec -> differs_from refuses it at load with a
+  SchemaError naming `sets.<s>.fields.<f>.differs_from` (verified:
+  .scratch/d4 overlay run). What is NOT checked anywhere is a *bundle*
+  standard's sets: field (base.yaml/presets skip configcheck), because
+  schema.py's shape check (`_differs_from`) only runs on fields that become
+  FieldSpecs -- i.e. only on sets some type includes. An orphan set's raw
+  field dicts reach vocabulary.py:225-236 unvalidated.
+- Fix (task's preferred option): `_validate_differs_from` in schema.py now
+  shape-checks every resolved set's field specs through the same
+  `_differs_from`, so a malformed one is a load-time SchemaError naming
+  `sets.<name>.fields.<field>.differs_from`, matching the other
+  differs_from errors. Included sets keep reporting as `types.X.fields.Y`
+  first (the types loop still runs before this).
+- Test added: malformed orphan-set differs_from in a scratch bundle -> load
+  raises SchemaError naming the path. Sabotage below.
+
+## T6. _anchor_map docstring over-claim — CONFIRMED, comment fixed
+
+- `_anchor_map` claims a fact line naming a verb's inverse points at "the
+  verb's" entry. Code: first loop claims every entry's own name (groups in
+  page order types -> links -> sets -> keys), the inverse claims are
+  `setdefault`ed afterwards -- so an inverse name that collides with a type
+  name resolves to the *type's* entry.
+- Checked the bundled standard for a real wrong link (probe over
+  vocabulary.entries of the repo project): no inverse collides with any
+  type/set name; only `alternate`/`drop_in` are self-inverse (same entry).
+  So comment-only, as the task guessed. Docstring now says the inverse
+  points at the verb's entry *unless an earlier group owns the name*.
+
+## F1. test_serve_cli stale-token test flakes under parallel load — cause found, test fixed
+
+- What it waits on: `_wait_for_file(token_file, differs_from=stale)`, 60s
+  wall-clock deadline, polling the *file* every 50ms. The file appears only
+  when the second `refdes serve` child process gets through its whole startup
+  chain: Popen -> CPython interpreter start -> `import refdes.cli` (+yaml) ->
+  `EditorApp.__init__` -> `ProjectState.load()` -> `_build()` = full
+  read-only project load *plus* `preview.render(project)` (the whole site
+  rendered to a temp preview dir) -> socket bind -> `write_launch_file`
+  (src/refdes/serve/server.py:464-465). The deadline starts when Popen
+  returns, so the 60s covers the entire cold start of a CPU-bound child.
+- Why load starves it: with ~6 pytest suites (each also spawning refdes
+  subprocesses) on one box, interpreter start + import + load + full render
+  can exceed 60s purely on CPU/IO contention. On an idle box the whole test
+  is ~2s. Nothing in serve blocks; the ordering (load before bind/write) is
+  deliberate -- a project that fails to load must not bind a port or publish
+  a credential (see cmd_serve's exit-2 refusal posture and
+  test_serve_on_a_directory_without_a_project_exits_with_an_error). So not a
+  code bug; the fixed 60s wall for a child cold start is the test's problem.
+- Fix: raise `_wait_for_file`'s timeout to 180s with a comment naming the
+  chain it covers. Ran the test alone 5x (results below).
+
+## Sabotage results
+
+- T1 (.scratch/t1_sabotage.py): with `project.types["bound"].differs_from`
+  cleared, the OLD assertion `"<dt>Differs from</dt>" in
+  html[html.index('id="term-bound"'):]` still passes (True -- the component
+  entry's alternate line below satisfies it), the NEW bounded assertion fails
+  (False). With real data both pass. Exactly the reviewer's point.
+- T3: `assert "'test'" in ...` matches the message's `names 'test',` (term
+  printed with `{term!r}`); the old `"test" in ...` would also have passed on
+  any message merely containing the substring (e.g. "latest").
+- T5: fix removed from schema.py (via edit, backed up in
+  .scratch/schema.py.fixed) -> the new test
+  `test_a_malformed_differs_from_on_a_set_no_type_includes_is_a_configuration_error`
+  fails with "DID NOT RAISE SchemaError"; with the fix in place, load raises
+  `sets.orphan.fields.x.differs_from must be a non-empty mapping of term to
+  the sentence that distinguishes them, got 42` and the whole
+  test_differs_from_key.py file passes (38). Pre-fix render-time crash
+  reproduced independently in .scratch/t5_probe.py (TypeError on `42`;
+  `dict("not a mapping")`/`dict(['a'])` raise the reviewer's ValueError --
+  exception type depends on the malformed value's shape).
+
+## F1 re-runs
+
+Ran `tests/test_serve_cli.py::test_a_stale_token_file_from_a_crash_is_rewritten_not_refused`
+alone 5 times after the fix: 1.26s, 1.21s, 1.28s, 1.18s, 1.20s -- 5 passed.
+A second possible mechanism was checked and left documented only: the test
+reuses the first launch's exact `--port` after a SIGKILL, so between the
+first child's death and the second bind another concurrent suite's
+`free_port()` could steal the now-free port; serve then exits 2 and the token
+file stays stale forever -- a loud busy-port story per serve_support's
+free_port docstring, which no wait-budget change would fix. The reported
+failure ("about 6 suites at once") matches the cold-start starvation
+mechanism, and that is the one the timeout change addresses.
+
+## Final gates
+
+- Full suite, FOREGROUND, `.scratch/suite.txt`:
+  `3475 passed, 2 skipped in 253.07s (0:04:13)`, exit=0.
+  Note on counts: the task quoted main's baseline as "3461 passed, 2
+  skipped", but at this branch's exact base (7175dc8, == origin/main) an
+  untouched extraction into .scratch/base7175 collects 3476 tests, so the
+  live baseline there is 3474 passed + 2 skipped. My branch adds exactly one
+  test (the T5 one): 3474 + 1 = 3475 passed, 2 skipped.
+- `ruff check --select E9,F src tests`: All checks passed!
+- `python docs-site/gen_examples.py --check`: both pages up to date (exit 0).
+
+## Changelog fragments (one per user-visible fix)
+
+- concepts-which-grouping-count.fixed.md (D2)
+- standard-library-retired-coverage-only.fixed.md (D3)
+- schema-reference-bare-doc-key.fixed.md (D4)
+- sets-differs-from-bundle-path-checked.fixed.md (T5)
+- None for D1 (no change), T1-T4 (test-only), F1 (test-only), T6 (comment
+  only).
+

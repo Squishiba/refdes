@@ -395,8 +395,11 @@ def _anchor_map(vocab: Vocabulary) -> dict[str, str]:
     sets, keys) -- the same winner that kept the un-suffixed anchor. A link
     verb's inverse name is claimed only afterwards, and only when nothing
     else owns it: `schema._validate_differs_from` resolves a verb under its
-    own *or* its inverse name, so a fact line naming the inverse has a real
-    entry to point at -- the verb's. A term with no entry (a field, an
+    own *or* its inverse name, so a fact line naming the inverse always has
+    a real entry to point at -- the verb's, *unless* an earlier group
+    already owns that name (an inverse that collides with a type name sends
+    the line to the type's entry; the bundled standard has no such
+    collision). A term with no entry (a field, an
     engine concept outside the page) has no anchor and is rendered as plain
     code text instead.
     """

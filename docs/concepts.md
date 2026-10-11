@@ -22,9 +22,11 @@ adding a `thermal_zone` type is a config change, not a code change. See the
 
 ## Which grouping?
 
-Five of these file an item somewhere; the sixth is a view of the lot. They are
-not interchangeable, and the difference is not visible in the word — which is
-why they are in one table instead of five paragraphs:
+Four of these file an item somewhere — `board` and `workspace` as a path,
+`group` and `tag` as data on the item; `section` files nothing (it is
+file-local syntax, not a place to file something) and `{{tree}}` is a view of
+the lot. They are not interchangeable, and the difference is not visible in
+the word — which is why they are in one table instead of six paragraphs:
 
 | | What it is for | Data or path? | In coverage? |
 |---|---|---|---|

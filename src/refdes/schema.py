@@ -568,6 +568,21 @@ def _validate_differs_from(
             set(),
             "type, link type, or set",
         )
+    # Shape-check the fields of *every* resolved set, not just the ones some
+    # type `include:`s. A set no type includes never becomes FieldSpecs, so
+    # the parse loop's `_differs_from` above never saw it -- and the
+    # vocabulary page renders raw set dicts (vocabulary.py's sets section),
+    # where a malformed block would surface as a ValueError in `dict(...)`
+    # at page-render time. Same load-time posture, same path in the message,
+    # as every other differs_from; the bundle path has no configcheck to
+    # catch it first.
+    for sname, sspec in sets.items():
+        for fname, fspec in ((sspec or {}).get("fields") or {}).items():
+            if isinstance(fspec, dict):
+                _differs_from(
+                    fspec.get("differs_from"),
+                    f"sets.{sname}.fields.{fname}.differs_from",
+                )
 
 
 def _parse_check_severity(
