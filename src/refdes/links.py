@@ -460,10 +460,13 @@ def plan_expansion(
 
 
 def _drop_refused(plan, refused: set[str]) -> None:
-    """A file the filesystem refused did not change, so neither its parsed
-    links nor the run's tally may claim otherwise: drop every planned rewrite
-    belonging to it before anything is applied in memory. A no-op unless a
-    write was refused -- see `revise.write_rewrites_verified()`."""
+    """A file whose rewrite did not land -- refused by the filesystem, rolled
+    back by the parse guard, or withheld for a duplicate key -- does not
+    contain that rewrite, so neither its parsed links nor the run's tally may
+    claim otherwise: drop every planned rewrite belonging to it before
+    anything is applied in memory. A no-op unless some write failed to
+    land -- see `revise.write_rewrites_verified()`, which returns all three
+    kinds together."""
     if refused:
         plan.rewrites = [
             entry

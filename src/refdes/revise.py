@@ -1471,15 +1471,21 @@ def apply(
     ensure_rewrites: list[FileRewrite] = []
     refresh_rewrites: list[FileRewrite] = []
     expansions: list[str] = []
-    # Taken for *every* mapping, not only a prefix rename: the display-half
-    # refresh below runs for all of them (a `fields:` rename reaches it on the
-    # old-schema tree, because the full `_load_and_validate` that would catch
-    # the moved field only runs after the refresh), and the refusal handler's
+    # Consumed by two readers, on two different paths. A real (non-dry) run
+    # needs it for *every* mapping: the display-half refresh below runs for
+    # all of them (a `fields:` rename reaches it on the old-schema tree,
+    # because the full `_load_and_validate` that would catch the moved field
+    # only runs after the refresh), and the refusal handler's
     # `_collect_refresh_rewrites()` can only list what the refresh wrote by
-    # diffing against this baseline. Gated to `prefix_rename` it was a no-op
+    # diffing against this baseline -- gated to `prefix_rename` it was a no-op
     # for every `types:`/`fields:`/`links:`/`citation_keys:` mapping, and the
-    # handler printed "rolled back." over a landed refresh write.
-    snapshot = _snapshot_item_texts(project_before)
+    # handler printed "rolled back." over a landed refresh write. A
+    # prefix-rename dry run reads it in `_simulate_key_ensure` below, for the
+    # per-line diff report. A non-prefix dry run reaches neither reader, so it
+    # doesn't pay for the read.
+    snapshot = (
+        _snapshot_item_texts(project_before) if not dry_run or prefix_rename else {}
+    )
     if prefix_rename:
         if dry_run:
             blockers, expansions = _simulate_key_ensure(config_path, snapshot, mapping)

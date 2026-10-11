@@ -140,3 +140,14 @@ Yes -- H6 landed as planned scope. Deliberately not done (plan's own list):
 no `refdes work`/`refdes thread`/index `threads` projection (H7), no gate
 rules (H8), no checkbox UI, no tasks_add:/tasks_done:, no derived rows
 written into `tasks:`.
+
+## Correction (2026-10-10 review follow-up, appended, history not rewritten)
+
+- The S1 entry above names the tick test
+  `test_tick_moves_semantic_digest_not_content_or_baseline`; no such test
+  exists. The real one is
+  `tests/test_tasks.py::test_ticking_a_task_moves_the_history_digest_not_the_content`
+  (the sabotage it describes did run against it).
+- The sabotage matrix has no S8 entry: numbering gap S7 -> S9. Every listed
+  sabotage (S1-S7, S9-S15) is accounted for; nothing is missing from the
+  matrix itself, only its number was skipped.

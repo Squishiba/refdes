@@ -628,9 +628,12 @@ instead. Resolution covers every section any item in the project cites for the
 path being pinned, not just the ones inside `--item`/`--path` scope — a page
 number is a fact about the bytes being pinned, so re-pinning a file under one
 item cannot leave another item's section pointing at the bytes it replaced.
-A `skipped` row whose lockfile keeps a copy reads `no copy` instead of `kept`
-when those bytes are not on disk — the same fact `refdes audit`'s pin column
-reports for that path — because a skip downloads nothing and puts nothing back.
+The kept column describes the bytes on disk now, not only what the lockfile
+claims: any row whose record keeps a copy — `skipped` or freshly `fetched` —
+reads `no copy` instead of `kept` when those bytes are not on disk, the same
+fact `refdes audit`'s pin column reports for that path. A `skipped` row is the
+usual way to see it: a skip downloads nothing and puts nothing back, so a
+deleted blob stays missing — while a real fetch rewrites the copy it lands.
 Updates `.refdes/citations.yaml`, and `.refdes/copies/` for any citation that
 opted into keeping a local copy.
 
