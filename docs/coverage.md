@@ -94,8 +94,8 @@ What the status lists then decide:
   item and written it up, without claiming it is met, so it is the one
   coverage stage with no status gate.
 
-The rule is worth its value — being automatic — precisely because neither
-half of the suffix intuition fails it:
+The rule earns its automaticity precisely because both halves of the suffix
+intuition fail it — and the rule holds in each failure:
 
 - A `_by` suffix does not keep a link out. `satisfied_by`, `verified_by` and
   `addressed_by` — the very names the computation reads as backlinks — all end

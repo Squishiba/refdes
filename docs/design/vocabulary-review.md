@@ -1034,10 +1034,11 @@ states exactly that rule, with no exception to remember. Re-verified against
 the coverage code rather than recalled: `build._coverage_for` reads exactly
 the three pairs `addresses`/`addressed_by`, `satisfies`/`satisfied_by`,
 `verifies`/`verified_by` from either authoring end; the settled-vs-`claimed`
-and verified gates are `satisfying_statuses:`/`verifying_statuses:` on the
-authoring type (`build.py:1055-1079`), and an authored `verified_by` is gated
-by the same list as an authored `verifies` (`build._verifier_type_names`), so
-the legacy spelling is a consequence of the rule, not an exception to it.
+gate is `satisfying_statuses:` on the satisfying item's type and the
+verified gate is `verifying_statuses:` on the *verifier's* type — the test —
+whichever end authored the link (`build.py:1055-1079`), so an authored
+`verified_by` is gated by the same list as an authored `verifies` and the
+legacy spelling is a consequence of the rule, not an exception to it.
 
 **P20 — put disambiguation in the standard, not in prose.** `vocabulary.py`
 already renders every type, field and verb onto a generated vocabulary page

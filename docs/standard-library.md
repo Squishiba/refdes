@@ -125,11 +125,12 @@ into a standard, answer three questions.
 
 Every rename this library has actually carried is a worked example of a
 failure found after the fact. `constraint` became `bound` at `hardware@2`
-([below](#versioning-and-pinning), change 2) because *requirement* and
-*constraint* read as near-synonyms in plain English — a questions-1-and-2
-miss of exactly the kind this section warns about: the pair's difference was
-never visible in the names, and it collided with a word the vocabulary itself
-already had. The history design nearly put `record`/`recorded` into the same
+([below](#versioning-and-pinning), change 2), and the recorded reason is
+question 2 pure and simple: "`requirement` and `constraint` read as
+near-synonyms in plain English — a constraint colloquially *is* a
+requirement — which is what produced the authoring mix-up this came from"
+(`src/refdes/standards/hardware/v2/base.yaml`). The history design nearly
+put `record`/`recorded` into the same
 vocabulary that had already shipped the `records:` link verb — question 1
 exactly, and it was caught only after the design prose was written: the event
 became `capture`/`captured` instead, and the applied-decision record in

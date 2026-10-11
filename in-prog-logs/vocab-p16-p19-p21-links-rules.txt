@@ -149,3 +149,44 @@ refines target as "requirement, bound" because subtype lists widen to
 subtypes (schema_json.py:170) — the declared lists are requirement->
 [requirement], bound->[bound] (loader output above); the docs row states the
 declared pair, matching the existing starter table.
+
+== Review follow-up (PR #186 CHANGES REQUESTED, review at .scratch/review-186.txt) ==
+
+Four findings, all fixed 2026-10-11 in a separate commit:
+
+1. [Medium] docs/coverage.md "neither half of the suffix intuition fails it"
+   stated the opposite of its bullets (which show BOTH halves fail — a _by
+   link that feeds coverage, a _by link that does not). Rewrote to: "The
+   rule earns its automaticity precisely because both halves of the suffix
+   intuition fail it — and the rule holds in each failure". Now says what
+   the bullets show.
+2. [Low] docs/standard-library.md constraint->bound rationale was invented
+   ("questions-1-and-2 miss ... collided with a word the vocabulary itself
+   already had"). Verified against the recorded reason: v2/base.yaml:21-24
+   (quoted by vocabulary-review.md at :78-80 and :391-394 — the review
+   itself files it under the "misleading imported meaning" = question-2
+   category, and says failures of question one OR two in its own P21 text,
+   now at :1063 with the Landed marks added). Replaced
+   with a verbatim quote of the recorded reason, attributed to question 2.
+   No claim kept that isn't in those lines.
+3. [Nit] vocabulary-review.md P19 Landed mark: "gates ... on the authoring
+   type" is imprecise for the legacy spelling. Now: satisfying gate on the
+   satisfying item's type, verifying gate on the VERIFIER's type — the test
+   — whichever end authored the link (build.py:1055 = satisfier_spec
+   .satisfying_statuses, build.py:1075 = verifier_spec.verifying_statuses,
+   both applied to the union of backlink and forward reads). Matches what
+   docs/coverage.md already says.
+4. [Nit] PR body: "Keeps the review's three questions verbatim" -> "lightly
+   expanded" (Q2 adds "ordinary engineering English", Q3 a closing
+   sentence — compared against the review's P21 text); build.py range
+   1038-1081 -> 1029-1081 (grep -n "def _coverage_for" src/refdes/build.py
+   -> 1029).
+
+Checks for the follow-up (foreground): gen_examples.py --check exit 0;
+grep of tests/ for the edited page paths found one test that reads the docs
+source (tests/test_scaffold.py:534-542, pins the yaml.schemas example block
+of standard-library.md, untouched by these edits; test_pages.py's
+"coverage.md" hits are sample-project page filenames, not docs/coverage.md).
+Ran tests/test_theme.py tests/test_scaffold.py tests/test_docs_examples.py
+-> 132 passed, exit 0. Full suite not re-run (wording-only doc edits, per
+the orchestrator's instruction).
