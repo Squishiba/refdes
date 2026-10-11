@@ -133,3 +133,10 @@ Task: Vocabulary P12 (`refdes revise` -> `refdes rename`, alias kept) + P13
 ## Status
 
 Finished. Committed, pushed, PR against main.
+
+PR: https://github.com/Squishiba/refdes/pull/200 (open against main, 17 files,
+nothing from .scratch/ staged). One thing deliberately NOT hidden: the
+invalid-choice error argparse raises for an unknown subcommand still lists
+`revise`, because that message is built from the parser map and `revise` really
+does still parse -- P12 asked for it out of `--help`, not out of the set of
+things that work.
