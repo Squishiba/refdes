@@ -1,0 +1,237 @@
+Task: P20 — optional `differs_from:` on type/field/link-verb definitions in a standard
+(and the project overlay), rendered as a fact line on the generated vocabulary page.
+Owner decision 2026-10-11: key name is `differs_from:`; the review's placeholder name
+must not appear in anything written except where P20 is marked landed with the rename.
+
+Findings so far (all verified by reading the named file / running the command):
+
+- AGENTS.md followed: schema/CLI claims below verified with the tool (PYTHONPATH=$PWD/src
+  /home/jorb/work/venv-refdes/bin/python -c "from refdes import ..." in this worktree),
+  never from memory. No git stash used. Tree was clean at start (only .scratch/TASK.txt
+  untracked-intended; branch vocab-p20-differs-from at c065891).
+
+- Design doc: docs/design/vocabulary-review.md §3.4 P20 (~line 1021). It proposes a
+  sibling key of `doc:` on the vocabulary definitions, rendered by _facts()
+  (vocabulary.py:802 on this checkout; review cited :387) and _term_html() (:769),
+  for pairs: alternate/drop_in, records:/capture, log-type/timeline,
+  claimed/assertion, bound/limit.
+
+- Where definitions are loaded/validated:
+  * configcheck.py validates the PROJECT OVERLAY (refdes-schema.yaml) with allow-lists
+    TYPE_KEYS / FIELD_KEYS / LINK_TYPE_KEYS (configcheck.py:75-104); an unknown key is
+    a SchemaError naming block path + legal keys + did-you-mean (BlockChecker.keys).
+    So the key must be ADDED to those frozensets on purpose, not slipped through.
+  * The bundled standard + presets do NOT go through configcheck (its docstring says
+    so); they flow into schema.load_project's parsing loop, which checks `doc:` shape
+    with _doc_text() (schema.py:462) — the same pattern the new key's shape check
+    should follow for the bundle path.
+  * Both paths merge in standards.resolve_namespaces -> plain dicts -> schema.py's
+    parse loop builds FieldSpec/LinkType/ItemType (model.py:122/170/243).
+
+- Dangling-reference posture in standard definitions (the precedent to match):
+    include: -> unknown set: SchemaError (standards._expand_include)
+    extends: -> unknown type: SchemaError (standards._resolve_extends)
+    links:   -> unknown target type: SchemaError (schema._validate_link_targets)
+    required_when: -> unknown field/link/choice: SchemaError (schema._validate_required_when)
+  All are load-time configuration ERRORS, not warnings. The only warning-adjacent
+  smell is "set contributes nothing that survives the merge" (schema_warnings), which
+  is not a dangling reference. So: differs_from naming a term that does not exist in
+  the resolved standard is a SchemaError at load, matching the precedent (stricter
+  than the task's "at least a warning" floor; the task says "follow the existing
+  posture... find the precedent and match it").
+
+- hardware@3 pair existence, checked with the resolved schema (load_project +
+  build_schema on this repo's refdes-project.yaml):
+  * alternate / drop_in: BOTH exist as link verbs (link_types list). doc strings read
+    from v3/base.yaml:172-173. -> pair lands.
+  * bound / limit: bound is a type; limit is its required field (bound fields list
+    includes limit). -> pair lands.
+  * records: / capture: `records` exists as a link verb on log, but `capture` is NOT
+    a term of the resolved standard — not a type, link verb, or field anywhere in
+    hardware@3 (v3 ships no presets dir). It is the history-store event / CLI
+    subcommand (`refdes history capture`, cli.py:1873) quoted in log's doc string
+    ("Captured history records earlier content"). A differs_from reference to it
+    would be dangling by the very validation this task adds. -> SKIP pair; log here
+    and in PR.
+  * claimed / assertion: `claimed` is a coverage STAGE (computed output,
+    docs/coverage.md), not a standard term; `assertion` does not exist — it was the
+    P10 proposed rename of the `claim` preset type, and the whole design-debate
+    preset is retired (vocabulary-review.md 2026-10-01 supersession note; only v2
+    presets dir has claim). v3 base.yaml has neither. -> SKIP pair; log here and in PR.
+  * log-the-type / timeline: skipped per task (depends on undecided P9).
+
+Progress 2 (exploration, before implementation):
+
+- Vocabulary page tests live in tests/test_vocabulary_page.py; it asserts
+  docs/vocabulary.md equals gen_examples.py output byte-for-byte, so the docs
+  page must be re-generated after the bundle gains differs_from.
+- Golden fixture for built-site hashes: tests/fixtures/no_theme_build_hashes.json,
+  driven from tests/test_theme.py (FIXTURE_HASHES at test_theme.py:50). Expected
+  to change for vocabulary.html only; re-pin only that entry after verifying the
+  diff, and prove an unrelated entry still fails if altered.
+- Unknown-key tests: tests/test_config_unknown_keys.py (+ conftest helpers).
+  Adding differs_from to TYPE_KEYS/FIELD_KEYS/LINK_TYPE_KEYS changes the legal-key
+  lists named in the BlockChecker.keys() error message; tests asserting those
+  message bodies verbatim need updating (check tests referencing "entry takes").
+- docs/where: definition keys are documented in docs/schema-reference.md (verify
+  by grep before writing).
+
+Progress 3 (design settled, implementing):
+
+- Shape: `differs_from:` is a non-empty mapping of term name -> one non-empty
+  sentence. Wrong shape (scalar/list/empty/whitespace/non-string parts) is a
+  SchemaError naming the block path — same posture as `doc:` (configcheck
+  BlockChecker.definition for overlays; schema._doc_text for the bundle, which
+  bypasses configcheck by design).
+- Term-reference validation: runs in schema.load_project after the merge
+  (_validate_required_when/_validate_link_targets are the neighbours), so it
+  judges the RESOLVED standard on both paths. Namespace of resolvable terms:
+  types, link verbs (and their inverse names), sets, and fields declared on
+  the same type. Unresolvable = SchemaError with a did-you-mean, matching the
+  precedent (error, not warning — see above).
+- extends: differs_from joins _NOT_INHERITED (standards.py) — like `doc:`, it
+  is the term's own definition text and must not leak from a parent type
+  (bound extends requirement would otherwise carry requirement's note).
+- Rendering: one fact line per pair, "Differs from <term>: <sentence>", in
+  vocabulary.html (dt/dd in vocab-facts; the term links to its page anchor
+  when it has one, else plain <code>) and in docs/vocabulary.md
+  ("Differs from `term`: …", docs page keeps its own anchors so no link
+  there — vocabulary.py cannot know the docs renderer's slugs). A field's
+  differs_from renders in that field's Definition cell in the fields table
+  of both outputs (fields are not standalone page terms).
+- Exports: `refdes schema` JSON gets "differs_from" as an extra annotation
+  keyword on the type branch / field fragment / link property where present
+  (unknown keywords are inert for JSON Schema consumers); absent =
+  byte-identical output, matching the `doc:` precedent's guarantee.
+- Golden outputs expected to change: docs/vocabulary.md (regenerate),
+  tests/fixtures/hardware3_resolved.json and
+  hardware2_design_debate_resolved.json (dataclasses.asdict dumps gain the
+  new model field on every object). tests/fixtures/no_theme_build_hashes.json
+  is for a no-differs_from note-type project — my rendering is conditional,
+  so its vocabulary.html hash must NOT change; if it does, that itself is a
+  bug (byte-identity guarantee). Will verify all three against the suite.
+
+Progress 4 (implementation in flight):
+- model.py: FieldSpec/LinkType/ItemType each gained
+  `differs_from: dict[str, str] = field(default_factory=dict)`.
+- configcheck.py: "differs_from" added to TYPE_KEYS/FIELD_KEYS/LINK_TYPE_KEYS;
+  new BlockChecker.differs_from() (non-empty mapping term->non-empty sentence,
+  mirrors definition()'s refusal of empty) wired into type_entry, field_spec
+  (so set fields too) and link_types.
+- next: schema.py bundle-path shape check + resolved-term cross-check,
+  standards.py _NOT_INHERITED, vocabulary.py rendering, schema_json annotation,
+  base.yaml pairs, tests.
+
+Progress 5 (engine + bundle + 27 new tests green):
+- vocabulary.py: TermEntry/FieldEntry carry differs_from; _facts() emits
+  ("Differs from", "<link|code>: sentence") per pair; _anchor_map() maps term
+  -> page anchor (first group wins); field lines render inside the fields
+  table (html <em> under the doc; md appended to the Definition cell, pipes
+  escaped). Markdown page names the term in code text without a link: the
+  docs page's heading anchors belong to the docs renderer, not to this
+  module -- noted in code comments.
+- schema_json.py: "differs_from" emitted as an annotation keyword on the type
+  branch, field fragment and link property fragment only when present (absent
+  = byte-identical, like `doc:`); build_schema passes a link_differs map.
+- v3/base.yaml: pair on the `alternate` verb (names drop_in, linked on the
+  page) and on the `bound` type (names its own `limit` field, no anchor).
+  Sentences written from the two terms' real doc strings, not the review's
+  prose.
+- tests/test_differs_from_key.py: 27 tests green (overlay accept on type/
+  field/verb/set-field, no-inherit under extends, 5 shape-error forms naming
+  the path, dangling term = error incl. post-override deletion and verb/field
+  paths, inverse-name and own-field references resolve, html link/no-link,
+  md fact line and field-row rendering, markup escaping, bundled pairs on
+  both generated pages and in the schema json, byte-identity with no key).
+- next: run the affected existing suites, re-pin changed goldens, docs,
+  changelog, sabotages.
+
+Progress 6 (goldens + sabotages):
+- test_theme's no_theme_build_hashes.json did NOT change (its vocabulary.html
+  hash is for a no-differs_from note-type project; rendering is conditional,
+  byte-identity held — if it had changed that would itself have been the bug).
+- Re-pinned tests/fixtures/hardware3_resolved.json and
+  hardware2_design_debate_resolved.json with oracle_dump.resolved_dump;
+  proved by structural diff (strip all differs_from keys from the new dumps →
+  byte-equal the old fixtures) that the ONLY change is the added field:
+  non-empty exactly at types.bound -> limit and link_types.alternate -> drop_in.
+- Sabotage 1 (attempt A): neutered the bundle-path shape raise in
+  schema._differs_from; the overlay shape tests did NOT fail — they hit
+  configcheck, which runs first on refdes-schema.yaml — which exposed a real
+  test gap. Added bundle-path tests (fake _STANDARDS_ROOT via monkeypatch,
+  standard: hardware@7) and re-ran the sabotage:
+  test_a_bad_shape_in_the_bundle...[scalar] and [empty] FAILED; restored → 8
+  bundle tests green.
+- Sabotage 2: removed the Differs-from fact-line loop from vocabulary._facts →
+  test_a_term_fact_line_links_the_other_term_in_html and
+  test_the_bundled_pairs_are_on_both_generated_pages FAILED; restored → green.
+- Sabotage 3 (golden): tampered an UNRELATED entry (requirement prefix → REQX)
+  in the re-pinned hardware3_resolved.json →
+  test_hardware3_base_resolves_unchanged[hardware3] FAILED (proving the pin is
+  still load-bearing, not blanket-rerolled); restored → green.
+- docs/vocabulary.md regenerated via docs-site/gen_examples.py: the diff is
+  exactly the two fact lines (bound/limit, alternate/drop_in); --check clean.
+  gen_examples also rewrites a generated block of docs/schema-reference.md —
+  it rewrote to identical bytes (no git diff), so check generated-block
+  boundaries before hand-editing that file.
+
+Progress 7 (docs + changelog done, suite time):
+- docs/schema-reference.md: `differs_from` rows in the link_types, types and
+  field-options tables + a `### differs_from` section after `### doc`
+  (outside the generated block; gen_examples --check clean after).
+- docs/design/vocabulary-review.md: P20 marked "Landed (2026-10-11)" with the
+  rename note and the per-pair disposition (landed: alternate/drop_in,
+  bound/limit; waiting: log/timeline on P9, records:/capture and
+  claimed/assertion for the term-existence reasons above).
+- changelog.d/vocabulary-differs-from.added.md written.
+- Running the full suite now to surface any fallout from the model/config
+  changes beyond the four already-handled goldens.
+
+Progress 8 (final gate):
+- Full suite, foreground: PYTHONPATH=$PWD/src ... -m pytest -q -p no:cacheprovider
+  -> 3457 passed, 2 skipped in 257.67s, exit=0 (tail in .scratch/suite.txt).
+  The known load flake (test_serve_cli.py stale-token test) did not fire.
+- ruff check --select E9,F src tests -> All checks passed! exit=0.
+- Task done: engine, bundle pairs, page renderers, exports, tests+33, goldens
+  re-pinned and proven, docs, review-doc P20 landed, changelog fragment.
+  No open design questions that would change user-visible behaviour: the one
+  judgement call (error vs warning for a dangling differs_from term) followed
+  the established precedent (load error) as the task instructed; recorded
+  above.
+
+Progress 9 (done): committed 2083b0b (staged by explicit path only; .scratch
+never staged; no stash used), pushed -u to origin/vocab-p20-differs-from, PR
+ opened: https://github.com/Squishiba/refdes/pull/190 (base main, title per
+ brief, body carries pairs/validation posture+precedent/sabotages/suite
+ counts). Not merged/closed/approved. Task complete.
+
+Review follow-up (chunk-1 review findings, PR #190):
+- Finding 1 [Medium]: docs/schema-reference.md claimed a bare `differs_from:`
+  is a configuration error. Probed first (.scratch/probe_bare_p20.py): on the
+  overlay path a bare `differs_from:` loads as {} on a type, a field and a
+  verb, and on the bundled-standard path too -- configcheck.py:315-316 and
+  schema.py:486-487 both return {} for None on purpose (the `doc:` posture:
+  definition()/_doc_text return "" for None, configcheck.py:298-299,
+  schema.py:470-471). Kept the code; rewrote the doc sentence to say null
+  loads as no block. Pinned with two new tests:
+  test_a_bare_differs_from_loads_as_empty_in_an_overlay (type+field+verb) and
+  test_a_bare_differs_from_loads_as_empty_in_the_bundle. The old `doc:`
+  sentence at schema-reference.md:429-430 carries the same inaccuracy but is
+  pre-existing and out of this finding's scope -- untouched.
+- Finding 2 [Low]: "the fact line links it" is true of vocabulary.html only;
+  docs/vocabulary.md never links (the page's heading anchors belong to the
+  docs site's renderer -- vocabulary.py `_md_facts`, lines 991-994). The doc
+  sentence now says so.
+- Finding 3 [Nit]: _validate_differs_from's dangling-term error said "...or
+  field of this type" even for link-verb owners, which resolve to no fields.
+  The wording is now per owner kind (type: "field of this type"; field: "field
+  declared on the same type"; verb: "type, link type, or set"), and the
+  `known` set is hoisted out of the per-term loop (built once per owner, with
+  an early return when nothing is declared). Dangling tests now assert the
+  owner-specific wording.
+- Gates, all foreground: full suite -> 3459 passed, 2 skipped in 261.98s,
+  exit=0 (+2 = the new pins; tail in .scratch/suite.txt). ruff check --select
+  E9,F src tests -> All checks passed! python docs-site/gen_examples.py
+  --check -> both files up to date (edits sit outside the generated blocks).
+- Committed and pushed to vocab-p20-differs-from; summary posted as a PR
+  comment. Not merged/closed/approved.

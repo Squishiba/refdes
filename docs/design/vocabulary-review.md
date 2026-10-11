@@ -1074,6 +1074,21 @@ The value is structural: a rename proposed later has one place to look for what
 the word was for, and the page stops being a list of definitions that happen to
 sit next to each other.
 
+**Landed (2026-10-11).** The owner approved P20 and chose the shorter name
+`differs_from:` over the placeholder sketched above (short, so it reads fast
+on the fact line). It is accepted on a type, a field and a link verb — in the
+bundled standard and in a project's `refdes-schema.yaml` — validated as a
+mapping of term to one sentence, with an unresolvable term a load error naming
+both sides, and rendered as a "Differs from" fact line on both generated pages
+(docs/schema-reference.md#differs_from). Landed pairs in `hardware@3`:
+`alternate`/`drop_in` (on the verb) and `bound`/`limit` (on the type, naming
+its own field). The other proposed pairs wait: `log`-the-type/`timeline`
+depends on P9 (undecided); `records:`/`capture` — `capture` is a history
+event and CLI subcommand, not a term of `hardware@3`, so a standard
+definition cannot reference it; `claimed`/`assertion` — `claimed` is a
+coverage stage, not a standard term, and `assertion` (P10's proposed rename)
+died with the retired `design-debate` preset.
+
 **P21 — a three-question rule for any new word entering a standard.** (1) Does
 this word already mean something else in refdes? grep the standards, `parse.py`,
 `vocabulary.py`, `cli.py`. (2) Does it mean something else to a hardware

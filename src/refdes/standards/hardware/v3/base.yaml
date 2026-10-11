@@ -170,7 +170,15 @@ link_types:
   blocked_by:     { inverse: blocks,        label: "Blocked by", doc: "Something is holding this entry up. Name only the immediate blocker; reports resolve the chain to its root. May point at an item of any type; a cycle is a build error." }
   part_of:        { inverse: contains,      label: "Part of", doc: "This item belongs to a group. Membership is always declared by the member, never by the group; contains is the computed backlink." }
   drop_in:        { inverse: drop_in,       label: "Drop-in", doc: "This component is a drop-in second source for that one — interchangeable as claimed, no review needed. Self-inverse, and restricted to component-to-component. For a part that is close but needs checking before it goes in a design, use alternate." }
-  alternate:      { inverse: alternate,     label: "Alternate", doc: "This component is functionally close to that one but not a drop-in: check before substituting. Self-inverse, component-to-component, and the rationale explaining what differs is required." }
+  # P20 (vocabulary-review §3.4): the one sentence that separates the pair
+  # lives on the confusable word, next to its definition, and the generated
+  # vocabulary page renders it as a fact line linking `drop_in`.
+  alternate:
+    inverse: alternate
+    label: "Alternate"
+    doc: "This component is functionally close to that one but not a drop-in: check before substituting. Self-inverse, component-to-component, and the rationale explaining what differs is required."
+    differs_from:
+      drop_in: "an alternate needs checking before it goes in a design; a drop-in is interchangeable as claimed, no review needed."
 
 types:
   requirement:
@@ -201,6 +209,10 @@ types:
     # parent.
     extends: requirement
     doc: "A numeric limit the design must respect — a voltage, a current, a tolerance. Its limit field makes it checkable by other items' checks. Counts toward coverage while active."
+    # P20 (vocabulary-review §3.4): `limit` is a field, not a page term of its
+    # own, so the page renders this without a link.
+    differs_from:
+      limit: "the bound is the numeric the design must respect, with its rationale and coverage; the limit is only the comparison stored on it, like '>= 9 V'."
     prefix: BND
     label: Bound
     plural: Bounds

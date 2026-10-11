@@ -121,6 +121,9 @@ class FieldEntry:
     doc: str = ""
     type: str = "text"
     required: bool = False
+    # vocabulary-review P20: {other term: one sentence}, shown under the
+    # definition in the type's fields table.
+    differs_from: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -151,6 +154,10 @@ class TermEntry:
     # YAML as it would appear in an items file (or, for a field set, in a
     # schema file), comments included.
     example: str = ""
+    # vocabulary-review P20: {other term: one sentence}, rendered as a fact
+    # line ("Differs from <term>: <sentence>"); the term links to its entry
+    # on the page when it has one.
+    differs_from: dict[str, str] = field(default_factory=dict)
 
     @property
     def defined(self) -> bool:
@@ -188,6 +195,7 @@ def entries(project: Project) -> Vocabulary:
                 doc=spec.doc,
                 label=spec.label or "",
                 prefix=spec.prefix,
+                differs_from=dict(spec.differs_from or {}),
                 fields=[_field_entry(f, s) for f, s in spec.fields.items()],
                 pointed_at_by=[
                     (verb, sorted(srcs)) for verb, srcs in sorted(inbound[name].items())
@@ -206,6 +214,7 @@ def entries(project: Project) -> Vocabulary:
                 doc=lt.doc,
                 label=lt.label or "",
                 inverse=lt.inverse,
+                differs_from=dict(lt.differs_from or {}),
                 targets=sorted(facts["targets"]),
                 targets_unrestricted=facts["unrestricted"],
                 declared_on=sorted(facts["declared_on"]),
@@ -256,10 +265,16 @@ def _field_entry(name: str, spec) -> FieldEntry:
         doc = spec.get("doc", "")
         ftype = spec.get("type", "text")
         required = spec.get("required", False)
+        differs = spec.get("differs_from") or {}
     else:
         doc, ftype, required = spec.doc, spec.type, spec.required
+        differs = spec.differs_from or {}
     return FieldEntry(
-        name=name, doc=doc or "", type=ftype or "text", required=bool(required)
+        name=name,
+        doc=doc or "",
+        type=ftype or "text",
+        required=bool(required),
+        differs_from=dict(differs),
     )
 
 
@@ -371,6 +386,20 @@ def _assign_anchors(vocab: Vocabulary) -> None:
             anchor = f"term-{entry.name}-{entry.kind}"
         seen.add(anchor)
         entry.anchor = anchor
+
+
+def _anchor_map(vocab: Vocabulary) -> dict[str, str]:
+    """Term name -> the anchor of its page entry, for `differs_from:` links.
+
+    First group to claim a name wins (the page's own order: types, links,
+    sets, keys) -- the same winner that kept the un-suffixed anchor. A term
+    with no entry (a field, an engine concept outside the page) has no
+    anchor and is rendered as plain code text instead.
+    """
+    anchors: dict[str, str] = {}
+    for entry in vocab.terms():
+        anchors.setdefault(entry.name, entry.anchor)
+    return anchors
 
 
 # ------------------------------------------------------------------ examples
@@ -731,6 +760,7 @@ def _fallback_example(e: TermEntry) -> str:
 def render_html(project: Project) -> str:
     """The page's body markup, for `vocabulary.html.j2` to embed."""
     vocab = entries(project)
+    anchors = _anchor_map(vocab)
     out: list[str] = []
     # The coverage spine above the index: it is the one picture of the
     # whole schema worth drawing, and a reader deciding where to start
@@ -745,7 +775,7 @@ def render_html(project: Project) -> str:
         if not group:
             continue
         out.append(f'<section class="vocab-group" id="group-{kind}"><h2>{escape(title)}</h2>')
-        out.extend(_term_html(e, project) for e in group)
+        out.extend(_term_html(e, project, anchors) for e in group)
         out.append("</section>")
     return "\n".join(out)
 
@@ -766,7 +796,7 @@ def _index_html(vocab: Vocabulary) -> str:
     return "".join(parts)
 
 
-def _term_html(e: TermEntry, project: Project) -> str:
+def _term_html(e: TermEntry, project: Project, anchors: dict[str, str]) -> str:
     parts = [f'<div class="vocab-term" id="{escape(e.anchor)}">']
     heading = f"<code>{escape(e.name)}</code>"
     if e.label and e.label != e.name:
@@ -783,13 +813,13 @@ def _term_html(e: TermEntry, project: Project) -> str:
         if e.defined
         else f'<p class="vocab-doc vocab-none">{NO_DEFINITION}</p>'
     )
-    facts = _facts(e)
+    facts = _facts(e, anchors)
     if facts:
         parts.append('<dl class="vocab-facts">')
         parts.extend(f"<dt>{escape(k)}</dt><dd>{v}</dd>" for k, v in facts)
         parts.append("</dl>")
     if e.fields:
-        parts.append(_fields_table(e))
+        parts.append(_fields_table(e, anchors))
     if e.example:
         parts.append(
             '<div class="vocab-example"><h4>Example</h4>'
@@ -799,7 +829,16 @@ def _term_html(e: TermEntry, project: Project) -> str:
     return "".join(parts)
 
 
-def _facts(e: TermEntry) -> list[tuple[str, str]]:
+def _differs_from_html(anchors: dict[str, str], term: str) -> str:
+    """The other term of a `differs_from:` pair: a link to its page entry
+    when it has one, plain code text otherwise (a field on the declaring
+    type is not itself an entry on the page)."""
+    anchor = anchors.get(term)
+    code = f"<code>{escape(term)}</code>"
+    return f'<a href="#{escape(anchor)}">{code}</a>' if anchor else code
+
+
+def _facts(e: TermEntry, anchors: dict[str, str]) -> list[tuple[str, str]]:
     facts: list[tuple[str, str]] = []
     if e.kind == "types":
         if e.prefix:
@@ -834,6 +873,10 @@ def _facts(e: TermEntry) -> list[tuple[str, str]]:
             "file": "A YAML list file, not an item",
         }[e.key_kind]
         facts.append(("Scope", escape(scope)))
+    for term, sentence in (e.differs_from or {}).items():
+        facts.append(
+            ("Differs from", f"{_differs_from_html(anchors, term)}: {escape(sentence)}")
+        )
     return facts
 
 
@@ -843,12 +886,17 @@ def _join(names, code: bool = False) -> str:
     return ", ".join(f"<code>{escape(n)}</code>" if code else escape(n) for n in names)
 
 
-def _fields_table(e: TermEntry) -> str:
+def _fields_table(e: TermEntry, anchors: dict[str, str]) -> str:
     rows = [
         "<tr><th>Field</th><th>Definition</th><th>Type</th><th>Required</th></tr>",
     ]
     for f in e.fields:
         doc = escape(f.doc) if f.doc.strip() else f'<span class="vocab-none">{NO_DEFINITION}</span>'
+        for term, sentence in (f.differs_from or {}).items():
+            # A field is not a page entry of its own, so its fact line lives
+            # under its definition in the table rather than in a term's dl.
+            line = f"Differs from {_differs_from_html(anchors, term)}: {escape(sentence)}"
+            doc = f"{doc}<br><em>{line}</em>" if f.doc.strip() else f"<em>{line}</em>"
         rows.append(
             f"<tr><td><code>{escape(f.name)}</code></td><td>{doc}</td>"
             f"<td>{escape(f.type)}</td><td>{'yes' if f.required else 'no'}</td></tr>"
@@ -881,6 +929,12 @@ def render_markdown(project: Project) -> str:
                 out.append("|---|---|---|---|")
                 for f in e.fields:
                     doc = _md(f.doc) if f.doc.strip() else NO_DEFINITION
+                    for term, sentence in (f.differs_from or {}).items():
+                        # The docs page gets its anchors from the docs site's
+                        # renderer, not from this module's `term-` ids, so the
+                        # other term is named in code text, never linked.
+                        line = f"Differs from `{term}`: {sentence}"
+                        doc = f"{doc} {_md(line)}" if f.doc.strip() else _md(line)
                     out.append(
                         f"| `{f.name}` | {doc} | {f.type} | {'yes' if f.required else 'no'} |"
                     )
@@ -934,4 +988,8 @@ def _md_facts(e: TermEntry) -> list[str]:
             "file": "a YAML list file, not an item",
         }[e.key_kind]
         lines.append(f"- **Scope:** {scope}")
+    for term, sentence in (e.differs_from or {}).items():
+        # Named in code text, not linked: the docs page's heading anchors
+        # belong to the docs site's renderer, not to this module.
+        lines.append(f"- **Differs from `{term}`:** {sentence}")
     return lines
