@@ -1,7 +1,8 @@
 # CLI reference
 
 ```
-refdes [-V] [-c CONFIG] [--no-write] {serve,build,check,revision,release,index,ls,id,fetch,audit,init,new,schema,standard,keys,revise,calc-rewrite,stub-tests,former-ids,history} [options]
+usage: refdes [-h] [-V] [-c CONFIG] [--no-write]
+              {serve,build,check,revision,release,index,ls,thread,id,fetch,audit,init,new,schema,standard,keys,revise,calc-rewrite,stub-tests,former-ids,history} ...
 ```
 
 | Global option | Effect |
@@ -19,7 +20,7 @@ section above or below is the authority; today the split is:
 
 | You named | Command | Exit |
 |---|---|---|
-| an item that is not in the project | `history capture`, `history redact` | `2` |
+| an item that is not in the project, or one on no thread | `history capture`, `history redact`, `thread` | `2` |
 | a preset the pinned standard lacks, or one not selected | `standard add-preset`, `standard remove-preset` | `2` |
 | a mapping file that is not on disk | `revise` | `2` |
 | a revision name that is not a usable name | `revision`, `release` | `2` |
@@ -493,6 +494,91 @@ in. Off by default: `tags:` is optional, and plenty of projects won't want
 the noise. Worth turning on once `refdes ls --tag`/free-text search is
 actually part of how the project finds things — flagging under-tagged items
 is only useful once something can act on the flag.
+
+---
+
+## `refdes thread <ref>`
+
+The thread view of [living-notes.md §6](design/living-notes.md) as a command:
+the tip, what the history store captured, the authors' own tasks with their
+age, and the self-closing derived block. The answer is
+`refdes.threads.threads_projection` — the same projection the index payload
+carries under `threads` — rendered for one thread; the command computes no
+fold of its own, so it cannot disagree with `refdes index`. Any entry on the
+thread names it: `LOG-001`, `LOG-002`, an id-less continuation's surrogate
+key — they all resolve to the same thread.
+
+```console
+$ refdes thread LOG-003
+Thread: LOG-001  (forked: tips LOG-002, LOG-003)
+Snapshot Captured: LOG-001 (followed by later entry)
+
+Tip: LOG-002  2026-09-02  Thermal modelling accepted.
+Verdict: accepted (LOG-002, 2026-09-02), 1 open task remaining below
+Tasks at LOG-002:
+  1. [ ] T-thermal-model  Model worst-case copper temperature.  (open since LOG-001, 2026-08-30)
+  2. [x] T-input-range  Check the 36 V input case.
+
+Tip: LOG-003  2026-09-03  Decoupling fork.
+Tasks at LOG-003:
+  1. [ ] T-decoupling  Recheck decoupling near U14.  (open since LOG-003, 2026-09-03)
+
+Derived (auto clears when fixed):
+  coverage  REQ-001  unverified
+  citation  LOG-002  unpinned
+```
+
+The structure is the design (§5's binding rules), not styling: the authored
+tasks and the derived rows are **two separate blocks with separate
+numbering** — derived rows carry no number and no checkbox, they exist only
+while their gap does, and nothing here is ever written back into `tasks:`.
+Every open task prints **the entry that declared it and that entry's date**;
+a folded verdict prints **with** its tip's open tasks (the `concluding` line
+above is a verdict never alone), and a fork prints one labelled block per
+open tip — there is no single current status to print. A fold that *refused*
+(two entries at the same distance declaring different statuses) prints
+`Verdict: conflicting …` rather than pretending nothing concluded; a task fold
+that refused prints `task reconciliation required`.
+
+| Flag | Meaning |
+| --- | --- |
+| `--json` | Print the thread's projection entry as JSON — exactly the object `index` carries in its `threads` array (plus a `diagnostics` entry, shaped like the index payload's, when the history store refused to be read and the capture lines are therefore not shown) |
+| `--as-of DATE` | Print open-task ages as a relative span measured against DATE. Without it the output prints the absolute declaring date and no span, so the bytes never depend on the wall clock. Not combinable with `--json` (exit 2): the projection is clock-free by design |
+
+```console
+$ refdes thread LOG-102 --as-of 2026-09-12
+Thread: LOG-101 -> LOG-102  (one tip)
+Snapshot Captured: LOG-101 (followed by later entry)
+
+Tip: LOG-102  2026-09-09  Idle current measured.
+Verdict: accepted (LOG-102, 2026-09-09), 1 open task remaining below
+Tasks at tip:
+  1. [ ] T-idle  Measure idle current.  (open since LOG-101, 2026-09-08 -- 4 days)
+
+Derived (auto clears when fixed):
+  (none)
+```
+
+The capture line prints what the store actually holds, in plain words: a
+followed edge — and its corrected form, "(followed by later entry,
+correcting an earlier link)" — deliberately carries no timestamp (§2 — a
+wall-clock stamp would give one fact different bytes in two checkouts), so
+its line says why the snapshot exists and nothing about time; an explicit
+`refdes history capture` event does carry one, and its line —
+"(captured by hand, <that time>)" — prints it inside the parentheses.
+
+A ref that is not an item, or an item on no thread (no `follows:` edge either
+way), is an error with **exit 2**:
+
+```console
+$ refdes thread LOG-999
+error: no item 'LOG-999' in this project (looked up by display id, then surrogate key)
+```
+
+Like `ls`, the command itself writes nothing beyond the load's own key
+minting/expansions — which, like `index` (and unlike `ls`), it announces on
+**stderr**, so the thread's answer is the only thing on stdout even on a
+never-opened project. Its build never writes a seal.
 
 ---
 

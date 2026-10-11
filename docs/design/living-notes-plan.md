@@ -434,6 +434,20 @@ are its tests (`tests/test_threads_projection.py`); the `refdes thread` /
 `refdes work` bullets are chunks B and C and stay open. `--as-of` is H7b's
 alone — the projection itself carries absolute dates only and reads no clock.
 
+**Landed (chunk B — `refdes thread`)** — `cmd_thread` renders one projected
+thread (§6's view: header, capture line, tip(s), tasks with age, derived
+block), with the review fixes chunk A came back with: a conflicting `status`
+fold now has its own `verdict.state` (via `chains.fold_field_at_tip`, which
+borrows the recording trick behind `fold_tasks`' `TipTasks.ambiguous` —
+`TipTasks` is the task fold's record, the field fold's is `chains.TipFold` —
+and `fold_at_tip` is a thin wrapper over it so the equivalence test still
+pins the walk), an all-malformed task list
+is `declared` with `malformed` counted rather than the author's `cleared`,
+the projection docstring's list-order claim matches the code, and the capture
+fact joined the projection (`captured`) so the CLI reads it instead of
+opening the store. `refdes work` (chunk C) stays open. See
+`in-prog-logs/living-notes-h7b-thread-cli.txt` and `tests/test_thread_cli.py`.
+
 ## Phase H8 — two optional release-gate rules, both off
 
 **Adds.** `open_tasks` (a release blocks while any thread tip carries an open

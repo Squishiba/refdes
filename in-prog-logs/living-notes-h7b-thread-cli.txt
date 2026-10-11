@@ -1,0 +1,297 @@
+Task: living-notes phase H7b — H7a review fixes + `refdes thread <ref>` CLI
+Branch/worktree: living-notes-h7b-thread-cli (started clean at the H7a PR #187 merge)
+
+Design decisions made up front (before coding, per TASK.txt's STOP rule):
+
+PART 1 — projection fixes (threads.py, plus one helper in chains.py)
+
+a. Ambiguous status fold vs "no status".
+   Problem: chains.fold_at_tip returns (None, None) for BOTH "two entries tie
+   at equal distance declaring different statuses" and "nothing ever declared
+   status" — the (value, source) pair literally cannot tell them apart, so
+   threads._verdict collapses both to verdict: null. The task fold already
+   keeps these apart the only way it can: fold_tasks records what its
+   declared_of was asked about (TipTasks.ambiguous). The field fold has no
+   equivalent, and threads.py must not grow a second fold. Decision: add
+   chains.TipFold + chains.fold_field_at_tip — the same _fold_from_tip walk
+   with fold_tasks' recording trick — and make fold_at_tip a thin wrapper over
+   it (its equivalence-with-resolve_current_with_source test stays the proof).
+   threads._verdict then reports an explicit verdict state: a declared dict
+   gains "state": "declared"; an ambiguous fold yields
+   {"state": "ambiguous", status/declared_by/declared_on null, concluding:
+   false}; an undeclared thread stays verdict: null. State name "ambiguous" is
+   the word §5 rule 3 and the tasks block already use.
+
+b. All-malformed declared task list.
+   Problem: _tasks derived state from the post-filter rows list, so a declared
+   non-empty list whose rows are all malformed reported "cleared" — a lie
+   (the fold never saw an explicit tasks: []). Decision: state comes from the
+   RAW declaration (empty list -> cleared, non-empty -> declared); rows is
+   still the filtered list (validation owns the error); when any row was
+   dropped, the block gains "malformed": true (conditional key, same posture
+   as open_since).
+
+c. Thread-list ordering.
+   §5 and §6 order entries WITHIN a thread (thread_entries' oldest-first) and
+   say nothing about ordering the LIST of threads. The code sorts views by
+   root ref. Decision: keep the code, fix the docstring ("ordered by ref");
+   add a test pinning ref-order with ids whose dates sort the other way
+   (sabotage: sorting by root date fails it).
+
+d. "rows verbatim" wording.
+   Wrong in threads.py's module docstring and docs/output.md: open rows gain
+   open_since and malformed rows are dropped. Fixed both to say: rows are
+   copied; open rows gain open_since; malformed rows are dropped.
+
+e. _scope and resolved_links.
+   Code already reads item.resolved_links (correct per AGENTS.md) but no test
+   pinned it: with every fixture link bare, raw links and resolved_links are
+   equal. Added a fixture hand-authoring a composite `addresses:
+   [REQ-001@<key>]` target (the test_keys_links.py pattern: mint keys, rewrite
+   the YAML, reload) and asserting the thread's derived row still names
+   REQ-001. Sabotage: reading item.links instead fails the test.
+
+f. docs/output.md fork example showed forked:true with two tips but one
+   branch. Made honest: both branches shown.
+
+PART 2 — `refdes thread <ref>` + capture line
+
+Capture line: threads_projection is the one query service (§6), and the CLI
+must not recompute, so the capture fact joins the PROJECTION: each thread view
+gains "captured": [{entry, kind, occurred_at}] for its members, read through
+history.capture_index (read-only, no clock — occurred_at is store content, so
+projection bytes stay clock-independent; a followed event deliberately carries
+no occurred_at per H2, so the time is rendered only when present — the §6
+sketch's timestamp only exists for explicit `history capture` events).
+
+CLI shape: new cmd_thread in cli.py next to cmd_index/cmd_ls; resolves <ref>
+by display id then surrogate key to its thread's projection entry and renders
+§6's sketch: header (one tip / forked with both tips), capture line(s), tip
+line(s), tasks with age, derived block.
+- Two separately labelled groups with separate numbering (binding rule):
+  authored tasks are numbered 1./2./... under "Tasks at tip:" (forked: "Tasks
+  at <tip>:"); derived rows are never numbered at all under "Derived
+  (self-closing):" — unnumbered is the strongest possible reading of "never
+  shares numbering" — and derived rows carry no tickable state.
+- Open task rows print the declaring entry and date: "(open since LOG-001,
+  2026-08-30)". Relative "N days" appended ONLY under explicit --as-of DATE.
+- Concluding verdict prints together with its tip's open tasks: the Verdict
+  line sits directly above the task block and, when concluding while open
+  tasks remain at that tip, says so ("concluding, N open task(s) at this
+  tip"). Verdicts are never printed alone.
+- Fork: every tip gets its own Tip/Tasks block; no thread-level status line
+  exists (the projection has none).
+- Task-block postures: declared rows / cleared ("none (cleared by X)") /
+  undeclared ("none (never declared)") / ambiguous ("task reconciliation
+  required", §5 rule 3's own phrase).
+- Derived empty -> block prints "(none)" rather than vanishing (the group's
+  presence is part of the two-groups structure).
+- Unknown <ref> (not an item at all) -> clear error, exit 2 (mirrors
+  `history capture`'s item-not-in-project row). <ref> is an item but on no
+  thread -> clear error, exit 2. Load errors: reported to stderr, exit 1 with
+  output intact (cmd_ls's posture). --as-of bad date -> exit 2.
+- --json prints exactly the thread's projection entry (json.dump, indent=2,
+  ensure_ascii=False, default=str — cmd_index's posture). --as-of + --json is
+  refused (exit 2): --json is the projection, which is clock/relative-free by
+  design.
+- --as-of only ever renders relative spans; it never rewrites the projection.
+- Writes: the command writes nothing itself; build runs seal_write=False like
+  index/ls, so no seal/log-seal files appear. Tests: (1) --no-write run on a
+  dirty tree leaves the tree hash unchanged; (2) a plain writable run creates
+  no seal files on a project with an append-only log type; (3) output is
+  byte-identical with time.time patched to different values (and no relative
+  span without --as-of).
+- State-name note: glyphs are [ ] open, [x] done, [-] dropped; wording lines
+  (Verdict:, Captured:, Derived (self-closing):) follow §6's sketch where it
+  gives words, otherwise are plain-CLI wording (the binding rules fix the
+  STRUCTURE; no doc fixes this line text — every CLI line is like this).
+
+Progress log:
+- Read TASK.txt, design docs (living-notes.md §2/§5/§6, living-notes-plan.md
+  phase H7, thread-workbench.md §7a), review reports
+  .scratch/review-h7a/raw-187-c1.txt + raw-187-c2.txt, and mapped every
+  finding to PART 1 a-f. Verified code: threads.py, chains.py (fold internals),
+  cli.py (index/ls/history-capture posture), history.py (capture_followed
+  stores kind; occurred_at only from explicit capture), model.py
+  (follows_graph), tests' fixtures.
+
+Implementation finished. What landed:
+
+- chains.py: TipFold + fold_field_at_tip (fold_tasks' recording trick for
+  any field); fold_at_tip is now a thin wrapper over it (the
+  resolve_current_with_source equivalence test still pins the walk).
+- threads.py: verdict state discriminator (declared/ambiguous, null = never
+  declared); all-malformed task list stays declared + malformed count;
+  captured list via history.capture_index (error-swallowing posture like
+  render.items_json); docstrings fixed (ordering claim, rows-copied claim).
+- cli.py: cmd_thread + parser (ref, --json, --as-of). Exit codes: 2 unknown
+  ref / entry on no thread / bad --as-of / --json+--as-of; 1 with load
+  errors and the answer intact; 0 otherwise. build(seal_write=False) like
+  index/ls; _announce_load_writes to stdout (text output owns stdout, so
+  the ls posture, not index's).
+- tests: 6 new projection tests + tests/test_thread_cli.py (17 tests).
+- docs: output.md threads section (honest two-branch fork example, captured
+  key, verdict states, malformed); cli-reference.md `refdes thread` section
+  with real captured output (fork, --as-of, exit-2 error); living-notes.md
+  §6 landing note; living-notes-plan.md chunk-B landed note; changelog
+  fragments thread-command.added.md + threads-projection-states.changed.md.
+
+Sabotage runs (each: mutate source, run the pinned tests, restore):
+  S1 chains.fold_field_at_tip stops recording (declared=source is not None,
+     ambiguous=False) -> test_ambiguous_verdict_is_its_own_state... and
+     test_ambiguous_verdict_prints_as_itself FAIL. Restored.
+  S2 threads._tasks state from the filtered rows instead of the raw
+     declaration -> test_all_malformed_task_list_is_declared_not_cleared
+     FAIL. Restored.
+  S3 threads._scope reads member.links (raw) instead of resolved_links ->
+     test_derived_scope_follows_composite_key_targets FAIL. Restored.
+  S4 _tasks passes the authored row through instead of copying (entry = row)
+     -> test_task_rows_are_copied_never_the_authored_field_itself FAIL.
+     Restored.
+  S5 thread list sorted by root date instead of ref ->
+     test_thread_list_is_ordered_by_ref_the_only_order_the_docs_allow FAIL.
+     Restored.
+  S6 cmd_thread computes the open-task span from date.today() when no
+     --as-of -> test_output_does_not_depend_on_the_wall_clock FAIL (and the
+     without--as-of assertion FAILed too). Restored.
+  S7 unknown ref returns 0 like a query miss ->
+     test_unknown_ref_is_a_clear_error FAIL. Restored.
+
+Notes found on the way:
+- Two siblings authored with a bare `follows:` onto the same entry FREEZE
+  into a chain on the first writable load (plan §H2: a bare edge freezes to
+  its target's current tip; the test_history_capture.py:190 comment says so
+  outright). An author asks for a fork by naming the key explicitly
+  (`follows: LOG-001@<key>`), which the freeze leaves alone. The CLI fork
+  test does exactly that (warm, read LOG-001's minted key, rewrite the
+  sibling's edge) -- this is existing documented behavior, not a bug, but
+  it surprised me while building the fixture, and docs/cli-reference.md's
+  example project was built the same way.
+- The one thing §6's sketch implies that the store does not provide is a
+  timestamp on a `followed` capture line (H2 writes no clock there); the
+  line prints `at <time>` only when the event carries one (an explicit
+  `history capture`). Recorded in living-notes.md §6's landing note.
+- ruff check (E9,F) clean on every touched file.
+- Full suite: 3462 passed, 2 skipped (foreground run).
+
+================================================================
+Fix round 1 (2026-10-11, FIX-1.txt; PR #191 review findings A/B/C)
+
+Corrections to this log's own record (C7 — appended, not rewritten):
+- ~line 31 above: `"malformed": true` — wrong. The key is a COUNT of
+  dropped rows (`"malformed": 1`), absent when zero; the
+  "same posture as open_since" comparison stands, the value does not.
+- ~line 132 above: "6 new projection tests + tests/test_thread_cli.py
+  (17 tests)" — wrong counts. The landed commit added 8 projection tests
+  (counted in `git show 2f8c5fd`) and test_thread_cli.py collected 18.
+- ~line 137 above: the projection fragment shipped as
+  `threads-projection-states.fixed.md`, not `.changed.md` as written.
+- ~line 175 above: the landed commit's full suite was 3463 passed,
+  2 skipped (per this worktree's .scratch/suite.txt tail), not 3462.
+
+Owner wording decisions (FIX-1 Part A, applied exactly; strings live in
+one place each — threads.py VERDICT_RESOLVED/VERDICT_CONFLICTING for the
+JSON states, cli.py THREAD_DERIVED_HEADING / THREAD_CAPTURE_PREFIX /
+THREAD_CAPTURE_KIND_WORDS / _thread_capture_line / _thread_verdict_suffix
+for the text lines, so `refdes work` (H7c) reuses them):
+- A1: `Verdict: accepted (LOG-002, 2026-09-02), 1 open task remaining
+  below` (plural "N open tasks remaining below"); no suffix when the
+  verdict is not concluding or the tip has no open rows.
+- A2: "Tasks at tip:" / "Tasks at <tip>:" untouched, as decided.
+- A3: heading now `Derived (auto clears when fixed):`.
+- A4 capture kinds + chosen wording (every kind `history.capture_index`
+  can hold — its filter is history's `_CAPTURE_KINDS`, verified by
+  reading it, not memory):
+    followed            -> "(followed by later entry)"
+    followed-corrected  -> "(followed by later entry, correcting an
+                            earlier link)"
+    captured            -> "(captured by hand)" and with the store's
+                            clock "(captured by hand, <time>)"
+  Prefix is "Snapshot Captured:". The time moved inside the parentheses
+  (the owner's example format); an unlisted kind falls back to the raw
+  kind word rather than crashing the command.
+- A5: JSON verdict.state "declared"->"resolved",
+  "ambiguous"->"conflicting"; null verdict unchanged (never declared).
+  tasks.state keeps its own vocabulary (declared/cleared/undeclared/
+  ambiguous) — the decision named verdict.state only. JUDGMENT CALL
+  flagged for the owner: the TEXT line for the refused fold now prints
+  the state word itself, "Verdict: conflicting -- ...", so the terminal
+  and the JSON never spell the same state two ways (cli.py's own
+  "two spellings of one condition" rule); the explanatory half of the
+  sentence is unchanged.
+
+B fixes (each with its test; sabotages recorded below):
+- B1: cmd_thread announces load writes on stderr now
+  (`_announce_load_writes(project, stream=sys.stderr)`). name_blocked
+  checked and deliberately left True (unlike index): thread's JSON
+  carries the store-failure diagnostics only, not the load's refused
+  files, so the summary line is still the only place they could be said.
+  Test: --json on a COLD project that mints keys -> stdout parses.
+  S-B1 (announce back to stdout): test_json_on_a_cold_project... FAIL
+  (JSONDecodeError). Restored.
+- B2: cmd_thread labels through threads._label.
+- B3: threads.capture_facts is the one store read + the warning sentence
+  (the projection stays silent by design); cmd_thread prints it to
+  stderr in text mode and in --json adds a `diagnostics` entry with the
+  index payload's shape (level/message/file/line/item). The old
+  _capture_index docstring's "the build's own diagnostic has already
+  said so" claim — true only of commands that print diagnostics — was
+  corrected at the same time. During the test I found the corrupt-store
+  case the catch could not see: an event file that fails YAML parsing
+  raised a raw yaml.ParserError past every (HistoryError, OSError)
+  reader (build's warn, items_json, the projection). load_events now
+  wraps parse failures in HistoryError (its own docstring already
+  promises "malformed record"), so the refusal reaches the surfaces
+  that were built to say it.
+- B4: items_json reads capture_index once and passes it through
+  threads_projection(captures=...); cmd_thread does the same with its
+  own single read. Payload byte-identical (all existing payload tests
+  green); test_items_json_reads_the_capture_store_once pins the count.
+- B5: test_partially_malformed_list_keeps_the_valid_rows_and_counts_the_rest.
+- B6: test_the_command_itself_never_seals rebuilt on a
+  `sealing: build` overlay for `log` (hardware@3's `log` is
+  sealing: history, which made the old test vacuous — confirmed in
+  standards/hardware/v3/base.yaml). The test first proves a writable
+  `refdes build` writes .refdes/log-seal.yaml there, deletes it, then
+  shows writable `refdes thread` never re-creates it. Old docstring's
+  "append-only and sealed" claim corrected. S-B6 (seal_write=True in
+  cmd_thread): the test FAILs. Restored.
+- B7: test_derived_row_self_closes_after_a_real_fix now snapshots
+  items/log.yaml bytes before the fix run and compares after (it passed
+  unchanged — the block really was byte-identical; now that's pinned).
+- B8/B9: clock test: CPython refuses to patch datetime.datetime.now /
+  date.today (immutable C types), so the mechanism-independent pin is
+  the one the review allowed: the no---as-of output must match no
+  `-- N days` pattern at all, alongside the moved-clock byte-equality.
+  S-B8 (span from datetime.now() when no --as-of): the test FAILs (on
+  the span assertion; time.time alone could not have caught it). The
+  "two years" claims are now "about three years (epoch 1_700_000_000 is
+  2023-11-14; fixtures 2026)" — also fixed in test_threads_projection.py,
+  which had the same stale phrase.
+- B10: loader.load_tree(config, write=True) spelled out.
+
+C fixes:
+- C1/C2: cli-reference.md after B1: the announce sentence now says
+  stderr "like `index`" honestly, and the --json row notes the one
+  case (unreadable store) where the object gains a `diagnostics` entry.
+- C3: usage header is the real `refdes --help` usage (thread between ls
+  and id); exit-2 "item not in the project" row now includes `thread`
+  (and names the on-no-thread case).
+- C4: living-notes.md §6 subcommand list includes `thread`, rephrased so
+  the historical claim stays true.
+- C5: output.md, the changelog fragment, and the §6 landing note all say
+  the clockless kinds are `followed` AND `followed-corrected`; the
+  landing note now says the line spells its kind in plain words. A4's
+  wording table covers followed-corrected; CLI test added for it.
+- C6: plan chunk-B note: TipTasks is the task fold's record; the field
+  fold borrows its recording trick and returns chains.TipFold.
+- C7: correction section above.
+- C8: chains.TipFold `declared` bullet: a `field: null` declaration
+  does not count and does not stop the walk; the walk stops at the
+  nearest declaring level, so entries further back never count.
+
+Round-1 suite/gates (foreground, .scratch/suite.txt): 3469 passed,
+2 skipped in 243.95s, exit=0 (3463 + the 6 new tests). ruff check
+--select E9,F src tests clean. docs-site/gen_examples.py --check clean.
+Docs example output re-run on .scratch/doc-thread (fork) and
+.scratch/doc-thread-asof (one tip, --as-of) and pasted fresh.

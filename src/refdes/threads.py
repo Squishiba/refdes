@@ -10,7 +10,9 @@ this one function — none of them computes its own fold.
 The shape carries §5's decisions, not a rendering of them:
 
 * two structurally separate groups — authored task lists live per tip in
-  ``branches[].tasks`` (the `chains.fold_tasks` rows verbatim), derived rows
+  ``branches[].tasks`` (the `chains.fold_tasks` rows, *copied*: open rows gain
+  ``open_since``, malformed rows are dropped with the count reported as
+  ``tasks.malformed``), derived rows
   live in a thread-level ``derived`` list whose rows carry no task-row ``id``,
   so they can never sort into the authors' numbering and nothing writes them
   back;
@@ -26,10 +28,22 @@ The shape carries §5's decisions, not a rendering of them:
 * a verdict is never alone: each branch's folded ``status`` sits in the same
   object as that tip's task block, with ``concluding`` answering the
   ``satisfying_statuses``/``verifying_statuses`` question
-  ``blocked._is_settled`` already asks, pointed at the thread's own tip;
+  ``blocked._is_settled`` already asks, pointed at the thread's own tip. A
+  verdict is ``null`` only when nothing on the branch ever declared a
+  ``status:``; a fold that *refused* between differing equal-distance
+  declarations gets its own explicit ``state: "conflicting"`` (the task
+  fold's ambiguity posture, via ``chains.fold_field_at_tip``), never
+  collapsed into the no-verdict null; a fold that concluded is
+  ``state: "resolved"``;
 * a fork is never collapsed: there is no thread-level status anywhere, and
   each open tip gets its own branch (its own ``fold_tasks`` list, its own
-  branch-local verdict via ``chains.fold_at_tip``).
+  branch-local verdict via ``chains.fold_at_tip``);
+* the store's capture fact travels with the thread it captures: ``captured``
+  names each member with a live capture event in the history store, with the
+  event's kind and its ``occurred_at`` when the store holds one (a
+  ``followed`` or ``followed-corrected`` edge deliberately carries none —
+  §2: display metadata, never ordered or gated on), so H7b's capture line
+  reads it instead of opening the store itself.
 
 Nothing here writes — the same tree-hash guarantee every read surface carries.
 """
@@ -38,6 +52,7 @@ from __future__ import annotations
 
 from . import blocked as blocked_mod
 from . import chains as chains_mod
+from . import history as history_mod
 from . import lifecycle as lifecycle_mod
 from .model import Item, Project
 
@@ -45,6 +60,15 @@ from .model import Item, Project
 # the order §5's worklist table lists them in, so the block never reorders
 # itself between builds.
 _KIND_ORDER = {"coverage": 0, "check": 1, "blocked": 2, "citation": 3}
+
+#: The verdict discriminator's two non-null states (owner wording, 2026-10-11
+#: fix round: `declared`/`ambiguous` read as the task fold's own postures,
+#: which they are not — a verdict either *concluded* something or two
+#: equal-distance declarations *conflict*). A null verdict is the third
+#: posture and needs no name: nothing on the branch ever declared a status.
+#: `refdes work` (H7c) renders these same strings, so they live here once.
+VERDICT_RESOLVED = "resolved"
+VERDICT_CONFLICTING = "conflicting"
 
 
 def _label(item: Item) -> str:
@@ -67,13 +91,40 @@ def _summary(item: Item) -> str:
     )
 
 
+def capture_facts(project: Project) -> tuple[dict, str | None]:
+    """One read of `history.capture_index` for a whole command run: the
+    index, plus — when the store refused to be read — the plain sentence
+    naming why the capture lines are missing.
+
+    The failure belongs to the *surface*, not the projection: the
+    projection stays silent by design (it must not grow a diagnostics
+    shape, and `render.items_json` shares one read with it), so the
+    command that renders capture lines owes the reader this sentence
+    itself — `cmd_thread` prints it on stderr in text mode and into the
+    `--json` payload's `diagnostics` array (the index payload's shape).
+    The projection takes the index through its `captures=` parameter, so
+    a command that already read it — or `items_json`, which needs the
+    same index for its per-item `captured` keys — never parses the event
+    store twice in one build.
+    """
+    try:
+        return history_mod.capture_index(project), None
+    except (history_mod.HistoryError, OSError) as exc:
+        return {}, f"the history store could not be read ({exc})"
+
+
 def threads_projection(
     project: Project,
     *,
     graph: chains_mod.ChainGraph | None = None,
+    captures: dict | None = None,
 ) -> list[dict]:
-    """Every thread in the project, oldest-root first, as JSON-serialisable
-    dicts — §6's query service, whole-project form.
+    """Every thread in the project, ordered by each thread's root ref, as
+    JSON-serialisable dicts — §6's query service, whole-project form.
+
+    The *list* order is the root's label, sort order (§5/§6 order entries
+    *within* a thread — `thread_entries`' oldest-first — and mandate nothing
+    about ordering threads; the sorted ref is the deterministic choice).
 
     A thread is a connected component of the `follows:` graph with at least
     one edge in either direction (`chains.is_threaded`'s question): a lone
@@ -87,12 +138,18 @@ def threads_projection(
     (`project.coverage`, `item.checks`, `project.blocked_chains`,
     `item.citations`), so a caller that has not run the build sees an empty
     derived block — the truth, not a recomputation.
+
+    `captures` is the build's one `capture_facts`/`history.capture_index`
+    read, passed down by a caller that needs the same index for its own
+    keys (`render.items_json`) so a whole `index` run parses the event
+    store once, not twice; by default the projection reads it itself.
     """
     graph = graph if graph is not None else chains_mod.build_graph(project)
     nodes = set(graph.predecessors) | set(graph.successors)
     if not nodes:
         return []
     problems = _derived_problems(project)
+    captures = capture_facts(project)[0] if captures is None else captures
     views: list[dict] = []
     seen: set[int] = set()
     for handle in sorted(nodes):
@@ -101,9 +158,38 @@ def threads_projection(
             continue
         members = chains_mod.thread_entries(project, item, graph=graph)
         seen.update(id(member) for member in members)
-        views.append(_thread_view(project, members, graph, problems))
+        views.append(_thread_view(project, members, graph, problems, captures))
     views.sort(key=lambda view: view["ref"])
     return views
+
+
+def _captured(members: list[Item], captures: dict) -> list[dict]:
+    """Which of a thread's members the history store holds a live capture
+    for (§6's capture line, and §2's "a fork captures the predecessor
+    snapshot once for each branch event" — the store keeps one event per
+    edge, `capture_index` picks the representative per item).
+
+    `kind` is the event's own kind (`followed`, `followed-corrected`, or an
+    explicit `captured`); `occurred_at` is null exactly when the event
+    carries no clock — which is every `followed` and `followed-corrected`
+    edge (`capture_followed` writes both without one, by H2's decision that
+    a wall-clock stamp would give one fact different bytes in two checkouts;
+    §2: display metadata, never ordered or gated on). Null here means "the
+    store does not record when", not "uncaptured"."""
+    rows: list[dict] = []
+    for member in members:
+        hit = captures.get(member.key) if member.key else None
+        if hit is None:
+            continue
+        event, _edited = hit
+        rows.append(
+            {
+                "entry": _label(member),
+                "kind": str(event["kind"]),
+                "occurred_at": event.get("occurred_at"),
+            }
+        )
+    return rows
 
 
 def _thread_view(
@@ -111,6 +197,7 @@ def _thread_view(
     members: list[Item],
     graph: chains_mod.ChainGraph,
     problems: dict,
+    captures: dict,
 ) -> dict:
     root = members[0]
     tips = chains_mod.thread_tips(project, root, graph=graph)
@@ -133,6 +220,7 @@ def _thread_view(
         "entries": [_label(member) for member in members],
         "tips": [branch["tip"] for branch in branches],
         "forked": len(branches) != 1,
+        "captured": _captured(members, captures),
         "branches": branches,
         "derived": _derived(project, members, problems),
     }
@@ -148,7 +236,9 @@ def _tasks(tip_tasks: chains_mod.TipTasks | None) -> dict:
     may be shown) are the fold's own postures; `rows` is null for the latter
     two because there is no list to show, not an empty one. Each open row
     carries `open_since`: the entry whose declaration won and that entry's
-    authored date — §5 rule 3, absolute only.
+    authored date — §5 rule 3, absolute only. A declared list with malformed
+    rows stays `declared` and gains `malformed` (the dropped-row count,
+    absent when zero): zero *valid* rows is not the author's empty list.
     """
     if tip_tasks is None:
         return {"state": "undeclared", "declared_by": None, "declared_on": None, "rows": None}
@@ -163,38 +253,64 @@ def _tasks(tip_tasks: chains_mod.TipTasks | None) -> dict:
             "rows": None,
         }
     rows = []
+    malformed = 0
     for row in tip_tasks.rows:
         if not isinstance(row, dict):
             # `build.validate_items` has already reported the malformed row;
             # the projection drops it rather than inventing a shape for it.
+            malformed += 1
             continue
         entry = dict(row)
         if entry.get("state") == "open":
             entry["open_since"] = {"entry": declared_by, "date": declared_on}
         rows.append(entry)
-    return {
-        "state": "declared" if rows else "cleared",
+    block = {
+        # `cleared` is the fold's own posture for the *explicit empty list*,
+        # never this list's post-filter emptiness: a declared list whose rows
+        # are all malformed IS a declaration (zero valid rows + the count
+        # below), and reporting it "cleared" would hide the error behind an
+        # empty list that says "the author closed everything".
+        "state": "declared" if tip_tasks.rows else "cleared",
         "declared_by": declared_by,
         "declared_on": declared_on,
         "rows": rows,
     }
+    if malformed:
+        block["malformed"] = malformed
+    return block
 
 
 def _verdict(project: Project, tip: Item, graph: chains_mod.ChainGraph) -> dict | None:
     """The tip's branch-local folded status, in the same object as its tasks
     (§5 rule 4: a verdict never prints alone).
 
-    `chains.fold_at_tip` is `resolve_current_with_source`'s own fold anchored
-    at this tip — identical answer on a one-tip thread, and the branch's own
-    answer on a fork, where a thread-level "current status" does not exist.
+    `chains.fold_field_at_tip` is `resolve_current_with_source`'s own fold
+    anchored at this tip — identical answer on a one-tip thread, and the
+    branch's own answer on a fork, where a thread-level "current status" does
+    not exist. `state` keeps the three postures the (value, source) pair alone
+    cannot separate: `VERDICT_RESOLVED` (there is a status, and what it
+    says), `VERDICT_CONFLICTING` (entries at the same distance refused — §5
+    rule 3's posture for `status`, said as itself and never displayed as
+    "nothing concluded"), and — by the verdict being null — no entry on the
+    branch ever declared a status at all.
     """
-    status, source = chains_mod.fold_at_tip(project, tip, "status", graph=graph)
-    if source is None:
+    fold = chains_mod.fold_field_at_tip(project, tip, "status", graph=graph)
+    if fold is None or not fold.declared:
         return None
+    if fold.ambiguous:
+        return {
+            "state": VERDICT_CONFLICTING,
+            "status": None,
+            "declared_by": None,
+            "declared_on": None,
+            "concluding": False,
+        }
+    status = fold.value
     return {
+        "state": VERDICT_RESOLVED,
         "status": status,
-        "declared_by": _label(source),
-        "declared_on": _date(source),
+        "declared_by": _label(fold.source),
+        "declared_on": _date(fold.source),
         "concluding": _concluding(project, tip, status),
     }
 

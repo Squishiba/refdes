@@ -505,16 +505,29 @@ static page remains a reader's rich rendering; it must not be the only way to
 learn the thread tip or task list. `refdes thread` and `refdes work` do not
 exist today; `refdes history` does, but it is the capture/redact/migrate-seals
 command for the `.refdes/history/` store of §3, not a thread or task query.
-The subcommands on `main` are `serve`, `build`, `check`, `revision`,
-`release`, `index`, `ls`, `id`, `fetch`, `audit`, `init`, `new`, `schema`,
-`standard`, `keys`, `revise`, `calc-rewrite`, `stub-tests`, `former-ids`, and
-`history` — so the thread/task surface in this section is still a proposal.
+The subcommands are `serve`, `build`, `check`, `revision`,
+`release`, `index`, `ls`, `thread`, `id`, `fetch`, `audit`, `init`, `new`,
+`schema`, `standard`, `keys`, `revise`, `calc-rewrite`, `stub-tests`,
+`former-ids`, and `history` — `thread` joined that list with the landing
+note below; when this section was written every one of its surfaces was
+still a proposal.
 
 Decided later (Jared, 2026-10-10): the primary interactive task surface is the
 floating task pane — in the `serve` preview, in the browser editor, and
 (read-only) on the static site. It stays a client of the one query service
 above, never a second implementation of the fold; the behaviour and its six
 sub-decisions are recorded in `docs/design/thread-workbench.md` §7a.
+
+Landed later (2026-10-11, plan §H7 chunk B): `refdes thread <ref>` exists —
+it renders one entry of `refdes.threads.threads_projection` (the same
+projection the `index` payload carries under `threads`), and its real output
+is documented in `docs/cli-reference.md`. `refdes work` is still chunk C and
+does not exist. The sketch below stays the shape it was decided against; the
+one thing it implied that the store does *not* provide is a timestamp on a
+`followed` or `followed-corrected` capture line — H2 deliberately writes no
+clock on either, so the line spells its capture kind in plain words and names
+a time only when the event actually carries one (an explicit
+`refdes history capture`).
 
 Proposed CLI, explicitly a sketch rather than current behavior:
 

@@ -14,6 +14,7 @@ from . import build as build_mod
 from . import calc_rewrite as calc_rewrite_mod
 from . import citations as citations_mod
 from . import diagram as diagram_mod
+from . import dates as dates_mod
 from . import docs_url as docs_url_mod
 from . import former_ids as former_ids_mod
 from . import get_version, model, standards, textio
@@ -29,6 +30,7 @@ from . import scaffold as scaffold_mod
 from . import schema_json as schema_json_mod
 from . import seal as seal_mod
 from . import stub_tests as stub_tests_mod
+from . import threads as threads_mod
 from .model import INVALIDATE, Item, Project
 from .schema import SCHEMA_NAME, SchemaError, load_project
 from .write_lock import LockUnavailable, project_write_lock
@@ -795,6 +797,263 @@ def _print_reuse_note(retired_id: str, holders: list[str]) -> None:
         "former id, which 'refdes check' reports as an error -- former_ids: "
         "may only name retired ids."
     )
+
+
+#: §6's sketch's checkbox column: the three authored states, and nothing else.
+#: Derived rows render without any glyph -- they have no tickable state (§5
+#: rule 2), which is exactly why they live in their own block.
+_THREAD_GLYPHS = {"open": "[ ]", "done": "[x]", "dropped": "[-]"}
+
+# The thread surface's fixed wording, spelled once (owner decisions,
+# 2026-10-11 fix round). `refdes work` (plan §H7 chunk C, stacked on
+# `refdes thread`) renders the same blocks and reads these constants and
+# helpers instead of re-spelling the strings -- two spellings of one line
+# is exactly what this block exists to prevent.
+
+#: The derived block's heading: self-closing said in plain words.
+THREAD_DERIVED_HEADING = "Derived (auto clears when fixed):"
+
+#: The capture line's prefix.
+THREAD_CAPTURE_PREFIX = "Snapshot Captured:"
+
+#: Plain wording for every capture kind the store's capture index can hold
+#: (history's `_CAPTURE_KINDS`: `followed`, `followed-corrected`, and an
+#: explicit `refdes history capture`'s `captured`). When the store also
+#: holds an `occurred_at` -- only ever the hand-captured kind -- it is
+#: appended after a comma inside the parentheses.
+THREAD_CAPTURE_KIND_WORDS = {
+    "followed": "followed by later entry",
+    "followed-corrected": "followed by later entry, correcting an earlier link",
+    "captured": "captured by hand",
+}
+
+
+def _thread_capture_line(capture: dict) -> str:
+    """One capture line: what the store holds about one member, in the
+    owner's plain words. The `kind` word says why the snapshot exists; a
+    time prints only when the store actually records one (H2 writes no
+    clock on the two `followed` kinds)."""
+    kind = str(capture["kind"])
+    wording = THREAD_CAPTURE_KIND_WORDS.get(kind, kind)
+    if capture["occurred_at"]:
+        wording += f", {capture['occurred_at']}"
+    return f"{THREAD_CAPTURE_PREFIX} {capture['entry']} ({wording})"
+
+
+def _thread_verdict_suffix(verdict: dict, open_count: int) -> str:
+    """§5 rule 4's "never alone" as a suffix on the verdict line: a
+    concluding verdict with open tasks at its tip says how many remain
+    below, in the owner's wording. Empty for a non-concluding verdict or
+    a tip with no open tasks (the verdict then prints alone because there
+    is nothing to conclude *against*)."""
+    if not verdict["concluding"] or not open_count:
+        return ""
+    return (
+        f", {open_count} open task" + ("" if open_count == 1 else "s")
+        + " remaining below"
+    )
+
+
+def _thread_age_suffix(row: dict, as_of, date_format: str) -> str:
+    """§5 rule 3's age line: the declaring entry and its authored date,
+    absolute; a relative span is appended ONLY under an explicit --as-of, so
+    a run without the flag is byte-identical whatever the wall clock says."""
+    since = row.get("open_since") or {}
+    entry, declared = since.get("entry"), since.get("date")
+    if not entry:
+        return ""
+    text = f"  (open since {entry}"
+    if declared:
+        text += f", {declared}"
+        if as_of is not None:
+            try:
+                start = dates_mod.parse_date(declared, date_format)
+            except ValueError:
+                start = None
+            if start is not None:
+                days = (as_of - start).days
+                if days < 0:
+                    text += " -- declared after --as-of"
+                else:
+                    text += f" -- {days} day" + ("" if days == 1 else "s")
+    return text + ")"
+
+
+def cmd_thread(args) -> int:
+    """One thread's view: tip, capture line, tasks with age, derived rows.
+
+    The thread *view* of living-notes.md §6 as a command: the query service
+    is `threads.threads_projection` -- the same single answer the index
+    payload and the VS Code hover read -- and this command renders one entry
+    of it, so it cannot disagree with `refdes index` about the fold, the tips
+    or the derived rows (a client "must not reconstruct the chain itself").
+    It reads: the load's own key-minting is the only writing, and the build
+    runs `seal_write=False` like `index`/`ls`.
+
+    Any entry on the thread is a valid argument (an id-less continuation's
+    key works the same way `item_by_ref` resolves it); it resolves to *its*
+    thread. Two separate labelled groups with separate numbering (§5 rule 1:
+    the derived rows carry no numbers at all, and never sort into the
+    authors' list), absolute ages without --as-of (rule 3), the folded
+    verdict printed with its tip's tasks rather than alone (rule 4), and on
+    a fork one labelled block per open tip with no single current status
+    anywhere (rule 4's fork half).
+    """
+    project, _stale = _load(args, require_ids=False)
+    # The load's own writes go to stderr, not stdout: like `index`, this
+    # command's stdout is its answer (--json's object, or the view itself),
+    # and a "(minted N key(s) while loading)" line printed ahead of it
+    # breaks `thread ... --json | jq` on every cold project. `name_blocked`
+    # stays True because --thread has no diagnostics payload to carry the
+    # refused files (the JSON gains its `diagnostics` array only when the
+    # history store itself refused); `index` can pass False precisely
+    # because its payload already names them.
+    _announce_load_writes(project, stream=sys.stderr)
+    load_errors = project.errors
+    for d in load_errors:
+        print(str(d), file=sys.stderr)
+    as_of = None
+    if args.as_of is not None:
+        if args.json:
+            # --as-of is a rendering option; --json is the projection itself,
+            # which is deliberately clock-free (§5 rule 3). Refuse the
+            # combination instead of silently ignoring the flag.
+            print(
+                "error: --as-of renders relative ages in the text output; "
+                "--json prints the thread projection, which carries absolute "
+                "dates only -- the two cannot combine",
+                file=sys.stderr,
+            )
+            return 2
+        try:
+            as_of = dates_mod.parse_date(args.as_of, project.date_format)
+        except ValueError as exc:
+            print(f"error: --as-of {args.as_of!r}: {exc}", file=sys.stderr)
+            return 2
+    item = project.item_by_ref(args.ref)
+    if item is None:
+        print(
+            f"error: no item {args.ref!r} in this project "
+            "(looked up by display id, then surrogate key)",
+            file=sys.stderr,
+        )
+        return 2
+    build_mod.build(project, seal_write=False, reseal=False)
+    label = threads_mod._label(item)
+    # One read of the capture store for the whole run (threads_projection
+    # takes the index it returns), and its failure kept in hand: the
+    # projection stays silent by design, so this command is the one that
+    # has to say so -- the capture lines would otherwise vanish with no
+    # trace (review B3).
+    captures, store_error = threads_mod.capture_facts(project)
+    views = threads_mod.threads_projection(project, captures=captures)
+    view = next((v for v in views if label in v["entries"]), None)
+    if view is None:
+        print(
+            f"error: {label} is not part of a thread (no follows: edge "
+            "either way) -- refdes thread shows a thread's tip, tasks and "
+            "derived rows",
+            file=sys.stderr,
+        )
+        return 2
+    if args.json:
+        if store_error is not None:
+            # Same entry shape as the index payload's `diagnostics`, so a
+            # consumer that reads both doors sees the same warning shape.
+            view["diagnostics"] = [
+                {
+                    "level": "warning",
+                    "message": (
+                        f"the thread's captured lines may be missing: {store_error}"
+                    ),
+                    "file": None,
+                    "line": None,
+                    "item": None,
+                }
+            ]
+        json.dump(view, sys.stdout, indent=2, ensure_ascii=False, default=str)
+        sys.stdout.write("\n")
+        return 1 if load_errors else 0
+    if store_error is not None:
+        print(
+            f"warning: the thread's captured lines may be missing: {store_error}",
+            file=sys.stderr,
+        )
+
+    if view["forked"]:
+        print(f"Thread: {view['ref']}  (forked: tips {', '.join(view['tips'])})")
+    else:
+        print(f"Thread: {' -> '.join(view['entries'])}  (one tip)")
+    for cap in view["captured"]:
+        print(_thread_capture_line(cap))
+    single = not view["forked"]
+    for branch in view["branches"]:
+        print()
+        date = f"  {branch['date']}" if branch["date"] else ""
+        print(f"Tip: {branch['tip']}{date}  {branch['summary']}")
+        verdict = branch["verdict"]
+        if verdict is not None:
+            if verdict["state"] == threads_mod.VERDICT_CONFLICTING:
+                # §5 rule 3's posture for `status`, said as itself -- never
+                # displayed as though nothing had concluded. The state word
+                # is the projection's own, spelled once (H7c reuses it).
+                print(
+                    f"Verdict: {verdict['state']} -- entries at the same "
+                    "distance declare different statuses; a continuation "
+                    "must declare one explicitly"
+                )
+            else:
+                open_rows = [
+                    row for row in (branch["tasks"]["rows"] or [])
+                    if row.get("state") == "open"
+                ]
+                suffix = _thread_verdict_suffix(verdict, len(open_rows))
+                on = f", {verdict['declared_on']}" if verdict["declared_on"] else ""
+                print(
+                    f"Verdict: {verdict['status']} "
+                    f"({verdict['declared_by']}{on}){suffix}"
+                )
+        heading = "Tasks at tip:" if single else f"Tasks at {branch['tip']}:"
+        tasks = branch["tasks"]
+        if tasks["state"] == "ambiguous":
+            print(f"{heading} task reconciliation required")
+        elif tasks["state"] == "undeclared":
+            print(f"{heading} none (never declared)")
+        elif tasks["state"] == "cleared":
+            print(f"{heading} none (cleared by {tasks['declared_by']})")
+        else:
+            malformed = tasks.get("malformed")
+            note = f" ({malformed} malformed row(s) not shown)" if malformed else ""
+            print(f"{heading}{note}" if note else heading)
+            for number, row in enumerate(tasks["rows"], start=1):
+                glyph = _THREAD_GLYPHS.get(row.get("state"), "[?]")
+                age = (
+                    _thread_age_suffix(row, as_of, project.date_format)
+                    if row.get("state") == "open"
+                    else ""
+                )
+                print(
+                    f"  {number}. {glyph} {row.get('id', '?')}  "
+                    f"{row.get('text', '')}{age}"
+                )
+    print()
+    print(THREAD_DERIVED_HEADING)
+    rows = view["derived"]
+    if not rows:
+        print("  (none)")
+    else:
+        width = max(len(row["kind"]) for row in rows)
+        for row in rows:
+            kind = row["kind"].ljust(width)
+            if row["kind"] == "check":
+                detail = f"{row['value']} violates {row['against']}"
+            elif row["kind"] == "blocked":
+                stale = " (stale)" if row["stale"] else ""
+                detail = f"by {row['root']} ({row['root_status']}){stale}"
+            else:
+                detail = row["problem"]
+            print(f"  {kind}  {row['ref']}  {detail}")
+    return 1 if load_errors else 0
 
 
 def cmd_id(args) -> int:
@@ -2272,6 +2531,41 @@ def main(argv: list[str] | None = None) -> int:
     p_ls.add_argument("--file", help="only items declared in this source file")
     p_ls.add_argument("--tag", help="only items with a tag containing this text")
     p_ls.set_defaults(func=cmd_ls)
+
+    p_thread = sub.add_parser(
+        "thread",
+        help="one thread's view: tip, capture line, tasks with age, derived rows",
+        description="The thread view of docs/design/living-notes.md section 6 as "
+        "a command. Any entry id or surrogate key on the thread names it, and "
+        "resolves to the thread that entry belongs to. The answer is the same "
+        "threads_projection answer the index payload carries -- this renders "
+        "one entry of it and computes no fold of its own. The authored task "
+        "block at each open tip and the labelled derived block are two "
+        "separate groups with separate numbering (derived rows are "
+        "self-closing, carry no numbers, and are never written back); every "
+        "open task prints the entry that declared it and that entry's date; "
+        "a folded verdict prints with its tip's tasks rather than alone; a "
+        "fork prints one block per open tip and never a single current "
+        "status. Open-task ages are absolute without --as-of -- a relative "
+        "span appears only when you name the date to measure against, so the "
+        "bytes never depend on the wall clock. An unknown ref, or a ref with "
+        "no follows: edge either way, is an error with exit 2.",
+    )
+    p_thread.add_argument(
+        "ref", help="any entry id or surrogate key on the thread"
+    )
+    p_thread.add_argument(
+        "--json",
+        action="store_true",
+        help="print the thread's projection entry as JSON",
+    )
+    p_thread.add_argument(
+        "--as-of",
+        metavar="DATE",
+        help="render open-task ages relative to DATE instead of absolute "
+        "dates only (not combinable with --json)",
+    )
+    p_thread.set_defaults(func=cmd_thread)
 
     p_id = sub.add_parser("id", help="allocate IDs for items that have none")
     p_id.add_argument("--dry-run", action="store_true", help="show without writing")

@@ -605,13 +605,27 @@ def items_json(project: Project, *, graph: chains_mod.ChainGraph | None = None) 
         }
         for item_id, cov in sorted(project.coverage.items())
     }
+    # Phase H3: captured items carry a `captured` / `edited_after_captured`
+    # pair so VS Code and the future editor read the fact from the index
+    # instead of recomputing it. Uncaptured items get neither key -- the
+    # same "absent key, not null" convention as `boards` -- so an
+    # uncaptured project's payload stays byte-identical. A store that
+    # refuses to be read yields no keys: build's own
+    # "edited-after-captured was not checked" warning is already in this
+    # payload's `diagnostics`, and the index never fails over the store.
+    # Read once here and handed to the thread projection below, so one
+    # `index` run parses the event store once, not twice.
+    try:
+        captures = history_mod.capture_index(project)
+    except (history_mod.HistoryError, OSError):
+        captures = {}
     # Living notes §6 / plan phase H7a: the thread projection, present only
     # when the project has threads at all -- the same "absent key, not null"
     # convention as `boards`, so a project with no `follows:` anywhere keeps
     # a byte-identical payload. H7b/H7c and the task-pane client read this
     # instead of reconstructing the chain (threads_projection is the one
     # fold/tip/derived-row service; see src/refdes/threads.py).
-    thread_rows = threads_mod.threads_projection(project, graph=graph)
+    thread_rows = threads_mod.threads_projection(project, graph=graph, captures=captures)
     if thread_rows:
         payload["threads"] = thread_rows
     # `doc` appears only where a definition was actually declared (finding 38),
@@ -639,17 +653,10 @@ def items_json(project: Project, *, graph: chains_mod.ChainGraph | None = None) 
     }
 
     # Phase H3: captured items carry a `captured` / `edited_after_captured`
-    # pair so VS Code and the future editor read the fact from the index
-    # instead of recomputing it. Uncaptured items get neither key -- the
-    # same "absent key, not null" convention as `boards` -- so an
-    # uncaptured project's payload stays byte-identical. A store that
-    # refuses to be read yields no keys: the build's own diagnostic has
-    # already said so, and the index never fails over it.
-    try:
-        captures = history_mod.capture_index(project)
-    except (history_mod.HistoryError, OSError):
-        captures = {}
-
+    # pair (the store was read for them above, once, and shared with the
+    # thread projection). Uncaptured items get neither key -- the same
+    # "absent key, not null" convention as `boards` -- so an uncaptured
+    # project's payload stays byte-identical.
     items_out = []
     for item in sorted(project.items.values(), key=lambda i: i.id):
         entry = {

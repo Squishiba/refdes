@@ -458,8 +458,17 @@ def load_events(root: str) -> list[dict[str, object]]:
         if not name.endswith(".yaml"):
             continue
         path = os.path.join(directory, name)
-        with open(path, "r", encoding="utf-8") as fh:
-            data = yaml_safe_load(fh)
+        try:
+            with open(path, "r", encoding="utf-8") as fh:
+                data = yaml_safe_load(fh)
+        except yaml.YAMLError as exc:
+            # A record that does not parse is the "malformed record" of
+            # HistoryError's own contract. Its readers all catch
+            # (HistoryError, OSError) and say so in their own posture; a
+            # raw parser exception escaping here would instead crash every
+            # one of them over one corrupt file -- the silent-store disease
+            # with its opposite symptom.
+            raise HistoryError(f"{path}: event file does not parse ({exc})") from exc
         _check_format(data, path)
         for field in ("item_key", "successor_key"):
             if data.get(field):

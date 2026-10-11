@@ -456,12 +456,16 @@ reconstructing the chain from `items[]`.
     "entries": ["LOG-PWR-001", "LOG-PWR-002", "LOG-PWR-003"],
     "tips": ["LOG-PWR-002", "LOG-PWR-003"],
     "forked": true,
+    "captured": [
+      { "entry": "LOG-PWR-001", "kind": "followed", "occurred_at": null }
+    ],
     "branches": [
       {
         "tip": "LOG-PWR-002",
         "date": "2026-08-30",
         "summary": "Thermal branch.",
-        "verdict": { "status": "proposed", "declared_by": "LOG-PWR-002",
+        "verdict": { "state": "resolved", "status": "proposed",
+                     "declared_by": "LOG-PWR-002",
                      "declared_on": "2026-08-30", "concluding": false },
         "tasks": {
           "state": "declared",
@@ -471,6 +475,22 @@ reconstructing the chain from `items[]`.
             { "id": "T-thermal-model", "text": "Model worst-case copper temp.",
               "state": "open",
               "open_since": { "entry": "LOG-PWR-001", "date": "2026-08-30" } }
+          ]
+        }
+      },
+      {
+        "tip": "LOG-PWR-003",
+        "date": "2026-08-31",
+        "summary": "Decoupling branch.",
+        "verdict": null,
+        "tasks": {
+          "state": "declared",
+          "declared_by": "LOG-PWR-003",
+          "declared_on": "2026-08-31",
+          "rows": [
+            { "id": "T-decoupling", "text": "Recheck decoupling near U14.",
+              "state": "open",
+              "open_since": { "entry": "LOG-PWR-003", "date": "2026-08-31" } }
           ]
         }
       }
@@ -488,9 +508,12 @@ reconstructing the chain from `items[]`.
 The shape is the decision, not the styling of it:
 
 - **Two separate groups.** `branches[].tasks` is the authors' own list at
-  that tip (the `chains.fold_tasks` fold verbatim); `derived` is computed
-  rows. A derived row carries no task `id`, and nothing here is ever
-  written back.
+  that tip (copies of the `chains.fold_tasks` rows: open rows gain
+  `open_since`, malformed rows are dropped and counted as `malformed` —
+  `build.validate_items` already reported them, and a declared-but-all-
+  malformed list is still `declared`, never the author's empty `cleared`
+  list); `derived` is computed rows. A derived row carries no task `id`,
+  and nothing here is ever written back.
 - **One branch per open tip.** `forked` is `tips.length != 1`, and a fork
   keeps its branches separate — each branch's `tasks` and `verdict` are
   that branch's own fold, so nothing in the payload reads as one current
@@ -503,7 +526,17 @@ The shape is the decision, not the styling of it:
 - **A verdict never prints alone.** Each tip's folded `status` sits in the
   same object as its tasks; `concluding` answers the same question a
   settled blocker does (the tip's type declares `satisfying_statuses:` /
-  `verifying_statuses:` and this status is one of them).
+  `verifying_statuses:` and this status is one of them). A null verdict
+  means nothing on that branch ever declared a `status:`; a fold that
+  concluded carries `verdict.state: "resolved"` with its status, and a
+  fold that *refused* between differing equal-distance declarations gets
+  its own `verdict.state: "conflicting"` with a null status — the three
+  are never collapsed.
+- **The capture fact travels with the thread.** `captured` names each
+  member the history store holds a live capture for, with the event's
+  `kind`; `occurred_at` is null exactly when the store records no clock,
+  which is every `followed` and `followed-corrected` edge (an explicit
+  `refdes history capture` event does carry one).
 - **Derived rows self-close.** They are computed from what already blocks
   a release — uncovered/unverified coverage, failing checks, declared
   `blocked_by:` chains, unpinned or cache-missing citations — over the
