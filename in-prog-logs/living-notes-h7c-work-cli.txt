@@ -1,0 +1,470 @@
+Task: living-notes phase H7c — `refdes work` (project-wide worklist CLI)
+Branch/worktree: living-notes-h7c-work-cli, cut from living-notes-h7b-thread-cli (PR #191, unmerged). Will be rebased later.
+
+Read first: AGENTS.md, .scratch/TASK.txt, living-notes.md §5 ("Generated worklist" + "Binding rules"), §6; living-notes-plan.md Phase H7 (+ P6 naming rule ~line 330: noun is always `task`, `work` is only the command+listing); src/refdes/threads.py; cmd_thread in cli.py; tests/test_thread_cli.py; in-prog-logs/living-notes-h7b-thread-cli.txt.
+
+VERIFIED by running the tool (AGENTS.md):
+- `refdes thread LOG-001` on a fork-authored-bare fixture freezes into a CHAIN (LOG-001 -> LOG-002 -> LOG-003), one tip — matches H7b's note: bare siblings freeze to a chain on the writable load; an author asks for a fork by naming the key on the second edge. The fork test/fixture must do that same warm-then-rename dance.
+- A project overriding the `log` type to `sealing: build` DOES write `.refdes/log-seal.yaml` on `refdes build`, so a seal-write tree-hash test around `refdes work` is non-vacuous (the H7b review flagged its own seal test as vacuous because its fixture never seals). Fixture: refdes-schema.yaml with types.log {append_only: true, sealing: build}.
+
+DESIGN DECISIONS (made up front; STOP-rule items marked (OWQ) also go under "Open wording questions" in the PR body):
+
+1. Command shape. `refdes work` takes no ref (it is project-wide). Flags: --json, --as-of DATE (same flag/semantics as `refdes thread`). Reads build state (coverage/checks/blocked/citations) via build(seal_write=False, reseal=False) like index/ls/thread; never touches the network (drift is citations.refresh under check --refresh only — left out, stated in docs + here). Writes nothing but the load's own key minting/expansions.
+
+2. Structure = §5's two binding-rule groups. (a) Authored open tasks, per thread / per tip, numbered within each block. (b) A clearly labelled `Derived (self-closing):` section, unnumbered, no checkbox, self-closing. (Binding rule 1: separate groups, separate numbering, derived never written back.)
+
+3. Authored group shows OPEN tasks only (it is a worklist). A tip with no open task contributes no block. An ambiguous task fold ("task reconciliation required") prints its header line so the author's own error is not silently dropped (it has no list to show). Reuses thread's `Thread:` header, `Tasks at tip:` / `Tasks at <tip>:` headings and task row format.
+
+4. Derived kinds produced offline (reuse existing producers, add nothing to the fold/coverage/check machinery):
+   - uncovered + unverified active requirements -> lifecycle._rule_uncovered_requirements / _rule_unverified_requirements (already in threads._derived_problems)
+   - failing checks -> item.checks (build.run_checks)
+   - blocked-by cascades + stale blockers -> blocked.by_item (blocked.resolve)
+   - unpinned citations / missing kept copies -> item.citations states {unpinned, cache_missing} (citations.verify; == _rule_unpinned_citations / _rule_missing_kept_copies)
+   - proposed/on-hold verdicts -> read from the projection's branch verdict (chains.fold_field_at_tip status fold); a new derived "verdict" row
+   - forked threads -> threads_projection view["forked"]/["tips"]; a new derived "fork" row
+   Remote citation drift: NOT produced (networked). Stated in docs + this log.
+
+5. "If the projection lacks something, add it to the projection (with a test), not to the CLI." threads_projection is per-thread scoped (derived per thread = members + one hop). A PROJECT-WIDE worklist must list each item-level gap exactly once across the whole project, so I add `threads.project_derived(project, graph=..., threads=...)` to threads.py that reuses the SAME per-subject row builder as `_derived` (refactored into `_rows_for_subject`, behavior-preserving) over all local_items, plus the new verdict + fork rows read from threads_projection. The CLI renders; it computes no fold/coverage/check.
+
+6. Derived row order (OWQ #2 below): coverage < verdict < blocked < check < citation < fork (the §5 table's order), then by ref. Project-wide derived is one flat sorted list (OWQ #3: per-kind vs per-item grouping for thread-less project rows — recommend flat sorted by kind-then-ref, matching the projection's existing derived sort posture).
+
+7. Concluding verdict with open tasks at its tip (binding rule 5): in the authored block, the thread's `Verdict: accepted (...)` line prints together with (directly above) that tip's open tasks, reusing cmd_thread's verdict line + "concluding, N open task(s) at this tip". A verdict never prints alone in the worklist.
+
+8. --as-of: relative spans ONLY under it (same as thread). No --as-of -> absolute declaring date, no relative span, byte-identical across wall clocks. --json + --as-of refused (exit 2), like thread.
+
+9. --json (OWQ none): prints {"threads": <threads_projection list>, "derived": <project-wide derived rows>} with cmd_index's json.dump posture (indent=2, ensure_ascii=False, default=str). Load-write notices + diagnostics go to stderr (like cmd_index; H7b review found cmd_thread still does this to stdout — cmd_work does it right). Valid JSON on stdout even on a first run that mints keys.
+
+10. Exit codes: read/list command. 0 on success (a non-empty worklist does NOT change the exit code — it is not a gate; H8 is the gate; recorded here per TASK recommendation, docs say nothing to the contrary). 1 when files failed to load (cmd_ls/cmd_thread posture: report on stderr, answer intact). No exit-2 naming path (work takes no ref); only a bad --as-of or --json+--as-of combination exits 2.
+
+cli.py: only the shared-rendering refactor (extract _task_row_line, _verdict_lines, _derived_detail from cmd_thread so cmd_work reuses the exact same strings instead of copying) + new cmd_work + its subparser. cmd_thread's output must stay byte-identical (test_thread_cli.py pins exact strings).
+threads.py: add project_derived() + _rows_for_subject() (behavior-preserving extraction of _derived's loop body) + verdict/fork rows; threads_projection's own output is unchanged.
+Nothing else in H7b (chains.py, tests/test_thread_cli.py) is modified.
+
+Progress log (kept as I go):
+
+VERIFICATION + shared rendering (done):
+- Refactored cmd_thread's per-branch verdict line, task rows, and derived block
+  into _verdict_line / _task_row_lines / _derived_detail + _derived_lines, and
+  the thread header into _thread_header; cmd_thread now CALLS these. cmd_thread
+  output stays byte-identical (test_thread_cli.py 18/18 and
+  test_threads_projection.py all pass after the refactor). I left cmd_thread's
+  own two-branch `Thread: ...` print inline (unchanged from H7b) and added the
+  matching _thread_header helper used only by cmd_work's authored blocks — I
+  did NOT edit that line in cmd_thread, so H7b's cmd_thread is textually
+  untouched apart from the three call-sites that were verbatim identical to the
+  helper bodies.
+- threads.py: extracted _rows_for_subject from _derived (behavior-preserving;
+  the per-thread derived block is unchanged), added _WORK_KIND_ORDER,
+  _OPEN_VERDICTS=("proposed","on_hold"), project_derived(), and work_projection()
+  (composes threads_projection + project_derived over one graph so the CLI does
+  a single load). Added 3 projection tests in tests/test_threads_projection.py.
+
+- cli.py: added cmd_work + `work` subparser (no ref; --json, --as-of). --json
+  prints {"threads","derived"} and routes load-write notices to stderr
+  (stream=sys.stderr, name_blocked=False) like cmd_index, so stdout is pure JSON
+  even on a first run that mints keys (the H7b-review finding). Text output
+  announces to stdout (cmd_thread's posture). --as-of parses via dates_mod,
+  refused with --json (exit 2) and on a bad date (exit 2). Exit 0 whatever the
+  worklist contains (read/list, not a gate); exit 1 with load errors and the
+  listing intact.
+
+INCIDENT (recorded honestly, no harm done): while capturing docs output I used
+a multi-line bash command with `cd docsA` after `mkdir -p .scratch/docsA/...`
+(absolute), so the relative `cd docsA` FAILED and left me in the repo ROOT; the
+subsequent newline-separated `cat >`/`work` lines then ran against the repo's
+OWN refdes project from the root. Effects, all caught by git status and all
+UNTRACKED (no tracked file changed): a stray `items/log.yaml` (a key got minted
+into it by the writable load) and one new `.refdes/history/events/<uuid>.yaml`
++ its content object under `.refdes/history/objects/`. I removed exactly those
+three artifacts by explicit path (no git stash, no recursive delete) and
+re-verified `git status` shows only my intended edits. Afterwards I captured
+every docs transcript with an absolute `-c <scratch>/refdes-project.yaml` and no
+repo-root `cd`, per AGENTS/TASK. Lesson recorded: never chain a relative `cd`
+onto absolute `mkdir`s.
+
+Docs (done): cli-reference.md `refdes work` section with REAL captured output
+(one-tip project, a fork, a derived-heavy project, --as-of span — each
+transcript produced by running the built command against a scratch project, not
+invented; NO exit-2 console capture — that posture is carried by the flag
+table's "(exit 2)" note and the tests only. Correction per PR #194 review C4:
+this line previously also claimed an exit-2 capture; cli-reference.md never
+had one, and the reviewer was right to flag it); the derived-kind/producer table; the deliberate networked-drift
+absence stated in prose; living-notes.md §6 landing note updated (work landed,
+chunk C); living-notes-plan.md chunk-C landed note; changelog.d/work-command.added.md.
+`docs-site/gen_examples.py --check` passes (schema-reference/vocabulary up to
+date — my docs feed generated examples not at all). docs/index.md nav lists
+commands only via the single "CLI reference" link, so nothing to add there.
+
+Sabotage matrix (each: mutate source, run the pinned test(s), restore; restored
+by copying back a .scratch backup made before the mutation, never git stash):
+  S1 cmd_work build(seal_write=False)->True ->
+     test_the_command_writes_no_seal_even_on_a_type_that_seals_on_build FAILS
+     (the seal appears). Restored. Proves the sealing:build fixture is NOT
+     vacuous (the same test's last assertion builds normally and sees the seal).
+  S2 --json announces load-writes to stdout (cmd_thread's still-unfixed posture)
+     -> test_json_is_valid_on_stdout_even_on_a_first_run_that_mints_keys FAILS
+     (json.loads on stdout raises — the `(minted ...)` line leaked onto stdout).
+     Restored.
+  S3 _work_authored_blocks stops skipping a tip with no open task (drop the
+     `if not open_rows: continue`) ->
+     test_a_thread_whose_tasks_are_all_settled_is_not_on_the_worklist FAILS
+     (an empty per-tip block prints for a settled tip). Restored. (My first S3
+     fixture had NO real thread, so it slipped through; I added the settled-tip
+     thread test and re-ran — now caught.)
+  S4 project_derived treats ANY declared verdict as a worklist row (drop the
+     _OPEN_VERDICTS guard) ->
+     test_verdict_row_self_closes_when_the_decision_is_made FAILS (the accepted
+     verdict still shows). Restored.
+  S5 _WORK_KIND_ORDER scrambled (coverage/citation swapped) ->
+     test_every_offline_derived_kind_appears_in_table_order FAILS (order).
+     Restored.
+  (thread-side H7b sabotos S1-S7 already live in the H7b log; not repeated.)
+
+Status: DONE. tests/test_work.py 19/19; threads + thread-cli suites green. Full
+suite + ruff run in the foreground below.
+
+Full suite (foreground, PYTHONPATH=src ... pytest -q -p no:cacheprovider):
+  3485 passed, 2 skipped in 261.44s (0:04:21)  exit=0
+  .scratch/suite.txt is the capture. The known serve-token load flake did not fire this run.
+
+================================================================
+REBASE onto main (2026-10-11, REBASE-1.txt)
+
+Path taken: `git fetch origin && git rebase --onto origin/main 2f8c5fd
+living-notes-h7c-work-cli` — the planned path. No abort, no stash. Git
+reported CONFLICT in exactly two files: src/refdes/cli.py and
+docs/design/living-notes.md; the rest auto-merged (threads.py,
+tests/test_threads_projection.py, docs/cli-reference.md,
+docs/design/living-notes-plan.md) — but I reviewed every auto-merge and
+fixed two real regressions it created (below).
+
+Conflicts and how each was resolved (main's H7b behaviour/strings win):
+1. cli.py, cmd_thread's per-branch verdict render: HEAD side (main) had the
+   fix-round render (`verdict["state"] == threads_mod.VERDICT_CONFLICTING`,
+   `_thread_verdict_suffix`, final owner wording); my side called my old
+   `_verdict_line` ("Verdict: ambiguous -- ...  -- concluding, N open
+   tasks at this tip"). Resolution: deleted my `_verdict_line` copy entirely
+   and rebuilt it (below) so BOTH commands print main's strings.
+2. cli.py, cmd_thread's derived-block tail + my `_work_authored_blocks`
+   opening (the hunks interleaved): main's side has
+   `print(THREAD_DERIVED_HEADING)` + inline kind-width/detail rendering; my
+   side called `_derived_lines`. Resolution: kept main's heading constant and
+   rebuilt `_derived_lines` to use exactly its strings, then cmd_thread
+   renders through the helper too (one place per string).
+3. docs/design/living-notes.md, the §6 landing note: HEAD said "refdes work
+   is still chunk C and does not exist" + the fix round's honest capture-kind
+   sentence ("followed OR followed-corrected", "spells its capture kind in
+   plain words"); my side claimed work landed but carried the older
+   capture-kind sentence. Merged: main's capture-kind sentence kept verbatim,
+   my "Landed next (chunk C): refdes work exists..." paragraph kept, plus my
+   networked-drift-absent sentence. The §6 *sketch* block (old "Captured:"/
+   "Derived (self-closing):" wording) is untouched — main keeps it as the
+   historical sketch, explicitly "rather than current behavior".
+
+Duplicates removed (my commit's copies vs main's now-canonical ones):
+- "Derived (self-closing):" literal in cmd_work/cmd_thread -> cli.py
+  THREAD_DERIVED_HEADING (main's constant, used at both call sites).
+- My `_verdict_line`'s "Verdict: ambiguous -- ..." + "  -- concluding, N
+  open task(s) at this tip" -> gone; the rebuilt helper spells main's
+  `Verdict: {state} -- ...` (state = threads.VERDICT_CONFLICTING) and
+  main's `_thread_verdict_suffix` (", N open task(s) remaining below").
+- My capture-line copy: none existed in cmd_work (work prints no capture
+  lines); cmd_thread keeps main's `_thread_capture_line` untouched.
+- threads.py: my `project_derived` guarded on the pre-fix-round
+  `verdict["state"] == "declared"` — an auto-merge REGRESSION (main renamed
+  the states to VERDICT_RESOLVED/VERDICT_CONFLICTING); now reads the
+  constant. Same class of fix in `_work_authored_blocks` (ambiguous check
+  now `== threads_mod.VERDICT_CONFLICTING`).
+- cmd_thread's Thread-header/task-row/derived-row inline renders were
+  factored into `_thread_header`/`_task_row_lines`/`_derived_lines` (string
+  bytes unchanged — test_thread_cli.py green) so cmd_work shares them.
+
+--json matched to main's cmd_thread (REBASE-1 step 1.3): cmd_work now
+sends ALL load-write notices to stderr (was: stderr only under --json,
+stdout in text mode), keeps name_blocked=True for main's stated reason,
+reads the capture store once via threads_mod.capture_facts and passes the
+index through work_projection(captures=) (new kwarg, B4's one-read
+posture), and on a store failure adds an index-shaped `diagnostics` list
+to the --json object (level/message/file/line/item). Deliberate
+divergence, recorded: cmd_thread also warns on stderr in TEXT mode (it
+renders capture lines there); cmd_work does not — the worklist text
+renders no capture lines at all, so there is nothing for the reader to
+have lost from what they are looking at; the store failure only degrades
+the `threads` half, which only --json carries.
+
+Step 2 fixes (amended into the same commit):
+- threads._label -> public threads.entry_label (the only cross-module user
+  was cli.cmd_thread's `threads_mod._label(item)`; cli now calls
+  entry_label; no private alias kept — nothing else needed it).
+- cli._task_row_lines printed literal "None" for an explicit-null `id:`/
+  `text:` (dict.get's default only covers the MISSING key). Now
+  `row.get('id') or '?'` / `row.get('text') or ''`. New test
+  tests/test_work.py::test_an_explicit_null_id_or_text_prints_placeholder_not_the_word_none.
+  Sabotage S6: reverted the two `or` fixes -> that test FAILS; restored.
+- docs/cli-reference.md + .scratch/PR-BODY.md re-captured against the
+  rebased build (owner wording visible in the pasted output).
+
+test_work.py wording pins updated to main's owner-approved strings:
+heading via cli_mod.THREAD_DERIVED_HEADING (no re-spelled literal) and the
+verdict line pinned as "Verdict: accepted (LOG-002, 2026-09-02), 1 open
+task remaining below".
+
+Post-rebase gates (all foreground):
+- tests/test_work.py 20/20 (19 + the null-row test); thread-cli 18, projection
+  suites green unchanged.
+- S6 sabotage (the null-row fix): reverted `or` in `_task_row_lines` ->
+  test_an_explicit_null_id_or_text_prints_placeholder_not_the_word_none
+  FAILS ("None" renders); restored, passes.
+- Docs re-captured against the rebased build on the same three .scratch
+  fixture projects (docsA/docsFork/docsDerived, absolute `-c` runs only):
+  owner wording now in the pasted output ("..., 1 open task remaining
+  below", "Derived (auto clears when fixed):"); --json table row notes the
+  store-failure `diagnostics` entry; the stderr-notice paragraph now says
+  stderr in every mode (main's cmd_thread posture); the usage header gained
+  `work` (verified against the real `refdes --help`, AGENTS rule).
+- ruff check --select E9,F src tests clean; gen_examples.py --check clean.
+- Full suite: 3530 passed, 2 skipped in 249.25s (0:04:09), exit=0
+  (.scratch/suite.txt). serve-token flake did not fire.
+- OWQ 1-4 (REBASE-1 step 3) still with the owner; provisional choices kept
+  and each still sits in one place (Worklist: in cmd_work; the derived
+  heading is main's constant; _WORK_KIND_ORDER; per-tip-block-always in
+  _work_authored_blocks).
+
+== OWNER ANSWERS OWQ 1-4 (2026-10-11), applied ==
+
+1. "Worklist:" heading: kept as chosen -- no change.
+2. ONE derived-kind order for both commands: coverage < verdict < blocked <
+   check < citation < fork, kept in ONE constant threads._KIND_ORDER.
+   _WORK_KIND_ORDER deleted; project_derived sorts by _KIND_ORDER; the
+   thread block is now identically ordered (visible change there: Blocked
+   before Failing checks; pinned by
+   tests/test_thread_cli.py::test_derived_kinds_print_in_the_worklists_shared_order,
+   new BLOCKED_AND_CHECK fixture).
+3. Derived rows grouped under a small per-kind heading (both commands) via
+   the now-shared cli._derived_lines: "  {Heading}:" then "    ref  detail"
+   (kind column dropped -- the heading names it); only kinds with rows
+   print; whole block empty still "(none)". Heading words in
+   cli.THREAD_DERIVED_GROUP_HEADINGS. --json untouched (presentation, not
+   structure).
+4. refdes work hides a fork tip with no open task (no empty "Tasks at
+   <tip>:" block); the forked header + fork derived row still name every
+   tip. refdes thread still prints every tip's block. Pinned by the paired
+   tests test_work_hides_a_fork_tip_with_no_open_task (test_work.py, new
+   FORK_SETTLED_TIP fixture) and test_thread_still_prints_a_fork_tip_with_
+   no_open_task (test_work.py: same fixture through cmd_thread, so the
+   two halves sit side by side).
+
+S7 sabotage (decision 4): deleted the "if not open_rows: continue" in
+_work_authored_blocks -> the work-side test FAILS (empty block prints) and
+the thread-side test still PASSES (thread unaffected) -- exactly the pair
+separation. Restored from .scratch/cli.py.owq4bak (no stash, per AGENTS).
+
+Tests after the change: work 22, thread-cli 23 (+1 order pin), projection
+suites unchanged; 70 -> 71 in the three derived/thread suites run together.
+
+Docs re-captured on the grouped build (absolute -c, warm first):
+cli-reference work section (one-tip/fork/--as-of blocks now show the
+grouped derived), the derived-kinds table intro ("groups ... under small
+headings, one shared order"), the fork-tip-hiding paragraph, the thread
+section (grouped fork + --as-of captures from .scratch/doc-thread, new
+LOG-003 sibling; prose: thread prints one block per tip -- every tip,
+unlike work). Changelog: work-command.added.md updated to the grouped
+shape; NEW thread-derived-grouping.changed.md records the thread-side
+presentation change (json unchanged). PR-BODY: console blocks re-
+captured grouped; "Open wording questions" section replaced by "Owner
+wording decisions"; rule 5 and S3/S5 wording re-pinned (S5 now scrambles
+the single _KIND_ORDER; S3 also trips the new work-hides test).
+
+== PR #194 FIX ROUND 1 (2026-10-11): owner review, W1-W12 + C1-C4 ==
+
+Committed as a NEW commit on top of 0a0b8db (PR under review; no amend, no
+force). Appending here per the task; each item's test + sabotage recorded.
+
+W1 (medium, sabotage) test_no_write_run_writes_nothing was vacuous (its
+   _warm() mints everything first, then even a plain writable run is a
+   no-op). Rebuilt on a COLD project in two phases: phase 1 proves a cold
+   WRITABLE `refdes work` changes the tree (asserts tree differs + a `key:`
+   line got minted into items/thread.yaml); phase 2 runs `--no-write` on a
+   FRESH cold copy (same _gaps fixture) and asserts its tree is byte-identical.
+   S8 sabotage: `args.no_write = False` before cmd_work's load -> the test
+   FAILS (keys land in the fresh copy). Restored (verified by grep: no
+   residue in the cli.py diff).
+
+W2 (low) The work --json store-failure diagnostics branch was unexercised,
+   and cmd_thread/cmd_work carried two copies. Factored one helper pair:
+   `_store_failure_message`/`_store_failure_diagnostics` (+ THREAD_STORE_
+   SUBJECT/WORK_STORE_SUBJECT constants) — both commands' json payloads and
+   thread's text warning build the one sentence through them. Added the
+   work-side pin `test_json_names_the_unreadable_store_in_diagnostics`
+   (thread keeps its own B3 pin): one test per command, one implementation.
+
+W3 (low, sabotage) No test for the authored `conflicting` line on this
+   command. New fixture MERGE_CONFLICT_OPEN (two same-distance parents,
+   accepted/proposed, shared tip with an open task) ->
+   `test_a_refused_verdict_fold_prints_with_its_tip_s_open_tasks_too` asserts
+   the owner-worded `Verdict: conflicting -- ...` line prints above the open
+   task. S9 sabotage: gate the authored verdict clause on `concluding` alone
+   -> that test FAILS; whole thread-CLI suite still passes (work-side clause).
+
+W4 (nit) test_a_non_empty_worklist_still_exits_zero now asserts a real
+   derived row (`    BND-001  uncovered`), not just the heading (which prints
+   even for `(none)`).
+
+W5 (medium) A conflicting (refused) verdict could vanish from `refdes work`
+   entirely. project_derived now adds a `verdict` row (status=VERDICT_
+   CONFLICTING) for every branch whose fold refused; merged tips fold the same
+   verdict at the same tip, so verdict rows are listed once per tip
+   (listed_verdicts set). It lists in the existing Verdicts group. New
+   `test_a_refused_verdict_fold_is_a_derived_row_even_with_no_open_task`.
+   Verified real: MERGE_CONFLICT scratch project prints
+   "(no open tasks authored)" + "Verdicts: / LOG-009  conflicting" once.
+   S10 sabotage: kill the conflicting branch -> both refused-fold tests FAIL.
+   Docs (cli-reference work section prose + verdict table row) updated to say
+   a refused fold is a derived row too, and its authored line still prints
+   when the tip has open work. NO doc console re-capture needed: no existing
+   doc example has a conflicting fold (checked).
+
+W6 (info) THREAD_DERIVED_GROUP_HEADINGS[kind] and _derived_detail raised bare
+   KeyError on an unknown kind. Now both go through `_unknown_kind_message`,
+   which names the unknown kind and points at the two places to teach.
+   `coverage` made an explicit branch (it and `citation` both carry "problem");
+   an unhandled kind falls to the raise. Test
+   `test_an_unknown_derived_kind_is_named_not_a_bare_keyerror` (no sabotage
+   asked).
+
+W7 The PR body (and here) claimed `cmd_thread`'s output bytes are unchanged.
+   False since owner Q2/Q3 (the thread derived block re-sorted + grouped).
+   PR body intro corrected to say so and point at the fragment.
+
+W8 (medium) `_OPEN_VERDICTS`' on_hold member was untested anywhere. New
+   `test_an_on_hold_verdict_is_listed_like_a_proposed_one` (LOG-04x fixture,
+   status on_hold -> "LOG-041  on_hold" row). S11 sabotage:
+   _OPEN_VERDICTS=("proposed",) -> that test FAILS. Restored.
+
+W9 (low) threads.py comment said "a concluding status is settled (never a
+   worklist row)" but the filter tested the status VALUE. DECISION: made the
+   code test the CONCLUDING flag too (`and not verdict["concluding"]`),
+   matching rule 4's intent that a verdict that concluded is rule-4-displayed,
+   never a lone gap. On the standard log type proposed/on_hold are never
+   concluding so behavior is unchanged there; the flag is the honest guard
+   (a project overlay can make on_hold satisfying). Test
+   `test_a_concluding_on_hold_never_becomes_a_lone_worklist_row`: an overlay
+   sets log.satisfying_statuses=[accepted, on_hold] -> the on_hold tip gets
+   the rule-4 authored pairing and NO derived row (status value alone would
+   have listed it). Comment rewritten to match the code.
+
+W10 (low) project_derived built chains.build_graph unconditionally but used it
+   only when threads is None. Graph now built lazily, inside the projection
+   branch. `test_project_derived_builds_no_chain_graph_when_threads_are_passed`
+   patches build_graph to raise and passes threads in -> no graph built.
+
+W11 (nit) threads.py module docstring now says the module also hosts the
+   whole-project work query (project_derived/work_projection), sharing the row
+   builder and _KIND_ORDER.
+
+W12 (nit) Wrapped >100-char lines: threads.py _KIND_ORDER (multi-line dict),
+   the two coverage row literals, the verdict filter (rewritten under W5);
+   the projection ordering test's inline sort key (named constant). Verified
+   no line THIS PR adds or changes in src exceeds 100 (awk length check on
+   the diff). [Round-2 correction, review R7: the original wording claimed no
+   source line in the touched files exceeds 100 -- false for cli.py, which
+   has 4 (then 1463/1633/1641/2919, now 1467/1637/1645/2923 after this PR's
+   insertions). git blame: all four are 2026-08/09 commits (0cad5a10,
+   2a33080c, 50d5d4de, aff31008), untouched by this PR, and the
+   259cf40..HEAD diff adds no >100 line to cli.py -- so per R7's rule (wrap
+   only lines touched in this PR) they stay.]
+
+C1 (medium) thread-derived-grouping.changed.md claimed "--json and the index
+   payload are unchanged." False as to ORDER: shared _KIND_ORDER feeds the
+   projection sort, so `thread --json`/index threads[].derived now list
+   blocked before check. Fragment corrected (shape unchanged, order follows
+   the shared kind order). Pinned by
+   `test_json_derived_rows_follow_the_shared_kind_order` (thread --json derived
+   kinds == coverage, blocked, check, citation).
+
+C2 (low) living-notes-plan.md still said "`refdes work` (chunk C) stays open"
+   right above the landed note. Changed to "landed next, below."
+
+C3 (low) S5 claim was weak because the thread shared-order test pinned only
+   blocked<check. Strengthened it to the FULL four-kind sequence (extended the
+   fixture with coverage + citation) + added the json-order test. Re-ran the
+   coverage/citation scramble (S5): now 5 tests FAIL (work table order, thread
+   text order, thread json order, + both projection ordering tests), whereas
+   the old pairwise version passed it. PR body S5 entry rewritten.
+
+C4 (nit) The work log claimed the captured doc transcripts include an exit-2
+   case; cli-reference.md has no exit-2 console capture (the flag table's
+   "(exit 2)" note and the tests carry that posture). Corrected the log line.
+
+Full suite (foreground), ruff E9,F, gen_examples --check: see the tail in the
+commit message / PR comment. No output changed for existing doc examples
+(only conflicting-fold behavior changed, and no doc example has one), so no
+doc console re-capture.
+
+== Round 2 (review #194 fix round 2, R1-R7) ==
+
+Head db37eec; this pass appends on top (no amend). Committed as
+"fix(cli): PR #194 review round 2 (R1-R7)".
+
+R1 (medium, sabotage) cli.py _work_authored_blocks: the ambiguous-task
+   branch appended "task reconciliation required" and `continue`d BEFORE the
+   verdict check, so a branch with a refused task fold AND a resolved
+   CONCLUDING status lost the verdict from `refdes work` entirely (the folds
+   are independent -- threads._thread_view computes them separately -- and a
+   concluding fold earns no derived row). `refdes thread` printed it (its
+   verdict print is unconditional per-branch). Fix: verdict check moved above
+   the ambiguous continue; the verdict line (shared `_verdict_line`, the same
+   text cmd_thread prints -- no open-rows suffix, since rows is null) now
+   prints above the reconciliation line. Docstring updated. New fixture
+   MERGE_AMBIGUOUS_CONCLUDED (two parents: same `accepted` status = fold
+   resolves/concludes, differing task lists = fold refuses) +
+   `test_an_ambiguous_task_fold_does_not_swallow_a_concluding_verdict`: work
+   shows the Verdict line before the reconciliation line, and the same line
+   `refdes thread LOG-009` prints. S12 sabotage: restored the early
+   `continue` -> that test FAILS (StopIteration, no Verdict line; verdict
+   vanishes). Restored and verified (work suite + cli.py diff clean).
+   No doc example has an ambiguous fold (grep: cli-reference.md's two
+   "reconciliation" mentions are prose, not console captures), so no doc
+   re-capture; gen_examples --check clean.
+
+R2 (nit) cli.py ~929 `row.get('id') or '?'` reads an explicit empty-string id
+   as '?' too -- kept (intended) and pinned by
+   `test_an_explicit_empty_string_id_prints_the_placeholder_too` (one
+   assertion on the shared `_task_row_lines`).
+
+R3 (nit) `_work_authored_blocks`' parameter named `threads` renamed to `views`
+   (the file imports the module as threads_mod). Call site is positional,
+   no other references (grep).
+
+R4 docs/design/living-notes.md §6: fixed "`refdes thread` and `refdes work`
+   do not exist today" (they exist now -- past-tense'd it and pointed at the
+   H7b/H7c landing notes below) and added `work` to the present-tense
+   subcommand list after `thread` (verified against this checkout's
+   `refdes --help` usage line, which lists ...ls,thread,work,id...).
+
+R5 docs/design/living-notes-plan.md: "it writes nothing (tree-hash test...)"
+   over-claimed -- W1's own phase one shows a COLD writable `work` run mints
+   keys (changes the tree). Rewritten to say exactly: a cold writable run's
+   only writes are the load's own key minting; `--no-write` writes nothing
+   (the tree-hash test's real subject); the command itself never seals or
+   captures (the sealing:build pin).
+
+R6 docs/cli-reference.md thread section: the small-heading sentence listed
+   all six kinds, but `Verdicts:`/`Forks:` rows are produced only by
+   project_derived (per-thread `_derived` emits coverage/check/blocked/
+   citation -- see threads.py `_rows_for_subject`/`_derived`), and the
+   thread-derived-grouping fragment itself says "verdict/fork kinds cannot
+   appear in a per-thread block". Sentence now lists only the four that can,
+   and says the other two are work-only.
+
+R7 The W12 log line claimed no source line in the touched files exceeds 100;
+   cli.py has 4 (verified awk on the current files AND that the
+   259cf40..HEAD diff adds none of them; git blame: 0cad5a10/2a33080c/
+   50d5d4de/aff31008, all pre-PR). Corrected the log line (with the round-2
+   annotation) and did NOT wrap them (R7's rule: wrap only lines touched in
+   this PR). My round-2 additions contain no >100 line (awk over the diff).
+
+Full suite (foreground): PYTHONPATH=$PWD/src <venv> -m pytest -q -p
+no:cacheprovider -> 3543 passed, 2 skipped in 285.38s, exit=0
+(.scratch/suite.txt). ruff E9,F on cli.py/threads.py/test_work.py: clean.
+gen_examples --check: all up to date.

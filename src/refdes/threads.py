@@ -5,7 +5,12 @@ and §6 (one query service every surface reads, so a client "must not
 reconstruct the chain itself"); plan phase H7a builds this projection and the
 index `threads` key, and H7b/H7c (the `refdes thread` / `refdes work`
 commands) and the task-pane client (thread-workbench.md §7a) are consumers of
-this one function — none of them computes its own fold.
+this one function — none of them computes its own fold. Since H7c this module
+also hosts the whole-project work query itself — `project_derived` and
+`work_projection`, §5's "Generated worklist" rows and the payload `refdes
+work` renders — sharing the per-item row builder and the one `_KIND_ORDER`
+with the per-thread block, so the two commands can never answer differently
+about the same gap.
 
 The shape carries §5's decisions, not a rendering of them:
 
@@ -56,10 +61,21 @@ from . import history as history_mod
 from . import lifecycle as lifecycle_mod
 from .model import Item, Project
 
-# Derived rows sort coverage < check < blocked < citation, then by ref —
-# the order §5's worklist table lists them in, so the block never reorders
-# itself between builds.
-_KIND_ORDER = {"coverage": 0, "check": 1, "blocked": 2, "citation": 3}
+# The derived rows' ONE order, spelled once here for BOTH commands (owner
+# decision, 2026-10-11): coverage < verdict < blocked < check < citation <
+# fork — the order §5's worklist table lists the kinds in. The per-thread
+# block simply never carries a `verdict` or `fork` row; `refdes work`'s
+# whole-project block carries all six. Both producers sort by this and both
+# renderers group by it, so the two commands can never reorder differently,
+# and the block never reorders itself between builds.
+_KIND_ORDER = {
+    "coverage": 0,
+    "verdict": 1,
+    "blocked": 2,
+    "check": 3,
+    "citation": 4,
+    "fork": 5,
+}
 
 #: The verdict discriminator's two non-null states (owner wording, 2026-10-11
 #: fix round: `declared`/`ambiguous` read as the task fold's own postures,
@@ -71,9 +87,11 @@ VERDICT_RESOLVED = "resolved"
 VERDICT_CONFLICTING = "conflicting"
 
 
-def _label(item: Item) -> str:
+def entry_label(item: Item) -> str:
     """How every view names an entry: display id, or key when it has none
-    (threads.md §2's permanently id-less continuation)."""
+    (threads.md §2's permanently id-less continuation). Public: `cli.py`'s
+    `refdes thread` resolves the requested ref's label with it, so the label
+    rule is spelled once (PR #191 review nit)."""
     return item.id or item.key or item.slug
 
 
@@ -184,7 +202,7 @@ def _captured(members: list[Item], captures: dict) -> list[dict]:
         event, _edited = hit
         rows.append(
             {
-                "entry": _label(member),
+                "entry": entry_label(member),
                 "kind": str(event["kind"]),
                 "occurred_at": event.get("occurred_at"),
             }
@@ -207,7 +225,7 @@ def _thread_view(
     }
     branches = [
         {
-            "tip": _label(tip),
+            "tip": entry_label(tip),
             "date": _date(tip),
             "summary": _summary(tip),
             "verdict": _verdict(project, tip, graph),
@@ -216,8 +234,8 @@ def _thread_view(
         for tip in tips
     ]
     return {
-        "ref": _label(root),
-        "entries": [_label(member) for member in members],
+        "ref": entry_label(root),
+        "entries": [entry_label(member) for member in members],
         "tips": [branch["tip"] for branch in branches],
         "forked": len(branches) != 1,
         "captured": _captured(members, captures),
@@ -243,7 +261,7 @@ def _tasks(tip_tasks: chains_mod.TipTasks | None) -> dict:
     if tip_tasks is None:
         return {"state": "undeclared", "declared_by": None, "declared_on": None, "rows": None}
     source = tip_tasks.source
-    declared_by = _label(source) if source is not None else None
+    declared_by = entry_label(source) if source is not None else None
     declared_on = _date(source) if source is not None else None
     if tip_tasks.rows is None:
         return {
@@ -309,7 +327,7 @@ def _verdict(project: Project, tip: Item, graph: chains_mod.ChainGraph) -> dict 
     return {
         "state": VERDICT_RESOLVED,
         "status": status,
-        "declared_by": _label(fold.source),
+        "declared_by": entry_label(fold.source),
         "declared_on": _date(fold.source),
         "concluding": _concluding(project, tip, status),
     }
@@ -361,71 +379,197 @@ def _scope(project: Project, members: list[Item]) -> dict[str, Item]:
     thread member. A row whose subject is further away than that is the
     other thread's (or no thread's) to show.
     """
-    scope: dict[str, Item] = {_label(member): member for member in members}
+    scope: dict[str, Item] = {entry_label(member): member for member in members}
     for member in members:
         for targets in member.resolved_links.values():
             for ref in targets:
                 target = project.item_by_ref(ref)
                 if target is not None:
-                    scope.setdefault(_label(target), target)
+                    scope.setdefault(entry_label(target), target)
     return scope
+
+
+def _rows_for_subject(project: Project, subject: Item, problems: dict) -> list[dict]:
+    """The item-level derived rows for one subject: coverage, checks, blocked
+    chains, citations. The single producer of those four kinds — both the
+    per-thread derived block (`_derived`, over a thread's scope) and the
+    whole-project worklist (`project_derived`, over every local item) read
+    them from here, so a gap is never re-derived differently in the two
+    places (§6: one query service, no client recomputing it)."""
+    rows: list[dict] = []
+    coverage = project.coverage.get(subject.id) if subject.id else None
+    if coverage is not None:
+        # `uncovered` (stage open — nobody has touched it) wins over the
+        # broader `unverified` (anything short of verified), the same
+        # way §5's table names the sharper problem when both are true.
+        if subject.id in problems["uncovered"]:
+            rows.append(
+                {
+                    "kind": "coverage",
+                    "ref": entry_label(subject),
+                    "problem": "uncovered",
+                    "stage": coverage.stage,
+                }
+            )
+        elif subject.id in problems["unverified"]:
+            rows.append(
+                {
+                    "kind": "coverage",
+                    "ref": entry_label(subject),
+                    "problem": "unverified",
+                    "stage": coverage.stage,
+                }
+            )
+    for check in subject.checks:
+        if check.ok is False:
+            rows.append(
+                {
+                    "kind": "check",
+                    "ref": entry_label(subject),
+                    "value": check.value_name,
+                    "against": check.against,
+                    "actual": check.actual,
+                    "limit": check.limit,
+                    "detail": check.detail,
+                    "margin": check.margin,
+                }
+            )
+    for chain in problems["blocked"].get(entry_label(subject), ()):
+        rows.append(
+            {
+                "kind": "blocked",
+                "ref": chain.item_id,
+                "path": list(chain.path),
+                "root": chain.root_id,
+                "root_status": chain.root_status,
+                "stale": chain.stale,
+            }
+        )
+    for status in subject.citations:
+        if status.state in ("unpinned", "cache_missing"):
+            # The two postures `_rule_unpinned_citations` /
+            # `_rule_missing_kept_copies` select; "ok" is not a row, and
+            # `hash_mismatch`/`missing` are the fetch/verify errors' own
+            # diagnostics, not worklist material.
+            rows.append(
+                {
+                    "kind": "citation",
+                    "ref": entry_label(subject),
+                    "problem": status.state,
+                    "path": status.spec.path,
+                    "detail": status.detail,
+                }
+            )
+    return rows
 
 
 def _derived(project: Project, members: list[Item], problems: dict) -> list[dict]:
     rows: list[dict] = []
     for subject in _scope(project, members).values():
-        coverage = project.coverage.get(subject.id) if subject.id else None
-        if coverage is not None:
-            # `uncovered` (stage open — nobody has touched it) wins over the
-            # broader `unverified` (anything short of verified), the same
-            # way §5's table names the sharper problem when both are true.
-            if subject.id in problems["uncovered"]:
-                rows.append(
-                    {"kind": "coverage", "ref": _label(subject), "problem": "uncovered", "stage": coverage.stage}
-                )
-            elif subject.id in problems["unverified"]:
-                rows.append(
-                    {"kind": "coverage", "ref": _label(subject), "problem": "unverified", "stage": coverage.stage}
-                )
-        for check in subject.checks:
-            if check.ok is False:
-                rows.append(
-                    {
-                        "kind": "check",
-                        "ref": _label(subject),
-                        "value": check.value_name,
-                        "against": check.against,
-                        "actual": check.actual,
-                        "limit": check.limit,
-                        "detail": check.detail,
-                        "margin": check.margin,
-                    }
-                )
-        for chain in problems["blocked"].get(_label(subject), ()):
-            rows.append(
-                {
-                    "kind": "blocked",
-                    "ref": chain.item_id,
-                    "path": list(chain.path),
-                    "root": chain.root_id,
-                    "root_status": chain.root_status,
-                    "stale": chain.stale,
-                }
-            )
-        for status in subject.citations:
-            if status.state in ("unpinned", "cache_missing"):
-                # The two postures `_rule_unpinned_citations` /
-                # `_rule_missing_kept_copies` select; "ok" is not a row, and
-                # `hash_mismatch`/`missing` are the fetch/verify errors' own
-                # diagnostics, not worklist material.
-                rows.append(
-                    {
-                        "kind": "citation",
-                        "ref": _label(subject),
-                        "problem": status.state,
-                        "path": status.spec.path,
-                        "detail": status.detail,
-                    }
-                )
+        rows.extend(_rows_for_subject(project, subject, problems))
     rows.sort(key=lambda row: (_KIND_ORDER[row["kind"]], row["ref"], str(row)))
     return rows
+
+
+# The folded verdicts that are an open decision — §5's table row "proposed/
+# on-hold verdicts", matched BY STATUS VALUE below (the table enumerates the
+# values), MINUS anything rule 4 calls concluding (`not concluding`: rule 4
+# pairs a concluding verdict with its tip's open tasks in the authored block
+# instead — never a lone worklist row — and a project overlay is free to make
+# e.g. `on_hold` satisfying, which the status value alone would not see;
+# review #194 W9). `in_progress`/`rejected`/`superseded` are the thread's own
+# business, not the "someone still has to decide" gap the table names.
+_OPEN_VERDICTS = ("proposed", "on_hold")
+
+
+def project_derived(
+    project: Project,
+    *,
+    graph: chains_mod.ChainGraph | None = None,
+    threads: list[dict] | None = None,
+) -> list[dict]:
+    """Every derived gap in the project at once — §5's "Generated worklist"
+    rows for `refdes work`, computed once over the whole project (not scoped
+    per thread, so a gap two threads touch is not listed twice).
+
+    The item-level rows (coverage / check / blocked / citation) are the exact
+    same rows the per-thread derived block reads, from `_rows_for_subject`, over
+    every local item. The two rows unique to the whole-project listing are read
+    from `threads_projection` itself — no fold, coverage stage, or check is
+    recomputed: a `verdict` row for each branch whose folded status is an open
+    decision (`_OPEN_VERDICTS`) *and* for each branch whose fold *refused*
+    (`VERDICT_CONFLICTING` — something has to reconcile it, and it must never
+    vanish because its tip has no open task, review #194 W5), and a `fork` row
+    for each forked thread naming its own tips. Two threads merged into one
+    tip fold the same verdict at it, so verdict rows are listed once per tip.
+    `threads` lets a caller that already ran the projection reuse it (and no
+    graph is built for it then). Remote citation drift is deliberately absent:
+    it is produced only by `citations.refresh`, which is networked and runs
+    under `check --refresh` alone — `refdes work` never touches the network."""
+    problems = _derived_problems(project)
+    rows: list[dict] = []
+    for subject in project.local_items:
+        rows.extend(_rows_for_subject(project, subject, problems))
+    if threads is None:
+        # The graph exists only for the projection (review #194 W10): a
+        # caller that passes `threads` in hand owes no chain-graph parse.
+        threads = threads_projection(
+            project, graph=graph if graph is not None else chains_mod.build_graph(project)
+        )
+    listed_verdicts: set[str] = set()
+    for view in threads:
+        if view["forked"]:
+            rows.append({"kind": "fork", "ref": view["ref"], "tips": list(view["tips"])})
+        for branch in view["branches"]:
+            verdict = branch["verdict"]
+            status: str | None = None
+            if verdict is not None:
+                if verdict["state"] == VERDICT_CONFLICTING:
+                    status = VERDICT_CONFLICTING
+                elif (
+                    verdict["state"] == VERDICT_RESOLVED
+                    and verdict["status"] in _OPEN_VERDICTS
+                    and not verdict["concluding"]
+                ):
+                    status = verdict["status"]
+            if status is None or branch["tip"] in listed_verdicts:
+                continue
+            listed_verdicts.add(branch["tip"])
+            rows.append(
+                {
+                    "kind": "verdict",
+                    "ref": branch["tip"],
+                    "status": status,
+                    "thread": view["ref"],
+                }
+            )
+    rows.sort(key=lambda row: (_KIND_ORDER[row["kind"]], row["ref"], str(row)))
+    return rows
+
+
+def work_projection(
+    project: Project,
+    *,
+    graph: chains_mod.ChainGraph | None = None,
+    captures: dict | None = None,
+) -> dict:
+    """`refdes work`'s whole-project answer: the same `threads_projection` list
+    (every thread's tips, authored task blocks, branch-local verdicts) plus the
+    whole-project `derived` block, built over one graph so the two halves share
+    a parse. This is §6's one query service in its whole-project form — the CLI
+    renders it and computes no fold, coverage stage, or check of its own.
+
+    `captures` is read once per command run by the caller and passed through to
+    `threads_projection` like `cmd_thread` does (B4's one-read posture), so a
+    run never parses the event store twice.
+
+    The two halves are kept in separate keys exactly as §5 rule 1 wants them
+    separate in the output: `threads[].branches[].tasks` are the authors' lists
+    (per tip), `derived` is the self-closing block, and no row in one is ever
+    written into the other."""
+    graph = graph if graph is not None else chains_mod.build_graph(project)
+    threads = threads_projection(project, graph=graph, captures=captures)
+    return {
+        "threads": threads,
+        "derived": project_derived(project, graph=graph, threads=threads),
+    }

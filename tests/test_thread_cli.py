@@ -98,6 +98,46 @@ DERIVED = (
     "    body: The idle rail must stay under 10 uA.\n"
 )
 
+# One thread carrying every gap kind the per-thread block can show, in an
+# order the shared `_KIND_ORDER` changed for `thread` (blocked used to print
+# after checks), so the shared-order tests can pin the FULL sequence.
+BLOCKED_AND_CHECK = (
+    "items:\n"
+    "  - id: LOG-000\n"
+    "    type: log\n"
+    "    summary: Thread opens.\n"
+    "    date: 2026-08-30\n"
+    "  - id: LOG-001\n"
+    "    type: log\n"
+    "    summary: Bring-up, blocked and out of bounds.\n"
+    "    date: 2026-09-01\n"
+    "    follows: LOG-000\n"
+    "    tasks: [{id: t1, text: Measure idle current., state: open}]\n"
+    "    addresses: REQ-001\n"
+    "    blocked_by: CMP-001\n"
+    "    citations: [{path: notes/datasheet.pdf}]\n"
+    "    checks: [{value: P_diss, against: BND-001}]\n"
+    "    body: |\n"
+    "      ```calc\n"
+    "      P_diss = 2 W\n"
+    "      ```\n"
+    "  - id: CMP-001\n"
+    "    type: component\n"
+    "    title: LDO regulator\n"
+    "    status: candidate\n"
+    "  - id: BND-001\n"
+    "    type: bound\n"
+    "    title: Idle power\n"
+    "    status: active\n"
+    "    limit: <= 0.5 W\n"
+    "    body: The board may not burn more than half a watt idle.\n"
+    "  - id: REQ-001\n"
+    "    type: requirement\n"
+    "    title: Idle current budget\n"
+    "    status: active\n"
+    "    body: The idle rail must stay under 10 uA.\n"
+)
+
 
 def _setup(tmp_path, items_yaml=ONE_TIP, notes=False, config_text=CONFIG):
     write_project_config(tmp_path, config_text)
@@ -377,8 +417,11 @@ def test_derived_block_reads_like_problems_not_tasks(tmp_path, capsys):
     lines = capsys.readouterr().out.splitlines()
     start = lines.index("Derived (auto clears when fixed):")
     rows = lines[start + 1 :]
-    assert any(line.strip().startswith("coverage  REQ-001  unverified") for line in rows)
-    assert any(line.strip().startswith("citation  LOG-001  unpinned") for line in rows)
+    # Owner decision 2026-10-11: one small heading per kind, rows without
+    # the kind column (the heading names it).
+    assert "  Coverage:" in rows
+    assert any(line.strip() == "REQ-001  unverified" for line in rows)
+    assert any(line.strip() == "LOG-001  unpinned" for line in rows)
     assert not any("[" in line for line in rows)  # no checkbox renders a derived row
     assert not any(line.lstrip()[:2].rstrip(".").isdigit() for line in rows)
 
@@ -558,7 +601,8 @@ def test_derived_row_self_closes_after_a_real_fix(tmp_path, capsys):
     _warm(tmp_path, config, capsys)
     assert _run(config, "thread", "LOG-001") == 0
     before = capsys.readouterr().out
-    assert "coverage  REQ-001  unverified" in before
+    assert "  Coverage:" in before.splitlines()
+    assert "    REQ-001  unverified" in before.splitlines()
 
     (tmp_path / "items" / "test.yaml").write_text(
         "items:\n"
@@ -577,6 +621,53 @@ def test_derived_row_self_closes_after_a_real_fix(tmp_path, capsys):
     assert _run(config, "thread", "LOG-001") == 0
     after = capsys.readouterr().out
     assert (tmp_path / "items" / "log.yaml").read_bytes() == source
-    assert "coverage  REQ-001  unverified" not in after
+    assert "    REQ-001  unverified" not in after.splitlines()
+    assert "  Coverage:" not in after.splitlines()  # a kind with no rows prints no heading
     task = next(line for line in before.splitlines() if "t1" in line)
     assert task in after.splitlines()
+
+
+def test_derived_kinds_print_in_the_worklists_shared_order(tmp_path, capsys):
+    """Owner decision 2026-10-11: ONE derived-kind order for both commands
+    (`threads._KIND_ORDER`). The FULL sequence this fixture can show is
+    pinned -- coverage < blocked < check < citation (verdict/fork kinds
+    never appear in a per-thread block; the work command's table-order test
+    pins all six) -- so no pairwise assertion's blind spot can survive
+    (review #194 C3: the earlier version pinned only blocked < check and
+    passed a coverage/citation scramble). The visible change for this
+    command is `Blocked:` before `Failing checks:`; the rows themselves are
+    the shared renderer's ref-only form."""
+    config = _setup(tmp_path, BLOCKED_AND_CHECK, notes=True)
+    _warm(tmp_path, config, capsys)
+    assert _run(config, "thread", "LOG-001") == 0
+    lines = capsys.readouterr().out.splitlines()
+    headings = [
+        "  Coverage:",
+        "  Blocked:",
+        "  Failing checks:",
+        "  Citations:",
+    ]
+    printed = [line for line in lines if line in headings]
+    assert printed == headings  # all four, in the one shared order
+    assert "    LOG-001  by CMP-001 (candidate)" in lines
+    assert "    LOG-001  P_diss violates BND-001" in lines
+    assert "    REQ-001  unverified" in lines
+    assert "    LOG-001  unpinned" in lines
+
+
+def test_json_derived_rows_follow_the_shared_kind_order(tmp_path, capsys):
+    """Review #194 C1: the machine door keeps its exact SHAPE but not its
+    old ORDER -- the same shared `_KIND_ORDER` feeds the projection's sort,
+    so `thread --json` (and `index`'s `threads[].derived`, same source)
+    list `blocked` before `check` where the pre-H7c listing had them the
+    other way. The changelog fragment says so; this is the pin."""
+    config = _setup(tmp_path, BLOCKED_AND_CHECK, notes=True)
+    _warm(tmp_path, config, capsys)
+    assert _run(config, "thread", "LOG-001", "--json") == 0
+    view = json.loads(capsys.readouterr().out)
+    assert [row["kind"] for row in view["derived"]] == [
+        "coverage",
+        "blocked",
+        "check",
+        "citation",
+    ]
