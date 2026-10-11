@@ -131,10 +131,12 @@ Checks (all foreground):
 - Full suite after the final edits:
   PYTHONPATH=$PWD/src ... -m pytest -q -p no:cacheprovider
   -> 3424 passed, 2 skipped in 260.06s, exit 0. (First full run before the
-  last wording pass: 3424 passed, 2 skipped in 264.42s, exit 0.) Main was
-  quoted at ~3420 passed / 2 skipped; +4 is main's own drift since the task
-  was written — the suite was green before I touched anything, my diff is
-  docs-only, and both runs are green. The known flake
+  last wording pass: 3424 passed, 2 skipped in 264.42s, exit 0.) The task
+  quoted main at ~3420 passed / 2 skipped; that is the task text being
+  approximate, not my diff: `pytest --collect-only` counts 3426 tests both
+  on this branch and on a throwaway `git worktree` at the branch point
+  c065891 (created under .scratch, then `git worktree remove`d), so the
+  docs-only diff did not change the collected count. The known flake
   tests/test_serve_cli.py::test_a_stale_token_file_from_a_crash_is_rewritten_not_refused
   did not fire in either run.
 - Self-check after writing: removed a docstring quote for met_by that is NOT
