@@ -425,6 +425,15 @@ thread); and the gate rule of H8, which is not in this phase's output at all.
 site panel, no stale-tip prompt (deferred, and it needs an explicit
 `last_touched_at` that nothing here writes), no writing into source files.
 
+**Landed (chunk A — the projection)** — `refdes.threads.threads_projection()`
+and the `items_json` `threads` key, with `chains.fold_at_tip()` as the one
+branch-local field fold H7b/H7c will reuse; see
+`in-prog-logs/living-notes-h7a-threads-projection.txt` and the
+`threads-index-projection` changelog fragment. The projection bullets above
+are its tests (`tests/test_threads_projection.py`); the `refdes thread` /
+`refdes work` bullets are chunks B and C and stay open. `--as-of` is H7b's
+alone — the projection itself carries absolute dates only and reads no clock.
+
 ## Phase H8 — two optional release-gate rules, both off
 
 **Adds.** `open_tasks` (a release blocks while any thread tip carries an open

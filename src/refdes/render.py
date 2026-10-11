@@ -19,6 +19,7 @@ from . import history as history_mod
 from . import ids as ids_mod
 from . import nav as nav_mod
 from . import theme as theme_mod
+from . import threads as threads_mod
 from . import tree as tree_mod
 from . import vocabulary as vocabulary_mod
 from .model import Item, Project
@@ -568,8 +569,12 @@ def _citations_json(item: Item) -> dict:
     return out
 
 
-def items_json(project: Project) -> dict:
+def items_json(project: Project, *, graph: chains_mod.ChainGraph | None = None) -> dict:
     """The machine-readable export. Anything downstream should read this, not HTML.
+
+    `graph` is the build's one `chains.build_graph(project)`; `render_site`
+    hands it down so the `threads` projection never rebuilds it (the same
+    one-graph-per-build rule `thread_view` follows above).
 
     The `boards` key and each item's `board` are only present when a project has
     actually declared a `boards:` registry -- so a project that has not adopted
@@ -600,6 +605,15 @@ def items_json(project: Project) -> dict:
         }
         for item_id, cov in sorted(project.coverage.items())
     }
+    # Living notes §6 / plan phase H7a: the thread projection, present only
+    # when the project has threads at all -- the same "absent key, not null"
+    # convention as `boards`, so a project with no `follows:` anywhere keeps
+    # a byte-identical payload. H7b/H7c and the task-pane client read this
+    # instead of reconstructing the chain (threads_projection is the one
+    # fold/tip/derived-row service; see src/refdes/threads.py).
+    thread_rows = threads_mod.threads_projection(project, graph=graph)
+    if thread_rows:
+        payload["threads"] = thread_rows
     # `doc` appears only where a definition was actually declared (finding 38),
     # so a project that writes no `doc:` keys gets byte-identical output.
     payload["types"] = {
@@ -1284,7 +1298,13 @@ def render_site(project: Project, draft: bool = False) -> str:
             )
 
     with open(os.path.join(out_dir, "items.json"), "w", encoding="utf-8") as fh:
-        json.dump(items_json(project), fh, indent=2, ensure_ascii=False, default=str)
+        json.dump(
+            items_json(project, graph=thread_graph),
+            fh,
+            indent=2,
+            ensure_ascii=False,
+            default=str,
+        )
 
     asset_out = os.path.join(out_dir, "assets")
     if os.path.isdir(ASSET_DIR):

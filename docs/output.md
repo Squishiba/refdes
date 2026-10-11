@@ -301,11 +301,13 @@ The print stylesheet hides all of this.
 
 The interchange format. **Anything downstream should read this, not the HTML.**
 
-Four keys follow the registries they come from, and are absent entirely
+Some keys follow the registries they come from, and are absent entirely
 without them rather than present and empty: top-level `boards` and a
 per-item `board` for a [`boards:`](multi-board.md) registry, top-level
 `workspaces` and a per-item `workspace` for a
-[`workspaces:`](workspaces.md) one. Everything else below is always present.
+[`workspaces:`](workspaces.md) one. Top-level `threads` follows the
+`follows:` graph the same way — see [Threads](#threads) below. Everything
+else is always present.
 
 ```json
 {
@@ -437,6 +439,76 @@ tree fully pinned for a release" without enumerating `state` values yourself.
 `kept_copy` and `sha256` distinguish hash-only pins (`kept_copy: false`, `sha256`
 set) from kept ones (`kept_copy: true`) — keeping a copy is opt-in per citation,
 so a fully-pinned project can still be `kept_copy: false` throughout.
+
+### `threads`
+
+Present only when the project has at least one thread — a `follows:` edge
+somewhere — and absent otherwise, so a project with no threads keeps a
+byte-identical payload. It is the whole per-thread worklist projection
+([living notes §5/§6](design/living-notes.md)): every consumer (`refdes
+thread`, `refdes work`, the VS Code task pane) reads this key instead of
+reconstructing the chain from `items[]`.
+
+```json
+"threads": [
+  {
+    "ref": "LOG-PWR-001",
+    "entries": ["LOG-PWR-001", "LOG-PWR-002", "LOG-PWR-003"],
+    "tips": ["LOG-PWR-002", "LOG-PWR-003"],
+    "forked": true,
+    "branches": [
+      {
+        "tip": "LOG-PWR-002",
+        "date": "2026-08-30",
+        "summary": "Thermal branch.",
+        "verdict": { "status": "proposed", "declared_by": "LOG-PWR-002",
+                     "declared_on": "2026-08-30", "concluding": false },
+        "tasks": {
+          "state": "declared",
+          "declared_by": "LOG-PWR-001",
+          "declared_on": "2026-08-30",
+          "rows": [
+            { "id": "T-thermal-model", "text": "Model worst-case copper temp.",
+              "state": "open",
+              "open_since": { "entry": "LOG-PWR-001", "date": "2026-08-30" } }
+          ]
+        }
+      }
+    ],
+    "derived": [
+      { "kind": "coverage", "ref": "REQ-PWR-003", "problem": "unverified",
+        "stage": "addressed" },
+      { "kind": "citation", "ref": "CMP-PWR-004", "problem": "unpinned",
+        "path": "https://ti.example/tps62913.pdf", "detail": "..." }
+    ]
+  }
+]
+```
+
+The shape is the decision, not the styling of it:
+
+- **Two separate groups.** `branches[].tasks` is the authors' own list at
+  that tip (the `chains.fold_tasks` fold verbatim); `derived` is computed
+  rows. A derived row carries no task `id`, and nothing here is ever
+  written back.
+- **One branch per open tip.** `forked` is `tips.length != 1`, and a fork
+  keeps its branches separate — each branch's `tasks` and `verdict` are
+  that branch's own fold, so nothing in the payload reads as one current
+  status. `tasks.state` distinguishes `declared`, `cleared` (an explicit
+  `tasks: []`), `undeclared` (never declared, `rows: null`), and
+  `ambiguous` (reconciliation required, `rows: null`).
+- **Ages are absolute.** `open_since` is the declaring entry and *its*
+  authored `date:`, never a relative span — the projection reads no clock,
+  so the same project produces the same bytes on any machine at any time.
+- **A verdict never prints alone.** Each tip's folded `status` sits in the
+  same object as its tasks; `concluding` answers the same question a
+  settled blocker does (the tip's type declares `satisfying_statuses:` /
+  `verifying_statuses:` and this status is one of them).
+- **Derived rows self-close.** They are computed from what already blocks
+  a release — uncovered/unverified coverage, failing checks, declared
+  `blocked_by:` chains, unpinned or cache-missing citations — over the
+  thread's own items plus what those items link to. Fix the gap, rebuild,
+  the row is gone; there is nothing to tick.
 
 ### What it is good for
 
