@@ -47,7 +47,7 @@ payload, the digest, load, save, and an idempotent event append. Nothing
 imports it except its own tests.
 
 **Files.** New `src/refdes/history.py`; new `tests/test_history.py`.
-`src/refdes/parse.py:33` (engine-reserved keys) is checked, not changed —
+`src/refdes/parse.py:40` (engine-reserved keys) is checked, not changed —
 `tasks:` and history's own metadata must not collide with a field named on an
 item.
 

@@ -7,7 +7,12 @@ page; the records are `in-prog-logs/thread-workbench-w1.md`,
 `thread-workbench-w3.md` as W3's phase summary). W4 stays folded in per
 §7.4, and its finding is the same in all three logs: nothing cheap and
 obvious was visible in the touch path, so no speculative optimization was
-made. One half of D1 is deliberately **not** shipped — dotted `ITEM.NAME`
+made. Since then **§7a — the floating task pane — is decided (Jared,
+2026-10-10)**, with its six sub-decisions recorded there, and §8 phases it
+as **W5: not started**, blocked on living-notes-plan H6 (`tasks:` + fold)
+and H7 (the two read commands and the index `threads` projection), which
+the pane consumes rather than reimplements. One half of D1 is deliberately
+**not** shipped — dotted `ITEM.NAME`
 mentions in prose stay undecorated, per the note under §5.
 
 # Thread workbench: a live authoring pane for working notes
@@ -227,7 +232,12 @@ Sub-decisions:
    greyed out, showing the last thread's name; it does not jump around.
 6. **The built static site gets the same pane, read-only.** On the site the
    floating pane can be toggled on and off while scrolling, and the toggle
-   must always be reachable somewhere on the page.
+   must always be reachable somewhere on the page. The site's read-only task
+   pane is progressive enhancement (decided 2026-10-10): with JavaScript off,
+   the site still reads fully and the pane simply doesn't appear. It shows
+   the tip's task list read-only — no checkboxes that write, no token, no
+   write API — so it stays within the rule that no editor control is emitted
+   into `_site/` (`docs/design/browser-editor.md`).
 
 **Architecture constraint, already decided in living-notes §6:** the pane is a
 client of the read-only query service / index `threads` projection (plan phase

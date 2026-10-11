@@ -1,0 +1,71 @@
+Task: docs pass — task pane static-site rule + stale design-doc references
+(branch docs-task-pane-static-site, cut from main at 6b02fe0; docs only, no
+src/ or tests/ touched).
+
+Edits and how each claim was verified:
+
+1. Owner-approved static-site rule (2026-10-10) added in two places:
+   - docs/design/thread-workbench.md §7a item 6 ("The built static site gets
+     the same pane, read-only") — progressive-enhancement wording appended
+     inside the item.
+   - docs/design/browser-editor.md, right after the "No editor control,
+     token, or write API is emitted into `_site/`" rule (Recommendation
+     section) — same decision, phrased as "within that rule, not an
+     exception to it", cross-referencing thread-workbench.md §7a.
+
+2. docs/design/living-notes.md §6 stale command list (was lines 505-508).
+   Verified with:
+     PYTHONPATH=$PWD/src /home/jorb/work/venv-refdes/bin/python -m refdes.cli --help
+   The real subcommand set is serve, build, check, revision, release, index,
+   ls, id, fetch, audit, init, new, schema, standard, keys, revise,
+   calc-rewrite, stub-tests, former-ids, history. The old doc list was
+   missing `serve` and `calc-rewrite`, and claimed `refdes history` did not
+   exist — it does, but it is the capture/redact/migrate-seals command for
+   the `.refdes/history/` store of §3 (living-notes.md §3 holds the chosen
+   dedicated store, line ~291/297), not the proposed thread/task query.
+   Rewrote the passage so `refdes thread`/`refdes work` stay proposals
+   while `refdes history` is acknowledged.
+
+3. docs/design/thread-workbench.md Status line now names §7a (task-pane
+   decisions, Jared 2026-10-10) and W5 (not started, blocked on
+   living-notes-plan H6/H7), matching §7a and §8 as already written in the
+   document.
+
+4. browser-editor.md README citation: "no server, no reader build step,
+   works with JavaScript disabled" is at README.md:353-354 (grep + read;
+   old citation said 342-346; line 46's "no build step" is about the VS
+   Code extension, not the site). Fixed to README.md:353-354.
+
+5. Engine-reserved vs overridable item keys:
+   - src/refdes/parse.py:40 RESERVED = {id, type, body, former_ids, key};
+     :44 OVERRIDABLE = {prefix, board, workspace, on_change}. Old item-level
+     `history:` is a hard error naming on_change: at parse.py:903-914
+     (project.error), per PR #184 (main commit 6b02fe0; fragment
+     history-config-on-change.breaking.md: "An old spelling is a hard error
+     naming `on_change:`").
+   - browser-editor.md "What exists today" updated: `history` dropped from
+     the reserved list, `on_change` added to the overridable list, line refs
+     33/37 -> 40/44, plus a note on the rename.
+   - living-notes-plan.md:50 line ref 33 -> 40.
+   - LEFTOVER (out of scope, not edited): docs/design/backlog.md:2612-2613
+     still cite parse.py:33/37 for the same two sets.
+
+6. changelog.d: the convention does cover design-doc-only changes —
+   existing docs-only fragments include workbench-w3-status-line.fixed.md,
+   follows-docs-honesty.fixed.md, docs-audit-batch1.fixed.md; categories
+   (breaking/added/changed/fixed/removed) are release.py:42
+   CHANGELOG_CATEGORIES. Added changelog.d/task-pane-static-site-rule.fixed.md.
+
+Verification runs (all foreground):
+- docs-site/gen_examples.py --check: exit 0 ("docs/schema-reference.md is up
+  to date. docs/vocabulary.md is up to date.").
+- Full suite: PYTHONPATH=$PWD/src
+  /home/jorb/work/venv-refdes/bin/python -m pytest -q -p no:cacheprovider
+  -> exit 0, exact tail: "3420 passed, 2 skipped in 264.36s (0:04:24)"
+  (.scratch/suite.txt). Baseline was quoted as ~3409 passed, 2 skipped on
+  main; 3420 > 3409 with zero failures, and this branch adds no tests, so
+  the quoted baseline figure is just approximate/stale.
+
+Finished: all six task items done, committed (b07bd85), pushed, PR opened:
+https://github.com/Squishiba/refdes/pull/185. Not merged/closed/approved,
+per instructions.

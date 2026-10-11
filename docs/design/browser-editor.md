@@ -20,8 +20,13 @@ This is a view over the existing plain-text files, not a new storage model.
 YAML and Markdown remain the source of truth; `refdes check`, hand editing,
 git diffs, and CI continue to work without the editor. The generated `_site/`
 also stays an ordinary static site: the README promises no server, no reader
-build step, and operation with JavaScript disabled (`README.md:342-346`). No
-editor control, token, or write API is emitted into `_site/`.
+build step, and operation with JavaScript disabled (`README.md:353-354`). No
+editor control, token, or write API is emitted into `_site/`. The site's
+read-only task pane (`docs/design/thread-workbench.md` §7a) is progressive
+enhancement within that rule, not an exception to it: with JavaScript off,
+the site still reads fully and the pane simply doesn't appear, and it shows
+the tip's task list read-only — no checkboxes that write, no token, no write
+API.
 
 **Decided.** This shape — Option B below — is the architecture, chosen 2026-09-16.
 Options A, C, D, and E stay in this document as considered-and-rejected for v1,
@@ -98,9 +103,11 @@ files may contain multiple fenced items plus a leading defaults block and
 section markers; the text after each closing fence is that item's body
 (`src/refdes/parse.py:565-664`). YAML files contain an `items:` sequence and
 may also apply defaults and section markers (`src/refdes/parse.py:665-732`).
-`id`, `type`, `history`, `body`, `former_ids`, and `key` are engine-reserved
-(`src/refdes/parse.py:33`); `prefix`, `board`, and `workspace` are
-conditionally overridable (`src/refdes/parse.py:37`).
+`id`, `type`, `body`, `former_ids`, and `key` are engine-reserved
+(`src/refdes/parse.py:40`); `prefix`, `board`, `workspace`, and `on_change`
+are conditionally overridable (`src/refdes/parse.py:44`) — the item-level
+override was renamed from `history:` to `on_change:` in PR #184, and the old
+spelling is now a reported error (`src/refdes/parse.py:903-914`).
 
 The parsed `Item` deliberately carries raw link spellings separately from
 resolved, current display IDs. Writes and hashing need the raw value, while
