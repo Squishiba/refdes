@@ -1141,14 +1141,18 @@ def cmd_thread(args) -> int:
         heading = "Tasks at tip:" if single else f"Tasks at {branch['tip']}:"
         tasks = branch["tasks"]
         if tasks["state"] == "ambiguous":
-            print(f"{heading} task reconciliation required")
+            print(f"{heading} {threads_mod.TASK_POSTURE_AMBIGUOUS}")
         elif tasks["state"] == "undeclared":
-            print(f"{heading} none (never declared)")
+            print(f"{heading} {threads_mod.TASK_POSTURE_UNDECLARED}")
         elif tasks["state"] == "cleared":
-            print(f"{heading} none (cleared by {tasks['declared_by']})")
+            print(
+                f"{heading} {threads_mod.task_posture_cleared(tasks['declared_by'])}"
+            )
         else:
             malformed = tasks.get("malformed")
-            note = f" ({malformed} malformed row(s) not shown)" if malformed else ""
+            note = (
+                f" {threads_mod.task_malformed_note(malformed)}" if malformed else ""
+            )
             print(f"{heading}{note}" if note else heading)
             for line in _task_row_lines(tasks["rows"], as_of, project.date_format):
                 print(line)

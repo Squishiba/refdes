@@ -26,9 +26,11 @@ from __future__ import annotations
 import hashlib
 import os
 
+import pytest
 from conftest import write_project_config
 
 from refdes import build as build_mod
+from refdes import history as history_mod
 from refdes import keys as keys_mod
 from refdes import parse, render, task_pane, threads
 from refdes.schema import load_project
@@ -128,8 +130,57 @@ NO_THREADS = (
     "    date: 2026-09-02\n"
 )
 
+# Nobody ever declared a task list anywhere (PR #197 review S1: the pane
+# must render each posture string `refdes thread` prints).
+UNDECLARED = (
+    "defaults: { type: log }\n"
+    "items:\n"
+    "  - id: LOG-001\n"
+    "    summary: Head, no tasks.\n"
+    "    date: 2026-08-01\n"
+    "  - id: LOG-002\n"
+    "    summary: Continuation, no tasks.\n"
+    "    date: 2026-08-02\n"
+    "    follows: LOG-001\n"
+)
 
-def _render(tmp_path, items_yaml, with_pages=False):
+# The tip declares the explicit empty list: the `cleared` posture.
+CLEARED = (
+    "defaults: { type: log }\n"
+    "items:\n"
+    "  - id: LOG-001\n"
+    "    summary: Work list.\n"
+    "    date: 2026-08-01\n"
+    "    tasks: [{id: T-old, text: Older task., state: open}]\n"
+    "  - id: LOG-002\n"
+    "    summary: Everything closed.\n"
+    "    date: 2026-08-02\n"
+    "    follows: LOG-001\n"
+    "    tasks: []\n"
+)
+
+# One valid row beside one row that is not even a mapping (PR #197 review
+# B1): the count rides the heading and the VALID ROW STILL PRINTS. The
+# malformed row is a validation error like everywhere else in the tool --
+# reported, and the projection drops it -- so this fixture renders with
+# errors on purpose.
+MALFORMED = (
+    "defaults: { type: log }\n"
+    "items:\n"
+    "  - id: LOG-001\n"
+    "    summary: Mixed list.\n"
+    "    date: 2026-08-01\n"
+    "    tasks:\n"
+    "      - {id: T-measure, text: Measure the rail., state: open}\n"
+    "      - not even a mapping\n"
+    "  - id: LOG-002\n"
+    "    summary: Silent continuation.\n"
+    "    date: 2026-08-02\n"
+    "    follows: LOG-001\n"
+)
+
+
+def _render(tmp_path, items_yaml, with_pages=False, allow_errors=False):
     write_project_config(tmp_path, CONFIG)
     items = tmp_path / "items"
     items.mkdir(exist_ok=True)
@@ -145,7 +196,8 @@ def _render(tmp_path, items_yaml, with_pages=False):
     keys_mod.mint_missing(project)
     build_mod.build(project)
     out = render.render_site(project)
-    assert not project.errors, [d.message for d in project.errors]
+    if not allow_errors:
+        assert not project.errors, [d.message for d in project.errors]
     return project, out
 
 
@@ -163,12 +215,24 @@ def pane(html: str) -> str:
 
 
 def panel(html: str, index: int) -> str:
-    """One tab panel's own markup."""
+    """One tab panel's own markup (T2, PR #197 review: not a slice that
+    stops at the first `</div>` -- it runs to the next panel, the derived
+    section, or the aside's end, whatever comes first)."""
     marker = f'id="refdes-taskpane-panel-{index}"'
-    start = html.find(marker)
-    assert start >= 0, marker
-    start = html.rfind("<div", 0, start)
-    return html[start : html.find("</div>", start)]
+    marker_at = html.find(marker)
+    assert marker_at >= 0, marker
+    start = html.rfind("<div", 0, marker_at)
+    after_open = html.find(">", marker_at) + 1
+    ends = [
+        at
+        for at in (
+            html.find("data-refdes-panel=\"", after_open),
+            html.find("<details", after_open),
+            html.find("</aside>", after_open),
+        )
+        if at != -1
+    ]
+    return html[start : min(ends)]
 
 
 def tree_of(root: str) -> dict:
@@ -260,10 +324,27 @@ def test_the_fork_tabs_never_union(tmp_path):
 def test_a_refused_fold_says_so_in_the_cli_words(tmp_path):
     _project, out = _render(tmp_path, REFUSED)
     body = pane(_page(out, "log-004"))
-    assert "Verdict: conflicting" in body
-    assert "Tasks at tip: task reconciliation required" in body
+    assert threads.verdict_conflicting_line(threads.VERDICT_CONFLICTING) in body
+    assert f"Tasks at tip: {threads.TASK_POSTURE_AMBIGUOUS}" in body
     # and it refuses to invent a winner either way
     assert "T-a" not in body and "T-b" not in body
+
+
+# ------------------------- PR #197 review B1: the count never hides the rows
+
+
+def test_malformed_rows_are_counted_and_the_valid_rows_still_print(tmp_path):
+    """`refdes thread` prints a partly-malformed list as the count on the
+    heading AND the valid rows under it; the pane must print the same
+    (review B1: the count once replaced the whole list here)."""
+    _project, out = _render(tmp_path, MALFORMED, allow_errors=True)
+    body = pane(_page(out, "log-001"))
+    assert f"Tasks at tip: {threads.task_malformed_note(1)}" in body
+    assert "T-measure" in body
+    assert "Measure the rail." in body
+    assert "[ ]" in body  # the valid row keeps its glyph
+    # the tip's page shows the identical block (same thread, one tip)
+    assert f"Tasks at tip: {threads.task_malformed_note(1)}" in pane(_page(out, "log-002"))
 
 
 # ------------------------------------------------ task rows, CLI parity
@@ -287,6 +368,24 @@ def test_the_verdict_line_is_the_cli_line(tmp_path):
         "Verdict: accepted (LOG-002, 2026-09-02), 1 open task remaining below"
         in body
     )
+
+
+# ---------------- PR #197 review S1: every posture string, from one spelling
+
+
+def test_the_undeclared_posture_renders_exactly_threads_spelling(tmp_path):
+    _project, out = _render(tmp_path, UNDECLARED)
+    body = pane(_page(out, "log-002"))
+    assert f"Tasks at tip: {threads.TASK_POSTURE_UNDECLARED}" in body
+
+
+def test_the_cleared_posture_renders_exactly_threads_spelling(tmp_path):
+    _project, out = _render(tmp_path, CLEARED)
+    body = pane(_page(out, "log-002"))
+    assert (
+        f"Tasks at tip: {threads.task_posture_cleared('LOG-002')}" in body
+    )
+    assert "T-old" not in body  # cleared is not "the older list, faded"
 
 
 # ------------------------------ §7a (4): derived, collapsed, labelled, plain
@@ -320,12 +419,23 @@ def test_derived_groups_use_the_one_shared_kind_order():
     assert [g["heading"] for g in groups] == [
         "Coverage", "Blocked", "Failing checks", "Citations",
     ]
-    # the one order #194 will align with, spelled once (§7a 4)
-    assert threads.DERIVED_GROUP_ORDER == (
-        "coverage", "verdict", "blocked", "check", "citation", "fork",
-    )
+    # the one order #194 aligns with, spelled once (§7a 4) -- and the order
+    # is the table: adding a kind to HEADINGS puts it in ORDER at once
+    # (PR #197 review S3, the one-table posture).
+    assert threads.DERIVED_GROUP_ORDER == tuple(threads.DERIVED_GROUP_HEADINGS)
     assert groups[1]["rows"] == ["DEC-002  by DEC-001 (proposed)"]
     assert groups[2]["rows"] == ["LOG-002  P_diss violates BND-001"]
+
+
+def test_an_unregistered_derived_kind_fails_loudly():
+    """S3 (PR #197 review): the pane filters rows by group membership, so a
+    kind the projection can emit but the table cannot group would silently
+    vanish from every page. It raises, naming the kind, instead."""
+    with pytest.raises(ValueError, match="audit"):
+        task_pane._derived_groups([
+            {"kind": "coverage", "ref": "REQ-001", "problem": "unverified"},
+            {"kind": "audit", "ref": "AUD-001", "problem": "something new"},
+        ])
 
 
 # ------------------------------------------ §7a (6): progressive enhancement
@@ -429,3 +539,56 @@ def test_a_project_with_no_threads_publishes_exactly_what_it_did_before(
 
     monkeypatch.undo()
     assert tree_of(render.render_site(project)) == honest
+
+
+# ---------------- PR #197 review E1: the event store is read once per render
+
+
+def test_one_site_render_reads_the_capture_store_once(tmp_path, monkeypatch):
+    """The pane's projection used to read `history.capture_index` beside
+    items.json's own read, so a `render_site` parsed the event store twice
+    (review E1). Hoisted in `render_site` and handed to both consumers:
+    exactly one read, byte-identical output asserted by the golden theme
+    test being green all the same."""
+    project, _out = _render(tmp_path, ONE_TIP)  # keys/built state ready
+    calls = []
+    real = history_mod.capture_index
+    monkeypatch.setattr(
+        history_mod, "capture_index", lambda p: calls.append(real(p)) or real(p)
+    )
+    render.render_site(project)
+    assert len(calls) == 1
+
+
+# ------------------ PR #197 review B3: a keyboard-reachable tablist
+
+
+def test_fork_tab_markup_is_a_roving_tablist(tmp_path):
+    """The markup half of the ARIA tabs pattern: exactly one stop (the
+    selected tab has no tabindex=-1, the others do); `taskpane.js` moves
+    the stop with arrow keys (checked in the node harness — no browser
+    here)."""
+    _project, out = _render(tmp_path, FORK)
+    body = pane(_page(out, "log-001"))
+    first = body[body.find('id="refdes-taskpane-tab-1"') :]
+    first = first[: first.find("</button>")]
+    assert 'aria-selected="true"' in first and "tabindex" not in first
+    second = body[body.find('id="refdes-taskpane-tab-2"') :]
+    second = second[: second.find("</button>")]
+    assert 'aria-selected="false"' in second and 'tabindex="-1"' in second
+
+
+# ------------------ PR #197 review B2: static sites keep the 16px place
+
+
+def test_the_published_pane_css_never_mentions_the_serve_bar(tmp_path):
+    """The bar offset is response-only (it lives in `serve/static/bar.css`
+    and bar.css is never part of `_site/`); the published `taskpane.css`
+    must keep the toggle at its own 16px bottom-right place."""
+    _project, out = _render(tmp_path, ONE_TIP)
+    with open(os.path.join(out, "assets", "taskpane.css"), encoding="utf-8") as fh:
+        css = fh.read()
+    assert "bottom: var(--space-16);" in css
+    assert "50px" not in css and "refdes-serve-bar" not in css
+    for name in ("log-001", "log-002", "index"):
+        assert "bar.css" not in _page(out, name)

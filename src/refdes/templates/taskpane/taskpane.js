@@ -61,18 +61,44 @@
     // §7a sub-decision 3: a fork shows one tab per open tip. Switching a
     // tab only moves which pre-rendered panel is visible — no task list is
     // ever assembled here.
+    function selectTab(tab) {
+      tabs.forEach(function (other) {
+        var selected = other === tab;
+        other.setAttribute("aria-selected", selected ? "true" : "false");
+        // Roving tabindex: the selected tab is the only stop in the
+        // tablist; the arrow keys move the stop with the selection.
+        other.tabIndex = selected ? 0 : -1;
+      });
+      panels.forEach(function (panel) {
+        panel.hidden =
+          panel.getAttribute("data-refdes-panel") !==
+          tab.getAttribute("data-refdes-tab");
+      });
+    }
     tabs.forEach(function (tab) {
       tab.addEventListener("click", function () {
-        tabs.forEach(function (other) {
-          var selected = other === tab;
-          other.setAttribute("aria-selected", selected ? "true" : "false");
-          other.tabIndex = selected ? 0 : -1;
-        });
-        panels.forEach(function (panel) {
-          panel.hidden =
-            panel.getAttribute("data-refdes-panel") !==
-            tab.getAttribute("data-refdes-tab");
-        });
+        selectTab(tab);
+      });
+      // The standard ARIA tabs keyboard pattern (PR #197 review B3):
+      // Left/Right move selection AND focus, wrapping at the ends; Home/End
+      // jump. Presentation-only, like everything here — it switches which
+      // pre-rendered panel is visible and computes no task state.
+      tab.addEventListener("keydown", function (event) {
+        var at = tabs.indexOf(tab);
+        var next = null;
+        if (event.key === "ArrowLeft") {
+          next = tabs[(at - 1 + tabs.length) % tabs.length];
+        } else if (event.key === "ArrowRight") {
+          next = tabs[(at + 1) % tabs.length];
+        } else if (event.key === "Home") {
+          next = tabs[0];
+        } else if (event.key === "End") {
+          next = tabs[tabs.length - 1];
+        }
+        if (next === null) return;
+        event.preventDefault();
+        selectTab(next);
+        next.focus();
       });
     });
   });

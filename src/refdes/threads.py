@@ -100,14 +100,17 @@ TASK_GLYPH_UNKNOWN = "[?]"
 #: heading (the task's owner string, 2026-10-11).
 DERIVED_HEADING = "Derived (auto clears when fixed)"
 
-#: The derived block's ONE kind order and its per-kind group headings (the
-#: owner's words). `refdes work` (#194, `living-notes-h7c-work-cli`, open
-#: when W5a was written) adds the same grouping to the CLI and will align
-#: these constants with its own; until it merges, this is the one place.
-#: A thread's own derived block simply never carries a `verdict` or `fork`
-#: row — those kinds belong to a whole-project worklist — but the order
-#: names all six so the grouping and the order are spelled once.
-DERIVED_GROUP_ORDER = ("coverage", "verdict", "blocked", "check", "citation", "fork")
+#: The derived block's per-kind group headings (the owner's words), in the
+#: ONE kind order — the table is the order: `DERIVED_GROUP_ORDER` is this
+#: dict's insertion order, so a kind added here appears in the grouping and
+#: the order at once and cannot be half-registered (a #194 review point for
+#: its `THREAD_DERIVED_GROUP_HEADINGS`, applied here first). `refdes work`
+#: (#194, `living-notes-h7c-work-cli`, open when W5a was written) adds the
+#: same grouping to the CLI and will align with these constants; until it
+#: merges, this is the one place. A thread's own derived block simply never
+#: carries a `verdict` or `fork` row — those kinds belong to a whole-project
+#: worklist — but the table names all six so the grouping and the order are
+#: spelled once.
 DERIVED_GROUP_HEADINGS = {
     "coverage": "Coverage",
     "verdict": "Verdicts",
@@ -116,6 +119,38 @@ DERIVED_GROUP_HEADINGS = {
     "citation": "Citations",
     "fork": "Forks",
 }
+DERIVED_GROUP_ORDER = tuple(DERIVED_GROUP_HEADINGS)
+
+#: The four postures the task block can show in place of a list, and the
+#: full conflicting-verdict sentence — `refdes thread` prints these and the
+#: task pane renders them, from this one spelling (the pane "shows the same
+#: facts and wording as that command" by the same mechanism as the glyphs
+#: above: one constant, two surfaces).
+TASK_POSTURE_AMBIGUOUS = "task reconciliation required"
+TASK_POSTURE_UNDECLARED = "none (never declared)"
+VERDICT_CONFLICTING_DETAIL = (
+    "entries at the same distance declare different statuses; "
+    "a continuation must declare one explicitly"
+)
+
+
+def task_posture_cleared(declared_by: str) -> str:
+    """The `cleared` posture, naming the entry that declared the empty list."""
+    return f"none (cleared by {declared_by})"
+
+
+def task_malformed_note(malformed: int) -> str:
+    """The dropped-row count riding on the `declared` heading — a count of
+    rows `build.validate_items` already reported, never a posture: the
+    valid rows print under it (surface fix, PR #197 review B1: the pane
+    once let this note hide them)."""
+    return f"({malformed} malformed row(s) not shown)"
+
+
+def verdict_conflicting_line(state: str) -> str:
+    """The whole conflicting verdict line, the state word spelled from the
+    projection's own (`VERDICT_CONFLICTING`)."""
+    return f"Verdict: {state} -- {VERDICT_CONFLICTING_DETAIL}"
 
 
 def verdict_open_suffix(verdict: dict, open_count: int) -> str:

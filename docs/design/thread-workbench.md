@@ -14,8 +14,8 @@ the preview and on the static site — has landed**, as the record
 `in-prog-logs/workbench-w5a-task-pane.txt` attests; W5b (ticks collected
 into a draft continuation) is not started. Unlike W1–W3 the pane is not a
 response-only decoration: it is rendered in the shared item template
-(§7a's "the same pane" sub-decision), and it computes nothing — every
-fact is a client of the projection it consumes. One half of D1 is deliberately
+(§7a's "the same pane" sub-decision), and it computes nothing — the pane is
+a client of the projection it consumes. One half of D1 is deliberately
 **not** shipped — dotted `ITEM.NAME`
 mentions in prose stay undecorated, per the note under §5.
 

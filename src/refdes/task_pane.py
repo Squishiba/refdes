@@ -42,16 +42,18 @@ from . import threads as threads_mod
 from .model import Item, Project
 
 
-def thread_views(project: Project, *, graph=None) -> list[dict]:
+def thread_views(project: Project, *, graph=None, captures=None) -> list[dict]:
     """The projection, once per render (§7a: the pane is a client of it).
 
     Same call `refdes thread` and the index `threads` key make; `graph`
-    reuses render's one build-wide follows graph so a whole-site render
-    doesn't re-parse edges per page. A project with no `follows:` edge
-    anywhere gets the empty list, which is what keeps its published pages
-    byte-identical (no panes, no pane assets).
+    reuses render's one build-wide follows graph and `captures` its one
+    capture-store read, so a whole-site render parses the history event
+    store once, not once per consumer (PR #197 review E1, the same
+    `captures=` pass-through `work_projection` takes). A project with no
+    `follows:` edge anywhere gets the empty list, which is what keeps its
+    published pages byte-identical (no panes, no pane assets).
     """
-    return threads_mod.threads_projection(project, graph=graph)
+    return threads_mod.threads_projection(project, graph=graph, captures=captures)
 
 
 def label(item: Item) -> str:
@@ -111,11 +113,7 @@ def _verdict_line(verdict: dict | None, open_count: int) -> str | None:
     if verdict is None:
         return None
     if verdict["state"] == threads_mod.VERDICT_CONFLICTING:
-        return (
-            f"Verdict: {verdict['state']} -- entries at the same distance "
-            "declare different statuses; a continuation must declare one "
-            "explicitly"
-        )
+        return threads_mod.verdict_conflicting_line(verdict["state"])
     on = f", {verdict['declared_on']}" if verdict["declared_on"] else ""
     suffix = threads_mod.verdict_open_suffix(verdict, open_count)
     return f"Verdict: {verdict['status']} ({verdict['declared_by']}{on}){suffix}"
@@ -124,15 +122,31 @@ def _verdict_line(verdict: dict | None, open_count: int) -> str | None:
 def _task_block(tasks: dict) -> dict:
     """The authored list under the CLI's own heading (`Tasks at tip:` /
     `Tasks at <tip>:`), with the fold's distinct postures kept distinct —
-    the same four lines `cmd_thread` prints."""
+    the same four lines `cmd_thread` prints, in `threads`' shared strings.
+
+    The malformed count is its own field, never the note that stands where
+    the rows go: `refdes thread` prints the count on the heading AND the
+    valid rows under it, and a pane that let the count hide the rows made
+    a partly-broken list look like an empty one (PR #197 review B1)."""
     if tasks["state"] == "ambiguous":
-        return {"state": "ambiguous", "note": "task reconciliation required", "rows": []}
+        return {
+            "state": "ambiguous",
+            "posture": threads_mod.TASK_POSTURE_AMBIGUOUS,
+            "malformed_note": "",
+            "rows": [],
+        }
     if tasks["state"] == "undeclared":
-        return {"state": "undeclared", "note": "none (never declared)", "rows": []}
+        return {
+            "state": "undeclared",
+            "posture": threads_mod.TASK_POSTURE_UNDECLARED,
+            "malformed_note": "",
+            "rows": [],
+        }
     if tasks["state"] == "cleared":
         return {
             "state": "cleared",
-            "note": f"none (cleared by {tasks['declared_by']})",
+            "posture": threads_mod.task_posture_cleared(tasks["declared_by"]),
+            "malformed_note": "",
             "rows": [],
         }
     malformed = tasks.get("malformed")
@@ -147,7 +161,10 @@ def _task_block(tasks: dict) -> dict:
     ]
     return {
         "state": "declared",
-        "note": f" ({malformed} malformed row(s) not shown)" if malformed else "",
+        "posture": "",
+        "malformed_note": (
+            threads_mod.task_malformed_note(malformed) if malformed else ""
+        ),
         "rows": rows,
     }
 
@@ -170,6 +187,16 @@ def _derived_groups(rows: list[dict]) -> list[dict]:
     grouping preserves that within-kind order and nothing here adds or
     removes a row — fix the gap, re-render, the row is gone (rule 2)."""
     groups = []
+    unknown = sorted({row["kind"] for row in rows} - set(threads_mod.DERIVED_GROUP_ORDER))
+    if unknown:
+        # A kind the projection can emit but the table cannot group must
+        # fail loudly, not drop its rows from the pane in silence (PR #197
+        # review S3): add it to `threads.DERIVED_GROUP_HEADINGS`, which IS
+        # the order now, and both surfaces pick it up.
+        raise ValueError(
+            f"derived kind(s) {unknown} missing from "
+            "threads.DERIVED_GROUP_HEADINGS (the one group table)"
+        )
     for kind in threads_mod.DERIVED_GROUP_ORDER:
         kind_rows = [row for row in rows if row["kind"] == kind]
         if kind_rows:

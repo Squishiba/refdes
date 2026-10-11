@@ -2061,8 +2061,9 @@ refdes serve --no-open --port 8731 --token-file /tmp/refdes-launch.txt
   the thread's open tips as tabs (a fork is never merged into one list), the
   tip's task list — with `viewing LOG-007 · tasks as of tip LOG-012` when
   the page is an older entry — the verdict line, and a collapsed *Derived
-  (auto clears when fixed)* section of check, coverage, blocked, citation
-  and fork rows. Every line is `refdes thread`'s own wording and every fact
+  (auto clears when fixed)* section of coverage, blocked, check and citation
+  rows (a thread's derived block never carries verdict or fork rows — those
+  kinds belong to `refdes work`). Every line is `refdes thread`'s own wording and every fact
   comes from the same headless projection that command reads; the pane
   computes nothing and writes nothing. See
   [`refdes thread`](#refdes-thread-ref) and `docs/design/thread-workbench.md` §7a.

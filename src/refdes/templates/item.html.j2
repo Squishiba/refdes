@@ -337,8 +337,11 @@
     {% if tab.verdict %}
     <p class="refdes-taskpane-verdict">{{ tab.verdict }}</p>
     {% endif %}
-    {% if tab.tasks.state == 'declared' and not tab.tasks.note %}
-    <p class="refdes-taskpane-heading">{{ heading }}</p>
+    {% if tab.tasks.state == 'declared' %}
+    {# B1 (PR #197 review): the malformed count rides on the heading and
+       the valid rows print under it, exactly as `refdes thread` prints
+       them — the count is never the note that stands where the rows go. #}
+    <p class="refdes-taskpane-heading">{{ heading }}{% if tab.tasks.malformed_note %} {{ tab.tasks.malformed_note }}{% endif %}</p>
     <ul class="refdes-taskpane-tasks tight">
       {% for row in tab.tasks.rows %}
       {# The same facts `refdes thread` prints, the checkbox glyph as text
@@ -347,7 +350,7 @@
       {% endfor %}
     </ul>
     {% else %}
-    <p class="refdes-taskpane-heading">{{ heading }} {{ tab.tasks.note }}</p>
+    <p class="refdes-taskpane-heading">{{ heading }} {{ tab.tasks.posture }}</p>
     {% endif %}
   </div>
   {% endfor %}

@@ -139,4 +139,61 @@ d) `<details open>` -> the collapsed-tag test FAILED (exact-tag assert).
 - Manual read-through check (documented, no browser here): the JS is a
   hidden/aria toggle over server-rendered markup; a node DOM-stub run
   exercised toggle-open, tab-switch and the greying path without errors.
-- Full suite, ruff and gen_examples --check: see below (run at the end).
+- Full suite (round 0, before the review fix round): 3527 passed, 2 skipped
+  in 269.63s, foreground, PYTHONPATH=$PWD/src. Ruff (I,F,E9) clean on every
+  touched file; the only finding was the pre-existing I001 on HEAD's cli.py,
+  left alone. docs-site/gen_examples.py --check: up to date.
+
+## Fix round 1 (PR #197 review, .scratch/FIX-1.txt)
+
+Owner settled: toggle label "Tasks" and the bottom-right position are fine.
+
+- B1 (malformed rows hid the whole list): the count is its own field
+  (`malformed_note`) in `_task_block`, and the template renders heading +
+  count + the VALID ROWS under it, exactly like `cmd_thread`. Tested
+  through BOTH surfaces (site test_task_pane.py, preview
+  test_serve_preview_task_pane.py). Sabotage: restoring the old
+  `and not tab.tasks.note` gate -> named tests fail (below).
+- B2 (toggle under the serve bar): the offset lives in bar.css —
+  response-only, never in `_site/` — with geometry derived from bar.css's
+  own numbers (bar top edge 12+6+13*1.4+6 = 42.2px; toggle 50px; panel
+  87px). How it was checked: Python tests assert the offset rules ship in
+  bar.css, that the preview page loads taskpane.css BEFORE bar.css (cascade
+  order), that the published taskpane.css keeps `bottom: var(--space-16)`
+  and never mentions the bar, and that no published page references
+  bar.css. No browser exists in this environment, so the pixel collision
+  itself was verified by that geometry arithmetic, not by eye — the
+  arithmetic is asserted in the test (12 + 30.2 < 50 < 87).
+- B3 (tabs unreachable by keyboard): taskpane.js now implements the ARIA
+  tabs pattern — Left/Right wrap, Home/End jump, selection follows focus,
+  roving tabindex — still presentation-only. Markup pinned in Python
+  (roving stop in the emitted tablist); the keyboard behavior ran in the
+  extended node DOM-stub harness (.scratch/w5a_js_check.js, 21 checks
+  incl. wrap at both ends, Home/End, unhandled keys no-op) — again
+  documented as no-browser manual-equivalent, not an eyeball check.
+- S1/S2: four posture strings, the cleared/malformed formatters, the
+  conflicting-verdict sentence and the unknown glyph are now threads.py
+  constants used by cli.py and task_pane.py; the pane renders each one
+  (undeclared/cleared tests added; refused/ambiguous/malformed tests
+  switched from retyped literals to the constants). cmd_thread's printed
+  bytes are unchanged (test_thread_cli green untouched).
+- S3: DERIVED_GROUP_ORDER is DERIVED_GROUP_HEADINGS (one table, one order),
+  and `_derived_groups` raises ValueError naming any kind the table cannot
+  group (test_an_unregistered_derived_kind_fails_loudly).
+- E1: render_site hoists the one `history.capture_index` read and hands it
+  to BOTH the pane's thread_views and items_json (new `captures=` kwarg);
+  test_one_site_render_reads_the_capture_store_once counts exactly one
+  read per render_site.
+- D1: checked before writing — #194 IS merged into origin/main by now, so
+  "H6 and H7 have since landed" is true and stays. Rebase per the NOTE
+  below.
+- D2: cli-reference's derived-section list now says coverage, blocked,
+  check, citation — no fork rows (threads.py's own comment).
+- D3: design doc now says the PANE is the client of the projection.
+- T1: the serve read-only test pins the aside marker before slicing.
+- T2: panel() slices to the next panel / derived section / aside end.
+- T3: the serve fixture grew a real fork (LOG-003 with two branch tips,
+  created the way an author would: the composite `LOG-003@<key>` edge after
+  the warm check froze the bare one — same trick as _fork_from_bare) and a
+  malformed task row beside a valid one; both tested through the template.
+

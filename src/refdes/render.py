@@ -570,12 +570,21 @@ def _citations_json(item: Item) -> dict:
     return out
 
 
-def items_json(project: Project, *, graph: chains_mod.ChainGraph | None = None) -> dict:
+def items_json(
+    project: Project,
+    *,
+    graph: chains_mod.ChainGraph | None = None,
+    captures: dict | None = None,
+) -> dict:
     """The machine-readable export. Anything downstream should read this, not HTML.
 
     `graph` is the build's one `chains.build_graph(project)`; `render_site`
     hands it down so the `threads` projection never rebuilds it (the same
-    one-graph-per-build rule `thread_view` follows above).
+    one-graph-per-build rule `thread_view` follows above). `captures` is the
+    same one-read rule for the event store (PR #197 review E1): when
+    `render_site` has already read `history.capture_index` for its task
+    panes it hands the result down, and nothing in one render parses the
+    store twice; direct callers leave it None and this reads it itself.
 
     The `boards` key and each item's `board` are only present when a project has
     actually declared a `boards:` registry -- so a project that has not adopted
@@ -614,12 +623,14 @@ def items_json(project: Project, *, graph: chains_mod.ChainGraph | None = None) 
     # refuses to be read yields no keys: build's own
     # "edited-after-captured was not checked" warning is already in this
     # payload's `diagnostics`, and the index never fails over the store.
-    # Read once here and handed to the thread projection below, so one
-    # `index` run parses the event store once, not twice.
-    try:
-        captures = history_mod.capture_index(project)
-    except (history_mod.HistoryError, OSError):
-        captures = {}
+    # Read once here (or handed down by `render_site`, E1) and handed to
+    # the thread projection below, so one `index` run parses the event
+    # store once, not twice.
+    if captures is None:
+        try:
+            captures = history_mod.capture_index(project)
+        except (history_mod.HistoryError, OSError):
+            captures = {}
     # Living notes §6 / plan phase H7a: the thread projection, present only
     # when the project has threads at all -- the same "absent key, not null"
     # convention as `boards`, so a project with no `follows:` anywhere keeps
@@ -965,6 +976,14 @@ def render_site(project: Project, draft: bool = False) -> str:
     # threads at all.
     thread_graph = chains_mod.build_graph(project)
     env.globals["thread_view"] = lambda item: thread_view(item, project, graph=thread_graph)
+    # PR #197 review E1: the event-store read the thread projection needs is
+    # hoisted here so one whole `render_site` parses it once — the same
+    # pass-through `threads_projection(captures=...)` already gives
+    # `items_json`, extended to the pane's second projection call below.
+    try:
+        capture_index = history_mod.capture_index(project)
+    except (history_mod.HistoryError, OSError):
+        capture_index = {}
     # W5a task pane (docs/design/thread-workbench.md §7a): the floating
     # pane's model, computed once per render from `threads.threads_projection`
     # -- the same projection the index payload's `threads` key carries and
@@ -974,7 +993,7 @@ def render_site(project: Project, draft: bool = False) -> str:
     # and no pane assets, published output byte-identical -- the same
     # "absent, not empty" posture as the thread panel itself.
     task_panes = task_pane_mod.panes_by_entry(
-        task_pane_mod.thread_views(project, graph=thread_graph)
+        task_pane_mod.thread_views(project, graph=thread_graph, captures=capture_index)
     )
     env.globals["task_pane"] = lambda item: task_panes.get(task_pane_mod.label(item))
     taskpane_assets = bool(task_panes)
@@ -1355,7 +1374,7 @@ def render_site(project: Project, draft: bool = False) -> str:
 
     with open(os.path.join(out_dir, "items.json"), "w", encoding="utf-8") as fh:
         json.dump(
-            items_json(project, graph=thread_graph),
+            items_json(project, graph=thread_graph, captures=capture_index),
             fh,
             indent=2,
             ensure_ascii=False,

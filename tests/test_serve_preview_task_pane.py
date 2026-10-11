@@ -12,6 +12,8 @@ boundary) and touches no API.
 
 from __future__ import annotations
 
+import re
+
 import pytest
 from conftest import write_project_config
 from serve_support import Client, snapshot_tree
@@ -32,11 +34,25 @@ LOG_FILE = (
     "    date: 2026-08-30\n"
     "    tasks:\n"
     "      - {id: T-thermal-model, text: Model worst-case copper temperature., state: open}\n"
+    "      - not even a mapping\n"
     "  - id: LOG-002\n"
     "    summary: Thermal modelling accepted.\n"
     "    date: 2026-09-02\n"
     "    follows: LOG-001\n"
     "    status: accepted\n"
+    "  - id: LOG-003\n"
+    "    summary: Fork head.\n"
+    "    date: 2026-09-03\n"
+    "  - id: LOG-004\n"
+    "    summary: Left branch.\n"
+    "    date: 2026-09-04\n"
+    "    follows: LOG-003\n"
+    "    tasks: [{id: T-left, text: Left branch task., state: open}]\n"
+    "  - id: LOG-005\n"
+    "    summary: Right branch.\n"
+    "    date: 2026-09-05\n"
+    "    follows: LOG-003\n"
+    "    tasks: [{id: T-right, text: Right branch task., state: open}]\n"
     "  - id: LOG-006\n"
     "    type: log\n"
     "    summary: A lone entry with no thread.\n"
@@ -51,7 +67,27 @@ def served(tmp_path):
     items.mkdir()
     (items / "log.yaml").write_text(LOG_FILE, encoding="utf-8")
     config = str(tmp_path / "refdes-project.yaml")
-    cli_mod.main(["-c", config, "check"])  # mint keys, as a real project starts
+    # A warm check: it mints keys, freezes the bare `follows:` edges -- and
+    # reports the malformed task row, which is exactly the point: serve
+    # shows the pane next to a project that has an error.
+    cli_mod.main(["-c", config, "check"])
+    # The writable path freezes a bare `follows:` to the target's CURRENT
+    # tip, so the two siblings froze into a chain. The spelled-out frozen
+    # edge is how an author asks for a branch (tests/test_thread_cli.py
+    # ::_fork_from_bare), so LOG-005's edge is rewritten to name LOG-003's
+    # key -- and the freeze leaves a composite edge alone on every later
+    # load.
+    path = tmp_path / "items" / "log.yaml"
+    text = path.read_text(encoding="utf-8")
+    (head_key,) = re.findall(r"- key: (\S+)\n    id: LOG-003", text)
+    blocks = re.split(r"(?=  - key: )", text)
+    text = "".join(
+        re.sub(r"follows: LOG-\d+@\S+", f"follows: LOG-003@{head_key}", block)
+        if re.match(r"  - key: \S+\n    id: LOG-005", block)
+        else block
+        for block in blocks
+    )
+    path.write_text(text, encoding="utf-8")
     app = EditorApp(config, poll_interval=0.05)
     app.start()
     try:
@@ -114,11 +150,70 @@ def test_serving_the_pane_changes_nothing_on_disk(served):
 def test_the_preview_page_has_no_write_control_or_token(served):
     """Read-only half of §7: the served pane page carries no token, no
     API path and no form — the editor chrome that does carry them lives
-    on the editor surface, not in the preview."""
+    on the editor surface, not in the preview. (T1, PR #197 review: pin
+    the marker first, so an absent pane can never pass this vacuously.)"""
     app, client, _tmp = served
     html = _body(client, app, "LOG-001")
-    pane = html[html.find('<aside class="refdes-taskpane"') :]
-    pane = pane[: pane.find("</aside>")]
+    start = html.find('<aside class="refdes-taskpane"')
+    assert start != -1, "the preview page must carry the pane at all"
+    pane = html[start:]
+    end = pane.find("</aside>")
+    assert end != -1
+    pane = pane[:end]
     assert "<input" not in pane
     for needle in ("X-Refdes-Token", "token", "/api/", "<form", "fetch("):
         assert needle not in pane
+
+
+# ------------------ PR #197 review T3: forks and malformed rows in preview
+
+
+def test_the_preview_renders_malformed_rows_as_count_plus_valid_row(served):
+    """B1 through the serve template path: the count rides the heading and
+    the valid row still prints."""
+    app, client, _tmp = served
+    html = _body(client, app, "LOG-001")
+    assert "Tasks at tip: (1 malformed row(s) not shown)" in html
+    assert "T-thermal-model" in html
+    assert "Model worst-case copper temperature." in html
+
+
+def test_the_preview_renders_fork_tabs_never_unioned(served):
+    """B1's sibling through the serve template path (review T3): a fork
+    gets one tab per tip, each panel carrying only its own list."""
+    app, client, _tmp = served
+    html = _body(client, app, "LOG-003")
+    assert ">LOG-004</button>" in html and ">LOG-005</button>" in html
+    assert "Tasks at LOG-004:" in html and "Tasks at LOG-005:" in html
+    first = html[html.find('data-refdes-panel="1"') :]
+    first = first[: first.find('data-refdes-panel="2"')]
+    second = html[html.find('data-refdes-panel="2"') :]
+    second = second[: second.find("<details")]
+    # exactly one task per panel, each panel a different one -- a union
+    # would put both in both
+    assert ("T-left" in first) != ("T-right" in first)
+    assert ("T-left" in second) != ("T-right" in second)
+    assert ("T-left" in first) != ("T-left" in second)
+
+
+# ----------------- PR #197 review B2: the pane clears the serve toolbar
+
+
+def test_the_preview_offsets_the_toggle_above_the_bar(served):
+    """Both halves of the collision fix on the served page: the bar's
+    stylesheet loads after `taskpane.css` (so its later rules win), and
+    the bar's own CSS carries the pane offsets -- response-only, the
+    published site never sees it."""
+    app, client, _tmp = served
+    html = _body(client, app, "LOG-001")
+    assert "refdes-serve-bar" in html  # the bar is on this page
+    assert html.find("assets/taskpane.css") < html.find("/edit/static/bar.css")
+    status, _h, css = client.page("/edit/static/bar.css")
+    assert status == 200
+    text = css.decode("utf-8")
+    assert ".refdes-taskpane-toggle { bottom: 50px; }" in text
+    assert ".refdes-taskpane { bottom: 87px; }" in text
+    # the bar's own top edge is at 12px + 30.2px (6+6 padding over 13px/1.4)
+    # = 42.2px; the toggle's 50px clears it, and the panel's 87px clears the
+    # ~29px toggle. Geometry arithmetic, checked against bar.css.
+    assert 12 + (6 + 13 * 1.4 + 6) < 50 < 87
