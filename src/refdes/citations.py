@@ -1219,6 +1219,17 @@ def lockfile_text(records: dict[str, dict]) -> str:
 
 
 def save_lockfile(project: Project, records: dict[str, dict]) -> None:
+    """Rewrite the whole lockfile.
+
+    The caller holds the project's cross-process write lock for its own
+    read-modify-write: `fetch_all` runs inside `cli.main`'s
+    `with project_write_lock(...)` (src/refdes/cli.py:2961), which wraps
+    every command but `serve`, `init`, `new` and `schema` and any read-only
+    run, and the editor's accept takes it around its own read and replace
+    (`serve/edit.py:_accept_pins`). A caller that
+    reads the file, decides from what it read, and then writes it here without
+    that lock is racing whoever else is writing it.
+    """
     path = lockfile_path(project)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     # The lockfile is machine-owned and rewritten whole, so its bytes must not
@@ -2377,6 +2388,22 @@ def fetch_all(
     (not bound as a parameter default) so tests can monkeypatch
     `citations.fetch_bytes` and have it take effect even through `refdes fetch`,
     which never passes `fetcher` itself.
+
+    Locking: this reads the lockfile (`load_lockfile` below) and rewrites it
+    whole (`save_lockfile` at the end), and both halves run inside the
+    project-wide `project_write_lock` that `cli.main` runs the command inside
+    (its `with project_write_lock(...)`, src/refdes/cli.py:2961) -- so its
+    read-modify-write is serialised against every other writer of the file,
+    including the editor's accept and its rollback. That lock is deliberately
+    wider than this function's own file
+    update: it also covers the load's source rewrites and the id ledger, and it
+    therefore spans the network wait for a remote citation. Narrowing it to
+    just the write is not available here without changing what a rewrite means
+    -- the record written at the end is derived from the bytes fetched between
+    the read and the write, so a lock that released across the fetch would
+    either lose another writer's record or require a per-path merge this
+    whole-file writer does not do. `serve` is excluded from `cli.main`'s lock
+    precisely because it holds the same lock in short sections of its own.
     """
     fetcher = fetcher or fetch_bytes
     entries = collect(project)

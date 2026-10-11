@@ -44,7 +44,13 @@ value) writes `.refdes/citations.yaml` as well as the item, because a body with
 a `source()` line whose key is not pinned is an item that does not build and a
 pinned key no body names is dead state in a tracked file. The lockfile lands
 first, so the delta gate judges the candidate the save actually produces, and
-every refusal after it restores the previous lockfile bytes. It is still one
+every refusal after it restores the previous lockfile bytes. Both of those
+lockfile mutations -- the read-modify-write that pins and the read-compare-
+restore that undoes it -- are one section under the project's cross-process
+write lock, the same `project_write_lock` `cli.main` wraps its commands in
+(`serve`, `init`, `new` and `schema` exempt, as are read-only runs), so no
+cooperating writer can land between their read and their replace; the delta
+gate between them deliberately does not hold it. It is still one
 apply-operation call and still one mutation entry point; what widened is the
 request, not the number of writers.
 
@@ -83,6 +89,7 @@ from ..model import (
 from ..parse import front_matter_defaults_block, md_front_matter_blocks, yaml_safe_load
 from ..patcher import AddLink, PatchPlan, Refusal, RemoveLink, SetBody, SetField
 from ..sources import PdfAnchor
+from ..write_lock import LockUnavailable
 from . import security
 from . import sources as sources_mod
 
@@ -138,7 +145,9 @@ class EditRequest:
     # Source values to pin alongside this edit (`SourcePin`). Only a `set_body`
     # may carry them, because only a body can name them; the write is then a
     # transaction over two files -- the item and `.refdes/citations.yaml` --
-    # inside this one lock. Empty for every edit that is not an accept.
+    # inside this one lock, with the lockfile's own read-modify-write and its
+    # rollback each inside the project's cross-process lock as well. Empty for
+    # every edit that is not an accept.
     pins: tuple = ()
 
 
@@ -235,7 +244,20 @@ def write_lock_for(project_root: str) -> threading.Lock:
     """The one write lock for one project root, shared by every apply in this
     process. The design's posture is that the lock stops *this* server from
     interleaving saves; `_disk_write_lock` serialises the final revision check
-    and replacement across server processes."""
+    and replacement across server processes.
+
+    LOCK ORDER, and it is not negotiable: `write_lock_for` is always taken
+    first and `_disk_write_lock` (i.e. `project_write_lock`) only ever inside
+    it. Every holder here honours it -- `apply_edit` and `create_item` take
+    this lock then that one, `serve/upload.py:669` takes this one alone, and
+    nothing in the package acquires `project_write_lock` and then reaches for
+    `write_lock_for`. The rule exists because these are two different locks
+    with no ordering of their own: two threads in this process that took them
+    in opposite orders would deadlock outright (one holds the project lock and
+    waits for this one, the other holds this one and waits for the project
+    lock, and nothing can time out), and a `refdes fetch` in another process
+    holds the project lock for its whole command, so an editor section must
+    expect to wait for it and never the reverse."""
     key = os.path.normcase(os.path.abspath(project_root))
     with _LOCKS_GUARD:
         lock = _LOCKS.get(key)
@@ -258,7 +280,14 @@ def file_revision(path: str) -> str:
 
 @contextmanager
 def _disk_write_lock(root: str):
-    """Use the same project lock as CLI writers."""
+    """Use the same project lock as CLI writers.
+
+    Re-entrant per thread (`write_lock.project_write_lock`), so a save may
+    take it again inside a section it already holds -- which is what the
+    accept's rollback does when a conflict is found inside the item's own
+    check-and-replace section. A read-only root raises `LockUnavailable`, an
+    `OSError`, which every caller here already turns into a refusal.
+    """
     from ..write_lock import project_write_lock
 
     with project_write_lock(root):
@@ -473,9 +502,14 @@ class _LockfileWrite:
     different rollback from a restore: an accept of an unpinned citation into a
     project nobody has ever fetched creates the file, and a refusal has to leave
     a project with no lockfile rather than one holding an empty `citations: {}`.
+
+    `root` is the project root, because the rollback is a read-modify-write of a
+    file another process writes and so runs under the same cross-process lock
+    every other writer of this file takes.
     """
 
     path: str
+    root: str
     previous: bytes | None
     staged: bytes
     written: bool = False
@@ -484,35 +518,57 @@ class _LockfileWrite:
         if not self.written:
             return
         self.written = False
-        # Compare before restoring: the accept's whole-file write is not inside
-        # the cross-process lock's check-and-replace section (the candidate
-        # gate it precedes can take seconds), so a cooperating writer may have
-        # replaced this file between our write and this rollback. Our `previous`
-        # is then stale -- restoring it would delete a save that already
-        # landed, whose body names a pin that would no longer exist. Leaving
-        # our pin in the file another writer replaced is the failure mode the
+        # One section under the project's cross-process write lock: the read,
+        # the compare and the restore cannot be split by a cooperating writer.
+        # `refdes fetch` runs inside the same lock -- `cli.main`'s
+        # `with project_write_lock(...)` spans its whole command -- and
+        # another server's accept and rollback take it the same way, so
+        # whatever else is going to happen to this file happens either before
+        # the read or after the restore -- never between them. That is the
+        # guarantee this section was added to buy; before it, a writer landing
+        # in the gap was overwritten by our `previous`.
+        #
+        # The compare stays, because it is not there for that gap. It is there
+        # for the slow candidate gate between our write and this rollback,
+        # which runs without the project lock, on purpose (it can take
+        # seconds, and a lock held across it would idle every writer that takes
+        # that lock for the same seconds): a save that landed during the gate
+        # has already replaced this file by the time we get here, our
+        # `previous` is stale, and restoring it would
+        # delete a landed writer's pin while its body still names it. Leaving
+        # our pin in a file another writer replaced is the failure mode the
         # design names as inert (docs/design/editor-source-picker.md §4);
         # destroying a landed writer's state is not.
         #
-        # Two limits of this compare-then-restore, documented rather than
-        # fixed. (1) Read error: an OSError here leaves `current` None, which
-        # matches no staged bytes, so the rollback is SKIPPED -- we decline to
-        # clobber a file whose current contents we cannot verify (a missing
-        # file is the same case: someone removed it, which is a replace we
-        # must not undo blind). (2) The comparison and the restore are not
-        # atomic: a cooperating writer landing between the read and the
-        # restore is overwritten by our `previous`. The window is microseconds
-        # -- orders of magnitude smaller than the gate-scale window the
-        # comparison above exists for -- so it is accepted, not closed;
-        # closing it properly means a real lock, which is a separate decision.
+        # What is still not guaranteed, and is not pretendable:
+        # (1) a read error here leaves `current` None, which matches no staged
+        # bytes, so the rollback is SKIPPED -- we decline to clobber a file
+        # whose current contents we cannot verify (a missing file is the same
+        # case: someone removed it, which is a replace we must not undo
+        # blind); (2) a lock we cannot acquire: the `except OSError` wrapped
+        # around the section catches `LockUnavailable` -- a read-only root with
+        # a writable child, write_lock.py:42-50 -- and any other filesystem
+        # error from opening or locking the lock file, and it declines the
+        # rollback either way: writing while unable to lock is the thing this
+        # whole change is against, and the accept's own write would have
+        # refused on such a root anyway; (3) a process killed inside the one
+        # `os.replace` that lands the restore, which is the crash window §4
+        # already states -- the recovery is bytes held in memory, not a
+        # journal, and the residue is an inert pin the next `refdes fetch`
+        # cleans; and (4) a writer that ignores the lock entirely, which no
+        # code here does but no lock can prevent either.
         try:
-            with open(self.path, "rb") as fh:
-                current = fh.read()
+            with _disk_write_lock(self.root):
+                try:
+                    with open(self.path, "rb") as fh:
+                        current = fh.read()
+                except OSError:
+                    current = None
+                if current != self.staged:
+                    return
+                _rollback(self.path, self.previous)
         except OSError:
-            current = None
-        if current != self.staged:
             return
-        _rollback(self.path, self.previous)
 
 
 @dataclass
@@ -537,7 +593,10 @@ def _undo_accept(accept: _Acceptance | None) -> None:
     out loud rather than papering over it: the window is one `os.replace` wide,
     and the failure mode if the process dies inside it is a lockfile pinning a
     key no item names, which is inert, visible in `git status`, and cleaned by
-    the next `refdes fetch`.
+    the next `refdes fetch`. What the window does *not* admit is another
+    writer: `_LockfileWrite.rollback` reads, compares and restores inside the
+    project's cross-process write lock, so a cooperating writer is serialised
+    outside that sequence rather than landing in the middle of it.
     """
     if accept is not None:
         accept.lock.rollback()
@@ -564,6 +623,10 @@ def _accept_pins(
        fetch's non-`--update` policy, in the shape fetch writes.
     3. the write, atomic and whole-file, in the same bytes `save_lockfile`
        would have produced.
+
+    Steps 2 and 3 read and then replace the same file, so they are one section
+    of the project's cross-process write lock; step 1, which only reads the
+    item and the source file, is not part of that section.
     """
     if not pins:
         return None, None
@@ -583,20 +646,6 @@ def _accept_pins(
     except sources_mod.SourceRefusal as exc:
         return None, str(exc)
 
-    # Fresh from disk, not the snapshot's copy: under this lock, the file is the
-    # state, and a pin written by a fetch since the snapshot was built belongs
-    # in what we write back.
-    #
-    # Strictly `load_lockfile`, and a LockfileError becomes this function's
-    # ordinary refusal reason rather than an exception: this is the second
-    # writer of the lockfile (step 3 of the sequence below), and it writes the
-    # file whole from the records it read. A lockfile it could not read would
-    # come back with one record -- the key being accepted -- and every other
-    # pin in the project silently gone. Refusing leaves both files untouched.
-    try:
-        records = citations_mod.load_lockfile(before)
-    except citations_mod.LockfileError as exc:
-        return None, str(exc)
     anchors = {}
     digests = {}
     for plan in plans:
@@ -611,33 +660,67 @@ def _accept_pins(
             return None, f"{pair[0]}: key {pair[1]!r} names conflicting PDF candidates"
         anchors[pair] = anchor
         digests[plan["path"]] = plan["sha256"]
-    errors, pinned = citations_mod.stage_source_pins(
-        before, records, [(p["path"], p["key"]) for p in plans],
-        anchors=anchors, digests=digests,
-    )
-    if errors:
-        return None, "; ".join(errors)
 
+    # Steps 2 and 3 are one section under the project's cross-process write
+    # lock -- the same `project_write_lock` that `cli.main` runs `refdes fetch`
+    # inside, and that `_LockfileWrite.rollback` takes for its
+    # read-compare-restore. Everything the write is decided from is inside it:
+    # the records read off disk, the extraction whose policy reads those
+    # records, and the replace. That is the whole of it, and it holds no
+    # network wait: the editor performs no network I/O anywhere
+    # (`serve/sources.py:229`), so the extraction inside the lock reads the
+    # local file or the kept copy, and the accept's slow part -- the candidate
+    # gate in `_apply_locked`, which can take seconds -- is deliberately
+    # outside. A read-only root raises `LockUnavailable` here, which becomes
+    # this function's ordinary refusal like every other reason it returns.
     lock_path = citations_mod.lockfile_path(before)
     try:
-        with open(lock_path, "rb") as fh:
-            previous = fh.read()
-    except OSError:
-        previous = None
-    staged = citations_mod.lockfile_text(records).encode("utf-8")
-    lock = _LockfileWrite(path=lock_path, previous=previous, staged=staged)
-    # Nothing changed -- re-accepting a key that is already pinned from these
-    # same bytes -- then nothing is written: a save that pins nothing new leaves
-    # the lockfile's mtime alone, and has no rollback to perform.
-    if staged != previous:
-        failure = (
-            _atomic_replace(lock_path, staged)
-            if previous is not None
-            else _atomic_create(lock_path, staged)
-        )
-        if failure is not None:
-            return None, failure
-        lock.written = True
+        with _disk_write_lock(before.root):
+            # Fresh from disk, not the snapshot's copy: under this lock, the file
+            # is the state, and a pin written by a fetch since the snapshot was
+            # built belongs in what we write back.
+            #
+            # Strictly `load_lockfile`, and a LockfileError becomes this
+            # function's ordinary refusal reason rather than an exception: this
+            # is the second writer of the lockfile (step 3 of the sequence
+            # below), and it writes the file whole from the records it read. A
+            # lockfile it could not read would come back with one record -- the
+            # key being accepted -- and every other pin in the project silently
+            # gone. Refusing leaves both files untouched.
+            try:
+                records = citations_mod.load_lockfile(before)
+            except citations_mod.LockfileError as exc:
+                return None, str(exc)
+            errors, pinned = citations_mod.stage_source_pins(
+                before, records, [(p["path"], p["key"]) for p in plans],
+                anchors=anchors, digests=digests,
+            )
+            if errors:
+                return None, "; ".join(errors)
+            try:
+                with open(lock_path, "rb") as fh:
+                    previous = fh.read()
+            except OSError:
+                previous = None
+            staged = citations_mod.lockfile_text(records).encode("utf-8")
+            lock = _LockfileWrite(
+                path=lock_path, root=before.root, previous=previous, staged=staged
+            )
+            # Nothing changed -- re-accepting a key that is already pinned from
+            # these same bytes -- then nothing is written: a save that pins
+            # nothing new leaves the lockfile's mtime alone, and has no rollback
+            # to perform.
+            if staged != previous:
+                failure = (
+                    _atomic_replace(lock_path, staged)
+                    if previous is not None
+                    else _atomic_create(lock_path, staged)
+                )
+                if failure is not None:
+                    return None, failure
+                lock.written = True
+    except LockUnavailable as exc:
+        return None, f"could not lock {before.root} for writing: {exc}"
     return _Acceptance(lock=lock, pinned=tuple(pinned)), None
 
 

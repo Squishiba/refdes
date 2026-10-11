@@ -956,7 +956,7 @@ Write a minimal `refdes-project.yaml` in the current directory, plus
 library](standard-library.md#refdes-init).
 
 The `.gitignore` covers `.vscode/settings.json`, `.refdes/copies/`,
-`.refdes/schema.json` and `.refdes/serve-write.lock` — appended to whatever
+`.refdes/schema.json` and `.refdes-write.lock` — appended to whatever
 was already there, never rewritten, and skipped for a path an existing
 pattern already covers.
 
@@ -1924,16 +1924,17 @@ refdes serve --no-open --port 8731 --token-file /tmp/refdes-launch.txt
   **every file under a `site.assets:` directory**: adding, replacing, or
   deleting an image moves the revision and rebuilds the preview just like a
   text edit does, whether or not any document references that file yet.
-- **The first save leaves one file behind: `.refdes/serve-write.lock`.** It is
-  how a save is serialized against another `refdes serve` on the same project:
-  each takes the lock across its final revision check and the write, so a save
-  planned against a file that has since moved comes back as a conflict instead
-  of overwriting it. The file is empty, holds no state worth keeping, and is
-  per-machine: deleting it costs nothing while no `serve` is running, and the
-  next save makes it again. It appears on the first *save*, not at startup and
-  not for reads — `refdes init` puts it in the project's `.gitignore` along
-  with the other two generated files (see [files the tool
-  writes](#files-the-tool-writes)).
+- **The first write leaves one file behind: `.refdes-write.lock`, at the
+  project root.** It is how a save is serialized against another `refdes
+  serve` — and against the CLI — on the same project: each takes the lock
+  across its final revision check and the write, so a save planned against a
+  file that has since moved comes back as a conflict instead of overwriting
+  it. The file is empty, holds no state worth keeping, and is per-machine:
+  deleting it costs nothing while no refdes process is running, and the next
+  write makes it again. It appears on the first *write* — a writing command or
+  a save — not at `init` and not for reads — `refdes init` puts it in the
+  project's `.gitignore` along with the other two generated files (see [files
+  the tool writes](#files-the-tool-writes)).
 
 The editor is served from `/edit/` as plain JavaScript and CSS packaged with
 refdes; no Node or build step is involved, and none of it is ever part of the
@@ -1979,12 +1980,12 @@ python -m http.server -d _site 8000
 | `.refdes/log-seal.yaml` | **yes** | Append-only seals for log entries with no board (the only file used at all when the project has no `boards:` registry) |
 | `.refdes/log-seal-<board>.yaml` | **yes** | Append-only seals for one registered board's own log entries |
 | `.refdes/boards.yaml` | **yes** | Board and workspace drift manifest; the `workspaces:` section only appears for a project that has declared `workspaces:` |
-| `.refdes/citations.yaml` | **yes** | Citation lockfile (sha256, fetch time, kept-copy flag, resolved sections, the pinned document's page count); written only by `refdes fetch` |
+| `.refdes/citations.yaml` | **yes** | Citation lockfile (sha256, fetch time, kept-copy flag, resolved sections, the pinned document's page count); written by `refdes fetch`, and by `refdes serve` when an editor accept pins a source value (`docs/design/editor-source-picker.md` §4). Every write is a read-modify-write inside the project's cross-process write lock |
 | `.refdes/baselines/<name>.yaml` | **yes** | One file per `refdes revision`/`refdes release` stamp. Not rewritten by any ordinary command; `refdes revise`, `refdes calc-rewrite` and `refdes standard upgrade` do edit it, to carry an item's content hash across a rename or a spelling-only rewrite |
 | `.refdes/keys-adopted.yaml` | **yes** | Adoption marker written once by `refdes keys adopt`; its presence is what makes future stamps, seals and membership manifests use key-keyed storage |
 | `.refdes/schema.json` | **no, gitignored** | The project's merged JSON Schema, for editor completion; rewritten by every command that loads the project. `refdes init` puts it in the project's `.gitignore` |
 | `.refdes/copies/` | **no, gitignored** | Kept local copies of datasheet bytes, content-addressed by sha256; written only by `refdes fetch --path ...` for a remote citation with `keep_copy: true`. `refdes init` puts it in the project's `.gitignore` |
-| `.refdes/serve-write.lock` | **no, gitignored** | The cross-process write lock `refdes serve` takes on save, so two instances on one project cannot save over each other. Always empty; created by the first save, not at startup. `refdes init` puts it in the project's `.gitignore` |
+| `.refdes-write.lock` | **no, gitignored** | The project's cross-process write lock — at the project root, not inside `.refdes/`. `write_lock.project_write_lock` is taken around any command that writes item or state files, and around each save by `refdes serve`, so neither a CLI writer nor the editor can interleave another's read-modify-write and two serves cannot save over each other. Outside `cli.main`'s hold: `serve` (it takes the lock per save instead), `init` (it writes the project marker before there is a project to lock), `new` and `schema`, and any `--no-write`/`--dry-run` run. Always empty; created by the first writer that takes it, not at startup. `refdes init` puts it in the project's `.gitignore` |
 | `.refdes/history/` | **yes** | Captured-history store: content-addressed snapshot objects and derived-id events; written by the `follows:` capture and by `refdes history capture`/`redact`/`migrate-seals` |
 | `_site/` | no | Generated output |
 
@@ -1997,4 +1998,4 @@ either.
 `.gitignore` (with `.vscode/settings.json`), and it is the only thing that does.
 A project created before that was the case keeps whatever `.gitignore` it had, so
 add the three lines by hand: `.refdes/copies/`, `.refdes/schema.json` and
-`.refdes/serve-write.lock`, one per line.
+`.refdes-write.lock`, one per line.

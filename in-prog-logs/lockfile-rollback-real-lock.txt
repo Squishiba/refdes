@@ -1,0 +1,373 @@
+Task: put every write of .refdes/citations.yaml under the project's real
+cross-process lock (project_write_lock), starting with the editor's rollback.
+Branch: lockfile-rollback-real-lock (cut from main). PR #182 follow-up.
+Started: 2026-10-11.
+
+=====================================================================
+1. WRITER INVENTORY (how it looked before this change)
+=====================================================================
+POINTER ERAS, because the two are mixed in this file and a bare `x.py:NNNN`
+is then ambiguous: §1 describes the code BEFORE this change, so its pointers
+are `main`'s positions. The change adds ~26 lines to citations.py and ~85 to
+edit.py, so anything written against the branch head is marked "(head)" and
+its main-era equivalent given alongside. §2 onward describe the branch, so
+their pointers are the head's unless they quote the pre-change code.
+
+Method: grep for save_lockfile / lockfile_text / lockfile_path and for the
+atomic-write helpers across src/, then read each call site. The lockfile path
+is citations.LOCKFILE = ".refdes/citations.yaml" (citations.py:68), spelled by
+citations.lockfile_path() (citations.py:84).
+
+Writers (the only three places that put bytes on that path):
+
+W1. citations.save_lockfile (src/refdes/citations.py:1221, textio.write_text)
+    -- called from exactly one place: citations.fetch_all (citations.py:2720 on main; head 2746),
+    which is reached from cli.cmd_fetch (cli.py:1139).
+    Holds project_write_lock? YES, but broadly: cli.main() (cli.py:2951-2968, the with at 2961)
+    wraps every command in project_write_lock(root) except --no-write,
+    --dry-run and {serve, init, new, schema}. So `refdes fetch` holds the lock
+    for its whole run -- including the network fetch and, deliberately, the
+    load (the comment at cli.py:2952 says the load itself can rewrite sources).
+    Its read (load_lockfile, cli.py:1121 / citations.py:2456 on main; head 2482) and its write are
+    therefore in one lock hold, so it cannot lose an update to another
+    lock-respecting writer.
+
+W2. serve/edit.py:_accept_pins (edit.py:621-641) -- the editor's accept writes
+    the lockfile whole with _atomic_replace / _atomic_create.
+    Holds project_write_lock? NO. It held only write_lock_for(root), the
+    in-process threading.Lock taken by apply_edit (edit.py:280). The
+    cross-process _disk_write_lock was taken later and only around the item
+    file's check-and-replace (edit.py:436-441). This is the instance PR #182
+    documented.
+
+W3. serve/edit.py:_LockfileWrite.rollback (edit.py:483-515) -> _rollback ->
+    _restore / os.unlink (edit.py:1512-1521), reached from _undo_accept at
+    edit.py:404, 430, 439, 443, 446. Read-compare-restore, unlocked
+    cross-process (same in-process lock only). One of the five call sites
+    (edit.py:439) already ran inside _disk_write_lock; project_write_lock is
+    re-entrant per thread, so nesting there is free.
+
+Not writers, checked and recorded:
+  * serve/upload.py (write_upload, upload.py:669) takes write_lock_for and
+    writes item/image files with edit._atomic_replace/_atomic_create, never the
+    lockfile. Not a lockfile writer; left alone.
+  * serve/sources.py reads the lockfile through citations.read_lockfile
+    (_lockfile, sources.py:86-99) -- read-only.
+  * serve/api.py refuses mutations up front when app.read_only (api.py:489,
+    655, 917), so a read-only server never reaches a writer.
+  * cli.cmd_check / cmd_audit read it with read_lockfile (cli.py:1467) --
+    read-only.
+  * serve/server.py's os.replace (server.py:427) is the --token-file launch
+    file, outside the project's tracked state.
+
+=====================================================================
+2. WHAT I CHANGED
+=====================================================================
+serve/edit.py
+  * `_LockfileWrite` gains a `root` field (the project root), because its
+    rollback is a read-modify-write of a file another process writes.
+  * `_LockfileWrite.rollback`: the read, the compare and the restore are one
+    `with _disk_write_lock(self.root)` section. The comment is rewritten: it
+    says what the section now guarantees (any cooperating writer lands before
+    the read or after the restore), why the compare stayed (it guards the
+    gate-scale window, not the read/restore gap), and the four things still
+    not guaranteed: a read error (decline), an unacquirable lock (decline), a
+    kill inside the one `os.replace` that lands the restore (the crash window
+    §4 already states), and a writer that ignores the lock.
+    A `LockUnavailable` (an OSError, so caught with the rest) makes the
+    rollback decline rather than write while unlocked.
+  * `_accept_pins`: `load_lockfile` -> `stage_source_pins` -> the whole-file
+    replace are one `_disk_write_lock(before.root)` section. `stage_source_pins`
+    is inside because its policy (which bytes a value may come from) reads the
+    records read inside the section. `sources_mod.accept_plan` -- authorization
+    and "the body names the pair" -- stayed outside: it reads only the item and
+    the source file, and it decides nothing that the locked read does not
+    re-check. A `LockUnavailable` there becomes this function's ordinary
+    refusal reason (`Refused`), matching how the existing item-file section
+    turns it into a refusal; the accept does not raise out of `apply_edit`.
+  * `_disk_write_lock`'s docstring records re-entrancy and that
+    `LockUnavailable` is what a read-only root does.
+  * `write_lock_for`'s docstring records the order: `write_lock_for` first,
+    `_disk_write_lock`/`project_write_lock` only inside it -- with the reason
+    (two threads taking them in opposite orders deadlock outright, nothing can
+    time out). Checked against every holder: `apply_edit` and `create_item`
+    take them in that order; `serve/upload.py:669` takes only `write_lock_for`;
+    `ids.reserve_id`/`ids.allocate` take only the project lock; nothing takes
+    the project lock and then reaches for `write_lock_for`.
+  * Module docstring and `EditRequest.pins` updated to say the two lockfile
+    mutations hold the cross-process lock and the gate does not.
+
+citations.py
+  * No behavioural change. `save_lockfile` gains a docstring naming who holds
+    the project lock and why a caller that reads-decides-writes without it is
+    racing. `fetch_all`'s docstring records its locking (see 4).
+
+docs
+  * `docs/design/editor-source-picker.md` §4: the sequence's stale line
+    reference (`serve/edit.py:199-209`, main's lines) now names the function, and a new
+    paragraph states the two locks and their order, why the gate holds
+    neither, and why the compare stayed. Nothing in docs said "accepted, not
+    closed" -- only the code comment did, and that comment is gone.
+  * `docs/cli-reference.md` "Files the tool writes": `.refdes/citations.yaml`
+    no longer claims "written only by `refdes fetch`" -- the editor's accept
+    has written it since Slice B -- and the row now says every write is a
+    read-modify-write inside the project's cross-process lock.
+
+=====================================================================
+3. NETWORK / LOCK SCOPE (task item 3)
+=====================================================================
+No writer fetches inside a lock that this change introduced, because the
+editor does no network I/O anywhere (serve/sources.py:229 says so, and
+`accept_plan`/`stage_source_pins` read the local cited file or the kept copy
+from disk). The accept's locked section therefore spans local file I/O plus
+one `os.replace`, and the slow candidate gate is deliberately outside it.
+
+`refdes fetch` is the one writer whose hold does span a network wait, and it
+did so before this change: `cli.main` (cli.py:2951-2968, the with at 2961)
+wraps every command in `project_write_lock(root)` except `serve`, `init`,
+`new` and `schema` and except `--no-write`/`--dry-run` runs, deliberately
+including the load ("the
+load itself can rewrite sources, and ID planning must see the ledger left by
+the previous process"). I did NOT narrow it, and that is the one writer where
+the task's "restructure so only the file update is locked" is not available
+without a design change:
+  * fetch's write is a whole-file rewrite from the records it read at the top
+    of `fetch_all` (head: citations.py:2482 -> 2746; main: 2456 -> 2720). Releasing the lock across the
+    fetch would mean another writer's records are silently replaced, so a
+    narrow lock would need a per-path merge, which is a different write policy
+    for this file (and `load_lockfile` refuses a lockfile it cannot read
+    precisely so that fetch never overwrites what it could not read).
+  * and taking the lock narrowly inside `fetch_all` while `cli.main` still
+    holds it for the same command buys nothing, because re-entrant holds do
+    not release.
+  * dropping fetch from `cli.main`'s set instead would stop serialising the
+    load's source rewrites and the id ledger against everything else, which is
+    what that comment exists to guarantee.
+So: fetch holds the lock while it writes (proven by test), which is the
+project rule; the width of that hold is pre-existing and documented in
+`fetch_all`'s docstring as a follow-up decision, not silently widened or
+silently narrowed. Consequence to keep in mind: a serve accept/rollback can
+wait out a `refdes fetch` (seconds for a remote pin). That was already true of
+the item-file check-and-replace section this change did not move.
+
+Not touched, recorded as observed: `create_item` holds `_disk_write_lock`
+across its own candidate gate (head: edit.py:1053-1055; main: 970-972), which is the same
+"don't hold the lock across the slow gate" complaint on a writer that does not
+write the lockfile. Out of scope here (no lockfile involved, and the ledger
+reservation's commit-or-rollback story depends on that single hold), but it is
+the same class and worth its own pass. Also stale, unrelated to this change and
+left alone: `docs/cli-reference.md` still lists a `.refdes/serve-write.lock`
+row; the lock `write_lock.py` actually creates is `.refdes-write.lock` at the
+project root. And the lockfile's own generated header still says "Written only
+by `refdes fetch`" (citations.py:1213) -- a one-line fix that rewrites every
+lockfile's first six lines, so it belongs in a pass of its own, not smuggled
+into this one.
+
+=====================================================================
+4. TESTS (tests/test_citations_lockfile_locking.py, 6 tests)
+=====================================================================
+  * test_no_writer_lands_between_the_rollbacks_read_and_its_restore -- the
+    window PR #182 named. The accept writes the lockfile then refuses (the
+    overlay load is monkeypatched to fail); a hook at `edit_mod._rollback`
+    starts a thread that takes `project_write_lock` and replaces the file. The
+    bounded `finished.wait(0.5)` asserts the NEGATIVE (it cannot land while the
+    rollback holds the lock), and the byte assertions are what decide the test:
+    the writer read the RESTORED bytes and the file ends as the writer wrote
+    it. Deterministic, not timing-dependent.
+  * test_a_write_that_landed_before_the_rollback_is_not_clobbered_by_it -- the
+    compare still protects. A whole accept (its pin, locked; its body) lands
+    during the gate, the save conflicts, and the rollback -- called from inside
+    the item's own check-and-replace section, so this is the nested/re-entrant
+    path too -- leaves the landed file alone.
+  * test_the_accepts_lockfile_write_happens_inside_the_project_write_lock --
+    the probe asks the real lock (flock/`msvcrt.locking` through a second open
+    file description, which the kernel does treat as a competing holder) at the
+    moment `_atomic_replace` runs. Both the lockfile and the item write report
+    held=True.
+  * test_refdes_fetch_holds_the_project_lock_while_it_writes_the_lockfile --
+    same probe, at the moment `save_lockfile` runs inside a real
+    `cli.main([... "fetch"])`.
+  * test_a_second_holder_keeps_fetch_out_of_the_lockfile -- with the project
+    lock held by the test thread, `fetch` in another thread is still blocked
+    and the lockfile does not exist; after the release it finishes (rc 0) and
+    writes it.
+  * test_an_accept_on_a_root_that_cannot_host_the_lock_refuses_like_every_other_writer
+    -- read-only root with a writable child: `LockUnavailable` becomes an
+    ordinary `Refused` ("could not lock ..."), the lockfile is byte-identical,
+    and no traceback escapes `apply_edit`.
+
+SABOTAGE RESULTS (each reverted; .scratch/*.backup held the pre-sabotage
+copies, and `git status` afterwards shows only the intended files):
+  a. `with _disk_write_lock(self.root)` removed from `_LockfileWrite.rollback`
+     (replaced with `if True:`):
+       FAILED test_no_writer_lands_between_the_rollbacks_read_and_its_restore
+       "a cooperating writer replaced the lockfile between the rollback's read
+        and its restore -- the window is open again"
+       1 failed, 5 passed in 0.79s
+  b. same trick on `_accept_pins`'s section:
+       FAILED test_the_accepts_lockfile_write_happens_inside_the_project_write_lock
+       FAILED test_an_accept_on_a_root_that_cannot_host_the_lock_refuses_like_every_other_writer
+       2 failed, 4 passed in 1.27s
+  c. "fetch" added to cli.main's excluded-command set (a regression of the
+     pre-existing coverage, to check the CLI-side tests actually bite):
+       FAILED test_refdes_fetch_holds_the_project_lock_while_it_writes_the_lockfile
+       FAILED test_a_second_holder_keeps_fetch_out_of_the_lockfile
+       2 failed, 4 passed in 0.79s
+
+=====================================================================
+5. GATES
+=====================================================================
+  * `ruff check --select E9,F src tests` -> All checks passed! (exit 0)
+  * Full suite, foreground, the command from the task:
+      PYTHONPATH=$PWD/src ...python -m pytest -q -p no:cacheprovider
+      > .scratch/suite.txt 2>&1; echo exit=$?
+    run once on the first commit (exit=0, 3513 passed, 2 skipped in 271.54s)
+    and again on the branch tip after the comment-only second commit:
+      exit=0
+      3513 passed, 2 skipped in 262.19s (0:04:22)
+    (.scratch/suite.txt holds the tip run. The known load flake,
+    test_serve_cli.py::test_a_stale_token_file_from_a_crash_is_rewritten_not_
+    refused, did not fire on either run.)
+  * Second commit: the lock comments in citations.py/edit.py cited
+    `cli.py:2954`, which is the `if` that *skips* the lock in cli.main; the
+    `project_write_lock` call is cli.py:2961. Comments and this log corrected;
+    no behaviour change, suite re-run above.
+
+STATUS: finished. Task list complete; nothing left half-done. Nothing was
+locked that could not be locked; the one writer whose lock is wider than its
+file update (fetch, and create_item's gate hold) is written up above and in
+the PR rather than quietly restructured.
+
+=====================================================================
+6. PR #195 REVIEW PASS (same day) -- cosmetic/pointer fixes only
+=====================================================================
+The review verified the locking and asked for six small things; all six done,
+no behaviour change:
+  1. docs/cli-reference.md: the added row left a blank line inside the "Files
+     the tool writes" table (GFM ends the table there, so the rows below
+     stopped rendering). Removed.
+  2. changelog.d fragment and tests/test_citations_lockfile_locking.py both
+     cited cli.py:2954 -- the `if` that SKIPS the lock. Cited by name instead
+     (`cli.main`'s `with project_write_lock(...)`), with a line number kept
+     only in the places whose neighbours use line numbers (the changelog
+     fragment, and citations.py's comments, which already point at
+     sources.py:245 / citations.py:1039); the edit.py comments and the test
+     comment now carry no number at all.
+  3. edit.py: an orphaned copy of the old "Fresh from disk ... under this
+     lock" comment sat above the PDF-anchor loop, which runs OUTSIDE the
+     locked section. Deleted; the reworded copy inside the locked section
+     stays. (I had first replaced it with a comment of my own saying the loop
+     is outside the lock -- deleted that too, since the reviewer asked for a
+     deletion, not a reword, and the locked section's own comment carries it.)
+  4. citations.py: two blank lines this PR added (save_lockfile body, and
+     after fetch_all's closing docstring) removed.
+  5. edit.py rollback comment: it named `LockUnavailable` for the declined
+     case, but the catch is `except OSError`, which also covers other
+     filesystem errors from opening or locking the lock file. Comment now says
+     OSError, with `LockUnavailable` named inside it.
+  6. docs/design/editor-source-picker.md: double blank line after the
+     sequence's lead-in, back to one.
+Gates after: ruff E9,F clean; targeted files (this PR's test file,
+test_serve_edit.py, test_serve_sources_accept.py, test_write_lock.py) 66
+passed; full suite foreground exit=0, 3513 passed, 2 skipped in 262.95s
+(0:04:22), .scratch/suite.txt updated.
+
+=====================================================================
+7. PR #195 RE-REVIEW (later same day) -- two doc fixes
+=====================================================================
+Chunk 2 approved. Chunk 1 asked for one doc fix plus one info item; did both,
+nothing else:
+  1. docs/design/editor-source-picker.md ~223 said the delta gate "holds
+     neither lock", which is false -- `apply_edit` takes `write_lock_for`
+     around all of `_apply_locked`, gate included (the doc's own lead-in at
+     ~191 says the sequence runs inside it). Reworded to what is actually
+     true: the gate holds the in-process lock like the rest of the sequence,
+     but deliberately not the project one.
+  2. docs/cli-reference.md's "Files the tool writes" row for the cross-process
+     lock named `.refdes/serve-write.lock`. Confirmed against src: the file is
+     `<project root>/.refdes-write.lock` (`write_lock.py:56`), and
+     `scaffold.py:158-166` gitignores exactly that name. The row now carries
+     the real name and the real (root, not `.refdes/`) path, and says the lock
+     is the project-wide one every writing command and every serve save takes,
+     consistent with the citations.yaml row above it. One row, not two.
+     NOT touched, because the review asked for this row only: three other
+     places still carry the old name -- docs/cli-reference.md ~959, ~1927 and
+     ~2000 (the prose around the save and the init/gitignore note), plus
+     docs/getting-started.md ~81. Flagged on the PR as follow-up rather than
+     fixed here.
+Gates: no code changed, so no full suite (docs-only). The doc tests
+(test_docs_examples, test_standard_docs_complete, test_vocabulary_page,
+test_schema_doc_key, test_candidate_parts_doc) and
+tests/test_citations_lockfile_locking.py: 56 passed.
+`python docs-site/gen_examples.py --check`: exit 0, both generated pages up to
+date.
+
+=====================================================================
+8. PR #195 REVIEW OF a5a36ec -- the same claim, swept whole-file
+=====================================================================
+Chunk 2 approved again; chunk 1 asked me to sweep each touched file for the
+claim I had fixed in one place, so this pass is that sweep plus two smaller
+points. No behaviour change.
+
+  1. `.refdes/serve-write.lock` was still named in four docs places. Grepped
+     the whole tree (`grep -rn serve-write docs/ src/ tests/ README*
+     changelog.d/`) and fixed every hit:
+       * docs/cli-reference.md's `init` section (the .gitignore list), its
+         "first save leaves one file behind" bullet, and the
+         "add the three lines by hand" list.
+       * docs/getting-started.md's four-paths sentence.
+       * tests/test_serve_edit.py and tests/test_serve_edit_links.py: both
+         `tree()` helpers filtered `name == "serve-write.lock"`. Dead since
+         #162 moved the lock to the project root (both walks cover only
+         `items/` and `.refdes/`), but the intent is still right, so the
+         filter now names `.refdes-write.lock`.
+       * changelog.d/init-gitignore-serve-write-lock.fixed.md: an UNRELEASED
+         fragment (both it and #162's rename are untagged, and CHANGELOG.md
+         mentions neither name), so it would have shipped a file name that
+         never exists. Content rewritten to the end state and the file
+         `git mv`'d to init-gitignore-project-write-lock.fixed.md; nothing
+         referenced the old slug.
+     Only remaining hits are stale .pyc caches under tests/__pycache__/.
+  2. "runs unlocked on purpose" was false in changelog.d's fragment and in
+     edit.py's rollback comment -- the gate holds `write_lock_for`. Both now
+     say "without the project lock, on purpose"; the same wording in
+     tests/test_citations_lockfile_locking.py's comment followed, and the
+     "would idle every CLI writer" phrasing in all three places became
+     "every writer that takes that lock" (see 3).
+  3. "around every writing CLI command" overstated in four places
+     (cli-reference's row, edit.py's module docstring, edit.py's rollback
+     comment, citations.py's save_lockfile docstring). The real rule,
+     cli.py:2954-2961: `cli.main` wraps every command EXCEPT `serve`, `init`,
+     `new` and `schema` and except `--no-write`/`--dry-run` runs -- and `init`
+     does write. Each place now states the exclusion list, or names `fetch`
+     (which is not exempt) where that is the point being made.
+  4. Log pointers: added a POINTER ERAS note under §1 (§1 describes the
+     pre-change code, so its pointers are main's; head-era ones are marked
+     "(head ...)" with main's alongside). Concretely: §1's citations.py
+     pointers were head's 2746/2482 and are now "2720 on main; head 2746" and
+     "2456 on main; head 2482"; §3's "(citations.py:2482 -> 2746)" is now
+     dual-labelled; §3's create_item pointer was main's 970-972 for a
+     paragraph describing the branch, now "(head: edit.py:1053-1055; main:
+     970-972)" (verified: head 1053 is `with write_lock_for(root):`, 1054 the
+     nested `_disk_write_lock`); §2's "(serve/edit.py:199-209)" is marked as
+     the doc's main-era reference. Verified the other §1 edit.py pointers
+     (280, 436-441, 483-515, 621-641, 1512-1521) really are main's, and that
+     the cli.py/upload.py/sources.py/api.py/server.py ones are era-independent
+     (those files are untouched by this branch).
+
+Swept the whole `git diff origin/main...HEAD` for other lock claims and
+checked each against code: the picker doc's "the same cross-process lock
+`refdes fetch` runs inside" (cli.py:2954 exempts four commands, `fetch` is
+not one of them -- true), the fragment's "`serve` is on that call's exclusion
+list and the editor has to take the lock itself" (true), "fetch's read and
+write are one hold" (true, and tested), the lock-order claims in
+`write_lock_for`'s docstring, and edit.py:1615's "no lock and no reservation"
+(which is `plan_new_item`, untouched by this branch and genuinely unlocked).
+The one claim in the PR that turned out to be loose is item 3 above.
+
+Gates: docs/comments/tests-of-comment-text only, so no full suite -- the
+doc tests (test_docs_examples, test_standard_docs_complete,
+test_vocabulary_page, test_schema_doc_key, test_candidate_parts_doc), this
+PR's test file and the two test files whose filter I renamed
+(test_serve_edit.py, test_serve_edit_links.py), plus
+`python docs-site/gen_examples.py --check`. Results in the PR comment.

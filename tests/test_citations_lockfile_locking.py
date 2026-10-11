@@ -1,0 +1,308 @@
+"""Every writer of `.refdes/citations.yaml` holds the project's cross-process
+write lock for its own read-modify-write.
+
+`docs/design/editor-source-picker.md` §4 makes the editor a second writer of
+that file, and PR #182's rollback documented, in `serve/edit.py`, that its
+read-compare-restore was not atomic: "the window is microseconds ... so it is
+accepted, not closed; closing it properly means a real lock, which is a
+separate decision." This is that decision, so these tests are the proof that
+the window is closed rather than a description of it:
+
+* a writer that tries to replace the lockfile **between** the rollback's read
+  and its restore is serialised out of that section -- it lands after, and the
+  file ends up as the last writer wrote it (`test_no_writer_lands_between...`);
+* a writer that lands **before** the rollback still defeats the restore, which
+  is what the compare is for and why it stayed
+  (`test_a_write_that_landed_before...`) -- that one also proves the rollback
+  is safe to call from inside a section the same thread already holds, which is
+  the conflict branch in `_apply_locked`;
+* the accept's own pin write happens inside the lock
+  (`test_the_accepts_lockfile_write...`);
+* `refdes fetch` -- the CLI writer -- writes while holding the lock, and a
+  second holder keeps it out of the file until that holder leaves
+  (`test_refdes_fetch_holds...`, `test_a_second_holder_keeps_fetch...`).
+
+The interleavings are built with threads and an event, and by monkeypatching a
+hook at the exact point in the rollback, not with sleeps: the bounded wait in
+the interleaving test asserts that a writer *cannot* have landed, and every
+final assertion below is a fact about bytes, so nothing here passes by being
+lucky about timing.
+"""
+
+from __future__ import annotations
+
+import os
+import threading
+
+import pytest
+from helpers import _build_at
+from test_serve_sources import fetch, lock, lock_bytes, make_root
+
+from refdes import cli as cli_mod
+from refdes import citations as citations_mod
+from refdes.patcher import SetBody
+from refdes.serve import edit as edit_mod
+from refdes.serve.edit import Applied, Conflict, EditRequest, Refused
+from refdes.write_lock import project_write_lock
+
+CSV_PATH = "analysis/budget.csv"
+RAIL = 'P = source("analysis/budget.csv", "rail_load") | W'
+EFF = 'eff = source("analysis/budget.csv", "eff") | 1'
+OTHER = 'o = source("analysis/budget.csv", "other") | 1'
+ITEM = "items/decisions.yaml"
+
+
+def calc_body(*lines) -> str:
+    return "```calc\n" + "".join(line + "\n" for line in lines) + "```\n"
+
+
+def accept(root, *, text=calc_body(RAIL, EFF), key="eff"):
+    """The editor's accept, called the way the HTTP route calls it."""
+    return edit_mod.apply_edit(
+        str(root),
+        EditRequest(
+            who="local-author",
+            ref="DEC-001",
+            op=SetBody(text),
+            expected_revision=edit_mod.file_revision(str(root / ITEM)),
+            pins=(edit_mod.SourcePin(path=CSV_PATH, key=key, unit="1", name=key),),
+        ),
+    )
+
+
+def fails_after_the_lockfile_lands(monkeypatch):
+    """Make every accept write the lockfile and then refuse, which is the only
+    way to be standing in the rollback with the file on disk."""
+    real = edit_mod.loader.load_readonly
+
+    def load(config, overlay=None):
+        if overlay:
+            raise RuntimeError("simulated failure after the lockfile landed")
+        return real(config, overlay=overlay)
+
+    monkeypatch.setattr(edit_mod.loader, "load_readonly", load)
+
+
+def another_pin(root) -> bytes:
+    """A whole lockfile holding one pin more than this project's fetch wrote --
+    what a cooperating writer's replace looks like from the outside."""
+    records = citations_mod.load_lockfile(_build_at(root))
+    records[CSV_PATH].setdefault("values", {})["other"] = {"reader": "csv", "value": "7"}
+    return citations_mod.lockfile_text(records).encode("utf-8")
+
+
+def lock_is_held(root) -> bool:
+    """Whether the project's cross-process write lock is held right now.
+
+    `write_lock.project_write_lock` locks one stable file, and a lock request
+    made through a *different* open file description is refused while another
+    holds it -- even from the same process -- so this asks the same lock the
+    writers ask, spelled with the same calls `write_lock` itself uses. It is a
+    probe of the real thing, not of a flag anyone has to remember to set.
+    """
+    path = os.path.join(os.path.abspath(str(root)), ".refdes-write.lock")
+    try:
+        with open(path, "a+b") as fh:
+            if os.name == "nt":
+                import msvcrt
+
+                try:
+                    msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
+                except OSError:
+                    return True
+                msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
+                return False
+            import fcntl
+
+            try:
+                fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except OSError:
+                return True
+            fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+            return False
+    except OSError:
+        return False
+
+
+# ------------------------------------------------------- the rollback's window
+
+
+def test_no_writer_lands_between_the_rollbacks_read_and_its_restore(tmp_path, monkeypatch):
+    # The window PR #182 named and left open. The accept writes the lockfile,
+    # then refuses; the rollback reads the file and is about to restore the
+    # bytes it read. A second writer -- here a thread, because the lock it
+    # wants is the one that serialises processes too -- tries to replace the
+    # file at exactly that moment.
+    root = make_root(tmp_path)
+    fetch(root)
+    lock_file = root / ".refdes" / "citations.yaml"
+    before = lock_file.read_bytes()
+    landed = another_pin(root)
+    assert landed != before
+    fails_after_the_lockfile_lands(monkeypatch)
+
+    started = threading.Event()
+    finished = threading.Event()
+    saw = {}
+    threads = []
+    real_restore = edit_mod._rollback
+
+    def a_writer_replaces_the_lockfile():
+        started.set()
+        with project_write_lock(str(root)):
+            # Only reachable once the rollback has left the section: that is the
+            # whole of what this test reads.
+            saw["bytes_when_it_got_the_lock"] = lock_file.read_bytes()
+            lock_file.write_bytes(landed)
+        finished.set()
+
+    def restore(path, original):
+        thread = threading.Thread(target=a_writer_replaces_the_lockfile, daemon=True)
+        thread.start()
+        threads.append(thread)
+        assert started.wait(10)
+        # Bounded, and it asserts the negative: while this thread holds the
+        # project lock -- which it does, from the read through the restore --
+        # the writer cannot be in the file. If the lock is ever dropped from
+        # this section again, it lands here and this fails.
+        assert not finished.wait(0.5), (
+            "a cooperating writer replaced the lockfile between the rollback's "
+            "read and its restore -- the window is open again"
+        )
+        real_restore(path, original)
+
+    monkeypatch.setattr(edit_mod, "_rollback", restore)
+    result = accept(root)
+    assert isinstance(result, Refused), result
+    assert len(threads) == 1
+    threads[0].join(60)
+    assert not threads[0].is_alive(), "the second writer never got the lock back"
+    # It serialised *after*: the bytes it read were the restored ones, so it
+    # wrote over a file it had just read, and the last whole writer wins.
+    assert saw["bytes_when_it_got_the_lock"] == before
+    assert lock_file.read_bytes() == landed
+    assert "other" in lock(root)["citations"][CSV_PATH]["values"]
+
+
+def test_a_write_that_landed_before_the_rollback_is_not_clobbered_by_it(tmp_path, monkeypatch):
+    # The other side of the same section, and the reason the compare stayed:
+    # a writer that lands during the slow candidate gate -- which runs
+    # without the project lock, on purpose -- has already replaced the file by
+    # the time the rollback reads it, so the restore declines. It also proves the rollback is safe
+    # when the same thread already holds the lock, which is the conflict branch
+    # in `_apply_locked`: `project_write_lock` is re-entrant, so the nested
+    # take neither deadlocks nor double-locks.
+    root = make_root(tmp_path)
+    fetch(root)
+    lock_file = root / ".refdes" / "citations.yaml"
+    item_file = root / ITEM
+    landed = another_pin(root)
+    original_gate = edit_mod._blocking_diagnostics
+
+    def a_whole_accept_lands_during_the_gate(before, after, item, op):
+        with project_write_lock(str(root)):
+            lock_file.write_bytes(landed)
+        text = item_file.read_text("utf-8")
+        item_file.write_text(
+            text.replace("      " + RAIL + "\n", "      " + RAIL + "\n      " + OTHER + "\n", 1),
+            "utf-8",
+        )
+        return original_gate(before, after, item, op)
+
+    monkeypatch.setattr(edit_mod, "_blocking_diagnostics", a_whole_accept_lands_during_the_gate)
+    result = accept(root)
+    assert isinstance(result, Conflict), result  # the late revision check is what says no
+    assert lock_file.read_bytes() == landed, "the rollback destroyed a save that had landed"
+    assert "other" in lock(root)["citations"][CSV_PATH]["values"]
+
+
+# ------------------------------------------------------------ the other writers
+
+
+def test_the_accepts_lockfile_write_happens_inside_the_project_write_lock(tmp_path, monkeypatch):
+    # The accept reads the lockfile, decides the new whole-file contents from
+    # what it read, and replaces it -- a read-modify-write like any other, so
+    # it holds the lock while it does it. The probe asks the lock itself at the
+    # moment of the replace, so this fails the day the write moves back out.
+    root = make_root(tmp_path)
+    fetch(root)
+    held = {}
+    real_replace = edit_mod._atomic_replace
+
+    def spy(path, payload):
+        held[os.path.basename(path)] = lock_is_held(root)
+        return real_replace(path, payload)
+
+    monkeypatch.setattr(edit_mod, "_atomic_replace", spy)
+    result = accept(root)
+    assert isinstance(result, Applied), result.message
+    assert held == {"citations.yaml": True, "decisions.yaml": True}, held
+    assert "eff" in lock(root)["citations"][CSV_PATH]["values"]
+
+
+def test_refdes_fetch_holds_the_project_lock_while_it_writes_the_lockfile(tmp_path, monkeypatch):
+    # `fetch` is the lockfile's other writer, and the one that rewrites the
+    # whole file from the records it read. Its read-modify-write is inside the
+    # lock `cli.main` takes around a writing command (its
+    # `with project_write_lock(...)` around `args.func(args)`); this says
+    # so about the write itself rather than trusting where the `with` sits.
+    root = make_root(tmp_path)
+    assert not (root / ".refdes" / "citations.yaml").exists()
+    held = {}
+    real_save = citations_mod.save_lockfile
+
+    def spy(project, records):
+        held["during_save"] = lock_is_held(root)
+        return real_save(project, records)
+
+    monkeypatch.setattr(citations_mod, "save_lockfile", spy)
+    assert cli_mod.main(["-c", str(root / "refdes-project.yaml"), "fetch"]) == 0
+    assert held == {"during_save": True}
+    assert lock(root)["citations"][CSV_PATH]["sha256"]
+
+
+def test_a_second_holder_keeps_fetch_out_of_the_lockfile(tmp_path):
+    # Same fact from the other side: with the lock held elsewhere, `fetch`
+    # waits, and the file it would have written does not exist yet. Bounded
+    # both ways -- the wait for the block and the wait for the release both
+    # fail the test rather than hang it.
+    root = make_root(tmp_path)
+    outcome = {}
+
+    def run_fetch():
+        outcome["rc"] = cli_mod.main(["-c", str(root / "refdes-project.yaml"), "fetch"])
+
+    thread = threading.Thread(target=run_fetch, daemon=True)
+    with project_write_lock(str(root)):
+        thread.start()
+        thread.join(0.5)
+        assert thread.is_alive(), "refdes fetch wrote the lockfile without the project lock"
+        assert not (root / ".refdes" / "citations.yaml").exists()
+    thread.join(120)
+    assert not thread.is_alive()
+    assert outcome.get("rc") == 0
+    assert lock(root)["citations"][CSV_PATH]["sha256"]
+
+
+# ---------------------------------------------------------------- read-only roots
+
+
+@pytest.mark.skipif(os.name == "nt", reason="chmod-based: advisory mode bits on Windows")
+def test_an_accept_on_a_root_that_cannot_host_the_lock_refuses_like_every_other_writer(tmp_path):
+    # `project_write_lock` raises `LockUnavailable` for a read-only root with a
+    # writable child (write_lock.py:42-50). A writer that cannot lock does not
+    # write, and an authoring outcome is a value: the accept comes back as a
+    # refusal, and the lockfile it read is untouched.
+    root = make_root(tmp_path)
+    fetch(root)
+    lock_file = root / ".refdes" / "citations.yaml"
+    before = lock_file.read_bytes()
+    root.chmod(0o555)
+    try:
+        result = accept(root)
+    finally:
+        root.chmod(0o755)
+    assert isinstance(result, Refused), result
+    assert "could not lock" in result.reason
+    assert lock_file.read_bytes() == before
+    assert lock_bytes(root) == before
