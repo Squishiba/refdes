@@ -262,3 +262,33 @@ Gates after: ruff E9,F clean; targeted files (this PR's test file,
 test_serve_edit.py, test_serve_sources_accept.py, test_write_lock.py) 66
 passed; full suite foreground exit=0, 3513 passed, 2 skipped in 262.95s
 (0:04:22), .scratch/suite.txt updated.
+
+=====================================================================
+7. PR #195 RE-REVIEW (later same day) -- two doc fixes
+=====================================================================
+Chunk 2 approved. Chunk 1 asked for one doc fix plus one info item; did both,
+nothing else:
+  1. docs/design/editor-source-picker.md ~223 said the delta gate "holds
+     neither lock", which is false -- `apply_edit` takes `write_lock_for`
+     around all of `_apply_locked`, gate included (the doc's own lead-in at
+     ~191 says the sequence runs inside it). Reworded to what is actually
+     true: the gate holds the in-process lock like the rest of the sequence,
+     but deliberately not the project one.
+  2. docs/cli-reference.md's "Files the tool writes" row for the cross-process
+     lock named `.refdes/serve-write.lock`. Confirmed against src: the file is
+     `<project root>/.refdes-write.lock` (`write_lock.py:56`), and
+     `scaffold.py:158-166` gitignores exactly that name. The row now carries
+     the real name and the real (root, not `.refdes/`) path, and says the lock
+     is the project-wide one every writing command and every serve save takes,
+     consistent with the citations.yaml row above it. One row, not two.
+     NOT touched, because the review asked for this row only: three other
+     places still carry the old name -- docs/cli-reference.md ~959, ~1927 and
+     ~2000 (the prose around the save and the init/gitignore note), plus
+     docs/getting-started.md ~81. Flagged on the PR as follow-up rather than
+     fixed here.
+Gates: no code changed, so no full suite (docs-only). The doc tests
+(test_docs_examples, test_standard_docs_complete, test_vocabulary_page,
+test_schema_doc_key, test_candidate_parts_doc) and
+tests/test_citations_lockfile_locking.py: 56 passed.
+`python docs-site/gen_examples.py --check`: exit 0, both generated pages up to
+date.

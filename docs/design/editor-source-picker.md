@@ -222,9 +222,10 @@ the in-process one and it stops this server interleaving its own saves; steps
 cross-process lock `refdes fetch` runs inside — so the lockfile's
 read-modify-write and the rollback's read-compare-restore are each one
 unbreakable section for any writer that takes the lock too. The delta gate
-between them deliberately holds neither lock: it can take seconds, and holding
-the project lock across it would keep every CLI writer out of the project for
-that long. That is also why the rollback still compares before it restores.
+between them holds the in-process lock like the rest of the sequence, but
+deliberately not the project one: it can take seconds, and holding the project
+lock across it would keep every CLI writer out of the project for that long.
+That is also why the rollback still compares before it restores.
 The compare is not there for the (now closed) gap between its own read and its
 restore; it is there for the gate — a save that landed while the gate was
 running has already replaced the file, and restoring the bytes this operation

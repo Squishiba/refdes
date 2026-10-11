@@ -1984,7 +1984,7 @@ python -m http.server -d _site 8000
 | `.refdes/keys-adopted.yaml` | **yes** | Adoption marker written once by `refdes keys adopt`; its presence is what makes future stamps, seals and membership manifests use key-keyed storage |
 | `.refdes/schema.json` | **no, gitignored** | The project's merged JSON Schema, for editor completion; rewritten by every command that loads the project. `refdes init` puts it in the project's `.gitignore` |
 | `.refdes/copies/` | **no, gitignored** | Kept local copies of datasheet bytes, content-addressed by sha256; written only by `refdes fetch --path ...` for a remote citation with `keep_copy: true`. `refdes init` puts it in the project's `.gitignore` |
-| `.refdes/serve-write.lock` | **no, gitignored** | The cross-process write lock `refdes serve` takes on save, so two instances on one project cannot save over each other. Always empty; created by the first save, not at startup. `refdes init` puts it in the project's `.gitignore` |
+| `.refdes-write.lock` | **no, gitignored** | The project's cross-process write lock — at the project root, not inside `.refdes/`. `write_lock.project_write_lock` takes it around every writing CLI command and around a save in `refdes serve`, so neither a CLI writer nor the editor can interleave another's read-modify-write, and two serves on one project cannot save over each other. Always empty; created by the first command or save that takes the lock, not at startup. `refdes init` puts it in the project's `.gitignore` |
 | `.refdes/history/` | **yes** | Captured-history store: content-addressed snapshot objects and derived-id events; written by the `follows:` capture and by `refdes history capture`/`redact`/`migrate-seals` |
 | `_site/` | no | Generated output |
 
