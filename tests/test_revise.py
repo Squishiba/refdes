@@ -454,7 +454,7 @@ def test_cli_revise_missing_mapping_file_exits_2_with_one_line(tmp_path, capsys)
     config = str(tmp_path / "refdes-project.yaml")
     missing = str(tmp_path / "nope.yaml")
 
-    assert cli_mod.main(["-c", config, "revise", missing]) == 2
+    assert cli_mod.main(["-c", config, "rename", missing]) == 2
     err = capsys.readouterr().err
     assert f"no such mapping file: {missing}" in err
     assert "Traceback" not in err
@@ -469,7 +469,7 @@ def test_cli_revise_unparseable_mapping_file_exits_2_with_one_line(tmp_path, cap
     bad.write_text("types:\n  bound: [unclosed\n", encoding="utf-8")
     config = str(tmp_path / "refdes-project.yaml")
 
-    assert cli_mod.main(["-c", config, "revise", str(bad)]) == 2
+    assert cli_mod.main(["-c", config, "rename", str(bad)]) == 2
     err = capsys.readouterr().err
     assert "could not be parsed" in err
     assert "Traceback" not in err
@@ -560,14 +560,16 @@ def test_an_ids_mapping_is_pointed_at_the_hand_rename_instead(tmp_path):
 def test_cli_revise_unknown_section_exits_2_and_writes_nothing(tmp_path, capsys):
     """Exit 2, the configuration-error class docs/cli-reference.md's exit-code
     table gives a bad input file -- the same one a missing mapping file gets,
-    through the same handler in cmd_revise. And nothing on disk moves: the
+    through the same handler in cmd_rename. And nothing on disk moves: the
     refusal is before any project load, so no key is minted and no reference
-    expanded."""
+    expanded. Run as `rename`: this asserts the shape of the refusal, and the
+    `revise` alias's one stderr line of deprecation note would break the
+    one-line claim under test (tests/test_rename_alias.py pins the note)."""
     path, mapping = _revise_project_with_mapping(tmp_path, "ids:\n  BND-001: BND-404\n")
     before = path.read_bytes()
     config = str(tmp_path / "refdes-project.yaml")
 
-    assert cli_mod.main(["-c", config, "revise", mapping]) == 2
+    assert cli_mod.main(["-c", config, "rename", mapping]) == 2
     err = capsys.readouterr().err
     assert "unknown top-level section 'ids'" in err
     assert "nothing to do" not in capsys.readouterr().out

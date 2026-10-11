@@ -919,7 +919,7 @@ def _build_item(
                     )
                 else:
                     where = "this project's schema"
-                    fix = "Rename it here, or see 'refdes revise' to rewrite the project."
+                    fix = "Rename it here, or see 'refdes rename' to rewrite the project."
                 project.error(
                     f"unknown type {type_name!r} -- it is now {renamed_to!r} in "
                     f"{where}. {fix}",

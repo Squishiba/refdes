@@ -36,7 +36,7 @@ refdes audit     # list suppressed fields, resealed entries, board moves, and im
 ```
 
 Fifteen commands in all, including `new`, `schema`, `fetch`, `revision`,
-`release`, `stub-tests`, `revise`, `standard`, and `former-ids` — see the
+`release`, `stub-tests`, `rename`, `standard`, and `former-ids` — see the
 [CLI reference](docs/cli-reference.md).
 
 ## Editor support

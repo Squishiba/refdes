@@ -3,11 +3,12 @@ prefixes) project-wide, carrying content hashes forward across baselines and
 seals so a purely cosmetic rename doesn't look like a content change.
 
 Two front doors, one engine (finding 12, plus the two extensions the user
-and I agreed on): `refdes revise <mapping-file>` applies an explicit,
-hand-written `Mapping` for project-local vocabulary; `refdes standard
-upgrade --to N` applies the bundled standard's own `migration.yaml` files,
-one per version, chained in order (standards.load_migration_chain). Both
-call `apply()` below.
+and I agreed on): `refdes rename <mapping-file>` -- still also `refdes
+revise`, its deprecated alias until the next minor release -- applies an
+explicit, hand-written `Mapping` for project-local vocabulary; `refdes
+standard upgrade --to N` applies the bundled standard's own `migration.yaml`
+files, one per version, chained in order (standards.load_migration_chain).
+Both call `apply()` below.
 
 Why this can't be a full re-serialization of every item file: PyYAML's
 safe_dump doesn't round-trip comments, block-scalar style, or flow-vs-block
@@ -51,7 +52,7 @@ from .schema import load_project
 # -------------------------------------------------------------------- mapping
 
 # The top-level sections of a mapping file, in the order the docstrings and
-# `refdes revise --help` list them. Kept here as the one place that knows the
+# `refdes rename --help` list them. Kept here as the one place that knows the
 # whole vocabulary: mapping_from_dict reads exactly these and _refuse_unknown_sections
 # rejects anything else, so the two cannot fall out of step.
 ACCEPTED_SECTIONS = ("types", "merge_types", "fields", "links", "prefixes", "citation_keys")
@@ -71,12 +72,12 @@ def _refuse_unknown_sections(raw: dict[str, Any], source: str) -> None:
     mixed file was worse: the recognised half was applied and the other half
     dropped without a word (verified). Both now stop here, before any project
     load, so `--dry-run` refuses exactly the same way -- load_mapping() raises
-    before anything looks at the Mapping (cmd_revise, cli.py).
+    before anything looks at the Mapping (cmd_rename, cli.py).
 
     SchemaError, not a project error, so the exit is the 2 the exit-code table
     at the top of docs/cli-reference.md gives a configuration error -- the same
     one a missing or unparseable mapping file already gets, and the same
-    handler in cmd_revise.
+    handler in cmd_rename.
     """
     unknown = sorted(str(name) for name in raw if str(name) not in ACCEPTED_SECTIONS)
     if not unknown:
@@ -214,7 +215,7 @@ def load_mapping(path: str) -> Mapping:
 
     A path that doesn't exist, isn't a file, or doesn't parse used to escape
     as a raw `FileNotFoundError` / `IsADirectoryError` / `yaml.YAMLError`
-    traceback out of here and past the `except SchemaError` in `cmd_revise`
+    traceback out of here and past the `except SchemaError` in `cmd_rename`
     -- the one place that turns a bad mapping file into the exit-2 the
     global exit-code table promises. Wrap all three here, so that handler is
     the only exit and the message is one line naming the file.
@@ -325,7 +326,7 @@ def check_ambiguous(
         ):
             errors.append(
                 f"link rename {old!r} -> {new!r}: {new!r} is not a link type this "
-                "project knows, and `refdes revise` only rewrites item files -- "
+                "project knows, and `refdes rename` only rewrites item files -- "
                 "the data would be renamed into a verb no schema declares, and an "
                 "unknown link verb is a warning rather than an error, so every "
                 "edge this rename touched would silently stop being one. Add the "

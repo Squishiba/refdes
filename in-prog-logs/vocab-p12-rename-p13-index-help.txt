@@ -1,0 +1,135 @@
+Task: Vocabulary P12 (`refdes revise` -> `refdes rename`, alias kept) + P13
+(`refdes index` help text only). Branch vocab-p12-rename-p13-index-help.
+
+## Start
+
+- Read .scratch/TASK.txt and AGENTS.md. `git status` clean at start (verified,
+  55176b0 = main's tip). Working only in this worktree.
+- IMPORTANT: the `refdes` script on PATH is the venv's editable install pointing
+  at /home/jorb/work/refdes (the main checkout). Per AGENTS.md/TASK rules I never
+  run it. Every refdes invocation here is
+  `PYTHONPATH=$PWD/src /home/jorb/work/venv-refdes/bin/python -m refdes.cli ...`
+  which resolves refdes to this worktree's src/ (verified: refdes.__file__ prints
+  this worktree's path).
+- Recorded BEFORE output: .scratch/help-before.txt (`refdes --help`),
+  .scratch/help-revise-before.txt, .scratch/help-index-before.txt.
+  `refdes --help`'s usage line and command list both name `revise`; `index`'s help
+  is "print items.json to stdout without rendering the site" and `refdes index
+  --help` has no description at all (just usage + --compact).
+
+## P12 code (cli.py, revise.py, parse.py)
+
+- `cmd_revise` -> `cmd_rename`; it prints the P12 note to STDERR first when the
+  name typed was `revise` (stdout is the command's report, and `--dry-run`'s
+  output is what scripts read). Verified: `refdes revise m.yaml --dry-run` with
+  stdout redirected to /dev/null shows the note; the two streams for `rename`
+  and `revise` are otherwise identical.
+- Module kept as `src/refdes/revise.py`: renaming it is NOT trivial -- it is
+  imported by calc_rewrite.py, adopt.py, keys.py, key_restore.py,
+  image_freeze.py, links.py, cli.py and by name in tests
+  (`from refdes import revise`), so the task's "unless renaming it is trivial
+  and touches nothing else" condition fails and the name stays. Docstring
+  pointers that named `cmd_revise` were updated to `cmd_rename`.
+- Parser: `p_revise` -> `p_rename` for the `rename` subcommand; a second, real
+  parser named `revise` carries the alias. WHY A SECOND PARSER AND NOT
+  `aliases=`: verified on this Python (3.13.5) that `sub.add_parser("rename",
+  aliases=["revise"])` renders the row as `rename (revise)` and the usage line
+  as `{...,rename,revise}` -- it shows the alias, which P12 forbids; and that
+  `help=argparse.SUPPRESS` on a *subparser* prints the literal `==SUPPRESS==`
+  as the row's help text, because a subcommand row is emitted by
+  `HelpFormatter._format_action`, which never consults SUPPRESS (only
+  `add_argument` gates on it, and it is not on that path for subactions).
+  So cli.py gained `_hide_command(sub, name)`: drop the row from
+  `sub._choices_actions` and pin `sub.metavar` to the visible commands. It
+  runs LAST in the builder (before `parse_args`), because the metavar is
+  computed from `sub.choices` at that moment -- called earlier it silently
+  drops every later command from the usage line (that is what happened on the
+  first attempt; the test would have caught it).
+- User-visible strings renamed: the link-verb refusal in revise.py, the
+  `unknown type ... see 'refdes rename'` fix line in parse.py, the global
+  `--no-write` help, `build --dry-run`'s help, and calc-rewrite's description.
+  Prose in lifecycle.py/seal.py/model.py/calc_rewrite.py that names `revise.py`
+  the MODULE is left alone (the module is still called that); the two historical
+  bug narratives in revise.py's docstrings that quote what `refdes revise` used
+  to print are left as history.
+- tests/test_no_write.py's pinned reporting-command set now says `rename`
+  (the help text it pins changed). Three tests in tests/test_revise.py that
+  assert "exactly one line of stderr" switched to the `rename` spelling,
+  because the alias legitimately adds a second line; tests/test_rename_alias.py
+  pins the alias itself.
+
+## P13 (index help text, no rename)
+
+- Payload keys were READ, not recalled: `.scratch/probe/idx` (a `refdes init`
+  project with a requirement/bound/test) prints title, version, coverage,
+  types, items, next_ids, diagnostics; `.scratch/probe/idx2` (adds a `boards:`
+  registry and two `follows:`-chained logs) additionally prints boards and
+  threads, and its items carry captured/edited_after_captured. workspaces is
+  the same "absent key, not null" rule (read render.items_json). The exit-0
+  on a broken item file was re-run too (`.scratch/probe/idx2` with
+  items/board-a/broken.yaml: ERROR on stderr, JSON on stdout, exit 0).
+- New `index` help/description names who it is for (the VS Code extension and
+  other editor tooling), what is always there, what is conditional, and the
+  deliberate exit-0 posture. The one-line `--help` entry no longer reads
+  "print items.json to stdout without rendering the site".
+- docs/cli-reference.md's `refdes index` section first line rewritten to the
+  same content in one sentence. No behaviour change, so the only test added is
+  the help-text pin in tests/test_index_help.py -- plus one test that runs
+  `index` for real and checks the keys the help names are the keys the payload
+  carries (that is the "don't list keys from memory" rule, made a gate).
+
+## Docs
+
+- docs/cli-reference.md: usage block, the `--no-write` row, both exit-code /
+  write-destination tables, the `build --dry-run` comparison, the
+  `standard upgrade` section's two cross-references, the "Files the tool
+  writes" baselines row, and the whole command section -- retitled
+  `## refdes rename <mapping-file>` with a paragraph saying `revise` is the
+  deprecated alias, hidden from --help, removed next minor. Its sample `$
+  refdes rename rename.yaml` refusal transcript was re-run for real
+  (`.scratch/probe/links`) so the quoted message matches the code's new text.
+- docs/ids.md, docs/links.md, docs/standard-library.md, docs/troubleshooting.md
+  (including the `#refdes-rename-mapping-file` anchor the section retitle
+  moves), README.md's command list: all updated.
+- Left alone on purpose, as the task said to: docs/design/*.md (including this
+  review's own §1.6 inventory rows and S1.3, which quote the text as found),
+  and docs/design-log.md (a dated log of past decisions).
+- No shell completions to update: `git ls-files | grep -i complet` finds no
+  completion script in the repo (only changelog/log filenames).
+
+## Tests + sabotage
+
+- New tests/test_rename_alias.py (6) and tests/test_index_help.py (4).
+- Sabotage 1 -- drop the note (`print(...)` replaced by `pass`):
+  `test_revise_still_does_the_work_and_says_so_once` fails with
+  `assert '' == '`refdes revise` is now `refdes rename`...'`
+  (1 failed, 5 passed) -- .scratch/sabotage.txt.
+- Sabotage 2 -- remove the `_hide_command(sub, "revise")` call:
+  `test_rename_lists_in_help_and_the_alias_does_not_appear_at_all` fails, and
+  the diff shows `{...,rename,revise,...}` back in the usage line
+  (1 failed, 5 passed) -- .scratch/sabotage2.txt.
+  Both sabotages were reverted; `grep -n SABOTAGE src/refdes/cli.py` is empty
+  and both files pass again afterwards.
+- Existing churn, all of it forced: tests/test_no_write.py's pinned reporting
+  list (the `--no-write` help text it pins now says `rename`), and three
+  tests in tests/test_revise.py that assert "exactly one line on stderr" --
+  they run `rename` now, because the alias legitimately adds a second line.
+  Everything else that still types `revise` (test_revise_flow_style.py,
+  test_readonly_explicit_writes.py, test_no_write.py's behaviour tests) was
+  left typing `revise`: it passes untouched, which is the alias's real-world
+  proof.
+
+## Gates
+
+- `ruff check --select E9,F src tests` -> All checks passed! (exit 0).
+- `docs-site/gen_examples.py --check` -> both pages up to date (exit 0).
+- ruff `--select I` reports 30 findings across the repo, 3 of them in files I
+  touched; all 3 are pre-existing (verified with
+  `git show HEAD:<file> | ruff check --select I --stdin-filename <file> -`)
+  and in import lines I did not touch, so per AGENTS.md they are left alone.
+- Full suite, foreground: 3572 passed, 2 skipped in 273s, exit 0
+  (.scratch/suite.txt). The known serve-token flake did not fire.
+
+## Status
+
+Finished. Committed, pushed, PR against main.

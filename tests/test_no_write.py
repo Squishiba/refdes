@@ -508,7 +508,7 @@ def _no_write_help(capsys):
 
 def test_no_write_help_lists_calc_rewrite_among_the_reporting_commands(capsys):
     """`calc-rewrite` sets `dry_run` from `--no-write` (cli.py's cmd_calc_rewrite)
-    exactly like `revise` and `id`, so it reports and writes nothing -- which is
+    exactly like `rename` and `id`, so it reports and writes nothing -- which is
     what docs/cli-reference.md's global `--no-write` table says. The global help
     string listed the reporting commands and left `calc-rewrite` out, so the
     flag's own documentation under-promised what it suppresses."""
@@ -519,12 +519,14 @@ def test_no_write_help_lists_calc_rewrite_among_the_reporting_commands(capsys):
 
 def test_no_write_help_lists_every_command_the_docs_table_lists_as_reporting(capsys):
     """Pins the whole reporting list, not just the one gap, so the next command
-    added to either side has to be added to the other."""
+    added to either side has to be added to the other. `rename` is what P12
+    renamed `revise` to; the deprecated alias is not listed here, because the
+    help text lists the commands a user is meant to type."""
     out = _no_write_help(capsys)
     reporting = " ".join(out.split("explicit write commands either")[1].split())
     listing = reporting.split(") or refuse")[0]
     listed = {name.strip() for name in listing.split("(", 1)[1].rstrip(")").split(",")}
-    assert listed == {"id", "revise", "calc-rewrite", "stub-tests", "revision", "release", "keys adopt"}
+    assert listed == {"id", "rename", "calc-rewrite", "stub-tests", "revision", "release", "keys adopt"}
 
 
 def test_calc_rewrite_under_no_write_reports_and_writes_nothing(tmp_path, capsys):
