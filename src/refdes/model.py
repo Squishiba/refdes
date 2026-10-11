@@ -135,6 +135,10 @@ class FieldSpec:
     # "" means undeclared, never rendered: a project that writes no `doc:` keys
     # exports exactly what it exported before this key existed.
     doc: str = ""
+    # Vocabulary-review P20: how this term differs from other terms it is
+    # confusable with -- {term: one sentence}, rendered as fact lines on the
+    # generated vocabulary page. {} means undeclared, never rendered.
+    differs_from: dict[str, str] = field(default_factory=dict)
 
 
 # The `FieldSpec.type` values whose values are *collections*, not scalars.
@@ -181,6 +185,8 @@ class LinkType:
     trace: bool = True
     # The verb's own definition (finding 38); "" when undeclared.
     doc: str = ""
+    # Vocabulary-review P20 (see FieldSpec.differs_from); {} when undeclared.
+    differs_from: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -305,6 +311,8 @@ class ItemType:
     verifying_statuses: list[str] | None = None
     # The type's own definition (finding 38); "" when undeclared.
     doc: str = ""
+    # Vocabulary-review P20 (see FieldSpec.differs_from); {} when undeclared.
+    differs_from: dict[str, str] = field(default_factory=dict)
 
 
 def build_subtype_map(types: dict[str, "ItemType"]) -> dict[str, set[str]]:

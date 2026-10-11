@@ -47,6 +47,7 @@ A numeric limit the design must respect — a voltage, a current, a tolerance. I
 
 - **Id prefix:** `BND`
 - **Pointed at by:** `addresses` from `log`; `constrained_by` from `component`, `log`; `derives_from` from `bound`; `governed_by` from `requirement`; `refines` from `bound`; `satisfies` from `component`, `log`; `verifies` from `test`
+- **Differs from `limit`:** the bound is the numeric the design must respect, with its rationale and coverage; the limit is only the comparison stored on it, like '>= 9 V'.
 
 | Field | Definition | Type | Required |
 |---|---|---|---|
@@ -265,6 +266,7 @@ This component is functionally close to that one but not a drop-in: check before
 - **Points at:** `component`
 - **Inverse:** `alternate`
 - **Declared on:** `component`
+- **Differs from `drop_in`:** an alternate needs checking before it goes in a design; a drop-in is interchangeable as claimed, no review needed.
 
 **Example:**
 

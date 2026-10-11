@@ -638,8 +638,9 @@ def _merge_types(
 # Identity/presentation properties a subtype must declare itself
 # (docs/design/extends.md §2.2, §9 Q1): inheriting them would make a
 # specialization silently adopt its parent's identity. `doc:` is the type's
-# own definition and is likewise never inherited.
-_NOT_INHERITED = ("prefix", "label", "plural", "doc")
+# own definition and is likewise never inherited -- nor is `differs_from:`,
+# its own disambiguation note (vocabulary-review P20).
+_NOT_INHERITED = ("prefix", "label", "plural", "doc", "differs_from")
 
 
 def _resolve_extends(types: dict[str, Any], sets: dict[str, Any]) -> dict[str, Any]:

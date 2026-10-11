@@ -15,7 +15,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": "Where the item's content came from \u2014 a spec section, a datasheet, a conversation. Kept out of the content hash, so correcting it never marks downstream items suspect."
+     "doc": "Where the item's content came from \u2014 a spec section, a datasheet, a conversation. Kept out of the content hash, so correcting it never marks downstream items suspect.",
+     "differs_from": {}
     },
     "note": {
      "name": "note",
@@ -25,7 +26,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": "A free-text remark about the item's provenance, kept beside the item instead of inside its body. Kept out of the content hash."
+     "doc": "A free-text remark about the item's provenance, kept beside the item instead of inside its body. Kept out of the content hash.",
+     "differs_from": {}
     },
     "tags": {
      "name": "tags",
@@ -35,7 +37,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": "Free-form labels for grouping and finding items; free-text search matches tags as well as titles. Kept out of the content hash."
+     "doc": "Free-form labels for grouping and finding items; free-text search matches tags as well as titles. Kept out of the content hash.",
+     "differs_from": {}
     },
     "owner": {
      "name": "owner",
@@ -45,7 +48,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": "The person responsible for this item \u2014 who a question about it goes to. Kept out of the content hash, so ownership changes never invalidate downstream work."
+     "doc": "The person responsible for this item \u2014 who a question about it goes to. Kept out of the content hash, so ownership changes never invalidate downstream work.",
+     "differs_from": {}
     },
     "last_reviewed": {
      "name": "last_reviewed",
@@ -55,7 +59,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": "The date this item was last reviewed. Bookkeeping only: kept out of the content hash."
+     "doc": "The date this item was last reviewed. Bookkeeping only: kept out of the content hash.",
+     "differs_from": {}
     },
     "title": {
      "name": "title",
@@ -65,7 +70,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": "An optional short label for tables and previews. The requirement's content is the body, not this."
+     "doc": "An optional short label for tables and previews. The requirement's content is the body, not this.",
+     "differs_from": {}
     },
     "status": {
      "name": "status",
@@ -79,7 +85,8 @@
      ],
      "default": "draft",
      "required_when": null,
-     "doc": "Lifecycle of the requirement. Only active requirements count toward coverage; draft and retired ones are excluded."
+     "doc": "Lifecycle of the requirement. Only active requirements count toward coverage; draft and retired ones are excluded.",
+     "differs_from": {}
     },
     "rationale": {
      "name": "rationale",
@@ -89,7 +96,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": "Why this requirement exists \u2014 the reasoning behind the statement, kept separate from the statement itself."
+     "doc": "Why this requirement exists \u2014 the reasoning behind the statement, kept separate from the statement itself.",
+     "differs_from": {}
     }
    },
    "links": {
@@ -119,7 +127,8 @@
     "active"
    ],
    "verifying_statuses": null,
-   "doc": "Something the design must achieve, stated as one prose body. Counts toward coverage while active; a draft or retired requirement is left out of coverage entirely."
+   "doc": "Something the design must achieve, stated as one prose body. Counts toward coverage while active; a draft or retired requirement is left out of coverage entirely.",
+   "differs_from": {}
   },
   "bound": {
    "name": "bound",
@@ -136,7 +145,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": "Where the item's content came from \u2014 a spec section, a datasheet, a conversation. Kept out of the content hash, so correcting it never marks downstream items suspect."
+     "doc": "Where the item's content came from \u2014 a spec section, a datasheet, a conversation. Kept out of the content hash, so correcting it never marks downstream items suspect.",
+     "differs_from": {}
     },
     "note": {
      "name": "note",
@@ -146,7 +156,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": "A free-text remark about the item's provenance, kept beside the item instead of inside its body. Kept out of the content hash."
+     "doc": "A free-text remark about the item's provenance, kept beside the item instead of inside its body. Kept out of the content hash.",
+     "differs_from": {}
     },
     "tags": {
      "name": "tags",
@@ -156,7 +167,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": "Free-form labels for grouping and finding items; free-text search matches tags as well as titles. Kept out of the content hash."
+     "doc": "Free-form labels for grouping and finding items; free-text search matches tags as well as titles. Kept out of the content hash.",
+     "differs_from": {}
     },
     "owner": {
      "name": "owner",
@@ -166,7 +178,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": "The person responsible for this item \u2014 who a question about it goes to. Kept out of the content hash, so ownership changes never invalidate downstream work."
+     "doc": "The person responsible for this item \u2014 who a question about it goes to. Kept out of the content hash, so ownership changes never invalidate downstream work.",
+     "differs_from": {}
     },
     "last_reviewed": {
      "name": "last_reviewed",
@@ -176,7 +189,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": "The date this item was last reviewed. Bookkeeping only: kept out of the content hash."
+     "doc": "The date this item was last reviewed. Bookkeeping only: kept out of the content hash.",
+     "differs_from": {}
     },
     "title": {
      "name": "title",
@@ -186,7 +200,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": "An optional short label for tables and previews. The bound's content is the body, not this."
+     "doc": "An optional short label for tables and previews. The bound's content is the body, not this.",
+     "differs_from": {}
     },
     "limit": {
      "name": "limit",
@@ -196,7 +211,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": "The numeric limit itself, parsed as a quantity with a comparison \u2014 '>= 9 V', '<= 600 mA'. Required, and it is what makes this bound checkable by other items' checks."
+     "doc": "The numeric limit itself, parsed as a quantity with a comparison \u2014 '>= 9 V', '<= 600 mA'. Required, and it is what makes this bound checkable by other items' checks.",
+     "differs_from": {}
     },
     "status": {
      "name": "status",
@@ -210,7 +226,8 @@
      ],
      "default": "draft",
      "required_when": null,
-     "doc": "Lifecycle of the bound. Only active bounds count toward coverage; draft and retired ones are excluded."
+     "doc": "Lifecycle of the bound. Only active bounds count toward coverage; draft and retired ones are excluded.",
+     "differs_from": {}
     },
     "rationale": {
      "name": "rationale",
@@ -220,7 +237,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": "Why this limit is what it is \u2014 the reasoning behind the number."
+     "doc": "Why this limit is what it is \u2014 the reasoning behind the number.",
+     "differs_from": {}
     }
    },
    "links": {
@@ -251,7 +269,10 @@
     "active"
    ],
    "verifying_statuses": null,
-   "doc": "A numeric limit the design must respect \u2014 a voltage, a current, a tolerance. Its limit field makes it checkable by other items' checks. Counts toward coverage while active."
+   "doc": "A numeric limit the design must respect \u2014 a voltage, a current, a tolerance. Its limit field makes it checkable by other items' checks. Counts toward coverage while active.",
+   "differs_from": {
+    "limit": "the bound is the numeric the design must respect, with its rationale and coverage; the limit is only the comparison stored on it, like '>= 9 V'."
+   }
   },
   "test": {
    "name": "test",
@@ -268,7 +289,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": "Where the item's content came from \u2014 a spec section, a datasheet, a conversation. Kept out of the content hash, so correcting it never marks downstream items suspect."
+     "doc": "Where the item's content came from \u2014 a spec section, a datasheet, a conversation. Kept out of the content hash, so correcting it never marks downstream items suspect.",
+     "differs_from": {}
     },
     "note": {
      "name": "note",
@@ -278,7 +300,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": "A free-text remark about the item's provenance, kept beside the item instead of inside its body. Kept out of the content hash."
+     "doc": "A free-text remark about the item's provenance, kept beside the item instead of inside its body. Kept out of the content hash.",
+     "differs_from": {}
     },
     "tags": {
      "name": "tags",
@@ -288,7 +311,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": "Free-form labels for grouping and finding items; free-text search matches tags as well as titles. Kept out of the content hash."
+     "doc": "Free-form labels for grouping and finding items; free-text search matches tags as well as titles. Kept out of the content hash.",
+     "differs_from": {}
     },
     "owner": {
      "name": "owner",
@@ -298,7 +322,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": "The person responsible for this item \u2014 who a question about it goes to. Kept out of the content hash, so ownership changes never invalidate downstream work."
+     "doc": "The person responsible for this item \u2014 who a question about it goes to. Kept out of the content hash, so ownership changes never invalidate downstream work.",
+     "differs_from": {}
     },
     "last_reviewed": {
      "name": "last_reviewed",
@@ -308,7 +333,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": "The date this item was last reviewed. Bookkeeping only: kept out of the content hash."
+     "doc": "The date this item was last reviewed. Bookkeeping only: kept out of the content hash.",
+     "differs_from": {}
     },
     "title": {
      "name": "title",
@@ -318,7 +344,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": "What the test proves, in one line. Required."
+     "doc": "What the test proves, in one line. Required.",
+     "differs_from": {}
     },
     "status": {
      "name": "status",
@@ -333,7 +360,8 @@
      ],
      "default": "planned",
      "required_when": null,
-     "doc": "Result of the test. Only a passing test counts as having verified what it points at."
+     "doc": "Result of the test. Only a passing test counts as having verified what it points at.",
+     "differs_from": {}
     }
    },
    "links": {
@@ -360,7 +388,8 @@
    "verifying_statuses": [
     "passing"
    ],
-   "doc": "A verification item that proves a requirement or bound. Its verifies links count toward coverage when the test's status is passing."
+   "doc": "A verification item that proves a requirement or bound. Its verifies links count toward coverage when the test's status is passing.",
+   "differs_from": {}
   },
   "component": {
    "name": "component",
@@ -377,7 +406,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": "Where the item's content came from \u2014 a spec section, a datasheet, a conversation. Kept out of the content hash, so correcting it never marks downstream items suspect."
+     "doc": "Where the item's content came from \u2014 a spec section, a datasheet, a conversation. Kept out of the content hash, so correcting it never marks downstream items suspect.",
+     "differs_from": {}
     },
     "note": {
      "name": "note",
@@ -387,7 +417,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": "A free-text remark about the item's provenance, kept beside the item instead of inside its body. Kept out of the content hash."
+     "doc": "A free-text remark about the item's provenance, kept beside the item instead of inside its body. Kept out of the content hash.",
+     "differs_from": {}
     },
     "tags": {
      "name": "tags",
@@ -397,7 +428,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": "Free-form labels for grouping and finding items; free-text search matches tags as well as titles. Kept out of the content hash."
+     "doc": "Free-form labels for grouping and finding items; free-text search matches tags as well as titles. Kept out of the content hash.",
+     "differs_from": {}
     },
     "owner": {
      "name": "owner",
@@ -407,7 +439,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": "The person responsible for this item \u2014 who a question about it goes to. Kept out of the content hash, so ownership changes never invalidate downstream work."
+     "doc": "The person responsible for this item \u2014 who a question about it goes to. Kept out of the content hash, so ownership changes never invalidate downstream work.",
+     "differs_from": {}
     },
     "last_reviewed": {
      "name": "last_reviewed",
@@ -417,7 +450,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": "The date this item was last reviewed. Bookkeeping only: kept out of the content hash."
+     "doc": "The date this item was last reviewed. Bookkeeping only: kept out of the content hash.",
+     "differs_from": {}
     },
     "citations": {
      "name": "citations",
@@ -427,7 +461,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": "Sources this item relies on. Each entry names a path (an http(s) URL or project-root-relative file) or item (another item's id); document entries may carry rev, page, section, part_number, keep_copy and an id for [[cite:]] references."
+     "doc": "Sources this item relies on. Each entry names a path (an http(s) URL or project-root-relative file) or item (another item's id); document entries may carry rev, page, section, part_number, keep_copy and an id for [[cite:]] references.",
+     "differs_from": {}
     },
     "title": {
      "name": "title",
@@ -437,7 +472,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": "What the component is, in one line. Required."
+     "doc": "What the component is, in one line. Required.",
+     "differs_from": {}
     },
     "part_number": {
      "name": "part_number",
@@ -447,7 +483,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": "The manufacturer part number. Indexed into the parts page, alongside part numbers cited inside citations entries."
+     "doc": "The manufacturer part number. Indexed into the parts page, alongside part numbers cited inside citations entries.",
+     "differs_from": {}
     },
     "refdes": {
      "name": "refdes",
@@ -457,7 +494,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": "Reference designators on the board \u2014 U14, R7 \u2014 where this part is placed. Kept out of the content hash."
+     "doc": "Reference designators on the board \u2014 U14, R7 \u2014 where this part is placed. Kept out of the content hash.",
+     "differs_from": {}
     },
     "status": {
      "name": "status",
@@ -472,7 +510,8 @@
      ],
      "default": "candidate",
      "required_when": null,
-     "doc": "Where the part stands in this design. Only a selected component counts as settled and closes coverage on what it satisfies; a rejected one was considered and not chosen, and never satisfies."
+     "doc": "Where the part stands in this design. Only a selected component counts as settled and closes coverage on what it satisfies; a rejected one was considered and not chosen, and never satisfies.",
+     "differs_from": {}
     },
     "rationale": {
      "name": "rationale",
@@ -484,7 +523,8 @@
      "required_when": {
       "links": "alternate"
      },
-     "doc": "Why this part, or \u2014 when an alternate link is present \u2014 what makes that alternate not a drop-in. Required whenever an alternate link exists."
+     "doc": "Why this part, or \u2014 when an alternate link is present \u2014 what makes that alternate not a drop-in. Required whenever an alternate link exists.",
+     "differs_from": {}
     },
     "checks": {
      "name": "checks",
@@ -494,7 +534,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": "Numeric checks: each entry compares a value from this item's calc block against a bound's limit, so a component can demonstrate compliance with a bound directly."
+     "doc": "Numeric checks: each entry compares a value from this item's calc block against a bound's limit, so a component can demonstrate compliance with a bound directly.",
+     "differs_from": {}
     }
    },
    "links": {
@@ -536,7 +577,8 @@
    "coverable": null,
    "coverable_statuses": null,
    "verifying_statuses": null,
-   "doc": "A part the design uses. A selected component closes coverage on what it satisfies, and it can carry its own checks against bounds. Drop-in and alternate claims between components are made here, not facts from a parts database."
+   "doc": "A part the design uses. A selected component closes coverage on what it satisfies, and it can carry its own checks against bounds. Drop-in and alternate claims between components are made here, not facts from a parts database.",
+   "differs_from": {}
   },
   "group": {
    "name": "group",
@@ -553,7 +595,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": "Where the item's content came from \u2014 a spec section, a datasheet, a conversation. Kept out of the content hash, so correcting it never marks downstream items suspect."
+     "doc": "Where the item's content came from \u2014 a spec section, a datasheet, a conversation. Kept out of the content hash, so correcting it never marks downstream items suspect.",
+     "differs_from": {}
     },
     "note": {
      "name": "note",
@@ -563,7 +606,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": "A free-text remark about the item's provenance, kept beside the item instead of inside its body. Kept out of the content hash."
+     "doc": "A free-text remark about the item's provenance, kept beside the item instead of inside its body. Kept out of the content hash.",
+     "differs_from": {}
     },
     "tags": {
      "name": "tags",
@@ -573,7 +617,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": "Free-form labels for grouping and finding items; free-text search matches tags as well as titles. Kept out of the content hash."
+     "doc": "Free-form labels for grouping and finding items; free-text search matches tags as well as titles. Kept out of the content hash.",
+     "differs_from": {}
     },
     "owner": {
      "name": "owner",
@@ -583,7 +628,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": "The person responsible for this item \u2014 who a question about it goes to. Kept out of the content hash, so ownership changes never invalidate downstream work."
+     "doc": "The person responsible for this item \u2014 who a question about it goes to. Kept out of the content hash, so ownership changes never invalidate downstream work.",
+     "differs_from": {}
     },
     "last_reviewed": {
      "name": "last_reviewed",
@@ -593,7 +639,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": "The date this item was last reviewed. Bookkeeping only: kept out of the content hash."
+     "doc": "The date this item was last reviewed. Bookkeeping only: kept out of the content hash.",
+     "differs_from": {}
     },
     "title": {
      "name": "title",
@@ -603,7 +650,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": "The name of the collection. Required \u2014 an unnamed group names nothing. Kept out of the content hash, so renaming a group never marks its members suspect."
+     "doc": "The name of the collection. Required \u2014 an unnamed group names nothing. Kept out of the content hash, so renaming a group never marks its members suspect.",
+     "differs_from": {}
     }
    },
    "links": {},
@@ -619,7 +667,8 @@
    "coverable": false,
    "coverable_statuses": null,
    "verifying_statuses": null,
-   "doc": "A named collection of items \u2014 'the PCIe interface spec' \u2014 that names the collection without letting it stand in for its members. Members point here with part_of; a group never lists its members, never appears in coverage, and nothing may satisfy one."
+   "doc": "A named collection of items \u2014 'the PCIe interface spec' \u2014 that names the collection without letting it stand in for its members. Members point here with part_of; a group never lists its members, never appears in coverage, and nothing may satisfy one.",
+   "differs_from": {}
   },
   "log": {
    "name": "log",
@@ -638,7 +687,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": "Where the item's content came from \u2014 a spec section, a datasheet, a conversation. Kept out of the content hash, so correcting it never marks downstream items suspect."
+     "doc": "Where the item's content came from \u2014 a spec section, a datasheet, a conversation. Kept out of the content hash, so correcting it never marks downstream items suspect.",
+     "differs_from": {}
     },
     "note": {
      "name": "note",
@@ -648,7 +698,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": "A free-text remark about the item's provenance, kept beside the item instead of inside its body. Kept out of the content hash."
+     "doc": "A free-text remark about the item's provenance, kept beside the item instead of inside its body. Kept out of the content hash.",
+     "differs_from": {}
     },
     "tags": {
      "name": "tags",
@@ -658,7 +709,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": "Free-form labels for grouping and finding items; free-text search matches tags as well as titles. Kept out of the content hash."
+     "doc": "Free-form labels for grouping and finding items; free-text search matches tags as well as titles. Kept out of the content hash.",
+     "differs_from": {}
     },
     "citations": {
      "name": "citations",
@@ -668,7 +720,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": "Sources this item relies on. Each entry names a path (an http(s) URL or project-root-relative file) or item (another item's id); document entries may carry rev, page, section, part_number, keep_copy and an id for [[cite:]] references."
+     "doc": "Sources this item relies on. Each entry names a path (an http(s) URL or project-root-relative file) or item (another item's id); document entries may carry rev, page, section, part_number, keep_copy and an id for [[cite:]] references.",
+     "differs_from": {}
     },
     "date": {
      "name": "date",
@@ -678,7 +731,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": "When this entry was written, if known. Older decisions may not have a date."
+     "doc": "When this entry was written, if known. Older decisions may not have a date.",
+     "differs_from": {}
     },
     "summary": {
      "name": "summary",
@@ -688,7 +742,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": "One-line account of what happened, shown in log listings above the body."
+     "doc": "One-line account of what happened, shown in log listings above the body.",
+     "differs_from": {}
     },
     "author": {
      "name": "author",
@@ -698,7 +753,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": "Who wrote the entry."
+     "doc": "Who wrote the entry.",
+     "differs_from": {}
     },
     "status": {
      "name": "status",
@@ -715,7 +771,8 @@
      ],
      "default": null,
      "required_when": null,
-     "doc": "A verdict when this entry declares one. Accepted entries can close coverage on what they satisfy."
+     "doc": "A verdict when this entry declares one. Accepted entries can close coverage on what they satisfy.",
+     "differs_from": {}
     },
     "rationale": {
      "name": "rationale",
@@ -727,7 +784,8 @@
      "required_when": {
       "status": "rejected"
      },
-     "doc": "Why this verdict was reached; required for a rejected verdict."
+     "doc": "Why this verdict was reached; required for a rejected verdict.",
+     "differs_from": {}
     },
     "options": {
      "name": "options",
@@ -737,7 +795,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": "Alternatives considered for this verdict."
+     "doc": "Alternatives considered for this verdict.",
+     "differs_from": {}
     },
     "checks": {
      "name": "checks",
@@ -747,7 +806,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": "Numeric checks against bounds; a failed check is an error."
+     "doc": "Numeric checks against bounds; a failed check is an error.",
+     "differs_from": {}
     },
     "tasks": {
      "name": "tasks",
@@ -757,7 +817,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": "Tasks at the thread tip: rows with a stable id, the task's text, and its state (open, done or dropped). A continuation entry that omits tasks: keeps the nearest prior list; an explicit empty list clears it; a declared list replaces it whole. Kept out of the content hash, so ticking a task never marks downstream items suspect or churns a baseline."
+     "doc": "Tasks at the thread tip: rows with a stable id, the task's text, and its state (open, done or dropped). A continuation entry that omits tasks: keeps the nearest prior list; an explicit empty list clears it; a declared list replaces it whole. Kept out of the content hash, so ticking a task never marks downstream items suspect or churns a baseline.",
+     "differs_from": {}
     }
    },
    "links": {
@@ -803,7 +864,8 @@
    "coverable": null,
    "coverable_statuses": null,
    "verifying_statuses": null,
-   "doc": "A design-log entry \u2014 narrative work or a verdict. Entries are append-only in the authoring sense: corrections are new entries. Captured history records earlier content; an edit after capture is a warning."
+   "doc": "A design-log entry \u2014 narrative work or a verdict. Entries are append-only in the authoring sense: corrections are new entries. Captured history records earlier content; an edit after capture is a warning.",
+   "differs_from": {}
   }
  },
  "link_types": {
@@ -812,105 +874,122 @@
    "inverse": "refined_by",
    "label": "Refines",
    "trace": true,
-   "doc": "A narrower, more detailed version of the same kind of statement: a requirement refining a requirement, or a bound refining a bound. Same category of thing, different altitude."
+   "doc": "A narrower, more detailed version of the same kind of statement: a requirement refining a requirement, or a bound refining a bound. Same category of thing, different altitude.",
+   "differs_from": {}
   },
   "derives_from": {
    "name": "derives_from",
    "inverse": "derived_by",
    "label": "Derives from",
    "trace": true,
-   "doc": "A bound whose value follows from a requirement or another bound \u2014 where the number came from, not a restatement of it."
+   "doc": "A bound whose value follows from a requirement or another bound \u2014 where the number came from, not a restatement of it.",
+   "differs_from": {}
   },
   "governed_by": {
    "name": "governed_by",
    "inverse": "governs",
    "label": "Governed by",
    "trace": true,
-   "doc": "This requirement must comply with a general rule stated elsewhere \u2014 another requirement or a bound \u2014 without being a narrower version of it. Traceability only; it never feeds coverage."
+   "doc": "This requirement must comply with a general rule stated elsewhere \u2014 another requirement or a bound \u2014 without being a narrower version of it. Traceability only; it never feeds coverage.",
+   "differs_from": {}
   },
   "satisfies": {
    "name": "satisfies",
    "inverse": "satisfied_by",
    "label": "Satisfies",
    "trace": true,
-   "doc": "A verdict log entry or component claims to meet a requirement or bound. This closes coverage once the claiming item reaches a satisfying status."
+   "doc": "A verdict log entry or component claims to meet a requirement or bound. This closes coverage once the claiming item reaches a satisfying status.",
+   "differs_from": {}
   },
   "constrained_by": {
    "name": "constrained_by",
    "inverse": "constrains",
    "label": "Constrained by",
    "trace": true,
-   "doc": "A verdict log entry or component that must respect a bound. Traceability only \u2014 it does not close coverage on the bound; satisfies does."
+   "doc": "A verdict log entry or component that must respect a bound. Traceability only \u2014 it does not close coverage on the bound; satisfies does.",
+   "differs_from": {}
   },
   "verifies": {
    "name": "verifies",
    "inverse": "verified_by",
    "label": "Verifies",
    "trace": true,
-   "doc": "A test proves a requirement or bound. Counts toward coverage when the test's status is one of the type's verifying_statuses."
+   "doc": "A test proves a requirement or bound. Counts toward coverage when the test's status is one of the type's verifying_statuses.",
+   "differs_from": {}
   },
   "addresses": {
    "name": "addresses",
    "inverse": "addressed_by",
    "label": "Addresses",
    "trace": false,
-   "doc": "A log entry records work done on a requirement or bound. Counts as addressed coverage \u2014 someone has worked on it and written it up \u2014 without claiming it is met."
+   "doc": "A log entry records work done on a requirement or bound. Counts as addressed coverage \u2014 someone has worked on it and written it up \u2014 without claiming it is met.",
+   "differs_from": {}
   },
   "follows": {
    "name": "follows",
    "inverse": "followed_by",
    "label": "Follows",
    "trace": false,
-   "doc": "This log entry continues an earlier entry in the same thread."
+   "doc": "This log entry continues an earlier entry in the same thread.",
+   "differs_from": {}
   },
   "amends": {
    "name": "amends",
    "inverse": "amended_by",
    "label": "Amends",
    "trace": false,
-   "doc": "A log entry corrects an earlier log entry. Entries are append-only, so a correction is written as a new entry pointing back at this one rather than as an edit."
+   "doc": "A log entry corrects an earlier log entry. Entries are append-only, so a correction is written as a new entry pointing back at this one rather than as an edit.",
+   "differs_from": {}
   },
   "supersedes": {
    "name": "supersedes",
    "inverse": "superseded_by",
    "label": "Supersedes",
    "trace": false,
-   "doc": "This verdict replaces an older one. The older entry keeps its history; moving its status to superseded is your edit, not something the link does by itself. A build warns when the link and target status disagree."
+   "doc": "This verdict replaces an older one. The older entry keeps its history; moving its status to superseded is your edit, not something the link does by itself. A build warns when the link and target status disagree.",
+   "differs_from": {}
   },
   "selects": {
    "name": "selects",
    "inverse": "selected_by",
    "label": "Selects",
    "trace": true,
-   "doc": "A verdict selects a component. The component's own status marks it selected; this link records which entry made the pick. A build warns when either half is missing and the other is not."
+   "doc": "A verdict selects a component. The component's own status marks it selected; this link records which entry made the pick. A build warns when either half is missing and the other is not.",
+   "differs_from": {}
   },
   "blocked_by": {
    "name": "blocked_by",
    "inverse": "blocks",
    "label": "Blocked by",
    "trace": true,
-   "doc": "Something is holding this entry up. Name only the immediate blocker; reports resolve the chain to its root. May point at an item of any type; a cycle is a build error."
+   "doc": "Something is holding this entry up. Name only the immediate blocker; reports resolve the chain to its root. May point at an item of any type; a cycle is a build error.",
+   "differs_from": {}
   },
   "part_of": {
    "name": "part_of",
    "inverse": "contains",
    "label": "Part of",
    "trace": true,
-   "doc": "This item belongs to a group. Membership is always declared by the member, never by the group; contains is the computed backlink."
+   "doc": "This item belongs to a group. Membership is always declared by the member, never by the group; contains is the computed backlink.",
+   "differs_from": {}
   },
   "drop_in": {
    "name": "drop_in",
    "inverse": "drop_in",
    "label": "Drop-in",
    "trace": true,
-   "doc": "This component is a drop-in second source for that one \u2014 interchangeable as claimed, no review needed. Self-inverse, and restricted to component-to-component. For a part that is close but needs checking before it goes in a design, use alternate."
+   "doc": "This component is a drop-in second source for that one \u2014 interchangeable as claimed, no review needed. Self-inverse, and restricted to component-to-component. For a part that is close but needs checking before it goes in a design, use alternate.",
+   "differs_from": {}
   },
   "alternate": {
    "name": "alternate",
    "inverse": "alternate",
    "label": "Alternate",
    "trace": true,
-   "doc": "This component is functionally close to that one but not a drop-in: check before substituting. Self-inverse, component-to-component, and the rationale explaining what differs is required."
+   "doc": "This component is functionally close to that one but not a drop-in: check before substituting. Self-inverse, component-to-component, and the rationale explaining what differs is required.",
+   "differs_from": {
+    "drop_in": "an alternate needs checking before it goes in a design; a drop-in is interchangeable as claimed, no review needed."
+   }
   }
  }
 }
