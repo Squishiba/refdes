@@ -23,6 +23,7 @@ from __future__ import annotations
 import os
 import re
 
+import yaml
 from helpers import REPO
 
 from refdes import parse
@@ -67,11 +68,14 @@ def _fence_after(heading: str, info: str) -> str:
     raise AssertionError(f"no ```{info} fence after {heading!r}")
 
 
-def _load_list_file(tmp_path, name: str, text: str):
+def _load_list_file(tmp_path, name: str, text: str, init: bool = True):
     """Write `text` as `items/<name>.yaml` in a freshly initialized project
     and parse it as a list file: the finding's failure mode is a load-time
-    rejection, so that is the layer this pins."""
-    scaffold_mod.init(str(tmp_path))
+    rejection, so that is the layer this pins. `init=False` reuses a project
+    already initialized by an earlier call (`refdes init` refuses to run
+    twice)."""
+    if init:
+        scaffold_mod.init(str(tmp_path))
     items_dir = os.path.join(str(tmp_path), "items")
     os.makedirs(items_dir, exist_ok=True)
     path = os.path.join(items_dir, f"{name}.yaml")
@@ -97,14 +101,29 @@ def test_recommendation_list_file_loads(tmp_path):
 
 def test_new_list_skeleton_shape_loads(tmp_path):
     """§6.4's printed skeleton is the mapping form `parse_list_file`
-    requires -- the same shape `scaffold.new_list_text` actually emits --
-    so redirecting `refdes new --list` into place cannot produce a rejected
-    file (candidate parts §6.4; PR #8 HIGH finding)."""
-    items = _load_list_file(tmp_path, "skeleton", _fence_after("### 6.4 Scaffolding", ""))
+    requires, and so is the real `refdes new --list` output -- which is
+    what makes redirecting that flag into place safe. The comparison with
+    `scaffold.new_list_text` is made here now, at the level the claim is
+    true: same mapping form (`defaults:` + `items:`), the same
+    `defaults:` block, and the generated text itself loads through the
+    same real parser. The sketch is a sketch -- it drops the generator's
+    per-field `# ...` hint comments and shows `part_number:` bare where
+    the generator comments it out as optional -- so the field lists are
+    deliberately not compared (candidate parts §6.4; PR #8 HIGH finding)."""
+    skeleton = _fence_after("### 6.4 Scaffolding", "")
+    items = _load_list_file(tmp_path, "skeleton", skeleton)
     assert len(items) == 1
     entry = items[0]
     assert entry.type == "component"
     assert "title" in entry.fields and "part_number" in entry.fields
+    generated = scaffold_mod.new_list_text(
+        "component", load_project(start=str(tmp_path)).types["component"]
+    )
+    # the flag's real output loads through the same parser
+    _load_list_file(tmp_path, "generated", generated, init=False)
+    sketch, real = yaml.safe_load(skeleton), yaml.safe_load(generated)
+    assert list(real) == list(sketch)  # both the `defaults:` + `items:` mapping form
+    assert real["defaults"] == sketch["defaults"]
 
 
 def test_worked_example_candidates_load(tmp_path):

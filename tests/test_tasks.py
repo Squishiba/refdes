@@ -30,7 +30,6 @@ CONFIG = (
 )
 
 THERMAL = "      - {id: T-thermal-model, text: Model worst-case copper temperature., state: open}\n"
-THERMAL_DONE = THERMAL.replace("state: open", "state: done")
 DECOUPLING = "      - {id: T-decoupling, text: Recheck decoupling near U14., state: open}\n"
 
 

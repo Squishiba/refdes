@@ -1,0 +1,158 @@
+# review-followups-2026-10-10
+
+Sweep of small follow-ups from the 2026-10-10 PR reviews. Branch cut from
+main at c065891; work per .scratch/TASK.txt. Every reproduction below was
+made by running the tool, not by reading memory (per AGENTS.md). Note on
+method: the terminal session garbled the *display* of some command output
+today; every claim below was therefore re-established by a script writing to
+a file (evidence kept in .scratch/probe/: item6.txt, repro6d.txt, repro6d2.txt,
+genlist.txt, wdiff*.txt), and the edit tool's own match-or-fail was treated
+as the confirmation that a change landed.
+
+## 1. revise.py snapshot gating — REPRODUCED, FIXED
+
+Confirmed by control-flow trace of apply(): after the `if dry_run: return`
+early-exit, the snapshot is read by exactly two consumers —
+`_simulate_key_ensure` (dry-run + prefix_rename, the per-line diff report)
+and `_collect_refresh_rewrites()` (its loop over `snapshot.items()`; both
+call sites live after the dry-run return, so non-dry only). For a non-prefix
+dry run nothing ever read it. Now gated:
+`if not dry_run or prefix_rename`, `{}` otherwise; position unchanged (it
+must be taken before `_run_key_ensure` mutates the tree on the non-dry prefix
+path). Position preserved matters — the snapshot is the baseline the
+refresh-rollback diffs against, and key-ensure rewrites are excluded from it
+by `rel not in ensure_rewrites`, so taking it any later would corrupt the
+`_collect_refresh_rewrites` classification.
+
+Tests: tests/test_readonly_explicit_writes.py (19) + the three revise test
+files = 115 passed. No behaviour change -> no new test required by the task;
+the gate is guarded by tests from both sides instead: inverting the
+condition makes 5 prefix-dry-run report tests fail
+(tests/test_revise_keys_cleanup.py::test_dry_run_simulates_the_pipeline_and_writes_nothing,
+::test_dry_run_changed_files_match_the_real_run_including_refresh et al.),
+and skipping it on a real run trips
+test_revise_rolls_back_refresh_writes_landed_by_a_non_prefix_mapping.
+Sabotage (inverted gate) run: 5 failed; restored: green.
+
+## 2. links.py _drop_refused docstring — REPRODUCED, FIXED
+
+`write_rewrites_verified` (revise.py) returns
+`{failed rels} | rolled_back | duplicate_keyed` — FS refusals, guard
+rollbacks (PR #179 / KEY-GUARD-001), and duplicate-key-withheld files.
+The docstring still said "A file the filesystem refused did not change".
+Rewritten to name all three kinds. Comment only.
+
+## 3. THERMAL_DONE — REPRODUCED, REMOVED
+
+grep: exactly one occurrence in the repo (tests/test_tasks.py:33). Deleted.
+
+## 4. living-notes-h6-tasks.txt — REPRODUCED, CORRECTED (appended, not rewritten)
+
+The fake test name is at line 97 (S1 entry); real test is
+tests/test_tasks.py::test_ticking_a_task_moves_the_history_digest_not_the_content
+(line 319). Matrix numbering: S1..S7, then S9..S15 — no S8. Appended a dated
+Correction section covering both.
+
+## 5. serve/edit.py rollback comments + cli-reference.md fetch scope — REPRODUCED, FIXED
+
+(a) `_LockfileWrite.rollback`: read OSError -> `current = None` != staged ->
+restore SKIPPED; compare-then-restore not atomic (writer landing in the gap
+is clobbered). Both documented in-place as accepted limits; no lock added
+(separate decision per task).
+
+(b) docs/cli-reference.md:631-633 scoped the `no copy` word to `skipped`
+rows. cli.py:910-916 decides `kept` vs `no copy` from the bytes on disk for
+EVERY printed row (the comment above it: "the word has to be true of the
+bytes on disk now, not only of what the lockfile claims"). Doc reworded to
+match. Pinned on the skip side by
+tests/test_citations.py::test_a_skipped_kept_copy_with_a_missing_blob_does_not_print_kept
+(and that test's `--update` half re-fetches through the fetched-row path).
+
+## 6. docs/design/candidate-parts.md + tests/test_candidate_parts_doc.py
+
+(a) §7.3 fence — REPRODUCED: fence labelled ```yaml contains a bare `---`
+separator and prose; `yaml.safe_load` on its body raises ComposerError
+(.scratch/probe/item6.txt). Relabelled ```markdown — the block is an item
+*file* fragment (front matter, `---`, body prose), the same honest label
+§7.4's page fragment uses. Nothing extracts a fence from §7.3 (only 6.1/6.4/7.2
+are pinned by tests), so the label change is inert for the suite.
+
+(b) §6.4 "matches what the implemented generator prints" — DOES NOT
+REPRODUCE. The claimed sentence is nowhere in the doc: greps for
+"implemented generator", "matches what the implemented", "generator prints"
+return no hits; the full §6.4 body was dumped and read (582-612) — it only
+derives defaults.type/defaults.status and says "Stdout only, exactly like
+`refdes new` today" (that "exactly" scopes to writes-nothing behaviour, not
+the block). Likely fixed by c065891's stale-design-doc-reference pass. SKIPPED
+per task instructions (skip what doesn't reproduce).
+
+(c) test_candidate_parts_doc.py:99-102 docstring claimed the §6.4 fence is
+"the same shape `scaffold.new_list_text` actually emits" while the test never
+called the generator — REPRODUCED. The literal claim is FALSE at key level:
+the real generator output (captured, .scratch/probe/genlist.txt) prints
+per-field `# ...` hint comments and COMMENTS OUT `part_number:` (optional in
+hardware@3) where the sketch shows it bare. Fixed both ways the task allowed:
+the comparison was added at the level the claim is true — both texts parse as
+the `defaults:`+`items:` mapping form (`list(real) == list(sketch)`), the
+`defaults:` blocks are equal, and the generated text itself loads through
+`parse_list_file` (`_load_list_file` grew an `init=False` reuse flag because
+`refdes init` refuses to run twice) — and the docstring now says exactly that
+including what is deliberately NOT compared. Sabotage (defaults comparison
+aimed at a bogus key): FAILED as required; restored: 3 passed.
+
+(d) §7.2 fixture — REPRODUCED LIVE, FIXED. Built a scratch project from the
+§7 fences verbatim (.scratch/probe/repro6d.txt, "A" run): `refdes check`
+exactly reported the named class, 6x
+"calc 'I_out'/'I_q': source('datasheets/<part>.csv', ...): CMP-PWR-0XX does
+not cite 'datasheets/<part>.csv'; add it to this item's citations:" — the
+same-item rule of `citations.authorize_source_path` (calc-sources.md §1) —
+plus 6 cascade "check refers to 'I_out', which no calc block defines" (the
+failed cals define nothing). The run also surfaced a second real fixture
+error that the review note didn't count: `keep_copy: true` on the LOCAL
+datasheets/mp1584.pdf -> ERROR "keep_copy: on local path ... is meaningless
+-- a local file is already local". Fixed in the doc: the three items now each
+cite their own CSV (path + id), the local PDF's meaningless `keep_copy: true`
+is dropped, and the §7.2 prose paragraph now states the same-item rule and
+the fetch step. Post-fix evidence (.scratch/probe/repro6d2.txt): fences
+verbatim -> check exits 1 with only the designed fetch-flow errors
+("has no locked value -- run 'refdes fetch --path ...'" + cascades); after
+`refdes fetch` (local paths, offline, exit 0): **check exits 0, 0 errors**
+("7 items, 0 errors, 3 warnings") — the fixture checks clean. The 3 warnings
+are sketch artifacts (bounds with no body, one unsatisfied bound), not
+errors.
+Harness note (NOT changed, out of scope): the harness must place the §7.4
+page under `pages/` for the project to load — `pages.py` loads narrative
+pages from `site.pages` (default `pages/`), while any `.md` under `items/`
+is an item file needing front matter; so the doc's §6.1/§7.4 path
+`items/power/power-supply.md` as a *narrative page* location is a real
+discrepancy the review didn't name. Recorded here, left alone — it interacts
+with §6.1/§6.2's whole convention argument and needs a decision, like the
+other deferred items.
+
+## Not done (per task "Don't do")
+
+real lock in serve/edit.py; on_change link verb; chains.fold_tasks live
+lists (H7a in flight); test_serve_cli flake.
+
+## Gates
+
+- Full suite in the FOREGROUND -> .scratch/suite.txt:
+  `3424 passed, 2 skipped in 261.85s (0:04:21)`, exit 0 (main's stated
+  baseline "about 3420 passed, 2 skipped"). No failures, so the known
+  load flake (test_serve_cli token-file test) never needed its re-run.
+- `ruff check --select E9,F src tests`: All checks passed!
+- `docs-site/gen_examples.py --check`: schema-reference.md + vocabulary.md
+  up to date (exit 0).
+
+## Changelog fragments
+
+- cli-reference-fetch-kept-column.fixed.md (user-visible docs-site page)
+- candidate-parts-doc-fixture-checks-clean.fixed.md (design-doc fixture +
+  doc-test pin; same style as the existing candidate-parts-doc-* fragment)
+- No fragments for items 1-4/5a: internal no-op gating, comment/docstring
+  only, dead test constant, private work-log correction.
+
+## Finished?
+
+Yes — all six items: done (1, 2, 3, 4, 5a, 5b, 6a, 6c, 6d) or
+recorded-not-reproducing (6b). Committed, PR opened per task.

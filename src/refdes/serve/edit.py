@@ -493,6 +493,18 @@ class _LockfileWrite:
         # our pin in the file another writer replaced is the failure mode the
         # design names as inert (docs/design/editor-source-picker.md §4);
         # destroying a landed writer's state is not.
+        #
+        # Two limits of this compare-then-restore, documented rather than
+        # fixed. (1) Read error: an OSError here leaves `current` None, which
+        # matches no staged bytes, so the rollback is SKIPPED -- we decline to
+        # clobber a file whose current contents we cannot verify (a missing
+        # file is the same case: someone removed it, which is a replace we
+        # must not undo blind). (2) The comparison and the restore are not
+        # atomic: a cooperating writer landing between the read and the
+        # restore is overwritten by our `previous`. The window is microseconds
+        # -- orders of magnitude smaller than the gate-scale window the
+        # comparison above exists for -- so it is accepted, not closed;
+        # closing it properly means a real lock, which is a separate decision.
         try:
             with open(self.path, "rb") as fh:
                 current = fh.read()

@@ -644,7 +644,8 @@ items:
     citations:
       - path: datasheets/mp1584.pdf
         id: mp1584-ds
-        keep_copy: true
+      - path: datasheets/mp1584.csv
+        id: mp1584-csv
     checks:
       - { value: I_out, against: BND-PWR-011 }
       - { value: I_q,   against: BND-PWR-012 }
@@ -665,6 +666,8 @@ items:
     citations:
       - path: datasheets/tps562200.pdf
         id: tps562200-ds
+      - path: datasheets/tps562200.csv
+        id: tps562200-csv
     checks:
       - { value: I_out, against: BND-PWR-011 }
       - { value: I_q,   against: BND-PWR-012 }
@@ -685,6 +688,8 @@ items:
     citations:
       - path: datasheets/lm2596.pdf
         id: lm2596-ds
+      - path: datasheets/lm2596.csv
+        id: lm2596-csv
     checks:
       - { value: I_out, against: BND-PWR-011 }
       - { value: I_q,   against: BND-PWR-012 }
@@ -704,10 +709,14 @@ Every `source()` line carries its own unit assertion, per
 the unit, and a `1850` that meant mW renders as `1850 W` rather than being
 guessed at. The datasheet PDF is a `citations:` entry with an `id:`, so prose
 links it with `[[cite:mp1584-ds]]` (`docs/markdown.md` §Citing a datasheet).
+The CSV each `source()` line names is a `citations:` entry too: a `source()`
+may only name a path the *same item* cites — a citation on another item does
+not authorize it (`docs/design/calc-sources.md` §1) — and `refdes fetch` is
+what extracts the used keys into the lockfile the checks then run on.
 
 ### 7.3 The decision
 
-```yaml
+```markdown
 id: DEC-PWR-007
 type: log
 summary: 3V3 rail regulator is the MP1584EN
