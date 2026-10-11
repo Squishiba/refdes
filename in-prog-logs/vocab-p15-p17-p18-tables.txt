@@ -1,0 +1,300 @@
+vocab-p15-p17-p18-tables — work log
+====================================
+
+Task: .scratch/TASK.txt — land P15, P17, P18 from docs/design/vocabulary-review.md
+§3.4. Docs only: nothing under src/ or tests/. Branch vocab-p15-p17-p18-tables
+cut from main; working tree was clean at start (git status, c065891).
+
+Started: reading AGENTS.md + the review (§3.4 at line 986, §2.2 D3 line 675,
+D4 line 685, S2.2 line 743).
+
+Verification harness (AGENTS.md):
+  PYTHONPATH=$PWD/src /home/jorb/work/venv-refdes/bin/python -m refdes.cli schema
+  run from the repo root (it has refdes-project.yaml). Output saved to
+  .scratch/schema.json (72 KB, exit 0). Every type/status claim below comes from
+  that JSON, not from memory of base.yaml.
+
+================================================================================
+P15 — "which grouping?" table for docs/concepts.md
+================================================================================
+
+Cells verified, and what each was verified against:
+
+board
+  - "one path segment under `items/`, matched against the `boards:` registry in
+    refdes-project.yaml -- the first segment under item_layout: flat, the second
+    under item_layout: workspace"; opt-in (no registry -> every item's board is
+    ""). src/refdes/boards.py:1-17.
+  - Override precedence "item override > file defaults > path", and an override
+    naming an unregistered board is a project.error: boards.py:74-113. `board`
+    is in parse.OVERRIDABLE (parse.py:44), so a type may take the key over --
+    this repo's own log type does (refdes-schema.yaml).
+  - Coverage: yes, twice. (a) scoped report set includes `coverage` ->
+    `coverage-<board>.html` (nav.scope_reports, nav.py:92; render.py:1142
+    writes it with rows filtered by `_in_scope`, render.py:62-69,160-169);
+    (b) a board declaring `conforms_to: [GRP-...]` gets the four stages
+    recomputed per (item, board) counting only that board's own satisfiers
+    (build.compute_board_coverage, build.py:1084-1139). Both confirmed by
+    running a probe project (see PROBE below): it wrote coverage-board-a.html
+    and warned "REQ-A-001 is not satisfied on board 'board-a' (board conforms
+    to GRP-001) ... see coverage-board-a.html".
+
+workspace
+  - "the ownership boundary one level above boards"; opt-in registry; path
+    segment only under `item_layout: workspace`, overridable per item/file by
+    the reserved `workspace:` key; the payoff is the cross-workspace link lint,
+    which "walks `item.links` only -- never `item.backlinks` (computed) or any
+    derived aggregate (coverage, a future parts index)".
+    src/refdes/workspaces.py:1-21, resolve() at :43-88.
+  - Coverage: yes as a scope only -- `coverage-<workspace>.html` is written with
+    rows filtered to that workspace (render.py:1202-1231, nav.py:58-109). There
+    is no per-workspace re-computation of the stages: `board_coverage` is keyed
+    by (item, board) alone (build.py:1128). Probe wrote coverage-ws-one.html.
+
+group
+  - An item type: `prefix: GRP`, `coverable: false`, declares no membership
+    links ("Members point here with part_of; a group never lists its members,
+    never appears in coverage, and nothing may satisfy one.")
+    src/refdes/standards/hardware/v3/base.yaml:251-266.
+  - Coverage: no. `coverable: false` -> `_resolve_coverable` returns False ->
+    `compute_coverage` `continue`s before writing project.coverage
+    (build.py:880-902, 1189-1193). Verified by probe: a GRP item present in
+    items/ does not appear in the `coverage` map of `refdes index` output.
+    Groups do touch coverage indirectly, but only as what a board's
+    `conforms_to:` names (build.py:1111-1127).
+
+section
+  - A file-local marker that *asserts a type*: `- section: <type>` in a YAML
+    list file, `---\nsection: <type>\n---` as a marker block in Markdown; it
+    holds for every item until the next section or end of file, and an item
+    that declares a different `type:` inside it is an error naming both.
+    parse.py:602-667, docs/authoring.md:149-211.
+  - Verified by running it: a probe file with a `section: requirement` marker
+    and a later `type: test` item reports
+    "item declares type 'test' but sits inside a 'section: requirement' block
+    (opened at line 11) -- a section asserts its items' type; this one disagrees."
+  - Not item data: the key is consumed -- `refdes index` output carries no
+    `section` field on any item (grepped the built items.json), and it is not a
+    path segment. Not in coverage: `compute_coverage` never reads it
+    (build.py:1142-1264 reads coverable/status/links only).
+
+tag (the `tags:` field)
+  - `tags: { type: list, on_change: ignore }` on the `provenance` field set:
+    "Free-form labels for grouping and finding items; free-text search matches
+    tags as well as titles. Kept out of the content hash." -- read out of the
+    live merged schema (`.scratch/schema.json`, `tags.description`), not from
+    memory. v3/base.yaml:116.
+  - Finding things: `refdes ls --help` says free text is "matched against id,
+    title, tags: and former_ids:" and lists `--tag`; ran both against a probe
+    (a `--tag io` filter and a bare `power` query each returned exactly the one
+    tagged item, whose title does not contain the word).
+  - Coverage: no -- `compute_coverage` reads no tags; the only tag code in
+    build.py is the opt-in `lint_own_tags` advisory (build.py:548-575).
+
+{{tree}}
+  - A generated block (blocks.py:880-885, params board=, workspace=, depth=,
+    and deliberately no via=) rendering the same forest as the generated
+    `tree.html` report: "The nesting is the containment spine -- workspace,
+    then board, then `part_of` group, then item" (src/refdes/tree.py:1-6).
+    Confirmed against the built page: tree.html's own prose says "filed by the
+    containment spine: workspace, board, part_of group, item".
+    NOTE: §2.2 D3 (line 682) says "{{tree}} nests by path"; the shipped
+    behaviour is the spine above, in which board and workspace happen to be
+    path segments and the group level is a `part_of` link. The table states
+    what the code and the page do.
+  - Coverage: no -- tree.py never mentions coverage (grep "coverage"
+    src/refdes/tree.py -> no matches); it renders, it does not compute.
+
+================================================================================
+P17 — "what does this word mean when a thing is finished with?"
+================================================================================
+
+All six words checked against the live merged schema, run two ways:
+  * this repo (hardware@3, presets: [], plus this repo's own overlay):
+    `python -m refdes.cli schema` -> .scratch/schema.json
+  * the standard with no overlay: a throwaway project pinned hardware@3,
+    presets: [] (.scratch/probe-hw3) -> .scratch/hw3-schema.json
+  * and hardware@2 + the design-debate preset for the two preset-only words
+    (.scratch/probe-hw2) -> .scratch/hw2-dd-schema.json
+
+Status enums read out of those JSON files (each `status.enum`):
+  requirement [draft, active, retired]      bound [draft, active, retired]
+  test        [planned, passing, failing, blocked]
+  component   [candidate, selected, rejected, obsolete]
+  log         [proposed, in_progress, accepted, on_hold, rejected, superseded]
+  group       (no status field at all)
+  hardware@2 + design-debate additionally: option [candidate, eliminated],
+  claim [open, accepted, rebutted], debate [open, resolved]
+  hardware@2 without the preset: decision [proposed, in_progress, accepted,
+  on_hold, rejected, superseded], component [candidate, selected, obsolete]
+  (no `rejected` -- that is an @3 addition).
+
+So, in hardware@3 as it ships today:
+  retired    -> requirement, bound. `coverable_statuses: [active]` (v3:182,
+                inherited by bound via `extends: requirement`), so a retired
+                one "is left out of coverage entirely" (its own doc string).
+                Verified by probe: a `status: retired` bound and a
+                `status: retired` requirement are absent from the `coverage`
+                map of `refdes index`, while their active siblings are present.
+  superseded -> log (hardware@1/@2 spelled it on `decision`; @3 merged the
+                type). `satisfying_statuses: [accepted]`, so a superseded
+                entry's `satisfies:` link caps its target at `claimed`
+                (probe: REQ stage `claimed`, claimed_by the superseded entry).
+                The `supersedes:` link does not set it: probe warns in both
+                directions -- "supersedes LOG-A-001, but that item's status is
+                'accepted', not 'superseded' -- the link does not move a status
+                on its own." and "status is 'superseded' but nothing supersedes
+                it". (docs/links.md:247-272 already documents this pass.)
+  obsolete   -> component. Never satisfies (only `selected` is in
+                `satisfying_statuses`), and its failed checks drop to `info`
+                (`check_severity: { ... obsolete: info }`, v3:238;
+                docs/checks.md:237-246 quotes the same shipped mapping).
+                Probe: an `obsolete` component's `satisfies:` link shows up in
+                `claimed_by`, never in `satisfied_by`.
+  on_hold    -> log. Paused, not dead: not `accepted`, so its claim caps at
+                `claimed`; and it is what a blocker chain resolves to -- probe
+                warning "2 requirement(s) unsettled because LOG-A-001 is
+                on_hold — see coverage.html" (docs/coverage.md:181-208).
+  eliminated -> NOT in hardware@3. It was the design-debate preset's `option`
+                status (v1/v2 presets only; hardware@3 ships no presets dir --
+                `ls src/refdes/standards/hardware/v3/` shows base.yaml and
+                migration.yaml only, and the docs already say hardware@3 "ships
+                no presets at all", docs/standard-library.md:166-176).
+  rebutted   -> NOT in hardware@3, same reason: the preset's `claim` status.
+                (The P10 rename of `claim` -> `assertion` was itself superseded
+                on 2026-10-01 by the preset's retirement, §3.2 line 947-948.)
+
+Stuck, two ways: `on_hold` is a status you set on the entry that is stuck;
+`blocked_by:` is a link you author to the thing holding it up ("Name only the
+immediate blocker; reports resolve the chain to its root. May point at an item
+of any type; a cycle is a build error." -- v3:170, and its `trace: false`
+family means it never feeds coverage, docs/coverage.md:69-90). The near-neighbour
+words in the same enums, also verified from the schema: `rejected` (component and
+log) and `blocked` (test, a result, not a pause).
+
+Where it goes: docs/standard-library.md. Its "What's in it" table (lines 24-36)
+already owns the per-type status enumerations, so a table explaining the words
+extends that page instead of starting a competing one. Checked the alternatives
+first: docs/lifecycle.md is the *project* lifecycle (revision/release/baselines),
+not item statuses; docs/coverage.md:210-273 owns `satisfying_statuses:`/
+`verifying_statuses:` behaviour, which is a different question;
+docs/vocabulary.md is generated by docs-site/gen_examples.py and is gated by
+tests/test_docs_examples.py, so it is not hand-editable.
+
+================================================================================
+P18 — component vs part
+================================================================================
+
+  - The type is `component` (label "Component", prefix CMP) -- read from the
+    live `refdes index` output's `types` map.
+  - The standard's own prose calls it a part, in four places, all read out of
+    .scratch/schema.json descriptions: the type doc ("A part the design
+    uses."), `part_number` ("The manufacturer part number. Indexed into the
+    parts page..."), `refdes` ("...where this part is placed"), `status`
+    ("Where the part stands in this design").
+  - The page is called the **parts** page, nowhere "components": the site
+    writes `parts.html` (render.py:1051-1056) and scopes it as
+    `parts-<board>.html` / `parts-<workspace>.html` (verified: a probe build
+    wrote parts.html, parts-board-a.html, parts-ws-one.html); the nav label is
+    "Parts" (nav.py REPORT_LABELS, nav.py:46-53, and the probe's index.html
+    really renders href="parts.html">Parts). docs/parts.md is titled "Parts"
+    and docs/index.md's guide table says "The parts page".
+  - What it indexes: every field literally named `part_number` on any type
+    (most projects put it on `component`), plus the nested `part_number`
+    inside `citations:` entries -- docs/parts.md:8-24. So the honest wording
+    for "the parts page is the components page" is the one in the docs page
+    itself: it indexes what is already there "rather than adding a `part` item
+    type" (docs/parts.md:4-6). Components themselves appear as a "Components"
+    section of `document.html` (the probe's document.html has
+    `<h2 class="part-title">Components</h2>`; label+`s` plural default from
+    schema.py:700) -- there is no page called components.
+  - Placement: docs/concepts.md line 5, "Everything is an **item**: a
+    requirement, a bound, a component, ..." is where `component` first appears.
+
+================================================================================
+PROBE (kept in .scratch/, gitignored)
+================================================================================
+
+.scratch/probe-hw3 (hardware@3, presets: [], item_layout: workspace, two
+boards -- board-a declaring conforms_to -- and two workspaces) and
+.scratch/probe-hw2 (hardware@2 + design-debate). Every "probe:" claim above is
+an output of `refdes index` / `refdes check` / `refdes build` run from that
+directory with --no-write. No file outside this workspace was written.
+
+(continues below, appended as I go)
+
+================================================================================
+DOCS WRITTEN (second pass)
+================================================================================
+
+docs/concepts.md
+  - P18: one sentence after the item-anatomy bullets (where `component` first
+    appears, line 5): type is `component`, the world calls it a part, the site's
+    Parts page is the components page; parts.html indexes every field literally
+    named part_number plus the ones inside citations: entries.
+  - P15: new "## Which grouping?" section between Items and "Links are edges",
+    six rows (board, workspace, group, section, tag, {{tree}}) x (what it is
+    for / data or path / in coverage), then the two deciding cases (group vs
+    tag, board vs group) and what section: actually is.
+  - Claim check after writing: `tag=` verified as an optional param on both
+    blocks -- src/refdes/blocks.py:867 (compare) and :872 (index). The group
+    row's "absent from every satisfies: target list" is base.yaml's own comment
+    at src/refdes/standards/hardware/v3/base.yaml:253.
+
+docs/standard-library.md
+  - P17: new "## When a thing is finished with" section between "What's in it"
+    and "Opting out". Six words against the type whose status enum declares
+    them, with retired/superseded/obsolete/on_hold doing real coverage damage
+    only where the standard says they do, and eliminated/rebutted recorded as
+    design-debate preset words absent from hardware@3.
+  - Two corrections made after drafting, both from re-reading the standard:
+      * I first wrote that `blocked_by:` is trace: false. It is not --
+        base.yaml:170 has no trace key and the comment at :158 says every verb
+        except amends/follows/supersedes/addresses traces by default. Reworded
+        to what is true: coverage never reads the link, it just never sees a
+        satisfying status, and the blocked report walks the chain.
+      * I first wrote that `rejected` drops check_severity to info "either way".
+        Only component has a per-status map (base.yaml:238); log's is a flat
+        `check_severity: error` (base.yaml:281). The bullet now says which.
+    Also cited require_rejection_rationale (model.py:955, default True) rather
+    than asserting rationale is unconditionally required.
+
+docs/design/vocabulary-review.md
+  - **Landed (2026-10-11).** paragraphs after P15, P17 and P18, matching the
+    existing marker style (line 438, line 854). The P17 marker records that the
+    "two ways to say stuck" note became three, because `blocked` is a test
+    result.
+
+changelog.d/docs-grouping-status-word-tables.added.md
+  - One bullet, docs-only, named P15/P17/P18, ends "nothing to do".
+
+================================================================================
+CHECKS
+================================================================================
+
+  - /home/jorb/work/venv-refdes/bin/python docs-site/gen_examples.py --check
+    -> "docs/schema-reference.md is up to date." / "docs/vocabulary.md is up to
+    date." (ran after all three docs edits).
+  - pytest: see below.
+  - Third pass over the P17 section after a proofread: the lead-in claimed
+    "two words sit next to these" above a bullet about three kinds of stuck,
+    and the two mentions of the chain report used different names ("cascade
+    report" in the table, "blocked report" in the bullet). Both now say cascade
+    report, which is what docs/links.md:289 calls it. The `eliminated` row's
+    closing sentence was also too loose -- it said the base standard's
+    equivalent is component's `rejected`, but what the preset's `option`
+    actually became is an `options:` verdict on the log that passed it over
+    (base.yaml:288 declares the field, docs/authoring.md:74 authors it with
+    `verdict: rejected`), and `rejected` is only the component-shaped case.
+  - gen_examples.py --check re-run after the last wording edits: clean.
+  - Full suite, foreground, exactly as the task specified:
+      PYTHONPATH=$PWD/src /home/jorb/work/venv-refdes/bin/python -m pytest -q \
+        -p no:cacheprovider > .scratch/suite.txt 2>&1; echo exit=$?
+    -> exit=0, tail: "3424 passed, 2 skipped in 256.84s (0:04:16)". The task
+       expects about 3420; `--collect-only` reports 3426 tests collected here,
+       and nothing in tests/ is parametrized over docs/ content (grepped), so
+       the four extra are not this change adding cases -- the change adds no
+       tests and touches no code. No failures, so the known
+       test_serve_cli.py stale-token flake did not need a re-run.
+
+STATUS: finished. P15, P17 and P18 all landed; committed and PR'd.

@@ -57,6 +57,39 @@ retyping five fields on every type, and [authoring: `source`, `note`,
 `rationale`, `body`](authoring.md#source-note-rationale-body) for what
 `source`/`note` are actually for, as distinct from `rationale`/`body`.
 
+## When a thing is finished with
+
+Six words in the standard's enums say *no longer in play*, and they are not
+synonyms — each belongs to the type that declares it, so merging them would
+lose the difference between a part that was never chosen and a verdict that
+was reversed. What each means, and which `status` enum has it, as
+`hardware@3` resolves with `presets: []`:
+
+| Word | Whose `status` has it | What it means there |
+|---|---|---|
+| `retired` | `requirement`, `bound` | The statement is no longer one the design owes. Both types are coverable only while `active` (`coverable_statuses: [active]`, inherited by `bound` from `requirement`), so a retired one is not left sitting at `open` — it drops out of coverage and its warnings entirely. |
+| `superseded` | `log` | A newer entry has replaced this verdict. The `supersedes:` link records *which*, and the link does not move the status: a build warns in both directions when link and status disagree. `satisfying_statuses: [accepted]`, so a superseded entry's `satisfies:` claim holds its target at `claimed`. |
+| `obsolete` | `component` | This design no longer uses the part. Only `selected` satisfies, and `check_severity` puts `obsolete` at `info`, so its failing checks cannot break the build. |
+| `on_hold` | `log` | Paused rather than finished: the verdict is still owed. Not in `satisfying_statuses: [accepted]`, so its claims stay `claimed`, and when a `blocked_by:` chain resolves to it the cascade report names it — *"2 requirement(s) unsettled because LOG-A-001 is on_hold"*. |
+| `eliminated` | none, in `hardware@3` | The `design-debate` preset's word for an `option` the argument passed over (`option: [candidate, eliminated]`). `hardware@3` [ships no presets](#presets), so the word is not in the schema such a project resolves; a project pinned to `hardware@1`/`@2` that selected the preset still has it. What it recorded is now an `options:` verdict on the log entry that passed the alternative over, or a `component` marked `rejected`. |
+| `rebutted` | none, in `hardware@3` | Same origin: the preset's `claim` status (`claim: [open, accepted, rebutted]`), retired with the rest of `design-debate`. |
+
+Two things to keep straight beside the table:
+
+- **Three ways to be stuck.** `on_hold` is a status you set on the entry you
+  have paused. `blocked_by:` is a link you author from the stuck item to the
+  thing holding it up ([links](links.md#blocked-by-and-the-cascade-report)) —
+  coverage never reads that link; it simply never sees a satisfying status, and
+  the cascade report is what walks the chain and names the root. `blocked` is
+  neither: it is one of the four results a `test` records, and only `passing`
+  counts as verifying.
+- **`rejected` is a decision, not a dead end.** For a `component` it means
+  considered and not chosen — which is what `eliminated` used to say about an
+  option — and its `check_severity` is `info`, so it cannot break the build.
+  For a `log` it is a verdict that says no, and there `rationale` becomes
+  required (`required_when: {status: rejected}`) unless the project sets
+  `require_rejection_rationale: false`.
+
 ## Opting out
 
 `standard: none`, or omitting `standard:` entirely, is the explicit escape
