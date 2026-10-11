@@ -146,10 +146,10 @@ def test_own_body_and_scalars_replace_the_parents(tmp_path):
     project = _load(
         tmp_path,
         PARENT + CHILD
-        + "    body: { on_change: log }\n    coverable: false\n",
+        + "    body: { on_change: timeline }\n    coverable: false\n",
     )
     bnd = project.types["bnd"]
-    assert bnd.body_on_change == "log" and bnd.body_required is False
+    assert bnd.body_on_change == "timeline" and bnd.body_required is False
     assert bnd.coverable is False
 
 

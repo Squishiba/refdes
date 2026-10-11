@@ -42,7 +42,7 @@ types:
       title: { type: text, required: true, on_change: invalidate }
       status: { type: enum, choices: [proposed, in_progress, accepted, on_hold, rejected, superseded], default: proposed, on_change: invalidate }
       rationale: { type: text, on_change: invalidate, required_when: {status: rejected} }
-      date: { type: date, on_change: log }
+      date: { type: date, on_change: timeline }
       options: { type: options, on_change: invalidate }
       checks: { type: checks, on_change: invalidate }
     include: [provenance, stewardship, citations, grouped, claims, invalidate_body]

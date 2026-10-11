@@ -12,14 +12,49 @@ from typing import Any
 from .calc import Equation
 
 # on_change modes. Only `invalidate` does anything today: compute_hashes()
-# (build.py) is the sole consumer and only checks for INVALIDATE, so `log` and
-# `ignore` are currently indistinguishable -- both are excluded from the content
-# hash and neither is written anywhere. `log` is reserved for a future per-field
-# history layer; until that exists it behaves exactly like `ignore`.
+# (build.py) is the sole consumer and only checks for INVALIDATE, so `timeline`
+# and `ignore` are currently indistinguishable -- both are excluded from the
+# content hash and neither is written anywhere. `timeline` is reserved for a
+# future field-level timeline layer; until that exists it behaves exactly like
+# `ignore`. (It used to be spelled `log`; vocabulary review P9 renamed it
+# because the name collided with the `log` item type. hardware@3 ships the new
+# spelling; the released v1/v2 standards still carry the old one.)
 INVALIDATE = "invalidate"  # feeds the content hash and suspect-link invalidation
-LOG = "log"                # reserved for a future history layer -- behaves as ignore today
+TIMELINE = "timeline"      # reserved for a future history layer -- behaves as ignore today
 IGNORE = "ignore"          # excluded from the content hash
-ON_CHANGE_MODES = (INVALIDATE, LOG, IGNORE)
+ON_CHANGE_MODES = (INVALIDATE, TIMELINE, IGNORE)
+
+# The old spelling of `timeline`, kept only so projects pinned to a pre-v3
+# standard keep loading: v1/v2 base.yaml name the mode `log`, and the rename
+# belongs to hardware@3. Everywhere else the old spelling is a load error
+# naming the new one (schema.py for settings/annotations, parse.py for item
+# front matter), the same hard-error posture vocabulary review P2 chose for
+# the `history:` key.
+ON_CHANGE_LOG_OLD = "log"
+
+
+def on_change_log_renamed_message(where: str) -> str:
+    """The one rename-error wording for the pre-v3 `log` spelling of the
+    timeline mode. configcheck (project-authored blocks) and schema (the
+    resolved schema) both raise exactly this, so the two paths cannot
+    drift; tests pin the wording."""
+    return (
+        f"{where}: on_change mode {ON_CHANGE_LOG_OLD!r} was renamed to "
+        f"{TIMELINE!r} -- the mode marks a change for the future field-level "
+        "timeline, not the `log` item type; rename it"
+    )
+
+
+def accepts_old_on_change_log(standard_version: int | None) -> bool:
+    """Whether a project may still spell the mode `log`.
+
+    True only for a project pinned to a bundled standard older than v3 --
+    the released standards name the mode that way in their own yaml. A
+    project pinned at v3 or later, or with no standard pin at all (its own
+    overlay references the engine's mode names directly), must use
+    `timeline`.
+    """
+    return standard_version is not None and standard_version < 3
 
 
 # Diagnostic severities, in descending order of consequence.

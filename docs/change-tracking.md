@@ -10,7 +10,7 @@ once the git history layer lands.
 | `on_change` | In the timeline | Counts in a baseline diff | Invalidates downstream |
 |---|---|---|---|
 | `invalidate` | yes | yes | yes |
-| `log` | yes | no | no |
+| `timeline` | yes | no | no |
 | `ignore` | no | no | no |
 
 **The last two columns are implemented; the first is not.** `refdes
@@ -19,26 +19,26 @@ only, and `refdes audit`'s baseline diff reports an item as changed
 precisely when that hash moved — so "counts in a baseline diff" is real,
 item-scoped behavior today. "In the timeline" describes a continuous,
 field-level history the parked git-reader layer would provide; until it
-exists, `log` and `ignore` are indistinguishable in every *other*
+exists, `timeline` and `ignore` are indistinguishable in every *other*
 observable way -- see [what is not built yet](#what-is-not-built-yet).
 
 `invalidate` is for the substance: a requirement's text, a bound's limit, a
-verdict entry's rationale. `log` is for things worth seeing but harmless: owner, tags,
+verdict entry's rationale. `timeline` is for things worth seeing but harmless: owner, tags,
 source reference. `ignore` is for noise: timestamps, generated fields.
 
 Note this controls **significance, not retention**. Git still records every byte.
 `ignore` means "the history layer does not treat this as a change", not "this is
 not stored".
 
-## Why `log` exists
+## Why `timeline` exists
 
 Without it, suspect links are unusable. If a change of owner marks fifty
 downstream links suspect, people stop reading the badges within a week and the
-feature is dead. Roughly half your fields should be `log`.
+feature is dead. Roughly half your fields should be `timeline`.
 
-This is design intent for the history layer, not current behavior: today `log`
+This is design intent for the history layer, not current behavior: today `timeline`
 has no observable effect beyond being excluded from the content hash, same as
-`ignore`. Marking a field `log` now is a forward-looking choice, not a
+`ignore`. Marking a field `timeline` now is a forward-looking choice, not a
 functional one -- it costs nothing and means the schema is already correct
 once the history layer exists.
 
@@ -52,9 +52,9 @@ types:
     fields:
       limit:         { type: limit,  on_change: invalidate }
       rationale:     { type: text,   on_change: invalidate }
-      source:        { type: text,   on_change: log }
-      owner:         { type: person, on_change: log }
-      tags:          { type: list,   on_change: log }
+      source:        { type: text,   on_change: timeline }
+      owner:         { type: person, on_change: timeline }
+      tags:          { type: list,   on_change: timeline }
       last_reviewed: { type: date,   on_change: ignore }
     body: { on_change: invalidate }
 ```
@@ -152,9 +152,9 @@ to hide a substantive change. Two things close that:
 Schema fields not tracked as 'invalidate':
   bound
     last_reviewed    ignore
-    note             log
-    owner            log
-    source           log
+    note             timeline
+    owner            timeline
+    source           timeline
     tags             ignore
 
 Item-level overrides:

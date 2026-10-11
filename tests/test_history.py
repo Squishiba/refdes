@@ -2,7 +2,7 @@
 
 Sabotage-style: every test tries to *break* the invariant it names — re-append
 and check nothing new was written, tamper with a payload and expect a refusal,
-change a `log` field and confirm the two digests do NOT collapse into each
+change a `timeline` field and confirm the two digests do NOT collapse into each
 other. A store that silently skips a bad record is the failure mode under test.
 """
 
@@ -29,7 +29,7 @@ types:
     label: Note
     fields:
       title: { type: text, required: true, on_change: invalidate }
-      owner: { type: text, on_change: log }
+      owner: { type: text, on_change: timeline }
     links: {}
     body: { on_change: invalidate }
 """
@@ -161,9 +161,9 @@ items:
     )
 
 
-def test_log_field_sabotage_digest_moves_content_hash_does_not(root):
+def test_timeline_field_digest_moves_content_hash_does_not(root):
     """The test that keeps semantic_digest and content_hash from collapsing
-    into each other later: a field marked `on_change: log` is invisible to
+    into each other later: a field marked `on_change: timeline` is invisible to
     content_hash (a task tick must not churn a baseline) but MUST be visible
     in history."""
     files = {
@@ -190,8 +190,8 @@ Body.
     project2 = _project(root, {})
     build_mod.build(project2)
     after = _item(project2, "NOTE-A-001")
-    assert after.content_hash == content_hash_before, "log field must not move content_hash"
-    assert history.semantic_digest(after) != digest_before, "log field must move the history digest"
+    assert after.content_hash == content_hash_before, "timeline field must not move content_hash"
+    assert history.semantic_digest(after) != digest_before, "timeline field must move the history digest"
 
 
 def test_digest_independent_of_hash_format(root, monkeypatch):

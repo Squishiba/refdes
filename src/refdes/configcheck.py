@@ -43,7 +43,13 @@ from typing import Any
 from . import docs_url as docs_url_mod
 from . import parse as parse_mod
 from . import theme as theme_mod
-from .model import ON_CHANGE_MODES, SEALING_MODES, SchemaError
+from .model import (
+    ON_CHANGE_LOG_OLD,
+    ON_CHANGE_MODES,
+    SEALING_MODES,
+    SchemaError,
+    on_change_log_renamed_message,
+)
 from .parse import DuplicateKey
 
 # What a field's `type:` may be. Derived from the one mapping of declared field
@@ -185,10 +191,20 @@ def check_duplicate_keys(records: list[DuplicateKey], source: str) -> None:
 
 
 class BlockChecker:
-    """The messages for one config file. `source` is the file named in each."""
+    """The messages for one config file. `source` is the file named in each.
 
-    def __init__(self, source: str) -> None:
+    `legacy_log_ok` is the standard-pin answer (model.accepts_old_on_change_log)
+    for the pre-v3 `on_change: log` spelling: a project pinned to hardware@1
+    or @2 still names the timeline mode `log`, and its own files say so in
+    that standard's vocabulary; everywhere else the old spelling is a rename
+    error. It is passed in, not computed here, because `standard:` lives in
+    the settings file while this checker also reads the overlay, which cannot
+    see it.
+    """
+
+    def __init__(self, source: str, legacy_log_ok: bool = False) -> None:
         self.source = source
+        self.legacy_log_ok = legacy_log_ok
 
     def error(self, message: str) -> SchemaError:
         return SchemaError(f"{self.source}: {message}")
@@ -336,6 +352,17 @@ class BlockChecker:
     def mode(self, value: Any, path: str, default: str) -> str:
         if value is None:
             return default
+        if value == ON_CHANGE_LOG_OLD:
+            # vocabulary review P9: `log` was renamed to `timeline`. A project
+            # pinned below hardware@3 still carries the released spelling in
+            # its own files and keeps loading with it (the value passes
+            # through; `schema.load_project` is where the pinned standard's
+            # vocabulary says which spelling is current); anywhere else it is
+            # the rename error, naming the new spelling, the same posture
+            # P2 chose for the old `history:` key.
+            if self.legacy_log_ok:
+                return str(value)
+            raise self.error(on_change_log_renamed_message(path))
         if value not in ON_CHANGE_MODES:
             raise self.wrong(path, f"one of {', '.join(ON_CHANGE_MODES)}", value)
         return str(value)
@@ -632,15 +659,19 @@ class BlockChecker:
                 self.string_list(spec.get(key), f"{path}.{key}", "a list of status values")
 
 
-def validate_settings(raw: dict[str, Any], source: str) -> dict[str, Any]:
+def validate_settings(
+    raw: dict[str, Any], source: str, *, legacy_log_ok: bool = False
+) -> dict[str, Any]:
     """Validate every nested block of the project settings file.
 
     Returns the resolved values -- defaults filled, types checked -- so
     `load_project` builds its objects from these and never re-reads a block
     unvalidated. `standard:` is checked for keys only and resolved by
-    `standards.resolve_schema`, which owns what it may be.
+    `standards.resolve_schema`, which owns what it may be. `legacy_log_ok`
+    (see `BlockChecker`) is the caller's standard-pin answer for the
+    pre-v3 `on_change: log` spelling.
     """
-    check = BlockChecker(source)
+    check = BlockChecker(source, legacy_log_ok=legacy_log_ok)
     check.standard(raw)
     return {
         "site": check.site(raw),
@@ -654,14 +685,19 @@ def validate_settings(raw: dict[str, Any], source: str) -> dict[str, Any]:
     }
 
 
-def validate_overlay(raw: dict[str, Any], source: str) -> None:
+def validate_overlay(
+    raw: dict[str, Any], source: str, *, legacy_log_ok: bool = False
+) -> None:
     """Validate the project's own `types:`/`link_types:`/`sets:`.
 
     Structure only: the merged result still goes through `load_project`'s
     parsing loop, which owns the cross-checks (an unknown link name, a
-    `required_when:` pointing at a field that is not there).
+    `required_when:` pointing at a field that is not there). `legacy_log_ok`
+    is `validate_settings`'s answer for the pre-v3 `on_change: log` spelling,
+    passed through by `load_project`, which is the only place that can see
+    both files at once.
     """
-    check = BlockChecker(source)
+    check = BlockChecker(source, legacy_log_ok=legacy_log_ok)
     check.sets(raw)
     check.link_types(raw)
     check.types(raw)

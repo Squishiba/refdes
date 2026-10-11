@@ -256,7 +256,7 @@ types:
   requirement:
     fields:
       status:  { type: enum, choices: [draft, active, retired], default: draft }
-      owner:   { type: person, on_change: log }
+      owner:   { type: person, on_change: timeline }
     body: { on_change: invalidate, required: true }
 ```
 
@@ -319,12 +319,12 @@ distinction is each field's [`on_change:`](change-tracking.md) mode:
 
 | Field | `on_change:` | What it's for |
 |---|---|---|
-| `source:` | `log` | Where a value or decision came from — a spec section, a datasheet, a conversation. Doesn't affect whether the item's content is still correct. |
-| `note:` | `log` | An aside that's neither where something came from nor part of the item's actual content — a loose "worth remembering" field. |
+| `source:` | `timeline` | Where a value or decision came from — a spec section, a datasheet, a conversation. Doesn't affect whether the item's content is still correct. |
+| `note:` | `timeline` | An aside that's neither where something came from nor part of the item's actual content — a loose "worth remembering" field. |
 | `rationale:` | `invalidate` | Why the content is correct. Part of the record: change it, and whatever depends on this item should be re-reviewed. |
 | `body:` | `invalidate` | Overflow content itself — a table, an image, extended prose the item's own fields have no room for. |
 
-`log` vs. `invalidate` is the line that matters, not the words themselves:
+`timeline` vs. `invalidate` is the line that matters, not the words themselves:
 `source`/`note` are metadata *about* an item, editable freely without ever
 making a downstream link suspect; `rationale`/`body` are part of what the
 item actually asserts, so a change there does. Choosing between `note:` and

@@ -1,0 +1,239 @@
+Task: P9 rename `on_change: log` -> `on_change: timeline` (all spellings, version-aware),
+plus #184 follow-up: link verb named an engine-reserved front-matter key becomes a
+load-time schema error. One PR.
+Status: finished -- PR #196 (review round: schema_json pin tests, test renames, dead constant removed).
+
+## Initial state
+
+- Branch `vocab-p9-timeline-and-184` at 259cf40, clean tree.
+- Interpreter `/home/jorb/work/venv-refdes/bin/python`, CLI form
+  `PYTHONPATH=$PWD/src .../python -m refdes.cli ...`.
+- AGENTS.md + .scratch/TASK.txt re-read.
+
+## Occurrence count (CHANGE 1) — counted myself, as instructed
+
+- `on_change: log` in `src/refdes/standards/hardware/v3/base.yaml`: **8 textual
+  occurrences** = 7 live annotations (source :114, note :115, owner :119,
+  refdes :254, group.title :276, group body :278, tasks :302) + 1 comment
+  (:65). The review's "six field annotations" is stale: `tasks` (:302, H6) and
+  the group `title`/`body` pair (:276/:278) post-date it.
+- v1/v2 standards (RELEASED, CHANGELOG 0.4.0/0.5.0): v1/base.yaml has 5
+  `on_change: log` (:13,:14,:17,:82,:116), v2/base.yaml 5 (:58,:59,:62,:128,:162),
+  and each ships `presets/design-debate.yaml` with `chat_id` on_change: log.
+  -> The task's premise "no released standard carries log" is FALSE for v1/v2.
+  Posture decision below.
+- No `history:`-style key in v1/v2 standards (P2's key never lived in the
+  bundled standards; that's why P2 needed no version gate and P9 does).
+
+## Old-spelling posture (matches P2's hard error, gated by standard pin)
+
+- P2 precedent = hard error naming the new spelling (project key + item key),
+  item-level errors but still applies the override.
+- Gate: the rename belongs to hardware@3. `standard_version` (model.Project) is
+  set iff the project pins a bundled base with an integer version.
+  - pin >= 3 or no pin: `log` is a hard error "…was renamed to…timeline…" at
+    (a) project setting on_change.default, (b) type/field/body annotations,
+    (c) item front-matter overrides (error + still applied as `timeline`,
+    exactly P2's item-level posture).
+  - pin 1/2: released standards carry `log` in their own yaml; those pins keep
+    loading unchanged. Annotations keep the spelling `log` internally (audit/
+    vocabulary output stays faithful); item overrides are normalised to the
+    canonical `timeline` internally (behaviour-identical) so every downstream
+    consumer keeps reading one canonical vocabulary.
+- Canonical modes become (invalidate, timeline, ignore). Downstream consumers
+  only ever compare against INVALIDATE (build.py, cli.py) or read
+  FieldSpec.on_change back out (render/audit/vocabulary), so keeping `log` in
+  FieldSpec under pre-v3 pins cannot change behaviour. Verified by grep
+  (src/refdes/{build,cli,model,schema_json}.py) — membership checks are only
+  on author-supplied *override* values (parse/model) and config validation.
+
+## Progress
+
+- Read: vocabulary-review.md P9/P2/P20 sections, change-tracking.md,
+  schema-reference.md on_change table, model.py constants, v3/base.yaml,
+  parse.py _apply_change_override/_build_item, configcheck.py mode()/
+  field_spec()/type_entry()/link_types(), schema.py load_project flow +
+  standard_version extraction (:911-923), P2 in-prog-log, test_change_policy_on_change_key.py.
+
+### Engine (done, each gate verified live on scratch projects)
+
+- `model.py`: `TIMELINE`, `ON_CHANGE_MODES=(INVALIDATE,TIMELINE,IGNORE)`,
+  `ON_CHANGE_LOG_OLD`, `accepts_old_on_change_log(standard_version)`
+  (= pin is not None and < 3).
+- `v3/base.yaml`: all 8 `on_change: log` -> `timeline` (the 7 annotations +
+  the :65 comment). v1/v2 untouched (released).
+- `configcheck.py`: `BlockChecker(source, legacy_log_ok=False)`, `mode()`
+  rename-error / legacy passthrough; `validate_settings`/`validate_overlay`
+  take keyword-only `legacy_log_ok`.
+- `schema.py`: pin hoisted before validation (`legacy_log_ok` threaded);
+  field/body annotation gates (keep `log` under pre-v3 pins, rename error
+  otherwise); `_reject_reserved_link_verb(name, where)` on every resolved
+  link verb name AND declared `inverse:` (#184). Types-loop guard NOT added:
+  `types.<t>.links:` can only name verbs already declared in `link_types:`
+  (else "is not a declared link_type"), so the loop guard covers all paths.
+- `parse.py`: `_apply_change_override` canonicalises `log`->`timeline` in
+  scalar/`mode:`/`fields:` spellings; hard error naming `timeline` unless
+  the pin is pre-v3; error-but-applied on items (P2 posture).
+- `schema_json.py`: `_on_change_override_def(legacy_log_ok)`; enum carries
+  `log` only for pre-v3 pins.
+- Repo `refdes-schema.yaml:45` (`date` on the decision type) renamed (repo
+  pins hardware@3); `refdes check` on the repo: same pre-existing content
+  error + 2 warnings as before, no schema errors.
+- `history.py` docstring reference renamed.
+
+- Live verification: v2-pin project with `log` in settings default + overlay
+  annotation + item override -> loads, 0 errors. v3 pin: settings default and
+  overlay annotation -> configuration error exit 2 naming `timeline`; item
+  scalar and `mode:` dict -> ERROR + override applied as `timeline`. Item
+  list-form #184 repro now dies at load with the collision error.
+  `refdes schema --json` before/after diff = exactly the 3 enum sites.
+
+### Docs (done)
+
+- change-tracking.md (table, prose, "Why `timeline` exists", examples, audit
+  sample), schema-reference.md (mode list, sets/type examples, front-matter
+  table, tasks line, + new reserved-verb paragraph in the `link_types`
+  section with the live reserved-key list from parse.py), authoring.md,
+  standard-library.md (only the mode references; `log`-type prose kept),
+  concepts.md table, troubleshooting.md P2 entry's mode list, cli-reference.md
+  audit sample (matches live `refdes audit` output now), output.md JSON
+  example, design-log.md. `docs-site/gen_examples.py` regenerated (vocabulary.md
+  unchanged; schema-reference.md region updated); test_docs_examples passes.
+- vocabulary-review.md: P9 "Landed (2026-10-11)" note added (8-occurrence
+  correction, pin-gated posture, revise-can't-rewrite-values note, P20 pair
+  now moot -> no differs_from).
+
+### Tests (done)
+
+- Functional log->timeline renames in unpinned/v3 test schemas: test_extends,
+  test_composition, test_calc, test_change_policy_on_change_key, test_history,
+  test_history_edited, test_tasks (comments), test_standards (:449 unpinned
+  only; the v1-pinned overlay test at :220 KEEPS `log` -- live regression
+  that pre-v3 pins still read it).
+- New in test_change_policy_on_change_key.py: settings/field/body rename
+  errors (unpinned), item scalar/mode/fields error-but-applied, and
+  `test_pre_v3_pin_still_reads_the_old_log_mode` (v2 pin: default, overlay
+  annotation, standard's own `source` field all keep `log`; item override
+  reads back as `timeline`).
+- New file test_reserved_link_verb.py: #184 collision on `on_change` (verb +
+  explicit inverse), the whole reserved class loop, ordinary verb loads.
+- Fixture `hardware3_resolved.json` re-pinned via .scratch/repin_fixture.py
+  (oracle_dump.resolved_dump), 21 lines moved to `timeline`;
+  hardware2_design_debate_resolved.json UNCHANGED (pin gate holds at the
+  oracle level).
+
+### Notes / findings to carry into the PR body
+
+- The task's premise "no released standard carries `log`" is false: released
+  hardware@1/@2 spell the mode `log` in their own yaml -- hence the pin gate,
+  which is exactly the P2 posture restricted to where the old name can still
+  legitimately appear.
+- #184's list-form variant exited 0 with links silently dropped (recorded in
+  .scratch/rf/verb184) -- the guard turns both spellings into exit-2 config
+  errors.
+- No migration.yaml entry: its categories (links/fields/citation_keys/
+  merge_types) rename keys, not values; P2 set the precedent that the
+  v2->v3 upgrade surfaces load errors naming the new spelling and the author
+  renames by hand.
+
+### Upgrade-path verification (ran the actual command)
+
+- v2 project with `log` overlay annotation: `refdes standard upgrade --to 3`
+  -> "refused: rewritten project no longer loads: types.memo.fields.title:
+  on_change mode 'log' was renamed to 'timeline' ..."; pin stays v2.
+- v2 project with an item `on_change: log`: upgrade -> "refused: rewritten
+  project has parse errors -- rolled back" with the item rename error. Both
+  halves transactional; the error text is the hand-rename guidance.
+
+### Sabotage (required by the task, both reverted, grep "SABOTAGE" clean)
+
+- `accepts_old_on_change_log` -> always False: corrected on re-run (see
+  Review round 2) -- FULL suite: 49 failed + 6 errors, including the whole
+  `refdes standard` v1/v2 resolution family in test_standards.py (released
+  standards stop loading -- the exact catastrophe the pin gate prevents),
+  test_pre_v3_pin_still_reads_the_old_log_mode, the
+  hardware2_design_debate oracle row, and the v1/v2 test_diagram fixtures
+  (setup errors). The earlier "14" was from a 4-file targeted subset.
+- `_reject_reserved_link_verb` -> no-op: 3 of 4 test_reserved_link_verb.py
+  tests fail (the ordinary-verb control still passes, as it should).
+- After revert: those files 116 passed.
+
+### Suite
+
+- Full run with the rename landed (before test_message_prose fix): 3 failed,
+  3515 passed, 2 skipped -- all 3 were tests asserting the literal mode list
+  "invalidate, log, ignore" in error prose (test_message_prose.py), updated
+  to timeline. Final full run pending below.
+
+### Final gates (foreground, awaited)
+
+- `PYTHONPATH=$PWD/src python -m pytest -q -p no:cacheprovider` (output:
+  .scratch/suite.txt): exit 0 -- 3518 passed, 2 skipped in 262.75s.
+- `ruff check src/refdes tests --select E9,F`: clean (repo-wide ruff default
+  set is not a valid gate, per AGENTS.md).
+- `docs-site/gen_examples.py --check`: vocabulary.md up to date.
+
+## Review round 1 (PR #196, chunk 2 requested changes)
+
+1. schema_json pin branch now tested: new
+   `test_editor_schema_carries_log_only_where_the_cli_accepts_it` in
+   test_schema_json.py checks all three on_change enums (scalar, mode:,
+   fields' additionalProperties) for v2 pin / v3 pin / no pin -- `log`
+   present iff the CLI accepts it, `timeline` everywhere. Sabotage:
+   forcing legacy_log_ok=False fails it (v2 case), forcing True fails it
+   (v3/none cases); restored, grep SABOTAGE clean, 19 passed.
+2. test_on_change_override_inherited_from_defaults_is_reported_at_the_
+   defaults_line: `status: log` -> `timeline` (it is not a legacy-posture
+   test) + `assert not project.errors` pins that it no longer rides the
+   rename path.
+3. Renamed stale identifiers: test_calc test_log_and_ignore... ->
+   test_timeline_and_ignore..., log_hash -> timeline_hash, test_log_field_
+   does_not_disturb... -> test_timeline_field_does_not_disturb... (found
+   by the leftover grep), docstring; test_history
+   test_log_field_sabotage... -> test_timeline_field_digest...;
+   test_history_edited test_an_on_change_log_edit... ->
+   test_an_on_change_timeline_edit...
+4. Dead `ON_CHANGE_OVERRIDE_DEF` constant deleted from schema_json.py
+   (grep: zero consumers anywhere).
+5. Work-log status line -> finished, PR #196.
+
+Deliberate remaining `log` hits (posture, verified by grep): v1/v2
+base.yaml + design-debate presets (released standards, frozen -- 12
+lines); schema.py:113 and configcheck.py:191/:670/:694 comments
+describing the pre-v3 spelling; test_standards.py:220 (v1-pinned
+overlay keeps `log` as a live pre-v3-pin regression);
+test_change_policy_on_change_key.py's rename-error tests (:261/:270/
+:278/:290/:300) and LEGACY_PIN v2-pin tests (:356/:371) -- those
+exist to exercise the old spelling; fixtures: v2 resolved json
+(unchanged, pre-v3 pin) and the 5 "log" hits in hardware3_resolved.
+json are the log *type* name.
+
+## Review round 2 (PR #196, chunk 1 requested changes)
+
+1. Gate-off sabotage RE-RUN on this head, full suite:
+   `PYTHONPATH=$PWD/src .../python -m pytest -q -p no:cacheprovider`
+   (saved at .scratch/suite-gateoff.txt): exit 1 -- **49 failed, 3464
+   passed, 2 skipped, 6 errors in 261.31s**. The 6 errors are the v1/v2
+   test_diagram fixtures failing at setup (the released standards cannot
+   load). Matches the reviewer's 49+6; the PR body's old "14" (a 4-file
+   subset) corrected via gh api. Restored, grep SABOTAGE clean.
+2. `verb-named-reserved-key.fixed.md` -> `.breaking.md` (git mv) and the
+   bullet now opens **Breaking:**. Rule applied: changelog.d/README.md
+   defines breaking as "existing projects must change" -- a project that
+   declared a reserved-name verb must rename it to load again -- and the
+   repo's precedent for previously-silent-now-error transitions is
+   breaking (duplicate-mapping-key.breaking.md: "A key written twice ...
+   is now a build error").
+3. The two byte-identical rename-error f-strings (configcheck mode(),
+   schema._on_change_log_renamed) now call one shared
+   `model.on_change_log_renamed_message(where)`; output byte-identical,
+   pinned by the existing exact-substring tests (188 targeted passed).
+   Ruff F401 --fix dropped the now-unused TIMELINE imports (and briefly
+   ate the new schema.py import -- caught by the targeted run, restored).
+4. docs/troubleshooting.md: the P2 settings entry now says pins to
+   `hardware@1`/`@2` still accept `log`.
+- Deliberately left: the `_standard_pin` ordering nit (reviewer agreed --
+  edge case: a malformed `standard:` reports from resolve_schema later,
+  and load_project's pin read only gates one setting).
+- Final gates: full suite foreground exit 0, 3519 passed / 2 skipped
+  (264.91s); ruff E9,F clean; gen_examples --check clean.

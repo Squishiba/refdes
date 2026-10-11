@@ -289,3 +289,42 @@ def test_check_refreshes_schema_json_and_warns_when_stale(tmp_path, capsys):
     cli_mod.main(["-c", str(tmp_path / "refdes-project.yaml"), "check"])
     out = capsys.readouterr().out
     assert "schema.json was older than" in out
+
+
+def _on_change_mode_enum(project):
+    doc = schema_json_mod.build_schema(project)
+    override = doc["$defs"]["on_change"]["oneOf"]
+    return (
+        set(override[0]["enum"]),
+        set(override[1]["properties"]["mode"]["enum"]),
+        set(override[1]["properties"]["fields"]["additionalProperties"]["enum"]),
+    )
+
+
+def test_editor_schema_carries_log_only_where_the_cli_accepts_it(tmp_path):
+    """P9's invariant for the editor schema: never stricter or looser than
+    the CLI. The CLI accepts the old `log` spelling only for a project
+    pinned below hardware@3, so `refdes schema --json` lists it in the
+    on_change enums exactly there -- and `timeline` everywhere."""
+    cases = [
+        ("v2", "standard: { base: hardware, version: 2 }\n", True),
+        ("v3", "standard: { base: hardware, version: 3 }\n", False),
+        (
+            "none",
+            "types:\n"
+            "  note:\n"
+            "    prefix: NOTE\n"
+            "    fields:\n"
+            "      status: { type: text }\n",
+            False,
+        ),
+    ]
+    for name, pin, expects_log in cases:
+        root = tmp_path / name
+        root.mkdir()
+        write_project_config(root, f"site: {{ title: T, out: _site }}\n{pin}")
+        enums = _on_change_mode_enum(_build_at(root))
+        for enum in enums:
+            assert ("log" in enum) is expects_log, name
+            assert "timeline" in enum, name
+            assert {"invalidate", "ignore"} <= enum, name

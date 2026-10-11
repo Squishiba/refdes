@@ -62,7 +62,7 @@
 #    `rationale`, `source`, `note`, and the log's `summary` all stay exactly
 #    as they were: `rationale` because `required_when: {status: rejected}`
 #    can require a field but not a paragraph sitting inside prose; `source`
-#    and `note` because they are `on_change: log`, and folding either into
+#    and `note` because they are `on_change: timeline`, and folding either into
 #    an `on_change: invalidate` field would silently make a provenance note
 #    invalidate downstream links; the log's `summary` because it is
 #    required. Phase 4a later merged decision into log within this unreleased
@@ -111,12 +111,12 @@
 sets:
   provenance:
     fields:
-      source: { type: text, on_change: log, doc: "Where the item's content came from — a spec section, a datasheet, a conversation. Kept out of the content hash, so correcting it never marks downstream items suspect." }
-      note: { type: text, on_change: log, doc: "A free-text remark about the item's provenance, kept beside the item instead of inside its body. Kept out of the content hash." }
+      source: { type: text, on_change: timeline, doc: "Where the item's content came from — a spec section, a datasheet, a conversation. Kept out of the content hash, so correcting it never marks downstream items suspect." }
+      note: { type: text, on_change: timeline, doc: "A free-text remark about the item's provenance, kept beside the item instead of inside its body. Kept out of the content hash." }
       tags: { type: list, on_change: ignore, doc: "Free-form labels for grouping and finding items; free-text search matches tags as well as titles. Kept out of the content hash." }
   stewardship:
     fields:
-      owner: { type: person, on_change: log, doc: "The person responsible for this item — who a question about it goes to. Kept out of the content hash, so ownership changes never invalidate downstream work." }
+      owner: { type: person, on_change: timeline, doc: "The person responsible for this item — who a question about it goes to. Kept out of the content hash, so ownership changes never invalidate downstream work." }
       last_reviewed: { type: date, on_change: ignore, doc: "The date this item was last reviewed. Bookkeeping only: kept out of the content hash." }
   citations:
     fields:
@@ -251,7 +251,7 @@ types:
     fields:
       title:       { doc: "What the component is, in one line. Required." }
       part_number: { type: text, on_change: invalidate, doc: "The manufacturer part number. Indexed into the parts page, alongside part numbers cited inside citations entries." }
-      refdes:      { type: list, on_change: log, doc: "Reference designators on the board — U14, R7 — where this part is placed. Kept out of the content hash." }
+      refdes:      { type: list, on_change: timeline, doc: "Reference designators on the board — U14, R7 — where this part is placed. Kept out of the content hash." }
       status:      { type: enum, choices: [candidate, selected, rejected, obsolete], default: candidate, on_change: invalidate, doc: "Where the part stands in this design. Only a selected component counts as settled and closes coverage on what it satisfies; a rejected one was considered and not chosen, and never satisfies." }
       rationale:   { type: text, on_change: invalidate, required_when: {links: alternate}, doc: "Why this part, or — when an alternate link is present — what makes that alternate not a drop-in. Required whenever an alternate link exists." }
       checks:      { type: checks, on_change: invalidate, doc: "Numeric checks: each entry compares a value from this item's calc block against a bound's limit, so a component can demonstrate compliance with a bound directly." }
@@ -273,9 +273,9 @@ types:
     preview: [title]
     coverable: false
     fields:
-      title: { type: text, required: true, on_change: log, doc: "The name of the collection. Required — an unnamed group names nothing. Kept out of the content hash, so renaming a group never marks its members suspect." }
+      title: { type: text, required: true, on_change: timeline, doc: "The name of the collection. Required — an unnamed group names nothing. Kept out of the content hash, so renaming a group never marks its members suspect." }
     include: [provenance, stewardship]
-    body: { on_change: log }
+    body: { on_change: timeline }
 
   log:
     doc: "A design-log entry — narrative work or a verdict. Entries are append-only in the authoring sense: corrections are new entries. Captured history records earlier content; an edit after capture is a warning."
@@ -299,7 +299,7 @@ types:
       rationale: { type: text, on_change: invalidate, required_when: {status: rejected}, doc: "Why this verdict was reached; required for a rejected verdict." }
       options: { type: options, on_change: invalidate, doc: "Alternatives considered for this verdict." }
       checks: { type: checks, on_change: invalidate, doc: "Numeric checks against bounds; a failed check is an error." }
-      tasks: { type: tasks, on_change: log, doc: "Tasks at the thread tip: rows with a stable id, the task's text, and its state (open, done or dropped). A continuation entry that omits tasks: keeps the nearest prior list; an explicit empty list clears it; a declared list replaces it whole. Kept out of the content hash, so ticking a task never marks downstream items suspect or churns a baseline." }
+      tasks: { type: tasks, on_change: timeline, doc: "Tasks at the thread tip: rows with a stable id, the task's text, and its state (open, done or dropped). A continuation entry that omits tasks: keeps the nearest prior list; an explicit empty list clears it; a declared list replaces it whole. Kept out of the content hash, so ticking a task never marks downstream items suspect or churns a baseline." }
     include: [provenance, citations, claims, invalidate_body]
     links:
       follows:   [log]

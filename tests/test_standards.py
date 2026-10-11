@@ -446,7 +446,7 @@ def test_sets_include_expands_with_own_fields_winning(tmp_path):
         "sets:\n"
         "  provenance:\n"
         "    fields:\n"
-        "      source: { type: text, on_change: log }\n"
+        "      source: { type: text, on_change: timeline }\n"
         "      tags:   { type: list, on_change: ignore }\n"
         "types:\n"
         "  requirement:\n"

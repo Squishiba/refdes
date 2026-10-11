@@ -20,8 +20,11 @@ from .model import (
     DIAGNOSTIC_LEVELS,
     ERROR,
     ITEM_LAYOUTS,
+    ON_CHANGE_LOG_OLD,
     ON_CHANGE_MODES,
     RELEASE_GATE_DEFAULTS,
+    accepts_old_on_change_log,
+    on_change_log_renamed_message,
     SEALING_BUILD,
     SEALING_HISTORY,
     SEALING_MODES,
@@ -35,7 +38,7 @@ from .model import (
     SchemaError,
     WorkspaceSpec,
 )
-from .parse import yaml_safe_load_checked
+from .parse import OVERRIDABLE, RESERVED, yaml_safe_load_checked
 
 # The project marker: every project setting lives here, and finding this file
 # is what makes a directory a refdes project.
@@ -101,6 +104,47 @@ def _legacy_config_error() -> SchemaError:
 
 def _settings_error(message: str) -> SchemaError:
     return SchemaError(f"{PROJECT_SETTINGS_NAME}: {message}")
+
+
+def _standard_pin(raw: dict[str, Any]) -> tuple[str, int | None]:
+    """The project's pinned standard base and version, without resolving it.
+
+    `load_project` needs the pin before it has a resolved standard, because
+    one setting's legal values depend on it (the pre-v3 `on_change: log`
+    spelling). Anything malformed about `standard:` is still
+    `standards.resolve_schema`'s to report -- this reads only what is already
+    plain: a known base and a plain integer version.
+    """
+    standard_cfg = raw.get("standard")
+    if isinstance(standard_cfg, dict) and standard_cfg.get("base") in standards.known_bases():
+        version = standard_cfg.get("version")
+        if isinstance(version, int) and not isinstance(version, bool):
+            return str(standard_cfg["base"]), version
+    return "", None
+
+
+def _on_change_log_renamed(where: str) -> SchemaError:
+    """The load error for the pre-v3 `log` spelling of the timeline mode."""
+    return SchemaError(on_change_log_renamed_message(where))
+
+
+# The front-matter keys the engine itself reads: the strictly reserved ones
+# and the ones a *declared field* can take over (#184: `on_change:` is a
+# per-item change-policy override, and `prefix:`/`board:`/`workspace:` carry
+# per-item hints). A link verb may not be named like any of them: front
+# matter spells that key for the engine, never for the link, so the verb
+# could never be written on an item. The whole class is one check, not a
+# per-key list -- parse.py owns the two sets, and this guard reads them
+# instead of restating them, so a future reserved key is guarded the day it
+# is added.
+def _reject_reserved_link_verb(name: Any, where: str) -> None:
+    if str(name) in RESERVED or str(name) in OVERRIDABLE:
+        raise SchemaError(
+            f"{where}: the link verb {str(name)!r} collides with the engine's "
+            f"reserved front-matter key {str(name)!r} -- items spell "
+            f"{str(name)}: for the engine's own reading, so this verb could "
+            "never be written on an item; rename the verb"
+        )
 
 
 def _validate_settings(raw: dict[str, Any]) -> dict[str, Any]:
@@ -664,12 +708,18 @@ def load_project(config_path: str | None = None, start: str = ".") -> Project:
     # before checking would let it pass as a schema key instead of naming it.
     settings = _validate_settings(raw)
     overlay = _load_schema_overlay(root)
+    # The standard pin, extracted before the blocks are validated: which
+    # spelling of the `on_change` timeline mode a file may use is decided by
+    # the standard the project is pinned to (model.accepts_old_on_change_log),
+    # and validation is the first place that answer is needed.
+    standard_base, standard_version = _standard_pin(raw)
+    legacy_log_ok = accepts_old_on_change_log(standard_version)
     # Every nested block of both files is validated here, before anything reads
     # it: an unknown key is a configuration error naming its block path, and a
-    # wrong type is one naming what it expected. Nothing below this line takes a
+    # wrong-typed block is one naming what it expected. Nothing below this line takes a
     # config value on trust -- see configcheck.py.
-    blocks = validate_settings(raw, PROJECT_SETTINGS_NAME)
-    validate_overlay(overlay, SCHEMA_NAME)
+    blocks = validate_settings(raw, PROJECT_SETTINGS_NAME, legacy_log_ok=legacy_log_ok)
+    validate_overlay(overlay, SCHEMA_NAME, legacy_log_ok=legacy_log_ok)
     # The two are disjoint by validation, so one dict is all
     # standards.resolve_schema needs: `standard:` from the settings, the
     # project's own types:/link_types:/sets: from the overlay.
@@ -697,6 +747,9 @@ def load_project(config_path: str | None = None, start: str = ".") -> Project:
     inverse_of: dict[str, str] = {}
     for name, spec in resolved_link_types.items():
         spec = spec or {}
+        _reject_reserved_link_verb(name, f"link_types.{name}")
+        if spec.get("inverse") is not None:
+            _reject_reserved_link_verb(spec["inverse"], f"link_types.{name}.inverse")
         inverse = spec.get("inverse", f"{name}_by")
         link_types[name] = LinkType(
             name=name,
@@ -722,7 +775,14 @@ def load_project(config_path: str | None = None, start: str = ".") -> Project:
         for fname, fspec in (tspec.get("fields") or {}).items():
             fspec = fspec or {}
             on_change = fspec.get("on_change", default_on_change)
-            if on_change not in ON_CHANGE_MODES:
+            if on_change == ON_CHANGE_LOG_OLD:
+                if not legacy_log_ok:
+                    raise _on_change_log_renamed(f"types.{tname}.fields.{fname}")
+                # Pre-v3 pin: keep the standard's own spelling in the resolved
+                # schema -- audit output and the vocabulary page show what the
+                # pinned standard says, and `log` behaves as `ignore` either
+                # way, so nothing downstream can tell the difference.
+            elif on_change not in ON_CHANGE_MODES:
                 raise SchemaError(
                     f"types.{tname}.fields.{fname}.on_change must be one of "
                     f"{', '.join(ON_CHANGE_MODES)}, got {on_change!r}"
@@ -768,7 +828,11 @@ def load_project(config_path: str | None = None, start: str = ".") -> Project:
 
         body_cfg = tspec.get("body") or {}
         body_on_change = body_cfg.get("on_change", default_on_change)
-        if body_on_change not in ON_CHANGE_MODES:
+        if body_on_change == ON_CHANGE_LOG_OLD and not legacy_log_ok:
+            raise _on_change_log_renamed(f"types.{tname}.body")
+        if body_on_change not in ON_CHANGE_MODES and not (
+            body_on_change == ON_CHANGE_LOG_OLD and legacy_log_ok
+        ):
             raise SchemaError(
                 f"types.{tname}.body.on_change must be one of "
                 f"{', '.join(ON_CHANGE_MODES)}"
@@ -910,17 +974,10 @@ def load_project(config_path: str | None = None, start: str = ".") -> Project:
 
     preset_provided_types: dict[str, str] = {}
     preset_provided_links: dict[str, str] = {}
-    standard_base = ""
-    standard_version: int | None = None
-    standard_cfg = raw.get("standard")
-    if isinstance(standard_cfg, dict) and standard_cfg.get("base") in standards.known_bases():
-        version = standard_cfg.get("version")
-        if isinstance(version, int) and not isinstance(version, bool):
-            standard_base = str(standard_cfg["base"])
-            standard_version = version
-            preset_provided_types, preset_provided_links = standards.preset_providers(
-                standard_cfg["base"], version
-            )
+    if standard_base and standard_version is not None:
+        preset_provided_types, preset_provided_links = standards.preset_providers(
+            standard_base, standard_version
+        )
 
     project = Project(
         title=site["title"],
