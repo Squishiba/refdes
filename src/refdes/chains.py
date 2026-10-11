@@ -617,6 +617,43 @@ def resolve_current_with_source(
     )
 
 
+def fold_at_tip(
+    project: Project,
+    tip: Item | str,
+    field: str,
+    *,
+    graph: ChainGraph | tuple[dict[str, list[Item]], dict[str, list[Item]]] | None = None,
+) -> tuple[Any, Item | None]:
+    """The same fold `resolve_current_with_source` runs, anchored at ONE tip.
+
+    On a thread with exactly one tip this returns what `resolve_current_with_source`
+    returns — same walk, same declaration rule (`_declares`), same
+    ambiguity posture — because that fold walks backward from exactly this tip.
+    The difference is an unmerged fork: `resolve_current` answers "what does the
+    thread currently conclude", and a thread with two open tips has no such
+    single answer (None), while a thread *view* must still show each open
+    branch its own branch-local value (living-notes.md §5: "forked values
+    remain branch-local"). `fold_tasks` is that per-tip fold for `tasks:`;
+    this is the same machinery for any field, so the thread view never needs a
+    second fold of its own.
+
+    Not memoized: the component cache keys on "the component's one current
+    value", which is exactly the question a per-tip fold does not ask.
+    """
+    predecessors, _successors, handles, items, _cg = _graph_view(graph, project)
+    tip_handle = _start_handle(project, tip, handles=handles)
+    if tip_handle is None:
+        return None, None
+    return _fold_from_tip(
+        project,
+        tip_handle,
+        lambda item: item.fields[field] if _declares(item, field) else None,
+        predecessors,
+        handles,
+        items,
+    )
+
+
 def resolve_current_link_with_source(
     project: Project,
     start: Item | str,

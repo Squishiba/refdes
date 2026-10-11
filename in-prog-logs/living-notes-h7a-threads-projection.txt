@@ -1,0 +1,219 @@
+Living notes H7a — the thread-view model and the index `threads` projection
+===========================================================================
+
+Branch: living-notes-h7a-threads-projection (cut from main at b7cc823).
+Started 2026-10-10. Chunk A of three (H7b = `refdes thread`, H7c = `refdes
+work`); this chunk builds ONLY the shared per-thread view function and the
+index `threads` key built from it.
+
+## Reading pass (done before any change)
+
+- AGENTS.md: verify schema/CLI claims by running the tool; graph walks read
+  `Item.resolved_links`, never raw `links`; never git stash; stage by path.
+- docs/design/living-notes-plan.md "Phase H7" (:377) — projection half of the
+  phase is ours; the two subparsers/CLI are H7b/H7c. H6's "Landed" marker style
+  (:326-330) is the marking style to follow.
+- docs/design/living-notes.md §5 (tasks at the thread tip, generated worklist
+  table, the five binding rules) and §6 (one query service, index payload,
+  "the extension must not reconstruct the chain itself").
+- docs/design/thread-workbench.md §7a sub-decisions 1-6 + W5: the task pane is
+  a CLIENT of this projection ("must not compute its own fold"), one tab per
+  open tip, derived rows in a second collapsed section, no tickable state.
+- Code, found by name (plan line numbers drifted as warned):
+  * chains.fold_tasks -> chains.py:691 (returns TipTasks per tip: tip, rows,
+    source, ambiguous — the three no-list/ambiguous states are already distinct
+    there: rows=[] declared-and-cleared, rows=None+ambiguous, rows=None+not
+    ambiguous).
+  * chains.thread_tips -> chains.py:372, thread_entries -> :401 (the connected
+    component = the thread), resolve_current/resolve_current_with_source ->
+    :563/:592, _fold_from_tip -> :526, _declares -> :451, _graph_view -> :298.
+  * render.items_json -> render.py:571; payload today: title, version,
+    boards?, workspaces?, coverage, types, items, next_ids, diagnostics.
+  * build.compute_coverage -> build.py:1142 (fills project.coverage),
+    build.run_checks -> :1608 (fills item.checks with ok/detail).
+  * blocked.resolve -> blocked.py:68 (fills project.blocked_chains),
+    blocked.by_item -> :134, blocked._is_settled -> :23 (the question: type
+    declares satisfying_statuses:/verifying_statuses: AND the current status is
+    in that list; unconfigured type => never settled).
+  * citations.verify -> citations.py:1457 (fills item.citations with
+    state in ok|unpinned|cache_missing|hash_mismatch|missing).
+  * lifecycle._rule_uncovered_requirements -> lifecycle.py:617 (stage == open),
+    _rule_unverified_requirements -> :621 (stage != verified),
+    _rule_unpinned_citations -> :586 (state unpinned),
+    _rule_missing_kept_copies -> :595 (state cache_missing) — all exclude
+    drafts; these four ARE the plan's named derived-row sources.
+
+## Decisions (written BEFORE coding, per the task)
+
+1. WHERE: new module `src/refdes/threads.py`.
+   Justification: the function composes chains + build + blocked + citations +
+   lifecycle. It cannot live in chains.py (lifecycle imports build, build
+   imports chains — a module-scope `from . import lifecycle` in chains.py would
+   be an import cycle), nor in build.py (build is the producer, not a consumer
+   of lifecycle), nor in render.py (render is already 1300 lines and H7b/H7c
+   must import the view without pulling the site renderer). `threads.py`
+   imports chains/blocked/lifecycle/model only; render imports it.
+   Public surface: `threads_projection(project, *, graph=None) -> list[dict]`,
+   JSON-serialisable, one entry per thread.
+
+2. VERDICT FOLD PER TIP: H7a needs, per tip, the folded `status`. On a settled
+   thread that is exactly `chains.resolve_current_with_source(tip, "status")`.
+   On an unmerged fork that fold is undefined (None) by design, but §5's
+   worklist table says "forked values remain branch-local", so each tip must
+   still carry ITS OWN branch's folded verdict. There is no public per-tip
+   field fold (fold_tasks is tasks-only), so I add ONE tiny public wrapper in
+   chains.py: `fold_at_tip(project, tip, field, *, graph=None) -> (value,
+   source)` = `_graph_view` + `_fold_from_tip` + `_declares` — literally the
+   machinery resolve_current_with_source uses, anchored at a given tip instead
+   of at "the component's one tip". No second fold is written; the docstring
+   states the one-tip equivalence. threads.py uses it uniformly (one rule for
+   settled and forked alike; for one-tip threads a test asserts equality with
+   resolve_current_with_source).
+
+3. WHAT COUNTS AS A THREAD: every connected component of the follows graph —
+   same definition as chains.thread_entries (§8) — restricted to items with a
+   follows edge in either direction (chains.is_threaded). A lone entry with no
+   follows either way is NOT its own thread in this projection (that is
+   render.thread_view's posture too, and it is what keeps a non-threaded
+   project's payload byte-identical: no threads -> no `threads` key at all).
+   Identity = `ref`: the thread's root (oldest entry by chains.thread_entries
+   order), named `id or key or slug` like every other view. `entries` lists
+   every member ref (so a client can map any item -> thread without walking),
+   `tips` lists tips (len > 1 == fork), plus explicit `forked` bool.
+
+4. SHAPE = THE BINDING RULES (§5, "output structure, not polish"):
+   - Rule 1, two structurally separate groups: authored tasks live at
+     tips[].tasks (per tip, fold_tasks verbatim rows); derived rows live in a
+     thread-level `derived` list. Different keys, different item shapes; a
+     derived row has no `id`/`state` fields, so it cannot sort into the
+     authors' numbering, and nothing ever writes them back (the function
+     mutates nothing; tree-hash test).
+   - Rule 2, self-closing: derived rows are COMPUTED per call from the build
+     state the lifecycle rules already consult (project.coverage, item.checks,
+     project.blocked_chains via blocked.by_item, item.citations) — fix the
+     gap, rebuild, the row is gone; there is no state to tick by construction
+     (absent keys, not null state fields).
+   - Rule 3, every open task shows its age, absolute only: each open row
+     carries `open_since: {entry, date}` from fold_tasks' source entry and that
+     entry's authored `date:`; the module imports no clock (guard test greets
+     `datetime` out of the module source), so two runs on different wall
+     clocks produce identical bytes; `--as-of` relative spans are H7b's.
+   - Rule 4, a verdict never prints alone: each tip carries `verdict`
+     (status/declared_by/declared_on/concluding) NEXT TO its `tasks` block in
+     the same tip object; `concluding` mirrors blocked._is_settled's question
+     (type declares satisfying_statuses:/verifying_statuses: and the folded
+     status is in it; neither declared -> not concluding).
+   - Rule 5 (gate) is explicitly NOT this phase's output (plan §H7), so it is
+     absent from the shape entirely.
+   - The fork rule: there is NO thread-level status/verdict key anywhere;
+     a fork shows tips[].verdict with per-tip branch-local folds (decision 2),
+     so the payload can never read as one current status.
+   - fold_tasks' distinct no-list states are kept distinct as
+     tasks.state: "declared" | "cleared" (rows: []) | "undeclared" (never
+     declared) | "ambiguous" ("task reconciliation required", rows null).
+
+5. WHICH DERIVED ROWS APPLY TO A THREAD: the thread's items = its members; a
+   row also applies when its subject is what a member's OUTGOING resolved links
+   point at (one hop, through item.resolved_links per AGENTS.md — never raw
+   links): §6's decided example shows exactly that (a log thread carries
+   `coverage REQ-... unverified` and `citation CMP-... unpinned`, neither of
+   which is a thread member). Selection predicates are the lifecycle rules the
+   plan names, verbatim (coverage stage open -> uncovered, stage != verified ->
+   unverified (uncovered wins as the label), check ok False, blocked chains
+   declared by a member, citation state unpinned/cache_missing). Rows are
+   ordered coverage < check < blocked < citation, then by ref, deterministically.
+   If this one-hop choice were wrong it would change user-visible output;
+   §6's example is the docs' own answer, so this is following, not settling.
+
+6. items_json(): `threads` inserted right after `coverage`, keyed presence =
+   non-empty projection (absent-key convention, same as boards/captured).
+   Golden fixtures: tests/fixtures/no_theme_build_hashes.json pins items.json's
+   hash for a NON-threaded project -> key absent -> unchanged (must verify by
+   running test_theme). The other two fixtures are resolved-schema dumps, not
+   payloads. No test asserts the exact key set of the payload.
+
+7. NOT BUILDING: no CLI, no serve/site panel/VS Code change, no stale-tip
+   prompt, no writes (tree-hash test around the projection).
+
+## Progress
+- [x] read plan/spec/docs/code, verified named symbols by grep
+- [x] design log written (this file, before coding)
+- [x] chains.fold_at_tip (chains.py, after resolve_current_with_source;
+      one-tip equivalence in its docstring, not memoized on purpose)
+- [x] threads.threads_projection (new src/refdes/threads.py)
+- [x] items_json threads key (render.py; inserted after coverage;
+      items_json grew an optional `graph=` parameter so render_site hands
+      down its one thread_graph -- tests/test_threads_render.py's
+      one-graph-per-build test caught the first version rebuilding it)
+- [x] tests/test_threads_projection.py (13 tests) + sabotage matrix below
+- [x] docs (output.md items.json section: paragraph tweak + `threads`
+      subsection with example + decision list; changelog.d/
+      threads-index-projection.added.md; plan Phase H7 "Landed (chunk A)"
+      note)
+- [x] suite / ruff / gen_examples / commit / push / PR
+
+## Diff summary (what actually shipped)
+- src/refdes/chains.py: +fold_at_tip (public per-tip field fold wrapper).
+- src/refdes/threads.py: new, threads_projection + the §5 shape rules.
+  Derived-row selection: coverage problems via the lifecycle rules
+  themselves (the coverable gate + draft exclusion are real logic worth
+  reusing); citation rows iterate item.citations for the two postures
+  _rule_unpinned_citations/_rule_missing_kept_copies select (the predicate
+  is a literal state test; fetching the rule's id set and re-filtering
+  would duplicate the same line with extra indirection -- documented at
+  the call site). checks from item.checks ok is False; blocked via
+  blocked.by_item. Scope = members + one hop out through resolved_links.
+- src/refdes/render.py: items_json(graph=None) gains `threads` after
+  `coverage` (absent when no threads); render_site passes its thread_graph.
+- tests/test_threads_projection.py: 13 tests.
+- docs/output.md, changelog.d/threads-index-projection.added.md,
+  docs/design/living-notes-plan.md Phase H7 landed note.
+
+## Deviations from the design log (decided during implementation)
+- Derived-row citation selection iterates item.citations states instead of
+  calling the two lifecycle rules (see diff summary; the selection sets
+  would need re-filtering anyway for the per-citation detail).
+- Derived-row "problem" key (not "state") for coverage/citation rows, so a
+  derived row can't be confused with a task row's `state`; check rows carry
+  the factual `ok`/`margin` from CheckResult, blocked rows carry `stale`.
+- items_json took the optional `graph` kwarg (not in the original design
+  notes) because the existing perf test pins one build_graph call per
+  render_site; the index CLI builds its own.
+
+## Sabotage matrix (each: break it, run tests/test_threads_projection.py, restore)
+1. Fork collapsed onto the thread-level answer (fold_tasks[:1] shared +
+   resolve_current for verdicts): FAILS
+   test_fork_keeps_everything_per_tip_and_collapses_nothing,
+   test_forked_verdicts_are_branch_local_where_resolve_current_is_none.
+2. Verdict fold via resolve_current_with_source alone (tasks still per-tip):
+   FAILS test_forked_verdicts_are_branch_local_where_resolve_current_is_none
+   only. (The two sabotages localize the two halves of the fork rule.)
+3. open_since dated/owned by the TIP instead of the DECLARING entry:
+   FAILS test_one_tip_thread_carries_tasks_with_age_and_verdict_together,
+   test_the_fold_list_states_stay_distinct.
+4. Derived rows given a task-shaped `id`: FAILS
+   test_derived_rows_read_like_problems_not_tasks only.
+5. A relative age read off time.time: FAILS
+   test_projection_never_reads_a_clock (+ the age equality).
+6. `_scope` walking raw `links` instead of `resolved_links`: NOT caught --
+   these fixtures mint composite-free link text, so the two maps agree.
+   Honest gap in the matrix: the bug would only bite on composite-keyed
+   links; noted, not papered over.
+All restored; 13/13 pass after restore (verified twice).
+
+## Gates
+- python -m pytest -q: 3414 passed, 2 skipped (full suite, re-run clean
+  after the graph fix; the first run failed tests/test_threads_render.py's one-graph-per-build assertion,
+  which is why items_json takes `graph=` now -- re-ran clean after the fix).
+- tests/test_theme.py (pinned non-threaded items.json hash): passes ->
+  the no-`threads`-key byte-identity claim holds end to end.
+- ruff: threads.py / test file clean; chains.py RUF059 on my line fixed
+  (`_successors`); the remaining render.py SIM103 and chains.py UP035 are
+  pre-existing lines outside this diff (AGENTS.md: don't silence them).
+- python docs-site/gen_examples.py --check: up to date.
+- tree-hash test (test_projection_writes_nothing) + clock-patch +
+  source-grep clock guard: pass.
+
+## Not built (chunk A scope, per plan)
+`refdes thread`, `refdes work`, `--as-of`, serve/site/VS Code changes,
+stale-tip prompt, gate rule (H8), anything that writes.
