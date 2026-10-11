@@ -233,7 +233,10 @@ edit is never a build error, and once an entry has been captured
 ```
 WARNING items/board-a/log.yaml:47 [LOG-A-003] — LOG-A-003: edited after captured
         -- current semantic content differs from the snapshot in captured event
-        1fa0259e-1c70-52ff-8fef-37ad1b96180b
+        1fa0259e-1c70-52ff-8fef-37ad1b96180b. If the edit was a correction,
+        revert it and append a new entry with `amends: [LOG-A-003]` instead;
+        otherwise there is nothing to do. See
+        https://squishiba.github.io/refdes/troubleshooting.html#the-design-log.
 ```
 
 A project on `hardware@1`/`hardware@2`, or one that sets `sealing: build` for

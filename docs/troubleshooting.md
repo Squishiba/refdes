@@ -464,11 +464,13 @@ than removed, record the old id in its replacement's
 **`LOG-A-003: edited after captured -- current semantic content differs from
 the snapshot in captured event <id>`**
 A warning, never an error: the entry was captured into `.refdes/history/` and
-has been edited since. When the entry's type is append-only — the design log
-itself — the warning adds how such an entry is corrected: revert the edit and
-append a new entry that `amends` this one. For an editable type the edit is
-legal in place, so a deliberate one needs nothing done about it; the warning
-is only the record that the snapshot no longer matches.
+has been edited since. When the entry's type is append-only and the project's
+schema declares an `amends` link that may point at it — the design log itself
+under the bundled standard — the warning adds how such an entry is corrected:
+revert the edit and append a new entry that `amends` this one. Otherwise — an
+editable type, or an append-only one whose schema declares no such verb — the
+warning only records that the snapshot no longer matches: a deliberate edit
+needs nothing done about it, and you revert it only if it was not deliberate.
 
 **`LOG-A-001 has a legacy seal record in .refdes/log-seal-board-a.yaml ... but
 is no longer in the project`**

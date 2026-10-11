@@ -618,16 +618,24 @@ def _orphan_is_history_backed(project: Project, display_id: str) -> bool:
     prefix match, every append-only type is a candidate. Prefixes may
     themselves contain hyphens (``REQ-TMP``), so the match runs to a prefix
     boundary -- the longest declared prefix the display id starts with --
-    rather than cutting at the first hyphen. Only when *every* candidate is
+    rather than cutting at the first hyphen. A type's ``legacy_prefixes``
+    open its own ids just as ``prefix`` does (ids.validate_prefixes treats a
+    legacy-prefixed id of the right type as legitimate, not a mismatch), so
+    they claim an orphan the same way. Only when *every* candidate is
     history-backed is the orphan one -- any doubt keeps today's error, because
     reading a build-sealed deletion as a mere warning would remove the
     deletion lock from the type that still has it.
     """
     append_only = [spec for spec in project.types.values() if spec.append_only]
-    matched = [spec for spec in append_only if display_id.startswith(f"{spec.prefix}-")]
-    if matched:
-        longest = max(len(spec.prefix) for spec in matched)
-        candidates = [spec for spec in matched if len(spec.prefix) == longest]
+    claimed = [
+        (spec, prefix)
+        for spec in append_only
+        for prefix in (spec.prefix, *spec.legacy_prefixes)
+        if display_id.startswith(f"{prefix}-")
+    ]
+    if claimed:
+        longest = max(len(prefix) for _spec, prefix in claimed)
+        candidates = [spec for spec, prefix in claimed if len(prefix) == longest]
     else:
         candidates = append_only
     return bool(candidates) and all(spec.sealing == SEALING_HISTORY for spec in candidates)

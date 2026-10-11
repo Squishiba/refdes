@@ -62,9 +62,11 @@ CITATION_PAGE_DOCS = f"{DOCS_URL}/troubleshooting.html#citations"
 
 # The user docs for the design log's append-only rules: the two `sealing:
 # build` sealed-entry errors, the `edited after captured` warning a
-# history-backed type gets in their place, and the one move that is legal in
-# both -- a new entry that `amends` the old one. troubleshooting.md's own
-# `## The design log` heading, which is the page that quotes the warning word
-# for word and gives the advice the warning now carries; slug checked against
+# history-backed type gets in their place, and the remedy that warning gives
+# on its branches -- a new entry that `amends` the old one where the schema
+# lets an `amends` link point at the type, nothing to do (revert it only if
+# the edit was not deliberate) everywhere else. troubleshooting.md's own
+# `## The design log` heading, which is the page that quotes the warning's
+# opening and walks its remedy branches; slug checked against
 # `pages._slugify` and against the anchors of a real build of docs-site/.
 DESIGN_LOG_DOCS = f"{DOCS_URL}/troubleshooting.html#the-design-log"

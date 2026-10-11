@@ -24,6 +24,7 @@ site: { title: Edited Test, out: ../site_out_edited }
 id: { width: 3, ledger: .refdes/ids.yaml }
 link_types:
   follows: { inverse: followed_by, label: Follows }
+  amends: { inverse: amended_by, label: Amends }
 types:
   log:
     prefix: LOG
@@ -33,6 +34,7 @@ types:
       owner: { type: text, on_change: log }
     links:
       follows: [log]
+      amends: [log]
 """
 
 TWO = (
@@ -272,6 +274,8 @@ def test_the_warning_carries_the_remedy_and_the_docs_page(tmp_path, capsys):
 REMEDY_SCOPE_SCHEMA = """\
 site: { title: Remedy Scope, out: ../site_out_remedy }
 id: { width: 3, ledger: .refdes/ids.yaml }
+link_types:
+  amends: { inverse: amended_by, label: Amends }
 types:
   log:
     prefix: LOG
@@ -279,6 +283,8 @@ types:
     sealing: history
     fields:
       summary: { type: text, required: true }
+    links:
+      amends: [log]
   memo:
     prefix: MEMO
     fields:
@@ -326,6 +332,103 @@ def test_the_amends_remedy_is_offered_only_where_following_it_is_legal(
     assert "amends" not in memo
     log_line = next(line for line in lines if "[LOG-001]" in line)
     assert "amends: [LOG-001]" in log_line
+
+
+AMENDS_ABSENT_SCHEMA = """\
+site: { title: Amends Absent, out: ../site_out_amends_absent }
+id: { width: 3, ledger: .refdes/ids.yaml }
+link_types:
+  amends: { inverse: amended_by, label: Amends }
+types:
+  log:
+    prefix: LOG
+    append_only: true
+    sealing: history
+    fields:
+      summary: { type: text, required: true }
+    links:
+      amends: [log]
+  memo:
+    prefix: MEMO
+    append_only: true
+    sealing: history
+    fields:
+      summary: { type: text, required: true }
+"""
+
+
+def test_an_append_only_type_without_an_amends_verb_gets_no_amends_advice(
+    tmp_path, capsys
+):
+    """The gate is not `append_only` alone: the `amends:` sentence is advice,
+    and advice is only sound where the project's own schema lets an `amends`
+    link point at the entry's type. A second append-only type declaring no
+    such verb (a project overlay replaces its bundled `log`'s links, so even
+    `log` can be in this shape) was still told to `append a new entry with
+    `amends: [MEMO-001]``, and following it was a silently-dropped unknown
+    field -- the reviewer's residual probe. The warning may *name* the verb
+    to explain why it is not offered; it must not tell you to write it, and
+    it must not call the type editable. What the warning *does* tell you to
+    do (write the `amends:` for the type that declares the verb) is followed
+    here and must stay legal."""
+    write_project_config(tmp_path, AMENDS_ABSENT_SCHEMA)
+    items = tmp_path / "items"
+    items.mkdir()
+    (items / "log.yaml").write_text(ONE_EACH, encoding="utf-8")
+    cfg = str(tmp_path / "refdes-project.yaml")
+    assert cli_mod.main(["-c", cfg, "build"]) == 0
+    for item_id in ("LOG-001", "MEMO-001"):
+        assert cli_mod.main(["-c", cfg, "history", "capture", item_id]) == 0
+    capsys.readouterr()
+
+    _edit_summary(tmp_path, "LOG-001", "First entry, edited.")
+    _edit_summary(tmp_path, "MEMO-001", "First memo, edited.")
+    assert cli_mod.main(["-c", cfg, "check"]) == 0
+    lines = [
+        line for line in capsys.readouterr().out.splitlines()
+        if "edited after captured" in line
+    ]
+    assert len(lines) == 2
+    memo = next(line for line in lines if "[MEMO-001]" in line)
+    assert "`amends: [MEMO-001]`" not in memo  # not told to write the link
+    assert "type is editable" not in memo  # it is append-only -- do not lie
+    log_line = next(line for line in lines if "[LOG-001]" in line)
+    assert "amends: [LOG-001]" in log_line
+
+    # Follow the advice that IS given: append a log entry amending LOG-001.
+    with (items / "log.yaml").open("a", encoding="utf-8") as fh:
+        fh.write(
+            "  - id: LOG-002\n    type: log\n"
+            "    summary: Correction.\n    amends: [LOG-001]\n"
+        )
+    assert cli_mod.main(["-c", cfg, "check"]) == 0  # advice leads to 0 errors
+
+    # And following the memo's own wording -- leaving the deliberate edit
+    # alone -- also stays green.
+    assert cli_mod.main(["-c", cfg, "check"]) == 0
+
+
+def test_an_unknown_type_is_not_claimed_editable(tmp_path):
+    """`spec is None` must not fold into the editable branch: the tool knows
+    nothing about an undeclared type, and asserting its editability is a
+    claim the code cannot support. A locally parsed item cannot reach this
+    (parse refuses an unknown type before it joins the project), but an item
+    whose type is simply not in the *local* resolved schema can -- the state
+    here is reproduced at API level by dropping the type after the load,
+    exactly the shape a foreign item's type has on a board that does not
+    declare it."""
+    cfg = _setup(tmp_path, TWO)
+    loader.load_tree(cfg, write=True)
+    _edit_summary(tmp_path, "LOG-001", "Rewritten after capture.")
+    project, _stale = loader.load_tree(cfg, write=True)
+    del project.types["log"]
+    build_mod.warn_edited_after_captured(project)
+    warnings = _edited_warnings(project)
+    assert len(warnings) == 1
+    assert "type is editable" not in warnings[0].message
+    assert "Nothing in this project's schema describes the entry's type" in (
+        warnings[0].message
+    )
 
 
 def test_a_project_with_no_history_is_silent_and_gains_no_directory(

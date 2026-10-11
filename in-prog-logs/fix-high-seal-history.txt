@@ -137,3 +137,134 @@ Both findings re-confirmed on d71c143, fixed at the root cause, each with a
 regression test sabotaged (fails pre-fix) and restored (passes post-fix);
 docs text corrected and re-verified by running; fragments added. Task
 finished.
+
+# Review follow-up (reviewer report .scratch/review/review-180.txt, PR #180)
+
+Five triaged items; each re-confirmed on head 323dfe3 before fixing.
+
+## Item 1 (MEDIUM): legacy_prefixes ignored by the prefix match — FIXED
+
+Re-confirmed: `bash .scratch/review-180/probe_legacy_prefix4.sh` on head —
+`check` printed `ERROR DEC-001 — DEC-001 is append-only and was sealed...`
+with `exit=1`, and `build --reseal` wrote `reseals: [{action: remove, id:
+DEC-001}]` dropping it from `sealed:` — the silent record loss, reached via
+a legacy prefix the match never consulted.
+
+Fix (seal.py `_orphan_is_history_backed`): match over `(spec.prefix,
+*spec.legacy_prefixes)` per append-only type, keeping the
+longest-declared-prefix tie-break (now longest over *matched prefixes*,
+not over prefixes). Precedent cited in the docstring:
+`ids.py:339` (`validate_prefixes`) treats a legacy-prefixed id of the
+right type as legitimate.
+
+Post-fix probe: `check` exit 0 with
+`WARNING DEC-001 — DEC-001 has a legacy seal record in .refdes/log-seal.yaml`;
+`--reseal` keeps the record byte-for-byte.
+
+Tests: `tests/test_history_seal.py::test_a_legacy_prefixed_record_is_classified_by_its_type`
+(the probe pinned: hardware@3 + overlay `log: sealing: build`, DEC-001
+deleted after flipping to history) and
+`tests/test_history_seal.py::test_the_longest_declared_prefix_wins_the_orphan`
+(nested `REQ` build-sealed beside `REQ-TMP` history-backed; the review
+noted this tie-break had no coverage).
+- Sabotage A (reverted the legacy-prefix hunk only):
+  `pytest tests/test_history_seal.py -k "legacy_prefixed or longest_declared"`
+  → legacy test FAILED (`assert 1 == 0`, error exit), nested test passed
+  (it exercises no legacy prefix — correct discrimination).
+- Sabotage B (tie-break removed, `candidates = matched`): nested test
+  FAILED (`assert 1 == 0`), legacy test passed.
+- Restored: 27 passed.
+
+## Item 2 (LOW-MEDIUM): amends remedy gated on append_only, not schema legality — FIXED
+
+Re-confirmed: `python .scratch/review-180/probe_amends_residual.py` on
+head — append-only `memo` (and, in that overlay, `log` too — the overlay
+replaced log's links, so no type declared `amends`) was told `append a
+new entry with `amends: [MEMO-001]``, and following it printed only
+`WARNING ... unknown field 'amends' on memo.` at exit 0 (silently
+dropped). The work log's earlier "beyond what the finding needs" note
+is overridden per the triage instruction.
+
+Fix (build.py): new `_amends_may_point_at(project, item_type)` asks the
+resolved schema (via `project.accepts_type`, so subtypes and
+unrestricted lists behave as link validation does); the `amends:`
+sentence is emitted only when some declared type's `amends` link may
+point at the entry's type. New branch for append-only-without-the-verb:
+"...is append-only, but this schema declares no `amends` link that may
+point at it, so a deliberate edit needs nothing done about it; revert it
+if it was not deliberate." (Not "editable" — that would be false.)
+
+Fixture discovery during this fix: an overlay's `types:` replaces the
+bundled type's links wholesale (verified: REMEDY_SCOPE_SCHEMA's `log`
+loads with `links == {}`), so the PR's two remedy tests were pinning the
+`amends:` sentence for schemas whose resolved schema forbids it — exactly
+the residual bug. Both fixtures (`FOLLOWS_SCHEMA`, `REMEDY_SCOPE_SCHEMA`)
+now declare the `amends` verb/link, preserving their intent honestly.
+
+Test: `tests/test_history_edited.py::test_an_append_only_type_without_an_amends_verb_gets_no_amends_advice`
+(append-only `memo` without the verb: no executable `amends: [MEMO-001]`
+advice, no false "editable"; log keeps `amends: [LOG-001]` and the test
+follows that advice — a real `amends: [LOG-001]` entry — staying at 0
+errors). Post-fix probe run confirms both probe types now get the
+append-only-without-verb wording.
+- Sabotage (reverted the build.py branch to the old two-branch gate):
+  `-k "amends_verb or unknown_type"` → both new tests FAILED (memo line
+  contained the advice; unknown type claimed editable). Restored: file
+  14 passed.
+
+## Item 3 (LOW): unknown type claimed editable — FIXED
+
+Re-confirmed at code level: old build.py `if spec is not None and
+spec.append_only ... else: "The entry's type is editable"` — `spec is
+None` asserted editability. CLI-level repro is not reachable for *local*
+items (parse refuses an unknown type before the item joins the project,
+parse.py:841-846 `return None`), so the state was reproduced at API
+level — captured item live, type removed from the resolved schema, which
+is the shape a foreign item's type has locally.
+Test: `tests/test_history_edited.py::test_an_unknown_type_is_not_claimed_editable`
+asserts neutral wording ("Nothing in this project's schema describes the
+entry's type...") and no "type is editable". Fails under the Item-2
+sabotage (same reverted branch), passes with the fix.
+
+## Item 4 (stale copies): docs_url.py comment, README sample — FIXED
+
+- `docs_url.py` DESIGN_LOG_DOCS comment claimed the page "quotes the
+  warning word for word"; it quotes the opening and walks the branches
+  (now three remedies). Rewritten.
+- README's sample block showed the pre-F4 truncated message; regenerated
+  the real warning (scratch probe project under `.scratch/readme-probe`;
+  piped output is one line, so the block's wrapping remains the README's
+  own convention) and updated the block to the current message, amends
+  branch included (hardware@3's bundled log declares `amends: [log]`, so
+  the sample type keeps that branch).
+- Also updated (behavior change of Item 2): `docs/troubleshooting.md`'s
+  `## The design log` paragraph said the amends advice comes "when the
+  entry's type is append-only"; now says append-only *and* the schema
+  declaring an `amends` link at the type, with the otherwise-branch
+  named. Noted but NOT touched: `docs/standard-library.md:632-636`
+  quotes the same warning without its `See ...` ending — pre-existing
+  incompleteness (the ending predates this PR), branch shape still
+  correct for its log entry, out of this packet.
+
+## Item 5: fragments — DONE
+
+`changelog.d/hyphenated-seal-prefix-orphan.fixed.md` now states the
+guarantee over `prefix` *and* `legacy_prefixes` with the longest-match
+tie-break; `edited-after-captured-remedy-scope.fixed.md` now states the
+gate as "some declared type's `amends` link may point at the entry's
+type", both new branches, and the README/troubleshooting doc updates.
+
+## Gates
+
+- Full suite (foreground):
+  `PYTHONPATH=$PWD/src /home/jorb/work/venv-refdes/bin/python -m pytest -q -p no:cacheprovider > .scratch/suite.txt 2>&1; echo exit=$?`
+  → exit 0, `3386 passed, 2 skipped in 257.18s (0:04:17)`. Baseline was
+  3382 passed, 2 skipped; +4 = the four new tests. No flake hit (the
+  known serve-test flake did not fire; no re-run needed).
+- `ruff check --select E9,F src tests` → All checks passed!
+- `docs-site/gen_examples.py --check` → up to date, exit 0.
+
+## Status
+
+All five items fixed, each re-confirmed first; sabotages recorded above.
+Task finished.
