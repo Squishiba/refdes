@@ -235,3 +235,34 @@ Review follow-up (chunk-1 review findings, PR #190):
   --check -> both files up to date (edits sit outside the generated blocks).
 - Committed and pushed to vocab-p20-differs-from; summary posted as a PR
   comment. Not merged/closed/approved.
+
+Review follow-up 2 (re-review chunk 2, .scratch/review-190-r2-chunk2.txt):
+- F1 [moderate, real bug]: the per-field differs_from loops in
+  vocabulary._fields_table (html) and vocabulary.render_markdown (md) decided
+  append-vs-replace on the ORIGINAL f.doc, so a doc-less field declaring two
+  or more pairs kept only the last -- every earlier sentence silently dropped
+  from both pages. Reproduced first against the shipped code (scratch probe:
+  FieldEntry with doc="" and two pairs -> first: False | second: True on
+  both renderers). Fixed by accumulating the lines and joining per renderer
+  ("<br>" html, " " md); a doc-less field keeps every pair, the
+  with-doc/no-pair byte-identity cases are unchanged. New test
+  test_a_doc_less_field_with_two_pairs_keeps_both_lines asserts BOTH
+  sentences on both pages. Sabotage: put the old f.doc.strip() condition
+  back in both loops -> test fails; restored -> green.
+- F2 [minor]: _anchor_map keyed only on entry.name, so a differs_from term
+  naming a link verb by its INVERSE name (e.g. tracked_by for tracks)
+  rendered plain code text even though _validate_differs_from accepts
+  own-or-inverse and the verb has a page entry. Fixed with a second pass
+  claiming entry.inverse for link entries (after all real names, so a real
+  entry always wins the name). New test
+  test_a_term_naming_a_verb_by_its_inverse_name_links_the_verb asserts
+  '<a href="#term-tracks"><code>tracked_by</code></a>' on the note's fact
+  line. Sabotage: dropped the second pass -> test fails; restored -> green.
+- F3 (raw sentence in _md_facts list items): note only, matches the
+  pre-existing _md_doc posture, no change made.
+- Gates, all foreground: full suite -> 3461 passed, 2 skipped in 254.99s,
+  exit=0 (+2 = the new pins; tail in .scratch/suite.txt). ruff check --select
+  E9,F src tests -> All checks passed! python docs-site/gen_examples.py
+  --check -> both files up to date.
+- Committed and pushed to vocab-p20-differs-from; summary posted as a PR
+  comment. Not merged/closed/approved.

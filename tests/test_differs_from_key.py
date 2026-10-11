@@ -396,6 +396,22 @@ def test_a_field_fact_line_links_the_page_term(tmp_path):
     assert 'Differs from <a href="#term-bound"><code>bound</code></a>' in block
 
 
+def test_a_term_naming_a_verb_by_its_inverse_name_links_the_verb(tmp_path):
+    """Validation resolves a verb's inverse name (own-or-inverse), so the
+    other term does have a page entry -- the verb's own -- and the fact line
+    links it there rather than falling back to plain code text."""
+    project = _load_vocab(
+        tmp_path,
+        _schema(
+            note_extra="    differs_from:\n"
+            "      tracked_by: the note states; the verb points at the record.\n"
+        ),
+    )
+    html = vocabulary.render_html(project)
+    block = html[html.index('id="term-note"'):]
+    assert '<a href="#term-tracks"><code>tracked_by</code></a>' in block
+
+
 def test_a_type_may_name_its_own_field_without_an_anchor(tmp_path):
     """`limit` is a field, not a page entry: the fact line names it in code
     text and links nothing."""
@@ -435,6 +451,34 @@ def test_fact_lines_render_in_markdown(tmp_path):
     )
     # the field's line lives inside its fields-table row, after its doc
     assert "| `title` | The label. Differs from `bound`: the title labels; the bound is an item. |" in md
+
+
+def test_a_doc_less_field_with_two_pairs_keeps_both_lines(tmp_path):
+    """The append-vs-replace decision tracks what the row already shows, not
+    the original doc: with no doc at all, a second pair must not overwrite
+    the first -- both sentences stay on both pages."""
+    project = _load_vocab(
+        tmp_path,
+        _schema(
+            note_fields="    fields:\n"
+            "      title:\n"
+            "        type: text\n"
+            "        differs_from:\n"
+            "          bound: the title labels; a bound is an item.\n"
+            "          tracks: the title is prose on the item; the verb is an edge.\n"
+            "    links: {}\n",
+        ),
+    )
+    html = vocabulary.render_html(project)
+    block = html[html.index('id="term-note"'):]
+    assert "<code>bound</code></a>: the title labels" in block
+    assert "<code>tracks</code></a>: the title is prose" in block
+    md = vocabulary.render_markdown(project)
+    assert (
+        "| `title` | Differs from `bound`: the title labels; a bound is an item."
+        " Differs from `tracks`: the title is prose on the item; the verb is an edge. |"
+        in md
+    )
 
 
 def test_a_sentence_with_markup_stays_text(tmp_path):

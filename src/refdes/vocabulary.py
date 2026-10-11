@@ -392,13 +392,20 @@ def _anchor_map(vocab: Vocabulary) -> dict[str, str]:
     """Term name -> the anchor of its page entry, for `differs_from:` links.
 
     First group to claim a name wins (the page's own order: types, links,
-    sets, keys) -- the same winner that kept the un-suffixed anchor. A term
-    with no entry (a field, an engine concept outside the page) has no
-    anchor and is rendered as plain code text instead.
+    sets, keys) -- the same winner that kept the un-suffixed anchor. A link
+    verb's inverse name is claimed only afterwards, and only when nothing
+    else owns it: `schema._validate_differs_from` resolves a verb under its
+    own *or* its inverse name, so a fact line naming the inverse has a real
+    entry to point at -- the verb's. A term with no entry (a field, an
+    engine concept outside the page) has no anchor and is rendered as plain
+    code text instead.
     """
     anchors: dict[str, str] = {}
     for entry in vocab.terms():
         anchors.setdefault(entry.name, entry.anchor)
+    for entry in vocab.terms():
+        if entry.kind == "links" and entry.inverse:
+            anchors.setdefault(entry.inverse, entry.anchor)
     return anchors
 
 
@@ -891,12 +898,22 @@ def _fields_table(e: TermEntry, anchors: dict[str, str]) -> str:
         "<tr><th>Field</th><th>Definition</th><th>Type</th><th>Required</th></tr>",
     ]
     for f in e.fields:
-        doc = escape(f.doc) if f.doc.strip() else f'<span class="vocab-none">{NO_DEFINITION}</span>'
-        for term, sentence in (f.differs_from or {}).items():
-            # A field is not a page entry of its own, so its fact line lives
-            # under its definition in the table rather than in a term's dl.
-            line = f"Differs from {_differs_from_html(anchors, term)}: {escape(sentence)}"
-            doc = f"{doc}<br><em>{line}</em>" if f.doc.strip() else f"<em>{line}</em>"
+        # A field is not a page entry of its own, so its fact lines live
+        # under its definition in the table rather than in a term's dl. The
+        # lines accumulate before the doc decision: a doc-less field with
+        # two pairs keeps both, the second does not overwrite the first.
+        lines = [
+            f"<em>Differs from {_differs_from_html(anchors, term)}: {escape(sentence)}</em>"
+            for term, sentence in (f.differs_from or {}).items()
+        ]
+        if f.doc.strip():
+            doc = escape(f.doc)
+            if lines:
+                doc = f"{doc}<br>{'<br>'.join(lines)}"
+        elif lines:
+            doc = "<br>".join(lines)
+        else:
+            doc = f'<span class="vocab-none">{NO_DEFINITION}</span>'
         rows.append(
             f"<tr><td><code>{escape(f.name)}</code></td><td>{doc}</td>"
             f"<td>{escape(f.type)}</td><td>{'yes' if f.required else 'no'}</td></tr>"
@@ -928,13 +945,23 @@ def render_markdown(project: Project) -> str:
                 out.append("| Field | Definition | Type | Required |")
                 out.append("|---|---|---|---|")
                 for f in e.fields:
-                    doc = _md(f.doc) if f.doc.strip() else NO_DEFINITION
-                    for term, sentence in (f.differs_from or {}).items():
-                        # The docs page gets its anchors from the docs site's
-                        # renderer, not from this module's `term-` ids, so the
-                        # other term is named in code text, never linked.
-                        line = f"Differs from `{term}`: {sentence}"
-                        doc = f"{doc} {_md(line)}" if f.doc.strip() else _md(line)
+                    # The docs page gets its anchors from the docs site's
+                    # renderer, not from this module's `term-` ids, so the
+                    # other term is named in code text, never linked. The
+                    # lines accumulate before the doc decision, as in the
+                    # html table: a doc-less field keeps every pair.
+                    lines = [
+                        _md(f"Differs from `{term}`: {sentence}")
+                        for term, sentence in (f.differs_from or {}).items()
+                    ]
+                    if f.doc.strip():
+                        doc = _md(f.doc)
+                        if lines:
+                            doc = f"{doc} {' '.join(lines)}"
+                    elif lines:
+                        doc = " ".join(lines)
+                    else:
+                        doc = NO_DEFINITION
                     out.append(
                         f"| `{f.name}` | {doc} | {f.type} | {'yes' if f.required else 'no'} |"
                     )
