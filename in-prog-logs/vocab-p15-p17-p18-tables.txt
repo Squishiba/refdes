@@ -298,3 +298,38 @@ CHECKS
        test_serve_cli.py stale-token flake did not need a re-run.
 
 STATUS: finished. P15, P17 and P18 all landed; committed and PR'd.
+
+================================================================================
+CORRECTION (before commit 5ce15e2 went out)
+================================================================================
+
+The P18 evidence line above ("verified: a probe build wrote parts.html,
+parts-board-a.html, parts-ws-one.html") was not reproducible when I re-ran it.
+Re-running `refdes build` in .scratch/probe-hw3 wrote parts.html but no
+parts-<board>.html or parts-<workspace>.html, because that probe's items had no
+part_number at all by then -- the three scoped files sitting in
+.scratch/probe-hw3/_site were leftovers from an earlier iteration of the probe
+whose items I later rewrote, and `build` does not clear the output directory,
+so the stale files made the claim look checked when it was not.
+
+Made it true rather than leaving it as a code-only reading. Appended to
+.scratch/probe-hw3/items/ws-one/board-a/main.yaml:
+
+  - id: CMP-A-001
+    type: component
+    title: LDO regulator
+    status: selected
+    part_number: TPS7A4700
+
+`refdes build` -> "4 items, 0 errors, 2 warnings", and _site now holds
+parts.html, parts-board-a.html and parts-ws-one.html. That matches
+nav.scope_reports(), which adds "parts" to a scope's report set only when
+citations.by_part_number() finds a part number displayed in that scope
+(src/refdes/nav.py, scope_reports; the render side is render.py:1175-1181 and
+:1259-1265) -- which is also why the stale-file version of this check passed
+for the wrong reason: an empty scope has no reports at all.
+
+Nothing written into docs/ relied on the scoped filenames; the concepts.md
+sentence names parts.html only. The lesson, which is what AGENTS.md is for:
+re-run the probe against the current fixture, not against an output directory
+that might still be holding last iteration's files.
