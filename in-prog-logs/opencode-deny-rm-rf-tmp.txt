@@ -131,3 +131,16 @@ Decisions / checks
 - Scratch files left in .scratch/ (not deleted, per AGENTS.md): debug-config-{before,after}-{root,tests}.json,
   pattern_check.py, pattern-table.txt.
 STATUS: task complete locally; committed, pushed, PR opened (see below).
+
+COMMITTED + PUSHED + PR OPENED — task finished.
+- commit bce9b5a, staged by path only (opencode.json, AGENTS.md, this log); .scratch/
+  never staged, no git stash used.
+- pushed to origin/opencode-deny-rm-rf-tmp.
+- PR #198 against main: https://github.com/Squishiba/refdes/pull/198 — titled
+  "chore(agents): opencode.json denies recursive rm and /tmp for OpenCode agents",
+  body = rules, before/after debug config, pattern table, whole-line vs
+  sub-command finding. Not merged, not approved, not closed.
+- One difficulty worth recording: the first pattern_check run crashed because it
+  read opencode.json with Python's json module, which cannot parse JSONC. Fixed
+  by reading the rules from `opencode debug config` output instead, which is
+  plain JSON and is OpenCode's own resolved view anyway.
