@@ -804,6 +804,55 @@ def _print_reuse_note(retired_id: str, holders: list[str]) -> None:
 #: rule 2), which is exactly why they live in their own block.
 _THREAD_GLYPHS = {"open": "[ ]", "done": "[x]", "dropped": "[-]"}
 
+# The thread surface's fixed wording, spelled once (owner decisions,
+# 2026-10-11 fix round). `refdes work` (plan §H7 chunk C, stacked on
+# `refdes thread`) renders the same blocks and reads these constants and
+# helpers instead of re-spelling the strings -- two spellings of one line
+# is exactly what this block exists to prevent.
+
+#: The derived block's heading: self-closing said in plain words.
+THREAD_DERIVED_HEADING = "Derived (auto clears when fixed):"
+
+#: The capture line's prefix.
+THREAD_CAPTURE_PREFIX = "Snapshot Captured:"
+
+#: Plain wording for every capture kind the store's capture index can hold
+#: (history's `_CAPTURE_KINDS`: `followed`, `followed-corrected`, and an
+#: explicit `refdes history capture`'s `captured`). When the store also
+#: holds an `occurred_at` -- only ever the hand-captured kind -- it is
+#: appended after a comma inside the parentheses.
+THREAD_CAPTURE_KIND_WORDS = {
+    "followed": "followed by later entry",
+    "followed-corrected": "followed by later entry, correcting an earlier link",
+    "captured": "captured by hand",
+}
+
+
+def _thread_capture_line(capture: dict) -> str:
+    """One capture line: what the store holds about one member, in the
+    owner's plain words. The `kind` word says why the snapshot exists; a
+    time prints only when the store actually records one (H2 writes no
+    clock on the two `followed` kinds)."""
+    kind = str(capture["kind"])
+    wording = THREAD_CAPTURE_KIND_WORDS.get(kind, kind)
+    if capture["occurred_at"]:
+        wording += f", {capture['occurred_at']}"
+    return f"{THREAD_CAPTURE_PREFIX} {capture['entry']} ({wording})"
+
+
+def _thread_verdict_suffix(verdict: dict, open_count: int) -> str:
+    """§5 rule 4's "never alone" as a suffix on the verdict line: a
+    concluding verdict with open tasks at its tip says how many remain
+    below, in the owner's wording. Empty for a non-concluding verdict or
+    a tip with no open tasks (the verdict then prints alone because there
+    is nothing to conclude *against*)."""
+    if not verdict["concluding"] or not open_count:
+        return ""
+    return (
+        f", {open_count} open task" + ("" if open_count == 1 else "s")
+        + " remaining below"
+    )
+
 
 def _thread_age_suffix(row: dict, as_of, date_format: str) -> str:
     """§5 rule 3's age line: the declaring entry and its authored date,
@@ -851,7 +900,15 @@ def cmd_thread(args) -> int:
     anywhere (rule 4's fork half).
     """
     project, _stale = _load(args, require_ids=False)
-    _announce_load_writes(project)
+    # The load's own writes go to stderr, not stdout: like `index`, this
+    # command's stdout is its answer (--json's object, or the view itself),
+    # and a "(minted N key(s) while loading)" line printed ahead of it
+    # breaks `thread ... --json | jq` on every cold project. `name_blocked`
+    # stays True because --thread has no diagnostics payload to carry the
+    # refused files (the JSON gains its `diagnostics` array only when the
+    # history store itself refused); `index` can pass False precisely
+    # because its payload already names them.
+    _announce_load_writes(project, stream=sys.stderr)
     load_errors = project.errors
     for d in load_errors:
         print(str(d), file=sys.stderr)
@@ -882,8 +939,14 @@ def cmd_thread(args) -> int:
         )
         return 2
     build_mod.build(project, seal_write=False, reseal=False)
-    label = item.id or item.key or item.slug
-    views = threads_mod.threads_projection(project)
+    label = threads_mod._label(item)
+    # One read of the capture store for the whole run (threads_projection
+    # takes the index it returns), and its failure kept in hand: the
+    # projection stays silent by design, so this command is the one that
+    # has to say so -- the capture lines would otherwise vanish with no
+    # trace (review B3).
+    captures, store_error = threads_mod.capture_facts(project)
+    views = threads_mod.threads_projection(project, captures=captures)
     view = next((v for v in views if label in v["entries"]), None)
     if view is None:
         print(
@@ -894,17 +957,35 @@ def cmd_thread(args) -> int:
         )
         return 2
     if args.json:
+        if store_error is not None:
+            # Same entry shape as the index payload's `diagnostics`, so a
+            # consumer that reads both doors sees the same warning shape.
+            view["diagnostics"] = [
+                {
+                    "level": "warning",
+                    "message": (
+                        f"the thread's captured lines may be missing: {store_error}"
+                    ),
+                    "file": None,
+                    "line": None,
+                    "item": None,
+                }
+            ]
         json.dump(view, sys.stdout, indent=2, ensure_ascii=False, default=str)
         sys.stdout.write("\n")
         return 1 if load_errors else 0
+    if store_error is not None:
+        print(
+            f"warning: the thread's captured lines may be missing: {store_error}",
+            file=sys.stderr,
+        )
 
     if view["forked"]:
         print(f"Thread: {view['ref']}  (forked: tips {', '.join(view['tips'])})")
     else:
         print(f"Thread: {' -> '.join(view['entries'])}  (one tip)")
     for cap in view["captured"]:
-        at = f" at {cap['occurred_at']}" if cap["occurred_at"] else ""
-        print(f"Captured: {cap['entry']}{at} ({cap['kind']})")
+        print(_thread_capture_line(cap))
     single = not view["forked"]
     for branch in view["branches"]:
         print()
@@ -912,27 +993,21 @@ def cmd_thread(args) -> int:
         print(f"Tip: {branch['tip']}{date}  {branch['summary']}")
         verdict = branch["verdict"]
         if verdict is not None:
-            if verdict["state"] == "ambiguous":
+            if verdict["state"] == threads_mod.VERDICT_CONFLICTING:
                 # §5 rule 3's posture for `status`, said as itself -- never
-                # displayed as though nothing had concluded.
+                # displayed as though nothing had concluded. The state word
+                # is the projection's own, spelled once (H7c reuses it).
                 print(
-                    "Verdict: ambiguous -- entries at the same distance "
-                    "declare different statuses; a continuation must declare "
-                    "one explicitly"
+                    f"Verdict: {verdict['state']} -- entries at the same "
+                    "distance declare different statuses; a continuation "
+                    "must declare one explicitly"
                 )
             else:
                 open_rows = [
                     row for row in (branch["tasks"]["rows"] or [])
                     if row.get("state") == "open"
                 ]
-                suffix = ""
-                if verdict["concluding"] and open_rows:
-                    count = len(open_rows)
-                    suffix = (
-                        f"  -- concluding, {count} open task"
-                        + ("" if count == 1 else "s")
-                        + " at this tip"
-                    )
+                suffix = _thread_verdict_suffix(verdict, len(open_rows))
                 on = f", {verdict['declared_on']}" if verdict["declared_on"] else ""
                 print(
                     f"Verdict: {verdict['status']} "
@@ -962,7 +1037,7 @@ def cmd_thread(args) -> int:
                     f"{row.get('text', '')}{age}"
                 )
     print()
-    print("Derived (self-closing):")
+    print(THREAD_DERIVED_HEADING)
     rows = view["derived"]
     if not rows:
         print("  (none)")

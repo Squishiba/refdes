@@ -464,7 +464,7 @@ reconstructing the chain from `items[]`.
         "tip": "LOG-PWR-002",
         "date": "2026-08-30",
         "summary": "Thermal branch.",
-        "verdict": { "state": "declared", "status": "proposed",
+        "verdict": { "state": "resolved", "status": "proposed",
                      "declared_by": "LOG-PWR-002",
                      "declared_on": "2026-08-30", "concluding": false },
         "tasks": {
@@ -528,14 +528,15 @@ The shape is the decision, not the styling of it:
   settled blocker does (the tip's type declares `satisfying_statuses:` /
   `verifying_statuses:` and this status is one of them). A null verdict
   means nothing on that branch ever declared a `status:`; a fold that
-  *refused* between differing equal-distance declarations gets its own
-  `verdict.state: "ambiguous"` with a null status — the two are never
-  collapsed.
+  concluded carries `verdict.state: "resolved"` with its status, and a
+  fold that *refused* between differing equal-distance declarations gets
+  its own `verdict.state: "conflicting"` with a null status — the three
+  are never collapsed.
 - **The capture fact travels with the thread.** `captured` names each
   member the history store holds a live capture for, with the event's
   `kind`; `occurred_at` is null exactly when the store records no clock,
-  which is every `followed` edge (an explicit `refdes history capture`
-  event does carry one).
+  which is every `followed` and `followed-corrected` edge (an explicit
+  `refdes history capture` event does carry one).
 - **Derived rows self-close.** They are computed from what already blocks
   a release — uncovered/unverified coverage, failing checks, declared
   `blocked_by:` chains, unpinned or cache-missing citations — over the

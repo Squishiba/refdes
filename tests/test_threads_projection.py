@@ -27,7 +27,7 @@ from unittest import mock
 from conftest import write_project_config
 
 from refdes import build as build_mod
-from refdes import chains, keys, parse, render, threads
+from refdes import chains, history, keys, parse, render, threads
 from refdes.schema import load_project
 
 CONFIG = (
@@ -161,7 +161,9 @@ def test_threads_key_is_the_only_payload_difference(tmp_path):
     # mints keys and expands links into the files). Unsorted dumps: the
     # claim is byte-identity including key order, not just equal content.
     dump = lambda payload: json.dumps(payload, default=str)
-    with mock.patch.object(render.threads_mod, "threads_projection", lambda project, *, graph=None: []):
+    with mock.patch.object(
+        render.threads_mod, "threads_projection", lambda project, *, graph=None, captures=None: []
+    ):
         forced = render.items_json(project)
     assert dump(forced) == dump(without)
 
@@ -451,9 +453,31 @@ def test_projection_writes_nothing(tmp_path):
     assert _snapshot(tmp_path) == before
 
 
+def test_items_json_reads_the_capture_store_once(tmp_path, monkeypatch):
+    """Review B4: `refdes index` used to parse the whole event store twice
+    in one call -- once inside the thread projection's capture rows, once
+    for the per-item `captured` keys. `items_json` now reads the index
+    once and hands it to the projection; this pins the read count around
+    the call itself (any diagnostic read inside `build` belongs to that
+    build, not to this export)."""
+    project = _derived_project(tmp_path)
+    calls: list = []
+    real = history.capture_index
+
+    def counting(p):
+        calls.append(p)
+        return real(p)
+
+    monkeypatch.setattr(history, "capture_index", counting)
+    payload = render.items_json(project)
+    assert "threads" in payload  # the shared read really did feed both halves
+    assert len(calls) == 1
+
+
 def test_projection_never_reads_a_clock(tmp_path):
-    """§5 rule 3's reproducibility rule: with the wall clock moved two years
-    the projection's bytes do not move. (Relative spans are H7b's
+    """§5 rule 3's reproducibility rule: with the wall clock moved about
+    three years (epoch 1_700_000_000 is 2023-11-14; the fixture dates are
+    2026) the projection's bytes do not move. (Relative spans are H7b's
     `--as-of` alone, on top of these absolute fields.)"""
     project = _derived_project(tmp_path)
     first = _json(threads.threads_projection(project))
@@ -495,7 +519,7 @@ def test_ambiguous_verdict_is_its_own_state_never_the_undeclared_null(tmp_path):
     views = threads.threads_projection(project)
 
     merged = _thread(views, "LOG-007")["branches"][0]["verdict"]
-    assert merged["state"] == "ambiguous"
+    assert merged["state"] == "conflicting"
     assert merged["status"] is None
     assert merged["concluding"] is False
     # The distinctness the fix exists for: ambiguous != never declared.
@@ -504,13 +528,14 @@ def test_ambiguous_verdict_is_its_own_state_never_the_undeclared_null(tmp_path):
 
 
 def test_declared_verdicts_carry_their_state_too(tmp_path):
-    """Uniform discriminator: a folded verdict is `state: declared` with its
-    status, so a consumer never has to guess whether `status: null` means
-    ambiguous or absent (it can't -- the absent case is a null verdict)."""
+    """Uniform discriminator: a folded verdict is `state: resolved` with
+    its status, so a consumer never has to guess whether `status: null`
+    means conflicting or absent (it can't -- the absent case is a null
+    verdict)."""
     project = _project(tmp_path, ONE_TIP)
     (view,) = threads.threads_projection(project)
     verdict = view["branches"][0]["verdict"]
-    assert verdict["state"] == "declared"
+    assert verdict["state"] == "resolved"
     assert verdict["status"] == "accepted"
 
 
@@ -544,6 +569,35 @@ def test_all_malformed_task_list_is_declared_not_cleared(tmp_path):
     clean = _project(tmp_path, ONE_TIP)
     (view,) = threads.threads_projection(clean)
     assert "malformed" not in view["branches"][0]["tasks"]
+
+
+def test_partially_malformed_list_keeps_the_valid_rows_and_counts_the_rest(tmp_path):
+    """The count posture has to hold beside non-empty valid rows, not only
+    in the all-dropped case: one malformed row next to one good row is
+    still `declared`, the good row still prints (with its `open_since`),
+    and `malformed` counts exactly what was dropped."""
+    text = (
+        "defaults: { type: log }\n"
+        "items:\n"
+        "  - id: LOG-001\n"
+        "    summary: Mixed list.\n"
+        "    date: 2026-08-01\n"
+        "    tasks:\n"
+        "      - {id: t1, text: Measure the rail., state: open}\n"
+        "      - not even a mapping\n"
+        "  - id: LOG-002\n"
+        "    summary: Silent continuation.\n"
+        "    date: 2026-08-02\n"
+        "    follows: LOG-001\n"
+    )
+    project = _project(tmp_path, text)
+    assert project.errors  # the malformed row was reported as everywhere else
+    (view,) = threads.threads_projection(project)
+    tasks = view["branches"][0]["tasks"]
+    assert tasks["state"] == "declared"
+    assert tasks["malformed"] == 1
+    assert [(row["id"], row["state"]) for row in tasks["rows"]] == [("t1", "open")]
+    assert tasks["rows"][0]["open_since"] == {"entry": "LOG-001", "date": "2026-08-01"}
 
 
 def test_task_rows_are_copied_never_the_authored_field_itself(tmp_path):

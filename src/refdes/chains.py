@@ -638,9 +638,13 @@ class TipFold:
     * `value`/`source` — exactly `fold_at_tip`'s pair: the folded value and the
       entry it came from; `(None, None)` when the fold is ambiguous or nothing
       declared.
-    * `declared` — whether any entry on this branch declared the field at all.
-    * `ambiguous` — differing equal-distance declarations; implies
-      `declared` and a `None` value/source.
+    * `declared` — whether the walk's nearest declaring level declared the
+      field with a non-null value: a `field: null` declaration does not
+      count (it is the walk's own no-hit, and it does not stop the walk),
+      and because the walk stops at that nearest level, entries further
+      back never count either.
+    * `ambiguous` — differing equal-distance declarations at that level;
+      implies `declared` and a `None` value/source.
     """
 
     tip: Item

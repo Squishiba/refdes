@@ -436,10 +436,12 @@ alone — the projection itself carries absolute dates only and reads no clock.
 
 **Landed (chunk B — `refdes thread`)** — `cmd_thread` renders one projected
 thread (§6's view: header, capture line, tip(s), tasks with age, derived
-block), with the review fixes chunk A came back with: an ambiguous `status`
-fold now has its own `verdict.state` (via `chains.fold_field_at_tip`, the
-field fold's `TipTasks.ambiguous`, and `fold_at_tip` is a thin wrapper over
-it so the equivalence test still pins the walk), an all-malformed task list
+block), with the review fixes chunk A came back with: a conflicting `status`
+fold now has its own `verdict.state` (via `chains.fold_field_at_tip`, which
+borrows the recording trick behind `fold_tasks`' `TipTasks.ambiguous` —
+`TipTasks` is the task fold's record, the field fold's is `chains.TipFold` —
+and `fold_at_tip` is a thin wrapper over it so the equivalence test still
+pins the walk), an all-malformed task list
 is `declared` with `malformed` counted rather than the author's `cleared`,
 the projection docstring's list-order claim matches the code, and the capture
 fact joined the projection (`captured`) so the CLI reads it instead of

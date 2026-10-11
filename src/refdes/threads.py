@@ -31,18 +31,19 @@ The shape carries §5's decisions, not a rendering of them:
   ``blocked._is_settled`` already asks, pointed at the thread's own tip. A
   verdict is ``null`` only when nothing on the branch ever declared a
   ``status:``; a fold that *refused* between differing equal-distance
-  declarations gets its own explicit ``state: "ambiguous"`` (the task fold's
-  ``ambiguous`` posture, via ``chains.fold_field_at_tip``), never collapsed
-  into the no-verdict null;
+  declarations gets its own explicit ``state: "conflicting"`` (the task
+  fold's ambiguity posture, via ``chains.fold_field_at_tip``), never
+  collapsed into the no-verdict null; a fold that concluded is
+  ``state: "resolved"``;
 * a fork is never collapsed: there is no thread-level status anywhere, and
   each open tip gets its own branch (its own ``fold_tasks`` list, its own
   branch-local verdict via ``chains.fold_at_tip``);
 * the store's capture fact travels with the thread it captures: ``captured``
   names each member with a live capture event in the history store, with the
   event's kind and its ``occurred_at`` when the store holds one (a
-  ``followed`` edge deliberately carries none — §2: display metadata only,
-  never ordered or gated on), so H7b's capture line reads it instead of
-  opening the store itself.
+  ``followed`` or ``followed-corrected`` edge deliberately carries none —
+  §2: display metadata, never ordered or gated on), so H7b's capture line
+  reads it instead of opening the store itself.
 
 Nothing here writes — the same tree-hash guarantee every read surface carries.
 """
@@ -59,6 +60,15 @@ from .model import Item, Project
 # the order §5's worklist table lists them in, so the block never reorders
 # itself between builds.
 _KIND_ORDER = {"coverage": 0, "check": 1, "blocked": 2, "citation": 3}
+
+#: The verdict discriminator's two non-null states (owner wording, 2026-10-11
+#: fix round: `declared`/`ambiguous` read as the task fold's own postures,
+#: which they are not — a verdict either *concluded* something or two
+#: equal-distance declarations *conflict*). A null verdict is the third
+#: posture and needs no name: nothing on the branch ever declared a status.
+#: `refdes work` (H7c) renders these same strings, so they live here once.
+VERDICT_RESOLVED = "resolved"
+VERDICT_CONFLICTING = "conflicting"
 
 
 def _label(item: Item) -> str:
@@ -81,10 +91,33 @@ def _summary(item: Item) -> str:
     )
 
 
+def capture_facts(project: Project) -> tuple[dict, str | None]:
+    """One read of `history.capture_index` for a whole command run: the
+    index, plus — when the store refused to be read — the plain sentence
+    naming why the capture lines are missing.
+
+    The failure belongs to the *surface*, not the projection: the
+    projection stays silent by design (it must not grow a diagnostics
+    shape, and `render.items_json` shares one read with it), so the
+    command that renders capture lines owes the reader this sentence
+    itself — `cmd_thread` prints it on stderr in text mode and into the
+    `--json` payload's `diagnostics` array (the index payload's shape).
+    The projection takes the index through its `captures=` parameter, so
+    a command that already read it — or `items_json`, which needs the
+    same index for its per-item `captured` keys — never parses the event
+    store twice in one build.
+    """
+    try:
+        return history_mod.capture_index(project), None
+    except (history_mod.HistoryError, OSError) as exc:
+        return {}, f"the history store could not be read ({exc})"
+
+
 def threads_projection(
     project: Project,
     *,
     graph: chains_mod.ChainGraph | None = None,
+    captures: dict | None = None,
 ) -> list[dict]:
     """Every thread in the project, ordered by each thread's root ref, as
     JSON-serialisable dicts — §6's query service, whole-project form.
@@ -105,13 +138,18 @@ def threads_projection(
     (`project.coverage`, `item.checks`, `project.blocked_chains`,
     `item.citations`), so a caller that has not run the build sees an empty
     derived block — the truth, not a recomputation.
+
+    `captures` is the build's one `capture_facts`/`history.capture_index`
+    read, passed down by a caller that needs the same index for its own
+    keys (`render.items_json`) so a whole `index` run parses the event
+    store once, not twice; by default the projection reads it itself.
     """
     graph = graph if graph is not None else chains_mod.build_graph(project)
     nodes = set(graph.predecessors) | set(graph.successors)
     if not nodes:
         return []
     problems = _derived_problems(project)
-    captures = _capture_index(project)
+    captures = capture_facts(project)[0] if captures is None else captures
     views: list[dict] = []
     seen: set[int] = set()
     for handle in sorted(nodes):
@@ -125,21 +163,6 @@ def threads_projection(
     return views
 
 
-def _capture_index(project: Project) -> dict:
-    """item key -> capture fact, read once per projection through
-    `history.capture_index` — the store's own read-only index, not a second
-    event reader.
-
-    A store that refuses to be read yields nothing, the same posture as
-    `render.items_json`'s use of the same call: the build's own diagnostic
-    has already said so, and the thread view never fails over it.
-    """
-    try:
-        return history_mod.capture_index(project)
-    except (history_mod.HistoryError, OSError):
-        return {}
-
-
 def _captured(members: list[Item], captures: dict) -> list[dict]:
     """Which of a thread's members the history store holds a live capture
     for (§6's capture line, and §2's "a fork captures the predecessor
@@ -148,9 +171,10 @@ def _captured(members: list[Item], captures: dict) -> list[dict]:
 
     `kind` is the event's own kind (`followed`, `followed-corrected`, or an
     explicit `captured`); `occurred_at` is null exactly when the event
-    carries no clock — which is every `followed` edge, by H2's decision that
-    a wall-clock stamp would give one fact different bytes in two checkouts
-    (§2: display metadata, never ordered or gated on). Null here means "the
+    carries no clock — which is every `followed` and `followed-corrected`
+    edge (`capture_followed` writes both without one, by H2's decision that
+    a wall-clock stamp would give one fact different bytes in two checkouts;
+    §2: display metadata, never ordered or gated on). Null here means "the
     store does not record when", not "uncaptured"."""
     rows: list[dict] = []
     for member in members:
@@ -264,18 +288,18 @@ def _verdict(project: Project, tip: Item, graph: chains_mod.ChainGraph) -> dict 
     anchored at this tip — identical answer on a one-tip thread, and the
     branch's own answer on a fork, where a thread-level "current status" does
     not exist. `state` keeps the three postures the (value, source) pair alone
-    cannot separate: `declared` (there is a status, and what it says),
-    `ambiguous` (entries at the same distance refused — §5 rule 3's posture
-    for `status`, said as itself and never displayed as "nothing concluded"),
-    and — by the verdict being null — no entry on the branch ever declared a
-    status at all.
+    cannot separate: `VERDICT_RESOLVED` (there is a status, and what it
+    says), `VERDICT_CONFLICTING` (entries at the same distance refused — §5
+    rule 3's posture for `status`, said as itself and never displayed as
+    "nothing concluded"), and — by the verdict being null — no entry on the
+    branch ever declared a status at all.
     """
     fold = chains_mod.fold_field_at_tip(project, tip, "status", graph=graph)
     if fold is None or not fold.declared:
         return None
     if fold.ambiguous:
         return {
-            "state": "ambiguous",
+            "state": VERDICT_CONFLICTING,
             "status": None,
             "declared_by": None,
             "declared_on": None,
@@ -283,7 +307,7 @@ def _verdict(project: Project, tip: Item, graph: chains_mod.ChainGraph) -> dict 
         }
     status = fold.value
     return {
-        "state": "declared",
+        "state": VERDICT_RESOLVED,
         "status": status,
         "declared_by": _label(fold.source),
         "declared_on": _date(fold.source),

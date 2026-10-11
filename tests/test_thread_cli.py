@@ -35,6 +35,12 @@ CONFIG = (
     "standard: { base: hardware, version: 3 }\n"
 )
 
+# Under hardware@3 the bundled `log` type is `sealing: history` (it writes no
+# seal at all), which would make the never-seals test vacuous -- so the seal
+# test opts the type back into build sealing, the overlay `refdes build`
+# itself announces on stderr.
+BUILD_SEALED = CONFIG + "types:\n  log:\n    sealing: build\n"
+
 ONE_TIP = (
     "defaults: { type: log }\n"
     "items:\n"
@@ -93,8 +99,8 @@ DERIVED = (
 )
 
 
-def _setup(tmp_path, items_yaml=ONE_TIP, notes=False):
-    write_project_config(tmp_path, CONFIG)
+def _setup(tmp_path, items_yaml=ONE_TIP, notes=False, config_text=CONFIG):
+    write_project_config(tmp_path, config_text)
     items = tmp_path / "items"
     items.mkdir(exist_ok=True)
     (items / "log.yaml").write_text(items_yaml, encoding="utf-8")
@@ -172,17 +178,16 @@ def test_one_tip_thread_prints_the_sketched_view(tmp_path, capsys):
     out = capsys.readouterr().out
     lines = out.splitlines()
     assert lines[0] == "Thread: LOG-001 -> LOG-002  (one tip)"
-    # The followed edge carries no clock (H2), so no `at ...` -- the line
-    # says captured and names the kind, and that is everything the store
-    # actually knows.
-    assert "Captured: LOG-001 (followed)" in lines
+    # The followed edge carries no clock (H2), so no time prints -- the
+    # line says captured in the owner's plain words and that is
+    # everything the store actually knows.
+    assert "Snapshot Captured: LOG-001 (followed by later entry)" in lines
     assert "Tip: LOG-002  2026-09-02  Thermal modelling accepted." in lines
     # Rule 4's "never alone": the concluding verdict and the open-task
     # count print on one line, directly above the tasks themselves.
-    assert any(
-        line.startswith("Verdict: accepted (LOG-002, 2026-09-02)")
-        and "concluding, 1 open task at this tip" in line
-        for line in lines
+    assert (
+        "Verdict: accepted (LOG-002, 2026-09-02), 1 open task remaining below"
+        in lines
     )
     assert lines.index("Tasks at tip:") < next(
         i for i, line in enumerate(lines) if line.startswith("Derived ")
@@ -192,7 +197,7 @@ def test_one_tip_thread_prints_the_sketched_view(tmp_path, capsys):
         "  1. [ ] T-thermal-model  Model worst-case copper temperature.  "
         "(open since LOG-001, 2026-08-30)"
     )
-    assert "Derived (self-closing):" in lines
+    assert "Derived (auto clears when fixed):" in lines
     assert "  (none)" in lines
 
 
@@ -219,15 +224,24 @@ def test_as_of_adds_relative_ages_and_without_it_there_are_none(tmp_path, capsys
 
 def test_output_does_not_depend_on_the_wall_clock(tmp_path, capsys):
     """The plan's reproducibility rule for the command itself: two runs with
-    the clock two years apart print the same bytes (the age is `--as-of`'s
-    or nobody's)."""
+    the clock years apart print the same bytes, and the no---as-of output
+    carries no relative span at all (the age is `--as-of`'s or nobody's).
+    Patching `time.time` alone was not enough (review B8): a span computed
+    from `datetime.now()`/`date.today()` ignores it, and CPython will not
+    let a test patch those classmethods (immutable C types), so the
+    mechanism-independent half is the real pin -- no `-- N day(s)` text may
+    appear unless the reader named the date."""
     config = _setup(tmp_path)
     _warm(tmp_path, config, capsys)
     assert _run(config, "thread", "LOG-001") == 0
     first = capsys.readouterr().out
+    # epoch 1_700_000_000 is 2023-11-14 -- about three years before the
+    # fixture's 2026 dates, not "two years" (review B9).
     with mock.patch("time.time", return_value=1_700_000_000.0):
         assert _run(config, "thread", "LOG-001") == 0
-    assert capsys.readouterr().out == first
+    second = capsys.readouterr().out
+    assert second == first
+    assert not re.search(r" -- \d+ days?", second)
 
 
 def test_json_prints_the_projection_entry(tmp_path, capsys):
@@ -242,8 +256,22 @@ def test_json_prints_the_projection_entry(tmp_path, capsys):
     assert view["tips"] == ["LOG-002"]
     assert view["captured"] == [{"entry": "LOG-001", "kind": "followed", "occurred_at": None}]
     verdict = view["branches"][0]["verdict"]
-    assert verdict["state"] == "declared"
+    assert verdict["state"] == "resolved"
     assert verdict["concluding"] is True
+
+
+def test_json_on_a_cold_project_that_mints_keys_is_still_json(tmp_path, capsys):
+    """--json owns stdout exactly like `index`'s does (review B1): on a
+    never-opened project the load itself mints keys and freezes the edge,
+    and that `(minted ... while loading)` notice must go to stderr -- a
+    first run whose JSON answer starts with a parenthetical fails
+    json.loads for every consumer."""
+    config = _setup(tmp_path)  # cold: no _warm, so this run writes
+    assert _run(config, "thread", "LOG-001", "--json") == 0
+    captured = capsys.readouterr()
+    view = json.loads(captured.out)  # fails if the notice leaked to stdout
+    assert view["ref"] == "LOG-001"
+    assert "while loading" in captured.err  # the notice itself still prints
 
 
 def test_as_of_and_json_refuse(tmp_path, capsys):
@@ -322,7 +350,8 @@ def test_task_block_states_print_as_themselves(tmp_path, capsys):
 
 def test_ambiguous_verdict_prints_as_itself(tmp_path, capsys):
     """H7b review fix (a) as output: a refused fold says so rather than
-    rendering as if nothing had concluded."""
+    rendering as if nothing had concluded. The state word is the
+    projection's own (`conflicting`, owner wording), spelled once."""
     text = (
         "defaults: { type: log }\n"
         "items:\n"
@@ -334,7 +363,7 @@ def test_ambiguous_verdict_prints_as_itself(tmp_path, capsys):
     _warm(tmp_path, config, capsys)
     assert _run(config, "thread", "LOG-001") == 0
     out = capsys.readouterr().out
-    assert "Verdict: ambiguous" in out
+    assert "Verdict: conflicting" in out
     assert "Verdict: accepted" not in out
 
 
@@ -346,7 +375,7 @@ def test_derived_block_reads_like_problems_not_tasks(tmp_path, capsys):
     _warm(tmp_path, config, capsys)
     assert _run(config, "thread", "LOG-001") == 0
     lines = capsys.readouterr().out.splitlines()
-    start = lines.index("Derived (self-closing):")
+    start = lines.index("Derived (auto clears when fixed):")
     rows = lines[start + 1 :]
     assert any(line.strip().startswith("coverage  REQ-001  unverified") for line in rows)
     assert any(line.strip().startswith("citation  LOG-001  unpinned") for line in rows)
@@ -355,21 +384,99 @@ def test_derived_block_reads_like_problems_not_tasks(tmp_path, capsys):
 
 
 def test_capture_line_names_the_time_the_store_records(tmp_path, capsys):
-    """The explicit `history capture` is the one event that may carry a
-    clock (§2/H4), and the capture line prints it when it does."""
+    """The explicit `history capture` is the one kind that may carry a
+    clock (§2/H4), and the capture line prints it inside the
+    owner-wording parentheses when it does; the `followed` line keeps the
+    timeless form."""
     config = _setup(tmp_path)
     _warm(tmp_path, config, capsys)
     from refdes import loader
 
-    loaded, _ = loader.load_tree(config)
+    loaded, _ = loader.load_tree(config, write=True)
     result = history.capture(
         str(tmp_path), loaded.item_by_id("LOG-002"), occurred_at="2026-09-15T14:08:00Z"
     )
     assert result.created_event
     assert _run(config, "thread", "LOG-002") == 0
     out = capsys.readouterr().out
-    assert "Captured: LOG-002 at 2026-09-15T14:08:00Z (captured)" in out
-    assert "Captured: LOG-001 (followed)" in out
+    assert "Snapshot Captured: LOG-002 (captured by hand, 2026-09-15T14:08:00Z)" in out
+    assert "Snapshot Captured: LOG-001 (followed by later entry)" in out
+
+
+def test_capture_line_of_a_corrected_edge_says_so(tmp_path, capsys):
+    """The third kind the capture index can hold: `followed-corrected`
+    (plan §H2 -- a re-pointed edge corrects the predecessor's earlier
+    edge, `history.capture_followed`), and its line gets its own plain
+    words, clockless like every store-written capture."""
+    config = _setup(tmp_path)
+    _warm(tmp_path, config, capsys)
+    from refdes import loader
+
+    # The fixture's single `followed` event is removed first so LOG-001
+    # has exactly one capture to render, then the event is hand-written
+    # through the store's own API instead of bending the fixture. The
+    # read-only run below is what keeps the writable load from freezing
+    # the (now event-less) edge back into a plain `followed` capture.
+    events = tmp_path / ".refdes" / "history" / "events"
+    for path in events.glob("*.yaml"):
+        path.unlink()
+    loaded, _ = loader.load_tree(config, write=False)
+    root = loaded.item_by_id("LOG-001")
+    tip = loaded.item_by_id("LOG-002")
+    history.append_event(
+        str(tmp_path),
+        "followed-corrected",
+        root.key,
+        history.semantic_digest(root),
+        successor_key=tip.key,
+        reason="supersedes the followed edge from x",
+    )
+    assert _run(config, "--no-write", "thread", "LOG-001") == 0
+    out = capsys.readouterr().out
+    assert (
+        "Snapshot Captured: LOG-001 (followed by later entry, correcting an earlier link)"
+        in out
+    )
+
+
+# ----------------------------------------------------------- the store's absence
+
+
+def _corrupt_store(tmp_path):
+    events = tmp_path / ".refdes" / "history" / "events"
+    (first,) = sorted(events.glob("*.yaml"))
+    first.write_text("kind: [\n", encoding="utf-8")
+
+
+def test_an_unreadable_store_is_said_not_silently_missing(tmp_path, capsys):
+    """Review B3: the projection swallows an unreadable history store by
+    design, so the *command* owes the reader the warning -- otherwise the
+    capture lines silently vanish and `Snapshot Captured:` rows read as
+    "never captured" on a project whose store is merely corrupt."""
+    config = _setup(tmp_path)
+    _warm(tmp_path, config, capsys)
+    _corrupt_store(tmp_path)
+    assert _run(config, "thread", "LOG-001") == 0
+    captured = capsys.readouterr()
+    assert "Thread: LOG-001 -> LOG-002" in captured.out  # the answer is intact
+    assert "Snapshot Captured" not in captured.out  # its rows did vanish --
+    assert "could not be read" in captured.err  # -- and the run says so
+
+
+def test_json_names_the_unreadable_store_in_diagnostics(tmp_path, capsys):
+    """The --json half of B3: the machine-readable door carries the same
+    warning in a `diagnostics` entry shaped exactly like the index
+    payload's, so a consumer of either door sees the store's failure."""
+    config = _setup(tmp_path)
+    _warm(tmp_path, config, capsys)
+    _corrupt_store(tmp_path)
+    assert _run(config, "thread", "LOG-001", "--json") == 0
+    view = json.loads(capsys.readouterr().out)
+    assert view["captured"] == []
+    (diagnostic,) = view["diagnostics"]
+    assert diagnostic["level"] == "warning"
+    assert "could not be read" in diagnostic["message"]
+    assert set(diagnostic) == {"level", "message", "file", "line", "item"}
 
 
 # ---------------------------------------------------------------- exit codes
@@ -424,15 +531,22 @@ def test_no_write_run_writes_nothing(tmp_path, capsys):
 
 
 def test_the_command_itself_never_seals(tmp_path, capsys):
-    """`seal_write=False` like `index`/`ls`: a plain writable run of the
-    standard project (whose `log` type is append-only and sealed) still
-    leaves no seal record behind -- the only files a `thread` run may add
-    are the load's incidental ones, never a sealing write."""
-    config = _setup(tmp_path)
-    assert _run(config, "thread", "LOG-001") == 0
+    """`seal_write=False` like `index`/`ls`, made non-vacuous (review B6):
+    under hardware@3 the bundled `log` type is `sealing: history`, so on
+    the stock fixture *nothing* writes a seal and the test would pass even
+    with `seal_write=True`. The fixture therefore opts the `log` type back
+    into build sealing, first proving a writable `refdes build` there
+    really does write `.refdes/log-seal.yaml`, then deleting it and
+    showing a plain writable `refdes thread` run never re-creates it."""
+    config = _setup(tmp_path, config_text=BUILD_SEALED)
+    assert _run(config, "build") == 0  # writable: this one DOES seal
     capsys.readouterr()
     sealed = [p for p in _tree(tmp_path) if "seal" in p]
-    assert sealed == []
+    assert sealed == [".refdes/log-seal.yaml"]  # the fixture proves itself
+    (tmp_path / ".refdes" / "log-seal.yaml").unlink()
+    assert _run(config, "thread", "LOG-001") == 0
+    capsys.readouterr()
+    assert [p for p in _tree(tmp_path) if "seal" in p] == []
 
 
 def test_derived_row_self_closes_after_a_real_fix(tmp_path, capsys):
@@ -455,8 +569,14 @@ def test_derived_row_self_closes_after_a_real_fix(tmp_path, capsys):
         "    verifies: REQ-001\n",
         encoding="utf-8",
     )
+    # The docstring's claim is about the *bytes*, so pin the bytes (review
+    # B7): the source file that holds the authors' task block is read in
+    # full before the fix run and compared after it, not just the one
+    # rendered line that used to stand in for the whole block.
+    source = (tmp_path / "items" / "log.yaml").read_bytes()
     assert _run(config, "thread", "LOG-001") == 0
     after = capsys.readouterr().out
+    assert (tmp_path / "items" / "log.yaml").read_bytes() == source
     assert "coverage  REQ-001  unverified" not in after
     task = next(line for line in before.splitlines() if "t1" in line)
     assert task in after.splitlines()
