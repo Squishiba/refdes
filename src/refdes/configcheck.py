@@ -338,7 +338,9 @@ class BlockChecker:
         }
 
     def on_change(self, raw: dict) -> dict:
-        block = self.mapping(raw.get("on_change"), "on_change", "a mapping of change-policy settings")
+        block = self.mapping(
+            raw.get("on_change"), "on_change", "a mapping of change-policy settings"
+        )
         self.keys(block, ON_CHANGE_KEYS, "on_change", "on_change:")
         return {"default": self.mode(block.get("default"), "on_change.default", "invalidate")}
 

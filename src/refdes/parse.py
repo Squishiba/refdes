@@ -901,16 +901,17 @@ def _build_item(
         item.key = str(key).strip()
 
     legacy_change_override = raw.get("history")
-    if legacy_change_override is not None and "history" not in spec.fields:
+    if "history" in raw and "history" not in spec.fields:
+        source_line = (defaults_line or line) if "history" in inherited else line
         project.error(
             "item-level history: was renamed to on_change: -- rename this key "
             "in the source file. Its override is used in this build so the "
             "change policy is not silently lost.",
             file=rel,
-            line=line,
+            line=source_line,
             item_id=item.id,
         )
-        _apply_change_override(project, item, legacy_change_override, rel, line)
+        _apply_change_override(project, item, legacy_change_override, rel, source_line)
 
     known_keys = set(spec.fields) | set(spec.links) | RESERVED | OVERRIDABLE
     for key, value in raw.items():
@@ -925,8 +926,12 @@ def _build_item(
                 item.board_hint = str(value)
             elif key == "workspace" and value:
                 item.workspace_hint = str(value)
-            elif key == "on_change" and value:
-                _apply_change_override(project, item, value, rel, line)
+            elif key == "on_change":
+                # Same attribution as the field branch below: a value inherited
+                # from `defaults:` is diagnosed at the defaults block's own
+                # line -- the key the author has to edit is up there.
+                source_line = (defaults_line or line) if key in inherited else line
+                _apply_change_override(project, item, value, rel, source_line)
             continue
         if key in spec.links:
             targets = value if isinstance(value, list) else [value]

@@ -144,38 +144,38 @@ and the same passage admits the exception:
 
 ### 1.3 Engine-reserved front matter keys
 
-`src/refdes/parse.py:33` — the keys a type may never shadow:
+`src/refdes/parse.py:40` — the keys a type may never shadow:
 
 ```python
-RESERVED = {"id", "type", "history", "body", "former_ids", "key"}
+RESERVED = {"id", "type", "body", "former_ids", "key"}
 ```
 
-`src/refdes/parse.py:34-37` — reserved only when the type does not declare
+`src/refdes/parse.py:41-44` — reserved only when the type does not declare
 the name itself:
 
 ```python
 # Reserved, but only when the item's own type does not already declare a field of
 # the same name -- so a schema that predates one of these keys keeps working
 # unchanged instead of having the field silently shadowed.
-OVERRIDABLE = {"prefix", "board", "workspace"}
+OVERRIDABLE = {"prefix", "board", "workspace", "on_change"}
 ```
 
-Their definitions live in code, in `src/refdes/vocabulary.py:57-107`
+Their definitions live in code, in `src/refdes/vocabulary.py:60-110`
 (`RESERVED_KEYS`), because they have no YAML `doc:` slot:
 
 | Key | Line | Definition as written |
 |---|---|---|
-| `id` | `vocabulary.py:58` | "The item's display identifier, minted from its type prefix and the project's id width. Stable in people's sentences, not in the engine: a rename moves it, and `former_ids:` records where it went." |
-| `type` | `:63` | "The item's item type -- the entry in `types:` that gives it a prefix, fields, and links." |
-| `key` | `:67` | "The item's surrogate key: opaque, immutable, and the identity the engine actually uses. Nothing rewrites it, and links resolve through it rather than through a display id." |
-| `former_ids` | `:72` | "Display ids this item used to have. Written by the engine when an id is re-minted, so old citations still resolve." |
-| `body` | `:76` | "The item's prose, below the front matter. Its change policy comes from the type's `body:` setting; for types whose content is the statement itself it is the required field." |
+| `id` | `vocabulary.py:61` | "The item's display identifier, minted from its type prefix and the project's id width. Stable in people's sentences, not in the engine: a rename moves it, and `former_ids:` records where it went." |
+| `type` | `:66` | "The item's item type -- the entry in `types:` that gives it a prefix, fields, and links." |
+| `key` | `:70` | "The item's surrogate key: opaque, immutable, and the identity the engine actually uses. Nothing rewrites it, and links resolve through it rather than through a display id." |
+| `former_ids` | `:75` | "Display ids this item used to have. Written by the engine when an id is re-minted, so old citations still resolve." |
+| `body` | `:79` | "The item's prose, below the front matter. Its change policy comes from the type's `body:` setting; for types whose content is the statement itself it is the required field." |
 | `on_change` | `:84` | "This item's change-policy override, in place of the project's `on_change: default`. A type that declares a field of this name takes it over." |
-| `prefix` | `:85` | "On a type: the id prefix its items carry. As an item key it is the engine's own, and a type that declares a field of this name takes it over." |
-| `board` | `:89` | "Which board an item belongs to -- the first path segment under `items/` unless the item says otherwise. Overridable by a type's own field." |
-| `workspace` | `:93` | "Which workspace an item belongs to, when the project registers them. Overridable by a type's own field." |
-| `defaults` | `:97` | "In a YAML list file: the type and field values every entry in that file inherits, before its own keys." |
-| `section` | `:101` | "In a YAML list file: the section heading its entries file under on the item's page; in a Markdown marker block, the section a generated block belongs to." |
+| `prefix` | `:89` | "On a type: the id prefix its items carry. As an item key it is the engine's own, and a type that declares a field of this name takes it over." |
+| `board` | `:93` | "Which board an item belongs to -- the first path segment under `items/` unless the item says otherwise. Overridable by a type's own field." |
+| `workspace` | `:97` | "Which workspace an item belongs to, when the project registers them. Overridable by a type's own field." |
+| `defaults` | `:101` | "In a YAML list file: the type and field values every entry in that file inherits, before its own keys." |
+| `section` | `:105` | "In a YAML list file: the section heading its entries file under on the item's page; in a Markdown marker block, the section a generated block belongs to." |
 
 The collision P2 addressed was that `history` was *also* a project-config key
 with a different meaning. P2 landed on 2026-10-10: both the project setting and

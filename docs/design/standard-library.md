@@ -1651,11 +1651,11 @@ same per-type serializer a third time, for `refdes new <type>`.
   in the property's `description` for a human to read on hover, not
   something the validator itself checks.
 - **Reserved and overridable keys** — `id` (deliberately unconstrained, see
-  below), `type` (the discriminator, see below), `history` (both shapes
+  below), `type` (the discriminator, see below), `on_change` (both shapes
   documented in schema-reference.md: a scalar mode or a `{fields, reason}`
   mapping), and `prefix`/`board` included as legal properties on a type's
   branch *only when that type doesn't already declare a same-named field* —
-  mirroring `OVERRIDABLE` (`parse.py:35`) exactly rather than approximating
+  mirroring `OVERRIDABLE` (`parse.py:44`) exactly rather than approximating
   it.
 - **`additionalProperties: false`** on every branch, which is what makes an
   unknown key light up the moment it's typed rather than the next time
@@ -1690,7 +1690,7 @@ A single type's branch, illustrated (`requirement`, abbreviated):
     "tags":          { "type": "array", "items": { "type": "string" } },
     "owner":         { "type": "string" },
     "last_reviewed": { "type": "string", "format": "date" },
-    "history":       { "$ref": "#/$defs/history" }
+    "on_change":     { "$ref": "#/$defs/on_change" }
   },
   "required": ["text"],
   "additionalProperties": false
@@ -1717,7 +1717,7 @@ discriminated structurally (a list file has an `items:` key at the top
 level; a bare item doesn't). One difference between the two bare-item
 contexts is worth stating precisely rather than glossing over: `body` is a
 legal key *inside a list-file entry* (the markdown body as a string,
-`parse.py:31`'s `RESERVED`) but is never a legal key in `.md` front matter,
+`parse.py:40`'s `RESERVED`) but is never a legal key in `.md` front matter,
 where the body is the text after the closing fence, not a YAML key at all.
 The per-type branch used for list-file entries includes `body`; the one
 conceptually describing `.md` front matter — see below for why "conceptually"

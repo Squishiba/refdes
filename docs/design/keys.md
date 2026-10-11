@@ -590,8 +590,8 @@ hard requirement that an author writes what they write today.
 ```
 
 `key:` sits immediately after `id:`, written by the tool. It becomes a
-**reserved key** in `parse.RESERVED` alongside `id`, `type`, `history`,
-`body`, `former_ids` — *not* an overridable one like `prefix`/`board`/
+**reserved key** in `parse.RESERVED` alongside `id`, `type`, `body`,
+`former_ids` — *not* an overridable one like `prefix`/`board`/
 `workspace`. Identity must not be shadowable by a type that happens to
 declare a field called `key`. No bundled type declares one today, so the
 practical blast radius is a project with a hand-rolled `key` field; §7 flags
