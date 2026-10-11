@@ -636,7 +636,11 @@ actually left to do. A **concluding** verdict (a status in the type's
 `satisfying_statuses:`) with open tasks at its tip prints **with** those tasks
 (the `1 open task remaining below` line above), never alone; a
 **proposed/on-hold** verdict is not settled and prints as a `verdict` derived
-row instead.
+row instead. A fold that **refused** (entries at the same distance declaring
+different statuses) is a `verdict` derived row too — listed once per tip as
+`conflicting`, so something needing reconciliation is never missing even when
+its tip has no open task; when that tip does have open work, its
+`Verdict: conflicting …` line prints there as well.
 
 The derived block groups the offline kinds under small headings, one per
 kind that has rows, in this one order (shared with `refdes thread`, and the
@@ -645,7 +649,7 @@ order §5's table lists):
 | Row | Producer |
 | --- | --- |
 | `coverage` uncovered / unverified active requirements | `lifecycle._rule_uncovered_requirements` / `_rule_unverified_requirements` |
-| `verdict` proposed / on-hold thread verdicts | `threads_projection` branch verdict (the `chains.fold_field_at_tip` status fold) |
+| `verdict` proposed / on-hold / conflicting thread verdicts | `threads_projection` branch verdict (the `chains.fold_field_at_tip` status fold) |
 | `blocked` blocked-by cascades and stale blockers | `blocked.resolve` / `blocked.by_item` |
 | `check` failing checks | `build.run_checks` (`item.checks`) |
 | `citation` unpinned citations / missing kept copies | `citations.verify` (the `_rule_unpinned_citations` / `_rule_missing_kept_copies` states) |

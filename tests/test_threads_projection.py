@@ -699,6 +699,22 @@ def test_thread_names_the_entries_the_store_holds_captures_for(tmp_path):
 # ------------------------------------------------------- the project-wide worklist (H7c)
 
 
+def test_project_derived_builds_no_chain_graph_when_threads_are_passed(tmp_path):
+    """Review #194 W10: the chain graph exists only for the projection, so a
+    caller that hands `project_derived` its `threads` must not pay for a
+    second parse -- the graph is built lazily now, only when the projection
+    still has to run. The spy makes the waste impossible to hide."""
+    project = _derived_project(tmp_path)
+    views = threads.threads_projection(project)
+    with mock.patch.object(
+        threads.chains_mod,
+        "build_graph",
+        side_effect=AssertionError("chain graph built despite a passed-in projection"),
+    ):
+        rows = threads.project_derived(project, threads=views)
+    assert rows and all(row["kind"] in threads._KIND_ORDER for row in rows)
+
+
 def test_project_derived_lists_each_item_gap_once_project_wide(tmp_path):
     """H7c's whole-project derived block. The item-level rows are the SAME rows
     the per-thread derived block reads (`_rows_for_subject`), but computed over
@@ -718,10 +734,11 @@ def test_project_derived_lists_each_item_gap_once_project_wide(tmp_path):
     assert ("citation", "LOG-001") in seen
     # Exactly once each, no duplicates from scoping.
     assert len(seen) == len(set(seen))
-    # Ordering matches §5's table: all coverage rows before all blocked rows.
-    assert sorted(
-        seen, key=lambda r: ({"coverage": 0, "verdict": 1, "blocked": 2, "check": 3, "citation": 4, "fork": 5})[r[0]]
-    ) == seen
+    # Ordering follows the shared kind order against an INDEPENDENT literal
+    # (review #194 W12's line was this one; #194 C3 keeps it honest): a
+    # scramble of threads._KIND_ORDER must fail here, not agree with it.
+    KIND_ORDER = {"coverage": 0, "verdict": 1, "blocked": 2, "check": 3, "citation": 4, "fork": 5}
+    assert sorted(seen, key=lambda row: KIND_ORDER[row[0]]) == seen
 
 
 def test_project_derived_adds_verdict_and_fork_rows_from_the_projection(tmp_path):

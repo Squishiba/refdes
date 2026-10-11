@@ -5,7 +5,12 @@ and §6 (one query service every surface reads, so a client "must not
 reconstruct the chain itself"); plan phase H7a builds this projection and the
 index `threads` key, and H7b/H7c (the `refdes thread` / `refdes work`
 commands) and the task-pane client (thread-workbench.md §7a) are consumers of
-this one function — none of them computes its own fold.
+this one function — none of them computes its own fold. Since H7c this module
+also hosts the whole-project work query itself — `project_derived` and
+`work_projection`, §5's "Generated worklist" rows and the payload `refdes
+work` renders — sharing the per-item row builder and the one `_KIND_ORDER`
+with the per-thread block, so the two commands can never answer differently
+about the same gap.
 
 The shape carries §5's decisions, not a rendering of them:
 
@@ -63,7 +68,14 @@ from .model import Item, Project
 # whole-project block carries all six. Both producers sort by this and both
 # renderers group by it, so the two commands can never reorder differently,
 # and the block never reorders itself between builds.
-_KIND_ORDER = {"coverage": 0, "verdict": 1, "blocked": 2, "check": 3, "citation": 4, "fork": 5}
+_KIND_ORDER = {
+    "coverage": 0,
+    "verdict": 1,
+    "blocked": 2,
+    "check": 3,
+    "citation": 4,
+    "fork": 5,
+}
 
 #: The verdict discriminator's two non-null states (owner wording, 2026-10-11
 #: fix round: `declared`/`ambiguous` read as the task fold's own postures,
@@ -392,11 +404,21 @@ def _rows_for_subject(project: Project, subject: Item, problems: dict) -> list[d
         # way §5's table names the sharper problem when both are true.
         if subject.id in problems["uncovered"]:
             rows.append(
-                {"kind": "coverage", "ref": entry_label(subject), "problem": "uncovered", "stage": coverage.stage}
+                {
+                    "kind": "coverage",
+                    "ref": entry_label(subject),
+                    "problem": "uncovered",
+                    "stage": coverage.stage,
+                }
             )
         elif subject.id in problems["unverified"]:
             rows.append(
-                {"kind": "coverage", "ref": entry_label(subject), "problem": "unverified", "stage": coverage.stage}
+                {
+                    "kind": "coverage",
+                    "ref": entry_label(subject),
+                    "problem": "unverified",
+                    "stage": coverage.stage,
+                }
             )
     for check in subject.checks:
         if check.ok is False:
@@ -449,11 +471,14 @@ def _derived(project: Project, members: list[Item], problems: dict) -> list[dict
     return rows
 
 
-# The folded verdicts that are an open decision, i.e. §5's table row "proposed/
-# on-hold verdicts". A `concluding` status is settled (never a worklist row —
-# rule 4 pairs it with its tip's open tasks in the authored block instead), and
-# `in_progress`/`rejected`/`superseded` are the thread's own business, not the
-# "someone still has to decide" gap the table names.
+# The folded verdicts that are an open decision — §5's table row "proposed/
+# on-hold verdicts", matched BY STATUS VALUE below (the table enumerates the
+# values), MINUS anything rule 4 calls concluding (`not concluding`: rule 4
+# pairs a concluding verdict with its tip's open tasks in the authored block
+# instead — never a lone worklist row — and a project overlay is free to make
+# e.g. `on_hold` satisfying, which the status value alone would not see;
+# review #194 W9). `in_progress`/`rejected`/`superseded` are the thread's own
+# business, not the "someone still has to decide" gap the table names.
 _OPEN_VERDICTS = ("proposed", "on_hold")
 
 
@@ -472,31 +497,52 @@ def project_derived(
     every local item. The two rows unique to the whole-project listing are read
     from `threads_projection` itself — no fold, coverage stage, or check is
     recomputed: a `verdict` row for each branch whose folded status is an open
-    decision (`_OPEN_VERDICTS`), and a `fork` row for each forked thread naming
-    its own tips. `threads` lets a caller that already ran the projection reuse
-    it. Remote citation drift is deliberately absent: it is produced only by
-    `citations.refresh`, which is networked and runs under `check --refresh`
-    alone — `refdes work` never touches the network."""
-    graph = graph if graph is not None else chains_mod.build_graph(project)
+    decision (`_OPEN_VERDICTS`) *and* for each branch whose fold *refused*
+    (`VERDICT_CONFLICTING` — something has to reconcile it, and it must never
+    vanish because its tip has no open task, review #194 W5), and a `fork` row
+    for each forked thread naming its own tips. Two threads merged into one
+    tip fold the same verdict at it, so verdict rows are listed once per tip.
+    `threads` lets a caller that already ran the projection reuse it (and no
+    graph is built for it then). Remote citation drift is deliberately absent:
+    it is produced only by `citations.refresh`, which is networked and runs
+    under `check --refresh` alone — `refdes work` never touches the network."""
     problems = _derived_problems(project)
     rows: list[dict] = []
     for subject in project.local_items:
         rows.extend(_rows_for_subject(project, subject, problems))
-    threads = threads if threads is not None else threads_projection(project, graph=graph)
+    if threads is None:
+        # The graph exists only for the projection (review #194 W10): a
+        # caller that passes `threads` in hand owes no chain-graph parse.
+        threads = threads_projection(
+            project, graph=graph if graph is not None else chains_mod.build_graph(project)
+        )
+    listed_verdicts: set[str] = set()
     for view in threads:
         if view["forked"]:
             rows.append({"kind": "fork", "ref": view["ref"], "tips": list(view["tips"])})
         for branch in view["branches"]:
             verdict = branch["verdict"]
-            if verdict is not None and verdict["state"] == VERDICT_RESOLVED and verdict["status"] in _OPEN_VERDICTS:
-                rows.append(
-                    {
-                        "kind": "verdict",
-                        "ref": branch["tip"],
-                        "status": verdict["status"],
-                        "thread": view["ref"],
-                    }
-                )
+            status: str | None = None
+            if verdict is not None:
+                if verdict["state"] == VERDICT_CONFLICTING:
+                    status = VERDICT_CONFLICTING
+                elif (
+                    verdict["state"] == VERDICT_RESOLVED
+                    and verdict["status"] in _OPEN_VERDICTS
+                    and not verdict["concluding"]
+                ):
+                    status = verdict["status"]
+            if status is None or branch["tip"] in listed_verdicts:
+                continue
+            listed_verdicts.add(branch["tip"])
+            rows.append(
+                {
+                    "kind": "verdict",
+                    "ref": branch["tip"],
+                    "status": status,
+                    "thread": view["ref"],
+                }
+            )
     rows.sort(key=lambda row: (_KIND_ORDER[row["kind"]], row["ref"], str(row)))
     return rows
 

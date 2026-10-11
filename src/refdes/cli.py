@@ -828,6 +828,11 @@ THREAD_DERIVED_GROUP_HEADINGS = {
     "fork": "Forks",
 }
 
+#: The store-failure sentence's subject, spelled once per command so the
+#: text warning and the --json `diagnostics` payload can never diverge.
+THREAD_STORE_SUBJECT = "the thread's captured lines"
+WORK_STORE_SUBJECT = "the worklist's captured lines"
+
 #: The capture line's prefix.
 THREAD_CAPTURE_PREFIX = "Snapshot Captured:"
 
@@ -950,7 +955,10 @@ def _verdict_line(verdict: dict, open_rows: list[dict]) -> str:
 def _derived_detail(row: dict) -> str:
     """The right-hand column of a derived row, spelled once for both
     commands. The `verdict`/`fork` kinds only ever appear in `refdes work`'s
-    whole-project block; the per-thread block carries none of them."""
+    whole-project block; the per-thread block carries none of them. An
+    unknown kind is said as itself (review #194 W6): `threads.py` is free to
+    grow a kind, and a renderer that never heard of it must name the gap
+    rather than die on a bare `KeyError` three frames away."""
     kind = row["kind"]
     if kind == "check":
         return f"{row['value']} violates {row['against']}"
@@ -961,7 +969,26 @@ def _derived_detail(row: dict) -> str:
         return row["status"]
     if kind == "fork":
         return "tips " + ", ".join(row["tips"])
-    return row["problem"]
+    if kind in ("coverage", "citation"):
+        return row["problem"]
+    raise ValueError(_unknown_kind_message(kind))
+
+
+def _unknown_kind_message(kind: str) -> str:
+    known = ", ".join(sorted(THREAD_DERIVED_GROUP_HEADINGS))
+    return (
+        f"unknown derived row kind {kind!r} reached the renderer: the producers "
+        f"in refdes.threads emit a kind refdes.cli does not know (it knows: "
+        f"{known}) -- teach THREAD_DERIVED_GROUP_HEADINGS and _derived_detail "
+        "before emitting it"
+    )
+
+
+def _derived_heading(kind: str) -> str:
+    try:
+        return THREAD_DERIVED_GROUP_HEADINGS[kind]
+    except KeyError:
+        raise ValueError(_unknown_kind_message(kind)) from None
 
 
 def _derived_lines(rows: list[dict]) -> list[str]:
@@ -982,9 +1009,30 @@ def _derived_lines(rows: list[dict]) -> list[str]:
     for row in rows:
         if row["kind"] != current:
             current = row["kind"]
-            out.append(f"  {THREAD_DERIVED_GROUP_HEADINGS[current]}:")
+            out.append(f"  {_derived_heading(current)}:")
         out.append(f"    {row['ref']}  {_derived_detail(row)}")
     return out
+
+
+def _store_failure_message(subject: str, store_error: str) -> str:
+    """The one sentence naming what an unreadable capture store hides, spelled
+    once for `refdes thread`'s text warning and both commands' --json
+    `diagnostics` payloads (review #194 W2)."""
+    return f"{subject} may be missing: {store_error}"
+
+
+def _store_failure_diagnostics(subject: str, store_error: str) -> list[dict]:
+    """The store-failure `diagnostics` payload, in the index payload's entry
+    shape, spelled once for both commands' --json doors (review #194 W2)."""
+    return [
+        {
+            "level": "warning",
+            "message": _store_failure_message(subject, store_error),
+            "file": None,
+            "line": None,
+            "item": None,
+        }
+    ]
 
 
 def cmd_thread(args) -> int:
@@ -1068,23 +1116,13 @@ def cmd_thread(args) -> int:
         if store_error is not None:
             # Same entry shape as the index payload's `diagnostics`, so a
             # consumer that reads both doors sees the same warning shape.
-            view["diagnostics"] = [
-                {
-                    "level": "warning",
-                    "message": (
-                        f"the thread's captured lines may be missing: {store_error}"
-                    ),
-                    "file": None,
-                    "line": None,
-                    "item": None,
-                }
-            ]
+            view["diagnostics"] = _store_failure_diagnostics(THREAD_STORE_SUBJECT, store_error)
         json.dump(view, sys.stdout, indent=2, ensure_ascii=False, default=str)
         sys.stdout.write("\n")
         return 1 if load_errors else 0
     if store_error is not None:
         print(
-            f"warning: the thread's captured lines may be missing: {store_error}",
+            f"warning: {_store_failure_message(THREAD_STORE_SUBJECT, store_error)}",
             file=sys.stderr,
         )
 
@@ -1235,17 +1273,7 @@ def cmd_work(args) -> int:
             # the same warning shape. The text worklist needs no sentence
             # of its own: it prints no capture lines at all, so the store
             # failure only ever degrades the `threads` half carried here.
-            work["diagnostics"] = [
-                {
-                    "level": "warning",
-                    "message": (
-                        f"the worklist's captured lines may be missing: {store_error}"
-                    ),
-                    "file": None,
-                    "line": None,
-                    "item": None,
-                }
-            ]
+            work["diagnostics"] = _store_failure_diagnostics(WORK_STORE_SUBJECT, store_error)
         json.dump(work, sys.stdout, indent=2, ensure_ascii=False, default=str)
         sys.stdout.write("\n")
         return 1 if load_errors else 0

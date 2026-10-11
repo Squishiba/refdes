@@ -27,6 +27,8 @@ import os
 import re
 from unittest import mock
 
+import pytest
+
 from conftest import write_project_config
 
 from refdes import cli as cli_mod
@@ -160,6 +162,35 @@ FORK_SETTLED_TIP = (
     "    follows: LOG-001\n"
     "    tasks:\n"
     "      - {id: T-decoupling, text: Recheck decoupling near U14., state: open}\n"
+)
+
+# A MERGE: two entries at the same distance from the shared tip declare
+# different statuses (LOG-007 `accepted`, LOG-008 `proposed`), so the fold of
+# `status` at LOG-009 REFUSED (state `conflicting`). Nothing anywhere carries
+# an open task -- review #194 W5 found a refused fold like this vanished from
+# `refdes work` entirely (the authored blocks skip tips with no open task, and
+# the derived `verdict` row used to enumerate only proposed/on_hold).
+MERGE_CONFLICT = (
+    "defaults: { type: log }\n"
+    "items:\n"
+    "  - {id: LOG-007, summary: Settled left., date: 2026-08-07, status: accepted}\n"
+    "  - {id: LOG-008, summary: Held right., date: 2026-08-08, status: proposed}\n"
+    "  - {id: LOG-009, summary: Silent merge., date: 2026-08-09, follows: [LOG-007, LOG-008]}\n"
+)
+
+# The same merge, but the shared tip carries an open task: rule 4's authored
+# pairing (`Verdict: conflicting -- ...` printed WITH the open tasks) is
+# review #194 W3's wiring, previously untested on this command.
+MERGE_CONFLICT_OPEN = (
+    "defaults: { type: log }\n"
+    "items:\n"
+    "  - {id: LOG-007, summary: Settled left., date: 2026-08-07, status: accepted}\n"
+    "  - {id: LOG-008, summary: Held right., date: 2026-08-08, status: proposed}\n"
+    "  - id: LOG-009\n"
+    "    summary: Silent merge with open work.\n"
+    "    date: 2026-08-09\n"
+    "    follows: [LOG-007, LOG-008]\n"
+    "    tasks: [{id: t1, text: Reconcile the two parents., state: open}]\n"
 )
 
 
@@ -353,6 +384,19 @@ def test_every_offline_derived_kind_appears_in_table_order(tmp_path, capsys):
     assert groups["citation"] == ["LOG-012  unpinned"]
 
 
+def test_an_unknown_derived_kind_is_named_not_a_bare_keyerror():
+    """Review #194 W6: `threads.py` is free to grow a derived kind, and the
+    renderer must then be taught it -- but until it is, the failure must name
+    the unknown kind rather than die on a bare KeyError three frames away.
+    Both halves of the rendering (the group-heading lookup and the detail
+    dispatch) must say so."""
+    row = {"kind": "widget", "ref": "WDG-001"}
+    with pytest.raises(ValueError, match="widget"):
+        cli_mod._derived_lines([row])
+    with pytest.raises(ValueError, match="widget"):
+        cli_mod._derived_detail(row)
+
+
 # ------------------------------------------------------------------- the fork
 
 
@@ -489,6 +533,96 @@ def test_verdict_row_self_closes_when_the_decision_is_made(tmp_path, capsys):
     assert "verdict" not in _derived_groups(capsys.readouterr().out)
 
 
+def test_a_refused_verdict_fold_is_a_derived_row_even_with_no_open_task(tmp_path, capsys):
+    """Review #194 W5: the authored blocks skip every tip with no open task
+    (owner decision 4) and the derived `verdict` row used to enumerate only
+    proposed/on_hold — so a fold that REFUSED (§5 rule 3: entries at the same
+    distance declaring different statuses) at a taskless tip vanished from
+    `refdes work` entirely. Something that needs reconciling must always be
+    on the worklist: it lists in the existing Verdicts group, as the
+    projection's own state word, once per tip (both merged threads fold the
+    same verdict at the same tip)."""
+    config = _setup(tmp_path, ("log.yaml", MERGE_CONFLICT))
+    _warm(tmp_path, config, capsys)
+    assert _run(config, "work") == 0
+    out = capsys.readouterr().out
+    assert "  (no open tasks authored)" in out.splitlines()  # nothing authored anywhere...
+    assert _derived_groups(out)["verdict"] == ["LOG-009  conflicting"]  # ...yet the conflict is listed, once
+
+
+def test_a_refused_verdict_fold_prints_with_its_tip_s_open_tasks_too(tmp_path, capsys):
+    """Rule 4's authored pairing on this command (review #194 W3, the
+    `VERDICT_CONFLICTING` clause in `_work_authored_blocks`): when the merged
+    tip carries an open task, the refusal prints directly above it — main's
+    owner-worded sentence through the shared `_verdict_line`, re-spelled
+    nowhere — and the derived guarantee (the test above) holds alongside."""
+    config = _setup(tmp_path, ("log.yaml", MERGE_CONFLICT_OPEN))
+    _warm(tmp_path, config, capsys)
+    assert _run(config, "work") == 0
+    lines = capsys.readouterr().out.splitlines()
+    verdict_at = lines.index(
+        "Verdict: conflicting -- entries at the same distance declare "
+        "different statuses; a continuation must declare one explicitly"
+    )
+    task_at = next(i for i, line in enumerate(lines) if "Reconcile the two parents." in line)
+    assert verdict_at < task_at  # the verdict never stands alone
+    assert _derived_groups("\n".join(lines))["verdict"] == ["LOG-009  conflicting"]
+
+
+def test_an_on_hold_verdict_is_listed_like_a_proposed_one(tmp_path, capsys):
+    """Review #194 W8: `_OPEN_VERDICTS`' second member had no test anywhere —
+    dropping `on_hold` from the filter broke nothing. §5's table row names
+    both values: a decision someone is deliberately holding is exactly the
+    "still has to decide" gap, and it lists in the same Verdicts group with
+    its own status word."""
+    text = (
+        "defaults: { type: log }\n"
+        "items:\n"
+        "  - {id: LOG-040, summary: Decision head., date: 2026-08-30}\n"
+        "  - {id: LOG-041, summary: Decision held., date: 2026-09-01, follows: LOG-040, status: on_hold}\n"
+    )
+    config = _setup(tmp_path, ("log.yaml", text))
+    _warm(tmp_path, config, capsys)
+    assert _run(config, "work") == 0
+    assert _derived_groups(capsys.readouterr().out)["verdict"] == ["LOG-041  on_hold"]
+
+
+def test_a_concluding_on_hold_never_becomes_a_lone_worklist_row(tmp_path, capsys):
+    """Review #194 W9: §5 rule 4 pairs a CONCLUDING verdict with its tip's
+    open tasks and never lets it print as a lone worklist row -- so the
+    filter must exclude anything `concluding` outright, not merely statuses
+    outside the standard log type's `[accepted]` list. A project whose
+    overlay declares `on_hold` satisfying gets the rule-4 authored pairing
+    and NO derived row; a filter testing the status value alone would list
+    this tip as an open decision it has actually decided."""
+    write_project_config(
+        tmp_path,
+        CONFIG + "types:\n  log:\n    satisfying_statuses: [accepted, on_hold]\n",
+    )
+    (tmp_path / "items").mkdir()
+    (tmp_path / "items" / "log.yaml").write_text(
+        "defaults: { type: log }\n"
+        "items:\n"
+        "  - {id: LOG-042, summary: Head., date: 2026-08-30}\n"
+        "  - id: LOG-043\n"
+        "    summary: Held, but satisfying in this project.\n"
+        "    date: 2026-09-01\n"
+        "    follows: LOG-042\n"
+        "    status: on_hold\n"
+        "    tasks: [{id: t1, text: Work the decision leaves., state: open}]\n",
+        encoding="utf-8",
+    )
+    config = str(tmp_path / "refdes-project.yaml")
+    _warm(tmp_path, config, capsys)
+    assert _run(config, "work") == 0
+    out = capsys.readouterr().out
+    lines = out.splitlines()
+    verdict_at = next(i for i, line in enumerate(lines) if line.startswith("Verdict: on_hold"))
+    task_at = next(i for i, line in enumerate(lines) if "Work the decision leaves." in line)
+    assert verdict_at < task_at  # rule 4's authored pairing...
+    assert "verdict" not in _derived_groups(out)  # ...and never a lone derived row
+
+
 def test_fork_row_self_closes_when_the_branches_merge(tmp_path, capsys):
     """The fork derived row is not a persistent "resolved" flag: merge the two
     tips with a continuation and the fork is gone -- the row closes itself."""
@@ -593,6 +727,35 @@ def test_json_is_valid_on_stdout_even_on_a_first_run_that_mints_keys(tmp_path, c
     assert _run(config, "work", "--json", "--as-of", "2026-09-02") == 2
 
 
+def _corrupt_store(tmp_path):
+    """Break the capture store's first event file, as thread's test file does
+    for its B3 pin."""
+    events = tmp_path / ".refdes" / "history" / "events"
+    (first,) = sorted(events.glob("*.yaml"))
+    first.write_text("kind: [\n", encoding="utf-8")
+
+
+def test_json_names_the_unreadable_store_in_diagnostics(tmp_path, capsys):
+    """Review #194 W2 (the work-side mirror of thread's B3 pin, against the
+    one helper both commands now build their entry through): the projection
+    swallows an unreadable capture store by design, so the machine door
+    carries the failure in a `diagnostics` entry shaped exactly like the
+    index payload's and `thread --json`'s -- and the worklist half it does
+    not degrade (the authored group) still answers."""
+    config = _authored(tmp_path)
+    _warm(tmp_path, config, capsys)
+    _corrupt_store(tmp_path)
+    assert _run(config, "work", "--json") == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["threads"], "the worklist half is intact"
+    assert all(view["captured"] == [] for view in payload["threads"])  # those rows did vanish --
+    (diagnostic,) = payload["diagnostics"]
+    assert diagnostic["level"] == "warning"
+    assert "could not be read" in diagnostic["message"]  # -- and the payload says so
+    assert set(diagnostic) == {"level", "message", "file", "line", "item"}
+    assert all("diagnostics" not in view for view in payload["threads"])
+
+
 def test_bad_as_of_date_is_loud(tmp_path, capsys):
     config = _authored(tmp_path)
     assert _run(config, "work", "--as-of", "not-a-date") == 2
@@ -608,7 +771,11 @@ def test_a_non_empty_worklist_still_exits_zero(tmp_path, capsys):
     config = _gaps(tmp_path)
     _warm(tmp_path, config, capsys)
     assert _run(config, "work") == 0
-    assert cli_mod.THREAD_DERIVED_HEADING in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert cli_mod.THREAD_DERIVED_HEADING in out
+    # Review #194 W4: a real derived row, not just the heading — the heading
+    # prints even on an empty block (`(none)`), so it proved nothing.
+    assert "    BND-001  uncovered" in out.splitlines()
 
 
 def test_a_project_with_nothing_open_prints_the_two_empty_groups(tmp_path, capsys):
@@ -657,14 +824,27 @@ def test_unparsable_file_is_reported_with_the_listing_intact(tmp_path, capsys):
 
 
 def test_no_write_run_writes_nothing(tmp_path, capsys):
-    """The plan's tree-hash rule, through `--no-write` on a dirty tree (pending
-    keys/expansions): `work` opens the store read-only and builds
-    `seal_write=False`, so the tree is unchanged."""
+    """The plan's tree-hash rule, proven on a tree a writable run WOULD change
+    (review #194 W1: the old version warmed the tree first, after which even a
+    plain writable `work` left it identical -- vacuous). Phase one proves a
+    cold writable `work` really does change the tree (it mints keys into the
+    item files); phase two runs `--no-write` on a FRESH cold project and
+    proves its tree is untouched -- the store opens read-only and the build
+    runs `seal_write=False`, so nothing at all lands."""
     config = _gaps(tmp_path)
-    _warm(tmp_path, config, capsys)
     before = _tree(tmp_path)
-    assert _run(config, "--no-write", "work") == 0
-    assert _tree(tmp_path) == before
+    assert _run(config, "work") == 0  # writable, on a COLD tree
+    capsys.readouterr()
+    after = _tree(tmp_path)
+    assert after != before, "a cold writable run must change this tree or the test is vacuous"
+    assert "key:" in (tmp_path / "items" / "thread.yaml").read_text(encoding="utf-8")
+
+    fresh = tmp_path / "fresh"
+    fresh.mkdir()
+    fresh_config = _gaps(fresh)  # the same cold project, untouched again
+    fresh_before = _tree(fresh)
+    assert _run(fresh_config, "--no-write", "work") == 0
+    assert _tree(fresh) == fresh_before
 
 
 def test_the_command_writes_no_seal_even_on_a_type_that_seals_on_build(tmp_path, capsys):

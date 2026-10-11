@@ -83,9 +83,12 @@ repo-root `cd`, per AGENTS/TASK. Lesson recorded: never chain a relative `cd`
 onto absolute `mkdir`s.
 
 Docs (done): cli-reference.md `refdes work` section with REAL captured output
-(one-tip project, a fork, a derived-heavy project, --as-of span, exit 2) — each
+(one-tip project, a fork, a derived-heavy project, --as-of span — each
 transcript produced by running the built command against a scratch project, not
-invented; the derived-kind/producer table; the deliberate networked-drift
+invented; NO exit-2 console capture — that posture is carried by the flag
+table's "(exit 2)" note and the tests only. Correction per PR #194 review C4:
+this line previously also claimed an exit-2 capture; cli-reference.md never
+had one, and the reviewer was right to flag it); the derived-kind/producer table; the deliberate networked-drift
 absence stated in prose; living-notes.md §6 landing note updated (work landed,
 chunk C); living-notes-plan.md chunk-C landed note; changelog.d/work-command.added.md.
 `docs-site/gen_examples.py --check` passes (schema-reference/vocabulary up to
@@ -271,3 +274,122 @@ presentation change (json unchanged). PR-BODY: console blocks re-
 captured grouped; "Open wording questions" section replaced by "Owner
 wording decisions"; rule 5 and S3/S5 wording re-pinned (S5 now scrambles
 the single _KIND_ORDER; S3 also trips the new work-hides test).
+
+== PR #194 FIX ROUND 1 (2026-10-11): owner review, W1-W12 + C1-C4 ==
+
+Committed as a NEW commit on top of 0a0b8db (PR under review; no amend, no
+force). Appending here per the task; each item's test + sabotage recorded.
+
+W1 (medium, sabotage) test_no_write_run_writes_nothing was vacuous (its
+   _warm() mints everything first, then even a plain writable run is a
+   no-op). Rebuilt on a COLD project in two phases: phase 1 proves a cold
+   WRITABLE `refdes work` changes the tree (asserts tree differs + a `key:`
+   line got minted into items/thread.yaml); phase 2 runs `--no-write` on a
+   FRESH cold copy (same _gaps fixture) and asserts its tree is byte-identical.
+   S8 sabotage: `args.no_write = False` before cmd_work's load -> the test
+   FAILS (keys land in the fresh copy). Restored (verified by grep: no
+   residue in the cli.py diff).
+
+W2 (low) The work --json store-failure diagnostics branch was unexercised,
+   and cmd_thread/cmd_work carried two copies. Factored one helper pair:
+   `_store_failure_message`/`_store_failure_diagnostics` (+ THREAD_STORE_
+   SUBJECT/WORK_STORE_SUBJECT constants) — both commands' json payloads and
+   thread's text warning build the one sentence through them. Added the
+   work-side pin `test_json_names_the_unreadable_store_in_diagnostics`
+   (thread keeps its own B3 pin): one test per command, one implementation.
+
+W3 (low, sabotage) No test for the authored `conflicting` line on this
+   command. New fixture MERGE_CONFLICT_OPEN (two same-distance parents,
+   accepted/proposed, shared tip with an open task) ->
+   `test_a_refused_verdict_fold_prints_with_its_tip_s_open_tasks_too` asserts
+   the owner-worded `Verdict: conflicting -- ...` line prints above the open
+   task. S9 sabotage: gate the authored verdict clause on `concluding` alone
+   -> that test FAILS; whole thread-CLI suite still passes (work-side clause).
+
+W4 (nit) test_a_non_empty_worklist_still_exits_zero now asserts a real
+   derived row (`    BND-001  uncovered`), not just the heading (which prints
+   even for `(none)`).
+
+W5 (medium) A conflicting (refused) verdict could vanish from `refdes work`
+   entirely. project_derived now adds a `verdict` row (status=VERDICT_
+   CONFLICTING) for every branch whose fold refused; merged tips fold the same
+   verdict at the same tip, so verdict rows are listed once per tip
+   (listed_verdicts set). It lists in the existing Verdicts group. New
+   `test_a_refused_verdict_fold_is_a_derived_row_even_with_no_open_task`.
+   Verified real: MERGE_CONFLICT scratch project prints
+   "(no open tasks authored)" + "Verdicts: / LOG-009  conflicting" once.
+   S10 sabotage: kill the conflicting branch -> both refused-fold tests FAIL.
+   Docs (cli-reference work section prose + verdict table row) updated to say
+   a refused fold is a derived row too, and its authored line still prints
+   when the tip has open work. NO doc console re-capture needed: no existing
+   doc example has a conflicting fold (checked).
+
+W6 (info) THREAD_DERIVED_GROUP_HEADINGS[kind] and _derived_detail raised bare
+   KeyError on an unknown kind. Now both go through `_unknown_kind_message`,
+   which names the unknown kind and points at the two places to teach.
+   `coverage` made an explicit branch (it and `citation` both carry "problem");
+   an unhandled kind falls to the raise. Test
+   `test_an_unknown_derived_kind_is_named_not_a_bare_keyerror` (no sabotage
+   asked).
+
+W7 The PR body (and here) claimed `cmd_thread`'s output bytes are unchanged.
+   False since owner Q2/Q3 (the thread derived block re-sorted + grouped).
+   PR body intro corrected to say so and point at the fragment.
+
+W8 (medium) `_OPEN_VERDICTS`' on_hold member was untested anywhere. New
+   `test_an_on_hold_verdict_is_listed_like_a_proposed_one` (LOG-04x fixture,
+   status on_hold -> "LOG-041  on_hold" row). S11 sabotage:
+   _OPEN_VERDICTS=("proposed",) -> that test FAILS. Restored.
+
+W9 (low) threads.py comment said "a concluding status is settled (never a
+   worklist row)" but the filter tested the status VALUE. DECISION: made the
+   code test the CONCLUDING flag too (`and not verdict["concluding"]`),
+   matching rule 4's intent that a verdict that concluded is rule-4-displayed,
+   never a lone gap. On the standard log type proposed/on_hold are never
+   concluding so behavior is unchanged there; the flag is the honest guard
+   (a project overlay can make on_hold satisfying). Test
+   `test_a_concluding_on_hold_never_becomes_a_lone_worklist_row`: an overlay
+   sets log.satisfying_statuses=[accepted, on_hold] -> the on_hold tip gets
+   the rule-4 authored pairing and NO derived row (status value alone would
+   have listed it). Comment rewritten to match the code.
+
+W10 (low) project_derived built chains.build_graph unconditionally but used it
+   only when threads is None. Graph now built lazily, inside the projection
+   branch. `test_project_derived_builds_no_chain_graph_when_threads_are_passed`
+   patches build_graph to raise and passes threads in -> no graph built.
+
+W11 (nit) threads.py module docstring now says the module also hosts the
+   whole-project work query (project_derived/work_projection), sharing the row
+   builder and _KIND_ORDER.
+
+W12 (nit) Wrapped >100-char lines: threads.py _KIND_ORDER (multi-line dict),
+   the two coverage row literals, the verdict filter (rewritten under W5);
+   the projection ordering test's inline sort key (named constant). Verified
+   no source line in the touched files exceeds 100 now (awk length check).
+
+C1 (medium) thread-derived-grouping.changed.md claimed "--json and the index
+   payload are unchanged." False as to ORDER: shared _KIND_ORDER feeds the
+   projection sort, so `thread --json`/index threads[].derived now list
+   blocked before check. Fragment corrected (shape unchanged, order follows
+   the shared kind order). Pinned by
+   `test_json_derived_rows_follow_the_shared_kind_order` (thread --json derived
+   kinds == coverage, blocked, check, citation).
+
+C2 (low) living-notes-plan.md still said "`refdes work` (chunk C) stays open"
+   right above the landed note. Changed to "landed next, below."
+
+C3 (low) S5 claim was weak because the thread shared-order test pinned only
+   blocked<check. Strengthened it to the FULL four-kind sequence (extended the
+   fixture with coverage + citation) + added the json-order test. Re-ran the
+   coverage/citation scramble (S5): now 5 tests FAIL (work table order, thread
+   text order, thread json order, + both projection ordering tests), whereas
+   the old pairwise version passed it. PR body S5 entry rewritten.
+
+C4 (nit) The work log claimed the captured doc transcripts include an exit-2
+   case; cli-reference.md has no exit-2 console capture (the flag table's
+   "(exit 2)" note and the tests carry that posture). Corrected the log line.
+
+Full suite (foreground), ruff E9,F, gen_examples --check: see the tail in the
+commit message / PR comment. No output changed for existing doc examples
+(only conflicting-fold behavior changed, and no doc example has one), so no
+doc console re-capture.

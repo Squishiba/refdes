@@ -445,7 +445,7 @@ pins the walk), an all-malformed task list
 is `declared` with `malformed` counted rather than the author's `cleared`,
 the projection docstring's list-order claim matches the code, and the capture
 fact joined the projection (`captured`) so the CLI reads it instead of
-opening the store. `refdes work` (chunk C) stays open. See
+opening the store. `refdes work` (chunk C) landed next, below. See
 `in-prog-logs/living-notes-h7b-thread-cli.txt` and `tests/test_thread_cli.py`.
 
 **Landed (chunk C — `refdes work`)** — `cmd_work` renders the whole-project
@@ -462,7 +462,9 @@ there as `Blocked:` before `Failing checks:`). The thread half is
 `threads_projection`; the derived half is a new `threads.project_derived` (over
 `chains.build_graph`) reusing `_derived`'s per-item row builder, plus the two
 whole-project-only rows read from the projection: `verdict` (a branch whose
-folded status is still `proposed`/`on_hold`) and `fork` (a forked thread and
+folded status is still `proposed`/`on_hold`, or whose fold *refused* — a
+conflicting verdict is a derived row too, so something needing
+reconciliation never vanishes, PR #194 W5) and `fork` (a forked thread and
 its tips). Offline kinds only — remote citation drift is `citations.refresh`
 (networked, `check --refresh` only), so it is deliberately absent, and the
 docs say so. `--json` prints `{threads, derived}` and its load-write notices

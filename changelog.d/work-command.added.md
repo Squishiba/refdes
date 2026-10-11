@@ -11,7 +11,8 @@
   `Tasks at <tip>:` block for each tip that still has open work, with no
   single current status anywhere. The derived block enumerates every gap that can be
   computed offline: uncovered/unverified active requirements, proposed/on-hold
-  thread verdicts, blocked-by cascades and stale blockers, failing checks,
+  and conflicting (refused-fold) thread verdicts, blocked-by cascades and stale
+  blockers, failing checks,
   unpinned citations and missing kept copies, and forked threads. Remote
   citation drift is deliberately absent — it is networked (`citations.refresh`,
   under `check --refresh` only) and `refdes work` never touches the network.
