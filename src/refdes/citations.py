@@ -1223,9 +1223,10 @@ def save_lockfile(project: Project, records: dict[str, dict]) -> None:
 
     The caller holds the project's cross-process write lock for its own
     read-modify-write: `fetch_all` runs inside `cli.main`'s
-    `with project_write_lock(...)` around every writing command
-    (src/refdes/cli.py:2961), and the editor's accept takes it around
-    its own read and replace (`serve/edit.py:_accept_pins`). A caller that
+    `with project_write_lock(...)` (src/refdes/cli.py:2961), which wraps
+    every command but `serve`, `init`, `new` and `schema` and any read-only
+    run, and the editor's accept takes it around its own read and replace
+    (`serve/edit.py:_accept_pins`). A caller that
     reads the file, decides from what it read, and then writes it here without
     that lock is racing whoever else is writing it.
     """

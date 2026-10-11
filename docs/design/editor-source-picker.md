@@ -224,8 +224,9 @@ read-modify-write and the rollback's read-compare-restore are each one
 unbreakable section for any writer that takes the lock too. The delta gate
 between them holds the in-process lock like the rest of the sequence, but
 deliberately not the project one: it can take seconds, and holding the project
-lock across it would keep every CLI writer out of the project for that long.
-That is also why the rollback still compares before it restores.
+lock across it would keep every other lock-taking writer out of the project
+for that long. That is also why the rollback still compares before it
+restores.
 The compare is not there for the (now closed) gap between its own read and its
 restore; it is there for the gate — a save that landed while the gate was
 running has already replaced the file, and restoring the bytes this operation

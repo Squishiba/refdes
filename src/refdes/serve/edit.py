@@ -47,7 +47,8 @@ first, so the delta gate judges the candidate the save actually produces, and
 every refusal after it restores the previous lockfile bytes. Both of those
 lockfile mutations -- the read-modify-write that pins and the read-compare-
 restore that undoes it -- are one section under the project's cross-process
-write lock, the same `project_write_lock` every CLI writer takes, so no
+write lock, the same `project_write_lock` `cli.main` wraps its commands in
+(`serve`, `init`, `new` and `schema` exempt, as are read-only runs), so no
 cooperating writer can land between their read and their replace; the delta
 gate between them deliberately does not hold it. It is still one
 apply-operation call and still one mutation entry point; what widened is the
@@ -520,7 +521,7 @@ class _LockfileWrite:
         # One section under the project's cross-process write lock: the read,
         # the compare and the restore cannot be split by a cooperating writer.
         # `refdes fetch` runs inside the same lock -- `cli.main`'s
-        # `with project_write_lock(...)` around every writing command -- and
+        # `with project_write_lock(...)` spans its whole command -- and
         # another server's accept and rollback take it the same way, so
         # whatever else is going to happen to this file happens either before
         # the read or after the restore -- never between them. That is the
@@ -529,10 +530,11 @@ class _LockfileWrite:
         #
         # The compare stays, because it is not there for that gap. It is there
         # for the slow candidate gate between our write and this rollback,
-        # which runs unlocked on purpose (it can take seconds, and a lock held
-        # across it would idle every CLI writer for the same seconds): a save
-        # that landed during the gate has already replaced this file by the
-        # time we get here, our `previous` is stale, and restoring it would
+        # which runs without the project lock, on purpose (it can take
+        # seconds, and a lock held across it would idle every writer that takes
+        # that lock for the same seconds): a save that landed during the gate
+        # has already replaced this file by the time we get here, our
+        # `previous` is stale, and restoring it would
         # delete a landed writer's pin while its body still names it. Leaving
         # our pin in a file another writer replaced is the failure mode the
         # design names as inert (docs/design/editor-source-picker.md §4);

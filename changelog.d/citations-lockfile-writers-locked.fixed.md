@@ -22,9 +22,10 @@
   write, so narrowing it to the write alone would need a per-path merge this
   whole-file writer does not do. The compare inside the rollback stays, and is
   not redundant: it is there for a save that landed during the *candidate gate*
-  — which runs unlocked on purpose, because it can take seconds and a lock held
-  across it would keep every CLI writer out of the project that long — not for
-  the gap between its own read and restore, which is now closed. What is still
+  — which runs without the project lock, on purpose, because it can take
+  seconds and a lock held across it would keep every other lock-taking writer
+  out of the project that long — not for the gap between its own read and
+  restore, which is now closed. What is still
   not promised, and the rewritten comment says so: a process killed inside the
   one `os.replace` that lands the restore (the crash window
   `docs/design/editor-source-picker.md` §4 already states), a read error or a

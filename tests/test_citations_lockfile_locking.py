@@ -186,9 +186,9 @@ def test_no_writer_lands_between_the_rollbacks_read_and_its_restore(tmp_path, mo
 
 def test_a_write_that_landed_before_the_rollback_is_not_clobbered_by_it(tmp_path, monkeypatch):
     # The other side of the same section, and the reason the compare stayed:
-    # a writer that lands during the slow candidate gate -- which is unlocked
-    # on purpose -- has already replaced the file by the time the rollback
-    # reads it, so the restore declines. It also proves the rollback is safe
+    # a writer that lands during the slow candidate gate -- which runs
+    # without the project lock, on purpose -- has already replaced the file by
+    # the time the rollback reads it, so the restore declines. It also proves the rollback is safe
     # when the same thread already holds the lock, which is the conflict branch
     # in `_apply_locked`: `project_write_lock` is re-entrant, so the nested
     # take neither deadlocks nor double-locks.
