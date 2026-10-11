@@ -821,16 +821,11 @@ THREAD_DERIVED_HEADING = f"{threads_mod.DERIVED_HEADING}:"
 #: the block is grouped under one heading per kind that has rows, and a row
 #: inside its group drops the kind column -- the heading names it. Both
 #: commands render through `cli._derived_lines`, and the kinds appear in the
-#: ONE order `threads._KIND_ORDER` sorts them in, so these words are spelled
-#: here once and nowhere else.
-THREAD_DERIVED_GROUP_HEADINGS = {
-    "coverage": "Coverage",
-    "verdict": "Verdicts",
-    "blocked": "Blocked",
-    "check": "Failing checks",
-    "citation": "Citations",
-    "fork": "Forks",
-}
+#: ONE order. Spelled once in `threads.DERIVED_GROUP_HEADINGS`, which IS the
+#: order (the table's insertion order); this name stays as the cli-side
+#: handle. (PR #197 NOTE dedupe: #194 and W5a met with two spellings, and
+#: the table won -- the pane groups by the very same object.)
+THREAD_DERIVED_GROUP_HEADINGS = threads_mod.DERIVED_GROUP_HEADINGS
 
 #: The store-failure sentence's subject, spelled once per command so the
 #: text warning and the --json `diagnostics` payload can never diverge.
@@ -916,7 +911,9 @@ def _task_row_lines(rows: list[dict], as_of, date_format: str) -> list[str]:
     than printing the literal "None"."""
     out = []
     for number, row in enumerate(rows, start=1):
-        glyph = _THREAD_GLYPHS.get(row.get("state"), "[?]")
+        glyph = _THREAD_GLYPHS.get(
+            row.get("state"), threads_mod.TASK_GLYPH_UNKNOWN
+        )
         age = (
             _thread_age_suffix(row, as_of, date_format)
             if row.get("state") == "open"
@@ -937,11 +934,7 @@ def _verdict_line(verdict: dict, open_rows: list[dict]) -> str:
     alone", via the shared `_thread_verdict_suffix`). `open_rows` is that
     tip's open tasks (already the empty list when there are none)."""
     if verdict["state"] == threads_mod.VERDICT_CONFLICTING:
-        return (
-            f"Verdict: {verdict['state']} -- entries at the same distance "
-            "declare different statuses; a continuation must declare one "
-            "explicitly"
-        )
+        return threads_mod.verdict_conflicting_line(verdict["state"])
     on = f", {verdict['declared_on']}" if verdict["declared_on"] else ""
     return (
         f"Verdict: {verdict['status']} ({verdict['declared_by']}{on})"
@@ -976,8 +969,8 @@ def _unknown_kind_message(kind: str) -> str:
     return (
         f"unknown derived row kind {kind!r} reached the renderer: the producers "
         f"in refdes.threads emit a kind refdes.cli does not know (it knows: "
-        f"{known}) -- teach THREAD_DERIVED_GROUP_HEADINGS and _derived_detail "
-        "before emitting it"
+        f"{known}) -- teach threads.DERIVED_GROUP_HEADINGS (the one table, "
+        "aliased here) and _derived_detail before emitting it"
     )
 
 
@@ -1201,7 +1194,7 @@ def _work_authored_blocks(views: list[dict], as_of, date_format: str) -> list[li
             ):
                 lines.append(_verdict_line(verdict, open_rows))
             if state == "ambiguous":
-                lines.append(f"{heading} task reconciliation required")
+                lines.append(f"{heading} {threads_mod.TASK_POSTURE_AMBIGUOUS}")
                 continue
             lines.append(heading)
             lines.extend(_task_row_lines(open_rows, as_of, date_format))

@@ -185,8 +185,30 @@ Owner settled: toggle label "Tasks" and the bottom-right position are fine.
   test_one_site_render_reads_the_capture_store_once counts exactly one
   read per render_site.
 - D1: checked before writing — #194 IS merged into origin/main by now, so
-  "H6 and H7 have since landed" is true and stays. Rebase per the NOTE
-  below.
+  "H6 and H7 have since landed" is true and stays. Rebased per the NOTE
+  (push needs --force-with-lease; sole writer of this branch).
+
+## Rebase + dedupe (PR #197 NOTE)
+
+#194 (`refdes work`) had merged, so the branch was rebased onto
+origin/main. One conflict, in cli.py's `cmd_thread`: #194 had refactored
+the verdict/row printing into helpers shared with `cmd_work`
+(`_verdict_line`, `_task_row_lines`); the conflict was resolved toward
+#194's structure. Then, per the NOTE ("leave exactly one spelling, in
+threads.py, used by cli.py"):
+- `cli.THREAD_DERIVED_GROUP_HEADINGS` is now an alias of
+  `threads.DERIVED_GROUP_HEADINGS` (its unknown-kind message names the
+  real table);
+- `threads._KIND_ORDER` is no longer a second spelled list — it numbers
+  the one table's insertion order;
+- `_verdict_line` renders `threads.verdict_conflicting_line`; the `[?]`
+  fallback in `_task_row_lines` is `TASK_GLYPH_UNKNOWN`; cmd_work's
+  ambiguous posture print uses `TASK_POSTURE_AMBIGUOUS`.
+`grep` over src/ confirms each posture string, the cleared/malformed
+formatters, the conflicting sentence and the unknown glyph appear exactly
+once in Python (chains.py's matches are docstring prose). test_work.py
+(111-suite green) still reads the cli alias, so no test churn was needed.
+
 - D2: cli-reference's derived-section list now says coverage, blocked,
   check, citation — no fork rows (threads.py's own comment).
 - D3: design doc now says the PANE is the client of the projection.

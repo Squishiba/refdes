@@ -61,21 +61,13 @@ from . import history as history_mod
 from . import lifecycle as lifecycle_mod
 from .model import Item, Project
 
-# The derived rows' ONE order, spelled once here for BOTH commands (owner
-# decision, 2026-10-11): coverage < verdict < blocked < check < citation <
-# fork — the order §5's worklist table lists the kinds in. The per-thread
-# block simply never carries a `verdict` or `fork` row; `refdes work`'s
-# whole-project block carries all six. Both producers sort by this and both
-# renderers group by it, so the two commands can never reorder differently,
-# and the block never reorders itself between builds.
-_KIND_ORDER = {
-    "coverage": 0,
-    "verdict": 1,
-    "blocked": 2,
-    "check": 3,
-    "citation": 4,
-    "fork": 5,
-}
+# The derived rows' ONE order (owner decision, 2026-10-11): coverage <
+# verdict < blocked < check < citation < fork — the order §5's worklist
+# table lists the kinds in. It is spelled once, as the
+# DERIVED_GROUP_HEADINGS table below; `_KIND_ORDER` is that table's
+# insertion order made numeric, and both commands' producers sort rows by
+# it while both renderers group by the table itself, so the two can never
+# reorder differently and the block never reorders itself between builds.
 
 #: The verdict discriminator's two non-null states (owner wording, 2026-10-11
 #: fix round: `declared`/`ambiguous` read as the task fold's own postures,
@@ -102,15 +94,14 @@ DERIVED_HEADING = "Derived (auto clears when fixed)"
 
 #: The derived block's per-kind group headings (the owner's words), in the
 #: ONE kind order — the table is the order: `DERIVED_GROUP_ORDER` is this
-#: dict's insertion order, so a kind added here appears in the grouping and
-#: the order at once and cannot be half-registered (a #194 review point for
-#: its `THREAD_DERIVED_GROUP_HEADINGS`, applied here first). `refdes work`
-#: (#194, `living-notes-h7c-work-cli`, open when W5a was written) adds the
-#: same grouping to the CLI and will align with these constants; until it
-#: merges, this is the one place. A thread's own derived block simply never
-#: carries a `verdict` or `fork` row — those kinds belong to a whole-project
-#: worklist — but the table names all six so the grouping and the order are
-#: spelled once.
+#: dict's insertion order and `_KIND_ORDER` numbers it, so a kind added
+#: here appears in the sort, the grouping and the headings at once and
+#: cannot be half-registered (the #194 review posture; after the PR #197
+#: NOTE rebase, `refdes work`'s `cli.THREAD_DERIVED_GROUP_HEADINGS` is an
+#: alias of this table — one spelling, used by both commands and the pane).
+#: A thread's own derived block simply never carries a `verdict` or `fork`
+#: row — those kinds belong to a whole-project worklist — but the table
+#: names all six so the grouping and the order are spelled once.
 DERIVED_GROUP_HEADINGS = {
     "coverage": "Coverage",
     "verdict": "Verdicts",
@@ -120,6 +111,7 @@ DERIVED_GROUP_HEADINGS = {
     "fork": "Forks",
 }
 DERIVED_GROUP_ORDER = tuple(DERIVED_GROUP_HEADINGS)
+_KIND_ORDER = {kind: index for index, kind in enumerate(DERIVED_GROUP_ORDER)}
 
 #: The four postures the task block can show in place of a list, and the
 #: full conflicting-verdict sentence — `refdes thread` prints these and the
