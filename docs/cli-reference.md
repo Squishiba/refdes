@@ -2054,6 +2054,18 @@ refdes serve --no-open --port 8731 --token-file /tmp/refdes-launch.txt
   to hide them. Every decoration is response-only like the toolbar, and every
   value on it is a string the build already computed — nothing is evaluated
   in the browser.
+- **Item pages of a threaded log carry the task pane** — and here the preview
+  and the published site show the *same* thing (it is rendered in the shared
+  item template, not added to the response). A floating **Tasks** button
+  (bottom-right; invisible unless JavaScript runs) opens a read-only pane:
+  the thread's open tips as tabs (a fork is never merged into one list), the
+  tip's task list — with `viewing LOG-007 · tasks as of tip LOG-012` when
+  the page is an older entry — the verdict line, and a collapsed *Derived
+  (auto clears when fixed)* section of check, coverage, blocked, citation
+  and fork rows. Every line is `refdes thread`'s own wording and every fact
+  comes from the same headless projection that command reads; the pane
+  computes nothing and writes nothing. See
+  [`refdes thread`](#refdes-thread-ref) and `docs/design/thread-workbench.md` §7a.
 - **Loading writes nothing.** No key is minted, no link expanded, nothing
   sealed, no `.refdes/schema.json` written — the same guarantee as
   `--no-write`, pinned by `tests/test_no_write.py`. Files you edit outside the

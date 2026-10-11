@@ -8,10 +8,14 @@ page; the records are `in-prog-logs/thread-workbench-w1.md`,
 §7.4, and its finding is the same in all three logs: nothing cheap and
 obvious was visible in the touch path, so no speculative optimization was
 made. Since then **§7a — the floating task pane — is decided (Jared,
-2026-10-10)**, with its six sub-decisions recorded there, and §8 phases it
-as **W5: not started**, blocked on living-notes-plan H6 (`tasks:` + fold)
-and H7 (the two read commands and the index `threads` projection), which
-the pane consumes rather than reimplements. One half of D1 is deliberately
+2026-10-10)**, with its six sub-decisions recorded there. H6 and H7 have
+since landed, and §8's **W5 is phased: W5a — the read-only task pane, on
+the preview and on the static site — has landed**, as the record
+`in-prog-logs/workbench-w5a-task-pane.txt` attests; W5b (ticks collected
+into a draft continuation) is not started. Unlike W1–W3 the pane is not a
+response-only decoration: it is rendered in the shared item template
+(§7a's "the same pane" sub-decision), and it computes nothing — every
+fact is a client of the projection it consumes. One half of D1 is deliberately
 **not** shipped — dotted `ITEM.NAME`
 mentions in prose stay undecorated, per the note under §5.
 
@@ -261,12 +265,14 @@ and the index projection). CLI parity (`refdes thread`, `refdes work`) stays.
   incremental/single-item rebuild effort stays deferred unless the ~1 s
   ceiling is actually felt. No speculative optimizations: if nothing cheap is
   visible while implementing W1–W3, that is the finding, stated plainly.
-- **W5 — task pane.** The floating task pane of §7a: tip-following task list
-  over the preview, ticks collected into a draft continuation, one tab per
-  open tip, collapsed derived section, and the read-only variant on the
-  static site. **Not started; blocked on H6 (`tasks:` + fold) and H7 (`refdes
-  thread` / `refdes work` + the index `threads` projection)** — the pane is a
-  client of that projection and computes nothing itself.
+- **W5a — task pane, read-only.** The floating task pane of §7a as it reads:
+  tip-following task list over the item page, one tab per open tip (never a
+  union), collapsed derived section, and the same pane on the static site
+  with progressive enhancement. **Landed**
+  (`in-prog-logs/workbench-w5a-task-pane.txt`) — a client of the H7
+  projection, computing nothing itself.
+- **W5b — ticks.** Ticks collected into a draft continuation. **Not
+  started.**
 
 Each phase is independently shippable and independently verifiable against the
 contract: for every rendered fact, name the Python mechanism that produced it.

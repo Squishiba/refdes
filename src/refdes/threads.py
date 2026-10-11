@@ -86,6 +86,51 @@ _KIND_ORDER = {
 VERDICT_RESOLVED = "resolved"
 VERDICT_CONFLICTING = "conflicting"
 
+#: The surface wording every thread view shares, spelled once here (the same
+#: reason VERDICT_RESOLVED lives here): `refdes thread` (cli.cmd_thread)
+#: renders through these, and so does the task pane
+#: (docs/design/thread-workbench.md §7a, W5a) — the pane "shows the same
+#: facts and wording as that command" by rendering these same strings, not
+#: a second spelling that can drift.
+TASK_GLYPHS = {"open": "[ ]", "done": "[x]", "dropped": "[-]"}
+TASK_GLYPH_UNKNOWN = "[?]"
+
+#: The derived block's heading, without the CLI's trailing colon: `refdes
+#: thread` prints `DERIVED_HEADING + ":"`, the pane's <summary> is the bare
+#: heading (the task's owner string, 2026-10-11).
+DERIVED_HEADING = "Derived (auto clears when fixed)"
+
+#: The derived block's ONE kind order and its per-kind group headings (the
+#: owner's words). `refdes work` (#194, `living-notes-h7c-work-cli`, open
+#: when W5a was written) adds the same grouping to the CLI and will align
+#: these constants with its own; until it merges, this is the one place.
+#: A thread's own derived block simply never carries a `verdict` or `fork`
+#: row — those kinds belong to a whole-project worklist — but the order
+#: names all six so the grouping and the order are spelled once.
+DERIVED_GROUP_ORDER = ("coverage", "verdict", "blocked", "check", "citation", "fork")
+DERIVED_GROUP_HEADINGS = {
+    "coverage": "Coverage",
+    "verdict": "Verdicts",
+    "blocked": "Blocked",
+    "check": "Failing checks",
+    "citation": "Citations",
+    "fork": "Forks",
+}
+
+
+def verdict_open_suffix(verdict: dict, open_count: int) -> str:
+    """§5 rule 4's "never alone" as a suffix on the verdict line: a
+    concluding verdict with open tasks at its tip says how many remain
+    below, in the owner's wording. Empty for a non-concluding verdict or
+    a tip with no open tasks (the verdict then prints alone because there
+    is nothing to conclude *against*)."""
+    if not verdict["concluding"] or not open_count:
+        return ""
+    return (
+        f", {open_count} open task" + ("" if open_count == 1 else "s")
+        + " remaining below"
+    )
+
 
 def entry_label(item: Item) -> str:
     """How every view names an entry: display id, or key when it has none

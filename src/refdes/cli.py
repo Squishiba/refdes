@@ -801,8 +801,10 @@ def _print_reuse_note(retired_id: str, holders: list[str]) -> None:
 
 #: §6's sketch's checkbox column: the three authored states, and nothing else.
 #: Derived rows render without any glyph -- they have no tickable state (§5
-#: rule 2), which is exactly why they live in their own block.
-_THREAD_GLYPHS = {"open": "[ ]", "done": "[x]", "dropped": "[-]"}
+#: rule 2), which is exactly why they live in their own block. The mapping
+#: lives in threads.py because the task pane (thread-workbench.md §7a,
+#: W5a) prints the same glyphs: one spelling, two surfaces.
+_THREAD_GLYPHS = threads_mod.TASK_GLYPHS
 
 # The thread surface's fixed wording, spelled once (owner decisions,
 # 2026-10-11 fix round). `refdes work` (plan §H7 chunk C, stacked on
@@ -810,8 +812,10 @@ _THREAD_GLYPHS = {"open": "[ ]", "done": "[x]", "dropped": "[-]"}
 # helpers instead of re-spelling the strings -- two spellings of one line
 # is exactly what this block exists to prevent.
 
-#: The derived block's heading: self-closing said in plain words.
-THREAD_DERIVED_HEADING = "Derived (auto clears when fixed):"
+#: The derived block's heading: self-closing said in plain words. The words
+#: live in threads.py (`DERIVED_HEADING`) because the task pane renders the
+#: same heading as a <summary>, without this command's trailing colon.
+THREAD_DERIVED_HEADING = f"{threads_mod.DERIVED_HEADING}:"
 
 #: The derived block's small per-kind headings (owner decision, 2026-10-11):
 #: the block is grouped under one heading per kind that has rows, and a row
@@ -861,17 +865,10 @@ def _thread_capture_line(capture: dict) -> str:
 
 
 def _thread_verdict_suffix(verdict: dict, open_count: int) -> str:
-    """§5 rule 4's "never alone" as a suffix on the verdict line: a
-    concluding verdict with open tasks at its tip says how many remain
-    below, in the owner's wording. Empty for a non-concluding verdict or
-    a tip with no open tasks (the verdict then prints alone because there
-    is nothing to conclude *against*)."""
-    if not verdict["concluding"] or not open_count:
-        return ""
-    return (
-        f", {open_count} open task" + ("" if open_count == 1 else "s")
-        + " remaining below"
-    )
+    """§5 rule 4's "never alone" as a suffix on the verdict line. The
+    wording lives in threads.py (`verdict_open_suffix`) because the task
+    pane (thread-workbench.md §7a, W5a) prints the same verdict line."""
+    return threads_mod.verdict_open_suffix(verdict, open_count)
 
 
 def _thread_age_suffix(row: dict, as_of, date_format: str) -> str:

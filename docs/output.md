@@ -80,7 +80,15 @@ exactly that.
 
 Static files. No server, no build step for the reader, no network calls. Hover
 previews are inlined at build time; with JavaScript disabled every reference is
-still a working link.
+still a working link. Item pages of a threaded log also carry a read-only task
+pane (a floating **Tasks** button beside the page) showing the thread's tip
+lists, verdicts and derived rows exactly as [`refdes thread`](cli-reference.md#refdes-thread-ref)
+prints them — rendered from the same projection at build time, never
+recomputed in the browser. It is pure enhancement: the button and pane start
+`hidden` and only the site's own script reveals the button, so with JavaScript
+disabled neither ever appears and the page reads as before. A project with no
+`follows:` edge anywhere publishes exactly the pages it published before: no
+pane, no pane assets, byte for byte.
 
 ### Per-board pages
 

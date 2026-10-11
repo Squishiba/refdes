@@ -1,0 +1,142 @@
+Task: workbench W5a — the floating task pane, read-only half
+(docs/design/thread-workbench.md §7a; branch workbench-w5a-task-pane-readonly)
+Status: FINISHED.
+Model: Qwen3.8-Flash-Next.
+
+## What landed
+
+A read-only task pane over the item page, shown in the `refdes serve`
+preview AND on the published static site, consuming
+`threads.threads_projection` and matching `refdes thread`'s wording.
+Nothing writes: no controls, no tokens, no API calls in any published
+byte. W5b (ticks collected into a draft continuation) is NOT started and
+this change builds nothing it would need to undo.
+
+Files:
+- src/refdes/threads.py — the one shared spelling of the pane/CLI strings:
+  TASK_GLYPHS, TASK_GLYPH_UNKNOWN, DERIVED_HEADING, DERIVED_GROUP_ORDER,
+  DERIVED_GROUP_HEADINGS, verdict_open_suffix().
+- src/refdes/cli.py — cmd_thread now reads those constants from threads
+  instead of its own private copies (its printed bytes are unchanged;
+  test_thread_cli.py stayed green untouched).
+- src/refdes/task_pane.py (new) — the pane's model: one pane per thread
+  member, pure read of the projection, no fold/tip-resolution/clock of
+  its own (§7a's architecture constraint).
+- src/refdes/render.py — computes the projection ONCE per render (reusing
+  the build-wide follows graph), publishes `task_pane`/`taskpane_assets`
+  template globals, and emits assets/taskpane.{css,js} from
+  templates/taskpane/ ONLY when the project actually has panes.
+- src/refdes/templates/item.html.j2 — the pane markup, all inside
+  `{% if pane %}`; src/refdes/templates/base.html.j2 — the css/js tags,
+  all inside `{% if taskpane_assets %}`.
+- src/refdes/templates/taskpane/taskpane.css, taskpane.js (new) — outside
+  ASSET_DIR on purpose (see byte-identity below).
+- tests/test_task_pane.py (15 tests), tests/test_serve_preview_task_pane.py
+  (5 tests); docs (cli-reference serve section, output.md static-files
+  paragraph, thread-workbench status header + §8 W5a/W5b split);
+  changelog.d/thread-workbench-task-pane.added.md.
+
+## Design decisions (recorded here per the design doc's habit)
+
+1. ONE implementation for both surfaces. §7a's sub-decision 6 says the
+   site shows "the same pane", so the pane is rendered in the shared item
+   template — not as a W1-W3-style response-only decoration. The preview
+   gets it for free (preview.py already renders through render_site), and
+   the tests prove preview bytes and site bytes carry the same lines.
+   Consequence accepted: unlike W1-W3, these ARE in the published page.
+   That is what §7a asks for; W1-W3's decorations remain response-only.
+2. "The thread in view" is trivially defined: an item page shows exactly
+   one thread entry, so the pane's `viewing` label is the page's own item.
+   panes_by_entry keys one pane per thread member; a hypothetical
+   multi-thread page would just switch the lookup.
+3. Fork tabs are the projection's branches, one per open tip, and there is
+   NO code path that merges their lists (sub-decision 3; living-notes §5
+   rule 4). Sabotage-verified below.
+4. Shared strings live in threads.py, not cli.py — render.py importing
+   cli.py would be circular, and threads.py already owns the projection
+   the strings name. #194 (refdes work) is NOT merged (verified with
+   `gh pr view 194`: OPEN), so I did not rebase on it; DERIVED_GROUP_ORDER
+   + DERIVED_GROUP_HEADINGS here are the single place its
+   THREAD_DERIVED_GROUP_HEADINGS/_KIND_ORDER should align to when it lands.
+5. Byte-identity for threadless projects: the pane's assets sit OUTSIDE
+   ASSET_DIR (templates/taskpane/) and are emitted only when a pane
+   exists; every template addition is behind `{% if pane %}` /
+   `{% if taskpane_assets %}`. Pinned three ways in
+   test_a_project_with_no_threads_publishes_exactly_what_it_did_before:
+   markers absent everywhere; forcing a pane onto the same project DOES
+   change bytes (so absence is the feature, not a dead path); re-render
+   reproduces the first tree to the byte.
+   (style.css selectors are pinned by test_style_tokens.py, hence the
+   separate taskpane.css — no new selectors were added to style.css.)
+6. Progressive enhancement (sub-decision 6): toggle and pane are rendered
+   `hidden`; only taskpane.js reveals the toggle. JS off => pane never
+   appears, page reads as before (test asserts article closes before the
+   aside opens, and both start hidden). JS never computes a task state,
+   fetches, or touches anything but hidden/aria classes — tab switching
+   and the follow-scroll greying (sub-decision 5: grey-out, not hide) are
+   the whole script.
+7. Wording = `refdes thread`'s lines, byte-for-byte where the projection
+   carries the facts: `viewing LOG-001 · tasks as of tip LOG-002`,
+   `Verdict: accepted (LOG-002, 2026-09-02), 1 open task remaining below`,
+   `Tasks at tip:` / `Tasks at LOG-002:` / heading + `task reconciliation
+   required` / `none (never declared)` / `none (cleared by …)`, glyph
+   `[ ]`/`[x]`/`[-]` as TEXT, `(open since LOG-001, 2026-08-30)` absolute
+   only (no relative span — that's `--as-of`'s, and a static page has no
+   clock). Conflicting status fold says `Verdict: conflicting …`, never
+   "nothing concluded" (§5 rule 3's posture).
+8. Derived section: collapsed `<details>` (no `open`), summary is exactly
+   `Derived (auto clears when fixed)`, groups in the one shared kind order
+   with the owner's headings (Coverage/Verdicts/Blocked/Failing checks/
+   Citations/Forks), rows carry no glyph and nothing inside is an input.
+
+## Difficulties / notes
+
+- An earlier draft of the site test file merged two test functions and
+  asserted the asset tags absent on a threaded project's unthreaded page
+  — wrong: the base template's asset tags are project-wide, only the pane
+  is per-page. Rewrote before ever running it (caught by re-reading the
+  template guards, not by a red test).
+- Two small test-authoring off-by-ones (`>` excluded from the slice; a
+  convoluted details-tag assert) failed fast and were fixed; no product
+  bug behind them.
+- The venv's refdes is editable-installed at ANOTHER worktree, so every
+  command here ran with PYTHONPATH=$PWD/src; never bare `refdes`.
+- THE one real bug, caught by the design's own guard: the first full-suite
+  run failed tests/test_theme.py::test_no_theme_build_is_byte_identical_to_
+  the_pinned_output — the template's per-line Jinja tags (the env runs
+  trim_blocks=True + lstrip_blocks=True) swallowed the blank line before
+  `<article>` and my added blank line after `</article>` left two stray
+  newlines on every no-pane item page. Fixed by moving a literal blank
+  line between `{% set %}` and `{% if pane %}` and dropping the added one
+  at the end; the golden test is green again. Worth noting: MY byte-
+  identity test (test_a_project_with_no_threads_publishes_exactly_what_it_
+  did_before) did NOT catch it — it compares my code's renders against
+  each other, so a constant deviation passes it. Only the test pinning
+  ORIGIN/MAIN's hashes can pin "byte-identical to before", and it earns
+  its keep exactly this way.
+
+## Sabotage checks (all four caught, all reverted; verified
+## `grep -r SABOTAGE src/` empty and the suite green after)
+
+a) Union instead of branches (pane_for merges every branch's rows into
+   every tab) -> tests/test_task_pane.py::test_the_fork_tabs_never_union
+   FAILED as intended.
+b) `<input type="checkbox">` replacing the text glyph ->
+   test_the_derived_section_is_collapsed_labelled_and_uncheckable,
+   test_the_site_carries_no_editor_control_or_token and the serve test
+   test_the_preview_page_has_no_write_control_or_token ALL FAILED.
+c) pane-on-every-page (render.py lambda falls back to the first pane) ->
+   test_a_page_without_a_thread_gets_no_pane_at_all FAILED.
+d) `<details open>` -> the collapsed-tag test FAILED (exact-tag assert).
+
+## Verification
+
+- tests/test_task_pane.py: 15 passed. tests/test_serve_preview_task_pane.py:
+  5 passed. Adjacent suites (threads_render, thread_cli, style_tokens,
+  serve_preview_values, serve_preview_decorations, serve_static): 132
+  passed together with the two new files.
+- node --check on taskpane.js: OK.
+- Manual read-through check (documented, no browser here): the JS is a
+  hidden/aria toggle over server-rendered markup; a node DOM-stub run
+  exercised toggle-open, tab-switch and the greying path without errors.
+- Full suite, ruff and gen_examples --check: see below (run at the end).

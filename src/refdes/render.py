@@ -18,6 +18,7 @@ from . import dates
 from . import history as history_mod
 from . import ids as ids_mod
 from . import nav as nav_mod
+from . import task_pane as task_pane_mod
 from . import theme as theme_mod
 from . import threads as threads_mod
 from . import tree as tree_mod
@@ -770,7 +771,9 @@ def _asset_file_list(asset_dir: str) -> list[str]:
     return out
 
 
-def _copy_project_assets(project: Project, out_dir: str, written: set[str]) -> None:
+def _copy_project_assets(
+    project: Project, out_dir: str, written: set[str], taskpane_enabled: bool = False
+) -> None:
     """Copy `project.assets` into `_site/assets/`: source path -> destination
     path (relative to assets/), the latter content-hashed for a resolved
     `<img src>` and identity-mapped for a `site.assets:` directory file (see
@@ -784,10 +787,14 @@ def _copy_project_assets(project: Project, out_dir: str, written: set[str]) -> N
     """
     # `theme.css` is not in ASSET_DIR -- it is generated per project, after this
     # copy -- but it is just as template-owned, and a project directory of that
-    # name would otherwise land on top of it.
+    # name would otherwise land on top of it. The task-pane assets join that
+    # set exactly when this render emits them (and not one project earlier,
+    # which would break the no-threads byte-identity the pane promises).
     reserved = (
         set(os.listdir(ASSET_DIR)) if os.path.isdir(ASSET_DIR) else set()
-    ) | {theme_mod.THEME_CSS_NAME}
+    ) | {theme_mod.THEME_CSS_NAME} | (
+        set(TASKPANE_ASSET_NAMES) if taskpane_enabled else set()
+    )
     asset_out = os.path.join(out_dir, "assets")
     for rel, dest_rel in sorted(project.assets.items()):
         top = dest_rel.split("/", 1)[0]
@@ -851,6 +858,33 @@ def _write_theme_css(project: Project, out_dir: str, written: set[str]) -> None:
     with open(os.path.join(asset_out, theme_mod.THEME_CSS_NAME), "w", encoding="utf-8") as fh:
         fh.write(theme_mod.render_theme_css(palettes))
     written.add(target)
+
+
+#: The task pane's own stylesheet and script (docs/design/thread-workbench.md
+#: §7a, W5a). They live outside `ASSET_DIR` because the whole-site copytree
+#: is unconditional and these two must not be: a project with no threads
+#: gets neither file, no `<link>` and no `<script>`, and publishes exactly
+#: the bytes it published before the pane existed.
+TASKPANE_DIR = os.path.join(TEMPLATE_DIR, "taskpane")
+TASKPANE_ASSET_NAMES = ("taskpane.css", "taskpane.js")
+
+
+def _write_taskpane_assets(out_dir: str, written: set[str], enabled: bool) -> None:
+    """Emit the pane's assets only when this render shows a pane anywhere
+    (`enabled` = the projection had at least one thread). Same posture as
+    `_write_theme_css`: nothing for the project that never asked -- the
+    site stays "no build step, works with JavaScript disabled" for every
+    project, and here additionally byte-identical for the ones with no
+    threads."""
+    if not enabled:
+        return
+    asset_out = os.path.join(out_dir, "assets")
+    os.makedirs(asset_out, exist_ok=True)
+    for name in TASKPANE_ASSET_NAMES:
+        shutil.copyfile(
+            os.path.join(TASKPANE_DIR, name), os.path.join(asset_out, name)
+        )
+        written.add(f"assets/{name}")
 
 
 def _prune_stale_output(out_dir: str, written: set[str]) -> None:
@@ -931,6 +965,20 @@ def render_site(project: Project, draft: bool = False) -> str:
     # threads at all.
     thread_graph = chains_mod.build_graph(project)
     env.globals["thread_view"] = lambda item: thread_view(item, project, graph=thread_graph)
+    # W5a task pane (docs/design/thread-workbench.md §7a): the floating
+    # pane's model, computed once per render from `threads.threads_projection`
+    # -- the same projection the index payload's `threads` key carries and
+    # `refdes thread` renders, so the pane computes no fold, no tip and no
+    # derived row of its own and cannot disagree with either. A project with
+    # no `follows:` edge anywhere gets an empty mapping: no pane on any page
+    # and no pane assets, published output byte-identical -- the same
+    # "absent, not empty" posture as the thread panel itself.
+    task_panes = task_pane_mod.panes_by_entry(
+        task_pane_mod.thread_views(project, graph=thread_graph)
+    )
+    env.globals["task_pane"] = lambda item: task_panes.get(task_pane_mod.label(item))
+    taskpane_assets = bool(task_panes)
+    env.globals["taskpane_assets"] = taskpane_assets
     env.globals["part_anchor"] = _part_anchor
     citations_by_path = citations_mod.by_path(project)
     parts_by_number = citations_mod.by_part_number(project)
@@ -1027,9 +1075,10 @@ def render_site(project: Project, draft: bool = False) -> str:
         if os.path.isdir(ASSET_DIR):
             shutil.copytree(ASSET_DIR, os.path.join(out_dir, "assets"), dirs_exist_ok=True)
             written.update(_asset_file_list(ASSET_DIR))
-        _copy_project_assets(project, out_dir, written)
+        _copy_project_assets(project, out_dir, written, taskpane_assets)
         _copy_datasheet_assets(project, out_dir, written)
         _write_theme_css(project, out_dir, written)
+        _write_taskpane_assets(out_dir, written, taskpane_assets)
         _prune_stale_output(out_dir, written)
         return out_dir
 
@@ -1317,9 +1366,10 @@ def render_site(project: Project, draft: bool = False) -> str:
     if os.path.isdir(ASSET_DIR):
         shutil.copytree(ASSET_DIR, asset_out, dirs_exist_ok=True)
         written.update(_asset_file_list(ASSET_DIR))
-    _copy_project_assets(project, out_dir, written)
+    _copy_project_assets(project, out_dir, written, taskpane_assets)
     _copy_datasheet_assets(project, out_dir, written)
     _write_theme_css(project, out_dir, written)
+    _write_taskpane_assets(out_dir, written, taskpane_assets)
 
     _prune_stale_output(out_dir, written)
     return out_dir

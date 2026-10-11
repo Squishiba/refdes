@@ -1,8 +1,21 @@
 {% extends "base.html.j2" %}
 {% block title %}{{ item.id }} — {{ project.title }}{% endblock %}
 {% block content %}
+{# The W5a task pane (docs/design/thread-workbench.md §7a): computed once
+   per render in render_site from threads.threads_projection — the same
+   projection `refdes thread` renders and the index `threads` key carries —
+   so an item with no thread gets `pane` None and this page renders exactly
+   the bytes it rendered before the pane existed. The pane is read-only:
+   every row below is text the projection decided; no control here writes.
+   The `data-refdes-thread` marker is the scroll anchor the (gated) pane
+   script watches; it exists only where a pane exists. #}
+{% set pane = task_pane(item) %}
 
+{% if pane %}
+<article class="item" data-refdes-thread="{{ pane.ref }}">
+{% else %}
 <article class="item">
+{% endif %}
 
 <div class="item-head">
   <span class="type-badge">{{ spec.label }}</span>
@@ -293,4 +306,67 @@
 </footer>
 
 </article>
+{% if pane %}
+{# §7a sub-decision 6: the toggle is always reachable (it is fixed to the
+   page by taskpane.css); `hidden` until the pane script exists, so with
+   JavaScript off neither toggle nor pane ever appears. #}
+<button type="button" class="refdes-taskpane-toggle" id="refdes-taskpane-toggle" aria-controls="refdes-taskpane" aria-expanded="false" hidden>Tasks</button>
+<aside class="refdes-taskpane" id="refdes-taskpane" data-refdes-taskpane="{{ pane.ref }}" aria-label="Thread tasks" hidden>
+  <header class="refdes-taskpane-head">
+    <h2 class="refdes-taskpane-title">Tasks <span class="mono">{{ pane.ref }}</span></h2>
+    <button type="button" class="refdes-taskpane-close" aria-label="Close task pane">&times;</button>
+  </header>
+  {% if pane.forked %}
+  {# §7a sub-decision 3: one tab per open tip, never a union — the tabs
+     are the projection's branches, and each panel shows only its own
+     tip's list. #}
+  <div class="refdes-taskpane-tabs" role="tablist" aria-label="Open tips">
+    {% for tab in pane.tabs %}
+    <button type="button" role="tab" class="refdes-taskpane-tab mono" id="refdes-taskpane-tab-{{ loop.index }}" aria-selected="{{ 'true' if loop.first else 'false' }}" aria-controls="refdes-taskpane-panel-{{ loop.index }}" data-refdes-tab="{{ loop.index }}"{% if not loop.first %} tabindex="-1"{% endif %}>{{ tab.tip }}</button>
+    {% endfor %}
+  </div>
+  {% endif %}
+  {% for tab in pane.tabs %}
+  {% if pane.forked %}{% set heading = 'Tasks at ' ~ tab.tip ~ ':' %}{% else %}{% set heading = 'Tasks at tip:' %}{% endif %}
+  <div class="refdes-taskpane-panel" role="tabpanel" id="refdes-taskpane-panel-{{ loop.index }}" data-refdes-panel="{{ loop.index }}"{% if pane.forked and not loop.first %} hidden{% endif %}>
+    {% if tab.note %}
+    {# §7a sub-decision 1: the tip's list on an older entry, saying so. #}
+    <p class="refdes-taskpane-note small">{{ tab.note }}</p>
+    {% endif %}
+    <p class="refdes-taskpane-tip small"><span class="mono">{{ tab.tip }}</span>{% if tab.date %} {{ tab.date }}{% endif %}{% if tab.summary %} — {{ tab.summary }}{% endif %}</p>
+    {% if tab.verdict %}
+    <p class="refdes-taskpane-verdict">{{ tab.verdict }}</p>
+    {% endif %}
+    {% if tab.tasks.state == 'declared' and not tab.tasks.note %}
+    <p class="refdes-taskpane-heading">{{ heading }}</p>
+    <ul class="refdes-taskpane-tasks tight">
+      {% for row in tab.tasks.rows %}
+      {# The same facts `refdes thread` prints, the checkbox glyph as text
+         — this is the read-only pane; ticking happens in files or /edit/. #}
+      <li><span class="mono">{{ loop.index }}.</span> <span class="mono">{{ row.glyph }}</span> <span class="mono">{{ row.id }}</span> {{ row.text }}{% if row.since %} <span class="small muted">{{ row.since }}</span>{% endif %}</li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="refdes-taskpane-heading">{{ heading }} {{ tab.tasks.note }}</p>
+    {% endif %}
+  </div>
+  {% endfor %}
+  {% if pane.derived %}
+  <details class="refdes-taskpane-derived">
+    {# §7a sub-decision 4: derived, self-closing rows in a second section
+       of the same pane — collapsed by default (no `open`), labelled as
+       derived, rows carry no glyph and nothing here writes. #}
+    <summary>{{ pane.derived_heading }}</summary>
+    {% for group in pane.derived %}
+    <h3>{{ group.heading }}</h3>
+    <ul class="tight small mono">
+      {% for row in group.rows %}
+      <li>{{ row }}</li>
+      {% endfor %}
+    </ul>
+    {% endfor %}
+  </details>
+  {% endif %}
+</aside>
+{% endif %}
 {% endblock %}
