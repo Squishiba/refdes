@@ -201,6 +201,37 @@ Progress 8 (final gate):
 
 Progress 9 (done): committed 2083b0b (staged by explicit path only; .scratch
 never staged; no stash used), pushed -u to origin/vocab-p20-differs-from, PR
-opened: https://github.com/Squishiba/refdes/pull/190 (base main, title per
-brief, body carries pairs/validation posture+precedent/sabotages/suite
-counts). Not merged/closed/approved. Task complete.
+ opened: https://github.com/Squishiba/refdes/pull/190 (base main, title per
+ brief, body carries pairs/validation posture+precedent/sabotages/suite
+ counts). Not merged/closed/approved. Task complete.
+
+Review follow-up (chunk-1 review findings, PR #190):
+- Finding 1 [Medium]: docs/schema-reference.md claimed a bare `differs_from:`
+  is a configuration error. Probed first (.scratch/probe_bare_p20.py): on the
+  overlay path a bare `differs_from:` loads as {} on a type, a field and a
+  verb, and on the bundled-standard path too -- configcheck.py:315-316 and
+  schema.py:486-487 both return {} for None on purpose (the `doc:` posture:
+  definition()/_doc_text return "" for None, configcheck.py:298-299,
+  schema.py:470-471). Kept the code; rewrote the doc sentence to say null
+  loads as no block. Pinned with two new tests:
+  test_a_bare_differs_from_loads_as_empty_in_an_overlay (type+field+verb) and
+  test_a_bare_differs_from_loads_as_empty_in_the_bundle. The old `doc:`
+  sentence at schema-reference.md:429-430 carries the same inaccuracy but is
+  pre-existing and out of this finding's scope -- untouched.
+- Finding 2 [Low]: "the fact line links it" is true of vocabulary.html only;
+  docs/vocabulary.md never links (the page's heading anchors belong to the
+  docs site's renderer -- vocabulary.py `_md_facts`, lines 991-994). The doc
+  sentence now says so.
+- Finding 3 [Nit]: _validate_differs_from's dangling-term error said "...or
+  field of this type" even for link-verb owners, which resolve to no fields.
+  The wording is now per owner kind (type: "field of this type"; field: "field
+  declared on the same type"; verb: "type, link type, or set"), and the
+  `known` set is hoisted out of the per-term loop (built once per owner, with
+  an early return when nothing is declared). Dangling tests now assert the
+  owner-specific wording.
+- Gates, all foreground: full suite -> 3459 passed, 2 skipped in 261.98s,
+  exit=0 (+2 = the new pins; tail in .scratch/suite.txt). ruff check --select
+  E9,F src tests -> All checks passed! python docs-site/gen_examples.py
+  --check -> both files up to date (edits sit outside the generated blocks).
+- Committed and pushed to vocab-p20-differs-from; summary posted as a PR
+  comment. Not merged/closed/approved.

@@ -469,14 +469,18 @@ fact line under the term's definition instead of leaving two near-synonyms to
 be told apart by their `doc:` strings alone (docs/design/vocabulary-review.md
 P20). A field is not an entry on the page of its own, so its line renders under
 its definition in the type's fields table. Where the other term has its own
-entry on the page, the fact line links it.
+entry on the page, the fact line links it — in `vocabulary.html` only. The
+lines on `docs/vocabulary.md` name the other term in code text and never
+link: that page's heading anchors belong to the docs site's renderer, not to
+the module that writes the page (deliberate; see `_md_facts`).
 
 Accepted on a type, a field (including a set's field spec, which is written
 once and rides into every includer) and a link type — in the bundled standard
 and in a project's `refdes-schema.yaml` alike. The value must be a non-empty
-mapping of term name to a non-empty sentence; `differs_from: 42`,
-`differs_from: {}` and a bare `differs_from:` are configuration errors naming
-the block path. A named term must resolve in the *resolved* schema — to a type,
+mapping of term name to a non-empty sentence; `differs_from: 42` and
+`differs_from: {}` are configuration errors naming the block path, while a
+bare `differs_from:` is not one: like a bare `doc:`, YAML null reads as no
+block at all. A named term must resolve in the *resolved* schema — to a type,
 a link verb (under its own or its inverse name), a set, or a field declared on
 the same type — and naming anything else is a load-time configuration error
 naming both sides, the same posture as an `include:`, `extends:`, link target

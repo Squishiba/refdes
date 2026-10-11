@@ -12,11 +12,13 @@ A vocabulary term -- a type, a field, a link verb -- can carry, next to its
 
 The shape is a non-empty mapping of term name to a non-empty sentence, in the
 bundled standard and in a project's `refdes-schema.yaml` alike; anything else
-is a configuration error naming the block path (the `doc:` posture). A named
-term that does not resolve in the *resolved* standard -- to a type, a link
-verb under its own or its inverse name, a set, or a field of the same type --
-is a load-time error too, the established posture for dangling references in
-standard definitions (`include:`, `extends:`, link targets, `required_when:`).
+is a configuration error naming the block path (the `doc:` posture) -- except
+a bare `differs_from:`, which, like a bare `doc:`, loads as no block at all.
+A named term that does not resolve in the *resolved* standard -- to a type, a
+link verb under its own or its inverse name, a set, or a field of the same
+type -- is a load-time error too, the established posture for dangling
+references in standard definitions (`include:`, `extends:`, link targets,
+`required_when:`).
 
 The generated vocabulary page renders each pair as a fact line, linking the
 other term when it has an entry on the page; a field's line appears under its
@@ -165,6 +167,28 @@ def test_a_type_without_differs_from_is_unchanged(tmp_path):
     assert project.link_types["tracks"].differs_from == {}
 
 
+def test_a_bare_differs_from_loads_as_empty_in_an_overlay(tmp_path):
+    """YAML null is not a shape error on any owner: like a bare `doc:`, the
+    key left blank loads as no block at all (`BlockChecker.differs_from`'s
+    `value is None` return), not as the configuration error that `differs_from:
+    {}` is."""
+    project = _load(
+        tmp_path,
+        _schema(
+            tracks_extra="    differs_from:\n",
+            note_extra="    differs_from:\n",
+            note_fields="    fields:\n"
+            "      title:\n"
+            "        type: text\n"
+            "        differs_from:\n"
+            "    links: {}\n",
+        ),
+    )
+    assert project.types["note"].differs_from == {}
+    assert project.types["note"].fields["title"].differs_from == {}
+    assert project.link_types["tracks"].differs_from == {}
+
+
 def test_a_subtype_never_inherits_its_parents_differs_from(tmp_path):
     """Like `doc:`, the note belongs to the term that wrote it -- inheriting
     it would put the parent's sentence on the subtype's page entry."""
@@ -272,13 +296,17 @@ def test_a_dangling_term_is_a_configuration_error(tmp_path):
     message = str(exc.value)
     assert "types.note.differs_from" in message
     assert "nogterm" in message
-    assert "not a declared" in message
+    assert "not a declared type, link type, set, or field of this type" in message
 
 
 def test_a_dangling_term_in_a_verb_and_in_a_field_is_caught(tmp_path):
-    for schema, needle in (
+    """The error names what the owner can actually resolve to: a verb has no
+    fields, so it says type, link type or set; a field's wording speaks of
+    the same type."""
+    for schema, needle, wording in (
         (_schema(tracks_extra="    differs_from: {nothere: x}\n"),
-         "link_types.tracks.differs_from"),
+         "link_types.tracks.differs_from",
+         "not a declared type, link type, or set"),
         (
             "types:\n"
             "  note:\n"
@@ -286,11 +314,13 @@ def test_a_dangling_term_in_a_verb_and_in_a_field_is_caught(tmp_path):
             "    fields:\n"
             "      title: {type: text, differs_from: {nothere: x}}\n",
             "types.note.fields.title.differs_from",
+            "not a declared type, link type, set, or field declared on the same type",
         ),
     ):
         with pytest.raises(SchemaError) as exc:
             _load(tmp_path, schema)
         assert needle in str(exc.value)
+        assert wording in str(exc.value)
 
 
 def test_a_term_deleted_by_an_override_is_still_dangling(tmp_path):
@@ -489,6 +519,20 @@ def test_the_bundle_path_accepts_a_good_block(tmp_path, monkeypatch):
         ),
     )
     assert project.types["note"].differs_from == {"bound": "prose, not a number."}
+
+
+def test_a_bare_differs_from_loads_as_empty_in_the_bundle(tmp_path, monkeypatch):
+    """Same posture on the bundle path: `_differs_from`'s `value is None`
+    return, not the shape error a `{}` block raises there either."""
+    project = _bundle_project(
+        tmp_path,
+        monkeypatch,
+        BUNDLE_BASE.replace(
+            "  note:\n    prefix: NTE",
+            "  note:\n    prefix: NTE\n    differs_from:",
+        ),
+    )
+    assert project.types["note"].differs_from == {}
 
 
 @pytest.mark.parametrize(

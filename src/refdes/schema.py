@@ -521,31 +521,53 @@ def _validate_differs_from(
     or its inverse name), a set, or a field declared on the referencing type
     -- the namespaces the vocabulary page actually renders.
     """
-    def _check(owner: str, differs_from: dict[str, str], sibling_fields: set[str]) -> None:
+    def _check(
+        owner: str,
+        differs_from: dict[str, str],
+        sibling_fields: set[str],
+        resolves_to: str,
+    ) -> None:
+        if not differs_from:
+            return
+        known = (
+            set(types)
+            | set(link_types)
+            | set(inverse_of)
+            | set(sets)
+            | sibling_fields
+        )
         for term in differs_from:
-            known = (
-                set(types)
-                | set(link_types)
-                | set(inverse_of)
-                | set(sets)
-                | sibling_fields
-            )
             if term in known:
                 continue
             close = difflib.get_close_matches(str(term), sorted(known), n=1, cutoff=0.5)
             hint = f" Did you mean {close[0]!r}?" if close else ""
             raise SchemaError(
                 f"{owner}.differs_from names {term!r}, which is not a declared "
-                f"type, link type, set, or field of this type.{hint}"
+                f"{resolves_to}.{hint}"
             )
 
     for tname, spec in types.items():
         fields = set(spec.fields)
-        _check(f"types.{tname}", spec.differs_from, fields)
+        _check(
+            f"types.{tname}",
+            spec.differs_from,
+            fields,
+            "type, link type, set, or field of this type",
+        )
         for fname, fspec in spec.fields.items():
-            _check(f"types.{tname}.fields.{fname}", fspec.differs_from, fields)
+            _check(
+                f"types.{tname}.fields.{fname}",
+                fspec.differs_from,
+                fields,
+                "type, link type, set, or field declared on the same type",
+            )
     for lname, lt in link_types.items():
-        _check(f"link_types.{lname}", lt.differs_from, set())
+        _check(
+            f"link_types.{lname}",
+            lt.differs_from,
+            set(),
+            "type, link type, or set",
+        )
 
 
 def _parse_check_severity(
