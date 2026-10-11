@@ -1,0 +1,142 @@
+Living notes H6 — `tasks:` on the merged log type, and its fold
+================================================================
+
+Branch: living-notes-h6-tasks (cut from main at d71c143). Started 2026-10-10.
+
+## Reading / verification pass (before any change)
+
+- AGENTS.md read; its rules on verifying schema/CLI claims by running the tool
+  are followed below (schema command run recorded later).
+- Plan section: docs/design/living-notes-plan.md "Phase H6" (line 326).
+  Spec: `tasks:` structured list field on hardware@3 `log` with `on_change: log`;
+  fold = existing chains machinery; validation in build.validate_items;
+  naming rule P6 (noun is `task`, `work` reserved); tests/test_tasks.py.
+- living-notes.md §5 fold rules 1-4 + complete-list decision confirmed (line 374).
+- Line numbers in the plan had drifted post-4a, as the task warned. Found by name:
+  - chains._fold_from_tip -> chains.py:515 (still exact);
+  - chains.resolve_current_with_source -> chains.py:581 (still exact);
+  - chains.thread_tips -> chains.py:361 (still exact);
+  - `log` type in v3 base.yaml -> base.yaml:268 (plan said :239, drifted);
+  - content_hash computation -> build.compute_hashes (~build.py:2146, plan said
+    build.py:1219, drifted); it hashes ONLY fields whose on_change mode is
+    `invalidate` (build.py, compute_hashes docstring), so `on_change: log`
+    keeps a task tick out of content_hash by construction.
+  - history.semantic_payload (history.py:161) covers item.fields wholesale --
+    includes `log`-mode fields -- so a task tick changes semantic_digest.
+  - build.validate_items -> build.py:241; structured-list field validation
+    already lives in its per-fspec.type branches (options/citations), with
+    _field_error() (build.py:216) as the diagnostic helper.
+- on_change spelling/behavior confirmed by grep: fspec.on_change in schema.py
+  (:604-609, validated against ON_CHANGE_MODES), model.Item.on_change_for
+  precedence, compute_hashes skips non-invalidate modes ("log" behaves as
+  "ignore" for hashing; keys.md/plan say history reads it separately).
+- Field-type registry: schema_json._FIELD_TYPE_MAP is the single map
+  (configcheck.FIELD_TYPES derives from it; scaffold/`schema --json` too).
+  NON_SCALAR_FIELD_TYPES (model.py:155) is what makes parse._reject_scalar_collection
+  refuse a scalar written into a collection field. A structured list field with
+  dict rows today = a dedicated type (options/checks/citations) + a
+  validate_items branch + a _FIELD_TYPE_MAP entry. So `tasks:` follows that
+  shape: new field type `tasks`.
+- Fold machinery check (rule expressibility, no second fold needed):
+  * `[]` clear works already: _fold_from_tip filters only `value is not None`,
+    so a declared `tasks: []` is a hit and stops the walk (clears). `[]`
+    survives parsing as [] (parse stores _strip_lines(value) directly);
+    a bare `tasks:` (null) coalesces to default/absent per parse's null rule.
+  * nearest-wins / replace / preserve: exactly what _fold_from_tip does.
+  * ambiguity vs "nothing declared": _fold returns (None, None) for BOTH. My
+    fold wraps a recording declared_of closure around the EXISTING
+    _fold_from_tip: declared_of is invoked exactly over the backward cone up
+    to the winning frontier, so "fold returned None but the callback saw
+    declarations" <=> equally-near differing lists <=> ambiguous. No second
+    walk, no second fold.
+  * fork: thread_tips() gives the labelled tips (oldest first; an entry with
+    no follows: at all gets itself as its one tip via _component_tips'
+    not-in-graph fallback), and _fold_from_tip is called per tip -- reusing
+    the same function, once per tip, never a union.
+- Design choice (fold function): lives in chains.py (next to the machinery it
+  calls; a sibling module would need chains._fold_from_tip/_graph_view/
+  _declares across module lines). Name: fold_tasks(project, start, *,
+  graph=None) -> list[TaskFold]; TaskFold(tip, rows, source, ambiguous).
+  One element per thread tip; len>1 == fork; rows None+ambiguous True ==
+  "task reconciliation required"; rows None+ambiguous False == no list.
+  Docstring documents this. P6 respected (task noun everywhere).
+- Docs marking: TASK.txt said mark H6 landed "the way H1-H5 were marked
+  (grep for 'Landed')". FACT: there are NO per-phase landed markers for
+  H1-H5 anywhere in docs/design/living-notes-plan.md (git log -S "Landed" on
+  that file: no commit ever added one; H1-H5 landed as PRs, their record is
+  git log + in-prog-logs). So there is no established pattern to copy; I will
+  add a clear "**Status: landed.**" line under the H6 heading and record this
+  discrepancy rather than invent markers for H1-H5.
+
+## Decisions
+- `tasks:` = new field type `tasks` in _FIELD_TYPE_MAP (array of {id,text,
+  state}, state enum open|done|dropped, additionalProperties false like
+  options), added to NON_SCALAR_FIELD_TYPES, declared on log with
+  `on_change: log`.
+- Validation in validate_items branch for fspec.type == "tasks", neighbours'
+  style (_field_error): row-not-a-mapping shape error (options posture),
+  id must be a non-empty string when given + unique within the list, state
+  when given must be one of open/done/dropped (did-you-mean hint like the
+  enum branch). Missing id/text/state not an error (matches options' posture
+  and the plan's stated scope).
+
+## Progress
+- [x] read plan/spec/code, verified drifted line numbers by function name
+- [x] base.yaml + schema_json + model NON_SCALAR + validate_items branch
+- [x] chains.fold_tasks
+- [x] tests/test_tasks.py incl. saboteurs
+- [x] docs (schema-reference + design-log from live `refdes schema` output,
+      changelog.d, plan marking, gen_examples regenerate + --check)
+- [x] full suite + ruff E9,F gate
+- [x] commit/push/PR
+
+## Sabotage matrix (each: break, run, see fail, restore; all restored,
+## `git diff --stat` re-checked after each batch)
+
+- S1 base.yaml `on_change: log` -> `invalidate`: tick test
+  (test_tick_moves_semantic_digest_not_content_or_baseline) FAILS. THE key
+  property's sabotage, as the plan names it.
+- S2 chains fold: treat `tasks: []` as absent (empty guard): clears test FAILS.
+- S3 chains fold: treat inherited defaults as declarations: defaults-dont-
+  declare test FAILS.
+- S4 fold_tasks: never flag ambiguous (always ambiguous=False): ambiguity test
+  FAILS.
+- S5 fold_tasks: return only the first tip's list: fork test FAILS.
+- S6 _fold_from_tip: invert walk direction (oldest-first wins): 6 tests FAIL.
+- S7 _fold_from_tip: walk to oldest declaration instead of nearest: replace +
+  3 more FAIL.
+- S9 chains fold: equal-lists agreement check `!=` -> `is not`: agreement test
+  FAILS.
+- S10 fold: preserve None as []: 7 tests FAIL (proves None vs [] distinction).
+- S11 fold_tasks: head-with-tasks short-circuit skipped: head test FAILS.
+- S12 silence duplicate-id diagnostic: dup test FAILS.
+- S13 silence unknown-state diagnostic: state test FAILS.
+- S14 silence row-shape diagnostic: shape test FAILS.
+- S15 model: drop "tasks" from NON_SCALAR_FIELD_TYPES: scalar-loader test FAILS.
+
+## Suite / docs / verification record
+- `refdes schema` run from .scratch/probes/ (scratch hardware@3 project): log
+  gains `tasks` = array of {id,text,state}, state enum open/done/dropped,
+  additionalProperties false; every doc claim in schema-reference.md/design-
+  log.md/vocabulary.md is based on this or on the code.
+- Oracle fixture tests/fixtures/hardware3_resolved.json regenerated via
+  oracle_dump.resolved_dump([], version=3) (the format its writer uses);
+  test_extends.py 57 passed. The log type now carries the field, so the
+  fixture MUST change -- that is what the fixture is for.
+- Pin tests updated for the legitimate new type: test_message_prose's declared-
+  order list (`... citations, tasks, enum`) and test_scalar_for_list_field's
+  NON_SCALAR_FIELD_TYPES set (both pin the constant itself; their docstrings
+  state that adding a real collection type means updating them, and serve.edit
+  / serve.api / loader share the one object).
+- docs-site/gen_examples.py regenerated schema-reference.md + vocabulary.md;
+  `--check` passes. vocabulary.py itself needed no change (it holds example
+  snippets, not a field-type list).
+- ruff check --select E9,F src tests: clean.
+- Full suite (foreground, ~4-6 min): 3387 passed, 10 skipped (main's baseline
+  3372 passed, 10 skipped; +15 = tests/test_tasks.py). .scratch/suite.txt.
+
+## Finished?
+Yes -- H6 landed as planned scope. Deliberately not done (plan's own list):
+no `refdes work`/`refdes thread`/index `threads` projection (H7), no gate
+rules (H8), no checkbox UI, no tasks_add:/tasks_done:, no derived rows
+written into `tasks:`.

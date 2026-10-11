@@ -157,6 +157,7 @@ A design-log entry — narrative work or a verdict. Entries are append-only in t
 | `rationale` | Why this verdict was reached; required for a rejected verdict. | text | no |
 | `options` | Alternatives considered for this verdict. | options | no |
 | `checks` | Numeric checks against bounds; a failed check is an error. | checks | no |
+| `tasks` | Tasks at the thread tip: rows with a stable id, the task's text, and its state (open, done or dropped). A continuation entry that omits tasks: keeps the nearest prior list; an explicit empty list clears it; a declared list replaces it whole. Kept out of the content hash, so ticking a task never marks downstream items suspect or churns a baseline. | tasks | no |
 
 **Example:**
 

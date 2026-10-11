@@ -391,7 +391,7 @@ type, or `requirement`).
 
 | Key | Purpose |
 |---|---|
-| `type` | `text`, `enum`, `limit`, `person`, `date`, `list`, `options`, `checks`, `citations`, `quantity` |
+| `type` | `text`, `enum`, `limit`, `person`, `date`, `list`, `options`, `checks`, `citations`, `tasks`, `quantity` |
 | `required` | Missing or empty is a build error |
 | `required_when` | Required only when a sibling condition currently holds — see below |
 | `choices` | Allowed values, for `type: enum` |
@@ -473,15 +473,16 @@ The standard's own `log.rationale` uses this
 uses the `links` form (`required_when: {links: alternate}`) — see
 [`alternate`'s required rationale](links.md#part-equivalence-drop_in-and-alternate).
 
-**`enum`, `limit`, and `citations` are enforced today.** `enum` is checked
-against `choices`; `limit` is parsed as a quantity; `citations` is checked to
-be a list of entries that each have at least a `path`. The rest are
+**`enum`, `limit`, `citations`, and `tasks` are enforced today.** `enum` is
+checked against `choices`; `limit` is parsed as a quantity; `citations` is
+checked to be a list of entries that each have at least a `path`; `tasks` is
+checked to be a list of task rows (see below). The rest are
 declarative — they document intent and are where future validation will hook
 in.
 
-**A field typed `list`, `options`, `checks`, or `citations` must be written as
-a YAML list.** Anything else is a build error naming the field, its type and
-what it was given:
+**A field typed `list`, `options`, `checks`, `citations`, or `tasks` must be
+written as a YAML list.** Anything else is a build error naming the field, its
+type and what it was given:
 
 ```
 ERROR   items/cmp.yaml:3 [CMP-010] — field 'tags' is a list field, but it
@@ -516,6 +517,14 @@ reference](cli-reference.md#refdes-fetch), and [output
 formats](output.md#items-json). A citation's `id`, when given, is what
 `[[cite:id]]` in prose resolves to — a project-wide-unique namespace, the
 same posture a figure's `id=` already has.
+
+`tasks` is keyed off the declared type the same way. Any field declared
+`type: tasks` is a list of task rows — a mapping with a stable `id`, the
+task's `text`, and its `state` (`open`, `done` or `dropped`) — where ids must
+be unique within the list and an unknown state is a build error. The hardware
+standard declares one on `log` (`on_change: log`); see
+[task lists](design-log.md#task-lists) for the fold rules that decide which
+list a thread's tip currently carries.
 
 ### Starter types
 
@@ -677,6 +686,7 @@ summary:  # required -- text
 # rationale:  # text; required when status is 'rejected'
 # options:  # options
 # checks:  # checks
+# tasks:  # tasks
 # satisfies: []  # target: requirement, bound
 # constrained_by: []  # target: bound
 # follows: []  # target: log

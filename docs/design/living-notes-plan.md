@@ -325,6 +325,9 @@ handling. Legacy seal files are still read; nothing is deleted from disk.
 
 ## Phase H6 — `tasks:` on the merged log type, and its fold
 
+**Landed** — see `in-prog-logs/living-notes-h6-tasks.txt` and the
+`log-tasks-field` changelog fragment.
+
 **Naming rule (vocabulary review P6, approved by the owner 2026-09-20).**
 `tasks:` stays the key and the noun is always `task` — in prose, in output, and
 in identifiers (`open_tasks`, task rows, task ids). `work` is reserved for the

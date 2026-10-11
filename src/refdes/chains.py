@@ -21,12 +21,23 @@ not O(N²).
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any, Callable
 
 from . import dates
 from .model import Item, Project
 
 FOLLOWS = "follows"
+# The field whose complete-list fold `fold_tasks` resolves (living-notes.md
+# §5, plan phase H6). hardware@3's merged `log` type declares it; the fold
+# itself only asks that a type name a field `tasks:`, same as any other
+# folded field.
+TASKS = "tasks"
+# `ChainGraph` memo key for `fold_tasks`'s per-component result. Namespaced
+# so it can never be handed a plain field's `(value, source)` memo — fields
+# keep the bare name (`resolve_current_with_source`'s comment), links use
+# `link:<name>`, this uses `<field>@tips` because its value is per-tip.
+TASK_FOLD_CACHE_KEY = f"{TASKS}@tips"
 
 
 def _name(item: Item | None) -> str:
@@ -648,6 +659,120 @@ def resolve_current_link_with_source(
         project, start, declared_of, cache_key=f"link:{link}", graph=graph
     )
     return (targets or []), source
+
+
+@dataclass(frozen=True)
+class TipTasks:
+    """The effective `tasks:` list at one thread tip, as `fold_tasks` reports it.
+
+    * `tip` — the tip entry, the label §5's fork rule demands: on an unmerged
+      fork every tip's list is printed under its own entry, never merged into
+      one global list and never unioned.
+    * `rows` — the complete declared task list (rows are `{id, text, state}`;
+      validation lives in `build.validate_items`). An empty list means the
+      thread's nearest declaration was an explicit `tasks: []` — the list is
+      declared and cleared. `None` means there is no list here: either
+      nothing in this tip's ancestry declared `tasks:` at all, or
+      `ambiguous` says otherwise.
+    * `source` — the entry whose own declaration won (for H7's "open since
+      LOG-A-004, 2026-08-30" age line); `None` when `rows` is `None`.
+    * `ambiguous` — equally-near differing declarations (§5 rule 3): no
+      single list may be shown, and the surface must say
+      "task reconciliation required" instead of picking one. Equal lists at
+      equal distance are agreement, not ambiguity, and fold to that list.
+    """
+
+    tip: Item
+    rows: list | None
+    source: Item | None
+    ambiguous: bool
+
+
+def fold_tasks(
+    project: Project,
+    start: Item | str,
+    *,
+    graph: ChainGraph | tuple[dict[str, list[Item]], dict[str, list[Item]]] | None = None,
+) -> tuple[TipTasks, ...]:
+    """Resolve "the task list at this tip" for `start`'s thread (§5 rules 1-4).
+
+    The fold *is* `_fold_from_tip`'s walk — one backward breadth-first walk
+    per thread tip, nearest own declaration winning, inherited `defaults:`
+    not declaring (via `_declares`) — never a second fold. `declared_of`
+    returns the declared value verbatim (so `[]` is a declaration that
+    *clears*, while an omitted `tasks:` preserves the prior list and a
+    declared list replaces it whole), and records what it was asked about:
+    a walk that found nothing and a walk that refused between differing
+    equal-distance lists both end `(None, None)`, and the recording is what
+    tells those two apart.
+
+    Returns one `TipTasks` per tip of the whole connected thread, oldest
+    first — `thread_tips`'s order. That shape is the fork rule: an unmerged
+    fork yields several labelled entries and there is no single current list
+    to hand out; a settled thread (and an entry with no `follows:` at all,
+    which is a thread of one — the ordinary log head "the first task list"
+    is written on) yields exactly one. `rows=None` with `ambiguous=False`
+    means the ancestry simply never declared `tasks:`; with
+    `ambiguous=True` it means "task reconciliation required" and the
+    continuation must declare an explicit complete list.
+
+    The returned lists are the declaring entries' own field values — read
+    them, never append derived rows to them (they are not tasks). On a
+    `ChainGraph` the per-component result is memoized like the field fold's,
+    so asking every entry of a thread costs one fold per tip, not per entry.
+    """
+    predecessors, successors, handles, items, cg = _graph_view(graph, project)
+    start_handle = _start_handle(project, start, handles=handles)
+    if start_handle is None:
+        return ()
+
+    comp_id = cg.component_id(start_handle) if cg is not None else None
+    if cg is not None and comp_id is not None:
+        found, cached = cg.cache_get(comp_id, TASK_FOLD_CACHE_KEY)
+        if found:
+            return cached
+
+    tips = thread_tips(
+        project,
+        start,
+        graph=cg if cg is not None else (predecessors, successors),
+    )
+    folds: list[TipTasks] = []
+    for tip in tips:
+        tip_handle = _start_handle(project, tip, handles=handles)
+        if tip_handle is None:
+            continue
+        declared: list = []
+
+        def declared_of(item: Item, _declared=declared) -> Any:
+            if not _declares(item, TASKS):
+                return None
+            value = item.fields[TASKS]
+            if value is None:
+                # An explicit `tasks: null` is what parse.py's coalesce
+                # leaves behind when the field has no default -- the same
+                # "no hit" the walk itself sees, and not a declaration the
+                # ambiguity recording may count.
+                return None
+            _declared.append(value)
+            return value
+
+        rows, source = _fold_from_tip(
+            project, tip_handle, declared_of, predecessors, handles, items
+        )
+        folds.append(
+            TipTasks(
+                tip=tip,
+                rows=rows,
+                source=source,
+                ambiguous=rows is None and bool(declared),
+            )
+        )
+
+    result = tuple(folds)
+    if cg is not None and comp_id is not None:
+        cg.cache_set(comp_id, TASK_FOLD_CACHE_KEY, result)
+    return result
 
 
 def _compute_component_tips(

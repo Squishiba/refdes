@@ -63,7 +63,7 @@ def test_field_type_outside_the_declared_types_is_named_in_prose(tmp_path):
     `sorted()` and not a repr."""
     message = _load(tmp_path, "      title: {type: strng, on_change: invalidate}\n")
     assert "types.note.fields.title.type must be one of the field types " in message
-    assert "text, person, limit, quantity, date, list, options, checks, citations, enum" in message
+    assert "text, person, limit, quantity, date, list, options, checks, citations, tasks, enum" in message
     assert "got 'strng'" in message
     assert "['" not in message
 

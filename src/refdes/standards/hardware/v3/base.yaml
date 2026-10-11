@@ -287,6 +287,7 @@ types:
       rationale: { type: text, on_change: invalidate, required_when: {status: rejected}, doc: "Why this verdict was reached; required for a rejected verdict." }
       options: { type: options, on_change: invalidate, doc: "Alternatives considered for this verdict." }
       checks: { type: checks, on_change: invalidate, doc: "Numeric checks against bounds; a failed check is an error." }
+      tasks: { type: tasks, on_change: log, doc: "Tasks at the thread tip: rows with a stable id, the task's text, and its state (open, done or dropped). A continuation entry that omits tasks: keeps the nearest prior list; an explicit empty list clears it; a declared list replaces it whole. Kept out of the content hash, so ticking a task never marks downstream items suspect or churns a baseline." }
     include: [provenance, citations, claims, invalidate_body]
     links:
       follows:   [log]

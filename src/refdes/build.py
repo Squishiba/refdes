@@ -31,6 +31,7 @@ from .model import (
     INFO,
     INVALIDATE,
     RETIRED_UNIT_SPELLING,
+    TASK_STATES,
     WARNING,
     CalcLine,
     CheckResult,
@@ -325,6 +326,58 @@ def validate_items(project: Project) -> None:
                         f"{fname}: [{{name: LDO, verdict: rejected, because: "
                         f"dissipates 10 W at full load}}]",
                     )
+            elif fspec.type == "tasks":
+                # living-notes.md §5, phase H6. Rows are `{id, text, state}`
+                # with `state` one of open | done | dropped. Two rules,
+                # decided with the fold: task ids are unique within a list
+                # (the fold replaces whole lists, so identity across entries
+                # is what a row's stable id is for), and a state outside the
+                # three known words is an error -- a row that means `done`
+                # but says `closed` would silently never tick. Row shape
+                # follows the `options:` posture above: the shape of an entry
+                # is diagnosed at the item, not discovered by the fold or a
+                # template that consumes it. A non-list `tasks:` (scalar or
+                # mapping) is the loader's error -- `_reject_scalar_collection`
+                # owns that keystroke (`tasks` is in NON_SCALAR_FIELD_TYPES).
+                if not isinstance(value, list):
+                    continue
+                seen_task_ids: dict[str, int] = {}
+                for index, entry in enumerate(value):
+                    if not isinstance(entry, dict):
+                        _field_error(
+                            project, item, fname,
+                            f"{fname}[{index}]: {entry!r} is not a task -- a "
+                            f"task is a mapping with an 'id', a 'text', and a "
+                            f"'state' of open, done or dropped, as in "
+                            f"{fname}: [{{id: T-thermal-model, text: Model "
+                            f"worst-case copper temperature., state: open}}]",
+                        )
+                        continue
+                    task_id = entry.get("id")
+                    if task_id is not None and str(task_id) != "":
+                        first = seen_task_ids.setdefault(str(task_id), index)
+                        if first != index:
+                            _field_error(
+                                project, item, fname,
+                                f"{fname}[{index}].id: {str(task_id)!r} is "
+                                f"already used at {fname}[{first}] -- task "
+                                f"ids must be unique within a list",
+                            )
+                    state = entry.get("state")
+                    if state is None or str(state) == "":
+                        continue
+                    if state not in TASK_STATES:
+                        close = difflib.get_close_matches(
+                            str(state), TASK_STATES, n=1, cutoff=0.5
+                        )
+                        hint = (
+                            f" Did you mean {close[0]!r}?" if close else ""
+                        )
+                        _field_error(
+                            project, item, fname,
+                            f"{fname}[{index}].state: {state!r} is not one "
+                            f"of {', '.join(TASK_STATES)}.{hint}",
+                        )
             elif fspec.type == "citations":
                 if not isinstance(value, list):
                     _field_error(

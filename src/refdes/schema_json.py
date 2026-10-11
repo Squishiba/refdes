@@ -97,6 +97,22 @@ _FIELD_TYPE_MAP: dict[str, dict[str, Any]] = {
             "additionalProperties": False,
         },
     },
+    # The task rows of a `tasks:` field (living-notes.md §5): `{id, text,
+    # state}` with `state` one of open | done | dropped. The fold that
+    # resolves "the list at this tip" lives in `chains.fold_tasks`; the
+    # rows' own validation (unique ids, known states) in validate_items.
+    "tasks": {
+        "type": "array",
+        "items": {
+            "type": "object",
+            "properties": {
+                "id": {"type": "string"},
+                "text": {"type": "string"},
+                "state": {"enum": ["open", "done", "dropped"]},
+            },
+            "additionalProperties": False,
+        },
+    },
 }
 
 HISTORY_DEF: dict[str, Any] = {
