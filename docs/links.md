@@ -135,6 +135,41 @@ stdout.
 Add your own by declaring them in `link_types` and listing them under a type's
 `links:`.
 
+### Which compliance verb?
+
+Six verbs read like six ways of saying "this has to do with that rule." They
+are not six ways of saying one thing; the two columns that decide which one you
+want are **does it feed [coverage](coverage.md)**, and **does it change the
+target or just point at it**. Everything here is read off the resolved
+`hardware@3` schema (`refdes schema`) and `build.compute_coverage`, not from
+memory.
+
+| Verb (inverse) | Authored on → targets | Feeds coverage? | Changes the target, or just points at it? |
+|---|---|---|---|
+| `satisfies` (`satisfied_by`) | log (a verdict entry) / component → requirement, bound | **Yes** — the `satisfied` stage (and `claimed` while the authoring item's `status` is outside its type's `satisfying_statuses:`) | **Changes it.** This is the one verb that closes coverage on its target; the others below never do. |
+| `refines` (`refined_by`) | requirement → requirement; bound → bound | No | Just points. A narrower, more detailed version of the *same kind of statement* — same category, different altitude. |
+| `derives_from` (`derived_by`) | bound → requirement, bound | No | Just points. Records where the bound's number came from — an origin, not a restatement and not a claim. |
+| `governed_by` (`governs`) | requirement → requirement, bound | No (its own definition says "Traceability only; it never feeds coverage") | Just points. The declaring requirement is a *different* fact that must comply with a general rule stated elsewhere, without narrowing it. |
+| `constrained_by` (`constrains`) | log (a verdict entry) / component → bound | No | Just points. Says the item must *respect* a bound; the number, if any, is evaluated by a `checks:` entry against that bound's `limit:`, never by this link. |
+| `met_by` (`meets`) — `design-debate` preset only | `option` → requirement, bound (v1 spells the targets requirement, constraint) | No — the coverage computation never reads `met_by`/`meets`, and `option` declares no status lists | Just points. Records how a candidate measures up. |
+
+> **The `met_by` row's preset does not exist in `hardware@3`.** `hardware@3`
+> ships no presets at all: its directory holds `base.yaml` and
+> `migration.yaml` only. Adding it to a `hardware@3` project errors —
+> `configuration error: preset 'design-debate' does not exist for hardware@3
+> (available: [])` — because the preset's `resolved_by: [decision]` link had
+> nothing left to target once the `decision` type retired into the `log`
+> (see [the standard library](standard-library.md#versioning-and-pinning),
+> change 7). `met_by` still ships in the `hardware@1`/`hardware@2` presets for
+> projects pinned there, and never fed coverage in either.
+
+`verifies` and `addresses` also feed coverage, but they are not alternatives to
+the compliance verbs in the table — reach for them for their own jobs: `verifies`
+(test → requirement/bound; the `verified` stage, gated by the test type's
+`verifying_statuses:`) and `addresses` (log → requirement/bound; the `addressed`
+stage, which carries no status gate — see
+[which links feed coverage](coverage.md#which-links-feed-coverage)).
+
 ### `governed_by` vs. `refines` vs. `constrained_by`
 
 Three verbs, three different questions, easy to reach for the wrong one:

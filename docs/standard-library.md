@@ -106,6 +106,40 @@ types:
   component: null   # errors here if any type still declares a link to it
 ```
 
+## Three questions before naming a new thing
+
+Anything added here — a standard's own type or verb, a preset's, or your
+project's overlay — adds a *word* before it adds a mechanism, and a bad word
+costs more to retire than to check. The rule from the
+[vocabulary review](design/vocabulary-review.md) (P21): before the name goes
+into a standard, answer three questions.
+
+1. **Does this word already mean something else in refdes?** Grep the
+   bundled standards, `parse.py`, `vocabulary.py` and `cli.py` for it —
+   reserved keys, verbs, statuses and commands all get first claim.
+2. **Does it mean something else to a hardware engineer** — in a BOM, in a
+   datasheet, in ordinary engineering English?
+3. **Where two words name adjacent ideas, is the difference visible in the
+   names**, or only in the doc strings? If only in the doc strings, the pair
+   will be confused; pick names that carry the difference.
+
+Every rename this library has actually carried is a worked example of a
+failure found after the fact. `constraint` became `bound` at `hardware@2`
+([below](#versioning-and-pinning), change 2) because *requirement* and
+*constraint* read as near-synonyms in plain English — a questions-1-and-2
+miss of exactly the kind this section warns about: the pair's difference was
+never visible in the names, and it collided with a word the vocabulary itself
+already had. The history design nearly put `record`/`recorded` into the same
+vocabulary that had already shipped the `records:` link verb — question 1
+exactly, and it was caught only after the design prose was written: the event
+became `capture`/`captured` instead, and the applied-decision record in
+`docs/design/living-notes-plan.md` names the shipped verb as the collision
+that rename removed. (`records:` itself was retired with the `decision` merge
+at `hardware@3`; [links](links.md) carries that story.) And
+`docs/design/vocabulary-review.md` §S1.1–S1.5 is a list of words that passed
+into use anyway and were found, each time, to name two things: those are
+questions one and two applied as they should have been, too late.
+
 ## `sets` and `include:`
 
 Reusable fragments of a type's own spec — `fields:`, `links:` and `body:`,

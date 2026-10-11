@@ -1000,6 +1000,17 @@ is worth keeping despite the fossil — a new author never met `constraint`, so
 the word only confuses people who read v1 — but the doc string should say
 "must respect a bound" and nothing that sounds like `governed_by`.
 
+**Landed (2026-10-11).** The table is in `docs/links.md`, "Which compliance
+verb?", authored against the resolved `hardware@3` schema (`refdes schema`)
+and `build.compute_coverage`, not recalled. `met_by` is recorded with its
+preset retired: `hardware@3` ships no presets (`preset 'design-debate' does
+not exist for hardware@3 (available: [])`), and the verb never fed coverage
+in the versions that do ship it. The `constrained_by` doc-string fix was
+*not* done here: that string lives in the standard's YAML, which is a code
+change and out of scope for this docs pass. It is recorded as a follow-up;
+note the current `v3/base.yaml` string already reads "…must respect a bound",
+so the follow-up may only need to confirm the wording is settled.
+
 **P17 — a "what does this word mean when a thing is finished with?" table** for
 `retired`, `superseded`, `obsolete`, `eliminated`, `rebutted` and `on_hold`
 (D4). Do not unify them: each is right for its type, and a single `retired`
@@ -1017,6 +1028,16 @@ can actually use is: *the suffix never tells you whether a link feeds coverage;
 the type's `satisfying_statuses` and `verifying_statuses` do.* That is true for
 every verb including `verified_by`, and it removes the one exception from a rule
 whose whole value is being automatic.
+
+**Landed (2026-10-11).** `docs/coverage.md`'s "Which links feed coverage" now
+states exactly that rule, with no exception to remember. Re-verified against
+the coverage code rather than recalled: `build._coverage_for` reads exactly
+the three pairs `addresses`/`addressed_by`, `satisfies`/`satisfied_by`,
+`verifies`/`verified_by` from either authoring end; the settled-vs-`claimed`
+and verified gates are `satisfying_statuses:`/`verifying_statuses:` on the
+authoring type (`build.py:1055-1079`), and an authored `verified_by` is gated
+by the same list as an authored `verifies` (`build._verifier_type_names`), so
+the legacy spelling is a consequence of the rule, not an exception to it.
 
 **P20 — put disambiguation in the standard, not in prose.** `vocabulary.py`
 already renders every type, field and verb onto a generated vocabulary page
@@ -1039,6 +1060,14 @@ the difference visible in the names, or only in the doc strings? The
 `constraint`/`requirement` rename, the `records:` confusion at
 `living-notes-plan.md:588`, and S1.1 through S1.5 in this review are all
 failures of question one or two, caught after the fact each time.
+
+**Landed (2026-10-11).** The three questions are now in
+`docs/standard-library.md`, "Three questions before naming a new thing" — the
+page for overriding and extending the standard. The examples were re-checked
+where they live now: the `records:` collision text has moved from
+`living-notes-plan.md:588` to that file's P1/P2 naming record (cited without
+the stale line number); the `constraint`→`bound` rename is `hardware@2`
+change 2 as documented there; S1.1-S1.5 are unchanged.
 
 ### 3.5 Order of work
 

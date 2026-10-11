@@ -1,0 +1,149 @@
+Task: vocabulary review proposals P16, P19, P21 — docs-only (per .scratch/TASK.txt)
+Branch: vocab-p16-p19-p21-links-rules, cut from main. Started 2026-10-11.
+
+READ FIRST: AGENTS.md (repo root) — verify schema claims with `refdes schema`
+run live, verify CLI claims by running them; scope one topic at a time; stage
+by path; never stash.
+
+git status at start: clean, on the task branch.
+
+== Evidence gathering (shared by P16/P19) ==
+
+- Ran from repo root (has refdes-project.yaml, pinned hardware@3, presets: []):
+    PYTHONPATH=$PWD/src /home/jorb/work/venv-refdes/bin/python -m refdes.cli schema
+  -> .scratch/schema.json (exit 0). Read the JSON: per-type link properties with
+  doc strings and (target: ...) annotations.
+- Loaded the resolved model directly (refdes.loader.load_readonly) to read
+  per-type link declarations and coverage switches:
+    requirement links: part_of[group], refines[requirement], governed_by[requirement,bound]; coverable=True covstat=[active]
+    bound      links: part_of[group], refines[bound], derives_from[requirement,bound]; coverable=True covstat=[active] (extends requirement)
+    component  links: ... satisfies[requirement,bound], constrained_by[bound] ...; satisfying_statuses=[selected]
+    log        links: satisfies[requirement,bound], constrained_by[bound], addresses[requirement,bound], follows/amends/supersedes[log], selects[component], blocked_by[any]; satisfying_statuses=[accepted]
+    decision   (project overlay type): satisfying_statuses=[accepted]
+    test       links: verifies[requirement,bound]; verifying_statuses=[passing]
+    group      coverable=False
+- Coverage code, src/refdes/build.py:
+  - _coverage_for (build.py:1029-1081) reads EXACTLY three verb pairs:
+    addressed_by backlink | addresses forward; satisfied_by | satisfies;
+    verified_by | verified_by forward (both directions of the pair).
+  - satisfies gate: satisfier type's satisfying_statuses, unset -> all count
+    (build.py:1055-1062); unsettled -> claimed stage.
+  - verifies/verified_by gate: verifier type's verifying_statuses, unset ->
+    all count (build.py:1075-1079). Applied identically whether the link was
+    authored as verifies or as legacy-spelling verified_by.
+  - addressed: no status gate at all (counted from the link's existence).
+  - _verifier_type_names (build.py:859-877) recognizes either spelling of the
+    verifies/verified_by pair, so a project authoring verified_by: [test]
+    directly makes the named type a verifier — the link feeds coverage
+    despite the _by suffix.
+  - diagram.py:315 COVERAGE_VERBS = ("addresses", "satisfies", "verifies");
+    diagram.py:321 _GATE_ATTR maps satisfies->satisfying_statuses,
+    verifies->verifying_statuses (no entry for addresses — no gate).
+  - grep of src/refdes/*.py for the non-coverage verbs: no engine read of
+    refines/refined_by, derives_from/derived_by, governed_by/governs,
+    constrained_by/constrains (only display uses, e.g. render.py:291
+    THREAD_VERDICT_LINKS lists constrained_by for the thread verdict panel),
+    and no engine read of met_by/meets anywhere.
+- Preset check for met_by: `ls src/refdes/standards/hardware/v3/` shows only
+  base.yaml + migration.yaml — hardware@3 ships NO presets directory.
+  Verified by running, from .scratch/probe-v3 (project yaml with
+  standard: {base: hardware, version: 3, presets: [design-debate]}):
+    PYTHONPATH=<repo>/src <venv python> -m refdes.cli schema
+  -> "configuration error: preset 'design-debate' does not exist for
+  hardware@3 (available: [])" (exit 2). met_by still exists in the
+  hardware@1/@2 presets (src/refdes/standards/hardware/v{1,2}/presets/
+  design-debate.yaml: link met_by/meets, declared on `option`,
+  option.met_by: [requirement, bound] in v2, [requirement, constraint] in v1).
+- P16 doc-string follow-up: the review wants constrained_by's doc to say
+  "must respect a bound". Current v3 string (base.yaml:163, per the schema
+  JSON): "A verdict log entry or component that must respect a bound.
+  Traceability only — it does not close coverage on the bound; satisfies
+  does." — it already says exactly that and carries nothing that reads like
+  governed_by. NOT edited (standard YAML is a code change; task says record
+  only). Recorded as follow-up in the PR body; note it appears already
+  satisfied by the current wording, so the follow-up may just close.
+
+== P19 — verdict: rule holds, proceed ==
+Verified "the suffix never tells you whether a link feeds coverage; the
+type's satisfying_statuses and verifying_statuses do" against build.py as
+above:
+- _by never excludes: satisfied_by/verified_by/addressed_by are the very
+  names the engine reads as backlinks, and an authored verified_by (legacy
+  spelling, build.py:1069-1070 + 859-877) feeds coverage too.
+- _by never admits: constrained_by/governed_by/blocked_by never feed it, and
+  no status list is consulted for them because the engine never reads the
+  pair at all.
+- What decides how a coverage pair counts: satisfying_statuses (satisfies),
+  verifying_statuses (verifies/verified_by, same gate either spelling).
+  addresses is the third pair; its "addressed" stage is by definition the
+  record that work was written up and has no status gate (diagram.py:321
+  confirms only two gated verbs) — the rule's directive (read the type's
+  status declarations, never the name) holds for it too. No verb exists for
+  which the SUFFIX decides coverage behavior (constrained_by vs verified_by
+  share it and differ), so the no-exception restatement is honest.
+
+== P16 — done ==
+Added "Which compliance verb?" table to docs/links.md (new subsection before
+the existing governed_by-vs-refines-vs-constrained_by prose, which stays as
+the detail and is cross-referenced). Rows: refines, derives_from,
+governed_by, constrained_by, satisfies, met_by; columns = review's two
+deciding columns (feeds coverage? / changes the target or points at it?),
+plus where it's authored, each cell from the schema JSON + build.py reads
+above. met_by row states the preset retired: hardware@3 ships no presets
+(verified by running, above) and the verb fed no coverage even where the
+preset ships.
+
+== P21 — home and examples ==
+Page chosen: docs/standard-library.md — docs/index.md describes it as "the
+bundled types and links every project starts with, how to override or extend
+them", i.e. the page for people authoring/extending standards and the
+project overlay. New subsection "Three questions before naming a new thing"
+after "Overriding and extending".
+Examples checked per the review (which cited living-notes-plan.md:588):
+- the records:/capture confusion at living-notes-plan.md:588 — MOVED; the
+  text is now at living-notes-plan.md:610-611 ("the shipped records: link
+  verb ... that is the collision P1 removed"). Fixed the citation to the
+  file (no brittle line number) in the docs text; the review doc itself is
+  left alone (not ours to rewrite).
+- constraint->bound rename: exists, documented as change 2 of hardware@2
+  (src/refdes/standards/hardware/v2/base.yaml:21-25).
+- S1.1-S1.5: still present in docs/design/vocabulary-review.md (S1.1 at
+  :410, S1.2 at :451, S1.3 at :471, S1.4 at :490, S1.5 at :520).
+
+== status ==
+DONE (2026-10-11). Files changed: docs/links.md (P16 table),
+docs/coverage.md (P19 rewrite of "Which links feed coverage"),
+docs/standard-library.md (P21 "Three questions before naming a new thing"),
+docs/design/vocabulary-review.md (Landed (2026-10-11) marks on P16/P19/P21,
+in the style of the P1/P2 marks), changelog.d/compliance-verb-and-naming-docs.added.md,
+this log. Nothing under src/ or tests/ touched.
+
+Follow-up recorded (not done — standard YAML is code, task said record only):
+constrained_by's doc string should say "must respect a bound" and nothing
+governed_by-ish. Verified current v3 string (base.yaml:163 / schema JSON)
+already reads "A verdict log entry or component that must respect a bound.
+Traceability only — it does not close coverage on the bound; satisfies does."
+So the follow-up may only need to confirm the wording is settled.
+
+Checks (all foreground):
+- python docs-site/gen_examples.py --check -> both files up to date, exit 0
+  (run again after the final doc edits).
+- Full suite after the final edits:
+  PYTHONPATH=$PWD/src ... -m pytest -q -p no:cacheprovider
+  -> 3424 passed, 2 skipped in 260.06s, exit 0. (First full run before the
+  last wording pass: 3424 passed, 2 skipped in 264.42s, exit 0.) Main was
+  quoted at ~3420 passed / 2 skipped; +4 is main's own drift since the task
+  was written — the suite was green before I touched anything, my diff is
+  docs-only, and both runs are green. The known flake
+  tests/test_serve_cli.py::test_a_stale_token_file_from_a_crash_is_rewritten_not_refused
+  did not fire in either run.
+- Self-check after writing: removed a docstring quote for met_by that is NOT
+  in the currently shipped preset YAMLs (the v1/v2 preset lines carry no
+  doc: key — the quote existed only in the review's frozen §1 table), so the
+  links.md row now states the verified code fact instead.
+
+Difficulties: none blocking. The live-schema JSON shows requirement's
+refines target as "requirement, bound" because subtype lists widen to
+subtypes (schema_json.py:170) — the declared lists are requirement->
+[requirement], bound->[bound] (loader output above); the docs row states the
+declared pair, matching the existing starter table.
