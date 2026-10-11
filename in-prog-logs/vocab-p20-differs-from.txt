@@ -198,3 +198,9 @@ Progress 8 (final gate):
   judgement call (error vs warning for a dangling differs_from term) followed
   the established precedent (load error) as the task instructed; recorded
   above.
+
+Progress 9 (done): committed 2083b0b (staged by explicit path only; .scratch
+never staged; no stash used), pushed -u to origin/vocab-p20-differs-from, PR
+opened: https://github.com/Squishiba/refdes/pull/190 (base main, title per
+brief, body carries pairs/validation posture+precedent/sabotages/suite
+counts). Not merged/closed/approved. Task complete.
