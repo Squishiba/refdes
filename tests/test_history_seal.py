@@ -434,6 +434,193 @@ def test_the_policy_is_per_type_in_one_project(tmp_path, capsys):
             assert seals[record_id] == value
 
 
+HYPHEN = """\
+site: { title: Hyphen, out: _site }
+id: { width: 3, ledger: .refdes/ids.yaml }
+types:
+  log:
+    prefix: REQ-TMP
+    append_only: true
+    SEALING_LOG
+    fields:
+      summary: { type: text, required: true }
+  note:
+    prefix: NTE
+    append_only: true
+    fields:
+      summary: { type: text, required: true }
+"""
+
+HYPHEN_ITEMS = (
+    "items:\n"
+    "  - id: REQ-TMP-001\n    type: log\n    summary: A log.\n"
+    "  - id: REQ-TMP-002\n    type: log\n    summary: Another log.\n"
+    "  - id: NTE-001\n    type: note\n    summary: A note.\n"
+    "  - id: NTE-002\n    type: note\n    summary: Another note.\n"
+)
+
+
+def test_a_hyphenated_prefix_still_classifies_its_orphans(tmp_path, capsys):
+    """A hyphenated prefix is a first-class supported form; the orphan's type
+    must be matched on the *whole* declared prefix, not the text before the
+    first hyphen. With `split("-", 1)` the prefix `REQ-TMP` truncated to `REQ`,
+    never matched, the orphan fell back to every append-only type, and (mixed
+    with the build-sealed `note`) the history-backed record was read as
+    build-sealed: `check` errored and `--reseal` dropped it -- the exact silent
+    record loss the PR's own docs promise cannot happen."""
+    (tmp_path / ".refdes").mkdir()
+    (tmp_path / ".refdes" / "keys-adopted.yaml").write_text("adopted: true\n", encoding="utf-8")
+    (tmp_path / "items").mkdir()
+    (tmp_path / "items" / "log.yaml").write_text(HYPHEN_ITEMS, encoding="utf-8")
+    write_project_config(tmp_path, HYPHEN.replace("    SEALING_LOG\n", ""))
+    cfg = str(tmp_path / "refdes-project.yaml")
+    assert cli_mod.main(["-c", cfg, "build"]) == 0
+    _age_seal_file(tmp_path)
+    write_project_config(tmp_path, HYPHEN.replace("SEALING_LOG", "sealing: history"))
+    seal_before = _seal_file(tmp_path).read_bytes()
+
+    _drop_item(tmp_path, "REQ-TMP-002")
+
+    code, output = _run(capsys, cfg, "check")
+    assert code == 0, output  # a history-backed orphan is a warning, not an error
+    assert "REQ-TMP-002 has a legacy seal record in .refdes/log-seal.yaml" in output
+    assert "REQ-TMP-002 is append-only and was sealed" not in output
+    assert _seal_file(tmp_path).read_bytes() == seal_before
+
+    code, output = _run(capsys, cfg, "build", "--reseal")
+    assert code == 0, output
+    assert "nothing was rewritten" in output
+    assert "REQ-TMP-002 was sealed as append-only" not in output
+    # The legacy record is kept byte-for-byte: nothing to drop means no rewrite.
+    assert _seal_file(tmp_path).read_bytes() == seal_before
+
+
+NESTED = """\
+site: { title: Nested, out: _site }
+id: { width: 3, ledger: .refdes/ids.yaml }
+types:
+  tmp:
+    prefix: REQ
+    append_only: true
+    SEALING_TMP
+    fields:
+      summary: { type: text, required: true }
+  log:
+    prefix: REQ-TMP
+    append_only: true
+    SEALING_LOG
+    fields:
+      summary: { type: text, required: true }
+"""
+
+NESTED_ITEMS = (
+    "items:\n"
+    "  - id: REQ-001\n    type: tmp\n    summary: A tmp item.\n"
+    "  - id: REQ-TMP-001\n    type: log\n    summary: A log.\n"
+    "  - id: REQ-TMP-002\n    type: log\n    summary: Another log.\n"
+)
+
+
+def test_the_longest_declared_prefix_wins_the_orphan(tmp_path, capsys):
+    """When two prefixes nest (`REQ` inside `REQ-TMP`), the display id belongs
+    to the longest one it opens with, and that is the only type the orphan can
+    provably have come from. Matched *without* the longest-first tie-break the
+    candidates would be both types, and a mix of history-backed and
+    build-sealed keeps the conservative error -- the record would then be
+    dropped by `--reseal` even though its own type (REQ-TMP, history-backed)
+    promised it would not be."""
+    (tmp_path / ".refdes").mkdir()
+    (tmp_path / ".refdes" / "keys-adopted.yaml").write_text("adopted: true\n", encoding="utf-8")
+    (tmp_path / "items").mkdir()
+    (tmp_path / "items" / "log.yaml").write_text(NESTED_ITEMS, encoding="utf-8")
+    write_project_config(
+        tmp_path,
+        NESTED.replace("SEALING_TMP", "sealing: build").replace("SEALING_LOG", "sealing: build"),
+    )
+    cfg = str(tmp_path / "refdes-project.yaml")
+    assert cli_mod.main(["-c", cfg, "build"]) == 0
+    _age_seal_file(tmp_path)
+    write_project_config(
+        tmp_path,
+        NESTED.replace("SEALING_TMP", "sealing: build").replace("SEALING_LOG", "sealing: history"),
+    )
+    seal_before = _seal_file(tmp_path).read_bytes()
+
+    _drop_item(tmp_path, "REQ-TMP-002")
+
+    code, output = _run(capsys, cfg, "check")
+    assert code == 0, output  # REQ-TMP (history-backed) owns the orphan
+    assert "REQ-TMP-002 has a legacy seal record in .refdes/log-seal.yaml" in output
+    assert "REQ-TMP-002 is append-only and was sealed" not in output
+
+    code, output = _run(capsys, cfg, "build", "--reseal")
+    assert code == 0, output
+    assert "REQ-TMP-002 was sealed as append-only" not in output
+    assert _seal_file(tmp_path).read_bytes() == seal_before
+
+
+LEGACY_PREFIX = """\
+site: { title: Legacy Prefix, out: _site }
+standard: { base: hardware, version: 3 }
+id: { width: 3, ledger: .refdes/ids.yaml }
+types:
+  log:
+    sealing: build
+  note:
+    prefix: NTE
+    append_only: true
+    fields:
+      summary: { type: text, required: true }
+"""
+
+LEGACY_PREFIX_ITEMS = (
+    "items:\n"
+    "  - id: DEC-001\n    type: log\n    summary: A migrated log entry.\n"
+    "  - id: LOG-001\n    type: log\n    summary: A current log entry.\n"
+    "  - id: NTE-001\n    type: note\n    summary: A note.\n"
+    "  - id: NTE-002\n    type: note\n    summary: Another note.\n"
+)
+
+
+def test_a_legacy_prefixed_record_is_classified_by_its_type(tmp_path, capsys):
+    """hardware@3's `log` carries `legacy_prefixes: [DEC]`, and ids.py treats a
+    legacy-prefixed id of that type as the type's own. A `DEC-001` seal record
+    therefore provably came from the (history-backed) `log` -- but a match on
+    `spec.prefix` alone misses it, the orphan falls back to *every*
+    append-only type, and mixed with the build-sealed `note` it is read as
+    build-sealed again: `check` errors and `--reseal` drops the record. The
+    reviewer's probe (`.scratch/review-180/probe_legacy_prefix4.sh`), pinned:
+    the log was first build-sealed via an overlay, then switched to
+    `sealing: history`, then the DEC- entry was deleted."""
+    (tmp_path / ".refdes").mkdir()
+    (tmp_path / ".refdes" / "keys-adopted.yaml").write_text("adopted: true\n", encoding="utf-8")
+    (tmp_path / "items").mkdir()
+    (tmp_path / "items" / "log.yaml").write_text(LEGACY_PREFIX_ITEMS, encoding="utf-8")
+    write_project_config(tmp_path, LEGACY_PREFIX)
+    cfg = str(tmp_path / "refdes-project.yaml")
+    assert cli_mod.main(["-c", cfg, "build"]) == 0
+    _age_seal_file(tmp_path)
+    write_project_config(
+        tmp_path, LEGACY_PREFIX.replace("sealing: build", "sealing: history")
+    )
+    seal_before = _seal_file(tmp_path).read_bytes()
+
+    _drop_item(tmp_path, "DEC-001")
+
+    code, output = _run(capsys, cfg, "check")
+    assert code == 0, output  # a history-backed orphan is a warning, not an error
+    assert "DEC-001 has a legacy seal record in .refdes/log-seal.yaml" in output
+    assert "DEC-001 is append-only and was sealed" not in output
+    assert _seal_file(tmp_path).read_bytes() == seal_before
+
+    code, output = _run(capsys, cfg, "build", "--reseal")
+    assert code == 0, output
+    assert "nothing was rewritten" in output
+    assert "DEC-001 was sealed as append-only" not in output
+    # The legacy record is kept byte-for-byte: nothing to drop means no rewrite.
+    assert _seal_file(tmp_path).read_bytes() == seal_before
+
+
 # ------------------------------------------------------------ corruption stays loud
 
 

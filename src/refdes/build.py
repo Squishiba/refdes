@@ -3166,6 +3166,23 @@ def collect_static_assets(project: Project) -> None:
 # ------------------------------------------------------------------------ entry point
 
 
+def _amends_may_point_at(project: Project, item_type: str) -> bool:
+    """Whether the schema lets any declared type write an `amends` link onto
+    an item of ``item_type`` -- the same target rule link validation uses
+    (``accepts_type``: an empty target list is unrestricted, subtypes satisfy
+    their parent's list). A project overlay that declares a type replaces its
+    links wholesale, so this asks the project's resolved schema, not the
+    bundled standard: an overlay's `log` without an `amends` verb gets no
+    `amends:` advice, exactly because following it would be an unknown field.
+    """
+    return any(
+        project.accepts_type(item_type, targets)
+        for spec in project.types.values()
+        for name, targets in spec.links.items()
+        if name == "amends"
+    )
+
+
 def warn_edited_after_captured(project: Project) -> None:
     """Phase H3: "edited after captured" is a diagnostic and never a failure.
 
@@ -3195,12 +3212,44 @@ def warn_edited_after_captured(project: Project) -> None:
         successor = by_key.get(successor_key)
         succ_label = successor.id or successor.key if successor else successor_key
         captured_when = f"; captured when {succ_label} followed it" if succ_label else ""
+        # Run-5 F4's remedy, scoped to where it is legal: `amends` is a verb
+        # one type declares for correcting entries, so the advice applies
+        # only where the project's own schema lets an `amends` link point at
+        # this entry's type. An append-only type whose schema declares no
+        # such verb, and an editable type -- which is most of what `history
+        # capture` can take -- would both fail the build or warn unknown-field
+        # if they followed it, so the warning says plainly that the snapshot
+        # no longer matches and stops; an unknown type is not claimed to be
+        # editable either, since the tool knows nothing about it.
+        spec = project.types.get(item.type)
+        if spec is None:
+            correction = (
+                "Nothing in this project's schema describes the entry's "
+                "type, so the tool cannot say what a deliberate edit needs "
+                "done about it; revert it if it was not deliberate."
+            )
+        elif spec.append_only and _amends_may_point_at(project, item.type):
+            correction = (
+                f"If the edit was a correction, revert it and append a new "
+                f"entry with `amends: [{label}]` instead; otherwise there is "
+                "nothing to do."
+            )
+        elif spec.append_only:
+            correction = (
+                "The entry's type is append-only, but this schema declares "
+                "no `amends` link that may point at it, so a deliberate edit "
+                "needs nothing done about it; revert it if it was not "
+                "deliberate."
+            )
+        else:
+            correction = (
+                "The entry's type is editable, so a deliberate edit needs "
+                "nothing done about it; revert it if it was not deliberate."
+            )
         project.warn(
             f"{label}: edited after captured -- current semantic "
             f"content differs from the snapshot in {finding.event['kind']} "
-            f"event {finding.event['id']}{captured_when}. If the edit was a "
-            f"correction, revert it and append a new entry with "
-            f"`amends: [{label}]` instead; otherwise there is nothing to do. "
+            f"event {finding.event['id']}{captured_when}. {correction} "
             f"See {docs_url_mod.DESIGN_LOG_DOCS}.",
             file=item.source_file,
             line=item.source_line,
