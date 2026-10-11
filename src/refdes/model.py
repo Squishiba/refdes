@@ -72,6 +72,10 @@ RELEASE_GATE_DEFAULTS: dict[str, dict[str, bool]] = {
     # Same default as unaccepted_board_moves -- a silent workspace change is
     # the same class of drift a release shouldn't ship past unnoticed.
     "unaccepted_workspace_moves": {"release": True,  "revision": False},
+    # Living notes H8: both off by default -- an opt-in tightening through the
+    # release_gate: overlay, not a new floor.
+    "open_tasks":                   {"release": False, "revision": False},
+    "captured_edits":               {"release": False, "revision": False},
 }
 
 
@@ -583,6 +587,19 @@ class Item:
     # inherited key, or the file has no defaults: at all.
     inherited_fields: frozenset[str] = field(default_factory=frozenset)
     defaults_line: int | None = None
+    # Living notes H8: source lines of the rows of a field whose type is
+    # `tasks`, captured in `_build_item` from parse's own `__line__` mapping
+    # tagging (the project's existing position tracker -- this stores what
+    # it already computes, it is not a second scanner). `{field name: one
+    # line per row, 1-indexed, None where no line could be had}` -- a row
+    # inherited from a `defaults:` block (already line-stripped before the
+    # merge) or a malformed non-mapping row. Deliberately NOT inside
+    # `fields`: `_strip_lines` exists precisely because a `__line__` key
+    # left in a field value would poison the content hash and the history
+    # digest. Consumed only by the `open_tasks` gate rule's offender, which
+    # points at the task row it names; an item built without parse (an
+    # import) has none and the offender falls back to the entry's own line.
+    field_lines: dict[str, list] = field(default_factory=dict)
 
     @property
     def title(self) -> str:
