@@ -59,7 +59,7 @@ def thread_views(project: Project, *, graph=None, captures=None) -> list[dict]:
 def label(item: Item) -> str:
     """How the projection names an entry (display id, or key when it has
     none) — the pane looks its thread up by the same label."""
-    return threads_mod._label(item)
+    return threads_mod.entry_label(item)
 
 
 def panes_by_entry(views: list[dict]) -> dict[str, dict]:
