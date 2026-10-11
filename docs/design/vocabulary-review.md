@@ -992,6 +992,14 @@ to reach for. Five tables and one mechanism:
 `section`, `tag` and `{{tree}}` (D3), in `docs/concepts.md`, one row each: what
 it is for, whether it is data or path, and whether it appears in coverage.
 
+**Landed (2026-10-11).** `docs/concepts.md` gained a "Which grouping?" section:
+six rows, one per word, each saying what it is for, whether it is data, a path,
+or a rendered view, and whether coverage reads it. The two deciding cases are
+spelled out under the table — `group` versus `tag` on whether you need to point
+at the collection, `board` versus `group` on path versus link — and `section` is
+recorded as what it actually is: a file-local type assertion, not a grouping.
+Documentation only; nothing in the engine changed.
+
 **P16 — a "which compliance verb?" table** for `refines`, `derives_from`,
 `governed_by`, `constrained_by`, `satisfies` and preset `met_by` (S1.10) in
 `docs/links.md`, with the two columns that actually decide it: does it feed
@@ -1018,9 +1026,22 @@ across six types would lose the difference between a part that was never chosen
 and a decision that was reversed. Document them as a set instead, and note that
 `on_hold` and `blocked_by` are two ways to say stuck.
 
+**Landed (2026-10-11).** `docs/standard-library.md` gained a "When a thing is
+finished with" section: the six words against the type whose `status` declares
+them and what each one does, with `eliminated` and `rebutted` recorded as
+`design-debate` words that a `hardware@3` project does not resolve at all. Not
+unified, as proposed. The stuck note became three ways rather than two, because
+`blocked` is a test *result* and would otherwise have been read as a third
+status for a stalled entry.
+
 **P18 — one sentence for component versus part** (S2.2): the type is
 `component`, the world calls it a part, and the parts page is the components
 page. Put it in `docs/concepts.md` where `component` first appears.
+
+**Landed (2026-10-11).** One sentence in `docs/concepts.md`, where `component`
+first appears: the type is `component`, the world calls it a part, and
+`parts.html` is the components page — it indexes every field literally named
+`part_number` rather than adding a `part` type.
 
 **P19 — restate the `_by` rule so it has no exception.** `docs/coverage.md:64-91`
 makes a good rule and then flags `verified_by` as breaking it. The rule authors

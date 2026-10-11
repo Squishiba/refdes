@@ -11,9 +11,35 @@ a log entry, a group. An item has
 - **links** to other items,
 - an optional **markdown body**.
 
+The type is `component`, the world calls it a part, and the site's
+[Parts page](parts.md) is the components page: `parts.html` indexes every field
+literally named `part_number` (plus the part numbers inside `citations:`
+entries) instead of adding a second type called `part`.
+
 Item types are not hard-coded. They are declared in `refdes-schema.yaml`, so
 adding a `thermal_zone` type is a config change, not a code change. See the
 [schema reference](schema-reference.md).
+
+## Which grouping?
+
+Five of these file an item somewhere; the sixth is a view of the lot. They are
+not interchangeable, and the difference is not visible in the word — which is
+why they are in one table instead of five paragraphs:
+
+| | What it is for | Data or path? | In coverage? |
+|---|---|---|---|
+| **`board`** | One physical board in a family of boards sharing a project. Registered in `boards:` — opt-in, and an item-level `board:` override naming a board that is not registered is a build error. | Path: the first segment under `items/` (the second under `item_layout: workspace`), overridable by the reserved `board:` key. | Yes, as a scope: each board with items gets `coverage-<board>.html`, and a board declaring `conforms_to:` gets the stages computed again for each member of that group, counting only that board's own satisfiers. |
+| **`workspace`** | The ownership boundary one level above boards: the seam along which a project would later split. Registered in `workspaces:`; the cross-workspace link lint is what it buys. | Path when `item_layout: workspace` (`items/<workspace>/<board>/`); under `flat`, only what a `workspace:` key says. | Yes, as a scope only: `coverage-<workspace>.html` filters the same rows to that workspace's items. Nothing is recomputed per workspace — the per-board recomputation has no workspace equivalent. |
+| **`group`** | A named collection of items — "the PCIe interface spec" — that can be pointed at without standing in for its members. | Data: an item type (`GRP`) with members pointing at it via `part_of:`; the group never lists its own members. | No. `coverable: false`, and it is absent from every `satisfies:` target list, so nothing may claim it. It touches coverage only indirectly: `conforms_to:` names a group, and its *members* are what the per-board rows are about. |
+| **`section`** | Nothing outside the file that contains it. A `- section: <type>` entry in a list file — or a `section:` marker block in Markdown — asserts the **type** of every item below it until the next marker; an item that disagrees is an error naming both. | Neither: file-local authoring syntax. It is not a field on the item (`items.json` carries no `section`), and it is not a path segment. | No. |
+| **`tag`** (`tags:`) | Finding items again: `refdes ls --tag io`, the free-text `refdes ls` query (which matches tags as well as titles), and `tag=` on the `{{index}}` and `{{compare}}` blocks. | Data: a `tags:` list field, part of the `provenance` set, `on_change: ignore` — so retagging marks nothing suspect. | No. Coverage reads `coverable:`, statuses, and verifier links; tags are none of those. |
+| **`{{tree}}`** | The nesting every item has without the author declaring anything: workspace, then board, then `part_of` group, then item — as the `tree.html` report, or `{{tree}}` inside a body. | Neither: it is a rendered view of the two path levels and the one link above. | No. It displays items; it computes nothing that coverage reads. |
+
+So: if you only want to find those items again, that is a **tag**, not a group —
+a group is an item with an id, and every member has to say `part_of:` to belong.
+If you want a folder the build checks against a registry, that is a **board**,
+not a group. And if you are typing `section:` to group things project-wide,
+you are not: it only ever says what type the next lines are.
 
 ## Links are edges, declarable from either end
 
