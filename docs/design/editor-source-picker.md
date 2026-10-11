@@ -188,7 +188,8 @@ keys to pin. Reasons, in order of weight:
   is an item that will not build.
 
 The sequence, inside the existing per-project write lock
-(`serve/edit.py:199-209`):
+(`serve/edit.py:write_lock_for`, taken by `apply_edit`):
+
 
 1. Load the before-project, resolve the item, check `expected_revision`,
    check sealed — all unchanged from today's `_apply_locked`.
@@ -215,6 +216,23 @@ and the failure mode if the process dies inside the window is a lockfile that
 pins a key no item names — which is inert, visible in `git status`, and
 cleaned by the next `refdes fetch`. That is stated rather than papered over:
 when the journal lands, this operation becomes its first client.
+
+Two locks, in that order, and never the other way round. `write_lock_for` is
+the in-process one and it stops this server interleaving its own saves; steps
+4 and 6 additionally take `write_lock.project_write_lock` — the same
+cross-process lock `refdes fetch` runs inside — so the lockfile's
+read-modify-write and the rollback's read-compare-restore are each one
+unbreakable section for any writer that takes the lock too. The delta gate
+between them deliberately holds neither lock: it can take seconds, and holding
+the project lock across it would keep every CLI writer out of the project for
+that long. That is also why the rollback still compares before it restores.
+The compare is not there for the (now closed) gap between its own read and its
+restore; it is there for the gate — a save that landed while the gate was
+running has already replaced the file, and restoring the bytes this operation
+read would delete a pin that a body on disk still names. What the lock cannot
+promise is the crash inside the one `os.replace` above, or a writer that
+ignores the lock. Proven both ways, with the interleaving built on events
+rather than on timing, in `tests/test_citations_lockfile_locking.py`.
 
 **The browser never re-pins a changed file.** Acceptance extracts under
 fetch's existing non-`--update` policy (`calc-sources.md` §5's command
