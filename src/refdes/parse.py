@@ -37,11 +37,11 @@ KEY_LINE_RE = re.compile(r"^[A-Za-z_][\w.-]*\s*:(\s|$)")
 # items sharing one `defaults:` block, so the tradeoff is not file count but whether
 # an entry carries prose: a bare date+summary log entry is fine as a list entry, one
 # carrying a prose body belongs in .md.
-RESERVED = {"id", "type", "history", "body", "former_ids", "key"}
+RESERVED = {"id", "type", "body", "former_ids", "key"}
 # Reserved, but only when the item's own type does not already declare a field of
 # the same name -- so a schema that predates one of these keys keeps working
 # unchanged instead of having the field silently shadowed.
-OVERRIDABLE = {"prefix", "board", "workspace"}
+OVERRIDABLE = {"prefix", "board", "workspace", "on_change"}
 
 # Fields renamed by a standard-library version bump, keyed by (type name, old
 # key) -> new key. A plain rename would otherwise surface as an unknown-field
@@ -458,7 +458,7 @@ def _duplicate_entry_id(
 
     An entry's own `__line__` is the start line of the mapping the entry *is*,
     so a repeat among the entry's top-level keys names the item exactly. A
-    repeat further down -- inside `history:`, say -- belongs to the entry that
+    repeat further down -- inside `on_change:`, say -- belongs to the entry that
     contains it, found by the last entry starting at or before it. A `defaults:`
     block is named for what it is, since a value lost there is inherited by
     every item in the file. Anything else (a repeat in the file's own
@@ -792,6 +792,36 @@ def _reject_scalar_collection(
     )
 
 
+def _apply_change_override(
+    project: Project,
+    item: Item,
+    value: Any,
+    rel: str,
+    line: int,
+) -> None:
+    """Parse an item's `on_change:` front-matter override into `item`."""
+    if isinstance(value, str):
+        if value not in ON_CHANGE_MODES:
+            project.error(
+                f"on_change: {value!r} must be one of {', '.join(ON_CHANGE_MODES)}",
+                file=rel,
+                line=line,
+                item_id=item.id,
+            )
+            return
+        item.on_change_override = {"mode": value}
+    elif isinstance(value, dict):
+        item.on_change_override = _strip_lines(value)
+        if item.on_change_override.get("fields") and not item.on_change_override.get("reason"):
+            project.warn(
+                "item-level on_change override has no 'reason'; suppression should be "
+                "self-documenting",
+                file=rel,
+                line=line,
+                item_id=item.id,
+            )
+
+
 def _build_item(
     project: Project,
     raw: dict[str, Any],
@@ -870,27 +900,24 @@ def _build_item(
     if key:
         item.key = str(key).strip()
 
-    history = raw.get("history")
-    if isinstance(history, str):
-        if history not in ON_CHANGE_MODES:
-            project.error(
-                f"history: {history!r} must be one of {', '.join(ON_CHANGE_MODES)}",
-                file=rel, line=line, item_id=item.id,
-            )
-        else:
-            item.history = {"mode": history}
-    elif isinstance(history, dict):
-        item.history = _strip_lines(history)
-        if item.history.get("fields") and not item.history.get("reason"):
-            project.warn(
-                "item-level history override has no 'reason'; suppression should be "
-                "self-documenting",
-                file=rel, line=line, item_id=item.id,
-            )
+    legacy_change_override = raw.get("history")
+    if "history" in raw and "history" not in spec.fields:
+        source_line = (defaults_line or line) if "history" in inherited else line
+        project.error(
+            "item-level history: was renamed to on_change: -- rename this key "
+            "in the source file. Its override is used in this build so the "
+            "change policy is not silently lost.",
+            file=rel,
+            line=source_line,
+            item_id=item.id,
+        )
+        _apply_change_override(project, item, legacy_change_override, rel, source_line)
 
     known_keys = set(spec.fields) | set(spec.links) | RESERVED | OVERRIDABLE
     for key, value in raw.items():
         if key == "__line__" or key in RESERVED:
+            continue
+        if key == "history" and "history" not in spec.fields:
             continue
         if key in OVERRIDABLE and key not in spec.fields:
             if key == "prefix" and value:
@@ -899,6 +926,12 @@ def _build_item(
                 item.board_hint = str(value)
             elif key == "workspace" and value:
                 item.workspace_hint = str(value)
+            elif key == "on_change":
+                # Same attribution as the field branch below: a value inherited
+                # from `defaults:` is diagnosed at the defaults block's own
+                # line -- the key the author has to edit is up there.
+                source_line = (defaults_line or line) if key in inherited else line
+                _apply_change_override(project, item, value, rel, source_line)
             continue
         if key in spec.links:
             targets = value if isinstance(value, list) else [value]

@@ -43,7 +43,7 @@ NESTED_ANCHOR = re.compile(r"<a\b[^>]*<a\b", re.IGNORECASE)
 CONFIG = """\
 site: {title: "Nested anchors", out: _site}
 id: {width: 3, ledger: .refdes/ids.yaml}
-history: {default: invalidate}
+on_change: {default: invalidate}
 units: {preferred: []}
 boards:
   power: {label: "Power"}

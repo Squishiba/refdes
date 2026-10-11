@@ -115,8 +115,8 @@ _FIELD_TYPE_MAP: dict[str, dict[str, Any]] = {
     },
 }
 
-HISTORY_DEF: dict[str, Any] = {
-    "description": "history: <mode> for the whole item, or a per-field override.",
+ON_CHANGE_OVERRIDE_DEF: dict[str, Any] = {
+    "description": "on_change: <mode> for the whole item, or a per-field override.",
     "oneOf": [
         {"enum": list(ON_CHANGE_MODES)},
         {
@@ -205,10 +205,11 @@ def _type_branch(
         properties[lname] = link_json_schema(
             targets, (link_docs or {}).get(lname, ""), subtype_map
         )
-    properties["history"] = {"$ref": "#/$defs/history"}
-    # prefix/board/workspace are legal properties only when this type doesn't
-    # already declare a same-named field -- mirrors OVERRIDABLE (parse.py)
+    # prefix/board/workspace/on_change are legal properties only when this type
+    # doesn't already declare a same-named field -- mirrors OVERRIDABLE (parse.py)
     # exactly rather than approximating it.
+    if "on_change" not in spec.fields:
+        properties["on_change"] = {"$ref": "#/$defs/on_change"}
     for key in ("prefix", "board", "workspace"):
         if key not in spec.fields:
             properties[key] = {"type": "string"}
@@ -246,7 +247,7 @@ def build_schema(project: Project) -> dict[str, Any]:
     (`{defaults?, items: [...]}`), discriminated structurally at the top
     level since a list file has an `items:` key and a bare item doesn't.
     """
-    defs: dict[str, Any] = {"history": HISTORY_DEF}
+    defs: dict[str, Any] = {"on_change": ON_CHANGE_OVERRIDE_DEF}
     link_docs = {name: lt.doc for name, lt in project.link_types.items() if lt.doc}
     bare_refs: list[dict[str, str]] = []
     entry_refs: list[dict[str, str]] = []

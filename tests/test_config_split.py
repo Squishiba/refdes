@@ -31,7 +31,7 @@ site:
 id:
   width: 4
 
-history:
+on_change:
   default: invalidate
 
 units:

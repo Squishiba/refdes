@@ -1,0 +1,306 @@
+Task: rename project-level `history:` and item-level override to `on_change:`.
+Status: in progress.
+
+## Initial state
+
+- Branch: `vocab-p2-history-to-on-change` at `d71c143`.
+- Full assignment re-read from `.scratch/TASK.txt`, including all 39 lines.
+- Working tree was clean except ignored `.scratch/probes/` from earlier exploration.
+- Interpreter: `/home/jorb/work/venv-refdes/bin/python`.
+- CLI verification command form:
+  `PYTHONPATH=$PWD/src /home/jorb/work/venv-refdes/bin/python -m refdes.cli ...`
+
+## Map of the renamed concept
+
+### Project-level config key
+
+- `src/refdes/schema.py`
+  - `_PROJECT_SETTING_KEYS` contains the old setting `history`.
+  - `_KNOWN_SETTINGS` derives from those keys, so unknown `on_change` currently fails with
+    `unknown setting 'on_change'` (verified with a copied project file).
+  - `_validate_settings()` reports unknown settings and special-cases prior renames.
+  - `LEGACY_CONFIG_ERROR` names `history:` among settings moved into `refdes-project.yaml`.
+  - `load_project()` reads `blocks["history"]["default"]` and uses it as the default per-field
+    `on_change` mode.
+- `src/refdes/configcheck.py`
+  - `HISTORY_KEYS = {"default"}`.
+  - `BlockChecker.history()` validates the `history:` mapping and returns `default`.
+  - `validate_settings()` returns the resolved block under `"history"`.
+- `refdes-project.yaml`
+  - Repo config currently has `history: {default: invalidate}`.
+- Docs/tests/fixtures
+  - `AGENTS.md`, `README.md`, `docs/schema-reference.md`, `docs/change-tracking.md`,
+    `docs/standard-library.md`, `docs/output.md`, and generated `docs/vocabulary.md` describe
+    the old key or item key.
+  - Test helpers and many tests use project config `history: {default: invalidate}` or multiline
+    equivalents.
+
+### Item-level override
+
+- `src/refdes/parse.py`
+  - `RESERVED = {"id", "type", "history", "body", "former_ids", "key"}`.
+  - `OVERRIDABLE = {"prefix", "board", "workspace"}`.
+  - `_build_item()` reads `raw.get("history")` into `item.history`, validates scalar modes, and
+    warns for a field override without `reason:`.
+  - The generic loop skips `RESERVED` and handles `OVERRIDABLE` only when the field is not declared.
+- `src/refdes/model.py`
+  - `Item.history` stores the parsed override.
+  - `Item.on_change_for()` implements precedence: item field override, whole-item mode, schema field,
+    project default.
+- `src/refdes/cli.py`
+  - `refdes audit` prints `item.history` and help says `item-level history overrides`.
+- `src/refdes/schema_json.py`
+  - `HISTORY_DEF` describes the front-matter override and every type branch unconditionally adds
+    `properties["history"]`.
+- `src/refdes/vocabulary.py`
+  - `RESERVED_KEYS["history"]` defines the item-key entry and the example writes `history:`.
+- `docs/schema-reference.md`, `docs/change-tracking.md`, `docs/authoring.md`, and generated docs
+  describe the front-matter key.
+
+### Things that must remain `history`
+
+- `refdes history capture`, `redact`, and `migrate-seals`.
+- `.refdes/history/`, `SEALING_HISTORY`, `sealing: history`, history-backed sealing.
+- Captured history and git history prose.
+- Per-field schema attribute `on_change:` already used in standards and type definitions.
+
+## Verified behavior before changes
+
+- Project-level `on_change:` is unknown today:
+  `configuration error: refdes-project.yaml: unknown setting 'on_change'.`
+- `refdes revise --help` accepts only top-level mapping sections
+  `types:/merge_types:/fields:/links:/prefixes:/citation_keys:`. It cannot rename a setting in
+  `refdes-project.yaml`, and it cannot rename a reserved front-matter key. Do not claim revise can
+  migrate this rename.
+
+## Decisions
+
+1. Rename both the project setting and item front-matter key to `on_change:`.
+2. Old project `history:` becomes a hard configuration error naming the replacement.
+3. Old item `history:` becomes a hard item error naming the replacement, except when the item's
+   type declares a field literally named `history`; then that field continues to own the key.
+4. The new item key must not shadow a declared field. To preserve this guarantee, move
+   `on_change` from the strictly reserved family to the overridable family: if the type declares
+   field `on_change`, that field owns the front-matter key; otherwise the front-matter key is the
+   change-policy override.
+5. Rename internal `Item.history` to `Item.on_change_override` so it is not confused with either
+   the history store or a field named `on_change`.
+6. Preserve value shapes and precedence exactly:
+   scalar mode or `{mode, fields, reason}`; item field > item whole > schema field > project default.
+
+## Progress
+
+- Mapped all relevant code and docs.
+- Wrote this work log.
+- Implemented engine/config changes:
+  - `schema.py`: accepts `on_change:`, hard-errors project `history:` with
+    `history: was renamed to on_change: -- it set the default on_change mode, not
+    the history store; rename it in refdes-project.yaml`.
+  - `configcheck.py`: validates nested `on_change.default`.
+  - `parse.py`: accepts item `on_change:` as an overridable key; hard-errors old
+    item `history:` with `item-level history: was renamed to on_change: -- rename
+    this key in the source file. Its override is used in this build so the change
+    policy is not silently lost.`
+  - `model.py`: renamed internal `Item.history` to `Item.on_change_override`.
+  - `schema_json.py`: item property and definition are `on_change`, omitted when
+    the type declares field `on_change`.
+  - `vocabulary.py`, README, AGENTS, schema/change tracking, standards/output/authoring/
+    troubleshooting docs, repo config, and one repo item were updated.
+  - Existing unreleased changelog fragments were left as historical prose; added
+    `changelog.d/history-config-on-change.breaking.md`.
+- Regenerated `docs/schema-reference.md` and `docs/vocabulary.md` with
+  `python docs-site/gen_examples.py`; `--check` passes.
+- Updated tests/helpers and config/item fixtures from project `history:` to
+  `on_change:`.
+- Added `tests/test_change_policy_on_change_key.py`:
+  1. project `on_change:` default works;
+  2. item scalar works;
+  3. item field mapping works;
+  4. old item spelling errors and still applies override;
+  5. old project spelling errors;
+  6. declared field named `on_change` owns the item key;
+  7. parse without build recognizes override.
+
+## Sabotage checks
+
+All sabotages were applied, the corresponding test was run in the foreground, it
+failed, then the code was restored.
+
+1. `test_project_on_change_key_sets_the_schema_default`: temporarily replaced
+   `default_on_change = blocks["on_change"]["default"]` with
+   `default_on_change = "invalidate"`; test failed
+   (`'invalidate' == 'ignore'`), then restored.
+2. `test_item_on_change_scalar_override`: temporarily made whole-item
+   `on_change_for` ignore `mode`; test failed (`ignore` instead of `invalidate`),
+   then restored.
+3. `test_item_on_change_field_override`: temporarily made field override read
+   return `None`; test failed (`ignore` instead of `log`), then restored.
+4. `test_old_item_history_override_errors_and_renames`: temporarily disabled the
+   old-item rename check; test failed because the rename message was absent, then
+   restored.
+5. `test_old_project_history_key_errors_and_renames`: temporarily disabled the
+   project rename check; test failed because old `history:` reported only as an
+   unknown setting, then restored.
+6. `test_declared_on_change_field_takes_over_the_item_key`: temporarily made
+   `on_change` override regardless of a declared field; test failed with missing
+   field value, then restored.
+7. `test_item_override_is_parsed_without_building_the_site`: temporarily disabled
+   scalar override assignment in `_apply_change_override`; test failed with empty
+   override, then restored.
+
+## Current verification
+
+- Focused changed-config/vocabulary/build/load/integration tests pass.
+- Full suite before fixture hash update: `1 failed, 3379 passed, 10 skipped`.
+- The failure was expected generated-output hash drift for `vocabulary.html`.
+  Updated `tests/fixtures/no_theme_build_hashes.json` to
+  `3793fef8d36abe14741ab88e022c3e307ac654a63f12883412fc1562313f8409` using a
+  `.scratch/hash_gen.py` build of the same coverage fixture.
+- `tests/test_theme.py::test_no_theme_build_is_byte_identical_to_the_pinned_output`
+  passes after the hash update.
+- Final full suite, foreground with output to `.scratch/suite.txt`:
+  `3380 passed, 10 skipped in 255.51s (0:04:15)`; exit `0`.
+  This is baseline `3372 passed, 10 skipped` plus 8 net added config/change-policy
+  tests.
+- `python docs-site/gen_examples.py --check` passes for both generated docs pages.
+- `ruff check --select E9,F` passes for every touched Python file.
+- Temporary scripts/build output remain under `.scratch/` per AGENTS.md and are not
+  staged.
+- Status: finished. Committed as `5b05631`, pushed, and PR #184 opened.
+
+## Review follow-up (post-review, head 41bd38c)
+
+Two cross-model reviews (`.scratch/review/review-184a.txt`,
+`review-184b.txt`) requested changes. Triaged list worked item by item.
+All repros run with
+`PYTHONPATH=$PWD/src /home/jorb/work/venv-refdes/bin/python -m refdes.cli check`
+inside throwaway projects under `.scratch/rf/`.
+
+### Item 1 (184a F1) — item-level `history:` with a null value silently accepted
+
+- Reproduced: `p_null` (items `NOTE-001 history:` null, `NOTE-002 history: {}`)
+  printed the rename error only for NOTE-002: "2 items, 1 errors". The guard
+  tested the value (parse.py:904), not key presence.
+- Fix: condition is now `"history" in raw and "history" not in spec.fields`,
+  matching the project-level half which iterates `for key in raw`.
+- After: "2 items, 2 errors", exit 1.
+- Test: `test_item_history_key_with_a_null_value_still_errors`.
+- Sabotage: reverted the condition to the value test ->
+  `FAILED ... NullValueStillErrors` (assertion, line 103). Restored, whole
+  file green.
+
+### Item 2 (184b F1) — `on_change: ""` silently accepted (regression)
+
+- Reproduced: `p_empty` (`on_change: ""`) -> "1 items, 0 errors, exit 0".
+  Baseline (d71c143 `isinstance(history, str)` + membership test) errored on
+  `''` — confirmed by reading `git show d71c143:src/refdes/parse.py` (the old
+  scalar branch validated any str value). The new `elif key == "on_change" and
+  value:` skipped validation for falsy values.
+- Fix: dropped `and value`; `_apply_change_override` already ignores non-str/
+  non-dict values (e.g. `on_change:` null), so null stays a silent no-op
+  exactly as the pre-rename `history:` null was; only strings reach the mode
+  check.
+- After: `ERROR ... on_change: '' must be one of invalidate, log, ignore`,
+  exit 1.
+- Test: `test_item_on_change_empty_value_errors_like_a_bad_mode`.
+- Sabotage: re-added `and value` -> `FAILED ... EmptyValueErrorsLikeABadMode`
+  (line 120). Restored, green.
+
+### Item 3 (184b F2) — inherited override reported at every entry, not the defaults line
+
+- Reproduced: `p_defaults` (`defaults:` block first key line 2, entries at
+  5/6) -> the no-reason warnings reported at lines 5 and 7. The helper was
+  always passed the entry `line`, never `defaults_line`. Convention documented
+  at parse.py's field branch ("reported at the defaults block's own line")
+  and pinned by
+  `tests/test_parse.py::test_inherited_default_failing_the_overridden_types_own_enum_names_the_defaults_line`
+  (`error.line == 2`).
+- Fix: both call sites (legacy-rename branch and the OVERRIDABLE `on_change`
+  branch) now pass `(defaults_line or line) if key in inherited else line`,
+  the same expression as the field branch.
+- After: both warnings at line 2 (the defaults block's first key).
+- Tests:
+  `test_on_change_override_inherited_from_defaults_is_reported_at_the_defaults_line`
+  and `test_inherited_history_rename_error_is_reported_at_the_defaults_line`
+  (legacy half).
+- Sabotage: reverted both call sites to `line` -> both tests FAILED.
+  Restored, green.
+
+### Item 4 (184a F3) — declared `history` field untested
+
+- Confirmed reachable: `p_histfield` (type `hist` with field `history`) ->
+  0 errors, value kept.
+- Test added: `test_declared_history_field_keeps_owning_the_item_key`
+  (mirrors the existing declared-`on_change` test: value kept as the field,
+  no rename error, no unknown-field warning).
+- Teeth check: neutered both `"history" not in spec.fields` guards -> the new
+  test FAILED. Method note: this sabotage pair was done with two in-place
+  `sed -i` swaps rather than the edit tool; the restore sed missed the
+  8-space-indented loop guard, caught by reviewing `git diff` and fixed with
+  the edit tool; final diff re-verified and the file + test_parse.py re-run
+  green (39 passed). Flagging the sed use because the task prefers the edit
+  tool for edits.
+
+### Item 5 — stale design docs
+
+- `docs/design/vocabulary-review.md` §1.3: `parse.py:33` -> `:40` with the
+  real RESERVED set (no `history`); `parse.py:34-37` -> `:41-44` with the
+  real OVERRIDABLE set (with `on_change`); `vocabulary.py:57-107` ->
+  `:60-110`; every table line re-verified by opening
+  `src/refdes/vocabulary.py` (id :61, type :66, key :70, former_ids :75,
+  body :79, on_change :84, prefix :89, board :93, workspace :97, defaults
+  :101, section :105 — several rows including id/body were already off by 3
+  before this PR; all corrected).
+- `docs/design/keys.md:593`: `key:` now quoted as reserved "alongside `id`,
+  `type`, `body`, `former_ids`" (`history` dropped; no longer in
+  parse.RESERVED).
+- `docs/design/standard-library.md`: illustrated property `"history":
+  {"$ref": "#/$defs/history"}` -> `"on_change": {"$ref":
+  "#/$defs/on_change"}` (verified against real `refdes schema` output from
+  `.scratch/rf/p_legacy`, which emits `"on_change": { "$ref":
+  "#/$defs/on_change" }`); `parse.py:35` -> `:44` (OVERRIDABLE) and
+  `parse.py:31` -> `:40` (RESERVED).
+- Out of triage scope, left alone (flagged for the owner): pre-rename line
+  refs still exist in `docs/design/browser-editor.md:102-103`,
+  `docs/design/backlog.md:2612-2613`, and `docs/design/living-notes-plan.md:50`.
+  The reviewers did not name them and the triage list is explicit.
+
+### Item 6 — troubleshooting.md entries
+
+- Both messages taken from live runs, quoted verbatim in the entry headings:
+  project half (`p_proj`, exit 2): `configuration error: refdes-project.yaml:
+  history: was renamed to on_change: -- it set the default on_change mode, not
+  the history store; rename it in refdes-project.yaml`; item half (`p_legacy`,
+  exit 1): `item-level history: was renamed to on_change: -- rename this key in
+  the source file. Its override is used in this build so the change policy is
+  not silently lost.`
+- Added after the two sibling rename entries, same style. Claims checked: exit
+  codes from the probes; `revise` can't rewrite them from `refdes revise
+  --help` (only types:/merge_types:/fields:/links:/prefixes:/citation_keys:);
+  the three modes from `model.ON_CHANGE_MODES`.
+
+### Item 7 — configcheck.py E501
+
+- Line 341 measured 102 chars; wrapped the `self.mapping(...)` call over
+  three lines, matching the file's existing wrap style. Remaining >100 lines
+  (381/571/580 = the three pre-existing E501s, shifted +2 by the wrap)
+  untouched.
+
+### Changelog
+
+- `changelog.d/history-config-on-change.breaking.md` unchanged: it claims
+  "An old spelling is a hard error naming `on_change:`", which item 1 makes
+  more true, not less. Items 2-3 restore/extend diagnostics whose shape the
+  docs never quoted. No user-facing message text changed anywhere.
+
+### Verification
+
+- `tests/test_change_policy_on_change_key.py` 7 -> 12 tests; module +
+  `test_parse.py` + `test_config_unknown_keys.py`: 95 passed.
+- `ruff check --select E9,F src tests` -> All checks passed!
+- `docs-site/gen_examples.py --check` -> both generated pages up to date.
+- Full suite (foreground, 540s timeout, output `.scratch/suite.txt`):
+  `3393 passed, 2 skipped in 254.81s (0:04:14)`, exit 0. 3390 collected at
+  head + 5 new = 3395; no failures, the known serve-CLI flake did not fire.
+- Status: finished. New commit on top of 41bd38c, pushed to the PR branch.
+

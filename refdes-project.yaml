@@ -21,7 +21,7 @@ id:
   width: 3                      # REQ-PWR-004. Set generously now; changing it later is painful.
   ledger: .refdes/ids.yaml   # burned IDs are never reused
 
-history:
+on_change:
   # Applied to any field that does not declare its own on_change.
   default: invalidate
 

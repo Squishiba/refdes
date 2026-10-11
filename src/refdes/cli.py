@@ -1029,13 +1029,15 @@ def cmd_audit(args) -> int:
     print("\nItem-level overrides:")
     any_item = False
     for item in sorted(project.items.values(), key=lambda i: i.id):
-        if not item.history:
+        if not item.on_change_override:
             continue
         any_item = True
-        reason = item.history.get("reason", "NO REASON GIVEN")
-        if item.history.get("mode"):
-            print(f"  {item.id:<14} whole item -> {item.history['mode']}  — {reason}")
-        for fname, mode in (item.history.get("fields") or {}).items():
+        reason = item.on_change_override.get("reason", "NO REASON GIVEN")
+        if item.on_change_override.get("mode"):
+            print(
+                f"  {item.id:<14} whole item -> {item.on_change_override['mode']}  — {reason}"
+            )
+        for fname, mode in (item.on_change_override.get("fields") or {}).items():
             print(f"  {item.id:<14} {fname} -> {mode}  — {reason}")
     if not any_item:
         print("  (none)")
@@ -2300,7 +2302,7 @@ def main(argv: list[str] | None = None) -> int:
         help="list suppressed fields, resealed entries, board/workspace moves, "
         "baseline diffs, and imports",
         description="List everything the build tracks but does not fail on: schema "
-        "fields excluded from invalidation, item-level history overrides, "
+        "fields excluded from invalidation, item-level on_change overrides, "
         "outstanding append-only seal drift and durable accepted reseal history "
         "(--reseal), accepted and "
         "outstanding board and workspace moves (--accept-board-move), what's "

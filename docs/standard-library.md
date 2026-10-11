@@ -330,7 +330,7 @@ abstract, so it's correct for a project that has customized anything.
 Covers field names and types per item type, legal `status` (and every other
 enum field's) values, link verb names with their allowed target types
 stated in each property's `description`, and reserved/overridable keys
-(`id`, `type`, `history`, and `prefix`/`board`/`workspace` where a type
+(`id`, `type`, `on_change`, and `prefix`/`board`/`workspace` where a type
 hasn't shadowed them with a same-named field). `additionalProperties:
 false` on every branch is what lights up an unknown key — `sattisfies:` —
 the moment it's typed, not the next time `refdes check` runs.

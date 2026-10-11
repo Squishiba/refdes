@@ -64,7 +64,7 @@ _PROJECT_SETTING_KEYS = {
     "workspaces",
     "units",
     "date_format",
-    "history",
+    "on_change",
     "coverage",
     "standard",
     "equations",
@@ -85,7 +85,7 @@ _KNOWN_SETTINGS = {
 LEGACY_CONFIG_ERROR = (
     f"{LEGACY_CONFIG_NAME} is retired. Split it into the two files it became: "
     f"move every project setting (site:, id:, boards:, workspaces:, units:, "
-    f"history:, standard:, equations:, imports:, and the process settings like "
+    f"on_change:, standard:, equations:, imports:, and the process settings like "
     f"sigfigs: and release_gate:) into {PROJECT_SETTINGS_NAME}, which is now the "
     f"project marker, and move any schema overlay (types:, link_types:, "
     f"sets:) into {SCHEMA_NAME}, which is optional -- omit it entirely if "
@@ -116,6 +116,12 @@ def _validate_settings(raw: dict[str, Any]) -> dict[str, Any]:
                 f"{key} does not belong here -- the project's own schema overlay "
                 f"lives in {SCHEMA_NAME}, which holds types:, link_types: and "
                 f"sets: and nothing else"
+            )
+        if key == "history":
+            raise _settings_error(
+                "history: was renamed to on_change: -- it set the default "
+                "on_change mode, not the history store; rename it in "
+                f"{PROJECT_SETTINGS_NAME}"
             )
         if key not in _KNOWN_SETTINGS:
             import difflib
@@ -563,7 +569,7 @@ def load_project(config_path: str | None = None, start: str = ".") -> Project:
     site = blocks["site"]
     id_cfg = blocks["id"]
     units = blocks["units"]
-    default_on_change = blocks["history"]["default"]
+    default_on_change = blocks["on_change"]["default"]
 
     # standard: {base, version, presets} resolves fresh, here, on every load --
     # never a scaffold copy. See standards.py and docs/design/standard-library.md

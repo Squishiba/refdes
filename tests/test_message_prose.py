@@ -77,7 +77,7 @@ def test_field_types_remain_a_set_for_membership_checks():
     assert configcheck_mod.FIELD_TYPE_ORDER != tuple(sorted(configcheck_mod.FIELD_TYPES))
 
 
-def test_item_history_mode_outside_the_modes_is_named_in_prose(tmp_path):
+def test_item_on_change_mode_outside_the_modes_is_named_in_prose(tmp_path):
     """The item-level half: this one is a `project.error` against an item
     rather than a load-time `SchemaError`, and lives in `parse.py`."""
     write_project_config(tmp_path, BASE)
@@ -87,13 +87,13 @@ def test_item_history_mode_outside_the_modes_is_named_in_prose(tmp_path):
         "defaults: {type: note}\n"
         "items:\n"
         "  - id: NOTE-001\n"
-        "    history: maybe\n",
+        "    on_change: maybe\n",
         encoding="utf-8",
     )
     project = _build_at(tmp_path)
     messages = [d.message for d in project.errors]
     assert any(
-        "history: 'maybe' must be one of invalidate, log, ignore" in m
+        "on_change: 'maybe' must be one of invalidate, log, ignore" in m
         for m in messages
     ), messages
     assert not any("['" in m for m in messages), messages

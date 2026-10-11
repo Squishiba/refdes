@@ -19,7 +19,7 @@ from refdes import render
 BLOCKED_SCHEMA = """\
 site: {title: "Blocked Test", out: _site}
 id: {width: 3, ledger: .refdes/ids.yaml}
-history: {default: invalidate}
+on_change: {default: invalidate}
 units: {preferred: []}
 link_types:
   satisfies:  { inverse: satisfied_by, label: "Satisfies" }

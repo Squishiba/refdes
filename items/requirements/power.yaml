@@ -32,7 +32,7 @@ items:
     body: The 3V3 rail shall remain within regulation during a 12 V to 9 V input step.
     status: draft
     owner: A. Rivera
-    history:
+    on_change:
       fields:
         owner: ignore
       reason: "Owner rotates weekly during bring-up; not a meaningful change."

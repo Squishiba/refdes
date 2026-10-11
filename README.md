@@ -186,7 +186,7 @@ Every field declares what a change to it means:
 The timeline column is design intent for the parked git-history layer, so
 `log` and `ignore` behave identically today. Set per field in the schema (a
 project's own fields in `refdes-schema.yaml`; the project-wide default in
-`history:` in `refdes-project.yaml`), overridable per item (with a required
+`on_change:` in `refdes-project.yaml`), overridable per item (with a required
 `reason:`). The content hash is computed over `invalidate` fields only, which is
 what stops an owner change from marking fifty links suspect.
 

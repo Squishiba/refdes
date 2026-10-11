@@ -21,7 +21,7 @@ from conftest import write_project_config
 HISTORY_SCHEMA = """\
 site: {title: "History Test", out: _site}
 id: {width: 3, ledger: .refdes/ids.yaml}
-history: {default: invalidate}
+on_change: {default: invalidate}
 units: {preferred: []}
 types:
   note:

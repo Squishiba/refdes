@@ -24,7 +24,7 @@ from refdes.schema import load_project
 CITATION_SCHEMA = """\
 site: {title: "Citation Test", out: _site}
 id: {width: 3, ledger: .refdes/ids.yaml}
-history: {default: invalidate}
+on_change: {default: invalidate}
 units: {preferred: []}
 types:
   component:

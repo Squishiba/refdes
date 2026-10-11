@@ -13,7 +13,7 @@ or pass `-c path/to/refdes-project.yaml`.
 **`refdes.yaml is retired. Split it into the two files it became: ...`**
 Your project still carries the old single-file config, which the loader now
 refuses rather than reading quietly. Move every project setting — `site:`,
-`id:`, `boards:`, `workspaces:`, `units:`, `history:`, `standard:`,
+`id:`, `boards:`, `workspaces:`, `units:`, `on_change:`, `standard:`,
 `equations:`, `imports:`, and the process settings like `sigfigs:` and
 `release_gate:` — into `refdes-project.yaml`, and move any
 `types:`/`link_types:`/`sets:` into the optional `refdes-schema.yaml`
@@ -139,6 +139,23 @@ library](standard-library.md#the-versions-shipped-so-far).
 The same rename's field half, which you'll see on a hand-rolled schema that
 declares a `constraint` type wanting `text:`. Its value is used for `text:`
 in that build so the item doesn't also report a missing required field.
+
+**`refdes-project.yaml: history: was renamed to on_change: -- it set the default on_change mode, not the history store; rename it in refdes-project.yaml`**
+The `on_change:` rename, project half. `history:` was the project's default
+change-policy setting and the old name invited exactly the wrong guess: it
+has nothing to do with the captured history store. Rename the key to
+`on_change:` — the value's shape is unchanged (`default:` takes one of
+`invalidate`, `log`, `ignore`). Until it is renamed no command loads the
+project (configuration error, exit 2), and `refdes revise` cannot rewrite
+it: it rewrites item vocabulary only, so edit the one line by hand.
+
+**`item-level history: was renamed to on_change: -- rename this key in the source file. Its override is used in this build so the change policy is not silently lost.`**
+The same rename's item half, on a `history:` in an item's front-matter.
+Rename it to `on_change:` — same value shape (a scalar mode, or
+`{mode, fields, reason}`). The override still applies in that build so the
+change policy is not silently lost while the rename is being made. A type
+that declares a field literally named `history` keeps owning the key; this
+error is only for the change-policy override.
 
 ## IDs
 

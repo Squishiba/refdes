@@ -19,7 +19,7 @@ from refdes.schema import SchemaError, load_project
 STUB_SCHEMA = """\
 site: {title: "Stub Test", out: _site}
 id: {width: 3, ledger: .refdes/ids.yaml}
-history: {default: invalidate}
+on_change: {default: invalidate}
 units: {preferred: []}
 boards:
   power: {label: Power}

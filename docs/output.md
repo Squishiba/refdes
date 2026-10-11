@@ -231,7 +231,7 @@ points and what points at it, and its fields.
 - **A term with no definition says so.** `doc:` is optional on project
   terms, so an undefined one renders as "No definition" rather than being
   dropped: the page is complete over the schema, and completeness is the
-  point. Engine-reserved keys (`id`, `type`, `key`, `body`, `history`, …)
+  point. Engine-reserved keys (`id`, `type`, `key`, `body`, `on_change`, …)
   are not author-declared at all, so their definitions live in
   `refdes/vocabulary.py` — one place, cited by the page.
 - **Direction is computed, not restated.** "Pointed at by" for a type comes

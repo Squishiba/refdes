@@ -2,7 +2,7 @@
 #
 # Optional, and the only file of its kind: it holds `types:`, `link_types:` and
 # `sets:` and nothing else. Everything the project *sets* -- site, id,
-# boards, units, history, the standard pin, process policy -- lives in
+# boards, units, on_change, the standard pin, process policy -- lives in
 # refdes-project.yaml, which is also what makes this directory a project.
 #
 # Most projects have no file here at all: the bundled standard named by

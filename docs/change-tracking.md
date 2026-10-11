@@ -59,25 +59,26 @@ types:
     body: { on_change: invalidate }
 ```
 
-Anything not declared falls back to `history.default` (`invalidate` in the starter
+Anything not declared falls back to `on_change.default` (`invalidate` in the starter
 schema).
 
 **Per item**, in the front-matter, when one item genuinely differs:
 
 ```yaml
-history:
+on_change:
   fields:
     owner: ignore
   reason: "Owner rotates weekly during bring-up; not a meaningful change."
 ```
 
 A `reason:` is expected — omitting it is a warning. One line, and every
-suppression is self-documenting.
+suppression is self-documenting. A type that declares its own field named
+`on_change` owns that key; the override applies to types without such a field.
 
 **Whole item**, as a scalar:
 
 ```yaml
-history: ignore
+on_change: ignore
 ```
 
 Useful for draft items not yet baselined, and for items rewritten wholesale by a

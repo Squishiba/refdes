@@ -9,7 +9,7 @@ that as the default risk, not the exception.
 - **The project config is two files; `refdes.yaml` is retired.**
   `refdes-project.yaml` is the project marker and holds *all* project
   settings — `site:`, `standard:`, `id:`, `boards:`, `workspaces:`,
-  `units:`, `history:`, `equations:`, and the process settings like
+  `units:`, `on_change:`, `equations:`, and the process settings like
   `sigfigs:` and `release_gate:`. `refdes-schema.yaml` is optional and
   holds only the project's own `types:`/`link_types:`/`sets:`
   overlay — most projects never have one, and a `types:` left in
