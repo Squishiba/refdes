@@ -38,4 +38,4 @@ def resolved_dump(presets: list[str], version: int = 3) -> str:
         "types": {n: _type_dict(t) for n, t in project.types.items()},
         "link_types": {n: dataclasses.asdict(t) for n, t in project.link_types.items()},
     }
-    return json.dumps(payload, indent=1)
+    return json.dumps(payload, indent=1) + "\n"

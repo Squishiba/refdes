@@ -118,13 +118,22 @@ def test_serve_on_a_directory_without_a_project_exits_with_an_error(tmp_path):
 # back to stdout would not catch the feature breaking.
 
 
-def _wait_for_file(path, timeout: float = 60.0, differs_from: str | None = None) -> str:
+def _wait_for_file(path, timeout: float = 180.0, differs_from: str | None = None) -> str:
     """The token file appears once the listener is up; poll for it, then return
     its text. Never touches stdout -- that is the point of the flag.
 
     A *complete* line is what it waits for. `serve` writes the file atomically,
     so a reader should never see half a URL, and a helper that accepted a
     partial read would be papering over exactly that bug instead of catching it.
+
+    The deadline is wall-clock over a whole child cold start -- interpreter,
+    imports, the first `ProjectState.load()` (full read-only project load plus
+    a site render), the bind, and the write -- so a fixed budget is only as
+    good as the machine is idle. It was 60s and failed once with ~6 test
+    suites contending for the box; the child itself is fine, it just had no
+    CPU. 180s buys the contention out without hiding a real hang (the child
+    that refuses to start exits in well under a second and the deadline then
+    only delays the assertion).
 
     `differs_from` is for the relaunch-over-a-stale-file case: the path already
     exists holding the dead launch's text, so existing is not yet news.
