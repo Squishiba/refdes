@@ -477,6 +477,21 @@ of `{release: false, revision: false}`, which makes them members of
 **Deliberately does not do.** No note type that blocks on its own, no
 project-policy engine, no default-on anywhere.
 
+**Landed.** Both rules are `_RULES` entries reading the existing machinery:
+`open_tasks` walks `chains.fold_tasks` (the projection's own fold — one walk
+per component via the `ChainGraph` memo, no second fold, no derived rows —
+§5 rules 1-2 enforced at the gate), and `captured_edits` reads
+`history.edited_after_captured` as the H3 diagnostic reports it. Offenders
+name the tip and the task (`LOG-002: open task T-thermal-model`) because a
+bare thread ref wouldn't say which task to go tick; a conflicting fold
+blocks, said as conflicting — the gate does not pass what it couldn't read.
+Provisional calls for the owner (see `in-prog-logs/living-notes-h8-gate-rules.txt`):
+a lone entry with no `follows:` at all is fold_tasks' own "thread of one"
+and its open task counts, and imported tips/items never count (every other
+rule is local-only). `evaluate_gate()`/`stamp()` needed no change, as
+planned. Tests: `tests/test_lifecycle.py` (the file was 332 lines, not
+huge), sabotage matrix in the log.
+
 ## Phase H9 — baseline snapshot events and the site history disclosure (optional)
 
 **Adds.** `revision`/`release` write `baseline` events into the same store, and

@@ -2481,10 +2481,10 @@ def main(argv: list[str] | None = None) -> int:
         help="run the readiness gate and stamp a baseline if it passes",
         description="Run the full readiness gate (release_gate: in "
         "refdes-project.yaml) and stamp .refdes/baselines/<name>.yaml only "
-        "if every enabled rule passes. The eight rules are draft_items, "
-        "unpinned_citations, missing_kept_copies, uncovered_requirements, "
-        "unverified_requirements, info_check_failures, "
-        "unaccepted_board_moves, and unaccepted_workspace_moves. On failure, "
+        "if every enabled rule passes. The rules are "
+        + ", ".join(lifecycle_mod.RULE_NAMES[:-1])
+        + ", and " + lifecycle_mod.RULE_NAMES[-1]
+        + ". On failure, "
         "nothing is written and the blocking rules are printed. Running this "
         "when the project "
         "isn't ready *is* the check -- there is no --dry-run. Takes exactly "

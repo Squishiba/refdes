@@ -72,6 +72,10 @@ RELEASE_GATE_DEFAULTS: dict[str, dict[str, bool]] = {
     # Same default as unaccepted_board_moves -- a silent workspace change is
     # the same class of drift a release shouldn't ship past unnoticed.
     "unaccepted_workspace_moves": {"release": True,  "revision": False},
+    # Living notes H8: both off by default -- an opt-in tightening through the
+    # release_gate: overlay, not a new floor.
+    "open_tasks":                   {"release": False, "revision": False},
+    "captured_edits":               {"release": False, "revision": False},
 }
 
 

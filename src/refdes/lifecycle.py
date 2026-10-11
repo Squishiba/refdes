@@ -30,6 +30,8 @@ from typing import Callable
 import yaml
 
 from . import build as build_mod
+from . import chains as chains_mod
+from . import history as history_mod
 from . import keys as keys_mod
 from . import model, textio
 from .model import INFO, RELEASE_GATE_DEFAULTS, Item, Project, SchemaError
@@ -647,6 +649,79 @@ def _rule_unaccepted_workspace_moves(project: Project) -> list[str]:
     return sorted({item_id for item_id, _old, _new in project.workspace_moves})
 
 
+def _rule_open_tasks(project: Project) -> list[str]:
+    """Living notes H8 (§5 rule 5): a release blocks while any thread tip
+    carries an open author task.
+
+    Reads the fold, never a re-implementation of it: `chains.fold_tasks` is
+    the same per-tip walk `threads.threads_projection` reads, memoized per
+    component on the `ChainGraph`, so starting it once per local item costs
+    one walk per tip. §5 rule 2 makes the fold exactly the author's own
+    rows -- derived rows (uncovered coverage, failing checks, blocked
+    chains, stale citations) live beside it in the projection's `derived`
+    list and are each already their own gate rule, so they are not
+    re-counted here.
+
+    A fork counts every open tip (a tip is what fold_tasks yields, one per
+    open end -- there is no tip to read only one of). A tip whose fold is
+    `ambiguous` blocks too, said as a conflicting list: the gate must not
+    pass something it couldn't read. Malformed rows are a build *error*
+    (`validate_items`), so the error floor refuses the stamp before the
+    gate ever runs; a legal row with no `state` is not `open`.
+
+    Offenders name the tip and the task ("LOG-002: open task T-thermal"),
+    because a bare thread ref wouldn't say which task to go tick; a row
+    whose id is absent (validation allows it) names its position in the
+    folded list. Imported items are skipped like every other rule: an
+    imported tip's open tasks are the other project's work.
+    """
+    graph = chains_mod.build_graph(project)
+    local = {id(item) for item in project.local_items}
+    offenders: list[str] = []
+    seen: set[int] = set()
+    for item in project.local_items:
+        for tip_tasks in chains_mod.fold_tasks(project, item, graph=graph):
+            if id(tip_tasks.tip) in seen or id(tip_tasks.tip) not in local:
+                continue
+            seen.add(id(tip_tasks.tip))
+            label = tip_tasks.tip.id or tip_tasks.tip.key
+            if tip_tasks.ambiguous:
+                offenders.append(
+                    f"{label}: conflicting task list (task reconciliation required)"
+                )
+                continue
+            for index, row in enumerate(tip_tasks.rows or []):
+                if not isinstance(row, dict) or row.get("state") != "open":
+                    continue
+                task_id = row.get("id")
+                shown = task_id if task_id else f"#{index + 1}"
+                offenders.append(f"{label}: open task {shown}")
+    return sorted(offenders)
+
+
+def _rule_captured_edits(project: Project) -> list[str]:
+    """Living notes H8: a release blocks while any item is edited after
+    captured -- the H3 diagnostic (`history.edited_after_captured`), read
+    as it is, never recomputed. Offenders carry the same label
+    `warn_edited_after_captured` prints (`item.id or item.key`). A store
+    that refuses to be read yields no offenders here: the build's own
+    warning already says the check declined (H3's "the build proceeds"
+    posture), and a corrupt-key store is an error the floor refuses first.
+    """
+    try:
+        findings = history_mod.edited_after_captured(project)
+    except (history_mod.HistoryError, OSError):
+        return []
+    local = {id(item) for item in project.local_items}
+    return sorted(
+        {
+            finding.item.id or finding.item.key
+            for finding in findings
+            if id(finding.item) in local
+        }
+    )
+
+
 _RULES: dict[str, Callable[[Project], list[str]]] = {
     "draft_items": _rule_draft_items,
     "unpinned_citations": _rule_unpinned_citations,
@@ -656,6 +731,8 @@ _RULES: dict[str, Callable[[Project], list[str]]] = {
     "info_check_failures": _rule_info_check_failures,
     "unaccepted_board_moves": _rule_unaccepted_board_moves,
     "unaccepted_workspace_moves": _rule_unaccepted_workspace_moves,
+    "open_tasks": _rule_open_tasks,
+    "captured_edits": _rule_captured_edits,
 }
 
 # Fixed order, matching the table in docs/design/lifecycle.md §1 -- also the
@@ -681,7 +758,7 @@ def evaluate_gate(project: Project, kind: str) -> list[GateRuleResult]:
     "release" or "revision" -- which half of each rule's (release, revision)
     pair is consulted. Only ever reads `project.release_gate`, already
     parsed and validated from refdes-project.yaml; this function is the only
-    place those eight rules are actually evaluated."""
+    place the configured rules are actually evaluated."""
     results = []
     for name in RULE_NAMES:
         enabled = bool(project.release_gate.get(name, RELEASE_GATE_DEFAULTS[name])[kind])

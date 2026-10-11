@@ -88,6 +88,8 @@ def test_project_settings_absent_file_matches_pre_config_defaults(tmp_path):
         "info_check_failures":        {"release": False, "revision": False},
         "unaccepted_board_moves":     {"release": True,  "revision": False},
         "unaccepted_workspace_moves": {"release": True,  "revision": False},
+        "open_tasks":                 {"release": False, "revision": False},
+        "captured_edits":             {"release": False, "revision": False},
     }
 
 

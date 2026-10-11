@@ -38,11 +38,13 @@ release_gate:
   info_check_failures:         { release: false, revision: false }
   unaccepted_board_moves:      { release: true,  revision: false }
   unaccepted_workspace_moves:  { release: true,  revision: false }
+  open_tasks:                  { release: false, revision: false }
+  captured_edits:              { release: false, revision: false }
 ```
 
 Only list the keys you want to change — this is an overlay on the defaults
 above. An unknown key is a load-time `SchemaError`, difflib-suggested
-against the eight names.
+against the rule names.
 
 | Rule | Blocks a release when... |
 |---|---|
@@ -54,6 +56,18 @@ against the eight names.
 | `info_check_failures` | a failing check whose resolved `check_severity` is `info` |
 | `unaccepted_board_moves` | an item's board differs from `.refdes/boards.yaml` |
 | `unaccepted_workspace_moves` | an item's workspace differs from `.refdes/boards.yaml`'s `workspaces:` key ([workspaces](workspaces.md)) |
+| `open_tasks` | a thread tip carries an open task (its fold lists one; a tip whose fold is ambiguous counts too, said as a conflicting list) |
+| `captured_edits` | an item's current content differs from its captured snapshot (the same fact as the "edited after captured" warning) |
+
+**Why `open_tasks` and `captured_edits` default off.** Both are living-notes
+gate rules (docs/design/living-notes.md §5 rule 5): they turn thread work
+and history into readiness facts, and a project that keeps its design log
+as a running notebook — open tasks and all — shouldn't feel that as a wall
+the day the feature lands. Enable either half per project through the same
+overlay. `open_tasks` reads the same task fold as `refdes thread` and
+counts only the author's own task rows — derived worklist rows (an
+uncovered requirement, a failing check) are each already their own rule
+above and are never re-counted as tasks.
 
 **Why `unverified_requirements` defaults off.** This is a hardware tool:
 boards frequently go to fab specifically so they *can* be tested. Requiring
@@ -103,6 +117,8 @@ release 'rev-b' blocked -- not stamped:
   skipped  info_check_failures
   pass     unaccepted_board_moves
   pass     unaccepted_workspace_moves
+  skipped  open_tasks
+  skipped  captured_edits
 ```
 
 Fix what's listed and run it again. There's no flag to override or skip a
@@ -162,6 +178,8 @@ gate:
   info_check_failures: skipped
   unaccepted_board_moves: pass
   unaccepted_workspace_moves: pass
+  open_tasks: skipped
+  captured_edits: skipped
 
 items:
   CMP-PWR-001: {hash: 673e6ba11269f350, type: component, title: "Buck converter",
