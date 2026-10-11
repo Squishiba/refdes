@@ -89,12 +89,12 @@ def test_type_own_body_beats_included_body_wholesale(tmp_path):
         "  note:\n"
         "    prefix: NTE\n"
         "    include: [strict]\n"
-        "    body: { on_change: log }\n"
+        "    body: { on_change: timeline }\n"
         "    fields:\n"
         "      title: { type: text, required: true }\n",
     )
     note = project.types["note"]
-    assert note.body_on_change == "log"
+    assert note.body_on_change == "timeline"
     assert note.body_required is False
 
 
@@ -180,7 +180,7 @@ def test_doc_only_field_patch_inherits_the_rest(tmp_path):
         "sets:\n"
         "  common:\n"
         "    fields:\n"
-        "      title: { type: text, required: true, on_change: log, default: t }\n"
+        "      title: { type: text, required: true, on_change: timeline, default: t }\n"
         "types:\n"
         "  note:\n"
         "    prefix: NTE\n"
@@ -192,7 +192,7 @@ def test_doc_only_field_patch_inherits_the_rest(tmp_path):
     assert title.doc == "Type-specific wording."
     assert title.type == "text"
     assert title.required is True
-    assert title.on_change == "log"
+    assert title.on_change == "timeline"
     assert title.default == "t"
 
 

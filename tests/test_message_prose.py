@@ -43,7 +43,7 @@ def _load(tmp_path, extra: str):
 def test_field_on_change_outside_the_modes_is_named_in_prose(tmp_path):
     message = _load(tmp_path, "      title: {type: text, on_change: maybe}\n")
     assert "types.note.fields.title.on_change must be one of " in message
-    assert "invalidate, log, ignore, got 'maybe'" in message
+    assert "invalidate, timeline, ignore, got 'maybe'" in message
     assert "['" not in message
 
 
@@ -54,7 +54,7 @@ def test_body_on_change_outside_the_modes_is_named_in_prose(tmp_path):
     Both are fixed; this one is the one that is reachable."""
     message = _load(tmp_path, "    body: {on_change: maybe}\n")
     assert "types.note.body.on_change must be one of " in message
-    assert "invalidate, log, ignore" in message
+    assert "invalidate, timeline, ignore" in message
     assert "['" not in message
 
 
@@ -93,7 +93,7 @@ def test_item_on_change_mode_outside_the_modes_is_named_in_prose(tmp_path):
     project = _build_at(tmp_path)
     messages = [d.message for d in project.errors]
     assert any(
-        "on_change: 'maybe' must be one of invalidate, log, ignore" in m
+        "on_change: 'maybe' must be one of invalidate, timeline, ignore" in m
         for m in messages
     ), messages
     assert not any("['" in m for m in messages), messages

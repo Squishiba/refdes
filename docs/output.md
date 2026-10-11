@@ -329,7 +329,7 @@ else is always present.
     "requirement": {
       "label": "Requirement",
       "prefix": "REQ",
-      "fields": { "owner": { "type": "person", "on_change": "log" } }
+      "fields": { "owner": { "type": "person", "on_change": "timeline" } }
     }
   },
   "items": [

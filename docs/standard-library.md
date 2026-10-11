@@ -115,7 +115,7 @@ naming something new adds a type from scratch.
 types:
   requirement:
     fields:
-      erratum_ref: { type: text, on_change: log }   # new field, additive
+      erratum_ref: { type: text, on_change: timeline }   # new field, additive
       rationale:   null                              # inherited field removed
       status:      { type: enum, choices: [draft, active, retired, deprecated],
                      default: draft, on_change: invalidate }   # full redeclare
@@ -185,7 +185,7 @@ The standard is built this way internally:
 sets:
   provenance:
     fields:
-      source: { type: text, on_change: log }
+      source: { type: text, on_change: timeline }
       tags:   { type: list, on_change: ignore }
 
 types:
@@ -588,7 +588,7 @@ nothing.
    the same reasoning, but was never `required:`, so `body:` isn't required
    on `test`. `rationale`, `source`, `note`, and the log's `summary` all
    stay: `rationale` because `required_when:` can require a field but not a
-   paragraph inside prose; `source`/`note` because they're `on_change: log`,
+   paragraph inside prose; `source`/`note` because they're `on_change: timeline`,
    and folding either into an `invalidate` field would silently make a
    provenance note invalidate downstream links; the log's `summary` because
    it's required, and `log` isn't part of this change.

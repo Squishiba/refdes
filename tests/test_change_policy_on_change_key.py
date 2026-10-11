@@ -57,17 +57,17 @@ def test_item_on_change_field_override(tmp_path):
         "  - id: NOTE-001\n"
         "    on_change:\n"
         "      fields:\n"
-        "        status: log\n"
+        "        status: timeline\n"
         "      reason: Rotates during bring-up.\n",
     )
     project = _build_at(tmp_path)
     item = project.item_by_id("NOTE-001")
 
     assert item.on_change_override == {
-        "fields": {"status": "log"},
+        "fields": {"status": "timeline"},
         "reason": "Rotates during bring-up.",
     }
-    assert item.on_change_for("status", project.types["note"], "ignore") == "log"
+    assert item.on_change_for("status", project.types["note"], "ignore") == "timeline"
 
 
 def test_old_item_history_override_errors_and_renames(tmp_path):
@@ -226,9 +226,153 @@ def test_item_override_is_parsed_without_building_the_site(tmp_path):
         "defaults: {type: note}\n"
         "items:\n"
         "  - id: NOTE-001\n"
-        "    on_change: log\n",
+        "    on_change: timeline\n",
     )
     project = load_project(start=str(tmp_path))
     load_items(project)
 
-    assert project.item_by_id("NOTE-001").on_change_override == {"mode": "log"}
+    assert project.item_by_id("NOTE-001").on_change_override == {"mode": "timeline"}
+
+
+# ------------------------------------------------- P9: `log` renamed to `timeline`
+
+
+def test_old_log_mode_in_the_project_default_errors_and_renames(tmp_path):
+    write_project_config(
+        tmp_path,
+        CONFIG.replace("on_change: {default: ignore}\n", "on_change: {default: log}\n"),
+    )
+
+    try:
+        load_project(start=str(tmp_path))
+    except SchemaError as exc:
+        assert "on_change mode 'log' was renamed to 'timeline'" in str(exc)
+    else:
+        raise AssertionError("old on_change default: log loaded unpinned")
+
+
+def test_old_log_mode_in_a_field_annotation_errors_and_renames(tmp_path):
+    write_project_config(
+        tmp_path,
+        CONFIG.replace(
+            "      status: {type: enum, choices: [draft, live], default: draft}\n",
+            "      status: {type: enum, choices: [draft, live], default: draft,\n"
+            "                 on_change: log}\n",
+        ),
+    )
+
+    try:
+        load_project(start=str(tmp_path))
+    except SchemaError as exc:
+        assert "types.note.fields.status: on_change mode 'log' was renamed" in str(exc)
+    else:
+        raise AssertionError("old field annotation on_change: log loaded unpinned")
+
+
+def test_old_log_mode_in_a_body_annotation_errors_and_renames(tmp_path):
+    write_project_config(
+        tmp_path,
+        CONFIG.replace(
+            "  note:\n    prefix: NOTE\n",
+            "  note:\n    prefix: NOTE\n    body: { on_change: log }\n",
+        ),
+    )
+
+    try:
+        load_project(start=str(tmp_path))
+    except SchemaError as exc:
+        assert (
+            "refdes-schema.yaml: types.note.body.on_change: on_change mode 'log' "
+            "was renamed" in str(exc)
+        )
+    else:
+        raise AssertionError("old body annotation on_change: log loaded unpinned")
+
+
+def test_item_log_override_errors_but_is_still_applied(tmp_path):
+    _write_project(
+        tmp_path,
+        CONFIG,
+        "defaults: {type: note}\n"
+        "items:\n"
+        "  - id: NOTE-001\n"
+        "    on_change: log\n",
+    )
+    project = _build_at(tmp_path)
+
+    assert [d for d in project.errors if "renamed to 'timeline'" in d.message]
+    assert project.item_by_id("NOTE-001").on_change_override == {"mode": "timeline"}
+    assert project.item_by_id("NOTE-001").on_change_for(
+        "status", project.types["note"], "ignore"
+    ) == "timeline"
+
+
+def test_item_log_mode_key_errors_but_is_still_applied(tmp_path):
+    _write_project(
+        tmp_path,
+        CONFIG,
+        "defaults: {type: note}\n"
+        "items:\n"
+        "  - id: NOTE-001\n"
+        "    on_change:\n"
+        "      mode: log\n"
+        "      reason: Drafted before the rename.\n",
+    )
+    project = _build_at(tmp_path)
+
+    assert [d for d in project.errors if "renamed to 'timeline'" in d.message]
+    assert project.item_by_id("NOTE-001").on_change_override["mode"] == "timeline"
+
+
+def test_item_log_field_entry_errors_but_is_still_applied(tmp_path):
+    _write_project(
+        tmp_path,
+        CONFIG,
+        "defaults: {type: note}\n"
+        "items:\n"
+        "  - id: NOTE-001\n"
+        "    on_change:\n"
+        "      fields:\n"
+        "        status: log\n"
+        "      reason: Rotates during bring-up.\n",
+    )
+    project = _build_at(tmp_path)
+
+    assert [d for d in project.errors if "renamed to 'timeline'" in d.message]
+    override = project.item_by_id("NOTE-001").on_change_override
+    assert override["fields"] == {"status": "timeline"}
+
+
+LEGACY_PIN = (
+    "site: {title: T, out: _site}\n"
+    "standard: { base: hardware, version: 2 }\n"
+    "on_change: {default: log}\n"
+    "types:\n"
+    "  note:\n"
+    "    prefix: NOTE\n"
+    "    fields:\n"
+    "      status: {type: enum, choices: [draft, live], default: draft,\n"
+    "                 on_change: log}\n"
+)
+
+
+def test_pre_v3_pin_still_reads_the_old_log_mode(tmp_path):
+    """`hardware@2` is released and its own yaml still spells the mode
+    `log`; a project pinned there must keep loading -- the standard itself
+    would otherwise fail to resolve. Its items may keep writing it too, and
+    the override reads as `timeline` like everywhere else."""
+    _write_project(
+        tmp_path,
+        LEGACY_PIN,
+        "defaults: {type: note}\n"
+        "items:\n"
+        "  - id: NOTE-001\n"
+        "    on_change: log\n",
+    )
+    project = _build_at(tmp_path)
+
+    assert not [d for d in project.errors if "renamed" in d.message]
+    assert project.default_on_change == "log"
+    assert project.types["note"].fields["status"].on_change == "log"
+    assert project.types["requirement"].fields["source"].on_change == "log"
+    assert project.item_by_id("NOTE-001").on_change_override == {"mode": "timeline"}

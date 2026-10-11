@@ -96,7 +96,7 @@ reports that reconciliation is required rather than picking one. A fork
 resolves to one labelled list per tip, never a union.
 
 Ticking a task is a log event, not a content change: `tasks:` is declared
-`on_change: log`, so a tick is seen by history while leaving the entry's
+`on_change: timeline`, so a tick is seen by history while leaving the entry's
 `content_hash` and any baseline diff untouched — downstream items do not go
 suspect because a task moved to `done`.
 

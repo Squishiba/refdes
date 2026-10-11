@@ -22,7 +22,14 @@ from typing import Any
 from . import diagram
 from . import model
 from . import textio
-from .model import ON_CHANGE_MODES, FieldSpec, ItemType, Project
+from .model import (
+    ON_CHANGE_LOG_OLD,
+    ON_CHANGE_MODES,
+    FieldSpec,
+    ItemType,
+    Project,
+    accepts_old_on_change_log,
+)
 
 SCHEMA_REL_PATH = os.path.join(".refdes", "schema.json")
 
@@ -115,24 +122,36 @@ _FIELD_TYPE_MAP: dict[str, dict[str, Any]] = {
     },
 }
 
-ON_CHANGE_OVERRIDE_DEF: dict[str, Any] = {
-    "description": "on_change: <mode> for the whole item, or a per-field override.",
-    "oneOf": [
-        {"enum": list(ON_CHANGE_MODES)},
-        {
-            "type": "object",
-            "properties": {
-                "mode": {"enum": list(ON_CHANGE_MODES)},
-                "fields": {
-                    "type": "object",
-                    "additionalProperties": {"enum": list(ON_CHANGE_MODES)},
+def _on_change_override_def(legacy_log_ok: bool) -> dict[str, Any]:
+    # The editor must not be stricter than the CLI (finding 3): a project
+    # pinned below hardware@3 still spells the timeline mode `log` (P9's
+    # rename lives in v3), so its front matter may say so and the enum has
+    # to carry both spellings -- exactly what `refdes check` accepts.
+    modes = list(ON_CHANGE_MODES) + ([ON_CHANGE_LOG_OLD] if legacy_log_ok else [])
+    return {
+        "description": "on_change: <mode> for the whole item, or a per-field override.",
+        "oneOf": [
+            {"enum": list(modes)},
+            {
+                "type": "object",
+                "properties": {
+                    "mode": {"enum": list(modes)},
+                    "fields": {
+                        "type": "object",
+                        "additionalProperties": {"enum": list(modes)},
+                    },
+                    "reason": {"type": "string"},
                 },
-                "reason": {"type": "string"},
+                "additionalProperties": False,
             },
-            "additionalProperties": False,
-        },
-    ],
-}
+        ],
+    }
+
+
+# The canonical (v3-and-later) shape, kept as the module-level constant for
+# any caller that has no project at hand; `build_schema` builds the
+# project-specific one.
+ON_CHANGE_OVERRIDE_DEF: dict[str, Any] = _on_change_override_def(False)
 
 
 def field_json_schema(fspec: FieldSpec) -> dict[str, Any]:
@@ -268,7 +287,11 @@ def build_schema(project: Project) -> dict[str, Any]:
     (`{defaults?, items: [...]}`), discriminated structurally at the top
     level since a list file has an `items:` key and a bare item doesn't.
     """
-    defs: dict[str, Any] = {"on_change": ON_CHANGE_OVERRIDE_DEF}
+    defs: dict[str, Any] = {
+        "on_change": _on_change_override_def(
+            accepts_old_on_change_log(project.standard_version)
+        )
+    }
     link_docs = {name: lt.doc for name, lt in project.link_types.items() if lt.doc}
     link_differs = {
         name: lt.differs_from

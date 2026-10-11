@@ -137,11 +137,11 @@ on_change:
 ```
 
 The `on_change` mode for any field that does not declare its own. One of
-`invalidate`, `log`, `ignore`. See [change tracking](change-tracking.md).
+`invalidate`, `timeline`, `ignore`. See [change tracking](change-tracking.md).
 
 Only `invalidate` has any effect today: it is the sole mode the content hash
-checks for. `log` is reserved for a future per-field history layer and currently
-behaves exactly like `ignore` -- choosing between them is not yet a meaningful
+checks for. `timeline` is reserved for a future per-field history layer and
+currently behaves exactly like `ignore` -- choosing between them is not yet a meaningful
 decision.
 
 This entire surface only matters to a project under version control. Without a
@@ -235,7 +235,7 @@ library](standard-library.md#overriding-and-extending) for the merge rules
 sets:
   provenance:
     fields:
-      source: { type: text, on_change: log }
+      source: { type: text, on_change: timeline }
       tags:   { type: list, on_change: ignore }
   tracked:
     links:
@@ -285,6 +285,12 @@ link_types:
 Either end resolves to the same edge, so a type may declare `verifies` even though
 `verified_by` is the name in `link_types`. See [links](links.md).
 
+A verb may not be named like one of the engine's reserved front-matter keys
+(`id`, `type`, `body`, `former_ids`, `key`, `prefix`, `board`, `workspace`,
+`on_change`): front matter spells that key for the engine, never for the link,
+so such a verb could never be written on an item — declaring it is a load-time
+configuration error (exit 2) rather than a link that silently never exists.
+
 `trace: false` marks a link as describing process rather than "this item's
 correctness rests on that one" — the bundled standard sets it on `amends`,
 `records`, `supersedes`, and `addresses`. A `{{cascade}}` block with no
@@ -309,7 +315,7 @@ types:
       limit:  { type: limit, required: true, on_change: invalidate }
       status: { type: enum, choices: [draft, active, retired],
                 default: draft, on_change: invalidate }
-      owner:  { type: person, on_change: log }
+      owner:  { type: person, on_change: timeline }
     include: [provenance]
     links:
       refines:      [bound]
@@ -398,7 +404,7 @@ type, or `requirement`).
 | `required_when` | Required only when a sibling condition currently holds — see below |
 | `choices` | Allowed values, for `type: enum` |
 | `default` | Applied when the item omits the field |
-| `on_change` | `invalidate`, `log`, or `ignore` |
+| `on_change` | `invalidate`, `timeline`, or `ignore` |
 | `doc` | The field's own definition — see [`doc`](#doc) |
 | `differs_from` | One sentence per confusable neighbour — see [`differs_from`](#differs_from) |
 
@@ -576,7 +582,7 @@ same posture a figure's `id=` already has.
 `type: tasks` is a list of task rows — a mapping with a stable `id`, the
 task's `text`, and its `state` (`open`, `done` or `dropped`) — where ids must
 be unique within the list and an unknown state is a build error. The hardware
-standard declares one on `log` (`on_change: log`); see
+standard declares one on `log` (`on_change: timeline`); see
 [task lists](design-log.md#task-lists) for the fold rules that decide which
 list a thread's tip currently carries.
 

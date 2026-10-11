@@ -10,7 +10,7 @@
     "source": {
      "name": "source",
      "type": "text",
-     "on_change": "log",
+     "on_change": "timeline",
      "required": false,
      "choices": null,
      "default": null,
@@ -21,7 +21,7 @@
     "note": {
      "name": "note",
      "type": "text",
-     "on_change": "log",
+     "on_change": "timeline",
      "required": false,
      "choices": null,
      "default": null,
@@ -43,7 +43,7 @@
     "owner": {
      "name": "owner",
      "type": "person",
-     "on_change": "log",
+     "on_change": "timeline",
      "required": false,
      "choices": null,
      "default": null,
@@ -140,7 +140,7 @@
     "source": {
      "name": "source",
      "type": "text",
-     "on_change": "log",
+     "on_change": "timeline",
      "required": false,
      "choices": null,
      "default": null,
@@ -151,7 +151,7 @@
     "note": {
      "name": "note",
      "type": "text",
-     "on_change": "log",
+     "on_change": "timeline",
      "required": false,
      "choices": null,
      "default": null,
@@ -173,7 +173,7 @@
     "owner": {
      "name": "owner",
      "type": "person",
-     "on_change": "log",
+     "on_change": "timeline",
      "required": false,
      "choices": null,
      "default": null,
@@ -284,7 +284,7 @@
     "source": {
      "name": "source",
      "type": "text",
-     "on_change": "log",
+     "on_change": "timeline",
      "required": false,
      "choices": null,
      "default": null,
@@ -295,7 +295,7 @@
     "note": {
      "name": "note",
      "type": "text",
-     "on_change": "log",
+     "on_change": "timeline",
      "required": false,
      "choices": null,
      "default": null,
@@ -317,7 +317,7 @@
     "owner": {
      "name": "owner",
      "type": "person",
-     "on_change": "log",
+     "on_change": "timeline",
      "required": false,
      "choices": null,
      "default": null,
@@ -401,7 +401,7 @@
     "source": {
      "name": "source",
      "type": "text",
-     "on_change": "log",
+     "on_change": "timeline",
      "required": false,
      "choices": null,
      "default": null,
@@ -412,7 +412,7 @@
     "note": {
      "name": "note",
      "type": "text",
-     "on_change": "log",
+     "on_change": "timeline",
      "required": false,
      "choices": null,
      "default": null,
@@ -434,7 +434,7 @@
     "owner": {
      "name": "owner",
      "type": "person",
-     "on_change": "log",
+     "on_change": "timeline",
      "required": false,
      "choices": null,
      "default": null,
@@ -489,7 +489,7 @@
     "refdes": {
      "name": "refdes",
      "type": "list",
-     "on_change": "log",
+     "on_change": "timeline",
      "required": false,
      "choices": null,
      "default": null,
@@ -590,7 +590,7 @@
     "source": {
      "name": "source",
      "type": "text",
-     "on_change": "log",
+     "on_change": "timeline",
      "required": false,
      "choices": null,
      "default": null,
@@ -601,7 +601,7 @@
     "note": {
      "name": "note",
      "type": "text",
-     "on_change": "log",
+     "on_change": "timeline",
      "required": false,
      "choices": null,
      "default": null,
@@ -623,7 +623,7 @@
     "owner": {
      "name": "owner",
      "type": "person",
-     "on_change": "log",
+     "on_change": "timeline",
      "required": false,
      "choices": null,
      "default": null,
@@ -645,7 +645,7 @@
     "title": {
      "name": "title",
      "type": "text",
-     "on_change": "log",
+     "on_change": "timeline",
      "required": true,
      "choices": null,
      "default": null,
@@ -658,7 +658,7 @@
    "preview": [
     "title"
    ],
-   "body_on_change": "log",
+   "body_on_change": "timeline",
    "body_required": false,
    "append_only": false,
    "sealing": "build",
@@ -682,7 +682,7 @@
     "source": {
      "name": "source",
      "type": "text",
-     "on_change": "log",
+     "on_change": "timeline",
      "required": false,
      "choices": null,
      "default": null,
@@ -693,7 +693,7 @@
     "note": {
      "name": "note",
      "type": "text",
-     "on_change": "log",
+     "on_change": "timeline",
      "required": false,
      "choices": null,
      "default": null,
@@ -812,7 +812,7 @@
     "tasks": {
      "name": "tasks",
      "type": "tasks",
-     "on_change": "log",
+     "on_change": "timeline",
      "required": false,
      "choices": null,
      "default": null,

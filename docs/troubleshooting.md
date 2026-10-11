@@ -145,7 +145,7 @@ The `on_change:` rename, project half. `history:` was the project's default
 change-policy setting and the old name invited exactly the wrong guess: it
 has nothing to do with the captured history store. Rename the key to
 `on_change:` — the value's shape is unchanged (`default:` takes one of
-`invalidate`, `log`, `ignore`). Until it is renamed no command loads the
+`invalidate`, `timeline`, `ignore`). Until it is renamed no command loads the
 project (configuration error, exit 2), and `refdes revise` cannot rewrite
 it: it rewrites item vocabulary only, so edit the one line by hand.
 

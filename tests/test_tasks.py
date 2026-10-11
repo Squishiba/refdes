@@ -2,7 +2,7 @@
 
 Every bullet under plan §H6 "Verified against" is a test here, and every test
 that pins a behaviour was sabotage-checked (the record is
-`in-prog-logs/living-notes-h6-tasks.txt`): the field's `on_change: log` is
+`in-prog-logs/living-notes-h6-tasks.txt`): the field's `on_change: timeline` is
 flipped and the fold's machinery is broken one rule at a time, each time with
 exactly the tests named here failing and nothing else.
 
@@ -313,7 +313,7 @@ def test_a_fork_returns_one_labelled_list_per_tip_and_never_a_union(tmp_path):
     assert [f.tip.id for f in folds2] == ["LOG-002", "LOG-003"]
 
 
-# ----------------------------------------- the `on_change: log` guarantee
+# ----------------------------------------- the `on_change: timeline` guarantee
 
 
 def test_ticking_a_task_moves_the_history_digest_not_the_content(tmp_path):
@@ -337,7 +337,7 @@ def test_ticking_a_task_moves_the_history_digest_not_the_content(tmp_path):
     ), "history must see a tick -- semantic_digest is the history digest"
     assert (
         project2.item_by_id("LOG-001").content_hash == hash_before
-    ), "a tick must stay out of content_hash -- that is what `on_change: log` is for"
+    ), "a tick must stay out of content_hash -- that is what `on_change: timeline` is for"
     diff = lifecycle.diff_against(
         project2, lifecycle.load_baseline(project2, "rev-a"), write=False
     )

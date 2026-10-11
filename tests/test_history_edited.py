@@ -31,7 +31,7 @@ types:
     append_only: true
     fields:
       summary: { type: text, required: true }
-      owner: { type: text, on_change: log }
+      owner: { type: text, on_change: timeline }
     links:
       follows: [log]
       amends: [log]
@@ -159,7 +159,7 @@ def test_the_diagnostic_is_a_warning_and_never_fails_a_build(tmp_path, capsys):
 
 def test_an_on_change_log_edit_moves_history_not_the_content_hash(tmp_path):
     """The digest covers what `content_hash` excludes: editing an
-    `on_change: log` field is an edit in history's eyes while the baseline
+    `on_change: timeline` field is an edit in history's eyes while the baseline
     digest does not move."""
     cfg = _setup(
         tmp_path,

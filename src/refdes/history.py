@@ -33,7 +33,7 @@ Two deliberate departures from the doc's sketch, both stated in the plan:
    between files must not make it look edited.
 
 This digest is **not** ``item.content_hash``: that one intentionally excludes
-``on_change: log`` and ``ignore`` fields (model.py ``Item.on_change_for``,
+``on_change: timeline`` and ``ignore`` fields (model.py ``Item.on_change_for``,
 docs/design/keys.md §on_change), while a task tick must be visible in history
 even though it must not churn a baseline. It is also independent of
 ``build.HASH_FORMAT``: a hash-format bump must never make an item look edited,

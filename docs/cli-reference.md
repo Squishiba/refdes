@@ -808,7 +808,7 @@ left to `refdes check`, which reports those.
 Schema fields not tracked as 'invalidate':
   bound
     last_reviewed    ignore
-    owner            log
+    owner            timeline
 
 Item-level overrides:
   REQ-PWR-004    owner -> ignore  — Owner rotates weekly during bring-up.

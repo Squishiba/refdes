@@ -20,9 +20,12 @@ import yaml
 from . import docs_url as docs_url_mod
 from .model import (
     NON_SCALAR_FIELD_TYPES,
+    ON_CHANGE_LOG_OLD,
     ON_CHANGE_MODES,
+    TIMELINE,
     Item,
     Project,
+    accepts_old_on_change_log,
     provisional_handle,
 )
 
@@ -792,6 +795,24 @@ def _reject_scalar_collection(
     )
 
 
+_LEGACY_LOG_RENAMED = (
+    "mode 'log' was renamed to 'timeline' (vocabulary review P9: the mode "
+    "names the future field-level timeline, and `log` collided with the "
+    "`log` item type) -- rename this value in the source file. It is read "
+    "as 'timeline' in this build so the change policy is not silently lost."
+)
+
+
+def _legacy_log_allowed(project: Project) -> bool:
+    """Vocabulary review P9: a project pinned below hardware@3 still spells
+    the timeline mode `log` -- the released standards name it that way in
+    their own yaml -- and its items may say so too. Everywhere else the old
+    spelling is the rename error below, and the only reason it still *reads*
+    is that `log` and `timeline` behave identically today.
+    """
+    return accepts_old_on_change_log(project.standard_version)
+
+
 def _apply_change_override(
     project: Project,
     item: Item,
@@ -799,8 +820,23 @@ def _apply_change_override(
     rel: str,
     line: int,
 ) -> None:
-    """Parse an item's `on_change:` front-matter override into `item`."""
+    """Parse an item's `on_change:` front-matter override into `item`.
+
+    A `log` mode anywhere in the override (scalar, `mode:` or a `fields:`
+    entry) is canonicalised to `timeline`; the old spelling errors first
+    unless the project's standard pin still carries it (P2's hard-error
+    posture, applied-but-named like the `history:` rename above).
+    """
     if isinstance(value, str):
+        if value == ON_CHANGE_LOG_OLD:
+            if not _legacy_log_allowed(project):
+                project.error(
+                    f"on_change: {_LEGACY_LOG_RENAMED}",
+                    file=rel,
+                    line=line,
+                    item_id=item.id,
+                )
+            value = TIMELINE
         if value not in ON_CHANGE_MODES:
             project.error(
                 f"on_change: {value!r} must be one of {', '.join(ON_CHANGE_MODES)}",
@@ -812,7 +848,30 @@ def _apply_change_override(
         item.on_change_override = {"mode": value}
     elif isinstance(value, dict):
         item.on_change_override = _strip_lines(value)
-        if item.on_change_override.get("fields") and not item.on_change_override.get("reason"):
+        override = item.on_change_override
+        legacy_ok = _legacy_log_allowed(project)
+        if override.get("mode") == ON_CHANGE_LOG_OLD:
+            if not legacy_ok:
+                project.error(
+                    f"on_change mode: {_LEGACY_LOG_RENAMED}",
+                    file=rel,
+                    line=line,
+                    item_id=item.id,
+                )
+            override["mode"] = TIMELINE
+        fields = override.get("fields")
+        if isinstance(fields, dict):
+            for fname, fmode in fields.items():
+                if fmode == ON_CHANGE_LOG_OLD:
+                    if not legacy_ok:
+                        project.error(
+                            f"on_change fields.{fname}: {_LEGACY_LOG_RENAMED}",
+                            file=rel,
+                            line=line,
+                            item_id=item.id,
+                        )
+                    fields[fname] = TIMELINE
+        if override.get("fields") and not override.get("reason"):
             project.warn(
                 "item-level on_change override has no 'reason'; suppression should be "
                 "self-documenting",

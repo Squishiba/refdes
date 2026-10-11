@@ -935,6 +935,23 @@ collapse `log` and `ignore` into one mode until the timeline exists — honest,
 but it throws away authoring intent already recorded in six fields, and the
 rename is smaller.
 
+**Landed (2026-10-11).** The mode rename is in: `model.py` (`TIMELINE`,
+`ON_CHANGE_MODES`), the v3 standard — counted on the live file, it is eight
+occurrences there, not six: seven live annotations plus one comment — and the
+user docs and tests. The old spelling is handled P2-style, with a gate P2 did
+not need: a project pinned to `hardware@1`/`@2` still reads `log`, because
+those released standards spell the mode that way in their own yaml and a hard
+error there would make the released standard itself fail to load; a v3 pin or
+no pin gets a load-time error naming `timeline` — in the settings default and
+in type/field/body annotations (configuration error, exit 2), and in item
+overrides (error, but the override is applied as `timeline` in that build, the
+same posture as P2's item-level `history:`). `refdes revise` cannot rewrite
+mode values — its mapping sections rename keys, not values — so a v2→v3
+upgrade surfaces the errors and the author renames by hand. The
+`log`-the-type/`timeline` pair P20 parked on this decision is moot: the two
+words now name different things, which was the whole point, so no
+`differs_from` pair is added.
+
 **P10 — preset type `claim` → `assertion`.** Removes the `claimed` stage /
 `claim` type collision (S1.8) at its cheapest point: the debate preset is
 opt-in, bundled with an unreleased standard, and nothing outside this repo can

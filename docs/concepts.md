@@ -117,11 +117,11 @@ Every field declares what a change to it means:
 | `on_change` | Timeline | Baseline diff | Invalidates downstream |
 |---|---|---|---|
 | `invalidate` | yes | yes | yes |
-| `log` | yes | no | no |
+| `timeline` | yes | no | no |
 | `ignore` | no | no | no |
 
 The last two columns are behaviour today; the timeline column is design
-intent for the parked git-history layer, so `log` and `ignore` are currently
+intent for the parked git-history layer, so `timeline` and `ignore` are currently
 indistinguishable in every observable way. See [change
 tracking](change-tracking.md#the-three-modes).
 
