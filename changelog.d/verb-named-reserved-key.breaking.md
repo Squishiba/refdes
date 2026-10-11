@@ -1,7 +1,8 @@
-- A link verb named like one of the engine's reserved front-matter keys
-  (`id`, `type`, `body`, `former_ids`, `key`, `prefix`, `board`,
-  `workspace`, `on_change`) is now a load-time configuration error naming
-  the verb and the key it collides with. Before this, front matter spelled
+- **Breaking:** a link verb named like one of the engine's reserved
+  front-matter keys (`id`, `type`, `body`, `former_ids`, `key`, `prefix`,
+  `board`, `workspace`, `on_change`) is now a load-time configuration error
+  (exit 2) naming the verb and the key it collides with -- a project that
+  declared one must rename the verb to load again. Before this, front matter spelled
   that key for the engine and never for the link, so the verb could never
   be written on an item: `on_change: MEMO-002` came back as a bogus
   "must be one of invalidate, log, ignore" error, and the list spelling

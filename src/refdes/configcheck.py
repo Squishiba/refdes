@@ -43,7 +43,13 @@ from typing import Any
 from . import docs_url as docs_url_mod
 from . import parse as parse_mod
 from . import theme as theme_mod
-from .model import ON_CHANGE_LOG_OLD, ON_CHANGE_MODES, SEALING_MODES, TIMELINE, SchemaError
+from .model import (
+    ON_CHANGE_LOG_OLD,
+    ON_CHANGE_MODES,
+    SEALING_MODES,
+    SchemaError,
+    on_change_log_renamed_message,
+)
 from .parse import DuplicateKey
 
 # What a field's `type:` may be. Derived from the one mapping of declared field
@@ -356,11 +362,7 @@ class BlockChecker:
             # P2 chose for the old `history:` key.
             if self.legacy_log_ok:
                 return str(value)
-            raise self.error(
-                f"{path}: on_change mode {ON_CHANGE_LOG_OLD!r} was renamed to "
-                f"{TIMELINE!r} -- the mode marks a change for the future "
-                "field-level timeline, not the `log` item type; rename it"
-            )
+            raise self.error(on_change_log_renamed_message(path))
         if value not in ON_CHANGE_MODES:
             raise self.wrong(path, f"one of {', '.join(ON_CHANGE_MODES)}", value)
         return str(value)

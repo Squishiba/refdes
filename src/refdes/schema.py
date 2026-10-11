@@ -23,8 +23,8 @@ from .model import (
     ON_CHANGE_LOG_OLD,
     ON_CHANGE_MODES,
     RELEASE_GATE_DEFAULTS,
-    TIMELINE,
     accepts_old_on_change_log,
+    on_change_log_renamed_message,
     SEALING_BUILD,
     SEALING_HISTORY,
     SEALING_MODES,
@@ -125,11 +125,7 @@ def _standard_pin(raw: dict[str, Any]) -> tuple[str, int | None]:
 
 def _on_change_log_renamed(where: str) -> SchemaError:
     """The load error for the pre-v3 `log` spelling of the timeline mode."""
-    return SchemaError(
-        f"{where}: on_change mode {ON_CHANGE_LOG_OLD!r} was renamed to "
-        f"{TIMELINE!r} -- the mode marks a change for the future field-level "
-        "timeline, not the `log` item type; rename it"
-    )
+    return SchemaError(on_change_log_renamed_message(where))
 
 
 # The front-matter keys the engine itself reads: the strictly reserved ones

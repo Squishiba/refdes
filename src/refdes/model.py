@@ -33,6 +33,18 @@ ON_CHANGE_MODES = (INVALIDATE, TIMELINE, IGNORE)
 ON_CHANGE_LOG_OLD = "log"
 
 
+def on_change_log_renamed_message(where: str) -> str:
+    """The one rename-error wording for the pre-v3 `log` spelling of the
+    timeline mode. configcheck (project-authored blocks) and schema (the
+    resolved schema) both raise exactly this, so the two paths cannot
+    drift; tests pin the wording."""
+    return (
+        f"{where}: on_change mode {ON_CHANGE_LOG_OLD!r} was renamed to "
+        f"{TIMELINE!r} -- the mode marks a change for the future field-level "
+        "timeline, not the `log` item type; rename it"
+    )
+
+
 def accepts_old_on_change_log(standard_version: int | None) -> bool:
     """Whether a project may still spell the mode `log`.
 

@@ -147,11 +147,13 @@ Status: finished -- PR #196 (review round: schema_json pin tests, test renames, 
 
 ### Sabotage (required by the task, both reverted, grep "SABOTAGE" clean)
 
-- `accepts_old_on_change_log` -> always False: 14 failures, including the
-  whole `refdes standard` v1/v2 resolution family in test_standards.py
-  (released standards stop loading -- the exact catastrophe the pin gate
-  prevents), test_pre_v3_pin_still_reads_the_old_log_mode, and the
-  hardware2_design_debate oracle row.
+- `accepts_old_on_change_log` -> always False: corrected on re-run (see
+  Review round 2) -- FULL suite: 49 failed + 6 errors, including the whole
+  `refdes standard` v1/v2 resolution family in test_standards.py (released
+  standards stop loading -- the exact catastrophe the pin gate prevents),
+  test_pre_v3_pin_still_reads_the_old_log_mode, the
+  hardware2_design_debate oracle row, and the v1/v2 test_diagram fixtures
+  (setup errors). The earlier "14" was from a 4-file targeted subset.
 - `_reject_reserved_link_verb` -> no-op: 3 of 4 test_reserved_link_verb.py
   tests fail (the ordinary-verb control still passes, as it should).
 - After revert: those files 116 passed.
@@ -205,3 +207,33 @@ test_change_policy_on_change_key.py's rename-error tests (:261/:270/
 exist to exercise the old spelling; fixtures: v2 resolved json
 (unchanged, pre-v3 pin) and the 5 "log" hits in hardware3_resolved.
 json are the log *type* name.
+
+## Review round 2 (PR #196, chunk 1 requested changes)
+
+1. Gate-off sabotage RE-RUN on this head, full suite:
+   `PYTHONPATH=$PWD/src .../python -m pytest -q -p no:cacheprovider`
+   (saved at .scratch/suite-gateoff.txt): exit 1 -- **49 failed, 3464
+   passed, 2 skipped, 6 errors in 261.31s**. The 6 errors are the v1/v2
+   test_diagram fixtures failing at setup (the released standards cannot
+   load). Matches the reviewer's 49+6; the PR body's old "14" (a 4-file
+   subset) corrected via gh api. Restored, grep SABOTAGE clean.
+2. `verb-named-reserved-key.fixed.md` -> `.breaking.md` (git mv) and the
+   bullet now opens **Breaking:**. Rule applied: changelog.d/README.md
+   defines breaking as "existing projects must change" -- a project that
+   declared a reserved-name verb must rename it to load again -- and the
+   repo's precedent for previously-silent-now-error transitions is
+   breaking (duplicate-mapping-key.breaking.md: "A key written twice ...
+   is now a build error").
+3. The two byte-identical rename-error f-strings (configcheck mode(),
+   schema._on_change_log_renamed) now call one shared
+   `model.on_change_log_renamed_message(where)`; output byte-identical,
+   pinned by the existing exact-substring tests (188 targeted passed).
+   Ruff F401 --fix dropped the now-unused TIMELINE imports (and briefly
+   ate the new schema.py import -- caught by the targeted run, restored).
+4. docs/troubleshooting.md: the P2 settings entry now says pins to
+   `hardware@1`/`@2` still accept `log`.
+- Deliberately left: the `_standard_pin` ordering nit (reviewer agreed --
+  edge case: a malformed `standard:` reports from resolve_schema later,
+  and load_project's pin read only gates one setting).
+- Final gates: full suite foreground exit 0, 3519 passed / 2 skipped
+  (264.91s); ruff E9,F clean; gen_examples --check clean.
