@@ -68,42 +68,59 @@ are that project's problem.
 
 ## Which links feed coverage
 
-**Deliberate convention, not an accident of naming:** every link this
-standard authors to make a coverage claim is active voice — `satisfies`,
-`verifies`, `addresses`. Coverage is computed from *only* the three backlinks
-their inverses produce: `satisfied_by`, `verified_by`, `addressed_by`
-(`build.compute_coverage`). Every link authored in the passive `X_by` form
-instead — `constrained_by`, `governed_by`, `blocked_by` — is deliberately
-kept out of that computation. None of `constrains`, `governs`, or `blocks`
-(their own backlinks) is ever read by it either.
+**The rule, stated so that it has no exceptions:** *the suffix never tells
+you whether a link feeds coverage; the type's `satisfying_statuses` and
+`verifying_statuses` do.* Check the type's status declarations and the verb's
+pair — never the name's ending.
 
-The name is the signal: if you're authoring a link to make something count
-as done, reach for the active form. A passive `..._by` traces a relationship
-without ever closing coverage on its own.
+Coverage is computed from exactly three verb pairs — `addresses`/`addressed_by`,
+`satisfies`/`satisfied_by`, `verifies`/`verified_by` — and since
+[links are declarable from either end](links.md#back-links-are-computed), each
+pair counts whichever end authored it (`build._coverage_for`). No other verb is
+ever read by the computation, whatever it is called: `constrained_by`,
+`governed_by`, `blocked_by`, `refines`, `derives_from` and their backlinks
+contribute nothing (`build.compute_coverage`).
 
-Most concretely, **`constrained_by` does not feed coverage**, however
-strongly the name suggests otherwise. A log entry that only `constrained_by`'s
-a bound leaves it exactly as open as if no link existed at all. `satisfies`
-is what closes it (see the
-[`governed_by` vs. `constrained_by`](links.md#governed_by-vs-refines-vs-constrained_by)
-distinction).
+What the status lists then decide:
 
-This holds without exception across the bundled standard's own vocabulary —
-checked, not assumed. One general engine capability is worth flagging rather
-than glossing over, though: [links are declarable from either
-end](links.md#back-links-are-computed). Coverage's read of `verified_by` is
-intentionally symmetric with `verifies` (`build._verifier_type_names`), and
-that symmetry exists to support a legacy spelling: a requirement declaring
-`verified_by: [test]` directly, instead of the test declaring `verifies:`.
-Authored that way, `verified_by` — despite the `_by` suffix — *is* the
-coverage-feeding form.
+- `satisfies` — the link counts as `claimed` while the authoring item's
+  `status` is outside its type's `satisfying_statuses:` (`log`: `accepted`,
+  `component`: `selected`), and as `satisfied` once inside; a type that
+  declares no `satisfying_statuses:` counts every link as satisfying.
+- `verifies` — the link counts once the verifier's `status` is in the
+  verifier type's `verifying_statuses:` (`test`: `passing`); unconfigured,
+  every link counts.
+- `addresses` — the `addressed` stage records that somebody has worked on the
+  item and written it up, without claiming it is met, so it is the one
+  coverage stage with no status gate.
 
-The bundled standard itself never authors it that way
-(`test.links.verifies: [requirement, bound]` is always the spelling in
-`base.yaml`), so the convention holds unbroken within this vocabulary as
-shipped. It is a standard-library authoring choice, not a rule the schema
-engine itself enforces, and a project overlay that reaches for the legacy
-`verified_by:` spelling is the one place the passive form does feed coverage.
+The rule earns its automaticity precisely because both halves of the suffix
+intuition fail it — and the rule holds in each failure:
+
+- A `_by` suffix does not keep a link out. `satisfied_by`, `verified_by` and
+  `addressed_by` — the very names the computation reads as backlinks — all end
+  in `_by`. And an authored `verified_by: [TST-…]` on a requirement — the
+  legacy spelling of a [link declarable from either
+  end](links.md#back-links-are-computed), written on the requirement instead
+  of the test declaring `verifies:` — feeds coverage just the same: the
+  verifier type's `verifying_statuses:` decides whether each such link
+  counts, exactly as it would for `verifies:`
+  (`build._verifier_type_names`, `build._coverage_for`).
+- A `_by` suffix does not put one in either. **`constrained_by` does not feed
+  coverage**, however strongly the name suggests otherwise. A log entry that
+  only `constrained_by`'s a bound leaves it exactly as open as if no link
+  existed at all. `satisfies` is what closes it (see the
+  [`governed_by` vs. `constrained_by`](links.md#governed_by-vs-refines-vs-constrained_by)
+  distinction).
+
+So: to know what a link does to coverage, find out which of the three pairs it
+is, and read the types' status declarations — `satisfying_statuses:` and
+`verifying_statuses:` above, and the item's own `coverable_statuses:` for
+whether it is tracked at all, [above](#what-gets-coverage). The active-voice
+spelling (`satisfies`, `verifies`, `addresses`, authored from the item doing
+the claiming) remains the standard's convention for *authoring* a coverage
+claim — a convention for where to write it down, not a test for whether it
+counts.
 
 ## The coverage page
 
