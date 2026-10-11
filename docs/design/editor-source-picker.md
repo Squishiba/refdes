@@ -190,7 +190,6 @@ keys to pin. Reasons, in order of weight:
 The sequence, inside the existing per-project write lock
 (`serve/edit.py:write_lock_for`, taken by `apply_edit`):
 
-
 1. Load the before-project, resolve the item, check `expected_revision`,
    check sealed — all unchanged from today's `_apply_locked`.
 2. Plan the body patch (`SetBody`, unchanged), producing `new_text`.

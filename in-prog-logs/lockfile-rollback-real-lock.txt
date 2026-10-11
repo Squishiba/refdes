@@ -228,3 +228,37 @@ STATUS: finished. Task list complete; nothing left half-done. Nothing was
 locked that could not be locked; the one writer whose lock is wider than its
 file update (fetch, and create_item's gate hold) is written up above and in
 the PR rather than quietly restructured.
+
+=====================================================================
+6. PR #195 REVIEW PASS (same day) -- cosmetic/pointer fixes only
+=====================================================================
+The review verified the locking and asked for six small things; all six done,
+no behaviour change:
+  1. docs/cli-reference.md: the added row left a blank line inside the "Files
+     the tool writes" table (GFM ends the table there, so the rows below
+     stopped rendering). Removed.
+  2. changelog.d fragment and tests/test_citations_lockfile_locking.py both
+     cited cli.py:2954 -- the `if` that SKIPS the lock. Cited by name instead
+     (`cli.main`'s `with project_write_lock(...)`), with a line number kept
+     only in the places whose neighbours use line numbers (the changelog
+     fragment, and citations.py's comments, which already point at
+     sources.py:245 / citations.py:1039); the edit.py comments and the test
+     comment now carry no number at all.
+  3. edit.py: an orphaned copy of the old "Fresh from disk ... under this
+     lock" comment sat above the PDF-anchor loop, which runs OUTSIDE the
+     locked section. Deleted; the reworded copy inside the locked section
+     stays. (I had first replaced it with a comment of my own saying the loop
+     is outside the lock -- deleted that too, since the reviewer asked for a
+     deletion, not a reword, and the locked section's own comment carries it.)
+  4. citations.py: two blank lines this PR added (save_lockfile body, and
+     after fetch_all's closing docstring) removed.
+  5. edit.py rollback comment: it named `LockUnavailable` for the declined
+     case, but the catch is `except OSError`, which also covers other
+     filesystem errors from opening or locking the lock file. Comment now says
+     OSError, with `LockUnavailable` named inside it.
+  6. docs/design/editor-source-picker.md: double blank line after the
+     sequence's lead-in, back to one.
+Gates after: ruff E9,F clean; targeted files (this PR's test file,
+test_serve_edit.py, test_serve_sources_accept.py, test_write_lock.py) 66
+passed; full suite foreground exit=0, 3513 passed, 2 skipped in 262.95s
+(0:04:22), .scratch/suite.txt updated.

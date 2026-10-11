@@ -243,7 +243,8 @@ def test_the_accepts_lockfile_write_happens_inside_the_project_write_lock(tmp_pa
 def test_refdes_fetch_holds_the_project_lock_while_it_writes_the_lockfile(tmp_path, monkeypatch):
     # `fetch` is the lockfile's other writer, and the one that rewrites the
     # whole file from the records it read. Its read-modify-write is inside the
-    # lock `cli.main` takes around a writing command (cli.py:2954); this says
+    # lock `cli.main` takes around a writing command (its
+    # `with project_write_lock(...)` around `args.func(args)`); this says
     # so about the write itself rather than trusting where the `with` sits.
     root = make_root(tmp_path)
     assert not (root / ".refdes" / "citations.yaml").exists()

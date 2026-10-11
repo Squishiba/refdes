@@ -519,8 +519,9 @@ class _LockfileWrite:
         self.written = False
         # One section under the project's cross-process write lock: the read,
         # the compare and the restore cannot be split by a cooperating writer.
-        # `refdes fetch` holds this same lock for its whole run (cli.py:2961),
-        # and another server's accept and rollback take it the same way, so
+        # `refdes fetch` runs inside the same lock -- `cli.main`'s
+        # `with project_write_lock(...)` around every writing command -- and
+        # another server's accept and rollback take it the same way, so
         # whatever else is going to happen to this file happens either before
         # the read or after the restore -- never between them. That is the
         # guarantee this section was added to buy; before it, a writer landing
@@ -542,16 +543,18 @@ class _LockfileWrite:
         # bytes, so the rollback is SKIPPED -- we decline to clobber a file
         # whose current contents we cannot verify (a missing file is the same
         # case: someone removed it, which is a replace we must not undo
-        # blind); (2) a lock we cannot acquire -- a read-only root with a
-        # writable child, `LockUnavailable` -- declines the rollback for the
-        # same reason: writing while unable to lock is the thing this whole
-        # change is against, and the accept's own write would have refused on
-        # such a root anyway; (3) a process killed inside the one `os.replace`
-        # that lands the restore, which is the crash window §4 already states
-        # -- the recovery is bytes held in memory, not a journal, and the
-        # residue is an inert pin the next `refdes fetch` cleans; and (4) a
-        # writer that ignores the lock entirely, which no code here does but
-        # no lock can prevent either.
+        # blind); (2) a lock we cannot acquire: the `except OSError` wrapped
+        # around the section catches `LockUnavailable` -- a read-only root with
+        # a writable child, write_lock.py:42-50 -- and any other filesystem
+        # error from opening or locking the lock file, and it declines the
+        # rollback either way: writing while unable to lock is the thing this
+        # whole change is against, and the accept's own write would have
+        # refused on such a root anyway; (3) a process killed inside the one
+        # `os.replace` that lands the restore, which is the crash window §4
+        # already states -- the recovery is bytes held in memory, not a
+        # journal, and the residue is an inert pin the next `refdes fetch`
+        # cleans; and (4) a writer that ignores the lock entirely, which no
+        # code here does but no lock can prevent either.
         try:
             with _disk_write_lock(self.root):
                 try:
@@ -641,16 +644,6 @@ def _accept_pins(
     except sources_mod.SourceRefusal as exc:
         return None, str(exc)
 
-    # Fresh from disk, not the snapshot's copy: under this lock, the file is the
-    # state, and a pin written by a fetch since the snapshot was built belongs
-    # in what we write back.
-    #
-    # Strictly `load_lockfile`, and a LockfileError becomes this function's
-    # ordinary refusal reason rather than an exception: this is the second
-    # writer of the lockfile (step 3 of the sequence below), and it writes the
-    # file whole from the records it read. A lockfile it could not read would
-    # come back with one record -- the key being accepted -- and every other
-    # pin in the project silently gone. Refusing leaves both files untouched.
     anchors = {}
     digests = {}
     for plan in plans:
@@ -667,8 +660,8 @@ def _accept_pins(
         digests[plan["path"]] = plan["sha256"]
 
     # Steps 2 and 3 are one section under the project's cross-process write
-    # lock -- the same `project_write_lock` that `refdes fetch` holds for its
-    # whole run (cli.py:2961) and that `_LockfileWrite.rollback` takes for its
+    # lock -- the same `project_write_lock` that `cli.main` runs `refdes fetch`
+    # inside, and that `_LockfileWrite.rollback` takes for its
     # read-compare-restore. Everything the write is decided from is inside it:
     # the records read off disk, the extraction whose policy reads those
     # records, and the replace. That is the whole of it, and it holds no

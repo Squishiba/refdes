@@ -13,8 +13,9 @@
   read, compare and restore. `project_write_lock` is re-entrant per thread, so
   the rollback that `_apply_locked` calls from inside the item's own
   check-and-replace section simply nests. `refdes fetch` was already covered —
-  `cli.main` takes the same lock around every writing command (cli.py:2954),
-  which is why `serve` is on that call's exclusion list and why the editor has
+  it runs inside `cli.main`'s whole-command
+  `with project_write_lock(...)` hold (src/refdes/cli.py:2961), which is why
+  `serve` is on that call's exclusion list and why the editor has
   to take the lock itself — and its read and write are one hold, so it cannot
   lose an update; that lock stays as wide as it was, because the record `fetch`
   writes at the end is derived from bytes it fetched between the read and the
