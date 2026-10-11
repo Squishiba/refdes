@@ -14,6 +14,7 @@ from . import build as build_mod
 from . import calc_rewrite as calc_rewrite_mod
 from . import citations as citations_mod
 from . import diagram as diagram_mod
+from . import dates as dates_mod
 from . import docs_url as docs_url_mod
 from . import former_ids as former_ids_mod
 from . import get_version, model, standards, textio
@@ -29,6 +30,7 @@ from . import scaffold as scaffold_mod
 from . import schema_json as schema_json_mod
 from . import seal as seal_mod
 from . import stub_tests as stub_tests_mod
+from . import threads as threads_mod
 from .model import INVALIDATE, Item, Project
 from .schema import SCHEMA_NAME, SchemaError, load_project
 from .write_lock import LockUnavailable, project_write_lock
@@ -795,6 +797,188 @@ def _print_reuse_note(retired_id: str, holders: list[str]) -> None:
         "former id, which 'refdes check' reports as an error -- former_ids: "
         "may only name retired ids."
     )
+
+
+#: §6's sketch's checkbox column: the three authored states, and nothing else.
+#: Derived rows render without any glyph -- they have no tickable state (§5
+#: rule 2), which is exactly why they live in their own block.
+_THREAD_GLYPHS = {"open": "[ ]", "done": "[x]", "dropped": "[-]"}
+
+
+def _thread_age_suffix(row: dict, as_of, date_format: str) -> str:
+    """§5 rule 3's age line: the declaring entry and its authored date,
+    absolute; a relative span is appended ONLY under an explicit --as-of, so
+    a run without the flag is byte-identical whatever the wall clock says."""
+    since = row.get("open_since") or {}
+    entry, declared = since.get("entry"), since.get("date")
+    if not entry:
+        return ""
+    text = f"  (open since {entry}"
+    if declared:
+        text += f", {declared}"
+        if as_of is not None:
+            try:
+                start = dates_mod.parse_date(declared, date_format)
+            except ValueError:
+                start = None
+            if start is not None:
+                days = (as_of - start).days
+                if days < 0:
+                    text += " -- declared after --as-of"
+                else:
+                    text += f" -- {days} day" + ("" if days == 1 else "s")
+    return text + ")"
+
+
+def cmd_thread(args) -> int:
+    """One thread's view: tip, capture line, tasks with age, derived rows.
+
+    The thread *view* of living-notes.md §6 as a command: the query service
+    is `threads.threads_projection` -- the same single answer the index
+    payload and the VS Code hover read -- and this command renders one entry
+    of it, so it cannot disagree with `refdes index` about the fold, the tips
+    or the derived rows (a client "must not reconstruct the chain itself").
+    It reads: the load's own key-minting is the only writing, and the build
+    runs `seal_write=False` like `index`/`ls`.
+
+    Any entry on the thread is a valid argument (an id-less continuation's
+    key works the same way `item_by_ref` resolves it); it resolves to *its*
+    thread. Two separate labelled groups with separate numbering (§5 rule 1:
+    the derived rows carry no numbers at all, and never sort into the
+    authors' list), absolute ages without --as-of (rule 3), the folded
+    verdict printed with its tip's tasks rather than alone (rule 4), and on
+    a fork one labelled block per open tip with no single current status
+    anywhere (rule 4's fork half).
+    """
+    project, _stale = _load(args, require_ids=False)
+    _announce_load_writes(project)
+    load_errors = project.errors
+    for d in load_errors:
+        print(str(d), file=sys.stderr)
+    as_of = None
+    if args.as_of is not None:
+        if args.json:
+            # --as-of is a rendering option; --json is the projection itself,
+            # which is deliberately clock-free (§5 rule 3). Refuse the
+            # combination instead of silently ignoring the flag.
+            print(
+                "error: --as-of renders relative ages in the text output; "
+                "--json prints the thread projection, which carries absolute "
+                "dates only -- the two cannot combine",
+                file=sys.stderr,
+            )
+            return 2
+        try:
+            as_of = dates_mod.parse_date(args.as_of, project.date_format)
+        except ValueError as exc:
+            print(f"error: --as-of {args.as_of!r}: {exc}", file=sys.stderr)
+            return 2
+    item = project.item_by_ref(args.ref)
+    if item is None:
+        print(
+            f"error: no item {args.ref!r} in this project "
+            "(looked up by display id, then surrogate key)",
+            file=sys.stderr,
+        )
+        return 2
+    build_mod.build(project, seal_write=False, reseal=False)
+    label = item.id or item.key or item.slug
+    views = threads_mod.threads_projection(project)
+    view = next((v for v in views if label in v["entries"]), None)
+    if view is None:
+        print(
+            f"error: {label} is not part of a thread (no follows: edge "
+            "either way) -- refdes thread shows a thread's tip, tasks and "
+            "derived rows",
+            file=sys.stderr,
+        )
+        return 2
+    if args.json:
+        json.dump(view, sys.stdout, indent=2, ensure_ascii=False, default=str)
+        sys.stdout.write("\n")
+        return 1 if load_errors else 0
+
+    if view["forked"]:
+        print(f"Thread: {view['ref']}  (forked: tips {', '.join(view['tips'])})")
+    else:
+        print(f"Thread: {' -> '.join(view['entries'])}  (one tip)")
+    for cap in view["captured"]:
+        at = f" at {cap['occurred_at']}" if cap["occurred_at"] else ""
+        print(f"Captured: {cap['entry']}{at} ({cap['kind']})")
+    single = not view["forked"]
+    for branch in view["branches"]:
+        print()
+        date = f"  {branch['date']}" if branch["date"] else ""
+        print(f"Tip: {branch['tip']}{date}  {branch['summary']}")
+        verdict = branch["verdict"]
+        if verdict is not None:
+            if verdict["state"] == "ambiguous":
+                # §5 rule 3's posture for `status`, said as itself -- never
+                # displayed as though nothing had concluded.
+                print(
+                    "Verdict: ambiguous -- entries at the same distance "
+                    "declare different statuses; a continuation must declare "
+                    "one explicitly"
+                )
+            else:
+                open_rows = [
+                    row for row in (branch["tasks"]["rows"] or [])
+                    if row.get("state") == "open"
+                ]
+                suffix = ""
+                if verdict["concluding"] and open_rows:
+                    count = len(open_rows)
+                    suffix = (
+                        f"  -- concluding, {count} open task"
+                        + ("" if count == 1 else "s")
+                        + " at this tip"
+                    )
+                on = f", {verdict['declared_on']}" if verdict["declared_on"] else ""
+                print(
+                    f"Verdict: {verdict['status']} "
+                    f"({verdict['declared_by']}{on}){suffix}"
+                )
+        heading = "Tasks at tip:" if single else f"Tasks at {branch['tip']}:"
+        tasks = branch["tasks"]
+        if tasks["state"] == "ambiguous":
+            print(f"{heading} task reconciliation required")
+        elif tasks["state"] == "undeclared":
+            print(f"{heading} none (never declared)")
+        elif tasks["state"] == "cleared":
+            print(f"{heading} none (cleared by {tasks['declared_by']})")
+        else:
+            malformed = tasks.get("malformed")
+            note = f" ({malformed} malformed row(s) not shown)" if malformed else ""
+            print(f"{heading}{note}" if note else heading)
+            for number, row in enumerate(tasks["rows"], start=1):
+                glyph = _THREAD_GLYPHS.get(row.get("state"), "[?]")
+                age = (
+                    _thread_age_suffix(row, as_of, project.date_format)
+                    if row.get("state") == "open"
+                    else ""
+                )
+                print(
+                    f"  {number}. {glyph} {row.get('id', '?')}  "
+                    f"{row.get('text', '')}{age}"
+                )
+    print()
+    print("Derived (self-closing):")
+    rows = view["derived"]
+    if not rows:
+        print("  (none)")
+    else:
+        width = max(len(row["kind"]) for row in rows)
+        for row in rows:
+            kind = row["kind"].ljust(width)
+            if row["kind"] == "check":
+                detail = f"{row['value']} violates {row['against']}"
+            elif row["kind"] == "blocked":
+                stale = " (stale)" if row["stale"] else ""
+                detail = f"by {row['root']} ({row['root_status']}){stale}"
+            else:
+                detail = row["problem"]
+            print(f"  {kind}  {row['ref']}  {detail}")
+    return 1 if load_errors else 0
 
 
 def cmd_id(args) -> int:
@@ -2272,6 +2456,41 @@ def main(argv: list[str] | None = None) -> int:
     p_ls.add_argument("--file", help="only items declared in this source file")
     p_ls.add_argument("--tag", help="only items with a tag containing this text")
     p_ls.set_defaults(func=cmd_ls)
+
+    p_thread = sub.add_parser(
+        "thread",
+        help="one thread's view: tip, capture line, tasks with age, derived rows",
+        description="The thread view of docs/design/living-notes.md section 6 as "
+        "a command. Any entry id or surrogate key on the thread names it, and "
+        "resolves to the thread that entry belongs to. The answer is the same "
+        "threads_projection answer the index payload carries -- this renders "
+        "one entry of it and computes no fold of its own. The authored task "
+        "block at each open tip and the labelled derived block are two "
+        "separate groups with separate numbering (derived rows are "
+        "self-closing, carry no numbers, and are never written back); every "
+        "open task prints the entry that declared it and that entry's date; "
+        "a folded verdict prints with its tip's tasks rather than alone; a "
+        "fork prints one block per open tip and never a single current "
+        "status. Open-task ages are absolute without --as-of -- a relative "
+        "span appears only when you name the date to measure against, so the "
+        "bytes never depend on the wall clock. An unknown ref, or a ref with "
+        "no follows: edge either way, is an error with exit 2.",
+    )
+    p_thread.add_argument(
+        "ref", help="any entry id or surrogate key on the thread"
+    )
+    p_thread.add_argument(
+        "--json",
+        action="store_true",
+        help="print the thread's projection entry as JSON",
+    )
+    p_thread.add_argument(
+        "--as-of",
+        metavar="DATE",
+        help="render open-task ages relative to DATE instead of absolute "
+        "dates only (not combinable with --json)",
+    )
+    p_thread.set_defaults(func=cmd_thread)
 
     p_id = sub.add_parser("id", help="allocate IDs for items that have none")
     p_id.add_argument("--dry-run", action="store_true", help="show without writing")

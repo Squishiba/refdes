@@ -471,3 +471,172 @@ def test_module_imports_no_clock():
         r"\bdatetime\b|\btime\b\.|utcnow|utcfromtimestamp|\.today\(|\.now\(",
         source,
     )
+
+# ------------------------------------------------- the review-fix matrix (H7b)
+
+
+def test_ambiguous_verdict_is_its_own_state_never_the_undeclared_null(tmp_path):
+    """H7b review fix (a): two merge parents at the same distance declaring
+    *different* statuses make the fold ambiguous, and `(None, None)` is byte
+    for byte what "nothing ever declared a status" returns -- so without a
+    distinct state the projection shows the ambiguity as a blank, exactly
+    the collapse §5 rule 3 forbids for task lists. LOG-005's branch (silent
+    ancestry) keeps `verdict: null`; LOG-009's refuses and must say so."""
+    text = (
+        "defaults: { type: log }\n"
+        "items:\n"
+        "  - {id: LOG-007, summary: Settled left., date: 2026-08-07, status: accepted}\n"
+        "  - {id: LOG-008, summary: Held right., date: 2026-08-08, status: proposed}\n"
+        "  - {id: LOG-009, summary: Silent merge., date: 2026-08-09, follows: [LOG-007, LOG-008]}\n"
+        "  - {id: LOG-005, summary: Silent head., date: 2026-08-05}\n"
+        "  - {id: LOG-006, summary: Silent continuation., date: 2026-08-06, follows: LOG-005}\n"
+    )
+    project = _project(tmp_path, text)
+    views = threads.threads_projection(project)
+
+    merged = _thread(views, "LOG-007")["branches"][0]["verdict"]
+    assert merged["state"] == "ambiguous"
+    assert merged["status"] is None
+    assert merged["concluding"] is False
+    # The distinctness the fix exists for: ambiguous != never declared.
+    silent = _thread(views, "LOG-005")["branches"][0]["verdict"]
+    assert silent is None
+
+
+def test_declared_verdicts_carry_their_state_too(tmp_path):
+    """Uniform discriminator: a folded verdict is `state: declared` with its
+    status, so a consumer never has to guess whether `status: null` means
+    ambiguous or absent (it can't -- the absent case is a null verdict)."""
+    project = _project(tmp_path, ONE_TIP)
+    (view,) = threads.threads_projection(project)
+    verdict = view["branches"][0]["verdict"]
+    assert verdict["state"] == "declared"
+    assert verdict["status"] == "accepted"
+
+
+def test_all_malformed_task_list_is_declared_not_cleared(tmp_path):
+    """H7b review fix (b): a declared, non-empty `tasks:` whose rows are all
+    malformed has zero *valid* rows -- but it is not the author's explicit
+    `tasks: []`. Reporting it `cleared` would hide the validation error
+    behind the one state that means "the author closed everything". The
+    state is the raw declaration's posture; `malformed` counts the drops
+    `build.validate_items` already reported."""
+    text = (
+        "defaults: { type: log }\n"
+        "items:\n"
+        "  - id: LOG-001\n"
+        "    summary: Nonsense list.\n"
+        "    date: 2026-08-01\n"
+        "    tasks: [measure the rail]\n"
+        "  - id: LOG-002\n"
+        "    summary: Silent continuation.\n"
+        "    date: 2026-08-02\n"
+        "    follows: LOG-001\n"
+    )
+    project = _project(tmp_path, text)
+    assert project.errors  # build.validate_items reported the row
+    (view,) = threads.threads_projection(project)
+    tasks = view["branches"][0]["tasks"]
+    assert tasks["state"] == "declared"
+    assert tasks["rows"] == []
+    assert tasks["malformed"] == 1
+    # A clean declaration carries the key only when something was dropped.
+    clean = _project(tmp_path, ONE_TIP)
+    (view,) = threads.threads_projection(clean)
+    assert "malformed" not in view["branches"][0]["tasks"]
+
+
+def test_task_rows_are_copied_never_the_authored_field_itself(tmp_path):
+    """H7b review fix (d)'s factual half: `rows` are copies -- `open_since`
+    is *added* to the copy -- so a consumer poking a projection row can
+    never rewrite `item.fields` (or the file through the item)."""
+    project = _project(tmp_path, ONE_TIP)
+    (view,) = threads.threads_projection(project)
+    tasks = view["branches"][0]["tasks"]
+    row = tasks["rows"][0]
+    authored = project.item_by_id("LOG-001").fields["tasks"][0]
+    assert row == {**authored, "open_since": {"entry": "LOG-001", "date": "2026-08-30"}}
+    row["text"] = "clobbered"
+    assert authored["text"] != "clobbered"
+    assert "open_since" not in authored
+
+
+def test_thread_list_is_ordered_by_ref_the_only_order_the_docs_allow(tmp_path):
+    """H7b review fix (c): §5/§6 order entries *within* a thread (oldest
+    first) and say nothing about the order of the *list of threads*; the
+    docstring used to claim "oldest-root first", which the code never did
+    -- it sorts by root ref. Pinned here with roots whose dates order the
+    other way, so a date sort of the list fails this test."""
+    text = (
+        "defaults: { type: log }\n"
+        "items:\n"
+        "  - {id: LOG-010, summary: Older thread root., date: 2026-01-01}\n"
+        "  - {id: LOG-011, summary: Older continuation., date: 2026-01-02, follows: LOG-010}\n"
+        "  - {id: LOG-002, summary: Newer thread root., date: 2026-06-01}\n"
+        "  - {id: LOG-003, summary: Newer continuation., date: 2026-06-02, follows: LOG-002}\n"
+    )
+    project = _project(tmp_path, text)
+    refs = [view["ref"] for view in threads.threads_projection(project)]
+    assert refs == ["LOG-002", "LOG-010"]
+
+
+def test_derived_scope_follows_composite_key_targets(tmp_path):
+    """H7b review fix (e): `_scope`'s one hop reads `Item.resolved_links`,
+    not raw `Item.links` (AGENTS.md: anything walking the graph that reads
+    raw links "stops matching the moment a target is composite-expanded").
+    With the fixture's `addresses:` hand-rewritten to `REQ-001@<key>`, raw
+    links hold a token `item_by_ref` cannot resolve -- only `resolved_links`
+    holds the bare label -- so this test is exactly the sabotage."""
+    project = _project(tmp_path, DERIVED)
+    key = project.item_by_id("REQ-001").key
+    assert key
+    path = tmp_path / "items" / "log.yaml"
+    text = path.read_text(encoding="utf-8")
+    composite = text.replace("addresses: REQ-001", f"addresses: REQ-001@{key}")
+    assert composite != text
+    path.write_text(composite, encoding="utf-8")
+
+    project = _load(tmp_path)
+    logger = project.item_by_id("LOG-001")
+    assert logger.links["addresses"] == [f"REQ-001@{key}"]  # the raw half
+    assert project.item_by_ref(f"REQ-001@{key}") is None  # raw text resolves nowhere
+    assert logger.resolved_links["addresses"] == ["REQ-001"]  # the half _scope reads
+
+    (view,) = threads.threads_projection(project)
+    assert ("coverage", "REQ-001") in [(row["kind"], row["ref"]) for row in view["derived"]]
+
+
+# ---------------------------------------------------------------- capture line
+
+
+def test_thread_without_store_history_has_no_capture_rows(tmp_path):
+    """`captured: []` is "the store holds no capture of any member" -- a
+    project that never ran a writable command simply has no store, and the
+    thread view says so with an empty list rather than failing over it."""
+    project = _project(tmp_path, ONE_TIP)
+    (view,) = threads.threads_projection(project)
+    assert view["captured"] == []
+
+
+def test_thread_names_the_entries_the_store_holds_captures_for(tmp_path):
+    """§6's capture line, as data: a writable load freezes the `follows:`
+    edge and captures the predecessor's snapshot, so the thread reports that
+    member as captured -- with the event's kind, and `occurred_at: null`
+    exactly because a `followed` edge deliberately carries no clock (H2: a
+    stamp would give one fact different bytes in two checkouts; §2 says
+    nobody may order or gate on it)."""
+    from refdes import loader
+
+    write_project_config(tmp_path, CONFIG)
+    items = tmp_path / "items"
+    items.mkdir(exist_ok=True)
+    (items / "log.yaml").write_text(ONE_TIP, encoding="utf-8")
+    config = str(tmp_path / "refdes-project.yaml")
+    loader.load_tree(config)  # writable: keys, expansion, and the capture
+    project, _ = loader.load_tree(config, write=False)
+    build_mod.build(project, seal_write=False, reseal=False)
+
+    (view,) = threads.threads_projection(project)
+    assert view["captured"] == [
+        {"entry": "LOG-001", "kind": "followed", "occurred_at": None}
+    ]

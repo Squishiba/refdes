@@ -617,6 +617,90 @@ def resolve_current_with_source(
     )
 
 
+@dataclass(frozen=True)
+class TipFold:
+    """One field's branch-local fold at one thread tip, as `fold_field_at_tip`
+    reports it.
+
+    The (value, source) pair `fold_at_tip` returns cannot answer a question a
+    thread *view* has to ask: an ambiguous fold — two entries tied at the same
+    distance declaring different values — returns `(None, None)`, which is
+    byte-for-byte what "nothing in this branch ever declared the field"
+    returns. `declared` separates them (some entry's own keys said so, whatever
+    the walk concluded), and `ambiguous` is the H7 §5 rule-3 posture: equal
+    values at equal distance are agreement and fold to that value; differing
+    ones make the field's current value no answer at all, which a surface must
+    be able to say *as itself* instead of silently displaying "never
+    declared". Same distinction `TipTasks.ambiguous` draws for task lists,
+    reached the same way: recording what the walk's `declared_of` was asked
+    about (the walk itself only ever reports its conclusion).
+
+    * `value`/`source` — exactly `fold_at_tip`'s pair: the folded value and the
+      entry it came from; `(None, None)` when the fold is ambiguous or nothing
+      declared.
+    * `declared` — whether any entry on this branch declared the field at all.
+    * `ambiguous` — differing equal-distance declarations; implies
+      `declared` and a `None` value/source.
+    """
+
+    tip: Item
+    value: Any
+    source: Item | None
+    declared: bool
+    ambiguous: bool
+
+
+def fold_field_at_tip(
+    project: Project,
+    tip: Item | str,
+    field: str,
+    *,
+    graph: ChainGraph | tuple[dict[str, list[Item]], dict[str, list[Item]]] | None = None,
+) -> "TipFold | None":
+    """`fold_at_tip`'s walk, plus what it saw: the field fold's `TipTasks`.
+
+    One backward walk from `tip`, identical declaration rule (`_declares`) and
+    same ambiguity posture as every other fold — the recording list is the only
+    addition, and it changes no answer, only reports one (`fold_at_tip` is a
+    thin wrapper over this, so the equivalence test against
+    `resolve_current_with_source` still pins the walk itself).
+
+    Returns None only when `tip` names no item; every real tip gets a
+    `TipFold`, including a thread of one and an ambiguous branch. Not
+    memoized, for `fold_at_tip`'s own reason: the component cache keys on the
+    one current value, which a per-tip fold does not ask for.
+    """
+    predecessors, _successors, handles, items, _cg = _graph_view(graph, project)
+    tip_handle = _start_handle(project, tip, handles=handles)
+    if tip_handle is None:
+        return None
+
+    declared: list = []
+
+    def declared_of(item: Item, _declared=declared) -> Any:
+        if not _declares(item, field):
+            return None
+        value = item.fields[field]
+        if value is None:
+            # Same "no hit" the walk itself sees (parse.py's coalesce leaves
+            # `field: null` behind for a field with no default), and not a
+            # declaration the ambiguity recording may count.
+            return None
+        _declared.append(value)
+        return value
+
+    value, source = _fold_from_tip(
+        project, tip_handle, declared_of, predecessors, handles, items
+    )
+    return TipFold(
+        tip=items[tip_handle],
+        value=value,
+        source=source,
+        declared=bool(declared),
+        ambiguous=value is None and bool(declared),
+    )
+
+
 def fold_at_tip(
     project: Project,
     tip: Item | str,
@@ -639,19 +723,14 @@ def fold_at_tip(
 
     Not memoized: the component cache keys on "the component's one current
     value", which is exactly the question a per-tip fold does not ask.
+
+    A thin wrapper over `fold_field_at_tip` — same single walk, minus the
+    recording that pair cannot carry.
     """
-    predecessors, _successors, handles, items, _cg = _graph_view(graph, project)
-    tip_handle = _start_handle(project, tip, handles=handles)
-    if tip_handle is None:
+    folded = fold_field_at_tip(project, tip, field, graph=graph)
+    if folded is None:
         return None, None
-    return _fold_from_tip(
-        project,
-        tip_handle,
-        lambda item: item.fields[field] if _declares(item, field) else None,
-        predecessors,
-        handles,
-        items,
-    )
+    return folded.value, folded.source
 
 
 def resolve_current_link_with_source(

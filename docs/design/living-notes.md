@@ -508,13 +508,23 @@ command for the `.refdes/history/` store of §3, not a thread or task query.
 The subcommands on `main` are `serve`, `build`, `check`, `revision`,
 `release`, `index`, `ls`, `id`, `fetch`, `audit`, `init`, `new`, `schema`,
 `standard`, `keys`, `revise`, `calc-rewrite`, `stub-tests`, `former-ids`, and
-`history` — so the thread/task surface in this section is still a proposal.
+`history` — so the thread/task surface in this section was still a proposal
+when it was written (see the landing note below).
 
 Decided later (Jared, 2026-10-10): the primary interactive task surface is the
 floating task pane — in the `serve` preview, in the browser editor, and
 (read-only) on the static site. It stays a client of the one query service
 above, never a second implementation of the fold; the behaviour and its six
 sub-decisions are recorded in `docs/design/thread-workbench.md` §7a.
+
+Landed later (2026-10-11, plan §H7 chunk B): `refdes thread <ref>` exists —
+it renders one entry of `refdes.threads.threads_projection` (the same
+projection the `index` payload carries under `threads`), and its real output
+is documented in `docs/cli-reference.md`. `refdes work` is still chunk C and
+does not exist. The sketch below stays the shape it was decided against; the
+one thing it implied that the store does *not* provide is a timestamp on a
+`followed` capture line — H2 deliberately writes no clock there, so the line
+prints the kind and names a time only when the event actually carries one.
 
 Proposed CLI, explicitly a sketch rather than current behavior:
 

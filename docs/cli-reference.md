@@ -496,6 +496,88 @@ is only useful once something can act on the flag.
 
 ---
 
+## `refdes thread <ref>`
+
+The thread view of [living-notes.md §6](design/living-notes.md) as a command:
+the tip, what the history store captured, the authors' own tasks with their
+age, and the self-closing derived block. The answer is
+`refdes.threads.threads_projection` — the same projection the index payload
+carries under `threads` — rendered for one thread; the command computes no
+fold of its own, so it cannot disagree with `refdes index`. Any entry on the
+thread names it: `LOG-001`, `LOG-002`, an id-less continuation's surrogate
+key — they all resolve to the same thread.
+
+```console
+$ refdes thread LOG-003
+Thread: LOG-001  (forked: tips LOG-002, LOG-003)
+Captured: LOG-001 (followed)
+
+Tip: LOG-002  2026-09-02  Thermal modelling accepted.
+Verdict: accepted (LOG-002, 2026-09-02)  -- concluding, 1 open task at this tip
+Tasks at LOG-002:
+  1. [ ] T-thermal-model  Model worst-case copper temperature.  (open since LOG-001, 2026-08-30)
+  2. [x] T-input-range  Check the 36 V input case.
+
+Tip: LOG-003  2026-09-03  Decoupling fork.
+Tasks at LOG-003:
+  1. [ ] T-decoupling  Recheck decoupling near U14.  (open since LOG-003, 2026-09-03)
+
+Derived (self-closing):
+  coverage  REQ-001  unverified
+  citation  LOG-002  unpinned
+```
+
+The structure is the design (§5's binding rules), not styling: the authored
+tasks and the derived rows are **two separate blocks with separate
+numbering** — derived rows carry no number and no checkbox, they exist only
+while their gap does, and nothing here is ever written back into `tasks:`.
+Every open task prints **the entry that declared it and that entry's date**;
+a folded verdict prints **with** its tip's open tasks (the `concluding` line
+above is a verdict never alone), and a fork prints one labelled block per
+open tip — there is no single current status to print. A fold that *refused*
+(two entries at the same distance declaring different statuses) prints
+`Verdict: ambiguous …` rather than pretending nothing concluded; a task fold
+that refused prints `task reconciliation required`.
+
+| Flag | Meaning |
+| --- | --- |
+| `--json` | Print the thread's projection entry as JSON — exactly the object `index` carries in its `threads` array |
+| `--as-of DATE` | Print open-task ages as a relative span measured against DATE. Without it the output prints the absolute declaring date and no span, so the bytes never depend on the wall clock. Not combinable with `--json` (exit 2): the projection is clock-free by design |
+
+```console
+$ refdes thread LOG-102 --as-of 2026-09-12
+Thread: LOG-101 -> LOG-102  (one tip)
+Captured: LOG-101 (followed)
+
+Tip: LOG-102  2026-09-09  Idle current measured.
+Verdict: accepted (LOG-102, 2026-09-09)  -- concluding, 1 open task at this tip
+Tasks at tip:
+  1. [ ] T-idle  Measure idle current.  (open since LOG-101, 2026-09-08 -- 4 days)
+
+Derived (self-closing):
+  (none)
+```
+
+The capture line prints what the store actually holds: a `followed` edge
+deliberately carries no timestamp (§2 — a wall-clock stamp would give one
+fact different bytes in two checkouts), so its line names the kind and says
+nothing about time; an explicit `refdes history capture` event does carry
+one, and its line prints `at <that time>`.
+
+A ref that is not an item, or an item on no thread (no `follows:` edge either
+way), is an error with **exit 2**:
+
+```console
+$ refdes thread LOG-999
+error: no item 'LOG-999' in this project (looked up by display id, then surrogate key)
+```
+
+Like `ls`, the command itself writes nothing beyond the load's own key
+minting/expansions (which it announces on stderr the same way), and its build
+never writes a seal.
+
+---
+
 ## `refdes id`
 
 Allocate IDs for items that have none, writing them into the source files.
