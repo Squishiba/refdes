@@ -333,3 +333,5 @@ Nothing written into docs/ relied on the scoped filenames; the concepts.md
 sentence names parts.html only. The lesson, which is what AGENTS.md is for:
 re-run the probe against the current fixture, not against an output directory
 that might still be holding last iteration's files.
+
+PR: https://github.com/Squishiba/refdes/pull/189
