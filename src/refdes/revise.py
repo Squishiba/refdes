@@ -887,9 +887,10 @@ def write_rewrites_verified(project, rewrites: list[FileRewrite], on_error=None)
     error is the only diagnostic; the file is handed back as refused, so the
     in-memory model matches the bytes on disk.
 
-    Returns the project-relative paths of the files the filesystem refused, so
-    each caller can leave its in-memory model matching the tree it could not
-    change -- see `keys.mint_missing()`. Empty in the ordinary case.
+    Returns the project-relative paths of every file whose rewrite did not
+    land -- the ones the filesystem refused and the ones this guard rolled
+    back -- so each caller can leave its in-memory model matching the tree it
+    could not change -- see `keys.mint_missing()`. Empty in the ordinary case.
 
     `on_error` overrides the refusal hook, and is how a caller that is doing
     more than a load says what a refusal means. Left None, a refused write is
@@ -919,6 +920,7 @@ def write_rewrites_verified(project, rewrites: list[FileRewrite], on_error=None)
         or (lambda rewrite, exc: _refuse_unwritable(project, rewrite)),
     )
     failed_paths = {rewrite.path for rewrite in failed}
+    rolled_back: set[str] = set()
     for rewrite in rewrites:
         if rewrite.path in failed_paths:
             continue
@@ -930,6 +932,14 @@ def write_rewrites_verified(project, rewrites: list[FileRewrite], on_error=None)
         if after_count is not None and after_count >= before_count:
             continue
         restore_rewrites([rewrite])
+        # The guard's rollback is the third way a write fails to reach disk
+        # (the insert refusing, and the filesystem refusing, are the other
+        # two). The file holds its original bytes again, so the caller's
+        # in-memory model may not act as if the rewrite had landed -- it is
+        # reported here exactly as a filesystem refusal is, or a minted key
+        # that never reached its file still feeds a composite later in the
+        # load (finding KEY-GUARD-001).
+        rolled_back.add(rewrite.rel)
         project.error(
             "a load-time write to this file would have left it unparseable "
             "or with fewer items -- the file was rolled back to its original "
@@ -937,7 +947,7 @@ def write_rewrites_verified(project, rewrites: list[FileRewrite], on_error=None)
             file=rewrite.rel,
             line=1,
         )
-    return {rewrite.rel for rewrite in failed} | duplicate_keyed
+    return {rewrite.rel for rewrite in failed} | rolled_back | duplicate_keyed
 
 
 def _stale_mapped_names(rel: str, text: str, mapping: Mapping) -> list[str]:
@@ -1461,9 +1471,16 @@ def apply(
     ensure_rewrites: list[FileRewrite] = []
     refresh_rewrites: list[FileRewrite] = []
     expansions: list[str] = []
-    snapshot: dict[str, str] = {}
+    # Taken for *every* mapping, not only a prefix rename: the display-half
+    # refresh below runs for all of them (a `fields:` rename reaches it on the
+    # old-schema tree, because the full `_load_and_validate` that would catch
+    # the moved field only runs after the refresh), and the refusal handler's
+    # `_collect_refresh_rewrites()` can only list what the refresh wrote by
+    # diffing against this baseline. Gated to `prefix_rename` it was a no-op
+    # for every `types:`/`fields:`/`links:`/`citation_keys:` mapping, and the
+    # handler printed "rolled back." over a landed refresh write.
+    snapshot = _snapshot_item_texts(project_before)
     if prefix_rename:
-        snapshot = _snapshot_item_texts(project_before)
         if dry_run:
             blockers, expansions = _simulate_key_ensure(config_path, snapshot, mapping)
             if blockers:
@@ -1639,22 +1656,61 @@ def apply(
     # file the refresh cannot write is a rename that landed in some item files
     # and not others, so it rolls back rather than reporting the stale
     # reference it left behind as prose (run 5, finding B2).
+    def _collect_refresh_rewrites(*, tolerate_unreadable: bool = False) -> list[str]:
+        """Record what the display-half refresh wrote, by comparing each item
+        file against the snapshot: anything that moved and belongs to neither
+        the rename's own rewrites nor the key-ensure writes is a refresh
+        write, and `_rollback()` can only put it back once it is listed.
+
+        `tolerate_unreadable` is for the refusal handler below: there the
+        re-read itself must never escape as an `OSError`, because the
+        exception would skip `_rollback()` and leave the half-applied
+        rename this handler exists to undo, wearing a traceback. A file it
+        cannot re-read is named in the returned list instead -- reported as
+        left, not hidden -- and every other file still gets collected."""
+        unreadable: list[str] = []
+        for rel, before in snapshot.items():
+            path = os.path.join(project_before.root, *rel.split("/"))
+            try:
+                if not os.path.isfile(path):
+                    continue
+                now = textio.read_text(path)
+            except OSError as read_exc:
+                if not tolerate_unreadable:
+                    raise
+                unreadable.append(f"{rel} ({read_exc})")
+                continue
+            if now != before and rel not in {r.rel for r in rewrites} | {
+                r.rel for r in ensure_rewrites
+            }:
+                refresh_rewrites.append(
+                    FileRewrite(path=path, rel=rel, before=before, after=now)
+                )
+        return unreadable
+
     try:
         _refresh_display_halves(config_path)
     except Refused as exc:
+        # Compare before rolling back, not after: the refresh writes files in
+        # path order and raises on the first refusal, so every write that
+        # landed is already on disk -- and `_rollback()` restores
+        # `refresh_rewrites`, which only this comparison can fill. Rolling
+        # back first printed "rolled back." while leaving a landed refresh
+        # write naming the id this very operation retired
+        # (finding TXN-ROLLBACK-001).
+        unreadable = _collect_refresh_rewrites(tolerate_unreadable=True)
         _rollback()
-        return RevisionResult(ok=False, errors=[str(exc), "rolled back."])
-    for rel, before in snapshot.items():
-        path = os.path.join(project_before.root, *rel.split("/"))
-        if not os.path.isfile(path):
-            continue
-        now = textio.read_text(path)
-        if now != before and rel not in {r.rel for r in rewrites} | {
-            r.rel for r in ensure_rewrites
-        }:
-            refresh_rewrites.append(
-                FileRewrite(path=path, rel=rel, before=before, after=now)
+        errors = [str(exc)]
+        if unreadable:
+            errors.append(
+                "could not re-read, so it could not be rolled back: "
+                + ", ".join(unreadable)
+                + " -- it may still hold a write of this run; check it against "
+                "your last known state of the tree"
             )
+        errors.append("rolled back.")
+        return RevisionResult(ok=False, errors=errors)
+    _collect_refresh_rewrites()
 
     try:
         seals_updated = _carry_forward_seals(project_before, old_hashes, new_hashes)
