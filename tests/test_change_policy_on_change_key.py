@@ -130,12 +130,13 @@ def test_on_change_override_inherited_from_defaults_is_reported_at_the_defaults_
         CONFIG,
         "defaults:\n"
         "  type: note\n"
-        "  on_change: {fields: {status: log}}\n"
+        "  on_change: {fields: {status: timeline}}\n"
         "items:\n"
         "  - id: NOTE-001\n"
         "  - id: NOTE-002\n",
     )
     project = _build_at(tmp_path)
+    assert not project.errors
     warnings = [d for d in project.warnings if "has no 'reason'" in d.message]
 
     assert len(warnings) == 2

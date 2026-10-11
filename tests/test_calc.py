@@ -585,20 +585,20 @@ def _hash_after(project, item_id, field, value):
     return changed
 
 
-def test_log_field_does_not_disturb_the_content_hash():
+def test_timeline_field_does_not_disturb_the_content_hash():
     """Changing owner must not mark downstream links suspect."""
     project = _project()
     before = project.item_by_id("REQ-PWR-001").content_hash
     assert _hash_after(project, "REQ-PWR-001", "owner", "Someone Else") == before
 
 
-def test_log_and_ignore_are_indistinguishable_for_hashing():
+def test_timeline_and_ignore_are_indistinguishable_for_hashing():
     """`timeline` is reserved for a future history layer; today it behaves as `ignore`."""
     project = _project()
     before = project.item_by_id("REQ-PWR-001").content_hash
-    log_hash = _hash_after(project, "REQ-PWR-001", "owner", "Someone Else")  # on_change: timeline
+    timeline_hash = _hash_after(project, "REQ-PWR-001", "owner", "Someone Else")  # on_change: timeline
     ignore_hash = _hash_after(project, "REQ-PWR-001", "last_reviewed", "2020-01-01")  # on_change: ignore
-    assert log_hash == before == ignore_hash
+    assert timeline_hash == before == ignore_hash
 
 
 def test_invalidate_field_changes_the_content_hash():
@@ -608,7 +608,7 @@ def test_invalidate_field_changes_the_content_hash():
 
 
 def test_item_level_override_beats_the_schema():
-    """REQ-PWR-004 sets owner -> ignore, so even a `log` field goes fully silent."""
+    """REQ-PWR-004 sets owner -> ignore, so even a `timeline` field goes fully silent."""
     project = _project()
     spec = project.types["requirement"]
     item = project.item_by_id("REQ-PWR-004")

@@ -157,7 +157,7 @@ def test_the_diagnostic_is_a_warning_and_never_fails_a_build(tmp_path, capsys):
 # ------------------------------------------------- the two-digest split (§3)
 
 
-def test_an_on_change_log_edit_moves_history_not_the_content_hash(tmp_path):
+def test_an_on_change_timeline_edit_moves_history_not_the_content_hash(tmp_path):
     """The digest covers what `content_hash` excludes: editing an
     `on_change: timeline` field is an edit in history's eyes while the baseline
     digest does not move."""

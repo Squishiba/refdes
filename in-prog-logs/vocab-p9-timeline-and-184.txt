@@ -1,7 +1,7 @@
 Task: P9 rename `on_change: log` -> `on_change: timeline` (all spellings, version-aware),
 plus #184 follow-up: link verb named an engine-reserved front-matter key becomes a
 load-time schema error. One PR.
-Status: in progress.
+Status: finished -- PR #196 (review round: schema_json pin tests, test renames, dead constant removed).
 
 ## Initial state
 
@@ -170,3 +170,38 @@ Status: in progress.
 - `ruff check src/refdes tests --select E9,F`: clean (repo-wide ruff default
   set is not a valid gate, per AGENTS.md).
 - `docs-site/gen_examples.py --check`: vocabulary.md up to date.
+
+## Review round 1 (PR #196, chunk 2 requested changes)
+
+1. schema_json pin branch now tested: new
+   `test_editor_schema_carries_log_only_where_the_cli_accepts_it` in
+   test_schema_json.py checks all three on_change enums (scalar, mode:,
+   fields' additionalProperties) for v2 pin / v3 pin / no pin -- `log`
+   present iff the CLI accepts it, `timeline` everywhere. Sabotage:
+   forcing legacy_log_ok=False fails it (v2 case), forcing True fails it
+   (v3/none cases); restored, grep SABOTAGE clean, 19 passed.
+2. test_on_change_override_inherited_from_defaults_is_reported_at_the_
+   defaults_line: `status: log` -> `timeline` (it is not a legacy-posture
+   test) + `assert not project.errors` pins that it no longer rides the
+   rename path.
+3. Renamed stale identifiers: test_calc test_log_and_ignore... ->
+   test_timeline_and_ignore..., log_hash -> timeline_hash, test_log_field_
+   does_not_disturb... -> test_timeline_field_does_not_disturb... (found
+   by the leftover grep), docstring; test_history
+   test_log_field_sabotage... -> test_timeline_field_digest...;
+   test_history_edited test_an_on_change_log_edit... ->
+   test_an_on_change_timeline_edit...
+4. Dead `ON_CHANGE_OVERRIDE_DEF` constant deleted from schema_json.py
+   (grep: zero consumers anywhere).
+5. Work-log status line -> finished, PR #196.
+
+Deliberate remaining `log` hits (posture, verified by grep): v1/v2
+base.yaml + design-debate presets (released standards, frozen -- 12
+lines); schema.py:113 and configcheck.py:191/:670/:694 comments
+describing the pre-v3 spelling; test_standards.py:220 (v1-pinned
+overlay keeps `log` as a live pre-v3-pin regression);
+test_change_policy_on_change_key.py's rename-error tests (:261/:270/
+:278/:290/:300) and LEGACY_PIN v2-pin tests (:356/:371) -- those
+exist to exercise the old spelling; fixtures: v2 resolved json
+(unchanged, pre-v3 pin) and the 5 "log" hits in hardware3_resolved.
+json are the log *type* name.

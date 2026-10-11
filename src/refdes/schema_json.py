@@ -148,12 +148,6 @@ def _on_change_override_def(legacy_log_ok: bool) -> dict[str, Any]:
     }
 
 
-# The canonical (v3-and-later) shape, kept as the module-level constant for
-# any caller that has no project at hand; `build_schema` builds the
-# project-specific one.
-ON_CHANGE_OVERRIDE_DEF: dict[str, Any] = _on_change_override_def(False)
-
-
 def field_json_schema(fspec: FieldSpec) -> dict[str, Any]:
     """The JSON-Schema fragment for one declared field, from its `type:`
     alone -- the single mapping both `refdes schema --json` and `refdes

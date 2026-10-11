@@ -161,7 +161,7 @@ items:
     )
 
 
-def test_log_field_sabotage_digest_moves_content_hash_does_not(root):
+def test_timeline_field_digest_moves_content_hash_does_not(root):
     """The test that keeps semantic_digest and content_hash from collapsing
     into each other later: a field marked `on_change: timeline` is invisible to
     content_hash (a task tick must not churn a baseline) but MUST be visible
