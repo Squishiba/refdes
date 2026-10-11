@@ -109,5 +109,9 @@ go in `.scratch/` at the repository root, which is gitignored. Do not delete
 them after the task and do not move them outside the repository; leave them
 in `.scratch/`. Never write outside your own working directory.
 
+`opencode.json` at the repo root denies recursive `rm` and any use of `/tmp`
+for OpenCode agents, so those attempts are refused outright instead of
+prompting — make a new `.scratch/` directory rather than clearing an old one.
+
 Stage files explicitly by path (`git add -- <paths>`), never `git add -A` or
 `git add .`, so nothing unintended is committed.
