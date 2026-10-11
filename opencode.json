@@ -1,0 +1,43 @@
+{
+  // Project-level OpenCode config for refdes. Merged on top of the global
+  // config (project wins for conflicting keys), and found by walking up from
+  // the current directory to the nearest git root — see
+  // https://opencode.ai/docs/config .
+  //
+  // Why these rules: OpenCode agents here kept reaching for `rm -rf .scratch/…`
+  // and for /tmp even though their prompts forbid both, and each attempt
+  // became a permission prompt blocking until a human answered. Denying makes
+  // it an immediate refusal instead. Agents: use a new directory name under
+  // .scratch/ rather than deleting.
+  //
+  // Matching (https://opencode.ai/docs/permissions): `*` matches zero or more
+  // characters, `?` exactly one, and the LAST matching rule wins — hence the
+  // catch-all "*" first (it restates OpenCode's own default of allow, so
+  // nothing else is loosened) with the specific denies after it.
+  "$schema": "https://opencode.ai/config.json",
+  "permission": {
+    "bash": {
+      "*": "allow",
+      // recursive deletes, in the flag spellings agents reach for
+      "*rm -rf*": "deny",
+      "*rm -fr*": "deny",
+      "*rm -r *": "deny",
+      "*rm -R *": "deny",
+      "*rm --recursive*": "deny",
+      // /tmp, always preceded by a space, quote, = or > so that scratch paths
+      // inside the repo like .scratch/tmpohpphczv (no "/tmp" substring at all,
+      // and no leading separator) are not caught
+      "* /tmp*": "deny",
+      "*>/tmp*": "deny",
+      "*=/tmp*": "deny",
+      "*'/tmp*": "deny",
+      "*\"/tmp*": "deny"
+    },
+    "external_directory": {
+      // Only /tmp is denied here; every other external path keeps its
+      // current behaviour (OpenCode's default for it is "ask").
+      "/tmp": "deny",
+      "/tmp/**": "deny"
+    }
+  }
+}

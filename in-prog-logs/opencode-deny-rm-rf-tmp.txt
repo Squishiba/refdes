@@ -1,0 +1,133 @@
+Task: add a project-level OpenCode config that DENIES recursive `rm` and `/tmp`
+use for OpenCode agents, refdes-only (no global config touched).
+Branch: opencode-deny-rm-rf-tmp. Finished: no (in progress).
+
+2026-10-11 — started.
+
+Environment
+- `opencode --version` = 1.18.32 (ran in worktree root).
+- `git status --short` clean at start; branch opencode-deny-rm-rf-tmp off main.
+- Global config is ~/.config/opencode/opencode.jsonc — read only, NOT edited.
+  It contains `$schema`, `plugin: ["morph"]` and a `provider.qwenlocal` block
+  and NO `permission` key. Nothing under ~/.config/opencode was modified.
+
+BEFORE — `opencode debug config` (captured in
+.scratch/debug-config-before-root.json, exit 0; also
+.scratch/debug-config-before-tests.json from tests/):
+  resolved keys: $schema, agent, command, mode, plugin, plugin_origins,
+  provider, username. There is NO `permission` key at all — neither global
+  nor project set one. So today nothing is explicitly configured for bash or
+  external_directory, and OpenCode's documented defaults apply: per
+  https://opencode.ai/docs/permissions#defaults "Most permissions default to
+  allow", while `doom_loop` and `external_directory` default to "ask".
+  => Adding bash `"*": "allow"` restates today's effective default (does not
+  loosen). Adding external_directory rules ONLY for /tmp leaves every other
+  external path at its current "ask" default (no blanket allow/deny added).
+
+Docs facts used (fetched from opencode.ai/docs/permissions and
+/docs/config, page footer "Last updated: Oct 11, 2026"):
+- Project config: `opencode.json` in project root; on startup OpenCode "first
+  looks for a config file in the current directory, then traverses up to the
+  nearest Git directory". Safe to check into git. Configs are MERGED, later
+  sources override only conflicting keys; precedence remote < global <
+  OPENCODE_CONFIG < project < .opencode dirs < inline < managed.
+- Wildcards: `*` matches zero or more of any character, `?` exactly one, all
+  other characters literal. "Rules are evaluated by pattern match, with the
+  last matching rule winning. A common pattern is to put the catch-all `*`
+  rule first, and more specific rules after it."
+- Actions: allow / ask / deny. `--auto` auto-approves requests that are not
+  explicitly denied, so explicit deny still bites in auto mode.
+- OpenCode supports JSON and JSONC formats (comments allowed); schema at
+  https://opencode.ai/config.json.
+
+Step 3 (whole-line vs per-sub-command) — NOT resolved from the installed
+build. The install is a 177 MB compiled binary
+(~/.local/agents/node_modules/opencode-ai/bin/opencode.exe); the orchestrator
+told me to stop grepping it, so I could not read the matcher. What the docs do
+say: /docs/permissions lists `bash` as "running shell commands (matches parsed
+commands like `git status --porcelain`)" — the wording "parsed commands" points
+at per-sub-command matching after `&&`/`;`/pipe parsing, but the docs never
+state it explicitly. Recorded as: not determined from the installed build; the
+leading `*` on every pattern is meant to cover both whole-line and
+per-sub-command matching, and the orchestrator will run one live check after
+merge.
+
+AFTER — wrote opencode.json at the repo root (JSONC with comments; `opencode
+debug config` exits 0 with an empty stderr, so comments in a file named
+`.json` are accepted by 1.18.32 — verified by running it).
+`opencode debug config` from the worktree root (.scratch/debug-config-after-root.json)
+now resolves a `permission` key, in declaration order:
+  bash: "*" allow, then deny "*rm -rf*", "*rm -fr*", "*rm -r *", "*rm -R *",
+        "*rm --recursive*", "* /tmp*", "*>/tmp*", "*=/tmp*", "*'/tmp*", "*\"/tmp*"
+  external_directory: "/tmp" deny, "/tmp/**" deny
+Same block resolves from tests/ (.scratch/debug-config-after-tests.json), with
+the same key order — so the walk-up to the git root finds the file.
+Nothing else in the resolved config changed (same keys before and after, plus
+`permission`; plugin/provider/agent/command/mode/username untouched).
+
+Pattern check — .scratch/pattern_check.py (output: .scratch/pattern-table.txt).
+It re-implements the documented semantics (`*`=any run, `?`=one char, whole-
+string anchoring, last match wins) and reads the rules out of the
+`opencode debug config` output rather than retyping them. THIS CHECKS THE
+DOCUMENTED SEMANTICS, NOT OPENCODE ITSELF — OpenCode's own matcher was not
+executed (see step 3).
+  must-deny, all deny: rm -rf .scratch/x | cd a && rm -rf b | rm -r build |
+    cp f /tmp/x | cd /tmp | mv a /tmp/ | echo x >/tmp/y | PYTHONPATH=/tmp/x python
+  must-allow, all allow: rm .scratch/one-file.txt | ls .scratch/tmpohpphczv |
+    python -m pytest -q | git status | grep -rn tmp src
+  13/13 required cases as expected, 0 mismatches.
+  The /tmp guard holds on lookalikes: `ls .scratch/tmpx`, `ls .scratch/tmpohpphczv`
+  and `cat .scratch/tmpx/out.txt` stay allowed — the "/tmp" substring inside
+  ".scratch/tmpx" is preceded by "h", not by a space/quote/=/> so no deny
+  pattern matches it. Also deny as intended: `echo x > /tmp/y`, `cp "/tmp/x" .`,
+  `cp '/tmp/x' .`, `sh -c "rm -rf .scratch/x"`, bare `rm -rf`, `rm -rfv /tmp/x`.
+  Known gaps, left as-is because the pattern list is the owner's: `rm -Rf x`
+  (combined flag), `rm -f -r x` (split flags) and `rm --force --recursive x`
+  (flags not adjacent) are NOT denied; `find … -delete` is not denied either.
+  The orchestrator's live check will show whether the gaps matter in practice.
+
+Step 3, final record — whole command line vs per sub-command:
+- Docs: /docs/permissions describes the `bash` permission as "running shell
+  commands (matches parsed commands like `git status --porcelain`)". The
+  phrase "parsed commands" suggests matching happens on commands extracted by
+  a shell parser (i.e. per sub-command for `&&`/`;`/pipelines) rather than on
+  the raw line, but neither /docs/permissions nor /docs/config states it, and
+  no worked `&&` example is given.
+- NOT DETERMINED FROM THE INSTALLED BUILD: the install here is a 177 MB
+  compiled binary (~/.local/agents/node_modules/opencode-ai/bin/opencode.exe)
+  with no readable source next to it, and the orchestrator told me to stop
+  digging through it rather than spend a permission prompt per grep. So this
+  is the honest state: docs only, unverified against the code.
+- Does the leading `*` cover both? Mostly, yes: with `*` on both sides a
+  pattern is a substring test, so it matches a whole line containing the
+  fragment AND a single parsed sub-command containing it (leading `*` matches
+  the empty prefix, e.g. "rm -rf b" on its own). Two cases where a
+  per-sub-command model could still differ from a whole-line model, because
+  it depends on what text the parser hands the matcher: a redirection
+  (`echo x >/tmp/y`) and an env-assignment prefix (`PYTHONPATH=/tmp/x python`)
+  — if those are parsed off rather than kept in the matched text, the bash
+  rule may not see them. That is exactly why the `/tmp`
+  `external_directory: deny` rules are the backstop: they trigger on the path
+  a tool touches, not on the shape of the command line.
+- The orchestrator will run one live check after merge; that settles it.
+
+Decisions / checks
+- No changelog.d fragment. Policy is changelog.d/README.md (there is no
+  CONTRIBUTING file — `ls CONTRIBUTING*` finds nothing): a fragment is for
+  "each change that deserves a changelog entry", written "for a reader of the
+  project, saying what changed and what they must do about it", and folded
+  into CHANGELOG.md by release.py. A repo-local OpenCode config plus an
+  AGENTS.md note is not a shipped behaviour change. Precedent: c504a74 ("repo:
+  add a gitignored .scratch/ for agent temporary files" — AGENTS.md +
+  .gitignore) and 2e9efe0 (AGENTS.md only) both committed without a fragment.
+- `python docs-site/gen_examples.py --check` not run: gen_examples.py's own
+  TARGET_DOC/VOCAB_DOC are docs/schema-reference.md and docs/vocabulary.md
+  (lines 55-56), neither touched. No test in tests/ mentions "opencode"
+  (grep -rln 'opencode' tests/ -> empty) and none lints the set of repo-root
+  files, so there is no repo-root-file gate to satisfy.
+- Full suite not run: no Python source changes (only opencode.json, AGENTS.md,
+  in-prog-logs/).
+- Nothing outside the worktree was written; ~/.config/opencode was read only.
+- Scratch files left in .scratch/ (not deleted, per AGENTS.md): debug-config-{before,after}-{root,tests}.json,
+  pattern_check.py, pattern-table.txt.
+STATUS: task complete locally; committed, pushed, PR opened (see below).
