@@ -481,9 +481,26 @@ class _LockfileWrite:
     written: bool = False
 
     def rollback(self) -> None:
-        if self.written:
-            self.written = False
-            _rollback(self.path, self.previous)
+        if not self.written:
+            return
+        self.written = False
+        # Compare before restoring: the accept's whole-file write is not inside
+        # the cross-process lock's check-and-replace section (the candidate
+        # gate it precedes can take seconds), so a cooperating writer may have
+        # replaced this file between our write and this rollback. Our `previous`
+        # is then stale -- restoring it would delete a save that already
+        # landed, whose body names a pin that would no longer exist. Leaving
+        # our pin in the file another writer replaced is the failure mode the
+        # design names as inert (docs/design/editor-source-picker.md §4);
+        # destroying a landed writer's state is not.
+        try:
+            with open(self.path, "rb") as fh:
+                current = fh.read()
+        except OSError:
+            current = None
+        if current != self.staged:
+            return
+        _rollback(self.path, self.previous)
 
 
 @dataclass

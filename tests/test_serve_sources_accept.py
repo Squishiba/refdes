@@ -37,6 +37,7 @@ from test_serve_sources import (  # the fixture is the feature's, not one file's
 )
 
 from refdes import build as build_mod
+from refdes import citations as citations_mod
 from refdes import cli as cli_mod
 from refdes.serve import edit as edit_mod
 
@@ -377,6 +378,63 @@ def test_a_failure_after_the_lockfile_landed_leaves_the_body_untouched(
     assert "simulated failure" in payload["reason"]
     assert snapshot_tree(root) == before
     assert os.stat(item_file).st_mtime_ns == item_mtime
+
+
+OTHER = 'o = source("analysis/budget.csv", "other") | 1'
+
+
+def test_a_conflicting_accept_does_not_unpin_a_save_that_already_landed(
+    served, monkeypatch
+):
+    # WRITE-CONCUR-001 (the PR #134 review's HIGH): the accept's lockfile write
+    # sits outside the cross-process check-and-replace section, so a
+    # cooperating server can land its whole accept -- body and pin -- in the
+    # window between this writer's lockfile write and its late revision check.
+    # Restoring the bytes *this* writer read would delete that save's pin while
+    # its body, which names the pin, is on disk: `refdes check` then fails the
+    # project on a line the loser never wrote. The rollback leaves a file it no
+    # longer owns alone -- §4's inert-pin failure mode is the design's own
+    # documented posture -- and the winner's project still checks.
+    _app, client, root = served
+    item_file = root / "items" / "decisions.yaml"
+    lock_file = root / ".refdes" / "citations.yaml"
+    original_gate = edit_mod._blocking_diagnostics
+
+    def another_accept_lands_midflight(before, after, item, op):
+        # Stand in for the other process's *applied* writes, as they exist at
+        # this instant: its lockfile, read fresh and extended with its own
+        # pin, and its body naming that pin.
+        records = citations_mod.load_lockfile(_build_at(root))
+        records[CSV_PATH].setdefault("values", {})["other"] = {
+            "reader": "csv",
+            "value": "7",
+        }
+        lock_file.write_bytes(
+            citations_mod.lockfile_text(records).encode("utf-8")
+        )
+        text = item_file.read_text("utf-8")
+        item_file.write_text(
+            text.replace(
+                "      " + RAIL + "\n",
+                "      " + RAIL + "\n      " + OTHER + "\n",
+                1,
+            ),
+            "utf-8",
+        )
+        return original_gate(before, after, item, op)
+
+    monkeypatch.setattr(edit_mod, "_blocking_diagnostics", another_accept_lands_midflight)
+    status, payload = accept(
+        client, root, text=calc_body(RAIL, EFF), pins=pin("eff", name="eff")
+    )
+    assert status == 409, payload
+    assert payload["kind"] == "conflict"
+    # the winner's body is on disk, and its pin is still what the loser's
+    # rollback would have destroyed
+    assert OTHER in item_file.read_text("utf-8")
+    assert "other" in lock(root)["citations"][CSV_PATH]["values"]
+    # the project is not left in the state neither save can fix from the editor
+    assert cli_mod.main(["-c", str(root / "refdes-project.yaml"), "check"]) == 0
 
 
 def test_a_rolled_back_accept_of_a_never_fetched_project_leaves_no_lockfile(
