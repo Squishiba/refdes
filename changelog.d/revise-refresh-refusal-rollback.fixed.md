@@ -14,6 +14,17 @@
   pre-rename snapshot now runs before the rollback as well as after the
   refresh, so the refusal path restores every write that landed; with two or
   more referencing files and a refusal on any but the first, the tree is now
-  byte-identical to how it was found. The printed refusal is unchanged — only
-  now it is true.
-  (`revise.apply`, finding TXN-ROLLBACK-001, PR #163 review.)
+  byte-identical to how it was found. That snapshot is also no longer gated
+  to prefix renames: the refresh runs for *every* mapping kind — a `fields:`
+  rename reaches it on the still-old-schema tree, since the full validation
+  that would catch the moved field runs only after it — and a first-round
+  review caught that with the snapshot gated, the comparison iterated an
+  empty dict and the same false "rolled back." survived every
+  `types:`/`fields:`/`links:`/`citation_keys:` mapping. The snapshot is now
+  taken for every mapping, and the same two-referencing-files refusal is
+  tested for a `fields:` rename as well as a prefix one. The printed refusal
+  is unchanged — only now it is true — with one addition on a tree that
+  cannot be re-read mid-rollback: a file whose re-read fails with an I/O
+  error is named as left and possibly rewritten, not rolled back silently
+  and not allowed to escape as a traceback over the half-applied rename.
+  (`revise.apply`, findings TXN-ROLLBACK-001 and the PR #179 review.)

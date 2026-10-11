@@ -152,3 +152,109 @@ Files touched:
 
 Finished: yes. Committed, pushed, PR opened — see branch
 fix-high-rollback-keys.
+
+=====================================================================
+REVIEW FOLLOW-UP (cross-model review of PR #179, .scratch/review/
+review-179.txt). Two items addressed on head 5117eda.
+=====================================================================
+
+FINDING 1 (MEDIUM) — TXN-ROLLBACK-001 fix inert for non-prefix
+mappings — FIXED.
+
+Re-confirmed on 5117eda by running the reviewer's own probe:
+  /home/jorb/work/venv-refdes/bin/python .scratch/probe_nonprefix.py
+-> "FILES LEFT CHANGED BY THE REFUSED RUN: ['dec_a.md']": dec_a.md
+   left `satisfies: [REQ-001@ws8c73hyfd2]` (this run's refresh write)
+   while the refusal printed "rolled back." Exactly the report's
+   output (different minted key, same shape).
+
+Root cause (verified by reading revise.py): `snapshot` was taken only
+under `if prefix_rename:`, so `_collect_refresh_rewrites()` iterated
+an empty dict for types:/fields:/links:/citation_keys: mappings and
+collected nothing on the refusal path.
+
+Fix: hoisted `snapshot = _snapshot_item_texts(project_before)` out of
+the guard (revise.py, with a comment saying why it runs for every
+mapping). The reviewer's one-line fix, kept exactly. No design
+decision needed.
+
+Prefix path unaffected by the hoist: the prefix flow passes the
+snapshot to `_simulate_key_ensure` and the dry-run blocker tests
+(test_revise_dry_run_reports_the_refusal_a_read_only_file_will_cause)
+plus the whole read-only + revise suites pass (see GATES below).
+
+Regression test:
+tests/test_readonly_explicit_writes.py::
+test_revise_rolls_back_refresh_writes_landed_by_a_non_prefix_mapping
+`fields: {requirement: {text: body}}` rename; keys minted with both
+referencing files read-only so references stay bare; dec_b.md (last
+in the refresh's path order) left 0444. Asserts exit 1, the refusal
+text, "rolled back.", and `_all_text == before` — the landed
+expansion restored.
+
+Sabotage: reverted only the hoist (snapshot back under
+`if prefix_rename:`) -> the test FAILS exactly on the bug:
+dec_a.md left `satisfies: [REQ-001@y1xc7gqjxwn]`. Restored -> passes.
+(`cp .scratch/revise.py.fixed.bak2 src/refdes/revise.py`, diff
+verified identical.)
+
+FINDING 2 (LOW) — _collect_refresh_rewrites() unguarded inside the
+except handler — FIXED.
+
+Re-confirmed by reading revise.py:1679 on the head commit (call site
+before `_rollback()`, plain `textio.read_text` per item file, no
+handler). Reproduced in the test below (sabotage run) rather than a
+CLI probe, since reaching it needs an injected I/O fault.
+
+Fix (same helper, new `tolerate_unreadable=True` from the refusal
+handler only): a file whose re-read raises `OSError` is collected
+into a named list, the rest of the collection proceeds, `_rollback()`
+then runs, and the refusal additionally prints
+  could not re-read, so it could not be rolled back: items/... (<oserror>)
+  -- it may still hold a write of this run; check it against your last
+  known state of the tree
+The failure is reported, not swallowed: the file is named as left,
+and the run never escapes a traceback over the half-applied rename.
+The success-path call site keeps the raising behaviour (nothing
+refused, nothing to protect).
+
+Test (writable without heavy mocking):
+tests/test_readonly_explicit_writes.py::
+test_revise_still_rolls_back_when_the_refusal_itself_cannot_reread_a_file
+Two targeted monkeypatches only, both narrow:
+- textio.read_text wrapper raising a plain OSError(5, EIO) for
+  items/dec_a.md *only after* the real refusal for dec_b.md has
+  started (armed inside a wrapper around the real _refuse_item_write,
+  which then runs untouched). Every legitimate read of the run —
+  loads, the refresh, the restore comparisons inside _rollback() —
+  uses the real read_text; dec_a.md is read exactly once after the
+  arm, by the handler's comparison.
+- asserts exit 1, refusal text, the named unreadable file, and that
+  req.yaml WAS rolled back (the rollback ran despite the OSError).
+
+Sabotage: replaced only the guard body with a bare `raise` -> the
+test FAILS with the injected OSError escaping to the caller (no
+rollback, no report). Restored -> passes.
+
+CHANGELOG: changelog.d/revise-refresh-refusal-rollback.fixed.md
+updated — the byte-identical guarantee now says it holds for every
+mapping kind (snapshot no longer gated to prefix renames) and names
+the one new message the mid-rollback unreadable-file case prints.
+docs/cli-reference.md's promises ("the whole operation is rolled
+back", "never partially applied", :61/:1102) are unchanged and now
+also true for non-prefix mappings; no doc quotes the new
+unreadable-file message (it did not exist before), so no doc text
+needed changing.
+
+GATES (this round)
+- ruff check --select E9,F src tests -> All checks passed! exit 0
+- Full suite, foreground:
+  PYTHONPATH=$PWD/src /home/jorb/work/venv-refdes/bin/python -m pytest \
+    -q -p no:cacheprovider > .scratch/suite.txt 2>&1; echo exit=$?
+  -> exit=0, tail: "3384 passed, 2 skipped in 254.66s (0:04:14)"
+  (3382 from the reviewer's clean-run tally + the 2 regression tests
+  added here. The known serve-cli flake did not fire; nothing to
+  re-run.)
+
+Finished: yes. Both findings fixed, tested, sabotaged, restored;
+fragment updated; committed as a new commit on top of 5117eda.

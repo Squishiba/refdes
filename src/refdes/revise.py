@@ -1471,9 +1471,16 @@ def apply(
     ensure_rewrites: list[FileRewrite] = []
     refresh_rewrites: list[FileRewrite] = []
     expansions: list[str] = []
-    snapshot: dict[str, str] = {}
+    # Taken for *every* mapping, not only a prefix rename: the display-half
+    # refresh below runs for all of them (a `fields:` rename reaches it on the
+    # old-schema tree, because the full `_load_and_validate` that would catch
+    # the moved field only runs after the refresh), and the refusal handler's
+    # `_collect_refresh_rewrites()` can only list what the refresh wrote by
+    # diffing against this baseline. Gated to `prefix_rename` it was a no-op
+    # for every `types:`/`fields:`/`links:`/`citation_keys:` mapping, and the
+    # handler printed "rolled back." over a landed refresh write.
+    snapshot = _snapshot_item_texts(project_before)
     if prefix_rename:
-        snapshot = _snapshot_item_texts(project_before)
         if dry_run:
             blockers, expansions = _simulate_key_ensure(config_path, snapshot, mapping)
             if blockers:
@@ -1649,22 +1656,37 @@ def apply(
     # file the refresh cannot write is a rename that landed in some item files
     # and not others, so it rolls back rather than reporting the stale
     # reference it left behind as prose (run 5, finding B2).
-    def _collect_refresh_rewrites() -> None:
+    def _collect_refresh_rewrites(*, tolerate_unreadable: bool = False) -> list[str]:
         """Record what the display-half refresh wrote, by comparing each item
         file against the snapshot: anything that moved and belongs to neither
         the rename's own rewrites nor the key-ensure writes is a refresh
-        write, and `_rollback()` can only put it back once it is listed."""
+        write, and `_rollback()` can only put it back once it is listed.
+
+        `tolerate_unreadable` is for the refusal handler below: there the
+        re-read itself must never escape as an `OSError`, because the
+        exception would skip `_rollback()` and leave the half-applied
+        rename this handler exists to undo, wearing a traceback. A file it
+        cannot re-read is named in the returned list instead -- reported as
+        left, not hidden -- and every other file still gets collected."""
+        unreadable: list[str] = []
         for rel, before in snapshot.items():
             path = os.path.join(project_before.root, *rel.split("/"))
-            if not os.path.isfile(path):
+            try:
+                if not os.path.isfile(path):
+                    continue
+                now = textio.read_text(path)
+            except OSError as read_exc:
+                if not tolerate_unreadable:
+                    raise
+                unreadable.append(f"{rel} ({read_exc})")
                 continue
-            now = textio.read_text(path)
             if now != before and rel not in {r.rel for r in rewrites} | {
                 r.rel for r in ensure_rewrites
             }:
                 refresh_rewrites.append(
                     FileRewrite(path=path, rel=rel, before=before, after=now)
                 )
+        return unreadable
 
     try:
         _refresh_display_halves(config_path)
@@ -1676,9 +1698,18 @@ def apply(
         # back first printed "rolled back." while leaving a landed refresh
         # write naming the id this very operation retired
         # (finding TXN-ROLLBACK-001).
-        _collect_refresh_rewrites()
+        unreadable = _collect_refresh_rewrites(tolerate_unreadable=True)
         _rollback()
-        return RevisionResult(ok=False, errors=[str(exc), "rolled back."])
+        errors = [str(exc)]
+        if unreadable:
+            errors.append(
+                "could not re-read, so it could not be rolled back: "
+                + ", ".join(unreadable)
+                + " -- it may still hold a write of this run; check it against "
+                "your last known state of the tree"
+            )
+        errors.append("rolled back.")
+        return RevisionResult(ok=False, errors=errors)
     _collect_refresh_rewrites()
 
     try:
