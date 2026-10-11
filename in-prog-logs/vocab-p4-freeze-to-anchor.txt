@@ -134,3 +134,5 @@ docs/design/vocabulary-review.md (24) -- the review's own proposal bodies
 ## Outcome
 FINISHED. Suite: 3562 passed, 2 skipped (exit=0, .scratch/suite.txt; no load
 flake seen). ruff --select E9,F src tests clean; gen_examples --check clean.
+
+PR opened: https://github.com/Squishiba/refdes/pull/199 (base main). Task complete.
