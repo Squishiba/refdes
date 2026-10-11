@@ -1,0 +1,137 @@
+Task: fix HIGH-severity findings, packet "candidate-parts-doc" (see .scratch/TASK.txt)
+Branch: fix-high-candidate-parts-doc @ d71c143 (main)
+Status: FINISHED
+
+Finding list: exactly one HIGH finding in the packet — DOC-SCOPE-001
+(from PR #8, source report .scratch/inputs/reports/pr-8.md finding 1).
+
+=====================================================================
+DOC-SCOPE-001 — RE-CONFIRMED on d71c143, FIXED, pinned by tests.
+=====================================================================
+
+Finding: docs/design/candidate-parts.md recommends a recommended list file
+written as `defaults:` + a top-level YAML sequence (§6.1, §6.4 skeleton,
+§7.2 fixture), but `parse_list_file` (src/refdes/parse.py:1305-1311,
+found by name; line numbers had drifted from the packet's 1305-era
+pointers only in surrounding context) requires "a mapping with an
+'items:' key" — and the sketched shape is not even valid YAML, so the
+doc's files fail `refdes check` outright.
+
+Re-confirmation (real commands, probe project at
+.scratch/probes/dcs001/, refdes-project.yaml with
+`standard: { base: hardware, version: 3 }`):
+
+  $ refdes check   # with §6.4 skeleton verbatim as items/power/skeleton.yaml
+  ERROR   items/power/skeleton.yaml:6 — invalid YAML: while parsing a block
+  mapping ... expected <block end>, but found '-' ...
+  0 items, 1 errors, 0 warnings
+  exit=1
+
+  $ refdes check   # §7.2 fixture and §6.1 snippet verbatim, same project
+  ERROR   items/power/skeleton.yaml:5 — invalid YAML: ... found '-' ...
+  ERROR   items/power/snippet61.yaml:6 — invalid YAML: ... found '-' ...
+  0 items, 2 errors, 0 warnings
+  exit=1
+
+Both doc artifacts are still unloadable on d71c143 => PRESENT, REPRODUCED.
+
+Additional context found while working (no decision needed, but it
+settled the direction of the fix): the design's phases 1 and 4 have
+since landed on main. `rejected` is in the hardware@3 component.status
+choices (src/refdes/standards/hardware/v3/base.yaml:243), and
+`scaffold.new_list_text` + `refdes new <type> --list` are implemented
+(src/refdes/scaffold.py:470, cli.py:1398) — the implemented generator
+emits the mapping form (`---`/`defaults:`/`items:`/`  - id:`/fields), and
+its own docstring says so: "The file takes the mapping form a list file
+must have (`defaults:` plus an `items:` key) rather than the bare
+top-level list in the design's sketch, so redirecting the output straight
+into place can't produce a file `parse_list_file` rejects." Verified by
+running the real command:
+
+  $ refdes new component --list > items/power/newlist.yaml   # exit 0, parses
+  (only remaining check error: "item has no id — run 'refdes id' ...",
+   which is by design for a skeleton template, docs/authoring.md "Entries
+   may omit id:")
+
+So the code side already resolved itself during implementation; the
+design doc remained stale with the rejected sketch. The fix is doc-side
+and required no design decision: the doc must show the shape its own
+implementation emits. Changing `parse_list_file` to accept the sketch
+shape was never an option — the shape is invalid YAML (the parser error
+is raised by PyYAML itself, not by the shape check), so there is no
+alternative code fix to weigh.
+
+Root cause: the PR #8 design sketch invented a file shape that never
+existed in the codebase (canonical: `defaults:` + `items:`,
+docs/authoring.md §List files, parse.py), and the doc kept recommending
+it after the implementation quietly chose the canonical shape.
+
+Fix (docs/design/candidate-parts.md only):
+- §6.1 recommendation: `defaults:` + top-level sequence -> `defaults:` +
+  `items:` (entry indented); the schematic `...` ellipsis line (which is
+  itself invalid YAML) became a comment, so the recommended file is now
+  copy-paste loadable.
+- §6.4 skeleton: same shape fix; the block now matches
+  `scaffold.new_list_text`'s real output (verified by running
+  `refdes new component --list`).
+- §7.2 fixture: same shape fix, AND the per-entry `---` + fenced
+  ```calc spelling replaced by the list-file body spelling — `body: |`
+  carrying the calc block (docs/authoring.md §Bodies in list files:
+  "The body is markdown ... including `calc` blocks"). The `---`/fence
+  spelling is the separately-recorded MEDIUM finding 2 of pr-8.md, but
+  the HIGH finding's named consequence ("§7.2 fixture doesn't load")
+  cannot be closed without it: with only the `items:` spelling added the
+  fixture still fails `refdes check` with
+  "invalid YAML: while scanning a simple key ... `---` ... could not
+  find expected ':'" (reproduced at .scratch/probes before the body fix).
+  Fixing the HIGH finding therefore necessarily fixes the fixture's
+  instance of the MEDIUM defect; the MEDIUM pass will find that instance
+  already fixed as a side effect. Untouched, deliberately, as belonging
+  to other findings: §7.2's `keep_copy: true` on a local citation
+  (pr-8 MEDIUM 3; build-time error, not a load blocker), the stale
+  `parse.py:601-627` citation (pr-8 LOW 4), the §7.1/§6.1-second-block
+  fragment sketches (not whole files, never flagged).
+
+Fix verification (actually ran it):
+- Extracted the three fixed fences from the doc and ran each through the
+  real `parse.parse_list_file` (.scratch/probes/extract_fences.py):
+  0 errors, 0 warnings; §7.2 yields CMP-PWR-014..017 with defaults merge
+  correct (014 selected — own value wins; 017 candidate — inherited).
+- `refdes new component --list > items/power/newlist.yaml` loads (above).
+
+Regression test: tests/test_candidate_parts_doc.py (new; 3 tests) —
+extracts §6.1/§6.4/§7.2's whole-file fences from the doc as authored and
+loads each through parse.parse_list_file in a freshly init'd project,
+asserting no load errors and the defaults-merge/`body: |` properties.
+Failed-before/passing-after proven by sabotage:
+
+  $ cp .scratch/candidate-parts.orig.md docs/design/candidate-parts.md
+  $ pytest tests/test_candidate_parts_doc.py -q
+  3 failed in 0.08s   # all three fail with the finding's exact
+                      # "invalid YAML ... expected <block end>, but
+                      # found '-'" diagnostic
+  (restore; re-run)
+  3 passed in 0.06s
+
+Incident, recorded honestly: while restoring after the sabotage I used
+`git checkout -- docs/design/candidate-parts.md`, which (stupidly, since
+my fix was uncommitted) blew the fixed doc away — `git status` showed a
+clean tree because the file was back at HEAD, identical to my .scratch
+pre-fix copy. I re-applied the three edits with the edit tool and
+re-verified (tests pass, fence probe clean, `git diff` reviewed hunk by
+hunk: exactly the three intended hunks). No other session's work was at
+risk (single file, my own changes, HEAD recovered it); I did not stash
+anything, per the project rule.
+
+Changelog: changelog.d/candidate-parts-doc-list-file-shape.fixed.md
+(existing *.fixed.md style).
+
+=====================================================================
+GATES
+=====================================================================
+- Full suite, foreground:
+  PYTHONPATH=$PWD/src python -m pytest -q -p no:cacheprovider
+  -> 3375 passed, 10 skipped in 263.66s (0:04:23), exit=0
+  (tail kept at .scratch/suite.txt). Main baseline 3372+10 -> +3 = my
+  three new tests. Nothing failed.
+- ruff check --select E9,F src tests -> All checks passed!
