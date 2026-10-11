@@ -4,7 +4,7 @@ docs/design/living-notes-plan.md §H5 (and Q1/Q2). A type declaring
 `sealing: history` is backed by captured history instead of the build-time
 hash lock: a writable build seals none of its entries, an edit to one is the
 H3 "edited after captured" warning rather than a build error, a bare
-`follows:` on an entry a seal file mentions freezes (and is captured) instead
+`follows:` on an entry a seal file mentions anchors (and is captured) instead
 of being refused, and `--reseal` says it has nothing to do. Seal files that
 already exist are read as legacy-seal markers -- never rewritten, never
 deleted -- and an entry such a file mentions going missing is a warning
@@ -170,13 +170,13 @@ def _run(capsys, cfg, *argv):
 # ------------------------------------------------------------ the decisive one
 
 
-def test_a_bare_follows_on_a_legacy_sealed_entry_freezes_and_is_captured(
+def test_a_bare_follows_on_a_legacy_sealed_entry_anchors_and_is_captured(
     tmp_path, capsys
 ):
     """The plan's decisive transcript: a history-backed project, an entry a
     legacy seal file mentions, a bare `follows:` added to it. Before H5 this
     ended in the "already sealed" refusal and an edge bare forever; now the
-    edge freezes, the chain forms, the capture line prints, and `check`
+    edge anchors, the chain forms, the capture line prints, and `check`
     reports zero errors."""
     cfg = _legacy_project(tmp_path)
     seal_before = _seal_file(tmp_path).read_bytes()
@@ -190,7 +190,7 @@ def test_a_bare_follows_on_a_legacy_sealed_entry_freezes_and_is_captured(
     project, _stale = loader.load_tree(cfg, write=False)
     first, second = project.item_by_id("LOG-001"), project.item_by_id("LOG-002")
     text = (tmp_path / "items" / "log.yaml").read_text(encoding="utf-8")
-    assert f"follows: [LOG-001@{first.key}]" in text  # frozen, not bare
+    assert f"follows: [LOG-001@{first.key}]" in text  # anchored, not bare
     assert second.links["follows"] == [f"LOG-001@{first.key}"]
     events = [e for e in history.load_events(str(tmp_path)) if e["kind"] == "followed"]
     assert [(e["item_key"], e["successor_key"]) for e in events] == [
@@ -215,7 +215,7 @@ def test_the_same_transcript_on_a_build_sealed_type_still_refuses(tmp_path, caps
     assert code == 0, output
     assert (
         "follows is still bare, but this append-only entry is already sealed; "
-        "leaving it unchanged because freezing would change its hash."
+        "leaving it unchanged because anchoring would change its hash."
     ) in output
     assert "follows: [LOG-001]" in (tmp_path / "items" / "log.yaml").read_text(
         encoding="utf-8"
@@ -651,7 +651,7 @@ def test_audit_reports_legacy_seals_and_edited_after_captured(tmp_path, capsys):
     code, output = _run(capsys, cfg, "audit")
     assert code == 0, output
     sealed = output.split("Append-only entries edited after sealing:")[1].split("\n\n")[0]
-    # LOG-001 (edited) and LOG-002 (gained a frozen follows:) both differ from
+    # LOG-001 (edited) and LOG-002 (gained an anchored follows:) both differ from
     # their legacy seal; said so, never as a lock.
     assert "LOG-001  (legacy seal: recorded hash only; original content was not captured)" in sealed
     assert "LOG-002  (legacy seal" in sealed

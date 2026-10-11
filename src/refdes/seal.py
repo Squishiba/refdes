@@ -369,7 +369,7 @@ def append_only_items(
 def is_sealed(project: Project, item: Item) -> bool:
     """Whether ``item`` already has an append-only seal in any board file.
 
-    Follows freezing happens before board resolution in the normal load path,
+    Follows anchoring happens before board resolution in the normal load path,
     so it must inspect every declared board rather than relying on
     ``item.board``. A legacy base-file seal remains authoritative until a
     writable build migrates it to its board-specific file.
@@ -377,7 +377,7 @@ def is_sealed(project: Project, item: Item) -> bool:
     Always False for a history-backed type (``sealing: history``): a seal
     record that mentions one of its entries is a legacy-seal marker, not a
     lock, so nothing that refuses an edit to a sealed entry -- the bare
-    ``follows:`` freeze, the editor, an upload, a calc rewrite -- refuses it.
+    ``follows:`` anchor, the editor, an upload, a calc rewrite -- refuses it.
     """
     spec = project.types.get(item.type)
     if spec is None or not spec.append_only or spec.sealing != SEALING_BUILD:

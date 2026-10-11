@@ -15,7 +15,7 @@ Fixes here:
   that inserts a key line (keys.mint_missing, ids.allocate,
   former_ids.confirm) reports and skips on refusal.
 - `revise.write_rewrites_verified` guards every load-time write (key minting,
-  link/check expansion, follows freeze): a rewritten file that no longer
+  link/check expansion, follows anchor): a rewritten file that no longer
   parses, or parses into fewer items, is restored to its original bytes and
   reported as an error.
 """
@@ -620,7 +620,7 @@ def test_a_refused_mint_leaves_the_run_reading_like_no_write(tmp_path, capsys):
     key is only durable once persisted) applies to a failed write too. So the
     index says `key: null` and the bare target stays bare, rather than
     publishing a key that exists only in this process -- and, critically, no
-    later step can freeze a composite naming it into a file that *is*
+    later step can anchor a composite naming it into a file that *is*
     writable, which would be a reference to nothing."""
     cfg = _id_project(tmp_path)
     items = tmp_path / "items"
@@ -755,7 +755,7 @@ def test_an_explicit_write_still_raises_on_a_read_only_tree(tmp_path):
 # `id:` lines. This is the file the parse reports (tests/test_parse.py), and
 # this is what the rest of the load must NOT do to it: mint the missing
 # `key:` line back into the entry (moving the very lines the author has to
-# read) and, worse, freeze a live reference in *another* file onto the item
+# read) and, worse, anchor a live reference in *another* file onto the item
 # that swallowed the vanished one. Both happened before the parse reported the
 # repeat, in the same load that discovered it.
 MERGED_ITEMS = (

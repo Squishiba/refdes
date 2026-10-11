@@ -785,7 +785,7 @@ def mint_missing(project: Project, write: bool = True) -> list[tuple[Item, str]]
         # per run would make the same item resolve differently from one
         # invocation to the next -- applies with equal force to a write that
         # failed. Items in a file that refused stay keyless, so nothing later
-        # in this load can freeze a composite naming a key that only ever
+        # in this load can anchor a composite naming a key that only ever
         # existed in memory.
         landed = [
             (item, new_key)

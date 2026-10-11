@@ -59,7 +59,7 @@
 # is not accepted there (PR #176 review). `recorded_by` needs no entry:
 # in v2 it is only the computed inverse name, never an authored key, so no
 # v2 item carries it. A migrated bare `follows:` target is chain-aware
-# like an authored one: the next writable load freezes it to its target's
+# like an authored one: the next writable load anchors it to its target's
 # current thread tip and captures the predecessor's snapshot.
 #
 # See docs/design/standard-library.md §3 for the versioning design this

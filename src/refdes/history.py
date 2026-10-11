@@ -510,7 +510,7 @@ class FollowCapture(NamedTuple):
     edge was already captured, so the caller prints nothing on a no-op), the
     event's path, and exactly which files this call created — so a caller
     running a batch of captures can undo its own writes when the surrounding
-    transaction fails (plan §H2: the frozen edge and its event are one unit)."""
+    transaction fails (plan §H2: the anchored edge and its event are one unit)."""
 
     announcement: str
     event_path: str
@@ -519,7 +519,7 @@ class FollowCapture(NamedTuple):
 
 
 def _follows_target_key(target: object) -> "str | None":
-    """The key half of a frozen follows target (``ID@key``, or a bare
+    """The key half of an anchored follows target (``ID@key``, or a bare
     well-formed key for an id-less tip); None for anything unresolved."""
     text = str(target)
     if "@" in text:
@@ -542,7 +542,7 @@ def capture_followed(
 
     * **Idempotence** (case five): the derived id means re-capturing the same
       edge is a filesystem no-op that announces nothing.
-    * **Typo corrected** (case one): when the successor's *current* frozen
+    * **Typo corrected** (case one): when the successor's *current* anchored
       edges no longer include a predecessor this successor was previously
       captured against, the new event is `followed-corrected`, naming the
       superseded key in `reason`. The original event is never deleted or
@@ -558,7 +558,7 @@ def capture_followed(
       clock.
 
     Cases two (VS Code's save refresh) and three (CI) are the caller's:
-    capture rides the freeze's `write` flag, so a writable load captures and
+    capture rides the anchor's `write` flag, so a writable load captures and
     `--no-write` never reaches this function.
     """
     if not predecessor.key or not successor.key:
@@ -646,8 +646,8 @@ class EditedAfterCaptured(NamedTuple):
 _CAPTURE_KINDS = ("followed", "followed-corrected", "captured")
 
 
-def _frozen_follows_key(target: object) -> "str | None":
-    """The key half of a follows target: ``ID@key``, or a bare well-formed
+def _anchored_follows_key(target: object) -> "str | None":
+    """The key half of an anchored follows target: ``ID@key``, or a bare well-formed
     key (an id-less tip); None for a still-bare display id — an edge whose
     spelling has not settled, which cannot disprove anything."""
     text = str(target)
@@ -675,7 +675,7 @@ def _superseded(event: dict, by_key: "dict[str, Item]") -> bool:
         return False
     resolved = [
         key
-        for key in map(_frozen_follows_key, successor.links.get("follows", []))
+        for key in map(_anchored_follows_key, successor.links.get("follows", []))
         if key
     ]
     if not resolved:

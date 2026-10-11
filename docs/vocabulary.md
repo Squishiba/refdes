@@ -372,7 +372,7 @@ This log entry continues an earlier entry in the same thread.
 ```yaml
 - id: LOG-A-004
   summary: Recorded the release outcome.
-  follows: [LOG-A-003]  # the earlier entry freezes here
+  follows: [LOG-A-003]  # the earlier entry anchors here
 ```
 
 ### `governed_by`

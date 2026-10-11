@@ -61,7 +61,7 @@ class AdoptionResult:
     errors: list[str] = field(default_factory=list)
     dry_run: bool = False
     already_adopted: bool = False
-    frozen_follows: int = 0
+    anchored_follows: int = 0
 
 
 def _baseline_data(baseline: lifecycle.Baseline, items: dict[str, dict]) -> dict:
@@ -148,7 +148,7 @@ def _compose_item_rewrites(project, assignments) -> tuple[list[revise.FileRewrit
     check_texts = dict(link_texts)
     check_texts.update({rewrite.rel: rewrite.after for rewrite in check_plan.files})
 
-    follows_plan = links_mod.plan_follows_freeze(project, source_texts=check_texts)
+    follows_plan = links_mod.plan_follows_anchor(project, source_texts=check_texts)
     follows_texts = dict(check_texts)
     follows_texts.update({rewrite.rel: rewrite.after for rewrite in follows_plan.files})
 
@@ -211,7 +211,7 @@ def apply(project_root: str, dry_run: bool = False) -> AdoptionResult:
             )
         if follows_plan.remaining:
             errors.append(
-                f"could not freeze {follows_plan.remaining} local follows reference(s)"
+                f"could not anchor {follows_plan.remaining} local follows reference(s)"
             )
         return AdoptionResult(ok=False, errors=errors, dry_run=dry_run)
 
@@ -321,7 +321,7 @@ def apply(project_root: str, dry_run: bool = False) -> AdoptionResult:
         baselines=baselines,
         seals=seals,
         memberships=memberships,
-        frozen_follows=len(follows_plan.rewrites),
+        anchored_follows=len(follows_plan.rewrites),
         changed_files=changed_files,
         dry_run=dry_run,
         already_adopted=marker_was_adopted and not changed_files,

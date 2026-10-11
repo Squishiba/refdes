@@ -150,7 +150,7 @@ def apply(root, ref, op, revision=None):
 # ------------------------------------------------------------------- applied
 
 
-def test_add_link_writes_the_composite_the_freeze_pass_would_write(project_root):
+def test_add_link_writes_the_composite_the_anchor_pass_would_write(project_root):
     """The written text is links.composite_for's own output, not a copy of the
     browser's string: whatever handle the client sent, the disk gets the same
     DISPLAY-ID@key spelling `_planned_target` expands a bare reference to."""

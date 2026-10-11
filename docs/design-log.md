@@ -280,7 +280,7 @@ new entry that `amends` the old one — but nothing is sealed any more:
   names at all stays silent — nothing recorded what it used to say, so there
   is no edit to report. `refdes audit` lists either kind of changed entry
   (below).
-- A bare `follows:` on an entry a seal file already mentions freezes and is
+- A bare `follows:` on an entry a seal file already mentions anchors and is
   captured like any other, instead of being left bare with "already sealed".
 - Seal files that already exist are kept and read as **legacy-seal markers** —
   recorded hash only; original content was not captured. `build`, `check`,

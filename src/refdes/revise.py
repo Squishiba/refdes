@@ -849,7 +849,7 @@ def _parse_item_count(rel: str, text: str) -> int | None:
 
 def write_rewrites_verified(project, rewrites: list[FileRewrite], on_error=None) -> set[str]:
     """Load-time write with a parse guard: no incidental write (key minting,
-    link/check expansion, follows freeze) may turn a parseable item file into
+    link/check expansion, follows anchor) may turn a parseable item file into
     an unparseable one, or one that yields fewer items than it did before.
 
     Same posture as apply()'s reload-and-verify, brought to the writes that
@@ -881,7 +881,7 @@ def write_rewrites_verified(project, rewrites: list[FileRewrite], on_error=None)
     A file whose parse reported a duplicate mapping key is not rewritten at
     all, for a different reason than any of the above: a `key:` inserted and
     a composite written into it would move the very lines the author has to
-    look at, and in the common shape (a lost `- ` marker) would freeze live
+    look at, and in the common shape (a lost `- ` marker) would anchor live
     references onto the item that swallowed the other one -- destroying the
     evidence of the merge in the same load that discovered it. The parse
     error is the only diagnostic; the file is handed back as refused, so the
@@ -1152,7 +1152,7 @@ def _load_light(config_path: str) -> Project:
 def _run_key_ensure(config_path: str) -> list[FileRewrite]:
     """Run the writable-load key maintenance pipeline (docs/design/keys.md
     §2-§3: mint, link expansion, `checks: against:` expansion, follows
-    freeze) for real, and return the net text changes as FileRewrites so the
+    anchor) for real, and return the net text changes as FileRewrites so the
     caller can roll them back if the operation that needed them is refused.
 
     This is the same sequence `cli._load()` runs on every writable command;
@@ -1183,7 +1183,7 @@ def _run_key_ensure(config_path: str) -> list[FileRewrite]:
         project = _load_light(config_path)
     if links_mod.expand_missing_checks(project, write=True):
         project = _load_light(config_path)
-    links_mod.freeze_follows(project, write=True)
+    links_mod.anchor_follows(project, write=True)
 
     rewrites: list[FileRewrite] = []
     for rel, text in before.items():
@@ -1461,7 +1461,7 @@ def apply(
     # A prefix rename moves display ids that structured references may still
     # spell bare. This engine no longer rewrites bare references (docs/design/
     # keys.md §4): it runs the same writable-load key maintenance every other
-    # command performs -- mint, link/check expansion, follows freeze -- inside
+    # command performs -- mint, link/check expansion, follows anchor -- inside
     # its own transaction first, and refuses with file:line if a structured
     # reference to an affected id is *still* bare afterwards. A dry run
     # simulates that whole pipeline on a throwaway copy of the tree, so the

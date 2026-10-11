@@ -73,7 +73,7 @@ def test_old_records_edges_upgrade_to_follows_links(tmp_path):
     (PR #176 review). `follows:` is the one log-to-log link the merged
     schema declares, and structured links are what the surrogate-key
     machinery keeps current -- asserted below by letting a writable load
-    freeze the migrated edge like any authored one.
+    anchor the migrated edge like any authored one.
     """
     config = _project(tmp_path, version=2)
     path = tmp_path / "items" / "thread.yaml"
@@ -93,7 +93,7 @@ def test_old_records_edges_upgrade_to_follows_links(tmp_path):
     assert cli.main(["-c", str(config), "--no-write", "check"]) == 0
 
     # The migrated edge is under the key machinery: the next writable load
-    # freezes it to `DEC-001@key` and captures the predecessor's snapshot,
+    # anchors it to `DEC-001@key` and captures the predecessor's snapshot,
     # exactly as it does for an authored `follows:`.
     assert cli.main(["-c", str(config), "check"]) == 0
     text = path.read_text(encoding="utf-8")
@@ -209,7 +209,7 @@ def test_item_citation_with_a_dead_key_reports_the_real_cause(tmp_path):
     assert "refdes keys restore" in messages[0]
 
 
-def test_bundled_follows_freezes_and_captures_predecessor(tmp_path):
+def test_bundled_follows_anchors_and_captures_predecessor(tmp_path):
     config = _project(tmp_path)
     item_file = tmp_path / "items" / "log.yaml"
     item_file.write_text(

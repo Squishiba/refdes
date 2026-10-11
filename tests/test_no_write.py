@@ -226,9 +226,9 @@ def test_no_write_leaves_whole_project_tree_byte_identical(tmp_path, capsys, arg
 
 
 def test_no_write_does_not_capture_follows_history(tmp_path, capsys):
-    """Living notes phase H2: the `follows:` freeze is also a capture, and
-    `--no-write` gates it exactly like the freeze itself -- nothing appears
-    under `.refdes/history/` until a writable load freezes the edge."""
+    """Living notes phase H2: the `follows:` anchor is also a capture, and
+    `--no-write` gates it exactly like the anchor itself -- nothing appears
+    under `.refdes/history/` until a writable load anchors the edge."""
     root, config = _snapshot_project(tmp_path)
     capsys.readouterr()
     before = _snapshot(root)
@@ -237,7 +237,7 @@ def test_no_write_does_not_capture_follows_history(tmp_path, capsys):
     assert not any(_changed(before, root).values())
     assert not (root / ".refdes" / "history").exists()
 
-    # The same load without the gate freezes the edge and captures: one
+    # The same load without the gate anchors the edge and captures: one
     # event, announced on stderr, nothing else in the store.
     assert cli_mod.main(["-c", config, "check"]) == 0
     err = capsys.readouterr().err
@@ -255,7 +255,7 @@ def test_no_write_reports_edited_after_captured_without_touching_the_tree(
     `.refdes/history/` byte-identical."""
     root, config = _snapshot_project(tmp_path)
     capsys.readouterr()
-    # A writable check freezes the LOG-002 -> LOG-001 edge and captures it.
+    # A writable check anchors the LOG-002 -> LOG-001 edge and captures it.
     assert cli_mod.main(["-c", config, "check"]) == 0
     capsys.readouterr()
 

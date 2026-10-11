@@ -794,7 +794,7 @@ class LoadWrites:
     of loading rather than as the command the user asked for (docs/design/
     keys.md §2): keys minted, and bare/stale reference texts rewritten into
     `DISPLAY-ID@key` composites -- link targets, `checks: against:`, cross-item
-    calc references and frozen `follows:` edges, all counted together, plus
+    calc references and anchored `follows:` edges, all counted together, plus
     images frozen to concrete project paths.
 
     Filled in by `loader.load_tree` and read by any command whose own verdict

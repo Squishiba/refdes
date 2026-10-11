@@ -260,7 +260,7 @@ def test_log_amendments_are_links_not_edits():
     project = _project()
     # resolved_links, not links: this repo's own items/ has been through
     # links.expand_missing() (docs/design/keys.md §3), so the raw stored
-    # target is now a frozen `LOG-A-003@<key>` composite -- item.links is
+    # target is now an anchored `LOG-A-003@<key>` composite -- item.links is
     # documented (model.py) as "nothing that merely traverses the graph
     # should read it directly". resolved_links is the always-bare form
     # every other graph-walking consumer reads, and what this assertion

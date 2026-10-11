@@ -100,7 +100,7 @@ This is a real dependency, not a convenience alias. The build evaluates items
 in dependency order — an item's calc runs only after every item it reads from —
 and the reference is stored expanded as a `DISPLAY-ID@key` composite like every
 other structured reference, so renaming `LOG-PWR-001` refreshes the label and
-keeps resolving. The next writable command freezes the bare spelling to its
+keeps resolving. The next writable command anchors the bare spelling to its
 composite; under `--no-write` the bare reference still resolves on the display
 id, and nothing is written.
 

@@ -234,7 +234,7 @@ def test_rename_of_target_refreshes_composite_and_still_resolves(tmp_path):
     assert not project.errors
     b_file = tmp_path / "items" / "b.md"
     text = b_file.read_text(encoding="utf-8")
-    assert "V = DEC-001@" in text  # frozen to the composite
+    assert "V = DEC-001@" in text  # anchored to the composite
     key = re.search(r"DEC-001@([0-9a-z]+)\.V_in", text).group(1)
 
     # Rename the target's display id; the reference's key half is unchanged.

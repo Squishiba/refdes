@@ -1,0 +1,136 @@
+Task: Vocabulary P4 (owner-approved 2026-10-11) — the "freeze/frozen" wording
+for key-pinned links becomes "anchor/anchored". Branch vocab-p4-freeze-to-anchor.
+Log kept as I go.
+
+## Reading done first
+- AGENTS.md (verify-by-running, never git stash, stage by path).
+- docs/design/vocabulary-review.md P4 (§3.1) and the P2/P9/P20 "Landed
+  (date)" notes — P4 is the rename of `frozen` (key-freezing) to `anchored`;
+  P2's landed note is the style to copy (it describes what landed, the
+  proposal body keeps the old word — precedent that historical proposal
+  text is NOT rewritten).
+- docs/design/keys.md (composite DISPLAY-ID@key links), docs/links.md
+  ("freezes it to the thread's current tip").
+- Verified the tool runs: `refdes --version` -> refdes 0.5.0;
+  `refdes keys adopt --help` (via PYTHONPATH=$PWD/src) — help text contains
+  no "freeze" wording, so no help-text rename needed.
+
+## Scope decisions (grep -rniE 'freez|frozen' over src tests docs)
+RENAME (this link-to-key behaviour — a bare reference rewritten on first
+writable load to name the target's permanent key, follows:/links/checks/calc):
+  identifiers: plan_follows_freeze->plan_follows_anchor, freeze_follows->
+  anchor_follows, FollowsFreezePlan->FollowsAnchorPlan, _freeze_rewrite_plan->
+  _anchor_rewrite_plan, _frozen_follows_target->_anchored_follows_target,
+  _frozen_target_key->_anchored_target_key, _frozen_follows_key->
+  _anchored_follows_key (history.py), adopt AdoptionResult.frozen_follows->
+  anchored_follows, chains.build_graph(frozen_only=)->anchored_only=,
+  tips_frozen->tips_anchored, loader local frozen_follows->anchored_follows.
+  messages: "could not freeze N local follows reference(s)"->could not anchor;
+  cli "would freeze"/"froze"->"would anchor"/"anchored"; links.py "freezing
+  would change its hash"->"anchoring would change its hash".
+KEEP (other senses; full per-file list in the PR body):
+  @dataclass(frozen=True) / frozenset everywhere; image_freeze.py + image
+  search "frozen path" sense (build.py 2147/2715/2732, markdown.md 170-175,
+  test_image_search.py, most backlog.md §3 hits); id-allocation sense
+  (ids.py 8/545, parse.py 695/709, ids.md, coverage.md, multi-board.md,
+  cli-reference.md 728/1579, test_ids.py, helpers.py, keys.md 166/534
+  "expand-and-freeze for bare-numeric ids"); immutability sense (standards.py,
+  keys.py:56, "frozen CI tree" in schema_json/seal/model/revise, seal.py 436
+  "freeze out of sealing", test_seal.py 578, test_citations.py 803,
+  test_serve_upload.py, named-calc-blocks.md, candidate-parts.md);
+  historical records kept as written: CHANGELOG.md, in-prog-logs/*,
+  docs/design-log.md (dated chronicle), vocabulary-review.md P4 body itself
+  (the proposal names the old word — same as P2's body still saying
+  `history:`, which its landed note did not rewrite).
+
+## Progress log
+- [start] tree clean at 55176b0, branch vocab-p4-freeze-to-anchor. No VS
+  Code-extension consumer found: `grep -rn frozen_follows` whole tree hits
+  only src/refdes + tests/test_threads.py (a local var) + historical logs/
+  design docs; editors/ has no freeze/frozen hit at all.
+- .refdes/keys-adopted.yaml checked: content is only `adopted: true` /
+  `format: 1` (+comments) — frozen_follows is NOT persisted anywhere.
+
+## Compatibility decisions (per field)
+- AdoptionResult.frozen_follows -> anchored_follows: in-memory dataclass field
+  only. `refdes keys adopt` prints human text lines (verified in
+  cmd_keys_adopt, cli.py:2150-2190 -- plain print, no JSON mode); whole-tree
+  grep for frozen_follows found no other consumer (editors/ = zero freeze
+  hits). Decision: plain rename + changelog line. NO read-old/write-new: no
+  consumer exists to be compatible with.
+- .refdes/keys-adopted.yaml: live file read -- only `adopted: true` +
+  `format: 1`; never carried the count. No persisted format changes, so the
+  fragment is *.changed.md (README: breaking = "existing projects must
+  change"; nothing on disk and no output contract forces a project change).
+- Message text renames (adopt refusal, cli report lines, the sealed-entry
+  "anchoring would change its hash" warning): human-facing prose, changed.
+- Item files keep the identical `DISPLAY-ID@key` composite; the composite
+  spelling itself is not part of P4 (matches the P4 cost note).
+
+## Scope calls (per file)
+- backlog.md §"resolve-and-freeze" (image path) + "frozen path/promise":
+  image-search and immutability senses, kept. Only the three key-sense lines
+  (1804, 1999, 2054) and the link-target clause at 2172 were renamed.
+- keys.md 166/534 "expand-and-freeze" = bare-numeric *id* expansion
+  (ids.py), a different behaviour; kept (test_ids.py/helpers.py same sense).
+- changelog.d pending fragments + CHANGELOG.md + other tasks' in-prog-logs:
+  per-change records, not renamed; the rename is announced via the new
+  changelog.d/follows-freeze-to-anchor.changed.md (matches P2/P9 practice --
+  they appended a fragment, never reworded history).
+- vocabulary-review.md P4 proposal body kept as written (P2's body still
+  says `history:`, precedent from its own landed note); Landed note added.
+- chains.py local `tips_frozen` renamed `component_tips` (plainly names
+  `_component_tips`' result; the word was leftover thread vocabulary).
+
+## Verification
+- ruff check --select E9,F src -> clean; python -m refdes.cli --version ->
+  0.5.0; keys adopt --help has no freeze wording.
+- docs/vocabulary.md regenerated via docs-site/gen_examples.py (one line
+  changed: "the earlier entry anchors here"); gen_examples --check clean.
+- Focused subset first: test_threads + history_capture/seal + keys_adopt +
+  no_write + decision_merge + load_time_writes + revise_keys_cleanup +
+  thread_cli + threads_projection + work + calc_cross_refs +
+  serve_edit_links + message_prose + vocabulary_page -> 321 passed.
+
+## Final `grep -rniE 'freez|frozen' src tests docs` — remaining hits, one line each
+(plus `frozen=True`/`frozenset`, which are Python, not vocabulary)
+src/refdes/parse.py:695,709 -- id-allocation sense: "freezing the wrong id
+  forever" is pinning an id NUMBER, not key-pinning a reference.
+src/refdes/image_freeze.py (7), tests/test_image_search.py (9) -- the
+  image-search resolve-and-freeze path behaviour; different mechanism.
+src/refdes/standards.py:195,197,401 -- released standards are frozen
+  (immutable) bytes.
+src/refdes/keys.py:56 -- key construction frozen = immutable contract.
+src/refdes/loader.py:5,24,163 -- "freeze uniquely searched images" + the
+  image_freeze module/call: image sense.
+src/refdes/build.py:2147,2715,2732 -- "a frozen /path": image path pinned to
+  project root; not key-pinning.
+src/refdes/ids.py:8,545 -- id immutability after baseline; numeric-hint
+  allocation "freeze the specific number".
+src/refdes/schema_json.py:424, seal.py:221, model.py:809, revise.py:864 --
+  "frozen CI tree" = read-only checkout.
+src/refdes/seal.py:436 -- "freeze healthy entries out of sealing" = lock out.
+src/refdes/model.py:798 -- "images frozen to concrete project paths" (the
+  adjacent `follows:` phrase was renamed to anchored).
+tests/test_ids.py (4), tests/helpers.py:103 -- bare-numeric expand-and-freeze
+  (id sense).
+tests/test_seal.py:578, tests/test_citations.py:803 -- "freeze out of
+  sealing"/"doesn't freeze the rest" = lock-out sense.
+tests/test_serve_upload.py (3) -- append-only entry frozen = sealed; a sealed
+  item "freezes" (blocks) an upload file; not key-pinning.
+docs/multi-board.md:408, docs/ids.md:219, docs/coverage.md:341,
+docs/cli-reference.md:728,1579 -- ids frozen once allocated/baselined.
+docs/markdown.md:170,175 -- image-search freeze (author doc for it).
+docs/design/named-calc-blocks.md:518, docs/design/candidate-parts.md (3) --
+  frozen = immutable record/fence.
+docs/design/backlog.md (13) -- image resolve-and-freeze decisions, released
+  shapes frozen, standards freeze promise; the three key-sense lines there
+  were renamed.
+docs/design/keys.md:166,534 -- bare-numeric id expand-and-freeze (id sense).
+docs/design/vocabulary-review.md (24) -- the review's own proposal bodies
+  (P1/P4 text + ordering) naming the old word; precedent: P2's body still
+  says `history:` under its landed note. Landed note added below P4.
+
+## Outcome
+FINISHED. Suite: 3562 passed, 2 skipped (exit=0, .scratch/suite.txt; no load
+flake seen). ruff --select E9,F src tests clean; gen_examples --check clean.
