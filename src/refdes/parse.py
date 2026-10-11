@@ -946,6 +946,20 @@ def _build_item(
                 project, key, fspec, value, rel, source_line, item.id or "?"
             )
             item.fields[key] = _strip_lines(value)
+            if fspec.type == "tasks" and isinstance(value, list):
+                # Living notes H8: keep what the line-tagging loader already
+                # computed for each task row, before _strip_lines discards it
+                # (it must -- a __line__ key left inside a field value would
+                # poison the content hash and the history digest). None where
+                # no line exists: a row inherited through `defaults:` (whose
+                # mapping is stripped before the merge) or a malformed
+                # non-mapping row.
+                item.field_lines[key] = [
+                    row["__line__"]
+                    if isinstance(row, dict) and isinstance(row.get("__line__"), int)
+                    else None
+                    for row in value
+                ]
         elif (spec.name, key) in _RENAMED_FIELDS:
             new_key = _RENAMED_FIELDS[(spec.name, key)]
             project.error(

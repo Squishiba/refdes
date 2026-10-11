@@ -669,11 +669,20 @@ def _rule_open_tasks(project: Project) -> list[str]:
     (`validate_items`), so the error floor refuses the stamp before the
     gate ever runs; a legal row with no `state` is not `open`.
 
-    Offenders name the tip and the task ("LOG-002: open task T-thermal"),
+    Offenders name the tip and the task ("LOG-002: open task T-thermal")
     because a bare thread ref wouldn't say which task to go tick; a row
     whose id is absent (validation allows it) names its position in the
-    folded list. Imported items are skipped like every other rule: an
-    imported tip's open tasks are the other project's work.
+    folded list; and each offender carries the source location of the row
+    it names -- "items/log.yaml:6" -- so it is clickable where the CLI is.
+    The row's own line comes from `Item.field_lines` (parse's own line
+    tagging, kept for `tasks` rows); the location is the *declaring*
+    entry's file (the fold's source, which is not always the tip), and an
+    entry whose list came from its file's `defaults:` block has no row
+    lines to keep -- there the location is the declaring entry's own line.
+    A conflicting fold names the tip's own entry line: the tip is
+    ambiguous precisely because it declares no list of its own, so it has
+    no `tasks:` line to point at. Imported items are skipped like every
+    other rule: an imported tip's open tasks are the other project's work.
     """
     graph = chains_mod.build_graph(project)
     local = {id(item) for item in project.local_items}
@@ -686,16 +695,29 @@ def _rule_open_tasks(project: Project) -> list[str]:
             seen.add(id(tip_tasks.tip))
             label = tip_tasks.tip.id or tip_tasks.tip.key
             if tip_tasks.ambiguous:
+                tip = tip_tasks.tip
                 offenders.append(
-                    f"{label}: conflicting task list (task reconciliation required)"
+                    f"{label}: conflicting task list (task reconciliation "
+                    f"required) ({tip.source_file}:{tip.source_line})"
                 )
                 continue
+            source = tip_tasks.source
+            lines = source.field_lines.get(chains_mod.TASKS) if source else None
             for index, row in enumerate(tip_tasks.rows or []):
                 if not isinstance(row, dict) or row.get("state") != "open":
                     continue
                 task_id = row.get("id")
                 shown = task_id if task_id else f"#{index + 1}"
-                offenders.append(f"{label}: open task {shown}")
+                line = lines[index] if lines and index < len(lines) else None
+                location = (
+                    f"{source.source_file}:{line}"
+                    if source is not None and line is not None
+                    else f"{source.source_file}:{source.source_line}"
+                    if source is not None
+                    else ""
+                )
+                suffix = f" ({location})" if location else ""
+                offenders.append(f"{label}: open task {shown}{suffix}")
     return sorted(offenders)
 
 

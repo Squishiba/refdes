@@ -169,3 +169,81 @@ STATUS: finished. Committed, PR open. Open questions for the owner are
 decisions 3 (lone thread-of-one tips count), 6 (offender wording), 8
 (revision half enable-able) — each implemented provisionally as
 recommended and pinned by a test.
+
+--------------------------------------------------------------------------------
+FOLLOW-UP (owner answers on PR #193): offender source locations
+
+Owner: items 1/3/4 keep as implemented; item 2 keeps the wording AND the
+offender should link to the actual task row. Decisions before coding:
+
+(a) Everywhere gate offenders are shown -- found by grepping evaluate_gate /
+    gate_results / offenders across cli.py, render.py, templates/, serve/:
+    exactly ONE rendering: cli._print_gate_table (cli.py, the "blocked --
+    not stamped:" table on stderr, reached from _run_stamp only). The
+    baseline's gate: block maps rule->status (no offenders); items.json /
+    index payloads carry no gate data; no template touches gates or
+    offenders; serve/edit.py's "delta diagnostic gate" compares BUILD ERROR
+    sets, never release-gate results. So (c) applies as its escape hatch:
+    offenders never render as HTML today -> no anchor work, no new page;
+    reported here and in the PR.
+
+(b) Row lines: the loader ALREADY has a position tracker -- parse._LineLoader
+    tags EVERY nested mapping with __line__ (start_mark.line+1), including
+    tasks: row mappings -- both item load paths (markdown front matter at
+    parse.py's _load_line_marked(text, _LineLoader), and parse_list_file)
+    use it. _build_item stores fields via _strip_lines(value), which is
+    exactly what discards the row lines (it must: __line__ inside fields
+    would poison content_hash/semantic_digest), so Item.fields carries no
+    row position today. Reuse, not a new tracker: _build_item captures the
+    row __line__ values for `tasks`-type fields BEFORE stripping and keeps
+    them on Item.field_lines (new dataclass field, default empty; consumed
+    only by the new gate rule). The fold hands back the declaring entry's
+    own fields["tasks"] list VERBATIM (chains._fold_from_tip via declared_of),
+    so tip_tasks.rows' index i == field_lines["tasks"][i] == row i's line.
+    Fallbacks, each said here rather than faked:
+      - tasks: inherited from a `defaults:` block -- parse strips the
+        defaults mapping before merging, rows arrive line-less -> the
+        offender names the DECLARING entry's own line (file:source_line).
+      - a malformed (non-mapping) row has no line -> same entry-line fallback
+        (its build error already stops the stamp before the gate anyway).
+    The line named is the task row's own line (flow rows: their single line;
+    block rows: the row mapping's start, i.e. its `- id:` line).
+
+(d) The conflicting-fold offender cannot point at a `tasks:` line: the
+    ambiguity IS the tip declaring no list itself (the refusal happens
+    between equal-distance ancestor declarations), so it names the tip's
+    own entry line (file:source_line) -- the entry the author must open to
+    resolve the conflict.
+
+FOLLOW-UP OUTCOMES
+
+- (a) recorded above: gate offenders render in exactly one place
+  (cli._print_gate_table's stderr table); (c) therefore took its escape
+  hatch -- no anchors, no new page, nothing to link from. Reported in the
+  PR.
+- (b) implemented as decided: Item.field_lines keeps the row lines the
+  existing _LineLoader already computes; the open_tasks offender carries
+  "(items/log.yaml:8)"; the conflicting-fold offender carries the tip's
+  entry line. Tests: named-offender test + CLI table test (asserts the
+  reported line really holds "id: T-thermal-model" in the file on disk) +
+  fork/lone/merge tests.
+  A real pitfall the tests caught: loading MINTS surrogate keys and
+  rewrites the item files, shifting lines by the inserted `key:` lines --
+  a project built before that rewrite names lines of files that are no
+  longer there. The H8 fixture rebuilds once after minting, and the tests
+  compute the expected line from the file ON DISK, not the fixture text.
+  (The first draft of the test failed for exactly this reason -- which is
+  the mechanism working.)
+- Sabotage S5 (line computation off by one, `__line__ + 1` in parse.py):
+  FAILED 4 tests -- test_cli_gate_table_offender_names_the_rows_line,
+  test_open_tasks_enabled_blocks_with_named_offender,
+  test_open_tasks_counts_every_open_tip_of_a_fork,
+  test_open_tasks_names_a_lone_thread_head (including the "line really
+  holds that row" disk assertion). Caught. Reverted, diff clean, suite re-green.
+- docs/lifecycle.md: the offender example is now REAL output (the
+  h8demo2 scratch run, WARNING line and all); the plan's Landed note and
+  the two owner-confirmed tests' docstrings updated to say "owner decision".
+
+- Follow-up suite (foreground): 3520 passed, 2 skipped in 261.62s, exit 0
+  (the +1 vs. the first commit's 3519 is the new CLI table-location test).
+  ruff E9,F clean; gen_examples --check up to date.

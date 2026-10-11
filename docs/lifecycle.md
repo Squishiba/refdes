@@ -125,6 +125,29 @@ Fix what's listed and run it again. There's no flag to override or skip a
 rule for one run — adjust `release_gate:` in `refdes-project.yaml` if a rule
 genuinely shouldn't apply to this project.
 
+An `open_tasks` offender names the tip it sits at, the task to go tick, and
+the source line of the task row, so the failure is clickable;
+`captured_edits` names the item the warning above the table already speaks
+for (real output, the two rules enabled through the overlay):
+
+```console
+$ refdes release rel-c
+WARNING items/log.yaml:3 [LOG-A-001] — LOG-A-001: edited after captured -- current semantic content differs from the snapshot in followed event 8bb15ab0-2656-5f29-b1af-53ca75be8fd6; captured when LOG-A-002 followed it. If the edit was a correction, revert it and append a new entry with `amends: [LOG-A-001]` instead; otherwise there is nothing to do. See https://squishiba.github.io/refdes/troubleshooting.html#the-design-log.
+2 items, 0 errors, 1 warnings
+
+release 'rel-c' blocked -- not stamped:
+  pass     draft_items
+  pass     unpinned_citations
+  pass     missing_kept_copies
+  pass     uncovered_requirements
+  skipped  unverified_requirements
+  skipped  info_check_failures
+  pass     unaccepted_board_moves
+  pass     unaccepted_workspace_moves
+  FAIL     open_tasks  LOG-A-002: open task T-thermal-model (items/log.yaml:8)
+  FAIL     captured_edits  LOG-A-001
+```
+
 ```console
 $ refdes release rev-b
 41 items, 0 errors, 0 warnings

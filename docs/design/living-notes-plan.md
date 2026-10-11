@@ -482,13 +482,16 @@ project-policy engine, no default-on anywhere.
 per component via the `ChainGraph` memo, no second fold, no derived rows —
 §5 rules 1-2 enforced at the gate), and `captured_edits` reads
 `history.edited_after_captured` as the H3 diagnostic reports it. Offenders
-name the tip and the task (`LOG-002: open task T-thermal-model`) because a
-bare thread ref wouldn't say which task to go tick; a conflicting fold
+name the tip, the task and the row's source line
+(`LOG-002: open task T-thermal-model (items/log.yaml:8)`, owner decision on
+the PR: link to the actual task row) because a bare thread ref wouldn't say
+which task to go tick; a conflicting fold
 blocks, said as conflicting — the gate does not pass what it couldn't read.
-Provisional calls for the owner (see `in-prog-logs/living-notes-h8-gate-rules.txt`):
+Owner-confirmed calls (PR #193):
 a lone entry with no `follows:` at all is fold_tasks' own "thread of one"
 and its open task counts, and imported tips/items never count (every other
-rule is local-only). `evaluate_gate()`/`stamp()` needed no change, as
+rule is local-only); the `revision` half is overlay-enable-able like every
+other rule's. `evaluate_gate()`/`stamp()` needed no change, as
 planned. Tests: `tests/test_lifecycle.py` (the file was 332 lines, not
 huge), sabotage matrix in the log.
 

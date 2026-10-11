@@ -372,6 +372,10 @@ def _h8_project(tmp_path, items_yaml, extra_config=""):
     items = tmp_path / "items"
     items.mkdir(exist_ok=True)
     (items / "log.yaml").write_text(items_yaml, encoding="utf-8")
+    # Loading minted surrogate keys and rewrote the item files -- rebuild once
+    # so the parsed source lines in the returned project name the CURRENT
+    # files, which is what the gate's file:line offenders must match.
+    _h8_rebuild(tmp_path, extra_config)
     return _h8_rebuild(tmp_path, extra_config)
 
 
@@ -455,13 +459,43 @@ def test_default_off_cli_release_stdout_unchanged(tmp_path, capsys):
     assert "all gates passed" in out
 
 
+def _line_of(root, needle):
+    """1-indexed line of the task row in the file on disk (after the
+    key-minting rewrite), so tests assert the real source location instead
+    of a magic number that drifts with the fixture."""
+    text = (root / "items" / "log.yaml").read_text(encoding="utf-8")
+    return next(i for i, line in enumerate(text.splitlines(), start=1) if needle in line)
+
+
+def test_cli_gate_table_offender_names_the_rows_line(tmp_path, capsys):
+    """The clickable line where the owner asked for it: the printed table
+    row carries the task row's file:line."""
+    from refdes import cli as cli_mod
+
+    _h8_project(tmp_path, H8_OPEN_TASK_THREAD, H8_GATE_RULES_ON)
+    cfg = str(tmp_path / "refdes-project.yaml")
+    assert cli_mod.main(["-c", cfg, "release", "rel-a"]) == 1
+    err = capsys.readouterr().err
+    line = _line_of(tmp_path, "id: T-thermal-model")
+    assert f"FAIL     open_tasks  LOG-002: open task T-thermal-model (items/log.yaml:{line})" in err
+    real = (tmp_path / "items" / "log.yaml").read_text(encoding="utf-8").splitlines()
+    assert "id: T-thermal-model" in real[line - 1]
+
+
 def test_open_tasks_enabled_blocks_with_named_offender(tmp_path):
     project = _h8_project(tmp_path, H8_OPEN_TASK_THREAD, H8_GATE_RULES_ON)
     results = {r.name: r for r in lifecycle.evaluate_gate(project, "release")}
     # the offender names the tip it sits at and the task id to go tick --
-    # the open row folds down from LOG-001 to the LOG-002 tip
+    # the open row folds down from LOG-001 to the LOG-002 tip -- and carries
+    # the row's own file:line
     assert results["open_tasks"].status == "FAIL"
-    assert results["open_tasks"].offenders == ["LOG-002: open task T-thermal-model"]
+    line = _line_of(tmp_path, "id: T-thermal-model")
+    assert results["open_tasks"].offenders == [
+        f"LOG-002: open task T-thermal-model (items/log.yaml:{line})"
+    ]
+    # the location really names the task row, not a nearby line
+    real = (tmp_path / "items" / "log.yaml").read_text(encoding="utf-8").splitlines()
+    assert "id: T-thermal-model" in real[line - 1]
 
     outcome = lifecycle.stamp(project, kind="release", name="rel-a")
     assert outcome.status == "gate_failed"
@@ -573,8 +607,8 @@ def test_open_tasks_counts_every_open_tip_of_a_fork(tmp_path):
     project = _h8_project(tmp_path, fork, H8_GATE_RULES_ON)
     results = {r.name: r for r in lifecycle.evaluate_gate(project, "release")}
     assert results["open_tasks"].offenders == [
-        "LOG-002: open task T-thermal-model",
-        "LOG-003: open task T-decoupling",
+        f"LOG-002: open task T-thermal-model (items/log.yaml:{_line_of(tmp_path, 'id: T-thermal-model')})",
+        f"LOG-003: open task T-decoupling (items/log.yaml:{_line_of(tmp_path, 'id: T-decoupling')})",
     ]
     # done/dropped tasks don't trip it: the same fork with both lists done
     done = fork.replace("state: open", "state: done")
@@ -605,17 +639,19 @@ def test_conflicting_fold_at_a_tip_blocks(tmp_path):
     )
     project = _h8_project(tmp_path, merge, H8_GATE_RULES_ON)
     results = {r.name: r for r in lifecycle.evaluate_gate(project, "release")}
+    # the tip declares no list of its own (that is the ambiguity), so the
+    # location is the tip entry's own line -- the file position to open to
+    # resolve the conflict
     assert results["open_tasks"].offenders == [
-        "LOG-009: conflicting task list (task reconciliation required)"
+        "LOG-009: conflicting task list (task reconciliation required) "
+        f"(items/log.yaml:{_line_of(tmp_path, 'id: LOG-009')})"
     ]
 
 
-def test_open_tasks_names_a_lone_thread_head_provisionally(tmp_path):
-    """Provisional design decision (plan doesn't settle it): a lone entry
-    with no `follows:` at all is fold_tasks' own "thread of one -- the
-    ordinary log head the first task list is written on", so its open task
-    blocks. If the owner decides only edge-bearing threads count, this test
-    flips."""
+def test_open_tasks_names_a_lone_thread_head(tmp_path):
+    """Owner decision (PR #193): a lone entry with no `follows:` at all is
+    fold_tasks' own "thread of one -- the ordinary log head the first task
+    list is written on", so its open task blocks."""
     lone = (
         "defaults: { type: log }\n"
         "items:\n"
@@ -627,13 +663,15 @@ def test_open_tasks_names_a_lone_thread_head_provisionally(tmp_path):
     )
     project = _h8_project(tmp_path, lone, H8_GATE_RULES_ON)
     results = {r.name: r for r in lifecycle.evaluate_gate(project, "release")}
-    assert results["open_tasks"].offenders == ["LOG-001: open task t1"]
+    assert results["open_tasks"].offenders == [
+        f"LOG-001: open task t1 (items/log.yaml:{_line_of(tmp_path, 'id: t1')})"
+    ]
 
 
 def test_revision_half_can_be_enabled_for_both_rules_through_the_overlay(tmp_path):
-    """Design posture (open question in the PR): both rules' revision half
-    is overlay-enable-able like every other rule's; nothing special-cases
-    them out of it."""
+    """Owner decision (PR #193): both rules' revision half is
+    overlay-enable-able like every other rule's; nothing special-cases them
+    out of it."""
     project = _h8_project(
         tmp_path,
         H8_OPEN_TASK_THREAD,
