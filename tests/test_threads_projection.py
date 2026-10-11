@@ -694,3 +694,58 @@ def test_thread_names_the_entries_the_store_holds_captures_for(tmp_path):
     assert view["captured"] == [
         {"entry": "LOG-001", "kind": "followed", "occurred_at": None}
     ]
+
+
+# ------------------------------------------------------- the project-wide worklist (H7c)
+
+
+def test_project_derived_lists_each_item_gap_once_project_wide(tmp_path):
+    """H7c's whole-project derived block. The item-level rows are the SAME rows
+    the per-thread derived block reads (`_rows_for_subject`), but computed over
+    every local item once: REQ-002 is open coverage that no thread touches, so
+    no per-thread block would ever show it, while the worklist must (it is a
+    real gap). Each row is present exactly once (no thread scoping to double a
+    gap two threads could touch), and the ordering follows §5's table
+    (coverage < blocked < citation) so the derived block is deterministic."""
+    project = _derived_project(tmp_path)
+    rows = threads.project_derived(project)
+    seen = [(row["kind"], row["ref"]) for row in rows]
+    # REQ-002 is nobody's thread row but the project's own coverage gap.
+    assert ("coverage", "REQ-002") in seen
+    # The per-thread gap still appears, once.
+    assert ("coverage", "REQ-001") in seen
+    assert ("blocked", "LOG-001") in seen
+    assert ("citation", "LOG-001") in seen
+    # Exactly once each, no duplicates from scoping.
+    assert len(seen) == len(set(seen))
+    # Ordering matches §5's table: all coverage rows before all blocked rows.
+    assert sorted(
+        seen, key=lambda r: ({"coverage": 0, "verdict": 1, "blocked": 2, "check": 3, "citation": 4, "fork": 5})[r[0]]
+    ) == seen
+
+
+def test_project_derived_adds_verdict_and_fork_rows_from_the_projection(tmp_path):
+    """The two row kinds unique to the whole-project listing, read from the
+    projection (no fold recomputed): a `verdict` row for a branch whose folded
+    status is still an open decision (`proposed`), and a `fork` row naming each
+    forked thread's own tips. The head's `accepted` list is settled, so it is
+    not a worklist row (rule 4 pairs it with its open tasks instead)."""
+    project = _project(tmp_path, FORK)
+    views = threads.threads_projection(project)
+    rows = threads.project_derived(project, threads=views)
+    verdict = [row for row in rows if row["kind"] == "verdict"]
+    assert [(row["ref"], row["status"]) for row in verdict] == [("LOG-002", "proposed")]
+    fork = [row for row in rows if row["kind"] == "fork"]
+    assert [(row["ref"], row["tips"]) for row in fork] == [("LOG-001", ["LOG-002", "LOG-003"])]
+
+
+def test_project_derived_writes_nothing_and_reads_no_clock(tmp_path):
+    """The same two reproducibility guarantees the projection carries: the
+    worklist is a pure read and its bytes never move with the wall clock."""
+    project = _derived_project(tmp_path)
+    before = _snapshot(tmp_path)
+    first = json.dumps(threads.project_derived(project), sort_keys=True, default=str)
+    with mock.patch("time.time", return_value=1_700_000_000.0):
+        second = json.dumps(threads.project_derived(project), sort_keys=True, default=str)
+    assert first == second
+    assert _snapshot(tmp_path) == before

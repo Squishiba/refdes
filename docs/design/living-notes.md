@@ -521,13 +521,19 @@ sub-decisions are recorded in `docs/design/thread-workbench.md` §7a.
 Landed later (2026-10-11, plan §H7 chunk B): `refdes thread <ref>` exists —
 it renders one entry of `refdes.threads.threads_projection` (the same
 projection the `index` payload carries under `threads`), and its real output
-is documented in `docs/cli-reference.md`. `refdes work` is still chunk C and
-does not exist. The sketch below stays the shape it was decided against; the
-one thing it implied that the store does *not* provide is a timestamp on a
-`followed` or `followed-corrected` capture line — H2 deliberately writes no
-clock on either, so the line spells its capture kind in plain words and names
-a time only when the event actually carries one (an explicit
-`refdes history capture`).
+is documented in `docs/cli-reference.md`. Landed next (2026-10-11, plan §H7
+chunk C): `refdes work` exists — the whole-project worklist of §5's "Generated
+worklist", reading `threads_projection` for the authored/tip/verdict/fork data
+and `threads.project_derived` for the derived block; its real output is
+documented in `docs/cli-reference.md` too. The sketch below stays the shape it
+was decided against; the one thing it implied that the store does *not*
+provide is a timestamp on a `followed` or `followed-corrected` capture line —
+H2 deliberately writes no clock on either, so the line spells its capture kind
+in plain words and names a time only when the event actually carries one (an
+explicit `refdes history capture`). The one row of §5's worklist table
+`refdes work` does **not** print is remote citation drift: it is networked
+(`citations.refresh`, under `check --refresh` only) and `work` never touches
+the network, so it reports `unpinned`/`cache_missing` and not drift.
 
 Proposed CLI, explicitly a sketch rather than current behavior:
 

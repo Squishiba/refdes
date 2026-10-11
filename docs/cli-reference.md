@@ -2,7 +2,7 @@
 
 ```
 usage: refdes [-h] [-V] [-c CONFIG] [--no-write]
-              {serve,build,check,revision,release,index,ls,thread,id,fetch,audit,init,new,schema,standard,keys,revise,calc-rewrite,stub-tests,former-ids,history} ...
+              {serve,build,check,revision,release,index,ls,thread,work,id,fetch,audit,init,new,schema,standard,keys,revise,calc-rewrite,stub-tests,former-ids,history} ...
 ```
 
 | Global option | Effect |
@@ -524,18 +524,28 @@ Tasks at LOG-003:
   1. [ ] T-decoupling  Recheck decoupling near U14.  (open since LOG-003, 2026-09-03)
 
 Derived (auto clears when fixed):
-  coverage  REQ-001  unverified
-  citation  LOG-002  unpinned
+  Coverage:
+    REQ-001  unverified
+  Citations:
+    LOG-002  unpinned
 ```
 
 The structure is the design (§5's binding rules), not styling: the authored
 tasks and the derived rows are **two separate blocks with separate
 numbering** — derived rows carry no number and no checkbox, they exist only
 while their gap does, and nothing here is ever written back into `tasks:`.
+Inside the derived block each kind with rows gets a small heading
+(`Coverage:`, `Verdicts:`, `Blocked:`, `Failing checks:`, `Citations:`,
+`Forks:` — in that one shared order), and its rows print without a kind
+column because the heading names them; a kind with no rows prints nothing,
+and a block with no rows at all prints `(none)`.
 Every open task prints **the entry that declared it and that entry's date**;
-a folded verdict prints **with** its tip's open tasks (the `concluding` line
-above is a verdict never alone), and a fork prints one labelled block per
-open tip — there is no single current status to print. A fold that *refused*
+a folded verdict prints **with** its tip's open tasks (the `1 open task
+remaining below` line above is a verdict never alone), and a fork prints one
+labelled block per tip — every tip, even one whose list is settled (unlike
+`refdes work`, `thread` is the thread's view, not a worklist) — and never a
+single current status.
+A fold that *refused*
 (two entries at the same distance declaring different statuses) prints
 `Verdict: conflicting …` rather than pretending nothing concluded; a task fold
 that refused prints `task reconciliation required`.
@@ -546,17 +556,21 @@ that refused prints `task reconciliation required`.
 | `--as-of DATE` | Print open-task ages as a relative span measured against DATE. Without it the output prints the absolute declaring date and no span, so the bytes never depend on the wall clock. Not combinable with `--json` (exit 2): the projection is clock-free by design |
 
 ```console
-$ refdes thread LOG-102 --as-of 2026-09-12
-Thread: LOG-101 -> LOG-102  (one tip)
-Snapshot Captured: LOG-101 (followed by later entry)
+$ refdes thread LOG-002 --as-of 2026-09-12
+Thread: LOG-001 -> LOG-002  (one tip)
+Snapshot Captured: LOG-001 (followed by later entry)
 
-Tip: LOG-102  2026-09-09  Idle current measured.
-Verdict: accepted (LOG-102, 2026-09-09), 1 open task remaining below
+Tip: LOG-002  2026-09-02  Thermal modelling accepted.
+Verdict: accepted (LOG-002, 2026-09-02), 1 open task remaining below
 Tasks at tip:
-  1. [ ] T-idle  Measure idle current.  (open since LOG-101, 2026-09-08 -- 4 days)
+  1. [ ] T-thermal-model  Model worst-case copper temperature.  (open since LOG-001, 2026-08-30 -- 13 days)
+  2. [x] T-input-range  Check the 36 V input case.
 
 Derived (auto clears when fixed):
-  (none)
+  Coverage:
+    REQ-001  unverified
+  Citations:
+    LOG-002  unpinned
 ```
 
 The capture line prints what the store actually holds, in plain words: a
@@ -579,6 +593,125 @@ Like `ls`, the command itself writes nothing beyond the load's own key
 minting/expansions — which, like `index` (and unlike `ls`), it announces on
 **stderr**, so the thread's answer is the only thing on stdout even on a
 never-opened project. Its build never writes a seal.
+
+---
+
+## `refdes work`
+
+The project-wide worklist of
+[living-notes.md §5](design/living-notes.md) as a command: every thread tip's
+**open** authored tasks, then one labelled block of every derived gap that can
+be computed offline. It is the whole-project sibling of `refdes thread` and
+reads the same `threads_projection` — the authored-task, tip, verdict, and fork
+data is the exact answer the index payload carries and `refdes thread` renders;
+the derived block is `refdes.threads.project_derived`, the same per-item rows
+the per-thread derived block reads, computed once over the whole project. The
+command computes no fold, coverage stage, or check of its own, and it never
+touches the network.
+
+```console
+$ refdes work
+Worklist:
+
+Thread: LOG-001 -> LOG-002  (one tip)
+Verdict: accepted (LOG-002, 2026-09-02), 1 open task remaining below
+Tasks at tip:
+  1. [ ] T-thermal-model  Model worst-case copper temperature.  (open since LOG-001, 2026-08-30)
+
+Derived (auto clears when fixed):
+  Coverage:
+    REQ-001  unverified
+  Citations:
+    LOG-002  unpinned
+```
+
+The **two groups are structurally separate** (§5's binding rules, not styling):
+the authored open tasks print first, numbered per tip with a checkbox and their
+declaring age (`open since LOG-001, 2026-08-30`); the derived block prints
+after, **unnumbered and with no checkbox** — a derived row has nothing to tick,
+it exists exactly while its gap does and disappears when the gap closes, and
+nothing here is ever written back into `tasks:`. A tip with nothing open
+contributes no authored block, so the listing stays honest about what is
+actually left to do. A **concluding** verdict (a status in the type's
+`satisfying_statuses:`) with open tasks at its tip prints **with** those tasks
+(the `1 open task remaining below` line above), never alone; a
+**proposed/on-hold** verdict is not settled and prints as a `verdict` derived
+row instead.
+
+The derived block groups the offline kinds under small headings, one per
+kind that has rows, in this one order (shared with `refdes thread`, and the
+order §5's table lists):
+
+| Row | Producer |
+| --- | --- |
+| `coverage` uncovered / unverified active requirements | `lifecycle._rule_uncovered_requirements` / `_rule_unverified_requirements` |
+| `verdict` proposed / on-hold thread verdicts | `threads_projection` branch verdict (the `chains.fold_field_at_tip` status fold) |
+| `blocked` blocked-by cascades and stale blockers | `blocked.resolve` / `blocked.by_item` |
+| `check` failing checks | `build.run_checks` (`item.checks`) |
+| `citation` unpinned citations / missing kept copies | `citations.verify` (the `_rule_unpinned_citations` / `_rule_missing_kept_copies` states) |
+| `fork` forked threads | `threads_projection` forked views (`chains.thread_tips`) |
+
+**Remote citation drift is deliberately absent.** It is the one row in §5's
+table that is networked — `citations.refresh`, reachable only under `refdes
+check --refresh` — and `refdes work` never touches the network, so it reports
+`unpinned` / `cache_missing` (offline facts) and not drift.
+
+A fork names every tip in its header and prints the open tips each with
+their own `Tasks at <tip>:` block, no single current status anywhere; the
+fork itself is a derived row:
+
+```console
+$ refdes work
+Worklist:
+
+Thread: LOG-001  (forked: tips LOG-002, LOG-003)
+Tasks at LOG-002:
+  1. [ ] T-thermal-model  Model worst-case copper temperature.  (open since LOG-001, 2026-08-30)
+Tasks at LOG-003:
+  1. [ ] T-decoupling  Recheck decoupling near U14.  (open since LOG-003, 2026-09-03)
+
+Derived (auto clears when fixed):
+  Verdicts:
+    LOG-002  proposed
+  Forks:
+    LOG-001  tips LOG-002, LOG-003
+```
+
+A fork tip whose own task list is settled prints **no** empty
+`Tasks at <tip>:` block — a worklist lists open work — while the forked
+header and the `fork` row above still name every tip, so nothing is lost;
+`refdes thread`, being the thread's view rather than a worklist, still
+prints every tip's block.
+
+| Flag | Meaning |
+| --- | --- |
+| `--json` | Print the worklist projection as JSON — `{"threads": [...], "derived": [...]}`, the `threads` array being exactly what `index` carries under `threads` (the object gains a `diagnostics` entry, shaped like the index payload's, only when the history store refused to be read and the threads' capture data is therefore missing) |
+| `--as-of DATE` | Print open-task ages as a relative span measured against DATE. Without it the output prints the absolute declaring date and no span, so the bytes never depend on the wall clock. Not combinable with `--json` (exit 2): the projection is clock-free by design |
+
+```console
+$ refdes work --as-of 2026-09-12
+Worklist:
+
+Thread: LOG-001 -> LOG-002  (one tip)
+Verdict: accepted (LOG-002, 2026-09-02), 1 open task remaining below
+Tasks at tip:
+  1. [ ] T-thermal-model  Model worst-case copper temperature.  (open since LOG-001, 2026-08-30 -- 13 days)
+
+Derived (auto clears when fixed):
+  Coverage:
+    REQ-001  unverified
+  Citations:
+    LOG-002  unpinned
+```
+
+`refdes work` is a **read/list command, not a gate** (the release gate is a
+later phase), so a non-empty worklist — every gap in the project — still exits
+**0**; a file that failed to parse is reported on stderr with the rest of the
+listing intact and exits **1** (like `ls`/`thread`). Like `thread` (and unlike
+`ls`), the load's own key-minting/expansion notice is announced on **stderr**
+even in text mode, so the worklist is the only thing on stdout and `--json`
+parses even on a never-opened project. The command itself writes nothing
+beyond that load, and its build never writes a seal.
 
 ---
 

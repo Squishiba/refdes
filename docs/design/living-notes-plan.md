@@ -448,6 +448,31 @@ fact joined the projection (`captured`) so the CLI reads it instead of
 opening the store. `refdes work` (chunk C) stays open. See
 `in-prog-logs/living-notes-h7b-thread-cli.txt` and `tests/test_thread_cli.py`.
 
+**Landed (chunk C — `refdes work`)** — `cmd_work` renders the whole-project
+worklist of §5's "Generated worklist": the authors' open tasks at each thread
+tip (numbered per tip; a fork names every tip and no single current status,
+and under the owner's 2026-10-11 answers prints a `Tasks at <tip>:` block
+only for tips that still have open work),
+then one labelled `Derived (auto clears when fixed)` block whose rows are
+grouped under a small heading per kind (the same owner answers; the shared
+renderer `_derived_lines` and heading dict `THREAD_DERIVED_GROUP_HEADINGS`
+are reused by `refdes thread`, whose per-thread derived block gained the
+same grouping and the one shared kind order — `threads._KIND_ORDER`, visible
+there as `Blocked:` before `Failing checks:`). The thread half is
+`threads_projection`; the derived half is a new `threads.project_derived` (over
+`chains.build_graph`) reusing `_derived`'s per-item row builder, plus the two
+whole-project-only rows read from the projection: `verdict` (a branch whose
+folded status is still `proposed`/`on_hold`) and `fork` (a forked thread and
+its tips). Offline kinds only — remote citation drift is `citations.refresh`
+(networked, `check --refresh` only), so it is deliberately absent, and the
+docs say so. `--json` prints `{threads, derived}` and its load-write notices
+go to stderr (so stdout is valid JSON on a first run that mints keys);
+`--as-of` renders relative spans only under it (and is refused with `--json`).
+A read/list command, not a gate (H8 is): a non-empty worklist exits 0, it
+writes nothing (tree-hash test around it, and on a `sealing: build` type whose
+`build` really does write `.refdes/log-seal.yaml`). See
+`in-prog-logs/living-notes-h7c-work-cli.txt` and `tests/test_work.py`.
+
 ## Phase H8 — two optional release-gate rules, both off
 
 **Adds.** `open_tasks` (a release blocks while any thread tip carries an open

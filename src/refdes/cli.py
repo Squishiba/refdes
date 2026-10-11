@@ -813,6 +813,21 @@ _THREAD_GLYPHS = {"open": "[ ]", "done": "[x]", "dropped": "[-]"}
 #: The derived block's heading: self-closing said in plain words.
 THREAD_DERIVED_HEADING = "Derived (auto clears when fixed):"
 
+#: The derived block's small per-kind headings (owner decision, 2026-10-11):
+#: the block is grouped under one heading per kind that has rows, and a row
+#: inside its group drops the kind column -- the heading names it. Both
+#: commands render through `cli._derived_lines`, and the kinds appear in the
+#: ONE order `threads._KIND_ORDER` sorts them in, so these words are spelled
+#: here once and nowhere else.
+THREAD_DERIVED_GROUP_HEADINGS = {
+    "coverage": "Coverage",
+    "verdict": "Verdicts",
+    "blocked": "Blocked",
+    "check": "Failing checks",
+    "citation": "Citations",
+    "fork": "Forks",
+}
+
 #: The capture line's prefix.
 THREAD_CAPTURE_PREFIX = "Snapshot Captured:"
 
@@ -879,6 +894,99 @@ def _thread_age_suffix(row: dict, as_of, date_format: str) -> str:
     return text + ")"
 
 
+def _thread_header(view: dict) -> str:
+    """The thread's own header line, spelled once for `refdes thread` and
+    `refdes work`: a one-tip thread prints its chain, a forked thread names
+    every tip (and there is no thread-level status to print -- §5 rule 5)."""
+    if view["forked"]:
+        return f"Thread: {view['ref']}  (forked: tips {', '.join(view['tips'])})"
+    return f"Thread: {' -> '.join(view['entries'])}  (one tip)"
+
+
+def _task_row_lines(rows: list[dict], as_of, date_format: str) -> list[str]:
+    """The authored task rows, spelled once for both commands so a task row
+    never reads differently in the two (§5's binding rules fix the
+    *structure*; the two commands owe the reader the same task line).
+    Numbering restarts at 1 for the given rows, so a caller lists a tip's
+    full block or (in `work`) just its open rows and each is numbered
+    within. `id`/`text` may be explicitly null in the authored YAML
+    (validation owns the error) -- `or` renders those as `?`/empty rather
+    than printing the literal "None"."""
+    out = []
+    for number, row in enumerate(rows, start=1):
+        glyph = _THREAD_GLYPHS.get(row.get("state"), "[?]")
+        age = (
+            _thread_age_suffix(row, as_of, date_format)
+            if row.get("state") == "open"
+            else ""
+        )
+        out.append(
+            f"  {number}. {glyph} {row.get('id') or '?'}  {row.get('text') or ''}{age}"
+        )
+    return out
+
+
+def _verdict_line(verdict: dict, open_rows: list[dict]) -> str:
+    """One folded verdict as a line, spelled once for both commands. A fold
+    that *refused* (§5 rule 3) prints the projection's own state word
+    (`threads.VERDICT_CONFLICTING`) -- never displayed as though nothing had
+    concluded, and never spelled a second way; a `concluding` verdict with
+    open tasks at its tip says how many remain below (rule 4's "never
+    alone", via the shared `_thread_verdict_suffix`). `open_rows` is that
+    tip's open tasks (already the empty list when there are none)."""
+    if verdict["state"] == threads_mod.VERDICT_CONFLICTING:
+        return (
+            f"Verdict: {verdict['state']} -- entries at the same distance "
+            "declare different statuses; a continuation must declare one "
+            "explicitly"
+        )
+    on = f", {verdict['declared_on']}" if verdict["declared_on"] else ""
+    return (
+        f"Verdict: {verdict['status']} ({verdict['declared_by']}{on})"
+        f"{_thread_verdict_suffix(verdict, len(open_rows))}"
+    )
+
+
+def _derived_detail(row: dict) -> str:
+    """The right-hand column of a derived row, spelled once for both
+    commands. The `verdict`/`fork` kinds only ever appear in `refdes work`'s
+    whole-project block; the per-thread block carries none of them."""
+    kind = row["kind"]
+    if kind == "check":
+        return f"{row['value']} violates {row['against']}"
+    if kind == "blocked":
+        stale = " (stale)" if row["stale"] else ""
+        return f"by {row['root']} ({row['root_status']}){stale}"
+    if kind == "verdict":
+        return row["status"]
+    if kind == "fork":
+        return "tips " + ", ".join(row["tips"])
+    return row["problem"]
+
+
+def _derived_lines(rows: list[dict]) -> list[str]:
+    """The derived block's body, spelled once for both commands: a small
+    heading per kind that has rows (owner decision, 2026-10-11), each row
+    printed under its kind's heading as `ref  detail` — no kind column
+    (the heading names it), no number and no checkbox (§5 rules 1/2 -- a
+    derived row has nothing to tick). Only kinds with rows print; when no
+    kind has any, `(none)` rather than nothing (the group's presence is
+    part of the two-groups structure, not a report of findings). The rows
+    arrive sorted by `threads._KIND_ORDER` then ref from both producers,
+    so the groups appear in that one order and rows within a kind in ref
+    order."""
+    if not rows:
+        return ["  (none)"]
+    out: list[str] = []
+    current: str | None = None
+    for row in rows:
+        if row["kind"] != current:
+            current = row["kind"]
+            out.append(f"  {THREAD_DERIVED_GROUP_HEADINGS[current]}:")
+        out.append(f"    {row['ref']}  {_derived_detail(row)}")
+    return out
+
+
 def cmd_thread(args) -> int:
     """One thread's view: tip, capture line, tasks with age, derived rows.
 
@@ -939,7 +1047,7 @@ def cmd_thread(args) -> int:
         )
         return 2
     build_mod.build(project, seal_write=False, reseal=False)
-    label = threads_mod._label(item)
+    label = threads_mod.entry_label(item)
     # One read of the capture store for the whole run (threads_projection
     # takes the index it returns), and its failure kept in hand: the
     # projection stays silent by design, so this command is the one that
@@ -980,10 +1088,7 @@ def cmd_thread(args) -> int:
             file=sys.stderr,
         )
 
-    if view["forked"]:
-        print(f"Thread: {view['ref']}  (forked: tips {', '.join(view['tips'])})")
-    else:
-        print(f"Thread: {' -> '.join(view['entries'])}  (one tip)")
+    print(_thread_header(view))
     for cap in view["captured"]:
         print(_thread_capture_line(cap))
     single = not view["forked"]
@@ -993,26 +1098,11 @@ def cmd_thread(args) -> int:
         print(f"Tip: {branch['tip']}{date}  {branch['summary']}")
         verdict = branch["verdict"]
         if verdict is not None:
-            if verdict["state"] == threads_mod.VERDICT_CONFLICTING:
-                # §5 rule 3's posture for `status`, said as itself -- never
-                # displayed as though nothing had concluded. The state word
-                # is the projection's own, spelled once (H7c reuses it).
-                print(
-                    f"Verdict: {verdict['state']} -- entries at the same "
-                    "distance declare different statuses; a continuation "
-                    "must declare one explicitly"
-                )
-            else:
-                open_rows = [
-                    row for row in (branch["tasks"]["rows"] or [])
-                    if row.get("state") == "open"
-                ]
-                suffix = _thread_verdict_suffix(verdict, len(open_rows))
-                on = f", {verdict['declared_on']}" if verdict["declared_on"] else ""
-                print(
-                    f"Verdict: {verdict['status']} "
-                    f"({verdict['declared_by']}{on}){suffix}"
-                )
+            open_rows = [
+                row for row in (branch["tasks"]["rows"] or [])
+                if row.get("state") == "open"
+            ]
+            print(_verdict_line(verdict, open_rows))
         heading = "Tasks at tip:" if single else f"Tasks at {branch['tip']}:"
         tasks = branch["tasks"]
         if tasks["state"] == "ambiguous":
@@ -1025,34 +1115,154 @@ def cmd_thread(args) -> int:
             malformed = tasks.get("malformed")
             note = f" ({malformed} malformed row(s) not shown)" if malformed else ""
             print(f"{heading}{note}" if note else heading)
-            for number, row in enumerate(tasks["rows"], start=1):
-                glyph = _THREAD_GLYPHS.get(row.get("state"), "[?]")
-                age = (
-                    _thread_age_suffix(row, as_of, project.date_format)
-                    if row.get("state") == "open"
-                    else ""
-                )
-                print(
-                    f"  {number}. {glyph} {row.get('id', '?')}  "
-                    f"{row.get('text', '')}{age}"
-                )
+            for line in _task_row_lines(tasks["rows"], as_of, project.date_format):
+                print(line)
     print()
     print(THREAD_DERIVED_HEADING)
-    rows = view["derived"]
-    if not rows:
-        print("  (none)")
-    else:
-        width = max(len(row["kind"]) for row in rows)
-        for row in rows:
-            kind = row["kind"].ljust(width)
-            if row["kind"] == "check":
-                detail = f"{row['value']} violates {row['against']}"
-            elif row["kind"] == "blocked":
-                stale = " (stale)" if row["stale"] else ""
-                detail = f"by {row['root']} ({row['root_status']}){stale}"
+    for line in _derived_lines(view["derived"]):
+        print(line)
+    return 1 if load_errors else 0
+
+
+def _work_authored_blocks(threads: list[dict], as_of, date_format: str) -> list[list[str]]:
+    """The authored group of `refdes work`: one block per thread that has any
+    open task, reusing `refdes thread`'s header, verdict line and task rows
+    (all spelled once in the helpers above).
+
+    It is a *worklist*, so a tip with no open task contributes no block; a tip
+    whose own task fold refused still prints its `task reconciliation required`
+    line (the author's error, not silently dropped, and there is no list to
+    show for it). A `concluding` verdict prints directly above its tip's open
+    tasks (rule 4, via the shared `_verdict_line`) — never a verdict alone. On
+    a fork the shared header names every tip and each tip gets its own block;
+    no thread-level status line is ever printed (rule 5)."""
+    blocks: list[list[str]] = []
+    for view in threads:
+        single = not view["forked"]
+        lines: list[str] | None = None
+        for branch in view["branches"]:
+            tasks = branch["tasks"]
+            state = tasks["state"]
+            if state == "ambiguous":
+                open_rows: list[dict] | None = None
             else:
-                detail = row["problem"]
-            print(f"  {kind}  {row['ref']}  {detail}")
+                open_rows = [row for row in (tasks["rows"] or []) if row.get("state") == "open"]
+                if not open_rows:
+                    continue
+            if lines is None:
+                lines = [_thread_header(view)]
+            heading = "Tasks at tip:" if single else f"Tasks at {branch['tip']}:"
+            if state == "ambiguous":
+                lines.append(f"{heading} task reconciliation required")
+                continue
+            verdict = branch["verdict"]
+            if verdict is not None and (
+                verdict["state"] == threads_mod.VERDICT_CONFLICTING or verdict["concluding"]
+            ):
+                lines.append(_verdict_line(verdict, open_rows))
+            lines.append(heading)
+            lines.extend(_task_row_lines(open_rows, as_of, date_format))
+        if lines is not None:
+            blocks.append(lines)
+    return blocks
+
+
+def cmd_work(args) -> int:
+    """The project-wide worklist: every thread tip's open authored tasks, then
+    one labelled, self-closing derived block of every gap `refdes work` can
+    produce offline.
+
+    §5's "Generated worklist" as a command. The thread half is the same
+    `threads_projection` answer `refdes thread` renders and the index carries;
+    the derived half is `threads.project_derived` — the exact per-item rows the
+    per-thread block reads, computed once over the whole project, plus the
+    proposed/on-hold verdict and fork rows read from the projection. The command
+    computes no fold, coverage stage, or check of its own. It never touches the
+    network: remote citation drift is `citations.refresh` under `check --refresh`
+    alone, so it is deliberately absent (§5's table names it as the one
+    networked row). Writes nothing but the load's own key minting/expansions;
+    the build runs `seal_write=False` like `index`/`ls`/`thread`.
+
+    The two groups (§5 rule 1) print as separate blocks with separate numbering:
+    the authored open tasks numbered per tip, the derived rows unnumbered with
+    nothing to tick and never written back. Every open task prints its declaring
+    entry and date (§5 rule 3), a relative span appearing only under `--as-of`
+    so the bytes never depend on the wall clock; a `concluding` verdict prints
+    with its tip's open tasks (rule 4); a fork prints one block per tip and no
+    single current status (rule 5). This is a read/list command, not a gate (H8
+    is the gate), so a non-empty worklist exits 0.
+    """
+    project, _stale = _load(args, require_ids=False)
+    # The load's own writes go to stderr, not stdout, like `thread` after its
+    # fix round: this command's stdout is its answer (--json's object, or the
+    # listing itself), and a "(minted N key(s) while loading)" line printed
+    # ahead of it breaks `work --json | jq` on every cold project.
+    # `name_blocked` stays True because the worklist payload carries the
+    # capture-store failure's `diagnostics` entry only, not the load's refused
+    # files, so the summary line is still the one place they could be said.
+    _announce_load_writes(project, stream=sys.stderr)
+    load_errors = project.errors
+    for d in load_errors:
+        print(str(d), file=sys.stderr)
+    as_of = None
+    if args.as_of is not None:
+        if args.json:
+            # --as-of is a rendering option; --json is the clock-free
+            # projection (§5 rule 3). Refuse the combination rather than
+            # silently ignore it.
+            print(
+                "error: --as-of renders relative ages in the text output; "
+                "--json prints the worklist projection, which carries absolute "
+                "dates only -- the two cannot combine",
+                file=sys.stderr,
+            )
+            return 2
+        try:
+            as_of = dates_mod.parse_date(args.as_of, project.date_format)
+        except ValueError as exc:
+            print(f"error: --as-of {args.as_of!r}: {exc}", file=sys.stderr)
+            return 2
+    build_mod.build(project, seal_write=False, reseal=False)
+    # One read of the capture store for the whole run (like `thread`'s B3
+    # fix): the projection stays silent by design, so this command is the
+    # surface that has to say so when the capture lines would vanish.
+    captures, store_error = threads_mod.capture_facts(project)
+    work = threads_mod.work_projection(project, captures=captures)
+    if args.json:
+        if store_error is not None:
+            # Same entry shape as the index payload's `diagnostics` (and
+            # `thread --json`'s), so a consumer that reads every door sees
+            # the same warning shape. The text worklist needs no sentence
+            # of its own: it prints no capture lines at all, so the store
+            # failure only ever degrades the `threads` half carried here.
+            work["diagnostics"] = [
+                {
+                    "level": "warning",
+                    "message": (
+                        f"the worklist's captured lines may be missing: {store_error}"
+                    ),
+                    "file": None,
+                    "line": None,
+                    "item": None,
+                }
+            ]
+        json.dump(work, sys.stdout, indent=2, ensure_ascii=False, default=str)
+        sys.stdout.write("\n")
+        return 1 if load_errors else 0
+
+    print("Worklist:")
+    blocks = _work_authored_blocks(work["threads"], as_of, project.date_format)
+    if not blocks:
+        print("  (no open tasks authored)")
+    else:
+        for block in blocks:
+            print()
+            for line in block:
+                print(line)
+    print()
+    print(THREAD_DERIVED_HEADING)
+    for line in _derived_lines(work["derived"]):
+        print(line)
     return 1 if load_errors else 0
 
 
@@ -2566,6 +2776,41 @@ def main(argv: list[str] | None = None) -> int:
         "dates only (not combinable with --json)",
     )
     p_thread.set_defaults(func=cmd_thread)
+
+    p_work = sub.add_parser(
+        "work",
+        help="the project-wide worklist: open tasks at every thread tip, plus derived gaps",
+        description="The whole-project worklist of docs/design/living-notes.md "
+        "section 5 as a command. Two structurally separate groups with separate "
+        "numbering: the authors' own open tasks at each thread tip (numbered, "
+        "one block per tip; a fork prints every tip and no single current "
+        "status), then a labelled `Derived (auto clears when fixed)` block of "
+        "every gap that can be produced offline -- uncovered/unverified active "
+        "requirements, proposed/on-hold verdicts, blocked-by cascades and stale "
+        "blockers, failing checks, unpinned citations and missing kept copies, "
+        "forked threads. Derived rows are unnumbered, carry no checkbox, exist "
+        "only while their gap does, and are never written back. The thread half "
+        "is the same threads_projection the index payload carries and `refdes "
+        "thread` renders; the derived half is threads.project_derived over the "
+        "whole project -- the command computes no fold, coverage stage, or check "
+        "of its own. Remote citation drift is not here: it is networked "
+        "(`citations.refresh`, under `check --refresh` only) and this command "
+        "never touches the network. A read/list command, not a gate (H8 is the "
+        "gate), so a non-empty worklist exits 0; it writes nothing beyond the "
+        "load's own key minting/expansions.",
+    )
+    p_work.add_argument(
+        "--json",
+        action="store_true",
+        help="print the worklist projection as JSON ({threads, derived})",
+    )
+    p_work.add_argument(
+        "--as-of",
+        metavar="DATE",
+        help="render open-task ages relative to DATE instead of absolute "
+        "dates only (not combinable with --json)",
+    )
+    p_work.set_defaults(func=cmd_work)
 
     p_id = sub.add_parser("id", help="allocate IDs for items that have none")
     p_id.add_argument("--dry-run", action="store_true", help="show without writing")
