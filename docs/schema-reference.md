@@ -280,6 +280,7 @@ link_types:
 | `label` | the link name | Heading shown on item pages |
 | `trace` | `true` | Whether this link type participates in a `{{cascade}}` block's default walk (see [generated blocks](blocks.md)) |
 | `doc` | not set | The verb's own definition — see [`doc`](#doc) |
+| `differs_from` | not set | One sentence per confusable neighbour — see [`differs_from`](#differs_from) |
 
 Either end resolves to the same edge, so a type may declare `verifies` even though
 `verified_by` is the name in `link_types`. See [links](links.md).
@@ -336,6 +337,7 @@ types:
 | `coverable_statuses` | not set — excludes `status: retired` if a `status` field exists, nothing otherwise | `status` values that keep an item in coverage; unlisted statuses (e.g. `draft`) are excluded entirely, not just "open" |
 | `verifying_statuses` | not set — every `verifies:` link counts | `status` values on a verifier (a type declaring a `verifies`-family link) that actually count as having verified, as opposed to merely linked; mirrors `satisfying_statuses` |
 | `doc` | not set | The type's own definition — see [`doc`](#doc) |
+| `differs_from` | not set | One sentence per confusable neighbour — see [`differs_from`](#differs_from) |
 
 `satisfying_statuses` requires the type to declare a `status` field — the project
 fails to load if it doesn't.
@@ -398,6 +400,7 @@ type, or `requirement`).
 | `default` | Applied when the item omits the field |
 | `on_change` | `invalidate`, `log`, or `ignore` |
 | `doc` | The field's own definition — see [`doc`](#doc) |
+| `differs_from` | One sentence per confusable neighbour — see [`differs_from`](#differs_from) |
 
 ### `doc`
 
@@ -441,6 +444,51 @@ editor description.
 The generated vocabulary reference and diagram that will read these definitions
 is [design finding 38](design/backlog.md); this is chunk 1 of it — the key, not
 the dictionary.
+
+### `differs_from`
+
+```yaml
+# refdes-schema.yaml
+link_types:
+  alternate:
+    inverse: alternate
+    doc: This component is functionally close to that one but not a drop-in: check before substituting.
+    differs_from:
+      drop_in: an alternate needs checking before it goes in a design; a drop-in is interchangeable as claimed, no review needed.
+types:
+  bound:
+    doc: A numeric limit the design must respect.
+    differs_from:
+      limit: the bound is the numeric the design must respect, with its rationale and coverage; the limit is only the comparison stored on it, like '>= 9 V'.
+```
+
+One sentence per confusable neighbour, written next to the definition it
+disambiguates, so the generated vocabulary page — `vocabulary.html` in a built
+site, `docs/vocabulary.md` on the docs site — renders it as a **Differs from**
+fact line under the term's definition instead of leaving two near-synonyms to
+be told apart by their `doc:` strings alone (docs/design/vocabulary-review.md
+P20). A field is not an entry on the page of its own, so its line renders under
+its definition in the type's fields table. Where the other term has its own
+entry on the page, the fact line links it.
+
+Accepted on a type, a field (including a set's field spec, which is written
+once and rides into every includer) and a link type — in the bundled standard
+and in a project's `refdes-schema.yaml` alike. The value must be a non-empty
+mapping of term name to a non-empty sentence; `differs_from: 42`,
+`differs_from: {}` and a bare `differs_from:` are configuration errors naming
+the block path. A named term must resolve in the *resolved* schema — to a type,
+a link verb (under its own or its inverse name), a set, or a field declared on
+the same type — and naming anything else is a load-time configuration error
+naming both sides, the same posture as an `include:`, `extends:`, link target
+or `required_when:` that points at what is not there. Like `doc:`, it is the
+term's own text and is never inherited through `extends:`.
+
+Nothing is rendered and nothing changes for a project that declares none: a
+term without `differs_from:` exports exactly what it exported before the key
+existed. Where it *is* declared, `refdes schema` carries it as a
+`differs_from` annotation on the type's branch, the field's fragment or the
+link's property in the emitted JSON Schema — an inert keyword for validators,
+there so the standard's disambiguation is visible from the CLI.
 
 ### `required_when`
 

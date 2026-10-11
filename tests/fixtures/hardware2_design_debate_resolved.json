@@ -15,7 +15,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": ""
+     "doc": "",
+     "differs_from": {}
     },
     "note": {
      "name": "note",
@@ -25,7 +26,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": ""
+     "doc": "",
+     "differs_from": {}
     },
     "tags": {
      "name": "tags",
@@ -35,7 +37,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": ""
+     "doc": "",
+     "differs_from": {}
     },
     "owner": {
      "name": "owner",
@@ -45,7 +48,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": ""
+     "doc": "",
+     "differs_from": {}
     },
     "last_reviewed": {
      "name": "last_reviewed",
@@ -55,7 +59,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": ""
+     "doc": "",
+     "differs_from": {}
     },
     "text": {
      "name": "text",
@@ -65,7 +70,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": ""
+     "doc": "",
+     "differs_from": {}
     },
     "status": {
      "name": "status",
@@ -79,7 +85,8 @@
      ],
      "default": "draft",
      "required_when": null,
-     "doc": ""
+     "doc": "",
+     "differs_from": {}
     },
     "rationale": {
      "name": "rationale",
@@ -89,7 +96,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": ""
+     "doc": "",
+     "differs_from": {}
     }
    },
    "links": {
@@ -112,7 +120,8 @@
     "active"
    ],
    "verifying_statuses": null,
-   "doc": ""
+   "doc": "",
+   "differs_from": {}
   },
   "bound": {
    "name": "bound",
@@ -129,7 +138,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": ""
+     "doc": "",
+     "differs_from": {}
     },
     "note": {
      "name": "note",
@@ -139,7 +149,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": ""
+     "doc": "",
+     "differs_from": {}
     },
     "tags": {
      "name": "tags",
@@ -149,7 +160,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": ""
+     "doc": "",
+     "differs_from": {}
     },
     "owner": {
      "name": "owner",
@@ -159,7 +171,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": ""
+     "doc": "",
+     "differs_from": {}
     },
     "last_reviewed": {
      "name": "last_reviewed",
@@ -169,7 +182,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": ""
+     "doc": "",
+     "differs_from": {}
     },
     "text": {
      "name": "text",
@@ -179,7 +193,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": ""
+     "doc": "",
+     "differs_from": {}
     },
     "limit": {
      "name": "limit",
@@ -189,7 +204,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": ""
+     "doc": "",
+     "differs_from": {}
     },
     "status": {
      "name": "status",
@@ -203,7 +219,8 @@
      ],
      "default": "draft",
      "required_when": null,
-     "doc": ""
+     "doc": "",
+     "differs_from": {}
     },
     "rationale": {
      "name": "rationale",
@@ -213,7 +230,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": ""
+     "doc": "",
+     "differs_from": {}
     }
    },
    "links": {
@@ -241,7 +259,8 @@
     "active"
    ],
    "verifying_statuses": null,
-   "doc": ""
+   "doc": "",
+   "differs_from": {}
   },
   "decision": {
    "name": "decision",
@@ -258,7 +277,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": ""
+     "doc": "",
+     "differs_from": {}
     },
     "note": {
      "name": "note",
@@ -268,7 +288,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": ""
+     "doc": "",
+     "differs_from": {}
     },
     "tags": {
      "name": "tags",
@@ -278,7 +299,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": ""
+     "doc": "",
+     "differs_from": {}
     },
     "owner": {
      "name": "owner",
@@ -288,7 +310,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": ""
+     "doc": "",
+     "differs_from": {}
     },
     "last_reviewed": {
      "name": "last_reviewed",
@@ -298,7 +321,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": ""
+     "doc": "",
+     "differs_from": {}
     },
     "title": {
      "name": "title",
@@ -308,7 +332,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": ""
+     "doc": "",
+     "differs_from": {}
     },
     "status": {
      "name": "status",
@@ -325,7 +350,8 @@
      ],
      "default": "proposed",
      "required_when": null,
-     "doc": ""
+     "doc": "",
+     "differs_from": {}
     },
     "rationale": {
      "name": "rationale",
@@ -337,7 +363,8 @@
      "required_when": {
       "status": "rejected"
      },
-     "doc": ""
+     "doc": "",
+     "differs_from": {}
     },
     "date": {
      "name": "date",
@@ -347,7 +374,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": ""
+     "doc": "",
+     "differs_from": {}
     },
     "options": {
      "name": "options",
@@ -357,7 +385,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": ""
+     "doc": "",
+     "differs_from": {}
     },
     "checks": {
      "name": "checks",
@@ -367,7 +396,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": ""
+     "doc": "",
+     "differs_from": {}
     }
    },
    "links": {
@@ -401,7 +431,8 @@
    "coverable": null,
    "coverable_statuses": null,
    "verifying_statuses": null,
-   "doc": ""
+   "doc": "",
+   "differs_from": {}
   },
   "test": {
    "name": "test",
@@ -418,7 +449,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": ""
+     "doc": "",
+     "differs_from": {}
     },
     "note": {
      "name": "note",
@@ -428,7 +460,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": ""
+     "doc": "",
+     "differs_from": {}
     },
     "tags": {
      "name": "tags",
@@ -438,7 +471,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": ""
+     "doc": "",
+     "differs_from": {}
     },
     "owner": {
      "name": "owner",
@@ -448,7 +482,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": ""
+     "doc": "",
+     "differs_from": {}
     },
     "last_reviewed": {
      "name": "last_reviewed",
@@ -458,7 +493,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": ""
+     "doc": "",
+     "differs_from": {}
     },
     "title": {
      "name": "title",
@@ -468,7 +504,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": ""
+     "doc": "",
+     "differs_from": {}
     },
     "status": {
      "name": "status",
@@ -483,7 +520,8 @@
      ],
      "default": "planned",
      "required_when": null,
-     "doc": ""
+     "doc": "",
+     "differs_from": {}
     },
     "method": {
      "name": "method",
@@ -493,7 +531,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": ""
+     "doc": "",
+     "differs_from": {}
     }
    },
    "links": {
@@ -517,7 +556,8 @@
    "verifying_statuses": [
     "passing"
    ],
-   "doc": ""
+   "doc": "",
+   "differs_from": {}
   },
   "component": {
    "name": "component",
@@ -534,7 +574,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": ""
+     "doc": "",
+     "differs_from": {}
     },
     "note": {
      "name": "note",
@@ -544,7 +585,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": ""
+     "doc": "",
+     "differs_from": {}
     },
     "tags": {
      "name": "tags",
@@ -554,7 +596,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": ""
+     "doc": "",
+     "differs_from": {}
     },
     "owner": {
      "name": "owner",
@@ -564,7 +607,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": ""
+     "doc": "",
+     "differs_from": {}
     },
     "last_reviewed": {
      "name": "last_reviewed",
@@ -574,7 +618,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": ""
+     "doc": "",
+     "differs_from": {}
     },
     "title": {
      "name": "title",
@@ -584,7 +629,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": ""
+     "doc": "",
+     "differs_from": {}
     },
     "part_number": {
      "name": "part_number",
@@ -594,7 +640,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": ""
+     "doc": "",
+     "differs_from": {}
     },
     "refdes": {
      "name": "refdes",
@@ -604,7 +651,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": ""
+     "doc": "",
+     "differs_from": {}
     },
     "status": {
      "name": "status",
@@ -618,7 +666,8 @@
      ],
      "default": "candidate",
      "required_when": null,
-     "doc": ""
+     "doc": "",
+     "differs_from": {}
     },
     "rationale": {
      "name": "rationale",
@@ -630,7 +679,8 @@
      "required_when": {
       "links": "alternate"
      },
-     "doc": ""
+     "doc": "",
+     "differs_from": {}
     },
     "datasheets": {
      "name": "datasheets",
@@ -640,7 +690,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": ""
+     "doc": "",
+     "differs_from": {}
     }
    },
    "links": {
@@ -670,7 +721,8 @@
    "coverable": null,
    "coverable_statuses": null,
    "verifying_statuses": null,
-   "doc": ""
+   "doc": "",
+   "differs_from": {}
   },
   "log": {
    "name": "log",
@@ -687,7 +739,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": ""
+     "doc": "",
+     "differs_from": {}
     },
     "note": {
      "name": "note",
@@ -697,7 +750,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": ""
+     "doc": "",
+     "differs_from": {}
     },
     "tags": {
      "name": "tags",
@@ -707,7 +761,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": ""
+     "doc": "",
+     "differs_from": {}
     },
     "date": {
      "name": "date",
@@ -717,7 +772,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": ""
+     "doc": "",
+     "differs_from": {}
     },
     "summary": {
      "name": "summary",
@@ -727,7 +783,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": ""
+     "doc": "",
+     "differs_from": {}
     },
     "author": {
      "name": "author",
@@ -737,7 +794,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": ""
+     "doc": "",
+     "differs_from": {}
     }
    },
    "links": {
@@ -766,7 +824,8 @@
    "coverable": null,
    "coverable_statuses": null,
    "verifying_statuses": null,
-   "doc": ""
+   "doc": "",
+   "differs_from": {}
   },
   "debate": {
    "name": "debate",
@@ -783,7 +842,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": ""
+     "doc": "",
+     "differs_from": {}
     },
     "note": {
      "name": "note",
@@ -793,7 +853,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": ""
+     "doc": "",
+     "differs_from": {}
     },
     "tags": {
      "name": "tags",
@@ -803,7 +864,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": ""
+     "doc": "",
+     "differs_from": {}
     },
     "owner": {
      "name": "owner",
@@ -813,7 +875,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": ""
+     "doc": "",
+     "differs_from": {}
     },
     "last_reviewed": {
      "name": "last_reviewed",
@@ -823,7 +886,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": ""
+     "doc": "",
+     "differs_from": {}
     },
     "title": {
      "name": "title",
@@ -833,7 +897,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": ""
+     "doc": "",
+     "differs_from": {}
     },
     "status": {
      "name": "status",
@@ -846,7 +911,8 @@
      ],
      "default": "open",
      "required_when": null,
-     "doc": ""
+     "doc": "",
+     "differs_from": {}
     },
     "chat_id": {
      "name": "chat_id",
@@ -856,7 +922,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": ""
+     "doc": "",
+     "differs_from": {}
     }
    },
    "links": {
@@ -877,7 +944,8 @@
    "coverable": null,
    "coverable_statuses": null,
    "verifying_statuses": null,
-   "doc": ""
+   "doc": "",
+   "differs_from": {}
   },
   "option": {
    "name": "option",
@@ -894,7 +962,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": ""
+     "doc": "",
+     "differs_from": {}
     },
     "note": {
      "name": "note",
@@ -904,7 +973,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": ""
+     "doc": "",
+     "differs_from": {}
     },
     "tags": {
      "name": "tags",
@@ -914,7 +984,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": ""
+     "doc": "",
+     "differs_from": {}
     },
     "title": {
      "name": "title",
@@ -924,7 +995,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": ""
+     "doc": "",
+     "differs_from": {}
     },
     "status": {
      "name": "status",
@@ -937,7 +1009,8 @@
      ],
      "default": "candidate",
      "required_when": null,
-     "doc": ""
+     "doc": "",
+     "differs_from": {}
     },
     "checks": {
      "name": "checks",
@@ -947,7 +1020,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": ""
+     "doc": "",
+     "differs_from": {}
     }
    },
    "links": {
@@ -969,7 +1043,8 @@
    "coverable": null,
    "coverable_statuses": null,
    "verifying_statuses": null,
-   "doc": ""
+   "doc": "",
+   "differs_from": {}
   },
   "claim": {
    "name": "claim",
@@ -986,7 +1061,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": ""
+     "doc": "",
+     "differs_from": {}
     },
     "note": {
      "name": "note",
@@ -996,7 +1072,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": ""
+     "doc": "",
+     "differs_from": {}
     },
     "tags": {
      "name": "tags",
@@ -1006,7 +1083,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": ""
+     "doc": "",
+     "differs_from": {}
     },
     "text": {
      "name": "text",
@@ -1016,7 +1094,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": ""
+     "doc": "",
+     "differs_from": {}
     },
     "status": {
      "name": "status",
@@ -1030,7 +1109,8 @@
      ],
      "default": "open",
      "required_when": null,
-     "doc": ""
+     "doc": "",
+     "differs_from": {}
     }
    },
    "links": {
@@ -1053,7 +1133,8 @@
    "coverable": null,
    "coverable_statuses": null,
    "verifying_statuses": null,
-   "doc": ""
+   "doc": "",
+   "differs_from": {}
   },
   "position": {
    "name": "position",
@@ -1070,7 +1151,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": ""
+     "doc": "",
+     "differs_from": {}
     },
     "note": {
      "name": "note",
@@ -1080,7 +1162,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": ""
+     "doc": "",
+     "differs_from": {}
     },
     "tags": {
      "name": "tags",
@@ -1090,7 +1173,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": ""
+     "doc": "",
+     "differs_from": {}
     },
     "participant": {
      "name": "participant",
@@ -1100,7 +1184,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": ""
+     "doc": "",
+     "differs_from": {}
     },
     "stance": {
      "name": "stance",
@@ -1110,7 +1195,8 @@
      "choices": null,
      "default": null,
      "required_when": null,
-     "doc": ""
+     "doc": "",
+     "differs_from": {}
     }
    },
    "links": {
@@ -1131,7 +1217,8 @@
    "coverable": null,
    "coverable_statuses": null,
    "verifying_statuses": null,
-   "doc": ""
+   "doc": "",
+   "differs_from": {}
   }
  },
  "link_types": {
@@ -1140,119 +1227,136 @@
    "inverse": "refined_by",
    "label": "Refines",
    "trace": true,
-   "doc": ""
+   "doc": "",
+   "differs_from": {}
   },
   "derives_from": {
    "name": "derives_from",
    "inverse": "derived_by",
    "label": "Derives from",
    "trace": true,
-   "doc": ""
+   "doc": "",
+   "differs_from": {}
   },
   "satisfies": {
    "name": "satisfies",
    "inverse": "satisfied_by",
    "label": "Satisfies",
    "trace": true,
-   "doc": ""
+   "doc": "",
+   "differs_from": {}
   },
   "constrained_by": {
    "name": "constrained_by",
    "inverse": "constrains",
    "label": "Constrained by",
    "trace": true,
-   "doc": ""
+   "doc": "",
+   "differs_from": {}
   },
   "verifies": {
    "name": "verifies",
    "inverse": "verified_by",
    "label": "Verifies",
    "trace": true,
-   "doc": ""
+   "doc": "",
+   "differs_from": {}
   },
   "addresses": {
    "name": "addresses",
    "inverse": "addressed_by",
    "label": "Addresses",
    "trace": false,
-   "doc": ""
+   "doc": "",
+   "differs_from": {}
   },
   "records": {
    "name": "records",
    "inverse": "recorded_by",
    "label": "Records",
    "trace": false,
-   "doc": ""
+   "doc": "",
+   "differs_from": {}
   },
   "amends": {
    "name": "amends",
    "inverse": "amended_by",
    "label": "Amends",
    "trace": false,
-   "doc": ""
+   "doc": "",
+   "differs_from": {}
   },
   "supersedes": {
    "name": "supersedes",
    "inverse": "superseded_by",
    "label": "Supersedes",
    "trace": false,
-   "doc": ""
+   "doc": "",
+   "differs_from": {}
   },
   "selects": {
    "name": "selects",
    "inverse": "selected_by",
    "label": "Selects",
    "trace": true,
-   "doc": ""
+   "doc": "",
+   "differs_from": {}
   },
   "blocked_by": {
    "name": "blocked_by",
    "inverse": "blocks",
    "label": "Blocked by",
    "trace": true,
-   "doc": ""
+   "doc": "",
+   "differs_from": {}
   },
   "equivalent": {
    "name": "equivalent",
    "inverse": "equivalent",
    "label": "Equivalent",
    "trace": true,
-   "doc": ""
+   "doc": "",
+   "differs_from": {}
   },
   "alternate": {
    "name": "alternate",
    "inverse": "alternate",
    "label": "Alternate",
    "trace": true,
-   "doc": ""
+   "doc": "",
+   "differs_from": {}
   },
   "raises": {
    "name": "raises",
    "inverse": "raised_by",
    "label": "Raises",
    "trace": true,
-   "doc": ""
+   "doc": "",
+   "differs_from": {}
   },
   "bears_on": {
    "name": "bears_on",
    "inverse": "borne_on",
    "label": "Bears on",
    "trace": true,
-   "doc": ""
+   "doc": "",
+   "differs_from": {}
   },
   "met_by": {
    "name": "met_by",
    "inverse": "meets",
    "label": "Met by",
    "trace": true,
-   "doc": ""
+   "doc": "",
+   "differs_from": {}
   },
   "resolved_by": {
    "name": "resolved_by",
    "inverse": "resolves",
    "label": "Resolved by",
    "trace": true,
-   "doc": ""
+   "doc": "",
+   "differs_from": {}
   }
  }
 }

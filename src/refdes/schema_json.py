@@ -150,6 +150,12 @@ def field_json_schema(fspec: FieldSpec) -> dict[str, Any]:
     # writes no `doc:` keys gets byte-identical output.
     if fspec.doc:
         frag["description"] = fspec.doc
+    # A `differs_from:` block (vocabulary-review P20) rides along as an
+    # annotation keyword: unknown keywords are inert for JSON Schema
+    # consumers, but `refdes schema` names the disambiguation the standard
+    # carries. Absent, not empty, exactly like `description` above.
+    if fspec.differs_from:
+        frag["differs_from"] = dict(fspec.differs_from)
     return frag
 
 
@@ -157,6 +163,7 @@ def link_json_schema(
     targets: list[str],
     doc: str = "",
     subtype_map: dict[str, set[str]] | None = None,
+    differs_from: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """The JSON-Schema fragment for one declared link. The allowed-target
     restriction can't be enforced here -- confirming a listed ID actually
@@ -165,7 +172,9 @@ def link_json_schema(
     to read on hover, not something the validator itself checks.
 
     A verb's own `doc:` definition goes in the same `description`, ahead of the
-    target line, which is what was already there (finding 38).
+    target line, which is what was already there (finding 38). Its
+    `differs_from:` block (vocabulary-review P20) rides along as an inert
+    annotation keyword, absent when the verb declares none.
     """
     # A subtype satisfies every list naming its parent (docs/design/extends.md
     # §3), so completion offers it wherever the parent is named.
@@ -175,11 +184,14 @@ def link_json_schema(
             sorted(t for t in (subtype_map or {}).get(name, ()) if t not in shown)
         )
     target = f"target: {', '.join(shown) if shown else 'any'}"
-    return {
+    frag: dict[str, Any] = {
         "type": "array",
         "items": {"type": "string"},
         "description": f"{doc} ({target})" if doc else target,
     }
+    if differs_from:
+        frag["differs_from"] = dict(differs_from)
+    return frag
 
 
 def _type_branch(
@@ -188,6 +200,7 @@ def _type_branch(
     include_body: bool,
     link_docs: dict[str, str] | None = None,
     subtype_map: dict[str, set[str]] | None = None,
+    link_differs: dict[str, dict[str, str]] | None = None,
 ) -> dict[str, Any]:
     properties: dict[str, Any] = {
         # Deliberately unconstrained and never required: an item mid-authoring,
@@ -203,7 +216,10 @@ def _type_branch(
             required.append(fname)
     for lname, targets in spec.links.items():
         properties[lname] = link_json_schema(
-            targets, (link_docs or {}).get(lname, ""), subtype_map
+            targets,
+            (link_docs or {}).get(lname, ""),
+            subtype_map,
+            (link_differs or {}).get(lname),
         )
     # prefix/board/workspace/on_change are legal properties only when this type
     # doesn't already declare a same-named field -- mirrors OVERRIDABLE (parse.py)
@@ -235,6 +251,11 @@ def _type_branch(
     }
     if spec.doc:
         branch["description"] = spec.doc
+    # The type's `differs_from:` block (vocabulary-review P20): an inert
+    # annotation keyword for JSON Schema consumers, present only when the
+    # type declares one.
+    if spec.differs_from:
+        branch["differs_from"] = dict(spec.differs_from)
     return branch
 
 
@@ -249,6 +270,11 @@ def build_schema(project: Project) -> dict[str, Any]:
     """
     defs: dict[str, Any] = {"on_change": ON_CHANGE_OVERRIDE_DEF}
     link_docs = {name: lt.doc for name, lt in project.link_types.items() if lt.doc}
+    link_differs = {
+        name: lt.differs_from
+        for name, lt in project.link_types.items()
+        if lt.differs_from
+    }
     bare_refs: list[dict[str, str]] = []
     entry_refs: list[dict[str, str]] = []
     subtype_map = project.subtype_map
@@ -256,10 +282,20 @@ def build_schema(project: Project) -> dict[str, Any]:
         bare_key = f"{type_name}__bare"
         entry_key = f"{type_name}__entry"
         defs[bare_key] = _type_branch(
-            type_name, spec, include_body=False, link_docs=link_docs, subtype_map=subtype_map
+            type_name,
+            spec,
+            include_body=False,
+            link_docs=link_docs,
+            subtype_map=subtype_map,
+            link_differs=link_differs,
         )
         defs[entry_key] = _type_branch(
-            type_name, spec, include_body=True, link_docs=link_docs, subtype_map=subtype_map
+            type_name,
+            spec,
+            include_body=True,
+            link_docs=link_docs,
+            subtype_map=subtype_map,
+            link_differs=link_differs,
         )
         bare_refs.append({"$ref": f"#/$defs/{bare_key}"})
         entry_refs.append({"$ref": f"#/$defs/{entry_key}"})

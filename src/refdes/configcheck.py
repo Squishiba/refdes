@@ -91,17 +91,27 @@ TYPE_KEYS = frozenset(
         "coverable",
         "coverable_statuses",
         "doc",
+        "differs_from",
     }
 )
 FIELD_KEYS = frozenset(
-    {"type", "on_change", "required", "required_when", "choices", "default", "doc"}
+    {
+        "type",
+        "on_change",
+        "required",
+        "required_when",
+        "choices",
+        "default",
+        "doc",
+        "differs_from",
+    }
 )
 BODY_KEYS = frozenset({"on_change", "required"})
 
 # A set is a fragment of the type's own spec and carries exactly these
 # (docs/design/composition.md §1.7); every other key is a loud error.
 _SET_ENTRY_KEYS = frozenset({"fields", "links", "body"})
-LINK_TYPE_KEYS = frozenset({"inverse", "label", "trace", "doc"})
+LINK_TYPE_KEYS = frozenset({"inverse", "label", "trace", "doc", "differs_from"})
 EQUATION_KEYS = frozenset({"params", "expr", "note"})
 
 # The page each of the two multi-item blocks is documented in, named in its
@@ -290,6 +300,38 @@ class BlockChecker:
         if not isinstance(value, str) or not value.strip():
             raise self.wrong(path, "a non-empty string", value)
         return value
+
+    def differs_from(self, value: Any, path: str) -> dict[str, str]:
+        """A `differs_from:` block (vocabulary-review P20): a mapping of other
+        term to the one sentence that tells them apart, or nothing at all.
+
+        The same refusal of empty as `definition()`: a block that renders
+        nothing is a block that says nothing. Whether a named term actually
+        exists is not checked here -- that is a cross-reference into the
+        *resolved* schema, which only `schema.load_project` has; it runs there
+        next to `required_when` and link-target validation (whose load-error
+        posture for a dangling reference in a definition this matches).
+        """
+        if value is None:
+            return {}
+        if not isinstance(value, dict) or not value:
+            raise self.wrong(
+                path,
+                "a non-empty mapping of term to the sentence that "
+                "distinguishes them",
+                value,
+            )
+        for term, sentence in value.items():
+            if not isinstance(term, str) or not term.strip():
+                raise self.error(
+                    f"{path} names the term {_got(term)}, which is not a "
+                    "non-empty term name"
+                )
+            if not isinstance(sentence, str) or not sentence.strip():
+                raise self.wrong(
+                    f"{path}.{term}", "a non-empty sentence", sentence
+                )
+        return {str(k): str(v) for k, v in value.items()}
 
     def mode(self, value: Any, path: str, default: str) -> str:
         if value is None:
@@ -488,6 +530,8 @@ class BlockChecker:
             self.boolean(block.get("required"), f"{path}.required")
         if "doc" in block:
             self.definition(block.get("doc"), f"{path}.doc")
+        if "differs_from" in block:
+            self.differs_from(block.get("differs_from"), f"{path}.differs_from")
         return block
 
     def field_map(self, value: Any, path: str) -> dict:
@@ -547,6 +591,7 @@ class BlockChecker:
             self.string(spec.get("label"), f"{path}.label")
             self.boolean(spec.get("trace"), f"{path}.trace", True)
             self.definition(spec.get("doc"), f"{path}.doc")
+            self.differs_from(spec.get("differs_from"), f"{path}.differs_from")
 
     def types(self, raw: dict) -> None:
         block = self.mapping(raw.get("types"), "types", "a mapping of type name to its settings")
@@ -565,6 +610,7 @@ class BlockChecker:
         self.string(spec.get("label"), f"{path}.label")
         self.string(spec.get("plural"), f"{path}.plural")
         self.definition(spec.get("doc"), f"{path}.doc")
+        self.differs_from(spec.get("differs_from"), f"{path}.differs_from")
         if "include" in spec:
             self.string_list(spec.get("include"), f"{path}.include", "a list of set names")
         self.field_map(spec.get("fields") or {}, f"{path}.fields")

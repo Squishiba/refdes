@@ -474,6 +474,80 @@ def _doc_text(value: Any, path: str) -> str:
     return value
 
 
+def _differs_from(value: Any, path: str) -> dict[str, str]:
+    """A resolved `differs_from:` block (vocabulary-review P20), checked for
+    the one shape it may take.
+
+    The twin of `_doc_text` for the bundle path: `configcheck` checks the
+    project's own overlay, and the bundled standard and its presets flow
+    through here without going through it. Whether a named term exists is
+    `_validate_differs_from`'s -- it needs the resolved namespaces.
+    """
+    if value is None:
+        return {}
+    if not isinstance(value, dict) or not value:
+        raise SchemaError(
+            f"{path} must be a non-empty mapping of term to the sentence "
+            f"that distinguishes them, got {value!r}"
+        )
+    resolved: dict[str, str] = {}
+    for term, sentence in value.items():
+        if not isinstance(term, str) or not term.strip():
+            raise SchemaError(
+                f"{path} names the term {term!r}, which is not a non-empty "
+                "term name"
+            )
+        if not isinstance(sentence, str) or not sentence.strip():
+            raise SchemaError(
+                f"{path}.{term} must be a non-empty sentence, got {sentence!r}"
+            )
+        resolved[term] = sentence
+    return resolved
+
+
+def _validate_differs_from(
+    types: dict[str, ItemType],
+    link_types: dict[str, LinkType],
+    sets: dict[str, Any],
+    inverse_of: dict[str, str],
+) -> None:
+    """Every `differs_from:` term name must resolve in the merged schema.
+
+    Runs after base, presets and the overlay have all been applied, like
+    `_validate_required_when` and `_validate_link_targets`, and with the same
+    posture: a dangling reference in a standard *definition* is a load-time
+    configuration error naming both sides, never a warning an author would
+    read as decoration. A term resolves to a type, a link verb (under its own
+    or its inverse name), a set, or a field declared on the referencing type
+    -- the namespaces the vocabulary page actually renders.
+    """
+    def _check(owner: str, differs_from: dict[str, str], sibling_fields: set[str]) -> None:
+        for term in differs_from:
+            known = (
+                set(types)
+                | set(link_types)
+                | set(inverse_of)
+                | set(sets)
+                | sibling_fields
+            )
+            if term in known:
+                continue
+            close = difflib.get_close_matches(str(term), sorted(known), n=1, cutoff=0.5)
+            hint = f" Did you mean {close[0]!r}?" if close else ""
+            raise SchemaError(
+                f"{owner}.differs_from names {term!r}, which is not a declared "
+                f"type, link type, set, or field of this type.{hint}"
+            )
+
+    for tname, spec in types.items():
+        fields = set(spec.fields)
+        _check(f"types.{tname}", spec.differs_from, fields)
+        for fname, fspec in spec.fields.items():
+            _check(f"types.{tname}.fields.{fname}", fspec.differs_from, fields)
+    for lname, lt in link_types.items():
+        _check(f"link_types.{lname}", lt.differs_from, set())
+
+
 def _parse_check_severity(
     tname: str, tspec: dict[str, Any], fields: dict[str, FieldSpec]
 ) -> str | dict[str, str]:
@@ -593,6 +667,9 @@ def load_project(config_path: str | None = None, start: str = ".") -> Project:
             label=spec.get("label", name),
             trace=bool(spec.get("trace", True)),
             doc=_doc_text(spec.get("doc"), f"link_types.{name}.doc"),
+            differs_from=_differs_from(
+                spec.get("differs_from"), f"link_types.{name}.differs_from"
+            ),
         )
         inverse_of[name] = inverse
 
@@ -638,6 +715,10 @@ def load_project(config_path: str | None = None, start: str = ".") -> Project:
                 default=fspec.get("default"),
                 required_when=required_when,
                 doc=_doc_text(fspec.get("doc"), f"types.{tname}.fields.{fname}.doc"),
+                differs_from=_differs_from(
+                    fspec.get("differs_from"),
+                    f"types.{tname}.fields.{fname}.differs_from",
+                ),
             )
 
         links: dict[str, list[str]] = {}
@@ -712,6 +793,9 @@ def load_project(config_path: str | None = None, start: str = ".") -> Project:
             coverable_statuses=coverable_statuses,
             verifying_statuses=verifying_statuses,
             doc=_doc_text(tspec.get("doc"), f"types.{tname}.doc"),
+            differs_from=_differs_from(
+                tspec.get("differs_from"), f"types.{tname}.differs_from"
+            ),
         )
 
     if not types:
@@ -722,6 +806,7 @@ def load_project(config_path: str | None = None, start: str = ".") -> Project:
 
     _validate_required_when(types)
     _validate_link_targets(types)
+    _validate_differs_from(types, link_types, resolved_sets, inverse_of)
 
     import_specs = [
         ImportSpec(
