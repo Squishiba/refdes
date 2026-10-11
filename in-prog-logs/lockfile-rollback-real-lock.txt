@@ -212,10 +212,17 @@ copies, and `git status` afterwards shows only the intended files):
   * Full suite, foreground, the command from the task:
       PYTHONPATH=$PWD/src ...python -m pytest -q -p no:cacheprovider
       > .scratch/suite.txt 2>&1; echo exit=$?
-    exit=0
-      3513 passed, 2 skipped in 271.54s (0:04:31)
-    (the known load flake, test_serve_cli.py::test_a_stale_token_file_from_a_
-    crash_is_rewritten_not_refused, did not fire on this run)
+    run once on the first commit (exit=0, 3513 passed, 2 skipped in 271.54s)
+    and again on the branch tip after the comment-only second commit:
+      exit=0
+      3513 passed, 2 skipped in 262.19s (0:04:22)
+    (.scratch/suite.txt holds the tip run. The known load flake,
+    test_serve_cli.py::test_a_stale_token_file_from_a_crash_is_rewritten_not_
+    refused, did not fire on either run.)
+  * Second commit: the lock comments in citations.py/edit.py cited
+    `cli.py:2954`, which is the `if` that *skips* the lock in cli.main; the
+    `project_write_lock` call is cli.py:2961. Comments and this log corrected;
+    no behaviour change, suite re-run above.
 
 STATUS: finished. Task list complete; nothing left half-done. Nothing was
 locked that could not be locked; the one writer whose lock is wider than its
