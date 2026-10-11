@@ -14,14 +14,14 @@ citations.lockfile_path() (citations.py:84).
 Writers (the only three places that put bytes on that path):
 
 W1. citations.save_lockfile (src/refdes/citations.py:1221, textio.write_text)
-    -- called from exactly one place: citations.fetch_all (citations.py:2720),
+    -- called from exactly one place: citations.fetch_all (citations.py:2746),
     which is reached from cli.cmd_fetch (cli.py:1139).
-    Holds project_write_lock? YES, but broadly: cli.main() (cli.py:2954-2962)
+    Holds project_write_lock? YES, but broadly: cli.main() (cli.py:2951-2968, the with at 2961)
     wraps every command in project_write_lock(root) except --no-write,
     --dry-run and {serve, init, new, schema}. So `refdes fetch` holds the lock
     for its whole run -- including the network fetch and, deliberately, the
     load (the comment at cli.py:2952 says the load itself can rewrite sources).
-    Its read (load_lockfile, cli.py:1121 / citations.py:2456) and its write are
+    Its read (load_lockfile, cli.py:1121 / citations.py:2482) and its write are
     therefore in one lock hold, so it cannot lose an update to another
     lock-respecting writer.
 
@@ -116,14 +116,14 @@ from disk). The accept's locked section therefore spans local file I/O plus
 one `os.replace`, and the slow candidate gate is deliberately outside it.
 
 `refdes fetch` is the one writer whose hold does span a network wait, and it
-did so before this change: `cli.main` (cli.py:2954-2962) wraps every writing
+did so before this change: `cli.main` (cli.py:2951-2968, the with at 2961) wraps every writing
 command in `project_write_lock(root)`, deliberately including the load ("the
 load itself can rewrite sources, and ID planning must see the ledger left by
 the previous process"). I did NOT narrow it, and that is the one writer where
 the task's "restructure so only the file update is locked" is not available
 without a design change:
   * fetch's write is a whole-file rewrite from the records it read at the top
-    of `fetch_all` (citations.py:2456 -> 2720). Releasing the lock across the
+    of `fetch_all` (citations.py:2482 -> 2746). Releasing the lock across the
     fetch would mean another writer's records are silently replaced, so a
     narrow lock would need a per-path merge, which is a different write policy
     for this file (and `load_lockfile` refuses a lockfile it cannot read

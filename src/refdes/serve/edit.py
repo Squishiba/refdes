@@ -519,7 +519,7 @@ class _LockfileWrite:
         self.written = False
         # One section under the project's cross-process write lock: the read,
         # the compare and the restore cannot be split by a cooperating writer.
-        # `refdes fetch` holds this same lock for its whole run (cli.py:2954),
+        # `refdes fetch` holds this same lock for its whole run (cli.py:2961),
         # and another server's accept and rollback take it the same way, so
         # whatever else is going to happen to this file happens either before
         # the read or after the restore -- never between them. That is the
@@ -668,7 +668,7 @@ def _accept_pins(
 
     # Steps 2 and 3 are one section under the project's cross-process write
     # lock -- the same `project_write_lock` that `refdes fetch` holds for its
-    # whole run (cli.py:2954) and that `_LockfileWrite.rollback` takes for its
+    # whole run (cli.py:2961) and that `_LockfileWrite.rollback` takes for its
     # read-compare-restore. Everything the write is decided from is inside it:
     # the records read off disk, the extraction whose policy reads those
     # records, and the replace. That is the whole of it, and it holds no
