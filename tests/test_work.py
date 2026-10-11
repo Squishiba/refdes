@@ -178,6 +178,24 @@ MERGE_CONFLICT = (
     "  - {id: LOG-009, summary: Silent merge., date: 2026-08-09, follows: [LOG-007, LOG-008]}\n"
 )
 
+# The same merge shape again, but now the two folds refuse DIFFERENTLY: the
+# parents declare the SAME status (so the status fold RESOLVES to the
+# concluding `accepted`) while their task lists differ (so the task fold
+# REFUSES). The folds are independent (`threads._thread_view` computes them
+# separately); a concluding fold earns no derived row, and review #194 R1
+# found this verdict vanishing from `refdes work` -- the ambiguous-task
+# branch `continue`d before the verdict check.
+MERGE_AMBIGUOUS_CONCLUDED = (
+    "defaults: { type: log }\n"
+    "items:\n"
+    "  - {id: LOG-007, summary: Left list., date: 2026-08-07, status: accepted,"
+    " tasks: [{id: t-left, text: Left thing., state: open}]}\n"
+    "  - {id: LOG-008, summary: Right list., date: 2026-08-08, status: accepted,"
+    " tasks: [{id: t-right, text: Right thing., state: open}]}\n"
+    "  - {id: LOG-009, summary: Accepted merge., date: 2026-08-09,"
+    " follows: [LOG-007, LOG-008]}\n"
+)
+
 # The same merge, but the shared tip carries an open task: rule 4's authored
 # pairing (`Verdict: conflicting -- ...` printed WITH the open tasks) is
 # review #194 W3's wiring, previously untested on this command.
@@ -339,6 +357,14 @@ def test_an_explicit_null_id_or_text_prints_placeholder_not_the_word_none(
     assert "None" not in out
     row = next(line for line in out.splitlines() if line.startswith("  1. [ ]"))
     assert row.startswith("  1. [ ] ?  ")  # `?` for the null id, empty text
+
+
+def test_an_explicit_empty_string_id_prints_the_placeholder_too():
+    """Review #194 R2 (nit): `or` reads an explicit empty-string id as falsy
+    too -- the intended reading (a row with no usable id prints `?`), pinned
+    directly on the shared row builder both commands render through."""
+    rows = [{"id": "", "text": "Still renders.", "state": "done"}]
+    assert cli_mod._task_row_lines(rows, None, "%Y-%m-%d") == ["  1. [x] ?  Still renders."]
 
 
 def test_concluding_verdict_prints_with_its_open_tasks(tmp_path, capsys):
@@ -567,6 +593,26 @@ def test_a_refused_verdict_fold_prints_with_its_tip_s_open_tasks_too(tmp_path, c
     task_at = next(i for i, line in enumerate(lines) if "Reconcile the two parents." in line)
     assert verdict_at < task_at  # the verdict never stands alone
     assert _derived_groups("\n".join(lines))["verdict"] == ["LOG-009  conflicting"]
+
+
+def test_an_ambiguous_task_fold_does_not_swallow_a_concluding_verdict(tmp_path, capsys):
+    """Review #194 R1: the task fold and the status fold are independent, so
+    a tip can carry a REFUSED task list and a resolved CONCLUDING status at
+    once. A concluding fold earns no derived row (rule 4 pairs it with the
+    tip's block instead), and `refdes work` used to `continue` on the
+    ambiguous list before the verdict check -- the verdict then vanished from
+    the command entirely. The verdict line now prints there too, the exact
+    line `refdes thread` prints (the shared `_verdict_line`), above the
+    reconciliation line."""
+    config = _setup(tmp_path, ("log.yaml", MERGE_AMBIGUOUS_CONCLUDED))
+    _warm(tmp_path, config, capsys)
+    assert _run(config, "work") == 0
+    lines = capsys.readouterr().out.splitlines()
+    verdict_at = next(i for i, line in enumerate(lines) if line.startswith("Verdict: accepted"))
+    reconciliation_at = lines.index("Tasks at tip: task reconciliation required")
+    assert verdict_at < reconciliation_at  # the verdict never stands alone
+    assert _run(config, "thread", "LOG-009") == 0  # the same line, spelled once
+    assert lines[verdict_at] in capsys.readouterr().out.splitlines()
 
 
 def test_an_on_hold_verdict_is_listed_like_a_proposed_one(tmp_path, capsys):

@@ -502,15 +502,17 @@ of the design, not implementation polish:
 **Decided:** build one read-only query service first, then expose it through
 CLI, `index`, VS Code, the eventual `serve` editor, and the static site. The
 static page remains a reader's rich rendering; it must not be the only way to
-learn the thread tip or task list. `refdes thread` and `refdes work` do not
-exist today; `refdes history` does, but it is the capture/redact/migrate-seals
-command for the `.refdes/history/` store of §3, not a thread or task query.
+learn the thread tip or task list. `refdes thread` and `refdes work` did
+not exist when this section was written; they landed later (plan §H7 chunks
+B and C, below), and they are the thread/task query. `refdes history` always
+did, but it is the capture/redact/migrate-seals command for the
+`.refdes/history/` store of §3, not a thread or task query.
 The subcommands are `serve`, `build`, `check`, `revision`,
-`release`, `index`, `ls`, `thread`, `id`, `fetch`, `audit`, `init`, `new`,
-`schema`, `standard`, `keys`, `revise`, `calc-rewrite`, `stub-tests`,
-`former-ids`, and `history` — `thread` joined that list with the landing
-note below; when this section was written every one of its surfaces was
-still a proposal.
+`release`, `index`, `ls`, `thread`, `work`, `id`, `fetch`, `audit`, `init`,
+`new`, `schema`, `standard`, `keys`, `revise`, `calc-rewrite`, `stub-tests`,
+`former-ids`, and `history` — `thread` and `work` joined that list with the
+landing notes below; when this section was written every one of its surfaces
+was still a proposal.
 
 Decided later (Jared, 2026-10-10): the primary interactive task surface is the
 floating task pane — in the `serve` preview, in the browser editor, and

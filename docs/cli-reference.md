@@ -535,10 +535,12 @@ tasks and the derived rows are **two separate blocks with separate
 numbering** — derived rows carry no number and no checkbox, they exist only
 while their gap does, and nothing here is ever written back into `tasks:`.
 Inside the derived block each kind with rows gets a small heading
-(`Coverage:`, `Verdicts:`, `Blocked:`, `Failing checks:`, `Citations:`,
-`Forks:` — in that one shared order), and its rows print without a kind
-column because the heading names them; a kind with no rows prints nothing,
-and a block with no rows at all prints `(none)`.
+(`Coverage:`, `Blocked:`, `Failing checks:`, `Citations:` — in that one
+shared order; the `Verdicts:` and `Forks:` kinds exist only in `refdes
+work`'s whole-project block and can never head a per-thread block), and
+its rows print without a kind column because the heading names them; a
+kind with no rows prints nothing, and a block with no rows at all prints
+`(none)`.
 Every open task prints **the entry that declared it and that entry's date**;
 a folded verdict prints **with** its tip's open tasks (the `1 open task
 remaining below` line above is a verdict never alone), and a fork prints one

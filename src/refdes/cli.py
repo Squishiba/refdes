@@ -1162,7 +1162,7 @@ def cmd_thread(args) -> int:
     return 1 if load_errors else 0
 
 
-def _work_authored_blocks(threads: list[dict], as_of, date_format: str) -> list[list[str]]:
+def _work_authored_blocks(views: list[dict], as_of, date_format: str) -> list[list[str]]:
     """The authored group of `refdes work`: one block per thread that has any
     open task, reusing `refdes thread`'s header, verdict line and task rows
     (all spelled once in the helpers above).
@@ -1171,18 +1171,22 @@ def _work_authored_blocks(threads: list[dict], as_of, date_format: str) -> list[
     whose own task fold refused still prints its `task reconciliation required`
     line (the author's error, not silently dropped, and there is no list to
     show for it). A `concluding` verdict prints directly above its tip's open
-    tasks (rule 4, via the shared `_verdict_line`) — never a verdict alone. On
-    a fork the shared header names every tip and each tip gets its own block;
-    no thread-level status line is ever printed (rule 5)."""
+    tasks (rule 4, via the shared `_verdict_line`) — never a verdict alone,
+    and the verdict check runs even when the task fold itself refused: the two
+    folds are independent (threads._thread_view computes them separately), a
+    concluding fold earns no derived row, and dropping the verdict line there
+    would hide it from this command entirely (review #194 R1). On a fork the
+    shared header names every tip and each tip gets its own block; no
+    thread-level status line is ever printed (rule 5)."""
     blocks: list[list[str]] = []
-    for view in threads:
+    for view in views:
         single = not view["forked"]
         lines: list[str] | None = None
         for branch in view["branches"]:
             tasks = branch["tasks"]
             state = tasks["state"]
             if state == "ambiguous":
-                open_rows: list[dict] | None = None
+                open_rows: list[dict] = []
             else:
                 open_rows = [row for row in (tasks["rows"] or []) if row.get("state") == "open"]
                 if not open_rows:
@@ -1190,14 +1194,14 @@ def _work_authored_blocks(threads: list[dict], as_of, date_format: str) -> list[
             if lines is None:
                 lines = [_thread_header(view)]
             heading = "Tasks at tip:" if single else f"Tasks at {branch['tip']}:"
-            if state == "ambiguous":
-                lines.append(f"{heading} task reconciliation required")
-                continue
             verdict = branch["verdict"]
             if verdict is not None and (
                 verdict["state"] == threads_mod.VERDICT_CONFLICTING or verdict["concluding"]
             ):
                 lines.append(_verdict_line(verdict, open_rows))
+            if state == "ambiguous":
+                lines.append(f"{heading} task reconciliation required")
+                continue
             lines.append(heading)
             lines.extend(_task_row_lines(open_rows, as_of, date_format))
         if lines is not None:

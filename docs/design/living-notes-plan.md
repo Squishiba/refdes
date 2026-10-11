@@ -470,10 +470,13 @@ its tips). Offline kinds only — remote citation drift is `citations.refresh`
 docs say so. `--json` prints `{threads, derived}` and its load-write notices
 go to stderr (so stdout is valid JSON on a first run that mints keys);
 `--as-of` renders relative spans only under it (and is refused with `--json`).
-A read/list command, not a gate (H8 is): a non-empty worklist exits 0, it
-writes nothing (tree-hash test around it, and on a `sealing: build` type whose
-`build` really does write `.refdes/log-seal.yaml`). See
-`in-prog-logs/living-notes-h7c-work-cli.txt` and `tests/test_work.py`.
+A read/list command, not a gate (H8 is): a non-empty worklist exits 0.
+A cold writable run's only writes are the load's own key minting (W1's test
+proves the tree changes); `--no-write` writes nothing at all (tree-hash test
+around it), and the command itself never seals or captures — pinned on a
+`sealing: build` type whose `build` really does write
+`.refdes/log-seal.yaml`. See `in-prog-logs/living-notes-h7c-work-cli.txt`
+and `tests/test_work.py`.
 
 ## Phase H8 — two optional release-gate rules, both off
 
