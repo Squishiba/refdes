@@ -11,6 +11,7 @@ import hashlib
 import http.client
 import json
 import os
+import random
 import socket
 from urllib.parse import urlsplit
 
@@ -428,13 +429,45 @@ def path_of(url: str) -> str:
     return parts.path + (("?" + parts.query) if parts.query else "")
 
 
-def free_port() -> int:
-    """An unused loopback port, from the OS, released for `serve --port` to claim.
+def ephemeral_start() -> int:
+    """The first port of this box's ephemeral range -- the range the OS hands
+    out on its own for `bind(0)` and for loopback connection source ports."""
+    try:
+        with open("/proc/sys/net/ipv4/ip_local_port_range", encoding="utf-8") as fh:
+            return int(fh.read().split()[0])
+    except (OSError, ValueError, IndexError):
+        # No readable /proc (Windows, macOS, or a stripped container): the
+        # IANA default dynamic start, which is what those platforms use.
+        return 49152
 
-    Every such helper races -- anything can take the port in between -- and what
-    losing here produces is the busy-port error the tests assert, so a flake is
-    loud rather than a pass on the wrong port.
+
+def free_port() -> int:
+    """An unused loopback port below the ephemeral range, released for
+    `serve --port` to claim.
+
+    Below the range, not inside it, on purpose: a port from the ephemeral
+    range -- which is what `bind(0)` returns -- is only on loan. Measured on
+    the load-flake box (in-prog-logs/fix-serve-stale-token-flake.txt), the
+    kernel hands a released ephemeral port straight back to the next binders
+    after ~7.5k allocations, so a concurrent suite's `free_port()` ->
+    `serve --port` can be holding the very port this test is about to claim
+    again, or a loopback connection can be sitting on it in TIME_WAIT. serve
+    then refuses the bind and exits, which no wait budget recovers: that was
+    the known stale-token-file flake. A port below the range is never
+    auto-assigned to anyone, so the only competitors left are other deliberate
+    choices, and losing to one of those is still the loud busy-port error the
+    tests assert rather than a pass on the wrong port.
+
+    Probing for free-ness is a check, not a lock -- the same window as always
+    -- but a random pick out of thousands of never-auto-assigned ports makes
+    that window negligible where a rotating allocator made it routine.
     """
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
-        probe.bind(("127.0.0.1", 0))
-        return probe.getsockname()[1]
+    band = range(2048, ephemeral_start())
+    for port in random.sample(band, k=min(16, len(band))):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+            try:
+                probe.bind(("127.0.0.1", port))
+            except OSError:
+                continue  # something holds it right now; try another
+        return port
+    raise RuntimeError("no free loopback port to pin: nothing bound, nothing was free")

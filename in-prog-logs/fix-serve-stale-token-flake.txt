@@ -1,0 +1,263 @@
+Task: fix the known load flake
+  tests/test_serve_cli.py::test_a_stale_token_file_from_a_crash_is_rewritten_not_refused
+Branch: fix-serve-stale-token-flake (cut from main d276925).
+Started: 2026-10-12 ~02:05. Model: Qwen3.8-Flash-Next.
+
+=====================================================================
+1. WHAT THE TEST WAITS FOR AND HOW (read, then verified by running)
+=====================================================================
+The test (tests/test_serve_cli.py:302-316):
+  1. port = free_port()  (tests/serve_support.py:431 -- bind to 127.0.0.1:0,
+     read the OS-chosen number, close, return it)
+  2. launches `refdes serve --port P --token-file tf` (real subprocess, _start)
+  3. stale = _wait_for_file(tf)          -- poll 50ms for: exists AND text ends
+     with "\n" AND text != None; wall-clock budget 180s (was 60s until
+     905ce6b raised it; the raised budget is on this branch already)
+  4. first.kill() (SIGKILL -- no cleanup), wait; assert tf still exists
+  5. second launch on the SAME --port P and same --token-file tf
+  6. fresh = _wait_for_file(tf, differs_from=stale) -- same 50ms poll, 180s
+     budget, now also requires the text to CHANGE; then asserts the URL still
+     carries the pinned port.
+
+What gates the file: EditorApp.__init__ (src/refdes/serve/server.py:438-473)
+does ProjectState.load() (full load + site render) -> bind ->
+write_launch_file(tf) -> only then serving. write_launch_file
+(server.py:341-432) is ALREADY atomic: mkstemp in the same dir, drained
+os.write loop, os.replace; a reader never sees an empty/partial file. So the
+task's "non-atomic write" candidate does NOT apply to this code (verified by
+reading the function and by the _wait_for_file endswith("\\n") condition being
+sound for an atomic rename).
+
+=====================================================================
+2. ROOT CAUSE (proven with evidence, NOT the timeout)
+=====================================================================
+Rejected: cold-start starvation / interpreter startup under load. A cold
+start to token-file-written measures ~0.5s on this box
+(.scratch/flake-repro/time_cold.py: 0.557s / 0.508s / 0.470s). Burning even
+the old 60s budget needs a >100x slowdown; the 180s budget raised it to >350x
+-- implausible with 20 cores, and the prior timeout raise (905ce6b) did not
+stop the flake, which is itself evidence against it.
+
+The real chain, proven by two bounded experiments (.scratch/flake-repro/):
+
+  exp1_time_wait_refusal.py (deterministic, REPRODUCED):
+    launch serve --port P --token-file tf; wait tf; open one HTTP connection;
+    SIGKILL serve; close the client so serve's accepted socket finishes its
+    close (TIME_WAIT sits on 127.0.0.1:P). Then:
+      - a plain bind of 127.0.0.1:P (no SO_REUSEADDR) -> EADDRINUSE
+      - a real `refdes serve --port P --token-file tf` child -> exit 2,
+        stderr "error: cannot listen on 127.0.0.1:P: Address already in use
+        -- ...a launch that stopped a moment ago still has sockets closing
+        on it..." (that exact wording is the product's own, server.py:289-293)
+      - tf NEVER rewritten -> _wait_for_file(differs_from=stale) would spin
+        its entire 180s budget against a dead child and then fail.
+    That matches the reported failure exactly ("waits for the token file and
+    gives up", passes when re-run alone -- by then the socket is long gone).
+
+  exp2_steal_realism.py (why ~6 concurrent suites is the trigger):
+    Vector A: the kernel hands a released ephemeral port BACK to bind(0)
+    after ~7,500 allocations (measured: re-offered after 7,510 probes in
+    0.04s of churn). free_port()'s whole design picks from the ephemeral
+    range (this box: 32768-60999) -- so seconds after the test SIGKILLs the
+    first launch and frees P, ambient bind(0)/connect traffic (concurrent
+    suites, browsers, IDE servers -- `ss -s` shows hundreds of live TCP
+    sockets, and vmstat showed >200k context switches/s even "idle") can
+    hand P to someone else: another suite's free_port() may pin P with its
+    own serve --port and HOLD it for its whole test (seconds), or a
+    loopback connection may hold P in TIME_WAIT for ~60s. Either way the
+    relaunch's bind fails exactly as in exp1, while a machine running this
+    suite ALONE almost never advances the allocator the ~7.5k allocations
+    needed within the sub-second relaunch window -- flake, not break.
+
+  Corroboration from the repo itself:
+    - Only test combining a pinned --port with a --token-file wait is THIS
+      one -- and it is the only named flake. Port-only tests fail loudly
+      (exit 2 asserted by their own tests); token-only tests use ephemeral
+      ports and never rebind.
+    - in-prog-logs/review-followups-2026-10-11.txt:193-200 documented this
+      exact second mechanism ("another concurrent suite's free_port() could
+      steal the now-free port; serve then exits 2 and the token file stays
+      stale forever -- ... which no wait-budget change would fix") but chose
+      to raise the timeout instead. The raise shipped; the flake remained.
+
+Why it is slow when it fires: _wait_for_file never checks whether the child
+is dead, so the failure burns the whole deadline (was 60s, now 180s) before
+the assertion runs -- "every worker and reviewer had to work around it".
+
+=====================================================================
+3. FIX PLAN (step 3)
+=====================================================================
+a) tests/serve_support.py free_port(): stop pinning ports the OS will
+   re-hand to other processes -- choose a random, probe-bindable port
+   BELOW ip_local_port_range (read from /proc when available), which the
+   allocator never auto-assigns to anyone. Same helper shape, shared fix
+   for every --port test.
+b) tests/test_serve_cli.py _wait_for_file(): take the launched process and
+   return as soon as readiness holds; if the child exits first, fail
+   immediately with its exit code + stderr tail instead of burning the
+   deadline -- the real readiness condition is "file rewritten", but only
+   while the waiter's premise (the child is alive) can still produce it.
+c) PRODUCT (real bug, real users): _Server.allow_reuse_address = False
+   turns any still-closing old socket on the pinned --port into a
+   60-second-restart wedge (exp1: the product's OWN error text describes
+   it). SO_REUSEADDR (the stdlib HTTPServer default!) makes a relaunch on
+   your own port succeed while old sockets close, and on POSIX it does NOT
+   let a live listener be shared/stolen -- the busy-port refusal stays.
+   On Windows SO_REUSEADDR means bind-over-anyone (a hijack), so there it
+   stays False. New subprocess test pins the fixed behavior (crash with an
+   open connection -> relaunch on same --port succeeds and rewrites tf).
+d) Before/after proof: loop the flaking test 20x while 6 concurrent churner
+   suites hammer free_port()/--port, before and after.
+
+=====================================================================
+4. BEFORE-FIX LOOP UNDER LOAD
+=====================================================================
+.tools: .scratch/flake-repro/churn_suite.py = loop of the two --port tests of
+test_serve_cli.py in the real pytest process (mimics six concurrent suites
+consuming free_port()/--port); 6 churners + 8 CPU spinners while the target
+test ran 20x in the foreground; everything spawned was killed by the same
+command (trap + wait), none left.
+
+  BEFORE FIX: 0/20 failed. Honest record: that load did not fire the race.
+  The measured mechanism needs the ephemeral allocator to advance the
+  ~7.5k allocations between the release and the relaunch bind (exp2) AND
+  the taker to pin the port; my churners consumed ~4 bind(0)/s (a wrap is
+  ~30 min away), so the natural race window essentially never opened --
+  which itself says the real ~6-suite boxes carry far heavier ambient
+  allocation traffic (suites' browsers/IDE servers/etc.) than a bare
+  pytest churn loop reproduces, exactly the "occasionally" in the report.
+  Because the natural repro is rare by construction, the failure was
+  instead pinned DETERMINISTICALLY two ways:
+    - exp1 (real serve children): TIME_WAIT on the pinned --port =>
+      relaunch exits 2, tf never rewritten, a wait spins its whole
+      deadline. REPRODUCED.
+    - the new test
+      test_relaunch_on_the_same_port_while_the_old_launches_sockets_are_still_closing
+      reproduces it at real-test level with a live connection through the
+      crash. With the product fix reverted (allow_reuse_address=False,
+      the original line): FAILED in 1.28s -- "the launched serve exited
+      (2) ...: error: cannot listen on 127.0.0.1:5804: Address already in
+      use ..." -- and the old code would have burned 180s first. That is
+      the flake's losing ticket, drawn on demand.
+  AFTER FIX: same 20-iteration loop under the same 6-churner+8-spinner
+  load: 20/20 passed; the deterministic restart test under the same load:
+  10/10 passed. (And alone, the whole file: 15/15.)
+
+=====================================================================
+5. THE FIX
+=====================================================================
+a) PRODUCT src/refdes/serve/server.py:
+   _Server.allow_reuse_address = os.name != "nt" (was False everywhere).
+   POSIX SO_REUSEADDR only reclaims a port whose old sockets are closing --
+   a live holder still answers bind with EADDRINUSE (proven: the busy-port
+   refusal tests, test_serve_cli.py and test_serve_security.py, pass
+   unchanged). On Windows SO_REUSEADDR means bind-over-anyone, so the
+   strictness stays and the "launch that stopped a moment ago still has
+   sockets closing on it" hint in _bind_failure_message is now Windows-only
+   wording (POSIX: "something else holds it"). This is the real-user fix:
+   the crash-and-restart-on-your-own-port wedge is gone, and it is what
+   turned the stolen port into a 60-second dead end in the test.
+   Fragment: changelog.d/serve-relaunch-reclaims-own-port.fixed.md
+   (rule: user-visible behavior change -> fragment; category `fixed`).
+b) TEST HELPER tests/serve_support.py free_port(): a random probe-bindable
+   port BELOW ip_local_port_range (read from /proc, IANA 49152 fallback),
+   so the OS allocator -- which re-hands released ephemeral ports after a
+   few thousand allocations (measured ~7.5k) -- can never point a
+   concurrent process at a test's pinned port, neither via bind(0) nor via
+   a connection source port. Shared fix: every --port test in
+   test_serve_cli.py/test_serve_security.py goes through this helper.
+   New test_free_port_hands_out_nothing_the_os_will_later_reassign pins
+   the contract.
+c) TEST HELPER _wait_for_file(..., proc=): the wait now ends the moment the
+   launched child is dead, failing immediately with the exit code and the
+   first three stderr lines -- the real readiness condition is "file
+   rewritten", and a child that exited cannot write it. Kills the
+   60s/180s-deadline burn that made this flake cost everybody a three-
+   minute stall. New test_a_wait_on_a_dead_launch_fails_at_once_naming_the_exit.
+   The deadline itself stays generous (180s) for true slow starts -- a
+   healthy child is ready in ~0.5-1.5s and the wait returns immediately.
+
+Sabotage (COMMON rule):
+  - (a): allow_reuse_address flipped back to False -> the new restart test
+    FAILED 1.28s with the exact stale-token-file symptom -> restored ->
+    10/10 + 15/15. (This doubles as the fails-before record.)
+  - (b): free_port reverted to bind(0) shape ->
+    test_free_port_hands_out_nothing_the_os_will_later_reassign FAILED in
+    0.08s (port inside the ephemeral range) -> restored -> passes.
+  - (c) was not sabotaged on purpose: its failure mode IS a 120s burn
+    (that is the bug), which the other two sabotages plus the 1.28s
+    pre-fix failure of (a) already demonstrate at real-test level.
+
+=====================================================================
+6. OTHER TESTS WITH THE SAME FRAGILE WAIT (task step 5)
+=====================================================================
+- Same pattern, fixed by the same shared helpers (no per-test change):
+  every test_serve_cli.py --token-file test (_wait_for_file now gets
+  proc=), test_serve_security.py's free_port users (in-process
+  EditorApp(port=...) -- loud ServeStartupError on loss, no silent spin).
+- Same FAMILY, different shape, NOT changed (fix would not be the shared
+  helper): _launch_url() in test_serve_cli.py:57 reads the launch URL from
+  stdout with a 60s thread join. A dead child EOFs readline instantly (no
+  spin), and cold starts measure ~0.5s, so it does not share this flake's
+  failure mode; a pathological cold start over 60s would still flake it.
+  Follow-up candidate if the file ever misbehaves again.
+- The rest of tests/test_serve*.py drive an in-process EditorApp over
+  http.client -- no subprocess token waits at all (verified by grep for
+  Popen/token-file/free_port across the 19 files; only hits were
+  test_serve_edit.py's _disk_write_lock child, unrelated).
+
+=====================================================================
+7. FINAL GATES
+=====================================================================
+- Full suite, FOREGROUND, the COMMON command, output in
+  .scratch/suite.txt: `3590 passed, 2 skipped in 271.98s (0:04:31)`,
+  exit=0. No reruns needed -- the known flake did not fire.
+- `ruff check --select E9,F src tests`: All checks passed! (The
+  pre-existing E501s in server.py at 666/690/786 are on lines this change
+  does not touch; AGENTS.md says the ruff baseline is not clean and the
+  gate is scoped to E9,F.)
+- `docs-site/gen_examples.py --check`: both files up to date, exit 0.
+- tests/test_serve_cli.py alone: 15/15 (12 before, +3 new).
+- Changelog fragment rule applied: changelog.d/README.md -- the product
+  bind change is an existing-behavior change users can observe, so it
+  gets a fragment; category `fixed` (the restart wedge was the bug).
+  The test-harness changes (b)/(c) get no fragment: not user-visible.
+
+=====================================================================
+8. LEFTOVER PROCESS CHECK
+=====================================================================
+`pgrep -af "refdes.*serve"` at the end: see log tail. All serve children
+in this task were spawned by pytest foreground commands or by the
+load-loop command's trap; none left running.
+
+=====================================================================
+9. PR #210 FIX ROUND 1 (approved; doc-only, per .scratch/FIX-1.txt)
+=====================================================================
+F1 changelog.d/serve-port-token-file.added.md: the older fragment's
+   "`allow_reuse_address` stays `False`..." sentence contradicted this
+   PR once both fragments fold into the same [Unreleased]. Rewritten to
+   agree (POSIX reclaims its own just-released port; Windows keeps the
+   strict bind because the flag means bind-over-anyone there), without
+   duplicating the new fragment's text. The quoted refusal message stays:
+   that full wording is what Windows still prints.
+F2 (orchestrator) macOS/BSD caveat: SO_REUSEADDR there also lets a bind
+   to 127.0.0.1:P succeed while ANOTHER process listens on the wildcard
+   0.0.0.0:P (standard BSD semantics, same as Python's own HTTPServer
+   default). Verified the doc wording as instructed: `grep -n "held by
+   anything else" docs/cli-reference.md` finds nothing -- the real
+   phrase at line 1976 is "A port something else already holds is a
+   refusal". Added the precise sentence there, and the same caveat as
+   one clause in changelog.d/serve-relaunch-reclaims-own-port.fixed.md.
+   Honest note: the macOS/BSD behavior is the orchestrator's claim; it
+   cannot be verified on this Linux box (Linux keeps EADDRINUSE vs any
+   live listener, which the busy-port refusal tests do pin).
+   server.py NOT touched, as instructed. OPEN OPTION for the owner:
+   restrict the flag to Linux (`sys.platform == "linux"`), leaving
+   macOS/BSD on the strict bind -- a one-line call once someone wants
+   it; recorded here so it is not lost.
+Gates this round: tests/test_docs_anchors.py and
+docs-site/gen_examples.py --check (results: commit that follows this
+log edit was built after both ran; see the PR comment).
+One commit, one push, PR comment posted. Not merged/closed/approved.
+
+

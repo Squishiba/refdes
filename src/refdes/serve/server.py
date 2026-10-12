@@ -265,7 +265,17 @@ def _decorate_calc_values(page: str, item) -> str:
 
 class _Server(ThreadingHTTPServer):
     daemon_threads = True
-    allow_reuse_address = False  # never share a port with a stale listener
+    # SO_REUSEADDR (the stdlib HTTPServer default) on POSIX only, so a
+    # relaunch of your own --port wins the port back while the previous
+    # launch's accepted sockets are still finishing their close: without it
+    # a socket lingering in TIME_WAIT on 127.0.0.1:<port> wedges the restart
+    # for its whole lifetime (up to a minute) with `Address already in use`.
+    # It is not a licence to share a port: on Linux a listener that is live
+    # still answers bind with EADDRINUSE, so the busy-port refusal stands.
+    # On Windows SO_REUSEADDR means bind-over-anyone -- a hijack -- so the
+    # strictness stays there (see also the Windows carve-outs in
+    # write_launch_file and sigterm_is_deliverable).
+    allow_reuse_address = os.name != "nt"
     app: EditorApp
 
 
@@ -279,14 +289,16 @@ class ServeStartupError(RuntimeError):
 def _bind_failure_message(port: int, exc: OSError) -> str:
     """One line naming the port, why it could not be bound, and what to do.
 
-    `allow_reuse_address` stays `False` (see `_Server`), so a port a launch gave
-    up moments ago can still report busy while its accepted sockets finish
-    closing. Saying that beats letting `Address already in use` read as a crash.
+    `allow_reuse_address` is True on POSIX (see `_Server`), so an EADDRINUSE
+    there means a live holder; on Windows it stays False, so a port a launch
+    gave up moments ago can still report busy while its accepted sockets
+    finish closing, and the message says so. Saying that beats letting
+    `Address already in use` read as a crash.
     """
     reason = exc.strerror or str(exc)
     if exc.errno == errno.EACCES:
         reason = f"{reason} (ports below 1024 need elevated privileges)"
-    elif exc.errno == errno.EADDRINUSE:
+    elif exc.errno == errno.EADDRINUSE and os.name == "nt":
         reason = (
             f"{reason} -- something else holds it, or a launch that stopped a "
             "moment ago still has sockets closing on it"
