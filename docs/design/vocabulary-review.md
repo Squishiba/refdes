@@ -986,11 +986,40 @@ prefixes) to every item file in one operation" (`cli.py:1514-1527`).
 *Cost*: T2. Parser name, `cmd_revise`, `docs/cli-reference.md`, shell
 completions, muscle memory — hence the alias, kept until the next minor.
 
+**Landed (2026-10-11).** The owner approved the rename. `refdes rename` is the
+command; `cmd_revise` is `cmd_rename`; the handler's one stderr line for the
+old spelling says what it became and when it goes away, and stdout is left
+exactly as it was (the report and the `--dry-run` plan are what scripts read).
+The alias is hidden rather than merely demoted, which took a helper
+(`cli.py::_hide_command`) instead of argparse's own mechanism: on this Python
+(3.13.5) `aliases=[...]` prints the old name in both the usage line and the
+command list (`rename (revise)`), and `help=SUPPRESS` on a subparser prints the
+literal `==SUPPRESS==` back, because a subcommand's row is emitted by
+`_format_action`, which never consults SUPPRESS. `src/refdes/revise.py` keeps
+its name — seven other modules import it by name (`adopt.py`,
+`calc_rewrite.py`, `cli.py`, `image_freeze.py`, `key_restore.py`, `keys.py`,
+`links.py`) and tests import it as `refdes.revise`, so
+renaming it is not the trivial, touches-nothing-else change the task allowed
+for. `docs/cli-reference.md` and every other user-facing doc now say `rename`
+(design docs and this review's own inventory keep the old name as history);
+the repo ships no shell completions, so there was nothing to rename there.
+
 **P13 — `refdes index` → `refdes items`, keeping `index` as an alias.** Four
 referents for `index` (D5), and this is the one users type. The command prints
 items; call it that. *Cost*: T2, same shape as P12, plus any editor tooling
 built on it — `docs/cli-reference.md:193` says that is precisely who it is for,
 so the alias matters more here than for P12.
+
+**Decided, no rename (2026-10-11).** The owner chose P14's posture for this
+one: the vagueness is fixed by help text, not by a new name. `refdes index
+--help` and the first line of its `docs/cli-reference.md` section now say what
+the command is for and what it puts on stdout — the machine-readable payload
+editor tooling reads, naming the keys it actually carries (`title`, `version`,
+`coverage`, `types`, `items`, `next_ids`, `diagnostics`, plus `boards`,
+`workspaces`, `threads` and the capture pair where a project has them) — rather
+than naming an artifact and a negation. No behaviour changed, so no editor
+tooling had to be told about anything. §1.6's inventory row for `index` still
+quotes the sentence it found, the way every row there quotes the text as found.
 
 **P14 — leave `audit`, `init`, `new`, `check`, `build`, `fetch`, `stub-tests`,
 `keys adopt`, `calc-rewrite`, `former-ids`, `standard`, `schema`, `ls`, `id`,

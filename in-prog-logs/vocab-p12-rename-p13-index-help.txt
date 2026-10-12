@@ -1,0 +1,343 @@
+Task: Vocabulary P12 (`refdes revise` -> `refdes rename`, alias kept) + P13
+(`refdes index` help text only). Branch vocab-p12-rename-p13-index-help.
+
+## Start
+
+- Read .scratch/TASK.txt and AGENTS.md. `git status` clean at start (verified,
+  55176b0 = main's tip). Working only in this worktree.
+- IMPORTANT: the `refdes` script on PATH is the venv's editable install pointing
+  at /home/jorb/work/refdes (the main checkout). Per AGENTS.md/TASK rules I never
+  run it. Every refdes invocation here is
+  `PYTHONPATH=$PWD/src /home/jorb/work/venv-refdes/bin/python -m refdes.cli ...`
+  which resolves refdes to this worktree's src/ (verified: refdes.__file__ prints
+  this worktree's path).
+- Recorded BEFORE output: .scratch/help-before.txt (`refdes --help`),
+  .scratch/help-revise-before.txt, .scratch/help-index-before.txt.
+  `refdes --help`'s usage line and command list both name `revise`; `index`'s help
+  is "print items.json to stdout without rendering the site" and `refdes index
+  --help` has no description at all (just usage + --compact).
+
+## P12 code (cli.py, revise.py, parse.py)
+
+- `cmd_revise` -> `cmd_rename`; it prints the P12 note to STDERR first when the
+  name typed was `revise` (stdout is the command's report, and `--dry-run`'s
+  output is what scripts read). Verified: `refdes revise m.yaml --dry-run` with
+  stdout redirected to /dev/null shows the note. CORRECTED in fix round 1: the
+  streams are identical for a real run, but NOT for `--dry-run` -- the plan
+  names the surrogate key it would mint, and `keys.mint()` draws from
+  `secrets.token_bytes`, so that line differs in every run: two `rename
+  --dry-run` runs on the same tree differ by it as much as `rename` and
+  `revise` do (`.scratch/fix1/probe`, r1/r2/v1/v2 above).
+- Module kept as `src/refdes/revise.py`: renaming it is NOT trivial -- it is
+  imported by calc_rewrite.py, adopt.py, keys.py, key_restore.py,
+  image_freeze.py, links.py, cli.py and by name in tests
+  (`from refdes import revise`), so the task's "unless renaming it is trivial
+  and touches nothing else" condition fails and the name stays. Docstring
+  pointers that named `cmd_revise` were updated to `cmd_rename`.
+- Parser: `p_revise` -> `p_rename` for the `rename` subcommand; a second, real
+  parser named `revise` carries the alias. WHY A SECOND PARSER AND NOT
+  `aliases=`: verified on this Python (3.13.5) that `sub.add_parser("rename",
+  aliases=["revise"])` renders the row as `rename (revise)` and the usage line
+  as `{...,rename,revise}` -- it shows the alias, which P12 forbids; and that
+  `help=argparse.SUPPRESS` on a *subparser* prints the literal `==SUPPRESS==`
+  as the row's help text, because a subcommand row is emitted by
+  `HelpFormatter._format_action`, which never consults SUPPRESS (only
+  `add_argument` gates on it, and it is not on that path for subactions).
+  So cli.py gained `_hide_command(sub, name)`: drop the row from
+  `sub._choices_actions` and pin `sub.metavar` to the visible commands. It
+  runs LAST in the builder (before `parse_args`), because the metavar is
+  computed from `sub.choices` at that moment -- called earlier it silently
+  drops every later command from the usage line (that is what happened on the
+  first attempt; the test would have caught it).
+- User-visible strings renamed: the link-verb refusal in revise.py, the
+  `unknown type ... see 'refdes rename'` fix line in parse.py, the global
+  `--no-write` help, `build --dry-run`'s help, and calc-rewrite's description.
+  CORRECTED in fix round 1: `build --dry-run`'s help was NOT renamed in this
+  round -- it still read `unlike id/revise/stub-tests` -- and the live refusal
+  strings in revise.py still named `revise`. Both fixed under R1/R2 below.
+  Prose in lifecycle.py/seal.py/model.py/calc_rewrite.py that names `revise.py`
+  the MODULE is left alone (the module is still called that); the two historical
+  bug narratives in revise.py's docstrings that quote what `refdes revise` used
+  to print are left as history.
+- tests/test_no_write.py's pinned reporting-command set now says `rename`
+  (the help text it pins changed). Three tests in tests/test_revise.py that
+  assert "exactly one line of stderr" switched to the `rename` spelling,
+  because the alias legitimately adds a second line; tests/test_rename_alias.py
+  pins the alias itself.
+
+## P13 (index help text, no rename)
+
+- Payload keys were READ, not recalled: `.scratch/probe/idx` (a `refdes init`
+  project with a requirement/bound/test) prints title, version, coverage,
+  types, items, next_ids, diagnostics; `.scratch/probe/idx2` (adds a `boards:`
+  registry and two `follows:`-chained logs) additionally prints boards and
+  threads, and its items carry captured/edited_after_captured. workspaces is
+  the same "absent key, not null" rule (read render.items_json). The exit-0
+  on a broken item file was re-run too (`.scratch/probe/idx2` with
+  items/board-a/broken.yaml: ERROR on stderr, JSON on stdout, exit 0).
+- New `index` help/description names who it is for (the VS Code extension and
+  other editor tooling), what is always there, what is conditional, and the
+  deliberate exit-0 posture. The one-line `--help` entry no longer reads
+  "print items.json to stdout without rendering the site".
+- docs/cli-reference.md's `refdes index` section first line rewritten to the
+  same content in one sentence. No behaviour change, so the only test added is
+  the help-text pin in tests/test_index_help.py -- plus one test that runs
+  `index` for real and checks the keys the help names are the keys the payload
+  carries (that is the "don't list keys from memory" rule, made a gate).
+
+## Docs
+
+- docs/cli-reference.md: usage block, the `--no-write` row, both exit-code /
+  write-destination tables, the `build --dry-run` comparison, the
+  `standard upgrade` section's two cross-references, the "Files the tool
+  writes" baselines row, and the whole command section -- retitled
+  `## refdes rename <mapping-file>` with a paragraph saying `revise` is the
+  deprecated alias, hidden from --help, removed next minor. Its sample `$
+  refdes rename rename.yaml` refusal transcript was re-run for real
+  (`.scratch/probe/links`) so the quoted message matches the code's new text.
+- docs/ids.md, docs/links.md, docs/standard-library.md, docs/troubleshooting.md
+  (including the `#refdes-rename-mapping-file` anchor the section retitle
+  moves), README.md's command list: all updated.
+- Left alone on purpose, as the task said to: docs/design/*.md (including this
+  review's own §1.6 inventory rows and S1.3, which quote the text as found),
+  and docs/design-log.md (a dated log of past decisions).
+- No shell completions to update: `git ls-files | grep -i complet` finds no
+  completion script in the repo (only changelog/log filenames).
+
+## Tests + sabotage
+
+- New tests/test_rename_alias.py (6) and tests/test_index_help.py (4).
+- Sabotage 1 -- drop the note (`print(...)` replaced by `pass`):
+  `test_revise_still_does_the_work_and_says_so_once` fails with
+  `assert '' == '`refdes revise` is now `refdes rename`...'`
+  (1 failed, 5 passed) -- .scratch/sabotage.txt.
+- Sabotage 2 -- remove the `_hide_command(sub, "revise")` call:
+  `test_rename_lists_in_help_and_the_alias_does_not_appear_at_all` fails, and
+  the diff shows `{...,rename,revise,...}` back in the usage line
+  (1 failed, 5 passed) -- .scratch/sabotage2.txt.
+  Both sabotages were reverted; `grep -n SABOTAGE src/refdes/cli.py` is empty
+  and both files pass again afterwards.
+- Existing churn, all of it forced: tests/test_no_write.py's pinned reporting
+  list (the `--no-write` help text it pins now says `rename`), and three
+  tests in tests/test_revise.py that assert "exactly one line on stderr" --
+  they run `rename` now, because the alias legitimately adds a second line.
+  Everything else that still types `revise` (test_revise_flow_style.py,
+  test_readonly_explicit_writes.py, test_no_write.py's behaviour tests) was
+  left typing `revise`: it passes untouched, which is the alias's real-world
+  proof.
+
+## Gates
+
+- `ruff check --select E9,F src tests` -> All checks passed! (exit 0).
+- `docs-site/gen_examples.py --check` -> both pages up to date (exit 0).
+- ruff `--select I` reports 30 findings across the repo, 3 of them in files I
+  touched; all 3 are pre-existing (verified with
+  `git show HEAD:<file> | ruff check --select I --stdin-filename <file> -`)
+  and in import lines I did not touch, so per AGENTS.md they are left alone.
+- Full suite, foreground: 3572 passed, 2 skipped in 273s, exit 0
+  (.scratch/suite.txt). The known serve-token flake did not fire.
+
+## Status
+
+Finished. Committed, pushed, PR against main.
+
+PR: https://github.com/Squishiba/refdes/pull/200 (open against main, 17 files,
+nothing from .scratch/ staged). One thing deliberately NOT hidden: the
+invalid-choice error argparse raises for an unknown subcommand still lists
+`revise`, because that message is built from the parser map and `revise` really
+does still parse -- P12 asked for it out of `--help`, not out of the set of
+things that work.
+
+## Fix round 1 (chunk 2 approved, chunk 1 requested changes)
+
+Against head 73302a7; R1-R5 (chunk 1) were the requests, R6-R7 the SHOULD FIXes.
+All seven landed in one commit, this log with them.
+
+### The rebase (why CI had never run)
+
+- The PR was CONFLICTING with main, and GitHub does not run `pull_request`
+  workflows on a PR it cannot merge -- that, not the code, is why `gh pr checks
+  200` had been empty. `git fetch origin` then `git rebase origin/main`
+  (#196 merged as 052d0c3 after this branch's 55176b0 base; #198 in between).
+- One conflict, in docs/troubleshooting.md's project-half `history:` ->
+  `on_change:` paragraph: #196 had widened the mode list to `invalidate`,
+  `timeline`, `ignore` and added the `hardware@1`/`@2` pin note, while our
+    commit had changed the tail clause of those same lines from `refdes revise`
+    to `refdes rename`. The resolution keeps both intents -- #196's mode list and
+    pin note, our `refdes rename` wording (docs/troubleshooting.md:148-153).
+
+  Both commits replayed clean; the other four auto-merged files
+  (docs/cli-reference.md, docs/design/vocabulary-review.md,
+  docs/standard-library.md, src/refdes/parse.py) were re-grepped, nothing lost.
+- What the rebase brought in that names the old command, from
+  `git diff 55176b0 origin/main --name-only` grepped for `refdes revise`:
+  - `changelog.d/vocab-p9-log-to-timeline.breaking.md:19` -- "`refdes revise`
+    cannot rewrite mode values". User-facing release text for the same
+    unreleased release as the rename, so it now says `refdes rename`. True
+    either way (the alias works), but release notes should name the command
+    that is in `--help`.
+  - `docs/design/vocabulary-review.md` (948 and friends) and
+    `docs/design-log.md` (402) -- dated design records, left as found. That is
+    this branch's standing rule for `docs/design/` and the design log.
+  - `src/refdes/model.py:77,139` -- model.py IS one of the files #196 touched,
+    but these two comment lines are not its doing: `git show
+    55176b0:src/refdes/model.py` has them already (at 42 and 104 there). So the
+    rebase brought in no new `refdes revise` there; they are internal comments,
+    listed in the R2 audit below rather than edited.
+
+### R1 -- `refdes build --dry-run`'s help
+
+- cli.py:2673 read `unlike id/revise/stub-tests`; now `id/rename/stub-tests`.
+  Verified by running it: `refdes build --help` wraps the line as
+  `(unlike id/rename/stub-` / `tests, ...`.
+- The claim that this had already been done (PR body, and this log's own line
+  above) was false at the time. The code is fixed and the log line is
+  corrected; the claim was the thing that was wrong, but not the only one.
+- Nothing pinned the old wording: `grep -rn "id/revise\|id/rename" tests` finds
+  no test, and docs/cli-reference.md's `--dry-run` row says only "Render the
+  site without sealing".
+
+### R2 -- the live refusal strings
+
+- Six user-facing strings in revise.py named the command: the four
+  `_stale_mapped_names` messages ("this value is written in a form revise
+  cannot edit"), the post-write guard that adds "-- rolled back:", and
+  `_bare_reference_blockers` ("revise does not rewrite bare references"). All
+  six now say "the rename" / "this rename".
+- `refdes standard upgrade` DOES reach them: `apply_standard_upgrade()` calls
+  `apply()` once per version step (revise.py:2172), and all three guards live
+  inside `apply()` (pre-write check at 1529, post-write guard at 1625, bare
+  references at 1498). So the wording is "the rename", with the article, not a
+  literal `refdes rename` -- a user mid-upgrade would not accept being told
+  they typed the wrong command, and each step of the chain really is a rename
+  (the version's own `migration.yaml` mapping).
+- New test, tests/test_rename_alias.py::
+  test_a_refusal_reached_through_rename_names_rename: a multi-line flow mapping
+  the rewrite cannot reach, driven through the real CLI as `refdes rename` --
+  exit 1, "the rename cannot edit" on stderr, no `revise` anywhere in either
+  stream, stdout empty, item file byte-identical. Verified against a real run
+  first (.scratch/fix1/probe3).
+- No existing test needed changing: the ones that assert on these refusals
+  (tests/test_revise_flow_style.py, test_calc_rewrite.py, test_keys_adopt.py,
+  test_keys_restore.py, test_readonly_explicit_writes.py) match "cannot edit"
+  or "rolled back", never the command word. Its section comment in
+  test_revise_flow_style.py now reads "forms the rename cannot edit", with a
+  pointer to where the wording itself is pinned.
+- Audit of everything in src/ that still says "revise", by AST-walking string
+  constants (which covers f-string parts) separately from docstrings and
+  comments, so "user-facing" is decided by where the string sits rather than by
+  eye:
+  - cli.py:2535 `REVISE_ALIAS_NOTE` -- naming `revise` is the note's entire
+    purpose. Stays.
+  - cli.py:2054 `args.command == "revise"`, 3143 `sub.add_parser("revise",
+    help=SUPPRESS)`, 3294 `_hide_command(sub, "revise")` -- the alias itself:
+    the check the note keys on, the parser that keeps it working, the call that
+    hides it from `--help`. Plumbing, not prose. Stays.
+  - revise.py:1226 `tempfile.mkdtemp(prefix="refdes-revise-")` -- the dry-run
+    simulator's throwaway directory name. Never printed as advice; named after
+    the module, so it moves when `revise.py` does. Stays.
+  - Docstrings and comments naming the command or the module: model.py:77,139
+    (internal comments that pre-date #196 -- it touched the file, not these
+    lines), lifecycle.py:105,282,
+    seal.py:229,267, parse.py:1147, calc_rewrite.py:5,12,88,251,295,
+    standards.py:358-364, textio.py:4, stub_tests.py:30,195, links.py:63-66,
+    schema_json.py:37,451, and revise.py's own module/`Mapping`/
+    `_refuse_unknown_sections` docstrings including the two historical bug
+    narratives. Internal prose about the engine, most of it naming
+    `revise.py` the module or its functions (`revise.apply`, `revise.Refused`,
+    `revise.write_rewrites_verified`); the module keeps its name, so they
+    stay with it.
+  - One generated message still lists `revise`: argparse's invalid-choice
+    error for an unknown subcommand builds its "choose from ..." from
+    `sub.choices`, and the alias really does parse. Re-verified this round:
+    `refdes nosuchcmd` prints the hidden-alias usage line but "choose from
+    ..., rename, revise, calc-rewrite, ...". Out of `--help` was the request,
+    not out of the set of things that work.
+
+### R3 -- the changelog claim
+
+- changelog.d/rename-replaces-revise.changed.md made two claims that were not
+  true: that "Error and help text that named the command now says `refdes
+  rename`" (R1/R2 say otherwise), and that a `--dry-run` plan "sees the same
+  bytes either way" (R5 says otherwise). It now says the text says `rename`,
+  names the two places the retired word is still printed (the alias's own
+  note; argparse's unknown-subcommand list), and says the plan differs between
+  runs by the surrogate keys it mints. Re-checked word by word against the R2
+  audit above.
+
+### R4 -- docs/cli-reference.md's index keys
+
+- The `refdes index` section listed `threads` beside the always-present keys.
+  It now says so conditionally: "`threads` too, when the project has any
+  `follows:`-chained entries, and `boards`/`workspaces` when those registries
+  are declared", matching `index --help` and `render.items_json`: boards and
+  workspaces are keyed off a declared registry, and `threads` only appears if
+  `threads_projection` returns rows -- a thread being a connected component of
+  the `follows:` graph with at least one edge (threads.py:140-153).
+
+### R5 -- this log's "otherwise identical" line
+
+- Corrected in place above. Shown by four real `--dry-run` runs of the same
+  project in .scratch/fix1/probe (r1, r2 = `rename` twice; v1, v2 = `revise`
+  twice): all four stdouts differ from each other at exactly the line naming
+  the key the plan would mint, and only there. A real run's streams are
+  identical as claimed; the plan is not, and never was between two runs.
+
+### R6 -- the alias's `--dry-run` byte-identity test
+
+- The test built two trees, renamed both for real, then ran `--dry-run` on
+  them, so both spellings printed "nothing to do -- mapping doesn't apply to
+  this project" and the comparison proved nothing about a real plan. It now
+  builds FOUR trees -- two for the real run, two left untouched for the plan --
+  asserts the plan is real work ("would change 1 file(s):") and that it mints
+  a key, and compares the plans with the minted keys blanked.
+- How they are normalised: `_MINTED_KEY` matches an 11-character run of
+  `keys.ALPHABET` -- Crockford base32 -- preceded by `key: ` or `@`, which are
+  the only two shapes a plan prints a key in, and `_without_minted_keys`
+  replaces each with `<key>`. The alphabet and the length are read from
+  keys.py, not retyped, so a widening there cannot leave the test quietly
+  matching nothing; the assertion that a minted key IS present would then fail
+  rather than pass vacuously.
+- Sabotage, .scratch/sabotage3.txt: variant A, the alias prints one extra
+  stdout line on every run -- test_revise_stdout_is_rename_stdout_byte_for_byte
+  fails (1 failed, 6 passed). Variant B, the extra line only under `--dry-run`,
+  so ONLY the new comparison can see it -- same test fails (1 failed, 6
+  deselected), with the diff showing the extra line against the plan's own
+  lines and the key already blanked to `<key>`. Reverted both:
+  `grep -c SABOTAGE src/refdes/cli.py` is 0 and the file is 7 passed again.
+
+### R7 -- README's command count
+
+- README.md said "Fifteen commands in all"; `refdes --help` on this branch
+  lists 22 (`serve,build,check,revision,release,index,ls,thread,work,id,fetch,
+  audit,init,new,schema,standard,keys,rename,calc-rewrite,stub-tests,
+  former-ids,history`), so the number was stale before this PR -- P12 renamed
+  one command and removed none. Reworded rather than renumbered, so it cannot
+  go stale again: the sentence now says `refdes --help` lists every command and
+  keeps the same examples and the CLI-reference link. (The "fifteen link verbs"
+  line in docs/standard-library.md is a different count of a different thing
+  and was left alone.)
+
+### Gates, this round
+
+- Full suite, foreground: 3585 passed, 2 skipped in 256s, exit 0
+  (.scratch/suite.txt). 3572 passed before the rebase, so the 13-test gain is
+  main's tests arriving plus the one new test here. The known
+  `test_serve_cli.py` stale-token flake did not fire.
+- `ruff check --select E9,F src tests` -> All checks passed! (exit 0).
+- `docs-site/gen_examples.py --check` -> docs/schema-reference.md and
+  docs/vocabulary.md both up to date (exit 0).
+- `ruff check --select I .` -> 29 repo-wide findings, 2 of them in files this
+  round touched (cli.py:3, revise.py:29); both reproduce on the pre-fix HEAD of
+  the same files (`git show HEAD:<file> | ruff check --select I --stdin-filename
+  <file> -`), both in module-level import blocks this round did not touch, and
+  tests/test_rename_alias.py -- the only import block edited -- is not among
+  them. Left alone per AGENTS.md.
+
+### Status, this round
+
+R1-R7 all done, one commit (this log with it). Pushed once with
+`--force-with-lease` (I am the only writer of this branch); the PR body's suite
+numbers get updated to the ones above and a review comment listing R1-R7 goes
+on the PR.
+

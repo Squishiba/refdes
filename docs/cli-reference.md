@@ -2,14 +2,14 @@
 
 ```
 usage: refdes [-h] [-V] [-c CONFIG] [--no-write]
-              {serve,build,check,revision,release,index,ls,thread,work,id,fetch,audit,init,new,schema,standard,keys,revise,calc-rewrite,stub-tests,former-ids,history} ...
+              {serve,build,check,revision,release,index,ls,thread,work,id,fetch,audit,init,new,schema,standard,keys,rename,calc-rewrite,stub-tests,former-ids,history} ...
 ```
 
 | Global option | Effect |
 |---|---|
 | `-V`, `--version` | Print one line, `refdes <version>`, naming the `refdes` you are actually holding, and exit `0`. Needs no project, no config, and no subcommand. The number is read from the installed package's own metadata, so it cannot disagree with what `pip show refdes` reports; run from a raw checkout with nothing installed, it prints `refdes (version unknown -- not installed as a package)` rather than raising. |
 | `-c`, `--config PATH` | Use this `refdes-project.yaml`. Default: search upward from the current directory. |
-| `--no-write` | Never modify anything under `items/` or `.refdes/`. Suppresses: key minting, link/check expansion to composite form, `.refdes/schema.json` regeneration, seal recording, board/workspace membership manifest, baseline stamping, and the ID ledger. Explicit write commands behave differently: commands with `--dry-run` (`id`, `revise`, `calc-rewrite`, `stub-tests`) report what would change and write nothing; `revision`/`release` report "would stamp" and write nothing; `keys adopt` and `keys restore` report the full plan and write nothing; commands that fundamentally write (`fetch`, `init`, `standard upgrade`, `standard add-preset`, `standard remove-preset`, `former-ids propose --confirm`, `history capture`, `history redact`, `history migrate-seals`) **refuse to run** under `--no-write` and exit 2. `refdes build --no-write` still writes the site — that is the command's own output, not a side effect. |
+| `--no-write` | Never modify anything under `items/` or `.refdes/`. Suppresses: key minting, link/check expansion to composite form, `.refdes/schema.json` regeneration, seal recording, board/workspace membership manifest, baseline stamping, and the ID ledger. Explicit write commands behave differently: commands with `--dry-run` (`id`, `rename`, `calc-rewrite`, `stub-tests`) report what would change and write nothing; `revision`/`release` report "would stamp" and write nothing; `keys adopt` and `keys restore` report the full plan and write nothing; commands that fundamentally write (`fetch`, `init`, `standard upgrade`, `standard add-preset`, `standard remove-preset`, `former-ids propose --confirm`, `history capture`, `history redact`, `history migrate-seals`) **refuse to run** under `--no-write` and exit 2. `refdes build --no-write` still writes the site — that is the command's own output, not a side effect. |
 
 Exit codes: `0` success, `1` errors found, `2` configuration error (including `--no-write` refusal).
 
@@ -22,7 +22,7 @@ section above or below is the authority; today the split is:
 |---|---|---|
 | an item that is not in the project, or one on no thread | `history capture`, `history redact`, `thread` | `2` |
 | a preset the pinned standard lacks, or one not selected | `standard add-preset`, `standard remove-preset` | `2` |
-| a mapping file that is not on disk | `revise` | `2` |
+| a mapping file that is not on disk | `rename` | `2` |
 | a revision name that is not a usable name | `revision`, `release` | `2` |
 | a base standard or preset that does not exist | `init` | `2` |
 | an item that is not in the project, or one with no `citations:` field; a path nothing cites | `fetch --item`, `fetch --path` | `1` |
@@ -59,7 +59,7 @@ what it could not write, or refuses:
 | `.refdes/baselines/<name>.yaml` | `revision`, `release` | Refuses: `error: cannot write .refdes/baselines/<name>.yaml …`, **exit 2**. A stamp that did not happen is never reported as one that did. |
 | a baseline's stored-hash format rewrite | `audit`, `former-ids propose` | Names the file and carries on, **exit 0**. A baseline already on disk holds correct content; only its format lags the current hash definition, and the diff is computed in memory either way. |
 | the `.refdes/history/` store | `history capture`, `history redact`, `history migrate-seals` | Refuses: `error: cannot write .refdes/history/… (read-only tree?) -- nothing was captured`, **exit 1**. A snapshot that was not taken is never announced as one that was. |
-| a seal hash or baseline entry carried forward, or an item file rewritten | `revise`, `calc-rewrite`, `standard upgrade` | `refused:` naming the file, **exit 1**, and the whole operation is rolled back. The carried hash is the only record that the rename was not an edit to a sealed entry or a stamped baseline, and a rename that lands in some item files and not others is not a rename. |
+| a seal hash or baseline entry carried forward, or an item file rewritten | `rename`, `calc-rewrite`, `standard upgrade` | `refused:` naming the file, **exit 1**, and the whole operation is rolled back. The carried hash is the only record that the rename was not an edit to a sealed entry or a stamped baseline, and a rename that lands in some item files and not others is not a rename. |
 | an id written back into its source file, or `.refdes/ids.yaml` | `id` | `cannot write <file> (read-only tree?) -- …`, **exit 1**. An id that never reached its source file is not allocated and its number stays free; the ledger is what stops a deleted item's number being reused, so a refusal to record it is reported too. |
 | a `stub-tests.md` | `stub-tests` | `refused:` naming the file, **exit 1**. The files are independent (one per workspace/board, holding only their own scope's stubs) and a written stub is the author's, so what landed stays and what was refused is named; re-running picks up exactly the missed ones. |
 | `refdes-project.yaml` | `standard add-preset`, `standard remove-preset` | `error: cannot write refdes-project.yaml (read-only tree?) -- …`, **exit 2** — the code these two already use for "your config is not what you asked for it to be". |
@@ -112,7 +112,7 @@ read-only tree (a file sitting at the `site.out` path is refused as
 kind of reason — their write is deliberately left outside the refusal
 machinery — so a filter on the marker will miss those two commands.
 
-The full rationale, and what an explicit write (`revise apply`, `keys adopt`)
+The full rationale, and what an explicit write (`rename`, `keys adopt`)
 does instead, is in [keys §2](design/keys.md#a-tree-that-will-not-take-the-write).
 
 ---
@@ -150,7 +150,7 @@ normal violation.
 
 `--dry-run` skips only that seal-recording side effect — the site is still
 rendered for real, to the same output directory, watermarked with a "Draft
-build" banner on every page. This is different from `id`/`revise`/
+build" banner on every page. This is different from `id`/`rename`/
 `stub-tests`'s own `--dry-run`, which print a preview and write nothing: the
 whole point of running `build` is the rendered site, so a dry-run that wrote
 no HTML would be useless for "let me see what this looks like without
@@ -358,8 +358,13 @@ and is still reported: the refusal is about the destination, not the project.
 
 ## `refdes index`
 
-Print `items.json` to stdout without rendering the site. Does everything `check`
-does, and emits the export instead of a report.
+Print the project's machine-readable payload — items with their fields, links,
+calcs, checks and `file:line`, beside the `coverage`, `types`, `next_ids` and
+`diagnostics` that always go with them (`threads` too, when the project has any
+`follows:`-chained entries, and `boards`/`workspaces` when those registries are
+declared) — as JSON on stdout, which is what the VS Code extension and other
+editor tooling read, without rendering the site. Does everything `check` does,
+and emits the export instead of a report.
 
 | Option | Effect |
 |---|---|
@@ -1251,7 +1256,7 @@ one combined rename, so a name a later version reuses (freed up by an
 earlier step) is never mistaken for a collision. Each step rewrites item
 files, bumps `standard.version:` in `refdes-project.yaml`, and carries the affected
 items' content hashes forward in every stamped baseline and seal file, the
-same way `refdes revise` does (below) — see there for what that buys you.
+same way `refdes rename` does (below) — see there for what that buys you.
 A baseline stamped before it recorded which standard version it started at
 (or stamped under `standard: none`) is left alone during a chained
 upgrade, reported rather than guessed at, since there's nowhere recorded
@@ -1269,7 +1274,7 @@ the chain attempts the step and the rewritten project fails to load, which is
 also an exit 1 with the config left at the version it had.
 
 > **The project must validate first — but a failing check is not that.**
-> Both this and `refdes revise` refuse if the project doesn't validate: an
+> Both this and `refdes rename` refuse if the project doesn't validate: an
 > item that doesn't parse, a missing required field, a link pointing at
 > nothing, a schema the data no longer satisfies. The rule is that a hash
 > change caused by the rename must not be able to hide behind an
@@ -1284,9 +1289,15 @@ also an exit 1 with the config left at the version it had.
 
 ---
 
-## `refdes revise <mapping-file>`
+## `refdes rename <mapping-file>`
 
-Rewrite project-local vocabulary — type names, type merges into an
+`revise` is this command's deprecated name: `refdes revise …` still works, with
+identical behaviour and exit codes, and prints one line to stderr saying so. It
+is hidden from `refdes --help` and will be removed in the next minor release —
+this is the rename formerly proposed as P12, because `revise` and `revision`
+are two letters apart and do unrelated things.
+
+Rename project-local vocabulary — type names, type merges into an
 existing type, field names (scoped per type), link verb names, id prefixes,
 citation-entry key names — across every item file in one operation, from a
 hand-written mapping:
@@ -1320,7 +1331,7 @@ standard declares a maintained link that fits, rename the verb under `links:`;
 `refdes standard upgrade` does exactly that for `records:` → `follows:`.
 
 For a bundled standard's own version upgrade, use `refdes standard upgrade
---to N` instead (above) — it needs no hand-written mapping. `revise` is
+--to N` instead (above) — it needs no hand-written mapping. `rename` is
 for your own project-local renames: something not part of the standard,
 or a hand-rolled schema with no `standard:` pin at all.
 
@@ -1340,8 +1351,8 @@ so a hash change caused by a rename can't hide behind an already-broken build.
 | `--dry-run` | Show which files would change and nothing more; write nothing |
 
 ```bash
-refdes revise rename.yaml --dry-run
-refdes revise rename.yaml
+refdes rename rename.yaml --dry-run
+refdes rename rename.yaml
 ```
 
 The dry run also names the minting and link expansion the real run performs
@@ -1364,7 +1375,7 @@ no project load, no minting, no dry-run report — with a one-line `error:` and
 exit 2, like any other configuration error:
 
 ```
-$ refdes revise nope.yaml
+$ refdes rename nope.yaml
 error: no such mapping file: nope.yaml
 ```
 
@@ -1372,7 +1383,7 @@ A mapping file that exists but doesn't parse gets the same treatment, with
 PyYAML's own mark-and-caret detail collapsed onto the one line:
 
 ```
-$ refdes revise broken.yaml
+$ refdes rename broken.yaml
 error: mapping file could not be parsed: broken.yaml: while parsing a flow sequence in "<unicode string>", line 2, column 16: requirement: [unclosed ^ expected ',' or ']', but got '<stream end>'
 ```
 
@@ -1387,24 +1398,24 @@ accepted sections listed and exit 2 — the same treatment as an unreadable file
 above. Ignoring it instead used to make `ids:` a silent no-op:
 
 ```
-$ refdes revise rename.yaml
+$ refdes rename rename.yaml
 error: rename.yaml: unknown top-level section 'ids'. A mapping file may have types:, fields:, links:, prefixes: or citation_keys:, and an unrecognised section is refused rather than ignored. To rename a single item, edit its `id:` by hand instead, after a writable `refdes check` has expanded references to composite form so they follow the rename -- see https://squishiba.github.io/refdes/troubleshooting.html#links.
 ```
 
-`revise` has no single-item rename — it renames ids only as part of a
+`rename` has no single-item rename — it renames ids only as part of a
 `prefixes:` rename — and a file whose only section was `ids:` used to print
 `nothing to do -- mapping doesn't apply to this project` and exit 0 having
 renamed nothing. A file mixing a recognised section with an unrecognised one
 was worse: the recognised half was applied and the rest dropped without a word.
 Both now stop. `--dry-run` refuses identically.
 
-**A type or required-field rename cannot be done with `refdes revise` alone.**
+**A type or required-field rename cannot be done with `refdes rename` alone.**
 The rename only touches item files, never `refdes-schema.yaml`'s own
 `types:`/`link_types:` — but the project is validated both before and after,
 and neither state is valid on its own: with the data renamed and the schema
 not, the build reports `unknown type 'spec2'. Did you mean 'spec'?`; with the
 schema renamed and the data not, it reports `unknown type 'spec'. Did you mean
-'spec2'?`. `revise` refuses on a project that already has build errors and
+'spec2'?`. `rename` refuses on a project that already has build errors and
 refuses one the rewrite would break, so both orders are refused and both leave
 the project exactly as it was. A *required*-field rename is the same story
 (`missing required field 'title'` one way, `missing required field 'label'` the
@@ -1413,7 +1424,7 @@ other).
 So on a hand-rolled schema, a type or required-field rename is a **hand edit
 to both files, made together**: rename the key in `refdes-schema.yaml` and the
 `type:`/`prefix:` and `id:` lines in the item files in one editing pass, then
-run `refdes check` to confirm the two agree. The renames `refdes revise` *can*
+run `refdes check` to confirm the two agree. The renames `refdes rename` *can*
 do alone on such a project are the prefix, id, **optional**-field, and
 **link-verb** renames — an optional field rename lands as an
 `unknown field 'label' on spec` warning until you add the field to the schema
@@ -1425,9 +1436,9 @@ on a project that declares no `narrows` is a hand edit to both files, made
 together, exactly like a type rename:
 
 ```
-$ refdes revise rename.yaml
+$ refdes rename rename.yaml
 refused:
-  link rename 'refines' -> 'narrows': 'narrows' is not a link type this project knows, and `refdes revise` only rewrites item files -- the data would be renamed into a verb no schema declares, and an unknown link verb is a warning rather than an error, so every edge this rename touched would silently stop being one. Add the verb to refdes-schema.yaml's `link_types:` (and to the renaming type's own `links:`) and re-run.
+  link rename 'refines' -> 'narrows': 'narrows' is not a link type this project knows, and `refdes rename` only rewrites item files -- the data would be renamed into a verb no schema declares, and an unknown link verb is a warning rather than an error, so every edge this rename touched would silently stop being one. Add the verb to refdes-schema.yaml's `link_types:` (and to the renaming type's own `links:`) and re-run.
 ```
 
 The refusal is deliberately early rather than left to the after-rewrite
@@ -1441,7 +1452,7 @@ is already in use is a different refusal, the collision one
 For a bundled standard's own version bump there is no such problem: the
 schema moves with the data inside one verified operation, because
 `refdes standard upgrade` (above) supplies the schema edit itself. That is why
-it exists and why `revise` defers to it. A standard's own migration is allowed
+it exists and why `rename` defers to it. A standard's own migration is allowed
 to rename a verb the *current* version has never heard of — hardware v2's
 `equivalent` becomes v3's `drop_in`, and `drop_in` is not a v2 verb at all —
 so the new version's vocabulary arrives with the same step.
@@ -1506,7 +1517,7 @@ and the equals-column alignment are preserved:
   items/board-a/log.yaml:19  Q   : mW   = P * 1000    # aligned block -> Q          = P * 1000 | mW    # aligned block
 ```
 
-The operation is transactional like `refdes revise`: the rewritten project
+The operation is transactional like `refdes rename`: the rewritten project
 is reloaded and fully validated, and every calc's evaluated result and unit
 are compared against the before picture — any calc that would compute
 differently rolls every file back. Content hashes and calc hashes are
@@ -2120,7 +2131,7 @@ python -m http.server -d _site 8000
 | `.refdes/log-seal-<board>.yaml` | **yes** | Append-only seals for one registered board's own log entries |
 | `.refdes/boards.yaml` | **yes** | Board and workspace drift manifest; the `workspaces:` section only appears for a project that has declared `workspaces:` |
 | `.refdes/citations.yaml` | **yes** | Citation lockfile (sha256, fetch time, kept-copy flag, resolved sections, the pinned document's page count); written by `refdes fetch`, and by `refdes serve` when an editor accept pins a source value (`docs/design/editor-source-picker.md` §4). Every write is a read-modify-write inside the project's cross-process write lock |
-| `.refdes/baselines/<name>.yaml` | **yes** | One file per `refdes revision`/`refdes release` stamp. Not rewritten by any ordinary command; `refdes revise`, `refdes calc-rewrite` and `refdes standard upgrade` do edit it, to carry an item's content hash across a rename or a spelling-only rewrite |
+| `.refdes/baselines/<name>.yaml` | **yes** | One file per `refdes revision`/`refdes release` stamp. Not rewritten by any ordinary command; `refdes rename`, `refdes calc-rewrite` and `refdes standard upgrade` do edit it, to carry an item's content hash across a rename or a spelling-only rewrite |
 | `.refdes/keys-adopted.yaml` | **yes** | Adoption marker written once by `refdes keys adopt`; its presence is what makes future stamps, seals and membership manifests use key-keyed storage |
 | `.refdes/schema.json` | **no, gitignored** | The project's merged JSON Schema, for editor completion; rewritten by every command that loads the project. `refdes init` puts it in the project's `.gitignore` |
 | `.refdes/copies/` | **no, gitignored** | Kept local copies of datasheet bytes, content-addressed by sha256; written only by `refdes fetch --path ...` for a remote citation with `keep_copy: true`. `refdes init` puts it in the project's `.gitignore` |

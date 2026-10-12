@@ -736,5 +736,5 @@ The standard's own types simply use them:
 A dry-run report of what a project's own usage would need to change ahead
 of `refdes standard upgrade`, without applying anything, is designed in
 [`docs/design/standard-library.md`](design/standard-library.md) §3 but not
-implemented — `refdes revise` supports `--dry-run`; `standard upgrade` does
+implemented — `refdes rename` supports `--dry-run`; `standard upgrade` does
 not yet. Everything else that document specs is built.

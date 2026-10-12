@@ -298,7 +298,7 @@ def test_revise_rewrites_section_inside_flow_marker_end_to_end(tmp_path):
     assert "bound" not in text
 
 
-# ------------------------------------------- refusals: forms revise cannot edit
+# --------------------------------------- refusals: forms the rename cannot edit
 
 MULTILINE_FLOW = (
     "defaults:\n  type: bound\n  prefix: BND\n"
@@ -313,7 +313,11 @@ def test_multiline_flow_mapping_type_rename_refuses_not_silent(tmp_path):
     """A flow mapping split across lines is invisible to every single-line
     pass -- but the parsed item still carries the old type. The post-rewrite
     guard must refuse with a file:line naming the unreachable spelling, never
-    exit 0 (and never "nothing to do"), leaving the file untouched."""
+    exit 0 (and never "nothing to do"), leaving the file untouched.
+
+    The refusal's own wording is pinned through the real CLI in
+    tests/test_rename_alias.py -- it names the command to the reader, which is
+    P12's subject, not this file's."""
     path = _project(tmp_path, "i.yaml", MULTILINE_FLOW)
     result = revise.apply(
         str(tmp_path), revise.Mapping(types={"bound": "constraint"})

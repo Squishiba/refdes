@@ -2050,7 +2050,12 @@ def _print_revision_result(result, dry_run: bool) -> int:
     return 0
 
 
-def cmd_revise(args) -> int:
+def cmd_rename(args) -> int:
+    if getattr(args, "command", None) == "revise":
+        # P12: the old name still works, but it says so -- on stderr, because
+        # stdout is this command's report (and what `--dry-run` and scripts
+        # read), so a note printed there would corrupt the output it annotates.
+        print(REVISE_ALIAS_NOTE, file=sys.stderr)
     if args.no_write:
         args.dry_run = True  # --no-write: report the plan, write nothing
     project_root = _standard_project_root(args)
@@ -2523,6 +2528,48 @@ def _version_line() -> str:
         return "refdes (version unknown -- not installed as a package)"
 
 
+# P12 (docs/design/vocabulary-review.md): `revise` was renamed `rename`, because
+# `revise` and `revision` are two letters apart and do unrelated things. The old
+# name is kept as a hidden alias until the next minor release.
+REVISE_ALIAS_NOTE = (
+    "`refdes revise` is now `refdes rename`; `revise` will be removed in the "
+    "next minor release"
+)
+
+
+def _hide_command(sub, name: str) -> None:
+    """Keep a working subcommand out of `refdes --help`.
+
+    Not what argparse's own mechanism does for a subparser, verified on this
+    Python (3.13.5, /usr/lib/python3.13/argparse.py): `help=argparse.SUPPRESS`
+    hides an *option*, but a subcommand's row is emitted by `_format_action`,
+    which never consults SUPPRESS and so prints the sentinel itself as the row's
+    help text; and the usage line's `{a,b,c}` list is built from the parser map,
+    which is also what dispatches the alias. Both are corrected here -- the row
+    is dropped from the choices list, and the metavar is pinned to the commands
+    that are still shown, in the order argparse would have shown them.
+    """
+    sub._choices_actions[:] = [
+        choice for choice in sub._choices_actions if choice.dest != name
+    ]
+    sub.metavar = "{" + ",".join(cmd for cmd in sub.choices if cmd != name) + "}"
+
+
+def _add_rename_arguments(parser) -> None:
+    """The arguments of `refdes rename`, added to it and to the hidden
+    `revise` alias by the same call, so the two cannot drift."""
+    parser.add_argument(
+        "mapping",
+        help=(
+            "path to a YAML file with types:/merge_types:/fields:/links:/prefixes:/"
+            "citation_keys: changes -- any other top-level section is refused"
+        ),
+    )
+    parser.add_argument(
+        "--dry-run", action="store_true", help="show what would change without writing"
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     _fix_console()
 
@@ -2546,7 +2593,7 @@ def main(argv: list[str] | None = None) -> int:
         ".refdes/schema.json regeneration, seal recording, "
         "board/workspace membership manifest, baseline stamping, "
         "and the ID ledger (.refdes/ids.yaml); explicit write commands "
-        "either report what would change (id, revise, calc-rewrite, "
+        "either report what would change (id, rename, calc-rewrite, "
         "stub-tests, revision, release, keys adopt) or refuse (fetch, init, "
         "standard upgrade, standard add-preset/remove-preset, "
         "former-ids propose --confirm, history capture/redact/"
@@ -2623,7 +2670,7 @@ def main(argv: list[str] | None = None) -> int:
     p_build.add_argument(
         "--dry-run",
         action="store_true",
-        help="render the site without sealing (unlike id/revise/stub-tests, "
+        help="render the site without sealing (unlike id/rename/stub-tests, "
         "this still writes real, browsable HTML -- only the seal-recording "
         "side effect on not-yet-sealed log entries is skipped; the output "
         "is watermarked as a draft)",
@@ -2737,7 +2784,24 @@ def main(argv: list[str] | None = None) -> int:
     p_release.set_defaults(func=cmd_release)
 
     p_index = sub.add_parser(
-        "index", help="print items.json to stdout without rendering the site"
+        "index",
+        help="print the project's machine-readable JSON payload to stdout, "
+        "without rendering the site",
+        description="Print the resolved project as one JSON document on stdout, "
+        "rendering no HTML: the machine-readable payload the VS Code extension "
+        "and other editor tooling read instead of scraping the site or the item "
+        "files. Always present: title, version, coverage, types, items (with "
+        "their fields, links, backlinks, calcs, checks, content hash and "
+        "source file:line), next_ids and diagnostics; boards and workspaces "
+        "when the project declares those registries, threads when it has any, "
+        "and a captured/edited_after_captured pair on items in the captured-"
+        "history store. Does everything 'refdes check' does and emits the "
+        "export in place of a report, because a tool that refreshes on every "
+        "save cannot wait on a whole site build. An item file that fails to "
+        "parse is reported on stderr while the JSON for everything that did "
+        "load is still printed on stdout, and the command still exits 0 -- the "
+        "extension discards a non-zero index outright, so a half-typed file "
+        "must not blank the editor.",
     )
     p_index.add_argument(
         "--compact", action="store_true", help="minified output, for tooling"
@@ -3053,9 +3117,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     p_keys_restore.set_defaults(func=cmd_keys_restore)
 
-    p_revise = sub.add_parser(
-        "revise",
-        help="rewrite project-local vocabulary (types/fields/links/prefixes) "
+    p_rename = sub.add_parser(
+        "rename",
+        help="rename project-local vocabulary (types/fields/links/prefixes) "
         "from a hand-written mapping file",
         description="Apply an explicit old->new vocabulary mapping (type "
         "names, field names scoped per type, link verb names, id prefixes) "
@@ -3068,17 +3132,18 @@ def main(argv: list[str] | None = None) -> int:
         "already-used target name, or a rename the current schema doesn't "
         "yet support.",
     )
-    p_revise.add_argument(
-        "mapping",
-        help=(
-            "path to a YAML file with types:/merge_types:/fields:/links:/prefixes:/"
-            "citation_keys: changes -- any other top-level section is refused"
-        ),
-    )
-    p_revise.add_argument(
-        "--dry-run", action="store_true", help="show what would change without writing"
-    )
-    p_revise.set_defaults(func=cmd_revise)
+    _add_rename_arguments(p_rename)
+    p_rename.set_defaults(func=cmd_rename)
+
+    # P12: the deprecated alias. A real parser rather than `aliases=[...]`,
+    # because argparse renders an alias entry as `rename (revise)` -- and P12
+    # asked for the old name to stop showing up at all. Same arguments, same
+    # handler, so behaviour and exit codes are identical; `args.command` is the
+    # name actually typed, which is what the note in cmd_rename keys on.
+    p_revise = sub.add_parser("revise", help=argparse.SUPPRESS)
+    p_revise.description = p_rename.description
+    _add_rename_arguments(p_revise)
+    p_revise.set_defaults(func=cmd_rename)
 
     p_calc_rewrite = sub.add_parser(
         "calc-rewrite",
@@ -3087,7 +3152,7 @@ def main(argv: list[str] | None = None) -> int:
         description="Rewrite every old-spelling unit assertion inside ```calc "
         "fences in item bodies to the pipe form, in place, preserving "
         "indentation and comments. Prose and {{name}} references are never "
-        "touched. Transactional like 'refdes revise': the rewritten project is "
+        "touched. Transactional like 'refdes rename': the rewritten project is "
         "reloaded, fully validated, and every calc's evaluated result and unit "
         "are compared against before -- any change in what a calc computes "
         "rolls every file back. Content hashes and calc hashes are carried "
@@ -3223,6 +3288,10 @@ def main(argv: list[str] | None = None) -> int:
         "`migrated-current` event -- never labelled seal-time text",
     )
     p_history_migrate.set_defaults(func=cmd_history_migrate_seals)
+
+    # Last, because it pins the usage line's command list to the commands
+    # registered so far: everything above has to be registered first.
+    _hide_command(sub, "revise")
 
     args = parser.parse_args(argv)
     try:

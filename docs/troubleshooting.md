@@ -91,7 +91,7 @@ you meant and delete the other. See ...
 
 Nested repeats count too — two `title:` lines inside one `site:` block, two
 `presets:` lines inside `standard:` — and every repeat in the file is named in
-the one error. A `revise` mapping file gets the same check: there a repeat drops
+the one error. A `rename` mapping file gets the same check: there a repeat drops
 one of the two renames the file asked for and applies the other, which is worse
 than dropping both.
 **Remedy:** delete one of the two blocks (or merge what both were setting into
@@ -147,9 +147,10 @@ has nothing to do with the captured history store. Rename the key to
 `on_change:` — the value's shape is unchanged (`default:` takes one of
 `invalidate`, `timeline`, `ignore`; a project pinned to `hardware@1` or `@2`
 still accepts the released spelling `log` there, because those standards
-still name the mode that way in their own yaml). Until it is renamed no command loads the
-project (configuration error, exit 2), and `refdes revise` cannot rewrite
-it: it rewrites item vocabulary only, so edit the one line by hand.
+still name the mode that way in their own yaml). Until it is renamed no
+command loads the project (configuration error, exit 2), and `refdes rename`
+cannot rewrite it: it rewrites item vocabulary only, so edit the one line by
+hand.
 
 **`item-level history: was renamed to on_change: -- rename this key in the source file. Its override is used in this build so the change policy is not silently lost.`**
 The same rename's item half, on a `history:` in an item's front-matter.
@@ -322,7 +323,7 @@ key was ever involved:
   `former_ids:` resolves *prose* references; a structured link still needs a
   live display id or key. Verified: recording `former_ids: [REQ-PWR-001]` onto
   the renamed item leaves this error exactly as it was.
-- `refdes revise` — maps `types:`/`merge_types:`/`fields:`/`links:`/
+- `refdes rename` — maps `types:`/`merge_types:`/`fields:`/`links:`/
   `prefixes:`/`citation_keys:`,
   not individual ids, so it cannot rename a single item. It is the tool for a
   prefix-wide rename, and it expands bare references *first* so they follow. An
@@ -374,7 +375,7 @@ is here because the block is what the command prints, in full.)
 
 Recording the retired id as `former_ids:` for external citations is a separate
 step, and a prefix-wide rename is what
-[`refdes revise`](cli-reference.md#refdes-revise-mapping-file) is for —
+[`refdes rename`](cli-reference.md#refdes-rename-mapping-file) is for —
 see [renumbering](ids.md#renumbering-former-ids).
 
 ## Math

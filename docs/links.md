@@ -37,7 +37,7 @@ load. This runs when the project is loaded for `check`, `build`, `revision`,
 `release`, `index`, `ls`, `id`, `fetch`, `audit`, `stub-tests`, and
 `former-ids propose` unless `--no-write` is given. It does **not** run for
 `init`, `new`, `schema`, `standard add-preset`, or `standard remove-preset`,
-which don't load the item files that way. `revise`, `standard upgrade`, and
+which don't load the item files that way. `rename`, `standard upgrade`, and
 `keys adopt` run the same minting and expansion inside their own transaction —
 under `--dry-run` they report what they would expand first instead of writing it.
 For example:
