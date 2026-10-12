@@ -110,7 +110,7 @@ intuition fail it — and the rule holds in each failure:
   coverage**, however strongly the name suggests otherwise. A log entry that
   only `constrained_by`'s a bound leaves it exactly as open as if no link
   existed at all. `satisfies` is what closes it (see the
-  [`governed_by` vs. `constrained_by`](links.md#governed_by-vs-refines-vs-constrained_by)
+  [`governed_by` vs. `constrained_by`](links.md#governed-by-vs-refines-vs-constrained-by)
   distinction).
 
 So: to know what a link does to coverage, find out which of the three pairs it
@@ -191,7 +191,7 @@ warnings.
 
 Diagnostics also have an `info` level, for the routine state of an
 incomplete project — hidden by default, shown with `-v`/`--verbose` on
-`check` or `build`. The [`blocked_by:` stale check](links.md#blocked_by-and-the-cascade-report)
+`check` or `build`. The [`blocked_by:` stale check](links.md#blocked-by-and-the-cascade-report)
 is the one thing in this area that's `info`. Nothing else coverage produces
 is, but `-v` is worth knowing about even if you came here for coverage.
 
@@ -221,7 +221,7 @@ roots, keeps its ordinary per-item warning instead — a misleading one-line
 summary would be worse than not summarizing it.
 
 `coverage.html` shows the same chain inline next to every claimed item's
-row. See [`blocked_by:`](links.md#blocked_by-and-the-cascade-report) for the
+row. See [`blocked_by:`](links.md#blocked-by-and-the-cascade-report) for the
 edge itself and the rest of its surfaces (`refdes audit`, the item page).
 
 ## Which statuses count as satisfying

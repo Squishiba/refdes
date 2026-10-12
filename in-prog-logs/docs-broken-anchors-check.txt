@@ -1,0 +1,74 @@
+Task: fix every broken in-page/cross-page anchor in docs/, add a CI anchor check.
+Branch: docs-broken-anchors-check (main 07666de). Per .scratch/TASK-ITEMS.txt + COMMON.txt.
+
+## Progress log
+
+- Verified env: branch clean at 07666de. (Was paused once mid-task by a vLLM
+  restart before any file was written; restarted from scratch after that.)
+- Found the real slug code, not a guess:
+  - `refdes.pages._slugify` (src/refdes/pages.py:22) — the function
+    src/refdes/docs_url.py's comments name as the anchor generator.
+  - Anchors are added by `pages.add_heading_anchors` (pages.py:149): only
+    `<h2>`/`<h3>` (HEADING_RE `<h([23])>`), text = inner HTML with tags
+    stripped (TAG_RE), slug = _slugify(text), duplicates get `-2`, `-3`…
+  - Render config: `build._markdown_parser()` (build.py:2122) =
+    MarkdownIt("gfm-like", {"html": False, "linkify": False}). Build calls
+    md.render then add_heading_anchors (build.py:3108-3133). docs-site is a
+    pages-only project (docs-site/refdes-project.yaml), pages: ../docs, so
+    no items exist -> _linkify can't alter headings. Docs pages have no
+    front-matter (checked index/concepts/links: zero `---`).
+  - Note: h1 headings get NO id on the site (HEADING_RE is h2/h3 only), so a
+    link to a page's own H1 title is broken by the site's own rules.
+- The test will call the real functions (import build._markdown_parser,
+  pages.add_heading_anchors) instead of reimplementing slug rules.
+- NEXT: probe script in .scratch/anchor-check/ to list broken anchors over
+  docs/*.md + docs/design/*.md + README.md.
+- Probe (.scratch/anchor-check/probe.py) found 16 broken anchors — matches
+  the earlier worker's 16 exactly. Two probe bugs found and fixed on the way
+  (both fixed in the test too): per-line link scanning missed a link whose
+  text spans lines 85-86 of parts.md (fixed by blanking fences/code-spans
+  across the whole file, preserving line numbers, then matching).
+- All 16 fixes = change the LINK to the real id; every heading is correct
+  (they use the repo's code-span style), the links guessed slugs by keeping
+  underscores or dropping `<placeholder>` markup:
+  - #governed_by-vs-refines-vs-constrained_by -> #governed-by-vs-refines-vs-constrained-by
+    (coverage.md:113, links.md:114, troubleshooting.md:340 [link spans 340-341])
+  - #blocked_by-and-the-cascade-report -> #blocked-by-and-the-cascade-report
+    (coverage.md:194,224; links.md:123)
+  - #part-equivalence-drop_in-and-alternate -> #part-equivalence-drop-in-and-alternate
+    (links.md:125,126; parts.md:77,85; schema-reference.md:534; standard-library.md:732)
+  - schema-reference.md:283,346,409 #differs_from -> #differs-from
+  - troubleshooting.md:378 cli-reference.md#refdes-rename-mapping-file ->
+    #refdes-rename-lt-mapping-file-gt (real heading is
+    ``## `refdes rename <mapping-file>` ``; html:false render leaves
+    &lt;/&gt; text, so the id carries lt/gt — same shape as the
+    refdes-thread-lt-ref-gt example in the task).
+- Test: tests/test_docs_anchors.py — calls the REAL code (build.
+  _markdown_parser + pages.add_heading_anchors + model.Page), no full site
+  build, runs in ~0.9s. Checks links in docs/*.md + README.md against ids of
+  every docs page incl. docs/design/ (load_pages walks the whole pages tree,
+  so design pages are site pages too). Skips external links, fenced code
+  blocks, inline code spans; reports every break as file:line. Docstring
+  states the test follows the docs SITE's slugs, not GitHub's (task step 6).
+  A sentinel test pins known ids so the check can't silently go vacuous.
+- Sabotage: reverted the coverage.md blocked_by fix ->
+  test_no_broken_anchor_links_in_docs failed naming docs/coverage.md:194 and
+  :224; restored (probe: 0 broken again). Recorded per COMMON.
+- Nit 1 (concepts.md "Five of these file an item somewhere"): ALREADY FIXED
+  on this branch — docs/concepts.md:25 reads "Four of these file an item
+  somewhere ... `section` files nothing". Skipped, nothing to change.
+- Nit 2 (standard-library.md retired row "drops out of coverage and its
+  warnings"): ALREADY FIXED — row 70 now says coverage drops it and
+  "coverage's warnings about it go with it. Nothing else goes quiet: a
+  retired item's own diagnostics ... still fire." Verified against code: the
+  only `status == "retired"` branch in src/refdes is the coverability check
+  (build.py:908-915, coverable_statuses fallback); no warning suppression
+  anywhere else. Matches. Skipped.
+- changelog fragment: changelog.d/docs-anchor-links.fixed.md — rule
+  `fixed` (bug fix; published-site broken links). Precedent for a docs-only
+  fragment: changelog.d/init-docs-pointer.fixed.md (also a pure link fix).
+
+- Gates: full suite foreground once: 3587 passed, 2 skipped, exit=0
+  (.scratch/suite.txt; no load flake seen). ruff check --select E9,F src tests:
+  clean. docs-site/gen_examples.py --check: both pages up to date.
+- Done; committing, pushing once, opening PR.
