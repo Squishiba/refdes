@@ -970,19 +970,19 @@ def _stale_mapped_names(rel: str, text: str, mapping: Mapping) -> list[str]:
         if isinstance(value, str) and value in mapping.types:
             stale.append(
                 f"{rel}:{line} - type '{value}' is still spelled the old way: "
-                "this value is written in a form revise cannot edit"
+                "this value is written in a form the rename cannot edit"
             )
         value = mapping_data.get("section")
         if isinstance(value, str) and value in mapping.types:
             stale.append(
                 f"{rel}:{line} - section type '{value}' is still spelled the "
-                "old way: this value is written in a form revise cannot edit"
+                "old way: this value is written in a form the rename cannot edit"
             )
         value = mapping_data.get("prefix")
         if isinstance(value, str) and _rename_prefix(value, mapping.prefixes):
             stale.append(
                 f"{rel}:{line} - prefix '{value}' is still spelled the old "
-                "way: this value is written in a form revise cannot edit"
+                "way: this value is written in a form the rename cannot edit"
             )
         value = mapping_data.get("id")
         if isinstance(value, str):
@@ -990,7 +990,7 @@ def _stale_mapped_names(rel: str, text: str, mapping: Mapping) -> list[str]:
             if split is not None and _rename_prefix(split[0], mapping.prefixes):
                 stale.append(
                     f"{rel}:{line} - id '{value}' still carries the old "
-                    "prefix: this value is written in a form revise cannot edit"
+                    "prefix: this value is written in a form the rename cannot edit"
                 )
 
     try:
@@ -1353,7 +1353,7 @@ def _bare_reference_blockers(project: Project, mapping: Mapping) -> list[str]:
             f"{item.source_file}:{item.source_line} [{item.id or '?'}] {pointer}: "
             f"{target!r} is still a bare reference to an id this rename moves "
             f"({target} -> {affected[target]}); key expansion could not reach it, "
-            "and revise does not rewrite bare references -- fix it by hand"
+            "and this rename does not rewrite bare references -- fix it by hand"
         )
 
     for item in project.local_items:
@@ -1630,7 +1630,7 @@ def apply(
             errors=[
                 (
                     "rewritten files still carry names this mapping was meant to "
-                    "move -- written in a form revise cannot edit -- rolled back:"
+                    "move -- written in a form the rename cannot edit -- rolled back:"
                 )
             ]
             + stale_after,

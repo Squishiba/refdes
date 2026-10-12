@@ -16,7 +16,7 @@
   reading `log` and keeps seeing it: the released standards spell the mode
   that way in their own yaml, so an ungated hard error would make the
   released standard itself fail to load — the pinned vocabulary is what
-  the pin promises. `refdes revise` cannot rewrite mode values (its
+  the pin promises. `refdes rename` cannot rewrite mode values (its
   mapping sections rename keys), so a v2→v3 upgrade surfaces these errors
   and the author renames by hand; each error names the new spelling.
   `timeline` and `log` behave identically today — the difference is only

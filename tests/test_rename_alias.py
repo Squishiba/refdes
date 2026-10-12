@@ -12,10 +12,13 @@ changelog looks up the word they already type.
 
 from __future__ import annotations
 
+import re
+
 import pytest
 from conftest import write_project_config
 
 from refdes import cli as cli_mod
+from refdes import keys as keys_mod
 
 SCHEMA = (
     "site: { title: T, out: _site }\n"
@@ -33,6 +36,21 @@ NOTE = (
     "`refdes revise` is now `refdes rename`; `revise` will be removed in the "
     "next minor release"
 )
+
+# A rewrite has to mint at least one surrogate key, and `keys.mint()` draws it
+# from `secrets.token_bytes` (keys.py), so the plan it prints is not the same
+# bytes twice -- in either spelling. The alphabet is spelled out of keys.py
+# rather than retyped, so a future widening of it cannot leave this stale.
+_MINTED_KEY = re.compile(
+    r"(?<=key: )" + f"[{keys_mod.ALPHABET}]{{{keys_mod.KEY_LEN}}}" + r"\b"
+    r"|(?<=@)" + f"[{keys_mod.ALPHABET}]{{{keys_mod.KEY_LEN}}}" + r"\b"
+)
+
+
+def _without_minted_keys(report: str) -> str:
+    """A dry-run plan with the per-run minted keys blanked: the two spellings'
+    plans differ by nothing else, so this is exact, not a loosened comparison."""
+    return _MINTED_KEY.sub("<key>", report)
 
 
 def _project(root) -> str:
@@ -118,13 +136,22 @@ def test_revise_stdout_is_rename_stdout_byte_for_byte(tmp_path, capsys):
     """The note may never touch stdout: this command's stdout *is* its report,
     so a script reading `changed N file(s):` has to get the same bytes whichever
     name was typed -- including under `--dry-run`, whose whole point is output
-    something else consumes."""
-    first = tmp_path / "new"
-    second = tmp_path / "old"
-    first.mkdir()
-    second.mkdir()
-    _project(first)
-    _project(second)
+    something else consumes.
+
+    The `--dry-run` half needs its OWN trees: run on a tree the same test has
+    already renamed, both spellings would print the no-op "nothing to do"
+    report and the comparison would prove nothing. And the plan is compared with
+    the minted key blanked, because a plan that has to mint prints a fresh
+    11-character surrogate key per RUN (`keys.mint()` is `secrets`-based), so
+    two runs differ there whichever name was typed -- the only difference
+    between the two spellings' plans is that key, so blanking it is exact
+    rather than a loosening.
+    """
+    trees = [tmp_path / name for name in ("new", "old", "dry-new", "dry-old")]
+    for root in trees:
+        root.mkdir()
+        _project(root)
+    first, second, dry_first, dry_second = trees
 
     status_new, out_new, _ = _cli("rename", first, capsys)
     status_old, out_old, err_old = _cli("revise", second, capsys)
@@ -132,9 +159,54 @@ def test_revise_stdout_is_rename_stdout_byte_for_byte(tmp_path, capsys):
     assert out_old == out_new
     assert NOTE not in out_old
 
-    _, dry_new, _ = _cli("rename", first, capsys, extra=("--dry-run",))
-    _, dry_old, _ = _cli("revise", second, capsys, extra=("--dry-run",))
-    assert dry_old == dry_new
+    status_dry_new, dry_new, _ = _cli("rename", dry_first, capsys, extra=("--dry-run",))
+    status_dry_old, dry_old, _ = _cli("revise", dry_second, capsys, extra=("--dry-run",))
+    assert (status_dry_new, status_dry_old) == (0, 0)
+    assert "would change 1 file(s):" in dry_new  # real planned work, not the no-op
+    assert "key: " in dry_new  # the plan mints, so the blanking below has work to do
+    assert _without_minted_keys(dry_old) == _without_minted_keys(dry_new)
+
+
+# ----------------------------------------------------------------- refusal text
+
+# The guard's refusal is the text a stuck author actually reads, and P12 is
+# about what the tool calls this command in front of them, so it is pinned here
+# rather than in the engine's own tests. A `flow:`-style item whose `type:`
+# cannot be reached by the rewrite is the shape that trips it.
+FLOW_SCHEMA = (
+    "site: { title: T, out: _site }\n"
+    "types:\n"
+    "  bound:\n"
+    "    prefix: BND\n"
+    "    fields:\n"
+    "      text: { type: text, required: true }\n"
+)
+FLOW_ITEM = (
+    "defaults:\n  type: bound\n  prefix: BND\n"
+    "items:\n"
+    "  - {id: BND-001,\n"
+    "    type: bound,\n"
+    "    text: Board power density}\n"
+)
+
+
+def test_a_refusal_reached_through_rename_names_rename(tmp_path, capsys):
+    """`refdes rename` on a value the rewrite cannot reach refuses (exit 1) and
+    says `the rename` -- never the retired name -- while leaving the file
+    untouched. `refdes standard upgrade` runs the same engine through the same
+    strings (apply_standard_upgrade calls apply() per version step), which is
+    why the wording is "the rename" and not a bare "rename"/"revise"."""
+    write_project_config(tmp_path, FLOW_SCHEMA)
+    (tmp_path / "items").mkdir()
+    (tmp_path / "items" / "i.yaml").write_text(FLOW_ITEM, encoding="utf-8")
+    (tmp_path / "rename.yaml").write_text("types:\n  bound: constraint\n", encoding="utf-8")
+
+    status, out, err = _cli("rename", tmp_path, capsys)
+    assert status == 1
+    assert "the rename cannot edit" in err
+    assert "revise" not in err
+    assert out == ""
+    assert (tmp_path / "items" / "i.yaml").read_text(encoding="utf-8") == FLOW_ITEM
 
 
 def test_revise_keeps_the_configuration_exit_codes(tmp_path, capsys):

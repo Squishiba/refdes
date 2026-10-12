@@ -359,10 +359,12 @@ and is still reported: the refusal is about the destination, not the project.
 ## `refdes index`
 
 Print the project's machine-readable payload — items with their fields, links,
-calcs, checks and `file:line`, beside the `coverage`, `types`, `threads`,
-`next_ids` and `diagnostics` that go with them — as JSON on stdout, which is
-what the VS Code extension and other editor tooling read, without rendering the
-site. Does everything `check` does, and emits the export instead of a report.
+calcs, checks and `file:line`, beside the `coverage`, `types`, `next_ids` and
+`diagnostics` that always go with them (`threads` too, when the project has any
+`follows:`-chained entries, and `boards`/`workspaces` when those registries are
+declared) — as JSON on stdout, which is what the VS Code extension and other
+editor tooling read, without rendering the site. Does everything `check` does,
+and emits the export instead of a report.
 
 | Option | Effect |
 |---|---|

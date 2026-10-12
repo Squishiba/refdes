@@ -35,8 +35,9 @@ refdes id        # allocate IDs for items that have none, writing them back
 refdes audit     # list suppressed fields, resealed entries, board moves, and imports
 ```
 
-Fifteen commands in all, including `new`, `schema`, `fetch`, `revision`,
-`release`, `stub-tests`, `rename`, `standard`, and `former-ids` — see the
+Those are the everyday ones. `refdes --help` lists every command —
+including `new`, `schema`, `fetch`, `revision`, `release`, `stub-tests`,
+`rename`, `standard`, and `former-ids` — see the
 [CLI reference](docs/cli-reference.md).
 
 ## Editor support

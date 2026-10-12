@@ -2670,7 +2670,7 @@ def main(argv: list[str] | None = None) -> int:
     p_build.add_argument(
         "--dry-run",
         action="store_true",
-        help="render the site without sealing (unlike id/revise/stub-tests, "
+        help="render the site without sealing (unlike id/rename/stub-tests, "
         "this still writes real, browsable HTML -- only the seal-recording "
         "side effect on not-yet-sealed log entries is skipped; the output "
         "is watermarked as a draft)",

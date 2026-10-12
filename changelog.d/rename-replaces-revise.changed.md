@@ -5,7 +5,11 @@
   every item file -- a rename. `refdes revise …` keeps working until the next
   minor release with identical behaviour and exit codes, printing one line to
   stderr naming the new name; stdout is untouched, so a script reading the
-  command's report or a `--dry-run` plan sees the same bytes either way. The
-  old name is gone from `refdes --help`, usage line included. Error and help
-  text that named the command now says `refdes rename`; the engine module is
-  still `src/refdes/revise.py`.
+  command's report sees the same bytes either way. A `--dry-run` plan is the
+  same either way too, except for the surrogate keys it mints to show the plan
+  with, which are drawn per run and so differ between any two runs. The old
+  name is gone from `refdes --help`, usage line included. Error and help text
+  that named the command now says `rename` -- the retired name survives only
+  in the alias's own note and in argparse's unknown-subcommand choice list,
+  which reflects what still parses; the engine module is still
+  `src/refdes/revise.py`.

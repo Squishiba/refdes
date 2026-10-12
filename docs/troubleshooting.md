@@ -147,9 +147,10 @@ has nothing to do with the captured history store. Rename the key to
 `on_change:` — the value's shape is unchanged (`default:` takes one of
 `invalidate`, `timeline`, `ignore`; a project pinned to `hardware@1` or `@2`
 still accepts the released spelling `log` there, because those standards
-still name the mode that way in their own yaml). Until it is renamed no command loads the
-project (configuration error, exit 2), and `refdes rename` cannot rewrite
-it: it rewrites item vocabulary only, so edit the one line by hand.
+still name the mode that way in their own yaml). Until it is renamed no
+command loads the project (configuration error, exit 2), and `refdes rename`
+cannot rewrite it: it rewrites item vocabulary only, so edit the one line by
+hand.
 
 **`item-level history: was renamed to on_change: -- rename this key in the source file. Its override is used in this build so the change policy is not silently lost.`**
 The same rename's item half, on a `history:` in an item's front-matter.
