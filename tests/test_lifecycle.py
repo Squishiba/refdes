@@ -586,6 +586,49 @@ def test_open_tasks_counts_author_rows_only_never_derived(tmp_path):
     assert results["open_tasks"].status == "pass"
 
 
+def test_open_tasks_ignores_a_derived_row_reached_through_a_link(tmp_path):
+    """§5 rules 1-2 at the gate, one hop out: the tip's `addresses:` link puts
+    the requirement's coverage gap INTO the thread's derived block
+    (`threads._scope` follows each member's own links one hop), so a gate
+    implementation that read derived rows instead of only the authored fold
+    would trip here. It must not: the gap stays its own rule's business and
+    `open_tasks` stays clean."""
+    from refdes import threads
+
+    items = H8_OPEN_TASK_THREAD.replace(
+        "      - {id: T-thermal-model, text: Model worst-case copper temperature., state: open}\n",
+        "      - {id: T-thermal-model, text: Model worst-case copper temperature., state: dropped}\n",
+    ).replace(
+        "    follows: LOG-001\n",
+        "    follows: LOG-001\n    addresses: REQ-001\n",
+    )
+    write_project_config(tmp_path, H8_CONFIG + H8_GATE_RULES_ON)
+    items_dir = tmp_path / "items"
+    items_dir.mkdir(exist_ok=True)
+    (items_dir / "log.yaml").write_text(items, encoding="utf-8")
+    (items_dir / "reqs.yaml").write_text(
+        "defaults: { type: requirement }\n"
+        "items:\n"
+        "  - id: REQ-001\n    title: Idle current budget\n    status: active\n"
+        "    body: The idle rail must stay under 10 uA.\n",
+        encoding="utf-8",
+    )
+    project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
+    parse.load_items(project)
+    keys.mint_missing(project)
+    build_mod.build(project)
+    # the one-hop reach is real: the derived row for a non-member, reached
+    # through the tip's own link, shows in the thread's derived block (§6's
+    # decided example). `addresses` makes the gap `unverified`, not `open`.
+    (view,) = threads.threads_projection(project)
+    assert [(row["kind"], row["problem"], row["ref"]) for row in view["derived"]] == [
+        ("coverage", "unverified", "REQ-001")
+    ]
+    results = {r.name: r for r in lifecycle.evaluate_gate(project, "release")}
+    assert results["open_tasks"].status == "pass"
+    assert results["open_tasks"].offenders == []
+
+
 def test_open_tasks_counts_every_open_tip_of_a_fork(tmp_path):
     fork = (
         "defaults: { type: log }\n"
