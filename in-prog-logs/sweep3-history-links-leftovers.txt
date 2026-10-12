@@ -1,0 +1,155 @@
+sweep3-history-links-leftovers — task K: history/links leftovers
+==================================================================
+
+Branch: sweep3-history-links-leftovers (cut from main 744cdb0).
+Tree was clean at start (git status). All commands run in the
+foreground; probes in .scratch/ with PYTHONPATH=$PWD/src pointing the
+venv python at THIS worktree's src (the installed `refdes` may point
+elsewhere; I ran `python -m refdes.cli` explicitly).
+
+K1 (#207 review, real bug) — DONE
+----------------------------------
+Verified first: append_event (src/refdes/history.py, was lines 424-428)
+read an existing event file with open(..., encoding="utf-8") +
+yaml_safe_load with NO wrap, while #207 (744cdb0) had wrapped the same
+read in load_events (then ~461-479).
+
+Reproduction (.scratch/k1-repro/repro.py, direct calls to
+history.append_event over a pre-existing file at the derived-id path;
+full tracebacks in .scratch/k1-repro/repro-out.txt):
+  - b"\xff" file -> raw UnicodeDecodeError escaping from history.py:426
+      UnicodeDecodeError: 'utf-8' codec can't decode byte 0xff in
+      position 0: invalid start byte
+      (raised through parse.yaml_safe_load -> _as_text -> read())
+  - "{: bad" file -> raw yaml.parser.ParserError escaping from
+    history.py:426
+      yaml.parser.ParserError: while parsing a flow node
+      expected the node content, but found ':'  in "<unicode string>",
+      line 1, column 2
+  (First repro run had a bug in MY probe — wrote a str in "wb" mode, so
+  only the b"\xff" case ran; fixed the probe and re-ran. Both tracebacks
+  above are the genuine escapes.)
+
+Fix: #207's wrap was inline in load_events, not a helper — the task's
+"reuse that one helper rather than adding a second wrap" therefore
+means extracting it. Added history._read_event_file(path): open+read
+with encoding utf-8, UnicodeDecodeError -> HistoryError
+"<path>: event file is not valid UTF-8 (...)", yaml.YAMLError ->
+HistoryError "<path>: event file does not parse (...)" — the exact
+messages #207's test pins for load_events. Both load_events and
+append_event's existing-file read now call it; the explanatory
+comments moved into the helper's docstring. Each caller keeps its own
+posture for what a parsed record must look like (append_event still
+raises its "existing event is not a YAML mapping" / re-point errors;
+load_events still runs _check_format).
+
+Tests: tests/test_history.py
+  - test_append_event_over_a_non_utf8_existing_file_is_a_history_error
+  - test_append_event_over_an_unparseable_existing_file_is_a_history_error
+  Both direct (no CLI), assert HistoryError names the derived-id file
+  and carries the wrapped message.
+
+Sabotage: reverted append_event to the raw open+yaml_safe_load (kept
+the helper for load_events), ran pytest -k "append_event_over":
+  FAILED ..._non_utf8_existing_file_is_a_history_error
+  FAILED ..._unparseable_existing_file_is_a_history_error
+  2 failed. Restored the fixed file; tests/test_history.py 24 passed.
+
+Repro re-run after fix (.scratch/k1-repro/repro-fixed.txt): both cases
+now print HistoryError naming the path ("event file is not valid
+UTF-8" / "event file does not parse").
+
+Changelog: changelog.d/append-event-existing-read.fixed.md (rule:
+"fixed" — user-visible bug fix; the crash was reachable from any
+command that records a history event). K2/K3/K4 produce no fragment:
+docstring-only, test-only and no-code-change respectively.
+
+K2 (#179) links.py _drop_refused docstring — SKIPPED, already fixed
+--------------------------------------------------------------------
+git log -L 462,470:src/refdes/links.py shows commit 7dc4a42 ("chore:
+small follow-ups from the 2026-10-10 reviews (#188)") already rewrote
+the docstring: it now reads "A file whose rewrite did not land --
+refused by the filesystem, rolled back by the parse guard, or withheld
+for a duplicate key -- ..." and names revise.write_rewrites_verified()
+"which returns all three kinds together" — matching revise.py:851's
+actual contract (rolled-back + refused + withheld). The "a file the
+filesystem refused did not change" wording the review quoted is gone.
+Nothing to change.
+
+K3 (#200) test_revise_stdout_is_rename_stdout_byte_for_byte — SKIPPED,
+claim does not hold on this branch
+---------------------------------------------------------------
+tests/test_rename_alias.py:135-167: the test already builds FOUR trees
+(first/old/dry-new/dry-old, line 150) and runs the --dry-run
+comparison on its OWN fresh dry_first/dry_second trees, never on a
+renamed one. It also already asserts the report is not the no-op
+("would change 1 file(s):" in dry_new) and that the plan mints (so the
+key-blanking has work to do), and its docstring explicitly warns about
+the very failure mode the review claimed. git log -L 135,168 shows the
+test only ever existed in this shape (introduced whole by 4e29ff6,
+i.e. #200 itself). Per the task's "if it already uses a fresh tree,
+record that and skip" — recorded, skipped, no sabotage attempted
+(there is no fix to sabotage).
+
+K4 (#184) on_change as a link-verb name — INVESTIGATED, no code change
+------------------------------------------------------------------------
+The collision is ALREADY a load-time rejection with a clear message:
+schema.py _reject_reserved_link_verb (lines 131-147), wired into
+link_types loading at schema.py:750/752, rejects any link verb (or
+inverse) whose name is in parse.RESERVED or parse.OVERRIDABLE — and
+OVERRIDABLE includes on_change. It landed in 052d0c3 ("feat(vocabulary):
+on_change mode log -> timeline (P9); reserved-name link verbs are load
+errors (#184) (#196)"), an ancestor of this branch's main.
+
+Live verification (scratch project .scratch/k4-onchange/proj, hardware@3
+via `refdes init`; refdes-schema.yaml declares
+link_types.on_change with an inverse; items/a.yaml uses the key):
+
+  $ refdes check          (exit 2)
+  configuration error: link_types.on_change: the link verb 'on_change'
+  collides with the engine's reserved front-matter key 'on_change' --
+  items spell on_change: for the engine's own reading, so this verb
+  could never be written on an item; rename the verb
+
+  $ refdes schema         (exit 2, no JSON emitted)
+  configuration error: <same message as above>
+
+So the review's symptom ("an error, and the link is lost") can no
+longer happen silently: the project refuses to load at all, the verb
+is named, and the remedy ("rename the verb") is in the message.
+
+Options for Jared (per the task; NOT implemented):
+  (a) reject `on_change` as a link-verb name at schema load with a
+      clear message — THIS IS WHAT THE CODE DOES TODAY (and for the
+      whole reserved/OVERRIDABLE class plus inverses, read from
+      parse.py's own sets so future reserved keys are guarded for
+      free).
+  (b) let link verbs own the name, as fields can (parse.py:981 already
+      lets a declared field take over an OVERRIDABLE key) — this would
+      need front matter to disambiguate `on_change:` by the type's
+      declaration, which is exactly the guessing the engine refuses;
+      the schema-load error exists because the two readings are
+      textually indistinguishable.
+  (c) leave it — moot if (a) is accepted as already done.
+  Recommendation: (a) = accept the current behavior as the fix for
+  #184 and close the review item; (b) is worse by parse.py's own
+  design (front matter spells OVERRIDABLE keys for the engine). No
+  code change made.
+
+Gates
+-----
+- ruff check --select E9,F src tests -> All checks passed! (scoped per
+  AGENTS.md: the repo's blanket ruff baseline is not green and this
+  change is not touching unrelated findings).
+- python docs-site/gen_examples.py --check -> schema-reference.md and
+  vocabulary.md both "up to date".
+- Full suite, foreground, once, at the end:
+    PYTHONPATH=$PWD/src ...python -m pytest -q -p no:cacheprovider
+    exit=0
+    3599 passed, 2 skipped in 270.74s (0:04:30)
+  (.scratch/suite.txt; the known serve token-file flake did not fire.)
+
+Task finished: yes. K1 fixed + tested + sabotaged; K2 skipped (already
+fixed by #188); K3 skipped (test already used fresh dry-run trees from
+birth, #200); K4 investigated only, no code change (option (a)
+already implemented by #196). One changelog fragment, for K1 only.

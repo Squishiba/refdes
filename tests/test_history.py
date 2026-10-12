@@ -431,6 +431,38 @@ def test_a_non_utf8_event_file_is_a_history_error_naming_the_file(root):
     ]
 
 
+def test_append_event_over_a_non_utf8_existing_file_is_a_history_error(root):
+    """Review #207's leftover: append_event's existing-file read was the
+    same open(yaml_safe_load) pair that #191 wrapped in load_events, but
+    with no wrap at all -- replaying an edge onto a file a stray byte had
+    corrupted escaped as a raw UnicodeDecodeError instead of this store's
+    loud HistoryError naming the path."""
+    eid = history.event_id("followed", "K1", "S1")
+    corrupt = os.path.join(history.events_dir(root), f"{eid}.yaml")
+    os.makedirs(history.events_dir(root), exist_ok=True)
+    with open(corrupt, "wb") as fh:
+        fh.write(b"\xff")
+    with pytest.raises(history.HistoryError) as exc_info:
+        history.append_event(root, "followed", "K1", "a" * 64, successor_key="S1")
+    assert f"{eid}.yaml" in str(exc_info.value)
+    assert "not valid UTF-8" in str(exc_info.value)
+
+
+def test_append_event_over_an_unparseable_existing_file_is_a_history_error(root):
+    """Same read, the other symptom: a record that does not parse is the
+    'malformed record' of HistoryError's own contract, not a raw
+    yaml.parser.ParserError crashing the caller over one corrupt file."""
+    eid = history.event_id("followed", "K1", "S1")
+    corrupt = os.path.join(history.events_dir(root), f"{eid}.yaml")
+    os.makedirs(history.events_dir(root), exist_ok=True)
+    with open(corrupt, "w", encoding="utf-8") as fh:
+        fh.write("{: bad")
+    with pytest.raises(history.HistoryError) as exc_info:
+        history.append_event(root, "followed", "K1", "a" * 64, successor_key="S1")
+    assert f"{eid}.yaml" in str(exc_info.value)
+    assert "does not parse" in str(exc_info.value)
+
+
 def test_duplicate_edge_under_two_ids_is_loud(root):
     """Only possible if ids were ever random (the doc's original sketch): the
     same (kind, item_key, successor_key) fact recorded twice. The derived-id

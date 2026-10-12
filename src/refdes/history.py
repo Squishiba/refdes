@@ -304,6 +304,28 @@ def _write_store_file(root: str, path: str, text: str) -> None:
         ) from exc
 
 
+def _read_event_file(path: str) -> object:
+    """Read one event file; a stray byte or an unparseable record is a
+    HistoryError naming the path, never a raw codec/YAML exception.
+
+    Decoding happens on the first read, inside yaml_safe_load, not at
+    open(); and UnicodeDecodeError is not a YAMLError, so left unwrapped
+    one stray byte escaped as a raw exception and crashed every reader of
+    the store -- review #191 wrapped ``load_events`` this way, and review
+    #207's leftover found ``append_event``'s existing-file read holding
+    the same record under the same failure with no wrap at all. One
+    helper, both readers. Each caller keeps its own posture for what a
+    parsed record must look like.
+    """
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            return yaml_safe_load(fh)
+    except UnicodeDecodeError as exc:
+        raise HistoryError(f"{path}: event file is not valid UTF-8 ({exc})") from exc
+    except yaml.YAMLError as exc:
+        raise HistoryError(f"{path}: event file does not parse ({exc})") from exc
+
+
 def _check_format(data: object, where: str) -> None:
     if not isinstance(data, dict):
         raise HistoryError(f"{where}: expected a YAML mapping, got {type(data).__name__}")
@@ -422,8 +444,7 @@ def append_event(
     if occurred_at is not None:
         payload["occurred_at"] = occurred_at
     if os.path.exists(path):
-        with open(path, "r", encoding="utf-8") as fh:
-            existing = yaml_safe_load(fh)
+        existing = _read_event_file(path)
         if not isinstance(existing, dict):
             raise HistoryError(f"{path}: existing event is not a YAML mapping")
         _check_format(existing, path)
@@ -458,25 +479,7 @@ def load_events(root: str) -> list[dict[str, object]]:
         if not name.endswith(".yaml"):
             continue
         path = os.path.join(directory, name)
-        try:
-            with open(path, "r", encoding="utf-8") as fh:
-                data = yaml_safe_load(fh)
-        except UnicodeDecodeError as exc:
-            # Decoding happens on the first read, inside yaml_safe_load, not
-            # at open(); and it is not a YAMLError, so left alone one stray
-            # byte escaped this wrap as a raw UnicodeDecodeError and crashed
-            # every reader -- review #191. It is the same malformed record
-            # as below, under its opposite symptom, and gets the same
-            # HistoryError naming the file.
-            raise HistoryError(f"{path}: event file is not valid UTF-8 ({exc})") from exc
-        except yaml.YAMLError as exc:
-            # A record that does not parse is the "malformed record" of
-            # HistoryError's own contract. Its readers all catch
-            # (HistoryError, OSError) and say so in their own posture; a
-            # raw parser exception escaping here would instead crash every
-            # one of them over one corrupt file -- the silent-store disease
-            # with its opposite symptom.
-            raise HistoryError(f"{path}: event file does not parse ({exc})") from exc
+        data = _read_event_file(path)
         _check_format(data, path)
         for field in ("item_key", "successor_key"):
             if data.get(field):
