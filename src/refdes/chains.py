@@ -836,10 +836,15 @@ def fold_tasks(
     `ambiguous=True` it means "task reconciliation required" and the
     continuation must declare an explicit complete list.
 
-    The returned lists are the declaring entries' own field values — read
-    them, never append derived rows to them (they are not tasks). On a
-    `ChainGraph` the per-component result is memoized like the field fold's,
-    so asking every entry of a thread costs one fold per tip, not per entry.
+    The returned lists are the declaring entries' own field values — live
+    aliases, not copies: callers must not mutate a returned list or any row
+    in it (a mutation rewrites the authored item and, on a `ChainGraph`,
+    every later reader of the memoized fold). Read them, never append
+    derived rows to them (they are not tasks), and copy first when a surface
+    needs to enrich a row — as `threads._tasks` does with `dict(row)` before
+    it attaches `open_since`. On a `ChainGraph` the per-component result is
+    memoized like the field fold's, so asking every entry of a thread costs
+    one fold per tip, not per entry.
     """
     predecessors, successors, handles, items, cg = _graph_view(graph, project)
     start_handle = _start_handle(project, start, handles=handles)

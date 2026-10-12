@@ -630,11 +630,14 @@ class Item:
     # inherited from a `defaults:` block (already line-stripped before the
     # merge) or a malformed non-mapping row. Deliberately NOT inside
     # `fields`: `_strip_lines` exists precisely because a `__line__` key
-    # left in a field value would poison the content hash and the history
-    # digest. Consumed only by the `open_tasks` gate rule's offender, which
-    # points at the task row it names; an item built without parse (an
-    # import) has none and the offender falls back to the entry's own line.
-    field_lines: dict[str, list] = field(default_factory=dict)
+    # left in a field value poisons the history digest, which hashes
+    # `fields` verbatim -- and for a field in `invalidate` mode it would
+    # poison the content hash too. The `tasks` field tagged here is
+    # `timeline` mode, so only the digest half bites for it. Consumed only
+    # by the `open_tasks` gate rule's offender, which points at the task
+    # row it names; an item built without parse (an import) has none and
+    # the offender falls back to the entry's own line.
+    field_lines: dict[str, list[int | None]] = field(default_factory=dict)
 
     @property
     def title(self) -> str:

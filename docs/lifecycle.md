@@ -57,11 +57,14 @@ against the rule names.
 | `unaccepted_board_moves` | an item's board differs from `.refdes/boards.yaml` |
 | `unaccepted_workspace_moves` | an item's workspace differs from `.refdes/boards.yaml`'s `workspaces:` key ([workspaces](workspaces.md)) |
 | `open_tasks` | a thread tip carries an open task (its fold lists one; a tip whose fold is ambiguous counts too, said as a conflicting list) |
-| `captured_edits` | an item's current content differs from its captured snapshot (the same fact as the "edited after captured" warning) |
+| `captured_edits` | an item's current content differs from its captured snapshot (the same fact as the "edited after captured" warning; ticking a task on a captured entry is one such edit — task rows are part of the fields the history digest covers) |
 
 **Why `open_tasks` and `captured_edits` default off.** Both are living-notes
-gate rules (docs/design/living-notes.md §5 rule 5): they turn thread work
-and history into readiness facts, and a project that keeps its design log
+gate rules, but not the same one: `open_tasks` is worklist binding rule 5 of
+docs/design/living-notes.md §5, while `captured_edits` is §3's
+allow-and-detect decision (§9 decision 2 — the gate mechanism it uses is the
+one §5 rule 5 introduces). They turn thread work and history into readiness
+facts, and a project that keeps its design log
 as a running notebook — open tasks and all — shouldn't feel that as a wall
 the day the feature lands. Enable either half per project through the same
 overlay. `open_tasks` reads the same task fold as `refdes thread` and

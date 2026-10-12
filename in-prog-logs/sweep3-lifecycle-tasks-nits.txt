@@ -1,0 +1,107 @@
+sweep3-lifecycle-tasks-nits — work log (branch cut from main 07666de)
+
+2026-10-12 (session start, then a mid-session pause for a vLLM restart;
+resumed with tree still clean and nothing committed, no redo needed).
+
+Setup: read AGENTS.md + .scratch/TASK-ITEMS.txt + .scratch/COMMON.txt.
+git status clean at start and at resume; branch sweep3-lifecycle-tasks-nits
+at 07666de.
+
+IMPORTANT: the `refdes` on PATH is the venv's install from the MAIN checkout
+(/home/jorb/work/refdes). Every probe below runs THIS worktree's code via
+PYTHONPATH=$PWD/src (verified: refdes.__file__ resolves into the worktree).
+
+F1 DONE. Verified by reading docs/design/living-notes.md: §5's binding-rule-5
+(line 487) names `open_tasks` only; captured_edits' gate decision is §3's
+"Decided -- allow and detect/show" + §9 decision 2 (line 654). The string
+"captured_edits" appears nowhere in the design doc (grep count 0). Fixed the
+lifecycle.md:62-63 citation to attribute each rule to its own source.
+
+F2 DONE (verified TRUE, then documented). Probe in .scratch/f2 (project with
+release_gate captured_edits release:true, LOG-001 captured when LOG-002
+followed it): ticked LOG-001's only task open->done, ran the gate command
+(`refdes release`, the command whose --help says "run the readiness gate").
+Before: `release 'rev-a' stamped ... all gates passed` exit 0. After the
+tick: WARNING "LOG-001: edited after captured" + `FAIL captured_edits
+LOG-001`, blocked -- not stamped, exit=1. Full gate block in
+.scratch/f2-probe.txt. Mechanism: tasks are item.fields, and
+history.semantic_payload hashes fields verbatim (history.py:173-179), so the
+tick moves the history digest. Added the fact to docs/lifecycle.md's
+captured_edits table row. (The venv refdes binary would have run the MAIN
+checkout's code -- all probes used PYTHONPATH=$PWD/src.)
+
+F3 DONE. Read the rule (_rule_open_tasks, lifecycle.py:652-723): it reads
+only chains.fold_tasks authored rows, never derived rows; the one-hop link
+walk is threads._scope (threads.py:372-388, via resolved_links per AGENTS.md
+-- threads.py itself is not touched). Added
+tests/test_lifecycle.py::test_open_tasks_ignores_a_derived_row_reached_through_a_link:
+tip's `addresses: REQ-001` link puts the requirement's coverage gap in the
+thread's derived block (asserted through threads_projection: row
+("coverage","unverified","REQ-001") -- `addresses` makes the gap unverified,
+not uncovered, per compute_coverage's stage table build.py:1142-1153), and
+open_tasks stays pass. Passes (2 passed with the sibling test).
+
+F4 DONE. Verified: tasks is `on_change: timeline` (v3/base.yaml:302;
+confirmed at runtime: on_change_for('tasks') == 'timeline' on a scratch
+project), compute_hashes skips non-invalidate fields (build.py:1831-1838,
+2199-2200), while history semantic_payload hashes ALL fields verbatim
+(history.py:176). So the old comment's "poison the content hash AND the
+history digest" is half-wrong for the timeline-mode tasks field: only the
+digest half bites. Made the model.py comment accurate. (parse.py:1008-1010
+carries the same half-wrong sentence but parse.py is on the do-not-touch list
+for this branch -- DEFERRED, noted for the owner.) Annotation: sole writer is
+parse.py:1016-1021 which builds [int-or-None per row] ->
+`dict[str, list[int | None]]`.
+
+F5 DONE (documentation option). Grep of consumers: lifecycle.py:692 (reads
+rows, never mutates), threads.py:224 _tasks (copies via dict(row) before
+attaching open_since, threads.py:281-286), task_pane/render: no fold_tasks
+use at all (grep: no hits for .rows/TipTasks outside chains/lifecycle/
+threads; sources.py's .rows is a different thing). No consumer mutates, so
+copies would be dead cost; strengthened the fold_tasks docstring to say the
+returned lists are live aliases and callers must not mutate, citing the
+memoization hazard and threads._tasks' copy. No behaviour change -> no new
+test (per the item's "test it if you change behaviour").
+
+F6 SKIP (already fixed). in-prog-logs/living-notes-h6-tasks.txt:144-150
+already carries a dated "## Correction (2026-10-10 review follow-up,
+appended, history not rewritten)" naming the real test
+tests/test_tasks.py::test_ticking_a_task_moves_the_history_digest_not_the_content
+(line 319, verified it exists; the bogus name exists nowhere in tests/).
+Verified also that review-followups-2026-10-10.txt:52 cites the real name.
+Nothing to add.
+
+F7 DONE. build.py:357-358 accepts missing/empty task ids (only non-empty ids
+enter the uniqueness check). Confirmed live in .scratch/f7: rows with no id /
+empty id produce no error or warning; only the real duplicate errors.
+lifecycle.py:671-673 docstring mentions "a row whose id is absent (validation
+allows it)" but user docs (docs/design-log.md:77-80) said every row has "a
+stable id" with no word on the omitted case -> added one sentence to
+design-log.md saying what happens (accepted; open_tasks names it #N).
+No behaviour change; verified `#1`/#2 naming live: "FAIL open_tasks LOG-001:
+open task #1 (items/log.yaml:8), ... #2 ..., T-dup ...".
+
+SABOTAGE (F3's test): temporarily appended derived-row offenders to
+_rule_open_tasks (`offenders += [... _rule_unverified_requirements(project)
+...]`); the new test FAILED at tests/test_lifecycle.py:628 as intended;
+restored the line and `git diff --stat src/refdes/lifecycle.py` shows NO
+diff (byte-identical restore); test passes again. Recorded per COMMON.
+
+CHANGELOG: one fragment, changelog.d/lifecycle-tasks-doc-nits.fixed.md,
+covering only the user-visible docs corrections (F1 citation split, F2
+tick-trips-captured_edits note, F7 omitted-id sentence). Rule applied from
+changelog.d/README.md: "fixed -- a bug fix", following the repo precedent
+that doc corrections ship as *.fixed.md fragments (docs-audit-*.fixed.md,
+follows-docs-honesty.fixed.md). F4 (comment/annotation), F5 (docstring),
+F3 (test) are not user-visible -> no fragment for them.
+
+VERIFICATION (all foreground):
+- ruff check --select E9,F src tests -> All checks passed!
+- docs-site/gen_examples.py --check -> schema-reference.md and
+  vocabulary.md up to date, exit 0.
+- Full suite once: 3586 passed, 2 skipped in 273.61s, exit=0
+  (.scratch/suite.txt). No flake needed re-running.
+
+STATUS: finished. F1 F2 F3 F4 F5 F7 done; F6 skipped (already fixed). One
+deferral noted for the parse.py:1008-1010 twin of F4's half-wrong comment
+(parse.py is on this branch's do-not-touch list).

@@ -77,7 +77,10 @@ sample project does exactly this; see
 A log entry may carry the thread's open work as `tasks:` rows — each a mapping
 with a stable `id`, the task's `text`, and its `state`: `open`, `done` or
 `dropped`. Task ids must be unique within a list, and a state outside those
-three words is a build error.
+three words is a build error. A row may omit `id` or leave it empty — there is
+then no id to be unique against, so validation accepts it, and the
+`open_tasks` gate rule names such an open row by its position in the list
+(`#1`) instead.
 
 ```yaml
   - id: LOG-A-003
