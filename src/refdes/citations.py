@@ -1070,8 +1070,11 @@ def load_lockfile(project: Project) -> dict[str, dict]:
     path = lockfile_path(project)
     if not os.path.isfile(path):
         return {}
-    with open(path, "r", encoding="utf-8") as fh:
-        text = fh.read()
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            text = fh.read()
+    except UnicodeDecodeError as exc:
+        raise LockfileError(f"is not valid UTF-8: {exc}") from exc
 
     conflict = _conflict_marker(text)
     if conflict is not None:

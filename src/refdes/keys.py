@@ -644,7 +644,7 @@ def is_adopted(project: Project) -> bool:
     try:
         with open(adoption_marker_path(project), encoding="utf-8") as fh:
             marker = yaml_safe_load(fh)
-    except (OSError, yaml.YAMLError):
+    except (OSError, UnicodeDecodeError, yaml.YAMLError):
         return False
     return isinstance(marker, Mapping) and marker.get("adopted") is True
 

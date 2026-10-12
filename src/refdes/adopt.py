@@ -299,8 +299,18 @@ def apply(project_root: str, dry_run: bool = False) -> AdoptionResult:
     marker_was_adopted = keys_mod.is_adopted(project)
     marker_before = ""
     if marker_existed:
-        with open(marker_path, "r", encoding="utf-8", newline="") as fh:
-            marker_before = fh.read()
+        try:
+            with open(marker_path, "r", encoding="utf-8", newline="") as fh:
+                marker_before = fh.read()
+        except UnicodeDecodeError as exc:
+            return AdoptionResult(
+                ok=False,
+                errors=[
+                    f"{keys_mod.ADOPTION_MARKER}: adoption marker file is not valid "
+                    f"UTF-8 ({exc}); repair it by hand or delete it and run again"
+                ],
+                dry_run=dry_run,
+            )
     if not marker_was_adopted:
         rewrites.append(
             revise.FileRewrite(

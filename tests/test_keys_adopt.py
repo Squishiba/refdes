@@ -413,3 +413,22 @@ def test_adopt_refuses_an_item_whose_key_was_hand_deleted(tmp_path, capsys):
     assert f"`key: {old_key}`" in errors
     assert _snapshot(tmp_path) == before
     assert not (tmp_path / keys_mod.ADOPTION_MARKER).exists()
+
+
+def test_adopt_refuses_a_corrupt_adoption_marker(tmp_path, capsys):
+    """Review #209's class beyond history.py: a b"\\xff"
+    .refdes/keys-adopted.yaml escaped `refdes keys adopt` as a raw
+    UnicodeDecodeError. is_adopted already swallows an unreadable marker
+    (unreadable = not adopted), but apply()'s plan-phase read of the same
+    bytes had no wrap at all -- the traceback named no file. It is now a
+    refusal on the module's own AdoptionResult error channel, naming the
+    file and saying what to do."""
+    _write_shape_project(tmp_path)
+    marker = tmp_path / keys_mod.ADOPTION_MARKER
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_bytes(b"\xff")
+    config = str(tmp_path / "refdes-project.yaml")
+    assert cli_mod.main(["-c", config, "keys", "adopt", "--dry-run"]) == 1
+    output = capsys.readouterr().err
+    assert ".refdes/keys-adopted.yaml" in output
+    assert "not valid UTF-8" in output

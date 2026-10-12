@@ -151,8 +151,13 @@ def _load_seal_data(project: Project, board: str = "") -> dict:
     path = seal_path(project, board)
     if not os.path.isfile(path):
         return {}
-    with open(path, "r", encoding="utf-8") as fh:
-        data = yaml_safe_load(fh) or {}
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            data = yaml_safe_load(fh) or {}
+    except UnicodeDecodeError as exc:
+        raise ValueError(f"{path}: seal file is not valid UTF-8 ({exc})") from exc
+    except yaml.YAMLError as exc:
+        raise ValueError(f"{path}: seal file does not parse ({exc})") from exc
     if not isinstance(data, dict):
         raise ValueError(f"{path}: seal file must be a mapping")
     for record_id, value in (data.get("sealed") or {}).items():

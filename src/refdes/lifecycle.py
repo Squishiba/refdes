@@ -185,8 +185,13 @@ def _same_baseline_items(stored: dict[str, dict], current: dict[str, dict]) -> b
 
 
 def _load_baseline_file(path: str, project: Project) -> Baseline:
-    with open(path, "r", encoding="utf-8") as fh:
-        data = yaml_safe_load(fh) or {}
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            data = yaml_safe_load(fh) or {}
+    except UnicodeDecodeError as exc:
+        raise SchemaError(f"{path}: baseline file is not valid UTF-8 ({exc})") from exc
+    except yaml.YAMLError as exc:
+        raise SchemaError(f"{path}: baseline file does not parse ({exc})") from exc
     for record_id, entry in (data.get("items") or {}).items():
         if "key" in entry:
             keys_mod.report_storage_key(project, entry["key"], path)
