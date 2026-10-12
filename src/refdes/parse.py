@@ -853,7 +853,7 @@ def _apply_change_override(
         if override.get("mode") == ON_CHANGE_LOG_OLD:
             if not legacy_ok:
                 project.error(
-                    f"on_change mode: {_LEGACY_LOG_RENAMED}",
+                    f"on_change: {_LEGACY_LOG_RENAMED}",
                     file=rel,
                     line=line,
                     item_id=item.id,

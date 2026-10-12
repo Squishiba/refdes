@@ -58,7 +58,16 @@ def test_explicit_inverse_named_on_change_is_a_schema_error(tmp_path):
 
 
 def test_the_whole_reserved_class_is_guarded(tmp_path):
-    for name in ("id", "type", "body", "former_ids", "key", "prefix", "board", "workspace"):
+    for name in (
+        "id",
+        "type",
+        "body",
+        "former_ids",
+        "key",
+        "prefix",
+        "board",
+        "workspace",
+    ):
         _rejects(
             tmp_path,
             CONFIG + f"link_types:\n  {name}: {{}}\n" + NOTE_TYPE,

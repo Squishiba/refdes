@@ -828,11 +828,12 @@ def load_project(config_path: str | None = None, start: str = ".") -> Project:
 
         body_cfg = tspec.get("body") or {}
         body_on_change = body_cfg.get("on_change", default_on_change)
-        if body_on_change == ON_CHANGE_LOG_OLD and not legacy_log_ok:
-            raise _on_change_log_renamed(f"types.{tname}.body")
-        if body_on_change not in ON_CHANGE_MODES and not (
-            body_on_change == ON_CHANGE_LOG_OLD and legacy_log_ok
-        ):
+        if body_on_change == ON_CHANGE_LOG_OLD:
+            if not legacy_log_ok:
+                raise _on_change_log_renamed(f"types.{tname}.body")
+            # Pre-v3 pin: keep the standard's own spelling, as in the field
+            # loop above.
+        elif body_on_change not in ON_CHANGE_MODES:
             raise SchemaError(
                 f"types.{tname}.body.on_change must be one of "
                 f"{', '.join(ON_CHANGE_MODES)}"

@@ -5,10 +5,13 @@
   declared one must rename the verb to load again. Before this, front matter spelled
   that key for the engine and never for the link, so the verb could never
   be written on an item: `on_change: MEMO-002` came back as a bogus
-  "must be one of invalidate, log, ignore" error, and the list spelling
-  `on_change: [MEMO-002]` — or any collision on `prefix:`/`board:`/
-  `workspace:`/the `RESERVED` keys — silently dropped every such link with
-  a clean exit. The check reads `parse.RESERVED` and `parse.OVERRIDABLE`
+  "must be one of invalidate, log, ignore" error; the list spelling
+  `on_change: [MEMO-002]` and a `body:` collision silently dropped the
+  link with a clean exit; a `prefix:`/`board:`/`workspace:` collision
+  dropped it too, absorbing the value as the item's own prefix/board/
+  workspace hint; and `key:`, `former_ids:`, `id:` and `type:` collided as
+  the item's own surrogate key, former ids and identity -- read as engine
+  values, not as links. The check reads `parse.RESERVED` and `parse.OVERRIDABLE`
   rather than restating them, so the whole class is guarded, including
   reserved keys added later, and both ends of a verb are checked (a
   declared `inverse:` too). No bundled standard verb collides; only a

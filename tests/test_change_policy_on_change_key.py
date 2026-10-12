@@ -301,7 +301,11 @@ def test_item_log_override_errors_but_is_still_applied(tmp_path):
     )
     project = _build_at(tmp_path)
 
-    assert [d for d in project.errors if "renamed to 'timeline'" in d.message]
+    assert [
+        d
+        for d in project.errors
+        if d.message.startswith("on_change: mode 'log' was renamed")
+    ]
     assert project.item_by_id("NOTE-001").on_change_override == {"mode": "timeline"}
     assert project.item_by_id("NOTE-001").on_change_for(
         "status", project.types["note"], "ignore"
@@ -321,7 +325,11 @@ def test_item_log_mode_key_errors_but_is_still_applied(tmp_path):
     )
     project = _build_at(tmp_path)
 
-    assert [d for d in project.errors if "renamed to 'timeline'" in d.message]
+    assert [
+        d
+        for d in project.errors
+        if d.message.startswith("on_change: mode 'log' was renamed")
+    ]
     assert project.item_by_id("NOTE-001").on_change_override["mode"] == "timeline"
 
 
