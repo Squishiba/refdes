@@ -270,3 +270,56 @@ push, no rebase. No Python logic touched.
 
 Fix round 2 FINISHED: one commit (staged by path, log in it), pushed once,
 PR body kept-hits list extended, short PR comment posted.
+
+## Fix round 3 (review: chunk 1 requested changes on stale `follows` claims)
+Carried .scratch/FIX-3.txt exactly, against head a19bc39. One commit, one
+push, no rebase. No Python logic touched (two docstring rewrites only).
+- H1: verified the truth first — src/refdes/standards/hardware/v3/base.yaml
+  :166 declares `follows` and :305 declares `follows: [log]`; v1/v2
+  base.yaml have no `follows:` link type. Re-probed live with
+  `refdes schema` on scratch projects pinned to each version, run from
+  THIS worktree via PYTHONPATH=$PWD/src (the venv refdes imports
+  /home/jorb/work/refdes, so plain `refdes` would have tested the wrong
+  tree) — v3 schema output carries `follows` (target: log) at
+  v3-schema.json:913 and :1149; v2 output has zero occurrences. Outputs in
+  .scratch/schema-probe-r3fix/. Rewrote the four false claims
+  (docs/links.md ~66-76, docs/cli-reference.md keys-adopt bullet,
+  tests/test_history_capture.py and tests/test_chains.py docstrings) to
+  say: bundled-but-UNRELEASED hardware@3 (CHANGELOG [Unreleased],
+  CHANGELOG.md:8/:27) declares it; released hardware@1/@2 need it declared
+  in the project's refdes-schema.yaml link_types: (schema.py:44,57).
+  docs/design/vocabulary-review.md :363 left alone (proposal-body quote).
+- H2: audited EVERY file:line pointer in docs/design/living-notes.md
+  (~65 distinct, incl. extension.js, item.html.j2, base.yaml, and
+  docs-to-docs refs) against current code with grep -n/def-boundary
+  checks, then applied 65 count-asserted replacements. Round-1/2 had left
+  most of this file at pre-move numbers (e.g. build.py:1855-1894 -> the
+  build() body is now 3303-3346; chains resolve 726-782 -> 971-1027;
+  render items_json 511-643/563-642 -> 572-746; cli _load 69-136/125 ->
+  56-81; _refuse_no_write 137-149 -> 84-94; --no-write arg 1167-1178 ->
+  2541-2555; seal resealed_ids 411-438 -> 747-774). Doc-to-docs pointers
+  checked too: lifecycle.md:31-43/:266-277 still true; keys.md:374-382 ->
+  391-406; keys.md:649-657 -> 736-741; browser-editor.md:5-23,154-182 ->
+  5-23 (154-182 is the keys end-state section now); base.yaml:268/:292 ->
+  v3 :280/:305. Post-edit range check: every pointer within its file.
+  One claim beyond a pointer number was found false in the audit: the
+  table row saying "`refdes serve` does not exist" — cmd_serve ships
+  (cli.py:452), row reworded to "No text/CLI equivalent" + serve exists.
+- H3: living-notes :193/:630 now quote the real gate,
+  `write=not (args.no_write or getattr(args, "dry_run", False))`
+  (cli.py:80).
+- Verification (round 3): touched test files + every test that opens a doc
+  this round edited (test_history_capture, test_chains,
+  test_audit_hash_only_wording, test_citations, test_exit_codes,
+  test_no_write, test_readonly_explicit_writes, test_revise) -> 255
+  passed, 1 skipped. `PYTHONPATH=$PWD/src .../python docs-site/
+  gen_examples.py --check` -> clean. `ruff check --select E9,F src tests`
+  -> clean. No test opens living-notes.md or links.md (grep tests/*.py:
+  docstring mentions only), but several open docs/cli-reference.md, which
+  H1 edited — FIX-3's "if any test reads a touched doc" convention ->
+  full suite in the FOREGROUND: `PYTHONPATH=$PWD/src .../python -m pytest
+  -q -p no:cacheprovider` -> 3562 passed, 2 skipped, exit=0 (271.49s,
+  .scratch/suite-r3.txt).
+
+Fix round 3 FINISHED: one commit (staged by path, log in it), pushed once,
+short PR comment posted (H1-H3).

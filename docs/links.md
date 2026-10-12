@@ -67,10 +67,13 @@ modified.
 "continue this thread", so the first writable load anchors it to the thread's
 current tip (becoming `DISPLAY-ID@key` or a bare key for an id-less tip). Once
 anchored, it follows the same rename-refresh rule as any other composite.
-**It is not yet available to authors:** no bundled standard declares the verb,
-so writing `follows:` today reports `unknown field 'follows' on <type>` and the
-build still succeeds — an unnoticed thread, not a failed one. The chain behaviour
-ships with the threads work — see [threads](design/threads.md).
+**Availability:** the bundled but *unreleased* `hardware@3` declares the verb
+(see `CHANGELOG.md`'s `[Unreleased]`); the released `hardware@1`/`hardware@2`
+do not, so on those a project must declare it itself in `refdes-schema.yaml`'s
+`link_types:`. Writing `follows:` with no declaration reports
+`unknown field 'follows' on <type>` and the build still succeeds — an
+unnoticed thread, not a failed one. The chain behaviour ships with the threads
+work — see [threads](design/threads.md).
 
 ## Back-links are computed
 

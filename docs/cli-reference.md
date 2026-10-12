@@ -1690,9 +1690,10 @@ one-time, transactional operation that:
   `key: <11-char>` in the source file)
 - Expands structured link targets and `checks: against:` references that
   resolve to a keyed item to the composite `DISPLAY-ID@key` form
-- Anchors bare `follows:` references at their thread tips (no bundled
-  standard declares `follows:` yet, so a project has none until the threads
-  work ships)
+- Anchors bare `follows:` references at their thread tips (only the bundled
+  but unreleased `hardware@3` — see `CHANGELOG.md`'s `[Unreleased]` — declares
+  `follows:`; earlier standards need it declared in the project's own
+  `refdes-schema.yaml`)
 - Rebases every baseline (`.refdes/baselines/*.yaml`) and seal file
   (`.refdes/log-seal*.yaml`) to key-keyed storage, carrying forward entries
   whose content is provably unchanged (older hashes migrate automatically;

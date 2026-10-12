@@ -6,9 +6,10 @@ When a writable load anchors a bare `follows:` edge, it also captures a
 `.refdes/history/` and prints `captured LOG-001: LOG-002 now follows it`
 on stderr. The anchor itself behaves exactly as before; `--no-write`
 reaches none of this (the tree-hash coverage lives in
-tests/test_no_write.py). The schema here declares `follows:` by hand --
-`hardware@3` does not declare it yet -- so every project in this file is
-the "any project whose schema declares it" case, the same convention as
+tests/test_no_write.py). The schema here declares `follows:` by hand -- only
+the bundled but unreleased `hardware@3` declares it (see CHANGELOG
+`[Unreleased]`); released `hardware@1`/`@2` do not -- so every project in this
+file is the "any project whose schema declares it" case, the same convention as
 tests/test_chains.py.
 """
 

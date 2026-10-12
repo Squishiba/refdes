@@ -3,7 +3,8 @@
 docs/design/threads.md §3 (the lazy walk, `resolve_current`'s per-field fold,
 "Branching's effect on current") and §6 (forks are legal info, merges close
 them, cycles are hard errors). The schema here declares `follows:` by hand --
-`hardware@3` does not declare it yet (that's the standard-layer phase) -- so
+only the bundled but unreleased `hardware@3` declares it (see CHANGELOG
+`[Unreleased]`); released `hardware@1`/`@2` do not -- so
 every project in this file is the "any project whose schema declares it" case
 §7 describes.
 """
