@@ -35,13 +35,13 @@ merge, §7's migration file), it says so and stops there.
   merge itself lands — §5/§7 remain other sessions'/a later session's work,
   scoped out of Phase 1 exactly as before — only which version number it
   targets once it does.
-- **A frozen `follows:` target is stored as `DISPLAY-ID@key` whenever the
+- **An anchored `follows:` target is stored as `DISPLAY-ID@key` whenever the
   target entry has a display id** (readable, refreshed on rename like every
   other composite link, `docs/design/keys.md` §3), **and as a bare key only
   when the target entry has no display id.** §1's own worked example ("the
   write-back pass ... rewrites the line to that tip's bare key") describes
   only the second case; a chain tip that *does* have a display id (the
-  common case — most heads are still worth naming) freezes to the composite
+  common case — most heads are still worth naming) anchors to the composite
   form instead, exactly like `satisfies:`/`refines:`/every other structured
   link. This is a consequence of §2's identity model, not a new mechanism:
   `follows:` is an ordinary link, so it gets the ordinary composite-or-bare
@@ -87,7 +87,7 @@ validation path. The reason, recorded in `migration.yaml:57-64`: an
 on the target's first rename, and the composite `DISPLAY-ID@key` spelling the
 surrogate-key machinery writes everywhere else is not accepted there at all
 (`item_by_id` is display-id only). A structured link is the one spelling the
-key machinery keeps current — it freezes to `DISPLAY-ID@key`, and the readable
+key machinery keeps current — it anchors to `DISPLAY-ID@key`, and the readable
 half is refreshed when the target renames. So the owner's requirement ("no
 link is lost", "a dangling item target is an error") is met by keeping the
 edge a maintained link rather than by re-encoding it as a citation. The
@@ -108,8 +108,8 @@ resolves as an ordinary declared link (whatever engine capability already
 resolves `satisfies:` resolves it too).
 
 **Phase 2a implemented** (this session, 2026-09-14): bare-key link
-resolution and one-time `follows:` freezing. A writable load freezes a bare
-display-ID `follows:` reference to the current frozen-edge tip, stores a
+resolution and one-time `follows:` anchoring. A writable load anchors a bare
+display-ID `follows:` reference to the current anchored-edge tip, stores a
 display-ID target as `DISPLAY-ID@key` (or an id-less target as its bare key),
 and leaves unmerged forks and sealed entries untouched with warnings.
 **Phase 3a implemented:** derived links retain an id-less entry's key rather
@@ -240,7 +240,7 @@ memorable name a chain has:
   ...
 ```
 
-On the next writable build, this resolves — and freezes — exactly the way
+On the next writable build, this resolves — and anchors — exactly the way
 an ordinary composite reference already does (`docs/design/keys.md` §3):
 the write-back pass walks forward from whatever `LOG-A-001` currently
 resolves to, along `followed_by:` backlinks, to the chain's **current
@@ -249,7 +249,7 @@ has no display id of its own (the common case once a chain has grown past
 its head through id-less continuations, §2), or as a `DISPLAY-ID@key`
 composite, refreshed on rename like any other structured link, if it does
 (decided 2026-09-14). The example below assumes the tip by then is a later,
-id-less continuation, which is why it freezes to a bare key rather than
+id-less continuation, which is why it anchors to a bare key rather than
 `LOG-A-004@k2p9w3x1r7` or similar:
 
 ```yaml
@@ -276,7 +276,7 @@ subtly wrong:
   work even if DEC-PWR-001 is three entries back by the time the build
   runs).
 - **Resolution happens exactly once, at the moment `follows:` is still a
-  bare display-id reference.** Once frozen to a bare key, no later build
+  bare display-id reference.** Once anchored to a bare key, no later build
   ever re-resolves it — for the identical reason a composite's key half is
   never re-resolved once written (keys.md §3, case 3: "an unknown key is
   an error, and the display half is deliberately not used as a fallback").
@@ -292,10 +292,10 @@ referencing `LOG-A-001` before either has seen the other's work:
 
 ```yaml
 # author A, local build, resolves LOG-A-001's *current* tip -> itself is now the tip
-- follows: [k_A_prev_tip]     # frozen against what A's checkout knew
+- follows: [k_A_prev_tip]     # anchored against what A's checkout knew
 
 # author B, local build, on an older checkout, same starting reference
-- follows: [k_A_prev_tip]     # frozen against the *same* prior tip -- B never saw A's entry
+- follows: [k_A_prev_tip]     # anchored against the *same* prior tip -- B never saw A's entry
 ```
 
 Both builds are individually correct — each resolved against the tip its
@@ -557,7 +557,7 @@ exactly as they do today, with zero new machinery.** `compute_hashes`
 `invalidate` fields, links, and body — unmodified. `seal.py`, in its
 entirety, is unaffected: an append-only-typed entry is sealed the first
 time it's built, and any edit to it — including an edit to its
-`follows:` link, once frozen — is caught the same way an edited `log`
+`follows:` link, once anchored — is caught the same way an edited `log`
 entry is caught today. **Appending to a chain means creating a brand-new
 item; it never touches an existing entry's hash or seal, because nothing
 about appending edits an existing file.** This is the direct, complete
@@ -915,7 +915,7 @@ already existed independently.
 | Item storage | `parse.py:701-740` (`load_items`, `_resolve_id_value`) | `project.items` re-keyed on `item.key`; new rule distinguishing "pending" from "permanently id-less" via `follows:` presence (§2) |
 | Project model | `model.py` (`Project.items`, new `Project.items_by_id`) | Re-keying (§2); `Item.slug` falls back to `self.key` when `self.id` is empty |
 | Link-target resolution | `build.py:248` (`_key_index`), `build.resolve_link_target` | New third case: a bare, well-formed key with no display half resolves directly (§2) — this is the only place `follows:`'s targets actually get resolved |
-| Chain write-back | new, alongside `links.expand_missing` (`links.py`) | Reuses `ids.insert_into_markdown`/`insert_into_list` (mechanism), new resolution logic: walk forward to the current tip, freeze once (§1) |
+| Chain write-back | new, alongside `links.expand_missing` (`links.py`) | Reuses `ids.insert_into_markdown`/`insert_into_list` (mechanism), new resolution logic: walk forward to the current tip, anchor once (§1) |
 | Coverage | `build.py` (`_coverage_for`, `compute_coverage`, `compute_board_coverage`) | Derived links use display-id-or-key refs. `satisfying_statuses` and `verifying_statuses` use `resolve_current(..., "status")` when the linked entry does not itself declare status; an unmerged fork is claimed, never satisfied. |
 | Checks | `build.py:576-652` (`run_checks`) | **Unaffected** — confirmed, not merely assumed (§3) |
 | Hashing | `build.py:655-767` (`compute_hashes`) | **Unaffected** — confirmed (§4) |

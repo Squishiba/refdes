@@ -647,7 +647,7 @@ def resolve_link_target(by_key: dict[str, Item], project: Project, target: str) 
     would resurrect exactly the ambiguity keys exist to remove (two items
     momentarily sharing a stale display id after a rename, say). A bare,
     well-formed key resolves directly by key. Any other bare token remains a
-    display-ID lookup, preserving the authoring path for unfrozen links.
+    display-ID lookup, preserving the authoring path for unanchored links.
 
     No `former_ids:` fallback here: that is a prose-only mechanism
     (`validate_former_ids` / `_linkify`'s "(formerly X)" marker). A

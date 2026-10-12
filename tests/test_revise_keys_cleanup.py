@@ -3,7 +3,7 @@
 The prefix-rename path no longer rewrites bare references, no longer
 relabels the id ledger, and no longer remaps baseline/seal record ids. In
 its place: apply() runs the writable-load key pipeline (mint, link/check
-expansion, follows freeze) inside its own transaction, refuses with
+expansion, follows anchor) inside its own transaction, refuses with
 file:line if a structured reference to an affected id is still bare
 afterwards, and refreshes composite display halves after the rename.
 A dry run simulates that whole pipeline on a throwaway copy of the tree.

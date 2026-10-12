@@ -2175,7 +2175,7 @@ def cmd_keys_adopt(args) -> int:
             "to composite form"
         )
         print(
-            f"would freeze {result.frozen_follows} follows reference(s) "
+            f"would anchor {result.anchored_follows} follows reference(s) "
             "at their thread tips"
         )
     else:
@@ -2189,7 +2189,7 @@ def cmd_keys_adopt(args) -> int:
             "to composite form"
         )
         print(
-            f"froze {result.frozen_follows} follows reference(s) "
+            f"anchored {result.anchored_follows} follows reference(s) "
             "at their thread tips"
         )
 

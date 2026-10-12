@@ -208,7 +208,7 @@ def _follows_value(value: str) -> str | None:
 
 
 def _dedupe_follows_field(out: list[str], start: int, end: int) -> None:
-    """Drop duplicate frozen targets without reserializing the surrounding item.
+    """Drop duplicate anchored targets without reserializing the surrounding item.
 
     Flow-style lists retain their original token spelling and whitespace for
     every surviving value. A duplicate block-list row becomes blank instead
@@ -313,7 +313,7 @@ def composite_for(item: Item) -> str | None:
     """The `DISPLAY-ID@key` spelling of a link target, or None when the item
     carries no key to write. This is the one composite rule in the codebase:
     the same text `_planned_target` expands a bare reference to, so a link
-    written by the editor and a link expanded by the freeze pass are spelled
+    written by the editor and a link expanded by the anchor pass are spelled
     identically (docs/design/keys.md §3)."""
     if item is None or not item.id or not item.key:
         return None
@@ -381,8 +381,8 @@ def plan_expansion(
         for link_name, targets in item.links.items():
             for target in targets:
                 # `follows:` is chain-aware while still bare: expanding it to
-                # the named head would freeze the wrong predecessor. Once the
-                # freeze pass wrote a composite, it is an ordinary structured
+                # the named head would anchor the wrong predecessor. Once the
+                # anchor pass wrote a composite, it is an ordinary structured
                 # link again and receives the normal stale-label refresh.
                 if link_name == "follows" and "@" not in target:
                     continue
@@ -544,11 +544,11 @@ def _report_missing(project: Project, count: int) -> None:
 
 
 
-# ----------------------------------------------------- follows: one-time freeze
+# ----------------------------------------------------- follows: one-time anchor
 
 
 @dataclass
-class FollowsFreezePlan:
+class FollowsAnchorPlan:
     rewrites: list[tuple[Item, str, str, str]] = field(default_factory=list)
     files: list[FileRewrite] = field(default_factory=list)
     remaining: int = 0
@@ -558,8 +558,8 @@ def _is_well_formed_key(target: str) -> bool:
     return len(target) == keys_mod.KEY_LEN and keys_mod.malformed_key_message(target) is None
 
 
-def _frozen_follows_target(by_key: dict[str, Item], target: str) -> Item | None:
-    """Resolve only an already-frozen follows edge, never a bare display id."""
+def _anchored_follows_target(by_key: dict[str, Item], target: str) -> Item | None:
+    """Resolve only an already-anchored follows edge, never a bare display id."""
     if "@" in target:
         _display, _, key = target.partition("@")
         return by_key.get(key)
@@ -584,15 +584,15 @@ def _tip_label(item: Item) -> str:
     return item.id or item.key
 
 
-def _freeze_rewrite_plan(
+def _anchor_rewrite_plan(
     project: Project,
     candidates: list[tuple[Item, str, str, str]],
     source_texts: dict[str, str] | None,
-) -> FollowsFreezePlan:
-    """Apply the established source-preserving link writers to freeze edits."""
+) -> FollowsAnchorPlan:
+    """Apply the established source-preserving link writers to anchor edits."""
     from .revise import FileRewrite
 
-    plan = FollowsFreezePlan()
+    plan = FollowsAnchorPlan()
     if not candidates:
         return plan
 
@@ -630,17 +630,17 @@ def _freeze_rewrite_plan(
     return plan
 
 
-def plan_follows_freeze(
+def plan_follows_anchor(
     project: Project, source_texts: dict[str, str] | None = None
-) -> FollowsFreezePlan:
-    """Freeze bare display-ID ``follows:`` references at each thread's tip.
+) -> FollowsAnchorPlan:
+    """Anchor bare display-ID ``follows:`` references at each thread's tip.
 
-    The temporary forward graph contains only already-frozen edges. Processing
+    The temporary forward graph contains only already-anchored edges. Processing
     one item at a time prevents an authored merge's second reference from
     seeing its owner as a tip; after that item's references are resolved, its
-    new frozen edges join the graph for the next item in D3 order.
+    newly anchored edges join the graph for the next item in D3 order.
     """
-    _predecessors, followers = chains_mod.build_graph(project, frozen_only=True)
+    _predecessors, followers = chains_mod.build_graph(project, anchored_only=True)
     by_key = {item.key: item for item in project.items.values() if item.key}
     handles = {id(item): handle for handle, item in project.items.items()}
 
@@ -665,12 +665,12 @@ def plan_follows_freeze(
         spec = project.types.get(item.type)
         # Build-sealed types only: `is_sealed` is always False for a
         # `sealing: history` type (living-notes plan §H5), whose bare edge
-        # freezes normally and is captured below like any other.
+        # anchors normally and is captured below like any other.
         if spec and spec.append_only and seal_mod.is_sealed(project, item):
             if id(item) not in sealed_warned:
                 project.warn(
                     "follows is still bare, but this append-only entry is already sealed; "
-                    "leaving it unchanged because freezing would change its hash.",
+                    "leaving it unchanged because anchoring would change its hash.",
                     file=item.source_file,
                     line=item.source_line,
                     item_id=item.id,
@@ -702,17 +702,17 @@ def plan_follows_freeze(
                 candidates.append((item, "follows", old, new))
                 resolved.append(new)
         for target in resolved:
-            predecessor = _frozen_follows_target(by_key, target)
+            predecessor = _anchored_follows_target(by_key, target)
             if predecessor is not None:
                 handle = handles.get(id(predecessor))
                 if handle is not None:
                     followers.setdefault(handle, []).append(item)
 
-    return _freeze_rewrite_plan(project, candidates, source_texts)
+    return _anchor_rewrite_plan(project, candidates, source_texts)
 
 
-def _frozen_target_key(target: str) -> str | None:
-    """The key half of a frozen follows target: `DISPLAY@key`, or a bare
+def _anchored_target_key(target: str) -> str | None:
+    """The key half of an anchored follows target: `DISPLAY@key`, or a bare
     well-formed key (an id-less tip); None for anything unresolved."""
     text = str(target)
     if "@" in text:
@@ -723,25 +723,25 @@ def _frozen_target_key(target: str) -> str | None:
 def _capture_followed_edges(
     project: Project, rewrites: list[tuple[Item, str, str, str]]
 ) -> list[str]:
-    """Capture every freshly frozen edge (plan §H2): one `followed` event
+    """Capture every freshly anchored edge (plan §H2): one `followed` event
     per (predecessor, successor) pair, holding the predecessor's snapshot.
 
     Raises after undoing its own partial writes if the store refuses, so the
     caller can roll the edge rewrites back with it -- the edge and its event
-    are one transaction, never an edge frozen without its event."""
+    are one transaction, never an edge anchored without its event."""
     by_key = {item.key: item for item in project.items.values() if item.key}
     created: list[str] = []
     announcements: list[str] = []
     try:
         for successor, _link_name, _old, new in rewrites:
-            pred_key = _frozen_target_key(new)
+            pred_key = _anchored_target_key(new)
             predecessor = by_key.get(pred_key) if pred_key else None
             if predecessor is None or not successor.key:
                 continue
             current = {
                 key
                 for key in map(
-                    _frozen_target_key, successor.links.get("follows", [])
+                    _anchored_target_key, successor.links.get("follows", [])
                 )
                 if key
             }
@@ -767,19 +767,19 @@ def _capture_followed_edges(
     return announcements
 
 
-def freeze_follows(project: Project, write: bool = True) -> list[tuple[Item, str, str, str]]:
-    """Write one-time follows freezes after key minting and before build.
+def anchor_follows(project: Project, write: bool = True) -> list[tuple[Item, str, str, str]]:
+    """Write one-time follows anchors after key minting and before build.
 
-    Phase H2 (docs/design/living-notes-plan.md): a frozen edge is also the
-    capture moment. Alongside the freeze, in the same write pass and behind
+    Phase H2 (docs/design/living-notes-plan.md): an anchored edge is also the
+    capture moment. Alongside the anchor, in the same write pass and behind
     the same `write` flag, every resolved (predecessor, successor) pair
     appends a `followed` event holding the predecessor's snapshot to
     `.refdes/history/` and announces itself on stderr -- visible in a
     terminal, never in a command's machine output (`index --compact`'s
-    stdout stays pure JSON, Q4). The freeze itself does exactly what it did
+    stdout stays pure JSON, Q4). The anchor itself does exactly what it did
     before; if an event write fails, the edge rewrites are rolled back so no
-    edge is ever frozen without its event."""
-    plan = plan_follows_freeze(project)
+    edge is ever anchored without its event."""
+    plan = plan_follows_anchor(project)
     if not plan.rewrites or not write:
         return []
 
@@ -806,7 +806,7 @@ def freeze_follows(project: Project, write: bool = True) -> list[tuple[Item, str
                 item.links["follows"] = original_links[id(item)]
         restore_rewrites(plan.files)
         project.error(
-            f"the follows: capture failed ({exc}); the frozen edges were "
+            f"the follows: capture failed ({exc}); the anchored edges were "
             "rolled back to their original text"
         )
         return []

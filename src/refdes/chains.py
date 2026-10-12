@@ -181,13 +181,13 @@ class ChainGraph:
 
 
 def build_graph(
-    project: Project, *, frozen_only: bool = False
+    project: Project, *, anchored_only: bool = False
 ) -> ChainGraph:
     """Build the follows graph, returning a `ChainGraph` with memoization.
 
-    ``frozen_only`` excludes bare display-ID references so a write-back pass
+    ``anchored_only`` excludes bare display-ID references so a write-back pass
     can resolve new entries against the existing durable chain rather than
-    accidentally selecting an unfrozen entry as its own tip.
+    accidentally selecting an unanchored entry as its own tip.
 
     A target that does not resolve is simply not an edge — `resolve_links`
     has already reported it as its own error, and this pass adds nothing to
@@ -209,7 +209,7 @@ def build_graph(
             continue
         seen: set[str] = set()
         for raw in targets:
-            if frozen_only and "@" not in raw and not build_mod._is_well_formed_bare_key(raw):
+            if anchored_only and "@" not in raw and not build_mod._is_well_formed_bare_key(raw):
                 continue
             target = build_mod.resolve_link_target(by_key, project, raw)
             if target is None:
@@ -504,15 +504,15 @@ def _fold(
         if found:
             return cached
 
-    tips_frozen = _component_tips(
+    component_tips = _component_tips(
         start_handle, predecessors, successors, handles, items, cg
     )
-    if len(tips_frozen) != 1:
+    if len(component_tips) != 1:
         result: tuple[Any, Item | None] = (None, None)
     else:
         result = _fold_from_tip(
             project,
-            next(iter(tips_frozen)),
+            next(iter(component_tips)),
             declared_of,
             predecessors,
             handles,

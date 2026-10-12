@@ -543,7 +543,7 @@ EXAMPLES: dict[tuple[str, str], str] = {
     ("links", "follows"): (
         "- id: LOG-A-004\n"
         "  summary: Recorded the release outcome.\n"
-        "  follows: [LOG-A-003]  # the earlier entry freezes here"
+        "  follows: [LOG-A-003]  # the earlier entry anchors here"
     ),
     ("links", "amends"): (
         "- id: LOG-A-006\n"

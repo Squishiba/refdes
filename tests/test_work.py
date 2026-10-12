@@ -62,7 +62,7 @@ AUTHORED = (
 # (or in a brand-new file / the lockfile) leaves the authored task file's bytes
 # untouched -- the read_bytes comparison that proves nothing was ticked or
 # written back. Covers five of the six offline row kinds; the fork lives in its
-# own fixture (it needs the writable path's freeze dance to be a real fork).
+# own fixture (it needs the writable path's anchor dance to be a real fork).
 GAPS = (
     "items:\n"
     "  - id: REQ-001\n"
@@ -279,7 +279,7 @@ def _derived_groups(out: str) -> dict[str, list[str]]:
 
 
 def _warm(tmp_path, config, capsys):
-    """One writable run so keys are minted and edges frozen on disk; from here
+    """One writable run so keys are minted and edges anchored on disk; from here
     the answer is the whole output (no `(minted ... while loading)` line in
     front of it)."""
     assert _run(config, "work") == 0
@@ -287,9 +287,9 @@ def _warm(tmp_path, config, capsys):
 
 
 def _fork_from_bare(tmp_path, config, capsys):
-    """Bare siblings freeze into a chain on the first writable load (plan §H2);
+    """Bare siblings anchor into a chain on the first writable load (plan §H2);
     an author asks for a real branch by naming the target's key. Warm once to
-    mint keys, then rewrite the younger sibling's frozen edge back onto the
+    mint keys, then rewrite the younger sibling's anchored edge back onto the
     root's key -- the same dance tests/test_thread_cli.py uses."""
     assert _run(config, "work") == 0
     capsys.readouterr()
@@ -706,7 +706,7 @@ def test_blocked_and_check_rows_self_close(tmp_path, capsys):
     assert "LOG-010  P_diss violates BND-001" in before["check"]
 
     gaps = tmp_path / "items" / "gaps.yaml"
-    # The warm run froze/expanded `blocked_by: CMP-001` to its composite form,
+    # The warm run anchored/expanded `blocked_by: CMP-001` to its composite form,
     # so match the whole line regardless of the target's key suffix.
     gaps.write_text(
         re.sub(r"    blocked_by: CMP-001[^\n]*\n", "", gaps.read_text(encoding="utf-8")).replace(

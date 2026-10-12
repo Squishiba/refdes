@@ -156,11 +156,11 @@ def _run(config, *args):
 
 def _fork_from_bare(tmp_path, capsys, config):
     """Make the bare two-siblings fixture an actual fork through the
-    writable path's own rule (plan §H2: a bare `follows:` freezes to its
-    target's *current tip*, so two siblings written bare in one file freeze
+    writable path's own rule (plan §H2: a bare `follows:` anchors to its
+    target's *current tip*, so two siblings written bare in one file anchor
     into a chain). Warm once to mint the keys, then name LOG-001's key on
-    the second sibling's edge -- the spelled-out frozen edge is how an
-    author asks for a branch, and the freeze leaves an already-composite
+    the second sibling's edge -- the spelled-out anchored edge is how an
+    author asks for a branch, and the anchor leaves an already-composite
     edge alone."""
     assert _run(config, "thread", "LOG-001") == 0
     capsys.readouterr()
@@ -302,7 +302,7 @@ def test_json_prints_the_projection_entry(tmp_path, capsys):
 
 def test_json_on_a_cold_project_that_mints_keys_is_still_json(tmp_path, capsys):
     """--json owns stdout exactly like `index`'s does (review B1): on a
-    never-opened project the load itself mints keys and freezes the edge,
+    never-opened project the load itself mints keys and anchors the edge,
     and that `(minted ... while loading)` notice must go to stderr -- a
     first run whose JSON answer starts with a parenthetical fails
     json.loads for every consumer."""
@@ -458,7 +458,7 @@ def test_capture_line_of_a_corrected_edge_says_so(tmp_path, capsys):
     # The fixture's single `followed` event is removed first so LOG-001
     # has exactly one capture to render, then the event is hand-written
     # through the store's own API instead of bending the fixture. The
-    # read-only run below is what keeps the writable load from freezing
+    # read-only run below is what keeps the writable load from anchoring
     # the (now event-less) edge back into a plain `followed` capture.
     events = tmp_path / ".refdes" / "history" / "events"
     for path in events.glob("*.yaml"):

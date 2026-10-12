@@ -1701,9 +1701,10 @@ one-time, transactional operation that:
   `key: <11-char>` in the source file)
 - Expands structured link targets and `checks: against:` references that
   resolve to a keyed item to the composite `DISPLAY-ID@key` form
-- Freezes bare `follows:` references at their thread tips (no bundled
-  standard declares `follows:` yet, so a project has none until the threads
-  work ships)
+- Anchors bare `follows:` references at their thread tips (only the bundled
+  but unreleased `hardware@3` — see `CHANGELOG.md`'s `[Unreleased]` — declares
+  `follows:`; earlier standards need it declared in the project's own
+  `refdes-schema.yaml`)
 - Rebases every baseline (`.refdes/baselines/*.yaml`) and seal file
   (`.refdes/log-seal*.yaml`) to key-keyed storage, carrying forward entries
   whose content is provably unchanged (older hashes migrate automatically;
@@ -1729,7 +1730,7 @@ refdes keys adopt
 minted 42 key(s)
 expanded 128 link reference(s) to composite form
 expanded 7 check reference(s) to composite form
-froze 3 follows reference(s) at their thread tips
+anchored 3 follows reference(s) at their thread tips
 baselines rebased:
   rev-c (41/41 entries carried)
   rev-b (41/41 entries carried)
@@ -1753,7 +1754,7 @@ Review the diff before committing.
 The four count lines are always printed, including at zero, and the
 `baselines`/`seals`/`membership manifests` sections appear only for the
 storage files that actually exist. Under `--dry-run` the same plan is printed
-with `would mint`/`would expand`/`would freeze` wording and
+with `would mint`/`would expand`/`would anchor` wording and
 `would be rebased:` headings, plus a `files that would change:` list.
 
 `uncomparable` entries (baseline or seal entries that genuinely changed since

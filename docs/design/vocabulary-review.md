@@ -881,6 +881,24 @@ composite `DISPLAY-ID@key` form itself does not change, so no item file and no
 baseline format changes. Worth doing before the threads work ships, because
 that work will add more uses of the word to the immutability cluster.
 
+**Landed (2026-10-11).** The owner approved P4 and it is in: `links.py` is
+now `plan_follows_anchor` / `anchor_follows` / `FollowsAnchorPlan`,
+`chains.build_graph` takes `anchored_only=`, `refdes keys adopt` reports
+`would anchor` / `anchored N follows reference(s)` and refuses with
+"could not anchor N local follows reference(s)", and the sealed-entry
+warning says "anchoring would change its hash". The old word needs no
+reader because it never reached disk: `frozen_follows` was an in-memory
+`AdoptionResult` field and `keys-adopted.yaml` carries only `adopted:` and
+`format:`, so the rename is printed text and identifiers only — no
+read-old/write-new anywhere, and no consumer of any kind exists in this
+repo (editor sources included). The bare-numeric-id "expand-and-freeze",
+the image-search path freeze, and every immutability use of `frozen` keep
+the old word: they name different behaviours, and this pass left them all
+in place. The one pre-existing use of `anchor` — a frozen image `/path`
+"project-root anchored" (`build.py`) — names where a path resolves, a
+different axis from which key a reference names, so the word reads
+correctly here without colliding with it.
+
 **P5 — a naming rule for H1 through H9, at zero cost.** `sealed` may only ever
 refer to the pre-H5 mechanism and the `legacy-seal` markers; the new state is
 `captured` and `edited after captured`. The decided behaviour of Q2 stays

@@ -673,7 +673,7 @@ def test_thread_without_store_history_has_no_capture_rows(tmp_path):
 
 
 def test_thread_names_the_entries_the_store_holds_captures_for(tmp_path):
-    """§6's capture line, as data: a writable load freezes the `follows:`
+    """§6's capture line, as data: a writable load anchors the `follows:`
     edge and captures the predecessor's snapshot, so the thread reports that
     member as captured -- with the event's kind, and `occurred_at: null`
     exactly because a `followed` edge deliberately carries no clock (H2: a

@@ -1,14 +1,15 @@
 """Phase H2: capture at the `follows:` edge, announced.
 
 docs/design/living-notes-plan.md §H2 and docs/design/living-notes.md §2.
-When a writable load freezes a bare `follows:` edge, it also captures a
+When a writable load anchors a bare `follows:` edge, it also captures a
 `followed` event holding the predecessor's snapshot into
 `.refdes/history/` and prints `captured LOG-001: LOG-002 now follows it`
-on stderr. The freeze itself behaves exactly as before; `--no-write`
+on stderr. The anchor itself behaves exactly as before; `--no-write`
 reaches none of this (the tree-hash coverage lives in
-tests/test_no_write.py). The schema here declares `follows:` by hand --
-`hardware@3` does not declare it yet -- so every project in this file is
-the "any project whose schema declares it" case, the same convention as
+tests/test_no_write.py). The schema here declares `follows:` by hand -- only
+the bundled but unreleased `hardware@3` declares it (see CHANGELOG
+`[Unreleased]`); released `hardware@1`/`@2` do not -- so every project in this
+file is the "any project whose schema declares it" case, the same convention as
 tests/test_chains.py.
 """
 
@@ -83,7 +84,7 @@ def _repoint_edge(path, new_target):
 # ------------------------------------------------------- the capture moment
 
 
-def test_a_frozen_edge_captures_the_predecessor_and_announces(tmp_path, capsys):
+def test_an_anchored_edge_captures_the_predecessor_and_announces(tmp_path, capsys):
     cfg = _setup(tmp_path, TWO)
     project, _stale = loader.load_tree(cfg, write=True)
     captured = capsys.readouterr()
@@ -185,10 +186,10 @@ def test_an_old_branch_replay_writes_the_identical_path_and_bytes(tmp_path):
     )
 
 
-def test_each_frozen_edge_captures_its_own_predecessor(tmp_path):
-    """Two frozen edges in one load -- two events, each holding the snapshot
-    of the predecessor that edge points at (freeze resolves a bare edge to
-    the current tip, so a chain authored bare freezes as a chain)."""
+def test_each_anchored_edge_captures_its_own_predecessor(tmp_path):
+    """Two anchored edges in one load -- two events, each holding the snapshot
+    of the predecessor that edge points at (the anchor resolves a bare edge to
+    the current tip, so a chain authored bare anchors as a chain)."""
     cfg = _setup(
         tmp_path,
         "defaults: { type: log }\n"
@@ -231,10 +232,10 @@ def test_a_merge_captures_both_parents_and_is_not_a_correction(tmp_path):
 # ------------------------------------------- the transaction and the refusals
 
 
-def test_a_failed_event_write_rolls_the_frozen_edge_back(tmp_path, monkeypatch):
+def test_a_failed_event_write_rolls_the_anchored_edge_back(tmp_path, monkeypatch):
     """The plan's transaction case the parse guard cannot catch: the rewrite
     parses fine and the *event* write is what fails -- the edge must not
-    stay frozen without its event."""
+    stay anchored without its event."""
 
     def boom(*args, **kwargs):
         raise OSError("the disk refused")

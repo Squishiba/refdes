@@ -64,13 +64,16 @@ stay bare, stale display halves are not refreshed, and no source files are
 modified.
 
 `follows:` will be the one exception while it is still bare: it means
-"continue this thread", so the first writable load freezes it to the thread's
+"continue this thread", so the first writable load anchors it to the thread's
 current tip (becoming `DISPLAY-ID@key` or a bare key for an id-less tip). Once
-frozen, it follows the same rename-refresh rule as any other composite.
-**It is not yet available to authors:** no bundled standard declares the verb,
-so writing `follows:` today reports `unknown field 'follows' on <type>` and the
-build still succeeds — an unnoticed thread, not a failed one. The chain behaviour
-ships with the threads work — see [threads](design/threads.md).
+anchored, it follows the same rename-refresh rule as any other composite.
+**Availability:** the bundled but *unreleased* `hardware@3` declares the verb
+(see `CHANGELOG.md`'s `[Unreleased]`); the released `hardware@1`/`hardware@2`
+do not, so on those a project must declare it itself in `refdes-schema.yaml`'s
+`link_types:`. Writing `follows:` with no declaration reports
+`unknown field 'follows' on <type>` and the build still succeeds — an
+unnoticed thread, not a failed one. The chain behaviour ships with the threads
+work — see [threads](design/threads.md).
 
 ## Back-links are computed
 
@@ -130,7 +133,7 @@ stdout.
 > about; v3 merges the two types, so the edge is log-to-log and is spelled
 > `follows:`. `refdes standard upgrade --to 3` renames the verb in place, and
 > the migrated edge is a maintained link from then on — a writable load
-> freezes it to `DISPLAY-ID@key` and captures the predecessor's snapshot.
+> anchors it to `DISPLAY-ID@key` and captures the predecessor's snapshot.
 
 Add your own by declaring them in `link_types` and listing them under a type's
 `links:`.

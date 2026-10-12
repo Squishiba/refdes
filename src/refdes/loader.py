@@ -2,7 +2,7 @@
 
 `load_tree` is what every command's `_load()` runs: parse the item sources,
 mint missing surrogate keys, expand bare links/checks/calc references to
-composites, and freeze `follows:` and uniquely searched images. With
+composites, and anchor `follows:` and freeze uniquely searched images. With
 ``write=True`` those steps rewrite source
 files (docs/design/keys.md §2); with ``write=False`` (the global
 ``--no-write``) each one still resolves in memory but nothing under `items/`
@@ -108,7 +108,7 @@ def load_tree(
         parse_span = parse_items(project, require_ids, discard=parse_span)
 
     # Imported artifacts join the resolution scope before structured link
-    # expansion: a bare local link to an imported keyed item must freeze to
+    # expansion: a bare local link to an imported keyed item must anchor to
     # the same composite form as a local target. load_imports() is idempotent,
     # so build() reuses this populated graph.
     imports_mod.load_imports(project)
@@ -129,18 +129,18 @@ def load_tree(
     expanded_checks = links_mod.expand_missing_checks(project, write=write)
 
     # Same treatment for cross-item calc references (`V_in = DEC-PWR-001.V_in`,
-    # finding 35): a bare target freezes to the composite and stale display
+    # finding 35): a bare target anchors to the composite and stale display
     # halves refresh through the same _planned_target rule. Under --no-write
     # the bare reference still resolves on the display id; only the write-back
     # is skipped.
     expanded_calc_refs = links_mod.expand_missing_calc_refs(project, write=write)
 
     # A bare follows reference means "continue this thread", not "pin this
-    # named entry". Resolve it once to the current frozen-edge tip after keys
+    # named entry". Resolve it once to the current anchored-edge tip after keys
     # exist, then reparse so build sees the durable composite-or-bare-key
     # spelling. The same global --no-write gate that protects ordinary link
     # expansion also protects this append-only-sensitive rewrite.
-    frozen_follows = links_mod.freeze_follows(project, write=write)
+    anchored_follows = links_mod.anchor_follows(project, write=write)
     # The tally of everything this load itself rewrote, for whoever reports on
     # the run (see `Project.load_writes`). All five steps return [] when
     # `write` is False, so a `--no-write`/`--dry-run` load leaves this falsy
@@ -149,10 +149,10 @@ def load_tree(
         len(expanded_links)
         + len(expanded_checks)
         + len(expanded_calc_refs)
-        + len(frozen_follows)
+        + len(anchored_follows)
     )
-    if frozen_follows:
-        # The follow-freeze writer is the one later source rewrite that still
+    if anchored_follows:
+        # The follows-anchor writer is the one later source rewrite that still
         # needs a reparse. Rebuild the imported portion of the resolution
         # scope afterward so build() never sees a local-only graph.
         project.imports_loaded = False

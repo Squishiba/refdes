@@ -106,15 +106,16 @@ phase, so every existing test — including the whole-tree byte-identical
 
 ## Phase H2 — capture at the `follows:` edge, announced
 
-**Adds.** The capture moment. When a writable load freezes a `follows:` edge, it
+**Adds.** The capture moment. When a writable load anchors a `follows:` edge, it
 captures a `followed` event holding the **predecessor's** snapshot, and prints
 the visible line: `captured LOG-A-011: LOG-A-012 now follows it`.
 
-**Files.** `src/refdes/cli.py:125` — the `freeze_follows(project,
-write=not args.no_write)` call inside `_load()` (`cli.py:69-136`) — plus
-`src/refdes/links.py:592-693` (`plan_follows_freeze` / `freeze_follows`,
-`FollowsFreezePlan` at `links.py:509`). Capture is added **alongside** the
-freeze, in the same write pass, sharing its `write` flag; `freeze_follows()`
+**Files.** `src/refdes/loader.py:143` — the `anchor_follows(project,
+write=write)` call inside `load_tree()` (reached from `_load()` at
+`cli.py:77`) — plus `src/refdes/links.py:633-818` (`plan_follows_anchor` /
+`anchor_follows`, `FollowsAnchorPlan` at `links.py:551`). Capture is added
+**alongside** the anchor, in the same write pass, sharing its `write` flag;
+`anchor_follows()`
 keeps exactly what it does today. `src/refdes/history.py` gains the one
 function that turns a resolved (predecessor, successor) pair into an event.
 Tests: new `tests/test_history_capture.py`, and an extension of
@@ -140,7 +141,7 @@ file under the project, so `.refdes/history/` is covered the moment it exists).
 5. *Idempotence.* One event per (predecessor key, successor key), enforced by
    the id, so the every-save load cannot accumulate duplicates.
 
-**Transaction.** The successor's frozen edge and the event are one unit: if the
+**Transaction.** The successor's anchored edge and the event are one unit: if the
 event write fails, the edge rewrite is rolled back by the existing load-time
 write guard (`tests/test_load_time_writes.py:130` and `:153` already prove that
 guard rolls a write back when the result stops parsing; H2 adds the case where
@@ -149,10 +150,10 @@ the guard passes and the *event* write is what fails).
 **Verified against.**
 - The analysis's own §3 transcript, inverted: a project with `follows:` on an
   append-only type, a bare edge authored after the entry was sealed, `refdes
-  index` → the edge **freezes**, the line prints, `.refdes/history/events/`
+  index` → the edge **anchors**, the line prints, `.refdes/history/events/`
   holds one file. (Under H5 this is the normal case; under H2 alone it is
   still refused for a *sealed* entry, and the test asserts the refusal is
-  unchanged — H2 must not silently change `links.py:623-634`.)
+  unchanged — H2 must not silently change `links.py:669-679`.)
 - Two consecutive writable loads → one event, second load prints nothing.
 - Corrected edge → second event of kind `followed-corrected`, first event
   still on disk.
@@ -255,7 +256,7 @@ the mechanism.
 
 **Adds.** For a type whose standard declares history-backed capture, the
 first writable build no longer writes a hash lock, an edit is no longer a build
-error, and `links.py:623-634` no longer refuses to freeze a bare `follows:` on
+error, and `links.py:669-679` no longer refuses to anchor a bare `follows:` on
 an entry that a legacy seal file mentions. Existing seal files keep being read
 and become **legacy-seal markers**: "recorded hash only; original content was
 not captured."
@@ -264,8 +265,8 @@ not captured."
 - `src/refdes/seal.py` — `verify()` (`:222`), `append_only_items()` (`:187`),
   `is_sealed()` (`:199`), `_report_deleted()` (`:343`). The change is scoped by
   a per-type policy so v1/v2 behaviour is byte-for-byte untouched.
-- `src/refdes/links.py:623-634` — the sealed-entry refusal in
-  `plan_follows_freeze`. For a history-backed type the refusal is not reached;
+- `src/refdes/links.py:669-679` — the sealed-entry refusal in
+  `plan_follows_anchor`. For a history-backed type the refusal is not reached;
   for a build-sealed type it stays exactly as written, including its warning.
 - `src/refdes/build.py:1977` — the `seal.verify(project, write=seal_write,
   reseal=reseal)` call site; unchanged in shape, and it is the only seal write
@@ -301,7 +302,7 @@ edited-after-captured items, which is the honest replacement in the report.
 **Verified against.**
 - **The decisive one, taken from the analysis §3 transcript:** a history-backed
   project, entry sealed by a legacy seal file, bare `follows:` added to it,
-  `refdes index` → the edge **freezes**, the chain forms, the capture line
+  `refdes index` → the edge **anchors**, the chain forms, the capture line
   prints, and `check` reports zero errors. Before H5 this transcript ends with
   a refusal and an edge that stays bare forever.
 - Edit a history-backed entry after capture → `check` and `build` both exit
@@ -560,7 +561,7 @@ delaying 4a for them would repeat the mistake this plan exists to end.
 **Why H5 and not earlier.** The blocker is not the type merge; the analysis is
 explicit that the merge, `merge_types`, `owner`, `legacy_prefixes: [DEC]`, the
 guard tests and the per-rename hint all stand unchanged. The blocker is that
-`links.py:623-634` refuses to freeze a bare `follows:` on a sealed append-only
+`links.py:669-679` refuses to anchor a bare `follows:` on a sealed append-only
 entry, so the edge stays bare forever and no chain ever forms — and the entry is
 sealed by the first writable build (`build.py:1977`, `seal_write` true only at
 `cli.py:283`). Only H5 changes that. H2 alone leaves the refusal in place for

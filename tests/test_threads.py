@@ -284,7 +284,7 @@ def test_no_provisional_handle_ever_appears_in_a_written_file(tmp_path):
                 assert handle not in text
 
 
-# ---------------------------------------------------- Phase 2a: follows freezing
+# ---------------------------------------------------- Phase 2a: follows anchoring
 
 
 def _minted_follows_project(tmp_path, items_yaml):
@@ -304,7 +304,7 @@ def _check(root, *, no_write=False):
     return cli_mod.main([*args, "check"])
 
 
-def test_follows_freezes_to_the_current_tip_not_the_authored_head(tmp_path):
+def test_follows_anchors_to_the_current_tip_not_the_authored_head(tmp_path):
     root, project = _minted_follows_project(
         tmp_path,
         "defaults: { type: log }\n"
@@ -332,7 +332,7 @@ def test_follows_freezes_to_the_current_tip_not_the_authored_head(tmp_path):
     assert f"follows: [{tail.key}]" in text
 
 
-def test_follows_freezes_to_a_bare_key_for_an_idless_tip_and_resolves_it(tmp_path):
+def test_follows_anchors_to_a_bare_key_for_an_idless_tip_and_resolves_it(tmp_path):
     root, project = _minted_follows_project(
         tmp_path,
         "defaults: { type: log }\n"
@@ -405,7 +405,7 @@ def test_forked_follows_stays_bare_and_names_every_tip(tmp_path, capsys):
     assert "pick one or list several to merge" in output.lower()
 
 
-def test_same_load_follows_freeze_in_date_then_source_order(tmp_path):
+def test_same_load_follows_anchor_in_date_then_source_order(tmp_path):
     root, project = _minted_follows_project(
         tmp_path,
         "defaults: { type: log }\n"
@@ -429,7 +429,7 @@ def test_same_load_follows_freeze_in_date_then_source_order(tmp_path):
     ]
 
 
-def test_new_follows_entry_never_freezes_against_itself(tmp_path):
+def test_new_follows_entry_never_anchors_against_itself(tmp_path):
     root, project = _minted_follows_project(
         tmp_path,
         "defaults: { type: log }\n"
@@ -444,7 +444,7 @@ def test_new_follows_entry_never_freezes_against_itself(tmp_path):
     assert f"LOG-002@{project.item_by_id('LOG-002').key}" not in text
 
 
-def test_rename_refreshes_frozen_follows_label_without_hash_churn(tmp_path):
+def test_rename_refreshes_anchored_follows_label_without_hash_churn(tmp_path):
     root, project = _minted_follows_project(
         tmp_path,
         "defaults: { type: log }\n"
@@ -487,9 +487,9 @@ def test_no_write_leaves_bare_follows_and_second_writable_load_is_idempotent(tmp
     assert _check(root, no_write=True) == 0
     assert path.read_bytes() == before
     assert _check(root) == 0
-    frozen = path.read_bytes()
+    anchored = path.read_bytes()
     assert _check(root) == 0
-    assert path.read_bytes() == frozen
+    assert path.read_bytes() == anchored
 
 
 def test_sealed_append_only_follows_is_not_rewritten(tmp_path, capsys):
@@ -548,7 +548,7 @@ def test_ordinary_addresses_still_expands_to_a_named_target_key(tmp_path):
     assert f"addresses: [REQ-001@{target.key}]" in path.read_text(encoding="utf-8")
 
 
-def test_same_date_follows_freeze_uses_source_file_order(tmp_path):
+def test_same_date_follows_anchor_uses_source_file_order(tmp_path):
     write_project_config(tmp_path, FOLLOWS_SCHEMA)
     items = tmp_path / "items"
     items.mkdir()
@@ -581,7 +581,7 @@ def test_same_date_follows_freeze_uses_source_file_order(tmp_path):
     ]
 
 
-def test_follows_freeze_deduplicates_matching_merge_targets(tmp_path):
+def test_follows_anchor_deduplicates_matching_merge_targets(tmp_path):
     root, project = _minted_follows_project(
         tmp_path,
         "defaults: { type: log }\n"
@@ -592,8 +592,8 @@ def test_follows_freeze_deduplicates_matching_merge_targets(tmp_path):
 
     assert _check(root) == 0
     text = (root / "items" / "log.yaml").read_text(encoding="utf-8")
-    frozen = f"LOG-001@{project.item_by_id('LOG-001').key}"
-    assert text.count(frozen) == 1
+    anchored = f"LOG-001@{project.item_by_id('LOG-001').key}"
+    assert text.count(anchored) == 1
 
 
 # ----------------------------------------------------- Phase 3a: engine consumers

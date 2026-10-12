@@ -673,7 +673,7 @@ two by hand first, then upgrade.
 **The first writable command after the upgrade captures history.** The
 upgrade itself writes bare targets and no events; the next command that loads
 the project writably then does what it does for an authored `follows:` —
-freezes each migrated edge to its target's current thread tip and captures
+anchors each migrated edge to its target's current thread tip and captures
 that target's snapshot, so a decision you already superseded stays readable
 after you start editing its successor:
 

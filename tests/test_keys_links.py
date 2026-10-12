@@ -20,7 +20,7 @@ from refdes.schema import load_project
 # ---------------------------------------------------- keys layer 2: hashing + links
 #
 # docs/design/keys.md §5 (link targets hashed as resolved keys, with the
-# baseline/seal hash-format migration) and the expand-and-freeze half of §3
+# baseline/seal hash-format migration) and the expand-and-anchor half of §3
 # (bare display id -> `DISPLAY-ID@key` composite, and resolution reading only
 # the part after '@'). Deliberately excludes the corruption lint (§6) and
 # revise.py/former_ids.py -- neither is touched by this layer.

@@ -32,7 +32,7 @@ surrogate keys on the root project"); see §7, "This repository's own
 project". §4, the subtractive `revise.py`/`former_ids.py` cleanup, is now
 implemented: `revise` no longer rewrites bare references, relabels the id
 ledger, or remaps baseline/seal record ids — a prefix rename runs the
-writable-load key pipeline (mint, link/check expansion, follows freeze)
+writable-load key pipeline (mint, link/check expansion, follows anchor)
 inside its own transaction first and refuses with file:line if a structured
 reference to an affected id is still bare afterwards (dry runs simulate the
 whole run, display-half refresh included, on a throwaway copy, and report
@@ -519,7 +519,7 @@ The author types exactly what they type today:
 satisfies: [REQ-IO-AI-001]
 ```
 
-The tool expands and freezes it:
+The tool expands and anchors it:
 
 ```yaml
 satisfies: [REQ-IO-AI-001@k7f3m2q9x4a]

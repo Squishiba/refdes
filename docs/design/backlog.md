@@ -1801,7 +1801,7 @@ making it real syntax with a real message, not for leaving it.
 Rename survival is the whole reason to care. This project stores structured
 references as `DISPLAY-ID@key` composites resolved on the key half only
 (docs/design/keys.md §3, `build.resolve_link_target` at build.py:395-422), so a
-reference is written by the author bare and frozen to
+reference is written by the author bare and anchored to
 `V_in = DEC-PWR-001@k7f3m2q9x4a.V_in`, refreshed on rename by the same rule.
 It is **not** a `links:` reference, though, and must not pretend to be: the
 precedent for a structured reference that lives outside `links:` is `checks:
@@ -1996,7 +1996,7 @@ equations beyond what one shared `env` gives for free.
 
 **Status: decided (2026-09-19).** Syntax is (a), `V_in = DEC-PWR-001.V_in`,
 stored as a `DISPLAY-ID@key` composite like every other structured reference
-(§1) — written bare, frozen on the key half, refreshed on rename by the same
+(§1) — written bare, anchored on the key half, refreshed on rename by the same
 rule. Any named value in the target is referenceable; there is no `exports:`
 list (§2, decided against that section's own recommendation, with the
 invisible-dependents cost accepted because a rename breaks loudly at every
@@ -2051,7 +2051,7 @@ written; see keys.md's implementation-status header for the shape):
   `_rename_prefix` survives as the private id/prefix-line helper, and
   `Mapping.prefixes` stays (prefix renames still move display ids). A prefix
   rename now runs the writable-load key pipeline (mint, link/check
-  expansion, follows freeze) inside its own transaction and refuses with
+  expansion, follows anchor) inside its own transaction and refuses with
   file:line if a structured reference to an affected id is still bare
   afterwards; dry runs simulate the pipeline on a throwaway copy and report
   what the real run would expand. `former_ids.propose` answers the internal
@@ -2169,7 +2169,7 @@ rename one of the files.
 already.** This project has already made this exact call twice: a bare
 numeric `id:` is expanded by `refdes id` and frozen at the number resolved
 (`docs/design/keys.md` §2 recap; `ids.py`), and a link target is expanded to
-the `DISPLAY-ID@key` composite and frozen, never re-resolved from the display
+the `DISPLAY-ID@key` composite and anchored, never re-resolved from the display
 half at build time (keys.md §3). The argument transfers unchanged: resolve
 the bare filename against the search path **once**, on a writable command,
 and rewrite the source file's `<img src="diagram.png">` to the concrete
