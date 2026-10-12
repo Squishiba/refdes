@@ -15,7 +15,7 @@ import threading
 import time
 
 import pytest
-from serve_support import free_port, make_project, path_of
+from serve_support import ephemeral_start, free_port, make_project, path_of
 
 from refdes.serve.server import sigterm_is_deliverable, sigterm_stops_cleanly
 
@@ -118,7 +118,8 @@ def test_serve_on_a_directory_without_a_project_exits_with_an_error(tmp_path):
 # back to stdout would not catch the feature breaking.
 
 
-def _wait_for_file(path, timeout: float = 180.0, differs_from: str | None = None) -> str:
+def _wait_for_file(path, timeout: float = 180.0, differs_from: str | None = None,
+                   proc=None) -> str:
     """The token file appears once the listener is up; poll for it, then return
     its text. Never touches stdout -- that is the point of the flag.
 
@@ -129,15 +130,28 @@ def _wait_for_file(path, timeout: float = 180.0, differs_from: str | None = None
     The deadline is wall-clock over a whole child cold start -- interpreter,
     imports, the first `ProjectState.load()` (full read-only project load plus
     a site render), the bind, and the write -- so a fixed budget is only as
-    good as the machine is idle. It was 60s and failed once with ~6 test
-    suites contending for the box; the child itself is fine, it just had no
-    CPU. 180s buys the contention out without hiding a real hang (the child
-    that refuses to start exits in well under a second and the deadline then
-    only delays the assertion).
+    good as the machine is idle; 180s buys contention out without hiding a
+    real hang. It is a backstop, not the fix: the flake this replaced was a
+    bind refusal on a stolen --port (in-prog-logs/fix-serve-stale-token-
+    flake.txt), which no raise of the deadline could cure.
 
     `differs_from` is for the relaunch-over-a-stale-file case: the path already
     exists holding the dead launch's text, so existing is not yet news.
+
+    With `proc`, the wait ends the moment the launch it waits on is dead: a
+    child that exited cannot write the file, and burning the whole deadline
+    on one was turning a one-second diagnosis into a three-minute stall that
+    every worker then had to work around. The exit code and the first lines
+    of stderr ride along in the assertion, so the failure says why.
     """
+    def dead_child() -> AssertionError:
+        out, err = proc.communicate(timeout=10)
+        why = " ".join((err or out or "").strip().splitlines()[:3])
+        return AssertionError(
+            f"the launched serve exited ({proc.returncode}) before {path} held "
+            f"a complete line: {why}"
+        )
+
     deadline = time.time() + timeout
     while time.time() < deadline:
         if os.path.exists(path):
@@ -145,10 +159,33 @@ def _wait_for_file(path, timeout: float = 180.0, differs_from: str | None = None
                 text = fh.read()
             if text.endswith("\n") and text != differs_from:
                 return text
+        if proc is not None and proc.poll() is not None:
+            # Checked after the file test even when the file exists: the
+            # relaunch-over-a-stale-file case left the *stale* text here and
+            # a dead child -- a child that exited cannot rewrite it, and
+            # waiting on one is how the old flake burned its whole deadline.
+            raise dead_child()
         time.sleep(0.05)
+    if proc is not None and proc.poll() is not None:
+        raise dead_child()
     if differs_from is None:
         raise AssertionError(f"--token-file {path} never held a complete line")
     raise AssertionError(f"--token-file {path} still holds the stale {differs_from!r}")
+
+
+def test_free_port_hands_out_nothing_the_os_will_later_reassign():
+    """The pinned-port tests are only trustworthy while the port they pin stays
+    theirs. A port from the ephemeral range -- what `bind(0)` used to return --
+    is handed by the kernel to whatever asks next once the holder releases it
+    (measured: back in circulation within a few thousand allocations), which
+    is how concurrent load stole a pinned --port mid-test and stranded the
+    token file on a refused relaunch. Below the range, the OS auto-assigns
+    nothing, so nothing ambient can take a pinned port back."""
+    start = ephemeral_start()
+    assert 1024 < start <= 65536
+    for _ in range(16):
+        port = free_port()
+        assert 1024 < port < start, f"{port} is inside the ephemeral range"
 
 
 def test_port_flag_binds_exactly_the_port_asked_for(tmp_path):
@@ -202,7 +239,7 @@ def test_token_file_holds_a_working_credential(tmp_path):
     token_file = str(tmp_path / "launch-url.txt")
     proc = _start(make_project(tmp_path), "--token-file", token_file)
     try:
-        text = _wait_for_file(token_file)
+        text = _wait_for_file(token_file, proc=proc)
         match = re.fullmatch(r"http://127\.0\.0\.1:(\d+)/\?token=(\S+)", text.strip())
         assert match, f"token file holds {text!r}, not a launch URL"
         port, token = int(match.group(1)), match.group(2)
@@ -243,7 +280,7 @@ def test_token_file_is_removed_when_serve_stops(tmp_path):
     token_file = str(tmp_path / "launch-url.txt")
     proc = _start(make_project(tmp_path), "--token-file", token_file)
     try:
-        _wait_for_file(token_file)
+        _wait_for_file(token_file, proc=proc)
         proc.send_signal(signal.SIGINT)  # Ctrl+C, the documented stop
         proc.wait(timeout=60)
         assert proc.returncode == 0
@@ -274,7 +311,7 @@ def test_token_file_is_removed_when_serve_stops_on_sigterm(tmp_path):
     token_file = str(tmp_path / "launch-url.txt")
     proc = _start(make_project(tmp_path), "--token-file", token_file)
     try:
-        _wait_for_file(token_file)
+        _wait_for_file(token_file, proc=proc)
         proc.send_signal(signal.SIGTERM)  # `kill $pid`, the scripted stop
         proc.wait(timeout=60)
         assert proc.returncode == 0, f"a SIGTERM stop was not clean: {proc.returncode}"
@@ -303,17 +340,84 @@ def test_a_stale_token_file_from_a_crash_is_rewritten_not_refused(tmp_path):
     port = free_port()
     token_file = str(tmp_path / "launch-url.txt")
     first = _start(make_project(tmp_path), "--port", str(port), "--token-file", token_file)
-    stale = _wait_for_file(token_file)
+    stale = _wait_for_file(token_file, proc=first)
     first.kill()  # no cleanup runs: this is the crash that leaves the file behind
     first.wait(timeout=30)
     assert os.path.exists(token_file)
     second = _start(make_project(tmp_path), "--port", str(port), "--token-file", token_file)
     try:
-        fresh = _wait_for_file(token_file, differs_from=stale)
+        # The `proc` here is the whole reliability of this test under load:
+        # a relaunch whose bind was refused by a port someone else grabbed
+        # exits in about a second, and used to have the 180s deadline burned
+        # on it before saying so. See in-prog-logs/fix-serve-stale-token-
+        # flake.txt for the diagnosis.
+        fresh = _wait_for_file(token_file, differs_from=stale, proc=second)
         assert f":{port}/" in fresh
     finally:
         second.terminate()
         second.wait(timeout=30)
+
+
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="the promise under test is SO_REUSEADDR on the bind, and on Windows "
+    "that flag means bind-over-anyone rather than reclaim-your-own-closing-port, "
+    "so _Server deliberately keeps it off there -- the restart would legitimately "
+    "have to wait for the old sockets there",
+)
+def test_relaunch_on_the_same_port_while_the_old_launches_sockets_are_still_closing(
+    tmp_path,
+):
+    """The flake's real failure mode, made deterministic (see the log at
+    in-prog-logs/fix-serve-stale-token-flake.txt): with a connection open when
+    the launch dies, its accepted socket finishes closing on its own time and
+    its TIME_WAIT sits on exactly 127.0.0.1:<pinned port>. A bind that refuses
+    reuse answers the relaunch with `Address already in use` for the minute
+    that socket lingers: serve exits 2, the token file keeps the dead URL, and
+    every wait on the rewrite burns its deadline on a child that cannot write.
+    Relaunching your own project on your own --port must just work."""
+    port = free_port()
+    token_file = str(tmp_path / "launch-url.txt")
+    first = _start(make_project(tmp_path), "--port", str(port), "--token-file", token_file)
+    conn = None
+    try:
+        stale = _wait_for_file(token_file, proc=first)
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+        conn.request("GET", "/", headers={"Host": f"127.0.0.1:{port}"})
+        conn.getresponse().read()  # a real open connection, like a browser tab
+    finally:
+        first.kill()  # the crash: the kernel finishes closing its sockets
+        first.wait(timeout=30)
+    if conn is not None:
+        conn.close()  # completes the handshake: serve's side goes to TIME_WAIT
+    second = _start(make_project(tmp_path), "--port", str(port), "--token-file", token_file)
+    try:
+        fresh = _wait_for_file(token_file, differs_from=stale, proc=second)
+        assert f":{port}/" in fresh, f"relaunch did not reclaim its own port: {fresh}"
+    finally:
+        second.terminate()
+        second.wait(timeout=30)
+
+
+def test_a_wait_on_a_dead_launch_fails_at_once_naming_the_exit(tmp_path):
+    """The readiness condition includes its premise: the launch being waited
+    on can still write the file. The known flake turned every loss of that
+    premise into a full deadline (first 60s, then 180s) burned polling a file
+    a dead child would never write -- the reason this suite grew a workaround
+    culture. A dead child must fail immediately, with the exit code and the
+    child's own words in the message."""
+    dead = subprocess.Popen(
+        [sys.executable, "-c", "import sys; sys.stderr.write('port was refused\\n'); "
+         "sys.exit(3)"],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+    )
+    dead.wait(timeout=30)
+    started = time.time()
+    with pytest.raises(AssertionError) as excinfo:
+        _wait_for_file(str(tmp_path / "never-written.txt"), timeout=120, proc=dead)
+    assert time.time() - started < 10, "the wait did not notice the dead child"
+    assert "exited (3)" in str(excinfo.value)
+    assert "port was refused" in str(excinfo.value)
 
 
 def test_token_file_refuses_to_overwrite_a_file_it_did_not_write(tmp_path):
