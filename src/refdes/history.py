@@ -461,6 +461,14 @@ def load_events(root: str) -> list[dict[str, object]]:
         try:
             with open(path, "r", encoding="utf-8") as fh:
                 data = yaml_safe_load(fh)
+        except UnicodeDecodeError as exc:
+            # Decoding happens on the first read, inside yaml_safe_load, not
+            # at open(); and it is not a YAMLError, so left alone one stray
+            # byte escaped this wrap as a raw UnicodeDecodeError and crashed
+            # every reader -- review #191. It is the same malformed record
+            # as below, under its opposite symptom, and gets the same
+            # HistoryError naming the file.
+            raise HistoryError(f"{path}: event file is not valid UTF-8 ({exc})") from exc
         except yaml.YAMLError as exc:
             # A record that does not parse is the "malformed record" of
             # HistoryError's own contract. Its readers all catch
@@ -518,12 +526,23 @@ class FollowCapture(NamedTuple):
     created_object: "str | None"
 
 
-def _follows_target_key(target: object) -> "str | None":
-    """The key half of an anchored follows target (``ID@key``, or a bare
-    well-formed key for an id-less tip); None for anything unresolved."""
+def _anchored_follows_key(target: object) -> "str | None":
+    """The key half of an anchored follows target: ``ID@key``, or a bare well-formed
+    key (an id-less tip); None for a still-bare display id — an edge whose
+    spelling has not settled, which cannot disprove anything.
+
+    One helper for both edge-set questions (review #199 merged it with the
+    narrower near-duplicate that ``capture_followed`` used as its default):
+    the capture-side correction check and the read-side superseded check ask
+    the same question -- which predecessor keys do an item's follows edges
+    currently name -- and the wider answer here is what the writable-load
+    call site in links.py has always computed for its explicit edge set.
+    """
     text = str(target)
     if "@" in text:
         return text.partition("@")[2]
+    if len(text) == keys_mod.KEY_LEN and keys_mod.malformed_key_message(text) is None:
+        return text
     return None
 
 
@@ -569,7 +588,7 @@ def capture_followed(
     if current_predecessor_keys is None:
         current_predecessor_keys = {
             key
-            for key in map(_follows_target_key, successor.links.get("follows", []))
+            for key in map(_anchored_follows_key, successor.links.get("follows", []))
             if key
         }
     superseded = sorted(
@@ -644,18 +663,6 @@ class EditedAfterCaptured(NamedTuple):
 # are decided (a migrated-current snapshot deliberately matches current
 # content, so letting it silence the diagnostic is a separate call).
 _CAPTURE_KINDS = ("followed", "followed-corrected", "captured")
-
-
-def _anchored_follows_key(target: object) -> "str | None":
-    """The key half of an anchored follows target: ``ID@key``, or a bare well-formed
-    key (an id-less tip); None for a still-bare display id — an edge whose
-    spelling has not settled, which cannot disprove anything."""
-    text = str(target)
-    if "@" in text:
-        return text.partition("@")[2]
-    if len(text) == keys_mod.KEY_LEN and keys_mod.malformed_key_message(text) is None:
-        return text
-    return None
 
 
 def _superseded(event: dict, by_key: "dict[str, Item]") -> bool:

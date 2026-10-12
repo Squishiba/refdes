@@ -1,0 +1,107 @@
+# sweep3-history-fixes — work log
+
+Branch cut from main 20ecd91. Task file: .scratch/TASK-ITEMS.txt (items H1/H2/H3).
+
+## Start
+
+- git status clean at start; branch sweep3-history-fixes.
+- Verified H1 still applies by reading: src/refdes/history.py load_events()
+  (lines 443-502) reads each event file at ~462 inside a try that catches
+  only yaml.YAMLError (464-471). UnicodeDecodeError from reading non-UTF-8
+  bytes is not a YAMLError, so it escapes the HistoryError wrap. Confirmed
+  readers catch (HistoryError, OSError) only (threads.capture_facts,
+  threads.py:128-131; cli.py:1567).
+
+## H1 (#191) — done
+
+- Reproduced on a scratch project (.scratch/h1-repro/proj): `refdes history
+  capture LOG-002` to populate the store, then wrote b"\xff" over an event
+  file, then `refdes thread LOG-002` -> UnicodeDecodeError traceback out of
+  load_events (history.py:463, via build.warn_edited_after_captured ->
+  capture_index). Traceback recorded in this log's session; reproduced
+  exactly as the review described: the try at 461 caught only YAMLError.
+- Fix: catch UnicodeDecodeError in load_events and raise
+  HistoryError(f"{path}: event file is not valid UTF-8 ({exc})"). Readers
+  (threads.capture_facts, build.warn_edited_after_captured, cli) already
+  catch (HistoryError, OSError), so the store-failure sentences come back
+  unchanged; live repro re-run now prints
+  "warning: the thread's captured lines may be missing: ... not valid
+  UTF-8 ..." on stderr with the answer intact and exit 0.
+- Tests: tests/test_history.py
+  ::test_a_non_utf8_event_file_is_a_history_error_naming_the_file (names
+  the file) and tests/test_thread_cli.py
+  ::test_a_non_utf8_event_file_is_said_not_crashed (CLI exit 0, answer
+  intact, store-failure sentence on stderr naming the file — same posture
+  the existing YAML-garbage tests pin).
+- Sabotage: replaced the raise with `raise` (raw re-raise); both new tests
+  failed with UnicodeDecodeError; restored, both pass.
+- Noted, out of scope (logged, not touched): append_event's read of an
+  existing event (history.py ~433) has no YAMLError/decode wrap either —
+  no HistoryError precedent there to match, and the review names only the
+  load_events read.
+
+## H2 (#199) — merged
+
+- Read both helpers and all callers. _follows_target_key (old ~529) was
+  used ONLY by capture_followed's default `current_predecessor_keys=None`
+  path; the single production caller (links.py:748) always passes the set
+  explicitly, computed with links.py's own _anchored_target_key — which
+  accepts a bare well-formed key, i.e. the WIDER semantics.
+  _anchored_follows_key (~649, used by _superseded) accepts the bare key.
+- Git evidence: _follows_target_key was born in 47a5300 (phase H2) already
+  narrower than its own docstring, which promised "a bare well-formed key
+  for an id-less tip" — code-vs-docstring drift, not a deliberate
+  difference. No test ever called capture_followed with the default.
+- Decision: merged. Deleted _follows_target_key; capture_followed's default
+  now uses _anchored_follows_key (kept, docstring extended to say it serves
+  both edge-set questions). Behavior change is confined to a path no caller
+  and no test reaches, and its documented semantics always matched the
+  merged helper's.
+- Table-driven test written BEFORE the change pinned both helpers' real
+  outputs on the same 8 inputs (divergence exactly the bare-key row);
+  after the merge it pins the merged helper's rows.
+- Proof of inertness: 212 tests across test_history/test_history_capture/
+  test_history_edited/test_history_commands/test_history_seal/
+  test_history_uncaptured_edit/test_threads/test_threads_projection/
+  test_thread_cli/test_work all pass unchanged.
+
+
+## H3 (#200) — done
+
+- Verified both halves still apply.
+- Half 1: test_revise_help_still_explains_itself matched the 46-char phrase
+  against unnormalized help. Reproduced the fragility: with COLUMNS=40 the
+  argparse description wraps mid-phrase and the raw `in` match fails
+  (confirmed by running `cli.main(['revise','--help'])` under
+  COLUMNS=40). Fixed the way tests/test_index_help.py does it:
+  `" ".join(out.split())`. Test now passes at COLUMNS=40 too.
+- Half 2: added
+  test_revise_unparseable_mapping_exits_2_saying_what_rename_says to
+  tests/test_rename_alias.py. The missing-file refusal was pinned for both
+  spellings; the unparseable-file refusal was pinned only for `rename`
+  (tests/test_revise.py). The new test pins the alias carrying the same
+  exit 2, the identical one-line refusal, the alias NOTE first (that is the
+  order cmd_rename prints them), and no traceback.
+- First run of the new test failed on line order ([rename_note, NOTE] vs
+  [NOTE, rename_note]); read cmd_rename (cli.py:2053-2062) — the alias note
+  prints before the mapping is even loaded — corrected the expectation to
+  match the tool's real behaviour, not the other way round.
+- H3 is test-only: no fragment.
+
+## Changelog
+
+- changelog.d/README.md rules: H1 is user-visible (a crash becomes a clean
+  refusal with an exit code) -> `history-non-utf8-event.fixed.md`. H2 is an
+  internal merge of two private helpers with no behaviour change, H3 is
+  test-only -> no fragments for either.
+
+
+## Gates
+
+- Full suite, foreground, once: 3591 passed, 2 skipped in 263.17s, exit 0
+  (.scratch/suite.txt). No load-flake rerun needed.
+- ruff check --select E9,F src tests: All checks passed!
+- docs-site/gen_examples.py --check: schema-reference.md and vocabulary.md
+  up to date, exit 0.
+- Task finished: H1, H2, H3 all done; nothing deferred.
+
