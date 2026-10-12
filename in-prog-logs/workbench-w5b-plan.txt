@@ -1,0 +1,111 @@
+Task: W5b (ticks -> draft continuation) implementation plan. Doc only: no
+src/, no tests/ (branch workbench-w5b-plan, cut from main at 48501ce).
+
+Deliverable: docs/design/thread-workbench-w5b-plan.md. Shape copied from
+docs/design/living-notes-plan.md (read its phase sections and its "Open
+questions for Jared" first): Status preamble -> goal -> verified mechanisms ->
+one-paragraph shape -> phases with "Adds / Files / Verified against /
+Deliberately does not do" -> Risks -> numbered questions with options and an
+assumed conservative default -> "Not in W5b" -> "What this plan does not
+decide".
+
+How the reads were done (narrowly, per the task): grep -n for the section
+headings of thread-workbench.md / living-notes.md / browser-editor.md /
+living-notes-plan.md, then read only the ranges needed (thread-workbench.md
+202-292; living-notes.md 153-212, 258-307, 375-500; browser-editor.md 785-884,
+951-1020; living-notes-plan.md 43-107, 660-769). The W5a pane was read from the
+open PR without checking anything out:
+
+  git fetch origin workbench-w5a-task-pane-readonly
+  git show origin/workbench-w5a-task-pane-readonly:src/refdes/task_pane.py
+  git show origin/workbench-w5a-task-pane-readonly:src/refdes/templates/taskpane/taskpane.js
+  git show origin/workbench-w5a-task-pane-readonly:src/refdes/templates/item.html.j2
+  git show origin/workbench-w5a-task-pane-readonly:docs/design/thread-workbench.md
+
+PR #197 confirmed OPEN, base main, head workbench-w5a-task-pane-readonly
+(`gh pr view 197 --json state,...`). The branch is not on main, so every
+citation taken from it is marked "(PR #197)" in the new page.
+
+CLI claims were produced by running, in this worktree:
+
+  PYTHONPATH=$PWD/src /home/jorb/work/venv-refdes/bin/python -m refdes.cli --help
+  ... -m refdes.cli thread --help
+  ... -m refdes.cli work --help
+  ... -m refdes.cli serve --help
+
+Findings worth recording (all re-read at the cited lines, not from memory):
+
+1. The editor has no way to write `tasks:` at all. `tasks` is in
+   NON_SCALAR_FIELD_TYPES (src/refdes/model.py:198-200), the editor model
+   reports the field "collections are not editable here"
+   (src/refdes/serve/api.py:213), `set_field` refuses a collection (api.py:508),
+   patcher.SetField is "one direct scalar field" (src/refdes/patcher.py:127),
+   and creation emits scalar fields only (src/refdes/serve/edit.py:1533-1551).
+   src/refdes/build.py:340-341 already says the editor "owns that keystroke".
+   This is the gap W5b's core phase fills, and it is why the plan does not
+   propose reusing the existing /edit/ save op.
+
+2. An editor save does not write the `followed` history event. edit.py loads
+   with write=False (src/refdes/serve/edit.py:340) and nothing under
+   src/refdes/serve/ calls history.capture_followed or links.anchor_follows
+   (the `capture` hits in serve/upload.py are the unrelated "would capture a
+   bare-name reference" lint). The capture point is links.anchor_follows
+   (links.py:770-812, reached from loader.load_tree at loader.py:143 with the
+   load's own write flag), so a continuation written by the browser captures its
+   predecessor on the next writable load. living-notes.md:185-188 asks for entry
+   + event in one transaction. Raised as Q2's explicit sub-question rather than
+   quietly decided.
+
+3. Creation has no revision check: CreateRequest has no expected_revision
+   (edit.py:1013-1038), so Q3 ("the tip moved while the draft was open") has no
+   mechanism on the create path today. Said so in the doc instead of assuming a
+   compare exists.
+
+4. The draft mechanism exists and is real, but its shape does not fit:
+   src/refdes/serve/static/drafts.js holds {revision, fields, body, pins,
+   links} per item handle, memory + sessionStorage, beforeunload. Keyed by
+   item, not by tip, and no task rows -- so the plan reuses its *lifetime rules*
+   and adds a sibling draft kind, rather than reusing the draft shape.
+
+5. The serve-only seam for anything that writes is the response decoration, not
+   a template flag: serve/server.py:_decorate (:726-761) injects the toolbar and
+   _reload_probe into the HTTP response only. Note `draft_build`
+   (src/refdes/render.py:922) is NOT that discriminator -- it means
+   `build --dry-run`/seal-skipping, and the preview render passes draft=True for
+   every preview page, so a template test on it would not keep a control out of
+   a plain `refdes build`.
+
+6. Vocabulary drift worth flagging: living-notes.md §5 proposed
+   `on_change: log` for `tasks:`; the shipped standard says
+   `on_change: timeline`
+   (src/refdes/standards/hardware/v3/base.yaml:302). The page cites the shipped
+   spelling and names the drift.
+
+Deliberate non-changes, with the reason:
+
+- No changelog.d fragment. Checked the precedent the task named: the commit that
+  added living-notes-plan.md (972997f "docs: implementation plan for living
+  notes") touched that one file and nothing else. So design-plan pages do not
+  get fragments, and this one does not either.
+- No docs-site change. Design pages reach the docs site by recursive discovery
+  (src/refdes/pages.py:39-46 os.walk under site.pages:), and site.nav in
+  docs-site/refdes-project.yaml names only the top-level guides --
+  living-notes-plan.md is not listed there either. Confirmed by grep: no file
+  under docs-site/ and no mkdocs*.yml mentions living-notes-plan (there is no
+  mkdocs config in this repo). Nothing to add for the new page.
+- docs/design/thread-workbench.md left alone. Its §8 is where a pointer to this
+  page would naturally go, but open PR #197 rewrites exactly that bullet list
+  into W5a/W5b; a main-side edit there is a guaranteed conflict for that PR for
+  no gain. The new page cites its parents in its Status block instead.
+
+Checks run (both green):
+  PYTHONPATH=$PWD /home/jorb/work/venv-refdes/bin/python -m pytest tests/test_docs_anchors.py -q
+  -> 2 passed (the new page is picked up by DOCS.rglob and contains no
+     fragment links; every cross-reference is written as a `file:line` code
+     span, which the anchor test does not treat as a link)
+  /home/jorb/work/venv-refdes/bin/python docs-site/gen_examples.py --check
+  -> up to date
+
+Status: finished. One commit (this log + the new page), no source or test
+changes. Scope note: worked only in /home/jorb/.paseo/worktrees/16msma8v/
+workbench-w5b-plan; scratch stayed in this worktree's .scratch/.
