@@ -30,7 +30,7 @@ python -m venv .venv && ./.venv/Scripts/python.exe -m pip install -e .
 refdes init      # write a minimal refdes-project.yaml pointing at the standard library
 refdes build     # render _site/ and items.json
 refdes check     # validate without rendering; non-zero exit on errors
-refdes index     # print items.json to stdout, for tooling
+refdes index     # print the resolved project as one JSON document on stdout, for tooling
 refdes id        # allocate IDs for items that have none, writing them back
 refdes audit     # list suppressed fields, resealed entries, board moves, and imports
 ```

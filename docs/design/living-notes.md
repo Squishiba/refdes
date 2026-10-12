@@ -123,7 +123,7 @@ computed by `check`, `index`, or `ls`.
 | --- | --- | --- | --- |
 | Per-item fields, body, links, backlinks, source location, content hash, citation state, calc results, and checks | `render.items_json()` exports those values (`src/refdes/render.py:572-746`). | **Yes.** `refdes index` emits it without `render_site()` (`src/refdes/cli.py:641-671`); VS Code consumes it on refresh. | Keep this as the editor/CLI data source, never scrape HTML. |
 | Coverage stages and their address/claim/satisfy/verify evidence | `compute_coverage()` populates `project.coverage` (`src/refdes/build.py:1142-1267`); the index exports it (`src/refdes/render.py:598-607`). | **Yes**, via `index`; the extension status bar also counts non-verified rows (`editors/vscode/extension.js:155-167`). | Add a concise human CLI worklist, not another coverage algorithm. |
-| Calculated values and failed checks | `run_checks()` builds `item.checks` (`src/refdes/build.py:1608-1799`); index exports `calcs` and `checks` (`src/refdes/render.py:692-718`). | **Yes**, structured through `index`; check diagnostics are also available from `refdes check`. VS Code hovers show failed checks and calc decorations use the index (`editors/vscode/extension.js:263-313,715-772`). | Add targeted CLI rendering of the same data. |
+| Calculated values and failed checks | `run_checks()` builds `item.checks` (`src/refdes/build.py:1608-1763`); index exports `calcs` and `checks` (`src/refdes/render.py:692-718`). | **Yes**, structured through `index`; check diagnostics are also available from `refdes check`. VS Code hovers show failed checks and calc decorations use the index (`editors/vscode/extension.js:264-313,715-772`). | Add targeted CLI rendering of the same data. |
 | Thread timeline and the "currently concludes" panel | `thread_view()` folds fields/links and identifies forks (`src/refdes/render.py:310-398`); the item template renders it (`src/refdes/templates/item.html.j2:48-92`). | **Partly.** `chains.resolve_current*()` and `thread_entries()` exist, but neither `index` nor a human CLI exposes the assembled panel. | Add `refdes thread <ref>` and an index `threads` projection; do not require a site build. |
 | Open thread tips/fork diagnostic | Chain resolution emits fork information (`src/refdes/chains.py:971-1027`). | **Yes** as diagnostics from `check`/`index`; **no** concise tip listing. | The same `refdes thread` command should show all tips. |
 | Blocked-by cascade and stale blockers | `blocked.resolve()` creates `project.blocked_chains`; `blocked.by_item()` groups them (`src/refdes/blocked.py:68-141`). | **Partly.** The item/coverage templates display the derived paths; `index` currently omits them. | Add them to the worklist/index protocol rather than making the site canonical. |
@@ -139,7 +139,7 @@ computed by `check`, `index`, or `ls`.
 | Board/workspace membership manifest, including accepted moves and stale-entry pruning | `build()` calls `boards.verify()` (`src/refdes/build.py:3337`); it writes only when changed and write-enabled (`src/refdes/boards.py:572-607`). | **No:** checks discover drift, but do not record it. | Keep a deliberate acceptance action; it already has one (`build --accept-board-move`). Do not make it dependent on HTML rendering. |
 | Schema cache, key minting, composite-link/check expansion, and `follows` anchoring | These occur in `_load()` for **any writable loading command**, before build (`src/refdes/cli.py:56-81`). | **Yes, but with writes**: `check`, `index`, `ls`, and others load this way; `--no-write` gates it. | This is the strongest counterexample to "only build writes," and the reason §2 puts history capture here rather than inventing a new write path. |
 | Citation lockfile/copies cache | Not a build side effect: `citations.verify()` is hermetic (`src/refdes/citations.py:1468-1553`); only `refdes fetch` writes pins and kept-copy bytes (`src/refdes/citations.py:1221-1242,2658-2661`). | **Yes**, via explicit fetch. | Leave it separate. Citation pinning is a different intentional record. |
-| Revision/release baseline | Not a build side effect: revision/release run a read-only build then write only a passing baseline (`src/refdes/cli.py:523-639`, `src/refdes/lifecycle.py:821-927`). | **Yes**, through explicit lifecycle commands. | Extend this moment with a rich history event (§4), not a generic build write. |
+| Revision/release baseline | Not a build side effect: revision/release run a read-only build then write only a passing baseline (`src/refdes/cli.py:523-639`, `src/refdes/lifecycle.py:821-921`). | **Yes**, through explicit lifecycle commands. | Extend this moment with a rich history event (§4), not a generic build write. |
 
 **Decision.** The premise is right about discoverability: thread state,
 coverage, checks, calcs, citations, and diagnostics should be queryable without
@@ -448,7 +448,7 @@ rows, but preserves their origins and never writes them into `tasks:`.
 | Unverified active requirements | `lifecycle._rule_unverified_requirements()` (`src/refdes/lifecycle.py:624-625`). |
 | Proposed/on-hold verdicts | Not currently enumerated as a worklist. A new projection must enumerate log threads and call the existing `chains.resolve_current(..., "status")` (`src/refdes/chains.py:563-589`); forked values remain branch-local. |
 | Blocked-by cascades and stale blockers | `blocked.resolve()` computes `project.blocked_chains` and stale-blocker info; `blocked.by_item()` groups it (`src/refdes/blocked.py:68-141`). |
-| Failing checks | `build.run_checks()` produces `item.checks` and sets `ok` (`src/refdes/build.py:1608-1799`). |
+| Failing checks | `build.run_checks()` produces `item.checks` and sets `ok` (`src/refdes/build.py:1608-1763`). |
 | Unpinned citations / missing kept copies | `citations.verify()` assigns status, and lifecycle's `_rule_unpinned_citations()` / `_rule_missing_kept_copies()` select it (`src/refdes/citations.py:1468-1553`, `src/refdes/lifecycle.py:580-599`). |
 | Remote citation drift | `citations.refresh()` computes drift only for `check --refresh`; it is read-only and networked (`src/refdes/citations.py:2768-2901`). |
 | Forked threads | `chains.resolve()` diagnoses open forks; `thread_tips()` identifies their tips (`src/refdes/chains.py:971-1027`, `chains.py:372-398`, consumed by `render.py:344-349`). |
@@ -565,14 +565,16 @@ block per branch; it never reports a single current status or list.
 
 VS Code shows the same tip, tasks, capture marker, and fork state in the hover
 for a thread entry. Today its hover is a compact item preview built from
-`index` (`editors/vscode/extension.js:263-313`, registered at
+`index` (`editors/vscode/extension.js:264-313`, registered at
 `editors/vscode/extension.js:957`), and the current index payload has no thread
 projection (`src/refdes/render.py:572-746` exports `boards`, `workspaces`,
 `coverage`, `types`, `items`, `next_ids`, and `diagnostics` — no threads). The extension must not reconstruct the
 chain itself; extend the Python index payload, as it already uses Python for
 schema, diagnostics, completions, and calculated values.
 
-`refdes serve` remains an optional client proposal, not a prerequisite.
+`refdes serve` ships today (preview + `/edit/` editor on a loopback port, per
+`refdes serve --help`), but it stays an optional surface for this design, not
+a prerequisite.
 `docs/design/browser-editor.md` already recommends a separate `/edit/` app
 over the plain files and says Python remains authoritative (`docs/design/browser-editor.md:5-23`). It should call the same query/continue/history APIs as
 CLI and VS Code. It must not make a site render create a snapshot.

@@ -1,0 +1,100 @@
+Task: sweep3 docs follow-ups (items I1-I5), branch sweep3-docs-followups,
+cut from main 20ecd91. PR title: "docs(sweep3): anchor check covers design
+pages; living-notes and README corrections".
+
+Started 2026-10-12. git status clean at start; branch confirmed at 20ecd91.
+
+I1 (anchor check) - DONE
+- tests/test_docs_anchors.py: _checked_files() was DOCS.glob("*.md") +
+  README.md; ids were already collected from DOCS.rglob("*.md"). Changed
+  _checked_files() to DOCS.rglob("*.md") so docs/design/*.md links are
+  checked too. Added README.md's own heading ids to _all_heading_ids() so a
+  future in-README `](#foo)` link resolves against README's real ids instead
+  of hitting the "links to non-page" branch (line ~97 of the old file).
+  Also fixed the relative-link base: it was `DOCS if source.parent == DOCS
+  else ROOT`, which breaks for docs/design/*.md (a `../links.md` link from a
+  design page would resolve against ROOT). Now base = source.parent, which
+  is correct for every directory depth (docs/x.md, docs/design/x.md,
+  README.md all keep resolving the way they did).
+- Ran the test: PASSED with the wider scope -- no broken anchors found in
+  docs/design/ (the design pages carry only 3 fragment links total:
+  keys.md:449 and standard-library.md:612, both pointing into
+  ../cli-reference.md and both valid). So nothing to fix and nothing
+  deferred.
+- docs/design/thread-workbench.md: grep '](.*#' finds ZERO anchor links
+  (its single `](` occurrence is `![]()` inside an inline code span, skipped
+  by the checker). No broken hits -> no temporary skip needed.
+- Sabotage #1 (design-page anchor): edited docs/design/keys.md:449 link
+  anchor to `...-in-a-logZZ`; test_no_broken_anchor_links_in_docs FAILED
+  reporting exactly `docs/design/keys.md:449:
+  ../cli-reference.md#matching-a-read-only-refusal-in-a-logZZ`. Restored.
+- Sabotage #2 (README fragment branch): temporarily inserted
+  `[install](#install) and [bad](#nope-not-here).` into README.md; the test
+  reported ONLY `README.md:52: #nope-not-here` (a fragment miss, not
+  "non-page"), proving #install resolved against README's real ids. Restored
+  README from .scratch/README.bak; git shows README.md and keys.md clean
+  again after restore.
+- Test-level: the behavior fix IS the test change itself (widening its
+  scope); the two sabotages above are the test-of-the-test.
+
+I2 (living-notes.md pointers) - DONE, all three claims still applied
+- `refdes serve --help` run: serve exists today (two surfaces on a 127.0.0.1
+  port, /preview/ + /edit/, token-gated). Line ~127 said serve "now ships"
+  (true); line ~575 said serve "remains an optional client proposal" (false
+  today). Reconciled ~575: serve ships today but stays an optional surface
+  for the living-notes design, not a prerequisite.
+- build.py:1608-1799 -> 1608-1763 (run_checks starts at 1608; last statement
+  `item.checks.append(result)` is 1763; 1799 is `HASH_FORMAT = 5` in the
+  content-hashing comment block). Two occurrences fixed (lines 126, 451).
+- lifecycle.py:821-927 -> 821-921 (stamp() starts at 821, ends 921; 927 is
+  @dataclass for the next class, DiffResult at 928).
+- extension.js:263-313 -> 264-313 (line 263 is blank; the hover-body JSDoc
+  starts at 264, function ends at 313). Two occurrences fixed (126, 568).
+  Left 715-772 as-is (not flagged, not checked).
+
+I3 (vocabulary-review.md §1.7) - DONE
+- Built a v3 scratch project in .scratch/i3-probe (`site: {title,out}`,
+  `standard: {base: hardware, version: 3, presets: []}`, `id:`) and ran
+  `refdes schema --json`: `follows` IS declared -- appears as a property of
+  the log type; source: `follows: { inverse: followed_by, label: "Follows",
+  trace: false, doc: "..." }` at src/refdes/standards/hardware/v3/base.yaml:166.
+- The §1.7 text (lines ~351-364) says "is not declared in the bundled
+  standard" / "no bundled standard declares the verb" in the present tense.
+  Kept the snapshot; added a dated 2026-10-12 blockquote note under it.
+
+I4 (README index wording) - DONE
+- Ran `refdes index --help`: "Print the resolved project as one JSON
+  document on stdout, rendering no HTML: the machine-readable payload the VS
+  Code extension and other editor tooling read...". README line 33 still
+  said "print items.json to stdout, for tooling" (the pre-P13 wording).
+  Replaced with "print the resolved project as one JSON document on stdout,
+  for tooling" to match the help one-liner.
+
+I5 (opencode-deny-gaps.txt) - DONE
+- Header line 4 said "Finished: no (in progress)" although the log itself
+  ends "committed, pushed, PR opened" and main has 20ecd91 (#202 merged).
+  Changed to "Finished: yes (merged as #202, commit 20ecd91 ...)".
+- The ~55-56 residual-gap claim (`rm --re x` not denied) is wrong:
+  `*rm -?r*` matches `rm --re x` (?=`-`, then literal r). Verified with
+  .scratch/i5_pattern_check.py, which loads the real deny rules from
+  opencode.json and applies them in last-match-wins order: `rm --re x` ->
+  deny; the genuine residual gap `rm -v -f -r x` (3 split flag words) ->
+  allow; must-allow `rm --force x` -> allow. Added a dated correction under
+  the claim.
+
+Changelog: NO fragment. Rule from changelog.d/README.md: fragments are
+changelog bullets "for a reader of the project, saying what changed and what
+they must do about it". Everything here is docs/test/log text; no shipped
+behavior changed. (Same call PR #198/#202 made for their config/docs-only
+changes.)
+
+Checks: see below (full suite run in foreground, ruff, gen_examples).
+
+Check results (all foreground, this branch):
+- Full suite: 3587 passed, 2 skipped in 276.19s, exit 0 (no flakes; the
+  known serve token flake did not fire). Log: .scratch/suite.txt.
+- ruff check --select E9,F src tests -> All checks passed, exit 0.
+- python docs-site/gen_examples.py --check -> schema-reference.md and
+  vocabulary.md up to date, exit 0.
+
+STATUS: complete locally; committed, pushed, PR opened.
