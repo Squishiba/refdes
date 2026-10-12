@@ -225,10 +225,41 @@ def test_revise_keeps_the_configuration_exit_codes(tmp_path, capsys):
 
 def test_revise_help_still_explains_itself(capsys):
     """Hidden from the list, still self-documenting: whoever has the old name in
-    their shell history gets the same description and the same two arguments."""
+    their shell history gets the same description and the same two arguments.
+
+    The help is whitespace-normalized before the 46-character phrase is matched
+    (the same way tests/test_index_help.py reads its help), because argparse
+    wraps the description to the terminal's width: on a narrow enough
+    terminal the phrase breaks mid-sentence and the raw match fails."""
     with pytest.raises(SystemExit):
         cli_mod.main(["revise", "--help"])
-    out = capsys.readouterr().out
+    out = " ".join(capsys.readouterr().out.split())
     assert "Apply an explicit old->new vocabulary mapping" in out
     assert "--dry-run" in out
     assert "mapping" in out
+
+
+def test_revise_unparseable_mapping_exits_2_saying_what_rename_says(tmp_path, capsys):
+    """The missing-file half of the configuration refusals is pinned for both
+    spellings above; the unparseable-file half was pinned for `rename` alone
+    (tests/test_revise.py). The alias must carry it too: same exit 2, the
+    same one-line note byte for byte, and its own note line and nothing
+    more besides."""
+    root = tmp_path / "p"
+    root.mkdir()
+    config = _project(root)
+    bad = root / "bad.yaml"
+    bad.write_text("prefixes: [unclosed\n", encoding="utf-8")
+
+    capsys.readouterr()
+    assert cli_mod.main(["-c", config, "rename", str(bad)]) == 2
+    rename_err = capsys.readouterr().err
+    assert "could not be parsed" in rename_err
+    assert "Traceback" not in rename_err
+    (rename_note,) = [line for line in rename_err.splitlines() if line.strip()]
+
+    assert cli_mod.main(["-c", config, "revise", str(bad)]) == 2
+    revise_err = capsys.readouterr().err
+    assert "Traceback" not in revise_err
+    lines = [line for line in revise_err.splitlines() if line.strip()]
+    assert lines == [NOTE, rename_note]  # the alias line, then the same refusal

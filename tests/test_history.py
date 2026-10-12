@@ -13,7 +13,9 @@ import os
 import pytest
 
 from refdes import build as build_mod
-from refdes import history, parse
+from refdes import history
+from refdes import keys as keys_mod
+from refdes import parse
 from refdes.schema import load_project
 
 from conftest import write_project_config
@@ -382,6 +384,51 @@ def test_load_malformed_event_is_loud_not_skipped(root):
     os.remove(os.path.join(history.events_dir(root), "hand-rolled-4.yaml"))
 
     assert [e["id"] for e in history.load_events(root)] == [good]
+
+
+def test_the_merged_follows_key_helper_on_the_old_pair_s_inputs():
+    """Review #199: `_follows_target_key` (capture_followed's default) and
+    `_anchored_follows_key` (`_superseded`) were near-duplicates whose
+    documented semantics were identical word-for-word but whose code
+    differed on exactly one input class: a bare well-formed key (the id-less
+    tip), which only `_anchored_follows_key` accepted -- against its own
+    docstring. This table, first written against the pair's real outputs
+    before the merge, now pins the merged helper: every row it shares with
+    the old narrower helper, plus the bare-key row answered the wider,
+    documented way."""
+    key = keys_mod.mint()
+    rows = [
+        (f"LOG-002@{key}", key),
+        (f"LOG-002@{key}@tail", f"{key}@tail"),
+        ("x@y", "y"),
+        (key, key),
+        ("LOG-001", None),
+        ("", None),
+        ("@x", "x"),
+        (None, None),
+    ]
+    for target, settled in rows:
+        assert history._anchored_follows_key(target) == settled, target
+
+
+def test_a_non_utf8_event_file_is_a_history_error_naming_the_file(root):
+    """Review #191: the file is opened with encoding utf-8, but the decode
+    happens on the first read -- inside yaml_safe_load -- and a
+    UnicodeDecodeError is not a YAMLError, so a stray byte escaped the
+    HistoryError wrap as a raw traceback and crashed every reader instead
+    of this store's usual loud naming of the malformed record."""
+    history.append_event(root, "followed", "K1", "a" * 64, successor_key="S1")
+    corrupt = os.path.join(history.events_dir(root), "not-utf8.yaml")
+    with open(corrupt, "wb") as fh:
+        fh.write(b"\xff")
+    with pytest.raises(history.HistoryError) as exc_info:
+        history.load_events(root)
+    assert "not-utf8.yaml" in str(exc_info.value)
+    assert "not valid UTF-8" in str(exc_info.value)
+    os.remove(corrupt)
+    assert [e["id"] for e in history.load_events(root)] == [
+        history.event_id("followed", "K1", "S1", "")
+    ]
 
 
 def test_duplicate_edge_under_two_ids_is_loud(root):

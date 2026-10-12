@@ -522,6 +522,24 @@ def test_json_names_the_unreadable_store_in_diagnostics(tmp_path, capsys):
     assert set(diagnostic) == {"level", "message", "file", "line", "item"}
 
 
+def test_a_non_utf8_event_file_is_said_not_crashed(tmp_path, capsys):
+    """Review #191: the store above is corrupted with bytes that cannot be
+    decoded, not with unterminated YAML. The decode happens on the first
+    read and raises something that is not a YAMLError, so it escaped
+    load_events' HistoryError wrap as a raw traceback -- every reader that
+    catches (HistoryError, OSError) and says its piece died over one byte."""
+    config = _setup(tmp_path)
+    _warm(tmp_path, config, capsys)
+    events = tmp_path / ".refdes" / "history" / "events"
+    (first,) = sorted(events.glob("*.yaml"))
+    first.write_bytes(b"\xff")
+    assert _run(config, "thread", "LOG-001") == 0
+    captured = capsys.readouterr()
+    assert "Thread: LOG-001 -> LOG-002" in captured.out  # the answer is intact
+    assert "could not be read" in captured.err  # the failure is said, not crashed --
+    assert first.name in captured.err  # -- and the sentence names the file
+
+
 # ---------------------------------------------------------------- exit codes
 
 
