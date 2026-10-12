@@ -24,6 +24,22 @@
       "*rm -r *": "deny",
       "*rm -R *": "deny",
       "*rm --recursive*": "deny",
+      // ...and the spellings those missed: a trailing `*` (not a space) so a
+      // glued flag word keeps matching (`rm -Rf x`, bare `rm -rf` at end of
+      // line); `?` = exactly one character, so `-?r`/`-?R` catch r/R glued
+      // after one other short flag (`rm -fr`, `rm -vrf`, `rm -fR`); `-? -r`
+      // catches r/R as its own word after one other flag (`rm -f -r`); and
+      // `--recursive` anywhere after `rm`, not just adjacent to it
+      // (`rm --force --recursive x`). `rm -d` (empty dirs only) stays allowed.
+      "*rm -r*": "deny",
+      "*rm -R*": "deny",
+      "*rm -?r*": "deny",
+      "*rm -?R*": "deny",
+      "*rm -? -r*": "deny",
+      "*rm -? -R*": "deny",
+      "*rm*--recursive*": "deny",
+      // find/bfs `-delete` is a recursive delete by another name
+      "* -delete*": "deny",
       // /tmp, always preceded by a space, quote, = or > so that scratch paths
       // inside the repo like .scratch/tmpohpphczv (no "/tmp" substring at all,
       // and no leading separator) are not caught
