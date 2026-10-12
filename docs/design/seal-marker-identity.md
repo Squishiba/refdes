@@ -195,7 +195,7 @@ change is invisible to already-written markers. Two halves:
 1. *Reader rule, no format change at all:* a `legacy-seal` marker's `item_key` is an
    identity only if it is a well-formed surrogate key; otherwise it is a display-id stand-in
    and must not be attributed to a live item. This is mechanically checkable today with
-   `keys.KEY_LEN` + `keys.malformed_key_message` (`src/refdes/keys.py:36,117`) — the exact
+   `keys.KEY_LEN` + `keys.malformed_key_message` (`src/refdes/keys.py:37,131`) — the exact
    test `history._anchored_follows_key` already performs. Cheap, total, and retroactive: it
    covers markers we cannot rewrite.
 2. *Optional additive field on new markers* (`identity_stable: false`, or an explicit

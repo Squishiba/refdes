@@ -370,7 +370,7 @@ def is_sealed(project: Project, item: Item) -> bool:
     """Whether ``item`` already has an append-only seal in any board file.
 
     Follows anchoring happens before board resolution in the normal load path,
-    so it must inspect every declared board rather than relying on
+    so ``is_sealed`` must inspect every declared board rather than relying on
     ``item.board``. A legacy base-file seal remains authoritative until a
     writable build migrates it to its board-specific file.
 

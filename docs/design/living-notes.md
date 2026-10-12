@@ -137,7 +137,7 @@ computed by `check`, `index`, or `ls`.
 | `_site/` HTML, `items.json`, copied assets, and the output manifest | `cmd_build()` calls `render_site()`; the renderer writes/prunes its manifest (`src/refdes/cli.py:288-290`, `src/refdes/render.py:641-655,723-738,1109`). | This is build's declared output, not incidental state. `--no-write` intentionally still writes it (`docs/design/keys.md:374-382`). | Keep it as output; never use it as an event that changes source/history state. |
 | New append-only seals; reseals; board-split seal migration | `build()` calls `seal.verify(... write=seal_write)` (`src/refdes/build.py:1859-1861`); new entries are written only when `write` is true (`src/refdes/seal.py:222-342`). | **No:** `check`/`index` verify only. | Replace "build seals new entry" with explicit captured-snapshot events. Preserve current files during migration (§8). |
 | Board/workspace membership manifest, including accepted moves and stale-entry pruning | `build()` calls `boards.verify()` (`src/refdes/build.py:1860-1862`); it writes only when changed and write-enabled (`src/refdes/boards.py:486-521`). | **No:** checks discover drift, but do not record it. | Keep a deliberate acceptance action; it already has one (`build --accept-board-move`). Do not make it dependent on HTML rendering. |
-| Schema cache, key minting, composite-link/check expansion, and `follows` anchoring | These occur in `_load()` for **any writable loading command**, before build (`src/refdes/cli.py:69-136`). | **Yes, but with writes**: `check`, `index`, `ls`, and others load this way; `--no-write` gates it. | This is the strongest counterexample to "only build writes," and the reason §2 puts history capture here rather than inventing a new write path. |
+| Schema cache, key minting, composite-link/check expansion, and `follows` anchoring | These occur in `_load()` for **any writable loading command**, before build (`src/refdes/cli.py:56-81`). | **Yes, but with writes**: `check`, `index`, `ls`, and others load this way; `--no-write` gates it. | This is the strongest counterexample to "only build writes," and the reason §2 puts history capture here rather than inventing a new write path. |
 | Citation lockfile/copies cache | Not a build side effect: `citations.verify()` is hermetic (`src/refdes/citations.py:483-547`); only `refdes fetch` writes pins and kept-copy bytes (`src/refdes/citations.py:360-372,806-1001`). | **Yes**, via explicit fetch. | Leave it separate. Citation pinning is a different intentional record. |
 | Revision/release baseline | Not a build side effect: revision/release run a read-only build then write only a passing baseline (`src/refdes/cli.py:318-380`, `src/refdes/lifecycle.py:642-735`). | **Yes**, through explicit lifecycle commands. | Extend this moment with a rich history event (§4), not a generic build write. |
 
@@ -188,7 +188,7 @@ be nagged about.
    neither the successor nor the event survives a partial write.
 2. A hand-authored `follows:` edge captures the same event. Capture happens in
    the writable-load path that already rewrites a bare edge's spelling —
-   `links.plan_follows_anchor()`/`anchor_follows()` (`src/refdes/links.py:592-693`,
+   `links.plan_follows_anchor()`/`anchor_follows()` (`src/refdes/links.py:633-818`,
    called from `_load()` at `src/refdes/cli.py:125` with `write=not args.no_write`)
    — so the edge and its event come from one write pass and no new command or
    hook is introduced. `anchor_follows()` keeps what it does today; capture is
@@ -605,7 +605,7 @@ unmerged fork is undefined (`src/refdes/chains.py:452-551`).
 | Retire the `design-debate` preset and its grouping capability | **Retire.** Do not retarget `debate.resolved_by` to `log`. |
 | `follows:` chain, fold, forks/merges, id-less continuations | **Keep.** It is exactly the topology needed to locate the editable tip and carry the task list. |
 | `append_only: true` meaning build seals every new log | **Change.** It would reintroduce the behavior this document rejects. `append_only` keeps its meaning for authoring (an entry is not rewritten in place; corrections are new entries) and loses the build-time hash lock. Log entries are capturable without being build-locked. |
-| `_load()` anchors hand-authored bare `follows:` on any writable command | **Keep, and extend.** The same writable-load path that anchors the edge (`src/refdes/links.py:592-693` via `src/refdes/cli.py:125`) is where the predecessor snapshot is captured (§2). Rendering and `--no-write` stay out. |
+| `_load()` anchors hand-authored bare `follows:` on any writable command | **Keep, and extend.** The same writable-load path that anchors the edge (`src/refdes/links.py:633-818` via `src/refdes/loader.py:143`) is where the predecessor snapshot is captured (§2). Rendering and `--no-write` stay out. |
 | Phase 4b static thread panel | **Keep, but make it a client.** It should display task/history data from the shared projection, not own its computation or trigger writes. |
 | `amends:` | **Keep as an annotation.** It identifies a specific correction; it is not a replacement for a history snapshot or chain position. |
 
@@ -626,7 +626,7 @@ capture contract before integration.
 | Existing baselines | Leave their compact schema and hash-format handling intact. New baselines gain history events; old baseline item pages say rich content is unavailable. |
 | Existing standalone logs | They remain valid ordinary entries. An explicit history-capture command supports them; no retroactive `follows:` inference. |
 | Projects with no Git or an exported tree | Fully supported by `.refdes/history/`; no Git fallback or silent absence. |
-| `--no-write` / CI | Validate and report mismatches, but create no events, objects, redactions, or migration files — including the automatic capture of §2, which sits behind the same `write=not args.no_write` gate as `anchor_follows()` (`src/refdes/cli.py:125`). A capture/continue request fails loudly under `--no-write` via `_refuse_no_write()` (`src/refdes/cli.py:137-149`). |
+| `--no-write` / CI | Validate and report mismatches, but create no events, objects, redactions, or migration files — including the automatic capture of §2, which sits behind the same `write=not args.no_write` gate as `anchor_follows()` (`src/refdes/loader.py:143`). A capture/continue request fails loudly under `--no-write` via `_refuse_no_write()` (`src/refdes/cli.py:84-94`). |
 
 The new store must key records by surrogate key where available, as seals and
 baselines now do after adoption. Display ID remains stored for readability but

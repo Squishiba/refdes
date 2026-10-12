@@ -24,7 +24,9 @@ writable load to name the target's permanent key, follows:/links/checks/calc):
   _frozen_target_key->_anchored_target_key, _frozen_follows_key->
   _anchored_follows_key (history.py), adopt AdoptionResult.frozen_follows->
   anchored_follows, chains.build_graph(frozen_only=)->anchored_only=,
-  tips_frozen->tips_anchored, loader local frozen_follows->anchored_follows.
+  tips_frozen->component_tips (fix round 1: an earlier draft of this line
+  said tips_anchored; the rename that landed is component_tips), loader
+  local frozen_follows->anchored_follows.
   messages: "could not freeze N local follows reference(s)"->could not anchor;
   cli "would freeze"/"froze"->"would anchor"/"anchored"; links.py "freezing
   would change its hash"->"anchoring would change its hash".
@@ -39,9 +41,11 @@ KEEP (other senses; full per-file list in the PR body):
   "freeze out of sealing", test_seal.py 578, test_citations.py 803,
   test_serve_upload.py, named-calc-blocks.md, candidate-parts.md);
   historical records kept as written: CHANGELOG.md, in-prog-logs/*,
-  docs/design-log.md (dated chronicle), vocabulary-review.md P4 body itself
-  (the proposal names the old word — same as P2's body still saying
-  `history:`, which its landed note did not rewrite).
+  vocabulary-review.md P4 body itself (the proposal names the old word —
+  same as P2's body still saying `history:`, which its landed note did not
+  rewrite). NOT docs/design-log.md after all (fix round 1 correction): the
+  PR edits it — its key-sense lines are renamed (283 in round 0, 270 in
+  fix round 1); the rest of that dated chronicle stays as written.
 
 ## Progress log
 - [start] tree clean at 55176b0, branch vocab-p4-freeze-to-anchor. No VS
@@ -92,47 +96,130 @@ KEEP (other senses; full per-file list in the PR body):
   thread_cli + threads_projection + work + calc_cross_refs +
   serve_edit_links + message_prose + vocabulary_page -> 321 passed.
 
-## Final `grep -rniE 'freez|frozen' src tests docs` — remaining hits, one line each
-(plus `frozen=True`/`frozenset`, which are Python, not vocabulary)
-src/refdes/parse.py:695,709 -- id-allocation sense: "freezing the wrong id
-  forever" is pinning an id NUMBER, not key-pinning a reference.
-src/refdes/image_freeze.py (7), tests/test_image_search.py (9) -- the
-  image-search resolve-and-freeze path behaviour; different mechanism.
-src/refdes/standards.py:195,197,401 -- released standards are frozen
-  (immutable) bytes.
-src/refdes/keys.py:56 -- key construction frozen = immutable contract.
-src/refdes/loader.py:5,24,163 -- "freeze uniquely searched images" + the
-  image_freeze module/call: image sense.
-src/refdes/build.py:2147,2715,2732 -- "a frozen /path": image path pinned to
+## Final check `grep -rniE 'freez|frozen' src tests docs` — kept-hits list
+rebuilt in fix round 1 from the command's REAL output (saved to
+.scratch/grep-final.txt), not from memory; re-run after all round edits.
+184 text lines (stale __pycache__ .pyc matches are reported as binary,
+ignored). 88 of them are Python's own @dataclass(frozen=True)/frozenset(...)
+— a language class, not vocabulary; checked line-by-line that no other sense
+hides inside them (they include the @dataclass(frozen=True) code examples at
+docs/design/calc-sources.md:635/640 and docs/design/editor-source-picker.md:269).
+The 96 lexical hits, one reason each:
+src (27):
+- parse.py:695,709 -- id-allocation sense: "freezing the wrong id forever"
+  pins an id NUMBER, not key-pinning a reference.
+- image_freeze.py:31,88,103,113,120,172,176 -- the image-search
+  resolve-and-freeze mechanism itself; different behaviour.
+- standards.py:195,197,401 -- released standards are frozen (immutable) bytes.
+- keys.py:56 -- key construction frozen = immutable contract.
+- loader.py:5,24,163 -- "freeze uniquely searched images" + the image_freeze
+  import/call (line 5 carries the already-renamed "anchor `follows:`").
+- build.py:2147,2715,2732 -- "a frozen /path": image path pinned to the
   project root; not key-pinning.
-src/refdes/ids.py:8,545 -- id immutability after baseline; numeric-hint
-  allocation "freeze the specific number".
-src/refdes/schema_json.py:424, seal.py:221, model.py:809, revise.py:864 --
-  "frozen CI tree" = read-only checkout.
-src/refdes/seal.py:436 -- "freeze healthy entries out of sealing" = lock out.
-src/refdes/model.py:798 -- "images frozen to concrete project paths" (the
-  adjacent `follows:` phrase was renamed to anchored).
-tests/test_ids.py (4), tests/helpers.py:103 -- bare-numeric expand-and-freeze
-  (id sense).
-tests/test_seal.py:578, tests/test_citations.py:803 -- "freeze out of
-  sealing"/"doesn't freeze the rest" = lock-out sense.
-tests/test_serve_upload.py (3) -- append-only entry frozen = sealed; a sealed
-  item "freezes" (blocks) an upload file; not key-pinning.
-docs/multi-board.md:408, docs/ids.md:219, docs/coverage.md:341,
-docs/cli-reference.md:728,1579 -- ids frozen once allocated/baselined.
-docs/markdown.md:170,175 -- image-search freeze (author doc for it).
-docs/design/named-calc-blocks.md:518, docs/design/candidate-parts.md (3) --
-  frozen = immutable record/fence.
-docs/design/backlog.md (13) -- image resolve-and-freeze decisions, released
-  shapes frozen, standards freeze promise; the three key-sense lines there
-  were renamed.
-docs/design/keys.md:166,534 -- bare-numeric id expand-and-freeze (id sense).
-docs/design/vocabulary-review.md (24) -- the review's own proposal bodies
-  (P1/P4 text + ordering) naming the old word; precedent: P2's body still
+- ids.py:8,545 -- id frozen after baseline; numeric hint freezes the number.
+- schema_json.py:424, seal.py:221, model.py:809, revise.py:864 -- "frozen CI
+  tree" = read-only checkout.
+- seal.py:436 -- "not freeze healthy entries out of sealing" = lock out.
+- model.py:798 -- "images frozen to concrete project paths"; image sense.
+tests (19):
+- test_image_search.py:226,235,258,303,309,329,348,372,378 -- image-freeze
+  tests; image sense.
+- test_ids.py:1,455,495,509, helpers.py:103 -- bare-numeric
+  expand-and-freeze; the author's chosen number staying frozen (id sense).
+- test_seal.py:578 -- "must not freeze [out of sealing]" = lock-out sense.
+- test_citations.py:803 -- "doesn't freeze the rest" = lock-out sense.
+- test_serve_upload.py:1213,1246,1379 -- append-only body/entry frozen =
+  sealed; a sealed item "freezes" (blocks) an upload file; not key-pinning.
+docs (50):
+- multi-board.md:408, ids.md:219, coverage.md:341, cli-reference.md:728,1579
+  -- ids frozen once allocated/baselined (id sense).
+- markdown.md:170,175 -- image-search freeze (the author doc for it).
+- named-calc-blocks.md:518 -- a fence in a sealed entry is frozen with it.
+- candidate-parts.md:225,228,741 -- `options:` as the frozen (immutable)
+  record of a decided comparison.
+- backlog.md:2168,2182,2192,2199,2201,2267,2272,2275,2278,2876 -- image
+  resolve-and-freeze decisions; :789 released shapes frozen; :2706 the
+  standards "byte-identical once released" freeze promise; :2170 the
+  bare-numeric id example inside that section (id sense). The three
+  key-sense lines there were renamed.
+- keys.md:166,534 -- bare-numeric id expand-and-freeze (id sense; the
+  composite-link sentence at 534 already says "anchored").
+- vocabulary-review.md:30,48,566,568,570,573,574,575,651,654,818,836,870,
+  871,872,873,878,879,890,894,895,897,1200,1216 (24) -- the review's own
+  S1.7/P4/ordering bodies naming the old word; precedent: P2's body still
   says `history:` under its landed note. Landed note added below P4.
+Regex caveat (this is what F1 was): 'freez|frozen' does NOT match the past
+tense "froze". `grep -rniI 'froz'` over src tests docs adds three prose hits
+the final check cannot see: cli.py:111 "froze N image(s)" (image sense) and
+the comments test_work.py:709 / test_load_time_writes.py:167 (describe
+composite expansion in the old word; prose only, left for the reviewer to
+call). design-log.md:270 was a key-sense hit this hid -- renamed to
+"anchored" in fix round 1; design-log.md now has zero froz hits.
 
 ## Outcome
 FINISHED. Suite: 3562 passed, 2 skipped (exit=0, .scratch/suite.txt; no load
 flake seen). ruff --select E9,F src tests clean; gen_examples --check clean.
 
-PR opened: https://github.com/Squishiba/refdes/pull/199 (base main). Task complete.
+PR opened: https://github.com/Squishiba/refdes/pull/199 (base main).
+
+## Fix round 1 (review: chunk 2 approved, chunk 1 requested changes)
+Carried .scratch/FIX-1.txt exactly, against head bde42fa; PR mergeable, no
+rebase. All findings documentation accuracy; no Python logic touched.
+- F1 docs/design-log.md:270 key-sense "a `follows:` successor froze an edge
+  to it" -> "anchored an edge to it" (same rename as :283). Root cause of
+  the miss: the final-check regex 'freez|frozen' never matches "froze"
+  (f-r-o-z-e); re-checked design-log.md with 'froz' -> 270 was the only
+  remaining hit there, now zero.
+- F2 corrected the KEEP section above: docs/design-log.md is NOT among the
+  historical records kept as written — this PR edits it (283 round 0, 270
+  round 1); rest of the chronicle untouched.
+- F3 final check re-run after the round's edits; kept-hits list above and
+  in the PR body rebuilt from the real saved output (line numbers from
+  .scratch/grep-final.txt, per-hit reasons written against it). Round 0's
+  from-memory file set turns out to have matched the real 96 lexical hits,
+  but only the rebuilt list carries the exact lines + the 88-hit
+  frozen=True/frozenset class note. PR body patched via `gh api` PATCH.
+- F4 identifiers line corrected: the chains local landed as
+  tips_frozen->component_tips (not tips_anchored); matches Scope calls.
+- F5 file:line pointers refreshed on the PR-touched doc lines only, each
+  verified with grep -n against current code (plan_follows_anchor
+  links.py:633, anchor_follows links.py:770, FollowsAnchorPlan links.py:551,
+  the anchor_follows() call site loader.load_tree loader.py:143 — not
+  cli.py:125 —, sealed-entry refusal links.py:669-679, _load cli.py:56-81
+  calling load_tree at cli.py:77, _refuse_no_write cli.py:84-94,
+  keys.KEY_LEN keys.py:37, keys.malformed_key_message keys.py:131):
+  * living-notes-plan.md H2 **Files.** — cli.py:125 -> loader.py:143 inside
+    load_tree (reached from _load at cli.py:77); links.py:592-693 ->
+    633-818; FollowsAnchorPlan 509 -> 551.
+  * living-notes-plan.md H5 Adds line and the §"Why H5" blocker line —
+    links.py:623-634 -> 669-679.
+  * living-notes.md :140 _load() cli.py:69-136 -> cli.py:56-81; :191
+    links.py:592-693 -> 633-818; :608 links.py -> 633-818 via loader.py:143;
+    :629 cli.py:125 -> loader.py:143 and cli.py:137-149 -> cli.py:84-94.
+  * seal-marker-identity.md keys.py:36,117 -> 37,131 (FIX-1 named this
+    pointer; the PR's rename sits on the very next line).
+  Left alone per FIX-1 (lines the PR did not touch): plan :156/:268
+  links.py:623-634 mentions, :566-567 build.py:1977/cli.py:283, the
+  living-notes.md :192 "cli.py:125" context line and :51/:147/:218/:347/:349
+  pointers; living-notes.md ~239-240/~248 (named in FIX-1 F5) contain no
+  file:line pointer and the PR did not touch them — the PR-touched lines
+  near them are :140/:191/:193/:608/:629, all handled above.
+- F6 tests/test_load_time_writes.py:18 "follows anchor" -> "follows
+  anchoring"; seal.py is_sealed docstring "so it must inspect" -> "so
+  ``is_sealed`` must inspect" (names its subject).
+
+## Verification (round 1)
+No Python logic changed -> affected test files first: test_load_time_writes
++ test_seal + test_revise_cli -> 111 passed.
+`PYTHONPATH=$PWD/src .../python docs-site/gen_examples.py --check` -> clean
+(schema-reference.md, vocabulary.md up to date).
+`ruff check --select E9,F src tests` -> clean.
+test_revise_cli.py:390-399 opens docs/design-log.md — a doc this round
+touched — which is FIX-1's trigger: full suite run in the FOREGROUND:
+`PYTHONPATH=$PWD/src /home/jorb/work/venv-refdes/bin/python -m pytest -q -p
+no:cacheprovider > .scratch/suite.txt 2>&1; echo exit=$?` -> 3562 passed, 2
+skipped, exit=0 (265.44s; no load flake). This run replaced round 0's
+suite.txt; the Outcome section's numbers still describe it correctly.
+
+Fix round 1 FINISHED: one commit (staged by path), pushed once, PR body
+kept-hits list replaced and a review-fix comment posted.

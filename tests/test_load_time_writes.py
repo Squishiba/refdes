@@ -15,7 +15,7 @@ Fixes here:
   that inserts a key line (keys.mint_missing, ids.allocate,
   former_ids.confirm) reports and skips on refusal.
 - `revise.write_rewrites_verified` guards every load-time write (key minting,
-  link/check expansion, follows anchor): a rewritten file that no longer
+  link/check expansion, follows anchoring): a rewritten file that no longer
   parses, or parses into fewer items, is restored to its original bytes and
   reported as an error.
 """

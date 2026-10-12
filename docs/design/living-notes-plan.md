@@ -110,11 +110,12 @@ phase, so every existing test — including the whole-tree byte-identical
 captures a `followed` event holding the **predecessor's** snapshot, and prints
 the visible line: `captured LOG-A-011: LOG-A-012 now follows it`.
 
-**Files.** `src/refdes/cli.py:125` — the `anchor_follows(project,
-write=not args.no_write)` call inside `_load()` (`cli.py:69-136`) — plus
-`src/refdes/links.py:592-693` (`plan_follows_anchor` / `anchor_follows`,
-`FollowsAnchorPlan` at `links.py:509`). Capture is added **alongside** the
-anchor, in the same write pass, sharing its `write` flag; `anchor_follows()`
+**Files.** `src/refdes/loader.py:143` — the `anchor_follows(project,
+write=write)` call inside `load_tree()` (reached from `_load()` at
+`cli.py:77`) — plus `src/refdes/links.py:633-818` (`plan_follows_anchor` /
+`anchor_follows`, `FollowsAnchorPlan` at `links.py:551`). Capture is added
+**alongside** the anchor, in the same write pass, sharing its `write` flag;
+`anchor_follows()`
 keeps exactly what it does today. `src/refdes/history.py` gains the one
 function that turns a resolved (predecessor, successor) pair into an event.
 Tests: new `tests/test_history_capture.py`, and an extension of
@@ -255,7 +256,7 @@ the mechanism.
 
 **Adds.** For a type whose standard declares history-backed capture, the
 first writable build no longer writes a hash lock, an edit is no longer a build
-error, and `links.py:623-634` no longer refuses to anchor a bare `follows:` on
+error, and `links.py:669-679` no longer refuses to anchor a bare `follows:` on
 an entry that a legacy seal file mentions. Existing seal files keep being read
 and become **legacy-seal markers**: "recorded hash only; original content was
 not captured."
@@ -560,7 +561,7 @@ delaying 4a for them would repeat the mistake this plan exists to end.
 **Why H5 and not earlier.** The blocker is not the type merge; the analysis is
 explicit that the merge, `merge_types`, `owner`, `legacy_prefixes: [DEC]`, the
 guard tests and the per-rename hint all stand unchanged. The blocker is that
-`links.py:623-634` refuses to anchor a bare `follows:` on a sealed append-only
+`links.py:669-679` refuses to anchor a bare `follows:` on a sealed append-only
 entry, so the edge stays bare forever and no chain ever forms — and the entry is
 sealed by the first writable build (`build.py:1977`, `seal_write` true only at
 `cli.py:283`). Only H5 changes that. H2 alone leaves the refusal in place for
