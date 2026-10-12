@@ -461,8 +461,18 @@ def free_port() -> int:
     Probing for free-ness is a check, not a lock -- the same window as always
     -- but a random pick out of thousands of never-auto-assigned ports makes
     that window negligible where a rotating allocator made it routine.
+
+    A box can be sysctl'd into leaving no room to pin (an
+    `ip_local_port_range` starting at or below 2048 empties the band), and a
+    test suite that cannot get a port at all is worse than one that races, so
+    a collapsed band falls back to the OS pick instead of raising.
     """
     band = range(2048, ephemeral_start())
+    if len(band) < 512:
+        # nothing to pin below: the OS pick is on loan again, race window reopened
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+            probe.bind(("127.0.0.1", 0))
+            return probe.getsockname()[1]
     for port in random.sample(band, k=min(16, len(band))):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
             try:

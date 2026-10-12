@@ -112,7 +112,6 @@ the current line is byte-identical to `git show 052d0c3:...`'s. Adding a
 dated closing line would contradict the "don't fix what isn't broken"
 rule; the premise ("still says in progress") matches no line in the file.
 
-## D6 — vocabulary.py differs_from on a malformed sets: entry -> bare ValueError
 ## D6 — SKIPPED as already fixed (bare ValueError in vocabulary dict())
 
 The review's line numbers predate sweep 2. `git log -S "surface as a
