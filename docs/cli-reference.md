@@ -2066,7 +2066,7 @@ refdes serve --no-open --port 8731 --token-file /tmp/refdes-launch.txt
   kinds belong to `refdes work`). Every line is `refdes thread`'s own wording and every fact
   comes from the same headless projection that command reads; the pane
   computes nothing and writes nothing. See
-  [`refdes thread`](#refdes-thread-ref) and `docs/design/thread-workbench.md` §7a.
+  [`refdes thread`](#refdes-thread-lt-ref-gt) and `docs/design/thread-workbench.md` §7a.
 - **Loading writes nothing.** No key is minted, no link expanded, nothing
   sealed, no `.refdes/schema.json` written — the same guarantee as
   `--no-write`, pinned by `tests/test_no_write.py`. Files you edit outside the
