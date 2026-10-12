@@ -1210,7 +1210,8 @@ def lockfile_text(records: dict[str, dict]) -> str:
         "# sha256 those sections were read out of, and the pinned document's page\n"
         "# count (or, when pypdf was not available to count it, why there is no\n"
         "# count) -- keyed by the citation's path (URL or project-relative\n"
-        "# file). Written only by `refdes fetch`.\n"
+        "# file). Written by `refdes fetch`, and by `refdes serve` when an\n"
+        "# editor accept pins a source value.\n"
         "# Never hand-edit the sha256.\n"
     )
     return header + yaml.safe_dump(
@@ -1223,10 +1224,10 @@ def save_lockfile(project: Project, records: dict[str, dict]) -> None:
 
     The caller holds the project's cross-process write lock for its own
     read-modify-write: `fetch_all` runs inside `cli.main`'s
-    `with project_write_lock(...)` (src/refdes/cli.py:2961), which wraps
-    every command but `serve`, `init`, `new` and `schema` and any read-only
+    `with project_write_lock(...)`, which wraps every command but
+    `serve`, `init`, `new` and `schema` and any read-only
     run, and the editor's accept takes it around its own read and replace
-    (`serve/edit.py:_accept_pins`). A caller that
+    (`serve/edit.py`'s `_accept_pins`). A caller that
     reads the file, decides from what it read, and then writes it here without
     that lock is racing whoever else is writing it.
     """
@@ -2392,7 +2393,7 @@ def fetch_all(
     Locking: this reads the lockfile (`load_lockfile` below) and rewrites it
     whole (`save_lockfile` at the end), and both halves run inside the
     project-wide `project_write_lock` that `cli.main` runs the command inside
-    (its `with project_write_lock(...)`, src/refdes/cli.py:2961) -- so its
+    (its `with project_write_lock(...)`) -- so its
     read-modify-write is serialised against every other writer of the file,
     including the editor's accept and its rollback. That lock is deliberately
     wider than this function's own file

@@ -119,8 +119,6 @@ def tree(root, *subdirs) -> dict[str, str]:
         base = os.path.join(str(root), sub)
         for dirpath, _dirs, names in os.walk(base):
             for name in names:
-                if name == ".refdes-write.lock":
-                    continue  # stable coordination file, not authoring content
                 path = os.path.join(dirpath, name)
                 rel = os.path.relpath(path, str(root)).replace("\\", "/")
                 with open(path, "rb") as fh:
