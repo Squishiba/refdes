@@ -10,9 +10,11 @@
   that asked for 8731 and got 8732 is the quiet failure). `--port` outside
   1–65535 is a usage error and exit `2` at parse time, because Python raises
   `OverflowError`, not `OSError`, for a port over 65535. `allow_reuse_address`
-  stays `False`, so a port a launch gave up a moment ago can report busy while
-  its sockets finish closing, which the message says rather than leaving you to
-  guess.
+  is on for POSIX, so the next launch reclaims a port its own previous launch
+  gave up moments ago while the old sockets finish closing; it stays off on
+  Windows, where the flag would mean bind-over-anyone, and there a just-released
+  port can still report busy — which the message says rather than leaving you
+  to guess.
 - **`refdes serve` takes `--token-file PATH`.** It writes this launch's URL to
   `PATH` — the whole URL, newline-terminated, exactly the string the stdout line
   carries, not the bare token, so it names the port too and is what

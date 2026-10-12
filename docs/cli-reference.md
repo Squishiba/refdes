@@ -1973,7 +1973,7 @@ and a browser editor. Loads exactly one project and prints a launch URL.
 | Option | Effect |
 |---|---|
 | `--no-open` | Print the launch URL but do not open a browser |
-| `--port PORT` | Bind this exact `127.0.0.1` port instead of an ephemeral one. A port something else already holds is a refusal — `error: cannot listen on 127.0.0.1:<port>: Address already in use …`, exit `2` — never a silent fallback to some other port. `PORT` is 1–65535; anything else is a usage error and exit `2`. Below 1024 it needs elevated privileges |
+| `--port PORT` | Bind this exact `127.0.0.1` port instead of an ephemeral one. A port something else already holds is a refusal — `error: cannot listen on 127.0.0.1:<port>: Address already in use …`, exit `2` — never a silent fallback to some other port. On Linux and Windows a port held by any other listener is refused; on macOS/BSD a listener on the wildcard address does not block a loopback bind (standard BSD `SO_REUSEADDR` semantics, the same as Python's own `HTTPServer` default). `PORT` is 1–65535; anything else is a usage error and exit `2`. Below 1024 it needs elevated privileges |
 | `--token-file PATH` | Write this launch's URL — which carries the launch token — to `PATH`, so a script reads the credential from a file instead of scraping stdout. Written atomically, owner-only (`0600`), never written through a symlink, and only ever over a previous launch file of its own — anything else at that path is a refusal and exit `2`. Removed when `serve` stops cleanly — on Ctrl+C or on a `SIGTERM` (`kill $pid`); only a hard kill (`kill -9`) leaves it behind |
 
 ```bash

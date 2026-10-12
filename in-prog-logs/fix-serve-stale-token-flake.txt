@@ -230,3 +230,34 @@ Sabotage (COMMON rule):
 in this task were spawned by pytest foreground commands or by the
 load-loop command's trap; none left running.
 
+=====================================================================
+9. PR #210 FIX ROUND 1 (approved; doc-only, per .scratch/FIX-1.txt)
+=====================================================================
+F1 changelog.d/serve-port-token-file.added.md: the older fragment's
+   "`allow_reuse_address` stays `False`..." sentence contradicted this
+   PR once both fragments fold into the same [Unreleased]. Rewritten to
+   agree (POSIX reclaims its own just-released port; Windows keeps the
+   strict bind because the flag means bind-over-anyone there), without
+   duplicating the new fragment's text. The quoted refusal message stays:
+   that full wording is what Windows still prints.
+F2 (orchestrator) macOS/BSD caveat: SO_REUSEADDR there also lets a bind
+   to 127.0.0.1:P succeed while ANOTHER process listens on the wildcard
+   0.0.0.0:P (standard BSD semantics, same as Python's own HTTPServer
+   default). Verified the doc wording as instructed: `grep -n "held by
+   anything else" docs/cli-reference.md` finds nothing -- the real
+   phrase at line 1976 is "A port something else already holds is a
+   refusal". Added the precise sentence there, and the same caveat as
+   one clause in changelog.d/serve-relaunch-reclaims-own-port.fixed.md.
+   Honest note: the macOS/BSD behavior is the orchestrator's claim; it
+   cannot be verified on this Linux box (Linux keeps EADDRINUSE vs any
+   live listener, which the busy-port refusal tests do pin).
+   server.py NOT touched, as instructed. OPEN OPTION for the owner:
+   restrict the flag to Linux (`sys.platform == "linux"`), leaving
+   macOS/BSD on the strict bind -- a one-line call once someone wants
+   it; recorded here so it is not lost.
+Gates this round: tests/test_docs_anchors.py and
+docs-site/gen_examples.py --check (results: commit that follows this
+log edit was built after both ran; see the PR comment).
+One commit, one push, PR comment posted. Not merged/closed/approved.
+
+

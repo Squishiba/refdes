@@ -8,4 +8,7 @@
   after nothing actually held the port. The bind now allows that reclaim
   (POSIX only; on Windows the flag means bind-over-anyone, so there the
   strictness stays). A port that is genuinely held -- by another live serve,
-  or by any other process -- is still the same refusal and exit 2.
+  or by any other process -- is still the same refusal and exit 2, though on
+  macOS/BSD (standard BSD `SO_REUSEADDR` semantics, as in Python's own
+  `HTTPServer` default) a listener on the wildcard address does not block a
+  loopback bind.
