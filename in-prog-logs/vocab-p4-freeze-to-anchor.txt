@@ -156,6 +156,18 @@ composite expansion in the old word; prose only, left for the reviewer to
 call). design-log.md:270 was a key-sense hit this hid -- renamed to
 "anchored" in fix round 1; design-log.md now has zero froz hits.
 
+Fix round 2 addendum (the reviewer called the two comments; see G1/G2
+below): the final check now runs
+`grep -rniE 'froze\b|freez|frozen' src tests docs` -> 185 text lines = the
+same 88 Python frozen=True/frozenset lines + 97 lexical hits (real output
+saved to .scratch/grep-final-2.txt). The widened regex adds exactly one
+kept hit beyond the 96 above:
+- src/refdes/cli.py:111 -- `f"froze {writes.rewritten_images} image(s)"` in
+  the load-write notice: reports image_freeze's freeze; image sense, kept.
+The two froze hits G1/G2 fixed (test_work.py:709, test_load_time_writes.py:167)
+described composite expansion in the old word and are now "anchored", so
+they are no longer hits.
+
 ## Outcome
 FINISHED. Suite: 3562 passed, 2 skipped (exit=0, .scratch/suite.txt; no load
 flake seen). ruff --select E9,F src tests clean; gen_examples --check clean.
@@ -223,3 +235,38 @@ suite.txt; the Outcome section's numbers still describe it correctly.
 
 Fix round 1 FINISHED: one commit (staged by path), pushed once, PR body
 kept-hits list replaced and a review-fix comment posted.
+
+## Fix round 2 (review: chunk 1 approved; chunk 2 requested changes, 2 comments)
+Carried .scratch/FIX-2.txt exactly, against head aef2376. One commit, one
+push, no rebase. No Python logic touched.
+- G1 tests/test_work.py:709 comment "froze/expanded" -> "anchored/expanded".
+- G2 tests/test_load_time_writes.py:167 docstring "froze a composite naming
+  it" -> "anchored a composite naming it".
+- G3 final check widened to `grep -rniE 'froze\b|freez|frozen' src tests
+  docs` -> 185 text lines (88 Python frozen=True/frozenset + 97 lexical;
+  saved .scratch/grep-final-2.txt). G1/G2 were the only key-sense froze hits
+  left; the widened regex adds exactly one KEPT hit (cli.py:111, image
+  sense), appended with its reason to the kept-hits section above and to
+  the PR body.
+- G4 (chunk 1 nits, PR-adjacent lines round 1 had left as untouched):
+  * living-notes.md :192 "called from `_load()` at `src/refdes/cli.py:125`"
+    -> "called from `load_tree()` at `src/refdes/loader.py:143`, reached
+    from `_load()`" (grep -n: the anchor_follows call is loader.py:143;
+    _load reaches load_tree at cli.py:77). The "with
+    `write=not args.no_write`" gate wording left as-is.
+  * living-notes-plan.md :156 (H2 "must not silently change") and :268 (H5
+    Files "the sealed-entry refusal in") — the two remaining
+    `links.py:623-634` mentions -> `links.py:669-679`, now matching the two
+    lines round 1 fixed. All four plan mentions of the refusal agree.
+- Verification (round 2): no Python logic changed -> the two touched test
+  files only: tests/test_work.py + tests/test_load_time_writes.py -> 89
+  passed. `PYTHONPATH=$PWD/src .../python docs-site/gen_examples.py
+  --check` -> clean. `ruff check --select E9,F src tests` -> clean.
+  Full-suite trigger checked: grep over tests/ finds "living-notes" only in
+  docstrings — no test opens either living-notes doc (round 1's trigger was
+  test_revise_cli.py opening design-log.md, untouched this round) — and
+  gen_examples reads only schema-reference.md/vocabulary.md -> per FIX-2,
+  NO full suite this round.
+
+Fix round 2 FINISHED: one commit (staged by path, log in it), pushed once,
+PR body kept-hits list extended, short PR comment posted.

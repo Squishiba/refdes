@@ -153,7 +153,7 @@ the guard passes and the *event* write is what fails).
   index` → the edge **anchors**, the line prints, `.refdes/history/events/`
   holds one file. (Under H5 this is the normal case; under H2 alone it is
   still refused for a *sealed* entry, and the test asserts the refusal is
-  unchanged — H2 must not silently change `links.py:623-634`.)
+  unchanged — H2 must not silently change `links.py:669-679`.)
 - Two consecutive writable loads → one event, second load prints nothing.
 - Corrected edge → second event of kind `followed-corrected`, first event
   still on disk.
@@ -265,7 +265,7 @@ not captured."
 - `src/refdes/seal.py` — `verify()` (`:222`), `append_only_items()` (`:187`),
   `is_sealed()` (`:199`), `_report_deleted()` (`:343`). The change is scoped by
   a per-type policy so v1/v2 behaviour is byte-for-byte untouched.
-- `src/refdes/links.py:623-634` — the sealed-entry refusal in
+- `src/refdes/links.py:669-679` — the sealed-entry refusal in
   `plan_follows_anchor`. For a history-backed type the refusal is not reached;
   for a build-sealed type it stays exactly as written, including its warning.
 - `src/refdes/build.py:1977` — the `seal.verify(project, write=seal_write,

@@ -164,7 +164,7 @@ def test_a_guard_rolled_back_mint_is_no_key_for_the_rest_of_the_load(
     ways a write fails to land (finding KEY-GUARD-001). The insert refusing
     and the filesystem refusing both fed that set; the parse guard's own
     rollback did not, so the rolled-back item kept its minted key in memory
-    and the next step of the same load froze a composite naming it.
+    and the next step of the same load anchored a composite naming it.
 
     A forced guard (same monkeypatch as the test above) rolls back the mint
     into a flow-front-matter item, and a block-style sibling links to it

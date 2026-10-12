@@ -189,7 +189,8 @@ be nagged about.
 2. A hand-authored `follows:` edge captures the same event. Capture happens in
    the writable-load path that already rewrites a bare edge's spelling —
    `links.plan_follows_anchor()`/`anchor_follows()` (`src/refdes/links.py:633-818`,
-   called from `_load()` at `src/refdes/cli.py:125` with `write=not args.no_write`)
+   called from `load_tree()` at `src/refdes/loader.py:143`, reached from
+   `_load()` — with `write=not args.no_write`)
    — so the edge and its event come from one write pass and no new command or
    hook is introduced. `anchor_follows()` keeps what it does today; capture is
    added alongside it, not substituted for it.

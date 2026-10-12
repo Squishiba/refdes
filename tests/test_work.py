@@ -706,7 +706,7 @@ def test_blocked_and_check_rows_self_close(tmp_path, capsys):
     assert "LOG-010  P_diss violates BND-001" in before["check"]
 
     gaps = tmp_path / "items" / "gaps.yaml"
-    # The warm run froze/expanded `blocked_by: CMP-001` to its composite form,
+    # The warm run anchored/expanded `blocked_by: CMP-001` to its composite form,
     # so match the whole line regardless of the target's key suffix.
     gaps.write_text(
         re.sub(r"    blocked_by: CMP-001[^\n]*\n", "", gaps.read_text(encoding="utf-8")).replace(
