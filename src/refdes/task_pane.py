@@ -49,6 +49,22 @@ from .model import Item, Project
 #: `_derived_groups` fails a row of any other kind loudly, naming it.
 RENDERED_DERIVED_KINDS = ("coverage", "blocked", "check", "citation")
 
+#: The four states the projection can give a tip's authored task block
+#: (`threads.threads_projection`'s `tasks["state"]`); `_task_block` renders
+#: one posture each. Anything else is a new state the pane has no wording
+#: for: it is said by name, like an unrenderable derived kind (PR #197
+#: review nit), never silently rendered as a `declared` list.
+TASK_BLOCK_STATES = ("ambiguous", "undeclared", "cleared", "declared")
+
+
+def _unknown_state_message(state: object) -> str:
+    return (
+        f"task pane cannot render task-block state {state!r}: it renders "
+        f"{', '.join(TASK_BLOCK_STATES)} -- teach task_pane._task_block (the "
+        "posture line) and threads.threads_projection (the state) together "
+        "before a new state reaches the pane"
+    )
+
 
 def _unrenderable_kinds_message(kinds: list[str]) -> str:
     named = ", ".join(repr(kind) for kind in kinds)
@@ -170,6 +186,8 @@ def _task_block(tasks: dict) -> dict:
             "malformed_note": "",
             "rows": [],
         }
+    if tasks["state"] != "declared":
+        raise ValueError(_unknown_state_message(tasks["state"]))
     malformed = tasks.get("malformed")
     rows = [
         {

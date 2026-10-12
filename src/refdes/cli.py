@@ -1118,7 +1118,7 @@ def cmd_thread(args) -> int:
                 if row.get("state") == "open"
             ]
             print(_verdict_line(verdict, open_rows))
-        heading = "Tasks at tip:" if single else f"Tasks at {branch['tip']}:"
+        heading = threads_mod.task_heading(branch["tip"], single_tip=single)
         tasks = branch["tasks"]
         if tasks["state"] == "ambiguous":
             print(f"{heading} {threads_mod.TASK_POSTURE_AMBIGUOUS}")
@@ -1174,7 +1174,7 @@ def _work_authored_blocks(views: list[dict], as_of, date_format: str) -> list[li
                     continue
             if lines is None:
                 lines = [_thread_header(view)]
-            heading = "Tasks at tip:" if single else f"Tasks at {branch['tip']}:"
+            heading = threads_mod.task_heading(branch["tip"], single_tip=single)
             verdict = branch["verdict"]
             if verdict is not None and (
                 verdict["state"] == threads_mod.VERDICT_CONFLICTING or verdict["concluding"]

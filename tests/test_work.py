@@ -935,3 +935,22 @@ def test_the_command_writes_no_seal_even_on_a_type_that_seals_on_build(tmp_path,
     # Non-vacuity: the same project, built normally, does write the seal.
     assert _run(config, "build") == 0
     assert seal.exists()
+
+
+def test_work_authored_heading_prints_what_threads_task_heading_returns(tmp_path, capsys, monkeypatch):
+    """PR #197 review K1: `_work_authored_blocks` renders its heading through
+    `threads.task_heading`, not a copy typed in cli.py. Sabotage (cli.py
+    re-types the literal heading): the sentinel never reaches the output and
+    this fails."""
+    from refdes import threads
+
+    def fake(tip, *, single_tip):
+        return f"Tasks via task_heading({tip}, single={single_tip}):"
+
+    config = _gaps(tmp_path)
+    _warm(tmp_path, config, capsys)
+    monkeypatch.setattr(threads, "task_heading", fake)
+    assert _run(config, "work") == 0
+    lines = capsys.readouterr().out.splitlines()
+    assert "Tasks via task_heading(LOG-002, single=True):" in lines
+    assert "Tasks at tip:" not in lines

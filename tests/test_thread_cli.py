@@ -671,3 +671,22 @@ def test_json_derived_rows_follow_the_shared_kind_order(tmp_path, capsys):
         "check",
         "citation",
     ]
+
+
+def test_thread_heading_prints_what_threads_task_heading_returns(tmp_path, capsys, monkeypatch):
+    """PR #197 review K1: cmd_thread renders its heading through
+    `threads.task_heading` (the pane's one spelling), not a copy typed in
+    cli.py. Sabotage (cli.py re-types the literal heading): the sentinel
+    never reaches the output and this fails."""
+    from refdes import threads
+
+    def fake(tip, *, single_tip):
+        return f"Tasks via task_heading({tip}, single={single_tip}):"
+
+    config = _setup(tmp_path)
+    _warm(tmp_path, config, capsys)
+    monkeypatch.setattr(threads, "task_heading", fake)
+    assert _run(config, "thread", "LOG-002") == 0
+    lines = capsys.readouterr().out.splitlines()
+    assert "Tasks via task_heading(LOG-002, single=True):" in lines
+    assert "Tasks at tip:" not in lines

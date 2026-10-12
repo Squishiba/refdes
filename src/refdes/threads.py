@@ -120,14 +120,20 @@ DERIVED_HEADING = "Derived (auto clears when fixed)"
 #: A thread's own derived block simply never carries a `verdict` or `fork`
 #: row — those kinds belong to a whole-project worklist — but the table
 #: names all six so the grouping and the order are spelled once.
-DERIVED_GROUP_HEADINGS = {
-    "coverage": "Coverage",
-    "verdict": "Verdicts",
-    "blocked": "Blocked",
-    "check": "Failing checks",
-    "citation": "Citations",
-    "fork": "Forks",
-}
+#: A `MappingProxyType` for the same reason as TASK_GLYPHS (PR #197 review
+#: K2): `cli.THREAD_DERIVED_GROUP_HEADINGS` aliases this very object, so a
+#: mutable shared mapping would let a bug on one surface rewrite the other's
+#: printed bytes.
+DERIVED_GROUP_HEADINGS = MappingProxyType(
+    {
+        "coverage": "Coverage",
+        "verdict": "Verdicts",
+        "blocked": "Blocked",
+        "check": "Failing checks",
+        "citation": "Citations",
+        "fork": "Forks",
+    }
+)
 DERIVED_GROUP_ORDER = tuple(DERIVED_GROUP_HEADINGS)
 _KIND_ORDER = {kind: index for index, kind in enumerate(DERIVED_GROUP_ORDER)}
 

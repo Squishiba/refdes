@@ -25,11 +25,14 @@ from __future__ import annotations
 
 import hashlib
 import os
+import shutil
+import subprocess
 
 import pytest
 from conftest import write_project_config
 
 from refdes import build as build_mod
+from refdes import cli as cli_mod
 from refdes import history as history_mod
 from refdes import keys as keys_mod
 from refdes import pages as pages_mod
@@ -326,7 +329,9 @@ def test_a_threaded_items_page_carries_the_pane(tmp_path):
         ' id="refdes-taskpane-toggle" aria-controls="refdes-taskpane"'
         ' aria-expanded="false" hidden>Tasks</button>' in page
     )
-    assert "hidden" in body[: body.find("\n")]
+    first_line_end = body.find("\n")
+    assert first_line_end != -1, "pane body is a single line"
+    assert "hidden" in body[:first_line_end]
     # C1 (PR #197 review round 2): the heading is the threads.py constant,
     # not a string the template re-types.
     assert threads.TASK_HEADING_TIP in body
@@ -473,7 +478,7 @@ def test_the_derived_section_is_collapsed_labelled_and_uncheckable(tmp_path):
     open_at, close_at = body.find("<details"), body.find(">", body.find("<details"))
     tag = body[open_at : close_at + 1]
     assert tag == '<details class="refdes-taskpane-derived">'  # no `open`: collapsed
-    assert "<summary>Derived (auto clears when fixed)</summary>" in body
+    assert "<summary>" + threads.DERIVED_HEADING + "</summary>" in body
     assert "<h3>Coverage</h3>" in body
     assert "REQ-001  unverified" in body
     # labelled as derived and read-only: nothing inside can be ticked.
@@ -835,3 +840,67 @@ def test_the_shared_glyph_mapping_is_read_only():
     dict would let a bug on one surface rewrite the other's printed bytes."""
     with pytest.raises(TypeError):
         threads.TASK_GLYPHS["open"] = "[X]"
+
+
+def test_the_shared_derived_heading_mapping_is_read_only():
+    """K2: `cli.THREAD_DERIVED_GROUP_HEADINGS` IS
+    `threads.DERIVED_GROUP_HEADINGS`; the same one-object aliasing as the
+    glyphs, so the same read-only guarantee."""
+    assert cli_mod.THREAD_DERIVED_GROUP_HEADINGS is threads.DERIVED_GROUP_HEADINGS
+    with pytest.raises(TypeError):
+        threads.DERIVED_GROUP_HEADINGS["coverage"] = "Covered"
+
+
+def test_taskpane_js_is_syntactically_valid():
+    """K7 (PR #197 review): `node --check` on the shipped script. CI's
+    test job installs no node (tests.yml runs setup-python only), so this
+    skips when node is not on PATH — it bites on dev machines and wherever
+    node exists."""
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node is not on PATH")
+    script = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "src",
+        "refdes",
+        "templates",
+        "taskpane",
+        "taskpane.js",
+    )
+    result = subprocess.run(
+        [node, "--check", script], capture_output=True, text=True
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def test_the_pane_glyphs_dropped_and_unknown_row_states_as_threads_spell_them():
+    """K-round-3 nit: the pane rows for a dropped task and an unknown-state
+    task carry the shared glyphs — `[-]` and `[?]` — and an unknown row state
+    still gets its row, not a silent drop."""
+    block = task_pane._task_block(
+        {
+            "state": "declared",
+            "rows": [
+                {"id": "T-a", "text": "First.", "state": "open"},
+                {"id": "T-b", "text": "Second.", "state": "dropped"},
+                {"id": "T-c", "text": "Third.", "state": "wibble"},
+            ],
+        }
+    )
+    assert [row["glyph"] for row in block["rows"]] == [
+        threads.TASK_GLYPHS["open"],
+        threads.TASK_GLYPHS["dropped"],
+        threads.TASK_GLYPH_UNKNOWN,
+    ]
+    assert [row["id"] for row in block["rows"]] == ["T-a", "T-b", "T-c"]
+
+
+def test_an_unknown_task_block_state_is_said_not_rendered_as_declared():
+    """K-round-3 nit: `tasks["state"]` outside the four the projection emits
+    raises a named error (like an unrenderable derived kind) instead of
+    falling through to the `declared` list shape."""
+    with pytest.raises(ValueError) as caught:
+        task_pane._task_block({"state": "wibble", "rows": []})
+    message = str(caught.value)
+    assert "'wibble'" in message
+    assert "task pane cannot render task-block state" in message

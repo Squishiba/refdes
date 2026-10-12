@@ -346,7 +346,10 @@
        the valid rows print under it, exactly as `refdes thread` prints
        them — the count is never the note that stands where the rows go. #}
     <p class="refdes-taskpane-heading">{{ tab.heading }}{% if tab.tasks.malformed_note %} {{ tab.tasks.malformed_note }}{% endif %}</p>
-    <ul class="refdes-taskpane-tasks tight">
+    {# K4 (PR #197 review): no `tight` here on purpose — style.css `ul.tight`
+       (element+class) out-specifies this list's class rules, so the pane's
+       own spacing would never ship. The pane styles its own list. #}
+    <ul class="refdes-taskpane-tasks">
       {% for row in tab.tasks.rows %}
       {# The same facts `refdes thread` prints, the checkbox glyph as text
          — this is the read-only pane; ticking happens in files or /edit/. #}

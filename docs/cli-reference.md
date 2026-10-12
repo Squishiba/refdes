@@ -2063,10 +2063,11 @@ refdes serve --no-open --port 8731 --token-file /tmp/refdes-launch.txt
   the page is an older entry — the verdict line, and a collapsed *Derived
   (auto clears when fixed)* section of coverage, blocked, check and citation
   rows (a thread's derived block never carries verdict or fork rows — those
-  kinds belong to `refdes work`). Every line is `refdes thread`'s own wording and every fact
-  comes from the same headless projection that command reads; the pane
-  computes nothing and writes nothing. See
-  [`refdes thread`](#refdes-thread-lt-ref-gt) and `docs/design/thread-workbench.md` §7a.
+  kinds belong to `refdes work`). Every line is `refdes thread`'s own
+  wording and every fact comes from the same headless projection that
+  command reads; the pane computes nothing and writes nothing. See
+  [`refdes thread`](#refdes-thread-lt-ref-gt) and
+  `docs/design/thread-workbench.md` §7a.
 - **Loading writes nothing.** No key is minted, no link expanded, nothing
   sealed, no `.refdes/schema.json` written — the same guarantee as
   `--no-write`, pinned by `tests/test_no_write.py`. Files you edit outside the

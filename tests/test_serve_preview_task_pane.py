@@ -123,7 +123,12 @@ def test_the_preview_serves_the_pane_with_the_projection_lines(served):
     assert "viewing LOG-001 · tasks as of tip LOG-002" in html
     # B3 (PR #197 review round 2): the expectation is the shared composer's
     # output for the served project's own verdict, not a re-typed literal.
-    branch = threads.threads_projection(app.state.snapshot.project)[0]["branches"][0]
+    view = next(
+        view
+        for view in threads.threads_projection(app.state.snapshot.project)
+        if "LOG-001" in view["entries"]
+    )
+    branch = view["branches"][0]
     open_count = sum(
         1 for row in branch["tasks"]["rows"] if row["state"] == "open"
     )
@@ -216,7 +221,9 @@ def test_the_preview_renders_fork_tabs_never_unioned(served):
     first = html[html.find('data-refdes-panel="1"') :]
     first = first[: first.find('data-refdes-panel="2"')]
     second = html[html.find('data-refdes-panel="2"') :]
-    second = second[: second.find("<details")]
+    derived_at = second.find("<details")
+    if derived_at != -1:  # this fixture's second tip carries no derived block
+        second = second[:derived_at]
     # exactly one task per panel, each panel a different one -- a union
     # would put both in both
     assert ("T-left" in first) != ("T-right" in first)
@@ -251,10 +258,15 @@ def test_the_preview_offsets_the_toggle_above_the_bar(served):
     panel = re.search(r"\.refdes-taskpane \{ bottom: (\d+)px; \}", text)
     assert toggle and panel, "bar.css carries no task-pane offsets at all"
     toggle_at, panel_at = int(toggle.group(1)), int(panel.group(1))
-    bar = re.search(r"\.refdes-serve-bar \{[^}]*\}", text).group(0)
-    bottom = int(re.search(r"bottom: (\d+)px", bar).group(1))
-    pad_v = int(re.search(r"padding: (\d+)px", bar).group(1))
-    font_px, leading = re.search(r"font: (\d+)px/([\d.]+)", bar).groups()
+    bar = re.search(r"\.refdes-serve-bar \{[^}]*\}", text)
+    assert bar, "bar.css carries no .refdes-serve-bar rule"
+    bar = bar.group(0)
+    bottom = re.search(r"bottom: (\d+)px", bar)
+    pad_v = re.search(r"padding: (\d+)px", bar)
+    font = re.search(r"font: (\d+)px/([\d.]+)", bar)
+    assert bottom and pad_v and font, f"bar.css rule lost its metrics: {bar!r}"
+    font_px, leading = font.groups()
+    bottom, pad_v = int(bottom.group(1)), int(pad_v.group(1))
     # The bar's own top edge, above the viewport bottom: its bottom offset
     # plus its height (vertical padding x2 over the font's line box).
     bar_top = bottom + 2 * pad_v + int(font_px) * float(leading)

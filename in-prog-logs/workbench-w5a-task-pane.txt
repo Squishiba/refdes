@@ -15,7 +15,8 @@ this change builds nothing it would need to undo.
 Files:
 - src/refdes/threads.py — the one shared spelling of the pane/CLI strings:
   TASK_GLYPHS, TASK_GLYPH_UNKNOWN, DERIVED_HEADING, DERIVED_GROUP_ORDER,
-  DERIVED_GROUP_HEADINGS, verdict_open_suffix().
+  DERIVED_GROUP_HEADINGS, verdict_open_suffix(), verdict_line(),
+  task_heading().
 - src/refdes/cli.py — cmd_thread now reads those constants from threads
   instead of its own private copies (its printed bytes are unchanged;
   test_thread_cli.py stayed green untouched).
@@ -90,6 +91,12 @@ Files:
    `Derived (auto clears when fixed)`, groups in the one shared kind order
    with the owner's headings (Coverage/Verdicts/Blocked/Failing checks/
    Citations/Forks), rows carry no glyph and nothing inside is an input.
+   CORRECTION (2026-10-11, round 3, K6): the pane as shipped renders FOUR
+   kinds, not all six — `task_pane.RENDERED_DERIVED_KINDS = (coverage,
+   blocked, check, citation)`; a thread's derived block never carries
+   verdict or fork rows, and the B1 guard in `_derived_groups` refuses any
+   other kind loudly. The six headings live in
+   `threads.DERIVED_GROUP_HEADINGS` (the whole-project worklist's table).
 
 ## Difficulties / notes
 
@@ -321,6 +328,11 @@ the single push at the end goes out with --force-with-lease.
   model (`tab.heading`), and item.html.j2 renders that instead of typing
   "Tasks at tip:" itself. Sabotage (template re-types a different string):
   the two constant-derived page assertions fail.
+  CORRECTION (2026-10-11, round 3): the claim above was FALSE as written —
+  round 2 moved the pane/template half but left `heading = "Tasks at tip:"
+  if single else f"Tasks at {branch['tip']}:"` hard-coded in cli.py at
+  ~1121 (cmd_thread) and ~1177 (_work_authored_blocks). Round 3 K1 made
+  both call `threads.task_heading`; proof below in the round-3 record.
 - C2: the panels get `role="tabpanel"` + `aria-labelledby` only when the
   pane is forked (i.e. when there IS a tablist); a single-tip page now
   emits no tab roles at all. Two tests pin both halves. Sabotage
@@ -366,3 +378,97 @@ the single push at the end goes out with --force-with-lease.
   (the anchor walk above ran against that build's output).
 - node --check on taskpane.js: OK; DOM-stub harness: 30 checks pass.
 - All sabotages reverted; `grep -r SABOTAGE src/ tests/` empty.
+
+## Fix round 3 (PR #197 review, .scratch/FIX-3.txt)
+
+Head at start: fbd9a95 (empty re-trigger commit); `git pull --ff-only` picked
+it up clean.
+
+### MUST FIX (K1-K7)
+
+- K1 (the FALSE CLAIM about C1 — corrected above the round-2 record, there):
+  cli.py ~1121 (cmd_thread) and ~1177 (_work_authored_blocks) now call
+  `threads.task_heading(branch["tip"], single_tip=single)`. Proof, run after
+  the change and re-run after reverting the sabotage:
+
+      $ grep -n 'Tasks at' src/refdes/cli.py
+      (no output, exit 1)
+
+  CLI bytes unchanged: tests/test_thread_cli.py and tests/test_work.py green
+  with no assertion changes. Two new sentinel tests
+  (test_thread_heading_prints_what_threads_task_heading_returns,
+  test_work_authored_heading_prints_what_threads_task_heading_returns)
+  monkeypatch threads.task_heading and assert the sentinel reaches the
+  output of each command.
+- K2: `threads.DERIVED_GROUP_HEADINGS` is a MappingProxyType (same treatment
+  as TASK_GLYPHS); test asserts `cli.THREAD_DERIVED_GROUP_HEADINGS is` it
+  and that mutation raises TypeError.
+- K3: taskpane.js — (a) the observer block carries a comment saying it only
+  ACTS on pages with more than one thread anchor and today's item pages
+  carry one (the whole <article>); (b) `anchors.length < 2` skips the
+  IntersectionObserver setup entirely, so a one-entry page never greys
+  (harness check "one anchor on the page: no observer is set up at all");
+  (c) docs/design/thread-workbench.md §7a gets a dated W5a status note
+  under the follow/switch bullets: the bullets are the multi-anchor rule,
+  not a claim about today's one-thread pages (grepping docs/cli-reference.md
+  for grey/scroll/switch finds no such claim in it, so nothing there to
+  fix — verified `grep -n -i 'scroll\|grey\|switch' docs/cli-reference.md`
+  hits nothing near the pane bullet); (d) greyed panes carry
+  aria-disabled="true", removed when un-greyed (harness checks both halves).
+- K4: dropped `tight` from the pane's task list (item.html.j2 ~349) —
+  style.css `ul.tight` (element+class) out-specifies the pane's class
+  rules, so with `tight` the pane's own spacing never shipped; a comment
+  says why it is gone. Verified in a rebuilt page (.scratch/w5a_probe):
+  the pane list is `<ul class="refdes-taskpane-tasks">`,
+  taskpane.css:111 `.refdes-taskpane-tasks` is the only rule that matches
+  it (style.css:230/231 now match only the other `tight` lists).
+- K5: Escape ignores a defaultPrevented keydown; focus returns to the
+  toggle only when it was inside a pane (read before the panes hide). The
+  DOM-stub harness grew for both: Escape-from-inside returns focus,
+  Escape-with-focus-outside does NOT move it, defaultPrevented Escape is
+  ignored, and toggle/close-button paths keep the C3 behavior. Harness:
+  ALL JS CHECKS PASSED (38 checks, up from 30).
+- K6: PR body open questions 1 and 2 marked settled (owner, 2026-10-11 —
+  fine for now, may change by feel later) via gh api PATCH. Decision 8
+  above got its dated CORRECTION line (pane renders four kinds, not six —
+  task_pane.RENDERED_DERIVED_KINDS); the C1 paragraph got its round-3
+  CORRECTION; the What-landed Files list now names verdict_line() and
+  task_heading(). (The ~151 "Owner settled" line was already TRUE — the
+  owner did say so on 2026-10-11 — so it stands unchanged.)
+- K7: tests/test_task_pane.py::test_taskpane_js_is_syntactically_valid
+  runs `node --check` on the shipped taskpane.js, skips when
+  shutil.which("node") is None. CI note: .github/workflows/tests.yml
+  installs no node (setup-python only, ubuntu+windows matrix), so this
+  test skips in CI and bites on dev machines.
+
+### NITS
+
+- cli-reference.md pane bullet's two long lines (89/92 cols) rewrapped to
+  the file's ~77.
+- test_serve_preview_task_pane.py: the `<details` cut now keeps the whole
+  tail when there is no derived section (this fixture's second tip has
+  none — the old blind slice was cutting the last character), each
+  bar-metric re.search is asserted to match before .group(), and the
+  served-page verdict test selects LOG-001's thread view by
+  `"LOG-001" in view["entries"]`, not by list index.
+- task_pane._task_block: a state outside
+  TASK_BLOCK_STATES ("ambiguous"/"undeclared"/"cleared"/"declared") now
+  raises ValueError naming it (message pattern mirrors
+  _unrenderable_kinds_message), tested; the derived-heading test uses
+  threads.DERIVED_HEADING instead of the literal; the single-line pane
+  body find("\n") is guarded; new pane tests pin the dropped `[-]` and
+  unknown-state `[?]` glyphs (and that an unknown row state keeps its
+  row).
+
+### Verification (round 3)
+
+- Full suite, foreground, PYTHONPATH=$PWD/src, -p no:cacheprovider:
+  3621 passed, 2 skipped in 277.54s (.scratch/suite.txt, exit 0).
+- ruff --select E9,F on src and tests: All checks passed.
+- docs-site/gen_examples.py --check: up to date.
+- node --check on taskpane.js: OK; DOM-stub harness: ALL JS CHECKS PASSED.
+- K1 sabotage: restored the hard-coded heading at cli.py ~1121 → the new
+  sentinel test FAILED (existing byte-pinned tests passed — they compare
+  final bytes, which are identical, which is exactly why the sentinel
+  test was needed). Reverted; sentinel tests pass again; grep shows no
+  'Tasks at' left in cli.py and no SABOTAGE marker anywhere.
