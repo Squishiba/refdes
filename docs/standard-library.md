@@ -729,7 +729,7 @@ The standard's own types simply use them:
 
 - [`blocked_by:` and the cascade report](links.md#blocked-by-and-the-cascade-report)
 - [Parts indexing and the parts page](parts.md)
-- [Part equivalence: `drop_in` and `alternate`](links.md#part-equivalence-drop_in-and-alternate)
+- [Part equivalence: `drop_in` and `alternate`](links.md#part-equivalence-drop-in-and-alternate)
 
 ## Not yet built
 

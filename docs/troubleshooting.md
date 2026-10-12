@@ -338,7 +338,7 @@ a `bound` and `checks:` actually involved — and only ever targets `bound`.
 To point at a requirement instead, use `satisfies` (log/component,
 also reaches `bound`) or `governed_by`/`refines` (requirement) — see
 [`governed_by` vs. `refines` vs.
-`constrained_by`](links.md#governed_by-vs-refines-vs-constrained_by).
+`constrained_by`](links.md#governed-by-vs-refines-vs-constrained-by).
 
 **A reference in prose did not become a link.**
 Bare IDs only link when they resolve. A near miss like `REQ-PWR-2` instead of
@@ -375,7 +375,7 @@ is here because the block is what the command prints, in full.)
 
 Recording the retired id as `former_ids:` for external citations is a separate
 step, and a prefix-wide rename is what
-[`refdes rename`](cli-reference.md#refdes-rename-mapping-file) is for —
+[`refdes rename`](cli-reference.md#refdes-rename-lt-mapping-file-gt) is for —
 see [renumbering](ids.md#renumbering-former-ids).
 
 ## Math

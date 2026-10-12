@@ -280,7 +280,7 @@ link_types:
 | `label` | the link name | Heading shown on item pages |
 | `trace` | `true` | Whether this link type participates in a `{{cascade}}` block's default walk (see [generated blocks](blocks.md)) |
 | `doc` | not set | The verb's own definition — see [`doc`](#doc) |
-| `differs_from` | not set | One sentence per confusable neighbour — see [`differs_from`](#differs_from) |
+| `differs_from` | not set | One sentence per confusable neighbour — see [`differs_from`](#differs-from) |
 
 Either end resolves to the same edge, so a type may declare `verifies` even though
 `verified_by` is the name in `link_types`. See [links](links.md).
@@ -343,7 +343,7 @@ types:
 | `coverable_statuses` | not set — excludes `status: retired` if a `status` field exists, nothing otherwise | `status` values that keep an item in coverage; unlisted statuses (e.g. `draft`) are excluded entirely, not just "open" |
 | `verifying_statuses` | not set — every `verifies:` link counts | `status` values on a verifier (a type declaring a `verifies`-family link) that actually count as having verified, as opposed to merely linked; mirrors `satisfying_statuses` |
 | `doc` | not set | The type's own definition — see [`doc`](#doc) |
-| `differs_from` | not set | One sentence per confusable neighbour — see [`differs_from`](#differs_from) |
+| `differs_from` | not set | One sentence per confusable neighbour — see [`differs_from`](#differs-from) |
 
 `satisfying_statuses` requires the type to declare a `status` field — the project
 fails to load if it doesn't.
@@ -406,7 +406,7 @@ type, or `requirement`).
 | `default` | Applied when the item omits the field |
 | `on_change` | `invalidate`, `timeline`, or `ignore` |
 | `doc` | The field's own definition — see [`doc`](#doc) |
-| `differs_from` | One sentence per confusable neighbour — see [`differs_from`](#differs_from) |
+| `differs_from` | One sentence per confusable neighbour — see [`differs_from`](#differs-from) |
 
 ### `doc`
 
@@ -531,7 +531,7 @@ The standard's own `log.rationale` uses this
 (`required_when: {status: rejected}`), toggled by
 `require_rejection_rationale:` in `refdes-project.yaml`. `component.rationale`
 uses the `links` form (`required_when: {links: alternate}`) — see
-[`alternate`'s required rationale](links.md#part-equivalence-drop_in-and-alternate).
+[`alternate`'s required rationale](links.md#part-equivalence-drop-in-and-alternate).
 
 **`enum`, `limit`, `citations`, and `tasks` are enforced today.** `enum` is
 checked against `choices`; `limit` is parsed as a quantity; `citations` is

@@ -111,7 +111,7 @@ stdout.
 |---|---|---|
 | `refines` | `refined_by` | a requirement narrowing another requirement, or a bound narrowing another bound |
 | `derives_from` | `derived_by` | a bound derived from a requirement or another bound |
-| `governed_by` | `governs` | a requirement that must comply with a general rule stated in another requirement or bound — see [below](#governed_by-vs-refines-vs-constrained_by) |
+| `governed_by` | `governs` | a requirement that must comply with a general rule stated in another requirement or bound — see [below](#governed-by-vs-refines-vs-constrained-by) |
 | `satisfies` | `satisfied_by` | verdict log entry or component → requirement or bound |
 | `constrained_by` | `constrains` | verdict log entry or component → bound — traceability only, does **not** feed [coverage](coverage.md#which-links-feed-coverage) |
 | `verifies` | `verified_by` | test → requirement or bound |
@@ -120,10 +120,10 @@ stdout.
 | `amends` | `amended_by` | log entry → earlier log entry |
 | `follows` | `followed_by` | log entry → the earlier entry it continues |
 | `supersedes` | `superseded_by` | verdict log entry → older one |
-| `blocked_by` | `blocks` | log entry → anything holding it up — see [below](#blocked_by-and-the-cascade-report) |
+| `blocked_by` | `blocks` | log entry → anything holding it up — see [below](#blocked-by-and-the-cascade-report) |
 | `part_of` | `contains` | an item belonging to a group — requirement, bound, test, or component → group (deliberately not `log`) |
-| `drop_in` | `drop_in` (self-inverse) | component → drop-in second source, no review needed — see [below](#part-equivalence-drop_in-and-alternate) |
-| `alternate` | `alternate` (self-inverse) | component → functionally close, check before substituting — see [below](#part-equivalence-drop_in-and-alternate) |
+| `drop_in` | `drop_in` (self-inverse) | component → drop-in second source, no review needed — see [below](#part-equivalence-drop-in-and-alternate) |
+| `alternate` | `alternate` (self-inverse) | component → functionally close, check before substituting — see [below](#part-equivalence-drop-in-and-alternate) |
 
 > **Only from `hardware@3` onward.** `part_of`, and the `group` type it points
 > at, are new in `hardware@3` — v1 and v2 declare neither.
