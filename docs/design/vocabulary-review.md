@@ -363,6 +363,14 @@ review was in flight, and `docs/links.md` now says "**It is not yet available
 to authors:** no bundled standard declares the verb, so writing `follows:`
 today is an unknown-link error."
 
+> **2026-10-12 note (this paragraph is now stale).** The snapshot above was
+> true when written but is not true today: `hardware@3` now *does* declare
+> the `follows` verb (`src/refdes/standards/hardware/v3/base.yaml`,
+> `follows: { inverse: followed_by, label: "Follows", trace: false, … }`,
+> reachable via `refdes schema` on a v3 project — it appears as a property
+> of the `log` type). `docs/links.md` no longer says it is unavailable.
+> Left in place because this is an inventory snapshot, not live docs.
+
 ### 1.8 Coverage of the inventory
 
 Every item type in all three bundled versions and the bundled preset (11

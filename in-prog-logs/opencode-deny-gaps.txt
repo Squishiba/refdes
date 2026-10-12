@@ -1,7 +1,8 @@
 Task: close the recursive-delete pattern gaps in the repo-root opencode.json
 (PR #198's rules miss `rm -Rf`, `rm -f -r`, `rm --force --recursive`,
 `find … -delete`). Branch opencode-deny-gaps, cut from main 07666de.
-Finished: no (in progress).
+Finished: yes (merged as #202, commit 20ecd91; see the 2026-10-12 correction
+below for the one residual-gap claim that was wrong).
 
 2026-10-12 — started (one pause in the middle: vLLM restart, not my work).
 
@@ -56,6 +57,13 @@ The change (opencode.json, bash block — eight new deny patterns)
   (`rm --re x` — GNU rm accepts `--re` for `--recursive`). Left alone
   deliberately; chasing them would need broad tokens like `*--re*` that
   refuse far more than recursive deletes.
+
+2026-10-12 correction (sweep3-docs-followups, item I5): the
+  `rm --re x` "gap" above is wrong — it is denied today. `*rm -?r*`
+  matches it: the substring `rm --r` satisfies `rm -` + `?` (=`-`) +
+  `r`. The real residual gaps are only the three-or-more split flag
+  words (`rm -v -f -r x`); the long-option abbreviation case closed
+  once `*rm -?r*` / `*rm -?R*` landed in the same change.
 
 AGENTS.md — one sentence added after the opencode.json note: matching is on
 the whole command line, so `grep -rn "rm -rf" src` is refused too; search

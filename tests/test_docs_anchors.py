@@ -10,7 +10,7 @@ only the site is what users browse), which is exactly the class of bug this
 catches: links like ``links.md#blocked_by-and-the-cascade-report`` that look
 right but slug to ``blocked-by-and-the-cascade-report``.
 
-Scope: every ``[text](target)``-style link in ``docs/*.md`` and
+Scope: every ``[text](target)``-style link in ``docs/**/*.md`` and
 ``README.md``, checked against the ids of the target page. External links,
 links inside fenced code blocks and links inside inline code spans are
 skipped (they are not rendered as links). Every broken link is reported as
@@ -68,11 +68,13 @@ def _iter_links(md_path: Path):
 
 
 def _all_heading_ids() -> dict[Path, set[str]]:
-    return {path: _heading_ids(path) for path in sorted(DOCS.rglob("*.md"))}
+    ids = {path: _heading_ids(path) for path in sorted(DOCS.rglob("*.md"))}
+    ids[ROOT / "README.md"] = _heading_ids(ROOT / "README.md")
+    return ids
 
 
 def _checked_files() -> list[Path]:
-    return sorted(p for p in DOCS.glob("*.md")) + [ROOT / "README.md"]
+    return sorted(DOCS.rglob("*.md")) + [ROOT / "README.md"]
 
 
 def test_docs_site_slug_rules_are_what_this_check_follows():
@@ -94,7 +96,7 @@ def test_no_broken_anchor_links_in_docs():
             page_part, _, fragment = target.partition("#")
             if not fragment:
                 continue
-            base = DOCS if source.parent == DOCS else ROOT
+            base = source.parent
             page = (base / page_part).resolve() if page_part else source
             rel = source.relative_to(ROOT)
             if page not in ids:
