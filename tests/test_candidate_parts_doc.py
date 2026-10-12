@@ -12,9 +12,16 @@ skeleton the phase-4 flag would generate and the fixture the §9 table test
 builds on were files no project could load. (The implemented
 `scaffold.new_list_text` emits the mapping form for exactly this reason.)
 
-This is the anti-drift gate for that fix: the three fences are extracted
-from the doc as authored and run through the real parser, so re-editing
-any one of them back into a sketch that does not parse -- in either
+The §7.3 decision item is the fourth whole-file example, added on the
+sweep-3 pass: it is a markdown item file, and it had been written (ever
+since its fence was relabelled from yaml to markdown) without the opening
+`---` front-matter delimiter, so the file it presents -- front matter,
+`---`, body prose -- is one `refdes check` refuses with `no YAML
+front-matter (file must start with '---')`.
+
+This is the anti-drift gate for those fixes: every one of these fences is
+extracted from the doc as authored and run through the real parser, so
+re-editing any of them back into a sketch that does not parse -- in either
 spelling -- fails the suite with the parser's own diagnostic.
 """
 
@@ -87,6 +94,22 @@ def _load_list_file(tmp_path, name: str, text: str, init: bool = True):
     return items
 
 
+def _load_item_file(tmp_path, name: str, text: str):
+    """Write `text` as `items/<name>.md` in a freshly initialized project
+    and parse it as a markdown item file -- the same load layer
+    `_load_list_file` pins, for the format the §7.3 fence is written in."""
+    scaffold_mod.init(str(tmp_path))
+    items_dir = os.path.join(str(tmp_path), "items")
+    os.makedirs(items_dir, exist_ok=True)
+    path = os.path.join(items_dir, f"{name}.md")
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(text)
+    project = load_project(start=str(tmp_path))
+    items = parse.parse_markdown_file(project, path)
+    assert not [d.message for d in project.errors], project.errors[0].message
+    return items
+
+
 def test_recommendation_list_file_loads(tmp_path):
     """§6.1's recommended `items/power/candidates.yaml` parses as a list
     file: `defaults:` plus `items:`, and the defaults merge under the
@@ -146,3 +169,24 @@ def test_worked_example_candidates_load(tmp_path):
     assert by_id["CMP-PWR-014"].fields["status"] == "selected"  # own value wins
     assert by_id["CMP-PWR-017"].fields["status"] == "candidate"  # defaults win
     assert "```calc" in by_id["CMP-PWR-014"].body
+
+
+def test_decision_item_file_loads(tmp_path):
+    """§7.3's fence is a whole markdown item file: front matter between
+    opening and closing `---`, body prose below (candidate parts §7.3).
+    Before the sweep-3 fix the fence opened straight on `id:`, and the
+    file it shows is one the loader refuses -- the parser's own word is
+    `no YAML front-matter (file must start with '---')`, so a reader
+    pasting the example in gets a load error, and the worked example
+    (bounds + candidates + this file) does not check clean."""
+    items = _load_item_file(
+        tmp_path, "decision", _fence_after("### 7.3 The decision", "markdown")
+    )
+    assert [item.id for item in items] == ["DEC-PWR-007"]
+    decision = items[0]
+    assert decision.type == "log"
+    assert decision.fields["status"] == "accepted"
+    assert decision.links["selects"] == ["CMP-PWR-014"]
+    assert decision.links["satisfies"] == ["BND-PWR-011"]
+    assert "Three candidates were compared" in decision.body
+    assert "id: DEC-PWR-007" not in decision.body  # front matter, not prose

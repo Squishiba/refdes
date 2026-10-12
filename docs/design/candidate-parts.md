@@ -525,14 +525,19 @@ items:
 ```
 
 `defaults:` is already merged under every item in a list file with the item's
-own value winning (`parse.py:601-627`), so `status: candidate` is written once
-and the winner overrides it in place:
+own value winning (`parse_list_file` in `parse.py` merges the `defaults:` dict
+and then updates it with each entry's own keys), so `status: candidate` is
+written once and the winner overrides it in place:
 
 ```yaml
 - id: CMP-PWR-014
   title: MP1584EN buck module
   status: selected        # DEC-PWR-007 selects this one
 ```
+
+That block is not a second file and not a whole item file — it is a fragment
+of the `items:` list above, the same entry after the one `status:` edit. The
+`defaults:` block stays exactly where it is.
 
 The winner does **not** move to a `chosen.yaml`. Moving it would split the
 comparison across two files, take the loser out of the same `{{compare}}`
@@ -604,6 +609,15 @@ be registered, so a registry would be ceremony around a convention.
   `status` enum default, and omitted when the type declares no `status` field.
   Stdout only, exactly like `refdes new` today — it writes nothing, so it is
   safe under `--no-write` and composes with `> items/power/candidates.yaml`.
+
+  The skeleton above is an abridged sketch, not the flag's byte-exact output.
+  Everything through the `- id:` line — the opening `---`, the `defaults:`
+  block, the `items:` key — is what `refdes new component --list` prints;
+  below `- id:` the real output lists every field the type declares with its
+  `#` hint (`title:  # required -- text`) and comments out the optional ones
+  and the links, while the sketch shows only the three fields a shortlist
+  actually fills in — `part_number:` bare, where the real line is
+  `# part_number:  # text`, commented out as optional.
 - **`refdes init`** — unchanged. It writes `refdes-project.yaml` and the
   `.vscode` settings and nothing else; it cannot know the project's boards or
   domains, so it must not invent `items/power/`. Its closing message gains one
@@ -717,6 +731,7 @@ what extracts the used keys into the lockfile the checks then run on.
 ### 7.3 The decision
 
 ```markdown
+---
 id: DEC-PWR-007
 type: log
 summary: 3V3 rail regulator is the MP1584EN
