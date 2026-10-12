@@ -187,8 +187,12 @@ def test_the_preview_page_has_no_write_control_or_token(served):
     the marker first, so an absent pane can never pass this vacuously.)"""
     app, client, _tmp = served
     html = _body(client, app, "LOG-001")
-    start = html.find('<aside class="refdes-taskpane"')
-    assert start != -1, "the preview page must carry the pane at all"
+    # Round-6 nit (chunk 6): the slice starts at the TOGGLE, which
+    # item.html.j2 emits immediately before the aside — starting at the aside
+    # left the toggle's own markup outside the scan, so a write control added
+    # THERE would have passed this test unnoticed.
+    start = html.find('<button type="button" class="refdes-taskpane-toggle"')
+    assert start != -1, "the preview page must carry the pane's toggle at all"
     pane = html[start:]
     end = pane.find("</aside>")
     assert end != -1

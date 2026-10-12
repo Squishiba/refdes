@@ -106,6 +106,7 @@ def task_heading(tip: str, *, single_tip: bool) -> str:
     """
     return TASK_HEADING_TIP if single_tip else f"Tasks at {tip}:"
 
+
 #: The derived block's heading, without the CLI's trailing colon: `refdes
 #: thread` prints `DERIVED_HEADING + ":"`, the pane's <summary> is the bare
 #: heading (the task's owner string, 2026-10-11).
@@ -238,14 +239,25 @@ def derived_detail(row: dict) -> str:
     raise ValueError(unknown_derived_kind_message(kind))
 
 
-def age_suffix(row: dict, as_of=None, date_format: str = "%Y-%m-%d") -> str:
+def age_suffix(
+    row: dict, as_of=None, date_format: str = dates_mod.DEFAULT_DATE_FORMAT
+) -> str:
     """§5 rule 3's age line, spelled once (PR #197 review P2, the same
     posture as B3's `verdict_line`): the declaring entry and its authored
     date, absolute; a relative span is appended ONLY under an explicit
     `as_of` -- that is what `refdes thread`'s --as-of passes -- so a run
     without the flag is byte-identical whatever the wall clock says, and
     the static task pane (no flag, no clock) always prints the absolute
-    line alone. `date_format` is read only when `as_of` is given. The
+    line alone. `date_format` is read only when `as_of` is given, and must
+    be a `dates.parse_date` format -- the project's own `date_format:`,
+    which is what `refdes thread` passes; the default is
+    `dates.DEFAULT_DATE_FORMAT` because that is the format the authored date
+    is parsed with. A strftime pattern (e.g. `%Y-%m-%d`) is NOT one of
+    those, and the `ValueError` guard below -- there to tolerate an
+    unparseable *authored* date -- would swallow a bad format into an
+    absolute-only line, so a caller with `as_of` set would silently age
+    nothing (found while writing the round-6 age test, which now pins the
+    default by using it). The
     parenthesis only: `refdes thread`'s row layout prepends its own
     separator, the pane renders the text as-is."""
     since = row.get("open_since") or {}

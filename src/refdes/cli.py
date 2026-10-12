@@ -2757,7 +2757,7 @@ def main(argv: list[str] | None = None) -> int:
         "section 5 as a command. Two structurally separate groups with separate "
         "numbering: the authors' own open tasks at each thread tip (numbered, "
         "one block per tip; a fork prints every tip and no single current "
-        "status), then a labelled `Derived (auto clears when fixed)` block of "
+        f"status), then a labelled `{threads_mod.DERIVED_HEADING}` block of "
         "every gap that can be produced offline -- uncovered/unverified active "
         "requirements, proposed/on-hold verdicts, blocked-by cascades and stale "
         "blockers, failing checks, unpinned citations and missing kept copies, "

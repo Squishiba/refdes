@@ -56,10 +56,24 @@
   // Escape closes the pane (PR #197 review C3). It closes only what is open
   // and computes nothing — with the pane closed the key does nothing at all.
   // K5: a keydown another handler already claimed (defaultPrevented) is not
-  // ours to act on.
+  // ours to act on. Round-6: nor is one pressed somewhere else on the page —
+  // app.js dismisses its hover preview card on the same key WITHOUT calling
+  // preventDefault (templates/assets/app.js ~122), so a blanket document
+  // handler closed both surfaces on a single press. We act only when the key
+  // lands on us: focus inside the pane or on the toggle, or focus nowhere at
+  // all (body/documentElement), where no other handler owns the press.
   document.addEventListener("keydown", function (event) {
     if (event.defaultPrevented) return;
-    if (open && event.key === "Escape") {
+    if (!open || event.key !== "Escape") return;
+    var target = event.target;
+    var ours =
+      target === toggle ||
+      panes.some(function (pane) {
+        return pane.contains(target);
+      });
+    var unowned =
+      target === document.body || target === document.documentElement;
+    if (ours || unowned) {
       setOpen(false);
     }
   });
@@ -111,6 +125,11 @@
       // jump. Presentation-only, like everything here — it switches which
       // pre-rendered panel is visible and computes no task state.
       tab.addEventListener("keydown", function (event) {
+        // Round-6: a press another handler already claimed, and a chord
+        // (Ctrl/Meta/Alt + arrow is a browser or page shortcut), are not
+        // ours to swallow — only the bare arrow/Home/End keys are.
+        if (event.defaultPrevented) return;
+        if (event.ctrlKey || event.metaKey || event.altKey) return;
         var at = tabs.indexOf(tab);
         var next = null;
         if (event.key === "ArrowLeft") {
@@ -146,33 +165,37 @@
   if (anchors.length < 2) return;
   if (!("IntersectionObserver" in window)) return;
 
-  var visible = {};
+  // Round-6: visible anchors are tracked BY ELEMENT. Keyed by the `ref` they
+  // name, two anchors of the same thread cancelled each other — one leaving
+  // the viewport deleted the other's entry, so a thread still on screen
+  // read as not-in-view.
+  var visible = [];
   var observer = new IntersectionObserver(
     function (entries) {
       entries.forEach(function (entry) {
-        var ref = entry.target.getAttribute("data-refdes-thread");
+        var at = visible.indexOf(entry.target);
         if (entry.isIntersecting) {
-          visible[ref] = true;
-        } else {
-          delete visible[ref];
+          if (at === -1) visible.push(entry.target);
+        } else if (at !== -1) {
+          visible.splice(at, 1);
         }
       });
       for (var i = 0; i < anchors.length; i++) {
-        var ref = anchors[i].getAttribute("data-refdes-thread");
-        if (visible[ref]) {
-          var pane = paneFor(ref);
-          if (pane) {
-            panes.forEach(function (other) {
-              other.classList.remove("refdes-taskpane-grey");
-              other.removeAttribute("aria-disabled");
-            });
-            if (pane !== current) {
-              current = pane;
-              if (open) setOpen(true);
-            }
-          }
-          return;
+        if (visible.indexOf(anchors[i]) === -1) continue;
+        // Something is in view, so no pane is greyed — and that includes the
+        // case where the anchor in view names a thread with no pane of its
+        // own (round-6: the old code returned before un-greying, leaving the
+        // panes greyed while a thread was plainly on screen).
+        panes.forEach(function (other) {
+          other.classList.remove("refdes-taskpane-grey");
+          other.removeAttribute("aria-disabled");
+        });
+        var pane = paneFor(anchors[i].getAttribute("data-refdes-thread"));
+        if (pane && pane !== current) {
+          current = pane;
+          if (open) setOpen(true);
         }
+        return;
       }
       panes.forEach(function (other) {
         other.classList.add("refdes-taskpane-grey");

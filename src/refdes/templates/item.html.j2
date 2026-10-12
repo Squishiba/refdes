@@ -374,7 +374,11 @@
     <summary>{{ pane.derived_heading }}</summary>
     {% for group in pane.derived %}
     <h3>{{ group.heading }}</h3>
-    <ul class="tight small mono">
+    {# No `tight` here either (round-6 nit): style.css `ul.tight` would
+       out-specify `.refdes-taskpane-derived ul` the same way it out-specifies
+       the tasks list above, so the class only half applied. The pane styles
+       its own list. #}
+    <ul class="small mono">
       {% for row in group.rows %}
       <li>{{ row }}</li>
       {% endfor %}

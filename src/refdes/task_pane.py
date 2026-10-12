@@ -100,9 +100,10 @@ def label(item: Item) -> str:
 def panes_by_entry(views: list[dict]) -> dict[str, dict]:
     """`{entry label: pane model}` for every entry of every thread.
 
-    One pane model per thread (shared object across that thread's entries
-    would be wrong: the `viewing` note names the entry the page shows), so
-    a member's pane differs from its tip's only in that note.
+    One pane model per entry of the thread (one shared object across that
+    thread's entries would be wrong: the `viewing` note names the entry the
+    page shows), so a member's pane differs from its tip's only in that
+    note.
     """
     panes: dict[str, dict] = {}
     for view in views:

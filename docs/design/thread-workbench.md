@@ -217,13 +217,18 @@ new surface.
 - When you scroll over a different thread, the pane switches to that thread's
   task list.
 
-  *W5a status (PR #197 review K3, 2026-10-11):* following and switching
-  need a page that carries **more than one** thread anchor. Today's item
-  pages carry exactly one — the whole `<article class="item">` — so on
-  them the pane always shows its own thread's list and never switches or
-  greys; `taskpane.js` skips the observer entirely below two anchors. The
-  bullets above are the rule for the multi-anchor page shape, not a claim
-  about today's one-thread-per-page item pages.
+  *W5a status (PR #197 review K3, 2026-10-11, narrowed by R2 of review
+  round 6):* following and switching need a page that carries **more than
+  one** thread anchor. Today's item pages carry exactly one — the whole
+  `<article class="item">` — so on them the pane always shows its own
+  thread's list and never switches or greys; `taskpane.js` skips the
+  observer entirely below two anchors. The two bullets above that follow or
+  switch (a newer tip bringing the pane along, scrolling over a different
+  thread) are the rule for that multi-anchor page shape, not a claim about
+  today's one-thread-per-page item pages. The first bullet works today as
+  written: the click opens and closes the pane, and its `fixed` placement is
+  what §7a means by "follows the scroll" (see the header comment of
+  `templates/taskpane/taskpane.css`).
 
 Sub-decisions:
 

@@ -23,8 +23,10 @@ Clauses pinned:
 
 from __future__ import annotations
 
+import datetime
 import hashlib
 import os
+import re
 import shutil
 import subprocess
 
@@ -454,14 +456,33 @@ def test_a_fully_malformed_list_keeps_the_heading_and_note_but_no_empty_ul(
 
 
 def test_task_rows_carry_the_cli_facts_as_text(tmp_path):
-    _project, out = _render(tmp_path, ONE_TIP)
+    project, out = _render(tmp_path, ONE_TIP)
     body = pane(_page(out, "log-002"))
     assert "[ ]" in body and "[x]" in body  # the glyph, as text
     assert "T-thermal-model" in body
     assert "Model worst-case copper temperature." in body
     assert "(open since LOG-001, 2026-08-30)" in body
-    # absolute only: no relative span without the CLI's --as-of (§5 rule 3)
-    assert "day" not in body
+    # Absolute only: no relative span without the CLI's --as-of (§5 rule 3).
+    # Round-6 nit: pinned as the composer's OWN text for this very row rather
+    # than a bare `"day" not in body`, which any unrelated word could trip.
+    # The age is asked for in the composer's DEFAULT format, which is what
+    # makes the guard below load-bearing: the round-6 finding was that this
+    # default was a strftime pattern `dates.parse_date` can never parse, so
+    # `as_of` aged nothing at all and any "no relative span" assertion passed
+    # for the wrong reason.
+    row = next(
+        task
+        for branch in threads.threads_projection(project)[0]["branches"]
+        for task in (branch["tasks"]["rows"] or [])
+        # an OPEN row carrying an age: the only rows whose age the pane
+        # renders at all (task_pane._task_block spells `since` that way)
+        if task.get("state") == "open" and (task.get("open_since") or {}).get("entry")
+    )
+    absolute = threads.age_suffix(row)
+    relative = threads.age_suffix(row, as_of=datetime.date(2026, 9, 20))
+    assert relative != absolute, "the fixture row must age under --as-of"
+    assert absolute in body  # what the pane does print ...
+    assert relative not in body  # ... and what it must never print
 
 
 def test_the_verdict_line_is_the_shared_composers_line(tmp_path):
@@ -756,6 +777,25 @@ def test_the_published_pane_css_never_mentions_the_serve_bar(tmp_path):
         assert "bar.css" not in _page(out, name)
 
 
+def test_the_published_pane_css_resets_its_own_lists(tmp_path):
+    """R2 (PR #197 review round 6): both pane lists mark their rows themselves
+    — the tasks rows with the manual `{{ loop.index }}.` the template renders,
+    the derived rows with plain text — and style.css has no global `ul` reset,
+    so without `list-style: none` every row carried a disc bullet AND its own
+    marker. Pinned on the PUBLISHED css, the byte the reader actually gets."""
+    _project, out = _render(tmp_path, ONE_TIP)
+    with open(os.path.join(out, "assets", "taskpane.css"), encoding="utf-8") as fh:
+        css = fh.read()
+    # Comments out first: both rules below CITE `list-style: none` in their
+    # own comment text, so reading the raw file would pass with the real
+    # declaration deleted (the round-4 C4 lesson, in a new costume).
+    css = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
+    for selector in (r"\.refdes-taskpane-tasks", r"\.refdes-taskpane-derived ul"):
+        rule = re.search(selector + r"\s*\{([^}]*)\}", css)
+        assert rule, f"no {selector} rule in the published css at all"
+        assert "list-style: none" in rule.group(1), f"{selector} lost its reset"
+
+
 # ================= PR #197 review round 2 =================
 
 # The two kinds `refdes work`'s whole-project block carries that a THREAD's
@@ -906,7 +946,10 @@ def test_a_forked_panel_is_labelled_by_its_own_tab(tmp_path):
 
 def test_the_shared_glyph_mapping_is_read_only():
     """C5: `cli._THREAD_GLYPHS` IS `threads.TASK_GLYPHS`; a mutable shared
-    dict would let a bug on one surface rewrite the other's printed bytes."""
+    dict would let a bug on one surface rewrite the other's printed bytes.
+    Round-6 nit: the docstring claims the aliasing, so the test asserts it
+    (the derived-heading twin below already did)."""
+    assert cli_mod._THREAD_GLYPHS is threads.TASK_GLYPHS
     with pytest.raises(TypeError):
         threads.TASK_GLYPHS["open"] = "[X]"
 

@@ -29,8 +29,14 @@
    above it. Geometry from this file: the bar occupies bottom 12px up to
    42.2px (padding 6+6 over a 13px/1.4 line = 30.2px tall). The toggle
    starts at 50px — 7.8px clear of the bar's top edge — and the panel at
-   87px, clearing the ~29px toggle (6+6 padding, 1px borders, 12.5px text)
-   plus a gap. Static sites never load this file, so their pane keeps its
-   16px/64px bottom-right place untouched. */
+    87px, clearing the ~29px toggle (6+6 padding, 1px borders, 12.5px text)
+    plus a gap. Static sites never load this file, so their pane keeps its
+    16px/64px bottom-right place untouched. The toggle metrics behind that
+    ~29px are NOT this file's — `.refdes-taskpane-toggle` in
+    templates/taskpane/taskpane.css sets them (its comment points back
+    here) — and the offset test cannot read them: the toggle's `font:`
+    shorthand leaves line-height `normal`, so its height is not computable
+    from CSS text. That is why the test reads this file's numbers and stops
+    at `toggle bottom < panel bottom`. */
 .refdes-taskpane-toggle { bottom: 50px; }
 .refdes-taskpane { bottom: 87px; }

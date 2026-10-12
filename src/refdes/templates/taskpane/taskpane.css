@@ -8,6 +8,12 @@
    tokens, so dark mode and themes recolor it for free; this file is emitted
    only for projects that actually show a pane. */
 
+/* The `bottom` here and on `.refdes-taskpane` below are the STATIC site's
+   place. On the `refdes serve` preview the bar owns that corner and
+   `serve/static/bar.css` overrides both offsets (it loads after this file)
+   — that file's comment spells out the geometry, which is derived from the
+   toggle metrics this rule sets. */
+
 .refdes-taskpane-toggle {
   position: fixed;
   right: var(--space-16);
@@ -109,6 +115,11 @@
 }
 
 .refdes-taskpane-tasks {
+  /* PR #197 review R2: `list-style: none` because the rows number
+     themselves (item.html.j2 renders `{{ loop.index }}.` as the marker,
+     matching `refdes thread`), and style.css resets no `ul` globally — so
+     without this every row shows a disc bullet AND its own number. */
+  list-style: none;
   margin: var(--space-2) var(--space-0) var(--space-10);
   padding-left: var(--space-10);
 }
@@ -136,6 +147,9 @@
 }
 
 .refdes-taskpane-derived ul {
+  /* Same reason as `.refdes-taskpane-tasks` above: no bullets behind the
+     pane's own rows (PR #197 review R2). */
+  list-style: none;
   margin: var(--space-2) var(--space-0) var(--space-6);
   padding-left: var(--space-10);
 }
