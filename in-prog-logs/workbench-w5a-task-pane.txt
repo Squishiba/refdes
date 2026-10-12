@@ -32,12 +32,13 @@ Files:
   all inside `{% if taskpane_assets %}`.
 - src/refdes/templates/taskpane/taskpane.css, taskpane.js (new) — outside
   ASSET_DIR on purpose (see byte-identity below).
-- tests/test_task_pane.py (33 tests), tests/test_serve_preview_task_pane.py
+- tests/test_task_pane.py (37 tests), tests/test_serve_preview_task_pane.py
   (8 tests); docs (cli-reference serve section, output.md static-files
   paragraph, thread-workbench status header + §8 W5a/W5b split);
   changelog.d/thread-workbench-task-pane.added.md.
-  (Round-0 counts were 15/5; 33/8 are the CURRENT counts, collected with
-  `pytest --collect-only -q <file> | tail -1` — PR #197 review round 2 A2.)
+  (Round-0 counts were 15/5, 33/8 as of round 2; 37/8 are the CURRENT
+  counts, collected with `pytest --collect-only -q <file> | tail -1` —
+  PR #197 review round 2 A2, corrected in round 4 L1.)
 
 ## Design decisions (recorded here per the design doc's habit)
 
@@ -472,3 +473,32 @@ it up clean.
   final bytes, which are identical, which is exactly why the sentinel
   test was needed). Reverted; sentinel tests pass again; grep shows no
   'Tasks at' left in cli.py and no SABOTAGE marker anywhere.
+
+## Fix round 4 (PR #197 review, .scratch/FIX-4.txt)
+
+Docs and log only — round 4 made L1 and L2 (this commit) and updated the
+PR body (L3). Chunks 2-5 were approved at 5c3d6fa; no code changed here.
+
+- L1 (this file): the Files-section count said tests/test_task_pane.py
+  carried 33 tests. Recollected at this head: 37 (test_serve_preview_
+  task_pane.py still 8) — count and CURRENT-counts note corrected.
+- L2 (docs/design/thread-workbench.md): §9's "No change to what the
+  published site renders" was contradicted by W5a itself (§7a.6, §8).
+  Reworded: the site gains only the read-only pane; nothing else it
+  renders changes. The same-file grep found one claim W5a also
+  contradicts — §2's "decorations the published site does not show" —
+  qualified: the §7a pane is the one shared piece, read-only on the
+  site per §7a.6.
+- L3 (PR body, gh api PATCH): "Full suite: 3615 passed, 2 skipped" →
+  "3621 passed, 2 skipped" (round 3's measurement, recorded above);
+  the stale number only, prose untouched.
+
+### Verification (round 4)
+
+- `pytest --collect-only -q tests/test_task_pane.py
+  tests/test_serve_preview_task_pane.py | tail -3`: 45 collected
+  (37 + 8), foreground, PYTHONPATH=$PWD/src.
+- `python docs-site/gen_examples.py --check`: up to date (both files).
+- No runnable code changed, so no full-suite run. tests/ greps for
+  thread-workbench.md: five docstring references only — no test reads
+  the file's contents — so nothing there needed re-running.

@@ -57,7 +57,8 @@ a presentation, not as a workbench.
 A **workbench view** inside `refdes serve`: a single-item projection, pinned
 to the entry under work (typically a thread tip), rebuilt when the project
 changes, carrying **additive author decorations** the published site does not
-show.
+show — with the §7a task pane the one shared piece, read-only on the site per
+§7a.6.
 
 This is not a new storage model, not a new renderer, not a new document genre.
 The thread tip *is* the worksheet genre; this is the missing projection of it.
@@ -291,4 +292,6 @@ contract: for every rendered fact, name the Python mechanism that produced it.
 - No new storage, no database, no editor-owned truth.
 - No client-side semantics of any kind.
 - No change to capture, sealing, coverage, or check semantics.
-- No change to what the published site renders.
+- No change to what the published site renders, beyond the read-only task
+  pane of §7a.6/§8-W5a: the site gains that one pane and nothing else it
+  renders changes.
