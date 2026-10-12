@@ -980,21 +980,32 @@ def render_site(project: Project, draft: bool = False) -> str:
     # hoisted here so one whole `render_site` parses it once — the same
     # pass-through `threads_projection(captures=...)` already gives
     # `items_json`, extended to the pane's second projection call below.
-    try:
-        capture_index = history_mod.capture_index(project)
-    except (history_mod.HistoryError, OSError):
-        capture_index = {}
-    # W5a task pane (docs/design/thread-workbench.md §7a): the floating
-    # pane's model, computed once per render from `threads.threads_projection`
-    # -- the same projection the index payload's `threads` key carries and
-    # `refdes thread` renders, so the pane computes no fold, no tip and no
-    # derived row of its own and cannot disagree with either. A project with
-    # no `follows:` edge anywhere gets an empty mapping: no pane on any page
-    # and no pane assets, published output byte-identical -- the same
-    # "absent, not empty" posture as the thread panel itself.
-    task_panes = task_pane_mod.panes_by_entry(
-        task_pane_mod.thread_views(project, graph=thread_graph, captures=capture_index)
-    )
+    # PR #197 review round 2 (C6): gated on `project.items`, because a project
+    # with no items cannot own a thread and returns early below — reading
+    # the store on that path would be a store read no consumer ever sees.
+    # The E1 test renders a threaded (items-bearing) project, so the hoist
+    # still means exactly one read per `render_site` where it can happen.
+    task_panes: dict[str, dict] = {}
+    capture_index: dict = {}
+    if project.items:
+        try:
+            capture_index = history_mod.capture_index(project)
+        except (history_mod.HistoryError, OSError):
+            capture_index = {}
+        # W5a task pane (docs/design/thread-workbench.md §7a): the floating
+        # pane's model, computed once per render from
+        # `threads.threads_projection` -- the same projection the index
+        # payload's `threads` key carries and `refdes thread` renders, so the
+        # pane computes no fold, no tip and no derived row of its own and
+        # cannot disagree with either. A project with no `follows:` edge
+        # anywhere gets an empty mapping: no pane on any page and no pane
+        # assets, published output byte-identical -- the same "absent, not
+        # empty" posture as the thread panel itself.
+        task_panes = task_pane_mod.panes_by_entry(
+            task_pane_mod.thread_views(
+                project, graph=thread_graph, captures=capture_index
+            )
+        )
     env.globals["task_pane"] = lambda item: task_panes.get(task_pane_mod.label(item))
     taskpane_assets = bool(task_panes)
     env.globals["taskpane_assets"] = taskpane_assets

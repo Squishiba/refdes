@@ -327,8 +327,12 @@
   </div>
   {% endif %}
   {% for tab in pane.tabs %}
-  {% if pane.forked %}{% set heading = 'Tasks at ' ~ tab.tip ~ ':' %}{% else %}{% set heading = 'Tasks at tip:' %}{% endif %}
-  <div class="refdes-taskpane-panel" role="tabpanel" id="refdes-taskpane-panel-{{ loop.index }}" data-refdes-panel="{{ loop.index }}"{% if pane.forked and not loop.first %} hidden{% endif %}>
+  {# The heading is `refdes thread`'s own line, spelled once in threads.py
+     and handed to the page in the pane model (`tab.heading`) — the template
+     never re-types it (PR #197 review C1). The tab roles are a fork's:
+     with no tablist above, a bare `role="tabpanel"` would name a tab that
+     does not exist (PR #197 review C2). #}
+  <div class="refdes-taskpane-panel"{% if pane.forked %} role="tabpanel" aria-labelledby="refdes-taskpane-tab-{{ loop.index }}"{% endif %} id="refdes-taskpane-panel-{{ loop.index }}" data-refdes-panel="{{ loop.index }}"{% if pane.forked and not loop.first %} hidden{% endif %}>
     {% if tab.note %}
     {# §7a sub-decision 1: the tip's list on an older entry, saying so. #}
     <p class="refdes-taskpane-note small">{{ tab.note }}</p>
@@ -341,7 +345,7 @@
     {# B1 (PR #197 review): the malformed count rides on the heading and
        the valid rows print under it, exactly as `refdes thread` prints
        them — the count is never the note that stands where the rows go. #}
-    <p class="refdes-taskpane-heading">{{ heading }}{% if tab.tasks.malformed_note %} {{ tab.tasks.malformed_note }}{% endif %}</p>
+    <p class="refdes-taskpane-heading">{{ tab.heading }}{% if tab.tasks.malformed_note %} {{ tab.tasks.malformed_note }}{% endif %}</p>
     <ul class="refdes-taskpane-tasks tight">
       {% for row in tab.tasks.rows %}
       {# The same facts `refdes thread` prints, the checkbox glyph as text
@@ -350,7 +354,7 @@
       {% endfor %}
     </ul>
     {% else %}
-    <p class="refdes-taskpane-heading">{{ heading }} {{ tab.tasks.posture }}</p>
+    <p class="refdes-taskpane-heading">{{ tab.heading }} {{ tab.tasks.posture }}</p>
     {% endif %}
   </div>
   {% endfor %}

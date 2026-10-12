@@ -41,6 +41,25 @@ from __future__ import annotations
 from . import threads as threads_mod
 from .model import Item, Project
 
+#: The derived kinds this pane renders a row for — `_derived_row`'s arms,
+#: in the shared table's order (`threads.DERIVED_GROUP_ORDER` restricted to
+#: what a thread's own derived block can carry). `verdict` and `fork` are in
+#: the shared group table but belong to `refdes work`'s whole-project block,
+#: and this pane has no wording for them (PR #197 review B1): the guard in
+#: `_derived_groups` fails a row of any other kind loudly, naming it.
+RENDERED_DERIVED_KINDS = ("coverage", "blocked", "check", "citation")
+
+
+def _unrenderable_kinds_message(kinds: list[str]) -> str:
+    named = ", ".join(repr(kind) for kind in kinds)
+    return (
+        f"task pane cannot render derived row kind(s) {named}: it renders "
+        f"{', '.join(RENDERED_DERIVED_KINDS)} -- teach task_pane._derived_row "
+        "(the row's detail wording) and, if the projection really emits the "
+        "kind per thread, threads.DERIVED_GROUP_HEADINGS (the one group "
+        "table) and this set before rendering it"
+    )
+
 
 def thread_views(project: Project, *, graph=None, captures=None) -> list[dict]:
     """The projection, once per render (§7a: the pane is a client of it).
@@ -78,17 +97,18 @@ def panes_by_entry(views: list[dict]) -> dict[str, dict]:
 
 def pane_for(view: dict, viewing: str) -> dict:
     """One thread's pane, as the page of `viewing` shows it."""
+    single_tip = not view["forked"]
     return {
         "ref": view["ref"],
         "viewing": viewing,
         "forked": view["forked"],
-        "tabs": [_tab(branch, viewing) for branch in view["branches"]],
+        "tabs": [_tab(branch, viewing, single_tip) for branch in view["branches"]],
         "derived": _derived_groups(view["derived"]),
         "derived_heading": threads_mod.DERIVED_HEADING,
     }
 
 
-def _tab(branch: dict, viewing: str) -> dict:
+def _tab(branch: dict, viewing: str, single_tip: bool) -> dict:
     tip = branch["tip"]
     tasks = branch["tasks"]
     rows = tasks["rows"]
@@ -97,6 +117,9 @@ def _tab(branch: dict, viewing: str) -> dict:
         "tip": tip,
         "date": branch["date"],
         "summary": branch["summary"],
+        # The same heading `refdes thread` prints, from the same spelling
+        # (PR #197 review C1): the template renders this, never its own copy.
+        "heading": threads_mod.task_heading(tip, single_tip=single_tip),
         # §7a sub-decision 1: the tip's list on any entry, with the note
         # naming what the pane is looking at. On the tip's own page the
         # list is simply current, and `refdes thread` says nothing extra
@@ -108,15 +131,13 @@ def _tab(branch: dict, viewing: str) -> dict:
 
 
 def _verdict_line(verdict: dict | None, open_count: int) -> str | None:
-    """`refdes thread`'s Verdict line, in the owner's wording — including
-    the conflicting posture (§5 rule 3 for `status`, said as itself)."""
+    """`refdes thread`'s Verdict line, in the owner's wording — composed by
+    `threads.verdict_line`, the one spelling shared with both commands
+    (PR #197 review B3), so the conflicting posture (§5 rule 3 for `status`,
+    said as itself) and the open-task suffix cannot drift from the CLI's."""
     if verdict is None:
         return None
-    if verdict["state"] == threads_mod.VERDICT_CONFLICTING:
-        return threads_mod.verdict_conflicting_line(verdict["state"])
-    on = f", {verdict['declared_on']}" if verdict["declared_on"] else ""
-    suffix = threads_mod.verdict_open_suffix(verdict, open_count)
-    return f"Verdict: {verdict['status']} ({verdict['declared_by']}{on}){suffix}"
+    return threads_mod.verdict_line(verdict, open_count)
 
 
 def _task_block(tasks: dict) -> dict:
@@ -153,9 +174,15 @@ def _task_block(tasks: dict) -> dict:
     rows = [
         {
             "glyph": threads_mod.TASK_GLYPHS.get(row.get("state"), threads_mod.TASK_GLYPH_UNKNOWN),
-            "id": row.get("id", "?"),
-            "text": row.get("text", ""),
-            "since": _age(row),
+            # `or`, like `cli._task_row_lines` (PR #197 review B2): `id`/`text`
+            # may be explicitly null in the authored YAML (validation owns the
+            # error), and `.get(key, default)` would render that as "None".
+            "id": row.get("id") or "?",
+            "text": row.get("text") or "",
+            # §5 rule 3's age line belongs to an OPEN row only, like the
+            # CLI's gate (PR #197 review B4): the projection's `dict(row)`
+            # carries an authored `open_since:` through on any state.
+            "since": _age(row) if row.get("state") == "open" else "",
         }
         for row in (tasks["rows"] or [])
     ]
@@ -187,16 +214,14 @@ def _derived_groups(rows: list[dict]) -> list[dict]:
     grouping preserves that within-kind order and nothing here adds or
     removes a row — fix the gap, re-render, the row is gone (rule 2)."""
     groups = []
-    unknown = sorted({row["kind"] for row in rows} - set(threads_mod.DERIVED_GROUP_ORDER))
-    if unknown:
-        # A kind the projection can emit but the table cannot group must
-        # fail loudly, not drop its rows from the pane in silence (PR #197
-        # review S3): add it to `threads.DERIVED_GROUP_HEADINGS`, which IS
-        # the order now, and both surfaces pick it up.
-        raise ValueError(
-            f"derived kind(s) {unknown} missing from "
-            "threads.DERIVED_GROUP_HEADINGS (the one group table)"
-        )
+    unrenderable = sorted({row["kind"] for row in rows} - set(RENDERED_DERIVED_KINDS))
+    if unrenderable:
+        # A kind the pane cannot render must fail loudly, not drop its rows
+        # from the page in silence (PR #197 review S3, widened by B1: the
+        # old guard only covered kinds missing from the group table, so
+        # `verdict`/`fork` — in the table, unrenderable here — died on a
+        # bare KeyError instead).
+        raise ValueError(_unrenderable_kinds_message(unrenderable))
     for kind in threads_mod.DERIVED_GROUP_ORDER:
         kind_rows = [row for row in rows if row["kind"] == kind]
         if kind_rows:
@@ -212,12 +237,17 @@ def _derived_groups(rows: list[dict]) -> list[dict]:
 
 def _derived_row(row: dict) -> str:
     """One derived row in `refdes thread`'s detail wording, minus the kind
-    column the group heading now names."""
+    column the group heading now names. The kinds are the set up front in
+    `_derived_groups`; a row that got past that guard and still is not one
+    of them raises the same named error (PR #197 review B1) — never a bare
+    KeyError on the `problem` key it does not have."""
     if row["kind"] == "check":
         detail = f"{row['value']} violates {row['against']}"
     elif row["kind"] == "blocked":
         stale = " (stale)" if row["stale"] else ""
         detail = f"by {row['root']} ({row['root_status']}){stale}"
-    else:
+    elif row["kind"] in ("coverage", "citation"):
         detail = row["problem"]
+    else:
+        raise ValueError(_unrenderable_kinds_message([row["kind"]]))
     return f"{row['ref']}  {detail}"

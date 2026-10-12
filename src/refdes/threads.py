@@ -55,6 +55,8 @@ Nothing here writes — the same tree-hash guarantee every read surface carries.
 
 from __future__ import annotations
 
+from types import MappingProxyType
+
 from . import blocked as blocked_mod
 from . import chains as chains_mod
 from . import history as history_mod
@@ -84,8 +86,24 @@ VERDICT_CONFLICTING = "conflicting"
 #: (docs/design/thread-workbench.md §7a, W5a) — the pane "shows the same
 #: facts and wording as that command" by rendering these same strings, not
 #: a second spelling that can drift.
-TASK_GLYPHS = {"open": "[ ]", "done": "[x]", "dropped": "[-]"}
+#: A `MappingProxyType`, not a plain dict: `cli._THREAD_GLYPHS` aliases this
+#: very object (PR #197 review C5), and a mutable shared mapping would let a
+#: bug on one surface rewrite the other's printed bytes.
+TASK_GLYPHS = MappingProxyType({"open": "[ ]", "done": "[x]", "dropped": "[-]"})
 TASK_GLYPH_UNKNOWN = "[?]"
+
+#: The authored block's heading for a one-tip thread, spelled once (PR #197
+#: review C1): `refdes thread` and `refdes work` print it and the task pane
+#: renders it, so the pane takes it from here instead of hard-coding it.
+TASK_HEADING_TIP = "Tasks at tip:"
+
+
+def task_heading(tip: str, *, single_tip: bool) -> str:
+    """One branch's task-block heading: `Tasks at tip:` when the thread has
+    exactly one tip, `Tasks at <tip>:` when a fork names it (the same rule
+    every surface follows; `refdes thread`/`refdes work` render through it).
+    """
+    return TASK_HEADING_TIP if single_tip else f"Tasks at {tip}:"
 
 #: The derived block's heading, without the CLI's trailing colon: `refdes
 #: thread` prints `DERIVED_HEADING + ":"`, the pane's <summary> is the bare
@@ -156,6 +174,24 @@ def verdict_open_suffix(verdict: dict, open_count: int) -> str:
     return (
         f", {open_count} open task" + ("" if open_count == 1 else "s")
         + " remaining below"
+    )
+
+
+def verdict_line(verdict: dict, open_count: int) -> str:
+    """One folded verdict as a whole line, spelled once (PR #197 review B3):
+    `refdes thread`, `refdes work` and the task pane all render through it,
+    so the wrapper cannot drift from the suffix it embeds. A fold that
+    *refused* (§5 rule 3) prints the projection's own state word — never as
+    though nothing had concluded; a `concluding` verdict with open tasks at
+    its tip says how many remain below (rule 4's "never alone", via
+    `verdict_open_suffix`). `open_count` is that tip's open tasks (already
+    the empty count when there are none)."""
+    if verdict["state"] == VERDICT_CONFLICTING:
+        return verdict_conflicting_line(verdict["state"])
+    on = f", {verdict['declared_on']}" if verdict["declared_on"] else ""
+    return (
+        f"Verdict: {verdict['status']} ({verdict['declared_by']}{on})"
+        f"{verdict_open_suffix(verdict, open_count)}"
     )
 
 

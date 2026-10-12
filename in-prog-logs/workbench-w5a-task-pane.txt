@@ -31,10 +31,12 @@ Files:
   all inside `{% if taskpane_assets %}`.
 - src/refdes/templates/taskpane/taskpane.css, taskpane.js (new) — outside
   ASSET_DIR on purpose (see byte-identity below).
-- tests/test_task_pane.py (15 tests), tests/test_serve_preview_task_pane.py
-  (5 tests); docs (cli-reference serve section, output.md static-files
+- tests/test_task_pane.py (33 tests), tests/test_serve_preview_task_pane.py
+  (8 tests); docs (cli-reference serve section, output.md static-files
   paragraph, thread-workbench status header + §8 W5a/W5b split);
   changelog.d/thread-workbench-task-pane.added.md.
+  (Round-0 counts were 15/5; 33/8 are the CURRENT counts, collected with
+  `pytest --collect-only -q <file> | tail -1` — PR #197 review round 2 A2.)
 
 ## Design decisions (recorded here per the design doc's habit)
 
@@ -219,3 +221,148 @@ once in Python (chains.py's matches are docstring prose). test_work.py
   the warm check froze the bare one — same trick as _fork_from_bare) and a
   malformed task row beside a valid one; both tested through the template.
 
+
+## Fix round 2 (PR #197 review, .scratch/FIX-2.txt)
+
+Rebase first: origin/main had moved (PR #196 merged as 052d0c3, PR #198 as
+cd96e61). `git fetch origin && git rebase origin/main` applied all four
+commits CLEANLY — no conflicts to resolve. Sole writer of the branch, so
+the single push at the end goes out with --force-with-lease.
+
+### MUST FIX (chunk 1)
+
+- A1 (broken anchors): the real ids come from a real build, not a guess —
+  `refdes build` in docs-site/ (what .github/workflows/docs.yml runs) writes
+  _docs/ at the repo root, and `grep 'id="refdes-thread' _docs/cli-reference.html`
+  gives `refdes-thread-lt-ref-gt` (the `<ref>` in the heading slugifies
+  through `pages._slugify` as `lt`/`gt`, like standard-library.md's
+  `#refdes-new-lt-type-gt`). Fixed the two links THIS PR added:
+  docs/cli-reference.md's serve bullet and docs/output.md's static-files
+  paragraph. Then wrote .scratch/a1/check_anchors.py, which walks every
+  fragment link in docs/*.md (196 of them, mapped the way pages.py does:
+  docs/<page>.md -> <page>.html, design/<n>.md -> design-<n>.html) against
+  the built _docs/*.html. Result: this PR's two were the only broken links
+  in files it touches; both now resolve. It also lists 16 PRE-EXISTING
+  broken anchors in files this PR never touches (coverage/links/parts/
+  schema-reference/standard-library/troubleshooting — e.g.
+  `#governed_by-...` where the real id is `governed-by-...`, and
+  `#refdes-revise-mapping-file` where the real id is
+  `refdes-revise-lt-mapping-file-gt`). Out of scope for this PR; reported
+  to the owner in the PR comment.
+- A2 (stale counts in this log's "What landed"): fixed in place — the real
+  current counts, collected with `pytest --collect-only -q <file> | tail -1`,
+  are 33 (test_task_pane.py) and 8 (test_serve_preview_task_pane.py).
+- A3 (PR body): the Verification number went from the round-0 3527 to this
+  round's final number (below), via `gh api ... PATCH`.
+
+### MUST FIX (chunk 2)
+
+- B1 (unrenderable derived kinds): the S3 guard checked membership in
+  DERIVED_GROUP_ORDER, which names `verdict` and `fork` too — and
+  `_derived_row` has no arm for them, so a row of either kind died on a
+  bare `KeyError: 'problem'` mid-site-render. The pane now owns an
+  explicit set, `RENDERED_DERIVED_KINDS = (coverage, blocked, check,
+  citation)` (its row arms, restricted to what a thread's derived block
+  can carry), checked up front in `_derived_groups`, and `_derived_row`
+  itself raises the same message instead of reaching for `problem`. The
+  message now says what a fixer actually has to teach — the pane's
+  `_derived_row` arm AND the shared table/this set — not "add it to the
+  headings table" (which was false). Tests: fork row and verdict row each
+  raise the named ValueError through both entry points, and a message test
+  pins that it names both places. Sabotage (restore the old guard + old
+  else-branch): the three tests fail with `KeyError: 'problem'`; restoring
+  ONLY the old else-branch is still caught by the two direct `_derived_row`
+  tests. Reverted (grep SABOTAGE empty, suite green).
+- B2 (null id/text): `_task_block` now uses `or` exactly like
+  `cli._task_row_lines` (`row.get("id") or "?"`, `row.get("text") or ""`).
+  Test through the template (NULLS fixture): the row shows `?` and no
+  "None". Sabotage (restore `.get(key, default)`): the test fails.
+- B3 (one Verdict-line composer): `threads.verdict_line(verdict,
+  open_count)` composes the whole line (conflicting posture + the
+  `verdict_open_suffix` tail); `cli._verdict_line` delegates to it, and
+  its now-dead `_thread_verdict_suffix` wrapper is gone; the pane's
+  `_verdict_line` returns the composer's line. Pane tests (site AND
+  preview) now call the composer with the projection's own verdict dict
+  instead of re-typing the literal. cmd_thread's bytes: untouched —
+  test_thread_cli.py and test_work.py stayed green untouched. Sabotage
+  (make the pane re-spell its own wrapper without the suffix): both
+  pane tests fail; (drop the suffix in the composer instead): the two CLI
+  byte-pinning tests fail — which is exactly the protection the review
+  asked to keep.
+- B4 (age line on non-open rows): the row's `since` is gated on
+  `state == "open"` like the CLI's, because the projection's `dict(row)`
+  carries an authored `open_since:` through on any state. Test
+  (DONE_WITH_AGE fixture): the done row shows no age, the open row keeps
+  `(open since LOG-001, 2026-08-01)`. Sabotage (ungated `_age`): fails.
+- B5 tests:
+  (a) forked thread viewed from a TIP's own page: that tab carries no
+      note, the other tip's tab does (FORK fixture, page log-002).
+      Sabotage (make the note unconditional): this test AND the old
+      single-tip "no note" test fail.
+  (b) TWO threads in one project (TWO_THREADS fixture):
+      `panes_by_entry` keys all four members, each pane names its own
+      thread's ref, and the two pages carry only their own thread's task.
+      Sabotage (key every entry off `views[0]`): fails.
+  (c) `panel()` no longer cuts at the next `data-refdes-panel="` (which
+      sits INSIDE the next panel's opening tag); it cuts at the next
+      `<div`. The old cut leaked the next panel's tag but no existing
+      assertion noticed — so the fork-tip test now also pins
+      `refdes-taskpane-panel-2 not in panel(1)`; the sabotage (restore
+      the marker cut) fails there, which is the honest record that the
+      fix is now meaningful rather than cosmetic.
+  (d) the old `assert out` no-op became real: the draft render's `_site/`
+      tree has pages, and the item page still carries the pane marker.
+
+### SHOULD FIX (C1-C6)
+
+- C1: `threads.TASK_HEADING_TIP` / `threads.task_heading(tip, single_tip=)`
+  are the one spelling; `cmd_thread`/`_work_authored_blocks` call it (the
+  two hard-coded copies are gone), `pane_for` puts the result in the tab
+  model (`tab.heading`), and item.html.j2 renders that instead of typing
+  "Tasks at tip:" itself. Sabotage (template re-types a different string):
+  the two constant-derived page assertions fail.
+- C2: the panels get `role="tabpanel"` + `aria-labelledby` only when the
+  pane is forked (i.e. when there IS a tablist); a single-tip page now
+  emits no tab roles at all. Two tests pin both halves. Sabotage
+  (unconditional role): the single-tip test fails.
+- C3: taskpane.js — Escape closes an open pane, and every close (Escape,
+  the close button, the toggle) returns focus to the toggle; nothing else
+  changed and it still computes nothing. Verified with node --check plus
+  the extended DOM-stub harness (.scratch/w5a_js_check.js, 30 checks):
+  Escape-close, focus return, Escape-with-pane-closed no-op, other keys
+  no-op. Sabotage (remove the listener and the focus call): the harness
+  fails — first attempt cut too much of the file and failed at check 1,
+  redone precisely to fail exactly at the C3 checks. Reverted.
+- C4 (serve tests): the geometry assertion no longer divides literals by
+  nothing — bar.css is fetched, and the bar's bottom/padding/font metrics
+  and both pane offsets are PARSED from it before the arithmetic, so a
+  changed bar.css can actually fail the test; the two stylesheet `find()`
+  order checks are preceded by presence assertions (a missing stylesheet
+  used to make them vacuous); the "changes nothing on disk" test is now a
+  dedicated test that snapshots BEFORE `app.start()` and again after
+  `app.stop()`, built on a `_write_project` helper split out of the
+  fixture (the fixture's own setup is unchanged).
+- C5: `threads.TASK_GLYPHS` is a `types.MappingProxyType`, so
+  `cli._THREAD_GLYPHS` (kept as the cli-side handle) is a read-only view.
+  Test asserts mutation raises TypeError; sabotage (plain dict): fails.
+- C6: the hoisted `capture_index` read could NOT literally move below the
+  no-items early return (env globals must exist before the page loop,
+  which runs above that return), so the read is gated on `project.items`
+  instead — the same effect (the store is not read on the path where no
+  consumer ever sees the result), and E1's one-read test stays
+  meaningful: it renders an items-bearing project and still counts
+  exactly one read. New test `test_a_pages_only_render_never_reads_the_
+  capture_store` pins the gate; sabotage (ungated read): it fails, E1's
+  still passes.
+
+### Verification (round 2)
+
+- Full suite, foreground, PYTHONPATH=$PWD/src, `-p no:cacheprovider`:
+  3615 passed, 2 skipped in 280.73s (.scratch/suite.txt, exit 0).
+- tests/test_task_pane.py: 33 tests; tests/test_serve_preview_task_pane.py:
+  8 tests. Adjacent suites (thread_cli, work, theme, threads_render) green.
+- ruff --select E9,F on every touched src/tests file: clean.
+- docs-site/gen_examples.py --check: up to date; docs-site builds clean
+  (the anchor walk above ran against that build's output).
+- node --check on taskpane.js: OK; DOM-stub harness: 30 checks pass.
+- All sabotages reverted; `grep -r SABOTAGE src/ tests/` empty.

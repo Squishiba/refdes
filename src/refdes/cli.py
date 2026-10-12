@@ -803,7 +803,9 @@ def _print_reuse_note(retired_id: str, holders: list[str]) -> None:
 #: Derived rows render without any glyph -- they have no tickable state (§5
 #: rule 2), which is exactly why they live in their own block. The mapping
 #: lives in threads.py because the task pane (thread-workbench.md §7a,
-#: W5a) prints the same glyphs: one spelling, two surfaces.
+#: W5a) prints the same glyphs: one spelling, two surfaces. It is a
+#: `MappingProxyType` there, so this alias is a read-only view, not a second
+#: handle that could mutate the pane's glyphs (PR #197 review C5).
 _THREAD_GLYPHS = threads_mod.TASK_GLYPHS
 
 # The thread surface's fixed wording, spelled once (owner decisions,
@@ -857,13 +859,6 @@ def _thread_capture_line(capture: dict) -> str:
     if capture["occurred_at"]:
         wording += f", {capture['occurred_at']}"
     return f"{THREAD_CAPTURE_PREFIX} {capture['entry']} ({wording})"
-
-
-def _thread_verdict_suffix(verdict: dict, open_count: int) -> str:
-    """§5 rule 4's "never alone" as a suffix on the verdict line. The
-    wording lives in threads.py (`verdict_open_suffix`) because the task
-    pane (thread-workbench.md §7a, W5a) prints the same verdict line."""
-    return threads_mod.verdict_open_suffix(verdict, open_count)
 
 
 def _thread_age_suffix(row: dict, as_of, date_format: str) -> str:
@@ -926,20 +921,12 @@ def _task_row_lines(rows: list[dict], as_of, date_format: str) -> list[str]:
 
 
 def _verdict_line(verdict: dict, open_rows: list[dict]) -> str:
-    """One folded verdict as a line, spelled once for both commands. A fold
-    that *refused* (§5 rule 3) prints the projection's own state word
-    (`threads.VERDICT_CONFLICTING`) -- never displayed as though nothing had
-    concluded, and never spelled a second way; a `concluding` verdict with
-    open tasks at its tip says how many remain below (rule 4's "never
-    alone", via the shared `_thread_verdict_suffix`). `open_rows` is that
-    tip's open tasks (already the empty list when there are none)."""
-    if verdict["state"] == threads_mod.VERDICT_CONFLICTING:
-        return threads_mod.verdict_conflicting_line(verdict["state"])
-    on = f", {verdict['declared_on']}" if verdict["declared_on"] else ""
-    return (
-        f"Verdict: {verdict['status']} ({verdict['declared_by']}{on})"
-        f"{_thread_verdict_suffix(verdict, len(open_rows))}"
-    )
+    """One folded verdict as a line, spelled once for both commands: the
+    whole line is composed in `threads.verdict_line` (PR #197 review B3 --
+    the wrapper and its suffix are one spelling, shared with the task pane).
+    `open_rows` is that tip's open tasks (already the empty list when there
+    are none)."""
+    return threads_mod.verdict_line(verdict, len(open_rows))
 
 
 def _derived_detail(row: dict) -> str:

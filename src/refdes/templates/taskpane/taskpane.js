@@ -35,7 +35,21 @@
       pane.hidden = !(open && pane === current);
     });
     toggle.setAttribute("aria-expanded", open ? "true" : "false");
+    if (!next) {
+      // The pane is about to be hidden, so whatever held focus inside it is
+      // gone: hand focus back to the one control that can open it again
+      // (PR #197 review C3). Presentation-only, like everything here.
+      toggle.focus();
+    }
   }
+
+  // Escape closes the pane (PR #197 review C3). It closes only what is open
+  // and computes nothing — with the pane closed the key does nothing at all.
+  document.addEventListener("keydown", function (event) {
+    if (open && event.key === "Escape") {
+      setOpen(false);
+    }
+  });
 
   // The toggle is marked `hidden` in the page so a reader with JavaScript
   // off never sees a dead control; revealing it is the first thing the

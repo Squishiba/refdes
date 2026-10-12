@@ -19,6 +19,7 @@ from conftest import write_project_config
 from serve_support import Client, snapshot_tree
 
 from refdes import cli as cli_mod
+from refdes import threads
 from refdes.serve.server import EditorApp
 
 CONFIG = (
@@ -60,8 +61,11 @@ LOG_FILE = (
 )
 
 
-@pytest.fixture()
-def served(tmp_path):
+def _write_project(tmp_path) -> str:
+    """The served project, on disk, unloaded: threaded log + a fork + a
+    malformed row. Returns the config path. Split out of the fixture so the
+    "changes nothing on disk" test can snapshot BEFORE the app starts
+    (PR #197 review C4)."""
     write_project_config(tmp_path, CONFIG)
     items = tmp_path / "items"
     items.mkdir()
@@ -88,6 +92,12 @@ def served(tmp_path):
         for block in blocks
     )
     path.write_text(text, encoding="utf-8")
+    return config
+
+
+@pytest.fixture()
+def served(tmp_path):
+    config = _write_project(tmp_path)
     app = EditorApp(config, poll_interval=0.05)
     app.start()
     try:
@@ -111,10 +121,15 @@ def test_the_preview_serves_the_pane_with_the_projection_lines(served):
     html = _body(client, app, "LOG-001")
     assert 'data-refdes-taskpane="LOG-001"' in html
     assert "viewing LOG-001 · tasks as of tip LOG-002" in html
-    assert (
-        "Verdict: accepted (LOG-002, 2026-09-02), 1 open task remaining below"
-        in html
+    # B3 (PR #197 review round 2): the expectation is the shared composer's
+    # output for the served project's own verdict, not a re-typed literal.
+    branch = threads.threads_projection(app.state.snapshot.project)[0]["branches"][0]
+    open_count = sum(
+        1 for row in branch["tasks"]["rows"] if row["state"] == "open"
     )
+    line = threads.verdict_line(branch["verdict"], open_count)
+    assert line in html
+    assert line.startswith("Verdict: accepted (")
 
 
 def test_the_pane_assets_ride_along_in_the_preview(served):
@@ -134,17 +149,30 @@ def test_a_non_threaded_preview_page_carries_no_pane(served):
     assert "refdes-taskpane" not in html
 
 
-def test_serving_the_pane_changes_nothing_on_disk(served):
-    """The pane is read-only in the strongest sense: serving it never
-    writes into the project. (The generation the preview renders into is
-    not project content either — snapshot covers the project root.)"""
-    app, client, tmp = served
-    before = snapshot_tree(tmp)
-    _body(client, app, "LOG-001")
-    _body(client, app, "LOG-006")
-    client.page("/preview/assets/taskpane.js")
-    client.page("/preview/assets/taskpane.css")
-    assert snapshot_tree(tmp) == before
+def test_serving_the_pane_changes_nothing_on_disk(tmp_path):
+    """The pane is read-only in the strongest sense: starting the server and
+    serving pane pages never writes into the project. (The generation the
+    preview renders into is not project content either — snapshot covers the
+    project root.)
+
+    C4 (PR #197 review round 2): the snapshot is taken BEFORE `app.start()`
+    -- the old version snapshotted inside the already-started fixture, so a
+    write during startup would have been invisible. Dedicated test (it needs
+    the app's whole lifetime) built on the fixture's own setup helper."""
+    config = _write_project(tmp_path)
+    before = snapshot_tree(tmp_path)
+    app = EditorApp(config, poll_interval=0.05)
+    app.start()
+    try:
+        client = Client(app)
+        _body(client, app, "LOG-001")
+        _body(client, app, "LOG-006")
+        client.page("/preview/assets/taskpane.js")
+        client.page("/preview/assets/taskpane.css")
+        assert snapshot_tree(tmp_path) == before
+    finally:
+        app.stop()
+    assert snapshot_tree(tmp_path) == before  # and stopping wrote nothing either
 
 
 def test_the_preview_page_has_no_write_control_or_token(served):
@@ -207,13 +235,28 @@ def test_the_preview_offsets_the_toggle_above_the_bar(served):
     app, client, _tmp = served
     html = _body(client, app, "LOG-001")
     assert "refdes-serve-bar" in html  # the bar is on this page
+    # C4 (PR #197 review round 2): presence FIRST -- `find` returns -1 for a
+    # missing needle, so `find(a) < find(b)` once passed vacuously on a page
+    # carrying neither stylesheet (or only the bar's).
+    assert 'href="assets/taskpane.css"' in html
+    assert "/edit/static/bar.css" in html
     assert html.find("assets/taskpane.css") < html.find("/edit/static/bar.css")
     status, _h, css = client.page("/edit/static/bar.css")
     assert status == 200
     text = css.decode("utf-8")
-    assert ".refdes-taskpane-toggle { bottom: 50px; }" in text
-    assert ".refdes-taskpane { bottom: 87px; }" in text
-    # the bar's own top edge is at 12px + 30.2px (6+6 padding over 13px/1.4)
-    # = 42.2px; the toggle's 50px clears it, and the panel's 87px clears the
-    # ~29px toggle. Geometry arithmetic, checked against bar.css.
-    assert 12 + (6 + 13 * 1.4 + 6) < 50 < 87
+    # The pane's offsets, read back OUT OF bar.css (C4: the old assertion
+    # was `12 + (6 + 13 * 1.4 + 6) < 50 < 87` -- pure literals that can
+    # never fail. Every number below comes from the fetched file.)
+    toggle = re.search(r"\.refdes-taskpane-toggle \{ bottom: (\d+)px; \}", text)
+    panel = re.search(r"\.refdes-taskpane \{ bottom: (\d+)px; \}", text)
+    assert toggle and panel, "bar.css carries no task-pane offsets at all"
+    toggle_at, panel_at = int(toggle.group(1)), int(panel.group(1))
+    bar = re.search(r"\.refdes-serve-bar \{[^}]*\}", text).group(0)
+    bottom = int(re.search(r"bottom: (\d+)px", bar).group(1))
+    pad_v = int(re.search(r"padding: (\d+)px", bar).group(1))
+    font_px, leading = re.search(r"font: (\d+)px/([\d.]+)", bar).groups()
+    # The bar's own top edge, above the viewport bottom: its bottom offset
+    # plus its height (vertical padding x2 over the font's line box).
+    bar_top = bottom + 2 * pad_v + int(font_px) * float(leading)
+    assert bar_top < toggle_at, "the toggle must clear the bar's top edge"
+    assert toggle_at < panel_at, "the panel must sit above the toggle"
