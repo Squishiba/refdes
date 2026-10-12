@@ -112,6 +112,9 @@ in `.scratch/`. Never write outside your own working directory.
 `opencode.json` at the repo root denies recursive `rm` and any use of `/tmp`
 for OpenCode agents, so those attempts are refused outright instead of
 prompting — make a new `.scratch/` directory rather than clearing an old one.
+Matching runs on the whole command line, so a command that merely mentions
+`rm -rf` inside a string — `grep -rn "rm -rf" src` — is refused too; search
+with a pattern that does not spell it out.
 
 Stage files explicitly by path (`git add -- <paths>`), never `git add -A` or
 `git add .`, so nothing unintended is committed.
