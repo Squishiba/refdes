@@ -1,0 +1,109 @@
+# sweep3-candidate-parts-doc — docs/design/candidate-parts.md corrections (from merged PR #181 review)
+
+Branch: sweep3-candidate-parts-doc (cut from main 20ecd91, tree clean at
+start). Task file: .scratch/TASK-ITEMS.txt.
+
+## Progress log
+
+- 2026-10-12: read AGENTS.md, task files. Started verification of J1-J5.
+  Key context found via git log: PR #188 ("small follow-ups from the
+  2026-10-10 reviews", commit 7dc4a42, on main) already touched this doc:
+  it relabelled the §7.3 fence `yaml`->`markdown`, added the CSVs to the
+  §7.2 fixtures' `citations:`, updated the §6.4 skeleton doc-test, and
+  recorded the §6.4 "matches the generator" body claim as "does not exist
+  on main -- skipped as not reproducing". Each item is re-verified
+  independently below, not taken on #188's word.
+
+## Item outcomes (each verified on this branch before touching anything)
+
+J1 §7.3 fence — FIXED (partially done by #188, rest still broken).
+   #188 relabelled the fence yaml->markdown, but the fence still opened on
+   `id:` with no leading delimiter, so the whole item file it shows is one
+   the loader refuses. Reproduced: scratch project (.scratch/j5-worked-
+   example/proj-decision) built from the §7 fences verbatim ->
+   `refdes check` exit 1: "items/power/decision.md:1 — no YAML front-matter
+   (file must start with '---')". With the opening `---` added inside the
+   fence (the change made here), the same project checks exit 0, 0 errors
+   (7 items; remaining warnings are the §7.1 fragment's stub bodies and
+   coverage, no errors; the two rejected components' failures are INFO
+   under -v exactly as §7.4 describes). Pinned by the new
+   test_decision_item_file_loads in tests/test_candidate_parts_doc.py
+   (extracts the fence via the existing _fence_after, runs it through
+   parse.parse_markdown_file; asserts id/type/status/selects/satisfies/body
+   split). Sabotage: removed the added `---` again, test failed with the
+   parser's own message ("no YAML front-matter ..."), restored, 4/4 pass.
+
+J2 §6.1's second yaml fence — FIXED (verified still applies).
+   The fence is a bare top-level sequence (one items: entry). The text
+   around it ("the winner overrides it in place:") did not say the block is
+   a fragment, so it read as a second whole file, which no list file may
+   be. Now says so explicitly after the fence. Also in that paragraph:
+   `parse.py:601-627` had drifted (that range is `_resolve_section_marker`
+   now; the merge is in `parse_list_file`, parse.py:1464-1466 on this
+   branch) — the citation now names the function and what it does instead
+   of a line range. No test: wording; the fence itself is already pinned
+   by test_candidate_parts_doc.py only via the FIRST yaml fence after the
+   heading (_fence_after semantics), the fragment is not parsed.
+
+J3 §6.4 "matches the generator" — FIXED (claim verified against the tool).
+   The exact phrase "matches the generator" is NOT in the doc (grep:
+   `generator|matches` hits only lines 837/884, unrelated) — #188 recorded
+   the same. What IS there presents the sketch as what the flag prints.
+   Verified by running `refdes new component --list` in the scratch project
+   (output kept in .scratch/j5-worked-example/pass1.txt): everything through
+   `- id:` matches the sketch exactly; below it the real output lists every
+   component field with its `#` hint and comments out optionals and links.
+   Added a paragraph to §6.4 saying exactly that (what matches, what is
+   abridged, incl. `part_number:` bare in the sketch vs `# part_number:` in
+   the output). Pinned at the level it's true by the existing
+   test_new_list_skeleton_shape_loads (mapping form + equal defaults +
+   generated output loads); the per-field claim in the new paragraph is
+   checked against the captured real output, not re-pinned (the existing
+   test docstring already says why field lists are not compared).
+
+J4 test docstring claiming a pin it doesn't make — SKIPPED, already fixed.
+   The test is tests/test_candidate_parts_doc.py. At #181 its
+   test_new_list_skeleton_shape_loads docstring claimed "the same shape
+   `scaffold.new_list_text` actually emits" without ever calling the
+   generator. #188 (git show 7dc4a42) added the actual comparison
+   (list(real)==list(sketch), equal defaults:, generated output loads) and
+   rewrote the docstring to say what is and isn't compared. Verified the
+   current docstring line by line against the current assertions: every
+   claim now has its assert. Nothing to change.
+
+J5 §7.2 source() CSVs — SKIPPED as already fixed (verified independently,
+   not on #188's word). Built the §7 example as a real project
+   (.scratch/j5-worked-example/build_proj.py, dirs proj/ + proj-decision/):
+   bounds (the §7.1 fence is a bare sequence, wrapped under items: to be a
+   file), candidates verbatim, decision (see J1), + key,value CSVs with the
+   §7.4 table's numbers + placeholder PDFs. `refdes check` before fetch:
+   exit 1, 12 errors = "source(...) has no locked value" x6 + cascade
+   "check refers to I_out/I_q, which no calc block defines" x6 — the §7.2
+   prose itself says fetch is what pins them. After `refdes fetch` (exit 0,
+   6 citations processed): check exit 0, "6 items, 0 errors"; with -v the
+   only check results are the two INFO violations on the rejected items,
+   matching §7.4's bullets ("hidden without -v, neither fails the build").
+   The review's 6 errors (source paths not authorized by a same-item
+   `citations:` entry) no longer reproduce — #188's citations addition is
+   what J5 asked for and it works. No doc change needed beyond J1.
+
+## Gates
+(see below, filled in when run)
+
+Gates (all foreground):
+- Full suite: 3588 passed, 2 skipped, exit 0 (.scratch/suite.txt, 260.98s).
+  No known load flake fired; no re-runs needed.
+- ruff check --select E9,F src tests: clean (exit 0).
+- docs-site/gen_examples.py --check: up to date (exit 0).
+- tests/test_candidate_parts_doc.py: 4 passed, including the new
+  test_decision_item_file_loads; sabotage run recorded under J1 above.
+
+Changelog fragment: changelog.d/candidate-parts-doc-decision-fence-loads.fixed.md.
+Rule applied: "Each change that deserves a changelog entry gets one fragment"
+— this is a user-visible doc defect (a whole-file example that does not load)
+fixed, and changelog.d precedent (candidate-parts-doc-fixture-checks-clean.
+fixed.md, candidate-parts-doc-list-file-shape.fixed.md) files doc fixes under
+`fixed`, so: <slug>.fixed.md.
+
+Task finished: J1/J2/J3 done, J4/J5 skipped (already fixed, verified with
+evidence above). Branch pushed once, PR opened; nothing committed after that.
