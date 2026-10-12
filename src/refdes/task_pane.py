@@ -215,14 +215,10 @@ def _task_block(tasks: dict) -> dict:
 
 
 def _age(row: dict) -> str:
-    """§5 rule 3's age line, absolute — `open since LOG-001, 2026-08-30`.
-    No relative span: that is what the CLI's `--as-of` adds, and a static
-    page has no as-of (and no clock)."""
-    since = row.get("open_since") or {}
-    entry, declared = since.get("entry"), since.get("date")
-    if not entry:
-        return ""
-    return f"(open since {entry}, {declared})" if declared else f"(open since {entry})"
+    """§5 rule 3's age line, spelled once in `threads.age_suffix` (PR #197
+    review P2) — absolute here, with no relative span: that is what the
+    CLI's `--as-of` adds, and a static page has no as-of (and no clock)."""
+    return threads_mod.age_suffix(row)
 
 
 def _derived_groups(rows: list[dict]) -> list[dict]:
@@ -254,18 +250,14 @@ def _derived_groups(rows: list[dict]) -> list[dict]:
 
 
 def _derived_row(row: dict) -> str:
-    """One derived row in `refdes thread`'s detail wording, minus the kind
-    column the group heading now names. The kinds are the set up front in
-    `_derived_groups`; a row that got past that guard and still is not one
-    of them raises the same named error (PR #197 review B1) — never a bare
-    KeyError on the `problem` key it does not have."""
-    if row["kind"] == "check":
-        detail = f"{row['value']} violates {row['against']}"
-    elif row["kind"] == "blocked":
-        stale = " (stale)" if row["stale"] else ""
-        detail = f"by {row['root']} ({row['root_status']}){stale}"
-    elif row["kind"] in ("coverage", "citation"):
-        detail = row["problem"]
-    else:
+    """One derived row in `refdes thread`'s detail wording, composed once in
+    `threads.derived_detail` (PR #197 review P2, the same posture as B3's
+    `verdict_line`) and minus the kind column the group heading now names.
+    The kinds this pane renders are the set up front in `_derived_groups`;
+    a row that got past that guard and still is not one of them raises the
+    same named error (PR #197 review B1) — never the shared composer's
+    wording for a kind (`verdict`/`fork`) this pane has none for, and never
+    a bare KeyError on the `problem` key it does not have."""
+    if row["kind"] not in RENDERED_DERIVED_KINDS:
         raise ValueError(_unrenderable_kinds_message([row["kind"]]))
-    return f"{row['ref']}  {detail}"
+    return f"{row['ref']}  {threads_mod.derived_detail(row)}"

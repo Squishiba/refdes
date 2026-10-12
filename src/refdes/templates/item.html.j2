@@ -348,7 +348,11 @@
     <p class="refdes-taskpane-heading">{{ tab.heading }}{% if tab.tasks.malformed_note %} {{ tab.tasks.malformed_note }}{% endif %}</p>
     {# K4 (PR #197 review): no `tight` here on purpose — style.css `ul.tight`
        (element+class) out-specifies this list's class rules, so the pane's
-       own spacing would never ship. The pane styles its own list. #}
+       own spacing would never ship. The pane styles its own list.
+       Round-5 nit: when EVERY authored row was malformed there is nothing
+       to list — the heading above carries the count and the list itself is
+       absent, not empty. #}
+    {% if tab.tasks.rows %}
     <ul class="refdes-taskpane-tasks">
       {% for row in tab.tasks.rows %}
       {# The same facts `refdes thread` prints, the checkbox glyph as text
@@ -356,6 +360,7 @@
       <li><span class="mono">{{ loop.index }}.</span> <span class="mono">{{ row.glyph }}</span> <span class="mono">{{ row.id }}</span> {{ row.text }}{% if row.since %} <span class="small muted">{{ row.since }}</span>{% endif %}</li>
       {% endfor %}
     </ul>
+    {% endif %}
     {% else %}
     <p class="refdes-taskpane-heading">{{ tab.heading }} {{ tab.tasks.posture }}</p>
     {% endif %}

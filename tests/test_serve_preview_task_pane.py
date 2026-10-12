@@ -193,8 +193,11 @@ def test_the_preview_page_has_no_write_control_or_token(served):
     end = pane.find("</aside>")
     assert end != -1
     pane = pane[:end]
+    # Round-5 nit: the scan is case-insensitive -- HTML and JS carry no
+    # reason for a write control's spelling to arrive lowercase.
+    pane = pane.lower()
     assert "<input" not in pane
-    for needle in ("X-Refdes-Token", "token", "/api/", "<form", "fetch("):
+    for needle in ("x-refdes-token", "token", "/api/", "<form", "fetch("):
         assert needle not in pane
 
 
@@ -206,7 +209,10 @@ def test_the_preview_renders_malformed_rows_as_count_plus_valid_row(served):
     the valid row still prints."""
     app, client, _tmp = served
     html = _body(client, app, "LOG-001")
-    assert "Tasks at tip: (1 malformed row(s) not shown)" in html
+    assert (
+        f"{threads.task_heading('', single_tip=True)} "
+        f"{threads.task_malformed_note(1)}"
+    ) in html
     assert "T-thermal-model" in html
     assert "Model worst-case copper temperature." in html
 
@@ -254,8 +260,11 @@ def test_the_preview_offsets_the_toggle_above_the_bar(served):
     # The pane's offsets, read back OUT OF bar.css (C4: the old assertion
     # was `12 + (6 + 13 * 1.4 + 6) < 50 < 87` -- pure literals that can
     # never fail. Every number below comes from the fetched file.)
-    toggle = re.search(r"\.refdes-taskpane-toggle \{ bottom: (\d+)px; \}", text)
-    panel = re.search(r"\.refdes-taskpane \{ bottom: (\d+)px; \}", text)
+    # Round-5 nit: `\s` matches newlines too, so a rule re-wrapped over
+    # several lines is still read (the old single-line patterns would
+    # silently report "no offsets" on a reformatted bar.css).
+    toggle = re.search(r"\.refdes-taskpane-toggle \{\s*bottom: (\d+)px;\s*\}", text)
+    panel = re.search(r"\.refdes-taskpane \{\s*bottom: (\d+)px;\s*\}", text)
     assert toggle and panel, "bar.css carries no task-pane offsets at all"
     toggle_at, panel_at = int(toggle.group(1)), int(panel.group(1))
     bar = re.search(r"\.refdes-serve-bar \{[^}]*\}", text)

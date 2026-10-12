@@ -862,28 +862,13 @@ def _thread_capture_line(capture: dict) -> str:
 
 
 def _thread_age_suffix(row: dict, as_of, date_format: str) -> str:
-    """§5 rule 3's age line: the declaring entry and its authored date,
-    absolute; a relative span is appended ONLY under an explicit --as-of, so
-    a run without the flag is byte-identical whatever the wall clock says."""
-    since = row.get("open_since") or {}
-    entry, declared = since.get("entry"), since.get("date")
-    if not entry:
-        return ""
-    text = f"  (open since {entry}"
-    if declared:
-        text += f", {declared}"
-        if as_of is not None:
-            try:
-                start = dates_mod.parse_date(declared, date_format)
-            except ValueError:
-                start = None
-            if start is not None:
-                days = (as_of - start).days
-                if days < 0:
-                    text += " -- declared after --as-of"
-                else:
-                    text += f" -- {days} day" + ("" if days == 1 else "s")
-    return text + ")"
+    """§5 rule 3's age line as `refdes thread` prints it: the whole wording
+    is composed once in `threads.age_suffix` (PR #197 review P2, the same
+    posture as B3's `verdict_line`, shared with the task pane); this wrapper
+    only prepends the row's separator, so a run without --as-of stays
+    byte-identical whatever the wall clock says."""
+    suffix = threads_mod.age_suffix(row, as_of, date_format)
+    return f"  {suffix}" if suffix else ""
 
 
 def _thread_header(view: dict) -> str:
@@ -929,43 +914,18 @@ def _verdict_line(verdict: dict, open_rows: list[dict]) -> str:
     return threads_mod.verdict_line(verdict, len(open_rows))
 
 
-def _derived_detail(row: dict) -> str:
-    """The right-hand column of a derived row, spelled once for both
-    commands. The `verdict`/`fork` kinds only ever appear in `refdes work`'s
-    whole-project block; the per-thread block carries none of them. An
-    unknown kind is said as itself (review #194 W6): `threads.py` is free to
-    grow a kind, and a renderer that never heard of it must name the gap
-    rather than die on a bare `KeyError` three frames away."""
-    kind = row["kind"]
-    if kind == "check":
-        return f"{row['value']} violates {row['against']}"
-    if kind == "blocked":
-        stale = " (stale)" if row["stale"] else ""
-        return f"by {row['root']} ({row['root_status']}){stale}"
-    if kind == "verdict":
-        return row["status"]
-    if kind == "fork":
-        return "tips " + ", ".join(row["tips"])
-    if kind in ("coverage", "citation"):
-        return row["problem"]
-    raise ValueError(_unknown_kind_message(kind))
-
-
-def _unknown_kind_message(kind: str) -> str:
-    known = ", ".join(sorted(THREAD_DERIVED_GROUP_HEADINGS))
-    return (
-        f"unknown derived row kind {kind!r} reached the renderer: the producers "
-        f"in refdes.threads emit a kind refdes.cli does not know (it knows: "
-        f"{known}) -- teach threads.DERIVED_GROUP_HEADINGS (the one table, "
-        "aliased here) and _derived_detail before emitting it"
-    )
+#: The right-hand column of a derived row is spelled once in
+#: `threads.derived_detail` (PR #197 review P2, the same posture as B3's
+#: `verdict_line`), used by both commands and by the task pane; aliased
+#: here so the block renderer below and any existing callers keep one name.
+_derived_detail = threads_mod.derived_detail
 
 
 def _derived_heading(kind: str) -> str:
     try:
         return THREAD_DERIVED_GROUP_HEADINGS[kind]
     except KeyError:
-        raise ValueError(_unknown_kind_message(kind)) from None
+        raise ValueError(threads_mod.unknown_derived_kind_message(kind)) from None
 
 
 def _derived_lines(rows: list[dict]) -> list[str]:

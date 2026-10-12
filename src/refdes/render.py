@@ -575,6 +575,7 @@ def items_json(
     *,
     graph: chains_mod.ChainGraph | None = None,
     captures: dict | None = None,
+    threads: list[dict] | None = None,
 ) -> dict:
     """The machine-readable export. Anything downstream should read this, not HTML.
 
@@ -585,6 +586,10 @@ def items_json(
     `render_site` has already read `history.capture_index` for its task
     panes it hands the result down, and nothing in one render parses the
     store twice; direct callers leave it None and this reads it itself.
+    `threads` is the one-projection-per-render rule for the projection
+    itself (PR #197 review round 5, P4): `render_site` computes the rows
+    once for its task panes and hands the SAME list here, so one render
+    projects once; direct callers leave it None and this projects itself.
 
     The `boards` key and each item's `board` are only present when a project has
     actually declared a `boards:` registry -- so a project that has not adopted
@@ -637,7 +642,11 @@ def items_json(
     # a byte-identical payload. H7b/H7c and the task-pane client read this
     # instead of reconstructing the chain (threads_projection is the one
     # fold/tip/derived-row service; see src/refdes/threads.py).
-    thread_rows = threads_mod.threads_projection(project, graph=graph, captures=captures)
+    thread_rows = (
+        threads
+        if threads is not None
+        else threads_mod.threads_projection(project, graph=graph, captures=captures)
+    )
     if thread_rows:
         payload["threads"] = thread_rows
     # `doc` appears only where a definition was actually declared (finding 38),
@@ -986,6 +995,7 @@ def render_site(project: Project, draft: bool = False) -> str:
     # The E1 test renders a threaded (items-bearing) project, so the hoist
     # still means exactly one read per `render_site` where it can happen.
     task_panes: dict[str, dict] = {}
+    thread_rows: list[dict] | None = None
     capture_index: dict = {}
     if project.items:
         try:
@@ -997,15 +1007,17 @@ def render_site(project: Project, draft: bool = False) -> str:
         # `threads.threads_projection` -- the same projection the index
         # payload's `threads` key carries and `refdes thread` renders, so the
         # pane computes no fold, no tip and no derived row of its own and
-        # cannot disagree with either. A project with no `follows:` edge
-        # anywhere gets an empty mapping: no pane on any page and no pane
-        # assets, published output byte-identical -- the same "absent, not
-        # empty" posture as the thread panel itself.
-        task_panes = task_pane_mod.panes_by_entry(
-            task_pane_mod.thread_views(
-                project, graph=thread_graph, captures=capture_index
-            )
+        # cannot disagree with either. PR #197 review round 5 (P4): the
+        # projection runs HERE, once, and the very same rows are handed to
+        # `items_json` below as `threads=` -- one render, one projection,
+        # pane and payload reading literally the same objects. A project with
+        # no `follows:` edge anywhere gets an empty mapping: no pane on any
+        # page and no pane assets, published output byte-identical -- the
+        # same "absent, not empty" posture as the thread panel itself.
+        thread_rows = task_pane_mod.thread_views(
+            project, graph=thread_graph, captures=capture_index
         )
+        task_panes = task_pane_mod.panes_by_entry(thread_rows)
     env.globals["task_pane"] = lambda item: task_panes.get(task_pane_mod.label(item))
     taskpane_assets = bool(task_panes)
     env.globals["taskpane_assets"] = taskpane_assets
@@ -1385,7 +1397,12 @@ def render_site(project: Project, draft: bool = False) -> str:
 
     with open(os.path.join(out_dir, "items.json"), "w", encoding="utf-8") as fh:
         json.dump(
-            items_json(project, graph=thread_graph, captures=capture_index),
+            items_json(
+                project,
+                graph=thread_graph,
+                captures=capture_index,
+                threads=thread_rows,
+            ),
             fh,
             indent=2,
             ensure_ascii=False,

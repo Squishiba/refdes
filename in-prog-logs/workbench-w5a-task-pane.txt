@@ -500,5 +500,74 @@ PR body (L3). Chunks 2-5 were approved at 5c3d6fa; no code changed here.
   (37 + 8), foreground, PYTHONPATH=$PWD/src.
 - `python docs-site/gen_examples.py --check`: up to date (both files).
 - No runnable code changed, so no full-suite run. tests/ greps for
-  thread-workbench.md: five docstring references only — no test reads
-  the file's contents — so nothing there needed re-running.
+  thread-workbench.md: five docstring references only — no test reads the
+  file's contents — so nothing there needed re-running.
+
+## Fix round 5 (PR #197 review, .scratch/FIX-5.txt)
+
+Head was 4ee3192; chunks 1/4/5 approved, chunks 2/3 requested changes.
+Mergeability first: `git fetch origin` + `gh pr view 197 --json mergeable`
+= MERGEABLE/CLEAN and `git merge-tree --write-tree origin/main HEAD`
+exited 0 with no conflict output — no rebase, plain push at the end.
+
+- P1 (package data): pyproject `[tool.setuptools.package-data]` gained
+  "templates/taskpane/*" — the pane's css/js matched no existing glob, so
+  an installed wheel had no assets and render.py's
+  `_write_taskpane_assets` copyfile died on any build with a pane. The
+  whole class is guarded by the new tests/test_package_data.py: walks
+  src/refdes for every non-.py file (skipping __pycache__) and asserts
+  each matches a pyproject glob (tomllib-parsed, glob.translate
+  semantics). Sabotage: dropped the new glob → the test failed naming
+  templates/taskpane/taskpane.css and .js; restored. Real wheel proof:
+  `pip wheel --no-deps` built refdes-0.5.0-py3-none-any.whl (offline,
+  cached build deps) and `unzip -l` lists both files under
+  refdes/templates/taskpane/.
+- P2 (one composer each): `threads.derived_detail(row)` (with
+  `unknown_derived_kind_message`) and `threads.age_suffix(row, as_of,
+  date_format)` are the B3 `verdict_line` posture extended: cli.py keeps
+  `_derived_detail` as an alias and `_thread_age_suffix` as a
+  separator-only wrapper (the two-space row separator is layout, not
+  wording); task_pane.py's `_age` delegates with no as_of (absolute-only,
+  as before) and `_derived_row` keeps its renderable-kind guard (verdict/
+  fork stay "unrenderable HERE") then delegates the wording. cli's
+  `_unknown_kind_message` is gone; its `_derived_heading` raises the
+  threads message (which names threads.derived_detail now).
+  tests/test_thread_cli.py and tests/test_work.py are green with ZERO
+  assertion changes (byte-identity held). New parity test
+  test_the_pane_and_the_cli_compose_the_same_derived_line pins
+  pane line == `ref  ` + CLI detail for coverage/blocked(x2 stale arms)/
+  check/citation. Sabotage: re-spelled cli._derived_detail alone → that
+  test failed at tests/test_task_pane.py:774; reverted (SABOTAGE grep
+  clean).
+- P3: the derived-groups heading test asserts
+  threads.DERIVED_GROUP_HEADINGS[kind] per kind instead of the four
+  literals.
+- P4 (projection once per render): render_site computes
+  `task_pane.thread_views(...)` once and hands the SAME rows to
+  `items_json(..., threads=...)`; items_json's new `threads=` kwarg
+  defaults None (direct callers project themselves, byte-identical). The
+  E1 test became test_one_site_render_reads_the_store_and_projects_once:
+  one store read AND one threads_projection call per render_site
+  (counting monkeypatches on both). Golden theme hashes stayed green.
+- Nits, all folded in: panel() docstring says it assumes no nested <div>;
+  the serve malformed-heading assertion composes
+  threads.task_heading + task_malformed_note; the read-only needle scan
+  lowercases the pane (needles too); the toggle/panel offset regexes use
+  \s* so a re-wrapped bar.css rule is still read (actual one-line rules
+  still match — serve tests green); taskpane.css z-index raised to 62
+  (pane) / 63 (toggle), clear of #preview-card's 60
+  (templates/assets/style.css); item.html.j2 skips the tasks <ul> when
+  rows are empty — an all-malformed list keeps heading + count and
+  renders no empty list, pinned by a new ALL_MALFORMED fixture test
+  (heading+note present, list class and any <li> absent).
+
+### Verification (round 5)
+
+- Full suite, foreground, PYTHONPATH=$PWD/src, -p no:cacheprovider:
+  3624 passed, 2 skipped in 275.54s (.scratch/suite.txt, exit 0) —
+  round 4's 3621 + the three new tests (package-data, parity,
+  all-malformed).
+- ruff --select E9,F on src and tests: All checks passed.
+- docs-site/gen_examples.py --check: up to date (both files).
+- No `refdes serve` was left running (the serve tests use in-process
+  EditorApp fixtures only).

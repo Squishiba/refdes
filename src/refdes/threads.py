@@ -59,6 +59,7 @@ from types import MappingProxyType
 
 from . import blocked as blocked_mod
 from . import chains as chains_mod
+from . import dates as dates_mod
 from . import history as history_mod
 from . import lifecycle as lifecycle_mod
 from .model import Item, Project
@@ -199,6 +200,73 @@ def verdict_line(verdict: dict, open_count: int) -> str:
         f"Verdict: {verdict['status']} ({verdict['declared_by']}{on})"
         f"{verdict_open_suffix(verdict, open_count)}"
     )
+
+
+def unknown_derived_kind_message(kind: str) -> str:
+    known = ", ".join(sorted(DERIVED_GROUP_HEADINGS))
+    return (
+        f"unknown derived row kind {kind!r} reached the renderer: a producer "
+        f"emitted a kind no renderer is taught (it knows: {known}) -- teach "
+        "threads.DERIVED_GROUP_HEADINGS (the one table) and "
+        "threads.derived_detail before emitting it"
+    )
+
+
+def derived_detail(row: dict) -> str:
+    """The right-hand column of a derived row, spelled once (PR #197 review
+    P2, the same posture as B3's `verdict_line`): `refdes thread`, `refdes
+    work` and the task pane all render through it, so a row's detail cannot
+    read differently on two surfaces. The `verdict`/`fork` kinds only ever
+    appear in `refdes work`'s whole-project block -- the per-thread block
+    carries none of them and the read-only pane refuses them by name before
+    it gets here. An unknown kind is said as itself (review #194 W6): a
+    producer is free to grow a kind, and a renderer that never heard of it
+    must name the gap rather than die on a bare `KeyError` three frames
+    away."""
+    kind = row["kind"]
+    if kind == "check":
+        return f"{row['value']} violates {row['against']}"
+    if kind == "blocked":
+        stale = " (stale)" if row["stale"] else ""
+        return f"by {row['root']} ({row['root_status']}){stale}"
+    if kind == "verdict":
+        return row["status"]
+    if kind == "fork":
+        return "tips " + ", ".join(row["tips"])
+    if kind in ("coverage", "citation"):
+        return row["problem"]
+    raise ValueError(unknown_derived_kind_message(kind))
+
+
+def age_suffix(row: dict, as_of=None, date_format: str = "%Y-%m-%d") -> str:
+    """§5 rule 3's age line, spelled once (PR #197 review P2, the same
+    posture as B3's `verdict_line`): the declaring entry and its authored
+    date, absolute; a relative span is appended ONLY under an explicit
+    `as_of` -- that is what `refdes thread`'s --as-of passes -- so a run
+    without the flag is byte-identical whatever the wall clock says, and
+    the static task pane (no flag, no clock) always prints the absolute
+    line alone. `date_format` is read only when `as_of` is given. The
+    parenthesis only: `refdes thread`'s row layout prepends its own
+    separator, the pane renders the text as-is."""
+    since = row.get("open_since") or {}
+    entry, declared = since.get("entry"), since.get("date")
+    if not entry:
+        return ""
+    text = f"(open since {entry}"
+    if declared:
+        text += f", {declared}"
+        if as_of is not None:
+            try:
+                start = dates_mod.parse_date(declared, date_format)
+            except ValueError:
+                start = None
+            if start is not None:
+                days = (as_of - start).days
+                if days < 0:
+                    text += " -- declared after --as-of"
+                else:
+                    text += f" -- {days} day" + ("" if days == 1 else "s")
+    return text + ")"
 
 
 def entry_label(item: Item) -> str:

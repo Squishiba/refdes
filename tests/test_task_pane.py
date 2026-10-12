@@ -243,6 +243,20 @@ MALFORMED = (
     "    follows: LOG-001\n"
 )
 
+ALL_MALFORMED = (
+    "defaults: { type: log }\n"
+    "items:\n"
+    "  - id: LOG-001\n"
+    "    summary: Nothing usable.\n"
+    "    date: 2026-08-01\n"
+    "    tasks:\n"
+    "      - not even a mapping\n"
+    "  - id: LOG-002\n"
+    "    summary: Silent continuation.\n"
+    "    date: 2026-08-02\n"
+    "    follows: LOG-001\n"
+)
+
 
 def _render(tmp_path, items_yaml, with_pages=False, allow_errors=False):
     write_project_config(tmp_path, CONFIG)
@@ -284,7 +298,8 @@ def panel(html: str, index: int) -> str:
     section, or the aside's end, whatever comes first). B5c (review round
     2): the old marker cut at the NEXT panel's `data-refdes-panel="`, which
     sits inside that panel's own opening tag, so panel 1's slice leaked the
-    next panel's `<div ...>` tag; the cut is the next `<div` instead."""
+    next panel's `<div ...>` tag; the cut is the next `<div` instead. It
+    assumes a panel's markup contains no nested <div> of its own."""
     marker = f'id="refdes-taskpane-panel-{index}"'
     marker_at = html.find(marker)
     assert marker_at >= 0, marker
@@ -422,6 +437,19 @@ def test_malformed_rows_are_counted_and_the_valid_rows_still_print(tmp_path):
     assert f"Tasks at tip: {threads.task_malformed_note(1)}" in pane(_page(out, "log-002"))
 
 
+def test_a_fully_malformed_list_keeps_the_heading_and_note_but_no_empty_ul(
+    tmp_path,
+):
+    """Round-5 nit: with EVERY authored row malformed there is nothing to
+    list — the pane keeps the heading and its count (the count is the whole
+    story) and renders no empty <ul> where the rows would have gone."""
+    _project, out = _render(tmp_path, ALL_MALFORMED, allow_errors=True)
+    body = pane(_page(out, "log-001"))
+    assert f"Tasks at tip: {threads.task_malformed_note(1)}" in body
+    assert "refdes-taskpane-tasks" not in body  # the list class is absent...
+    assert "<li>" not in body  # ...and so is any list item anywhere in the pane
+
+
 # ------------------------------------------------ task rows, CLI parity
 
 
@@ -498,7 +526,8 @@ def test_derived_groups_use_the_one_shared_kind_order():
     ]
     groups = task_pane._derived_groups(rows)
     assert [g["heading"] for g in groups] == [
-        "Coverage", "Blocked", "Failing checks", "Citations",
+        threads.DERIVED_GROUP_HEADINGS[kind]
+        for kind in ("coverage", "blocked", "check", "citation")
     ]
     # the one order #194 aligns with, spelled once (§7a 4) -- and the order
     # is the table: adding a kind to HEADINGS puts it in ORDER at once
@@ -631,23 +660,39 @@ def test_a_project_with_no_threads_publishes_exactly_what_it_did_before(
     assert tree_of(render.render_site(project)) == honest
 
 
-# ---------------- PR #197 review E1: the event store is read once per render
+# ------- PR #197 review E1 / round-5 P4: store read once, projection once
 
 
-def test_one_site_render_reads_the_capture_store_once(tmp_path, monkeypatch):
+def test_one_site_render_reads_the_store_and_projects_once(tmp_path, monkeypatch):
     """The pane's projection used to read `history.capture_index` beside
     items.json's own read, so a `render_site` parsed the event store twice
-    (review E1). Hoisted in `render_site` and handed to both consumers:
-    exactly one read, byte-identical output asserted by the golden theme
+    (review E1) — and even with ONE read hoisted, the projection itself
+    still ran twice: once for the panes, once inside `items_json`
+    (round-5 P4). Both are hoisted in `render_site` now and the very same
+    objects handed to both consumers: exactly one store read and exactly
+    one projection, byte-identical output asserted by the golden theme
     test being green all the same."""
     project, _out = _render(tmp_path, ONE_TIP)  # keys/built state ready
-    calls = []
-    real = history_mod.capture_index
-    monkeypatch.setattr(
-        history_mod, "capture_index", lambda p: calls.append(real(p)) or real(p)
-    )
+    reads: list = []
+    projections: list = []
+    real_capture = history_mod.capture_index
+    real_projection = threads.threads_projection
+
+    def counting_capture(p):
+        result = real_capture(p)
+        reads.append(result)
+        return result
+
+    def counting_projection(*args, **kwargs):
+        result = real_projection(*args, **kwargs)
+        projections.append(result)
+        return result
+
+    monkeypatch.setattr(history_mod, "capture_index", counting_capture)
+    monkeypatch.setattr(threads, "threads_projection", counting_projection)
     render.render_site(project)
-    assert len(calls) == 1
+    assert len(reads) == 1
+    assert len(projections) == 1
 
 
 def test_a_pages_only_render_never_reads_the_capture_store(tmp_path, monkeypatch):
@@ -750,6 +795,30 @@ def test_the_unrenderable_kind_message_names_everything_to_teach():
     assert "fork" in message and "verdict" in message
     assert "task_pane._derived_row" in message
     assert "threads.DERIVED_GROUP_HEADINGS" in message
+
+
+def test_the_pane_and_the_cli_compose_the_same_derived_line():
+    """P2 (PR #197 review round 5): the pane and `refdes thread`/`refdes
+    work` spell a derived row's detail through ONE composer,
+    `threads.derived_detail` (the B3 `verdict_line` posture) — this pins
+    that the pane's line IS the CLI's `ref  detail` for every kind the
+    pane renders (the CLI's own line adds only block indentation, in
+    `cli._derived_lines`). Re-spelling the wording on either surface
+    fails this test; drifting it silently cannot."""
+    rows = [
+        {"kind": "coverage", "ref": "REQ-001", "problem": "uncovered"},
+        {"kind": "blocked", "ref": "LOG-011", "root": "CMP-001",
+         "root_status": "candidate", "stale": False},
+        {"kind": "blocked", "ref": "LOG-012", "root": "CMP-002",
+         "root_status": "draft", "stale": True},
+        {"kind": "check", "ref": "LOG-010", "value": "P_diss",
+         "against": "BND-001"},
+        {"kind": "citation", "ref": "LOG-012", "problem": "unpinned"},
+    ]
+    for row in rows:
+        assert task_pane._derived_row(row) == (
+            f"{row['ref']}  {cli_mod._derived_detail(row)}"
+        )
 
 
 def test_explicit_null_id_and_text_render_as_query_and_empty(tmp_path):
