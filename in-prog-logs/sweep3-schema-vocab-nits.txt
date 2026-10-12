@@ -61,6 +61,24 @@ shipped -- it exists only in unreleased #196 territory whose own fragment
 (on-change-log-timeline) already covers the rename; rule applied: no new
 fragment for wording inside an unreleased change's own message.
 
+Correction (2026-10-12, PR #206 review round 1): the sabotage above did
+NOT prove the 856 fix. As recorded, the sed flipped 856 *and* the
+HEAD-correct scalar site 834, and the tightened test feeds the SCALAR
+form -- so its failure proved the 834 flip, while the dict branch at 856
+was never guarded (its test matched only the substring "renamed to
+'timeline'", common to both wordings). Redone: the exact-message pin
+(startswith "on_change: mode 'log' was renamed") now also sits on
+test_item_log_mode_key_errors_but_is_still_applied, the dict-form test
+(`on_change: {mode: log}`) that actually drives 856; the scalar test
+keeps its pin, wrapped under 100 cols (style nit). Sabotage redone
+properly: doubled "mode" reintroduced ONLY at 856 as an exact single-line
+edit (`git diff src/refdes/parse.py` -> 856 only, 1 insertion / 1
+deletion) -> "1 failed, 18 passed" with the failure being the dict-form
+test_item_log_mode_key_errors_but_is_still_applied and the scalar
+test_item_log_override_errors_but_is_still_applied passing; restored
+(`git diff src/refdes/parse.py` empty) -> 19 passed. The 856 fix is now
+genuinely proven by a pin on the branch it changed.
+
 ## D3 — schema.py body on_change check -> if/elif like the field loop
 
 Replaced `== OLD and not legacy` + `not in MODES and not (== OLD and
