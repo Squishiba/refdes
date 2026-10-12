@@ -89,7 +89,6 @@ from ..model import (
 from ..parse import front_matter_defaults_block, md_front_matter_blocks, yaml_safe_load
 from ..patcher import AddLink, PatchPlan, Refusal, RemoveLink, SetBody, SetField
 from ..sources import PdfAnchor
-from ..write_lock import LockUnavailable
 from . import security
 from . import sources as sources_mod
 
@@ -517,6 +516,15 @@ class _LockfileWrite:
     def rollback(self) -> None:
         if not self.written:
             return
+        # Clearing `written` before the lock is taken cannot lose a rollback:
+        # the flag is memory of this instance alone, and the instance never
+        # leaves the `_Acceptance` its apply put it in. Its one caller is
+        # `_undo_accept`, reached at most once per acceptance, on the thread
+        # holding `write_lock_for`; a concurrent writer -- another apply in
+        # this process or a whole other server -- has its own instance and
+        # reads none of this flag, so nothing can observe the cleared value
+        # and skip a restore someone owed it. Clearing first is what keeps a
+        # second call, if one ever existed, from restoring twice.
         self.written = False
         # One section under the project's cross-process write lock: the read,
         # the compare and the restore cannot be split by a cooperating writer.
@@ -668,11 +676,15 @@ def _accept_pins(
     # the records read off disk, the extraction whose policy reads those
     # records, and the replace. That is the whole of it, and it holds no
     # network wait: the editor performs no network I/O anywhere
-    # (`serve/sources.py:229`), so the extraction inside the lock reads the
-    # local file or the kept copy, and the accept's slow part -- the candidate
-    # gate in `_apply_locked`, which can take seconds -- is deliberately
-    # outside. A read-only root raises `LockUnavailable` here, which becomes
-    # this function's ordinary refusal like every other reason it returns.
+    # (`serve/sources.py`'s `_kept_copy`), so the extraction inside the lock
+    # reads the local file or the kept copy, and the accept's slow part -- the
+    # candidate gate in `_apply_locked`, which can take seconds -- is
+    # deliberately outside. Any failure of the lock -- a read-only root's
+    # `LockUnavailable` or any other `OSError` the filesystem can raise on its
+    # way in -- becomes this function's ordinary refusal like every other
+    # reason it returns: the whole `with` section is caught as an `OSError`,
+    # spelled the same way the re-check-and-replace section in `_apply_locked`
+    # spells it.
     lock_path = citations_mod.lockfile_path(before)
     try:
         with _disk_write_lock(before.root):
@@ -719,7 +731,7 @@ def _accept_pins(
                 if failure is not None:
                     return None, failure
                 lock.written = True
-    except LockUnavailable as exc:
+    except OSError as exc:
         return None, f"could not lock {before.root} for writing: {exc}"
     return _Acceptance(lock=lock, pinned=tuple(pinned)), None
 
@@ -1051,8 +1063,19 @@ def create_item(project_root: str, request: CreateRequest):
     root = os.path.abspath(project_root)
     config = os.path.join(root, CONFIG_NAME)
     with write_lock_for(root):
-        with _disk_write_lock(root):
-            return _create_locked(config, request)
+        # A lock the filesystem will not host -- a read-only root's
+        # `LockUnavailable`, or any other `OSError` on the way in -- is a
+        # `Refused` here like on every other writing route in this module
+        # (`_apply_locked`'s re-check section spells it the same way), not an
+        # exception past the entry point that the caller's docstring says
+        # returns only values.
+        try:
+            with _disk_write_lock(root):
+                return _create_locked(config, request)
+        except OSError as exc:
+            return Refused(
+                request.who, "", f"could not lock {root} for writing: {exc}"
+            )
 
 
 def _create_locked(config: str, request: CreateRequest):

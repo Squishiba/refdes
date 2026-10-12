@@ -1,0 +1,133 @@
+SWEEP 3, task E: serve, citations, revise and links nits (from merged #179/#182/#195)
+Branch: sweep3-serve-citations-revise-nits (base 07666de). Worked 2026-10-12.
+(Note: an earlier session on this branch was interrupted during verification;
+this session re-verified everything from the clean tree at 07666de before
+touching anything.)
+
+VERIFICATION (all line numbers are the current branch, grep-verified)
+
+E1 APPLIES. serve/edit.py:722 `except LockUnavailable` in `_accept_pins`, while
+   the section at ~465-473 catches `OSError` and `_disk_write_lock`'s docstring
+   (edit.py:288-289) says the OSError "every caller here" raises is turned into
+   a refusal. `project_write_lock` (write_lock.py) does raise raw OSErrors
+   outside LockUnavailable: `os.stat(root)` and the walk's `os.stat(directory)`
+   (write_lock.py:42-46) are unwrapped; only open/flock failures are wrapped.
+   Decided by reading the callers: `apply_edit`'s contract is "authoring
+   outcomes are values; only a genuinely unexpected internal fault raises"
+   (edit.py docstring) and api.py `_apply_edit`/`_create_item` call the entry
+   points with no OSError handler (a raised OSError becomes a 500). So the
+   DOCS are right and the CATCH is wrong: broaden _accept_pins to OSError.
+   The same read of callers also indicts `create_item` (edit.py:1054): its
+   `with _disk_write_lock(root)` has no handler at all, and a probe
+   (.scratch/e1-probe/test_probe.py, run under pytest) confirmed
+   `create_item` on a read-only root with writable child raises
+   `refdes.write_lock.LockUnavailable` out of the entry point instead of
+   returning `Refused`, violating both its own "Returns Created | Refused |
+   Invalid" docstring and the _disk_write_lock "every caller" claim. Fixed
+   both; tests in tests/test_citations_lockfile_locking.py (existing
+   read-only-root accept test is the sibling).
+
+E2 APPLIES (add comment). `_LockfileWrite.rollback` (edit.py:517-520) clears
+   `self.written` before taking the lock. Cannot lose a rollback: `written` is
+   per-instance memory; the instance never escapes its `_Acceptance`; the only
+   caller of rollback is `_undo_accept` (edit.py:602), reached at most once per
+   acceptance on the same thread under `write_lock_for`. No second reader of
+   the flag exists, in-thread or cross-process. Added a comment saying so.
+
+E3 ALREADY FIXED, skipped. `_LockfileWrite.rollback` (edit.py:560-571) does
+   the read-compare-restore inside `_disk_write_lock` (the #195 change), and
+   the OSError skip is documented (edit.py:543-559, items (1) and (2) of
+   "What is still not guaranteed"). Verified on this branch by reading the
+   code above; no change made.
+
+E4 APPLIES. citations.py:1213 header says "Written only by `refdes fetch`";
+   `save_lockfile`'s docstring and the editor's accept (`_accept_pins`, which
+   replaces the file with `lockfile_text` bytes) both write it. Kept the
+   replacement short because it lands in users' committed lockfiles. No test
+   pinned the header text (grepped tests/ for "Written only", "Computed
+   provenance", "Never hand-edit" -- no hits), so a small pinning test was
+   added instead of updating one.
+
+E5 APPLIES. The comments at citations.py:1226 and :2395 cite
+   `src/refdes/cli.py:2961` -- which was `main`'s
+   `with project_write_lock(...)` at the time of #195 (verified with
+   `git show d804b59:src/refdes/cli.py | sed -n '2961p'`-equivalent) and has
+   since drifted to ~3307: the live demonstration of why not to cite by line.
+   #195 itself touched no cli.py comment (`git show d804b59 -- src/refdes/cli.py`
+   is empty), so "cli.py ~2961" in the item is the cited site itself, not a
+   third comment. Both cites rewritten to name `cli.main`. Other line-number
+   cites exist elsewhere (cli.py:1722-1733 etc.) but are older, from other
+   PRs, and out of this item's named scope -- left alone.
+
+E6 APPLIES. docs/getting-started.md:81-84 says the write lock is taken by
+   "every writing command". cli.main (cli.py:3300-3302) takes it for EVERY
+   command except {serve, init, new, schema} and except `--no-write`/`--dry-run`
+   runs -- including read-mostly ones like check/build, because the load itself
+   can rewrite sources (the comment there says so). The exempt set verified:
+   init, new, schema (and serve) are exactly the exemption list; serve's editor
+   takes it in short sections (edit.py). Sentence rewritten.
+
+E7 ALREADY FIXED (both halves), skipped. (a) revise.py:1487-1489:
+   `snapshot = _snapshot_item_texts(...) if not dry_run or prefix_rename else {}`
+   -- the non-prefix dry-run skip with the explanatory comment is in the base.
+   (b) links.py:462-469 `_drop_refused`'s docstring already names all three
+   kinds carried by the refused set ("refused by the filesystem, rolled back
+   by the parse guard, or withheld for a duplicate key"). Nothing to change.
+
+E8 ALREADY FIXED, skipped. The #182-era doc said only a `skipped` row reads
+   `no copy` (git show b7cc823:docs/cli-reference.md, ~line 631), narrower
+   than cmd_fetch's check (applies to any row whose record keeps a copy).
+   Current docs/cli-reference.md ~861-865 already says "any row ... `skipped`
+   or freshly `fetched`", matching the code; landed in 7dc4a42 (#188).
+
+E9 APPLIES. The `tree()` helper in tests/test_serve_edit.py:113 and
+   tests/test_serve_edit_links.py:111 skips a file named
+   `.refdes-write.lock` while walking only the passed subdirs; every caller
+   passes ("items", ".refdes") and the lock lives at the project root
+   (write_lock.py:56), so the filter can never match -- inert. Removed from
+   both. (tests/serve_support.py's `snapshot_tree` walks the whole root and
+   its identically-spelled filter there is live; test_serve_create.py's tree()
+   has no filter -- both untouched.)
+
+CHANGES MADE (see git show for the diff):
+- edit.py: `_accept_pins` catches OSError (comment updated to say "any
+  OSError"); `create_item` wraps its disk-lock section and returns Refused on
+  OSError; unused `LockUnavailable` import dropped; `_LockfileWrite.rollback`
+  gets the E2 safety comment; header-comment line-number-free.
+- citations.py: lockfile header "Written only by `refdes fetch`" -> "Written
+  by `refdes fetch` and by `refdes serve` when an editor accept pins a source
+  value" (kept to two comment lines); both cli.py:2961 cites now name
+  `cli.main`.
+- docs/getting-started.md: write-lock sentence corrected to match cli.main.
+- tests/test_citations_lockfile_locking.py: +3 tests (accept bare-OSError
+  refusal; create read-only-root refusal; lockfile header claims both
+  writers).
+- tests/test_serve_edit.py / test_serve_edit_links.py: inert filter removed.
+
+CHANGELOG: changelog.d/serve-lock-refusal-instead-of-crash.fixed.md (E1 --
+user-visible: editor routes on a lock-failing filesystem return a refusal
+instead of a 500) and changelog.d/lockfile-header-writers.fixed.md (E4 -- the
+header text is bytes in users' committed files and it told them a falsehood).
+Rule applied from changelog.d/README.md: fragments only for user-visible
+behavior/output changes; the doc corrections (E6/E8 already-fixed skip),
+comment-only changes (E2/E5) and test-only changes (E9) are not user-visible
+and get no fragment.
+
+SABOTAGE:
+- E1/accept: reverted `_accept_pins`'s `except OSError` back to
+  `except LockUnavailable` (+ re-added the import) ->
+  `test_an_accept_where_the_lock_raises_a_bare_oserror_refuses_like_a_lock_miss`
+  failed (1 failed, 9 passed). Restored, 10 pass again.
+- E1/create: removed the try/except around `create_item`'s disk-lock section ->
+  BOTH `test_a_create_where_the_lock_raises_a_bare_oserror_refuses_like_a_lock_miss`
+  and `test_a_create_on_a_root_that_cannot_host_the_lock_refuses_like_every_other_writer`
+  failed (2 failed, 8 deselected), proving they are not vacuous. Restored.
+- Verified no SABOTAGE marker or stray `LockUnavailable` import remains in
+  edit.py (the remaining 4 hits are the pre-existing docstring/comment prose).
+- ruff check --select E9,F on the edited src+test files: clean.
+
+SUITE: PYTHONPATH=$PWD/src <venv> -m pytest -q -p no:cacheprovider (full,
+foreground, .scratch/suite.txt): 3589 passed, 2 skipped in 271.97s, exit 0.
+No re-runs needed (the known serve-CLI load flake did not fire).
+ruff check --select E9,F src tests: clean. docs-site/gen_examples.py --check:
+both files up to date.

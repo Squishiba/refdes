@@ -31,6 +31,7 @@ lucky about timing.
 
 from __future__ import annotations
 
+import contextlib
 import os
 import threading
 
@@ -306,3 +307,95 @@ def test_an_accept_on_a_root_that_cannot_host_the_lock_refuses_like_every_other_
     assert "could not lock" in result.reason
     assert lock_file.read_bytes() == before
     assert lock_bytes(root) == before
+
+
+def test_an_accept_where_the_lock_raises_a_bare_oserror_refuses_like_a_lock_miss(
+    tmp_path, monkeypatch
+):
+    # `_disk_write_lock`'s docstring promises an `OSError` becomes a refusal,
+    # and the re-check-and-replace section in `_apply_locked` catches the whole
+    # `OSError`; the accept's own lock section used to catch only
+    # `LockUnavailable`, so any *other* OSError the lock can raise on its way
+    # in -- an unwrapped `os.stat` in `project_write_lock`, say -- escaped as a
+    # raised exception past an entry point whose contract is values-only. Here
+    # the lock raises the bare `OSError` directly, and the accept must refuse
+    # the same way it does for a read-only root, leaving the lockfile alone.
+    root = make_root(tmp_path)
+    fetch(root)
+    lock_file = root / ".refdes" / "citations.yaml"
+    before = lock_file.read_bytes()
+
+    @contextlib.contextmanager
+    def lock_raises_oserror(_root):
+        raise OSError(5, "Input/output error")
+        yield  # pragma: no cover - never reached
+
+    monkeypatch.setattr(edit_mod, "_disk_write_lock", lock_raises_oserror)
+    result = accept(root)
+    assert isinstance(result, Refused), result
+    assert "could not lock" in result.reason
+    assert lock_file.read_bytes() == before
+    assert lock_bytes(root) == before
+
+
+def test_a_create_where_the_lock_raises_a_bare_oserror_refuses_like_a_lock_miss(
+    tmp_path, monkeypatch
+):
+    # The other route PR #195 made a lockfile writer: `create_item` takes the
+    # disk lock around its whole write and returns `Created | Refused | Invalid`
+    # per its own docstring, yet the lock call sat unwrapped, so a raised
+    # `OSError` -- any `OSError`, `LockUnavailable` included -- flew past the
+    # entry point instead of coming back as a value.
+    root = make_root(tmp_path)
+    fetch(root)
+
+    @contextlib.contextmanager
+    def lock_raises_oserror(_root):
+        raise OSError(5, "Input/output error")
+        yield  # pragma: no cover - never reached
+
+    monkeypatch.setattr(edit_mod, "_disk_write_lock", lock_raises_oserror)
+    result = edit_mod.create_item(
+        str(root),
+        edit_mod.CreateRequest(who="local-author", type="decision", fields={"title": "x"}),
+    )
+    assert isinstance(result, Refused), result
+    assert "could not lock" in result.reason
+
+
+@pytest.mark.skipif(os.name == "nt", reason="chmod-based: advisory mode bits on Windows")
+def test_a_create_on_a_root_that_cannot_host_the_lock_refuses_like_every_other_writer(
+    tmp_path
+):
+    # The same fact the accept's read-only-root test above establishes, for the
+    # create route: `create_item` is a writing route too, and a root that cannot
+    # host the lock is a refusal, not a traceback.
+    root = make_root(tmp_path)
+    fetch(root)
+    root.chmod(0o555)
+    try:
+        result = edit_mod.create_item(
+            str(root),
+            edit_mod.CreateRequest(who="local-author", type="decision", fields={"title": "x"}),
+        )
+    finally:
+        root.chmod(0o755)
+    assert isinstance(result, Refused), result
+    assert "could not lock" in result.reason
+
+
+# --------------------------------------------------------- the header's writer claim
+
+
+def test_the_lockfile_header_names_both_of_the_files_writers():
+    # The header is comment bytes inside users' committed lockfiles, so what
+    # it says about who writes the file is a claim that has to stay true: the
+    # two are `refdes fetch` and the editor's accept (docs/design/
+    # editor-source-picker.md §4 -- `serve/edit.py`'s `_accept_pins` writes
+    # the whole file through `lockfile_text`, and `save_lockfile`'s docstring
+    # says so too), and the header used to read "Written only by
+    # `refdes fetch`." Nothing else pinned the header text, so this pins it.
+    header = citations_mod.lockfile_text({})
+    assert "Written only by" not in header
+    assert "`refdes fetch`" in header
+    assert "`refdes serve`" in header
