@@ -1,0 +1,162 @@
+# sweep3-schema-vocab-nits — work log
+
+Branch cut from main 07666de. Task file: .scratch/TASK-ITEMS.txt (items D1-D10,
+from merged PRs #190 and #196). Rules: .scratch/COMMON.txt.
+
+## D1 — changelog.d/verb-named-reserved-key.breaking.md overgeneralization
+
+Verified against the pre-#196 code (`git show 052d0c3^:src/refdes/parse.py`,
+the `for key, value in raw.items()` loop in `_build_item`, old lines ~916-936,
+and `_apply_change_override` at old line 795):
+
+- `if key == "__line__" or key in RESERVED: continue` — so of the RESERVED
+  keys, only `body:` was simply skipped (dropped, clean exit). `id:`/`type:`
+  are read above the loop as the item's own identity (they can never be
+  written as a link — one mapping, one `id:`); `key:` (old line ~900) is read
+  into `item.key`; `former_ids:` (old lines 895-897) into `item.former_ids` —
+  both consumed as engine values, not "dropped links".
+- `key in OVERRIDABLE and key not in spec.fields` branch: `prefix:`/`board:`/
+  `workspace:` values absorbed into `item.prefix_hint`/`board_hint`/
+  `workspace_hint`, link dropped, no diagnostic, clean exit — true as written.
+- `on_change:` scalar non-mode -> `_apply_change_override` `project.error`
+  ("must be one of ...") — error exit, already covered by the preceding
+  clause; list value -> neither str nor dict, falls through, silently
+  dropped, clean exit — true as written.
+
+Narrowed the sentence to exactly that. No behavior change -> no new changelog
+fragment needed (editing an existing unreleased fragment's wording; rule
+applied: fragments describe user-visible change, this fragment already exists
+and this task adds no user-visible change).
+
+## D2 — "on_change mode: mode 'log'..." doubled wording
+
+Verified by running: the item-level dict-mode override message came from
+parse.py:856 `f"on_change mode: {_LEGACY_LOG_RENAMED}"` while
+_LEGACY_LOG_RENAMED itself starts "mode 'log' was renamed ..." -> rendered
+"on_change mode: mode 'log' was renamed ..." (reproduced on a scratch
+project at .scratch/d2 before the fix: `check` on an item with
+`on_change: {mode: log}` printed the doubled text; the review's "~799"
+line number is the constant). The doubling came from ONE site: the dict
+`mode:` branch at 856. The scalar branch (834) and the `fields:` branch
+(868, "on_change fields.{fname}: ...") were already correctly prefixed at
+HEAD (`git show HEAD:src/refdes/parse.py | grep -c "on_change mode: "`
+-> 1). Fix: 856's prefix is now f"on_change: ", matching 842's sibling
+message. No test
+pinned the doubled text (`grep -rn "mode: mode" tests/ src/ docs/` clean;
+-S over history too), and the existing item-level tests only matched
+"renamed to 'timeline'" -- a substring both wordings share, so none of
+them could fail without the fix. Tightened
+test_item_log_override_errors_but_is_still_applied to require the message
+to *start with* "on_change: mode 'log' was renamed".
+Sabotage (COMMON requirement): sed flipped every "on_change: {renamed}"
+message back to "on_change mode: " -- it matched 856 *and* the
+HEAD-correct scalar site 834 -- -> the tightened test failed, "1 failed,
+18 passed"; sed flipped everything forward again, leaving the same
+single-site diff (verified `git diff src/refdes/parse.py`: 856 only) ->
+19 passed. After-fix runtime
+message confirmed at .scratch/d2: "ERROR ... on_change: mode 'log' was
+renamed to 'timeline' ..." (rc=1, applied as timeline as before ->
+behaviour unchanged). No changelog fragment: the doubled prefix never
+shipped -- it exists only in unreleased #196 territory whose own fragment
+(on-change-log-timeline) already covers the rename; rule applied: no new
+fragment for wording inside an unreleased change's own message.
+
+## D3 — schema.py body on_change check -> if/elif like the field loop
+
+Replaced `== OLD and not legacy` + `not in MODES and not (== OLD and
+legacy)` with `if == OLD: if not legacy: raise` / `elif not in MODES:`
+(schema.py ~830). Verified equivalence first: ran both old and new
+decision functions over {modes, log, bogus, wrong-case, empty, None, 1}
+x {legacy on/off} -- 18 cases, zero mismatches. tests
+(test_change_policy_on_change_key 19 passed; body-on_change pins in that
+file exercise both arms). No behaviour change -> no fragment.
+
+## D4 — SKIPPED as already fixed (test names) + done (line wrap)
+
+tests/test_history.py:164 and tests/test_history_edited.py:160 are
+already named for `timeline` -- #196 itself renamed them
+(`test_log_field_sabotage_...` -> `test_timeline_field_digest_...`,
+`test_an_on_change_log_edit_...` -> `test_an_on_change_timeline_edit_...`;
+confirmed via `git show 052d0c3 -- <files>`). The review's line numbers
+pin the pre-rename text. Nothing to change.
+The ~95-char line at tests/test_reserved_link_verb.py:61 (92 chars) is
+real: wrapped the 8-name tuple over one-per-line. Project line-length is
+100 so E501 never fired; the nit is style only. File still passes.
+
+## D5 — SKIPPED as already fixed
+
+in-prog-logs/vocab-p9-timeline-and-184.txt:4 reads "Status: finished --
+PR #196 (review round: ...)" -- NOT "in progress" -- and the file's
+"Review round 2" section already records the #196 review close-out.
+Verified: `git log -S "Status: in progress" -- <file>` shows the status
+line was set to finished by f32bd46 (a #196 commit, landed at 052d0c3);
+the current line is byte-identical to `git show 052d0c3:...`'s. Adding a
+dated closing line would contradict the "don't fix what isn't broken"
+rule; the premise ("still says in progress") matches no line in the file.
+
+## D6 — vocabulary.py differs_from on a malformed sets: entry -> bare ValueError
+## D6 — SKIPPED as already fixed (bare ValueError in vocabulary dict())
+
+The review's line numbers predate sweep 2. `git log -S "surface as a
+ValueError" -- src/refdes/schema.py` -> 905ce6b (sweep-2 merged, ancestor
+of HEAD): its T5 added the load-time guard -- `_validate_differs_from`
+now shape-checks every resolved set's fields via `_differs_from`
+(schema.py:623-629, comment names the exact vocabulary `dict(...)` crash),
+which is exactly what D6 asks for. The `except ValueError: raise` fallback
+in vocabulary._field_entry remains as the unreachable belt-and-braces it
+always was. Also verified directly: overlay `sets:` entries can't even
+carry a set-level `differs_from` (configcheck: "may not declare
+'differs_from': a set carries fields, links and body only"), so the only
+reachable shapes are bundle paths, all guarded at load. Nothing to fix.
+
+## D7 — SKIPPED as already fixed (_anchor_map docstring overclaim)
+
+sweep-2 T6 (905ce6b): the docstring no longer claims an inverse-name fact
+line always points at the verb's entry -- `git show 905ce6b --
+src/refdes/vocabulary.py` shows the "always ... *unless* an earlier group
+owns the name" reword; current HEAD text matches (vocabulary.py ~395-403,
+only P4's anchor work touched the file since, diff 905ce6b..HEAD has no
+other docstring hunk). Comment-only nit, already closed.
+
+## D8 — SKIPPED as already fixed (resolved_dump trailing newline)
+
+sweep-2 T4 (905ce6b, "resolved_dump now emits a trailing newline and both
+resolved fixtures were re-emitted"). Verified at HEAD directly:
+tests/oracle_dump.py resolved_dump ends `json.dumps(...) + "\\n"`, and
+both fixtures end with a newline -- fixture final bytes `} \n` checked via
+od on `git show HEAD:` and the working tree (identical, `git diff
+HEAD --stat -- tests/fixtures/` empty).
+
+## D9 — SKIPPED as already fixed (test_differs_from_key.py nits)
+
+All three are sweep-2 T1/T2/T3 (905ce6b). At HEAD: the HTML slice is
+bounded (test_differs_from_key.py:504-505 slices between the
+term-bound heading and the next `id="term-`); `_load_vocab` is gone
+(`grep -n _load_vocab tests/test_differs_from_key.py` -> no matches;
+`git log -S _load_vocab` shows 905ce6b removing it); the dangling-term
+assertion quotes the term (search for the bare `"test" in str(exc)` finds
+nothing; `git log -S` for it has no hits either). The review's line
+numbers predate the fix landing.
+
+## D10 — SKIPPED as already fixed (schema-reference.md bare doc: claim)
+
+sweep-2 D4 (905ce6b) fixed :429's wrong claim ("a bare `doc:` is NOT a
+configuration error -- `doc:` alone loads and builds; `doc: 42` errors").
+At HEAD the two passages agree: schema-reference.md:435-438 "The value
+must be a non-empty string; `doc: 42` and `doc: [a, b]` are configuration
+errors ... while a bare `doc:` is not one: like a bare `differs_from:`
+below, YAML null reads as no definition at all." Behaviour was verified
+by sweep 2 by running it (their commit message records the scratch
+project); the contradiction the review cites no longer exists in the
+file.
+
+## Summary
+
+Fixed: D1 (fragment wording), D2 (doubled prefix at 856 + test
+pin + sabotage record), D3 (if/elif restructure, equivalence-proven),
+D4 (only the test_reserved_link_verb.py wrap; renames already done by
+#196). Skipped-as-already-fixed with evidence: D5, D6, D7, D8, D9, D10
+(D6-D10 were sweep-2's own T1-T6/D4, merged at 905ce6b, which the
+review's line numbers predate -- and D4's renames/D5's status line were
+closed by #196 itself). No new changelog fragments (rule: all edits are
+wording/test/style or cover unreleased changes' own fragments).
