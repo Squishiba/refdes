@@ -2193,7 +2193,16 @@ def _image_inputs_hash_value(project: Project, item: Item, digest_cache: dict):
             except OSError:
                 digest = None
         entries.add((rel, digest))
-    return sorted([list(entry) for entry in entries])
+    # Sort on a key that never compares the ``None`` sentinel with a str
+    # digest: a raw unresolved src's text can equal another src's resolved
+    # project-relative path (IMAGE-ASSET-001), putting ``[path, None]`` and
+    # ``[path, digest]`` in one set with the same first element. For a set
+    # of all-str digests -- every ordinary project -- the key orders exactly
+    # like the plain pair it replaces, so no ordinary project's hash moves.
+    return sorted(
+        ([path, digest] for path, digest in entries),
+        key=lambda entry: (entry[0], entry[1] is not None, entry[1] or ""),
+    )
 
 
 def compute_hashes(project: Project) -> None:
