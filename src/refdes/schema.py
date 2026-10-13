@@ -20,6 +20,7 @@ from .model import (
     DIAGNOSTIC_LEVELS,
     ERROR,
     ITEM_LAYOUTS,
+    NON_SCALAR_FIELD_TYPES,
     ON_CHANGE_LOG_OLD,
     ON_CHANGE_MODES,
     RELEASE_GATE_DEFAULTS,
@@ -803,13 +804,48 @@ def load_project(config_path: str | None = None, start: str = ".") -> Project:
                         "requiredness already implies every condition; use one "
                         "or the other"
                     )
+            # A collection-shaped field needs a collection-shaped default.
+            # parse.py refuses the same mismatch written on an item
+            # (`_reject_scalar_collection`), but until now nothing checked the
+            # schema's own `default:` -- a scalar one was copied verbatim into
+            # every item that omitted the field (parse.py copies
+            # `fspec.default` with no shape test), so `refdes check` stayed
+            # green and `refdes ls --tag analog` "found" items holding the
+            # single tag `"power, analog"`. The schema is where the author
+            # has to fix it, so that is where it fails -- once, at config
+            # load, not per item at build time.
+            field_type = fspec.get("type", "text")
+            default = fspec.get("default")
+            if (
+                default is not None
+                and field_type in NON_SCALAR_FIELD_TYPES
+                and not isinstance(default, list)
+            ):
+                # Same posture as parse._reject_scalar_collection: name the
+                # comma consequence only when there is one -- a substring
+                # search for the value itself can still find e.g. a bare
+                # scalar, so claiming otherwise would put a second wrong
+                # thing in a message whose job is to be believed.
+                consequence = (
+                    " -- the comma is part of the value, so a search for "
+                    "either of those values matches only by substring"
+                    if isinstance(default, str) and "," in default
+                    else ""
+                )
+                raise SchemaError(
+                    f"types.{tname}.fields.{fname}.default on the {field_type} "
+                    f"field {fname!r} must be a list, got {default!r} -- write "
+                    f"it as default: [first, second]. A scalar default is never "
+                    f"split: every item that omits the field stores it as one "
+                    f"entry{consequence}."
+                )
             fields[fname] = FieldSpec(
                 name=fname,
-                type=fspec.get("type", "text"),
+                type=field_type,
                 on_change=on_change,
                 required=required,
                 choices=fspec.get("choices"),
-                default=fspec.get("default"),
+                default=default,
                 required_when=required_when,
                 doc=_doc_text(fspec.get("doc"), f"types.{tname}.fields.{fname}.doc"),
                 differs_from=_differs_from(

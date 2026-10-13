@@ -1,0 +1,88 @@
+Fix SCHEMA-VALID-004 — scalar `default:` on a collection-shaped schema field
+Date: 2026-10-13
+Branch: fix/list-default-validation-20261013 (worktree, main unchanged, started at 8b6a52e)
+
+## Task
+
+From in-prog-logs/current-main-resweep-schema-validation.tsv (the TSV lives
+in the main checkout /home/jorb/work/refdes/in-prog-logs/, not in this
+worktree — found it there by `find`). At 8b6a52e, a schema field declared
+`tags: {type: list, default: "power, analog"}` was copied verbatim into
+`item.fields` as a str: `refdes --no-write check` exited 0 ("2 items, 0
+errors, 0 warnings") and `refdes ls --tag analog` listed the items, because
+tag matching is a substring test. Fix validation at the appropriate
+load/parse seam. SCHEMA-VALID-004 only — 001/005/014 untouched.
+
+## Reproduction (actual CLI, per AGENTS.md)
+
+Fixture: .scratch/proj004 (hardware@3, refdes-schema.yaml overlaying
+decision.tags). Ran the worktree's own code via
+`PYTHONPATH=<worktree>/src python -c "from refdes.cli import main; ..."`
+(the venv `refdes` console script resolves to the main checkout, so it does
+NOT exercise worktree code; the package has no `__main__`).
+
+Confirmed before the fix, matching the TSV exactly:
+- `--no-write check` -> "2 items, 0 errors, 0 warnings", exit 0
+- item.fields['tags'] == 'power, analog' (type str) on both items
+- `ls --tag analog` listed both items
+
+## Fix
+
+One seam: src/refdes/schema.py, in the field loop that constructs the only
+`FieldSpec` in the codebase (single construction site — grep `FieldSpec(`).
+When `type` is in `NON_SCALAR_FIELD_TYPES` (imported from model.py, the one
+shared constant the loader and the editor already consult) and `default` is
+present but not a list -> `SchemaError` with the
+`types.<type>.fields.<field>.default` path convention.
+
+Why schema-load and not parse.py's default-copy (1106-1107/1116): the
+mistake is the schema's, not any item's; parse.py has no schema file/line to
+report it against, and reporting it per item would blame items whose own
+text is correct. The load seam fails once, points at the file the author
+edits, and — because FieldSpec has one construction site — also covers
+presets/sets/migration-merged schemas. The parse-side copy needs no change:
+after load-time validation a non-None `FieldSpec.default` on a collection
+field is always a list.
+
+Message keeps `parse._reject_scalar_collection`'s posture: refuse-don't-
+split, and the comma/substring consequence is named only when the default
+string actually contains a comma (bare `default: "power"` gets no substring
+claim — a search for "power" does find it).
+
+## Verification
+
+- Repro now: "configuration error: types.decision.fields.tags.default on
+  the list field 'tags' must be a list, got 'power, analog' -- write it as
+  default: [first, second]. ...", exit 2 (was exit 0).
+- Control `default: [power, analog]`: check exit 0, items carry
+  ['power', 'analog'], `ls --tag analog` still lists them (now correctly).
+- Scalar default on a scalar field (`source: {type: text, default:
+  datasheet}`): unaffected.
+- Bundled standards untouched: every `default:` in src/refdes/standards/ is
+  on an `enum` field (grep), so the check cannot break a pinned standard.
+- Tests: tests/test_schema_scalar_default.py, 11 tests (CLI exit code,
+  SchemaError path, list-default control, scalar-field control, mapping
+  default, comma-free message wording, parametrize over all five
+  NON_SCALAR_FIELD_TYPES).
+- Full suite: 3613 passed, 2 skipped (~4.5 min).
+- ruff: scoped to the touched files; src/refdes/schema.py has the same 3
+  findings before and after (pre-existing, line-shifted); new test file
+  clean (fixed UP031/F841 in my own file only).
+
+## Difficulties / notes
+
+- The TSV named in the task is not committed on this branch; read it from
+  the main checkout instead of guessing its content.
+- First test draft gave the hand-rolled fixture schema both the bad default
+  and the green-control items; caught before running — controls got their
+  own schema constant.
+- `--no-write check` on the scratch project warns ".refdes/schema.json was
+  older" after editing refdes-schema.yaml — pre-existing, unrelated
+  (artifact of iterating on the scratch fixture).
+- The full-suite run printed one "Exception occurred during processing of
+  request from ('127.0.0.1', ...)" — known serve-test socket noise, suite
+  green.
+
+## Status
+
+Finished. Committed on this branch only: no push, no PR, main untouched.
