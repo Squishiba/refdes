@@ -386,6 +386,65 @@ def test_init_refuses_a_directory_named_gitignore_before_writing_anything(
     assert (tmp_path / "refdes-project.yaml").exists()
 
 
+@pytest.mark.skipif(
+    os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0),
+    reason="needs POSIX permission bits: chmod 0o444 does not stop Windows (or root) "
+    "from writing the file, so the unwritable case cannot be produced that way",
+)
+def test_init_refuses_a_readonly_gitignore_it_would_have_to_append_to(
+    tmp_path, monkeypatch, capsys
+):
+    """Review follow-up: a readable mode-0444 `.gitignore` passed the first
+    preflight, so init wrote the config and the editor file and only THEN
+    died of `PermissionError` appending its entries -- the directory
+    shape's half-creation through a different door. Now the refusal names
+    the file before anything is created, and the same project inits
+    cleanly once it is writable again."""
+    gitignore = tmp_path / ".gitignore"
+    gitignore.write_text("_site/\n", encoding="utf-8")
+    gitignore.chmod(0o444)
+    monkeypatch.chdir(tmp_path)
+    try:
+        assert cli_mod.main(["init"]) == 2
+        err = capsys.readouterr().err
+        assert "not writable" in err
+        assert not (tmp_path / "refdes-project.yaml").exists()
+        assert not (tmp_path / ".vscode").exists()
+        gitignore.chmod(0o644)
+        assert cli_mod.main(["init"]) == 0
+        capsys.readouterr()
+        assert (tmp_path / "refdes-project.yaml").exists()
+        assert ".refdes/schema.json" in gitignore.read_text(encoding="utf-8").splitlines()
+    finally:
+        gitignore.chmod(0o644)
+
+
+def test_init_proceeds_with_a_readonly_gitignore_that_already_covers_everything(
+    tmp_path, monkeypatch, capsys
+):
+    """The refusal is conditional on having something to write: a read-only
+    `.gitignore` that already states the project's position on every path
+    `init` wants needs no append, and must not become a refusal reason --
+    otherwise this fix would break the ordinary append-nothing case for
+    anyone who (say) mounts their project tree read-write except that
+    file."""
+    gitignore = tmp_path / ".gitignore"
+    gitignore.write_text(
+        ".vscode/settings.json\n.refdes/copies/\n.refdes/schema.json\n"
+        ".refdes-write.lock\n",
+        encoding="utf-8",
+    )
+    gitignore.chmod(0o444)
+    monkeypatch.chdir(tmp_path)
+    try:
+        assert cli_mod.main(["init"]) == 0
+        capsys.readouterr()
+    finally:
+        gitignore.chmod(0o644)
+    assert (tmp_path / "refdes-project.yaml").exists()
+    assert gitignore.read_text(encoding="utf-8").count("\n") == 4
+
+
 def test_scaffold_init_refuses_an_unusable_gitignore_before_creating_anything(
     tmp_path,
 ):

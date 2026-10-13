@@ -80,3 +80,50 @@ Difficulties / notes
 
 Status: finished. Committed on branch fix/init-gitignore-refusal-20261012
 (one commit: scaffold.py, cli.py, test_scaffold.py).
+
+REVIEW FOLLOW-UP (same day): read-only-but-readable .gitignore
+
+Reviewer reproduced a remaining same-family half-creation
+(.scratch/review-init-gitignore-20261012/readonly-gitignore, base
+checkout, this branch's src): .gitignore is valid UTF-8, chmod 0444.
+The first preflight passes (the read works), init writes the config and
+.vscode/settings.json, then the append in _ensure_gitignore_entries
+dies of PermissionError at the open() -- survivors
+refdes-project.yaml + .vscode. Reproduced independently in
+.scratch/fix-init-gitignore-20261012/repro-readonly-* before fixing.
+
+Fix (second commit on this branch):
+- scaffold.init now assembles the wanted gitignore entries BEFORE its
+  first write. That required hoisting the "will we write
+  .vscode/settings.json" decision from _write_vscode_settings's return
+  value to a pre-write check of vscode_settings_exists -- the same
+  predicate that method branches on, so behavior is identical (no
+  external caller passes write_vscode_settings=False; verified by
+  grep).
+- New scaffold._refuse_unwritable_gitignore(target_dir, wanted): reads
+  via read_existing_gitignore, and when some wanted entry is NOT
+  already addressed, refuses with SchemaError if
+  os.access(path, W_OK) fails -- named, exit 2, nothing written.
+  Conditional on having something to append: a read-only .gitignore
+  that already covers all wanted patterns inits fine (new test pins
+  that, so the fix does not regress the append-nothing case).
+- Honest TOCTOU statement in the helper's docstring: a chmod landing
+  between the check and the actual append still surfaces as a
+  write-time traceback -- no check can close that (the two files are
+  not atomically writable anyway); the promise is that an obstacle
+  present when init starts is named before anything is created.
+- Prose corrected: the original docstring/comment claimed the
+  announcement pre-read and the preflight were "the same read" of a
+  single read -- cmd_init and scaffold.init in fact each call
+  read_existing_gitignore (and _ensure_gitignore_entries reads once
+  more at append time). Now documented per-call, with why the read
+  count is the least interesting property here.
+
+Tests: two new in test_scaffold.py -- read-only-needs-append refuses
+(exit 2, named, nothing written) and inits cleanly after chmod 0644;
+read-only-covering-everything proceeds (exit 0). skipif nt-or-root on
+the first (same repo pattern), none on the second (it asserts success,
+which holds regardless of whether the platform honors 0444).
+Targeted suites 170 passed (was 168); probe.sh all PASS + normal init
+and existing-gitignore announce paths re-checked.
+
