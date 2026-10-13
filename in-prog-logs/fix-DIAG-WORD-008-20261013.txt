@@ -1,0 +1,85 @@
+# fix DIAG-WORD-008 — destination refusals must not guess "read-only tree?"
+
+Branch: fix/destination-error-wording-20261013, base main 8b6a52e.
+Task from in-prog-logs/current-main-resweep-refusal-wording.tsv (read from
+the sibling main checkout /home/jorb/work/refdes/in-prog-logs/ — the tsv is
+untracked there and does not exist in this worktree).
+
+## The finding, confirmed before touching code
+
+model.py `DESTINATION_REFUSAL` hard-codes `(read-only tree?)` and ids.py
+caught bare `except OSError` at the write-back (HEAD :649) and the ledger
+save (:696), so any filesystem failure — ENOSPC, EIO, ENAMETOOLONG — was
+reported as a probable read-only tree, on a tree that was fully writable.
+Reproduced first with fault injection (probe `.scratch/dw008/`):
+hardware@3 project + `enospc_run.py` monkeypatching
+`refdes.textio.atomic_write_text` to raise `OSError(errno.ENOSPC, ...)`
+for writes to r.yaml/ids.yaml, then `cli.main(["id"])`:
+
+    ERROR items/r.yaml:3 — cannot write items/r.yaml (read-only tree?) -- ...
+    ERROR <project> — cannot write .refdes/ids.yaml (read-only tree?) -- ...
+    STATUS 1 / TREE_WRITABLE True True
+
+`os.access` confirmed both dirs writable during the run, so the printed
+hint was false. This contradicts docs/cli-reference.md's own stated
+principle (:106-113): for writes that "can be refused for reasons that
+have nothing to do with a read-only tree ... the marker would be a claim
+refdes cannot make there" — the reason build's site refusal and keys
+adopt/restore already report the OS's own reason.
+
+## The fix
+
+- model.py: new `could_be_read_only(exc)` — True for `PermissionError`
+  (including textio's own read-only guards, which raise it with no errno —
+  that's why the predicate checks the type, not just errno 13, which would
+  also have broken root/Windows CI) and for EACCES/EPERM/EROFS
+  (`READ_ONLY_ERRNOS`). New `write_refusal_reason(exc)` follows the
+  existing `strerror`-or-bare-errno convention already used by
+  sources.py:440, citations.py:2291, cli.py:423.
+- `destination_refusal(path, consequence, cause=None)`: with `cause`, the
+  parenthetical becomes the OS's own reason when `could_be_read_only` is
+  False; byte-identical `(read-only tree?)` otherwise, including every
+  call site that passes no cause.
+- ids.py: both catches bind `exc`, pass it, and split the remedy sentence
+  — "Make the tree writable / Make .refdes/ writable" only for failures
+  that could be one; "Fix the reported failure ..." otherwise. Read-only
+  output is byte-identical to before.
+
+## Verification
+
+- `.scratch/dw008/enospc_run.py` after the fix: both refusal lines read
+  "cannot write ... (No space left on device) -- ... Fix the reported
+  failure ..."; exit code, accounting ("allocated 0 id(s)", nothing
+  burned) unchanged.
+- New tests in tests/test_readonly_explicit_writes.py (after the `id`
+  section): ENOSPC at both sites, ENOSPC at the ledger only (ids land,
+  remedy alone changes), injected no-errno `PermissionError` keeping the
+  marker byte-for-byte (runs as root/Windows, where the chmod tests skip),
+  and a helper-level test of `destination_refusal` across
+  EROFS/EACCES/EPERM/EIO/ENAMETOOLONG/unknown-errno/no-cause.
+- Targeted: test_readonly_explicit_writes.py 23 passed; then
+  test_load_time_writes/test_calc_rewrite/test_reseal_audit/test_revise
+  (the other files asserting the marker) 147 passed. Full suite:
+  3606 passed, 2 skipped (274 s). `ruff check` on the three touched
+  files shows the same 4 findings as HEAD's copies (.scratch/dw008/
+  baseline/) — all pre-existing UP037/RUF059, none introduced.
+
+## Limitations / deliberately out of scope
+
+- Scope was model.py/ids.py/tests. `history._store_refusal`, scaffold's
+  two preset refusals, `revise._refuse_item_write` and `stub_tests` all
+  catch `OSError as exc` and still call `destination_refusal` without the
+  cause, so they keep the unconditional marker — same latent mis-blame,
+  ready for a follow-up now that the helper accepts the cause.
+- The load-time degrade (`READ_ONLY_REFUSAL`/`read_only_refusal`, the
+  "(load could not write this file ...)" warning) is likewise untouched;
+  the finding named only the destination shape.
+- docs/cli-reference.md:102-105 says destination refusals "do all contain
+  `(read-only tree?)`" — true for every failure that could be one, but
+  under this fix a non-permission refusal reports the OS reason instead.
+  The docs sentence now needs a qualifier; left for the docs follow-up
+  because docs were out of the stated scope.
+
+Finished: yes. Committed on this branch; no push/PR per instructions.
+Also added `changelog.d/destination-refusal-real-cause.fixed.md`, matching
+the per-fix changelog-fragment convention (HEAD~1 did the same).

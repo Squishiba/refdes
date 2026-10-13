@@ -6,6 +6,7 @@ git history layer -- reads these structures and nothing else.
 
 from __future__ import annotations
 
+import errno
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -798,10 +799,41 @@ READ_ONLY_REFUSAL = "could not write this file (read-only tree?)"
 #:
 #: It is a separate stem from `READ_ONLY_REFUSAL` rather than a variant of it
 #: because the two arrive in genuinely different places (a per-file diagnostic
-#: vs. a command's own refusal line), but both carry `(read-only tree?)`, and
-#: that is the substring a CI filter matches on -- see
-#: docs/cli-reference.md#matching-a-read-only-refusal-in-a-log.
+#: vs. a command's own refusal line), but both carry `(read-only tree?)` for
+#: the failures that could be one, and that is the substring a CI filter
+#: matches on -- see docs/cli-reference.md#matching-a-read-only-refusal-in-a-log.
+#: A refusal built *with* the failing `OSError` (see `destination_refusal`)
+#: carries the operating system's own reason instead when the errno could not
+#: be a read-only tree -- a full disk is not a tree that is read-only, and
+#: claiming otherwise sends the user hunting for a permission (DIAG-WORD-008).
 DESTINATION_REFUSAL = "cannot write {path} (read-only tree?)"
+
+#: The errnos for which `(read-only tree?)` is a claim refdes is entitled to
+#: make: the tree or filesystem refused the write itself.
+READ_ONLY_ERRNOS = frozenset({errno.EACCES, errno.EPERM, errno.EROFS})
+
+
+def could_be_read_only(exc: OSError) -> bool:
+    """Whether `exc` is a write failure that a read-only tree could explain.
+
+    ENOSPC says the disk is full, EIO says the device is failing, ENAMETOOLONG
+    says the name is too long -- none of those is permission, and printing
+    `(read-only tree?)` for them is the false hint this predicate exists to
+    stop (DIAG-WORD-008: the real cause was confirmed by injecting
+    `OSError(ENOSPC)` into `textio.atomic_write_text` on a writable tree).
+    `PermissionError` qualifies even with no errno attached, because that is
+    exactly what `textio.atomic_write_text`'s own read-only guards raise.
+    """
+    if isinstance(exc, PermissionError):
+        return True
+    return getattr(exc, "errno", None) in READ_ONLY_ERRNOS
+
+
+def write_refusal_reason(exc: OSError) -> str:
+    """The operating system's own reason for `exc`, the way `sources`,
+    `citations` and `cli`'s site refusal already report it: `strerror`, with
+    the bare errno behind it when the OSError was built without one."""
+    return getattr(exc, "strerror", None) or f"OS error {getattr(exc, 'errno', None)}"
 
 
 def read_only_refusal(consequence: str = "") -> str:
@@ -816,14 +848,24 @@ def read_only_refusal(consequence: str = "") -> str:
     return f"{stem}; run with --no-write to silence this"
 
 
-def destination_refusal(path: str, consequence: str) -> str:
+def destination_refusal(path: str, consequence: str, cause: OSError | None = None) -> str:
     """`DESTINATION_REFUSAL` for `path`, plus what the refused write was for.
 
     The explicit-write counterpart to `read_only_refusal`: a load nobody asked
     for degrades, but a write somebody did ask for either happened or did not,
     and the report has to name the file that would have held it.
+
+    Pass `cause` when the refusal is built from a caught `OSError`: the
+    parenthetical then stays `(read-only tree?)` only while the failure could
+    be one (see `could_be_read_only`), and becomes the operating system's own
+    reason -- "(No space left on device)", not a permission hunt -- when it
+    cannot. A caller with no exception in hand keeps the marker.
     """
-    return f"{DESTINATION_REFUSAL.format(path=path)} -- {consequence}"
+    if cause is not None and not could_be_read_only(cause):
+        stem = f"cannot write {path} ({write_refusal_reason(cause)})"
+    else:
+        stem = DESTINATION_REFUSAL.format(path=path)
+    return f"{stem} -- {consequence}"
 
 
 @dataclass
