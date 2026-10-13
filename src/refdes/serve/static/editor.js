@@ -9,7 +9,7 @@
 
 import { api } from './api.js';
 import {
-  getDraft, setDraftField, setDraftBody, addDraftPin, setDraftRevision, clearDraft, isDirty,
+  getDraft, setDraftField, setDraftBody, addDraftPin, dropAppliedOp, clearDraft, isDirty,
 } from './drafts.js';
 import { createLinksSection } from './links.js';
 import { createImagePicker } from './images.js';
@@ -237,16 +237,9 @@ export function createEditor(item, handle, onSaved, onDiscarded) {
       });
       rev = payload.revision;
       revision = rev;
-      setDraftRevision(handle, rev);
-      if (one.op === 'set_field') delete draft.fields[one.field];
-      else if (one.op === 'set_body') { draft.body = null; draft.pins = []; }
-      else {
-        const side = one.op === 'add_link' ? 'add' : 'remove';
-        const list = draft.links[side][one.verb] || [];
-        const at = list.indexOf(one.target);
-        if (at >= 0) list.splice(at, 1);
-        if (!list.length) delete draft.links[side][one.verb];
-      }
+      // The drop and the mirror refresh are one step in drafts.js: memory
+      // and sessionStorage must never disagree about which ops are pending.
+      dropAppliedOp(handle, one, rev);
     }
     return rev;
   }
