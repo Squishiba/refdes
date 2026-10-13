@@ -50,3 +50,63 @@ seal.py (TRY004 at :157, UP017 at :320) are pre-existing at HEAD on untouched
 lines, left alone per AGENTS.md.
 
 Finished: yes. Not pushed; commit is local on the branch.
+
+-------------------------------------------------------------- follow-up (review)
+Review on cc2e5be: _umask_respecting_mode() mutated the process-wide umask
+(set-and-restore); any concurrent thread creating files in the window gets a
+wrong mode, and the "serve never seals" claim shouldn't be load-bearing.
+Re-audited callers to test that claim: seal_write=True reaches seal.verify
+only through cli.py:403 (the build command); every other build() call site
+(serve/edit.py:358, loader.py:193, revise.py:1384, cli check/index/ls/...)
+is seal_write=False; revise.py:2038 calls save_seals directly. All CLI. But
+the design should not depend on that, so it was replaced.
+
+Options considered:
+- Keep NamedTemporaryFile + a separate same-directory O_CREAT|O_EXCL mode-0666
+  probe file: works but adds a second file, its own collision handling and a
+  crash-debris class, for information the temp creation itself can produce.
+- mkstemp/NamedTemporaryFile then chmod from a computed mode: back to reading
+  the umask somehow. Rejected.
+- Chosen: create the seal temp itself with os.open(O_WRONLY|O_CREAT|O_EXCL,
+  0o666) -- the kernel filters the creation mode through the umask, so a NEW
+  seal file lands 0666 & ~umask with no chmod, no probe, no process-umask
+  mutation; the existing-file branch still copies the old mode verbatim.
+  Same-directory creation is already required for the os.replace to be
+  atomic, and it is the repo's own idiom (serve/edit.py _atomic_create opens
+  its temp at 0o666); the random name uses secrets.token_hex like keys.py /
+  serve/security.py. Uniqueness via O_EXCL + retry loop (mkstemp does the
+  same). tempfile import dropped.
+
+Trade-off accepted: the temp is group-readable while being written under a
+group umask (the old temp was 0600 until the chmod). The payload is content
+hashes, not secrets, its siblings in .refdes/ are group-readable from
+creation anyway, and _atomic_create already has exactly this property. The
+name is unpredictable (16 hex chars).
+
+Cleanup/portability: the existing finally still unlinks the temp on every
+failure path; fdopen failure closes the raw fd (no leak); missing/read-only
+directory raises OSError into the unchanged _record_seal_write refusal path.
+Windows: os.open/O_EXCL work; the mode argument is advisory there, same as
+the os.chmod line already in this function -- parity, not a new assumption.
+
+CLI re-verification after the swap (proj4, this worktree src): fresh build
+umask 002 -> 664; chmod 600 + rebuild -> 600; new entry against a 555
+.refdes -> exit 1, the usual "NOT sealed ... read-only tree?" ERROR, old
+file intact, no .log-seal-*.tmp debris; settled rebuild exit 0 (steady state
+writes nothing, so a read-only .refdes is not refused then -- unchanged).
+
+Tests: kept the two behaviour tests; added
+- test_a_colliding_temp_name_is_retried_not_fatal (seal._create_temp gets a
+  fresh name when one roll collides with a foreign file),
+- test_saving_seals_never_reads_or_writes_the_process_umask (os.umask spy:
+  zero calls during save_seals).
+Negative checks: creating the temp at 0600 fails both parametrized new-file
+cases; an inserted os.umask readback fails the spy test; both reverted.
+25/25 test_seal.py; caller set (seal, history-seal, revise, checks-keys,
+calc-rewrite, sealing-optin) 164 passed. ruff --select I,F,E9 clean on both
+files. Changelog fragment unchanged: user-visible behaviour is identical.
+Behaviour-level limitation kept honest: no deterministic test can catch a
+future re-introduction of the umask *window* mid-call beyond the spy test,
+which catches any call itself -- the spy is that tripwire.
+
+Follow-up finished: yes, committed locally on the same branch. Not pushed.

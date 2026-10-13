@@ -632,14 +632,17 @@ def test_a_corrupt_seal_file_is_a_clean_cli_error_not_a_traceback(sealed_board_p
 
 
 # ---------------------------------------------------------------- file modes
-# PERM-OWNER-001: `save_seals` writes through a NamedTemporaryFile, which
-# creates at 0600. It copies the old file's mode before `os.replace` so a
-# rewrite never changes what a group-shared `.refdes/` already reads -- but
-# with no old file there was nothing to copy, and the first seal file in a
-# tree kept the temp's 0600 while its siblings (`schema.json`, the write
-# lock), written by ordinary `open()` calls, landed at the umask default.
-# Under a 002 umask that left the file carrying the append-only guarantee as
-# the one file in `.refdes/` the group could not read.
+# PERM-OWNER-001: `save_seals` used to write through a NamedTemporaryFile,
+# which creates at 0600, and copy the old file's mode before `os.replace`
+# only when an old file existed -- so the first seal file in a tree kept the
+# temp's 0600 while its siblings (`schema.json`, the write lock), written by
+# ordinary `open()` calls, landed at the umask default. Under a 002 umask
+# that left the file carrying the append-only guarantee as the one file in
+# `.refdes/` the group could not read. The fix creates the temp itself with
+# `O_CREAT | O_EXCL` at 0666 so the kernel applies the umask -- the temp
+# creation must therefore never go back to a 0600-creating helper, and
+# `os.umask` must stay untouched: it is process-wide, so reading it by
+# mutation would mis-mode any other thread's concurrent file creations.
 
 
 @contextmanager
@@ -662,6 +665,49 @@ def test_a_new_seal_file_gets_the_umask_default_mode(sealed_flat_project, umask,
     with _umask(umask):
         assert seal.save_seals(project, {"LOG-001": "0" * 16})
     assert os.stat(path).st_mode & 0o777 == expected
+
+
+def test_a_colliding_temp_name_is_retried_not_fatal(tmp_path, monkeypatch):
+    """`O_EXCL` is what makes the temp creation collision-safe rather than
+    clobbering, so the collision branch must retry, not die: a foreign file
+    that happens to hold one roll of the name must not fail the write."""
+    tokens = iter(["c" * 16])
+    real_hex = seal.secrets.token_hex
+
+    def once_colliding(_n):
+        try:
+            return next(tokens)
+        except StopIteration:
+            return real_hex(_n)
+
+    decoy = tmp_path / f".log-seal-{'c' * 16}.tmp"
+    decoy.write_text("", encoding="utf-8")
+    monkeypatch.setattr(seal.secrets, "token_hex", once_colliding)
+    fd, path = seal._create_temp(str(tmp_path))
+    os.close(fd)
+    assert path != str(decoy)  # retried onto its own name, not the decoy reused
+    assert os.path.basename(path).startswith(".log-seal-") and path.endswith(".tmp")
+    assert os.path.exists(path)
+
+
+def test_saving_seals_never_reads_or_writes_the_process_umask(sealed_flat_project, monkeypatch):
+    """The temp file gets its new-file mode from the kernel (`O_CREAT` mode
+    filtered through the umask), not from reading the umask itself:
+    `os.umask` is process-wide, so a set-and-restore read has a window in
+    which another thread's file creation -- serve's ThreadingHTTPServer is
+    one process, and `build.py` keeps thread-locals -- would land with the
+    wrong mode. Pin that the whole write touches it zero times."""
+    calls = []
+    real = os.umask
+
+    def spy(mask):
+        calls.append(mask)
+        return real(mask)
+
+    monkeypatch.setattr(os, "umask", spy)
+    project = load_project(config_path=str(sealed_flat_project / "refdes-project.yaml"))
+    assert seal.save_seals(project, {"LOG-001": "0" * 16})
+    assert calls == []
 
 
 def test_a_rewritten_seal_file_keeps_the_mode_it_had(sealed_flat_project):

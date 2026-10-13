@@ -31,7 +31,7 @@ word "sealed" stays with the build-time lock and those markers alone
 from __future__ import annotations
 
 import os
-import tempfile
+import secrets
 from collections.abc import Mapping
 from datetime import datetime, timezone
 
@@ -218,16 +218,27 @@ def format_seals(seals: Seals, reseals: list[dict] | None = None) -> str:
     return _HEADER + yaml.safe_dump(data, sort_keys=True, default_flow_style=False)
 
 
-def _umask_respecting_mode() -> int:
-    """The mode a plain ``open(path, "w")`` gives a *new* file: 0666 minus the
-    process umask. ``os.umask`` has no read-only form, so the value is read by
-    the set-and-restore round-trip, leaving the safe 022 in place during the
-    window rather than a wide-open 000 (the pip idiom). This lives here, not
-    in a shared writer, because the only new-file default any other writer
-    needs has to come from its own call site's semantics."""
-    mask = os.umask(0o022)
-    os.umask(mask)
-    return 0o666 & ~mask
+def _create_temp(directory: str) -> tuple[int, str]:
+    """Create a unique temp file in `directory`, returning `(fd, path)`, with
+    the mode a plain ``open(path, "w")`` gives a *new* file: an ``O_CREAT``
+    open's mode argument is filtered through the process umask by the
+    kernel, so asking for 0666 here yields exactly 0666 & ~umask without
+    this process ever mutating its own -- `os.umask` is process-wide, and
+    a set-and-restore read has a window in which another thread's file
+    creations get the wrong mode. The retry absorbs a name collision, the
+    way `tempfile.mkstemp` does (serve's ``_atomic_create`` creates its
+    temps the same umask-respecting way; the `secrets` naming is the
+    keys/security idiom)."""
+    for _ in range(100):
+        path = os.path.join(directory, f".log-seal-{secrets.token_hex(8)}.tmp")
+        try:
+            return (
+                os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o666),
+                path,
+            )
+        except FileExistsError:
+            continue
+    raise FileExistsError(f"could not create a temporary seal file in {directory}")
 
 
 def save_seals(
@@ -258,23 +269,22 @@ def save_seals(
         # A failed write must leave both the old hash and its history intact.
         temporary = None
         try:
-            with tempfile.NamedTemporaryFile(
-                mode="w", encoding="utf-8", newline="", dir=os.path.dirname(path),
-                prefix=".log-seal-", suffix=".tmp", delete=False,
-            ) as fh:
-                temporary = fh.name
+            fd, temporary = _create_temp(os.path.dirname(path))
+            try:
+                fh = os.fdopen(fd, "w", encoding="utf-8", newline="")
+            except BaseException:
+                os.close(fd)
+                raise
+            with fh:
                 fh.write(payload)
                 fh.flush()
                 os.fsync(fh.fileno())
+            # A new seal file already has the umask default its siblings get
+            # (0600 would leave the append-only guarantee unreadable by the
+            # group a 002 umask shares the tree with -- PERM-OWNER-001); a
+            # rewrite carries the existing file's mode over instead.
             if os.path.exists(path):
                 os.chmod(temporary, os.stat(path).st_mode & 0o777)
-            else:
-                # A *new* seal file would otherwise keep the temp file's 0600
-                # and be unreadable by the group its siblings get: under a
-                # 002 umask `.refdes/schema.json` and the write lock land
-                # 0664 while the seal file -- the one that carries the
-                # append-only guarantee -- sat at 0600 (PERM-OWNER-001).
-                os.chmod(temporary, _umask_respecting_mode())
             os.replace(temporary, path)
         finally:
             if temporary is not None and os.path.exists(temporary):
