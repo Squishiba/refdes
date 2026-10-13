@@ -823,10 +823,11 @@ the optional extra — `pip install refdes[pdf]`.
 
 An authored `page:` is checked here too, because this is where the bytes are:
 the document's page count is recorded in the lockfile (`page_count:`, or
-`page_count_error:` when the pages could not be counted) and every cited `page:`
-for the path is compared against it, so a re-pin that shortened the document
-cannot carry a page that stopped existing into the next build. A page that is
-not in the document is a `WARNING` line here and a warning at every later
+`page_count_error:` when the pages could not be counted) beside
+`page_count_sha256:`, the pinned digest those pages were counted from, and every
+cited `page:` for the path is compared against it, so a re-pin that shortened the
+document cannot carry a page that stopped existing into the next build. A page
+that is not in the document is a `WARNING` line here and a warning at every later
 `check`/`build` — the pin still lands, and the pin is not what is wrong.
 
 A local file cited by a calc [`source("path", "key")`](math.md#reading-a-value-from-a-source-file)
@@ -854,10 +855,14 @@ given, so a routine re-run does not re-download anything — but a `section:`
 added since the last run is still resolved then, from the bytes already on
 disk, and only if those bytes are still the pinned ones: a local file that has
 moved since it was pinned is not resolved against, and says to run `--update`
-instead. Resolution covers every section any item in the project cites for the
-path being pinned, not just the ones inside `--item`/`--path` scope — a page
-number is a fact about the bytes being pinned, so re-pinning a file under one
-item cannot leave another item's section pointing at the bytes it replaced.
+instead. A page count is refreshed the same way: if a cited path's recorded
+count/error is missing or cannot be trusted as belonging to the pinned digest,
+plain fetch recounts from the local file or kept copy and writes the matching
+`page_count_sha256:`. Resolution covers every section any item in the project
+cites for the path being pinned, not just the ones inside `--item`/`--path`
+scope — a page number is a fact about the bytes being pinned, so re-pinning a
+file under one item cannot leave another item's section pointing at the bytes it
+replaced.
 The kept column describes the bytes on disk now, not only what the lockfile
 claims: any row whose record keeps a copy — `skipped` or freshly `fetched` —
 reads `no copy` instead of `kept` when those bytes are not on disk, the same
@@ -891,8 +896,9 @@ derive it from `1`/`2` alone.
 A fourth refusal is a `.refdes/citations.yaml` that cannot be read as a
 lockfile — unresolved merge markers, invalid YAML, a `citations:` that is not a
 mapping, a key that appears twice, a record that is not a pin record, a `sha256`
-that is not a 64-character hex digest, a `page_count:` that is not a number, or
-a record carrying both `page_count:` and `page_count_error:` (they are opposites:
+that is not a 64-character hex digest, a `page_count:` that is not a number, a
+`page_count_sha256:` that is not a 64-character hex digest, or a record carrying
+both `page_count:` and `page_count_error:` (they are opposites:
 a count, and the reason there is none). The file is committed and
 hand-mergeable, so the realistic way to get one is two branches both running
 `refdes fetch` and the merge being resolved badly. `refdes fetch` refuses and
@@ -910,7 +916,13 @@ pages, and `refdes fetch` establishes the count, even in its plain form (which
 re-pins nothing) for a record whose bytes are on this machine: a local file or
 a kept copy. A remote pin kept hash-only has no bytes here to count, so only
 `--update` establishes its count, and until then `check` reports the
-citation's page numbers as not checked.
+citation's page numbers as not checked. A count or error that is present is also
+sound in shape when `page_count_sha256:` is a valid digest or absent; the digest
+does not have to match `sha256:` for the lockfile to parse, because an old record
+or a remote hash-only record may legitimately lack that provenance. What a
+missing or mismatched `page_count_sha256:` means is that `check` does not trust
+the recorded count as checked against these bytes — and plain `fetch` repairs it
+offline where the bytes are available.
 
 Every other command reports the same problem as an ordinary project error.
 `check` and `build` exit `1` for it like any other error (`build --keep-going`
@@ -1081,15 +1093,18 @@ citation whose kept copy is gone says `no copy` rather than claiming `kept`.
 A `hash_mismatch` row reads `kept`: the blob is there, and the state column is
 what says its bytes are wrong.
 
-A row whose document's pages could not be counted, **and which cites a `page:`
-of that document**, reads `pages unchecked` instead of `ok`, with the reason the
-lockfile recorded on the line below it. The pin is fine — a cited `page:` simply
-has nothing to be compared against, and an `ok` that meant "recorded" was read
-as "checked". `refdes check` warns about the same fact, and about the same set of
-citations: a citation citing no page has no unchecked page number, even when the
-lockfile still records a failed count for the path from before the `page:` was
-deleted. `page_count_error:` in `.refdes/citations.yaml` is where both read it,
-and `refdes fetch --update --path <path>` is what replaces it with a count.
+A row whose document's pages could not be counted, or whose recorded count/error
+is not trusted as belonging to the pinned bytes, **and which cites a `page:` of
+that document**, reads `pages unchecked` instead of `ok`, with the reason the
+lockfile or provenance check supplies on the line below it. The pin is fine — a
+cited `page:` simply has nothing trustworthy to be compared against, and an `ok`
+that meant "recorded" was read as "checked". `refdes check` warns about the same
+fact, and about the same set of citations: a citation citing no page has no
+unchecked page number, even when the lockfile still records a failed count for
+the path from before the `page:` was deleted. `page_count_error:` and
+`page_count_sha256:` in `.refdes/citations.yaml` are where both read it, and
+`refdes fetch --update --path <path>` is what replaces a failed or untrusted
+record with a count tied to the freshly pinned bytes.
 
 An import declared with a `version:` reads `pinned to 2026.3`; one declared
 without one reads `unpinned`, and its items still count toward the
@@ -2152,7 +2167,7 @@ python -m http.server -d _site 8000
 | `.refdes/log-seal.yaml` | **yes** | Append-only seals for log entries with no board (the only file used at all when the project has no `boards:` registry) |
 | `.refdes/log-seal-<board>.yaml` | **yes** | Append-only seals for one registered board's own log entries |
 | `.refdes/boards.yaml` | **yes** | Board and workspace drift manifest; the `workspaces:` section only appears for a project that has declared `workspaces:` |
-| `.refdes/citations.yaml` | **yes** | Citation lockfile (sha256, fetch time, kept-copy flag, resolved sections, the pinned document's page count); written by `refdes fetch`, and by `refdes serve` when an editor accept pins a source value (`docs/design/editor-source-picker.md` §4). Every write is a read-modify-write inside the project's cross-process write lock |
+| `.refdes/citations.yaml` | **yes** | Citation lockfile (sha256, fetch time, kept-copy flag, resolved sections, the pinned document's page count and the digest that count was taken from); written by `refdes fetch`, and by `refdes serve` when an editor accept pins a source value (`docs/design/editor-source-picker.md` §4). Every write is a read-modify-write inside the project's cross-process write lock |
 | `.refdes/baselines/<name>.yaml` | **yes** | One file per `refdes revision`/`refdes release` stamp. Not rewritten by any ordinary command; `refdes rename`, `refdes calc-rewrite` and `refdes standard upgrade` do edit it, to carry an item's content hash across a rename or a spelling-only rewrite |
 | `.refdes/keys-adopted.yaml` | **yes** | Adoption marker written once by `refdes keys adopt`; its presence is what makes future stamps, seals and membership manifests use key-keyed storage |
 | `.refdes/schema.json` | **no, gitignored** | The project's merged JSON Schema, for editor completion; rewritten by every command that loads the project. `refdes init` puts it in the project's `.gitignore` |

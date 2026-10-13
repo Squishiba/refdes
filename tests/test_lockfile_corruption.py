@@ -639,6 +639,32 @@ def test_a_malformed_page_count_pair_is_a_diagnostic(project, capsys, extra):
     ), err
 
 
+def test_a_malformed_page_count_provenance_is_a_diagnostic(project, capsys):
+    """`page_count_sha256` is fetch's provenance marker, not a free-form note.
+
+    A wrong shape here would make the record impossible to trust in exactly the
+    way a mismatched digest does, but it is the kind of line a bad merge can
+    leave behind, so the reader has to name it rather than silently treat the
+    count as untrusted and let the build continue as if nothing were wrong."""
+    record = {
+        "sha256": SHA,
+        "fetched": "2026-01-01T00:00:00Z",
+        "kept_copy": False,
+        "bytes": 509,
+        "page_count": 8,
+        "page_count_sha256": "not-a-hash",
+    }
+    with open(_lockfile(project), "w", encoding="utf-8") as fh:
+        fh.write(citations_mod.lockfile_text({CITE: record}))
+
+    assert cli_mod.main(["-c", str(project / "refdes-project.yaml"), "check"]) == 1
+    err = capsys.readouterr().err
+    assert f"ERROR   {citations_mod.LOCKFILE}:" in err, err
+    assert "Traceback" not in err
+    assert "has page_count_sha256" in err, err
+    assert "64-character lowercase hex digest" in err, err
+
+
 def test_a_lockfile_with_neither_page_key_still_validates(project):
     """A record with neither key claims nothing about its pages -- a
     hand-written one, or one written before page counting existed -- and every

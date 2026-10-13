@@ -1734,8 +1734,8 @@ def cmd_audit(args) -> int:
             )
             if unchecked:
                 print(
-                    f"      the pages could not be counted, so no cited page "
-                    f"number was checked: {gap}"
+                    f"      the pages could not be checked against these bytes, "
+                    f"so no cited page number was checked: {gap}"
                 )
                 if silent:
                     print(

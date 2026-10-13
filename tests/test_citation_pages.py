@@ -557,6 +557,7 @@ def test_without_the_pdf_extra_the_page_is_not_checked_and_fetch_says_so(
     assert record["sha256"] == hashlib.sha256(
         (root / "docs" / "manual.pdf").read_bytes()
     ).hexdigest()
+    assert record["page_count_sha256"] == record["sha256"]
 
     project = _build(root)
     assert [str(w) for w in project.warnings] == [
@@ -760,3 +761,69 @@ def test_audit_says_what_check_says_about_a_hash_only_pin(tmp_path, capsys):
     out = capsys.readouterr().out
     assert "pages unchecked" in out, out
     assert "pinned hash-only, with no kept copy to count offline" in out, out
+
+
+@pytest.mark.parametrize("provenance", [None, "0" * 64])
+def test_a_count_without_matching_provenance_is_not_trusted_and_plain_fetch_repairs_it(
+    tmp_path, provenance, capsys
+):
+    """A merge can pair the correct PDF hash with another PDF's page count.
+
+    Both an old count without provenance and a mismatched provenance hash must
+    be reported before a link to page 5 of a two-page PDF is treated as checked.
+    A plain fetch can recount the already-pinned local bytes without a re-pin.
+    """
+    root = _project(tmp_path, _page_item("5"), pages=2)
+    _fetch(root)
+    record = _record(root)
+    record["page_count"] = 8
+    if provenance is None:
+        record.pop("page_count_sha256", None)
+    else:
+        record["page_count_sha256"] = provenance
+    lockfile = root / ".refdes" / "citations.yaml"
+    lockfile.write_text(yaml.safe_dump({"citations": {"docs/manual.pdf": record}}))
+
+    assert cli_mod.main(["-c", str(root / "refdes-project.yaml"), "check"]) == 0
+    out = capsys.readouterr().out
+    assert "page numbers cited for docs/manual.pdf are not checked" in out
+    assert "pinned sha256" in out
+    assert _build(root, require_citations=True).errors
+
+    results = _fetch(root)
+    assert results[0].skipped
+    assert results[0].page_warnings == [
+        "docs/manual.pdf: page 5 is not in this document -- it has 2 page(s) "
+        "(cited by CMP-001)"
+    ]
+    repaired = _record(root)
+    assert repaired["page_count"] == 2
+    assert repaired["page_count_sha256"] == repaired["sha256"]
+
+
+def test_hash_only_pin_with_stale_count_stays_loud_until_update(tmp_path, capsys):
+    """A plain fetch cannot repair a remote hash-only count offline."""
+    url = "https://example.com/manual.pdf"
+    root = _project(tmp_path, _page_item("5", path=url), pages=2)
+    (root / ".refdes").mkdir(exist_ok=True)
+    record = {
+        "sha256": hashlib.sha256(pdf_bytes(2)).hexdigest(),
+        "fetched": "2026-01-01T00:00:00Z",
+        "kept_copy": False,
+        "bytes": len(pdf_bytes(2)),
+        "page_count": 8,
+        "page_count_sha256": "0" * 64,
+    }
+    (root / ".refdes" / "citations.yaml").write_text(
+        yaml.safe_dump({"citations": {url: record}}), encoding="utf-8"
+    )
+
+    def no_network(_url):
+        raise AssertionError("plain fetch must not download a pinned citation")
+
+    results = citations_mod.fetch_all(_load_only(root), fetcher=no_network)
+    assert results[0].skipped
+    assert any("not checked" in warning for warning in results[0].page_warnings)
+    assert _record(root, url)["page_count"] == 8
+    assert cli_mod.main(["-c", str(root / "refdes-project.yaml"), "audit"]) == 0
+    assert "pages unchecked" in capsys.readouterr().out

@@ -602,6 +602,17 @@ writes one or the other, never both. Keep the one that is true of these bytes;
 the other is a leftover from a merge, and the count wins on every read, so a
 stale reason beside it would never be shown to anyone again.
 
+**`.refdes/citations.yaml:N — the entry for '…' has page_count_sha256 '…'`**
+`refdes fetch` records the page count, or failed count, beside the digest naming
+the bytes it counted. A shape that is not a 64-character lowercase hex digest is
+a bad hand-edit or merge: restore the record, or re-run the fetch that writes it.
+A valid digest beside the count is different from a matching digest: `check` only
+trusts `page_count:`/`page_count_error:` as checked when the provenance matches
+`sha256:`, except for old remote hash-only records that a plain fetch cannot
+repair offline. A mismatch is not malformed; it is reported as *pages unchecked*,
+and repaired by a plain fetch when the bytes are on this machine or by
+`--update` when they are not.
+
 **`.refdes/citations.yaml:N — duplicate key '…' in one mapping (lines N and M)`**
 YAML resolves a repeated key to the *last* one and says nothing, so this is the
 one shape here that loses a pin **silently**: the file reads as though only one
