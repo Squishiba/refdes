@@ -201,6 +201,52 @@ def _gitignore_patterns(text: str) -> list[str]:
     ]
 
 
+def read_existing_gitignore(target_dir: str) -> str | None:
+    """Read the project's `.gitignore` -- or refuse before `init` touches
+    anything (DIAG-TRACE-006). Returns `None` when there is no `.gitignore`
+    yet.
+
+    Three shapes used to escape as tracebacks out of init: binary bytes
+    (`UnicodeDecodeError` on the read), a file the process cannot read
+    (`PermissionError`), and a *directory* named `.gitignore`
+    (`IsADirectoryError` on the write). The first two died before anything
+    was written, ugly but survivable; the third died *after*
+    `refdes-project.yaml` and `.vscode/settings.json` were on disk, leaving
+    a half-created project whose orphaned config then made every retry
+    refuse to overwrite it. Here all three raise `SchemaError` instead,
+    which `main()` prints as a named, exit-2 refusal, and they raise before
+    any file is created: `init` does not begin writing until the file it
+    will have to append to is proven readable text, absent, or a clean
+    refusal.
+
+    `cmd_init` keeps the returned text for the announcement diff
+    (`added_gitignore_patterns`), so the preflight read and the
+    announcement's pre-read are the same read.
+    """
+    path = os.path.join(target_dir, ".gitignore")
+    if os.path.lexists(path) and not os.path.isfile(path):
+        raise SchemaError(
+            f"{path} exists but is not a regular file -- refdes init refuses "
+            "to start rather than write a project around it; remove or "
+            "rename it and run init again"
+        )
+    if not os.path.isfile(path):
+        return None
+    try:
+        return textio.read_text(path)
+    except UnicodeDecodeError as exc:
+        raise SchemaError(
+            f"cannot read {path}: not valid UTF-8 text at byte {exc.start} "
+            f"({exc.reason}) -- .gitignore must be plain text; convert or "
+            "remove it and run init again"
+        ) from None
+    except OSError as exc:
+        raise SchemaError(
+            f"cannot read {path}: {exc.strerror or exc} -- make .gitignore "
+            "readable, or remove it, and run init again"
+        ) from None
+
+
 def _ensure_gitignore_entries(target_dir: str, entries: list[_GitignoreEntry]) -> None:
     """Make sure the project's `.gitignore` ignores each entry's path,
     creating `.gitignore` when the project has none.
@@ -346,8 +392,11 @@ def init(
     (`added_gitignore_patterns`).
 
     Returns the path written. Raises SchemaError if refdes-project.yaml already
-    exists at the target, or if `presets` is given with `standard=None`
-    (every preset's types target base types, so presets require a base).
+    exists at the target, if `presets` is given with `standard=None`
+    (every preset's types target base types, so presets require a base), or
+    if a `.gitignore` is in the way (see `read_existing_gitignore`) -- that
+    last check runs here, before anything is created, so a refused init
+    leaves the directory exactly as it found it.
     """
     presets = presets or []
     if standard is None and presets:
@@ -373,6 +422,8 @@ def init(
                     f"preset {preset_name!r} does not exist for {standard}@{version} "
                     f"(available: {available}).{hint}"
                 )
+
+    read_existing_gitignore(target_dir)
 
     os.makedirs(target_dir, exist_ok=True)
     with open(config_path, "w", encoding="utf-8") as fh:
