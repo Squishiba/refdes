@@ -692,7 +692,13 @@ def _create_item(app, body) -> tuple[int, dict]:
             who="local",
             type=type_name,
             fields=fields,
-            id=body.get("id"),
+            # An empty `id` reads as "not given" -- exactly what
+            # `_create_preview` makes of `?id=`: an empty id box previews
+            # the next free id, so the POST that saves that preview must
+            # not die on the empty string it carried. A malformed id that
+            # is not empty ("  ", "not-an-id") still reaches the id layer
+            # and is refused there, on both routes alike.
+            id=body.get("id") or None,
             destination=body.get("destination"),
             amends=body.get("amends"),
             links=links_body,
