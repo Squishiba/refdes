@@ -592,7 +592,9 @@ that look alike are told apart above. `page_count: 0` is not this error — that
 what a document with no pages in it is recorded as. A record with no
 `page_count:` and no `page_count_error:` is not this error either: it claims
 nothing about its pages (see [citing a datasheet](markdown.md#citing-a-datasheet))
-and the next `refdes fetch` records the count.
+and the next `refdes fetch` records the count — plain, for a local file or a kept
+copy; `--update` for a remote pin kept hash-only, whose cited pages are reported
+as not checked until that run.
 
 **`.refdes/citations.yaml:N — the entry for '…' has both page_count and page_count_error`**
 Those are opposites — a count, and the reason there is none — and `refdes fetch`

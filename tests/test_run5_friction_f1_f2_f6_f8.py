@@ -334,8 +334,14 @@ def test_several_unreachable_urls_are_still_counted(tmp_path, monkeypatch, capsy
     code, out, err = _run(capsys, config, "check", "--refresh", "--allow-unreachable")
     combined = out + err
     assert code == 0, combined
-    assert combined.count(DEAD) == 1, combined
-    assert combined.count(LIVE) == 1, combined
+    # Three each, not one (CITE-LOCK-003): the refresh line this test guards,
+    # plus the not-checked-pages warning every cited `page:` of a hash-only
+    # pin now earns from `check` -- twice in that one message, since it names
+    # the path and the `--update --path` remedy. These fixtures cite a page
+    # and pin no count. The F6 invariant itself is `_said_unreachable`'s:
+    # refresh says each url exactly once, and here that count is 3 lines, not 4.
+    assert combined.count(DEAD) == 3, combined
+    assert combined.count(LIVE) == 3, combined
     said = _said_unreachable(combined.splitlines())
     assert len(said) == 3, combined  # two urls and the count, not four lines
     assert "2 pinned citations could not be refreshed" in combined, combined

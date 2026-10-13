@@ -466,7 +466,13 @@ about a document:
   one written before any of this, has no `page_count:` and no
   `page_count_error:` — it says nothing about its pages, so nothing is checked
   against it. Every project has to run `refdes fetch` before `check` can pass
-  it, and that run records the count.
+  it, and that run records the count: a plain fetch — which re-pins nothing —
+  counts from the bytes the record already vouches for, a local file or a kept
+  copy. The exception is a remote pin kept hash-only, whose bytes are not on
+  this machine: plain fetch does not download them, so only `refdes fetch
+  --update` establishes that count, and until it runs `check` reports the
+  citation's page numbers as *not checked*, in the same shape (and with the
+  same `--require-citations` escalation) as the unreadable-extra case above.
 
 `page:` means the page of the *PDF*, counted from 1 — the same number the
 rendered `#page=` fragment opens. A datasheet's own printed page number is a

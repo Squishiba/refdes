@@ -1065,14 +1065,25 @@ def test_cli_audit_never_calls_a_missing_kept_copy_kept(citation_project, capsys
 
 
 @pytest.mark.parametrize(
-    "kept_copy, blob, expected",
-    [(False, False, "hash-only"), (True, True, "kept")],
+    "kept_copy, blob, expected_pin, expected_state",
+    [
+        (False, False, "hash-only", "pages unchecked"),
+        (True, True, "kept", "ok"),
+    ],
 )
 def test_cli_audit_pinned_citation_keeps_its_pin_words(
-    citation_project, capsys, kept_copy, blob, expected
+    citation_project, capsys, kept_copy, blob, expected_pin, expected_state
 ):
     """Only the row that was lying changes: a pinned citation with no kept copy
     still reads `hash-only`, and one whose bytes are kept still reads `kept`.
+
+    The state column joins in for the hash-only row (CITE-LOCK-003): this
+    citation cites `page: "14"`, and a hash-only pin whose record carries no
+    count can never have that page checked -- `fetch --update` is the only
+    command that can bring bytes back to count. Printing `ok` there is
+    cmd_audit's own description of the failure it fixed in run-5: reading a
+    record as a check. The pin column, which is this test's subject, is
+    untouched; the kept row proves the flip is about the bytes, not the flag.
     """
     sha = hashlib.sha256(b"datasheet bytes").hexdigest()
     _write_citation_lockfile(
@@ -1089,7 +1100,7 @@ def test_cli_audit_pinned_citation_keeps_its_pin_words(
         _write_kept_copy_blob(citation_project, sha, ".pdf", b"datasheet bytes")
 
     line = _audit_citation_line(citation_project, capsys)
-    assert line == f"ok {expected} cited by CMP-001"
+    assert line == f"{expected_state} {expected_pin} cited by CMP-001"
 
 
 # -------------------------------------------------------------------- rendering

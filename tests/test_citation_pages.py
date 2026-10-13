@@ -603,3 +603,160 @@ def test_a_page_on_an_unreadable_pdf_is_reported_as_unreadable(tmp_path):
     assert "Traceback" not in message
     # A document whose pages cannot be counted is not a document with no pages.
     assert "page_count" not in _record(root)
+
+
+# ------------------------------------------- already pinned, no count (CITE-LOCK-003)
+
+
+def _rewrite_item(root, item_text):
+    (root / "items" / "cmp.yaml").write_text(item_text, encoding="utf-8")
+
+
+def test_a_plain_fetch_counts_a_pinned_document_when_a_page_is_first_cited(
+    tmp_path, capsys
+):
+    """The exact resweep repro (CITE-LOCK-003): pin the path while nothing
+    cites a page -- counting is scoped to cited pages -- then cite page 99 of
+    the 8-page PDF and run plain `refdes fetch`. Before the fix fetch printed
+    `skipped`, `check` said nothing, and `build` published `#page=99` as
+    verified; the docs' promise that `refdes fetch` records the count was
+    false for an already-pinned path. A count derived from the bytes the
+    record already vouches for needs no network and re-pins nothing -- the
+    same offline derivation the same skip branch has always done for
+    `section:` -- so a plain fetch now counts, records, and reports."""
+    root = _project(tmp_path, _item("path: docs/manual.pdf"))
+    assert cli_mod.main(["-c", str(root / "refdes-project.yaml"), "fetch"]) == 0
+    capsys.readouterr()
+    assert "page_count" not in _record(root)
+
+    _rewrite_item(root, _page_item("99"))
+    assert cli_mod.main(["-c", str(root / "refdes-project.yaml"), "fetch"]) == 0
+    captured = capsys.readouterr()
+    # the skip is still a skip -- no re-download, same sha, same words --
+    assert "skipped  docs/manual.pdf" in captured.out
+    # but it is no longer silent, and the record now holds the count
+    assert (
+        "WARNING  docs/manual.pdf: page 99 is not in this document -- it has "
+        "8 page(s) (cited by CMP-001)" in captured.err
+    ), captured.err
+    assert _record(root)["page_count"] == 8
+
+    assert cli_mod.main(["-c", str(root / "refdes-project.yaml"), "check"]) == 0
+    out = capsys.readouterr().out
+    assert "page 99 is not in this document -- it has 8 page(s)" in out
+    assert "1 items, 0 errors, 1 warnings" in out
+
+    assert cli_mod.main(
+        ["-c", str(root / "refdes-project.yaml"), "build", "--require-citations"]
+    ) == 1
+    built = capsys.readouterr()
+    assert "page 99 is not in this document" in built.out + built.err
+
+
+def test_the_control_an_in_range_page_stays_clean_end_to_end(tmp_path, capsys):
+    """The same flow with `page: "4"` on the same 8-page document: the plain
+    fetch records the count, and no command says a word about pages."""
+    root = _project(tmp_path, _item("path: docs/manual.pdf"))
+    assert cli_mod.main(["-c", str(root / "refdes-project.yaml"), "fetch"]) == 0
+    capsys.readouterr()
+
+    _rewrite_item(root, _page_item("4"))
+    assert cli_mod.main(["-c", str(root / "refdes-project.yaml"), "fetch"]) == 0
+    captured = capsys.readouterr()
+    assert "WARNING" not in captured.err, captured.err
+    assert _record(root)["page_count"] == 8
+
+    assert cli_mod.main(["-c", str(root / "refdes-project.yaml"), "check"]) == 0
+    assert "1 items, 0 errors, 0 warnings" in capsys.readouterr().out
+
+    assert cli_mod.main(["-c", str(root / "refdes-project.yaml"), "build"]) == 0
+    capsys.readouterr()
+    html = (root / "_site" / "cmp-001.html").read_text(encoding="utf-8")
+    assert "#page=4" in html
+    assert "not in this document" not in html
+
+
+def test_a_hash_only_pin_reports_pages_no_offline_fetch_can_count(tmp_path):
+    """The other half of the decision (CITE-LOCK-003): a remote pin kept
+    hash-only has no bytes on this machine to count, and a plain fetch does
+    not go and get them -- the skip/no-update promise holds exactly as before.
+    What must not hold is the silence: `check` reports the cited pages as not
+    checked in `--update`'s own direction, the gate escalates it, and a real
+    `--update` (the command the warning names) turns the state into the
+    ordinary recorded-count one, warning about the page itself."""
+    root = _project(tmp_path, _item("path: https://example.com/ds.pdf"))
+    citations_mod.fetch_all(_load_only(root), fetcher=lambda url: pdf_bytes(8))
+    key = "https://example.com/ds.pdf"
+    assert "page_count" not in _record(root, key)
+
+    _rewrite_item(root, _page_item("99", path=key))
+
+    def no_network(url):
+        raise AssertionError("a plain fetch must not re-download a pinned path")
+
+    results = citations_mod.fetch_all(_load_only(root), fetcher=no_network)
+    assert results[0].skipped
+    assert "page_count" not in _record(root, key)  # nothing was written
+
+    warning = (
+        "WARNING items/cmp.yaml:4 [CMP-001] — the page numbers cited for "
+        f"{key} are not checked: the lockfile records no page count for this "
+        "document because it is pinned hash-only, with no kept copy to count "
+        f"offline -- run 'refdes fetch --update --path {key}' to establish it"
+    )
+    project = _build(root)
+    assert [str(w) for w in project.warnings] == [warning], _messages(project)
+    assert _build(root, require_citations=True).errors
+
+    results = citations_mod.fetch_all(
+        _load_only(root), update=True, fetcher=lambda url: pdf_bytes(8)
+    )
+    assert _record(root, key)["page_count"] == 8
+    assert results[0].page_warnings == [
+        (
+            f"{key}: page 99 is not in this document -- it has 8 page(s) "
+            "(cited by CMP-001)"
+        )
+    ]
+
+
+def test_a_plain_fetch_still_never_recounts_a_path_that_has_a_count(tmp_path, monkeypatch):
+    """The fix adds a count where none exists; it must not turn every routine
+    re-run into a re-count. A pinned path whose record already carries a count
+    is re-checked from the lockfile alone, exactly as before."""
+    root = _project(tmp_path, _page_item("4"))
+    _fetch(root)
+    assert _record(root)["page_count"] == 8
+    monkeypatch.setattr(
+        citations_mod,
+        "page_count",
+        lambda *a, **kw: pytest.fail("a pinned path with a count is not re-counted"),
+    )
+    results = _fetch(root)
+    assert results[0].skipped
+    assert results[0].page_warnings == []
+
+
+def test_audit_says_what_check_says_about_a_hash_only_pin(tmp_path, capsys):
+    """`audit` and `check` cannot disagree about what "we could not check
+    this" means -- the run-5 F1 lesson, restated in `page_count_gaps`. The
+    hash-only state `check` now names has to appear in the report `audit`
+    prints, or the release reviewer sees `ok` for it."""
+    root = _project(tmp_path, _page_item("99", path="https://example.com/ds.pdf"))
+    data = pdf_bytes(8)
+    (root / ".refdes").mkdir(exist_ok=True)
+    (root / ".refdes" / "citations.yaml").write_text(
+        yaml.safe_dump({"citations": {
+            "https://example.com/ds.pdf": {
+                "sha256": hashlib.sha256(data).hexdigest(),
+                "fetched": "2026-01-01T00:00:00Z",
+                "kept_copy": False,
+                "bytes": len(data),
+            }
+        }}),
+        encoding="utf-8",
+    )
+    assert cli_mod.main(["-c", str(root / "refdes-project.yaml"), "audit"]) == 0
+    out = capsys.readouterr().out
+    assert "pages unchecked" in out, out
+    assert "pinned hash-only, with no kept copy to count offline" in out, out

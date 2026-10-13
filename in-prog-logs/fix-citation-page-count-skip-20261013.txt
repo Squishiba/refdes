@@ -1,0 +1,87 @@
+Task: fix CITE-LOCK-003 only (branch fix/citation-page-count-skip-20261013,
+pinned origin/main 8b6a52e), per
+in-prog-logs/current-main-resweep-cite-page.tsv.
+
+Report (reproduced before the fix with the real CLI, in .scratch/repro-cite003):
+a citation path already pinned while nothing cited a page (counting is scoped
+to cited pages) keeps no page_count; citing page "99" of an 8-page PDF and
+running plain `refdes fetch` printed `skipped ... hash-only` and wrote nothing;
+`check` said `0 errors, 0 warnings`; `build` published `#page=99` as verified.
+The docs' promise (markdown.md "that run records the count", cli-reference.md
+"the first `refdes fetch` establishes the count") was false for an
+already-pinned path.
+
+Fix (src/refdes/citations.py):
+1. fetch_all's skip branch now has an `elif pages and not stale:` arm: when a
+   cited page meets a record that claims nothing (neither page_count nor
+   page_count_error), the count is derived OFFLINE from the bytes the record
+   already vouches for, via _section_bytes (sha256-verified against the pin,
+   no network) — the same offline derivation the same skip branch has always
+   done for `section:`. Success records page_count and runs _check_pages (so
+   the fetch-time warning and the recorded count land together); a pypdf
+   failure records page_count_error with the usual remedy. When the bytes
+   are not on this machine — a remote pin kept hash-only, or a local file
+   that changed since the pin — the branch does nothing: the plain-fetch
+   skip/no-update promise holds exactly as before, verified with a
+   booby-trapped fetcher.
+2. _apply_page gained the missing state for the case plain fetch cannot
+   repair: remote pin, no kept copy, PDF extension, cited pages, no count →
+   warning "the page numbers cited for X are not checked: ... it is pinned
+   hash-only, with no kept copy to count offline -- run 'refdes fetch
+   --update --path X' to establish it", same soft shape (escalated by
+   build --require-citations) as the page_count_error case.
+3. page_count_gaps reports the identical state (shared HASH_ONLY_UNCOUNTED_WHY
+   + _hash_only_without_count predicate), so `audit`'s Citations section says
+   `pages unchecked` where `check` now warns — the run-5 F1 coherence rule.
+4. CITE-LOCK-011/012 kept: the new check/build warning fires only when the
+   count key is ABSENT; a recorded page_count: 0 / -3 behaves as before.
+   CITE-LOCK-004 untouched: no page_count provenance added.
+
+Docs: the three claims that "the next fetch records the count" (markdown.md
+bullet, cli-reference.md lockfile-shape paragraph, troubleshooting.md)
+amended — true now for a plain fetch of a bytes-backed record (local file or
+kept copy); a hash-only remote pin needs --update and reports its cited
+pages as not checked until then.
+
+Tests (tests/test_citation_pages.py, new section "already pinned, no count"):
+- exact repro end-to-end via the real CLI: plain fetch counts (page_count: 8
+  recorded, warning at fetch), check warns, build --require-citations exits 1;
+- control: page "4" — plain fetch records the count, check/build clean,
+  #page=4 published;
+- remote hash-only: plain fetch skipped with no network and no write, check's
+  exact warning text, gate escalates, `fetch(update=True)` counts and flips
+  to the ordinary out-of-range warning;
+- guard: plain fetch never recounts a record that already has a count
+  (page_count monkeypatched to fail);
+- audit/check coherence on a hand-written hash-only record.
+
+Existing tests updated for the intended behavior change (both had asserted the
+old silence):
+- tests/test_citations.py::test_cli_audit_pinned_citation_keeps_its_pin_words:
+  the hash-only row's STATE column is now `pages unchecked` (the row cited
+  page "14" and could never have been checked — printing `ok` there was
+  reading the record as a check, the exact failure cmd_audit documents from
+  run-5); the PIN column — the test's actual subject — is unchanged, and the
+  kept row still reads `ok kept`, proving the flip is about missing bytes,
+  not the kept_copy flag.
+- tests/test_run5_friction_f1_f2_f6_f8.py::test_several_unreachable_urls_are_still_counted:
+  each url is now named three times, not once (refresh line + the new
+  warning, which names the path and its --update remedy). The F6 invariant
+  itself is still guarded by _said_unreachable's count.
+
+Verification: full suite 3607 passed, 2 skipped, 0 failed (PYTHONPATH=<worktree>/src).
+ruff check of the four touched python files reports exactly the 20 findings
+that the same four files report at 8b6a52e — no new findings. Real-CLI
+re-verification of both shapes (local count-on-skip, remote hash-only
+skip+loud) in .scratch/repro-cite003{,-remote}; refdes.__file__ confirmed to
+resolve to the worktree under PYTHONPATH.
+
+Limits / not done: CITE-LOCK-004 (hash provenance for page_count) and
+CITE-LOCK-011/012 (recorded counts of 0/negative semantics) deliberately
+out of scope per the resweep row. The window between citing a page and
+running fetch on a LOCAL path still builds silently (lockfile claims nothing
+→ nothing checked) — unchanged by design; markdown.md documents that fetch is
+part of the loop, and after the fix that promise is enforced. No push, no PR.
+Scratch repros left in .scratch/ per AGENTS.md.
+
+Finished: yes.

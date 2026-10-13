@@ -906,7 +906,11 @@ Every field `refdes fetch` writes is accepted, and only fields it writes are
 checked: `page_count:` may be `0`, because that is what a document pypdf opens
 and finds no pages in is recorded as, and a record carrying neither
 `page_count:` nor `page_count_error:` is sound — it claims nothing about its
-pages, and the first `refdes fetch` establishes the count.
+pages, and `refdes fetch` establishes the count, even in its plain form (which
+re-pins nothing) for a record whose bytes are on this machine: a local file or
+a kept copy. A remote pin kept hash-only has no bytes here to count, so only
+`--update` establishes its count, and until then `check` reports the
+citation's page numbers as not checked.
 
 Every other command reports the same problem as an ordinary project error.
 `check` and `build` exit `1` for it like any other error (`build --keep-going`
