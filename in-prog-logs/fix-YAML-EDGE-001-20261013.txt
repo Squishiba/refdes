@@ -1,0 +1,171 @@
+Task: fix YAML-EDGE-001 — `parse._construct_mapping_dupes` omits
+`_preserve_surrogate_scalars`, so an 11-digit type key in a hand-written
+`refdes-schema.yaml` is retyped int and `refdes check` dies with an
+uncaught `TypeError` at `schema.py:880`.
+
+Worktree: /home/jorb/.paseo/worktrees/16msma8v/fix-yaml-surrogate-duplicate-20261013
+Branch:   fix/yaml-surrogate-duplicate-20261013 (from main @ 8b6a52e)
+Status:   FINISHED — one commit, parser fix + two tests + changelog fragment.
+
+==========================================================================
+## 0. Inputs
+
+- `in-prog-logs/current-main-resweep-yaml-diagnostics.tsv` and its `.txt`
+  companion are NOT in this worktree at 8b6a52e: they are untracked, and
+  live only in the main checkout
+  (`/home/jorb/work/refdes/in-prog-logs/`) and in the resweep archive
+  (`/home/jorb/work/refdes/.scratch/resweep-archive-20261012/resweep-yaml-diagnostics-20261012/in-prog-logs/`).
+  Read from there; nothing copied into this tree.
+- Row YAML-EDGE-001 (PRESENT / REPRODUCED at 8b6a52e): `_construct_mapping_dupes`
+  (parse.py:295-297) calls only `_collect_duplicates`; its twin
+  `_construct_mapping` (:266-271) calls both. In-process the two loaders
+  disagree on the same bytes; end-to-end the probe crashed with
+  `TypeError: 'int' object is not subscriptable` at schema.py:880.
+- `git status` at start: clean, nothing to commit, tree mine. No stash used.
+
+## 1. Reproduced at main, in this worktree
+
+The `refdes` on PATH and the venv python both default to the *main
+checkout's* src (editable install), so everything below ran with
+`export PYTHONPATH=$PWD/src` and `refdes.__file__` printed/verified as
+this worktree's path first, every time.
+
+Probe project `.scratch/yaml-edge-001/` (`refdes init`, plus
+`refdes-schema.yaml` declaring `12345678901:` as a type):
+
+    $ $VENV/python -m refdes.cli --no-write check
+    ...
+    File ".../src/refdes/schema.py", line 880, in load_project
+      prefix=tspec.get("prefix", tname[:3].upper()),
+    TypeError: 'int' object is not subscriptable
+    [exit=1]
+
+Same in-process contrast as the finding: `yaml_safe_load` yields the key
+`'12345678901'` (str), `yaml_safe_load_checked` yields `12345678901` (int).
+
+Two probe iterations before the crash appeared, worth recording so nobody
+reads the repro as easier than it was: a field spec of `body: str` and then
+`body: {type: str}` are *configuration errors* (exit 2, caught by
+`cli.main`) and never reach `load_project`'s type loop. The type must be
+valid enough to get that far — `title: {type: text}` is.
+
+## 2. The fix
+
+One call, in the loader that was missing it (`src/refdes/parse.py`):
+`_construct_mapping_dupes` now runs `_preserve_surrogate_scalars(node)`
+before `_collect_duplicates(loader, node)`, exactly like `_construct_mapping`
+and `_construct_key_mapping` already do. Comment in the diff records why.
+`_DupSafeLoader`'s docstring said "records a repeated mapping key, and
+nothing else"; "nothing else" was the bug, so it now says "adds no
+bookkeeping", which is the part that actually has to stay true (a
+`__line__` key would be reported by `configcheck` as an unknown setting).
+
+Why this is the right layer rather than a `str(tname)` in `schema.py`: the
+retag exists so a surrogate-shaped scalar keeps the spelling its author
+wrote, across every hand-authored file refdes reads, and it is already
+applied by the other two mapping constructors in this file. The two loaders
+disagreeing about the same bytes is the defect; `tname[:3]` was only where
+it became loud. Scope stayed in the parser as briefed — no schema.py/cli.py
+edit: with the retag the type loads under its own name (prefix `123`, label
+from its own `label:`) and the run is green, which is the "valid handling"
+outcome, not merely a nicer crash.
+
+After the fix, same probe:
+
+    $ $VENV/python -m refdes.cli --no-write check
+    1 items, 0 errors, 1 warnings      # the warning is --no-write's stale .refdes/schema.json
+    [exit=0]
+    # load_project: types['12345678901'] -> ItemType(name='12345678901',
+    #   prefix='123', label='Oddity', fields=['title'])
+
+## 3. Tests (`tests/test_keys.py`, next to the existing spelling test)
+
+1. `test_the_config_loader_keeps_yaml_ambiguous_keys_the_same_way` —
+   parity: `yaml_safe_load_checked`, `_DupSafeLoader` and
+   `_PurePythonDupLoader` (via `_load_line_marked`) must all load
+   `12345678901:` as the string `yaml_safe_load` does, keep a
+   surrogate-shaped `key:` value a string, still collect duplicates (the
+   retag must not disturb the walk it shares a constructor with), and still
+   make an int of a `number: 84008808238` (the retag stays scoped to key
+   fields and mapping keys).
+2. `test_a_surrogate_shaped_type_name_in_the_overlay_is_not_a_traceback` —
+   through `cli.main(..., "--no-write", "check")` on a project whose
+   `refdes-schema.yaml` declares that type and whose `items/r.yaml` carries
+   an item of it: no `Traceback` on stderr, exit 0, and the type really is
+   usable (`prefix == "123"`, the item parses under `type: 12345678901`).
+
+Both FAIL at main's code (verified by writing
+`git show HEAD:src/refdes/parse.py` over the file, running, then restoring
+from `.scratch/yaml-edge-001/backup/parse.py.fixed` — no stash, per
+AGENTS.md):
+
+    FAILED tests/test_keys.py::test_the_config_loader_keeps_yaml_ambiguous_keys_the_same_way
+    FAILED tests/test_keys.py::test_a_surrogate_shaped_type_name_in_the_overlay_is_not_a_traceback
+      E  TypeError: 'int' object is not subscriptable  (src/refdes/schema.py:880)
+
+i.e. the second one fails on exactly the reported traceback, and passes on
+the fix — which is the regression the finding asks for.
+
+## 4. Runs
+
+    $ $VENV/python -m pytest tests/test_keys.py tests/test_config_duplicate_keys.py \
+        tests/test_parse.py tests/test_config_unknown_keys.py tests/test_config_split.py \
+        tests/test_revise_flow_style.py tests/test_load_time_writes.py -q -p no:randomly
+    241 passed
+
+Targeted because those are the files that exercise the four
+`yaml_safe_load_checked` call sites (`schema.load_project`,
+`schema._load_schema_overlay`, `scaffold` preset settings,
+`revise.load_mapping`) plus the item-file loaders and the surrogate-key
+family.
+
+Full suite run too, because the changed constructor is a shared read path
+for four call sites rather than one:
+
+    $ $VENV/python -m pytest tests/ -q -p no:randomly
+    3604 passed, 2 skipped in 270.77s (0:04:30)
+
+ruff, scoped to the touched files (AGENTS.md: `ruff check .` is not a green
+baseline, so this is per-file, not a gate):
+
+    $ ruff check src/refdes/parse.py tests/test_keys.py   -> All checks passed!
+    $ ruff check <same two files at HEAD>                 -> All checks passed!
+
+No new findings (both clean before and after).
+
+## 5. Limitations / not done
+
+- The *other* rows in the same resweep table are untouched:
+  DIAG-WORD-001/005 (duplicate-key message misattribution around an inline
+  `defaults:`), DIAG-WORD-006 (`refdes id` printing load errors twice),
+  YAML-EDGE-002 (no test for a leading-zero all-octal fingerprint).
+- `str()`-ing `tname` defensively in `schema.py` was deliberately not
+  added: it would hide a future loader that stops preserving spellings
+  instead of reporting it, and the retag makes it unnecessary for this
+  shape. Any *other* int-scalar crash in a config block is still a raw
+  traceback (unchanged, pre-existing, and the subject of
+  `tests/test_config_unknown_keys.py`'s remaining expectations).
+- An 11-digit *board*/workspace/type name that a project already has is a
+  behaviour change for that project in one respect: it now keeps its string
+  spelling, so the default prefix is `123` rather than the run crashing. No
+  project in this repo declares such a name (grep of the repo's own
+  `refdes-schema.yaml`/`refdes-project.yaml`).
+- No changelog fragment was in the original scope; a one-line `fixed`
+  fragment (`changelog.d/schema-surrogate-shaped-type-name.fixed.md`) was
+  added anyway because changelog.d/README.md says each change that deserves
+  an entry commits one with the change. Drop that file if the reviewer
+  wants the diff strictly parser+tests.
+
+## 6. Files
+
+- `src/refdes/parse.py` — `_construct_mapping_dupes` calls
+  `_preserve_surrogate_scalars`; `_DupSafeLoader` docstring reworded.
+- `tests/test_keys.py` — the two tests above.
+- `changelog.d/schema-surrogate-shaped-type-name.fixed.md` — the fragment.
+
+### Scratch (`.scratch/yaml-edge-001/`, gitignored, left in place)
+
+The probe project (`refdes-project.yaml`, `refdes-schema.yaml`,
+`items/r.yaml`), `backup/parse.py.fixed` (the fixed file, used for the
+main-code run in §3), `backup/head/` (HEAD's two files, for the ruff
+baseline diff).

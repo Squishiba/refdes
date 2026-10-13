@@ -182,6 +182,86 @@ def test_yaml_ambiguous_existing_keys_keep_their_spelling(tmp_path):
     assert yaml_safe_load("number: 84008808238\n")["number"] == 84008808238
 
 
+def test_the_config_loader_keeps_yaml_ambiguous_keys_the_same_way():
+    """`yaml_safe_load_checked` must not disagree with `yaml_safe_load`.
+
+    Both loaders read hand-authored YAML, and one of them used to skip the
+    retag: `_construct_mapping_dupes` collected duplicates without calling
+    `_preserve_surrogate_scalars`, so the same bytes loaded a mapping key as
+    the string `'12345678901'` under one and the int `12345678901` under the
+    other. `schema.load_project` and `schema._load_schema_overlay` read through
+    the checked one, so an 11-digit type name in a hand-written
+    `refdes-schema.yaml` reached `tname[:3].upper()` as an int and `refdes
+    check` died with an uncaught `TypeError` (YAML-EDGE-001).
+    """
+    from refdes.parse import (
+        _DupSafeLoader,
+        _load_line_marked,
+        _PurePythonDupLoader,
+        yaml_safe_load,
+        yaml_safe_load_checked,
+    )
+
+    text = "types:\n  12345678901:\n    fields:\n      key: 84008808238\n"
+    plain = yaml_safe_load(text)
+    assert list(plain["types"]) == ["12345678901"]
+    assert plain["types"]["12345678901"]["fields"]["key"] == "84008808238"
+    for loader in (_DupSafeLoader, _PurePythonDupLoader):
+        loaded, duplicates = _load_line_marked(text, loader)
+        assert list(loaded["types"]) == ["12345678901"]
+        assert loaded["types"]["12345678901"]["fields"]["key"] == "84008808238"
+    loaded, duplicates = yaml_safe_load_checked(text)
+    assert list(loaded["types"]) == ["12345678901"]
+    assert loaded["types"]["12345678901"]["fields"]["key"] == "84008808238"
+    # The retag does not disturb the duplicate walk it shares a constructor with.
+    assert duplicates == []
+    assert yaml_safe_load_checked("site: a\nsite: b\n")[1] != []
+    # ... and it stays as narrowly scoped as the plain loader's: an ambiguous
+    # scalar nobody calls `key` is still the int YAML says it is.
+    assert yaml_safe_load_checked("number: 84008808238\n")[0] == {"number": 84008808238}
+
+
+def test_a_surrogate_shaped_type_name_in_the_overlay_is_not_a_traceback(tmp_path, capsys):
+    """A type named with 11 digits loads, and is usable, through the CLI.
+
+    Through `cli.main` rather than only the loader, because the failure was a
+    crash rather than a diagnostic: `main` catches `SchemaError` and prints
+    `configuration error:`, and the int type name raised a `TypeError` that
+    escaped it, so the user got a traceback and exit 1 instead of either a
+    refusal or a working project.
+    """
+    write_project_config(
+        tmp_path,
+        "site: {title: T, out: _site}\n"
+        "id: {width: 3}\n"
+        "on_change: {default: invalidate}\n"
+        "types:\n"
+        "  12345678901:\n"
+        "    label: Oddity\n"
+        "    fields:\n"
+        "      title: { type: text }\n",
+    )
+    (tmp_path / "items").mkdir()
+    (tmp_path / "items" / "r.yaml").write_text(
+        "items:\n  - id: 12345678901-001\n    type: 12345678901\n    title: Oddity one\n",
+        encoding="utf-8",
+    )
+
+    code = cli_mod.main(
+        ["-c", str(tmp_path / "refdes-project.yaml"), "--no-write", "check"]
+    )
+    captured = capsys.readouterr()
+    assert "Traceback" not in captured.err, captured.err
+    assert code == 0, captured.err + captured.out
+
+    project = load_project(config_path=str(tmp_path / "refdes-project.yaml"))
+    oddity = project.types["12345678901"]
+    assert oddity.name == "12345678901"
+    assert oddity.prefix == "123"
+    parse.load_items(project)
+    assert project.item_by_id("12345678901-001").type == "12345678901"
+
+
 def _key_cli(root, *args):
     env = os.environ.copy()
     env["PYTHONPATH"] = str(Path(__file__).resolve().parents[1] / "src")
