@@ -830,6 +830,23 @@ def _render_calcblock(project: Project, params: dict[str, str], where: str = "")
             "```calc block; this item computes nothing."
         )
 
+    if not block:
+        # §5.4: `block` names a *named* block. The old `line.block == block`
+        # match said yes to the empty string, which is the unnamed fence's
+        # own tag -- so `block=""` rendered the owner's unnamed rows under a
+        # caption whose block half was a dangling separator, on a table with
+        # no anchor for a `#calc:` link to ever resolve to.
+        named = sorted({line.block for line in item.calcs if line.block})
+        listing = (
+            f"{item.id} names: " + ", ".join(named) + "."
+            if named
+            else f"{item.id} has calc blocks but none is named -- add "
+            'id="..." to its fence to make this block work.'
+        )
+        raise _BlockError(
+            'block="" is not a calc block name -- calcblock renders a '
+            f"named ```calc block. {listing}"
+        )
     rows = [line for line in item.calcs if line.block == block]
     if not rows:
         names = sorted({line.block for line in item.calcs if line.block})

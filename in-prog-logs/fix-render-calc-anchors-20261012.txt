@@ -1,0 +1,112 @@
+fix-render-calc-anchors — 2026-10-12 — Qwen3.8-Flash-Next
+
+Task: implement fixes for RENDER-ANCHOR-001/-002/-003 (findings in
+in-prog-logs/current-main-resweep-render-anchor.tsv, read from the base
+checkout /home/jorb/work/refdes — not present in this worktree) on main at
+8b6a52e. Branch: fix/render-calc-anchors-20261012.
+
+## Findings as confirmed here
+
+All three reproduced in this worktree before any change, with the real CLI:
+.scratch/fix-render-calc-anchors/probe (refdes-project.yaml + two items each
+with a ```calc id="losses"``` fence, DEC-002 also an unnamed block, pages
+two.md/empty.md), built via
+`PYTHONPATH=<worktree>/src /home/jorb/work/venv-refdes/bin/python3 -c "...refdes.cli.main(['build'])"`
+with `refdes.__file__` verified to be this worktree's src:
+- 001: _site/document.html had id="calc-losses" x2 (build.py:2334 emits the
+  anchor per named block; names are per-item unique only; render.py merges
+  all item bodies into one DOM).
+- 003: pages/two.md with two {{calcblock}} naming `losses` on two items ->
+  two.html had id="calc-losses" x2.
+- 002: pages/empty.md {{calcblock item="DEC-002" block=""}} -> empty.html
+  rendered the unnamed block's Q_diss table (no anchor), caption
+  "DEC-002 / " dangling — blocks.py's `line.block == block` matches "" .
+
+## Anchor strategy chosen (and why)
+
+Emission is NOT changed. The owner's own item page keeps the bare
+`id="calc-<name>"`, which is exactly what `[[ID#calc:name]]` resolves to
+(href = `<owner-slug>.html#calc-<name>`, always page-prefixed, so it lands
+on the standalone page from anywhere — including from document.html, where
+_anchorize's PAGE_HREF_RE deliberately does not touch fragment hrefs). That
+keeps every generated cross-reference and every published deep link working
+byte-for-byte, which the review note asked to preserve.
+
+Uniqueness is then enforced where it is actually a property: one rendered
+page. `render._write_html` is documented in this repo as "the single seam
+every HTML page in the site is written through" (verified: it is the only
+template.render/write site in render.py, and serve's preview rebuilds via
+render_site -> the same seam). A `_unique_calc_anchors` pass runs there: the
+first `calc-*` id in document order keeps its anchor; each later repeat on
+that page moves to `-2`/`-3`…, with the candidate checked against every id
+already on the page (so a genuine block named `losses-2` can never be
+squashed). Non-calc ids are never renamed (field-/cite- anchors only exist
+on item pages, where per-item validation already forbids repeats).
+
+This covers document.html, the board/workspace document copies, log pages,
+calcblock pages, and item pages (no-op) with one mechanism and no state
+threaded through the templates.
+
+## RENDER-ANCHOR-002 fix
+
+`blocks._render_calcblock` now rejects an empty `block` before matching:
+`block="" is not a calc block name -- calcblock renders a named ```calc
+block. <ID> names: ...` (or the existing §7 "none is named" wording when the
+item names nothing). A _BlockError, so: build error at the page line, ⚠
+(block-error <p>) in place, no table rendered. The dangling "ID / " caption
+became unreachable with it. Changelog records it under Breaking (a page that
+built before now errors) — same posture as the duplicate-calc-name entry.
+
+## Tests
+
+New tests/test_render_calc_anchors.py (5 tests). Ran them before the fix:
+4 failed exactly on the three findings + the `losses-2` collision edge; the
+5th (item pages keep bare anchors + page-prefixed cross-ref hrefs,
+document.html must not anchorize a fragment href) is the preservation guard
+and passed before the fix too — it is there to fail if someone later changes
+emission. After the fix: 5/5 pass.
+- Full suite: `PYTHONPATH=src python -m pytest tests/ -q` -> 3607 passed,
+  2 skipped (4m33s). No existing test needed rewording — the pinned
+  unnamed-table and owner-page anchor tests (test_calc_block_names.py,
+  test_calcblock.py) still pass unchanged, confirming emission compat.
+- Real CLI probe after the fix (src verified again): document.html has
+  calc-losses x1 + calc-losses-2 x1; two.html likewise unique, both tables
+  present; empty.md now `ERROR pages/empty.md:3 — {{calcblock ... block=""}}
+  — block="" is not a calc block name ...` exit non-zero (1 error),
+  empty.html shows the block-error <p>, no Q_diss table; dec-001.html/
+  dec-002.html keep `id="calc-losses"` and the cross-ref hrefs are unchanged.
+- ruff scoped to touched files: 3 findings, all pre-existing (identical 3 on
+  the HEAD copies in .scratch/ruff-head/); my lines add none. `--select I001`
+  clean.
+
+## Docs updated (behavior changed)
+
+- docs/math.md: anchor uniqueness is a page property; bare anchor on the
+  owner page, `-2`-style suffixes on merged documents.
+- docs/blocks.md: calcblock `block` param cannot be empty; new failure-mode
+  block; "same anchor" clause qualified.
+- docs/design/named-calc-blocks.md: dated post-implementation bullet in
+  §3.5; §5.4 param row; §7 gains the block="" error example.
+- CHANGELOG.md [Unreleased]: Breaking (block="" error) + Fixed (anchor
+  repeats) entries.
+
+## Difficulties / notes
+
+- The tsv was only in the base checkout; read it there (documented above).
+- Chose write-seam renaming over prefixing anchors with the item id at
+  emission: prefixing would have changed the standalone-page anchor contract
+  (§3.5/§5.3, pinned tests, any hand-written deep links) for a collision
+  that only exists on merged pages. The suffixed merged-page anchors are
+  positional (reading order) and nothing in generated output links to them;
+  that trade is recorded in the design-doc bullet and the changelog.
+- `grep 'href="dec-00\.html#...'` in one probe step was a bad pattern (the
+  dot); the pytest guard covers the real assertion, and eyeballing the file
+  confirmed the page-prefixed hrefs are in document.html.
+- Not covered by a dedicated test: a board-scoped document-<board>.html with
+  a cross-board duplicate name (same template/same seam as document.html,
+  which is tested); two {{calcblock}} with the *identical* target on one
+  page (renames via the same pass — mechanism covered by the -2 suffix tests).
+  Left as known-test gaps rather than fixture bloat.
+
+Status: finished. Committed on fix/render-calc-anchors-20261012; no PR,
+main untouched.

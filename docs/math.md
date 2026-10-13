@@ -66,6 +66,14 @@ calculations in an item are distinguishable on its page.
 `{{calcblock item="LOG-PWR-001" block="losses"}}` on a page renders it — both
 address the block itself, never its individual values.
 
+An anchor is a property of the page it lands on: an item's own page carries
+the bare `#calc-<name>`, and every `#calc:` link names the owner's page, so
+it always resolves there. On a page that renders two tables under one name —
+the merged `document.html` (and its board/workspace copies) where two items
+named their block the same thing, or a page with two `{{calcblock}}`
+directives — the later table's anchor gains a `-2`, `-3`… suffix so the page
+stays id-unique; nothing links to those suffixed anchors.
+
 What a name is **not**:
 
 - **Not a scope.** `env` and the one-name-per-item rule stay item-wide: a value

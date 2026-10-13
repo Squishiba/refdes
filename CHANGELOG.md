@@ -176,6 +176,17 @@ and this project uses [Semantic Versioning](https://semver.org/).
   additive. Part 6 needs none either: `refdes history migrate-seals`
   records the legacy seals in `.refdes/history/` if you want them there,
   and changes nothing about how the build treats them.
+- **`{{calcblock block=""}}` is a build error, not a render of the owner's
+  unnamed calc block.** The parameter has always been specified to name a
+  *named* block (`docs/design/named-calc-blocks.md` §5.4), but matching
+  compared it against the unnamed fence's own empty block tag, so `block=""`
+  silently rendered the owner's unnamed rows under a caption whose block
+  half was a dangling separator, on a table no `#calc:` link could ever
+  address. The error now reads ``{{calcblock item="DEC-PWR-001" block=""}} —
+  block="" is not a calc block name -- calcblock renders a named ```calc
+  block. DEC-PWR-001 names: losses, supply.`` (and the existing "none is
+  named" wording when the item names nothing). A page that meant the unnamed
+  rows now gives that fence an `id="..."` and names it.
 
 ### Added
 
@@ -422,6 +433,18 @@ and this project uses [Semantic Versioning](https://semver.org/).
   and `>` are now escaped (`\u003c`/`\u003e`) at dump time -- valid JSON
   escapes that `JSON.parse` decodes back to the original characters, so
   the payload value is unchanged.
+- **Calc-table DOM anchors could repeat on one page.** Block names are
+  unique per item, not per project, so on `document.html` and its
+  board/workspace copies two items both naming their block `losses` put
+  `id="calc-losses"` in one DOM twice, and so did two `{{calcblock}}`
+  directives naming the same block of two different items on a page. At the
+  one seam every page is written through, each later repeat of a `calc-`
+  anchor now moves to a `-2`, `-3`… suffix chosen to avoid every id the page
+  already carries (a third item may genuinely own a block `losses-2`). Item
+  pages are byte-identical: the owner's own page keeps the bare
+  `#calc-<name>`, `#calc:` hrefs carry the owner's page name, and every
+  published cross-reference and deep link resolves exactly where it did
+  before.
 
 ## [0.5.0] - 2026-08-21
 

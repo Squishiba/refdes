@@ -149,13 +149,15 @@ Renders one named [calc block](math.md#naming-a-calc-block)'s rows on a
 narrative page. A `calc`
 block gets a name from the `id="..."` on its fence line; that name anchors
 the block's table on the owner's page, and `{{calcblock}}` re-renders the
-same table — same anchor, caption, rows — for the page that wants it, with a
+same table — same anchor (unless the page already renders a table under that
+name, in which case this one gains a `-2`-style suffix so the page stays
+id-unique), caption, rows — for the page that wants it, with a
 caption line above naming the owning item (linked) and the block. Parameters:
 
 | Parameter | Required | Meaning |
 |---|---|---|
 | `item` | yes | A local item's display id (or `DISPLAY-ID@key` composite). Must exist. |
-| `block` | yes | A calc block name that item actually has (`id="..."` on one of its fences). |
+| `block` | yes | A calc block name that item actually has (`id="..."` on one of its fences). It cannot be empty: `block=""` names nothing, and the unnamed fence is not addressable. |
 
 Two properties follow from the implementation:
 
@@ -216,6 +218,12 @@ other refdes diagnostic holds to:
 {{calcblock item="LOG-THM-009" block="losses"}} — LOG-THM-009 has calc
     blocks but none is named -- add id="..." to its fence to make this block
     work.
+```
+
+```
+{{calcblock item="LOG-PWR-001" block=""}} — block="" is not a calc block
+    name -- calcblock renders a named ```calc block. LOG-PWR-001 names:
+    losses, supply.
 ```
 
 ```
