@@ -852,8 +852,18 @@ def _pdf_proposal(
     changed file between the page read and this read, and the quote and decimal
     always come from Python's fresh extraction, never the browser.
     """
+    # The same digit-run ceiling `page_number` holds the page grammar to, for
+    # all three coordinates: they are one selection, and the bound is the
+    # grammar's own because `int()` below would rather raise than convert a
+    # five-thousand-digit run -- which is a ValueError out of the handler and
+    # no response for the client, not a refusal (DIAG-TRACE-001).
     for text, label, minimum in ((page, "page", 1), (row, "row", 0), (token, "token", 0)):
-        if not text.isascii() or not text.isdigit() or int(text) < minimum:
+        if (
+            not text.isascii()
+            or not text.isdigit()
+            or len(text) > citations_mod.MAX_PAGE_DIGITS
+            or int(text) < minimum
+        ):
             raise SourceRefusal(f"{label} must be an integer >= {minimum} for a PDF pick")
     listing = page_payload(project, item, path, page)
     if not sha256 or sha256 != listing["sha256"]:

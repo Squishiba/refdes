@@ -294,6 +294,20 @@ def _norm(title: str) -> str:
     return " ".join((title or "").split())
 
 
+# The longest digit run a page may be spelled with. It is a bound of this
+# grammar, not of the interpreter: `int()` refuses to convert a run longer
+# than its own integer-conversion limit (4300 by default, and `0` -- no limit
+# -- is a legal setting), so a `page:` or `?page=` of a few thousand digits
+# used to raise ValueError out of the conversion below and kill the request
+# handler outright. The smallest non-zero limit the interpreter will run with
+# is 640 (`sys.set_int_max_str_digits` and `PYTHONINTMAXSTRDIGITS` both
+# reject anything between 1 and 640), so a 64-digit run converts on every
+# interpreter setting, and a longer run is not a page this can open -- no page
+# of any document has sixty-five digits -- so the grammar says None rather
+# than asking `int()` about it at all.
+MAX_PAGE_DIGITS = 64
+
+
 def page_number(text: str) -> int | None:
     """`text` as a page of a document, or None.
 
@@ -303,10 +317,16 @@ def page_number(text: str) -> int | None:
     also what the loader accepts: two page grammars in one tree is how `page: 0`
     comes to mean page 1 in the browser and an error in the terminal, and a
     document's printed page labels (`"xiv"`) are not a page index the rendered
-    `#page=` fragment could carry anyway.
+    `#page=` fragment could carry anyway. A run of digits longer than
+    `MAX_PAGE_DIGITS` is likewise not a page: it is refused here rather than
+    converted, so no caller ever has to survive an `int()` that raises.
     """
     stripped = (text or "").strip()
-    if not stripped.isascii() or not stripped.isdigit():
+    if (
+        not stripped.isascii()
+        or not stripped.isdigit()
+        or len(stripped) > MAX_PAGE_DIGITS
+    ):
         return None
     value = int(stripped)
     return value if value >= 1 else None
