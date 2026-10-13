@@ -58,7 +58,14 @@ request, not the number of writers.
 Slice 3's entry point, which does mint a key, reserve an id, and write a new
 item -- inside the same lock, with the same refuse-as-a-value posture, and
 with the ledger reservation and the file write committed or rolled back
-together.
+together. An append through `create_item` is planned against the destination
+bytes read under that lock and re-read once, immediately before the replace,
+so a destination a writer outside the lock touched in the meantime is
+re-planned from a fresh load rather than silently replaced -- and a create
+whose last check passes can still lose to a writer that lands between that
+check and the `os.replace` itself, which no check-and-replace on a plain
+file can prevent; see `create_item`'s docstring for what is and is not
+promised.
 """
 
 from __future__ import annotations
@@ -996,7 +1003,11 @@ def _restore(path: str, original: bytes) -> None:
 # minted by `keys.mint`, and every link is spelled by `links.composite_for`.
 # The ledger reservation runs only after the file write succeeded, and any
 # failure after the write rolls the file back -- a failed creation burns
-# nothing. Destinations are suggested but always overridable (Decisions,
+# nothing. An append re-reads its destination immediately before replacing
+# it: bytes a writer outside the lock landed in the meantime re-plan the
+# creation onto the current file or end it as a refusal, never a silent
+# replacement reported as success. Destinations are suggested but always
+# overridable (Decisions,
 # "Creation destination: suggest plus override"); the three supported shapes
 # are append to an existing YAML list file, append to an existing
 # multi-item Markdown file, and create a new single-item Markdown file.
@@ -1055,11 +1066,51 @@ class Created:
         return f"created: {self.item_id} ({self.type}) in {self.path}"
 
 
+# How many times one `create_item` call plans and attempts its append. A
+# destination that another process wrote between this create's read of it and
+# its replace is re-planned from a fresh load while attempts remain, then
+# refused -- never silently replaced. Two attempts: enough for the ordinary
+# one-shot concurrent append, bounded so a destination under steady outside
+# writing ends in a refusal instead of an unbounded spin under the lock.
+CREATE_DESTINATION_ATTEMPTS = 2
+
+
+@dataclass(frozen=True)
+class _DestinationMoved:
+    """Private signal, never returned by `create_item`: the destination file
+    holds different bytes now than the ones this creation read and planned
+    its append onto. Carried instead of raised because a result value is how
+    this module says "no"; `create_item` retries the whole plan while
+    attempts remain and then spells the refusal. It is not one of the four
+    public outcomes and must not leave this module."""
+
+    who: str
+    new_id: str
+    rel: str
+    path: str
+
+
 def create_item(project_root: str, request: CreateRequest):
     """Create one item in the project at `project_root`, under the same
     per-project write lock every edit takes: two creates in flight cannot
     claim the same id, because the second plans against the state the first
-    committed. Returns `Created` | `Refused` | `Invalid`."""
+    committed. Returns `Created` | `Refused` | `Invalid`.
+
+    An append to an existing destination checks that file one last time
+    immediately before replacing it (see `_create_locked`); a destination
+    that moved in between is re-planned from a fresh load up to
+    `CREATE_DESTINATION_ATTEMPTS` times, and a destination still moving
+    after that is refused with nothing written and no id reserved. What a
+    standard `os.replace` cannot offer -- and this does not claim -- is a
+    check and its replacement as one atomic step: a writer that does not
+    take the project's write lock can still land in the gap between this
+    create's final check and its replace. The check shrinks a create's
+    exposure from the whole candidate gate (two project loads, easily
+    seconds) to that gap; it is the same posture `apply_edit`'s own
+    last-moment revision check takes, and it is not a conflict guarantee
+    against uncooperating writers. A destination planned as a new file
+    needs none of this: `_atomic_create` links rather than replaces, so a
+    file that appeared underneath is already a refusal."""
     root = os.path.abspath(project_root)
     config = os.path.join(root, CONFIG_NAME)
     with write_lock_for(root):
@@ -1071,7 +1122,20 @@ def create_item(project_root: str, request: CreateRequest):
         # returns only values.
         try:
             with _disk_write_lock(root):
-                return _create_locked(config, request)
+                attempts = max(1, CREATE_DESTINATION_ATTEMPTS)
+                for attempt in range(attempts):
+                    result = _create_locked(config, request)
+                    if not isinstance(result, _DestinationMoved):
+                        return result
+                    if attempt + 1 == attempts:
+                        return Refused(
+                            result.who,
+                            result.new_id,
+                            f"{result.rel} kept changing while this creation was "
+                            f"being planned ({attempts} attempts); nothing was "
+                            "written and no id was reserved -- retry the creation",
+                            path=result.path,
+                        )
         except OSError as exc:
             return Refused(
                 request.who, "", f"could not lock {root} for writing: {exc}"
@@ -1162,9 +1226,17 @@ def _create_locked(config: str, request: CreateRequest):
     else:
         try:
             with open(path, "rb") as fh:
-                original = fh.read().decode("utf-8")
+                raw = fh.read()
+            original = raw.decode("utf-8")
         except (OSError, UnicodeDecodeError) as exc:
             return Refused(who, new_id, f"could not read {rel}: {exc}")
+        # The revision of exactly the bytes this append was planned against,
+        # computed from the read itself rather than a second read of the
+        # path: what this check can promise is that the bytes being replaced
+        # are the bytes that were appended to, and it can only promise that
+        # about the bytes it actually has. The check that consumes it runs
+        # immediately before the replace, below.
+        planned_revision = hashlib.sha256(raw).hexdigest()
         # The ending of the line the new block is being appended *after*, not
         # "CRLF if the file mentions CRLF anywhere": appending to a file whose
         # tail is LF used to hand the new item CRLF endings, because an
@@ -1201,6 +1273,22 @@ def _create_locked(config: str, request: CreateRequest):
     if dest["kind"] == "new-md":
         failure = _atomic_create(path, new_text.encode("utf-8"))
     else:
+        # The gate above is two full project loads with the destination
+        # masked by the overlay -- it cannot see what landed on the
+        # destination's own bytes meanwhile, and `new_text` is a rewrite of
+        # the whole file, so writing it over bytes that moved in that window
+        # would silently replace whatever a writer outside this lock put
+        # there and report it as a clean create. One last look at the file
+        # now, immediately before the replace: if it holds different bytes
+        # than the read this append was planned against, nothing is written,
+        # nothing is reserved, and `create_item` re-plans from a fresh load
+        # (or refuses once attempts run out). This is the same last-moment
+        # posture `apply_edit` takes above the same primitive; the gap
+        # between this read and the `os.replace` inside `_atomic_replace`
+        # cannot be closed by any check-and-replace on a plain file, only
+        # narrowed -- see `create_item`'s docstring.
+        if file_revision(path) != planned_revision:
+            return _DestinationMoved(who, new_id, rel, path)
         failure = _atomic_replace(path, new_text.encode("utf-8"))
     if failure is not None:
         return Refused(who, new_id, failure, path=path)
