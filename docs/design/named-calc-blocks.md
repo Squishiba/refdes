@@ -235,9 +235,11 @@ tells an author in one line whether they have any such fence.
   which render every in-scope item's body into one DOM — can carry two items
   both naming their block `losses`, and two `{{calcblock}}` directives naming
   the same block of two items do the same on an ordinary page. At the one
-  write seam (`render._write_html`), any `id="calc-*"` that would repeat a
-  `calc-` id already on the page moves to a `-2`/`-3`… suffix that avoids
-  every id the page carries (an item may genuinely own a block `losses-2`).
+  write seam (`render._write_html`), each table anchor repeating one the page
+  already carries moves to a `-2`/`-3`… suffix that avoids every id the page
+  carries (an item may genuinely own a block `losses-2`); only the anchors
+  `_calc_table_html` emits are ever read or moved — attributes merely
+  *named* like ids (`data-id=`, `hiddenid=`) hold values, not ids.
   The owner's own page always keeps the bare anchor — a single item cannot
   repeat one within itself (§3.4) — and `#calc:` hrefs always carry the
   owner's page name, so §5.3 resolution is untouched by the rename.

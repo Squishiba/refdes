@@ -50,7 +50,8 @@ def _anchorize(html: str, known_slugs: set[str]) -> str:
     return PAGE_HREF_RE.sub(swap, html)
 
 
-_ID_ATTR_RE = re.compile(r'id="([^"]*)"')
+_ID_ATTR_RE = re.compile(r'(?<![-\w])id="([^"]*)"')
+_CALC_TABLE_ID_RE = re.compile(r'(<table class="calc" id=")(calc-[^"]*)(")')
 
 
 def _unique_calc_anchors(html: str) -> str:
@@ -66,14 +67,21 @@ def _unique_calc_anchors(html: str) -> str:
     anywhere); on a page that renders the same calc anchor again, the *later*
     occurrence moves to `-2`/`-3`…, never onto an id the page already carries
     (an item can genuinely name a block `losses-2`).
+
+    The rename targets only the exact opening tag `_calc_table_html` emits.
+    An `id="` can also be the tail of some other attribute name (`data-id=`,
+    `hiddenid=`, the generated `data-where-id=`) or plain escaped text, and
+    a value inside such an attribute is not a DOM id -- matching only the
+    generated tag keeps this pass from reading or moving anything it does
+    not own. The collision inventory (`_ID_ATTR_RE`) is attribute-bounded
+    for the same reason: `data-id="calc-losses-2"` must not push a rename
+    one suffix further.
     """
     taken = set(_ID_ATTR_RE.findall(html))
     emitted: set[str] = set()
 
     def swap(match: re.Match) -> str:
-        anchor = match.group(1)
-        if not anchor.startswith("calc-"):
-            return match.group(0)
+        anchor = match.group(2)
         if anchor not in emitted:
             emitted.add(anchor)
             return match.group(0)
@@ -82,9 +90,9 @@ def _unique_calc_anchors(html: str) -> str:
             suffix += 1
         renamed = f"{anchor}-{suffix}"
         emitted.add(renamed)
-        return f'id="{renamed}"'
+        return f"{match.group(1)}{renamed}{match.group(3)}"
 
-    return _ID_ATTR_RE.sub(swap, html)
+    return _CALC_TABLE_ID_RE.sub(swap, html)
 
 
 def _figured(project: Project, bodies: list[str]):

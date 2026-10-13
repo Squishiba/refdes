@@ -24,6 +24,7 @@ from conftest import write_project_config
 from helpers import _build_at
 
 from refdes import render as render_mod
+from refdes.render import _unique_calc_anchors
 
 CONFIG = (
     "site: { title: T, out: _site }\n"
@@ -197,6 +198,56 @@ def test_calcblock_empty_block_is_a_build_error(tmp_path):
     # The unnamed block's rows are NOT rendered here.
     assert "Q_diss" not in page_obj.body_html
     assert '<table class="calc"' not in page_obj.body_html
+
+
+# ------------------------------------------------- only real generated anchors
+
+
+def test_helper_renames_only_the_generated_table_anchor():
+    """The pass acts on the exact opening tag `_calc_table_html` emits —
+    nothing else that merely contains an `id="` substring.
+
+    A `data-id` value is not a DOM id: `data-id="calc-losses"` sitting
+    before a table must neither take the anchor from it nor be renamed
+    itself (RENDER-ANCHOR follow-up, 2026-10-12 — the first pass matched the
+    `id="` suffix of `data-id`, so this exact page lost its bare anchor).
+    Sabotage: a rename regex that matches `id="` anywhere re-fails here.
+    """
+    page = (
+        '<div data-id="calc-losses"></div>'
+        '<table class="calc" id="calc-losses"></table>'
+    )
+    assert _unique_calc_anchors(page) == page
+
+    # Same for an attribute whose NAME ends in "id" (hiddenid, data-where-id):
+    # not an id attribute, so it neither claims an anchor nor enters the
+    # collision inventory the rename routes around.
+    page = (
+        '<span hiddenid="calc-losses"></span>'
+        '<span data-where-id="calc-losses"></span>'
+        '<table class="calc" id="calc-losses"></table>'
+    )
+    assert _unique_calc_anchors(page) == page
+
+
+def test_helper_still_renames_later_table_duplicates_with_inventory():
+    """Narrowing the match must not lose the per-page dedup: the *second*
+    generated table anchor still moves, and the candidate still routes
+    around every real id the page carries — including a hand-written one.
+
+    Sabotage: dropping the inventory check lands the rename on the existing
+    `id="calc-losses-2"` span; dropping the dedup ships two identical table
+    anchors.
+    """
+    page = (
+        '<span id="calc-losses-2"></span>'
+        '<table class="calc" id="calc-losses"></table>'
+        '<table class="calc" id="calc-losses"></table>'
+    )
+    renamed = _unique_calc_anchors(page)
+    assert renamed.count('<table class="calc" id="calc-losses">') == 1
+    assert '<table class="calc" id="calc-losses-3">' in renamed
+    assert renamed.count('id="calc-losses-2"') == 1  # the span keeps its id
 
 
 def _page(tmp_path, items, pages):

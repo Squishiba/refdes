@@ -438,11 +438,11 @@ and this project uses [Semantic Versioning](https://semver.org/).
   board/workspace copies two items both naming their block `losses` put
   `id="calc-losses"` in one DOM twice, and so did two `{{calcblock}}`
   directives naming the same block of two different items on a page. At the
-  one seam every page is written through, each later repeat of a `calc-`
-  anchor now moves to a `-2`, `-3`… suffix chosen to avoid every id the page
-  already carries (a third item may genuinely own a block `losses-2`). Item
-  pages are byte-identical: the owner's own page keeps the bare
-  `#calc-<name>`, `#calc:` hrefs carry the owner's page name, and every
+  one seam every page is written through, each later repeat of a generated
+  calc-table anchor now moves to a `-2`, `-3`… suffix chosen to avoid every
+  id the page already carries (a third item may genuinely own a block
+  `losses-2`). Item pages are byte-identical: the owner's own page keeps the
+  bare `#calc-<name>`, `#calc:` hrefs carry the owner's page name, and every
   published cross-reference and deep link resolves exactly where it did
   before.
 
