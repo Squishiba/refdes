@@ -437,6 +437,174 @@ def test_a_conflicting_accept_does_not_unpin_a_save_that_already_landed(
     assert cli_mod.main(["-c", str(root / "refdes-project.yaml"), "check"]) == 0
 
 
+def test_a_conflicting_identical_accept_does_not_unpin_the_save_that_adopted_it(
+    served, monkeypatch
+):
+    # WRITE-CONCUR-001's second half: two accepts of the *same* key stage the
+    # same bytes, so the winner's lockfile write is a no-op and the file still
+    # holds exactly the loser's own staged bytes -- the byte compare reads
+    # "still mine" while the winner's body, naming the pin this rollback would
+    # drop, is on disk. The rollback therefore asks the tree as well as the
+    # file: a pair we added that something on disk still names is a landed
+    # save's state now, and the restore that would delete it is not ours.
+    _app, client, root = served
+    item_file = root / "items" / "decisions.yaml"
+    original_gate = edit_mod._blocking_diagnostics
+
+    def another_identical_accept_lands_midflight(before, after, item, op):
+        # Stand in for the other process's applied accept of the same key: its
+        # lockfile stage equalled the bytes this writer had just written, so
+        # it wrote nothing to citations.yaml -- only its body, naming the pin,
+        # lands.
+        text = item_file.read_text("utf-8")
+        item_file.write_text(
+            text.replace(
+                "      " + RAIL + "\n",
+                "      " + RAIL + "\n      " + EFF + "\n",
+                1,
+            ),
+            "utf-8",
+        )
+        return original_gate(before, after, item, op)
+
+    monkeypatch.setattr(
+        edit_mod, "_blocking_diagnostics", another_identical_accept_lands_midflight
+    )
+    status, payload = accept(
+        client, root, text=calc_body(RAIL, EFF), pins=pin("eff", name="eff")
+    )
+    assert status == 409, payload
+    assert payload["kind"] == "conflict"
+    # the winner's body is on disk, and the pin it names -- staged by this
+    # writer and adopted by the winner -- is still pinned
+    assert EFF in item_file.read_text("utf-8")
+    assert "eff" in lock(root)["citations"][CSV_PATH]["values"]
+    # the project is not left in the state neither save can fix from the editor
+    assert cli_mod.main(["-c", str(root / "refdes-project.yaml"), "check"]) == 0
+
+
+def test_a_rollback_that_deleted_our_pin_inside_the_gate_is_reapplied_before_the_body(
+    served, monkeypatch
+):
+    # The window runs both ways. A cooperating accept of the same key can gate
+    # over OUR pin, fail, and roll back inside OUR gate -- its rollback's tree
+    # check cannot see a body that has not landed yet -- and our gate has then
+    # passed over a pin that is gone from under the body we are about to
+    # write. §4's pair lands together: the final section, under the same lock
+    # that replaces the body, asks the lockfile whether it still holds what
+    # this accept staged, and puts a deleted pin back before the body lands.
+    _app, client, root = served
+    item_file = root / "items" / "decisions.yaml"
+    lock_file = root / ".refdes" / "citations.yaml"
+    pre_accept_bytes = lock_bytes(root)
+    original_gate = edit_mod._blocking_diagnostics
+
+    def cooperator_rolls_back_our_pin_midgate(before, after, item, op):
+        # Stand in for the cooperating accept's rollback, exactly as it
+        # happens on disk: it restores the bytes it read, which are every
+        # byte of this file from before our write -- our pin, gone.
+        lock_file.write_bytes(pre_accept_bytes)
+        return original_gate(before, after, item, op)
+
+    monkeypatch.setattr(
+        edit_mod, "_blocking_diagnostics", cooperator_rolls_back_our_pin_midgate
+    )
+    status, payload = accept(
+        client, root, text=calc_body(RAIL, EFF), pins=pin("eff", name="eff")
+    )
+    assert status == 200, payload
+    assert payload["kind"] == "applied"
+    # the body landed, and the pin it names landed with it -- under the same
+    # lock, not in the order the race left them
+    assert EFF in item_file.read_text("utf-8")
+    assert "eff" in lock(root)["citations"][CSV_PATH]["values"]
+    assert cli_mod.main(["-c", str(root / "refdes-project.yaml"), "check"]) == 0
+
+
+def test_a_rolled_back_accept_does_not_erase_a_pin_adopted_over_a_pre_named_key(
+    tmp_path, monkeypatch
+):
+    # A pair the project was already naming, unpinned, is not exempt from the
+    # rollback's tree check: a cooperating accept of that key stages the
+    # identical bytes, writes nothing, gates clean over the pin THIS writer
+    # added, and lands -- reporting the pre-named key pinned. A restore
+    # gated only on "newly named" sees the tree naming that pair in this
+    # writer's own snapshot and restores the pin out from under the landed
+    # body. The check is the naming lines themselves: a second line over the
+    # pair is an adoption, and the restore is not ours to make.
+    root = make_root(tmp_path, items=(
+        "defaults: { type: decision }\n"
+        "items:\n"
+        "  - id: DEC-001\n"
+        "    citations:\n"
+        "      - path: analysis/budget.csv\n"
+        "    body: |\n"
+        "      ```calc\n"
+        "      P = source(\"analysis/budget.csv\", \"rail_load\") | W\n"
+        "      ```\n"
+        "  - id: DEC-002\n"
+        "    citations:\n"
+        "      - path: analysis/budget.csv\n"
+        "    body: |\n"
+        "      ```calc\n"
+        "      Q = 1 | 1\n"
+        "      ```\n"
+    ))
+    fetch(root)  # pins rail_load; `eff` stays unpinned
+    item_file = root / "items" / "decisions.yaml"
+    text = item_file.read_text("utf-8")
+    item_file.write_text(
+        text.replace(
+            "      " + RAIL + "\n",
+            "      " + RAIL + "\n      " + EFF + "\n",
+            1,
+        ),
+        "utf-8",
+    )
+    # the premise: DEC-001 names `eff` with nothing pinned behind it
+    assert cli_mod.main(["-c", str(root / "refdes-project.yaml"), "check"]) != 0
+    app = start(root)
+    try:
+        client = Client(app)
+        original_gate = edit_mod._blocking_diagnostics
+
+        def a_save_adopts_the_pin_midflight(before, after, item, op):
+            # Stand in for the other accept of the same key, applied: its
+            # stage equalled the bytes this writer had just written, so it
+            # wrote nothing to citations.yaml -- only its body, a second line
+            # naming the pre-named pair, lands.
+            current = item_file.read_text("utf-8")
+            item_file.write_text(
+                current.replace(
+                    "      Q = 1 | 1\n",
+                    "      Q = 1 | 1\n"
+                    '      eff2 = source("analysis/budget.csv", "eff") | 1\n',
+                    1,
+                ),
+                "utf-8",
+            )
+            return original_gate(before, after, item, op)
+
+        monkeypatch.setattr(
+            edit_mod, "_blocking_diagnostics", a_save_adopts_the_pin_midflight
+        )
+        status, payload = accept(
+            client,
+            root,
+            ref="DEC-002",
+            text=calc_body("Q = 1 | 1", EFF, "eff = 2 | 1"),
+            pins=pin("eff", name="eff"),
+        )
+        assert status == 422, payload
+        assert payload["kind"] == "invalid"
+    finally:
+        app.stop()
+    # the landed body names the pair, and the pin it adopted is still pinned
+    assert "eff2" in item_file.read_text("utf-8")
+    assert "eff" in lock(root)["citations"][CSV_PATH]["values"]
+    assert cli_mod.main(["-c", str(root / "refdes-project.yaml"), "check"]) == 0
+
+
 def test_a_rolled_back_accept_of_a_never_fetched_project_leaves_no_lockfile(
     tmp_path, monkeypatch
 ):

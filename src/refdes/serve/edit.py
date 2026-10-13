@@ -44,7 +44,14 @@ value) writes `.refdes/citations.yaml` as well as the item, because a body with
 a `source()` line whose key is not pinned is an item that does not build and a
 pinned key no body names is dead state in a tracked file. The lockfile lands
 first, so the delta gate judges the candidate the save actually produces, and
-every refusal after it restores the previous lockfile bytes. Both of those
+every refusal after it restores the previous lockfile bytes -- unless the tree
+no longer names the pins this accept added with exactly the lines the accept
+read them named, in which case the file has passed to a save that landed
+during the gate and the rollback leaves it alone (§4). The window is checked
+from both sides: the accept whose gate passed over a cooperating writer's pin
+re-asserts, under the same lock that writes its body, that the pin is still on
+disk, and puts it back if a cooperating rollback deleted it mid-gate (§4).
+Both of those
 lockfile mutations -- the read-modify-write that pins and the read-compare-
 restore that undoes it -- are one section under the project's cross-process
 write lock, the same `project_write_lock` `cli.main` wraps its commands in
@@ -466,6 +473,17 @@ def _apply_locked(config: str, request: EditRequest):
             if current_revision != request.expected_revision:
                 _undo_accept(accept)
                 return _conflict(who, ref, path, before, request, current_revision)
+            # The gate read the lockfile off disk without this lock, and the
+            # window runs both ways: a cooperating accept that gated over
+            # our pin can have failed and rolled back inside our gate,
+            # deleting it. The body written below names that pin, so §4's
+            # pair lands together: under this same lock, the pins go back
+            # first, or the save is refused and both files stay as they are.
+            if accept is not None:
+                reason = _reapply_pins(before, accept)
+                if reason is not None:
+                    _undo_accept(accept)
+                    return Refused(who, ref, reason, path=path)
             failure = _atomic_replace(path, new_text.encode("utf-8"))
     except OSError as exc:
         _undo_accept(accept)
@@ -505,6 +523,17 @@ class _LockfileWrite:
     `root` is the project root, because the rollback is a read-modify-write of a
     file another process writes and so runs under the same cross-process lock
     every other writer of this file takes.
+
+    `watched` is the set of `(canonical path, key)` pairs this write newly
+    pins, and `referents` the `source()` lines that named them in the project
+    as the accept read it -- `(item identity, line)` pairs, sorted. The
+    rollback re-reads the tree and restores only while those lines are still
+    the ones naming those pairs (see `rollback`); a pair the project was
+    already naming when the accept started is *not* exempt, because a
+    cooperating accept can land a body over exactly that pre-named, newly
+    pinned pair during this window, and restoring the bytes this writer read
+    would erase the adoption. `referents` None means the snapshot's names
+    could not be computed, and the rollback declines.
     """
 
     path: str
@@ -512,6 +541,8 @@ class _LockfileWrite:
     previous: bytes | None
     staged: bytes
     written: bool = False
+    watched: frozenset = frozenset()
+    referents: tuple | None = ()
 
     def rollback(self) -> None:
         if not self.written:
@@ -548,6 +579,25 @@ class _LockfileWrite:
         # design names as inert (docs/design/editor-source-picker.md §4);
         # destroying a landed writer's state is not.
         #
+        # The tree is checked too, under the same lock, because the byte
+        # compare cannot see an identical accept: two accepts of the same key
+        # stage the same bytes, so the winner's own write is a no-op and this
+        # file still holds exactly what THIS writer wrote -- "still mine" --
+        # while the winner's body, naming the pin this rollback would drop,
+        # is on disk. `watched` is what only this write newly pins, and
+        # `referents` the lines that named those pairs when the accept read
+        # the project; the restore is ours to make only while the tree on
+        # disk names them with exactly those lines and nothing else. A pair
+        # the project was already naming, unpinned, before this write is NOT
+        # exempt: a cooperating accept can land a body over exactly that
+        # pre-named pair during this window -- adopting the pin this file has
+        # only just added, and reporting it pinned -- and restoring the bytes
+        # this writer read would erase that adoption from under the landed
+        # body: the one failure the compare was ever for. The check parses
+        # the tree under the lock (a read-only parse, no build); it is the
+        # refusal path, rare against the apply path, and the latency is
+        # bounded by one parse.
+        #
         # What is still not guaranteed, and is not pretendable:
         # (1) a read error here leaves `current` None, which matches no staged
         # bytes, so the rollback is SKIPPED -- we decline to clobber a file
@@ -574,9 +624,63 @@ class _LockfileWrite:
                     current = None
                 if current != self.staged:
                     return
+                if self.watched and _pins_referents_moved(
+                    self.root, self.watched, self.referents
+                ):
+                    return
                 _rollback(self.path, self.previous)
         except OSError:
             return
+
+
+def _pinned_pairs(records: dict) -> frozenset:
+    """`{(canonical path, key)}` for every value the records pin.
+
+    The path is the record key, which is already canonical -- that is what the
+    calc resolver looks a `source()` call up by (`build._make_source_resolver`
+    reads `records.get(canon)`), so the pairs compare with
+    `citations.collect_source_uses`'s own canonical paths.
+    """
+    return frozenset(
+        (cited, key)
+        for cited, record in records.items()
+        for key in (record.get("values") or {})
+    )
+
+
+def _pins_referents_moved(root: str, watched: frozenset, referents: tuple | None) -> bool:
+    """Whether the tree on disk no longer names `watched` with `referents`.
+
+    A read-only re-parse (`loader.load_tree`, no build, and no write lock --
+    it takes none and writes nothing), and `collect_source_uses`'s parse of
+    every `source()` line -- the same walk `fetch` and `verify` use to say
+    which keys a body reads. A use that is not authorized has no canonical
+    path and cannot resolve against any lockfile, so it cannot be named by
+    the restore either. The comparison is a multiset of the naming lines
+    themselves -- `(item identity, line)` -- not a set of pairs: an accept
+    that lands a second line over a pair the project already named is an
+    adoption the pair-set cannot see, and the restore must not erase it. A
+    `referents` of None means the snapshot's names were never computed; a
+    tree that will not parse says the same thing. Both decline the rollback
+    rather than clobber a state they cannot see.
+    """
+    if referents is None:
+        return True
+    try:
+        project, _stale = loader.load_tree(
+            os.path.join(root, CONFIG_NAME), require_ids=False, write=False
+        )
+        uses = citations_mod.collect_source_uses(project)
+    except Exception:
+        return True
+    disk = tuple(
+        sorted(
+            (use.item.key or use.item.id, use.line if use.line is not None else -1)
+            for use in uses
+            if use.canon and (use.canon, use.key) in watched
+        )
+    )
+    return disk != referents
 
 
 @dataclass
@@ -585,13 +689,20 @@ class _Acceptance:
 
     `lock` is what to put back if anything past here fails; `pinned` is what the
     reader read, which is the only thing about the pick worth telling the caller
-    back. The composed line is deliberately not carried: the author already has
-    it -- it is the text in the body being saved -- and a second copy of it here
-    would be a second thing to keep in agreement.
+    back. `plans`, `anchors` and `digests` are the accept's own staged keys,
+    carried so the final section can re-assert them if a cooperating rollback
+    deleted them mid-gate (`_reapply_pins`) -- the re-staging is the same
+    staged extraction, so it is the same bytes, or a refusal. The composed line
+    is deliberately not carried: the author already has it -- it is the text in
+    the body being saved -- and a second copy of it here would be a second
+    thing to keep in agreement.
     """
 
     lock: _LockfileWrite | None
     pinned: tuple = ()
+    plans: tuple = ()
+    anchors: dict = field(default_factory=dict)
+    digests: dict = field(default_factory=dict)
 
 
 def _undo_accept(accept: _Acceptance | None) -> None:
@@ -604,10 +715,66 @@ def _undo_accept(accept: _Acceptance | None) -> None:
     the next `refdes fetch`. What the window does *not* admit is another
     writer: `_LockfileWrite.rollback` reads, compares and restores inside the
     project's cross-process write lock, so a cooperating writer is serialised
-    outside that sequence rather than landing in the middle of it.
+    outside that sequence rather than landing in the middle of it -- and the
+    sequence asks the tree, under that same lock, whether the bytes it is
+    about to restore are still its own to restore.
     """
     if accept is not None:
         accept.lock.rollback()
+
+
+def _reapply_pins(before: Project, accept: _Acceptance) -> str | None:
+    """Re-assert this accept's pins if a cooperating rollback deleted them.
+
+    The gate reads the lockfile off disk outside the project lock, on purpose
+    (§4: it can take seconds). The window runs both ways: an accept that
+    gates over *this* transaction's pin can fail and roll back inside this
+    transaction's own gate -- its rollback's tree check cannot see a body
+    that has not landed yet -- and this accept's gate has then passed over a
+    pin that is gone from under the body its final section writes. §4's pair
+    lands together here: under the same lock that writes the body, the file
+    as it is now is asked whether it still holds what this accept staged,
+    and a deleted pin goes back -- re-staged from the current records under
+    fetch's own policy, so records this transaction's keys no longer
+    describe are a refusal, not a clobber. Returns a refusal reason, or None
+    when the pins stand (the common case: nobody moved the file).
+    """
+    lock = accept.lock
+    if lock is None:
+        return None
+    with _disk_write_lock(before.root):
+        try:
+            with open(lock.path, "rb") as fh:
+                current = fh.read()
+        except OSError as exc:
+            return f"could not read {lock.path}: {exc}"
+        if current == lock.staged:
+            return None
+        try:
+            records = citations_mod.load_lockfile(before)
+        except citations_mod.LockfileError as exc:
+            return str(exc)
+        pairs = [(plan["path"], plan["key"]) for plan in accept.plans]
+        if all(
+            citations_mod.locked_source_value(records.get(canon), key) is not None
+            for canon, key in pairs
+        ):
+            return None
+        errors, _pinned = citations_mod.stage_source_pins(
+            before, records, pairs, anchors=accept.anchors, digests=accept.digests,
+        )
+        if errors:
+            return "; ".join(errors)
+        staged = citations_mod.lockfile_text(records).encode("utf-8")
+        failure = _atomic_replace(lock.path, staged)
+        if failure is not None:
+            return failure
+        # From here this transaction owns the file: a rollback of this apply
+        # restores what THIS write replaced, not what the accept found.
+        lock.previous = current
+        lock.staged = staged
+        lock.written = True
+        return None
 
 
 def _accept_pins(
@@ -703,6 +870,7 @@ def _accept_pins(
                 records = citations_mod.load_lockfile(before)
             except citations_mod.LockfileError as exc:
                 return None, str(exc)
+            pinned_before = _pinned_pairs(records)
             errors, pinned = citations_mod.stage_source_pins(
                 before, records, [(p["path"], p["key"]) for p in plans],
                 anchors=anchors, digests=digests,
@@ -715,8 +883,39 @@ def _accept_pins(
             except OSError:
                 previous = None
             staged = citations_mod.lockfile_text(records).encode("utf-8")
+            # What only this write newly pins: `stage_source_pins` merges
+            # into `records` in place, and only ever adds -- a changed source
+            # file is refused above, not re-pinned -- so the diff of the
+            # pinned pairs is exactly the accept's own additions. The
+            # rollback's tree check asks about nothing else: every one of
+            # these, named-pinned or named-unpinned in the snapshot, is a
+            # pair a cooperating save could adopt these bytes for.
+            watched = _pinned_pairs(records) - pinned_before
+            # The lines that named those pairs in the project as this accept
+            # read it: the multiset the tree has to still be naming for the
+            # restore to be ours to make. A snapshot that cannot be walked
+            # for reasons past the filesystem's is recorded as None, and
+            # the rollback declines on it -- an inert pin is the documented
+            # residue; an erased adoption is not.
+            try:
+                snapshot_uses = citations_mod.collect_source_uses(before)
+            except Exception:  # noqa: BLE001 - decline, do not propagate
+                referents = None
+            else:
+                referents = tuple(
+                    sorted(
+                        (
+                            use.item.key or use.item.id,
+                            use.line if use.line is not None else -1,
+                        )
+                        for use in snapshot_uses
+                        if use.canon and (use.canon, use.key) in watched
+                    )
+                )
             lock = _LockfileWrite(
-                path=lock_path, root=before.root, previous=previous, staged=staged
+                path=lock_path, root=before.root, previous=previous, staged=staged,
+                watched=watched,
+                referents=referents,
             )
             # Nothing changed -- re-accepting a key that is already pinned from
             # these same bytes -- then nothing is written: a save that pins
@@ -733,7 +932,13 @@ def _accept_pins(
                 lock.written = True
     except OSError as exc:
         return None, f"could not lock {before.root} for writing: {exc}"
-    return _Acceptance(lock=lock, pinned=tuple(pinned)), None
+    return _Acceptance(
+        lock=lock,
+        pinned=tuple(pinned),
+        plans=tuple(plans),
+        anchors=anchors,
+        digests=digests,
+    ), None
 
 
 # ------------------------------------------------------------------ resolution
